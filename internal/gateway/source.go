@@ -1,0 +1,62 @@
+// Package gateway aggregates sessions from many node sources into one merged view
+// and routes control calls back to the owning node. A source may be the local
+// engine (in-process) or a remote node reached over the WebSocket uplink; the
+// aggregator treats both through the same Source interface.
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/session"
+)
+
+// Source is one node feeding the aggregator. Its session ids are node-local;
+// the aggregator namespaces them into composite ids.
+type Source interface {
+	// ID is the stable node identifier (the composite-id prefix and routing key).
+	ID() string
+	// Label is a human-friendly name, e.g. the hostname.
+	Label() string
+	// Snapshot returns the source's current sessions (node-local ids).
+	Snapshot() []session.Session
+	// Subscribe returns the source's live event stream and a cancel function.
+	Subscribe() (<-chan registry.Event, func())
+	// Call invokes a control method on the source with already node-local params
+	// and returns the raw JSON result.
+	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
+	// Done is closed when the source disconnects. For the in-process source this
+	// never fires (the local engine does not disconnect).
+	Done() <-chan struct{}
+}
+
+// InProcessSource adapts the local engine (a registry plus a control dispatcher)
+// to the Source interface, with no serialization or network hop.
+type InProcessSource struct {
+	id, label string
+	reg       *registry.Registry
+	dispatch  api.DispatchFunc
+	done      chan struct{} // never closed: the local engine is always present
+}
+
+// NewInProcessSource wraps a local registry and control dispatch as a Source.
+func NewInProcessSource(id, label string, reg *registry.Registry, dispatch api.DispatchFunc) *InProcessSource {
+	return &InProcessSource{id: id, label: label, reg: reg, dispatch: dispatch, done: make(chan struct{})}
+}
+
+func (s *InProcessSource) ID() string                                 { return s.id }
+func (s *InProcessSource) Label() string                              { return s.label }
+func (s *InProcessSource) Snapshot() []session.Session                { return s.reg.Snapshot() }
+func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }
+func (s *InProcessSource) Done() <-chan struct{}                      { return s.done }
+
+// Call dispatches to the local handlers and marshals the result.
+func (s *InProcessSource) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	res, err := s.dispatch(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(res)
+}
