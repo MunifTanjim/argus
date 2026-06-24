@@ -170,6 +170,10 @@ func (c *Client) ListPanes(ctx context.Context) ([]Pane, error) {
 }
 
 func parsePane(line string) (Pane, error) {
+	// tmux >=3.4 vis-escapes non-printable bytes in -F output, so our 0x1F
+	// separator arrives as the literal four-character sequence "\037". Older
+	// tmux emits the raw byte. Normalize the escaped form before splitting.
+	line = strings.ReplaceAll(line, `\037`, fieldSep)
 	f := strings.Split(line, fieldSep)
 	if len(f) != 11 {
 		return Pane{}, fmt.Errorf("tmux: unexpected pane format (%d fields): %q", len(f), line)

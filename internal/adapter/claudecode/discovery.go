@@ -117,6 +117,11 @@ func NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 	return d
 }
 
+// SetMatch overrides Claude-pane detection. Intended for tests that need
+// discovery to treat arbitrary panes (e.g. a plain shell) as Claude sessions so
+// reconciliation keeps them instead of pruning them.
+func (d *Discoverer) SetMatch(fn func(tmux.Pane) bool) { d.match = fn }
+
 // cachedTranscript returns the summary and transcript-derived live status hint
 // for a transcript, recomputing only when the file's mod time changed since the
 // last scan. Returns (nil, "") when the path is empty or unreadable.

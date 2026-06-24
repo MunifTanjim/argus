@@ -3,8 +3,40 @@ package tmux
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 )
+
+// TestParsePaneSeparators verifies that parsePane handles the field separator
+// both as a raw 0x1F byte (tmux <3.4) and as the literal "\037" octal escape
+// that tmux >=3.4 emits for non-printable bytes in -F output.
+func TestParsePaneSeparators(t *testing.T) {
+	fields := []string{
+		"%0", "work", "1", "0", "9416", "bash",
+		"/home/runner/work/argus/argus", "/dev/pts/1", "1", "0", "0",
+	}
+	want := Pane{
+		PaneID: "%0", SessionName: "work", WindowIndex: 1, PaneIndex: 0,
+		PanePID: 9416, CurrentCommand: "bash",
+		CurrentPath: "/home/runner/work/argus/argus", TTY: "/dev/pts/1",
+		Active: true, Dead: false, InMode: false,
+	}
+	cases := map[string]string{
+		"raw 0x1F":      strings.Join(fields, "\x1f"),
+		"escaped \\037": strings.Join(fields, `\037`),
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := parsePane(line)
+			if err != nil {
+				t.Fatalf("parsePane: %v", err)
+			}
+			if got != want {
+				t.Errorf("parsePane(%q)\n got %+v\nwant %+v", line, got, want)
+			}
+		})
+	}
+}
 
 // testClient returns a Client bound to a throwaway, isolated tmux server socket
 // and ensures the server is killed when the test finishes. Tests are skipped if

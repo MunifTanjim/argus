@@ -37,6 +37,12 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmuxClient,
 	})
+	// Discovery identifies Claude panes by their foreground process; this pane
+	// runs /bin/sh, so make discovery treat it as Claude. Otherwise the startup
+	// and hook scans reconcile it away (ReconcileDiscovered prunes panes it does
+	// not recognize) and capture/input race against that prune. A real Claude
+	// pane is found by discovery and kept, which is what this models.
+	d.disc.SetMatch(func(tmux.Pane) bool { return true })
 
 	socket := filepath.Join(t.TempDir(), "d.sock")
 	go func() { _ = d.Run(ctx, socket) }()
@@ -52,6 +58,10 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 		t.Fatalf("hook call: %v", err)
 	}
 	sessionID := "argus:" + paneID
+
+	// Force a synchronous discovery scan (Run and the hook also kick async
+	// scans; making one deterministic here exercises the reconcile path).
+	d.scan(ctx)
 
 	// Capture should succeed.
 	var cap api.CaptureResult
