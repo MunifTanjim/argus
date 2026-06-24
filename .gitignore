@@ -1,0 +1,27 @@
+# Binaries
+/argus
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store
+
+# Web frontend
+web/node_modules/
+web/dist/
+
+# Flutter
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/ios/Pods/
+app/android/.gradle/
+
+# Superpowers workflow scratch (brainstorm/sdd state, briefs, diffs)
+.superpowers/
