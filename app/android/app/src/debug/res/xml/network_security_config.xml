@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only: allow cleartext ws:// so the app can pair with a local,
+     non-TLS gateway (e.g. ws://10.0.2.2:8443/client from the emulator).
+     This config applies to debug builds ONLY; release builds keep Android's
+     default cleartext-blocking, so production stays wss://-only. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

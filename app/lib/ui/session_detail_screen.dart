@@ -1,0 +1,180 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/result.dart';
+import '../data/session_repository.dart';
+import '../data/transcript_repository.dart';
+import '../models/session.dart';
+import '../state/gateway.dart';
+import '../state/sessions.dart';
+import '../state/tool_detail.dart';
+import '../state/transcript_controller.dart';
+import '../transport/connection.dart';
+import 'interaction_bar.dart';
+import 'live_screen_screen.dart';
+import 'respond_sheet.dart';
+import 'status_style.dart';
+import 'theme.dart';
+import 'transcript_feed.dart';
+
+class SessionDetailScreen extends ConsumerStatefulWidget {
+  const SessionDetailScreen({super.key, required this.session});
+
+  final Session session;
+
+  @override
+  ConsumerState<SessionDetailScreen> createState() =>
+      _SessionDetailScreenState();
+}
+
+class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
+  TranscriptSubscription? _sub;
+
+  String get _sid => widget.session.id;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _open());
+  }
+
+  void _open() {
+    _sub?.dispose();
+    _sub = ref.read(transcriptRepositoryProvider).open(
+          sessionId: _sid,
+          store: ref.read(transcriptProvider(_sid).notifier),
+        );
+  }
+
+  @override
+  void dispose() {
+    _sub?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Re-open on reconnect (new RpcClient ⇒ stale sub_id).
+    ref.listen<ConnState>(connStateProvider, (prev, next) {
+      if (next == ConnState.connected && prev != ConnState.connected) {
+        _open();
+      }
+    });
+
+    final st = ref.watch(transcriptProvider(_sid));
+    final conn = ref.watch(connStateProvider);
+    final s = widget.session;
+    final live = ref.watch(sessionsProvider)[_sid] ?? s;
+    final title = live.displayTitle;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Text(statusGlyph(live.status),
+                style: TextStyle(
+                    fontFamily: 'monospace', color: statusColor(live.status))),
+            const SizedBox(width: 8),
+            Expanded(
+                child:
+                    Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.terminal),
+            tooltip: 'Live screen',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LiveScreenScreen(session: live),
+              ),
+            ),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'kill') {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Kill session?'),
+                    content: const Text('This cannot be undone.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        style: TextButton.styleFrom(
+                            foregroundColor: Colors.red),
+                        child: const Text('Kill'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
+                final result =
+                    await ref.read(sessionRepositoryProvider).kill(live.id);
+                if (!context.mounted) return;
+                switch (result) {
+                  case Ok():
+                    Navigator.of(context).pop();
+                  case Error(:final error):
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed: $error')),
+                    );
+                }
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem<String>(
+                value: 'kill',
+                child: Text('Kill session'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (conn != ConnState.connected) _Banner(state: conn),
+          Expanded(
+            // Spinner until the first snapshot arrives, so an empty session
+            // shows progress rather than a blank feed. error stops the spinner.
+            child: !st.loaded && st.error == null
+                ? const Center(child: CircularProgressIndicator())
+                : TranscriptFeed(
+                    detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
+          ),
+          if (live.interaction != null)
+            InteractionBar(
+              interaction: live.interaction!,
+              onRespond: () => showRespondSheet(context, live),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Banner extends StatelessWidget {
+  const _Banner({required this.state});
+  final ConnState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = switch (state) {
+      ConnState.connecting => 'Connecting…',
+      ConnState.reconnecting => 'Reconnecting…',
+      ConnState.disconnected => 'Disconnected',
+      ConnState.connected => 'Connected',
+    };
+    return Container(
+      width: double.infinity,
+      color: AppColors.awaitingSurface,
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      child: Text(text,
+          style: const TextStyle(color: AppColors.secondary, fontSize: 12)),
+    );
+  }
+}

@@ -1,0 +1,236 @@
+import 'package:flutter/material.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
+
+import '../models/chunk.dart';
+import '../state/tool_detail.dart';
+import 'item_detail_screen.dart';
+import 'item_row.dart';
+import 'subagent_trace_screen.dart';
+import 'theme.dart';
+
+const _redColor = Color(0xFFfb4934);
+const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
+final _monoDim = _mono.copyWith(color: AppColors.dim);
+
+class ChunkCard extends StatefulWidget {
+  const ChunkCard({super.key, required this.detailRef, required this.chunk});
+
+  final ToolDetailRef detailRef;
+  final Chunk chunk;
+
+  @override
+  State<ChunkCard> createState() => _ChunkCardState();
+}
+
+class _ChunkCardState extends State<ChunkCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (widget.chunk.kind) {
+      case ChunkKind.user:
+        return _UserBubble(text: widget.chunk.text ?? '');
+      case ChunkKind.ai:
+        return _aiCard(widget.chunk);
+      case ChunkKind.system:
+      case ChunkKind.compact:
+        return _MetaRow(chunk: widget.chunk);
+      case ChunkKind.unknown:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _aiCard(Chunk c) {
+    final meta = <String>[
+      if (c.model != null && c.model!.isNotEmpty) c.model!,
+      if (c.hasContext) '${c.contextPct.round()}% ctx',
+      if (c.usage.total > 0) '${c.usage.total} tok',
+      if (c.durationMs > 0) '${(c.durationMs / 1000).toStringAsFixed(1)}s',
+    ].join('  ·  ');
+
+    // The header (chevron + meta) is the only collapse target. Keeping the toggle
+    // off the body means scrolling or drilling inside an expanded card can't
+    // accidentally collapse it.
+    final header = InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Icon(_expanded ? Icons.expand_more : Icons.chevron_right,
+                size: 16, color: AppColors.dim),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(meta.isNotEmpty ? meta : 'response',
+                  style: _monoDim),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              const SizedBox(height: 6),
+              // Expanded body is free of any toggle gesture; tool/subagent rows
+              // keep their own drill handlers. Collapsed: tap the short preview
+              // (no scroll-collapse risk) to expand.
+              if (_expanded)
+                ..._expandedBody(c)
+              else
+                InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: () => setState(() => _expanded = true),
+                  child: _collapsedBody(c),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _collapsedBody(Chunk c) {
+    final last = c.previewItem;
+    final extra = c.items.length > 1
+        ? Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('▸ ${c.items.length} items',
+                style: _monoDim),
+          )
+        : const SizedBox.shrink();
+
+    if (last == null) {
+      return Text('(no output)', style: _monoDim);
+    }
+    if (last.kind == ItemKind.text) {
+      final firstLine = (last.text ?? '')
+          .trim()
+          .split('\n')
+          .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(firstLine,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.text, fontSize: 14)),
+          extra,
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [ItemRow(item: last), extra],
+    );
+  }
+
+  List<Widget> _expandedBody(Chunk c) {
+    final widgets = <Widget>[];
+    for (final it in c.items) {
+      if (it.kind == ItemKind.text) {
+        if ((it.text ?? '').trim().isEmpty) continue;
+        widgets.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: GptMarkdown(it.text!),
+        ));
+      } else {
+        widgets.add(ItemRow(item: it, onTap: _drill(it)));
+      }
+    }
+    if (widgets.isEmpty) {
+      widgets.add(
+          Text('(no output)', style: _monoDim));
+    }
+    return widgets;
+  }
+
+  /// Returns a tap handler for drillable rows, or null for non-drillable ones.
+  /// Tool rows open the tool detail; subagent rows with a trace (inline or
+  /// streamable via agentId) open the subagent trace.
+  VoidCallback? _drill(Item it) {
+    if (it.kind == ItemKind.tool) {
+      return () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  ItemDetailScreen(item: it, detailRef: widget.detailRef),
+            ),
+          );
+    }
+    if (it.kind == ItemKind.subagent &&
+        (it.hasTrace || (it.agentId?.isNotEmpty ?? false))) {
+      return () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  SubagentTraceScreen(parentRef: widget.detailRef, item: it),
+            ),
+          );
+    }
+    return null;
+  }
+}
+
+class _UserBubble extends StatelessWidget {
+  const _UserBubble({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 40),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            border: Border.all(color: AppColors.accent.withValues(alpha: 0.5)),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: GptMarkdown(text),
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({required this.chunk});
+  final Chunk chunk;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = chunk.isError ? _redColor : AppColors.dim;
+    final glyph = chunk.kind == ChunkKind.compact ? '⊟' : '·';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$glyph ${chunk.summary ?? ''}',
+              style: _mono.copyWith(color: color)),
+          if (chunk.detail != null && chunk.detail!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 14, top: 2),
+              child: Text(chunk.detail!,
+                  style: _monoDim),
+            ),
+        ],
+      ),
+    );
+  }
+}
