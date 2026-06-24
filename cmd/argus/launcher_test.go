@@ -98,7 +98,7 @@ func TestGatewayValidSubmit(t *testing.T) {
 
 func TestGatewayInvalidURLStays(t *testing.T) {
 	m := enterGateway(newLauncherModel(""))
-	m.urlIn.SetValue("http://nope") // unsupported scheme
+	m.urlIn.SetValue("http://nope")                   // unsupported scheme
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // url -> token
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit
 	if m.choice.kind == launchGateway {

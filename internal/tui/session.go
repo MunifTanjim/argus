@@ -137,7 +137,7 @@ func (m model) sessionLayout() (historyH, dockH int) {
 	if m.focus != focusDock {
 		return max(1, avail-2), 2
 	}
-	capH := avail - 1 // focused = answering: expand to fit; history keeps ≥1 line
+	capH := avail - 1                         // focused = answering: expand to fit; history keeps ≥1 line
 	dockH = min(m.dockContentLines()+1, capH) // +1 for the focus rule
 	if dockH < 3 {
 		dockH = 3

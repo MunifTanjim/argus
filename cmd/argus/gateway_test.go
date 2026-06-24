@@ -28,9 +28,9 @@ func TestResolveGatewayURLSSH(t *testing.T) {
 	cases := []struct {
 		raw, route, want string
 	}{
-		{"ssh://user@gateway.example.com", "/node", "ws://gateway.example.com:8443/node"},           // default gateway port
-		{"ssh://user@gateway.example.com:2222", "/node", "ws://gateway.example.com:8443/node"},      // :port is SSH port, not gateway
-		{"ssh://gateway.example.com?port=9000", "/client", "ws://gateway.example.com:9000/client"},  // gateway port via query
+		{"ssh://user@gateway.example.com", "/node", "ws://gateway.example.com:8443/node"},          // default gateway port
+		{"ssh://user@gateway.example.com:2222", "/node", "ws://gateway.example.com:8443/node"},     // :port is SSH port, not gateway
+		{"ssh://gateway.example.com?port=9000", "/client", "ws://gateway.example.com:9000/client"}, // gateway port via query
 		{"ssh://user@gateway.example.com:2222?port=9000", "/node", "ws://gateway.example.com:9000/node"},
 	}
 	for _, tc := range cases {

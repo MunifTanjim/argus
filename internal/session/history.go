@@ -4,14 +4,14 @@ package session
 // read-only History view. NodeID/NodeLabel are empty node-side and stamped by
 // the gateway when aggregating across machines.
 type HistoryProject struct {
-	ProjectDir   string `json:"project_dir"`           // routing key for its sessions (node-local path)
-	Cwd          string `json:"cwd"`                   // working directory of the project
-	Repo         string `json:"repo,omitempty"`        // git repo basename, when inside a repo
-	Label        string `json:"label"`                 // display name (repo, else cwd basename)
-	SessionCount int    `json:"session_count"`         // number of transcripts in the project
-	LastActivity string `json:"last_activity"`         // RFC3339 (UTC) newest transcript mod time
-	NodeID       string `json:"node_id,omitempty"`     // origin machine (gateway-stamped)
-	NodeLabel    string `json:"node_label,omitempty"`  // origin machine label (gateway-stamped)
+	ProjectDir   string `json:"project_dir"`          // routing key for its sessions (node-local path)
+	Cwd          string `json:"cwd"`                  // working directory of the project
+	Repo         string `json:"repo,omitempty"`       // git repo basename, when inside a repo
+	Label        string `json:"label"`                // display name (repo, else cwd basename)
+	SessionCount int    `json:"session_count"`        // number of transcripts in the project
+	LastActivity string `json:"last_activity"`        // RFC3339 (UTC) newest transcript mod time
+	NodeID       string `json:"node_id,omitempty"`    // origin machine (gateway-stamped)
+	NodeLabel    string `json:"node_label,omitempty"` // origin machine label (gateway-stamped)
 }
 
 // HistorySession is one past session within a project, for the History session list.

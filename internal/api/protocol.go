@@ -23,11 +23,11 @@ const (
 	// on demand (transcript chunks ship without these heavy bodies).
 	MethodSessionToolDetail = "sessions.toolDetail" // request: ToolDetailParams; result: ToolDetail
 	MethodSessionCapture    = "sessions.capture"    // request: SessionRef; result: CaptureResult
-	MethodSessionInput          = "sessions.input"          // request: InputParams; result: nil
-	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
-	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
-	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
-	MethodSessionKill           = "sessions.kill"           // request: SessionRef; result: nil
+	MethodSessionInput      = "sessions.input"      // request: InputParams; result: nil
+	MethodSessionKey        = "sessions.key"        // request: KeyParams; result: nil
+	MethodSessionRespond    = "sessions.respond"    // request: RespondParams; result: nil
+	MethodSessionSpawn      = "sessions.spawn"      // request: SpawnParams; result: SpawnResult
+	MethodSessionKill       = "sessions.kill"       // request: SessionRef; result: nil
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
