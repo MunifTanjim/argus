@@ -1,0 +1,33 @@
+package api
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+)
+
+func TestTranscriptDeltaJSONTags(t *testing.T) {
+	d := TranscriptDelta{SubID: "s1", FromIndex: 2, Chunks: []claudecode.Chunk{{ID: "2"}}}
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	want := `{"sub_id":"s1","from_index":2,"chunks":[{"id":"2","kind":""}]}`
+	if got != want {
+		t.Fatalf("delta json = %s, want %s", got, want)
+	}
+}
+
+func TestTranscriptSubscribeParamsRoundTrip(t *testing.T) {
+	in := TranscriptSubscribeParams{SubID: "s1", SessionID: "d:1", AgentID: "a1", HaveChunks: 3}
+	b, _ := json.Marshal(in)
+	var out TranscriptSubscribeParams
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out != in {
+		t.Fatalf("round trip = %+v, want %+v", out, in)
+	}
+}

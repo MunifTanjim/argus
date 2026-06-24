@@ -1,0 +1,130 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net"
+	"sync"
+	"time"
+)
+
+// HandlerFunc handles a single request. params is the raw JSON params (may be
+// nil); the returned value is marshaled as the result.
+type HandlerFunc func(ctx context.Context, params json.RawMessage) (any, error)
+
+// Notifier sends a server-initiated notification to one connected client.
+type Notifier interface {
+	Notify(method string, params any) error
+}
+
+// Server dispatches JSON-RPC requests and streams notifications to clients. Each
+// accepted connection becomes a Peer whose inbound requests are routed through
+// the shared handler registry.
+type Server struct {
+	mu        sync.RWMutex
+	handlers  map[string]HandlerFunc
+	onConnect func(n Notifier) (cleanup func())
+	log       *slog.Logger // optional per-request logging; nil disables it
+}
+
+// NewServer returns an empty Server.
+func NewServer() *Server {
+	return &Server{handlers: make(map[string]HandlerFunc)}
+}
+
+// SetLogger enables per-request logging through l (nil disables it). Each dispatched
+// request is logged once on completion with its method, duration, and error (if any).
+func (s *Server) SetLogger(l *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log = l
+}
+
+// Handle registers a handler for a method.
+func (s *Server) Handle(method string, h HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handlers[method] = h
+}
+
+// OnConnect registers a hook invoked once per connection with a Notifier for
+// pushing notifications; the returned cleanup runs when the connection closes.
+func (s *Server) OnConnect(fn func(n Notifier) (cleanup func())) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onConnect = fn
+}
+
+// Serve accepts connections on l until the listener is closed.
+func (s *Server) Serve(l net.Listener) error {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return err
+		}
+		go s.ServeConn(conn)
+	}
+}
+
+// ServeConn serves a single already-established connection until it closes. It is
+// exported so non-listener transports (e.g. an accepted WebSocket adapted to a
+// net.Conn) can reuse the same dispatch path.
+func (s *Server) ServeConn(netConn net.Conn) {
+	s.ServeConnContext(context.Background(), netConn)
+}
+
+// ServeConnContext is ServeConn with a connection-scoped base context, whose
+// values (e.g. an auth Principal set by the WebSocket handler) reach every
+// request served on the connection.
+func (s *Server) ServeConnContext(ctx context.Context, netConn net.Conn) {
+	peer := NewPeer(netConn, PeerOptions{Dispatch: s.dispatch, BaseContext: ctx})
+	defer peer.Close()
+
+	s.mu.RLock()
+	onConnect := s.onConnect
+	s.mu.RUnlock()
+	if onConnect != nil {
+		if cleanup := onConnect(peer); cleanup != nil {
+			defer cleanup()
+		}
+	}
+	<-peer.Done()
+}
+
+// DispatchFunc returns a DispatchFunc bound to this server's handler registry,
+// so the same handlers can be served over a non-listener transport (e.g. the
+// node's gateway uplink, where the gateway issues control requests down the link).
+func (s *Server) DispatchFunc() DispatchFunc { return s.dispatch }
+
+// dispatch routes an inbound request to the registered handler, or returns a
+// method-not-found RPCError.
+func (s *Server) dispatch(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	s.mu.RLock()
+	h := s.handlers[method]
+	log := s.log
+	s.mu.RUnlock()
+
+	start := time.Now()
+	if h == nil {
+		err := &RPCError{Code: CodeMethodNotFound, Message: "method not found: " + method}
+		logRequest(log, method, start, err)
+		return nil, err
+	}
+	res, err := h(ctx, params)
+	logRequest(log, method, start, err)
+	return res, err
+}
+
+// logRequest emits one per-request line (method, duration, and error if any). No-op when
+// log is nil.
+func logRequest(log *slog.Logger, method string, start time.Time, err error) {
+	if log == nil {
+		return
+	}
+	if err != nil {
+		log.Info("rpc", "method", method, "dur", time.Since(start), "err", err)
+		return
+	}
+	log.Info("rpc", "method", method, "dur", time.Since(start))
+}
