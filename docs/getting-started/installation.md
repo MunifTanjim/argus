@@ -1,0 +1,63 @@
+# Installation
+
+Argus runs on **macOS** and **Linux**. Install the prebuilt binary with the
+script below, or build from source.
+
+## Prerequisites
+
+These are needed to *run* Argus, however you install it:
+
+- [tmux](https://github.com/tmux/tmux) — Argus discovers Claude Code sessions running in tmux
+- [Claude Code](https://www.claude.com/product/claude-code) — the AI coding agent Argus supervises
+
+## Install Pre-built Binary
+
+The script downloads the right binary for your platform from the latest
+[GitHub release](https://github.com/MunifTanjim/argus/releases). It uses the
+[GitHub CLI](https://cli.github.com/) (`gh`):
+
+```sh
+# if you don't already have gh
+brew install gh && gh auth login
+```
+
+```sh
+gh api -H "Accept: application/vnd.github.raw" repos/MunifTanjim/argus/contents/scripts/install.sh | bash
+```
+
+This installs the binary in `~/.local/bin/argus`. To install elsewhere, set `INSTALL_DIR`:
+
+```sh
+gh api -H "Accept: application/vnd.github.raw" repos/MunifTanjim/argus/contents/scripts/install.sh | INSTALL_DIR=/usr/local/bin bash
+```
+
+Make sure the install directory is on your `PATH`.
+
+## Compile from Source
+
+Requires [Go](https://go.dev/) 1.26 or later.
+
+```sh
+go install github.com/MunifTanjim/argus/cmd/argus@latest   # -> $(go env GOPATH)/bin
+```
+
+Or clone and install with `make`:
+
+```sh
+git clone https://github.com/MunifTanjim/argus
+cd argus
+
+make install                          
+```
+
+
+## Install Hooks
+
+Install Argus's Claude Code hooks so it can track each session's status live:
+
+```sh
+argus hooks install
+```
+
+This is safe to re-run and only touches its own entries. Without it, status still
+works but is less precise.

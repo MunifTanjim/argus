@@ -6,9 +6,8 @@
 // Delivery is UnifiedPush / Web Push: the gateway HTTP-POSTs an encrypted payload
 // (RFC 8291) with a VAPID authorization (RFC 8292) to a device-provided endpoint.
 // The endpoint comes from a distributor on the phone — an external app (ntfy,
-// Sunup) or the app's own embedded FCM distributor, which yields an
-// fcm.googleapis.com Web Push endpoint. There is no Firebase project or
-// service-account anywhere; the gateway holds only a self-generated VAPID key.
+// Sunup) or the app's own embedded distributor. The gateway holds only a
+// self-generated VAPID key.
 //
 // A Dispatcher fans a Notification out to every registered device Target and
 // prunes targets that come back gone. A Watch loop turns session events into

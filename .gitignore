@@ -15,8 +15,11 @@ coverage.*
 web/node_modules/
 web/dist/
 
-# Node
+# Node / docs
 node_modules/
+docs/.vitepress/cache
+docs/.vitepress/dist
+
 # Flutter
 app/.dart_tool/
 app/build/

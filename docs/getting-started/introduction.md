@@ -1,4 +1,4 @@
-# Argus
+# Introduction
 
 **Watch and control all your AI coding sessions — from one place.**
 
@@ -10,9 +10,7 @@ answer prompts, spawn/interrupt/kill — without leaving the TUI.
 Start local in a terminal. Scale to a fleet across machines. Get a push
 notification on your phone when a session needs you.
 
-> [!IMPORTANT]
-> 📖 **Read the full documentation at [argus.muniftanjim.dev](https://argus.muniftanjim.dev)** —
-> installation, setup guides, the TUI, the mobile app, and configuration.
+Argus supports **Claude Code** today, with room for more agents over time.
 
 ## Highlights
 
@@ -22,8 +20,16 @@ notification on your phone when a session needs you.
 - **Live screen** — watch a session's terminal and type into it.
 - **Lifecycle control** — spawn, interrupt, kill, answer prompts in place.
 - **Fleet mode** — aggregate machines, watch them all from one TUI.
-- **Mobile app** — Android companion with **Push Notification**, even when closed.
+- **Mobile app** — Android companion with **Push Notification**.
 
-## License
+## How it fits together
 
-Licensed under the MIT License. Check the [LICENSE](./LICENSE) file for details.
+Argus runs as a **node** on each machine: it discovers Claude Code sessions in
+tmux, tracks their status, and serves a local API that the TUI and the
+Claude Code hooks talk to.
+
+- On a **single machine**, you just run the [TUI](/guide/tui); it connects to
+  that machine's local node automatically.
+- Across **several machines**, one node acts as a [gateway](/guide/multi-machine) that the
+  others dial into, and the TUI — or your [phone](/guide/mobile-app) — connects
+  to that single endpoint.

@@ -39,9 +39,8 @@ dependencies:
   flutter_riverpod: ^3.3.2
   gpt_markdown: ^1.1.7
   # Push notifications via UnifiedPush / Web Push. An external distributor (ntfy,
-  # Sunup) or the app's embedded FCM distributor (gradle dep, Play-services
-  # devices) provides the endpoint; messages render via flutter_local_notifications.
-  # No Firebase project or service-account. See docs/push.md.
+  # Sunup) or the app's embedded distributor (gradle dep, Play-services devices)
+  # provides the endpoint; messages render via flutter_local_notifications.
   flutter_local_notifications: ^19.0.0
   unifiedpush: ^6.0.0
 

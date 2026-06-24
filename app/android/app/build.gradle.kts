@@ -89,8 +89,7 @@ configurations.all {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    // Embedded UnifiedPush distributor that registers directly with FCM via Web
-    // Push + VAPID (no Firebase project/service-account); the in-app fallback when
-    // no external distributor is installed. See docs/push.md.
+    // Embedded UnifiedPush distributor that registers via Web Push + VAPID; the
+    // in-app fallback when no external distributor is installed.
     implementation("org.unifiedpush.android:embedded-fcm-distributor:3.0.0")
 }
