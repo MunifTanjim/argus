@@ -1,0 +1,569 @@
+package parser_test
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+)
+
+// Helper to write a JSONL file from lines.
+func writeJSONL(t *testing.T, dir, name string, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Shorthand entry builders to keep tests readable.
+func userEntry(uuid, ts, content string) string {
+	return fmt.Sprintf(
+		`{"uuid":%q,"type":"user","timestamp":%q,"isSidechain":false,"isMeta":false,"message":{"role":"user","content":%q}}`,
+		uuid, ts, content,
+	)
+}
+
+func metaUserEntry(uuid, ts, content string) string {
+	return fmt.Sprintf(
+		`{"uuid":%q,"type":"user","timestamp":%q,"isSidechain":false,"isMeta":true,"message":{"role":"user","content":%q}}`,
+		uuid, ts, content,
+	)
+}
+
+func assistantEntry(uuid, ts, text string) string {
+	return fmt.Sprintf(
+		`{"uuid":%q,"type":"assistant","timestamp":%q,"isSidechain":false,"isMeta":false,"message":{"role":"assistant","content":[{"type":"text","text":%q}],"model":"claude-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}`,
+		uuid, ts, text,
+	)
+}
+
+func snapshotEntry(uuid string) string {
+	return fmt.Sprintf(
+		`{"type":"file-history-snapshot","messageId":%q,"snapshot":{"messageId":%q,"trackedFileBackups":{},"timestamp":"2026-02-20T06:42:33.954Z"},"isSnapshotUpdate":false}`,
+		uuid, uuid,
+	)
+}
+
+// --- scanSessionPreview tests ---
+
+func TestScanPreview_NormalUserText(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Hello world"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi there"),
+	)
+
+	preview, count := parser.ScanSessionPreview(path)
+	if preview != "Hello world" {
+		t.Errorf("preview = %q, want %q", preview, "Hello world")
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
+func TestScanPreview_CommandFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "<command-name>/model</command-name><command-args>sonnet</command-args>"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Switched model"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "/model" {
+		t.Errorf("preview = %q, want %q", preview, "/model")
+	}
+}
+
+func TestScanPreview_CommandFallbackOverriddenByText(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "<command-name>/model</command-name>"),
+		userEntry("u2", "2025-01-15T10:00:01Z", "Now help me with this"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "Now help me with this" {
+		t.Errorf("preview = %q, want %q", preview, "Now help me with this")
+	}
+}
+
+func TestScanPreview_SkipsCommandOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "<local-command-stdout>file1.go file2.go</local-command-stdout>"),
+		userEntry("u2", "2025-01-15T10:00:01Z", "What are these files?"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "What are these files?" {
+		t.Errorf("preview = %q, want %q", preview, "What are these files?")
+	}
+}
+
+func TestScanPreview_SkipsInterruptions(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "[Request interrupted by user at 2025-01-15T10:00:00Z]"),
+		userEntry("u2", "2025-01-15T10:00:01Z", "Try again please"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "Try again please" {
+		t.Errorf("preview = %q, want %q", preview, "Try again please")
+	}
+}
+
+func TestScanPreview_DoesNotFilterIsMeta(t *testing.T) {
+	// claude-devtools processes isMeta entries for preview. If the first
+	// type=user entry is isMeta with real text, it should be used.
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		metaUserEntry("m1", "2025-01-15T10:00:00Z", "Tool result: some data here"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Got it"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "Tool result: some data here" {
+		t.Errorf("preview = %q, want %q", preview, "Tool result: some data here")
+	}
+	// Turn count is 0 here because isMeta user messages aren't counted as
+	// conversation turns. That's correct -- the test is about preview extraction.
+}
+
+func TestScanPreview_TeammateMessageNotFiltered(t *testing.T) {
+	// Teammate messages should pass through sanitization, not be skipped.
+	teammateMsg := `<teammate-message teammate_id="lead">You are working on task #1</teammate-message>`
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", teammateMsg),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "On it"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	// SanitizeContent strips noise tags but not teammate-message tags.
+	// The preview should contain the teammate message text.
+	if preview == "" {
+		t.Error("preview is empty, teammate message should produce a preview")
+	}
+	if !strings.Contains(preview, "task #1") {
+		t.Errorf("preview = %q, should contain teammate message content", preview)
+	}
+}
+
+func TestScanPreview_SanitizesNoiseFromPreview(t *testing.T) {
+	// system-reminder tags inside user content should be stripped.
+	content := "<system-reminder>some noise</system-reminder>Real question here"
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", content),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if preview != "Real question here" {
+		t.Errorf("preview = %q, want %q", preview, "Real question here")
+	}
+}
+
+func TestScanPreview_GhostSession(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		snapshotEntry("snap1"),
+		snapshotEntry("snap2"),
+	)
+
+	preview, count := parser.ScanSessionPreview(path)
+	if preview != "" {
+		t.Errorf("preview = %q, want empty for ghost session", preview)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for ghost session", count)
+	}
+}
+
+func TestScanPreview_NewlinesCollapsed(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "line one\nline two\nline three"),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	if strings.Contains(preview, "\n") {
+		t.Errorf("preview contains newlines: %q", preview)
+	}
+	if preview != "line one line two line three" {
+		t.Errorf("preview = %q, want %q", preview, "line one line two line three")
+	}
+}
+
+func TestScanPreview_TruncatesLongPreview(t *testing.T) {
+	longText := strings.Repeat("x", 600)
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", longText),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	// Parser caps at 500 chars; TUI handles display truncation.
+	if len(preview) > 500 {
+		t.Errorf("preview length = %d, should be <= 500", len(preview))
+	}
+}
+
+func TestScanPreview_PreservesUnder500(t *testing.T) {
+	longText := strings.Repeat("x", 200)
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", longText),
+	)
+
+	preview, _ := parser.ScanSessionPreview(path)
+	// Under 500 chars should come through untruncated.
+	if preview != longText {
+		t.Errorf("preview length = %d, want %d (no truncation under 500)", len(preview), len(longText))
+	}
+}
+
+func TestScanPreview_CountsEntireFile(t *testing.T) {
+	// Even though preview stops at 200 lines, turn counting covers entire file.
+	// Build a file with alternating user + assistant messages past line 200.
+	var lines []string
+	for i := 0; i < 125; i++ {
+		lines = append(lines,
+			userEntry(
+				fmt.Sprintf("u%d", i),
+				fmt.Sprintf("2025-01-15T10:%02d:%02dZ", (i*2)/60, (i*2)%60),
+				fmt.Sprintf("question %d", i),
+			),
+			assistantEntry(
+				fmt.Sprintf("a%d", i),
+				fmt.Sprintf("2025-01-15T10:%02d:%02dZ", (i*2+1)/60, (i*2+1)%60),
+				fmt.Sprintf("response %d", i),
+			),
+		)
+	}
+
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl", lines...)
+
+	preview, count := parser.ScanSessionPreview(path)
+	if preview != "question 0" {
+		t.Errorf("preview = %q, want %q", preview, "question 0")
+	}
+	// 125 user turns + 125 AI turns = 250 conversation turns
+	if count != 250 {
+		t.Errorf("count = %d, want 250", count)
+	}
+}
+
+// --- DiscoverProjectSessions tests ---
+
+func TestDiscoverProjectSessions_FiltersGhosts(t *testing.T) {
+	dir := t.TempDir()
+
+	// Real session.
+	writeJSONL(t, dir, "real-session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Hello"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi"),
+	)
+	// Ghost session (only snapshots).
+	writeJSONL(t, dir, "ghost-session.jsonl",
+		snapshotEntry("snap1"),
+	)
+	// Agent file (should be excluded).
+	writeJSONL(t, dir, "agent_abc.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "agent msg"),
+	)
+
+	sessions, err := parser.DiscoverProjectSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (ghost and agent should be filtered)", len(sessions))
+	}
+	if sessions[0].SessionID != "real-session" {
+		t.Errorf("session ID = %q, want %q", sessions[0].SessionID, "real-session")
+	}
+}
+
+func TestDiscoverProjectSessions_SortedByModTime(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write older session first.
+	p1 := writeJSONL(t, dir, "older.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Older session"),
+	)
+	// Write newer session.
+	p2 := writeJSONL(t, dir, "newer.jsonl",
+		userEntry("u1", "2025-01-15T11:00:00Z", "Newer session"),
+	)
+
+	// Force the mod times to be in the right order.
+	older := mustStat(t, p1).ModTime()
+	os.Chtimes(p2, older.Add(1), older.Add(1))
+
+	sessions, err := parser.DiscoverProjectSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(sessions))
+	}
+	if sessions[0].SessionID != "newer" {
+		t.Errorf("first session = %q, want newer (most recent first)", sessions[0].SessionID)
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi
+}
+
+// --- ReadSessionIncremental tests ---
+
+func TestReadSessionIncremental_FullRead(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Hello"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi"),
+	)
+
+	msgs, _, offset, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Errorf("len(msgs) = %d, want 2", len(msgs))
+	}
+	if offset == 0 {
+		t.Error("offset should be > 0 after reading")
+	}
+}
+
+func TestReadSessionIncremental_IncrementalRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	// Write initial content.
+	line1 := userEntry("u1", "2025-01-15T10:00:00Z", "Hello")
+	os.WriteFile(path, []byte(line1+"\n"), 0644)
+
+	// First read.
+	msgs1, _, offset1, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs1) != 1 {
+		t.Fatalf("first read: len(msgs) = %d, want 1", len(msgs1))
+	}
+
+	// Append more content.
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	line2 := assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi")
+	f.WriteString(line2 + "\n")
+	f.Close()
+
+	// Incremental read from previous offset.
+	msgs2, _, offset2, err := parser.ReadSessionIncremental(path, offset1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs2) != 1 {
+		t.Fatalf("incremental read: len(msgs) = %d, want 1", len(msgs2))
+	}
+	if offset2 <= offset1 {
+		t.Errorf("offset didn't advance: %d <= %d", offset2, offset1)
+	}
+}
+
+func TestReadSessionIncremental_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.jsonl")
+	os.WriteFile(path, []byte{}, 0644)
+
+	msgs, _, offset, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("len(msgs) = %d, want 0", len(msgs))
+	}
+	if offset != 0 {
+		t.Errorf("offset = %d, want 0 for empty file", offset)
+	}
+}
+
+// --- Exact project directory matching tests ---
+
+func TestDiscoverAllProjectSessions_ExactMatchOnly(t *testing.T) {
+	// Simulate ~/.claude/projects/ with a parent dir and a child that shares
+	// its prefix. Only the explicitly-passed directory's sessions should appear.
+	projectsRoot := t.TempDir()
+	parentDir := filepath.Join(projectsRoot, "-Users-kyle-Code-my-projects")
+	childDir := filepath.Join(projectsRoot, "-Users-kyle-Code-my-projects-tail-claude")
+
+	os.Mkdir(parentDir, 0o755)
+	os.Mkdir(childDir, 0o755)
+
+	writeJSONL(t, parentDir, "parent-session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Parent session"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Reply"),
+	)
+	writeJSONL(t, childDir, "child-session.jsonl",
+		userEntry("u2", "2025-01-15T11:00:00Z", "Child session"),
+		assistantEntry("a2", "2025-01-15T11:00:01Z", "Reply"),
+	)
+
+	sessions, err := parser.DiscoverAllProjectSessions([]string{parentDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (exact match only)", len(sessions))
+	}
+	if sessions[0].SessionID != "parent-session" {
+		t.Errorf("session = %q, want parent-session", sessions[0].SessionID)
+	}
+}
+
+// --- DiscoverAllProjectSessions tests ---
+
+func TestDiscoverAllProjectSessions_MergesAcrossDirs(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	// Session in dir1 (older).
+	p1 := writeJSONL(t, dir1, "session-a.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Session A"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Reply A"),
+	)
+	// Session in dir2 (newer).
+	p2 := writeJSONL(t, dir2, "session-b.jsonl",
+		userEntry("u2", "2025-01-15T11:00:00Z", "Session B"),
+		assistantEntry("a2", "2025-01-15T11:00:01Z", "Reply B"),
+	)
+
+	// Force mod times so session-b is newer.
+	older := mustStat(t, p1).ModTime()
+	os.Chtimes(p2, older.Add(time.Second), older.Add(time.Second))
+
+	sessions, err := parser.DiscoverAllProjectSessions([]string{dir1, dir2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(sessions))
+	}
+	// Newest first.
+	if sessions[0].SessionID != "session-b" {
+		t.Errorf("first session = %q, want session-b (newest first)", sessions[0].SessionID)
+	}
+	if sessions[1].SessionID != "session-a" {
+		t.Errorf("second session = %q, want session-a", sessions[1].SessionID)
+	}
+}
+
+func TestDiscoverAllProjectSessions_SkipsMissingDirs(t *testing.T) {
+	dir := t.TempDir()
+	writeJSONL(t, dir, "real.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Hello"),
+		assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi"),
+	)
+
+	sessions, err := parser.DiscoverAllProjectSessions([]string{dir, "/nonexistent/dir"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (missing dir skipped)", len(sessions))
+	}
+}
+
+func TestReadSessionIncremental_NoNewContent(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJSONL(t, dir, "session.jsonl",
+		userEntry("u1", "2025-01-15T10:00:00Z", "Hello"),
+	)
+
+	// Read everything.
+	_, _, offset1, _ := parser.ReadSessionIncremental(path, 0, false)
+
+	// Read again from the end -- nothing new.
+	msgs, _, offset2, err := parser.ReadSessionIncremental(path, offset1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("len(msgs) = %d, want 0 (no new content)", len(msgs))
+	}
+	if offset2 != offset1 {
+		t.Errorf("offset changed: %d != %d", offset2, offset1)
+	}
+}
+
+func TestReadSessionIncremental_DefersPartialLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	complete := userEntry("u1", "2025-01-15T10:00:00Z", "Hello") + "\n"
+	partial := `{"type":"assistant","uuid":"a1"` // no closing brace, no newline
+	if err := os.WriteFile(path, []byte(complete+partial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _, offset, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("len(msgs) = %d, want 1 (partial line deferred)", len(msgs))
+	}
+	if offset != int64(len(complete)) {
+		t.Fatalf("offset = %d, want %d (just past the last newline)", offset, len(complete))
+	}
+
+	// Complete the partial line; a second read returns exactly that one entry.
+	rest := `,"timestamp":"2025-01-15T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}]}}` + "\n"
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	f.WriteString(rest)
+	f.Close()
+
+	msgs2, _, offset2, err := parser.ReadSessionIncremental(path, offset, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs2) != 1 {
+		t.Fatalf("second read len(msgs) = %d, want 1", len(msgs2))
+	}
+	if offset2 <= offset {
+		t.Fatalf("offset did not advance: %d <= %d", offset2, offset)
+	}
+}
+
+func TestReadSessionIncremental_ExtractsLinks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	// A tool-result entry carrying an agentId linked to a Task tool_use id.
+	line := `{"type":"user","uuid":"r1","timestamp":"2025-01-15T10:00:00Z","sourceToolUseID":"tool-1","toolUseResult":{"agentId":"aaa"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, links, _, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links["aaa"] != "tool-1" {
+		t.Fatalf("links[aaa] = %q, want tool-1", links["aaa"])
+	}
+}
