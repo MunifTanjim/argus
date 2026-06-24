@@ -1,0 +1,220 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/tunnel"
+	"github.com/MunifTanjim/argus/internal/util"
+)
+
+// tunnelOptions are the resolved inputs for building a tunnel provider. Kept
+// separate from cobra flags so the gates below are unit-testable.
+type tunnelOptions struct {
+	provider string // --tunnel: "cloudflare" or "cloudflare:<mode>" ("" disables)
+	bin      string // provider binary path; "" => look up on PATH (set only in tests)
+
+	cfToken      string // --cloudflare-token (remote)
+	cfTunnelName string // --cloudflare-tunnel-name (local; default "argus")
+	cfHostname   string // --cloudflare-hostname (local; public hostname argus routes)
+
+	runGateway bool
+	listenAddr string
+
+	logLevel slog.Level // argus log level; mapped to the provider's own --loglevel
+}
+
+// providerBinary maps a provider name to the CLI it runs (for PATH lookup).
+var providerBinary = map[string]string{"cloudflare": "cloudflared"}
+
+// resolveTunnel validates the options and builds the selected provider plus the
+// local origin URL. It returns (nil, "", nil) when no tunnel is requested. All
+// failure modes are pre-flight: callers fail fast before starting anything.
+func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
+	if o.provider == "" {
+		return nil, "", nil
+	}
+	if !o.runGateway {
+		return nil, "", fmt.Errorf("--tunnel requires gateway mode (run without --gateway and with --token)")
+	}
+	// --tunnel is "<provider>" or "<provider>:<mode>"; the mode is provider-specific.
+	providerName, mode, _ := strings.Cut(o.provider, ":")
+	binName, ok := providerBinary[providerName]
+	if !ok {
+		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare)", providerName)
+	}
+	switch providerName {
+	case "cloudflare":
+		cfMode, err := cloudflareMode(mode, o)
+		if err != nil {
+			return nil, "", err
+		}
+		bin, err := resolveBin(o.bin, binName)
+		if err != nil {
+			return nil, "", err
+		}
+		origin, err := originFromListen(o.listenAddr)
+		if err != nil {
+			return nil, "", err
+		}
+		name := o.cfTunnelName
+		if cfMode == "local" && name == "" {
+			name = "argus" // default name for the tunnel argus creates and owns
+		}
+		return tunnel.Cloudflare{
+			Bin:      bin,
+			Token:    o.cfToken,
+			Tunnel:   name,
+			Hostname: o.cfHostname,
+			LogLevel: cloudflaredLogLevel(o.logLevel),
+		}, origin, nil
+	default:
+		// unreachable: providerBinary already gated unknown names
+		return nil, "", fmt.Errorf("unknown tunnel provider %q", providerName)
+	}
+}
+
+// cloudflaredLogLevel maps argus's log level to cloudflared's --loglevel, offset
+// by one tier at info: cloudflared's own info output is chatty heartbeat/connection
+// noise that argus treats as below-the-fold, so argus-info runs cloudflared at warn.
+// This filters the noise at the source (cutting the volume piped back) rather than
+// dropping it after the fact.
+//
+//	argus              -> cloudflared
+//	trace, debug       -> debug
+//	info, warn         -> warn
+//	error, fatal       -> error
+func cloudflaredLogLevel(l slog.Level) string {
+	switch {
+	case l <= slog.LevelDebug:
+		return "debug"
+	case l <= slog.LevelWarn:
+		return "warn"
+	default:
+		return "error"
+	}
+}
+
+// resolveBin returns bin if set (a test seam), else looks binName up on PATH.
+func resolveBin(bin, binName string) (string, error) {
+	if bin != "" {
+		return bin, nil
+	}
+	if !shell.ExecutableExists(binName) {
+		return "", fmt.Errorf("%s not found on PATH: install it or add it to PATH", binName)
+	}
+	return shell.ExecutablePath(binName), nil
+}
+
+// cloudflareMode resolves and validates the Cloudflare tunnel mode. explicit is
+// the suffix from --tunnel cloudflare:<mode> ("" when omitted); when empty the
+// mode is inferred from which --cloudflare-* params are set. It returns the
+// resolved mode ("quick", "remote", or "local") or a validation error.
+func cloudflareMode(explicit string, o tunnelOptions) (string, error) {
+	hasRemote := o.cfToken != ""
+	hasLocal := o.cfHostname != "" || o.cfTunnelName != ""
+
+	mode := explicit
+	if mode == "" { // no suffix: infer the mode from the params
+		switch {
+		case hasRemote && hasLocal:
+			return "", fmt.Errorf("--cloudflare-token (remote tunnel) cannot be combined with --cloudflare-hostname/--cloudflare-tunnel-name (local tunnel)")
+		case hasRemote:
+			mode = "remote"
+		case hasLocal:
+			mode = "local"
+		default:
+			mode = "quick"
+		}
+	}
+
+	switch mode {
+	case "quick":
+		if hasRemote || hasLocal {
+			return "", fmt.Errorf("a quick Cloudflare tunnel takes no other --cloudflare-* flags; use cloudflare:remote or cloudflare:local")
+		}
+	case "remote":
+		if !hasRemote {
+			return "", fmt.Errorf("a remote Cloudflare tunnel requires --cloudflare-token")
+		}
+		if hasLocal {
+			return "", fmt.Errorf("--cloudflare-hostname/--cloudflare-tunnel-name are only valid with a local tunnel")
+		}
+	case "local":
+		if o.cfHostname == "" {
+			return "", fmt.Errorf("a local Cloudflare tunnel requires --cloudflare-hostname: argus routes a DNS record for the hostname to the tunnel")
+		}
+		if hasRemote {
+			return "", fmt.Errorf("--cloudflare-token is only valid with a remote tunnel")
+		}
+		// The origin certificate (cloudflared tunnel login) is an environmental
+		// prerequisite handled at startup by ensureCloudflareLogin, not here.
+	default:
+		return "", fmt.Errorf("unknown cloudflare tunnel type %q (use cloudflare:quick, cloudflare:remote, or cloudflare:local)", mode)
+	}
+	return mode, nil
+}
+
+// cloudflareCertPath resolves the origin certificate path the way cloudflared
+// does: $TUNNEL_ORIGIN_CERT if set (isDefault=false), else ~/.cloudflared/cert.pem
+// (isDefault=true). The child cloudflared processes inherit this environment, so
+// they resolve the same path.
+func cloudflareCertPath() (path string, isDefault bool, err error) {
+	if c := os.Getenv("TUNNEL_ORIGIN_CERT"); c != "" {
+		return c, false, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, fmt.Errorf("locate cloudflared origin certificate: %w", err)
+	}
+	return filepath.Join(home, ".cloudflared", "cert.pem"), true, nil
+}
+
+// ensureCloudflareLogin makes sure a locally-managed tunnel has the origin
+// certificate it needs (from `cloudflared tunnel login`). When the cert is
+// missing and we're on an interactive terminal using the default cert path, it
+// runs the (blocking, browser-based) login for the user; otherwise it fails fast
+// with guidance. It is a no-op for quick/remote tunnels (cf.Tunnel == "").
+func ensureCloudflareLogin(ctx context.Context, cf tunnel.Cloudflare, interactive bool) error {
+	if cf.Tunnel == "" {
+		return nil
+	}
+	cert, isDefault, err := cloudflareCertPath()
+	if err != nil {
+		return err
+	}
+	if exists, _ := util.FileExists(cert); exists {
+		return nil // already logged in
+	}
+	// Only auto-login for the default path: that's where `tunnel login` writes; a
+	// custom TUNNEL_ORIGIN_CERT means the user is managing the cert themselves.
+	if !interactive || !isDefault {
+		return fmt.Errorf("cloudflare locally-managed tunnel needs an origin certificate at %s: run 'cloudflared tunnel login' first (or set TUNNEL_ORIGIN_CERT)", cert)
+	}
+	shell.StdErrF("argus start: no Cloudflare origin certificate at %s; launching 'cloudflared tunnel login' (a browser will open)…\n", cert)
+	login := shell.NewCommandContext(ctx, cf.Bin, "tunnel", "login").
+		WithStdIn(os.Stdin).WithStdOut(os.Stderr).WithStdErr(os.Stderr)
+	if err := login.Run(); err != nil {
+		return fmt.Errorf("cloudflared tunnel login: %w", err)
+	}
+	if exists, _ := util.FileExists(cert); !exists {
+		return fmt.Errorf("cloudflared tunnel login completed but no certificate found at %s", cert)
+	}
+	return nil
+}
+
+// originFromListen turns a gateway listen address (e.g. ":8443") into the loopback
+// origin URL the tunnel points at (the edge terminates tls, so it is plain http).
+func originFromListen(listenAddr string) (string, error) {
+	_, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return "", fmt.Errorf("parse --listen-addr %q: %w", listenAddr, err)
+	}
+	return "http://127.0.0.1:" + port, nil
+}
