@@ -1,0 +1,52 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: publish
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          mkdir -p build
+          go build -trimpath -ldflags "-s -w -X main.version=${TAG_NAME}" -o build/argus-${TAG_NAME}-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/argus
+      - name: Upload Release Asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: gh release upload "${TAG_NAME}" build/argus-${TAG_NAME}-${{ matrix.goos }}-${{ matrix.goarch }} --clobber

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub Token
+        uses: actions/create-github-app-token@v3
+        id: gh-token
+        with:
+          client-id: ${{ secrets.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Release
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.gh-token.outputs.token }}
+
+      - name: Trigger Release Build
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ steps.gh-token.outputs.token }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run --repo "${GITHUB_REPOSITORY}" publish.yml -f tag="${TAG_NAME}"

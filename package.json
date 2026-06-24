@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "name": "argus",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "lint:commit:current": "commitlint --edit",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "husky": "^9.1.7"
+  }
+}

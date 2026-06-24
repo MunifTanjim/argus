@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Dependencies
+        run: go mod download
+      - name: Check Format
+        run: make fmt-check
+      - name: Vet
+        run: make vet
+      - name: Build
+        run: make build
+      - name: Test
+        run: make test
+
+  convention:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install Dependencies
+        run: pnpm install
+      - name: Lint last Commit Message
+        if: github.event_name == 'push'
+        run: pnpm exec commitlint --last --verbose
+      - name: Lint PR Commit Messages
+        if: github.event_name == 'pull_request'
+        run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
