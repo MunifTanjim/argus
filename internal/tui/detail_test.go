@@ -1,0 +1,348 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/session"
+)
+
+func TestFilledTool(t *testing.T) {
+	m := testModel()
+	m.toolBodies = map[string]toolBodyEntry{
+		"loadingTool": {loading: true},
+		"doneTool":    {done: true, toolInput: `{"x":1}`, result: "out", resultIsError: true},
+	}
+
+	// No ToolID → not addressable → treated as already resolved (renders inline).
+	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolInput: "inline"}); !fetched {
+		t.Error("item without ToolID should be reported as fetched")
+	}
+	// Outstanding fetch → not yet fetched (caller shows a placeholder).
+	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "loadingTool"}); fetched {
+		t.Error("loading item should not be reported as fetched")
+	}
+	// Unknown id → not fetched.
+	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "unknown"}); fetched {
+		t.Error("unknown tool should not be reported as fetched")
+	}
+	// Completed fetch → fields filled from the cache.
+	got, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "doneTool"})
+	if !fetched {
+		t.Fatal("done item should be reported as fetched")
+	}
+	if got.ToolInput != `{"x":1}` || got.Result != "out" || !got.ResultIsError {
+		t.Errorf("filled item = %+v", got)
+	}
+}
+
+func detailTestModel(c claudecode.Chunk) model {
+	m := testModel()
+	m.transcript.chunks = []claudecode.Chunk{c}
+	m.transcript.cursor = 0
+	m.historyView = histDetail
+	m.enterDetail()
+	return m
+}
+
+// maxLineWidth returns the widest visible line width in s (ANSI-aware).
+func maxLineWidth(s string) int {
+	w := 0
+	for _, line := range strings.Split(s, "\n") {
+		if lw := lipgloss.Width(line); lw > w {
+			w = lw
+		}
+	}
+	return w
+}
+
+func TestDetailItemsHaveAccentRule(t *testing.T) {
+	m := detailTestModel(claudecode.Chunk{
+		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+		Items: []claudecode.Item{
+			{Kind: claudecode.ItemText, Text: "hello output"},
+			{Kind: claudecode.ItemTool, ToolName: "Bash",
+				ToolInput: `{"command":"ls"}`, Result: "out"},
+		},
+	})
+	out := m.detailBody()
+	if !strings.Contains(out, "┃") {
+		t.Errorf("detail items should have an accent rule:\n%s", out)
+	}
+	if !strings.Contains(out, "hello output") {
+		t.Errorf("output content lost:\n%s", out)
+	}
+}
+
+func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
+	m := detailTestModel(claudecode.Chunk{
+		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}},
+	})
+	m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
+	m.height = 40
+	out := m.detailBody()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			t.Errorf("expected left gutter (centered) on wide terminal: %q", line)
+			break
+		}
+	}
+}
+
+func TestDetailItemsWrapLongContent(t *testing.T) {
+	width := 40
+	longCmd := "echo " + strings.Repeat("verylongtokenwithoutspaces", 8)
+	longJSON := `{"k":"` + strings.Repeat("x", 200) + `"}`
+	m := testModel()
+
+	cases := map[string]claudecode.Item{
+		"bash command": {Kind: claudecode.ItemTool, ToolName: "Bash",
+			ToolInput: `{"command":"` + longCmd + `"}`},
+		"json result": {Kind: claudecode.ItemTool, ToolName: "UnknownTool",
+			Result: longJSON},
+		"edit diff": {Kind: claudecode.ItemTool, ToolName: "Edit",
+			ToolInput: `{"file_path":"a.go","old_string":"short","new_string":"` + strings.Repeat("z", 200) + `"}`},
+	}
+	for name, it := range cases {
+		// The expanded body wraps under the accent gutter; the gutter adds 2
+		// columns, so lines must stay within width.
+		out := m.detailItemBody(it, itemAccentColor(it), GlyphAccentBar, width)
+		if got := maxLineWidth(out); got > width {
+			t.Errorf("%s: line width %d > %d:\n%s", name, got, width, out)
+		}
+	}
+}
+
+func TestCollapsedRowFitsWidth(t *testing.T) {
+	m := testModel()
+	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash",
+		InputPreview: strings.Repeat("a long command preview ", 6)}
+	out := m.detailRowBlock(it, false, false, 40)
+	if got := maxLineWidth(out); got > 40 {
+		t.Errorf("collapsed row width %d > 40:\n%s", got, out)
+	}
+	if n := strings.Count(out, "\n") + 1; n != 1 {
+		t.Errorf("collapsed row should be a single line, got %d:\n%s", n, out)
+	}
+}
+
+// The focused item uses a heavy gutter bar; an unfocused one uses the thin bar.
+// This is the color-independent focus cue.
+func TestDetailRowBarReflectsFocus(t *testing.T) {
+	m := testModel()
+	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash", InputPreview: "ls"}
+
+	focused := m.detailRowBlock(it, false, true, 40)
+	if !strings.Contains(focused, GlyphAccentBarFocused) {
+		t.Errorf("focused row should use the heavy bar %q:\n%s", GlyphAccentBarFocused, focused)
+	}
+	unfocused := m.detailRowBlock(it, false, false, 40)
+	if !strings.Contains(unfocused, GlyphAccentBar) {
+		t.Errorf("unfocused row should use the thin bar %q:\n%s", GlyphAccentBar, unfocused)
+	}
+	if strings.Contains(unfocused, GlyphAccentBarFocused) {
+		t.Errorf("unfocused row should not use the heavy bar:\n%s", unfocused)
+	}
+}
+
+func TestPermissionPromptWrapsLongCommand(t *testing.T) {
+	width := 40
+	ix := &session.Interaction{
+		Kind:      session.InteractionPermission,
+		ToolName:  "Bash",
+		ToolInput: `{"command":"` + strings.Repeat("a", 200) + `"}`,
+		Message:   strings.Repeat("permission message ", 10),
+	}
+	m := testModel()
+	out := interactionBody(m, ix, width)
+	if got := maxLineWidth(out); got > width {
+		t.Errorf("permission body line width %d > %d:\n%s", got, width, out)
+	}
+}
+
+func TestDetailScrollHint(t *testing.T) {
+	// Build a chunk whose render far exceeds a tiny viewport.
+	var items []claudecode.Item
+	for i := 0; i < 40; i++ {
+		items = append(items, claudecode.Item{Kind: claudecode.ItemText, Text: "line of output"})
+	}
+	m := detailTestModel(claudecode.Chunk{ID: "a", Kind: claudecode.ChunkAI, Items: items})
+	m.width, m.height = 80, 10
+
+	out := m.detailBody()
+	if !strings.Contains(out, "▼") {
+		t.Errorf("expected a down-scroll hint when content overflows:\n%s", out)
+	}
+	// Body must still fit the viewport height.
+	if got := strings.Count(out, "\n") + 1; got > m.viewportHeight() {
+		t.Errorf("detail body %d lines > viewport %d", got, m.viewportHeight())
+	}
+
+	// Scrolled to the bottom, the hint shows lines hidden above (▲).
+	m.topFrame().scroll = 9999 // detailBody clamps to the last full page
+	if out := m.detailBody(); !strings.Contains(out, "▲") {
+		t.Errorf("expected an up-scroll hint when scrolled down:\n%s", out)
+	}
+}
+
+func TestEnterDrillPopStack(t *testing.T) {
+	sub := claudecode.Item{
+		Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{
+			{Kind: claudecode.ItemTool, ToolName: "Read"},
+			{Kind: claudecode.ItemTool, ToolName: "Grep"},
+		}}},
+	}
+	m := testModel()
+	m.transcript.chunks = []claudecode.Chunk{{
+		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}, sub},
+	}}
+	m.transcript.cursor = 0
+	m.enterDetail()
+	if len(m.transcript.detailStack) != 1 || len(m.topFrame().items) != 2 {
+		t.Fatalf("root frame: %d frames", len(m.transcript.detailStack))
+	}
+	// Drill into the subagent (cursor on item 1).
+	m.topFrame().cursor = 1
+	m.drillDetail()
+	if len(m.transcript.detailStack) != 2 || len(m.topFrame().items) != 2 || m.topFrame().label != "explorer" {
+		t.Fatalf("drill: frames=%d label=%q", len(m.transcript.detailStack), m.topFrame().label)
+	}
+	if m.topFrame().defaultExpanded {
+		t.Error("drilled subagent children should start collapsed")
+	}
+	if m.popDetail() {
+		t.Error("popping to root should not empty the stack")
+	}
+	if !m.popDetail() {
+		t.Error("popping the root should empty the stack")
+	}
+}
+
+func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
+	m := testModel()
+	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash",
+		ToolInput: `{"command":"ls"}`, Result: "out"}
+
+	collapsed := m.detailRowBlock(it, false, false, 60)
+	if strings.Contains(collapsed, "out") {
+		t.Errorf("collapsed row should not show the result body:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "Bash") {
+		t.Errorf("collapsed row should name the tool:\n%s", collapsed)
+	}
+	expanded := m.detailRowBlock(it, true, false, 60)
+	if !strings.Contains(expanded, "out") {
+		t.Errorf("expanded row should show the result body:\n%s", expanded)
+	}
+
+	sub := claudecode.Item{Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemTool, ToolName: "Read"}}}}}
+	if !strings.Contains(m.detailRowBlock(sub, false, false, 60), "↵") {
+		t.Errorf("a drillable subagent row should show the drill affordance")
+	}
+}
+
+func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
+	m := detailTestModel(claudecode.Chunk{
+		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+		Items: []claudecode.Item{
+			{Kind: claudecode.ItemText, Text: "hello"},
+			{Kind: claudecode.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
+		},
+	})
+	m.width, m.height = 80, 30
+	// Output (text) items start pre-expanded; other root items start collapsed.
+	if !m.topFrame().isExpanded(0) {
+		t.Errorf("Output item should start pre-expanded")
+	}
+	if m.topFrame().isExpanded(1) {
+		t.Errorf("non-Output root items should start collapsed")
+	}
+	out := m.detailBody()
+	if !strings.Contains(out, "Opus 4.8") {
+		t.Errorf("breadcrumb missing root label:\n%s", out)
+	}
+	if !strings.Contains(out, "hello") || !strings.Contains(out, "Bash") {
+		t.Errorf("frame rows missing:\n%s", out)
+	}
+	// Drill into a focused item → breadcrumb grows.
+	m.topFrame().cursor = 1
+	m.drillDetail()
+	if out := m.detailBody(); !strings.Contains(out, "Opus 4.8 › Bash") {
+		t.Errorf("drilled breadcrumb missing:\n%s", out)
+	}
+}
+
+// A non-drillable item focuses exactly once; further Enter presses on the focus
+// frame must not keep nesting the same item.
+func TestFocusFrameDoesNotRenest(t *testing.T) {
+	m := detailTestModel(claudecode.Chunk{
+		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+		Items: []claudecode.Item{
+			{Kind: claudecode.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
+		},
+	})
+	m.width, m.height = 80, 30
+
+	m.drillDetail() // focus the Bash item
+	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
+		t.Fatalf("first drill should focus once: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
+	}
+	for i := 0; i < 3; i++ {
+		m.drillDetail() // re-pressing Enter must be a no-op on a focus frame
+	}
+	if len(m.transcript.detailStack) != 2 {
+		t.Fatalf("focus frame re-nested: frames=%d", len(m.transcript.detailStack))
+	}
+}
+
+func TestDrillableUsesHasTrace(t *testing.T) {
+	withTrace := claudecode.Item{Kind: claudecode.ItemSubagent, AgentID: "a1", HasTrace: true}
+	if !drillable(withTrace) {
+		t.Error("subagent with HasTrace should be drillable")
+	}
+	plain := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Read"}
+	if drillable(plain) {
+		t.Error("non-subagent should not be drillable")
+	}
+}
+
+func TestDetailKeyNav(t *testing.T) {
+	sub := claudecode.Item{Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{
+			{Kind: claudecode.ItemTool, ToolName: "Read"}}}}}
+	m := detailTestModel(claudecode.Chunk{ID: "a", Kind: claudecode.ChunkAI,
+		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}, sub}})
+	m.width, m.height = 80, 30
+
+	// j moves the cursor.
+	res, _ := m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
+	m = res.(model)
+	if m.topFrame().cursor != 1 {
+		t.Fatalf("cursor=%d want 1", m.topFrame().cursor)
+	}
+	// space toggles expansion of the selected item (root items start collapsed,
+	// so the first space expands).
+	before := m.topFrame().isExpanded(1)
+	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: ' '})
+	m = res.(model)
+	if m.topFrame().isExpanded(1) == before {
+		t.Error("space should toggle the selected item's expansion")
+	}
+	// enter on the subagent drills in.
+	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if len(m.transcript.detailStack) != 2 || m.topFrame().label != "explorer" {
+		t.Fatalf("enter should drill: frames=%d", len(m.transcript.detailStack))
+	}
+}
