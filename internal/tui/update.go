@@ -139,6 +139,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
 				if m.transcript.detailStack[i].agentID == msg.agentID {
 					m.transcript.detailStack[i].items = flattenTrace(msg.chunks)
+					m.transcript.detailStack[i].expandOutputs()
 					break
 				}
 			}
@@ -163,6 +164,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i := range m.transcript.detailStack {
 				if m.transcript.detailStack[i].subID == msg.delta.SubID {
 					m.transcript.detailStack[i].items = flattenTrace(m.transcriptCache[msg.ref.key()].chunks)
+					m.transcript.detailStack[i].expandOutputs()
 					break
 				}
 			}

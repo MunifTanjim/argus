@@ -48,6 +48,23 @@ func (f *detailFrame) toggle(i int) {
 	f.expanded[i] = !f.isExpanded(i)
 }
 
+// expandOutputs pre-expands the frame's Output (text) items so a subagent's
+// final output shows without a manual unfold, matching the root AI frame. Only
+// items without an existing override are touched, so it's safe to re-run as a
+// streamed trace grows (it won't re-expand an item the user collapsed).
+func (f *detailFrame) expandOutputs() {
+	if f.expanded == nil {
+		f.expanded = map[int]bool{}
+	}
+	for i, it := range f.items {
+		if it.Kind == claudecode.ItemText {
+			if _, ok := f.expanded[i]; !ok {
+				f.expanded[i] = true
+			}
+		}
+	}
+}
+
 // topFrame returns the active (deepest) frame, or nil when the stack is empty.
 func (m model) topFrame() *detailFrame {
 	if len(m.transcript.detailStack) == 0 {
@@ -101,11 +118,7 @@ func (m *model) enterDetail() {
 			f.label = shortModel(c.Model)
 		}
 		f.items = c.Items
-		for i, it := range c.Items {
-			if it.Kind == claudecode.ItemText {
-				f.expanded[i] = true // pre-expand Output items
-			}
-		}
+		f.expandOutputs() // pre-expand Output items
 	} else {
 		f.label = "detail"
 		f.body = m.renderDetail(c)
@@ -130,6 +143,7 @@ func (m *model) drillDetail() {
 		nf.items = flattenTrace(it.Trace)
 		nf.defaultExpanded = false // children start collapsed
 		nf.agentID = it.AgentID    // the trace's items belong to this subagent
+		nf.expandOutputs()         // but pre-expand the subagent's Output items
 	} else {
 		nf.label = drillLabel(it)
 		nf.items = []claudecode.Item{it}
