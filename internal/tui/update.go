@@ -428,6 +428,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var listTable = []keyTableEntry{
 	{listKeys.Up, model.actListUp},
 	{listKeys.Down, model.actListDown},
+	{listKeys.Top, model.actListTop},
+	{listKeys.Bottom, model.actListBottom},
+	{listKeys.HalfUp, model.actListHalfUp},
+	{listKeys.HalfDown, model.actListHalfDown},
 	{listKeys.Open, model.actListOpen},
 	{listKeys.Screen, model.actListScreen},
 	{listKeys.Jump, model.actListJump},
@@ -441,6 +445,35 @@ var listTable = []keyTableEntry{
 func (m model) actListUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.cursor = cursorUp(m.cursor)
 	return m, nil
+}
+
+func (m model) actListTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.cursor = 0
+	return m, nil
+}
+
+func (m model) actListBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.cursor = cursorBottom(len(m.order))
+	return m, nil
+}
+
+func (m model) actListHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.cursor = max(0, m.cursor-m.cardListPageStep())
+	return m, nil
+}
+
+func (m model) actListHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.cursor = min(cursorBottom(len(m.order)), m.cursor+m.cardListPageStep())
+	return m, nil
+}
+
+// cardListPageStep is how many cards a half-page jump (ctrl-u/ctrl-d) moves in a
+// card list, estimated from the viewport height and a card's nominal line count
+// (box edges + two body lines + a blank separator). Shared by the session list
+// and the history project/session lists.
+func (m model) cardListPageStep() int {
+	const cardLines = 5
+	return max(1, max(1, m.height-4)/cardLines/2)
 }
 
 func (m model) actListDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {

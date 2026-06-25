@@ -46,19 +46,24 @@ func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, 
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Quit key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown                        key.Binding
+	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Quit key.Binding
 }{
-	Up:      nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:    nb([]string{"down", "j"}, "", ""),
-	Open:    nb([]string{"enter"}, "enter", "open"),
-	Screen:  nb([]string{"s"}, "s", "screen"),
-	Jump:    nb([]string{"O"}, "O", "jump"),
-	TabPrev: nb([]string{"left", "h"}, "", ""),
-	TabNext: nb([]string{"right", "l"}, "h/l", "tabs"),
-	New:     nb([]string{"n"}, "n", "new"),
-	Kill:    nb([]string{"x"}, "x", "kill"),
-	Refresh: nb([]string{"r"}, "r", "refresh"),
-	Quit:    nb([]string{"q"}, "q", "quit"),
+	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
+	Down:     nb([]string{"down", "j"}, "", ""),
+	Top:      nb([]string{"g"}, "", ""),
+	Bottom:   nb([]string{"G"}, "g/G", "ends"),
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
+	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	Open:     nb([]string{"enter"}, "enter", "open"),
+	Screen:   nb([]string{"s"}, "s", "screen"),
+	Jump:     nb([]string{"O"}, "O", "jump"),
+	TabPrev:  nb([]string{"left", "h"}, "", ""),
+	TabNext:  nb([]string{"right", "l"}, "h/l", "tabs"),
+	New:      nb([]string{"n"}, "n", "new"),
+	Kill:     nb([]string{"x"}, "x", "kill"),
+	Refresh:  nb([]string{"r"}, "r", "refresh"),
+	Quit:     nb([]string{"q"}, "q", "quit"),
 }
 
 var transcriptKeys = struct {
@@ -125,27 +130,31 @@ var promptKeys = struct {
 }
 
 var historyProjectsKeys = struct {
-	Up, Down, Top, Bottom, Open, Refresh, Back key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, Refresh, Back key.Binding
 }{
-	Up:      nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:    nb([]string{"down", "j"}, "", ""),
-	Top:     nb([]string{"g"}, "", ""),
-	Bottom:  nb([]string{"G"}, "g/G", "ends"),
-	Open:    nb([]string{"enter"}, "enter", "open"),
-	Refresh: nb([]string{"r"}, "r", "refresh"),
-	Back:    nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
+	Down:     nb([]string{"down", "j"}, "", ""),
+	Top:      nb([]string{"g"}, "", ""),
+	Bottom:   nb([]string{"G"}, "g/G", "ends"),
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
+	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	Open:     nb([]string{"enter"}, "enter", "open"),
+	Refresh:  nb([]string{"r"}, "r", "refresh"),
+	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
 
 var historySessionsKeys = struct {
-	Up, Down, Top, Bottom, Open, More, Back key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back key.Binding
 }{
-	Up:     nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:   nb([]string{"down", "j"}, "", ""),
-	Top:    nb([]string{"g"}, "", ""),
-	Bottom: nb([]string{"G"}, "g/G", "ends"),
-	Open:   nb([]string{"enter"}, "enter", "open"),
-	More:   nb([]string{"m"}, "m", "more"),
-	Back:   nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
+	Down:     nb([]string{"down", "j"}, "", ""),
+	Top:      nb([]string{"g"}, "", ""),
+	Bottom:   nb([]string{"G"}, "g/G", "ends"),
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
+	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	Open:     nb([]string{"enter"}, "enter", "open"),
+	More:     nb([]string{"m"}, "m", "more"),
+	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
 
 // screenLeave is the only app binding in the live-screen passthrough: it leaves

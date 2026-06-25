@@ -84,6 +84,8 @@ var historyProjectsTable = []keyTableEntry{
 	{historyProjectsKeys.Down, model.actHistProjDown},
 	{historyProjectsKeys.Top, model.actHistProjTop},
 	{historyProjectsKeys.Bottom, model.actHistProjBottom},
+	{historyProjectsKeys.HalfUp, model.actHistProjHalfUp},
+	{historyProjectsKeys.HalfDown, model.actHistProjHalfDown},
 	{historyProjectsKeys.Open, model.actHistProjOpen},
 	{historyProjectsKeys.Refresh, model.actHistProjRefresh},
 	{listKeys.TabPrev, model.actHistProjBack}, // left/h → Sessions tab
@@ -107,6 +109,16 @@ func (m model) actHistProjTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) actHistProjBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.history.projCursor = cursorBottom(len(m.history.projects))
+	return m, nil
+}
+
+func (m model) actHistProjHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.history.projCursor = max(0, m.history.projCursor-m.cardListPageStep())
+	return m, nil
+}
+
+func (m model) actHistProjHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.history.projCursor = min(cursorBottom(len(m.history.projects)), m.history.projCursor+m.cardListPageStep())
 	return m, nil
 }
 
@@ -144,6 +156,8 @@ var historySessionsTable = []keyTableEntry{
 	{historySessionsKeys.Down, model.actHistSessDown},
 	{historySessionsKeys.Top, model.actHistSessTop},
 	{historySessionsKeys.Bottom, model.actHistSessBottom},
+	{historySessionsKeys.HalfUp, model.actHistSessHalfUp},
+	{historySessionsKeys.HalfDown, model.actHistSessHalfDown},
 	{historySessionsKeys.Open, model.actHistSessOpen},
 	{historySessionsKeys.More, model.actHistSessMore},
 	{historySessionsKeys.Back, model.actHistSessBack},
@@ -166,6 +180,16 @@ func (m model) actHistSessTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) actHistSessBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.history.sessCursor = cursorBottom(len(m.history.sessions))
+	return m, nil
+}
+
+func (m model) actHistSessHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.history.sessCursor = max(0, m.history.sessCursor-m.cardListPageStep())
+	return m, nil
+}
+
+func (m model) actHistSessHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.history.sessCursor = min(cursorBottom(len(m.history.sessions)), m.history.sessCursor+m.cardListPageStep())
 	return m, nil
 }
 

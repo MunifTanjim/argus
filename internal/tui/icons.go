@@ -118,18 +118,18 @@ func initIcons() {
 		Branch:    StyledIcon{"\uF418", ColorGitBranch}, // nf-pl-branch
 		Chat:      StyledIcon{"\uF086", ColorTextDim},   // nf-fa-comments
 		Claude:    StyledIcon{glyphRobot, ColorInfo},
-		Clock:     StyledIcon{"\uF017", ColorTextDim},     // nf-fa-clock
-		Collapsed: StyledIcon{"\uF054", ColorTextDim},     // nf-fa-chevron_right
-		Dot:       StyledIcon{"·", ColorTextMuted},        // middle dot
-		DrillDown: StyledIcon{"\uF061", ColorAccent},      // nf-fa-arrow_right
-		Ellipsis:  StyledIcon{"…", ColorTextDim},          // horizontal ellipsis
-		Expanded:  StyledIcon{"\uF078", ColorTextPrimary}, // nf-fa-chevron_down
-		Output:    StyledIcon{"\U000F0182", ColorAccent},  // nf-md-comment_outline
-		Selected:  StyledIcon{"│", ColorAccent},           // box drawing vertical
-		Help:      StyledIcon{"\U000F02D7", ColorAccent},  // nf-md-help_circle_outline
-		Memory:    StyledIcon{"\U000F01C0", ColorTextDim}, // nf-md-book_open_variant
+		Clock:     StyledIcon{"\uF017", ColorTextDim},           // nf-fa-clock
+		Collapsed: StyledIcon{"\uF054", ColorTextDim},           // nf-fa-chevron_right
+		Dot:       StyledIcon{"·", ColorTextMuted},              // middle dot
+		DrillDown: StyledIcon{"\uF061", ColorAccent},            // nf-fa-arrow_right
+		Ellipsis:  StyledIcon{"…", ColorTextDim},                // horizontal ellipsis
+		Expanded:  StyledIcon{"\uF078", ColorTextPrimary},       // nf-fa-chevron_down
+		Output:    StyledIcon{"\U000F0182", ColorAccent},        // nf-md-comment_outline
+		Selected:  StyledIcon{"│", ColorAccent},                 // box drawing vertical
+		Help:      StyledIcon{"\U000F02D7", ColorAccent},        // nf-md-help_circle_outline
+		Memory:    StyledIcon{"\U000F01C0", ColorTextDim},       // nf-md-book_open_variant
 		Node:      StyledIcon{"\U000F0429", ColorTextSecondary}, // nf-md-server
-		Session:   StyledIcon{"\U000F0237", ColorTextDim}, // nf-md-fingerprint
+		Session:   StyledIcon{"\U000F0237", ColorTextDim},       // nf-md-fingerprint
 		Subagent:  StyledIcon{glyphRobot, ColorAccent},
 		System:    StyledIcon{"\uF120", ColorTextMuted}, // nf-fa-terminal
 		SystemErr: StyledIcon{"\uF06A", ColorError},     // nf-fa-circle_exclamation
