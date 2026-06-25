@@ -6,7 +6,13 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "pull-request-title-pattern": "chore: release ${version}"
+      "pull-request-title-pattern": "chore: release ${version}",
+      "exclude-paths": [
+        ".gitignore",
+        ".release-please-manifest.json",
+        "release-please-config.json",
+        "app"
+      ]
     }
   }
 }
