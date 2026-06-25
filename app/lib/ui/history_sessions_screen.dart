@@ -6,6 +6,7 @@ import '../data/history_repository.dart';
 import '../models/history.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
+import 'responsive.dart';
 
 class HistorySessionsScreen extends ConsumerStatefulWidget {
   const HistorySessionsScreen({super.key, required this.project});
@@ -17,8 +18,7 @@ class HistorySessionsScreen extends ConsumerStatefulWidget {
       _HistorySessionsScreenState();
 }
 
-class _HistorySessionsScreenState
-    extends ConsumerState<HistorySessionsScreen> {
+class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   List<HistorySession> _items = [];
   bool _hasMore = false;
   bool _loading = false;
@@ -35,7 +35,9 @@ class _HistorySessionsScreenState
       _loading = true;
       _error = null;
     });
-    final result = await ref.read(historyRepositoryProvider).sessions(
+    final result = await ref
+        .read(historyRepositoryProvider)
+        .sessions(
           nodeId: widget.project.nodeId,
           projectDir: widget.project.projectDir,
           limit: 100,
@@ -80,32 +82,34 @@ class _HistorySessionsScreenState
       return const Center(child: Text('No sessions in this project.'));
     }
 
-    return ListView.builder(
-      itemCount: _items.length + (_hasMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index == _items.length) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Center(
-              child: TextButton(
-                onPressed: _loading ? null : () => _loadMore(_items.length),
-                child: const Text('Load more'),
+    return CenteredBody(
+      child: ListView.builder(
+        itemCount: _items.length + (_hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == _items.length) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Center(
+                child: TextButton(
+                  onPressed: _loading ? null : () => _loadMore(_items.length),
+                  child: const Text('Load more'),
+                ),
+              ),
+            );
+          }
+          final s = _items[index];
+          return _SessionCard(
+            session: s,
+            label: s.displayTitle,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HistoryTranscriptScreen(session: s),
               ),
             ),
           );
-        }
-        final s = _items[index];
-        return _SessionCard(
-          session: s,
-          label: s.displayTitle,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => HistoryTranscriptScreen(session: s),
-            ),
-          ),
-        );
-      },
+        },
+      ),
     );
   }
 }

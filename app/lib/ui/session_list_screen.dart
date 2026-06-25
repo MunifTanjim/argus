@@ -5,6 +5,7 @@ import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../state/sessions.dart';
 import '../transport/connection.dart';
+import 'responsive.dart';
 import 'session_card.dart';
 import 'session_detail_screen.dart';
 import 'spawn_dialog.dart';
@@ -43,32 +44,36 @@ class SessionListScreen extends ConsumerWidget {
                       children: const [
                         SizedBox(height: 120),
                         Center(
-                          child: Text('No sessions.',
-                              style: TextStyle(color: AppColors.dim)),
+                          child: Text(
+                            'No sessions.',
+                            style: TextStyle(color: AppColors.dim),
+                          ),
                         ),
                       ],
                     )
-                  : ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: [
-                        for (final section in sections) ...[
-                          _SectionHeader(section: section),
-                          for (final s in section.sessions)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: SessionCard(
-                                session: s,
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        SessionDetailScreen(session: s),
+                  : CenteredBody(
+                      child: ListView(
+                        padding: const EdgeInsets.all(12),
+                        children: [
+                          for (final section in sections) ...[
+                            _SectionHeader(section: section),
+                            for (final s in section.sessions)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: SessionCard(
+                                  session: s,
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          SessionDetailScreen(session: s),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          const SizedBox(height: 8),
+                            const SizedBox(height: 8),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
             ),
           ),
@@ -85,15 +90,20 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = section.needsYou ? AppColors.accent : AppColors.dim;
-    final label = section.offline ? '${section.title} (offline)' : section.title;
+    final label = section.offline
+        ? '${section.title} (offline)'
+        : section.title;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, top: 4),
-      child: Text('▌ ${label.toUpperCase()}',
-          style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: color)),
+      child: Text(
+        '▌ ${label.toUpperCase()}',
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -114,8 +124,10 @@ class _ReconnectBanner extends StatelessWidget {
       width: double.infinity,
       color: AppColors.awaitingSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      child: Text(text,
-          style: const TextStyle(color: AppColors.secondary, fontSize: 12)),
+      child: Text(
+        text,
+        style: const TextStyle(color: AppColors.secondary, fontSize: 12),
+      ),
     );
   }
 }

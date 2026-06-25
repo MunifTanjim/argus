@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../push/push_controller.dart';
 import '../state/push.dart';
+import 'responsive.dart';
 import 'theme.dart';
 
 /// Push notifications settings: the active backend, a test button, and a
@@ -71,28 +72,36 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       appBar: AppBar(title: const Text('Push notifications')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _registrationStatus(),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: active == null ? null : _sendTest,
-                  icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('Send test notification'),
-                ),
-                const SizedBox(height: 16),
-                _header('Distributor'),
-                ..._distributorBody(),
-              ],
+          : CenteredBody(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _registrationStatus(),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: active == null ? null : _sendTest,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Send test notification'),
+                  ),
+                  const SizedBox(height: 16),
+                  _header('Distributor'),
+                  ..._distributorBody(),
+                ],
+              ),
             ),
     );
   }
 
   Widget _registrationStatus() {
-    const red = Color(0xFFfb4934); // gruvbox red — matches status usage elsewhere
+    const red = Color(
+      0xFFfb4934,
+    ); // gruvbox red — matches status usage elsewhere
     final (icon, color, label) = switch (_registered) {
-      true => (Icons.check_circle_outline, AppColors.accent, 'Registered with gateway'),
+      true => (
+        Icons.check_circle_outline,
+        AppColors.accent,
+        'Registered with gateway',
+      ),
       false => (Icons.error_outline, red, 'Not registered — retrying'),
       null => (Icons.hourglass_empty, AppColors.dim, 'Registration pending'),
     };
@@ -107,13 +116,16 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   }
 
   Widget _header(String title) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(title.toUpperCase(),
-            style: const TextStyle(
-                color: AppColors.accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w700)),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      title.toUpperCase(),
+      style: const TextStyle(
+        color: AppColors.accent,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
 
   List<Widget> _distributorBody() {
     if (_distributors.isEmpty) {
@@ -127,8 +139,10 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       ];
     }
     return [
-      const Text('Pick the distributor to deliver push:',
-          style: TextStyle(color: AppColors.text, fontSize: 13)),
+      const Text(
+        'Pick the distributor to deliver push:',
+        style: TextStyle(color: AppColors.text, fontSize: 13),
+      ),
       const SizedBox(height: 4),
       RadioGroup<String>(
         groupValue: _currentDistributor,
@@ -140,9 +154,10 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                 contentPadding: EdgeInsets.zero,
                 value: d,
                 title: Text(_distributorLabel(d)),
-                subtitle: Text(d,
-                    style:
-                        const TextStyle(color: AppColors.dim, fontSize: 11)),
+                subtitle: Text(
+                  d,
+                  style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                ),
               ),
           ],
         ),
@@ -171,10 +186,14 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     }
     try {
       await _controller.sendTest();
-      if (mounted) _toast('Re-registered and sent test — check your notifications');
+      if (mounted) {
+        _toast('Re-registered and sent test — check your notifications');
+      }
     } catch (e) {
       if (mounted) {
-        _toast('Re-registered, but test still failed — try again in a moment: $e');
+        _toast(
+          'Re-registered, but test still failed — try again in a moment: $e',
+        );
       }
     }
   }

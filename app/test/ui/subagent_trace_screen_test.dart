@@ -14,7 +14,7 @@ void main() {
       subagentType: 'Explore',
       hasTrace: true,
       trace: [
-        Chunk(id: 't', kind: ChunkKind.ai, items: [
+        Chunk(id: 't', kind: ChunkKind.ai, previewItemId: 'ti', items: [
           Item(id: 'ti', kind: ItemKind.text, text: 'searched everything'),
         ]),
       ],

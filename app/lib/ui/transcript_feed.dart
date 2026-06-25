@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/chunk.dart';
 import '../state/tool_detail.dart';
 import 'chunk_card.dart';
+import 'responsive.dart';
 import 'theme.dart';
 
 /// The shared transcript body: a feed of [ChunkCard]s with an empty state.
@@ -84,19 +85,29 @@ class _TranscriptFeedState extends State<TranscriptFeed> {
   Widget build(BuildContext context) {
     final controller = widget.stickToBottom ? _sc : null;
     if (widget.chunks.isEmpty) {
-      return ListView(controller: controller, children: [
-        const SizedBox(height: 120),
-        Center(
-            child: Text(widget.emptyText,
-                style: const TextStyle(color: AppColors.dim))),
-      ]);
+      // No width cap on the empty state: a single centred line gains nothing
+      // from it.
+      return ListView(
+        controller: controller,
+        children: [
+          const SizedBox(height: 120),
+          Center(
+            child: Text(
+              widget.emptyText,
+              style: const TextStyle(color: AppColors.dim),
+            ),
+          ),
+        ],
+      );
     }
-    return ListView.builder(
-      controller: controller,
-      padding: const EdgeInsets.all(12),
-      itemCount: widget.chunks.length,
-      itemBuilder: (_, i) =>
-          ChunkCard(detailRef: widget.detailRef, chunk: widget.chunks[i]),
+    return CenteredBody(
+      child: ListView.builder(
+        controller: controller,
+        padding: const EdgeInsets.all(12),
+        itemCount: widget.chunks.length,
+        itemBuilder: (_, i) =>
+            ChunkCard(detailRef: widget.detailRef, chunk: widget.chunks[i]),
+      ),
     );
   }
 }

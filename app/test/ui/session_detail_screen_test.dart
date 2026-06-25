@@ -21,7 +21,8 @@ class _SeededTranscript extends TranscriptNotifier {
   _SeededTranscript(this._seed);
   final List<Chunk> _seed;
   @override
-  TranscriptState build() => TranscriptState(subId: 'x', chunks: _seed);
+  TranscriptState build() =>
+      TranscriptState(subId: 'x', chunks: _seed, loaded: true);
 }
 
 class _FakeSessionControl extends FakeSessionRepository {

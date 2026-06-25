@@ -7,6 +7,7 @@ import '../state/history_view_model.dart';
 import '../transport/connection.dart';
 import 'history_sessions_screen.dart';
 import 'relative_time.dart';
+import 'responsive.dart';
 
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
@@ -28,8 +29,8 @@ class HistoryScreen extends ConsumerWidget {
         onRefresh: () => ref.read(historyProjectsProvider.notifier).reload(),
         child: switch (projects) {
           AsyncError(:final error) => ListView(
-              children: [Center(child: Text(error.toString()))],
-            ),
+            children: [Center(child: Text(error.toString()))],
+          ),
           AsyncData(:final value) => _ProjectList(projects: value),
           _ => const Center(child: CircularProgressIndicator()),
         },
@@ -51,20 +52,22 @@ class _ProjectList extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      itemCount: projects.length,
-      itemBuilder: (context, index) {
-        final p = projects[index];
-        return _ProjectCard(
-          project: p,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => HistorySessionsScreen(project: p),
+    return CenteredBody(
+      child: ListView.builder(
+        itemCount: projects.length,
+        itemBuilder: (context, index) {
+          final p = projects[index];
+          return _ProjectCard(
+            project: p,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HistorySessionsScreen(project: p),
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

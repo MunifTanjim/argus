@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/result.dart';
 import '../models/chunk.dart';
 import '../state/tool_detail.dart';
+import 'responsive.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
 
@@ -26,7 +27,11 @@ String itemTitle(Item it) {
 /// (input/result) is stripped from the streamed chunk, so a tool item fetches it
 /// on demand (sessions.toolDetail) and fills the item before rendering.
 class ItemDetailScreen extends ConsumerStatefulWidget {
-  const ItemDetailScreen({super.key, required this.item, required this.detailRef});
+  const ItemDetailScreen({
+    super.key,
+    required this.item,
+    required this.detailRef,
+  });
 
   final Item item;
   final ToolDetailRef detailRef;
@@ -77,19 +82,23 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       appBar: AppBar(title: Text(itemTitle(_item))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text('Failed to load: $_error',
-                          style: const TextStyle(color: AppColors.dim)),
-                    ),
-                  toolDetailBody(_item),
-                ],
+          : CenteredBody(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Failed to load: $_error',
+                          style: const TextStyle(color: AppColors.dim),
+                        ),
+                      ),
+                    toolDetailBody(_item),
+                  ],
+                ),
               ),
             ),
     );

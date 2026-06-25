@@ -10,6 +10,7 @@ import '../models/session.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
+import 'responsive.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
 Future<void> showRespondSheet(BuildContext context, Session session) {
@@ -18,7 +19,8 @@ Future<void> showRespondSheet(BuildContext context, Session session) {
     isScrollControlled: true,
     builder: (sheetCtx) => Padding(
       padding: EdgeInsets.only(
-          bottom: MediaQuery.of(sheetCtx).viewInsets.bottom),
+        bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
+      ),
       child: RespondSheet(session: session),
     ),
   );
@@ -72,7 +74,9 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       _finish(_vm.respond, () => _vm.respond.execute(params));
 
   Future<void> _sendInput(String text) => _finish(
-      _vm.sendInput, () => _vm.sendInput.execute((sessionId: _sid, text: text)));
+    _vm.sendInput,
+    () => _vm.sendInput.execute((sessionId: _sid, text: text)),
+  );
 
   /// Runs [exec], then pops on success or shows the error from [cmd].
   Future<void> _finish(Command<void> cmd, Future<void> Function() exec) async {
@@ -82,8 +86,9 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       case Ok():
         Navigator.of(context).pop();
       case Error(:final error):
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed: $error')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $error')));
       case null:
         break;
     }
@@ -94,12 +99,15 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     final ix = widget.session.interaction;
     if (ix == null) return const SizedBox.shrink();
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: _body(ix),
+      child: CenteredBody(
+        maxWidth: 520,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _body(ix),
+          ),
         ),
       ),
     );
@@ -126,15 +134,17 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   List<Widget> _serverDecision(Interaction ix, String kind) {
     final detail = <Widget>[];
     if ((ix.toolName ?? '').isNotEmpty) {
-      detail.add(Text(ix.toolName!,
-          style: const TextStyle(fontWeight: FontWeight.bold)));
+      detail.add(
+        Text(ix.toolName!, style: const TextStyle(fontWeight: FontWeight.bold)),
+      );
     }
     if ((ix.toolInput ?? '').isNotEmpty) detail.add(codeBlock(ix.toolInput!));
     if ((ix.plan ?? '').isNotEmpty) detail.add(GptMarkdown(ix.plan!));
 
     final reject = ix.options.firstWhere(
       (o) => o.reject,
-      orElse: () => const DecisionOption(label: 'Reject', value: 'deny', reject: true),
+      orElse: () =>
+          const DecisionOption(label: 'Reject', value: 'deny', reject: true),
     );
 
     final options = ix.options.isNotEmpty
@@ -192,11 +202,14 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         FilledButton(
           onPressed: _busy
               ? null
-              : () => _respond(optionRespond(
-                  sessionId: _sid,
-                  kind: kind,
-                  value: reject.value,
-                  reason: _text.text)),
+              : () => _respond(
+                  optionRespond(
+                    sessionId: _sid,
+                    kind: kind,
+                    value: reject.value,
+                    reason: _text.text,
+                  ),
+                ),
           child: const Text('Send'),
         ),
       ],
@@ -209,31 +222,33 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   }
 
   List<Widget> _idle() => [
-        TextField(
-          controller: _text,
-          autofocus: true,
-          minLines: 1,
-          maxLines: 6,
-          decoration: const InputDecoration(
-              labelText: 'Reply', border: OutlineInputBorder()),
-        ),
-        const SizedBox(height: 12),
-        FilledButton(
-          onPressed: _busy
-              ? null
-              : () {
-                  final t = _text.text.trim();
-                  if (t.isEmpty) return;
-                  _sendInput(t);
-                },
-          child: const Text('Send'),
-        ),
-        if (_busy)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: LinearProgressIndicator(),
-          ),
-      ];
+    TextField(
+      controller: _text,
+      autofocus: true,
+      minLines: 1,
+      maxLines: 6,
+      decoration: const InputDecoration(
+        labelText: 'Reply',
+        border: OutlineInputBorder(),
+      ),
+    ),
+    const SizedBox(height: 12),
+    FilledButton(
+      onPressed: _busy
+          ? null
+          : () {
+              final t = _text.text.trim();
+              if (t.isEmpty) return;
+              _sendInput(t);
+            },
+      child: const Text('Send'),
+    ),
+    if (_busy)
+      const Padding(
+        padding: EdgeInsets.only(top: 12),
+        child: LinearProgressIndicator(),
+      ),
+  ];
 
   List<Widget> _questions(Interaction ix) {
     final qs = ix.questions;
@@ -246,7 +261,8 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var qi = 0; qi < qs.length; qi++) _questionCard(qs[qi], drafts[qi]),
+              for (var qi = 0; qi < qs.length; qi++)
+                _questionCard(qs[qi], drafts[qi]),
             ],
           ),
         ),
@@ -257,7 +273,10 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
             ? null
             : () {
                 final p = questionRespond(
-                    sessionId: _sid, questions: qs, drafts: drafts);
+                  sessionId: _sid,
+                  questions: qs,
+                  drafts: drafts,
+                );
                 if (p != null) _respond(p);
               },
         child: const Text('Submit'),
@@ -266,8 +285,9 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       OutlinedButton(
         onPressed: _busy
             ? null
-            : () => _respond(clarifyRespond(
-                sessionId: _sid, questions: qs, drafts: drafts)),
+            : () => _respond(
+                clarifyRespond(sessionId: _sid, questions: qs, drafts: drafts),
+              ),
         child: const Text('Chat about this'),
       ),
       if (_busy)
@@ -282,16 +302,20 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     final oi = otherIndex(q);
     final rows = <Widget>[];
     if ((q.header ?? '').isNotEmpty) {
-      rows.add(Align(
-        alignment: Alignment.centerLeft,
-        child: Chip(label: Text(q.header!)),
-      ));
+      rows.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Chip(label: Text(q.header!)),
+        ),
+      );
     }
     if ((q.question ?? '').isNotEmpty) {
-      rows.add(Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(q.question!),
-      ));
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(q.question!),
+        ),
+      );
     }
     final labels = [...q.options, otherLabel];
     // Per-option metadata is valid only for real options; the synthetic
@@ -310,53 +334,64 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
 
     if (q.multiSelect) {
       for (var i = 0; i < labels.length; i++) {
-        rows.add(CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(labels[i]),
-          subtitle: desc(i) != null ? Text(desc(i)!) : null,
-          value: d.toggles.contains(i),
-          onChanged: (_) => setState(() {
-            d.toggles.contains(i) ? d.toggles.remove(i) : d.toggles.add(i);
-          }),
-        ));
+        rows.add(
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(labels[i]),
+            subtitle: desc(i) != null ? Text(desc(i)!) : null,
+            value: d.toggles.contains(i),
+            onChanged: (_) => setState(() {
+              d.toggles.contains(i) ? d.toggles.remove(i) : d.toggles.add(i);
+            }),
+          ),
+        );
       }
     } else {
-      rows.add(RadioGroup<int>(
-        groupValue: d.chosen,
-        onChanged: (v) => setState(() => d.chosen = v ?? -1),
-        child: Column(
-          children: [
-            for (var i = 0; i < labels.length; i++) ...[
-              RadioListTile<int>(
-                contentPadding: EdgeInsets.zero,
-                title: Text(labels[i]),
-                subtitle: desc(i) != null ? Text(desc(i)!) : null,
-                value: i,
-              ),
-              if (preview(i) != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 16, bottom: 8),
-                  child: codeBlock(preview(i)!),
+      rows.add(
+        RadioGroup<int>(
+          groupValue: d.chosen,
+          onChanged: (v) => setState(() => d.chosen = v ?? -1),
+          child: Column(
+            children: [
+              for (var i = 0; i < labels.length; i++) ...[
+                RadioListTile<int>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(labels[i]),
+                  subtitle: desc(i) != null ? Text(desc(i)!) : null,
+                  value: i,
                 ),
+                if (preview(i) != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 16, bottom: 8),
+                    child: codeBlock(preview(i)!),
+                  ),
+              ],
             ],
-          ],
+          ),
         ),
-      ));
+      );
     }
     final showCustom = q.multiSelect ? d.toggles.contains(oi) : d.chosen == oi;
     if (showCustom) {
-      rows.add(TextField(
-        autofocus: true,
-        decoration: const InputDecoration(
-            labelText: 'Your answer', border: OutlineInputBorder()),
-        onChanged: (v) => setState(() => d.custom = v),
-      ));
+      rows.add(
+        TextField(
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Your answer',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (v) => setState(() => d.custom = v),
+        ),
+      );
     }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        ),
       ),
     );
   }
