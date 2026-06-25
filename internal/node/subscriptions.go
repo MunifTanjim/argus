@@ -97,22 +97,22 @@ func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSub
 
 // resolveTranscriptPath returns the file to tail for a subscription: the session
 // transcript, or a subagent file when AgentID is set.
-func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (string, error) {
+func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, root string, err error) {
 	s, ok := d.reg.Get(p.SessionID)
 	if !ok {
-		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
+		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
 	}
 	if s.TranscriptPath == "" {
-		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
+		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
 	}
 	if p.AgentID == "" {
-		return s.TranscriptPath, nil
+		return s.TranscriptPath, s.TranscriptPath, nil
 	}
-	path, ok := parser.SubagentFilePath(s.TranscriptPath, p.AgentID)
+	sub, ok := parser.SubagentFilePath(s.TranscriptPath, p.AgentID)
 	if !ok {
-		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
+		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
 	}
-	return path, nil
+	return sub, s.TranscriptPath, nil
 }
 
 // diffChunks returns the first index at which cur differs from old, and whether
@@ -157,12 +157,12 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
 	cs := d.getOrCreateConnSubs(ctx, n)
-	path, err := d.resolveTranscriptPath(p)
+	path, root, err := d.resolveTranscriptPath(p)
 	if err != nil {
 		return nil, err
 	}
 
-	st := claudecode.NewStreamingTranscript(path, p.AgentID != "")
+	st := claudecode.NewStreamingTranscript(path, root, p.AgentID != "")
 	chunks, err := st.Refresh()
 	if err != nil {
 		return nil, err

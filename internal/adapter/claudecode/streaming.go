@@ -13,16 +13,20 @@ import (
 // file content. Not safe for concurrent use.
 type StreamingTranscript struct {
 	path       string
+	rootPath   string // session root, for resolving sibling subagent files (flat dir)
 	isSubagent bool
 	offset     int64
 	msgs       []parser.ClassifiedMsg
-	links      map[string]string // agentID -> toolUseID (cumulative; unused for subagents)
+	links      map[string]string // agentID -> toolUseID (cumulative)
 }
 
 // NewStreamingTranscript returns a folder positioned at the start of the file.
-// isSubagent disables subagent linking (subagent files have no nested subagents).
-func NewStreamingTranscript(path string, isSubagent bool) *StreamingTranscript {
-	return &StreamingTranscript{path: path, isSubagent: isSubagent, links: map[string]string{}}
+// rootPath is the session root used to resolve subagent files (pass path itself
+// for a session root). isSubagent clears the sidechain flag while reading a
+// subagent file. Nested children are linked for both session and subagent files;
+// linking is suppressed past MaxSubagentDepth.
+func NewStreamingTranscript(path, rootPath string, isSubagent bool) *StreamingTranscript {
+	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}}
 }
 
 // Refresh reads newly appended lines, updates state, and returns the full folded
@@ -46,9 +50,10 @@ func (s *StreamingTranscript) Refresh() ([]Chunk, error) {
 	s.offset = newOffset
 
 	pchunks := parser.BuildChunks(s.msgs)
-	var agentRefs map[string]string
-	if !s.isSubagent {
-		agentRefs = parser.AgentRefsFromLinks(s.path, s.links)
+	agentRefs := parser.AgentRefsFromLinks(s.rootPath, s.links)
+	if s.isSubagent &&
+		parser.SpawnDepth(s.rootPath, parser.AgentIDFromPath(s.path)) >= parser.MaxSubagentDepth {
+		agentRefs = nil
 	}
 	return foldChunks(pchunks, agentRefs, nil), nil
 }

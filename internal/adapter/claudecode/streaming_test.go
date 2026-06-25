@@ -31,7 +31,7 @@ func TestStreamingTranscriptMatchesOneShot(t *testing.T) {
 		`{"type":"user","uuid":"u2","timestamp":"2025-01-15T10:00:02Z","message":{"role":"user","content":[{"type":"text","text":"More"}]}}`,
 	}
 
-	st := NewStreamingTranscript(path, false)
+	st := NewStreamingTranscript(path, path, false)
 	if err := os.WriteFile(path, nil, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestStreamingTranscriptTruncationResets(t *testing.T) {
 	appendLine(t, path, `{"type":"user","uuid":"u1","timestamp":"2025-01-15T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"first"}]}}`)
 	appendLine(t, path, `{"type":"user","uuid":"u2","timestamp":"2025-01-15T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"second"}]}}`)
 
-	st := NewStreamingTranscript(path, false)
+	st := NewStreamingTranscript(path, path, false)
 	if _, err := st.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestStreamingTranscriptMatchesOneShotWithSubagent(t *testing.T) {
 	}
 
 	lines := splitLines(content)
-	st := NewStreamingTranscript(parentPath, false)
+	st := NewStreamingTranscript(parentPath, parentPath, false)
 
 	for i, line := range lines {
 		appendLine(t, parentPath, line)
@@ -165,7 +165,7 @@ func TestStreamingTranscriptSubagentClearsSidechain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := NewStreamingTranscript(path, true) // isSubagent = true
+	st := NewStreamingTranscript(path, path, true) // isSubagent = true
 	for _, line := range lines {
 		appendLine(t, path, line)
 	}
@@ -197,4 +197,76 @@ func splitLines(data []byte) []string {
 		}
 	}
 	return out
+}
+
+func writeNestedStreamFixture(t *testing.T) (root, subA string) {
+	t.Helper()
+	dir := t.TempDir()
+	root = filepath.Join(dir, "sess.jsonl")
+	if err := os.WriteFile(root, []byte(
+		`{"uuid":"u1","type":"user","timestamp":"2025-06-15T10:00:00Z","message":{"role":"user","content":"go"}}`+"\n"+
+			`{"uuid":"a1","type":"assistant","timestamp":"2025-06-15T10:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-gp","name":"Task","input":{"subagent_type":"general-purpose","description":"d"}}]}}`+"\n"+
+			`{"uuid":"r1","type":"user","timestamp":"2025-06-15T10:00:30Z","isMeta":true,"sourceToolUseID":"tool-gp","toolUseResult":{"agentId":"A"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-gp","content":"done"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd := filepath.Join(dir, "sess", "subagents")
+	if err := os.MkdirAll(sd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subA = filepath.Join(sd, "agent-A.jsonl")
+	if err := os.WriteFile(subA, []byte(
+		`{"uuid":"au1","type":"user","timestamp":"2025-06-15T10:00:02Z","isSidechain":true,"message":{"role":"user","content":"d"}}`+"\n"+
+			`{"uuid":"aa1","type":"assistant","timestamp":"2025-06-15T10:00:03Z","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-ex","name":"Task","input":{"subagent_type":"Explore","description":"e"}}]}}`+"\n"+
+			`{"uuid":"ar1","type":"user","timestamp":"2025-06-15T10:00:20Z","isSidechain":true,"isMeta":true,"sourceToolUseID":"tool-ex","toolUseResult":{"agentId":"B"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-ex","content":"f"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "agent-A.meta.json"), []byte(`{"agentType":"general-purpose","spawnDepth":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "agent-B.jsonl"), []byte(
+		`{"uuid":"bu1","type":"user","timestamp":"2025-06-15T10:00:04Z","isSidechain":true,"message":{"role":"user","content":"e"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, subA
+}
+
+func subagentItem(chunks []Chunk) (Item, bool) {
+	for _, c := range chunks {
+		for _, it := range c.Items {
+			if it.Kind == ItemSubagent {
+				return it, true
+			}
+		}
+	}
+	return Item{}, false
+}
+
+func TestStreaming_NestedSubagentLinked(t *testing.T) {
+	root, subA := writeNestedStreamFixture(t)
+	st := NewStreamingTranscript(subA, root, true)
+	chunks, err := st.Refresh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, ok := subagentItem(chunks)
+	if !ok {
+		t.Fatal("no subagent item in streamed agent-A trace")
+	}
+	if it.AgentID != "B" || !it.HasTrace {
+		t.Fatalf("nested item AgentID=%q HasTrace=%v, want B/true", it.AgentID, it.HasTrace)
+	}
+}
+
+func TestStreaming_DepthCapSuppressesLink(t *testing.T) {
+	root, subA := writeNestedStreamFixture(t)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(subA), "agent-A.meta.json"),
+		[]byte(`{"agentType":"general-purpose","spawnDepth":5}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := NewStreamingTranscript(subA, root, true)
+	chunks, _ := st.Refresh()
+	it, _ := subagentItem(chunks)
+	if it.AgentID != "" || it.HasTrace {
+		t.Fatalf("capped item AgentID=%q HasTrace=%v, want empty/false", it.AgentID, it.HasTrace)
+	}
 }
