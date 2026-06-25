@@ -80,14 +80,19 @@ type ToolDetail struct {
 // relative to the parent transcript path); empty searches the session transcript.
 // ok is false when no item with that toolID exists in the resolved file.
 func FindToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
+	read := parser.ReadSession
 	if agentID != "" {
 		sub, ok := parser.SubagentFilePath(path, agentID)
 		if !ok {
 			return ToolDetail{}, false, nil
 		}
 		path = sub
+		// Subagent files mark every entry isSidechain=true; ReadSubagentSession
+		// clears the flag so Classify keeps them (ReadSession would drop them all,
+		// leaving the tool unfindable). Mirrors ReadSubagentView.
+		read = parser.ReadSubagentSession
 	}
-	pchunks, err := parser.ReadSession(path)
+	pchunks, err := read(path)
 	if err != nil {
 		return ToolDetail{}, false, err
 	}
