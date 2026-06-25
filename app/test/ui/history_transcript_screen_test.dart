@@ -15,6 +15,7 @@ class _FakeHistoryRepository implements HistoryRepository {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   }) async {
     final r = _result;
     if (r is Exception) return Result.error(r);

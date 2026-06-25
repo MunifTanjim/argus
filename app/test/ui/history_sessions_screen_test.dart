@@ -33,6 +33,7 @@ class _FakeHistoryRepository implements HistoryRepository {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   }) async =>
       const Result.ok([]);
 }
@@ -54,6 +55,7 @@ class _ThrowingHistoryRepository implements HistoryRepository {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   }) async =>
       const Result.ok([]);
 }

@@ -22,6 +22,7 @@ abstract class HistoryRepository {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   });
 }
 
@@ -51,8 +52,10 @@ class HistoryRepositoryRemote implements HistoryRepository {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   }) =>
-      _api.transcript(nodeId: nodeId, transcriptPath: transcriptPath);
+      _api.transcript(
+          nodeId: nodeId, transcriptPath: transcriptPath, agentId: agentId);
 }
 
 final historyRepositoryProvider = Provider<HistoryRepository>(

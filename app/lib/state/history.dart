@@ -59,6 +59,7 @@ class HistoryApi {
   Future<Result<List<Chunk>>> transcript({
     String? nodeId,
     required String transcriptPath,
+    String? agentId,
   }) =>
       _guard((c) async {
         // See sessions(): node_id is mandatory for gateway-routed history reads.
@@ -68,6 +69,7 @@ class HistoryApi {
         final params = <String, dynamic>{
           'node_id': nodeId,
           'transcript_path': transcriptPath,
+          if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
         };
         final result = await c.call('sessions.historyTranscript', params);
         final map = result as Map<String, dynamic>;

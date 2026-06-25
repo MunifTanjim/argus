@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/result.dart';
+import '../data/history_repository.dart';
 import '../data/transcript_repository.dart';
 import '../models/chunk.dart';
 import '../state/gateway.dart';
@@ -26,19 +28,26 @@ class SubagentTraceScreen extends ConsumerStatefulWidget {
 
 class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
   TranscriptSubscription? _sub;
+  Future<Result<List<Chunk>>>? _histFuture;
 
   bool get _inline => widget.item.trace.isNotEmpty;
   String? get _agentId => widget.item.agentId;
   String? get _sessionId => widget.parentRef.sessionId;
+  bool get _isHistory => widget.parentRef.isHistory;
   String get _key => '${_sessionId ?? ''}/${_agentId ?? ''}';
   ToolDetailRef get _traceRef => widget.parentRef.forAgent(_agentId);
 
   @override
   void initState() {
     super.initState();
-    if (!_inline &&
-        (_agentId?.isNotEmpty ?? false) &&
-        (_sessionId?.isNotEmpty ?? false)) {
+    if (_inline || (_agentId?.isEmpty ?? true)) return;
+    if (_isHistory) {
+      _histFuture = ref.read(historyRepositoryProvider).transcript(
+            nodeId: widget.parentRef.nodeId,
+            transcriptPath: widget.parentRef.transcriptPath!,
+            agentId: _agentId,
+          );
+    } else if (_sessionId?.isNotEmpty ?? false) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _open());
     }
   }
@@ -71,6 +80,32 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
               detailRef: _traceRef,
               chunks: widget.item.trace,
               stickToBottom: false), // inlined trace is complete; read top-down
+        ),
+      );
+    }
+
+    if (_isHistory) {
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: SafeArea(
+          top: false, // AppBar insets top; bottom clears the system nav bar.
+          child: FutureBuilder<Result<List<Chunk>>>(
+            future: _histFuture,
+            builder: (context, snap) {
+              final data = snap.data;
+              if (data == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return switch (data) {
+                Ok(value: final chunks) => TranscriptFeed(
+                    detailRef: _traceRef,
+                    chunks: chunks,
+                    stickToBottom: false),
+                Error(error: final e) =>
+                  Center(child: Text('Failed to load trace: $e')),
+              };
+            },
+          ),
         ),
       );
     }
