@@ -65,10 +65,13 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
     if (_inline) {
       return Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: TranscriptFeed(
-            detailRef: _traceRef,
-            chunks: widget.item.trace,
-            stickToBottom: false), // inlined trace is complete; read top-down
+        body: SafeArea(
+          top: false, // AppBar insets top; bottom clears the system nav bar.
+          child: TranscriptFeed(
+              detailRef: _traceRef,
+              chunks: widget.item.trace,
+              stickToBottom: false), // inlined trace is complete; read top-down
+        ),
       );
     }
 
@@ -84,12 +87,15 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
-      body: Column(
-        children: [
-          if (conn != ConnState.connected) _Banner(state: conn),
-          Expanded(
-              child: TranscriptFeed(detailRef: _traceRef, chunks: st.chunks)),
-        ],
+      body: SafeArea(
+        top: false, // AppBar insets top; bottom clears the system nav bar.
+        child: Column(
+          children: [
+            if (conn != ConnState.connected) _Banner(state: conn),
+            Expanded(
+                child: TranscriptFeed(detailRef: _traceRef, chunks: st.chunks)),
+          ],
+        ),
       ),
     );
   }

@@ -135,23 +135,29 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (conn != ConnState.connected) _Banner(state: conn),
-          Expanded(
-            // Spinner until the first snapshot arrives, so an empty session
-            // shows progress rather than a blank feed. error stops the spinner.
-            child: !st.loaded && st.error == null
-                ? const Center(child: CircularProgressIndicator())
-                : TranscriptFeed(
-                    detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
-          ),
-          if (live.interaction != null)
-            InteractionBar(
-              interaction: live.interaction!,
-              onRespond: () => showRespondSheet(context, live),
+      // top:false — AppBar already insets the top; we only need the bottom
+      // (and side) safe-area so content/InteractionBar clear the system
+      // navigation bar (e.g. Android 3-button nav).
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            if (conn != ConnState.connected) _Banner(state: conn),
+            Expanded(
+              // Spinner until the first snapshot arrives, so an empty session
+              // shows progress rather than a blank feed. error stops the spinner.
+              child: !st.loaded && st.error == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : TranscriptFeed(
+                      detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
             ),
-        ],
+            if (live.interaction != null)
+              InteractionBar(
+                interaction: live.interaction!,
+                onRespond: () => showRespondSheet(context, live),
+              ),
+          ],
+        ),
       ),
     );
   }

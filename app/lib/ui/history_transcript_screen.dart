@@ -49,7 +49,9 @@ class _HistoryTranscriptScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.session.displayTitle)),
-      body: _buildBody(),
+      // top:false — AppBar insets the top; bottom safe-area keeps the feed
+      // clear of the system navigation bar (e.g. Android 3-button nav).
+      body: SafeArea(top: false, child: _buildBody()),
     );
   }
 
