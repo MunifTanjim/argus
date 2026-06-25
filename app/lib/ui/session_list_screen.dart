@@ -24,6 +24,9 @@ class SessionListScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final sessions = ref.watch(sessionsProvider).values;
     final sections = buildSections(sessions);
+    // When sessions span nodes, the "Needs you" section mixes hosts under one
+    // header, so its cards must name their own node.
+    final grouped = nodesFromSessions(sessions).isNotEmpty;
     final conn = ref.watch(connStateProvider);
 
     return Scaffold(
@@ -62,6 +65,7 @@ class SessionListScreen extends ConsumerWidget {
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: SessionCard(
                                   session: s,
+                                  showNode: section.needsYou && grouped,
                                   onTap: () => Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>
