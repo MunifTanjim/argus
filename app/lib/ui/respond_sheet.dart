@@ -10,7 +10,6 @@ import '../models/session.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
-import 'responsive.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
 Future<void> showRespondSheet(BuildContext context, Session session) {
@@ -99,14 +98,20 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     final ix = widget.session.interaction;
     if (ix == null) return const SizedBox.shrink();
     return SafeArea(
-      child: CenteredBody(
-        maxWidth: 520,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: _body(ix),
+      // Align with heightFactor 1.0 caps width without forcing full height, so
+      // the modal sheet shrink-wraps its content instead of covering the page.
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1.0,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: _body(ix),
+            ),
           ),
         ),
       ),
