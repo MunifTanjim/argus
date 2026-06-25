@@ -14,26 +14,44 @@ import (
 // claudecode types the node RPC and TUI depend on. If the parser's types
 // change, only the mapping below needs fixing.
 
-// ReadTranscriptView reads a transcript (and its subagents) via the vendored
-// parser and maps the result into argus's chunk model. Subagent traces are
-// inlined (history / summary path).
+// ReadTranscriptView reads a transcript via the vendored parser and maps it into
+// argus's chunk model. Subagent items carry agentId + hasTrace; traces are NOT
+// inlined — each level is fetched on drill (see ReadSubagentView).
 func ReadTranscriptView(path string) (TranscriptView, error) {
 	pchunks, err := parser.ReadSession(path)
 	if err != nil {
 		return TranscriptView{}, err
 	}
 	agentRefs := map[string]string{}
-	traces := map[string][]Chunk{}
 	if procs, derr := parser.DiscoverSubagents(path); derr == nil && len(procs) > 0 {
 		parser.LinkSubagents(procs, pchunks, path)
 		for _, p := range procs {
 			if p.ParentTaskID != "" {
 				agentRefs[p.ParentTaskID] = p.ID
-				traces[p.ParentTaskID] = foldChunks(p.Chunks, nil, nil) // one level deep
 			}
 		}
 	}
-	return TranscriptView{Chunks: foldChunks(pchunks, agentRefs, traces)}, nil
+	return TranscriptView{Chunks: foldChunks(pchunks, agentRefs, nil)}, nil
+}
+
+// ReadSubagentView folds a single subagent file (resolved by agentID under
+// rootPath) with its nested children linked, so the result is drillable one more
+// level. Children are suppressed when this subagent's spawnDepth reaches the cap.
+// ok is false when no subagent file exists for agentID.
+func ReadSubagentView(rootPath, agentID string) (TranscriptView, bool, error) {
+	sub, ok := parser.SubagentFilePath(rootPath, agentID)
+	if !ok {
+		return TranscriptView{}, false, nil
+	}
+	pchunks, err := parser.ReadSubagentSession(sub)
+	if err != nil {
+		return TranscriptView{}, false, err
+	}
+	var agentRefs map[string]string
+	if parser.SpawnDepth(rootPath, agentID) < parser.MaxSubagentDepth {
+		agentRefs = parser.ChildAgentRefs(sub, rootPath)
+	}
+	return TranscriptView{Chunks: foldChunks(pchunks, agentRefs, nil)}, true, nil
 }
 
 // ReadStreamingView folds a transcript for live streaming: subagent items carry

@@ -82,7 +82,8 @@ func TestReadTranscriptViewGrouping(t *testing.T) {
 }
 
 func TestReadTranscriptViewSubagentTrace(t *testing.T) {
-	view, err := ReadTranscriptView(writeSession(t))
+	session := writeSession(t)
+	view, err := ReadTranscriptView(session)
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
@@ -103,12 +104,23 @@ func TestReadTranscriptViewSubagentTrace(t *testing.T) {
 	if sub.AgentID != "abc123" {
 		t.Errorf("agent id = %q, want abc123", sub.AgentID)
 	}
-	if len(sub.Trace) == 0 {
-		t.Fatalf("subagent trace not linked")
+	// Lazy contract: the item is drillable but its trace is NOT inlined.
+	if !sub.HasTrace {
+		t.Errorf("subagent item should be drillable (HasTrace)")
 	}
-	last := sub.Trace[len(sub.Trace)-1]
+	if len(sub.Trace) != 0 {
+		t.Errorf("trace should not be inlined, got %d chunks", len(sub.Trace))
+	}
+	// The trace is fetched on demand via ReadSubagentView.
+	tv, ok, err := ReadSubagentView(session, "abc123")
+	if err != nil || !ok {
+		t.Fatalf("ReadSubagentView(abc123) ok=%v err=%v", ok, err)
+	}
+	if len(tv.Chunks) == 0 {
+		t.Fatalf("fetched subagent trace is empty")
+	}
+	last := tv.Chunks[len(tv.Chunks)-1]
 	if last.Kind != ChunkAI || last.Text == "" {
-		// the trace's final AI chunk should carry the subagent's output
 		if lo, ok := last.LastOutput(); !ok || lo.Text != "mapped it" {
 			t.Errorf("unexpected trace tail: %+v (lastOutput ok=%v)", last, ok)
 		}

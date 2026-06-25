@@ -90,6 +90,16 @@ func ReadHistoryTranscript(path string) (TranscriptView, error) {
 	return ReadTranscriptView(clean)
 }
 
+// ReadHistorySubagentView is the history counterpart of ReadSubagentView: it
+// validates path is under the projects root, then folds the nested subagent.
+func ReadHistorySubagentView(path, agentID string) (TranscriptView, bool, error) {
+	clean, err := safeProjectsPath(path)
+	if err != nil {
+		return TranscriptView{}, false, err
+	}
+	return ReadSubagentView(clean, agentID)
+}
+
 // FindHistoryToolDetail returns one tool item's full body from a past session's
 // transcript, addressed by tool_use id, after the same projects-root path check
 // ReadHistoryTranscript applies.
