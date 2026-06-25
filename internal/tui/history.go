@@ -233,8 +233,14 @@ func (m model) historyProjectsView() string {
 		return centerBlock(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
 	}
 	cards := make([]string, len(m.history.projects))
+	prevNode := ""
 	for i, p := range m.history.projects {
-		cards[i] = historyProjectRow(p, i == m.history.projCursor, cardW)
+		card := historyProjectRow(p, i == m.history.projCursor, cardW)
+		if i == 0 || p.NodeID != prevNode {
+			card = historyNodeHeader(p) + "\n" + card
+		}
+		prevNode = p.NodeID
+		cards[i] = card
 	}
 	body := renderCardList(cards, m.history.projCursor, max(1, m.height-4))
 	footer := m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
@@ -318,15 +324,51 @@ func historyProjectRow(p session.HistoryProject, sel bool, w int) string {
 	titleLeft := dimStyle.Render("○") + " " + headlineStyle(sel).Render(p.Label)
 	titleRight := dimStyle.Render(relTime(p.LastActivity))
 
-	meta := []string{fmt.Sprintf("%d sessions", p.SessionCount)}
-	if p.NodeLabel != "" {
-		meta = append(meta, p.NodeLabel)
-	}
+	// The node is shown by the group header above; the card carries only its own
+	// counts and path.
 	body := []string{
-		dimStyle.Render(strings.Join(meta, " · ")),
+		dimStyle.Render(fmt.Sprintf("%d sessions", p.SessionCount)),
 		dimStyle.Render(p.Cwd),
 	}
 	return cardTitled(titleLeft, titleRight, body, w, border, chrome)
+}
+
+// historyNodeHeader renders a group header naming the origin node, shown above
+// that node's first project card.
+func historyNodeHeader(p session.HistoryProject) string {
+	return Icon.Node.Render() + " " + StyleSecondaryBold.Render(nodeDisplayLabel(p))
+}
+
+// nodeDisplayLabel is the human name for a project's origin node, falling back to
+// the node id and then a local placeholder (direct node connections carry no
+// gateway-stamped node info).
+func nodeDisplayLabel(p session.HistoryProject) string {
+	if p.NodeLabel != "" {
+		return p.NodeLabel
+	}
+	if p.NodeID != "" {
+		return p.NodeID
+	}
+	return "this machine"
+}
+
+// groupProjectsByNode reorders a recency-sorted project list so each node's
+// projects are contiguous, with groups in first-occurrence (newest-activity)
+// order and recency order preserved within each group.
+func groupProjectsByNode(ps []session.HistoryProject) []session.HistoryProject {
+	var order []string
+	buckets := map[string][]session.HistoryProject{}
+	for _, p := range ps {
+		if _, ok := buckets[p.NodeID]; !ok {
+			order = append(order, p.NodeID)
+		}
+		buckets[p.NodeID] = append(buckets[p.NodeID], p)
+	}
+	out := make([]session.HistoryProject, 0, len(ps))
+	for _, id := range order {
+		out = append(out, buckets[id]...)
+	}
+	return out
 }
 
 func historySessionRow(s session.HistorySession, sel bool, w int) string {

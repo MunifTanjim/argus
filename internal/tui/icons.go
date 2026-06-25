@@ -77,6 +77,7 @@ type iconSet struct {
 	Expanded  StyledIcon
 	Help      StyledIcon
 	Memory    StyledIcon
+	Node      StyledIcon
 	Output    StyledIcon
 	Selected  StyledIcon
 	Session   StyledIcon
@@ -127,6 +128,7 @@ func initIcons() {
 		Selected:  StyledIcon{"│", ColorAccent},           // box drawing vertical
 		Help:      StyledIcon{"\U000F02D7", ColorAccent},  // nf-md-help_circle_outline
 		Memory:    StyledIcon{"\U000F01C0", ColorTextDim}, // nf-md-book_open_variant
+		Node:      StyledIcon{"\U000F0429", ColorTextSecondary}, // nf-md-server
 		Session:   StyledIcon{"\U000F0237", ColorTextDim}, // nf-md-fingerprint
 		Subagent:  StyledIcon{glyphRobot, ColorAccent},
 		System:    StyledIcon{"\uF120", ColorTextMuted}, // nf-fa-terminal

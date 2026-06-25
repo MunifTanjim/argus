@@ -108,7 +108,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen, m.screenErr = msg.screen, msg.err
 		}
 	case histProjectsMsg:
-		m.history.projects, m.history.err = msg.projects, msg.err
+		m.history.projects, m.history.err = groupProjectsByNode(msg.projects), msg.err
 		if m.history.projCursor >= len(m.history.projects) {
 			m.history.projCursor = max(0, len(m.history.projects)-1)
 		}
