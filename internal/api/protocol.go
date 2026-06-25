@@ -169,9 +169,11 @@ type HistorySessionsParams struct {
 
 // HistoryTranscriptParams reads a past session's transcript by its node-local path.
 // NodeID selects the owning node (gateway routing key; ignored node-side).
+// AgentID, when set, selects a nested subagent trace within that transcript.
 type HistoryTranscriptParams struct {
 	NodeID         string `json:"node_id,omitempty"`
 	TranscriptPath string `json:"transcript_path"`
+	AgentID        string `json:"agent_id,omitempty"`
 }
 
 // SessionRef selects a session by id.

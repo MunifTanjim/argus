@@ -35,6 +35,16 @@ func (d *Node) handleHistoryTranscript(_ context.Context, params json.RawMessage
 	if p.TranscriptPath == "" {
 		return nil, fmt.Errorf("historyTranscript: transcript_path is required")
 	}
+	if p.AgentID != "" {
+		v, found, err := claudecode.ReadHistorySubagentView(p.TranscriptPath, p.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
+		}
+		return v, nil
+	}
 	return claudecode.ReadHistoryTranscript(p.TranscriptPath)
 }
 
