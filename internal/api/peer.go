@@ -82,7 +82,16 @@ func (p *Peer) Close() error {
 }
 
 // Call issues a request and unmarshals the result into out (which may be nil).
+// It blocks until the reply arrives or the connection closes; use CallContext to
+// bound the wait.
 func (p *Peer) Call(method string, params, out any) error {
+	return p.CallContext(context.Background(), method, params, out)
+}
+
+// CallContext is Call with a context: if ctx is cancelled or its deadline passes
+// before the reply arrives, it abandons the request and returns ctx.Err(). The
+// pending slot is reclaimed so a late reply is discarded rather than leaked.
+func (p *Peer) CallContext(ctx context.Context, method string, params, out any) error {
 	var rawParams json.RawMessage
 	if params != nil {
 		b, err := json.Marshal(params)
@@ -100,10 +109,15 @@ func (p *Peer) Call(method string, params, out any) error {
 	p.pending[id] = resCh
 	p.mu.Unlock()
 
-	if err := p.send(message{ID: &idRaw, Method: method, Params: rawParams}); err != nil {
+	// forget reclaims the pending slot so a later reply is discarded, not leaked.
+	forget := func() {
 		p.mu.Lock()
 		delete(p.pending, id)
 		p.mu.Unlock()
+	}
+
+	if err := p.send(message{ID: &idRaw, Method: method, Params: rawParams}); err != nil {
+		forget()
 		return err
 	}
 
@@ -116,6 +130,9 @@ func (p *Peer) Call(method string, params, out any) error {
 			return json.Unmarshal(resp.Result, out)
 		}
 		return nil
+	case <-ctx.Done():
+		forget()
+		return ctx.Err()
 	case <-p.closed:
 		return fmt.Errorf("api: connection closed")
 	}

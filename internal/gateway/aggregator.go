@@ -16,6 +16,11 @@ import (
 // (marked Offline) before the aggregator removes them.
 const DefaultOfflineGrace = 30 * time.Second
 
+// fanoutTimeout caps how long a single Fanout waits on a node's reply, so one
+// slow or wedged node can't stall a broadcast read for everyone. A node that
+// exceeds it gets a DeadlineExceeded error in-band, like any other failure.
+const fanoutTimeout = 15 * time.Second
+
 // Aggregator maintains the merged session view across all sources and routes
 // control calls to the owning source. Its Snapshot/Subscribe pair mirrors the
 // registry's pub/sub so a gateway client consumes it exactly like a node's
@@ -310,8 +315,9 @@ type FanoutResult struct {
 
 // Fanout calls method on every source and collects their raw results, tagged with
 // the source's id and label. Used for reads that aggregate across machines (e.g.
-// history projects). Sources are called sequentially; per-source errors are returned
-// in-band so one unreachable node doesn't fail the whole call.
+// history projects). Sources are called concurrently so total latency is the
+// slowest node, not the sum; per-source errors (including the fanoutTimeout) are
+// returned in-band so one unreachable or slow node doesn't fail the whole call.
 func (a *Aggregator) Fanout(ctx context.Context, method string, params json.RawMessage) []FanoutResult {
 	a.mu.Lock()
 	type ref struct {
@@ -324,11 +330,18 @@ func (a *Aggregator) Fanout(ctx context.Context, method string, params json.RawM
 	}
 	a.mu.Unlock()
 
-	out := make([]FanoutResult, 0, len(refs))
-	for _, r := range refs {
-		res, err := r.src.Call(ctx, method, params)
-		out = append(out, FanoutResult{NodeID: r.id, Label: r.label, Result: res, Err: err})
+	// Each goroutine writes its own slot, so no lock is needed on out.
+	out := make([]FanoutResult, len(refs))
+	var wg sync.WaitGroup
+	for i, r := range refs {
+		wg.Go(func() {
+			cctx, cancel := context.WithTimeout(ctx, fanoutTimeout)
+			defer cancel()
+			res, err := r.src.Call(cctx, method, params)
+			out[i] = FanoutResult{NodeID: r.id, Label: r.label, Result: res, Err: err}
+		})
 	}
+	wg.Wait()
 	return out
 }
 

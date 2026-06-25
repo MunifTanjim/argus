@@ -40,9 +40,11 @@ func (r *RemoteSource) Subscribe() (<-chan registry.Event, func()) {
 }
 
 // Call forwards a control request to the node and returns the raw JSON result.
-func (r *RemoteSource) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+// The context bounds the wait so a wedged node can't block the caller (e.g. a
+// gateway Fanout) past its deadline.
+func (r *RemoteSource) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	var out json.RawMessage
-	if err := r.peer.Call(method, params, &out); err != nil {
+	if err := r.peer.CallContext(ctx, method, params, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
