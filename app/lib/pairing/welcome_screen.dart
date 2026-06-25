@@ -15,9 +15,9 @@ class WelcomeScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('argus', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            const Text('Argus', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('supervise Claude Code from your phone'),
+            const Text('Watch and control all your AI coding sessions'),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: () async {
@@ -37,7 +37,7 @@ class WelcomeScreen extends StatelessWidget {
                   onPaired(c);
                 }),
               ),
-              child: const Text('Enter URL + token'),
+              child: const Text('Enter URL + Token'),
             ),
           ],
         ),

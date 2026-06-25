@@ -35,7 +35,9 @@ class _ManualEntryFormState extends State<ManualEntryForm> {
         16,
         16,
         16,
-        16 + MediaQuery.of(context).viewInsets.bottom,
+        16 +
+            MediaQuery.of(context).viewInsets.bottom +
+            MediaQuery.of(context).padding.bottom,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
