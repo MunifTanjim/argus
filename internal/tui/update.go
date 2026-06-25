@@ -131,6 +131,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case histTranscriptMsg:
 		m.transcript.chunks, m.transcript.err = msg.chunks, msg.err
 		m.transcript.cursor, m.transcript.scroll = 0, 0
+	case histSubagentMsg:
+		// Fill the deepest pending history-drill frame for this agent. The user
+		// may have drilled into a leaf above it, so match by agentID rather than
+		// assuming topFrame().
+		if msg.err == nil {
+			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
+				if m.transcript.detailStack[i].agentID == msg.agentID {
+					m.transcript.detailStack[i].items = flattenTrace(msg.chunks)
+					break
+				}
+			}
+		}
 	case toolDetailMsg:
 		// File the fetched body (or, on error, a done entry with an empty body so
 		// the loading placeholder clears and we don't retry on every render).

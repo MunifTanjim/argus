@@ -346,3 +346,25 @@ func TestDetailKeyNav(t *testing.T) {
 		t.Fatalf("enter should drill: frames=%d", len(m.transcript.detailStack))
 	}
 }
+
+func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
+	sub := claudecode.Item{
+		Kind: claudecode.ItemSubagent, SubagentType: "Explore",
+		AgentID: "B", HasTrace: true, // Trace empty => lazy
+	}
+	m := testModel()
+	m.mode = modeHistoryTranscript
+	m.history.openNodeID, m.history.openPath = "n1", "/p/sess.jsonl"
+	m.transcript.detailStack = []detailFrame{{
+		items: []claudecode.Item{sub}, cursor: 0, expanded: map[int]bool{},
+	}}
+	mm, cmd := m.actDetailDrill(tea.KeyPressMsg{})
+	got := mm.(model)
+	top := got.topFrame()
+	if top == nil || top.agentID != "B" {
+		t.Fatalf("expected pushed frame with agentID B, got %+v", top)
+	}
+	if cmd == nil {
+		t.Fatal("expected a fetch command for history nested drill")
+	}
+}

@@ -252,6 +252,14 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	it := f.items[f.cursor]
 	if it.Kind == claudecode.ItemSubagent && it.HasTrace && len(it.Trace) == 0 && it.AgentID != "" {
+		if m.mode == modeHistoryTranscript {
+			// Past session: one-shot fetch the nested subagent transcript
+			// (history has no live subscription).
+			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
+				label: subagentLabel(it), agentID: it.AgentID, expanded: map[int]bool{},
+			})
+			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, it.AgentID)
+		}
 		// Live session: stream the subagent trace into a new frame.
 		// Stash the current session subRef so we can restore it without a leak on pop.
 		m.sessionSub = m.activeSub

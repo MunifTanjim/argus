@@ -50,6 +50,26 @@ func (m model) fetchHistTranscript(nodeID, path string) tea.Cmd {
 	}
 }
 
+// histSubagentMsg carries a fetched nested subagent transcript for history mode.
+type histSubagentMsg struct {
+	agentID string
+	chunks  []claudecode.Chunk
+	err     error
+}
+
+// fetchHistSubagent one-shot fetches a nested subagent transcript in a past
+// session (history has no live subscription).
+func (m model) fetchHistSubagent(nodeID, path, agentID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var view claudecode.TranscriptView
+		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
+			NodeID: nodeID, TranscriptPath: path, AgentID: agentID,
+		}, &view)
+		return histSubagentMsg{agentID: agentID, chunks: view.Chunks, err: err}
+	}
+}
+
 // --- key handling -------------------------------------------------------------
 
 func (m model) handleHistoryProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
