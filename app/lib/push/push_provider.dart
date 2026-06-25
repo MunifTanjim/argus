@@ -45,6 +45,11 @@ abstract class PushProvider {
     required void Function(PushMessage) onOpen,
   });
 
+  /// Re-request the current endpoint from the distributor so [onTarget] fires
+  /// again. Used when the controller has no target after a restart/connect and
+  /// needs the backend to surface one.
+  Future<void> refresh();
+
   /// Stop receiving and forget the target (called on unpair).
   Future<void> stop();
 }

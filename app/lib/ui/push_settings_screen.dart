@@ -21,15 +21,25 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   List<String> _distributors = [];
   String? _currentDistributor;
   bool _loading = true;
+  bool? _registered;
   StreamSubscription<String>? _failureSub;
+  StreamSubscription<bool>? _regSub;
 
   PushController get _controller => ref.read(pushControllerProvider);
 
   @override
   void initState() {
     super.initState();
+    // Seed from the last known result: registration usually completes on connect,
+    // before this screen (and its broadcast subscription) exists.
+    _registered = _controller.lastRegistration;
     _failureSub = _controller.pushFailures.listen((reason) {
       if (mounted) _toast('UnifiedPush registration failed: $reason');
+    });
+    _regSub = _controller.registrations.listen((ok) {
+      if (!mounted) return;
+      setState(() => _registered = ok);
+      if (!ok) _toast('Failed to register with the gateway — will retry');
     });
     _load();
   }
@@ -37,6 +47,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   @override
   void dispose() {
     _failureSub?.cancel();
+    _regSub?.cancel();
     super.dispose();
   }
 
@@ -63,8 +74,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text('Active backend: ${active ?? "none"}',
-                    style: const TextStyle(color: AppColors.dim, fontSize: 12)),
+                _registrationStatus(),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: active == null ? null : _sendTest,
@@ -76,6 +86,23 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                 ..._distributorBody(),
               ],
             ),
+    );
+  }
+
+  Widget _registrationStatus() {
+    const red = Color(0xFFfb4934); // gruvbox red — matches status usage elsewhere
+    final (icon, color, label) = switch (_registered) {
+      true => (Icons.check_circle_outline, AppColors.accent, 'Registered with gateway'),
+      false => (Icons.error_outline, red, 'Not registered — retrying'),
+      null => (Icons.hourglass_empty, AppColors.dim, 'Registration pending'),
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: color, fontSize: 12)),
+      ],
     );
   }
 
@@ -130,8 +157,25 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     try {
       await _controller.sendTest();
       if (mounted) _toast('Test notification sent — check your notifications');
+      return;
+    } catch (_) {
+      // The gateway may have no/stale registration for this device. Re-register
+      // and retry once.
+    }
+    if (mounted) _toast('Re-registering with the gateway…');
+    final ok = await _controller.reregister();
+    if (!mounted) return;
+    if (!ok) {
+      _toast('Re-registration failed — check the connection and distributor');
+      return;
+    }
+    try {
+      await _controller.sendTest();
+      if (mounted) _toast('Re-registered and sent test — check your notifications');
     } catch (e) {
-      if (mounted) _toast('Test failed: $e');
+      if (mounted) {
+        _toast('Re-registered, but test still failed — try again in a moment: $e');
+      }
     }
   }
 

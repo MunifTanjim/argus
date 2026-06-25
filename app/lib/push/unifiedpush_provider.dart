@@ -90,6 +90,28 @@ class UnifiedPushProvider implements PushProvider {
   /// registration (e.g. fetched on connect).
   Future<void> reregister() => register();
 
+  /// Forces the distributor to re-emit the endpoint (via onNewEndpoint) and waits
+  /// for it to arrive, so callers can register the fresh endpoint immediately.
+  /// Skips the embedded distributor until its required VAPID key is known; returns
+  /// without waiting if no endpoint arrives within the timeout.
+  @override
+  Future<void> refresh() async {
+    if (preferredDistributor != null &&
+        await savedDistributor() == preferredDistributor &&
+        vapidPubKey == null) {
+      return;
+    }
+    // Subscribe before register() so the resulting endpoint isn't missed.
+    final next = unifiedPushEndpoints.first;
+    try {
+      await register();
+      await next.timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      // Distributor produced no endpoint in time; the caller falls back to the
+      // currently known target.
+    }
+  }
+
   @override
   Future<void> stop() async {
     await _sub?.cancel();
