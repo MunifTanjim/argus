@@ -5,6 +5,18 @@ mirrors the TUI — sessions, status, transcripts, live screen, prompts,
 history — and adds **Push Notification**: it pings you the moment a session needs
 you (a prompt, a question, a finished turn) **even when backgrounded or killed**.
 
+## Install
+
+The app is in **Closed Testing** on Google Play — anyone can join:
+
+1. Join the **[argus-android-app-beta](https://groups.google.com/g/argus-android-app-beta)**
+   Google Group with the Google account you use on the device.
+2. Open the **[testing opt-in link](https://play.google.com/apps/testing/dev.muniftanjim.argus)**
+   and tap **Become a tester**.
+3. Follow the link to install **Argus** from the Play Store.
+
+Updates then arrive automatically through the Play Store like any other app.
+
 ## Pairing
 
 The app talks to a **[gateway](/guide/multi-machine)** over the network, so you
