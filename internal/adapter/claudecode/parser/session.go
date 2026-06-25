@@ -54,6 +54,18 @@ func ReadSession(path string) ([]Chunk, error) {
 	return BuildChunks(msgs), nil
 }
 
+// ReadSubagentSession reads one subagent JSONL file into chunks. Subagent files
+// mark every entry isSidechain=true, so the flag is cleared before classifying
+// (otherwise Classify drops them all). Mirrors readSubagentSession without the
+// team-metadata extraction.
+func ReadSubagentSession(path string) ([]Chunk, error) {
+	msgs, _, _, err := ReadSessionIncremental(path, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	return BuildChunks(msgs), nil
+}
+
 // ReadSessionIncremental reads complete lines appended after offset and returns
 // the newly classified msgs, the subagent links (agentID -> toolUseID) found in
 // those lines, and the offset advanced to the end of the last NEWLINE-terminated
