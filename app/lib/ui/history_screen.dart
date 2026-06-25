@@ -52,21 +52,96 @@ class _ProjectList extends StatelessWidget {
       );
     }
 
+    final rows = _groupByNode(projects);
     return CenteredBody(
       child: ListView.builder(
-        itemCount: projects.length,
+        itemCount: rows.length,
         itemBuilder: (context, index) {
-          final p = projects[index];
-          return _ProjectCard(
-            project: p,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => HistorySessionsScreen(project: p),
+          final row = rows[index];
+          return switch (row) {
+            _NodeHeader(:final label) => _NodeHeaderTile(label: label),
+            _ProjectEntry(:final project) => _ProjectCard(
+              project: project,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => HistorySessionsScreen(project: project),
+                ),
               ),
             ),
-          );
+          };
         },
+      ),
+    );
+  }
+}
+
+/// A flattened row in the grouped project list: either a node header or a
+/// project under the current node.
+sealed class _Row {}
+
+class _NodeHeader extends _Row {
+  _NodeHeader(this.label);
+  final String label;
+}
+
+class _ProjectEntry extends _Row {
+  _ProjectEntry(this.project);
+  final HistoryProject project;
+}
+
+/// Groups a recency-sorted project list by origin node: groups appear in
+/// first-occurrence (newest-activity) order, recency order preserved within
+/// each, every group led by a header row.
+List<_Row> _groupByNode(List<HistoryProject> projects) {
+  final order = <String>[];
+  final buckets = <String, List<HistoryProject>>{};
+  for (final p in projects) {
+    final key = p.nodeId ?? '';
+    if (!buckets.containsKey(key)) order.add(key);
+    (buckets[key] ??= []).add(p);
+  }
+  final rows = <_Row>[];
+  for (final key in order) {
+    final group = buckets[key]!;
+    rows.add(_NodeHeader(_nodeLabel(group.first)));
+    rows.addAll(group.map(_ProjectEntry.new));
+  }
+  return rows;
+}
+
+/// The human name for a project's origin node, falling back to the node id and
+/// then a local placeholder (direct node connections carry no node info).
+String _nodeLabel(HistoryProject p) {
+  final label = p.nodeLabel;
+  if (label != null && label.isNotEmpty) return label;
+  final id = p.nodeId;
+  if (id != null && id.isNotEmpty) return id;
+  return 'This machine';
+}
+
+class _NodeHeaderTile extends StatelessWidget {
+  const _NodeHeaderTile({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Row(
+        children: [
+          Icon(Icons.dns_outlined,
+              size: 16, color: Theme.of(context).colorScheme.secondary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.secondary,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -86,24 +161,10 @@ class _ProjectCard extends StatelessWidget {
       if (project.lastActivity.isNotEmpty) relativeTime(project.lastActivity),
     ];
 
+    // The node is named by the group header above; the card shows only its own
+    // label, counts and path.
     return ListTile(
-      title: Row(
-        children: [
-          Expanded(child: Text(project.label)),
-          if (project.nodeLabel != null && project.nodeLabel!.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                project.nodeLabel!,
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ),
-        ],
-      ),
+      title: Text(project.label),
       subtitle: Text(subtitleParts.join(' · ')),
       onTap: onTap,
     );
