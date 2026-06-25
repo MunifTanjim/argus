@@ -255,14 +255,24 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 		task = StyleDim.Render("(idle)")
 	}
 
-	return cardTitled(titleLeft, titleRight, []string{m.cardMeta(s, innerW, selected), task}, cardW, border, chrome)
+	// In the cross-host "Needs you" section the per-node header is replaced, so the
+	// node would otherwise be unknowable; surface it on the card itself.
+	nodeLabel := ""
+	if s.Status == session.StatusAwaitingInput && m.grouped() {
+		nodeLabel = s.NodeLabel
+		if nodeLabel == "" {
+			nodeLabel = "local"
+		}
+	}
+
+	return cardTitled(titleLeft, titleRight, []string{m.cardMeta(s, innerW, selected, nodeLabel), task}, cardW, border, chrome)
 }
 
 // cardMeta builds a session card's metadata line: model · ctx% · tokens on the left
 // (each omitted when unknown) and the relative last-activity on the right. On an
 // unfocused card the model badge is dimmed and a healthy ctx% is dimmed too; an
 // elevated ctx% (>=50%) keeps its warning color so it triages at a glance.
-func (m model) cardMeta(s session.Session, width int, selected bool) string {
+func (m model) cardMeta(s session.Session, width int, selected bool, nodeLabel string) string {
 	var parts []string
 	if sum := s.Summary; sum != nil {
 		if sum.Model != "" {
@@ -287,10 +297,16 @@ func (m model) cardMeta(s session.Session, width int, selected bool) string {
 	if left == "" {
 		left = StyleDim.Render(statusWord(s)) // no summary yet: at least show status
 	}
-	right := ""
-	if s.Summary != nil {
-		right = StyleDim.Render(relTime(s.Summary.LastActivity))
+	// Node on the right, before the time, so the cross-host "Needs you" cards
+	// stay attributable to their host.
+	var rights []string
+	if nodeLabel != "" {
+		rights = append(rights, StyleSecondary.Render(Icon.Node.Glyph+" "+nodeLabel))
 	}
+	if s.Summary != nil {
+		rights = append(rights, StyleDim.Render(relTime(s.Summary.LastActivity)))
+	}
+	right := strings.Join(rights, StyleDim.Render(" · "))
 	return spaceBetween(left, right, width)
 }
 
