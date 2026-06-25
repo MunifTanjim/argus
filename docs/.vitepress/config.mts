@@ -13,7 +13,7 @@ export default defineConfig({
       "link",
       {
         rel: "icon",
-        href: "https://emojiapi.dev/api/v1/laptop/256.png",
+        href: "/logo.png",
       },
     ],
   ],
@@ -23,6 +23,8 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: "/logo.png",
+
     nav: [
       { text: "Getting Started", link: "/getting-started/introduction" },
       { text: "Guide", link: "/guide/single-machine" },
