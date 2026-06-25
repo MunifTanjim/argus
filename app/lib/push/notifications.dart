@@ -34,7 +34,9 @@ class PushNotifications {
   Future<void> init() async {
     if (_ready) return;
     const InitializationSettings settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      // Monochrome status-bar icon (Android masks small icons to alpha; a
+      // full-color launcher icon would render as a white blob).
+      android: AndroidInitializationSettings('ic_stat_argus'),
     );
     await _plugin.initialize(
       settings,

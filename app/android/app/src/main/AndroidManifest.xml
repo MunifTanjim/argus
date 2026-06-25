@@ -43,6 +43,13 @@
             </intent-filter>
         </receiver>
 
+        <!-- Monochrome status-bar icon for notifications the OS renders directly
+             (Android masks small icons to alpha; the launcher icon would show as
+             a white blob). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_argus" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
