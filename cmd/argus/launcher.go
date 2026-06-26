@@ -10,12 +10,14 @@ import (
 type launchKind int
 
 const (
-	launchQuit    launchKind = iota // user backed out; spawn nothing, exit cleanly
-	launchSpawn                     // start an ephemeral local node
-	launchGateway                   // connect to the entered gateway URL + token
+	launchQuit           launchKind = iota // user backed out; spawn nothing, exit cleanly
+	launchSpawnIsolated                    // start an ephemeral isolated node
+	launchSpawnConnected                   // start an ephemeral connected node
+	launchGateway                          // connect to the entered gateway URL + token
 )
 
-// launchChoice is the launcher's result. gatewayURL/token are set only for launchGateway.
+// launchChoice is the launcher's result. gatewayURL/token are set for launchGateway
+// and launchSpawnConnected (both dial a gateway).
 type launchChoice struct {
 	kind       launchKind
 	gatewayURL string
@@ -32,20 +34,22 @@ const (
 )
 
 const (
-	menuSpawn   = 0
-	menuGateway = 1
+	menuSpawnIsolated = iota
+	menuSpawnConnected
+	menuGateway
 )
 
 // launcherModel is the pre-TUI connect chooser. It is shown only in local mode
 // when no node is listening; its choice drives how cmd/argus builds the client.
 type launcherModel struct {
-	state   launcherState
-	cursor  int // menu cursor: menuSpawn or menuGateway
-	field   int // gateway form focus: 0 = url, 1 = token
-	urlIn   textinput.Model
-	tokenIn textinput.Model
-	errMsg  string
-	choice  launchChoice
+	state          launcherState
+	cursor         int  // menu cursor: menuSpawnIsolated, menuSpawnConnected, or menuGateway
+	spawnConnected bool // gateway form is for a connected spawn, not a plain gateway connect
+	field          int  // gateway form focus: 0 = url, 1 = token
+	urlIn          textinput.Model
+	tokenIn        textinput.Model
+	errMsg         string
+	choice         launchChoice
 }
 
 func newLauncherModel(token string) launcherModel {
@@ -93,10 +97,13 @@ func (m launcherModel) updateMenu(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case "enter":
-		if m.cursor == menuSpawn {
-			m.choice = launchChoice{kind: launchSpawn}
+		if m.cursor == menuSpawnIsolated {
+			m.choice = launchChoice{kind: launchSpawnIsolated}
 			return m, tea.Quit
 		}
+		// menuSpawnConnected and menuGateway both need a gateway URL + token, so
+		// they go through the form; spawnConnected picks the kind on submit.
+		m.spawnConnected = m.cursor == menuSpawnConnected
 		m.state = stateGateway
 		m.field = 0
 		return m, m.urlIn.Focus()
@@ -156,15 +163,19 @@ func (m launcherModel) submitGateway() (tea.Model, tea.Cmd) {
 		m.errMsg = err.Error()
 		return m, nil
 	}
-	m.choice = launchChoice{kind: launchGateway, gatewayURL: url, token: m.tokenIn.Value()}
+	kind := launchGateway
+	if m.spawnConnected {
+		kind = launchSpawnConnected
+	}
+	m.choice = launchChoice{kind: kind, gatewayURL: url, token: m.tokenIn.Value()}
 	return m, tea.Quit
 }
 
 func (m launcherModel) View() tea.View {
 	var b string
-	title := lipgloss.NewStyle().Bold(true).Render("argus — no local server running")
+	title := lipgloss.NewStyle().Bold(true).Render("Argus — no node running")
 	if m.state == stateMenu {
-		items := []string{"Spawn local server (ephemeral)", "Connect to a gateway"}
+		items := []string{"Spawn isolated node (ephemeral)", "Spawn gateway connected node (ephemeral)", "Connect to gateway"}
 		body := ""
 		for i, it := range items {
 			prefix := "  "
@@ -182,7 +193,11 @@ func (m launcherModel) View() tea.View {
 }
 
 func (m launcherModel) gatewayView() string {
-	title := lipgloss.NewStyle().Bold(true).Render("Connect to a gateway")
+	heading := "Connect to gateway"
+	if m.spawnConnected {
+		heading = "Spawn gateway connected node"
+	}
+	title := lipgloss.NewStyle().Bold(true).Render(heading)
 	urlLabel, tokLabel := "  URL:   ", "  Token: "
 	if m.field == 0 {
 		urlLabel = "❯ URL:   "

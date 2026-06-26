@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
-
-	"github.com/MunifTanjim/argus/internal/socketpath"
 )
 
 // Config is the resolved argus configuration. Values come from (highest priority
@@ -51,7 +49,7 @@ type CloudflareConfig struct {
 // defaults are the built-in values, used when a key is set by neither a flag, an env
 // var, nor the config file.
 var defaults = map[string]any{
-	"socket":                        socketpath.Default(),
+	"socket":                        GetRuntimePath("argus.sock"),
 	"token":                         "",
 	"gateway.url":                   "",
 	"gateway.listen-addr":           ":8443",

@@ -34,15 +34,26 @@ func newRootCmd(version string) *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var client *api.ReconnectingClient
-			if cfg.Gateway.URL != "" {
-				client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
-			} else if running, perr := localNodeRunning(cfg.Socket); perr != nil {
+			running, perr := localNodeRunning(cfg.Socket)
+			if perr != nil {
 				shell.StdErrF("argus: cannot reach argusd at %s: %v\n", cfg.Socket, perr)
 				return errSilent
-			} else if running {
+			}
+
+			var client *api.ReconnectingClient
+			switch {
+			case cfg.Gateway.URL != "":
+				// The TUI drives the gateway so it sees the whole fleet. If no local node
+				// is running, spawn an ephemeral one that enrolls with the same gateway, so
+				// this machine joins the fleet too; otherwise the running node enrolls itself.
+				if running {
+					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+				} else {
+					client, err = connectLocalSpawnWithGateway(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+				}
+			case running:
 				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
-			} else {
+			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
 					return fail(cmd, lerr)
@@ -50,8 +61,10 @@ func newRootCmd(version string) *cobra.Command {
 				switch choice.kind {
 				case launchQuit:
 					return nil
-				case launchSpawn:
+				case launchSpawnIsolated:
 					client, err = connectLocalSpawn(ctx, cfg.Token, cfg.Socket)
+				case launchSpawnConnected:
+					client, err = connectLocalSpawnWithGateway(ctx, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
 					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
 				}

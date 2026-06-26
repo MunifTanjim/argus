@@ -11,7 +11,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/shell"
-	"github.com/MunifTanjim/argus/internal/socketpath"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
@@ -36,11 +35,9 @@ func newHookCmd() *cobra.Command {
 			}
 			payload, _ := io.ReadAll(io.LimitReader(os.Stdin, 8*1024*1024))
 
-			// Honor a configured socket so a custom path works end-to-end; fall back to
-			// the default if config can't be resolved (hook is strictly best-effort).
-			socket := socketpath.Default()
-			if cfg, err := resolveConfig(cmd); err == nil {
-				socket = cfg.Socket
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				shell.Exit(0)
 			}
 
 			ev := claudecode.HookEvent{
@@ -56,7 +53,7 @@ func newHookCmd() *cobra.Command {
 			// unreachable or returns nothing, print nothing so Claude falls back to its
 			// own interactive prompt. Claude's own 600s hook timeout bounds the wait.
 			if event == "PermissionRequest" {
-				client, err := api.Dial(socket)
+				client, err := api.Dial(cfg.Socket)
 				if err != nil {
 					shell.Exit(0)
 				}
@@ -72,7 +69,7 @@ func newHookCmd() *cobra.Command {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				client, err := api.Dial(socket)
+				client, err := api.Dial(cfg.Socket)
 				if err != nil {
 					return
 				}

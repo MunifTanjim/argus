@@ -26,20 +26,40 @@ func TestMenuNavigationClamps(t *testing.T) {
 		t.Fatalf("cursor after up at top = %d, want 0", m.cursor)
 	}
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.cursor != 1 {
-		t.Fatalf("cursor after down = %d, want 1", m.cursor)
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.cursor != menuGateway {
+		t.Fatalf("cursor after two downs = %d, want %d", m.cursor, menuGateway)
 	}
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown}) // already at bottom
-	if m.cursor != 1 {
-		t.Fatalf("cursor after down at bottom = %d, want 1", m.cursor)
+	if m.cursor != menuGateway {
+		t.Fatalf("cursor after down at bottom = %d, want %d", m.cursor, menuGateway)
 	}
 }
 
 func TestMenuSpawnChoice(t *testing.T) {
 	m := newLauncherModel("")
-	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = spawn
-	if m.choice.kind != launchSpawn {
-		t.Fatalf("choice = %v, want launchSpawn", m.choice.kind)
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = spawn isolated
+	if m.choice.kind != launchSpawnIsolated {
+		t.Fatalf("choice = %v, want launchSpawnIsolated", m.choice.kind)
+	}
+}
+
+func TestMenuSpawnConnectedNeedsGateway(t *testing.T) {
+	m := newLauncherModel("")
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})  // cursor 1 = spawn connected
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // -> gateway form, no choice yet
+	if m.state != stateGateway || !m.spawnConnected {
+		t.Fatalf("state = %v spawnConnected = %v, want stateGateway/true", m.state, m.spawnConnected)
+	}
+	m.urlIn.SetValue("ws://gw.example.com:8443")
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // url -> token
+	m.tokenIn.SetValue("secret")
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit
+	if m.choice.kind != launchSpawnConnected {
+		t.Fatalf("choice = %v, want launchSpawnConnected", m.choice.kind)
+	}
+	if m.choice.gatewayURL != "ws://gw.example.com:8443" || m.choice.token != "secret" {
+		t.Fatalf("choice gatewayURL/token = %q/%q", m.choice.gatewayURL, m.choice.token)
 	}
 }
 
@@ -52,7 +72,8 @@ func TestMenuQuitChoice(t *testing.T) {
 }
 
 func enterGateway(m launcherModel) launcherModel {
-	// from menu, move to "Connect to a gateway" and select it
+	// from menu, move to "Connect to gateway" (last item) and select it
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	return m

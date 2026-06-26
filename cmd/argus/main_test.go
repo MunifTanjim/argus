@@ -80,6 +80,62 @@ func TestConnectLocalSpawn(t *testing.T) {
 	}
 }
 
+// A connected spawn enrolls the embedded node on the gateway and points the TUI
+// client at the gateway, so the returned client sees the fleet (this machine
+// included via the uplink), not just the local socket.
+func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
+	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
+	ts := httptest.NewServer(hsrv.Handler())
+	defer ts.Close()
+
+	sock := shortSocket(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c, err := connectLocalSpawnWithGateway(ctx, wsURL(ts.URL), "", sock)
+	if err != nil {
+		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
+	}
+	defer c.Close()
+
+	// The returned client talks to the gateway, so once the uplink establishes the
+	// embedded node shows up in its nodes.list — proving the TUI sees the fleet.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var nodes []api.NodeInfo
+		if c.Call(api.MethodNodesList, nil, &nodes) == nil && len(nodes) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("embedded connected node never enrolled / not visible to the TUI client")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A connected spawn against an unreachable/rejecting gateway fails synchronously
+// (surfacing the error) instead of dropping the user into the TUI with a silent,
+// forever-retrying background uplink.
+func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
+	auth := func(tok string) bool { return tok == "right" }
+	hsrv := gateway.NewServer(gateway.New(0), auth, auth)
+	ts := httptest.NewServer(hsrv.Handler())
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Wrong token: the gateway rejects the upgrade, so the probe must fail.
+	if _, err := connectLocalSpawnWithGateway(ctx, wsURL(ts.URL), "WRONG", shortSocket(t)); err == nil {
+		t.Fatal("expected an error for a rejected gateway token")
+	}
+
+	// Unreachable host: dial failure must also surface.
+	if _, err := connectLocalSpawnWithGateway(ctx, "ws://127.0.0.1:1", "right", shortSocket(t)); err == nil {
+		t.Fatal("expected an error for an unreachable gateway")
+	}
+}
+
 func TestNodeAbsent(t *testing.T) {
 	if !nodeAbsent(syscall.ENOENT) || !nodeAbsent(syscall.ECONNREFUSED) {
 		t.Fatal("ENOENT/ECONNREFUSED should count as node-absent")

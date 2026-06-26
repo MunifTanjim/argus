@@ -211,6 +211,29 @@ func paneExists(t *testing.T, c *tmux.Client, paneID string) bool {
 	return false
 }
 
+// TestRunRefusesWhenAlreadyRunning verifies Run will not steal a socket from a
+// live node: a second Run on the same path errors instead of unlinking and
+// rebinding (which previously orphaned the first node and let teardown of either
+// delete the other's socket).
+func TestRunRefusesWhenAlreadyRunning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	socket := filepath.Join(t.TempDir(), "d.sock")
+	d1 := New()
+	go func() { _ = d1.Run(ctx, socket) }()
+	dialWithRetry(t, socket).Close() // wait until d1 is listening
+
+	d2 := New()
+	err := d2.Run(ctx, socket)
+	if err == nil {
+		t.Fatal("second Run should refuse a socket with a live node")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("error = %v, want 'already running'", err)
+	}
+}
+
 func dialWithRetry(t *testing.T, socket string) *api.Client {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

@@ -5,12 +5,14 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -133,10 +135,14 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	srv.OnConnect(func(n api.Notifier) func() {
 		d.registerConn(n)
 		events, cancel := reg.Subscribe()
-		// Send the current snapshot first so a fresh client is in sync.
+		// Send the current snapshot first so a fresh client is in sync. A client may
+		// hang up before/while we stream it — e.g. a liveness probe that connects and
+		// immediately closes (localNodeRunning). That's expected: stop on the first
+		// failed notify rather than spamming one per session against a dead connection.
+		// The live-event loop below treats a dropped client the same way (silent return).
 		for _, s := range reg.Snapshot() {
 			if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
-				d.log.Warn("initial snapshot notify failed", "err", err)
+				break
 			}
 		}
 		done := make(chan struct{})
@@ -173,8 +179,17 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return err
 	}
-	// Remove a stale socket from a previous run.
+	// A leftover socket is only safe to remove if no node is actually listening
+	// on it. Probe first: if a live node answers, refuse rather than unlink it
+	// out from under the running node (which would orphan it and let teardown of
+	// either node delete the other's socket). Only a stale/dead socket is removed.
 	if _, err := os.Stat(socketPath); err == nil {
+		if conn, derr := net.Dial("unix", socketPath); derr == nil {
+			conn.Close()
+			return fmt.Errorf("a node is already running at %s", socketPath)
+		} else if !nodeAbsent(derr) {
+			return fmt.Errorf("probing socket %s: %w", socketPath, derr)
+		}
 		if err := os.Remove(socketPath); err != nil {
 			d.log.Warn("removing stale socket failed", "path", socketPath, "err", err)
 		}
@@ -206,4 +221,11 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		return nil // shutdown requested
 	}
 	return err
+}
+
+// nodeAbsent reports whether a dial error means no node is listening: a missing
+// socket file (ENOENT) or a stale one with no listener (ECONNREFUSED). Any other
+// error is a real problem and should not be treated as "safe to remove".
+func nodeAbsent(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }

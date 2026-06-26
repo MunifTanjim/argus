@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"syscall"
 	"time"
 
@@ -72,14 +73,48 @@ func localNodeRunning(socket string) (bool, error) {
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it
 // to accept, then connects. The embedded node stops when ctx is cancelled.
 func connectLocalSpawn(ctx context.Context, token, socket string) (*api.ReconnectingClient, error) {
-	startEmbeddedNode(ctx, socket)
+	return connectLocalSpawnWithGateway(ctx, "", token, socket)
+}
+
+// connectLocalSpawnWithGateway starts an ephemeral embedded node (tied to ctx) and
+// waits for it to accept. When gatewayURL is empty (an isolated spawn) it connects
+// the TUI over the node's local socket. When gatewayURL is set (a connected spawn)
+// the node dials that upstream gateway so this machine joins the fleet, and the TUI
+// connects to the gateway instead — so it sees the whole fleet, including this
+// machine via the uplink. The node and its uplink stop when ctx is cancelled.
+func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, error) {
+	var wsURL string
+	var gatewayClient *http.Client
+	if gatewayURL != "" {
+		var err error
+		if wsURL, gatewayClient, err = resolveGatewayURL(gatewayURL, routeNode, nil); err != nil {
+			shell.StdErrF("argus: %v\n", err)
+			return nil, err
+		}
+		// Probe the gateway synchronously so an unreachable host or rejected token is
+		// reported here, before the TUI takes the screen. d.ConnectGateway (below)
+		// retries silently in the background — without this probe a bad URL/token
+		// would leave the node permanently un-enrolled with no feedback to the user.
+		probe, err := api.DialWSConn(ctx, wsURL, token, gatewayClient)
+		if err != nil {
+			shell.StdErrF("argus: cannot reach gateway at %s: %v\n", gatewayURL, err)
+			return nil, err
+		}
+		probe.Close()
+	}
+	d := startEmbeddedNode(ctx, socket)
+	if gatewayURL != "" {
+		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
+	}
 	conn, err := dialWithRetry(socket, 3*time.Second)
 	if err != nil {
 		shell.StdErrF("argus: embedded node did not start at %s: %v\n", socket, err)
 		return nil, err
 	}
 	conn.Close() // probe only; the client opens its own connection
-	return connect(ctx, "", token, socket)
+	// Isolated spawn: drive the local node directly. Connected spawn: drive the
+	// gateway (client route) so the TUI sees the whole fleet, this machine included.
+	return connect(ctx, gatewayURL, token, socket)
 }
 
 // nodeAbsent reports whether a dial error means "no node is listening": a
@@ -93,9 +128,10 @@ func nodeAbsent(err error) bool {
 // alt-screen. Unlike `argus start` it does not reconcile installed Claude Code
 // hooks: this launch is ephemeral and may run from a different binary path than
 // the installed one, so rewriting global hook config here would be surprising.
-func startEmbeddedNode(ctx context.Context, socket string) {
+func startEmbeddedNode(ctx context.Context, socket string) *node.Node {
 	d := node.New()
 	go func() { _ = d.Run(ctx, socket) }()
+	return d
 }
 
 // dialWithRetry polls the socket until a node accepts a connection or timeout.
