@@ -548,6 +548,18 @@ func (s *Server) nodeHandler() http.Handler {
 	})
 }
 
+// Node uplink keepalive: the gateway pings each node on this cadence so a
+// half-open link (node host vanished without a TCP FIN) is detected promptly
+// instead of lingering until an OS keepalive or a failed write. Closing the peer
+// after nodeKeepaliveFailures consecutive unanswered pings fires Done and flows
+// into the aggregator's normal offline → grace → removal path; requiring two
+// failures rides out a transient blip so a briefly busy node isn't dropped.
+const (
+	nodeKeepaliveInterval = 15 * time.Second
+	nodeKeepaliveTimeout  = 5 * time.Second
+	nodeKeepaliveFailures = 2
+)
+
 // serveNode adopts an accepted node uplink: decode its event notifications,
 // learn its identity, register it as a source, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
@@ -556,6 +568,9 @@ func (s *Server) serveNode(conn net.Conn) {
 	// Stored atomically to satisfy the race detector (OnNotify runs in a goroutine).
 	var peerRef atomic.Pointer[api.Peer]
 	peer := api.NewPeer(conn, api.PeerOptions{
+		KeepaliveInterval:         nodeKeepaliveInterval,
+		KeepaliveTimeout:          nodeKeepaliveTimeout,
+		KeepaliveFailureThreshold: nodeKeepaliveFailures,
 		OnNotify: func(n api.Notification) {
 			switch n.Method {
 			case api.MethodSessionEvent:

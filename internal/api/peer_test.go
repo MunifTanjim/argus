@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -140,5 +141,68 @@ func TestPeerCallUnblocksOnClose(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Call did not unblock on close")
+	}
+}
+
+// With keepalive on, a remote that stops answering pings (a half-open link that
+// never errors on read) is detected: the peer closes itself, firing Done.
+func TestPeerKeepaliveClosesOnUnresponsiveRemote(t *testing.T) {
+	block := make(chan struct{})
+	pa, _, done := makePeers(
+		PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 40 * time.Millisecond},
+		PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) {
+			<-block // never answers the ping
+			return nil, nil
+		}},
+	)
+	defer done()
+	defer close(block)
+
+	select {
+	case <-pa.Done():
+		// good: keepalive detected the dead remote and closed the peer
+	case <-time.After(time.Second):
+		t.Fatal("keepalive did not close peer on unresponsive remote")
+	}
+}
+
+// A single missed ping is a transient blip, not a death: with a failure
+// threshold above one, the peer survives one timed-out ping as long as the next
+// one is answered.
+func TestPeerKeepaliveToleratesTransientBlip(t *testing.T) {
+	var pings atomic.Int32
+	pa, _, done := makePeers(
+		PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 30 * time.Millisecond, KeepaliveFailureThreshold: 2},
+		PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) {
+			if pings.Add(1) == 1 {
+				time.Sleep(60 * time.Millisecond) // miss only the first ping
+			}
+			return nil, nil
+		}},
+	)
+	defer done()
+
+	select {
+	case <-pa.Done():
+		t.Fatal("keepalive closed peer after a single transient blip")
+	case <-time.After(200 * time.Millisecond):
+		// good: one missed ping did not kill the peer
+	}
+}
+
+// Keepalive leaves a healthy peer alone: as long as pings are answered, the peer
+// stays open across several cycles.
+func TestPeerKeepaliveStaysUpWhenAnswered(t *testing.T) {
+	pa, _, done := makePeers(
+		PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 40 * time.Millisecond},
+		PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) { return nil, nil }},
+	)
+	defer done()
+
+	select {
+	case <-pa.Done():
+		t.Fatal("keepalive closed a healthy peer")
+	case <-time.After(150 * time.Millisecond):
+		// good: peer survived several keepalive cycles
 	}
 }

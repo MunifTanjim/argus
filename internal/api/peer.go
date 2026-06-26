@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // DispatchFunc handles an incoming request. params is the raw JSON params (may be
@@ -26,6 +27,19 @@ type PeerOptions struct {
 	// served request (so connection-scoped values like an auth Principal flow to
 	// handlers). Defaults to context.Background().
 	BaseContext context.Context
+	// KeepaliveInterval, when > 0, makes the peer send a ping every interval. A
+	// ping that does not get a reply within KeepaliveTimeout closes the peer
+	// (firing Done), so a half-open link that never errors on read is still
+	// detected. Zero disables keepalive.
+	KeepaliveInterval time.Duration
+	// KeepaliveTimeout bounds how long each keepalive ping waits for its reply.
+	// Defaults to KeepaliveInterval when zero. Ignored unless KeepaliveInterval
+	// is set.
+	KeepaliveTimeout time.Duration
+	// KeepaliveFailureThreshold is how many consecutive failed pings close the
+	// peer. A single answered ping resets the count, so a transient blip is
+	// tolerated. Defaults to 1 (close on the first failure) when zero.
+	KeepaliveFailureThreshold int
 }
 
 // Peer is one end of a symmetric JSON-RPC 2.0 connection: it can both issue
@@ -69,7 +83,45 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 		closed:   make(chan struct{}),
 	}
 	go p.readLoop()
+	if opts.KeepaliveInterval > 0 {
+		go p.keepalive(opts.KeepaliveInterval, opts.KeepaliveTimeout, opts.KeepaliveFailureThreshold)
+	}
 	return p
+}
+
+// keepalive pings the remote every interval and closes the peer after threshold
+// consecutive pings fail to get a reply within timeout. An answered ping resets
+// the streak, so a transient blip is tolerated. This catches a half-open
+// connection whose read side never errors, which the read loop alone would not
+// notice. It stops when the peer closes.
+func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
+	if timeout <= 0 {
+		timeout = interval
+	}
+	if threshold < 1 {
+		threshold = 1
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	fails := 0
+	for {
+		select {
+		case <-p.closed:
+			return
+		case <-t.C:
+			ctx, cancel := context.WithTimeout(p.ctx, timeout)
+			err := p.CallContext(ctx, MethodPing, nil, nil)
+			cancel()
+			if err == nil {
+				fails = 0
+				continue
+			}
+			if fails++; fails >= threshold {
+				_ = p.Close()
+				return
+			}
+		}
+	}
 }
 
 // Done is closed when the peer's read loop ends (connection closed or errored).
