@@ -8,6 +8,7 @@ import 'state/gateway.dart';
 import 'state/push.dart';
 import 'transport/connection.dart';
 import 'ui/home_shell.dart';
+import 'ui/route_observer.dart';
 import 'ui/theme.dart';
 
 Future<void> main(List<String> args) async {
@@ -73,6 +74,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     return MaterialApp(
       title: 'argus',
       theme: buildArgusTheme(),
+      navigatorObservers: [appRouteObserver],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : creds == null

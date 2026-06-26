@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +7,7 @@ import '../core/result.dart';
 import '../data/session_repository.dart';
 import '../data/transcript_repository.dart';
 import '../models/session.dart';
+import '../push/notifications.dart';
 import '../state/gateway.dart';
 import '../state/sessions.dart';
 import '../state/tool_detail.dart';
@@ -13,6 +16,7 @@ import '../transport/connection.dart';
 import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
 import 'respond_sheet.dart';
+import 'route_observer.dart';
 import 'status_style.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
@@ -27,7 +31,8 @@ class SessionDetailScreen extends ConsumerStatefulWidget {
       _SessionDetailScreenState();
 }
 
-class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
+class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
+    with RouteAware, WidgetsBindingObserver {
   TranscriptSubscription? _sub;
 
   String get _sid => widget.session.id;
@@ -35,7 +40,52 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _claimActive();
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) appRouteObserver.subscribe(this, route);
+  }
+
+  // Mark this session as the one on screen and clear any standing notification
+  // for it. Called whenever the view becomes visible: on open, when a route
+  // pushed over it is popped, and when the app returns to the foreground (which
+  // also dismisses a notification the background isolate raised while away).
+  void _claimActive() {
+    PushNotifications.instance.setActiveSession(_sid);
+    unawaited(PushNotifications.instance.cancelForSession(_sid));
+  }
+
+  // Stop suppressing this session's notifications, unless something else already
+  // became the active session.
+  void _releaseActive() {
+    if (PushNotifications.instance.activeSessionId == _sid) {
+      PushNotifications.instance.setActiveSession(null);
+    }
+  }
+
+  @override
+  void didPopNext() => _claimActive();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Foreground again on this session: re-suppress and dismiss anything that
+      // arrived while away.
+      if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+        _claimActive();
+      }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      // Screen off or backgrounded: you're not actively viewing, so let this
+      // session's notifications through.
+      _releaseActive();
+    }
   }
 
   void _open() {
@@ -48,6 +98,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
 
   @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    _releaseActive();
     _sub?.dispose();
     super.dispose();
   }

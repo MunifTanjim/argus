@@ -20,6 +20,24 @@ class PushNotifications {
   final StreamController<String> _taps = StreamController<String>.broadcast();
   final SeenMessages _seen = SeenMessages();
   bool _ready = false;
+  // Set when the notification platform plugin can't be initialized (e.g. a
+  // non-Android platform, or a test/headless context without the plugin). Lets
+  // show/cancel degrade to no-ops so opening a session never crashes the UI.
+  bool _unavailable = false;
+
+  // The session whose detail view is currently open in the foreground, if any.
+  // Its notifications are suppressed (and dismissed on open) so a session you are
+  // already looking at doesn't also buzz the status bar. This lives only in the
+  // UI isolate; the background (app-killed) isolate keeps its own always-null
+  // copy, so a killed app still notifies normally.
+  String? _activeSessionId;
+
+  /// The session whose view is currently open, or null.
+  String? get activeSessionId => _activeSessionId;
+
+  /// Marks [sessionId] as the actively viewed session (null when none). While
+  /// set, [show] suppresses notifications for that session.
+  void setActiveSession(String? sessionId) => _activeSessionId = sessionId;
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'argus_sessions',
@@ -32,21 +50,27 @@ class PushNotifications {
   Stream<String> get taps => _taps.stream;
 
   Future<void> init() async {
-    if (_ready) return;
+    if (_ready || _unavailable) return;
     const InitializationSettings settings = InitializationSettings(
       // Monochrome status-bar icon (Android masks small icons to alpha; a
       // full-color launcher icon would render as a white blob).
       android: AndroidInitializationSettings('ic_stat_argus'),
     );
-    await _plugin.initialize(
-      settings,
-      onDidReceiveNotificationResponse: (resp) => _emitTap(resp.payload),
-    );
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
-    _ready = true;
+    try {
+      await _plugin.initialize(
+        settings,
+        onDidReceiveNotificationResponse: (resp) => _emitTap(resp.payload),
+      );
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(_channel);
+      _ready = true;
+    } catch (_) {
+      // No notification platform implementation available; degrade to no-op
+      // rather than crashing callers (e.g. SessionDetailScreen on open).
+      _unavailable = true;
+    }
   }
 
   /// Requests the Android 13+ POST_NOTIFICATIONS runtime permission.
@@ -67,11 +91,14 @@ class PushNotifications {
 
   Future<void> show(PushMessage m) async {
     await init();
+    if (!_ready) return;
     // Drop deliveries the UnifiedPush Android plugin replays to a fresh engine
     // on app relaunch (its event flow buffers the last events with replay=20),
     // which would otherwise re-raise an already-shown notification.
     if (!await _seen.markSeen(m.id)) return;
-    final id = (m.sessionId ?? m.title ?? m.body ?? '').hashCode;
+    // Don't raise a notification for the session the user is actively viewing.
+    if (suppressForActive(_activeSessionId, m)) return;
+    final id = sessionNotificationId(m.sessionId ?? m.title ?? m.body ?? '');
     await _plugin.show(
       id,
       m.title ?? 'argus',
@@ -89,6 +116,14 @@ class PushNotifications {
     );
   }
 
+  /// Dismisses the standing notification for [sessionId], if any. Called when a
+  /// session's view opens so its alert clears as you start reading.
+  Future<void> cancelForSession(String sessionId) async {
+    await init();
+    if (!_ready) return;
+    await _plugin.cancel(sessionNotificationId(sessionId));
+  }
+
   void _emitTap(String? payload) {
     final id = _sessionFromPayload(payload);
     if (id != null) _taps.add(id);
@@ -104,3 +139,28 @@ class PushNotifications {
     }
   }
 }
+
+/// The notification id used for [sessionId]. [PushNotifications.show] reuses it so
+/// a session only ever has one notification, and [PushNotifications.cancelForSession]
+/// can target it.
+///
+/// Uses a deterministic FNV-1a hash rather than [String.hashCode]: hashCode is
+/// not stable across isolates or runs, so the headless background isolate (which
+/// shows notifications when the app is killed) would otherwise pick a different
+/// id than the foreground isolate for the same session — stacking duplicates and
+/// defeating cancellation. FNV-1a depends only on the bytes, so every isolate
+/// agrees. Masked to a positive 31-bit int to stay within Android's int id range.
+int sessionNotificationId(String sessionId) {
+  var hash = 0x811c9dc5;
+  for (final byte in utf8.encode(sessionId)) {
+    // Mask to 32 bits each round so the result matches a standard FNV-1a-32
+    // (Dart's native int is 64-bit and would not wrap on its own).
+    hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
+  }
+  return hash & 0x7fffffff;
+}
+
+/// Whether a push for [m] should be suppressed because its session is the one
+/// currently open on screen ([activeSessionId]).
+bool suppressForActive(String? activeSessionId, PushMessage m) =>
+    activeSessionId != null && m.sessionId == activeSessionId;
