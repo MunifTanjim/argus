@@ -38,6 +38,76 @@ func TestParsePaneSeparators(t *testing.T) {
 	}
 }
 
+// TestPaneFocused checks the active-pane / active-window / attached-client logic
+// that decides whether a pane is currently on a user's screen.
+func TestPaneFocused(t *testing.T) {
+	sep := "\x1f"
+	line := func(id, paneActive, windowActive, attached string) string {
+		return strings.Join([]string{id, paneActive, windowActive, attached}, sep)
+	}
+	out := strings.Join([]string{
+		line("%1", "1", "1", "1"), // focused: active pane, active window, attached
+		line("%2", "1", "1", "0"), // not focused: no client attached
+		line("%3", "0", "1", "1"), // not focused: not the active pane
+		line("%4", "1", "0", "1"), // not focused: not the active window
+		line("%5", "1", "1", "2"), // focused: two clients attached
+	}, "\n") + "\n"
+
+	want := map[string]bool{"%1": true, "%2": false, "%3": false, "%4": false, "%5": true, "%absent": false}
+	for id, exp := range want {
+		got, err := paneFocused(out, id)
+		if err != nil {
+			t.Fatalf("paneFocused(%q): %v", id, err)
+		}
+		if got != exp {
+			t.Errorf("paneFocused(%q) = %v, want %v", id, got, exp)
+		}
+	}
+}
+
+// TestPaneFocusedEscapedSep verifies the tmux >=3.4 "\037"-escaped separator is
+// normalized, matching parsePane's handling.
+func TestPaneFocusedEscapedSep(t *testing.T) {
+	got, err := paneFocused(strings.Join([]string{"%9", "1", "1", "1"}, `\037`), "%9")
+	if err != nil {
+		t.Fatalf("paneFocused: %v", err)
+	}
+	if !got {
+		t.Fatal("escaped-separator line not parsed as focused")
+	}
+}
+
+// TestIsFocusedDetached checks that a detached session's pane (no client attached)
+// is never reported focused — the no-false-positive case we can verify headlessly
+// (attaching a client needs a real terminal).
+func TestIsFocusedDetached(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	pane, err := c.NewSession(ctx, NewSessionOpts{Name: "s1"})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	focused, err := c.IsFocused(ctx, pane)
+	if err != nil {
+		t.Fatalf("IsFocused: %v", err)
+	}
+	if focused {
+		t.Errorf("IsFocused(%q) = true; want false (no client attached)", pane)
+	}
+}
+
+// TestIsFocusedNoServer returns false, not an error, when nothing runs.
+func TestIsFocusedNoServer(t *testing.T) {
+	c := testClient(t)
+	focused, err := c.IsFocused(context.Background(), "%0")
+	if err != nil {
+		t.Fatalf("IsFocused (no server): %v", err)
+	}
+	if focused {
+		t.Fatal("IsFocused on empty server = true, want false")
+	}
+}
+
 // testClient returns a Client bound to a throwaway, isolated tmux server socket
 // and ensures the server is killed when the test finishes. Tests are skipped if
 // tmux is not installed.

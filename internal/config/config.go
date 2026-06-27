@@ -16,6 +16,7 @@ type Config struct {
 	Token   string // shared gateway token: presented by clients/nodes, required by the gateway
 	Gateway GatewayConfig
 	Node    NodeConfig
+	Push    PushConfig
 	Log     LogConfig
 	Tunnel  TunnelConfig
 }
@@ -28,6 +29,14 @@ type GatewayConfig struct {
 type NodeConfig struct {
 	ID    string
 	Label string
+}
+
+type PushConfig struct {
+	Desktop DesktopConfig
+}
+
+type DesktopConfig struct {
+	Enabled bool // render native desktop notifications on this node (opt-in)
 }
 
 type LogConfig struct {
@@ -55,6 +64,7 @@ var defaults = map[string]any{
 	"gateway.listen-addr":           ":8443",
 	"node.id":                       "",
 	"node.label":                    "",
+	"push.desktop.enabled":          false,
 	"log.level":                     "info",
 	"log.format":                    "pretty",
 	"tunnel.provider":               "",
@@ -117,6 +127,11 @@ func FromViper(v *viper.Viper) Config {
 		Node: NodeConfig{
 			ID:    v.GetString("node.id"),
 			Label: v.GetString("node.label"),
+		},
+		Push: PushConfig{
+			Desktop: DesktopConfig{
+				Enabled: v.GetBool("push.desktop.enabled"),
+			},
 		},
 		Log: LogConfig{
 			Level:  v.GetString("log.level"),

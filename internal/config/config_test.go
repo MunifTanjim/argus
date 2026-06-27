@@ -135,3 +135,25 @@ func TestDefaultMissingOK(t *testing.T) {
 		t.Errorf("missing default config should not error: %v", err)
 	}
 }
+
+func TestPushDesktopDefaultFalse(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.Push.Desktop.Enabled {
+		t.Fatal("push.desktop.enabled default = true, want false")
+	}
+}
+
+func TestPushDesktopFromFile(t *testing.T) {
+	path := writeConfig(t, "push:\n  desktop:\n    enabled: true\n")
+	if c := load(t, path); !c.Push.Desktop.Enabled {
+		t.Fatal("push.desktop.enabled from file = false, want true")
+	}
+}
+
+func TestPushDesktopFromEnv(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("ARGUS_PUSH_DESKTOP_ENABLED", "true")
+	if c := load(t, ""); !c.Push.Desktop.Enabled {
+		t.Fatal("push.desktop.enabled from env = false, want true")
+	}
+}

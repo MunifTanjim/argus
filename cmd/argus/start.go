@@ -71,6 +71,8 @@ func newStartCmd(version string) *cobra.Command {
 			// node, which shares a TUI's terminal, leaves logging at its discard default).
 			// The tunnel supervisor gets its own scope so its output lands in the same stream.
 			d.SetLogger(logger.Scoped("node").L)
+			clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
+			d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -94,6 +96,20 @@ func newStartCmd(version string) *cobra.Command {
 			// read after d.Run so the process exits non-zero (it already cancelled ctx).
 			var nodeFailed atomic.Bool
 			httpSrv := serveGateway(ctx, cfg, d, tun, tunOrigin, stop, &nodeFailed)
+
+			// Plain local node (no gateway, no uplink): nothing upstream drives desktop
+			// notifications, so run a local Watch over our own registry that renders
+			// directly. Gateway mode reaches the co-located node via Fanout; uplink mode
+			// is driven by the remote gateway's push.desktop RPC.
+			if cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !gatewayMode(cfg) {
+				events, cancel := d.Registry().Subscribe()
+				// Render through the node's focus-aware sink (same path as gateway-pushed
+				// notifications): it suppresses alerts for a session already on screen.
+				go func() {
+					defer cancel()
+					push.Watch(ctx, events, []push.Sink{d.DesktopSink()}, logger.Scoped("push").L)
+				}()
+			}
 
 			shell.StdErrF("argus start %s: local API on %s\n", version, cfg.Socket)
 			// serveGateway already prints "gateway listening on …" when it runs; connectGateway
@@ -228,9 +244,10 @@ func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Serve
 	hsrv.SetPush(store, dispatcher)
 
 	events, cancel := agg.Subscribe()
+	broadcaster := fanoutNotifier{agg: agg, log: log}
 	go func() {
 		defer cancel()
-		push.Watch(ctx, events, dispatcher, log)
+		push.Watch(ctx, events, []push.Sink{dispatcher, broadcaster}, log)
 	}()
 }
 

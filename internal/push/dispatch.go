@@ -49,6 +49,9 @@ func (d *Dispatcher) Send(ctx context.Context, n Notification) {
 	}
 }
 
+// Notify makes *Dispatcher a Sink, delivering to every registered device.
+func (d *Dispatcher) Notify(ctx context.Context, n Notification) { d.Send(ctx, n) }
+
 // SendTo delivers n to a single device's target (e.g. the test endpoint). It
 // returns the sender's error and prunes the device when its target is gone.
 func (d *Dispatcher) SendTo(ctx context.Context, deviceID string, n Notification) error {

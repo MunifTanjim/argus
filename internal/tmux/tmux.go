@@ -198,6 +198,58 @@ func atoi(s string) int {
 	return n
 }
 
+// focusFormat queries, per pane, the three facts that together mean "an attached
+// client is showing this pane right now": it is the active pane (#{pane_active})
+// of the active window (#{window_active}) of a session at least one client is
+// attached to (#{session_attached}).
+var focusFormat = strings.Join([]string{
+	"#{pane_id}",
+	"#{pane_active}",
+	"#{window_active}",
+	"#{session_attached}",
+}, fieldSep)
+
+// IsFocused reports whether an attached tmux client is currently displaying
+// paneID — i.e. paneID is the active pane of the active window of a session a
+// client is attached to. Used to suppress a desktop notification for a session
+// the user is already looking at. An empty paneID, or no server running, is never
+// focused.
+func (c *Client) IsFocused(ctx context.Context, paneID string) (bool, error) {
+	if paneID == "" {
+		return false, nil
+	}
+	out, err := c.run(ctx, "list-panes", "-a", "-F", focusFormat)
+	if err != nil {
+		if noServer(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return paneFocused(out, paneID)
+}
+
+// paneFocused scans focusFormat output for paneID and reports whether it is the
+// active pane (#{pane_active}) of the active window (#{window_active}) of an
+// attached session (#{session_attached} > 0).
+func paneFocused(out, paneID string) (bool, error) {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		// tmux >=3.4 vis-escapes the 0x1F separator as the literal "\037"; older
+		// tmux emits the raw byte. Normalize before splitting (see parsePane).
+		line = strings.ReplaceAll(line, `\037`, fieldSep)
+		f := strings.Split(line, fieldSep)
+		if len(f) != 4 {
+			return false, fmt.Errorf("tmux: unexpected focus format (%d fields): %q", len(f), line)
+		}
+		if f[0] == paneID {
+			return f[1] == "1" && f[2] == "1" && atoi(f[3]) > 0, nil
+		}
+	}
+	return false, nil
+}
+
 // CaptureOpts controls capture-pane behavior.
 type CaptureOpts struct {
 	// Escapes includes color/attribute escape sequences (-e).

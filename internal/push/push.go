@@ -38,6 +38,10 @@ type Notification struct {
 	Data  map[string]string // e.g. session_id, node_id
 }
 
+// SessionID returns the session id carried in Data for deep-linking, or "" when
+// absent. Single source for the "session_id" key (set in trigger.go).
+func (n Notification) SessionID() string { return n.Data["session_id"] }
+
 // ErrGone marks a permanently dead target (HTTP 404/410) so the dispatcher prunes
 // it. Senders wrap it for such responses.
 var ErrGone = errors.New("push: target gone")
@@ -45,4 +49,11 @@ var ErrGone = errors.New("push: target gone")
 // Sender delivers one notification to one target.
 type Sender interface {
 	Send(ctx context.Context, t Target, n Notification) error
+}
+
+// Sink consumes a ready-to-send notification. Both mobile dispatch (*Dispatcher)
+// and desktop fan-out / local OS rendering are sinks, so one transition detector
+// (Watch) can feed several delivery channels.
+type Sink interface {
+	Notify(ctx context.Context, n Notification)
 }

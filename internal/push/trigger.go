@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 	"log/slog"
+	"strconv"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -23,7 +24,7 @@ import (
 // Watch runs until ctx is cancelled or the stream closes; callers pass the
 // channel/cancel from Aggregator.Subscribe so the push package stays decoupled
 // from the gateway (no import cycle).
-func Watch(ctx context.Context, events <-chan registry.Event, d *Dispatcher, log *slog.Logger) {
+func Watch(ctx context.Context, events <-chan registry.Event, sinks []Sink, log *slog.Logger) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -52,7 +53,10 @@ func Watch(ctx context.Context, events <-chan registry.Event, d *Dispatcher, log
 			if s.Status == session.StatusAwaitingInput && was != session.StatusAwaitingInput {
 				log.Info("push: session awaiting input, notifying",
 					"session", s.ID, "from", string(was), "type", string(ev.Type), "repo", s.Repo)
-				d.Send(ctx, notificationFor(s))
+				n := notificationFor(s)
+				for _, sink := range sinks {
+					sink.Notify(ctx, n)
+				}
 			}
 		}
 	}
@@ -76,13 +80,15 @@ func notificationFor(s session.Session) Notification {
 	if ix := s.Interaction; ix != nil {
 		switch ix.Kind {
 		case session.InteractionPermission:
-			body = "Permission request"
+			body = "Permission Request"
 			if ix.ToolName != "" {
 				body = "Permission: " + ix.ToolName
 			}
 		case session.InteractionQuestion:
 			body = "Question"
-			if len(ix.Questions) > 0 && ix.Questions[0].Header != "" {
+			if len(ix.Questions) > 1 {
+				body = strconv.Itoa(len(ix.Questions)) + " Questions"
+			} else if len(ix.Questions) == 1 && ix.Questions[0].Header != "" {
 				body = "Question: " + ix.Questions[0].Header
 			}
 		case session.InteractionPlan:

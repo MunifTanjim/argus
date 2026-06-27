@@ -16,6 +16,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -32,6 +33,12 @@ type Node struct {
 	label string // human-friendly node name (e.g. hostname)
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
+
+	desktopNotify bool      // render incoming push.desktop notifications on this machine
+	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
+
+	revealFn  func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
+	focusedFn func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
@@ -55,6 +62,16 @@ func (d *Node) scan(ctx context.Context) {
 	if err := d.disc.ScanOnce(ctx); err != nil {
 		d.log.Warn("discovery scan failed", "err", err)
 	}
+}
+
+// SetDesktopNotify enables (or disables) rendering of push.desktop notifications
+// on this node's machine, wiring the click command so a clicked notification
+// focuses the session, and (re)building the notifier so render failures log
+// through the node's logger. Call before Run — not safe once the API server is
+// serving (it mutates fields read by handler goroutines).
+func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
+	d.desktopNotify = enabled
+	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
 // SetIdentity overrides the node's id and label (defaults derive from the
@@ -88,6 +105,17 @@ func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
 		return nil, fmt.Errorf("no tmux client for server %q", s.Tmux.Server)
 	}
 	return c, nil
+}
+
+// resolveLocal maps a bare or composite "<nodeID>:<localID>" session id to a
+// session local to this node, stripping this node's own prefix first (a composite
+// id this node owns is locally addressable once unprefixed). A foreign or unknown
+// id yields resolve's error. Shared by the focus-click and focus-suppression paths.
+func (d *Node) resolveLocal(id string) (session.Session, *tmux.Client, error) {
+	if nodeID, local, ok := session.SplitCompositeID(id); ok && nodeID == d.id {
+		id = local
+	}
+	return d.resolve(id)
 }
 
 // resolve looks up a session and its tmux client and pane.
@@ -127,6 +155,13 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		log:     slog.New(slog.DiscardHandler),
 		pending: map[string]*pendingDecision{},
 		conns:   map[api.Notifier]*connSubs{},
+	}
+	d.notifier = push.NewOSNotifier(nil, nil)
+	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
+		return c.Reveal(ctx, paneID)
+	}
+	d.focusedFn = func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) {
+		return c.IsFocused(ctx, paneID)
 	}
 
 	srv := api.NewServer()

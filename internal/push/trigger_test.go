@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -19,7 +20,7 @@ func runWatch(t *testing.T, events []registry.Event) []Target {
 
 	ch := make(chan registry.Event)
 	done := make(chan struct{})
-	go func() { Watch(context.Background(), ch, d, nil); close(done) }()
+	go func() { Watch(context.Background(), ch, []Sink{d}, nil); close(done) }()
 	for _, ev := range events {
 		ch <- ev
 	}
@@ -172,5 +173,31 @@ func TestNotificationForCarriesSessionID(t *testing.T) {
 	}
 	if n.Data["node_id"] != "node1" {
 		t.Errorf("Data[node_id] = %q, want node1", n.Data["node_id"])
+	}
+}
+
+// recordSink counts notifications it receives.
+type recordSink struct {
+	mu sync.Mutex
+	n  []Notification
+}
+
+func (r *recordSink) Notify(_ context.Context, n Notification) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.n = append(r.n, n)
+}
+
+func TestWatchFansToAllSinks(t *testing.T) {
+	a, b := &recordSink{}, &recordSink{}
+	ch := make(chan registry.Event)
+	done := make(chan struct{})
+	go func() { Watch(context.Background(), ch, []Sink{a, b}, nil); close(done) }()
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput) // one transition
+	close(ch)
+	<-done
+
+	if len(a.n) != 1 || len(b.n) != 1 {
+		t.Fatalf("fan-out = a:%d b:%d, want 1 each", len(a.n), len(b.n))
 	}
 }

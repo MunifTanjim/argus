@@ -28,6 +28,7 @@ const (
 	MethodSessionRespond    = "sessions.respond"    // request: RespondParams; result: nil
 	MethodSessionSpawn      = "sessions.spawn"      // request: SpawnParams; result: SpawnResult
 	MethodSessionKill       = "sessions.kill"       // request: SessionRef; result: nil
+	MethodSessionFocus      = "sessions.focus"      // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
@@ -75,6 +76,7 @@ const (
 	// register a Web Push subscription bound to it (e.g. the embedded FCM
 	// distributor). Empty Key means Web Push is unavailable.
 	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
+	MethodPushDesktop  = "push.desktop"  // request: push.Notification; result: nil (render on node if opted in)
 )
 
 // PushVAPIDKey carries the gateway's VAPID public key (base64url, uncompressed
