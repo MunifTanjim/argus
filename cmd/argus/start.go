@@ -51,6 +51,9 @@ func newStartCmd(version string) *cobra.Command {
 			if err := setupLogger(cfg); err != nil {
 				return fail(cmd, err)
 			}
+			if config.RuntimeDirIsFallback {
+				shell.StdErrF("argus start: XDG runtime dir unavailable; using %s for runtime files\n", config.RuntimeDir)
+			}
 
 			tun, tunOrigin, err := resolveTunnel(tunnelOptions{
 				provider:     cfg.Tunnel.Provider,
