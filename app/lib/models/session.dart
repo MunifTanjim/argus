@@ -152,6 +152,7 @@ class Session {
   final SessionStatus status;
   final String statusLabel;
   final SessionSource source;
+  final FrontendKind frontend;
   final String? repo;
   final Summary? summary;
   final Interaction? interaction;
@@ -166,6 +167,7 @@ class Session {
     required this.status,
     this.statusLabel = '',
     required this.source,
+    this.frontend = FrontendKind.unknown,
     this.claudeSessionId,
     this.name,
     this.cwd,
@@ -189,6 +191,7 @@ class Session {
         status: statusFromWire(j['status'] as String?),
         statusLabel: j['status_label'] as String? ?? '',
         source: sourceFromWire(j['source'] as String?),
+        frontend: frontendFromWire(j['frontend'] as String?),
         repo: j['repo'] as String?,
         summary: j['summary'] == null
             ? null
@@ -207,4 +210,8 @@ class Session {
       : (name?.isNotEmpty ?? false)
           ? name!
           : id;
+
+  /// Whether argus can drive this session's terminal. Derived from frontend:
+  /// only tmux sessions are controllable; vscode/external are decision-only.
+  bool get controllable => frontend == FrontendKind.tmux;
 }

@@ -18,10 +18,10 @@ func focusTestNode(t *testing.T, sessID, paneID string) (*Node, *string) {
 		session.TmuxServerDefault: tmux.New("focus-test"),
 	})
 	d.SetIdentity("nodeA", "nodeA")
-	d.reg.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: paneID, ClaudeSessionID: sessID},
+	d.reg.ReconcileSessions("claude-code", []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: paneID, ClaudeSessionID: sessID, Frontend: session.FrontendTmux},
 	})
-	// ReconcileDiscovered sets ID = "default:<paneID>".
+	// ReconcileSessions sets ID = "default:<paneID>".
 	revealed := new(string)
 	d.revealFn = func(_ context.Context, _ *tmux.Client, pane string) error {
 		*revealed = pane
@@ -32,7 +32,7 @@ func focusTestNode(t *testing.T, sessID, paneID string) (*Node, *string) {
 
 func TestFocusRevealsLocalSession(t *testing.T) {
 	paneID := "%7"
-	sessID := "default:" + paneID // registry key assigned by ReconcileDiscovered
+	sessID := "default:" + paneID // registry key assigned by ReconcileSessions
 	d, revealed := focusTestNode(t, "abc", paneID)
 	params, _ := json.Marshal(api.SessionRef{SessionID: sessID})
 	if _, err := d.handleSessionFocus(context.Background(), params); err != nil {
@@ -45,7 +45,7 @@ func TestFocusRevealsLocalSession(t *testing.T) {
 
 func TestFocusStripsOwnNodePrefix(t *testing.T) {
 	paneID := "%7"
-	sessID := "default:" + paneID // registry key assigned by ReconcileDiscovered
+	sessID := "default:" + paneID // registry key assigned by ReconcileSessions
 	d, revealed := focusTestNode(t, "abc", paneID)
 	// Gateway-broadcast notifications carry the composite id "nodeA:<sessID>".
 	params, _ := json.Marshal(api.SessionRef{SessionID: session.CompositeID("nodeA", sessID)})

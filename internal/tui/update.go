@@ -509,6 +509,11 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
+	s := m.sessions[m.order[m.cursor]]
+	if !s.Controllable() {
+		m.flash = string(s.Frontend) + " session: terminal control unavailable"
+		return m, nil
+	}
 	m.selectedID = m.order[m.cursor]
 	m.mode = modeScreen
 	m.screen, m.screenErr = "", nil
@@ -546,8 +551,8 @@ func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason strin
 		return "", "can't jump: session is on argus's private socket"
 	case !sameMachine(s, hostname):
 		return "", "can't jump: session is on " + machineLabel(s)
-	case s.Tmux.PaneID == "":
-		return "", "no tmux pane to jump to"
+	case !s.Controllable():
+		return "", "can't jump: " + string(s.Frontend) + " session has no tmux pane"
 	default:
 		return s.Tmux.PaneID, ""
 	}
@@ -626,9 +631,15 @@ func (m model) handleSpawnPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.cursor < len(m.order) {
-		m.pendingKill = true
+	if m.cursor >= len(m.order) {
+		return m, nil
 	}
+	s := m.sessions[m.order[m.cursor]]
+	if !s.Controllable() {
+		m.flash = string(s.Frontend) + " session: terminal control unavailable"
+		return m, nil
+	}
+	m.pendingKill = true
 	return m, nil
 }
 

@@ -55,6 +55,21 @@ const (
 	SourceHooked Source = "hooked"
 )
 
+// Frontend classifies where a session's UI lives, which determines whether argus
+// can drive its terminal. tmux sessions have a pane and are fully controllable;
+// vscode/external sessions are paneless (hook-only) and support decisions but not
+// terminal control.
+type Frontend string
+
+const (
+	// FrontendTmux: has a tmux pane → fully controllable.
+	FrontendTmux Frontend = "tmux"
+	// FrontendVSCode: paneless, started from the VSCode extension (entrypoint "claude-vscode").
+	FrontendVSCode Frontend = "vscode"
+	// FrontendExternal: paneless, some other non-tmux terminal.
+	FrontendExternal Frontend = "external"
+)
+
 // TmuxServer identifies which tmux server a pane lives on.
 type TmuxServer string
 
@@ -166,6 +181,9 @@ type Session struct {
 	StatusLabel string `json:"status_label,omitempty"`
 	Source      Source `json:"source"`
 
+	// Frontend classifies the session's UI host (tmux/vscode/external).
+	Frontend Frontend `json:"frontend,omitempty"`
+
 	// Repo is the basename of the session directory's git repository, when known
 	// (path-derived, not from the transcript).
 	Repo string `json:"repo,omitempty"`
@@ -185,3 +203,8 @@ type Session struct {
 	// from the gateway: kept visible (greyed) for a grace period before removal.
 	Offline bool `json:"offline,omitempty"`
 }
+
+// Controllable reports whether argus can drive the session's terminal (send
+// text/keys, capture, kill, focus). Only tmux-pane sessions are controllable;
+// vscode/external sessions support decisions but not terminal control.
+func (s Session) Controllable() bool { return s.Tmux.PaneID != "" }

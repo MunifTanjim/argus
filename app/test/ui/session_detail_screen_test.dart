@@ -14,7 +14,7 @@ import 'package:argus/ui/session_detail_screen.dart';
 import '../support/fake_session_repository.dart';
 
 Session _s() => Session.fromJson(jsonDecode(
-        '{"id":"mac:%1","tool":"t","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus","node_label":"mac"}')
+        '{"id":"mac:%1","tool":"t","status":"working","source":"hooked","frontend":"tmux","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus","node_label":"mac"}')
     as Map<String, dynamic>);
 
 class _SeededTranscript extends TranscriptNotifier {

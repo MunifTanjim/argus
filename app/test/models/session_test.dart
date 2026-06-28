@@ -65,4 +65,28 @@ void main() {
     expect(e.type, RegistryEventType.updated);
     expect(e.session.id, 'macbook:%3');
   });
+
+  test('parses vscode frontend and is not controllable', () {
+    final s = Session.fromJson({
+      'id': 'claude:vs1',
+      'tmux': {'pane_id': ''},
+      'status': 'idle',
+      'source': 'hooked',
+      'frontend': 'vscode',
+    });
+    expect(s.frontend, FrontendKind.vscode);
+    expect(s.controllable, isFalse);
+  });
+
+  test('tmux session is controllable', () {
+    final s = Session.fromJson({
+      'id': 's1',
+      'tmux': {'pane_id': '%3'},
+      'status': 'idle',
+      'source': 'discovered',
+      'frontend': 'tmux',
+    });
+    expect(s.frontend, FrontendKind.tmux);
+    expect(s.controllable, isTrue);
+  });
 }

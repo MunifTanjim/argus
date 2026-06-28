@@ -35,6 +35,11 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, sessionKeys.Raw):
+		s := m.sessions[m.selectedID]
+		if !s.Controllable() {
+			m.flash = string(s.Frontend) + " session: terminal control unavailable"
+			return m, nil
+		}
 		m.mode = modeScreen
 		m.screen, m.screenErr = "", nil
 		return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
@@ -279,7 +284,7 @@ func windowLines(s string, height, anchor int) string {
 func (m model) sessionView() string {
 	s := m.sessions[m.selectedID]
 	header := headerStyle.Render("argus · "+s.Tmux.SessionName) +
-		dimStyle.Render(fmt.Sprintf("  [%s] %s", s.Tmux.PaneID, statusWord(s)))
+		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
 
 	body := m.historyBody()
 	if m.sessionInteraction() != nil {

@@ -100,6 +100,18 @@ func formatContext(c claudecode.Chunk) string {
 		c.ContextFirstPct, c.ContextPct, formatTokens(c.ContextDeltaTokens)))
 }
 
+// paneTag is the bracket label shown for a session: its tmux pane id when it has
+// one, else the frontend word (e.g. "vscode") so paneless sessions read clearly.
+func paneTag(s session.Session) string {
+	if s.Tmux.PaneID != "" {
+		return s.Tmux.PaneID
+	}
+	if s.Frontend != "" {
+		return string(s.Frontend)
+	}
+	return "?"
+}
+
 // statusWord is the display word for a session's status: the server-rendered
 // StatusLabel when present, else the raw status value as a fallback.
 func statusWord(s session.Session) string {
@@ -229,8 +241,8 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 	if name != "" {
 		tmux = append(tmux, truncate(name, 24))
 	}
-	if s.Tmux.PaneID != "" {
-		tmux = append(tmux, s.Tmux.PaneID)
+	if tag := paneTag(s); tag != "?" {
+		tmux = append(tmux, tag)
 	}
 	tmux = append(tmux, string(s.Tmux.Server))
 	tmuxStyle := StyleDim

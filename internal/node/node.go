@@ -124,8 +124,8 @@ func (d *Node) resolve(id string) (session.Session, *tmux.Client, error) {
 	if !ok {
 		return session.Session{}, nil, fmt.Errorf("unknown session: %s", id)
 	}
-	if s.Tmux.PaneID == "" {
-		return s, nil, fmt.Errorf("session %s has no tmux pane", id)
+	if !s.Controllable() {
+		return s, nil, fmt.Errorf("%s: %w", id, api.ErrNoTerminalControl)
 	}
 	c, err := d.clientFor(s)
 	return s, c, err

@@ -108,6 +108,29 @@ func TestPlanJump(t *testing.T) {
 	}
 }
 
+func TestPlanJumpPanelessFrontendReason(t *testing.T) {
+	s := session.Session{
+		Frontend: session.FrontendVSCode,
+		Tmux:     session.TmuxLocation{Server: session.TmuxServerDefault},
+	}
+	_, reason := planJump(s, "host", "/tmp/tmux-1000/default,1,0")
+	if reason == "" {
+		t.Fatal("expected a refusal reason for a paneless vscode session")
+	}
+}
+
+func TestPaneTag(t *testing.T) {
+	if got := paneTag(session.Session{Tmux: session.TmuxLocation{PaneID: "%3"}, Frontend: session.FrontendTmux}); got != "%3" {
+		t.Errorf("tmux paneTag=%q want %%3", got)
+	}
+	if got := paneTag(session.Session{Frontend: session.FrontendVSCode}); got != "vscode" {
+		t.Errorf("vscode paneTag=%q want vscode", got)
+	}
+	if got := paneTag(session.Session{Frontend: session.FrontendExternal}); got != "external" {
+		t.Errorf("external paneTag=%q want external", got)
+	}
+}
+
 // Pressing O outside tmux surfaces the reason as a flash rather than acting.
 func TestListJumpFlashesWhenRefused(t *testing.T) {
 	t.Setenv("TMUX", "") // force the "not inside tmux" branch deterministically

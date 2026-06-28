@@ -13,7 +13,13 @@ import (
 func promptModel(ix *session.Interaction) model {
 	m := testModel()
 	m.sessions = map[string]session.Session{
-		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix},
+		"s1": {
+			ID:          "s1",
+			Status:      session.StatusAwaitingInput,
+			Tmux:        session.TmuxLocation{PaneID: "%1", Server: session.TmuxServerDefault},
+			Frontend:    session.FrontendTmux,
+			Interaction: ix,
+		},
 	}
 	m.selectedID = "s1"
 	m.mode = modeSession
@@ -55,6 +61,26 @@ func TestPromptPermissionComposeThenSubmit(t *testing.T) {
 	m = res.(model)
 	if m.focus != focusHistory || cmd == nil {
 		t.Errorf("submit: focus=%v cmd=%v", m.focus, cmd)
+	}
+}
+
+func TestIdleDockPanelessEnterIsSilent(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	// Paneless vscode session: the idle dock is informational, not a composer.
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendVSCode,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if m.flash != "" {
+		t.Errorf("enter on the informational idle dock must not flash, got %q", m.flash)
+	}
+	if cmd != nil {
+		t.Errorf("enter on the informational idle dock must be a no-op, got cmd %v", cmd)
 	}
 }
 
@@ -667,5 +693,50 @@ func TestDecisionOptionsUsesServerOptionsOnly(t *testing.T) {
 	// With no server options there is no hardcoded fallback anymore.
 	if l := decisionOptions(&session.Interaction{Kind: session.InteractionPermission}); l != nil {
 		t.Fatalf("want nil for optionless interaction, got %v", l)
+	}
+}
+
+func TestRespondElsewhereLabel(t *testing.T) {
+	if got := respondElsewhereLabel(session.FrontendVSCode); got != "Respond in VSCode" {
+		t.Errorf("vscode label = %q", got)
+	}
+	if got := respondElsewhereLabel(session.FrontendExternal); got != "Respond in your terminal" {
+		t.Errorf("external label = %q", got)
+	}
+}
+
+func TestIdleDockInformationalForPaneless(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	// Make the selected session a paneless vscode session.
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendVSCode, // no Tmux pane → not controllable
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	lines, _ := m.promptLinesWidth(80)
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(out, "Respond in VSCode") {
+		t.Errorf("paneless idle dock should show the indicator, got:\n%s", out)
+	}
+	if !strings.Contains(out, "argus can't send input to this session") {
+		t.Errorf("paneless idle dock should show the sub-line, got:\n%s", out)
+	}
+	if strings.Contains(out, "> ") {
+		t.Errorf("paneless idle dock must NOT show the editable composer, got:\n%s", out)
+	}
+}
+
+func TestIdleDockComposerForControllable(t *testing.T) {
+	// Default promptModel session is tmux/controllable with a pane.
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	lines, _ := m.promptLinesWidth(80)
+	out := strings.Join(lines, "\n")
+	if strings.Contains(out, "Respond in VSCode") {
+		t.Errorf("controllable idle dock must not show the indicator, got:\n%s", out)
+	}
+	if !strings.Contains(out, "> ") {
+		t.Errorf("controllable idle dock should show the composer, got:\n%s", out)
 	}
 }

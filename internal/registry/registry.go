@@ -112,110 +112,139 @@ func (r *Registry) publish(ev Event) {
 	}
 }
 
-// DiscoveredPane is what an adapter reports for a pane it believes runs a
-// supported tool.
-type DiscoveredPane struct {
-	Tool        string
-	Server      session.TmuxServer
-	PaneID      string
-	SessionName string
-	WindowIndex int
-	CurrentPath string
-	Repo        string // git repo basename for CurrentPath, when known
-
-	// Claude-side enrichment derived at discovery from ~/.claude/sessions/<pid>.json
-	// (all optional; empty/nil when the process file isn't available yet).
+// DiscoveredSession is the unified reconcile input: one Claude session found by a
+// discovery scan, optionally pinned to a tmux pane. Correlation is by pane key
+// when HasPane, else by claude session id.
+type DiscoveredSession struct {
 	ClaudeSessionID string
-	Name            string // Claude's own session name
+	HasPane         bool
+	Server          session.TmuxServer
+	PaneID          string
+	SessionName     string
+	WindowIndex     int
+	CurrentPath     string
+	Frontend        session.Frontend // adapter-computed (tmux/vscode/external)
+	Name            string
 	Cwd             string
+	Repo            string
 	TranscriptPath  string
-	Summary         *session.Summary // computed from the transcript; nil when unavailable
-
-	// StatusHint is the transcript-derived live status at discovery
-	// (session.StatusWorking / StatusIdle), or "" when unknown. Seeds a new or
-	// still-discovered session; never overrides a hook-derived status.
-	StatusHint session.Status
+	Summary         *session.Summary
+	StatusHint      session.Status
 }
 
-// ReconcileDiscovered syncs the registry's discovered sessions for a (tool,
-// server) pair to match the provided panes: adds new, updates existing, and
-// marks vanished panes dead. Hook-promoted sessions keep their richer status.
-func (r *Registry) ReconcileDiscovered(tool string, server session.TmuxServer, panes []DiscoveredPane) {
+// ReconcileSessions syncs all of a tool's sessions to the scan's live set. It
+// adds new sessions, refreshes existing ones (correlating pane-first, else claude
+// id), and prunes any whose pane and claude id were both absent this scan. The
+// dual-or liveness rule keeps a session alive through a transient pane-correlation
+// miss (via its claude id) or a not-yet-filed session (via its pane).
+func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	seen := make(map[string]bool, len(panes))
-	for _, p := range panes {
-		key := paneKey(server, p.PaneID)
-		seen[key] = true
-		if id, ok := r.index.findByPane(key); ok {
-			s := r.sessions[id]
-			// Refresh mutable tmux fields; never downgrade a hook-derived status.
-			s.Tmux.SessionName = p.SessionName
-			s.Tmux.WindowIndex = p.WindowIndex
-			s.Tmux.CurrentPath = p.CurrentPath
-			if p.Repo != "" {
-				s.Repo = p.Repo
+	seenPane := map[string]bool{}
+	seenClaude := map[string]bool{}
+
+	for _, f := range found {
+		paneK := ""
+		if f.HasPane {
+			paneK = paneKey(f.Server, f.PaneID)
+			seenPane[paneK] = true
+		}
+		if f.ClaudeSessionID != "" {
+			seenClaude[f.ClaudeSessionID] = true
+		}
+
+		var s *session.Session
+		if paneK != "" {
+			if id, ok := r.index.findByPane(paneK); ok {
+				s = r.sessions[id]
 			}
-			r.enrichDiscovered(s, p)
-			applyStatusHint(s, p.StatusHint)
-			r.publish(Event{Type: EventUpdated, Session: *s})
-			continue
 		}
-		s := &session.Session{
-			ID:     key,
-			Tool:   tool,
-			Status: session.StatusDiscovered,
-			Source: session.SourceDiscovered,
-			Repo:   p.Repo,
-			Tmux: session.TmuxLocation{
-				Server:      server,
-				PaneID:      p.PaneID,
-				SessionName: p.SessionName,
-				WindowIndex: p.WindowIndex,
-				CurrentPath: p.CurrentPath,
-			},
+		if s == nil && f.ClaudeSessionID != "" {
+			if id, ok := r.index.findByClaude(f.ClaudeSessionID); ok {
+				s = r.sessions[id]
+			}
 		}
-		r.enrichDiscovered(s, p)
-		applyStatusHint(s, p.StatusHint)
-		r.sessions[s.ID] = s
-		r.index.setPane(key, s.ID)
-		r.publish(Event{Type: EventAdded, Session: *s})
+
+		created := false
+		if s == nil {
+			id := paneK
+			if id == "" {
+				id = "claude:" + f.ClaudeSessionID
+			}
+			s = &session.Session{
+				ID:     id,
+				Tool:   tool,
+				Status: session.StatusDiscovered,
+				Source: session.SourceDiscovered,
+			}
+			r.sessions[id] = s
+			created = true
+		}
+
+		if paneK != "" {
+			r.index.setPane(paneK, s.ID)
+			s.Tmux.Server = f.Server
+			s.Tmux.PaneID = f.PaneID
+			s.Tmux.SessionName = f.SessionName
+			s.Tmux.WindowIndex = f.WindowIndex
+			s.Tmux.CurrentPath = f.CurrentPath
+		}
+		if f.ClaudeSessionID != "" && s.ClaudeSessionID != f.ClaudeSessionID {
+			s.ClaudeSessionID = f.ClaudeSessionID
+			r.index.setClaude(f.ClaudeSessionID, s.ID)
+		}
+
+		// Frontend: a pane is always tmux; otherwise adopt the discovered frontend
+		// only while the record is still paneless. Never downgrade.
+		if f.HasPane {
+			s.Frontend = session.FrontendTmux
+		} else if s.Tmux.PaneID == "" && f.Frontend != "" {
+			s.Frontend = f.Frontend
+		}
+
+		if f.Name != "" {
+			s.Name = f.Name
+		}
+		if f.Cwd != "" {
+			s.Cwd = f.Cwd
+		}
+		if f.Repo != "" {
+			s.Repo = f.Repo
+		}
+		if f.TranscriptPath != "" {
+			s.TranscriptPath = f.TranscriptPath
+		}
+		if f.Summary != nil {
+			s.Summary = f.Summary
+		}
+		applyStatusHint(s, f.StatusHint)
+
+		evType := EventUpdated
+		if created {
+			evType = EventAdded
+		}
+		r.publish(Event{Type: evType, Session: *s})
 	}
 
-	// Remove sessions on this (tool, server) whose pane is gone.
-	for key, id := range r.index.byPane {
-		s := r.sessions[id]
-		if s.Tool != tool || s.Tmux.Server != server {
+	for id, s := range r.sessions {
+		if s.Tool != tool {
 			continue
 		}
-		if seen[key] {
-			continue
+		pk := ""
+		alive := false
+		if s.Tmux.PaneID != "" {
+			pk = paneKey(s.Tmux.Server, s.Tmux.PaneID)
+			if seenPane[pk] {
+				alive = true
+			}
 		}
-		r.remove(id, key, session.StatusDead)
-	}
-}
-
-// enrichDiscovered applies Claude-side fields from ~/.claude/sessions/<pid>.json
-// onto a session (identity, summary) and registers the byClaude index for later
-// hook correlation. A nil summary never downgrades an existing one. Does not
-// promote status past StatusDiscovered. Caller holds r.mu.
-func (r *Registry) enrichDiscovered(s *session.Session, p DiscoveredPane) {
-	if p.ClaudeSessionID != "" && s.ClaudeSessionID != p.ClaudeSessionID {
-		s.ClaudeSessionID = p.ClaudeSessionID
-		r.index.setClaude(p.ClaudeSessionID, s.ID)
-	}
-	if p.Name != "" {
-		s.Name = p.Name
-	}
-	if p.Cwd != "" {
-		s.Cwd = p.Cwd
-	}
-	if p.TranscriptPath != "" {
-		s.TranscriptPath = p.TranscriptPath
-	}
-	if p.Summary != nil {
-		s.Summary = p.Summary
+		if s.ClaudeSessionID != "" && seenClaude[s.ClaudeSessionID] {
+			alive = true
+		}
+		if !alive {
+			r.remove(id, pk, session.StatusDead)
+		}
 	}
 }
 
@@ -275,7 +304,10 @@ type HookUpdate struct {
 	Cwd             string
 	Repo            string // git repo basename for Cwd, when known
 	TranscriptPath  string
-	Status          session.Status
+	// Frontend classifies the session's UI host; the adapter derives it from the
+	// hook env. Never downgrades a session that has a pane (see ApplyHook).
+	Frontend session.Frontend
+	Status   session.Status
 	// Summary is a refreshed transcript digest, or nil to keep the cached one.
 	Summary *session.Summary
 	// Interaction is the pending user request. Applied when Status is set:
@@ -343,6 +375,13 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 	if u.TranscriptPath != "" {
 		s.TranscriptPath = u.TranscriptPath
+	}
+	// Set the frontend, but never downgrade a pane-bearing (tmux) session: if the
+	// session has a pane it is tmux regardless of what a later correlated hook says.
+	if s.Tmux.PaneID != "" {
+		s.Frontend = session.FrontendTmux
+	} else if u.Frontend != "" {
+		s.Frontend = u.Frontend
 	}
 	// Non-nil replaces the cached summary; nil keeps the prior digest.
 	if u.Summary != nil {

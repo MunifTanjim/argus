@@ -292,6 +292,16 @@ func (m model) promptLinesWidth(width int) ([]string, int) {
 	if ix == nil {
 		return []string{dimStyle.Render("(no pending interaction)")}, 0
 	}
+
+	// A paneless session's idle "compose" can't be delivered (argus has no pane to
+	// type into), so show a static indicator pointing the user to where the session
+	// lives instead of an editable composer. Decisions still render normally below.
+	if s := m.sessions[m.selectedID]; ix.Kind == session.InteractionIdle && !s.Controllable() {
+		label := StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend))
+		sub := dimStyle.Render("argus can't send input to this session")
+		return strings.Split(label+"\n"+sub, "\n"), 0
+	}
+
 	switch ix.Kind {
 	case session.InteractionQuestion:
 		return m.questionLines(ix, width)
@@ -393,6 +403,16 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 
 // chatHint is the footer affordance for the "Chat about this" action.
 func chatHint() string { return StyleDim.Render("c · chat about this") }
+
+// respondElsewhereLabel is the indicator shown in the dock for a paneless idle
+// session: argus cannot send input, so the user must respond where the session
+// actually lives.
+func respondElsewhereLabel(f session.Frontend) string {
+	if f == session.FrontendVSCode {
+		return "Respond in VSCode"
+	}
+	return "Respond in your terminal"
+}
 
 // questionLines renders the tabbed question panel (or the active single question).
 func (m model) questionLines(ix *session.Interaction, width int) ([]string, int) {

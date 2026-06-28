@@ -9,7 +9,9 @@ import (
 func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 	r := New()
 	// First discovered via tmux.
-	r.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []DiscoveredPane{pane("%0", "a")})
+	r.ReconcileSessions("claude-code", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
 
 	// Then a hook arrives for that pane.
 	got, alive := r.ApplyHook(HookUpdate{
@@ -55,7 +57,9 @@ func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 
 func TestApplyHookStatusDeadRemoves(t *testing.T) {
 	r := New()
-	r.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []DiscoveredPane{pane("%0", "a")})
+	r.ReconcileSessions("claude-code", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
 	_, alive := r.ApplyHook(HookUpdate{
 		Tool:   "claude-code",
 		Server: session.TmuxServerDefault,
@@ -225,39 +229,30 @@ func TestApplyHookCorrelatesByClaudeIDAcrossReconcile(t *testing.T) {
 	}
 }
 
-// Discovery enrichment: a DiscoveredPane carrying Claude-side fields populates the
-// session, registers the byClaude index (so a paneless hook still correlates), and
-// a later nil-summary reconcile must not wipe the computed summary.
-func TestReconcileDiscoveredEnriches(t *testing.T) {
+func TestApplyHookStoresFrontend(t *testing.T) {
 	r := New()
-	sum := &session.Summary{Model: "claude-opus-4-8", HasContext: true, ContextPct: 12}
-	r.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []DiscoveredPane{{
+	s, alive := r.ApplyHook(HookUpdate{
+		Tool: "claude-code", ClaudeSessionID: "vs1",
+		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
+	})
+	if !alive || s.Frontend != session.FrontendVSCode || s.Controllable() {
+		t.Fatalf("want paneless vscode session, got frontend=%q controllable=%v", s.Frontend, s.Controllable())
+	}
+}
+
+func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
+	r := New()
+	// First: a tmux session via hook (pane present).
+	r.ApplyHook(HookUpdate{
 		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
-		SessionName: "tmux-name", ClaudeSessionID: "sess-1", Name: "claude-name",
-		Cwd: "/repo/argus", TranscriptPath: "/t/sess-1.jsonl", Summary: sum,
-	}})
-
-	snap := r.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("want 1 session, got %d", len(snap))
-	}
-	s := snap[0]
-	if s.ClaudeSessionID != "sess-1" || s.Name != "claude-name" ||
-		s.Cwd != "/repo/argus" || s.TranscriptPath != "/t/sess-1.jsonl" || s.Summary == nil {
-		t.Fatalf("enrichment missing: %+v", s)
-	}
-
-	// A hook with no pane but a matching claude id correlates to the same session.
-	got, ok := r.ApplyHook(HookUpdate{Tool: "claude-code", ClaudeSessionID: "sess-1", Status: session.StatusWorking})
-	if !ok || got.ID != s.ID {
-		t.Fatalf("hook should correlate by claude id: got %+v ok=%v", got, ok)
-	}
-
-	// A nil-summary reconcile keeps the existing summary.
-	r.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []DiscoveredPane{{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0", ClaudeSessionID: "sess-1",
-	}})
-	if r.Snapshot()[0].Summary == nil {
-		t.Error("nil-summary reconcile should not wipe the existing summary")
+		ClaudeSessionID: "s1", Frontend: session.FrontendTmux, Status: session.StatusIdle,
+	})
+	// Then: a later hook correlated by claude id arrives paneless/vscode — must NOT downgrade.
+	s, _ := r.ApplyHook(HookUpdate{
+		Tool: "claude-code", ClaudeSessionID: "s1",
+		Frontend: session.FrontendVSCode, Status: session.StatusWorking,
+	})
+	if s.Frontend != session.FrontendTmux {
+		t.Fatalf("frontend downgraded to %q, want tmux", s.Frontend)
 	}
 }

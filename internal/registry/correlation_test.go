@@ -17,7 +17,9 @@ func TestHookThenDiscoverySamePaneStaysSingle(t *testing.T) {
 		PaneID: "%0",
 		Status: session.StatusWorking,
 	})
-	r.ReconcileDiscovered("claude-code", session.TmuxServerDefault, []DiscoveredPane{pane("%0", "a")})
+	r.ReconcileSessions("claude-code", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", Frontend: session.FrontendTmux},
+	})
 
 	if n := len(r.Snapshot()); n != 1 {
 		t.Fatalf("hook+discovery for the same pane should yield 1 session, got %d", n)

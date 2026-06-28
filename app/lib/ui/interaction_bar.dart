@@ -14,15 +14,42 @@ String interactionLabel(Interaction ix) => switch (ix.kind) {
       InteractionKind.unknown => 'Respond',
     };
 
+String respondElsewhereLabel(FrontendKind f) =>
+    f == FrontendKind.vscode ? 'Respond in VSCode' : 'Respond in your terminal';
+
 class InteractionBar extends StatelessWidget {
   const InteractionBar(
-      {super.key, required this.interaction, required this.onRespond});
+      {super.key,
+      required this.interaction,
+      required this.onRespond,
+      this.informationalMessage});
 
   final Interaction interaction;
   final VoidCallback onRespond;
+  final String? informationalMessage;
 
   @override
   Widget build(BuildContext context) {
+    if (informationalMessage != null) {
+      return Material(
+        color: AppColors.awaitingSurface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(informationalMessage!,
+                  style: const TextStyle(
+                      color: AppColors.secondary, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              const Text("argus can't send input to this session",
+                  style: TextStyle(color: AppColors.secondary, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
     return Material(
       color: AppColors.awaitingSurface,
       child: InkWell(

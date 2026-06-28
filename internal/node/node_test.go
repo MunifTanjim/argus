@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
@@ -34,15 +37,30 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 
+	panes, err := tmuxClient.ListPanes(ctx)
+	if err != nil || len(panes) == 0 {
+		t.Fatalf("ListPanes: err=%v len=%d", err, len(panes))
+	}
+	var tty string
+	for _, p := range panes {
+		if p.PaneID == paneID {
+			tty = claudecode.NormalizeTTYForTest(p.TTY)
+		}
+	}
+
+	procDir := t.TempDir()
+	claudecode.SetSessionsDirForTest(procDir)
+	t.Cleanup(func() { claudecode.SetSessionsDirForTest("") })
+	if err := os.WriteFile(filepath.Join(procDir, "4242.json"),
+		[]byte(`{"pid":4242,"sessionId":"sh-1","cwd":"/repo","entrypoint":"cli"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restorePS := claudecode.SetRunPSForTest(func() (string, error) { return "  4242 " + tty + " S+ claude", nil })
+	t.Cleanup(restorePS)
+
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmuxClient,
 	})
-	// Discovery identifies Claude panes by their foreground process; this pane
-	// runs /bin/sh, so make discovery treat it as Claude. Otherwise the startup
-	// and hook scans reconcile it away (ReconcileDiscovered prunes panes it does
-	// not recognize) and capture/input race against that prune. A real Claude
-	// pane is found by discovery and kept, which is what this models.
-	d.disc.SetMatch(func(tmux.Pane) bool { return true })
 
 	socket := filepath.Join(t.TempDir(), "d.sock")
 	go func() { _ = d.Run(ctx, socket) }()
@@ -245,4 +263,18 @@ func dialWithRetry(t *testing.T, socket string) *api.Client {
 	}
 	t.Fatal("node never came up")
 	return nil
+}
+
+func TestResolvePanelessReturnsNoTerminalControl(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{
+		session.TmuxServerDefault: tmux.New(""),
+	})
+	d.reg.ApplyHook(registry.HookUpdate{
+		Tool: "claude-code", ClaudeSessionID: "vs1",
+		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
+	})
+	_, _, err := d.resolve("claude:vs1")
+	if !errors.Is(err, api.ErrNoTerminalControl) {
+		t.Fatalf("want ErrNoTerminalControl, got %v", err)
+	}
 }

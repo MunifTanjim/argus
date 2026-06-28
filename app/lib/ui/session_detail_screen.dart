@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
 import '../data/session_repository.dart';
+import '../models/enums.dart';
 import '../data/transcript_repository.dart';
 import '../models/session.dart';
 import '../push/notifications.dart';
@@ -131,21 +132,36 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             Expanded(
                 child:
                     Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            if (live.frontend != FrontendKind.tmux)
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Chip(
+                  label: Text(live.frontend.name),
+                  padding: EdgeInsets.zero,
+                  labelPadding:
+                      const EdgeInsets.symmetric(horizontal: 6),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
           ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Live screen',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => LiveScreenScreen(session: live),
-              ),
-            ),
+            onPressed: live.controllable
+                ? () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LiveScreenScreen(session: live),
+                      ),
+                    )
+                : null,
           ),
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'kill') {
+                if (!live.controllable) return;
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -180,9 +196,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem<String>(
+              PopupMenuItem<String>(
                 value: 'kill',
-                child: Text('Kill session'),
+                enabled: live.controllable,
+                child: const Text('Kill session'),
               ),
             ],
           ),
@@ -207,6 +224,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             if (live.interaction != null)
               InteractionBar(
                 interaction: live.interaction!,
+                informationalMessage: (!live.controllable &&
+                        live.interaction!.kind == InteractionKind.idle)
+                    ? respondElsewhereLabel(live.frontend)
+                    : null,
                 onRespond: () => showRespondSheet(context, live),
               ),
           ],

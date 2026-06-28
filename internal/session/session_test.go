@@ -2,6 +2,23 @@ package session
 
 import "testing"
 
+func TestControllable(t *testing.T) {
+	withPane := Session{Tmux: TmuxLocation{PaneID: "%3"}}
+	if !withPane.Controllable() {
+		t.Fatal("session with a pane should be controllable")
+	}
+	paneless := Session{Frontend: FrontendVSCode}
+	if paneless.Controllable() {
+		t.Fatal("paneless session should not be controllable")
+	}
+}
+
+func TestFrontendConstants(t *testing.T) {
+	if FrontendTmux != "tmux" || FrontendVSCode != "vscode" || FrontendExternal != "external" {
+		t.Fatalf("unexpected frontend values: %s %s %s", FrontendTmux, FrontendVSCode, FrontendExternal)
+	}
+}
+
 func TestStatusLabel(t *testing.T) {
 	cases := map[Status]string{
 		StatusWorking:       "working",

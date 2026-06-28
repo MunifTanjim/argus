@@ -256,7 +256,7 @@ func (m model) screenView() string {
 	s := m.sessions[m.selectedID]
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("argus · "+s.Tmux.SessionName) +
-		dimStyle.Render(fmt.Sprintf("  [%s] %s", s.Tmux.PaneID, statusWord(s))) + "\n\n")
+		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s))) + "\n\n")
 
 	body := m.screen
 	if m.screenErr != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Claude Code writes a live status file per running process at
@@ -20,6 +21,9 @@ type procSession struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Version   string `json:"version"`
+	// Entrypoint is how the session was launched: "cli" (terminal) or
+	// "claude-vscode" (VSCode extension). It is the authoritative frontend signal.
+	Entrypoint string `json:"entrypoint"`
 }
 
 // claudeSessionsDirOverride lets tests point the reader at a temp directory; empty
@@ -53,4 +57,61 @@ func readProcSession(dir string, pid int) (procSession, bool) {
 		return procSession{}, false
 	}
 	return ps, true
+}
+
+// listProcSessions reads every ~/.claude/sessions/<pid>.json and returns the
+// parsed procSession for each, with the pid taken from the filename. Dirs,
+// non-.json entries, and unparseable/idless files are skipped. Returns nil on an
+// empty or unreadable dir. Used by discovery's paneless (VSCode) pass.
+func listProcSessions(dir string) []procSession {
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []procSession
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSuffix(e.Name(), ".json"))
+		if err != nil {
+			continue
+		}
+		if ps, ok := readProcSession(dir, pid); ok {
+			out = append(out, ps)
+		}
+	}
+	return out
+}
+
+// findProcSessionByID scans the sessions dir for the proc-session file whose
+// sessionId matches id. Files are pid-keyed, but a hook only carries the claude
+// session id, so a scan is required. The dir holds only a handful of small files,
+// so a per-hook scan is cheap. ok is false on empty dir/id, a read error, or no
+// match.
+func findProcSessionByID(dir, sessionID string) (procSession, bool) {
+	if dir == "" || sessionID == "" {
+		return procSession{}, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return procSession{}, false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var ps procSession
+		if json.Unmarshal(data, &ps) == nil && ps.SessionID == sessionID {
+			return ps, true
+		}
+	}
+	return procSession{}, false
 }

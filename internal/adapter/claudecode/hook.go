@@ -215,6 +215,21 @@ func classifyNotification(p hookPayload) *session.Interaction {
 	return &session.Interaction{Kind: session.InteractionIdle, Message: p.Message}
 }
 
+// frontendFor classifies a session's UI host from its launch entrypoint (read
+// from ~/.claude/sessions/<pid>.json) and whether it has a real tmux pane. The
+// VSCode extension reports entrypoint "claude-vscode" (paneless); the `claude`
+// CLI reports "cli" and may run in a tmux pane. An unknown entrypoint is treated
+// like cli.
+func frontendFor(entrypoint string, hasPane bool) session.Frontend {
+	if entrypoint == "claude-vscode" {
+		return session.FrontendVSCode
+	}
+	if hasPane {
+		return session.FrontendTmux
+	}
+	return session.FrontendExternal
+}
+
 // serverFromSocket derives which logical tmux server a pane belongs to from the
 // $TMUX socket basename. argus's private socket is "argus"; everything else
 // (the user's default socket, typically "default") maps to the default server.
@@ -268,14 +283,31 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		sum = summarize(p.TranscriptPath)
 	}
 
+	// $TMUX/$TMUX_PANE are inherited by every child of the process that started
+	// tmux — including a `claude` run in a VSCode terminal opened from a tmux pane.
+	// Trust the inherited pane only for a genuine terminal (cli) session; the
+	// authoritative launch entrypoint comes from ~/.claude/sessions/<pid>.json. A
+	// non-cli (e.g. vscode) session must stay paneless, or discovery's next scan
+	// prunes it from a pane it never occupied. Unknown entrypoint (file missing or
+	// racy at the first SessionStart) trusts the pane: forcing paneless would race
+	// the scan and duplicate a real cli/tmux session; a later hook resolves it.
+	entry, _ := findProcSessionByID(claudeSessionsDir(), p.SessionID)
+	terminal := entry.Entrypoint == "" || entry.Entrypoint == "cli"
+	paneID := ev.TmuxPane
+	server := serverFromSocket(ev.TmuxSocket)
+	if !terminal {
+		paneID, server = "", ""
+	}
+
 	return reg.ApplyHook(registry.HookUpdate{
 		Tool:               Tool,
-		Server:             serverFromSocket(ev.TmuxSocket),
-		PaneID:             ev.TmuxPane,
+		Server:             server,
+		PaneID:             paneID,
 		ClaudeSessionID:    p.SessionID,
 		Cwd:                p.Cwd,
 		Repo:               repoName(p.Cwd),
 		TranscriptPath:     p.TranscriptPath,
+		Frontend:           frontendFor(entry.Entrypoint, paneID != ""),
 		Status:             status,
 		Summary:            sum,
 		Interaction:        ix,

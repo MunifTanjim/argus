@@ -20,9 +20,15 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 		return nil, err
 	}
 	s, alive := claudecode.ProcessHook(d.reg, ev)
-	// A hook (esp. SessionStart) signals a session change — rescan so newly started
-	// sessions surface without polling.
-	go d.scan(context.Background())
+	// ProcessHook already created/updated the firing session in the registry, so a
+	// rescan only adds value for lifecycle events: SessionStart surfaces a brand-new
+	// pane (and enriches its Name) and SessionEnd prunes a vanished one. The frequent
+	// per-tool-call events (Pre/PostToolUse, etc.) come from already-known sessions, so
+	// scanning on them is pure ps+tmux churn.
+	switch claudecode.EventName(ev) {
+	case "SessionStart", "SessionEnd":
+		go d.scan(context.Background())
+	}
 
 	if alive && claudecode.EventName(ev) == "PermissionRequest" {
 		return api.HookResult{Output: d.awaitDecision(ctx, s.ID, ev)}, nil

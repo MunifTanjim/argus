@@ -30,6 +30,12 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // handleIdleKey composes a free-text reply, delivered via pane input on submit.
 func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// A paneless session's idle dock is informational only (see promptLinesWidth):
+	// argus has no pane to deliver input to, so swallow keys silently rather than
+	// flash a "terminal control unavailable" error the indicator already explains.
+	if !m.sessions[m.selectedID].Controllable() {
+		return m, nil
+	}
 	switch msg.String() {
 	case "enter":
 		id := m.selectedID

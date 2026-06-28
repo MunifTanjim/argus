@@ -5,9 +5,16 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
+
+// ErrNoTerminalControl is returned for pane-bound actions (capture, input, key,
+// kill, focus) targeting a session argus cannot drive — a paneless vscode/external
+// session. Clients use it to distinguish "unsupported for this frontend" from a
+// real failure and to gate the action's UI.
+var ErrNoTerminalControl = errors.New("session has no terminal control")
 
 const jsonrpcVersion = "2.0"
 

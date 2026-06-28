@@ -61,3 +61,18 @@ InteractionKind interactionKindFromWire(String? s) {
       return InteractionKind.unknown;
   }
 }
+
+enum FrontendKind { tmux, vscode, external, unknown }
+
+FrontendKind frontendFromWire(String? s) {
+  switch (s) {
+    case 'tmux':
+      return FrontendKind.tmux;
+    case 'vscode':
+      return FrontendKind.vscode;
+    case 'external':
+      return FrontendKind.external;
+    default:
+      return FrontendKind.unknown;
+  }
+}

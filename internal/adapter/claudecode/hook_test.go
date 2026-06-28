@@ -2,6 +2,8 @@ package claudecode
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -40,8 +42,8 @@ func TestServerFromSocket(t *testing.T) {
 
 func TestProcessHookDrivesStatus(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 
 	mk := func(event string) HookEvent {
@@ -77,8 +79,8 @@ func TestProcessHookDrivesStatus(t *testing.T) {
 
 func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	hook := func(event string, payload map[string]any) HookEvent {
 		raw, _ := json.Marshal(payload)
@@ -125,8 +127,8 @@ func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 
 func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	raw, _ := json.Marshal(map[string]any{"source": "startup"})
 	got, alive := ProcessHook(reg, HookEvent{Event: "SessionStart", TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
@@ -144,8 +146,8 @@ func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 
 func TestProcessHookSessionEndRemovesOnGenuineEnd(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	end := func(reason string) HookEvent {
 		raw, _ := json.Marshal(map[string]any{"reason": reason})
@@ -158,8 +160,8 @@ func TestProcessHookSessionEndRemovesOnGenuineEnd(t *testing.T) {
 
 func TestInteractionDetection(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	hook := func(event string, payload map[string]any) HookEvent {
 		raw, _ := json.Marshal(payload)
@@ -257,14 +259,108 @@ func TestPermissionInteractionHasOptions(t *testing.T) {
 	}
 }
 
-// A Notification never derives tool details — regardless of its message it
-// resolves to an idle "awaiting input" interaction, so it can't misattribute a
-// permission to the wrong tool (the back-to-back prompt bug). Permission/question/
-// plan prompts come from the PermissionRequest/PreToolUse hooks instead.
+func TestFrontendFor(t *testing.T) {
+	cases := []struct {
+		entrypoint string
+		hasPane    bool
+		want       session.Frontend
+	}{
+		{"cli", true, session.FrontendTmux},
+		{"cli", false, session.FrontendExternal},
+		{"claude-vscode", false, session.FrontendVSCode},
+		{"claude-vscode", true, session.FrontendVSCode},
+		{"", true, session.FrontendTmux},      // unknown entrypoint trusts the pane
+		{"", false, session.FrontendExternal}, // unknown, no pane
+	}
+	for _, c := range cases {
+		if got := frontendFor(c.entrypoint, c.hasPane); got != c.want {
+			t.Errorf("frontendFor(%q,%v)=%q want %q", c.entrypoint, c.hasPane, got, c.want)
+		}
+	}
+}
+
+func TestProcessHookVSCodeIgnoresInheritedPane(t *testing.T) {
+	dir := t.TempDir()
+	claudeSessionsDirOverride = dir
+	t.Cleanup(func() { claudeSessionsDirOverride = "" })
+	if err := os.WriteFile(filepath.Join(dir, "111.json"),
+		[]byte(`{"pid":111,"sessionId":"vs-1","entrypoint":"claude-vscode"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := registry.New()
+	payload := []byte(`{"session_id":"vs-1","hook_event_name":"UserPromptSubmit"}`)
+	s, alive := ProcessHook(reg, HookEvent{Event: "UserPromptSubmit", TmuxPane: "%5", TmuxSocket: "default", Payload: payload})
+	if !alive {
+		t.Fatal("session should be alive")
+	}
+	if s.Tmux.PaneID != "" {
+		t.Fatalf("vscode session must be paneless, got pane %q", s.Tmux.PaneID)
+	}
+	if s.Frontend != session.FrontendVSCode {
+		t.Fatalf("want vscode frontend, got %q", s.Frontend)
+	}
+	if s.ID != "claude:vs-1" {
+		t.Fatalf("want claude:vs-1 key, got %q", s.ID)
+	}
+
+	// A discovery scan that does not list pane %5 must NOT prune the session;
+	// the unified scan still reports the live VSCode session (by claude id).
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode},
+	})
+	if _, ok := reg.Get("claude:vs-1"); !ok {
+		t.Fatal("vscode session was pruned by reconcile — regression")
+	}
+}
+
+func TestProcessHookCLIKeepsPane(t *testing.T) {
+	dir := t.TempDir()
+	claudeSessionsDirOverride = dir
+	t.Cleanup(func() { claudeSessionsDirOverride = "" })
+	if err := os.WriteFile(filepath.Join(dir, "222.json"),
+		[]byte(`{"pid":222,"sessionId":"cli-1","entrypoint":"cli"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := registry.New()
+	payload := []byte(`{"session_id":"cli-1","hook_event_name":"UserPromptSubmit"}`)
+	s, alive := ProcessHook(reg, HookEvent{Event: "UserPromptSubmit", TmuxPane: "%7", TmuxSocket: "default", Payload: payload})
+	if !alive {
+		t.Fatal("session should be alive")
+	}
+	if s.Tmux.PaneID != "%7" {
+		t.Fatalf("cli session must keep its pane, got %q", s.Tmux.PaneID)
+	}
+	if s.Frontend != session.FrontendTmux {
+		t.Fatalf("want tmux frontend, got %q", s.Frontend)
+	}
+}
+
+func TestProcessHookUnknownEntrypointTrustsPane(t *testing.T) {
+	dir := t.TempDir()
+	claudeSessionsDirOverride = dir
+	t.Cleanup(func() { claudeSessionsDirOverride = "" })
+	// No proc-session file for this session id.
+
+	reg := registry.New()
+	payload := []byte(`{"session_id":"ghost","hook_event_name":"UserPromptSubmit"}`)
+	s, alive := ProcessHook(reg, HookEvent{Event: "UserPromptSubmit", TmuxPane: "%9", TmuxSocket: "default", Payload: payload})
+	if !alive {
+		t.Fatal("session should be alive")
+	}
+	if s.Tmux.PaneID != "%9" {
+		t.Fatalf("unknown entrypoint must trust the pane, got %q", s.Tmux.PaneID)
+	}
+	if s.Frontend != session.FrontendTmux {
+		t.Fatalf("want tmux frontend, got %q", s.Frontend)
+	}
+}
+
 func TestNotificationAlwaysIdle(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileDiscovered(Tool, session.TmuxServerDefault, []registry.DiscoveredPane{
-		{Tool: Tool, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a"},
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	notify := func(msg string) session.Session {
 		payload, _ := json.Marshal(map[string]any{"message": msg})

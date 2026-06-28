@@ -38,48 +38,96 @@ func normalizeTTY(tty string) string {
 	return strings.TrimPrefix(tty, "/dev/")
 }
 
-// parseForegroundClaude maps each tty whose foreground process group (stat
-// contains '+') includes a process whose argv0 basename is "claude" to that
-// claude process's pid. The pid lets discovery read ~/.claude/sessions/<pid>.json
-// regardless of how claude was launched (the pane's pane_pid is the shell when
-// claude was started from a shell, so it can't be trusted).
-func parseForegroundClaude(psOut string) map[string]int {
-	out := map[string]int{}
+// parseClaudeProcs maps each claude pid (argv0 basename "claude") to its tty,
+// across all processes regardless of foreground state. A ttyless process (ps
+// shows "??") maps to "". Keys are the liveness set; values drive
+// pid→tty→pane correlation.
+func parseClaudeProcs(psOut string) map[int]string {
+	out := map[int]string{}
 	for _, line := range strings.Split(psOut, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 4 {
 			continue
 		}
-		pid, tty, stat, argv0 := fields[0], fields[1], fields[2], fields[3]
-		if !strings.Contains(stat, "+") { // not foreground
+		pid, tty, argv0 := fields[0], fields[1], fields[3]
+		if filepath.Base(argv0) != "claude" {
 			continue
 		}
-		if filepath.Base(argv0) == "claude" {
-			if n, err := strconv.Atoi(pid); err == nil {
-				out[tty] = n
-			}
+		n, err := strconv.Atoi(pid)
+		if err != nil {
+			continue
 		}
+		if tty == "??" || tty == "?" {
+			tty = ""
+		}
+		out[n] = tty
 	}
 	return out
 }
 
-// foregroundClaude takes one ps snapshot and returns the tty→claude-pid map.
-func foregroundClaude() (map[string]int, error) {
+// claudeProcs takes one ps snapshot and returns the claude pid→tty map (liveness
+// set + correlation source).
+func claudeProcs() (map[int]string, error) {
 	out, err := runPS()
 	if err != nil {
 		return nil, err
 	}
-	return parseForegroundClaude(out), nil
+	return parseClaudeProcs(out), nil
 }
 
-// isClaudePane reports whether a pane is running Claude Code: either a direct
-// launch (command "claude") or a pane whose tty has claude in the foreground.
-func isClaudePane(p tmux.Pane, claudeTTYs map[string]int) bool {
-	if p.CurrentCommand == "claude" {
-		return true
+// paneInfo is a tmux pane located for tty correlation.
+type paneInfo struct {
+	server      session.TmuxServer
+	paneID      string
+	sessionName string
+	windowIndex int
+	currentPath string
+}
+
+// buildDiscovered correlates live proc-sessions to tmux panes and produces the
+// reconcile input. procs is pid→tty (a pid absent here is not alive → skipped);
+// paneByTTY maps a normalized tty to its pane; entries is the proc-session
+// listing. It sets structural + identity fields only — Summary/StatusHint are
+// filled by ScanOnce via the Discoverer's transcript cache.
+func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entries []procSession) []registry.DiscoveredSession {
+	var out []registry.DiscoveredSession
+	for _, ps := range entries {
+		tty, alive := procs[ps.PID]
+		if !alive {
+			continue
+		}
+		d := registry.DiscoveredSession{
+			ClaudeSessionID: ps.SessionID,
+			Name:            ps.Name,
+			Cwd:             ps.Cwd,
+			Repo:            repoName(ps.Cwd),
+		}
+		if tty != "" {
+			if pi, ok := paneByTTY[normalizeTTY(tty)]; ok {
+				d.HasPane = true
+				d.Server = pi.server
+				d.PaneID = pi.paneID
+				d.SessionName = pi.sessionName
+				d.WindowIndex = pi.windowIndex
+				d.CurrentPath = pi.currentPath
+				if pi.currentPath != "" {
+					d.Repo = repoName(pi.currentPath)
+				}
+			}
+		}
+		if d.HasPane {
+			d.Frontend = session.FrontendTmux
+		} else {
+			d.Frontend = frontendFor(ps.Entrypoint, false)
+		}
+		if ps.Cwd != "" {
+			if projDir, err := parser.ProjectDirForPath(ps.Cwd); err == nil {
+				d.TranscriptPath = filepath.Join(projDir, ps.SessionID+".jsonl")
+			}
+		}
+		out = append(out, d)
 	}
-	_, ok := claudeTTYs[normalizeTTY(p.TTY)]
-	return ok
+	return out
 }
 
 // serverClient pairs a logical tmux server with its CLI client.
@@ -93,7 +141,6 @@ type serverClient struct {
 type Discoverer struct {
 	reg     *registry.Registry
 	servers []serverClient
-	match   func(tmux.Pane) bool
 
 	sumMu    sync.Mutex
 	sumCache map[string]summaryEntry // transcript path → last computed summary and status hint
@@ -116,11 +163,6 @@ func NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 	}
 	return d
 }
-
-// SetMatch overrides Claude-pane detection. Intended for tests that need
-// discovery to treat arbitrary panes (e.g. a plain shell) as Claude sessions so
-// reconciliation keeps them instead of pruning them.
-func (d *Discoverer) SetMatch(fn func(tmux.Pane) bool) { d.match = fn }
 
 // cachedTranscript returns the summary and transcript-derived live status hint
 // for a transcript, recomputing only when the file's mod time changed since the
@@ -146,43 +188,20 @@ func (d *Discoverer) cachedTranscript(path string) (*session.Summary, session.St
 	return sum, hint
 }
 
-// enrich fills a DiscoveredPane's Claude-side fields from the pane's claude
-// process: ~/.claude/sessions/<pid>.json gives the session id, cwd, and name;
-// from those we derive the transcript path and a (mtime-cached) summary. claudePID
-// is the foreground claude pid (from the ps scan); panePID is a fallback for
-// tmux-launched panes. No-ops when no process file is found.
-func (d *Discoverer) enrich(dp *registry.DiscoveredPane, claudePID, panePID int) {
-	dir := claudeSessionsDir()
-	ps, ok := readProcSession(dir, claudePID)
-	if !ok {
-		ps, ok = readProcSession(dir, panePID)
-	}
-	if !ok {
-		return
-	}
-	dp.ClaudeSessionID = ps.SessionID
-	dp.Name = ps.Name
-	dp.Cwd = ps.Cwd
-	if ps.Cwd != "" {
-		if projDir, err := parser.ProjectDirForPath(ps.Cwd); err == nil {
-			dp.TranscriptPath = filepath.Join(projDir, ps.SessionID+".jsonl")
-			dp.Summary, dp.StatusHint = d.cachedTranscript(dp.TranscriptPath)
-		}
-	}
-}
-
 // ScanOnce scans every configured server once and reconciles the registry. An
 // error from one server does not stop the others; the last error is returned.
 // Discovery is on-demand: callers invoke this at startup and on triggers
 // (client refresh, hook events, spawn/kill) rather than on a timer.
 func (d *Discoverer) ScanOnce(ctx context.Context) error {
-	// One ps snapshot per scan identifies claude panes by their real foreground
-	// process and yields the claude pid per tty (unless a test matcher is set).
-	var claudeTTYs map[string]int
-	if d.match == nil {
-		claudeTTYs, _ = foregroundClaude()
+	// ~/.claude/sessions is the enumeration source; ps is the liveness oracle.
+	// A ps failure skips the whole reconcile — never prune on a failed probe.
+	procs, err := claudeProcs()
+	if err != nil {
+		return err
 	}
 
+	// tmux is consulted only to attach panes by tty correlation.
+	paneByTTY := map[string]paneInfo{}
 	var lastErr error
 	for _, sc := range d.servers {
 		panes, err := sc.client.ListPanes(ctx)
@@ -190,33 +209,36 @@ func (d *Discoverer) ScanOnce(ctx context.Context) error {
 			lastErr = err
 			continue
 		}
-		var found []registry.DiscoveredPane
 		for _, p := range panes {
-			isClaude := isClaudePane(p, claudeTTYs)
-			if d.match != nil {
-				isClaude = d.match(p)
+			paneByTTY[normalizeTTY(p.TTY)] = paneInfo{
+				server:      sc.server,
+				paneID:      p.PaneID,
+				sessionName: p.SessionName,
+				windowIndex: p.WindowIndex,
+				currentPath: p.CurrentPath,
 			}
-			if !isClaude {
-				continue
-			}
-			dp := registry.DiscoveredPane{
-				Tool:        Tool,
-				Server:      sc.server,
-				PaneID:      p.PaneID,
-				SessionName: p.SessionName,
-				WindowIndex: p.WindowIndex,
-				CurrentPath: p.CurrentPath,
-				Repo:        repoName(p.CurrentPath),
-			}
-			// Enrich immediately from ~/.claude/sessions/<pid>.json so the card
-			// shows real info before any hook fires.
-			d.enrich(&dp, claudeTTYs[normalizeTTY(p.TTY)], p.PanePID)
-			if dp.Cwd != "" && dp.Repo == "" {
-				dp.Repo = repoName(dp.Cwd)
-			}
-			found = append(found, dp)
 		}
-		d.reg.ReconcileDiscovered(Tool, sc.server, found)
 	}
+
+	found := buildDiscovered(procs, paneByTTY, listProcSessions(claudeSessionsDir()))
+	for i := range found {
+		found[i].Summary, found[i].StatusHint = d.cachedTranscript(found[i].TranscriptPath)
+	}
+	d.reg.ReconcileSessions(Tool, found)
 	return lastErr
+}
+
+// Test seams (used by other packages' tests). Not for production use.
+
+// NormalizeTTYForTest exposes normalizeTTY to external test packages.
+func NormalizeTTYForTest(tty string) string { return normalizeTTY(tty) }
+
+// SetSessionsDirForTest overrides the proc-session dir ("" restores default).
+func SetSessionsDirForTest(dir string) { claudeSessionsDirOverride = dir }
+
+// SetRunPSForTest swaps the ps command and returns a restore func.
+func SetRunPSForTest(fn func() (string, error)) (restore func()) {
+	prev := runPS
+	runPS = fn
+	return func() { runPS = prev }
 }
