@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.3](https://github.com/MunifTanjim/argus/compare/0.0.2...0.0.3) (2026-06-28)
+
+
+### Features
+
+* add desktop notification for macOS ([e8dbef8](https://github.com/MunifTanjim/argus/commit/e8dbef811f0841a40ac736f21c7aec24062cbcae))
+* **gateway:** heartbeat node uplinks to detect half-open links ([f67ea0f](https://github.com/MunifTanjim/argus/commit/f67ea0f81b808fc9eea5bf17918fd52042a0561a))
+* support non-tmux claude sessions ([9688398](https://github.com/MunifTanjim/argus/commit/96883981a8873bb9d61aa14087bc82c8d5b25f62))
+* **tui:** smarter node startup when you open the dashboard ([5ecd3b9](https://github.com/MunifTanjim/argus/commit/5ecd3b96e0e478ac82f9c306946eec560e5b272a))
+
+
+### Bug Fixes
+
+* **config:** add fallback when XDG runtime dir is unavailable ([65314c3](https://github.com/MunifTanjim/argus/commit/65314c383d1e907bbe8a81ac0e83152339451ab5))
+
 ## [0.0.2](https://github.com/MunifTanjim/argus/compare/0.0.1...0.0.2) (2026-06-25)
 
 
