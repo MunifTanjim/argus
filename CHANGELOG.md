@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.4](https://github.com/MunifTanjim/argus/compare/0.0.3...0.0.4) (2026-06-29)
+
+
+### Features
+
+* add server.info with version and connected nodes ([2977358](https://github.com/MunifTanjim/argus/commit/29773583d86f3b5788068ccf189f642374c1912f))
+* add upgrade command ([7f10f5d](https://github.com/MunifTanjim/argus/commit/7f10f5d0bd19f01079b29405151213fd3a4ab207))
+* gate spawn-session on per-node tmux availability ([68cfb18](https://github.com/MunifTanjim/argus/commit/68cfb18004e3b7e3370d42e491d4fd99e8fd9671))
+* spawn new sessions with a dir picker and initial prompt ([f95e1af](https://github.com/MunifTanjim/argus/commit/f95e1aff41bfebc65019f8d2aeaec7744b3d50b9))
+
+
+### Bug Fixes
+
+* **push:** recover from gone endpoints by minting a fresh one ([48dfd9b](https://github.com/MunifTanjim/argus/commit/48dfd9b6261c7e188f66e6797233764f09124c65))
+
 ## [0.0.3](https://github.com/MunifTanjim/argus/compare/0.0.2...0.0.3) (2026-06-28)
 
 
