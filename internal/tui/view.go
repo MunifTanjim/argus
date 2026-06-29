@@ -167,6 +167,9 @@ func (m model) homeTabs(historyActive bool) string {
 }
 
 func (m model) listView() string {
+	if m.spawn.active() {
+		return m.spawnView()
+	}
 	title := Icon.Claude.Render() + " " + headerStyle.Render("argus")
 	if m.reconnecting {
 		title += dimStyle.Render("  (reconnecting…)")
@@ -224,8 +227,6 @@ func (m model) listView() string {
 	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
 		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, listKeys.Quit)
 	switch {
-	case m.spawnPick:
-		footer = m.spawnPickPrompt()
 	case m.pendingKill && m.cursor < len(m.order):
 		footer = asstStyle.Render("kill this session? y/n")
 	case m.flash != "":
@@ -236,20 +237,78 @@ func (m model) listView() string {
 	return centerBlock(inner, cardW, m.width)
 }
 
-// spawnPickPrompt renders the node chooser shown before spawning on a multi-node
-// gateway: each node label, the selected one highlighted, plus the key hints.
-func (m model) spawnPickPrompt() string {
-	parts := make([]string, 0, len(m.spawnNodes))
-	for i, n := range m.spawnNodes {
-		label := nodeName(n.NodeLabel, n.NodeID)
-		if i == m.spawnCursor {
-			parts = append(parts, asstStyle.Render("❯ "+label))
-		} else {
-			parts = append(parts, dimStyle.Render("  "+label))
+// spawnView renders the active "new session" flow as a dedicated, vertically
+// scrolling screen. List steps (node, dir) render one choice per line, windowed
+// to the terminal height with the cursor kept visible; text steps (custom path,
+// name, command) render a labeled input line. Rows are width-clamped so a long
+// project list or long paths never overflow the screen.
+func (m model) spawnView() string {
+	cardW := historyWidth(m)
+	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") +
+		dimStyle.Render("  ·  new session")
+	avail := max(1, m.height-4)
+	navFooter := dimStyle.Render("↑/↓ move · enter select · esc cancel")
+
+	var body, footer string
+	switch m.spawn.step {
+	case spawnStepNode:
+		cards := make([]string, len(m.spawn.nodes))
+		for i, n := range m.spawn.nodes {
+			cards[i] = spawnChoiceRow(nodeName(n.NodeLabel, n.NodeID), "", i == m.spawn.cursor, cardW)
+		}
+		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
+			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
+		footer = navFooter
+	case spawnStepDir:
+		if m.spawn.custom {
+			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +
+				asstStyle.Render(truncate(m.spawn.cwd, cardW-1)+"▏")
+			footer = dimStyle.Render("type a path · enter confirm · esc cancel")
+			break
+		}
+		cards := make([]string, 0, m.spawn.dirCursorMax())
+		for i, p := range m.spawn.dirs {
+			cards = append(cards, spawnChoiceRow(p.Label, p.Cwd, i == m.spawn.cursor, cardW))
+		}
+		cards = append(cards, spawnChoiceRow("Custom path…", "", m.spawn.cursor == len(m.spawn.dirs), cardW))
+		body = StyleSecondaryBold.Render("Choose a directory") + "\n\n" +
+			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
+		footer = navFooter
+	case spawnStepPrompt:
+		lines := strings.Split(m.spawn.prompt, "\n")
+		for i, ln := range lines {
+			lines[i] = truncateLine(ln, cardW)
+		}
+		lines[len(lines)-1] += "▏" // cursor at the end; Split always yields ≥1 line
+		// Window to the height left after the label + blank, keeping the tail
+		// (where typing happens) visible so a long prompt never overflows.
+		if budget := max(1, avail-2); len(lines) > budget {
+			lines = lines[len(lines)-budget:]
+		}
+		body = StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)") + "\n\n" +
+			asstStyle.Render(strings.Join(lines, "\n"))
+		footer = dimStyle.Render("enter launch · shift+enter/ctrl+j newline · esc cancel")
+	}
+
+	return centerBlock(title+"\n\n"+body+"\n\n"+footer, cardW, m.width)
+}
+
+// spawnChoiceRow renders one selectable row in the node/dir steps: a cursor
+// marker, the label, and an optional dimmed sub-line (e.g. the project path),
+// the whole row clamped to w so it never overflows the screen width.
+func spawnChoiceRow(label, sub string, sel bool, w int) string {
+	marker, name := "  ", dimStyle.Render(label)
+	if sel {
+		marker, name = asstStyle.Render("❯ "), headlineStyle(sel).Render(label)
+	}
+	line := marker + name
+	if sub != "" {
+		rest := w - lipgloss.Width(line) - 2
+		if rest >= 8 {
+			line += "  " + dimStyle.Render(truncate(sub, rest))
 		}
 	}
-	return StyleSecondary.Render("spawn on:") + " " + strings.Join(parts, "  ") +
-		dimStyle.Render("   (↑/↓ · enter · esc)")
+	return truncateLine(line, w)
 }
 
 func (m model) screenView() string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -175,21 +176,65 @@ func (d *Node) handleSessionKey(ctx context.Context, params json.RawMessage) (an
 	return nil, c.SendKeys(ctx, s.Tmux.PaneID, p.Keys...)
 }
 
+// defaultSessionName derives a tmux session name from a working directory when
+// the client leaves the name blank. The directory's base name is meaningful
+// (e.g. the repo folder); it falls back to "claude" for empty/root paths.
+func defaultSessionName(cwd string) string {
+	base := filepath.Base(strings.TrimSpace(cwd))
+	switch base {
+	case "", ".", string(filepath.Separator):
+		return "claude"
+	}
+	return base
+}
+
+// uniqueName returns base if it is free, otherwise base-2, base-3, … so the new
+// tmux session name does not collide with an existing one on the server.
+func uniqueName(base string, taken map[string]bool) string {
+	if !taken[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s-%d", base, i)
+		if !taken[cand] {
+			return cand
+		}
+	}
+}
+
+// buildSpawnOpts assembles the tmux launch options for a spawn: the command
+// defaults to "claude", and a non-empty prompt is passed as the command's
+// argument so the new session starts working on it.
+func buildSpawnOpts(name, cwd, command, prompt string) tmux.NewSessionOpts {
+	if command == "" {
+		command = "claude"
+	}
+	opts := tmux.NewSessionOpts{Name: name, Cwd: cwd, Command: command}
+	if prompt != "" {
+		opts.Args = []string{prompt}
+	}
+	return opts
+}
+
 // handleSessionSpawn launches a new Claude Code session on argus's private server.
 func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SpawnParams](params)
 	if err != nil {
 		return nil, err
 	}
-	if p.Name == "" {
-		return nil, fmt.Errorf("spawn: name is required")
-	}
-	command := p.Command
-	if command == "" {
-		command = "claude"
-	}
 	c := d.clients[session.TmuxServerArgus]
-	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: p.Name, Cwd: p.Cwd, Command: command})
+	if p.Name == "" {
+		taken := map[string]bool{}
+		// ListPanes error is intentionally ignored: on failure the dedup set is
+		// empty and any name collision will surface as a tmux new-session error.
+		if panes, err := c.ListPanes(ctx); err == nil {
+			for _, pn := range panes {
+				taken[pn.SessionName] = true
+			}
+		}
+		p.Name = uniqueName(defaultSessionName(p.Cwd), taken)
+	}
+	paneID, err := c.NewSession(ctx, buildSpawnOpts(p.Name, p.Cwd, p.Command, p.Prompt))
 	if err != nil {
 		return nil, err
 	}

@@ -16,9 +16,8 @@ abstract class SessionRepository {
   Future<Result<void>> sendRaw(String sessionId, String text);
   Future<Result<void>> spawn({
     String? nodeId,
-    required String name,
     String? cwd,
-    String? command,
+    required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
   Future<Result<List<NodeRef>>> nodes();
@@ -52,11 +51,10 @@ class SessionRepositoryRemote implements SessionRepository {
   @override
   Future<Result<void>> spawn({
     String? nodeId,
-    required String name,
     String? cwd,
-    String? command,
+    required String prompt,
   }) =>
-      _service.spawn(nodeId: nodeId, name: name, cwd: cwd, command: command);
+      _service.spawn(nodeId: nodeId, cwd: cwd, prompt: prompt);
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);

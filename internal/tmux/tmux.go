@@ -325,15 +325,27 @@ func (c *Client) SendKeys(ctx context.Context, paneID string, keys ...string) er
 
 // NewSessionOpts configures a detached session.
 type NewSessionOpts struct {
-	Name    string // session name; required
-	Command string // optional command to run (empty = default shell)
-	Cwd     string // optional working directory for the session
-	Width   int    // optional geometry; defaults to a TUI-friendly 120x40
+	Name    string   // session name; required
+	Command string   // optional command to run (empty = default shell)
+	Args    []string // optional arguments passed to Command as separate argv; ignored when Command is empty
+	Cwd     string   // optional working directory for the session
+	Width   int      // optional geometry; defaults to a TUI-friendly 120x40
 	Height  int
 }
 
 // NewSession creates a detached session and returns the pane id of its first pane.
 func (c *Client) NewSession(ctx context.Context, opts NewSessionOpts) (string, error) {
+	out, err := c.run(ctx, newSessionArgs(opts)...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// newSessionArgs builds the `tmux new-session` argument list. Command and each
+// Args element are appended as separate trailing arguments so tmux execs them
+// directly (no shell), preserving spaces and newlines in arguments.
+func newSessionArgs(opts NewSessionOpts) []string {
 	w, h := opts.Width, opts.Height
 	if w == 0 {
 		w = 120
@@ -353,12 +365,9 @@ func (c *Client) NewSession(ctx context.Context, opts NewSessionOpts) (string, e
 	}
 	if opts.Command != "" {
 		sub = append(sub, opts.Command)
+		sub = append(sub, opts.Args...)
 	}
-	out, err := c.run(ctx, sub...)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
+	return sub
 }
 
 // KillPane kills a single pane. If it is the last pane in its session, the

@@ -28,9 +28,8 @@ class FakeSessionRepository implements SessionRepository {
   @override
   Future<Result<void>> spawn({
     String? nodeId,
-    required String name,
     String? cwd,
-    String? command,
+    required String prompt,
   }) async =>
       const Result.ok(null);
 

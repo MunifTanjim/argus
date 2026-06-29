@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -176,19 +175,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcriptCache[msg.ref.key()] = cachedTranscript{chunks: m.transcript.chunks}
 		m.restoreChunkCursor(prevID, atBottom)
 	case spawnNodesMsg:
-		// No gateway node list (plain node errors) or a single target: spawn here.
-		// Two or more nodes: let the user pick where it lands.
-		if msg.err != nil || len(msg.nodes) <= 1 {
-			nodeID := ""
-			if len(msg.nodes) == 1 {
-				nodeID = msg.nodes[0].NodeID
-			}
-			return m.spawnNamed(msg.cwd, nodeID)
+		nodes := msg.nodes
+		if msg.err != nil { // no gateway node list (plain local node); nodeID stays empty
+			nodes = nil
 		}
-		m.spawnPick = true
-		m.spawnNodes = msg.nodes
-		m.spawnCwd = msg.cwd
-		m.spawnCursor = 0
+		m.beginSpawn(nodes, msg.projects, msg.cwd)
+		return m, nil
 	case screenTickMsg:
 		if m.mode == modeScreen {
 			return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
@@ -270,12 +262,12 @@ func (m model) sendInputCmd(id, text string) tea.Cmd {
 	}
 }
 
-func (m model) spawnCmd(name, cwd, nodeID string) tea.Cmd {
+func (m model) spawnCmd(cwd, nodeID, prompt string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		// nodeID is empty for a local node or a single-node gateway; SpawnParams
-		// omits it, and the node ignores it anyway.
-		_ = client.Call(api.MethodSessionSpawn, api.SpawnParams{NodeID: nodeID, Name: name, Cwd: cwd}, nil)
+		_ = client.Call(api.MethodSessionSpawn, api.SpawnParams{
+			NodeID: nodeID, Cwd: cwd, Prompt: prompt,
+		}, nil)
 		return nil // registry events will surface the new session
 	}
 }
@@ -288,7 +280,9 @@ func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
 	return func() tea.Msg {
 		var nodes []api.NodeInfo
 		err := client.Call(api.MethodNodesList, nil, &nodes)
-		return spawnNodesMsg{nodes: nodes, cwd: cwd, err: err}
+		var projects []session.HistoryProject
+		_ = client.Call(api.MethodSessionsHistoryProjects, nil, &projects)
+		return spawnNodesMsg{nodes: nodes, projects: projects, cwd: cwd, err: err}
 	}
 }
 
@@ -396,9 +390,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	// Spawn node picker gate (list view).
-	if m.spawnPick {
-		return m.handleSpawnPickKey(msg)
+	// Spawn flow gate (list view).
+	if m.spawn.active() {
+		return m.handleSpawnKey(msg)
 	}
 
 	// The composite session screen owns its own navigation/fold/compose keys.
@@ -601,33 +595,6 @@ func (m model) actListHistory(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) actListNew(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	cwd, _ := os.Getwd()
 	return m, m.fetchSpawnNodes(cwd)
-}
-
-// spawnNamed spawns an auto-named session on nodeID (empty = let the server decide).
-func (m model) spawnNamed(cwd, nodeID string) (model, tea.Cmd) {
-	m.spawnSeq++
-	name := fmt.Sprintf("argus-%d", m.spawnSeq)
-	return m, m.spawnCmd(name, cwd, nodeID)
-}
-
-// handleSpawnPickKey drives the node picker shown when a gateway has 2+ nodes.
-func (m model) handleSpawnPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		m.spawnCursor = cursorUp(m.spawnCursor)
-	case "down", "j":
-		m.spawnCursor = cursorDown(m.spawnCursor, len(m.spawnNodes))
-	case "enter":
-		if m.spawnCursor < len(m.spawnNodes) {
-			node := m.spawnNodes[m.spawnCursor]
-			cwd := m.spawnCwd
-			m.spawnPick, m.spawnNodes, m.spawnCwd = false, nil, ""
-			return m.spawnNamed(cwd, node.NodeID)
-		}
-	case "esc", "q":
-		m.spawnPick, m.spawnNodes, m.spawnCwd = false, nil, ""
-	}
-	return m, nil
 }
 
 func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {

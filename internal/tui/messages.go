@@ -41,9 +41,10 @@ type histTranscriptMsg struct {
 // spawnNodesMsg carries the nodes.list reply for a pending "new session" action.
 // cwd is the working dir captured when the user pressed New.
 type spawnNodesMsg struct {
-	nodes []api.NodeInfo
-	cwd   string
-	err   error
+	nodes    []api.NodeInfo
+	projects []session.HistoryProject
+	cwd      string
+	err      error
 }
 type screenTickMsg struct{} // screen refresh
 type spinResumeMsg struct{} // periodic kick that re-arms the list spinner

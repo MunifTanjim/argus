@@ -5,15 +5,13 @@ import '../data/session_repository.dart';
 class SpawnRequest {
   const SpawnRequest({
     this.nodeId,
-    required this.name,
     this.cwd,
-    this.command,
+    required this.prompt,
   });
 
   final String? nodeId;
-  final String name;
   final String? cwd;
-  final String? command;
+  final String prompt;
 }
 
 /// View model for the spawn dialog. Exposes the spawn action as a [Command] so
@@ -23,12 +21,7 @@ class SpawnViewModel {
   final SessionRepository _repo;
 
   late final Command1<void, SpawnRequest> spawn = Command1(
-    (r) => _repo.spawn(
-      nodeId: r.nodeId,
-      name: r.name,
-      cwd: r.cwd,
-      command: r.command,
-    ),
+    (r) => _repo.spawn(nodeId: r.nodeId, cwd: r.cwd, prompt: r.prompt),
   );
 
   void dispose() => spawn.dispose();

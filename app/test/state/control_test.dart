@@ -107,36 +107,34 @@ void main() {
 
   // --- spawn/kill tests ---
 
-  test('spawn(name only) emits sessions.spawn with name and no optional keys',
+  test('spawn(prompt only) emits sessions.spawn with prompt and no optional keys',
       () async {
     final frames = <String>[];
     final incoming = StreamController<RpcMessage>();
     final client =
         RpcClient(incoming: incoming.stream, sendFrame: frames.add);
     // ignore: unawaited_futures
-    SessionService(() => client).spawn(name: 'x');
+    SessionService(() => client).spawn(prompt: 'do the thing');
     await Future<void>.delayed(Duration.zero);
     expect(frames.single, contains('"method":"sessions.spawn"'));
-    expect(frames.single, contains('"name":"x"'));
+    expect(frames.single, contains('"prompt":"do the thing"'));
     expect(frames.single, isNot(contains('"node_id"')));
     expect(frames.single, isNot(contains('"cwd"')));
-    expect(frames.single, isNot(contains('"command"')));
   });
 
-  test('spawn with all args includes all four keys', () async {
+  test('spawn with all args includes prompt, node_id, cwd', () async {
     final frames = <String>[];
     final incoming = StreamController<RpcMessage>();
     final client =
         RpcClient(incoming: incoming.stream, sendFrame: frames.add);
     // ignore: unawaited_futures
     SessionService(() => client)
-        .spawn(nodeId: 'n', name: 'x', cwd: '/p', command: 'claude');
+        .spawn(nodeId: 'n', cwd: '/p', prompt: 'do the thing');
     await Future<void>.delayed(Duration.zero);
     expect(frames.single, contains('"method":"sessions.spawn"'));
-    expect(frames.single, contains('"name":"x"'));
+    expect(frames.single, contains('"prompt":"do the thing"'));
     expect(frames.single, contains('"node_id":"n"'));
     expect(frames.single, contains('"cwd":"/p"'));
-    expect(frames.single, contains('"command":"claude"'));
   });
 
   test('nodes emits nodes.list and parses node_id/node_label', () async {
@@ -182,7 +180,7 @@ void main() {
   });
 
   test('null client: spawn returns Error carrying StateError', () async {
-    final result = await SessionService(() => null).spawn(name: 'x');
+    final result = await SessionService(() => null).spawn(prompt: 'x');
     expect(result, isA<Error<void>>());
     expect((result as Error<void>).error, isA<StateError>());
   });

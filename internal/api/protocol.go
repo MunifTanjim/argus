@@ -155,9 +155,10 @@ type NodeInfo struct {
 // node itself ignores it.
 type SpawnParams struct {
 	NodeID  string `json:"node_id,omitempty"` // gateway routing key; ignored node-side
-	Name    string `json:"name"`              // tmux session name
+	Name    string `json:"name,omitempty"`    // tmux session name; blank = node-generated default
 	Cwd     string `json:"cwd,omitempty"`     // working directory
 	Command string `json:"command,omitempty"` // launch command (default: "claude")
+	Prompt  string `json:"prompt,omitempty"`  // initial prompt, passed to the command as its argument
 }
 
 // SpawnResult identifies the newly created session.

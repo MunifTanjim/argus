@@ -266,3 +266,26 @@ func TestKillSession(t *testing.T) {
 		t.Fatalf("want 0 panes after kill, got %d", len(panes))
 	}
 }
+
+func TestNewSessionArgsIncludesCommandAndArgs(t *testing.T) {
+	got := newSessionArgs(NewSessionOpts{
+		Name: "argus", Cwd: "/p", Command: "claude", Args: []string{"do the thing"},
+	})
+	// The command and each arg must be separate trailing elements (tmux execs
+	// them directly, so no shell quoting and newlines survive).
+	if len(got) < 2 || got[len(got)-2] != "claude" || got[len(got)-1] != "do the thing" {
+		t.Fatalf("args tail = %#v, want [... claude \"do the thing\"]", got)
+	}
+	// Sanity: cwd is passed via -c.
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "-c /p") {
+		t.Fatalf("missing cwd flag in %q", joined)
+	}
+}
+
+func TestNewSessionArgsOmitsArgsWhenEmpty(t *testing.T) {
+	got := newSessionArgs(NewSessionOpts{Name: "x", Command: "claude"})
+	if got[len(got)-1] != "claude" {
+		t.Fatalf("trailing element = %q, want \"claude\"", got[len(got)-1])
+	}
+}

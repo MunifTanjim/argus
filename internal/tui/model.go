@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
-	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -94,15 +93,9 @@ type model struct {
 	prompt promptState // compose-then-submit draft for the prompt dock
 
 	pendingKill bool   // awaiting kill confirmation in list view
-	spawnSeq    int    // counter for auto-naming spawned sessions
 	flash       string // transient list-view status (e.g. why a jump was refused)
 
-	// Spawn node picker (list view): active only when a gateway reports 2+ nodes,
-	// so the user can choose where a new session lands.
-	spawnPick   bool
-	spawnNodes  []api.NodeInfo
-	spawnCursor int
-	spawnCwd    string // working dir captured when the picker opened
+	spawn spawnState // staged "new session" flow (node → dir → name → command)
 
 	spin     int  // animation frame for the list's working-session spinner
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)

@@ -60,15 +60,13 @@ class SessionService {
 
   Future<Result<void>> spawn({
     String? nodeId,
-    required String name,
     String? cwd,
-    String? command,
+    required String prompt,
   }) =>
       _guard((c) => c.call('sessions.spawn', {
-            'name': name,
+            'prompt': prompt,
             if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
             if (cwd != null && cwd.isNotEmpty) 'cwd': cwd,
-            if (command != null && command.isNotEmpty) 'command': command,
           }));
 
   Future<Result<void>> kill(String sessionId) =>
