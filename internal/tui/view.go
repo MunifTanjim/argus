@@ -254,7 +254,11 @@ func (m model) spawnView() string {
 	case spawnStepNode:
 		cards := make([]string, len(m.spawn.nodes))
 		for i, n := range m.spawn.nodes {
-			cards[i] = spawnChoiceRow(nodeName(n.NodeLabel, n.NodeID), "", i == m.spawn.cursor, cardW)
+			sub := ""
+			if !n.Capabilities.SpawnSession {
+				sub = "no tmux" // disabled: can't spawn here
+			}
+			cards[i] = spawnChoiceRow(nodeName(n.NodeLabel, n.NodeID), sub, i == m.spawn.cursor, cardW)
 		}
 		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))

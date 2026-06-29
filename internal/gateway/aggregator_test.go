@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -35,8 +36,11 @@ func newFakeSource(id, label string, snap ...session.Session) *fakeSource {
 	}
 }
 
-func (f *fakeSource) ID() string                                 { return f.id }
-func (f *fakeSource) Label() string                              { return f.label }
+func (f *fakeSource) ID() string    { return f.id }
+func (f *fakeSource) Label() string { return f.label }
+func (f *fakeSource) Capabilities() api.NodeCapabilities {
+	return api.NodeCapabilities{SpawnSession: true}
+}
 func (f *fakeSource) Snapshot() []session.Session                { return f.snap }
 func (f *fakeSource) Subscribe() (<-chan registry.Event, func()) { return f.events, func() {} }
 func (f *fakeSource) Done() <-chan struct{}                      { return f.done }

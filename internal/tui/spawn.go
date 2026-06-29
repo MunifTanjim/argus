@@ -77,8 +77,9 @@ func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 
 // beginSpawn initializes the staged flow. With ≥2 nodes it starts at the node
 // step; otherwise it records the single node (if any) and drops to the dir step,
-// pre-selecting the most recent project. Empty history opens free-text path
-// entry seeded with fallbackCwd.
+// pre-selecting the most recent project. A lone node without tmux is left on the
+// node step so its disabled (no-spawn) state is visible rather than auto-selected.
+// Empty history opens free-text path entry seeded with fallbackCwd.
 func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) {
 	m.spawn = spawnState{nodes: nodes, allProjects: projects, fallbackCwd: fallbackCwd}
 	if len(nodes) >= 2 {
@@ -86,6 +87,10 @@ func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProje
 		return
 	}
 	if len(nodes) == 1 {
+		if !nodes[0].Capabilities.SpawnSession {
+			m.spawn.step = spawnStepNode // surface the disabled node, don't auto-advance
+			return
+		}
 		m.spawn.nodeID = nodes[0].NodeID
 	}
 	m.spawn.enterDirStep()
@@ -118,7 +123,11 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.spawn.cursor = cursorDown(m.spawn.cursor, len(m.spawn.nodes))
 		case "enter":
 			if m.spawn.cursor < len(m.spawn.nodes) {
-				m.spawn.nodeID = m.spawn.nodes[m.spawn.cursor].NodeID
+				n := m.spawn.nodes[m.spawn.cursor]
+				if !n.Capabilities.SpawnSession {
+					return m, nil // disabled: tmux not available on this node
+				}
+				m.spawn.nodeID = n.NodeID
 				m.spawn.enterDirStep()
 			}
 		}

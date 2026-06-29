@@ -81,8 +81,17 @@ class SessionService {
             .map((m) {
               final id = m['node_id'] as String? ?? '';
               final label = m['node_label'] as String?;
-              return NodeRef(id, label != null && label.isNotEmpty ? label : id);
+              final caps = m['capabilities'] as Map<String, dynamic>?;
+              final spawnSupported = caps?['spawn_session'] as bool? ?? false;
+              return NodeRef(
+                id,
+                label != null && label.isNotEmpty ? label : id,
+                spawnSupported: spawnSupported,
+              );
             })
+            // The app only talks to a gateway, whose nodes.list always carries
+            // non-empty node ids. (A plain node serves itself with an empty id
+            // for its directly-connected TUI; the app never hits that path.)
             .where((n) => n.id.isNotEmpty)
             .toList();
       });

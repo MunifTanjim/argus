@@ -15,18 +15,20 @@ import (
 // session.event notifications (decoded into the events channel by the caller).
 type RemoteSource struct {
 	id, label string
+	caps      api.NodeCapabilities
 	peer      *api.Peer
 	events    <-chan registry.Event
 }
 
 // NewRemoteSource wraps an accepted node uplink. events must be the channel the
 // peer's OnNotify decodes session.event notifications into.
-func NewRemoteSource(id, label string, peer *api.Peer, events <-chan registry.Event) *RemoteSource {
-	return &RemoteSource{id: id, label: label, peer: peer, events: events}
+func NewRemoteSource(id, label string, caps api.NodeCapabilities, peer *api.Peer, events <-chan registry.Event) *RemoteSource {
+	return &RemoteSource{id: id, label: label, caps: caps, peer: peer, events: events}
 }
 
-func (r *RemoteSource) ID() string    { return r.id }
-func (r *RemoteSource) Label() string { return r.label }
+func (r *RemoteSource) ID() string                         { return r.id }
+func (r *RemoteSource) Label() string                      { return r.label }
+func (r *RemoteSource) Capabilities() api.NodeCapabilities { return r.caps }
 
 // Snapshot pulls the node's current sessions via sessions.list.
 func (r *RemoteSource) Snapshot() []session.Session {

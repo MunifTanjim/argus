@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/history.dart';
+import 'package:argus/state/grouping.dart';
 import 'package:argus/state/history_view_model.dart';
 import 'package:argus/ui/spawn_dialog.dart';
 import '../support/fake_session_repository.dart';
@@ -27,6 +28,13 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
     spawnedPrompt = prompt;
     return const Result.ok(null);
   }
+}
+
+class _NodesRepo extends FakeSessionRepository {
+  _NodesRepo(this._nodes);
+  final List<NodeRef> _nodes;
+  @override
+  Future<Result<List<NodeRef>>> nodes() async => Result.ok(_nodes);
 }
 
 class _FailingSpawnRepo extends FakeSessionRepository {
@@ -103,6 +111,21 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.spawnedPrompt, equals('the text'));
+  });
+
+  testWidgets('node without tmux disables spawn and shows a hint',
+      (tester) async {
+    final repo = _NodesRepo(const [NodeRef('n1', 'box', spawnSupported: false)]);
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'do it');
+    await tester.pump();
+
+    // Even with a prompt, a non-tmux node can't spawn.
+    final spawnFinder = find.widgetWithText(TextButton, 'Spawn');
+    expect(tester.widget<TextButton>(spawnFinder).onPressed, isNull);
+    expect(find.textContaining('tmux is not available'), findsOneWidget);
   });
 
   testWidgets('error path shows a SnackBar and keeps the dialog open',

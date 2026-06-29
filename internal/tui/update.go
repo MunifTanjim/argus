@@ -272,9 +272,11 @@ func (m model) spawnCmd(cwd, nodeID, prompt string) tea.Cmd {
 	}
 }
 
-// fetchSpawnNodes asks the gateway which nodes are connected so New can route the
-// spawn. A plain local node has no nodes.list handler (the call errors); that and
-// the ≤1-node cases fall back to an immediate local spawn.
+// fetchSpawnNodes asks which nodes can be a spawn target so New can route (and
+// gate) the spawn. A gateway returns every connected node; a plain local node
+// returns just itself (empty NodeID) with its tmux/spawn capability. Only a true
+// call error (e.g. an older node without the handler) yields no nodes, leaving
+// node_id empty for an immediate local spawn.
 func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {

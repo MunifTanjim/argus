@@ -620,6 +620,6 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Capabilities, peer, events))
 	<-peer.Done()
 }

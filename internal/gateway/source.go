@@ -20,6 +20,8 @@ type Source interface {
 	ID() string
 	// Label is a human-friendly name, e.g. the hostname.
 	Label() string
+	// Capabilities reports what the node supports (e.g. spawn = tmux present).
+	Capabilities() api.NodeCapabilities
 	// Snapshot returns the source's current sessions (node-local ids).
 	Snapshot() []session.Session
 	// Subscribe returns the source's live event stream and a cancel function.
@@ -36,18 +38,20 @@ type Source interface {
 // to the Source interface, with no serialization or network hop.
 type InProcessSource struct {
 	id, label string
+	caps      api.NodeCapabilities
 	reg       *registry.Registry
 	dispatch  api.DispatchFunc
 	done      chan struct{} // never closed: the local engine is always present
 }
 
 // NewInProcessSource wraps a local registry and control dispatch as a Source.
-func NewInProcessSource(id, label string, reg *registry.Registry, dispatch api.DispatchFunc) *InProcessSource {
-	return &InProcessSource{id: id, label: label, reg: reg, dispatch: dispatch, done: make(chan struct{})}
+func NewInProcessSource(id, label string, caps api.NodeCapabilities, reg *registry.Registry, dispatch api.DispatchFunc) *InProcessSource {
+	return &InProcessSource{id: id, label: label, caps: caps, reg: reg, dispatch: dispatch, done: make(chan struct{})}
 }
 
 func (s *InProcessSource) ID() string                                 { return s.id }
 func (s *InProcessSource) Label() string                              { return s.label }
+func (s *InProcessSource) Capabilities() api.NodeCapabilities         { return s.caps }
 func (s *InProcessSource) Snapshot() []session.Session                { return s.reg.Snapshot() }
 func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }
 func (s *InProcessSource) Done() <-chan struct{}                      { return s.done }

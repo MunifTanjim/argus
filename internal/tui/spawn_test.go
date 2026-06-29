@@ -65,7 +65,10 @@ func openSpawn(t *testing.T, c *spawnPickClient) model {
 // carries the chosen node, the picked project's cwd, and the typed prompt.
 func TestSpawnMultiNodeRoutesAndPicksDir(t *testing.T) {
 	c := &spawnPickClient{
-		nodes: []api.NodeInfo{{NodeID: "alpha"}, {NodeID: "beta"}},
+		nodes: []api.NodeInfo{
+			{NodeID: "alpha", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+			{NodeID: "beta", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+		},
 		projects: []session.HistoryProject{
 			{Label: "b1", Cwd: "/beta/1", NodeID: "beta"},
 			{Label: "a1", Cwd: "/alpha/1", NodeID: "alpha"},
@@ -194,7 +197,7 @@ func TestSpawnCustomPathThenPrompt(t *testing.T) {
 // Single node: node step skipped, straight to dir, most-recent pre-selected.
 func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 	c := &spawnPickClient{
-		nodes:    []api.NodeInfo{{NodeID: "only"}},
+		nodes:    []api.NodeInfo{{NodeID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
 	}
 	m := openSpawn(t, c)
@@ -203,6 +206,64 @@ func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 	}
 	if len(m.spawn.dirs) != 1 || m.spawn.cursor != 0 {
 		t.Fatalf("most-recent not pre-selected: dirs=%+v cursor=%d", m.spawn.dirs, m.spawn.cursor)
+	}
+}
+
+// A lone node without tmux must not auto-advance: the node step shows it disabled
+// (marked "no tmux"), and pressing enter on it does nothing.
+func TestSpawnSingleNodeNoTmuxStaysDisabled(t *testing.T) {
+	c := &spawnPickClient{
+		nodes:    []api.NodeInfo{{NodeID: "only", NodeLabel: "only", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
+	}
+	m := openSpawn(t, c)
+	if m.spawn.step != spawnStepNode {
+		t.Fatalf("non-tmux node should stay on node step, got %v", m.spawn.step)
+	}
+	m.width, m.height = 80, 24
+	if !strings.Contains(m.spawnView(), "no tmux") {
+		t.Fatalf("node view should mark the node as having no tmux:\n%s", m.spawnView())
+	}
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // enter on disabled node
+	m = mm.(model)
+	if cmd != nil || m.spawn.step != spawnStepNode {
+		t.Fatalf("enter on a disabled node must be a no-op; step=%v", m.spawn.step)
+	}
+}
+
+// Plain local node (nodes.list returns one self-entry with empty NodeID): when it
+// lacks tmux the flow is gated on the node step; when capable it skips straight to
+// the dir step with node_id left empty (so projects are not filtered away).
+func TestSpawnLocalNodeNoTmuxGated(t *testing.T) {
+	c := &spawnPickClient{
+		nodes:    []api.NodeInfo{{NodeLabel: "box", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
+	}
+	m := openSpawn(t, c)
+	if m.spawn.step != spawnStepNode {
+		t.Fatalf("non-tmux local node should stay on node step, got %v", m.spawn.step)
+	}
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = mm.(model)
+	if cmd != nil || m.spawn.step != spawnStepNode {
+		t.Fatalf("enter on disabled local node must be a no-op; step=%v", m.spawn.step)
+	}
+}
+
+func TestSpawnLocalNodeWithTmuxSkipsToDir(t *testing.T) {
+	c := &spawnPickClient{
+		nodes:    []api.NodeInfo{{NodeLabel: "box", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
+	}
+	m := openSpawn(t, c)
+	if m.spawn.step != spawnStepDir {
+		t.Fatalf("capable local node should skip to dir, got %v", m.spawn.step)
+	}
+	if m.spawn.nodeID != "" {
+		t.Fatalf("local node_id must stay empty, got %q", m.spawn.nodeID)
+	}
+	if len(m.spawn.dirs) != 1 { // project (empty NodeID) not filtered away
+		t.Fatalf("projects should be unfiltered for the local node: %+v", m.spawn.dirs)
 	}
 }
 

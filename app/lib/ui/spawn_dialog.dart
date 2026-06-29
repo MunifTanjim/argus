@@ -54,9 +54,18 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     _vm.spawn.addListener(_onCommand);
     final nodes = nodesFromSessions(ref.read(sessionsProvider).values);
     if (nodes.length >= 2) {
-      _nodeId = nodes.first.id;
+      _nodeId = _defaultNodeId(nodes);
     }
     _loadNodes();
+  }
+
+  // Prefer a spawn-capable (tmux) node as the default selection; fall back to the
+  // first node so the picker still shows a (disabled) selection when none qualify.
+  String? _defaultNodeId(List<NodeRef> nodes) {
+    for (final n in nodes) {
+      if (n.spawnSupported) return n.id;
+    }
+    return nodes.isNotEmpty ? nodes.first.id : null;
   }
 
   Future<void> _loadNodes() async {
@@ -68,7 +77,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
           _remoteNodes = value;
           if (value.length >= 2 &&
               (_nodeId == null || !value.any((n) => n.id == _nodeId))) {
-            _nodeId = value.first.id;
+            _nodeId = _defaultNodeId(value);
           }
         });
       case Ok():
@@ -122,6 +131,23 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     final nodes = _remoteNodes.isNotEmpty ? _remoteNodes : sessionNodes;
     final busy = _vm.spawn.running;
 
+    // The node the spawn will target: the explicit selection, or the sole node
+    // when there's no picker. A node that lacks tmux can't spawn, so the button
+    // is disabled with a hint. Unknown target (no nodes) stays enabled — the node
+    // rejects it server-side if tmux is missing.
+    NodeRef? selectedNode;
+    if (_nodeId != null) {
+      for (final n in nodes) {
+        if (n.id == _nodeId) {
+          selectedNode = n;
+          break;
+        }
+      }
+    } else if (nodes.length == 1) {
+      selectedNode = nodes.first;
+    }
+    final spawnable = selectedNode?.spawnSupported ?? true;
+
     final allProjects = ref.watch(historyProjectsProvider).value ??
         const <HistoryProject>[];
     final projects = [
@@ -141,7 +167,13 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               isExpanded: true,
               items: [
                 for (final n in nodes)
-                  DropdownMenuItem(value: n.id, child: Text(n.label)),
+                  DropdownMenuItem(
+                    value: n.id,
+                    enabled: n.spawnSupported,
+                    child: Text(
+                      n.spawnSupported ? n.label : '${n.label} (no tmux)',
+                    ),
+                  ),
               ],
               onChanged: (v) => setState(() {
                 _nodeId = v;
@@ -186,6 +218,16 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
             keyboardType: TextInputType.multiline,
             onChanged: (v) => setState(() => _prompt = v),
           ),
+          if (!spawnable)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'tmux is not available on this node — spawning is disabled.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+              ),
+            ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -195,7 +237,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
                 child: const Text('Cancel'),
               ),
               TextButton(
-                onPressed: (busy || _prompt.trim().isEmpty) ? null : _spawn,
+                onPressed:
+                    (busy || _prompt.trim().isEmpty || !spawnable) ? null : _spawn,
                 child: busy
                     ? const SizedBox(
                         width: 16,

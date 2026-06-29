@@ -4,7 +4,13 @@ import '../models/session.dart';
 class NodeRef {
   final String id;
   final String label;
-  const NodeRef(this.id, this.label);
+
+  /// Whether this node can spawn sessions (tmux present). Defaults to true:
+  /// session-derived nodes already host sessions, and an older gateway that
+  /// omits the flag is assumed capable.
+  final bool spawnSupported;
+
+  const NodeRef(this.id, this.label, {this.spawnSupported = true});
 }
 
 List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {

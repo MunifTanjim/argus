@@ -16,6 +16,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPing, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
 	srv.Handle(api.MethodSessionsList, d.handleSessionsList)
 	srv.Handle(api.MethodNodeIdentify, d.handleNodeIdentify)
+	srv.Handle(api.MethodNodesList, d.handleNodesList)
 	srv.Handle(api.MethodSessionsRefresh, d.handleSessionsRefresh)
 	srv.Handle(claudecode.HookMethod, d.handleHook)
 	srv.Handle(api.MethodSessionTranscriptView, d.handleTranscriptView)

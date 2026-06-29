@@ -1,6 +1,54 @@
 package node
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tmux"
+)
+
+// A node without tmux must advertise no spawn support and reject sessions.spawn
+// with an error, even if a client bypasses the UI gating.
+func TestSpawnGuardAndIdentifyReportTmux(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{
+		session.TmuxServerArgus: tmux.New("argus-guard-test"),
+	})
+
+	d.caps.SpawnSession = false // simulate a host without the tmux binary
+	if r, _ := d.handleNodeIdentify(context.Background(), nil); r.(api.IdentifyResult).Capabilities.SpawnSession {
+		t.Fatal("identify should report spawn_session=false")
+	}
+	if _, err := d.handleSessionSpawn(context.Background(), nil); err == nil {
+		t.Fatal("spawn should be rejected when tmux is unavailable")
+	}
+
+	d.caps.SpawnSession = true
+	if r, _ := d.handleNodeIdentify(context.Background(), nil); !r.(api.IdentifyResult).Capabilities.SpawnSession {
+		t.Fatal("identify should report spawn_session=true")
+	}
+}
+
+// A plain node answers nodes.list with just itself: an empty NodeID (addressed
+// implicitly, no routing namespace) carrying its spawn capability, so a direct
+// client can gate the spawn UI.
+func TestNodesListReportsSelf(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{
+		session.TmuxServerArgus: tmux.New("argus-list-test"),
+	})
+	d.label = "boxy"
+	d.caps.SpawnSession = false
+
+	r, _ := d.handleNodesList(context.Background(), nil)
+	got := r.([]api.NodeInfo)
+	if len(got) != 1 {
+		t.Fatalf("nodes.list = %d entries, want 1", len(got))
+	}
+	if got[0].NodeID != "" || got[0].NodeLabel != "boxy" || got[0].Capabilities.SpawnSession {
+		t.Fatalf("self entry = %+v", got[0])
+	}
+}
 
 func TestDefaultSessionName(t *testing.T) {
 	cases := map[string]string{

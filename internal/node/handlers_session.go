@@ -30,7 +30,17 @@ func (d *Node) handleSessionsList(context.Context, json.RawMessage) (any, error)
 
 // handleNodeIdentify announces this node's identity over the gateway uplink.
 func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error) {
-	return api.IdentifyResult{ID: d.id, Label: d.label}, nil
+	return api.IdentifyResult{ID: d.id, Label: d.label, Capabilities: d.caps}, nil
+}
+
+// handleNodesList lets a client talking directly to a plain node (no gateway)
+// enumerate spawn targets — here, just this node — so it can gate the spawn UI on
+// tmux availability instead of discovering it only when the spawn fails. The
+// NodeID is empty: a plain node has no routing namespace, so the client addresses
+// it implicitly (no node_id on sessions.spawn). The gateway overrides this method
+// with its own cross-node aggregation.
+func (d *Node) handleNodesList(context.Context, json.RawMessage) (any, error) {
+	return []api.NodeInfo{{NodeLabel: d.label, Capabilities: d.caps}}, nil
 }
 
 // handleSessionsRefresh rescans on demand, then returns the current snapshot.
@@ -221,6 +231,12 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	p, err := api.Decode[api.SpawnParams](params)
 	if err != nil {
 		return nil, err
+	}
+	if !d.caps.SpawnSession {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "spawn unavailable: tmux not found on node " + d.label,
+		}
 	}
 	c := d.clients[session.TmuxServerArgus]
 	if p.Name == "" {

@@ -136,18 +136,28 @@ type ClientRemoveParams struct {
 	Token string `json:"token"`
 }
 
+// NodeCapabilities describes what a node supports, so clients can gate features
+// per node. Reported by node.identify and nodes.list; grows as new capabilities
+// are added.
+type NodeCapabilities struct {
+	// SpawnSession reports whether the node can spawn sessions (tmux present).
+	SpawnSession bool `json:"spawn_session"`
+}
+
 // IdentifyResult announces a node's identity to the gateway. ID is the stable
 // node id (the composite-id prefix and routing key); Label is human-friendly.
 type IdentifyResult struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID           string           `json:"id"`
+	Label        string           `json:"label"`
+	Capabilities NodeCapabilities `json:"capabilities"`
 }
 
 // NodeInfo identifies a node connected to the gateway. It is the unit returned by
 // nodes.list and the routing key (NodeID) a client passes to sessions.spawn.
 type NodeInfo struct {
-	NodeID    string `json:"node_id"`
-	NodeLabel string `json:"node_label"`
+	NodeID       string           `json:"node_id"`
+	NodeLabel    string           `json:"node_label"`
+	Capabilities NodeCapabilities `json:"capabilities"`
 }
 
 // SpawnParams launches a new Claude Code session on argus's private tmux server.

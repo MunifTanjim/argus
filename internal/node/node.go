@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -31,6 +32,8 @@ type Node struct {
 
 	id    string // stable node id announced to the gateway (composite-id prefix)
 	label string // human-friendly node name (e.g. hostname)
+
+	caps api.NodeCapabilities // what this node supports (e.g. spawn = tmux present)
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
@@ -89,6 +92,10 @@ func (d *Node) SetIdentity(id, label string) {
 // ID and Label report the node's identity (see SetIdentity).
 func (d *Node) ID() string    { return d.id }
 func (d *Node) Label() string { return d.label }
+
+// Capabilities reports what this node supports (e.g. spawn = tmux available).
+// Clients use it to gate features per node.
+func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 
 // Registry exposes the node's live session store so a co-located gateway can
 // aggregate it as an in-process source.
@@ -150,8 +157,19 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	if host == "" {
 		host = "argusd"
 	}
+	// Probe tmux once at construction: spawn (and pane control) needs it, so a
+	// node without it advertises no spawn support rather than failing at use. The
+	// probe is bounded so a wedged tmux binary can't hang startup.
+	var caps api.NodeCapabilities
+	if c, ok := clients[session.TmuxServerArgus]; ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		caps.SpawnSession = c.Available(ctx)
+		cancel()
+	}
+
 	d := &Node{
 		reg: reg, disc: disc, clients: clients, id: host, label: host,
+		caps:    caps,
 		log:     slog.New(slog.DiscardHandler),
 		pending: map[string]*pendingDecision{},
 		conns:   map[api.Notifier]*connSubs{},

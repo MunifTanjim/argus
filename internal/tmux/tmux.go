@@ -115,6 +115,15 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// Available reports whether the tmux binary is present and runnable. `tmux -V`
+// just prints the version (it does not start a server), so it's a cheap probe.
+// Spawning sessions and all pane control require tmux; a node without it can
+// still observe nothing but should not advertise spawn support.
+func (c *Client) Available(ctx context.Context) bool {
+	_, err := c.Version(ctx)
+	return err == nil
+}
+
 // Pane is one tmux pane and the process running in it.
 type Pane struct {
 	PaneID         string // stable "%N" identifier

@@ -151,16 +151,19 @@ void main() {
     expect(frames.single, contains('"method":"nodes.list"'));
     final id = idOf(frames.single);
     incoming.add(RpcMessage.fromJson(jsonDecode(
-        '{"jsonrpc":"2.0","id":"$id","result":[{"node_id":"n1","node_label":"Box One"},{"node_id":"n2","node_label":""}]}')));
+        '{"jsonrpc":"2.0","id":"$id","result":[{"node_id":"n1","node_label":"Box One","capabilities":{"spawn_session":false}},{"node_id":"n2","node_label":"","capabilities":{"spawn_session":true}}]}')));
 
     final result = await fut;
     final nodes = (result as Ok<List<NodeRef>>).value;
     expect(nodes, hasLength(2));
     expect(nodes[0].id, 'n1');
     expect(nodes[0].label, 'Box One');
+    // capabilities.spawn_session is parsed onto the NodeRef.
+    expect(nodes[0].spawnSupported, isFalse);
     // Empty label falls back to the id.
     expect(nodes[1].id, 'n2');
     expect(nodes[1].label, 'n2');
+    expect(nodes[1].spawnSupported, isTrue);
   });
 
   test('null client: nodes returns Error', () async {

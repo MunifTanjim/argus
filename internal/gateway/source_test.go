@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 )
 
@@ -12,7 +13,7 @@ func TestInProcessSourceCallMarshalsDispatchResult(t *testing.T) {
 	dispatch := func(_ context.Context, method string, params json.RawMessage) (any, error) {
 		return map[string]string{"method": method, "params": string(params)}, nil
 	}
-	src := NewInProcessSource("home", "home-box", registry.New(), dispatch)
+	src := NewInProcessSource("home", "home-box", api.NodeCapabilities{SpawnSession: true}, registry.New(), dispatch)
 
 	if src.ID() != "home" || src.Label() != "home-box" {
 		t.Fatalf("identity: %q/%q", src.ID(), src.Label())
@@ -43,7 +44,7 @@ func TestInProcessSourceRoutesThroughAggregator(t *testing.T) {
 		return map[string]bool{"ok": true}, nil
 	}
 	a := New(0)
-	a.AddSource(NewInProcessSource("home", "home-box", registry.New(), dispatch))
+	a.AddSource(NewInProcessSource("home", "home-box", api.NodeCapabilities{SpawnSession: true}, registry.New(), dispatch))
 
 	if _, err := a.Route(context.Background(), "sessions.kill", json.RawMessage(`{"session_id":"home:default:%1"}`)); err != nil {
 		t.Fatalf("route: %v", err)

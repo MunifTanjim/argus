@@ -264,7 +264,7 @@ func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tun
 		return nil
 	}
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Registry(), d.DispatchFunc()))
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
 	// Client connections authenticate with either the master token (admin: the TUI
 	// and `argus pair`/`unpair`) or a minted per-client token (revocable devices).
 	store := clienttoken.New(config.GetStatePath("client-tokens"))
