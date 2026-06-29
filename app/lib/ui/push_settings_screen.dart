@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../push/push_controller.dart';
 import '../state/push.dart';
+import '../transport/jsonrpc.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
@@ -173,10 +174,41 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       await _controller.sendTest();
       if (mounted) _toast('Test notification sent — check your notifications');
       return;
+    } on RpcError catch (e) {
+      // The gateway pruned a permanently dead target: re-registering the same
+      // endpoint would just fail again, so force a fresh one instead.
+      if (e.code == pushGoneCode) {
+        await _recoverGoneAndRetry();
+        return;
+      }
+      // Other RPC failure (e.g. no/stale registration): re-register and retry.
     } catch (_) {
-      // The gateway may have no/stale registration for this device. Re-register
-      // and retry once.
+      // Not connected yet / no target: re-register and retry.
     }
+    await _reregisterAndRetry();
+  }
+
+  /// The cached endpoint is gone: mint a fresh one, then retry the test.
+  Future<void> _recoverGoneAndRetry() async {
+    if (mounted) _toast('Push endpoint expired — refreshing…');
+    final ok = await _controller.reregister(force: true);
+    if (!mounted) return;
+    if (!ok) {
+      _toast(
+        "Could not refresh the push endpoint. Clear the app's data or "
+        'reinstall to mint a new push token, then try again.',
+      );
+      return;
+    }
+    await _sendTestThenToast(
+      onSuccess: 'Refreshed and sent test — check your notifications',
+      onFailure: 'Refreshed, but the test still failed — the push token may be '
+          "dead. Clear the app's data or reinstall to mint a new one.",
+    );
+  }
+
+  /// Stale/missing registration: re-register the current endpoint, then retry.
+  Future<void> _reregisterAndRetry() async {
     if (mounted) _toast('Re-registering with the gateway…');
     final ok = await _controller.reregister();
     if (!mounted) return;
@@ -184,17 +216,23 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       _toast('Re-registration failed — check the connection and distributor');
       return;
     }
+    await _sendTestThenToast(
+      onSuccess: 'Re-registered and sent test — check your notifications',
+      onFailure: 'Re-registered, but test still failed — try again in a moment',
+    );
+  }
+
+  /// Sends a test notification and toasts the outcome; [onFailure] gets the error
+  /// appended.
+  Future<void> _sendTestThenToast({
+    required String onSuccess,
+    required String onFailure,
+  }) async {
     try {
       await _controller.sendTest();
-      if (mounted) {
-        _toast('Re-registered and sent test — check your notifications');
-      }
+      if (mounted) _toast(onSuccess);
     } catch (e) {
-      if (mounted) {
-        _toast(
-          'Re-registered, but test still failed — try again in a moment: $e',
-        );
-      }
+      if (mounted) _toast('$onFailure ($e)');
     }
   }
 

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -429,7 +430,13 @@ func (s *Server) registerPush(srv *api.Server) {
 		sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		if err := s.pushSender.SendTo(sctx, p.DeviceID, n); err != nil {
-			return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+			code := api.CodeInternalError
+			if errors.Is(err, push.ErrGone) {
+				// Target is dead and already pruned; tell the client to mint a
+				// fresh endpoint instead of re-registering the same one.
+				code = api.CodePushGone
+			}
+			return nil, &api.RPCError{Code: code, Message: err.Error()}
 		}
 		return nil, nil
 	})

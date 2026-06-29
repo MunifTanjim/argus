@@ -3,11 +3,13 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -118,6 +120,48 @@ func TestSpawnWithoutNodeIDAmbiguousFails(t *testing.T) {
 	if _, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"name":"x"}`)); err == nil {
 		t.Fatal("want error when node_id omitted with multiple nodes, got nil")
+	}
+}
+
+// goneSender is a push.Sender that always reports its target gone, so push.test
+// can be exercised against the prune-and-report path.
+type goneSender struct{}
+
+func (goneSender) Send(context.Context, push.Target, push.Notification) error {
+	return fmt.Errorf("%w: 410 gone https://example/ep", push.ErrGone)
+}
+
+// TestPushTestReturnsGoneCode verifies push.test surfaces CodePushGone (not the
+// generic internal error) when the target is gone, so the client knows to mint a
+// fresh endpoint rather than re-register the dead one.
+func TestPushTestReturnsGoneCode(t *testing.T) {
+	a := New(time.Second)
+	srv := NewServer(a, nil, nil)
+	store := push.NewStore(t.TempDir())
+	srv.SetPush(store, push.NewDispatcher(store, goneSender{}, nil))
+
+	dispatch := srv.clientSrv.DispatchFunc()
+	if _, err := dispatch(context.Background(), api.MethodPushRegister,
+		json.RawMessage(`{"device_id":"d1","endpoint":"https://example/ep"}`)); err != nil {
+		t.Fatalf("push.register: %v", err)
+	}
+
+	_, err := dispatch(context.Background(), api.MethodPushTest,
+		json.RawMessage(`{"device_id":"d1"}`))
+	rpcErr, ok := err.(*api.RPCError)
+	if !ok {
+		t.Fatalf("want *api.RPCError, got %T: %v", err, err)
+	}
+	if rpcErr.Code != api.CodePushGone {
+		t.Fatalf("want CodePushGone (%d), got %d", api.CodePushGone, rpcErr.Code)
+	}
+
+	// The gone target must have been pruned, so a follow-up test finds no record.
+	if _, _, gerr := store.Get("d1"); gerr != nil {
+		t.Fatalf("store.Get: %v", gerr)
+	}
+	if recs, _ := store.List(); len(recs) != 0 {
+		t.Fatalf("want target pruned, got %d records", len(recs))
 	}
 }
 

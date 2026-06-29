@@ -321,6 +321,15 @@ const (
 	CodeInternalError  = -32603
 )
 
+// Application-defined error codes (outside the JSON-RPC reserved range).
+const (
+	// CodePushGone marks a push.test against a permanently dead target (HTTP
+	// 404/410). The gateway has already pruned the stale registration; the client
+	// uses this to force a fresh endpoint from its distributor rather than
+	// re-registering the same dead one.
+	CodePushGone = 410
+)
+
 // TranscriptSubscribeParams opens a subscription. AgentID selects a subagent
 // trace; empty means the session transcript. HaveChunks is how many chunks the
 // client already has cached (0 = none), used to send a minimal catch-up.

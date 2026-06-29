@@ -14,6 +14,12 @@ import 'unifiedpush_provider.dart';
 /// distributor, preferred by default when no distributor has been chosen.
 const appPackageName = 'dev.muniftanjim.argus';
 
+/// RPC error code the gateway returns from push.test when the device's target is
+/// permanently gone (HTTP 404/410) — mirrors api.CodePushGone on the gateway. The
+/// gateway has already pruned the dead record; the client must mint a fresh
+/// endpoint (see [PushController.reregister] with force) rather than re-register it.
+const pushGoneCode = 410;
+
 /// PushController coordinates push end to end over UnifiedPush / Web Push. It
 /// activates a distributor (the embedded FCM one by default, or an external/chosen
 /// one), shows incoming messages, tracks the device [target] and (re)registers it
@@ -98,13 +104,29 @@ class PushController {
   /// failed test, or the gateway pruned a gone target). Re-requests an endpoint
   /// from the distributor and re-registers it with the gateway, bypassing the
   /// per-connection dedupe. Returns true once the gateway acknowledges.
-  Future<bool> reregister() async {
+  ///
+  /// With [force] (push.test returned [pushGoneCode]: the cached endpoint is
+  /// permanently dead), the dead target is dropped everywhere — persisted,
+  /// in-memory, and the distributor's last-emitted endpoint — and only a brand-new
+  /// endpoint is registered; the dead one is never resurrected. Returns false if no
+  /// fresh endpoint could be obtained (the push token is likely dead; the user must
+  /// clear app data / reinstall to mint a new one).
+  Future<bool> reregister({bool force = false}) async {
     _registeredTarget = null; // bypass dedupe so the register actually fires
     _registerInFlight = null;
-    // refresh() waits for the fresh endpoint, during which _setTarget may start
-    // its own registration; _registerIfPossible then awaits that same in-flight
-    // RPC rather than returning before it completes.
-    await _active?.refresh();
+    if (force) {
+      await _targetStore.clear();
+      _target = null;
+      final fresh = await _unifiedPush.forceFreshTarget();
+      if (fresh == null) return false;
+      _target = fresh;
+      await _targetStore.save(fresh);
+    } else {
+      // refresh() waits for the fresh endpoint, during which _setTarget may start
+      // its own registration; _registerIfPossible then awaits that same in-flight
+      // RPC rather than returning before it completes.
+      await _active?.refresh();
+    }
     return _registerIfPossible();
   }
 

@@ -93,22 +93,40 @@ class UnifiedPushProvider implements PushProvider {
   /// Forces the distributor to re-emit the endpoint (via onNewEndpoint) and waits
   /// for it to arrive, so callers can register the fresh endpoint immediately.
   /// Skips the embedded distributor until its required VAPID key is known; returns
-  /// without waiting if no endpoint arrives within the timeout.
+  /// without waiting if no endpoint arrives within the timeout (the caller falls
+  /// back to the currently known target).
   @override
-  Future<void> refresh() async {
+  Future<void> refresh() => _freshEndpoint();
+
+  /// Drops the distributor's cached endpoint and forces a brand-new one, returning
+  /// the fresh target — never a stale fallback. Used to recover from a gone
+  /// endpoint: unlike [refresh] (which reuses the cached endpoint and so can't
+  /// recover a dead one), this unregisters first so the dead endpoint can't be
+  /// re-emitted. Returns null if skipped or no endpoint arrives in time.
+  Future<PushTarget?> forceFreshTarget() => _freshEndpoint(unregisterFirst: true);
+
+  /// Asks the distributor to (re-)emit its endpoint and returns it. Skips the
+  /// embedded distributor until its required VAPID key is known. When
+  /// [unregisterFirst] is set, the cached endpoint is dropped first (via
+  /// [UnifiedPush.unregister]'s onUnregistered) so a dead one can't be re-emitted.
+  /// Returns null if skipped or no endpoint arrives within the timeout.
+  Future<PushTarget?> _freshEndpoint({bool unregisterFirst = false}) async {
     if (preferredDistributor != null &&
         await savedDistributor() == preferredDistributor &&
         vapidPubKey == null) {
-      return;
+      return null;
     }
-    // Subscribe before register() so the resulting endpoint isn't missed.
+    // Subscribe before unregister/register so the resulting endpoint isn't missed.
     final next = unifiedPushEndpoints.first;
+    if (unregisterFirst) await UnifiedPush.unregister();
     try {
       await register();
-      await next.timeout(const Duration(seconds: 10));
+      return await next.timeout(const Duration(seconds: 10));
     } on TimeoutException {
-      // Distributor produced no endpoint in time; the caller falls back to the
-      // currently known target.
+      // No endpoint within the window. An endpoint that arrives later still
+      // self-registers via the start() listener (_setTarget), so a timeout here
+      // is recoverable on the next attempt rather than terminal.
+      return null;
     }
   }
 
