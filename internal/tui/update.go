@@ -272,19 +272,18 @@ func (m model) spawnCmd(cwd, nodeID, prompt string) tea.Cmd {
 	}
 }
 
-// fetchSpawnNodes asks which nodes can be a spawn target so New can route (and
-// gate) the spawn. A gateway returns every connected node; a plain local node
-// returns just itself (empty NodeID) with its tmux/spawn capability. Only a true
-// call error (e.g. an older node without the handler) yields no nodes, leaving
-// node_id empty for an immediate local spawn.
+// fetchSpawnNodes asks which nodes can be a spawn target (via server.info) so New
+// can route (and gate) the spawn. A gateway returns every connected node; a plain
+// local node returns just itself (empty ID) with its tmux/spawn capability. A call
+// error yields no nodes, leaving node_id empty for an immediate local spawn.
 func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		var nodes []api.NodeInfo
-		err := client.Call(api.MethodNodesList, nil, &nodes)
+		var info api.ServerInfo
+		err := client.Call(api.MethodServerInfo, nil, &info)
 		var projects []session.HistoryProject
 		_ = client.Call(api.MethodSessionsHistoryProjects, nil, &projects)
-		return spawnNodesMsg{nodes: nodes, projects: projects, cwd: cwd, err: err}
+		return spawnNodesMsg{nodes: info.Nodes, projects: projects, cwd: cwd, err: err}
 	}
 }
 

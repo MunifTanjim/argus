@@ -36,7 +36,7 @@ class SpawnDialogBody extends ConsumerStatefulWidget {
 
 class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   late final SpawnViewModel _vm;
-  // Nodes from nodes.list; preferred over session-derived nodes so a target is
+  // Nodes from server.info; preferred over session-derived nodes so a target is
   // offered even with zero sessions. Empty until the call returns.
   List<NodeRef> _remoteNodes = const [];
   String? _nodeId;

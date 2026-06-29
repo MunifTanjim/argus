@@ -59,30 +59,34 @@ func TestRefreshFansOutToNodes(t *testing.T) {
 	}
 }
 
-// nodes.list returns every connected node so a client can pick a spawn target
-// without first having a session there.
-func TestNodesListReturnsConnectedNodes(t *testing.T) {
+// server.info reports the version set via SetVersion plus every connected node,
+// so a client can both show the version and pick a spawn target.
+func TestServerInfoReportsVersionAndNodes(t *testing.T) {
 	a := New(time.Second)
 	a.AddSource(newFakeSource("home", "home-box"))
 	a.AddSource(newFakeSource("dev", "dev-box"))
-
 	srv := NewServer(a, nil, nil)
+	srv.SetVersion("1.2.3")
 	dispatch := srv.clientSrv.DispatchFunc()
-	res, err := dispatch(context.Background(), api.MethodNodesList, nil)
+
+	res, err := dispatch(context.Background(), api.MethodServerInfo, nil)
 	if err != nil {
-		t.Fatalf("nodes.list dispatch: %v", err)
+		t.Fatalf("server.info dispatch: %v", err)
 	}
 	raw, _ := json.Marshal(res)
-	var nodes []api.NodeInfo
-	if err := json.Unmarshal(raw, &nodes); err != nil {
-		t.Fatalf("decode nodes: %v (%s)", err, raw)
+	var info api.ServerInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		t.Fatalf("decode info: %v (%s)", err, raw)
+	}
+	if info.Version != "1.2.3" {
+		t.Fatalf("version = %q, want 1.2.3", info.Version)
 	}
 	got := map[string]string{}
-	for _, n := range nodes {
-		got[n.NodeID] = n.NodeLabel
+	for _, n := range info.Nodes {
+		got[n.ID] = n.Label
 	}
 	if got["home"] != "home-box" || got["dev"] != "dev-box" {
-		t.Fatalf("nodes = %+v, want home-box/dev-box", nodes)
+		t.Fatalf("nodes = %+v, want home-box/dev-box", info.Nodes)
 	}
 }
 

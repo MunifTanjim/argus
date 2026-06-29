@@ -64,12 +64,13 @@ func (a *Aggregator) Nodes() []api.NodeInfo {
 	out := make([]api.NodeInfo, 0, len(a.sources))
 	for id, st := range a.sources {
 		out = append(out, api.NodeInfo{
-			NodeID:       id,
-			NodeLabel:    st.src.Label(),
+			ID:           id,
+			Label:        st.src.Label(),
+			Version:      st.src.Version(),
 			Capabilities: st.src.Capabilities(),
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].NodeLabel < out[j].NodeLabel })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Label < out[j].Label })
 	return out
 }
 

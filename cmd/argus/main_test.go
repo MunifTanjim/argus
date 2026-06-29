@@ -99,11 +99,11 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	defer c.Close()
 
 	// The returned client talks to the gateway, so once the uplink establishes the
-	// embedded node shows up in its nodes.list — proving the TUI sees the fleet.
+	// embedded node shows up in its server.info — proving the TUI sees the fleet.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		var nodes []api.NodeInfo
-		if c.Call(api.MethodNodesList, nil, &nodes) == nil && len(nodes) > 0 {
+		var info api.ServerInfo
+		if c.Call(api.MethodServerInfo, nil, &info) == nil && len(info.Nodes) > 0 {
 			return
 		}
 		if time.Now().After(deadline) {

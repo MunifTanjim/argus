@@ -137,7 +137,7 @@ void main() {
     expect(frames.single, contains('"cwd":"/p"'));
   });
 
-  test('nodes emits nodes.list and parses node_id/node_label', () async {
+  test('nodes derives from server.info and parses id/label', () async {
     final frames = <String>[];
     final incoming = StreamController<RpcMessage>();
     final client =
@@ -148,10 +148,10 @@ void main() {
 
     final fut = SessionService(() => client).nodes();
     await Future<void>.delayed(Duration.zero);
-    expect(frames.single, contains('"method":"nodes.list"'));
+    expect(frames.single, contains('"method":"server.info"'));
     final id = idOf(frames.single);
     incoming.add(RpcMessage.fromJson(jsonDecode(
-        '{"jsonrpc":"2.0","id":"$id","result":[{"node_id":"n1","node_label":"Box One","capabilities":{"spawn_session":false}},{"node_id":"n2","node_label":"","capabilities":{"spawn_session":true}}]}')));
+        '{"jsonrpc":"2.0","id":"$id","result":{"version":"1.0","nodes":[{"id":"n1","label":"Box One","capabilities":{"spawn_session":false}},{"id":"n2","label":"","capabilities":{"spawn_session":true}}]}}')));
 
     final result = await fut;
     final nodes = (result as Ok<List<NodeRef>>).value;
@@ -164,6 +164,30 @@ void main() {
     expect(nodes[1].id, 'n2');
     expect(nodes[1].label, 'n2');
     expect(nodes[1].spawnSupported, isTrue);
+  });
+
+  test('serverInfo emits server.info and parses version + nodes', () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client =
+        RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+
+    String idOf(String frame) =>
+        (jsonDecode(frame.trim()) as Map<String, dynamic>)['id'] as String;
+
+    final fut = SessionService(() => client).serverInfo();
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.single, contains('"method":"server.info"'));
+    final id = idOf(frames.single);
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","result":{"version":"1.2.3","nodes":[{"id":"n1","label":"Box","version":"1.2.3","capabilities":{"spawn_session":true}}]}}')));
+
+    final info = (await fut as Ok<ServerInfo>).value;
+    expect(info.version, '1.2.3');
+    expect(info.nodes, hasLength(1));
+    expect(info.nodes[0].label, 'Box');
+    expect(info.nodes[0].version, '1.2.3');
+    expect(info.nodes[0].spawnSupported, isTrue);
   });
 
   test('null client: nodes returns Error', () async {

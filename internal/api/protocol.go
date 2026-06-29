@@ -45,12 +45,12 @@ const (
 	// MethodSessionToolDetail: one tool item's full input/result from a past
 	// session's transcript, addressed by node-local path.
 	MethodSessionHistoryToolDetail = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
-	// MethodNodesList returns the nodes currently connected to the gateway, so a
-	// client can offer a spawn target without first having a session on each node.
-	MethodNodesList = "nodes.list" // request: no params; result: []NodeInfo
 	// MethodNodeIdentify is called by the gateway over a node uplink to learn the
 	// node's stable id and label before aggregating it.
 	MethodNodeIdentify = "node.identify" // request: no params; result: IdentifyResult
+	// MethodServerInfo returns server-wide metadata (version + connected nodes)
+	// for a connected client to display.
+	MethodServerInfo = "server.info" // request: no params; result: ServerInfo
 	// MethodTranscriptSubscribe opens a streaming transcript subscription.
 	MethodTranscriptSubscribe = "transcript.subscribe" // request: TranscriptSubscribeParams; result: TranscriptDelta
 	// MethodTranscriptUnsubscribe closes a streaming transcript subscription.
@@ -137,11 +137,19 @@ type ClientRemoveParams struct {
 }
 
 // NodeCapabilities describes what a node supports, so clients can gate features
-// per node. Reported by node.identify and nodes.list; grows as new capabilities
+// per node. Reported by node.identify and server.info; grows as new capabilities
 // are added.
 type NodeCapabilities struct {
 	// SpawnSession reports whether the node can spawn sessions (tmux present).
 	SpawnSession bool `json:"spawn_session"`
+}
+
+// ServerInfo carries server-wide metadata for a connected client (e.g. the
+// settings screen): the server binary's version and the currently connected
+// nodes. Served by the gateway, which aggregates the nodes.
+type ServerInfo struct {
+	Version string     `json:"version"`
+	Nodes   []NodeInfo `json:"nodes"`
 }
 
 // IdentifyResult announces a node's identity to the gateway. ID is the stable
@@ -149,14 +157,16 @@ type NodeCapabilities struct {
 type IdentifyResult struct {
 	ID           string           `json:"id"`
 	Label        string           `json:"label"`
+	Version      string           `json:"version"` // node's binary version
 	Capabilities NodeCapabilities `json:"capabilities"`
 }
 
-// NodeInfo identifies a node connected to the gateway. It is the unit returned by
-// nodes.list and the routing key (NodeID) a client passes to sessions.spawn.
+// NodeInfo identifies a node connected to the gateway. It is the unit returned in
+// server.info; ID is the routing key a client passes to sessions.spawn (as node_id).
 type NodeInfo struct {
-	NodeID       string           `json:"node_id"`
-	NodeLabel    string           `json:"node_label"`
+	ID           string           `json:"id"`
+	Label        string           `json:"label"`
+	Version      string           `json:"version"` // node's binary version
 	Capabilities NodeCapabilities `json:"capabilities"`
 }
 

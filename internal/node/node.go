@@ -30,8 +30,9 @@ type Node struct {
 	server  *api.Server
 	clients map[session.TmuxServer]*tmux.Client
 
-	id    string // stable node id announced to the gateway (composite-id prefix)
-	label string // human-friendly node name (e.g. hostname)
+	id      string // stable node id announced to the gateway (composite-id prefix)
+	label   string // human-friendly node name (e.g. hostname)
+	version string // binary version, reported to clients via identify/server.info
 
 	caps api.NodeCapabilities // what this node supports (e.g. spawn = tmux present)
 
@@ -89,9 +90,14 @@ func (d *Node) SetIdentity(id, label string) {
 	}
 }
 
+// SetVersion records the node's binary version, reported to clients via
+// identify/server.info. Call before Run.
+func (d *Node) SetVersion(v string) { d.version = v }
+
 // ID and Label report the node's identity (see SetIdentity).
-func (d *Node) ID() string    { return d.id }
-func (d *Node) Label() string { return d.label }
+func (d *Node) ID() string      { return d.id }
+func (d *Node) Label() string   { return d.label }
+func (d *Node) Version() string { return d.version }
 
 // Capabilities reports what this node supports (e.g. spawn = tmux available).
 // Clients use it to gate features per node.

@@ -52,6 +52,7 @@ type Server struct {
 	pushSender   *push.Dispatcher       // routes a push to its backend (for push.test)
 	vapidPubKey  string                 // VAPID public key served to devices (push.vapidKey)
 	master       string                 // master token; a /client conn presenting it is admin
+	version      string                 // server binary version, served via server.info
 	publicURL    atomic.Pointer[string] // gateway's reachable base URL for pairing QRs
 
 	pairMu      sync.Mutex
@@ -91,6 +92,10 @@ func (s *Server) SetPush(store *push.Store, dispatcher *push.Dispatcher) {
 // SetVAPIDPublicKey publishes the VAPID public key the app fetches (push.vapidKey)
 // to register a Web Push subscription bound to it (embedded FCM distributor).
 func (s *Server) SetVAPIDPublicKey(key string) { s.vapidPubKey = key }
+
+// SetVersion records the server binary's version, served to clients via
+// server.info (e.g. the app's settings screen). Call before serving.
+func (s *Server) SetVersion(v string) { s.version = v }
 
 // SetPublicURL records the gateway's reachable base URL (scheme://host, no path),
 // returned by clients.pairStart so the pairing QR points back here. Safe to call
@@ -213,10 +218,10 @@ func (s *Server) buildClientServer() *api.Server {
 		})
 	}
 
-	// nodes.list lets a client enumerate connected nodes (for a spawn target)
-	// without first having a session on each.
-	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
-		return s.agg.Nodes(), nil
+	// server.info returns server-wide metadata (version + connected nodes), the
+	// single source for both the about/settings view and the spawn target picker.
+	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
+		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
 	})
 
 	// sessions.spawn has no session_id to route on; route by an explicit node_id.
@@ -620,6 +625,6 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Capabilities, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.Capabilities, peer, events))
 	<-peer.Done()
 }

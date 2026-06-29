@@ -38,7 +38,7 @@ type histTranscriptMsg struct {
 	err    error
 }
 
-// spawnNodesMsg carries the nodes.list reply for a pending "new session" action.
+// spawnNodesMsg carries the server.info reply for a pending "new session" action.
 // cwd is the working dir captured when the user pressed New.
 type spawnNodesMsg struct {
 	nodes    []api.NodeInfo

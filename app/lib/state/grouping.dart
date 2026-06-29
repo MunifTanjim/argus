@@ -5,12 +5,20 @@ class NodeRef {
   final String id;
   final String label;
 
-  /// Whether this node can spawn sessions (tmux present). Defaults to true:
-  /// session-derived nodes already host sessions, and an older gateway that
-  /// omits the flag is assumed capable.
+  /// Whether this node can spawn sessions (tmux present). Defaults to true for
+  /// session-derived nodes (they already host sessions); nodes parsed from
+  /// server.info set it explicitly from the reported capability.
   final bool spawnSupported;
 
-  const NodeRef(this.id, this.label, {this.spawnSupported = true});
+  /// The node's binary version (empty when unknown, e.g. session-derived nodes).
+  final String version;
+
+  const NodeRef(
+    this.id,
+    this.label, {
+    this.spawnSupported = true,
+    this.version = '',
+  });
 }
 
 List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {

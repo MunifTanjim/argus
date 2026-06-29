@@ -70,6 +70,7 @@ func newStartCmd(version string) *cobra.Command {
 
 			d := node.New()
 			d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
+			d.SetVersion(version)
 			// Standalone node: operational logs go to the configured logger (the embedded
 			// node, which shares a TUI's terminal, leaves logging at its discard default).
 			// The tunnel supervisor gets its own scope so its output lands in the same stream.
@@ -264,7 +265,7 @@ func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tun
 		return nil
 	}
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
 	// Client connections authenticate with either the master token (admin: the TUI
 	// and `argus pair`/`unpair`) or a minted per-client token (revocable devices).
 	store := clienttoken.New(config.GetStatePath("client-tokens"))
@@ -273,6 +274,7 @@ func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tun
 	}
 	hsrv := gateway.NewServer(agg, tokenAuth(cfg.Token), clientAuth)
 	hsrv.SetClientTokens(store, cfg.Token)
+	hsrv.SetVersion(version)
 	hsrv.SetPublicURL(gatewayBaseURL(cfg))
 	hsrv.SetLogger(logger.Scoped("gateway").L)
 	setupPush(ctx, agg, hsrv)

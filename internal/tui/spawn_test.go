@@ -12,7 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// spawnPickClient serves a canned nodes.list and records the spawn it receives.
+// spawnPickClient serves a canned server.info and records the spawn it receives.
 type spawnPickClient struct {
 	nodes       []api.NodeInfo
 	projects    []session.HistoryProject
@@ -24,9 +24,9 @@ type spawnPickClient struct {
 
 func (c *spawnPickClient) Call(method string, params, out any) error {
 	switch method {
-	case api.MethodNodesList:
-		if p, ok := out.(*[]api.NodeInfo); ok {
-			*p = c.nodes
+	case api.MethodServerInfo:
+		if p, ok := out.(*api.ServerInfo); ok {
+			*p = api.ServerInfo{Nodes: c.nodes}
 		}
 	case api.MethodSessionsHistoryProjects:
 		if p, ok := out.(*[]session.HistoryProject); ok {
@@ -66,8 +66,8 @@ func openSpawn(t *testing.T, c *spawnPickClient) model {
 func TestSpawnMultiNodeRoutesAndPicksDir(t *testing.T) {
 	c := &spawnPickClient{
 		nodes: []api.NodeInfo{
-			{NodeID: "alpha", Capabilities: api.NodeCapabilities{SpawnSession: true}},
-			{NodeID: "beta", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+			{ID: "alpha", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+			{ID: "beta", Capabilities: api.NodeCapabilities{SpawnSession: true}},
 		},
 		projects: []session.HistoryProject{
 			{Label: "b1", Cwd: "/beta/1", NodeID: "beta"},
@@ -197,7 +197,7 @@ func TestSpawnCustomPathThenPrompt(t *testing.T) {
 // Single node: node step skipped, straight to dir, most-recent pre-selected.
 func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 	c := &spawnPickClient{
-		nodes:    []api.NodeInfo{{NodeID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		nodes:    []api.NodeInfo{{ID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
 	}
 	m := openSpawn(t, c)
@@ -213,7 +213,7 @@ func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 // (marked "no tmux"), and pressing enter on it does nothing.
 func TestSpawnSingleNodeNoTmuxStaysDisabled(t *testing.T) {
 	c := &spawnPickClient{
-		nodes:    []api.NodeInfo{{NodeID: "only", NodeLabel: "only", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
+		nodes:    []api.NodeInfo{{ID: "only", Label: "only", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
 	}
 	m := openSpawn(t, c)
@@ -231,12 +231,12 @@ func TestSpawnSingleNodeNoTmuxStaysDisabled(t *testing.T) {
 	}
 }
 
-// Plain local node (nodes.list returns one self-entry with empty NodeID): when it
+// Plain local node (server.info returns one self-entry with empty ID): when it
 // lacks tmux the flow is gated on the node step; when capable it skips straight to
 // the dir step with node_id left empty (so projects are not filtered away).
 func TestSpawnLocalNodeNoTmuxGated(t *testing.T) {
 	c := &spawnPickClient{
-		nodes:    []api.NodeInfo{{NodeLabel: "box", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
+		nodes:    []api.NodeInfo{{Label: "box", Capabilities: api.NodeCapabilities{SpawnSession: false}}},
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
 	}
 	m := openSpawn(t, c)
@@ -252,7 +252,7 @@ func TestSpawnLocalNodeNoTmuxGated(t *testing.T) {
 
 func TestSpawnLocalNodeWithTmuxSkipsToDir(t *testing.T) {
 	c := &spawnPickClient{
-		nodes:    []api.NodeInfo{{NodeLabel: "box", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		nodes:    []api.NodeInfo{{Label: "box", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
 	}
 	m := openSpawn(t, c)

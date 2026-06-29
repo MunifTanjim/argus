@@ -30,23 +30,28 @@ func TestSpawnGuardAndIdentifyReportTmux(t *testing.T) {
 	}
 }
 
-// A plain node answers nodes.list with just itself: an empty NodeID (addressed
-// implicitly, no routing namespace) carrying its spawn capability, so a direct
-// client can gate the spawn UI.
-func TestNodesListReportsSelf(t *testing.T) {
+// A plain node answers server.info with its version and just itself: an empty ID
+// (addressed implicitly, no routing namespace) carrying its spawn capability, so a
+// direct client can show the version and gate the spawn UI.
+func TestServerInfoReportsSelf(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmux.New("argus-list-test"),
 	})
 	d.label = "boxy"
+	d.version = "9.9"
 	d.caps.SpawnSession = false
 
-	r, _ := d.handleNodesList(context.Background(), nil)
-	got := r.([]api.NodeInfo)
-	if len(got) != 1 {
-		t.Fatalf("nodes.list = %d entries, want 1", len(got))
+	r, _ := d.handleServerInfo(context.Background(), nil)
+	info := r.(api.ServerInfo)
+	if info.Version != "9.9" {
+		t.Fatalf("version = %q, want 9.9", info.Version)
 	}
-	if got[0].NodeID != "" || got[0].NodeLabel != "boxy" || got[0].Capabilities.SpawnSession {
-		t.Fatalf("self entry = %+v", got[0])
+	if len(info.Nodes) != 1 {
+		t.Fatalf("nodes = %d entries, want 1", len(info.Nodes))
+	}
+	n := info.Nodes[0]
+	if n.ID != "" || n.Label != "boxy" || n.Version != "9.9" || n.Capabilities.SpawnSession {
+		t.Fatalf("self entry = %+v", n)
 	}
 }
 

@@ -258,7 +258,7 @@ func (m model) spawnView() string {
 			if !n.Capabilities.SpawnSession {
 				sub = "no tmux" // disabled: can't spawn here
 			}
-			cards[i] = spawnChoiceRow(nodeName(n.NodeLabel, n.NodeID), sub, i == m.spawn.cursor, cardW)
+			cards[i] = spawnChoiceRow(nodeName(n.Label, n.ID), sub, i == m.spawn.cursor, cardW)
 		}
 		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))

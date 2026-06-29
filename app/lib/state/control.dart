@@ -72,31 +72,63 @@ class SessionService {
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 
-  /// Lists the nodes connected to the gateway, so the spawn picker can offer a
-  /// target even before any session exists on that node.
-  Future<Result<List<NodeRef>>> nodes() => _guard((c) async {
-        final result = await c.call('nodes.list');
-        return (result as List)
-            .map((e) => e as Map<String, dynamic>)
-            .map((m) {
-              final id = m['node_id'] as String? ?? '';
-              final label = m['node_label'] as String?;
-              final caps = m['capabilities'] as Map<String, dynamic>?;
-              final spawnSupported = caps?['spawn_session'] as bool? ?? false;
-              return NodeRef(
-                id,
-                label != null && label.isNotEmpty ? label : id,
-                spawnSupported: spawnSupported,
-              );
-            })
-            // The app only talks to a gateway, whose nodes.list always carries
-            // non-empty node ids. (A plain node serves itself with an empty id
-            // for its directly-connected TUI; the app never hits that path.)
-            .where((n) => n.id.isNotEmpty)
-            .toList();
+  /// Fetches server-wide metadata (version + connected nodes) for the settings
+  /// screen (server.info).
+  Future<Result<ServerInfo>> serverInfo() => _guard((c) async {
+        final r = await c.call('server.info') as Map<String, dynamic>;
+        return ServerInfo(
+          version: r['version'] as String? ?? '',
+          nodes: _parseNodes(r['nodes'] as List? ?? const []),
+        );
       });
+
+  /// Lists the nodes connected to the gateway, so the spawn picker can offer a
+  /// target even before any session exists on that node. Derived from server.info.
+  Future<Result<List<NodeRef>>> nodes() async => switch (await serverInfo()) {
+        Ok(:final value) => Result.ok(value.nodes),
+        Error(:final error) => Result.error(error),
+      };
 }
+
+/// Server-wide metadata returned by server.info.
+class ServerInfo {
+  const ServerInfo({required this.version, required this.nodes});
+  final String version;
+  final List<NodeRef> nodes;
+}
+
+/// Parses node maps (from server.info) into [NodeRef]s, dropping any with an empty
+/// id. A gateway always sends non-empty ids; a plain node serves itself with an
+/// empty id for its directly-connected TUI, which the app never hits.
+List<NodeRef> _parseNodes(List<dynamic> raw) => raw
+    .map((e) => e as Map<String, dynamic>)
+    .map((m) {
+      final id = m['id'] as String? ?? '';
+      final label = m['label'] as String?;
+      final caps = m['capabilities'] as Map<String, dynamic>?;
+      final spawnSupported = caps?['spawn_session'] as bool? ?? false;
+      return NodeRef(
+        id,
+        label != null && label.isNotEmpty ? label : id,
+        spawnSupported: spawnSupported,
+        version: m['version'] as String? ?? '',
+      );
+    })
+    .where((n) => n.id.isNotEmpty)
+    .toList();
 
 final sessionServiceProvider = Provider<SessionService>(
   (ref) => SessionService(() => ref.read(gatewayProvider)?.client),
 );
+
+/// One-shot read of server metadata (version + nodes) for the settings screen.
+/// Refetches when the connection state changes; resolves to null when the call
+/// fails (e.g. not connected).
+final serverInfoProvider = FutureProvider.autoDispose<ServerInfo?>((ref) async {
+  ref.watch(connStateProvider); // refetch on (re)connect
+  final result = await ref.read(sessionServiceProvider).serverInfo();
+  return switch (result) {
+    Ok(:final value) => value,
+    Error() => null,
+  };
+});

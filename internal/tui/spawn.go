@@ -91,7 +91,7 @@ func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProje
 			m.spawn.step = spawnStepNode // surface the disabled node, don't auto-advance
 			return
 		}
-		m.spawn.nodeID = nodes[0].NodeID
+		m.spawn.nodeID = nodes[0].ID
 	}
 	m.spawn.enterDirStep()
 }
@@ -127,7 +127,7 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if !n.Capabilities.SpawnSession {
 					return m, nil // disabled: tmux not available on this node
 				}
-				m.spawn.nodeID = n.NodeID
+				m.spawn.nodeID = n.ID
 				m.spawn.enterDirStep()
 			}
 		}

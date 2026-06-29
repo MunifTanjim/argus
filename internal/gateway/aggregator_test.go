@@ -36,8 +36,9 @@ func newFakeSource(id, label string, snap ...session.Session) *fakeSource {
 	}
 }
 
-func (f *fakeSource) ID() string    { return f.id }
-func (f *fakeSource) Label() string { return f.label }
+func (f *fakeSource) ID() string      { return f.id }
+func (f *fakeSource) Label() string   { return f.label }
+func (f *fakeSource) Version() string { return "" }
 func (f *fakeSource) Capabilities() api.NodeCapabilities {
 	return api.NodeCapabilities{SpawnSession: true}
 }
