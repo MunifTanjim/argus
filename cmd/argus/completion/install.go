@@ -1,6 +1,7 @@
 package completion
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ErrCompletionNotEnabled means the completion file was written successfully, but
+// the shell is not configured to load completions. The install itself succeeded;
+// callers decide whether that warrants a non-zero exit.
+var ErrCompletionNotEnabled = errors.New("shell completion installed but not enabled")
+
 func InstallCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
@@ -17,6 +23,9 @@ func InstallCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := Install(cmd); err != nil {
+				if errors.Is(err, ErrCompletionNotEnabled) {
+					shell.Exit(1)
+				}
 				return err
 			}
 			shell.StdErrLn("Installed shell completion!")
@@ -60,7 +69,7 @@ func Install(cmd *cobra.Command) error {
 				"autoload -Uz compinit",
 				"compinit",
 			)
-			shell.Exit(1)
+			return ErrCompletionNotEnabled
 		}
 		return nil
 	default:

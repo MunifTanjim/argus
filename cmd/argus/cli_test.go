@@ -8,7 +8,7 @@ import (
 
 func TestCommandTreeWiring(t *testing.T) {
 	root := newRootCmd("test")
-	want := map[string]bool{"start": false, "hooks": false, "hook": false}
+	want := map[string]bool{"start": false, "hooks": false, "hook": false, "upgrade": false}
 	for _, c := range root.Commands() {
 		if _, ok := want[c.Name()]; ok {
 			want[c.Name()] = true
