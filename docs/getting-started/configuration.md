@@ -62,7 +62,7 @@ worth it:
    session replace the previous one instead of stacking. Install it on `PATH`:
 
    ```sh
-   brew install alerter
+   brew install vjeantet/tap/alerter
    ```
 
 2. **[Hammerspoon](https://www.hammerspoon.org/) — clickable, extra setup.**
