@@ -258,6 +258,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if err != nil {
 		return err
 	}
+	d.log.Info("serving local API", "socket", socketPath)
 	defer func() {
 		l.Close()
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {

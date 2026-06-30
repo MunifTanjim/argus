@@ -8,6 +8,7 @@ import (
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
@@ -29,6 +30,14 @@ func newRootCmd(version string) *cobra.Command {
 				return fail(cmd, err)
 			}
 
+			// Honor the configured log level so an embedded node's buffered logs
+			// (shown in the TUI Logs tab) respect cfg.Log.Level. Unlike `start`,
+			// the TUI must not install the global stderr handler (logger.Init):
+			// stderr output would corrupt the alt-screen.
+			if err := applyLogLevel(cfg); err != nil {
+				return fail(cmd, err)
+			}
+
 			// Any embedded node spawned below is tied to this context, so it stops
 			// when the TUI exits — nothing lingers.
 			ctx, cancel := context.WithCancel(context.Background())
@@ -41,6 +50,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 
 			var client *api.ReconnectingClient
+			var logs *logbuf.Buffer
 			switch {
 			case cfg.Gateway.URL != "":
 				// The TUI drives the gateway so it sees the whole fleet. If no local node
@@ -49,7 +59,7 @@ func newRootCmd(version string) *cobra.Command {
 				if running {
 					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				} else {
-					client, err = connectLocalSpawnWithGateway(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				}
 			case running:
 				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
@@ -62,9 +72,9 @@ func newRootCmd(version string) *cobra.Command {
 				case launchQuit:
 					return nil
 				case launchSpawnIsolated:
-					client, err = connectLocalSpawn(ctx, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawn(ctx, cfg.Token, cfg.Socket)
 				case launchSpawnConnected:
-					client, err = connectLocalSpawnWithGateway(ctx, choice.gatewayURL, choice.token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
 					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
 				}
@@ -74,7 +84,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			defer client.Close()
 
-			if err := tui.Run(client); err != nil {
+			if err := tui.Run(client, logs); err != nil {
 				return fail(cmd, err)
 			}
 			return nil

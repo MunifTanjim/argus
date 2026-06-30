@@ -22,7 +22,6 @@ import (
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
-	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -51,8 +50,9 @@ func newStartCmd(version string) *cobra.Command {
 			if err := setupLogger(cfg); err != nil {
 				return fail(cmd, err)
 			}
+			logger.Scoped("node").Info("starting argus node", "version", version)
 			if config.RuntimeDirIsFallback {
-				shell.StdErrF("argus start: XDG runtime dir unavailable; using %s for runtime files\n", config.RuntimeDir)
+				logger.Scoped("config").Warn("XDG runtime dir unavailable; using fallback", "dir", config.RuntimeDir)
 			}
 
 			tun, tunOrigin, err := resolveTunnel(tunnelOptions{
@@ -115,9 +115,6 @@ func newStartCmd(version string) *cobra.Command {
 				}()
 			}
 
-			shell.StdErrF("argus start %s: local API on %s\n", version, cfg.Socket)
-			// serveGateway already prints "gateway listening on …" when it runs; connectGateway
-			// prints "connecting to gateway …". A plain local node prints only the line above.
 			err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
 
 			if httpSrv != nil {
@@ -193,13 +190,24 @@ func tokenAuth(want string) func(string) bool {
 // setupLogger resolves the log level/format from config and installs the global logger,
 // before anything logs. config.LogLevel is a *slog.LevelVar the handler reads live.
 func setupLogger(cfg *config.Config) error {
+	if err := applyLogLevel(cfg); err != nil {
+		return err
+	}
+	config.LogFormat = cfg.Log.Format
+	logger.Init()
+	return nil
+}
+
+// applyLogLevel resolves cfg.Log.Level into the global config.LogLevel var WITHOUT
+// installing the global stderr handler (logger.Init). The TUI uses this so the
+// embedded node's buffered logger honors the configured level while leaving stderr
+// untouched — installing the stderr handler would corrupt the TUI's alt-screen.
+func applyLogLevel(cfg *config.Config) error {
 	var lvl applog.Level
 	if err := lvl.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
 		return fmt.Errorf("invalid log level %q (use trace, debug, info, warn, error, or fatal)", cfg.Log.Level)
 	}
 	config.LogLevel.Set(lvl.Level())
-	config.LogFormat = cfg.Log.Format
-	logger.Init()
 	return nil
 }
 
@@ -207,10 +215,11 @@ func setupLogger(cfg *config.Config) error {
 // binary's event set, so a newly added hook takes effect without a manual reinstall.
 // Best-effort: a no-op if hooks were never installed, and failures are logged, not fatal.
 func reconcileInstalledHooks() {
+	log := logger.Scoped("hooks")
 	if added, err := claudecode.ReconcileIfInstalled(detectArgusBin()); err != nil {
-		shell.StdErrF("argus start: reconcile hooks: %v\n", err)
+		log.Error("reconcile hooks failed", "err", err)
 	} else if len(added) > 0 {
-		shell.StdErrF("argus start: reconciled argus hooks, added: %v\n", added)
+		log.Info("reconciled argus hooks", "added", added)
 	}
 }
 
@@ -224,7 +233,6 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	if err != nil {
 		return err
 	}
-	shell.StdErrF("argus start: connecting to gateway %s\n", cfg.Gateway.URL)
 	go d.ConnectGateway(ctx, wsURL, cfg.Token, gatewayClient)
 	return nil
 }
@@ -234,24 +242,24 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 // self-generated VAPID key, and a watcher that notifies registered devices when a
 // session needs the user. The watcher stops when ctx is cancelled.
 func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server) {
-	log := logger.Scoped("push").L
+	log := logger.Scoped("push")
 	store := push.NewStore(config.GetStatePath("push-tokens"))
 	// VAPID key (self-generated, persisted) signs Web Push requests; the public
 	// half is served to devices (push.vapidKey) to bind their subscription.
 	vapid, err := push.LoadOrCreateVAPID(config.GetStatePath("vapid_key.pem"))
 	if err != nil {
-		shell.StdErrF("argus start: push: vapid disabled: %v\n", err)
+		log.Warn("vapid disabled", "err", err)
 	} else {
 		hsrv.SetVAPIDPublicKey(vapid.PublicKey())
 	}
-	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
+	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log.L)
 	hsrv.SetPush(store, dispatcher)
 
 	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log}
+	broadcaster := fanoutNotifier{agg: agg, log: log.L}
 	go func() {
 		defer cancel()
-		push.Watch(ctx, events, []push.Sink{dispatcher, broadcaster}, log)
+		push.Watch(ctx, events, []push.Sink{dispatcher, broadcaster}, log.L)
 	}()
 }
 
@@ -272,32 +280,34 @@ func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tun
 	clientAuth := func(tok string) bool {
 		return (cfg.Token != "" && tok == cfg.Token) || store.Authorize(tok)
 	}
+	gatewayLog := logger.Scoped("gateway")
 	hsrv := gateway.NewServer(agg, tokenAuth(cfg.Token), clientAuth)
 	hsrv.SetClientTokens(store, cfg.Token)
 	hsrv.SetVersion(version)
 	hsrv.SetPublicURL(gatewayBaseURL(cfg))
-	hsrv.SetLogger(logger.Scoped("gateway").L)
+	hsrv.SetLogger(gatewayLog.L)
 	setupPush(ctx, agg, hsrv)
 	httpSrv := &http.Server{Addr: cfg.Gateway.ListenAddr, Handler: hsrv.Handler()}
-	shell.StdErrF("argus start: gateway listening on %s (ws://…/node, ws://…/client)\n", cfg.Gateway.ListenAddr)
+	gatewayLog.Info("gateway listening", "addr", cfg.Gateway.ListenAddr)
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			shell.StdErrF("argus start: gateway listener: %v\n", err)
+			gatewayLog.Error("gateway listener failed", "err", err)
 			nodeFailed.Store(true)
 			stop() // bring the node down if the gateway can't serve
 		}
 	}()
 
 	if tun != nil {
-		sup := tunnel.Supervisor{Logger: logger.Scoped("tunnel").L}
-		shell.StdErrF("argus start: opening %s tunnel to %s\n", tun.Name(), tunOrigin)
+		tunnelLog := logger.Scoped("tunnel")
+		sup := tunnel.Supervisor{Logger: tunnelLog.L}
+		tunnelLog.Info("opening tunnel", "provider", tun.Name(), "origin", tunOrigin)
 		go func() {
 			rerr := sup.Run(ctx, tun, tunOrigin, func(u string) {
 				hsrv.SetPublicURL(u)
-				shell.StdErrF("argus start: tunnel public URL: %s — run `argus pair` to add a device\n", u)
+				tunnelLog.Info("tunnel public URL; run `argus pair` to add a device", "url", u)
 			})
 			if rerr != nil && ctx.Err() == nil {
-				shell.StdErrF("argus start: tunnel: %v\n", rerr)
+				tunnelLog.Error("tunnel failed", "err", rerr)
 				nodeFailed.Store(true)
 				stop() // bring the node down if a requested tunnel can't come up
 			}

@@ -47,6 +47,7 @@ type spawnNodesMsg struct {
 	err      error
 }
 type screenTickMsg struct{} // screen refresh
+type logTickMsg struct{}    // embedded-node logs changed; wake the render loop
 type spinResumeMsg struct{} // periodic kick that re-arms the list spinner
 type spinTickMsg struct{}   // list spinner animation frame
 

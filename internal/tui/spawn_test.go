@@ -52,7 +52,7 @@ func (c *spawnPickClient) Close() error                    { return nil }
 // model parked at its first spawn step.
 func openSpawn(t *testing.T, c *spawnPickClient) model {
 	t.Helper()
-	m := newModel(c, false, nil)
+	m := newModel(c, false, nil, nil)
 	_, cmd := m.actListNew(tea.KeyPressMsg{})
 	if cmd == nil {
 		t.Fatal("actListNew returned no command")

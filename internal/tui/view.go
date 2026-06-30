@@ -148,6 +148,8 @@ func (m model) View() tea.View {
 		content = m.historySessionsView()
 	case modeHistoryTranscript:
 		content = m.historyTranscriptView()
+	case modeLogs:
+		content = m.logsView()
 	default:
 		content = m.listView()
 	}
@@ -156,14 +158,24 @@ func (m model) View() tea.View {
 	return v
 }
 
-// homeTabs renders the home screen's Sessions / History tab bar, highlighting
-// the active tab. The active tab is derived from the current mode by the caller.
-func (m model) homeTabs(historyActive bool) string {
-	sess, hist := StyleAccentBold, StyleDim
-	if historyActive {
-		sess, hist = StyleDim, StyleAccentBold
+// homeTabs renders the home screen's Sessions / History (/ Logs) tab bar,
+// highlighting the active tab. The Logs tab shows only when the TUI spawned an
+// embedded node (see hasLogsTab). The active tab is passed in by the caller.
+func (m model) homeTabs(active viewMode) string {
+	sess, hist, logs := StyleDim, StyleDim, StyleDim
+	switch active {
+	case modeList:
+		sess = StyleAccentBold
+	case modeHistoryProjects:
+		hist = StyleAccentBold
+	case modeLogs:
+		logs = StyleAccentBold
 	}
-	return sess.Render("Sessions") + StyleDim.Render("   ") + hist.Render("History")
+	out := sess.Render("Sessions") + StyleDim.Render("   ") + hist.Render("History")
+	if m.hasLogsTab() {
+		out += StyleDim.Render("   ") + logs.Render("Logs")
+	}
+	return out
 }
 
 func (m model) listView() string {
@@ -174,7 +186,7 @@ func (m model) listView() string {
 	if m.reconnecting {
 		title += dimStyle.Render("  (reconnecting…)")
 	}
-	title += "    " + m.homeTabs(false)
+	title += "    " + m.homeTabs(modeList)
 
 	// Empty state: a warm welcome with the next steps that actually work here.
 	if len(m.order) == 0 {

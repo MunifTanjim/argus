@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/logbuf"
+	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
@@ -71,8 +73,9 @@ func localNodeRunning(socket string) (bool, error) {
 }
 
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it
-// to accept, then connects. The embedded node stops when ctx is cancelled.
-func connectLocalSpawn(ctx context.Context, token, socket string) (*api.ReconnectingClient, error) {
+// to accept, then connects. The embedded node stops when ctx is cancelled. It also
+// returns the node's in-memory log buffer for the TUI's Logs tab.
+func connectLocalSpawn(ctx context.Context, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
 	return connectLocalSpawnWithGateway(ctx, "", token, socket)
 }
 
@@ -82,14 +85,14 @@ func connectLocalSpawn(ctx context.Context, token, socket string) (*api.Reconnec
 // the node dials that upstream gateway so this machine joins the fleet, and the TUI
 // connects to the gateway instead — so it sees the whole fleet, including this
 // machine via the uplink. The node and its uplink stop when ctx is cancelled.
-func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
 	var wsURL string
 	var gatewayClient *http.Client
 	if gatewayURL != "" {
 		var err error
 		if wsURL, gatewayClient, err = resolveGatewayURL(gatewayURL, routeNode, nil); err != nil {
 			shell.StdErrF("argus: %v\n", err)
-			return nil, err
+			return nil, nil, err
 		}
 		// Probe the gateway synchronously so an unreachable host or rejected token is
 		// reported here, before the TUI takes the screen. d.ConnectGateway (below)
@@ -98,23 +101,27 @@ func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket
 		probe, err := api.DialWSConn(ctx, wsURL, token, gatewayClient)
 		if err != nil {
 			shell.StdErrF("argus: cannot reach gateway at %s: %v\n", gatewayURL, err)
-			return nil, err
+			return nil, nil, err
 		}
 		probe.Close()
 	}
-	d := startEmbeddedNode(ctx, socket)
+	d, logs := startEmbeddedNode(ctx, socket)
 	if gatewayURL != "" {
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
 	}
 	conn, err := dialWithRetry(socket, 3*time.Second)
 	if err != nil {
 		shell.StdErrF("argus: embedded node did not start at %s: %v\n", socket, err)
-		return nil, err
+		return nil, nil, err
 	}
 	conn.Close() // probe only; the client opens its own connection
 	// Isolated spawn: drive the local node directly. Connected spawn: drive the
 	// gateway (client route) so the TUI sees the whole fleet, this machine included.
-	return connect(ctx, gatewayURL, token, socket)
+	client, err := connect(ctx, gatewayURL, token, socket)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, logs, nil
 }
 
 // nodeAbsent reports whether a dial error means "no node is listening": a
@@ -124,14 +131,18 @@ func nodeAbsent(err error) bool {
 }
 
 // startEmbeddedNode runs a node in-process, serving the unix socket until ctx
-// is cancelled. It stays quiet on stderr so it never corrupts the TUI's
-// alt-screen. Unlike `argus start` it does not reconcile installed Claude Code
-// hooks: this launch is ephemeral and may run from a different binary path than
-// the installed one, so rewriting global hook config here would be surprising.
-func startEmbeddedNode(ctx context.Context, socket string) *node.Node {
+// is cancelled. Its operational logs are routed to an in-memory buffer (returned
+// alongside the node) so the TUI can tail them in its Logs tab; nothing is
+// written to stderr, so the alt-screen stays clean. Unlike `argus start` it does
+// not reconcile installed Claude Code hooks: this launch is ephemeral and may run
+// from a different binary path than the installed one, so rewriting global hook
+// config here would be surprising.
+func startEmbeddedNode(ctx context.Context, socket string) (*node.Node, *logbuf.Buffer) {
 	d := node.New()
+	logs := logbuf.New(1000)
+	d.SetLogger(logger.NewBufferLogger(logs).With("scope", "node"))
 	go func() { _ = d.Run(ctx, socket) }()
-	return d
+	return d, logs
 }
 
 // dialWithRetry polls the socket until a node accepts a connection or timeout.

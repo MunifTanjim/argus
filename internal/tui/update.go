@@ -185,6 +185,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeScreen {
 			return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
 		}
+	case logTickMsg:
+		// New log lines arrived; returning re-renders, which re-reads the buffer.
+		return m, nil
 	case jumpResultMsg:
 		// On success the client has already switched away; only surface failures.
 		if msg.err != nil {
@@ -408,6 +411,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleHistorySessionsKey(msg)
 	case modeHistoryTranscript:
 		return m.handleHistoryTranscriptKey(msg)
+	case modeLogs:
+		return m.handleLogsKey(msg)
 	}
 
 	// modeList: any key dismisses a transient flash before dispatching. The jump
@@ -431,6 +436,7 @@ var listTable = []keyTableEntry{
 	{listKeys.Screen, model.actListScreen},
 	{listKeys.Jump, model.actListJump},
 	{listKeys.TabNext, model.actListHistory}, // right/l → History tab
+	{listKeys.TabPrev, model.actOpenLogs},    // left/h → Logs tab (when spawned)
 	{listKeys.New, model.actListNew},
 	{listKeys.Kill, model.actListKill},
 	{listKeys.Refresh, model.actListRefresh},

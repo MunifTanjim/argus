@@ -89,6 +89,7 @@ var historyProjectsTable = []keyTableEntry{
 	{historyProjectsKeys.Open, model.actHistProjOpen},
 	{historyProjectsKeys.Refresh, model.actHistProjRefresh},
 	{listKeys.TabPrev, model.actHistProjBack}, // left/h → Sessions tab
+	{listKeys.TabNext, model.actOpenLogs},     // right/l → Logs tab (when spawned)
 	{historyProjectsKeys.Back, model.actHistProjBack},
 }
 
@@ -245,7 +246,7 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 // --- views --------------------------------------------------------------------
 
 func (m model) historyProjectsView() string {
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(true)
+	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(modeHistoryProjects)
 	cardW := historyWidth(m)
 	if m.history.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)

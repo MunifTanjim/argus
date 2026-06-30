@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -18,6 +19,7 @@ const (
 	modeHistoryProjects   // read-only: list of past projects
 	modeHistorySessions   // read-only: a project's past sessions
 	modeHistoryTranscript // read-only: a past session's transcript (reuses the transcript region)
+	modeLogs              // embedded-node log tail (only when the TUI spawned the node)
 )
 
 type focusArea int
@@ -101,6 +103,15 @@ type model struct {
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)
 
 	history historyState // read-only browsing of past sessions on disk
+
+	// Logs tab: present only when the TUI spawned an embedded node (logs != nil).
+	// logsScroll is the absolute top-line offset when paused; logsFollow pins the
+	// view to the newest line and ignores logsScroll. Note: once the ring buffer is
+	// at capacity, a paused offset addresses shifting content as old lines evict —
+	// acceptable drift for a tail view.
+	logs       *logbuf.Buffer
+	logsScroll int
+	logsFollow bool
 }
 
 // transcriptState is the transcript viewer: the parsed chunks plus the scroll/cursor/
@@ -136,11 +147,13 @@ type historyState struct {
 	openPath   string
 }
 
-func newModel(client Client, hasDark bool, keyCh chan paneKey) model {
+func newModel(client Client, hasDark bool, keyCh chan paneKey, logs *logbuf.Buffer) model {
 	return model{
 		client:          client,
 		hasDark:         hasDark,
 		keyCh:           keyCh,
+		logs:            logs,
+		logsFollow:      true,
 		sessions:        make(map[string]session.Session),
 		transcriptCache: make(map[string]cachedTranscript),
 		toolBodies:      make(map[string]toolBodyEntry),

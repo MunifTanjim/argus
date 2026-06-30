@@ -22,6 +22,7 @@ const (
 // registry changes up as session.event notifications. The gateway pulls the initial
 // snapshot via sessions.list, so only live events are streamed here.
 func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient *http.Client) {
+	d.log.Info("connecting to gateway", "url", url)
 	backoff := uplinkBaseBackoff
 	for {
 		if ctx.Err() != nil {
@@ -34,6 +35,7 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 		if connected {
 			backoff = uplinkBaseBackoff // reset after a successful session
 		}
+		d.log.Debug("retrying gateway uplink", "backoff", backoff)
 		select {
 		case <-ctx.Done():
 			return
@@ -54,9 +56,13 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		Dispatch: d.server.DispatchFunc(),
 	})
 	if err != nil {
+		if ctx.Err() == nil {
+			d.log.Warn("gateway uplink dial failed", "url", url, "err", err)
+		}
 		return false
 	}
 	defer peer.Close()
+	d.log.Info("gateway uplink established", "url", url)
 
 	// Subscribe before the gateway pulls our snapshot so no live event is lost.
 	events, cancel := d.reg.Subscribe()
@@ -67,14 +73,19 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		case <-ctx.Done():
 			return true
 		case <-peer.Done():
-			return true
 		case ev, ok := <-events:
 			if !ok {
 				return true
 			}
-			if err := peer.Notify(api.MethodSessionEvent, ev); err != nil {
-				return true
+			if err := peer.Notify(api.MethodSessionEvent, ev); err == nil {
+				continue
 			}
 		}
+		// peer.Done() fired, or a Notify failed: the uplink is gone. Log once,
+		// but not on clean shutdown (cancellation).
+		if ctx.Err() == nil {
+			d.log.Info("gateway uplink closed", "url", url)
+		}
+		return true
 	}
 }

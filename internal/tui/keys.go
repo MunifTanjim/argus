@@ -157,6 +157,18 @@ var historySessionsKeys = struct {
 	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
 
+var logsKeys = struct {
+	Up, Down, HalfUp, HalfDown, Top, Bottom, Back key.Binding
+}{
+	Up:       nb([]string{"up", "k"}, "↑/↓", "scroll"),
+	Down:     nb([]string{"down", "j"}, "", ""),
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
+	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	Top:      nb([]string{"g"}, "", ""),
+	Bottom:   nb([]string{"G"}, "g/G", "ends"),
+	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
+}
+
 // screenLeave is the only app binding in the live-screen passthrough: it leaves
 // back to the list (every other key is forwarded to the pane). Footer-only.
 var screenLeave = nb([]string{"ctrl+]"}, "ctrl+]", "leave")

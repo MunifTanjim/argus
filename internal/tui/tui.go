@@ -11,6 +11,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
 // Client is the connection the TUI drives. Both *api.Client and
@@ -24,8 +25,9 @@ type Client interface {
 	Close() error
 }
 
-// Run connects the TUI to the node and blocks until the user quits.
-func Run(client Client) error {
+// Run connects the TUI to the node and blocks until the user quits. When logs is
+// non-nil (the TUI spawned an embedded node), its lines are tailed in the Logs tab.
+func Run(client Client, logs *logbuf.Buffer) error {
 	// Detect the terminal background ONCE, before Bubble Tea enters alt-screen.
 	// lipgloss queries it via OSC 11, which can fail once alt-screen is active.
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
@@ -36,7 +38,7 @@ func Run(client Client) error {
 	keyCh := make(chan paneKey, 512)
 	go sendKeyLoop(client, keyCh)
 
-	p := tea.NewProgram(newModel(client, hasDark, keyCh))
+	p := tea.NewProgram(newModel(client, hasDark, keyCh, logs))
 	go func() {
 		events, states := client.Events(), client.States()
 		for {
@@ -54,6 +56,13 @@ func Run(client Client) error {
 			}
 		}
 	}()
+	if logs != nil {
+		go func() {
+			for range logs.Notify() {
+				p.Send(logTickMsg{})
+			}
+		}()
+	}
 	_, err := p.Run()
 	return err
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/config"
@@ -10,6 +11,20 @@ func cfgWith(url, token string) *config.Config {
 	c := &config.Config{Token: token}
 	c.Gateway.URL = url
 	return c
+}
+
+func TestApplyLogLevelSetsConfiguredLevel(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+
+	if err := applyLogLevel(&config.Config{Log: config.LogConfig{Level: "debug"}}); err != nil {
+		t.Fatalf("applyLogLevel: %v", err)
+	}
+	if got := config.LogLevel.Level(); got != slog.LevelDebug {
+		t.Errorf("level = %v, want debug", got)
+	}
+	if err := applyLogLevel(&config.Config{Log: config.LogConfig{Level: "bogus"}}); err == nil {
+		t.Error("expected error for invalid level")
+	}
 }
 
 func TestRoleGates(t *testing.T) {
