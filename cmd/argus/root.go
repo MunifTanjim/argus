@@ -57,7 +57,7 @@ func newRootCmd(version string) *cobra.Command {
 				if running {
 					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				} else {
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				}
 			case running:
 				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
@@ -70,9 +70,9 @@ func newRootCmd(version string) *cobra.Command {
 				case launchQuit:
 					return nil
 				case launchSpawnIsolated:
-					client, logs, err = connectLocalSpawn(ctx, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawn(ctx, cfg, cfg.Token, cfg.Socket)
 				case launchSpawnConnected:
-					client, logs, err = connectLocalSpawnWithGateway(ctx, choice.gatewayURL, choice.token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
 					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
 				}

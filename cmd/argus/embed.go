@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
+	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
@@ -69,15 +71,15 @@ func localNodeRunning(socket string) (bool, error) {
 
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it to
 // accept, then connects. Returns the node's log buffer for the TUI's Logs tab.
-func connectLocalSpawn(ctx context.Context, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
-	return connectLocalSpawnWithGateway(ctx, "", token, socket)
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+	return connectLocalSpawnWithGateway(ctx, cfg, "", token, socket)
 }
 
 // connectLocalSpawnWithGateway starts an ephemeral embedded node (tied to ctx). Empty
 // gatewayURL (isolated spawn): the TUI drives the local socket. Set gatewayURL
 // (connected spawn): the node uplinks to that gateway so this machine joins the fleet,
 // and the TUI drives the gateway so it sees the whole fleet, this machine included.
-func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
 	var wsURL string
 	var gatewayClient *http.Client
 	if gatewayURL != "" {
@@ -95,9 +97,17 @@ func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket
 		}
 		probe.Close()
 	}
-	d, logs := startEmbeddedNode(ctx, socket)
+	d, logs := startEmbeddedNode(ctx, cfg, socket)
 	if gatewayURL != "" {
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
+	} else if cfg.Push.Desktop.Enabled {
+		// Isolated spawn has no gateway to drive alerts, so watch our own registry.
+		// (A connected spawn gets push.desktop RPCs from its gateway instead.)
+		events, cancel := d.Registry().Subscribe()
+		go func() {
+			defer cancel()
+			push.Watch(ctx, events, []push.Sink{d.DesktopSink()}, logger.NewBufferLogger(logs).With("scope", "push"))
+		}()
 	}
 	conn, err := dialWithRetry(socket, 3*time.Second)
 	if err != nil {
@@ -123,10 +133,12 @@ func nodeAbsent(err error) bool {
 // in-memory buffer (returned) for the TUI's Logs tab, not stderr, to keep the
 // alt-screen clean. Unlike `argus start` it does not reconcile installed Claude Code
 // hooks: this ephemeral launch may run from a different binary path than the install.
-func startEmbeddedNode(ctx context.Context, socket string) (*node.Node, *logbuf.Buffer) {
+func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer) {
 	d := node.New()
 	logs := logbuf.New(1000)
 	d.SetLogger(logger.NewBufferLogger(logs).With("scope", "node"))
+	// Without this the embedded node drops every desktop alert.
+	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	go func() { _ = d.Run(ctx, socket) }()
 	return d, logs
 }

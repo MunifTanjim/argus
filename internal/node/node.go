@@ -74,6 +74,9 @@ func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
+// DesktopNotifyEnabled reports whether this node renders desktop notifications.
+func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
+
 // SetIdentity overrides the node's id and label (default: hostname). The id is
 // the gateway's routing key, so it must be stable across reconnects and unique
 // within a fleet.

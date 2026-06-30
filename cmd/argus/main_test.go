@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/gateway"
 )
 
@@ -52,7 +53,7 @@ func TestConnectLocalSpawn(t *testing.T) {
 	sock := shortSocket(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	c, _, err := connectLocalSpawn(ctx, "", sock)
+	c, _, err := connectLocalSpawn(ctx, &config.Config{}, "", sock)
 	if err != nil {
 		cancel()
 		t.Fatalf("connectLocalSpawn should start a node: %v", err)
@@ -80,6 +81,22 @@ func TestConnectLocalSpawn(t *testing.T) {
 	}
 }
 
+// An embedded node must opt into desktop notifications when config enables them;
+// otherwise it silently drops every alert (gateway push.desktop RPC and the local
+// Watch both gate on this flag).
+func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
+	sock := shortSocket(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := &config.Config{}
+	cfg.Push.Desktop.Enabled = true
+	d, _ := startEmbeddedNode(ctx, cfg, sock)
+	if !d.DesktopNotifyEnabled() {
+		t.Fatal("embedded node should render desktop notifications when config enables them")
+	}
+}
+
 // A connected spawn enrolls the embedded node on the gateway and points the TUI
 // client at the gateway, so the returned client sees the fleet (this machine
 // included via the uplink), not just the local socket.
@@ -92,7 +109,7 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c, _, err := connectLocalSpawnWithGateway(ctx, wsURL(ts.URL), "", sock)
+	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock)
 	if err != nil {
 		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
 	}
@@ -126,12 +143,12 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	defer cancel()
 
 	// Wrong token: the gateway rejects the upgrade, so the probe must fail.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, wsURL(ts.URL), "WRONG", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t)); err == nil {
 		t.Fatal("expected an error for a rejected gateway token")
 	}
 
 	// Unreachable host: dial failure must also surface.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, "ws://127.0.0.1:1", "right", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t)); err == nil {
 		t.Fatal("expected an error for an unreachable gateway")
 	}
 }
