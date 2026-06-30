@@ -134,8 +134,8 @@ func TestSupervisorClassifiesLineLevels(t *testing.T) {
 	cancel()
 	<-done
 
-	if lvl, _ := cap.levelFor("INF info line"); lvl != slog.LevelInfo {
-		t.Errorf("INF line logged at %v, want Info", lvl)
+	if lvl, _ := cap.levelFor("INF info line"); lvl != slog.LevelDebug {
+		t.Errorf("INF line logged at %v, want Debug", lvl)
 	}
 	if lvl, _ := cap.levelFor("WRN warn line"); lvl != slog.LevelWarn {
 		t.Errorf("WRN line logged at %v, want Warn", lvl)

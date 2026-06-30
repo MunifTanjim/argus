@@ -55,12 +55,18 @@ func (c Cloudflare) Command(origin string) (CommandSpec, error) {
 	}
 }
 
-// cfLevelByToken maps cloudflared's text-log level tokens to slog levels. FTL maps
-// to Error rather than a fatal level: classification only sets the log level, and we
-// never want a tunnel line to escalate beyond Error.
+// cfLevelByToken maps cloudflared's text-log level tokens to slog levels.
+// cloudflared's own INFO is chatty heartbeat/connection noise, so it maps to
+// Debug (below argus's info threshold). This lets a quick tunnel run cloudflared
+// at --loglevel info — needed because its public-URL banner is printed at info —
+// without that banner's sibling lines surfacing as argus info. The URL itself is
+// pulled out by ExtractURL and printed by the supervisor's report callback
+// regardless of log level. FTL maps to Error rather than a fatal level:
+// classification only sets the log level, and we never want a tunnel line to
+// escalate beyond Error.
 var cfLevelByToken = map[string]slog.Level{
 	"DBG": slog.LevelDebug,
-	"INF": slog.LevelInfo,
+	"INF": slog.LevelDebug,
 	"WRN": slog.LevelWarn,
 	"ERR": slog.LevelError,
 	"FTL": slog.LevelError,

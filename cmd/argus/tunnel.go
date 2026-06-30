@@ -67,12 +67,22 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 		if cfMode == "local" && name == "" {
 			name = "argus" // default name for the tunnel argus creates and owns
 		}
+		cfLog := cloudflaredLogLevel(o.logLevel)
+		// A quick tunnel's public *.trycloudflare.com URL is only emitted by
+		// cloudflared at info level (and below). argus's default mapping
+		// (info -> warn) would suppress it, leaving the tunnel with no printed URL,
+		// so floor quick mode at info. The resulting cloudflared INFO noise stays
+		// below the fold via ClassifyLine (INF -> Debug); the URL is still surfaced
+		// by ExtractURL + the supervisor's report callback.
+		if cfMode == "quick" && cfLog != "debug" {
+			cfLog = "info"
+		}
 		return tunnel.Cloudflare{
 			Bin:      bin,
 			Token:    o.cfToken,
 			Tunnel:   name,
 			Hostname: o.cfHostname,
-			LogLevel: cloudflaredLogLevel(o.logLevel),
+			LogLevel: cfLog,
 		}, origin, nil
 	default:
 		// unreachable: providerBinary already gated unknown names

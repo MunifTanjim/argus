@@ -275,6 +275,8 @@ func TestCloudflaredLogLevel(t *testing.T) {
 
 func TestResolveTunnelSetsCloudflaredLogLevel(t *testing.T) {
 	o := baseOpts()
+	o.provider = "cloudflare:remote" // remote keeps the plain info->warn offset
+	o.cfToken = "tok"
 	o.logLevel = slog.LevelInfo
 	p, _, err := resolveTunnel(o)
 	if err != nil {
@@ -286,5 +288,29 @@ func TestResolveTunnelSetsCloudflaredLogLevel(t *testing.T) {
 	}
 	if cf.LogLevel != "warn" {
 		t.Errorf("cf.LogLevel = %q, want warn (offset from info)", cf.LogLevel)
+	}
+}
+
+// A quick tunnel must run cloudflared at info (or below) or its public-URL banner
+// is never printed; the info->warn offset that suits other modes would hide it.
+func TestResolveTunnelQuickFloorsLogLevel(t *testing.T) {
+	cases := map[slog.Level]string{
+		slog.Level(-8):  "debug", // trace: stays at debug (URL still emitted)
+		slog.LevelDebug: "debug",
+		slog.LevelInfo:  "info", // would be warn without the floor
+		slog.LevelWarn:  "info",
+		slog.LevelError: "info",
+	}
+	for in, want := range cases {
+		o := baseOpts() // no --cloudflare-* flags => quick mode
+		o.logLevel = in
+		p, _, err := resolveTunnel(o)
+		if err != nil {
+			t.Fatalf("resolve(%v): %v", in, err)
+		}
+		cf := p.(tunnel.Cloudflare)
+		if cf.LogLevel != want {
+			t.Errorf("quick LogLevel at argus %v = %q, want %q", in, cf.LogLevel, want)
+		}
 	}
 }

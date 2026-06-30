@@ -118,7 +118,9 @@ func TestCloudflareClassifyLine(t *testing.T) {
 		want slog.Level
 	}{
 		{"2026-06-19T16:29:34Z DBG connecting", slog.LevelDebug},
-		{"2026-06-19T16:29:34Z INF Registered tunnel connection", slog.LevelInfo},
+		// cloudflared INFO is below-the-fold noise; mapped to Debug so quick mode
+		// can run cloudflared at info (for its URL banner) without it surfacing.
+		{"2026-06-19T16:29:34Z INF Registered tunnel connection", slog.LevelDebug},
 		{"2026-06-19T16:29:34Z WRN failed to serve tunnel connection", slog.LevelWarn},
 		{"2026-06-19T16:29:34Z ERR no connection", slog.LevelError},
 		{"2026-06-19T16:29:34Z FTL fatal boom", slog.LevelError},
