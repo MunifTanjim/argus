@@ -8,7 +8,30 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/shell"
 )
+
+func newConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Inspect argus configuration",
+	}
+	cmd.AddCommand(newConfigDirCmd())
+	return cmd
+}
+
+func newConfigDirCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dir",
+		Short: "Print the config directory path",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			shell.StdOut(config.ConfigDir)
+			shell.StdErrLn()
+			return nil
+		},
+	}
+}
 
 // flagKeys maps a cobra flag name to its viper config key, so a set flag overrides
 // the corresponding env var and config-file value.
