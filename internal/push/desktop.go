@@ -110,6 +110,10 @@ func (o *OSNotifier) detectHammerspoon() bool {
 
 // Notify renders n on the local desktop. Best-effort; failures are logged only.
 func (o *OSNotifier) Notify(ctx context.Context, n Notification) {
+	// Detach from caller cancellation: alerter blocks until the user clicks, but
+	// callers pass the peer connection ctx, which a reconnect would cancel mid-banner.
+	ctx = context.WithoutCancel(ctx)
+
 	// Brand the title: desktop notifications are delivered by Hammerspoon / the
 	// terminal, so (unlike mobile, which comes from the Argus app itself) nothing
 	// otherwise identifies them as argus. n is a value copy — this does not affect
