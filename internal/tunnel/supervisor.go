@@ -3,6 +3,7 @@ package tunnel
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,6 +70,12 @@ func (s Supervisor) Run(ctx context.Context, p Provider, origin string, report f
 
 	for {
 		spec, err := p.Command(origin)
+		if errors.Is(err, ErrNoProcess) {
+			// Nothing to supervise (externally-managed tunnel); the URL, if any, was
+			// already reported by Prepare. Idle until ctx is cancelled.
+			<-ctx.Done()
+			return ctx.Err()
+		}
 		if err != nil {
 			return fmt.Errorf("%s command: %w", p.Name(), err)
 		}

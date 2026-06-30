@@ -240,6 +240,48 @@ func TestSupervisorReportsPreparedURL(t *testing.T) {
 	}
 }
 
+func TestSupervisorNoProcessReportsURLThenIdlesUntilCancel(t *testing.T) {
+	sup := quietSupervisor()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	urls := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- sup.Run(ctx, External{URL: "wss://argus.example.com"}, "", func(u string) {
+			select {
+			case urls <- u:
+			default:
+			}
+		})
+	}()
+
+	select {
+	case u := <-urls:
+		if u != "wss://argus.example.com" {
+			t.Fatalf("url = %q", u)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for external url")
+	}
+
+	// No process to run: Run must block until ctx is cancelled, not return early.
+	select {
+	case err := <-done:
+		t.Fatalf("Run returned before cancel: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("Run err = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
 func TestSupervisorPrepareErrorAbortsRun(t *testing.T) {
 	sentinel := filepath.Join(t.TempDir(), "started")
 	// If the run ever starts, the binary creates the sentinel file.

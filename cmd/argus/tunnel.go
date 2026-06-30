@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,8 @@ type tunnelOptions struct {
 	cfTunnelName string // --cloudflare-tunnel-name (local; default "argus")
 	cfHostname   string // --cloudflare-hostname (local; public hostname argus routes)
 
+	externalURL string // --external-url: gateway's public URL when the tunnel is external
+
 	runGateway bool
 	listenAddr string
 
@@ -32,6 +35,18 @@ type tunnelOptions struct {
 
 // providerBinary maps a provider name to the CLI it runs (for PATH lookup).
 var providerBinary = map[string]string{"cloudflare": "cloudflared"}
+
+// tunnelFlagCompletions are the shell-completion candidates for --tunnel, each a
+// "value\tdescription" pair. Keeps the value list out of the (terse) flag help.
+func tunnelFlagCompletions() []string {
+	return []string{
+		"cloudflare\tmanaged Cloudflare tunnel (mode inferred from --cloudflare-* flags)",
+		"cloudflare:quick\tephemeral *.trycloudflare.com tunnel, no account",
+		"cloudflare:remote\tremotely-managed tunnel (--cloudflare-token)",
+		"cloudflare:local\tlocally-managed tunnel (--cloudflare-hostname)",
+		"external\texternally managed tunnel; public URL via --external-url",
+	}
+}
 
 // resolveTunnel validates the options and builds the provider plus local origin URL.
 // Returns (nil, "", nil) when no tunnel is requested. All failures are pre-flight.
@@ -44,9 +59,12 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 	}
 	// --tunnel is "<provider>" or "<provider>:<mode>"; the mode is provider-specific.
 	providerName, mode, _ := strings.Cut(o.provider, ":")
+	if providerName == "external" {
+		return resolveExternalTunnel(mode, o)
+	}
 	binName, ok := providerBinary[providerName]
 	if !ok {
-		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare)", providerName)
+		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare, external)", providerName)
 	}
 	switch providerName {
 	case "cloudflare":
@@ -84,6 +102,40 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 		// unreachable: providerBinary already gated unknown names
 		return nil, "", fmt.Errorf("unknown tunnel provider %q", providerName)
 	}
+}
+
+// resolveExternalTunnel builds the External provider for a tunnel argus does not run
+// itself (a reverse proxy, ingress, or ssh -R). It takes no mode; --external-url carries
+// the gateway's public URL and is the only required input.
+func resolveExternalTunnel(mode string, o tunnelOptions) (tunnel.Provider, string, error) {
+	if mode != "" {
+		return nil, "", fmt.Errorf("--tunnel external takes no mode suffix (got %q)", mode)
+	}
+	if o.cfToken != "" || o.cfHostname != "" || o.cfTunnelName != "" {
+		return nil, "", fmt.Errorf("--cloudflare-* flags are not valid with --tunnel external")
+	}
+	if o.externalURL == "" {
+		return nil, "", fmt.Errorf("an external tunnel requires --external-url ws(s)://host (the gateway's public URL)")
+	}
+	u, err := url.Parse(o.externalURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse --external-url %q: %w", o.externalURL, err)
+	}
+	switch u.Scheme {
+	case "ws", "wss", "http", "https":
+	default:
+		return nil, "", fmt.Errorf("--external-url %q must use scheme ws, wss, http, or https", o.externalURL)
+	}
+	if u.Host == "" {
+		return nil, "", fmt.Errorf("--external-url %q must include a host", o.externalURL)
+	}
+	// A reverse proxy may expose the gateway under a base path (/client and /node append
+	// to it). Query/fragment/userinfo have no place here and would leak into pairing QRs.
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return nil, "", fmt.Errorf("--external-url %q must be scheme://host[/base-path] with no query, fragment, or user info (it is echoed into pairing QRs)", o.externalURL)
+	}
+	// No local origin: argus runs no process for an external tunnel.
+	return tunnel.External{URL: o.externalURL}, "", nil
 }
 
 // cloudflaredLogLevel maps argus's log level to cloudflared's --loglevel, offset at

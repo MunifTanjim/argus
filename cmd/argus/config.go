@@ -48,6 +48,7 @@ var flagKeys = map[string]string{
 	"cloudflare-token":       "tunnel.cloudflare.token",
 	"cloudflare-tunnel-name": "tunnel.cloudflare.tunnel-name",
 	"cloudflare-hostname":    "tunnel.cloudflare.hostname",
+	"external-url":           "tunnel.external.url",
 }
 
 // addClientFlags registers the node/gateway-reaching flags shared by the root TUI

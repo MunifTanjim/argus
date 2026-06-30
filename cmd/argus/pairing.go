@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 
 	"github.com/mdp/qrterminal/v3"
 )
 
 // pairingURI converts a gateway public URL into the mobile pairing URI
-// argus://pair?url=<wss base>&token=<token>. The url is a base (no path); the app
-// appends the implicit /client route, mirroring the TUI's hub-url resolver.
+// argus://pair?url=<wss base>&token=<token>. The url keeps any reverse-proxy base path
+// (trailing slash trimmed); the app appends the implicit /client route, mirroring the
+// TUI's hub-url resolver (resolveGatewayURL).
 func pairingURI(publicURL, token string) (string, error) {
 	u, err := url.Parse(publicURL)
 	if err != nil {
@@ -27,7 +29,7 @@ func pairingURI(publicURL, token string) (string, error) {
 	default:
 		return "", fmt.Errorf("pairing: unsupported scheme %q", u.Scheme)
 	}
-	u.Path = ""
+	u.Path = strings.TrimRight(u.Path, "/")
 	q := url.Values{}
 	q.Set("url", u.String())
 	q.Set("token", token)

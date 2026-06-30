@@ -6,8 +6,14 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 )
+
+// ErrNoProcess is returned from Command by a provider that runs no child process (an
+// externally-managed tunnel). Supervisor reports any Prepare URL, then idles until ctx
+// is cancelled instead of exec/restart.
+var ErrNoProcess = errors.New("tunnel: provider runs no process")
 
 // CommandSpec is the external command a provider runs to open its tunnel.
 type CommandSpec struct {

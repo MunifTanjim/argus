@@ -190,6 +190,115 @@ func TestResolveTunnelUnknownType(t *testing.T) {
 	}
 }
 
+// --- external (tunnel argus does not run) ---
+
+func TestResolveTunnelExternalHappy(t *testing.T) {
+	o := baseOpts()
+	o.provider = "external"
+	o.externalURL = "wss://argus.example.com"
+	p, origin, err := resolveTunnel(o)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	ext, ok := p.(tunnel.External)
+	if !ok {
+		t.Fatalf("provider type = %T", p)
+	}
+	if ext.URL != "wss://argus.example.com" {
+		t.Errorf("URL = %q", ext.URL)
+	}
+	if origin != "" {
+		t.Errorf("origin = %q, want empty (no local process)", origin)
+	}
+}
+
+func TestResolveTunnelExternalRequiresURL(t *testing.T) {
+	o := baseOpts()
+	o.provider = "external"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "--external-url") {
+		t.Fatalf("err = %v, want --external-url requirement", err)
+	}
+}
+
+func TestResolveTunnelExternalRequiresGatewayMode(t *testing.T) {
+	o := baseOpts()
+	o.provider = "external"
+	o.externalURL = "wss://argus.example.com"
+	o.runGateway = false
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "gateway mode") {
+		t.Fatalf("err = %v, want gateway-mode requirement", err)
+	}
+}
+
+func TestResolveTunnelExternalRejectsMode(t *testing.T) {
+	o := baseOpts()
+	o.provider = "external:quick"
+	o.externalURL = "wss://argus.example.com"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "no mode suffix") {
+		t.Fatalf("err = %v, want no-mode-suffix error", err)
+	}
+}
+
+func TestResolveTunnelExternalRejectsCloudflareFlags(t *testing.T) {
+	o := baseOpts()
+	o.provider = "external"
+	o.externalURL = "wss://argus.example.com"
+	o.cfToken = "tok"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "--cloudflare-") {
+		t.Fatalf("err = %v, want cloudflare-flag rejection", err)
+	}
+}
+
+func TestResolveTunnelExternalValidatesScheme(t *testing.T) {
+	for _, bad := range []string{"argus.example.com", "ftp://h", "://h"} {
+		o := baseOpts()
+		o.provider = "external"
+		o.externalURL = bad
+		if _, _, err := resolveTunnel(o); err == nil {
+			t.Errorf("externalURL %q should be rejected", bad)
+		}
+	}
+	for _, ok := range []string{"ws://h", "wss://h", "http://h", "https://h"} {
+		o := baseOpts()
+		o.provider = "external"
+		o.externalURL = ok
+		if _, _, err := resolveTunnel(o); err != nil {
+			t.Errorf("externalURL %q should be accepted, got %v", ok, err)
+		}
+	}
+}
+
+func TestResolveTunnelExternalAcceptsBasePath(t *testing.T) {
+	// A reverse proxy may mount the gateway under a base path; the URL is kept verbatim
+	// and /client|/node append to it at connect time.
+	o := baseOpts()
+	o.provider = "external"
+	o.externalURL = "wss://example.com/gateway"
+	p, _, err := resolveTunnel(o)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if ext := p.(tunnel.External); ext.URL != "wss://example.com/gateway" {
+		t.Errorf("URL = %q, want base path preserved", ext.URL)
+	}
+}
+
+func TestResolveTunnelExternalRejectsQueryFragmentUserinfo(t *testing.T) {
+	// These would leak verbatim into the pairing QR; a base path is fine but these are not.
+	for _, bad := range []string{"wss://h?x=1", "wss://h#frag", "wss://user:pass@h"} {
+		o := baseOpts()
+		o.provider = "external"
+		o.externalURL = bad
+		if _, _, err := resolveTunnel(o); err == nil {
+			t.Errorf("externalURL %q should be rejected", bad)
+		}
+	}
+}
+
 // --- ensureCloudflareLogin (cert prerequisite for local tunnels) ---
 
 func TestEnsureCloudflareLoginNonLocalNoop(t *testing.T) {

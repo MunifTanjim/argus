@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/sshconn"
 )
@@ -18,15 +19,18 @@ const (
 )
 
 // resolveGatewayURL turns a --gateway base into the WebSocket URL and *http.Client to
-// use, appending the role route ("/node" or "/client"). The route is role-determined, so
-// a path on the gateway URL is rejected.
+// use, appending the role route ("/node" or "/client") after any base path.
 //
-//   - ws:// or wss:// → "<scheme>://<host>[:port]<route>", nil client (default transport).
+//   - ws:// or wss:// → "<scheme>://<host>[:port][/base-path]<route>", nil client (default
+//     transport). A reverse proxy may expose the gateway under a base path (e.g.
+//     wss://example.com/gateway); the role route is appended to it. The proxy is expected
+//     to strip the prefix, since the gateway serves /node and /client at root.
 //   - ssh://[user@]host[:ssh-port][?port=<gateway-port>] → a client tunneling every dial
 //     through a managed `ssh -W` child to 127.0.0.1:<gateway-port> on the SSH host, and
 //     "ws://<host>:<gateway-port><route>". Authority port is the SSH port (ssh -p); the
 //     "port" query is the gateway's loopback port (default 8443); identity/jump hosts come
-//     from ssh config. The gateway is expected to bind loopback.
+//     from ssh config. The gateway is expected to bind loopback. No base path: ssh dials
+//     the gateway directly, bypassing any reverse proxy.
 //
 // log receives the ssh child's stderr (auth / host-key failures); nil to discard.
 func resolveGatewayURL(raw, route string, log *slog.Logger) (string, *http.Client, error) {
@@ -34,18 +38,18 @@ func resolveGatewayURL(raw, route string, log *slog.Logger) (string, *http.Clien
 	if err != nil {
 		return "", nil, fmt.Errorf("parse --gateway: %w", err)
 	}
-	if u.Path != "" && u.Path != "/" {
-		return "", nil, fmt.Errorf("--gateway takes no path (the %s route is implicit): use scheme://[user@]host[:port]", route)
-	}
 
 	switch u.Scheme {
 	case "ws", "wss":
-		return u.Scheme + "://" + u.Host + route, nil, nil
+		return u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/") + route, nil, nil
 
 	case "ssh":
 		host := u.Hostname()
 		if host == "" {
 			return "", nil, fmt.Errorf("ssh gateway url needs a host: %s", raw)
+		}
+		if u.Path != "" && u.Path != "/" {
+			return "", nil, fmt.Errorf("ssh gateway url takes no path (it dials the gateway directly): %s", raw)
 		}
 		sshPort := u.Port() // SSH port (ssh -p); empty => ssh config / 22
 		gatewayPort := u.Query().Get("port")

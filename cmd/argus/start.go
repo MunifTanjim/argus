@@ -59,6 +59,7 @@ func newStartCmd(version string) *cobra.Command {
 				cfToken:      cfg.Tunnel.Cloudflare.Token,
 				cfTunnelName: cfg.Tunnel.Cloudflare.TunnelName,
 				cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
+				externalURL:  cfg.Tunnel.External.URL,
 				runGateway:   gatewayMode(cfg),
 				listenAddr:   cfg.Gateway.ListenAddr,
 				logLevel:     config.LogLevel.Level(),
@@ -143,10 +144,15 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("log-level", "", "log verbosity: trace, debug, info, warn, error, fatal (default info) [$ARGUS_LOG_LEVEL]")
 	f.String("log-format", "", "log format: pretty or json (default pretty) [$ARGUS_LOG_FORMAT]")
 
-	f.String("tunnel", "", "expose the gateway via a tunnel: cloudflare[:quick|remote|local] — mode inferred from --cloudflare-* flags when omitted (requires gateway mode)")
+	f.String("tunnel", "", "expose the gateway via a tunnel: cloudflare or external (requires gateway mode; tab-complete for modes)")
 	f.String("cloudflare-token", "", "[remote] Cloudflare tunnel token [$ARGUS_CLOUDFLARE_TOKEN]")
 	f.String("cloudflare-tunnel-name", "", "[local] name of the tunnel argus creates (if absent) and runs (default: argus) [$ARGUS_CLOUDFLARE_TUNNEL_NAME]")
 	f.String("cloudflare-hostname", "", "[local] public hostname argus routes to the tunnel [$ARGUS_CLOUDFLARE_HOSTNAME]")
+	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
+
+	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
+	})
 
 	return cmd
 }
