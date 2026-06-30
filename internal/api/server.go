@@ -111,20 +111,21 @@ func (s *Server) dispatch(ctx context.Context, method string, params json.RawMes
 		logRequest(log, method, start, err)
 		return nil, err
 	}
+	ctx, la := withLogAttrs(ctx)
 	res, err := h(ctx, params)
-	logRequest(log, method, start, err)
+	logRequest(log, method, start, err, la.kv...)
 	return res, err
 }
 
-// logRequest emits one per-request line (method, duration, and error if any). No-op when
-// log is nil.
-func logRequest(log *slog.Logger, method string, start time.Time, err error) {
+// logRequest emits one per-request line (method, duration, handler-supplied attrs,
+// and error if any). No-op when log is nil.
+func logRequest(log *slog.Logger, method string, start time.Time, err error, extra ...any) {
 	if log == nil {
 		return
 	}
+	args := append([]any{"method", method, "dur", time.Since(start)}, extra...)
 	if err != nil {
-		log.Info("rpc", "method", method, "dur", time.Since(start), "err", err)
-		return
+		args = append(args, "err", err)
 	}
-	log.Info("rpc", "method", method, "dur", time.Since(start))
+	log.Info("rpc", args...)
 }
