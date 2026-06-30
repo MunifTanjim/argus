@@ -231,9 +231,8 @@ func TestSpawnSingleNodeNoTmuxStaysDisabled(t *testing.T) {
 	}
 }
 
-// Plain local node (server.info returns one self-entry with empty ID): when it
-// lacks tmux the flow is gated on the node step; when capable it skips straight to
-// the dir step with node_id left empty (so projects are not filtered away).
+// A local node (self-entry with empty ID) without tmux stays gated on the node
+// step rather than auto-advancing.
 func TestSpawnLocalNodeNoTmuxGated(t *testing.T) {
 	c := &spawnPickClient{
 		nodes:    []api.NodeInfo{{Label: "box", Capabilities: api.NodeCapabilities{SpawnSession: false}}},

@@ -17,9 +17,8 @@ func newHooksCmd() *cobra.Command {
 		Short:         "Install or remove the Claude Code hooks",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// Reached only when no install/uninstall subcommand matched. Unlike the other
-		// commands, this returns a real error (printed by main) rather than the
-		// errSilent path — there is nothing of its own to print first.
+		// Reached only when no subcommand matched; returns a real error (printed by
+		// main) rather than errSilent, since there's nothing of its own to print first.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return fmt.Errorf("hooks: a subcommand is required (install or uninstall)")
@@ -82,9 +81,8 @@ func newHooksUninstallCmd() *cobra.Command {
 	}
 }
 
-// detectArgusBin returns the path hooks should invoke as `<bin> hook <event>`:
-// this executable itself (the unified argus binary), falling back to "argus" on
-// PATH if the path can't be resolved.
+// detectArgusBin returns the path hooks invoke as `<bin> hook <event>`: this
+// executable, falling back to "argus" on PATH if it can't be resolved.
 func detectArgusBin() string {
 	if exe, err := os.Executable(); err == nil {
 		return exe

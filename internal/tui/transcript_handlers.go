@@ -29,8 +29,8 @@ var transcriptTable = []keyTableEntry{
 	{transcriptKeys.CollapseAll, model.actCollapseAll},
 }
 
-// actSmartNext (j) selects the next turn, but first scrolls through the selected
-// card when it overflows the viewport so nothing below the fold is skipped unseen.
+// actSmartNext (j) selects the next turn, first scrolling through an overflowing
+// selected card so nothing below the fold is skipped unseen.
 func (m model) actSmartNext(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.cursorVisible() {
 		m.transcript.cursor = m.firstVisibleChunk() // re-anchor; viewport stays put

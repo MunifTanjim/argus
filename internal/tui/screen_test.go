@@ -45,9 +45,8 @@ func TestTmuxKeyFor(t *testing.T) {
 	if got := named(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); got != "C-c" {
 		t.Errorf("ctrl+c: named=%q want C-c", got)
 	}
-	// A bare modifier / unknown key is ignored.
+	// An unmapped key (shift+up) is ignored without panicking.
 	if _, ok := tmuxKeyFor(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift, Text: ""}); ok {
-		// shift+up isn't in our map; that's fine — just shouldn't panic.
 		_ = ok
 	}
 }

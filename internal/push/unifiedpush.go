@@ -17,11 +17,9 @@ import (
 // a TTL header and reject the request without one.
 const unifiedPushTTL = "86400"
 
-// messageID returns a random per-delivery id stamped into every payload. The
-// client dedups on it: the UnifiedPush Android plugin buffers the last events
-// (replay=20) and re-emits them to a freshly attached engine when the app's
-// Activity is relaunched, so the same payload — same id — is delivered again
-// without a fresh push. A real send gets a new id; a replay repeats the old one.
+// messageID returns a random per-delivery id stamped into every payload so the
+// client can dedup replays: the UnifiedPush Android plugin buffers recent events
+// and re-emits them (same id) to a freshly attached engine on Activity relaunch.
 func messageID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -31,8 +29,7 @@ func messageID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// encodePayload marshals the JSON body delivered to the device, stamping id so
-// the client can drop replayed deliveries (see messageID).
+// encodePayload marshals the device JSON body, stamping id for replay dedup (see messageID).
 func encodePayload(n Notification, id string) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"id":    id,
@@ -42,21 +39,17 @@ func encodePayload(n Notification, id string) ([]byte, error) {
 	})
 }
 
-// UnifiedPushSender delivers via the UnifiedPush model: an HTTP POST to the
-// device-provided distributor endpoint. Modern distributors hand out Web Push
-// endpoints (RFC 8030) and require the payload encrypted (RFC 8291) with a TTL
-// header and VAPID auth (RFC 8292); when the target carries subscription keys this
-// sender does exactly that. A target without keys (legacy plain endpoint, e.g.
-// older ntfy) falls back to a plain JSON POST. A 404/410 means the subscription is
-// gone.
+// UnifiedPushSender POSTs to a device-provided distributor endpoint. With
+// subscription keys it sends an encrypted Web Push request (RFC 8291) with TTL and
+// VAPID auth (RFC 8292); without keys (legacy plain endpoint) a plain JSON POST.
+// A 404/410 means the subscription is gone.
 type UnifiedPushSender struct {
 	client *http.Client
 	vapid  *VAPID // signs the VAPID header for Web Push; nil disables it
 }
 
-// NewUnifiedPushSender returns a sender with a bounded HTTP timeout. vapid may be
-// nil (no VAPID header), but Web Push services may then reject restricted
-// subscriptions.
+// NewUnifiedPushSender returns a sender with a bounded HTTP timeout. nil vapid
+// omits the VAPID header (Web Push services may then reject restricted subscriptions).
 func NewUnifiedPushSender(v *VAPID) *UnifiedPushSender {
 	return &UnifiedPushSender{client: &http.Client{Timeout: 10 * time.Second}, vapid: v}
 }

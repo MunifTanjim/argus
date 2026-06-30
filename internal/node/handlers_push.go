@@ -7,10 +7,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/push"
 )
 
-// handlePushDesktop renders a gateway-pushed desktop notification on this node's
-// machine, but only when the node opted in (push.desktop). A non-opted-in node
-// (e.g. a headless server) silently ignores the broadcast. Always returns nil so
-// the gateway's Fanout sees a clean reply.
+// handlePushDesktop renders a gateway-pushed desktop notification, but only when
+// the node opted in; a non-opted-in node (e.g. headless) silently ignores it.
+// Always returns nil so the gateway's Fanout sees a clean reply.
 func (d *Node) handlePushDesktop(ctx context.Context, params json.RawMessage) (any, error) {
 	if !d.desktopNotify {
 		return nil, nil
@@ -24,7 +23,7 @@ func (d *Node) handlePushDesktop(ctx context.Context, params json.RawMessage) (a
 }
 
 // desktopSink adapts a Node into a push.Sink so the standalone push.Watch loop
-// renders through the same focus-aware path as gateway-pushed notifications.
+// renders through the same focus-aware path as gateway pushes.
 type desktopSink struct{ d *Node }
 
 func (s desktopSink) Notify(ctx context.Context, n push.Notification) { s.d.renderDesktop(ctx, n) }
@@ -33,11 +32,9 @@ func (s desktopSink) Notify(ctx context.Context, n push.Notification) { s.d.rend
 // suppressing any whose session the user is already looking at.
 func (d *Node) DesktopSink() push.Sink { return desktopSink{d} }
 
-// renderDesktop shows n on this machine's desktop unless its session is already
-// focused — the active pane of an attached tmux client — in which case the user
-// is looking at it and a banner would only be noise. A session that doesn't
-// resolve locally (e.g. a broadcast for another node's session) is never focused
-// here, so it renders.
+// renderDesktop shows n unless its session is already focused (the active pane of
+// an attached tmux client), where a banner would only be noise. A session that
+// doesn't resolve locally is never focused here, so it renders.
 func (d *Node) renderDesktop(ctx context.Context, n push.Notification) {
 	if d.notifier == nil {
 		return

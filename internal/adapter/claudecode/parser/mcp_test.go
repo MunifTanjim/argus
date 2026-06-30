@@ -8,9 +8,8 @@ import (
 )
 
 func TestMCPToolResults(t *testing.T) {
-	// Fixture has: user question → AI turn with 3 MCP tool calls and results.
-	// MCP tool results have toolUseResult as a JSON array (not object),
-	// which previously caused ParseEntry to fail silently.
+	// MCP tool results carry toolUseResult as a JSON array (not object), which
+	// previously made ParseEntry fail silently. Fixture: 3 MCP calls + results.
 	path := filepath.Join("testdata", "mcp-tools.jsonl")
 	chunks, err := parser.ReadSession(path)
 	if err != nil {

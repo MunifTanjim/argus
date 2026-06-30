@@ -1,11 +1,9 @@
-// Package tmux is a thin wrapper around the tmux CLI (driven via os/exec) for
-// discovering, reading, controlling, and managing panes. argus uses it to
-// observe Claude Code sessions on the user's default tmux server and to spawn
-// its own sessions on a private socket.
+// Package tmux is a thin wrapper around the tmux CLI for discovering, reading,
+// controlling, and managing panes.
 //
 // Design notes (see docs/superpowers/specs/2026-06-12-argus-design.md):
 //   - Always request explicit -F formats; never screen-scrape default output.
-//   - Key state on pane_id (%N), which is stable and never reused — never on
+//   - Key state on pane_id (%N), stable and never reused — never on
 //     session:window.pane indices, which renumber.
 package tmux
 
@@ -20,8 +18,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// fieldSep is an unlikely separator (ASCII unit separator) used inside -F
-// formats so values containing spaces/tabs (e.g. paths) parse unambiguously.
+// fieldSep (ASCII unit separator) delimits -F format fields so values containing
+// spaces/tabs (e.g. paths) parse unambiguously.
 const fieldSep = "\x1f"
 
 // Client drives a single tmux server. A zero socket targets the user's default
@@ -45,8 +43,7 @@ func (c *Client) args(sub ...string) []string {
 	return append(a, sub...)
 }
 
-// run executes a tmux subcommand and returns its stdout. The returned error
-// includes stderr for diagnosis.
+// run executes a tmux subcommand and returns its stdout. Errors include stderr.
 func (c *Client) run(ctx context.Context, sub ...string) (string, error) {
 	cmd := shell.NewCommandContext(ctx, c.bin, c.args(sub...)...)
 	if err := cmd.Run(); err != nil {
@@ -84,10 +81,9 @@ func noServer(err error) bool {
 		strings.Contains(s, "no current session")
 }
 
-// SocketBaseFromEnv returns the tmux socket basename from a $TMUX value, whose
-// format is "<socket-path>,<pid>,<session>". It returns "" when not inside tmux.
-// The basename identifies the server: "default" for the user's normal server,
-// "argus" for argus's private socket.
+// SocketBaseFromEnv returns the tmux socket basename from a $TMUX value (format
+// "<socket-path>,<pid>,<session>"), or "" when not inside tmux. The basename
+// identifies the server (e.g. "default", "argus").
 func SocketBaseFromEnv(tmuxEnv string) string {
 	if tmuxEnv == "" {
 		return ""
@@ -99,11 +95,9 @@ func SocketBaseFromEnv(tmuxEnv string) string {
 	return filepath.Base(sockPath)
 }
 
-// Reveal brings the calling tmux client to the given pane, changing its session,
-// window, and pane in one step: switch-client treats a target containing ':',
-// '.' or '%' (a pane id is "%N") as that special case. It runs as a subprocess
-// that inherits $TMUX, so it targets the caller's own client. Use the
-// default-server client; switch-client cannot cross tmux servers.
+// Reveal brings the calling tmux client to the given pane in one step. Runs as a
+// subprocess inheriting $TMUX, so it targets the caller's own client; use the
+// default-server client since switch-client cannot cross tmux servers.
 func (c *Client) Reveal(ctx context.Context, paneID string) error {
 	_, err := c.run(ctx, "switch-client", "-t", paneID)
 	return err
@@ -115,10 +109,8 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-// Available reports whether the tmux binary is present and runnable. `tmux -V`
-// just prints the version (it does not start a server), so it's a cheap probe.
-// Spawning sessions and all pane control require tmux; a node without it can
-// still observe nothing but should not advertise spawn support.
+// Available reports whether the tmux binary is present and runnable. `tmux -V` is
+// a cheap probe: it prints the version without starting a server.
 func (c *Client) Available(ctx context.Context) bool {
 	_, err := c.Version(ctx)
 	return err == nil
@@ -179,9 +171,8 @@ func (c *Client) ListPanes(ctx context.Context) ([]Pane, error) {
 }
 
 func parsePane(line string) (Pane, error) {
-	// tmux >=3.4 vis-escapes non-printable bytes in -F output, so our 0x1F
-	// separator arrives as the literal four-character sequence "\037". Older
-	// tmux emits the raw byte. Normalize the escaped form before splitting.
+	// tmux >=3.4 vis-escapes the 0x1F separator as literal "\037"; older tmux emits
+	// the raw byte. Normalize before splitting.
 	line = strings.ReplaceAll(line, `\037`, fieldSep)
 	f := strings.Split(line, fieldSep)
 	if len(f) != 11 {
@@ -207,10 +198,8 @@ func atoi(s string) int {
 	return n
 }
 
-// focusFormat queries, per pane, the three facts that together mean "an attached
-// client is showing this pane right now": it is the active pane (#{pane_active})
-// of the active window (#{window_active}) of a session at least one client is
-// attached to (#{session_attached}).
+// focusFormat queries the three facts that together mean a client is showing a pane:
+// active pane of the active window of an attached session.
 var focusFormat = strings.Join([]string{
 	"#{pane_id}",
 	"#{pane_active}",
@@ -218,11 +207,9 @@ var focusFormat = strings.Join([]string{
 	"#{session_attached}",
 }, fieldSep)
 
-// IsFocused reports whether an attached tmux client is currently displaying
-// paneID — i.e. paneID is the active pane of the active window of a session a
-// client is attached to. Used to suppress a desktop notification for a session
-// the user is already looking at. An empty paneID, or no server running, is never
-// focused.
+// IsFocused reports whether an attached client is currently displaying paneID.
+// Used to suppress desktop notifications for a session the user is already viewing.
+// An empty paneID, or no server running, is never focused.
 func (c *Client) IsFocused(ctx context.Context, paneID string) (bool, error) {
 	if paneID == "" {
 		return false, nil
@@ -238,15 +225,13 @@ func (c *Client) IsFocused(ctx context.Context, paneID string) (bool, error) {
 }
 
 // paneFocused scans focusFormat output for paneID and reports whether it is the
-// active pane (#{pane_active}) of the active window (#{window_active}) of an
-// attached session (#{session_attached} > 0).
+// active pane of the active window of an attached session.
 func paneFocused(out, paneID string) (bool, error) {
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		// tmux >=3.4 vis-escapes the 0x1F separator as the literal "\037"; older
-		// tmux emits the raw byte. Normalize before splitting (see parsePane).
+		// Normalize tmux's vis-escaped separator before splitting (see parsePane).
 		line = strings.ReplaceAll(line, `\037`, fieldSep)
 		f := strings.Split(line, fieldSep)
 		if len(f) != 4 {
@@ -298,28 +283,23 @@ func (c *Client) CancelMode(ctx context.Context, paneID string) error {
 	return err
 }
 
-// SendText sends literal text to a pane without interpreting key names (-l). It
-// does NOT submit; send "Enter" via SendKeys afterwards.
+// SendText sends literal text to a pane (-l). Does NOT submit; send "Enter" via SendKeys.
 func (c *Client) SendText(ctx context.Context, paneID, text string) error {
 	_, err := c.run(ctx, "send-keys", "-t", paneID, "-l", "--", text)
 	return err
 }
 
-// bracketedPaste wraps text as a terminal bracketed paste (ESC[200~ … ESC[201~)
-// and normalizes every line ending to a bare CR. A TUI in bracketed-paste mode
-// inserts the body verbatim, so each CR lands as a literal newline in its input.
-// This is the only way injected newlines survive: sent outside a paste, a raw LF
-// is dropped and a raw CR submits the line. (Verified against Claude Code.)
+// bracketedPaste wraps text as a terminal bracketed paste and normalizes line
+// endings to bare CR. This is the only way injected newlines survive: outside a
+// paste a raw LF is dropped and a raw CR submits the line. (Verified vs Claude Code.)
 func bracketedPaste(text string) string {
 	body := strings.NewReplacer("\r\n", "\r", "\n", "\r").Replace(text)
 	return "\x1b[200~" + body + "\x1b[201~"
 }
 
-// PasteText injects text as a bracketed paste so embedded newlines are preserved
-// as line breaks (see bracketedPaste). Like SendText it does NOT submit; send
-// "Enter" via SendKeys afterwards. Prefer it for multi-line input; single-line
-// input can use SendText so interactive triggers (slash menus, @-mentions) still
-// fire as if typed.
+// PasteText injects text as a bracketed paste so embedded newlines survive (see
+// bracketedPaste). Does NOT submit. Prefer for multi-line input; use SendText for
+// single-line so interactive triggers (slash menus, @-mentions) still fire as typed.
 func (c *Client) PasteText(ctx context.Context, paneID, text string) error {
 	_, err := c.run(ctx, "send-keys", "-t", paneID, "-l", "--", bracketedPaste(text))
 	return err
@@ -351,9 +331,9 @@ func (c *Client) NewSession(ctx context.Context, opts NewSessionOpts) (string, e
 	return strings.TrimSpace(out), nil
 }
 
-// newSessionArgs builds the `tmux new-session` argument list. Command and each
-// Args element are appended as separate trailing arguments so tmux execs them
-// directly (no shell), preserving spaces and newlines in arguments.
+// newSessionArgs builds the `tmux new-session` argument list. Command/Args are
+// appended as separate trailing args so tmux execs them directly (no shell),
+// preserving spaces and newlines.
 func newSessionArgs(opts NewSessionOpts) []string {
 	w, h := opts.Width, opts.Height
 	if w == 0 {

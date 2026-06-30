@@ -1,7 +1,6 @@
 // Package gateway aggregates sessions from many node sources into one merged view
-// and routes control calls back to the owning node. A source may be the local
-// engine (in-process) or a remote node reached over the WebSocket uplink; the
-// aggregator treats both through the same Source interface.
+// and routes control calls back to the owning node. A source is either the local
+// engine (in-process) or a remote node over the WebSocket uplink; both implement Source.
 package gateway
 
 import (
@@ -28,11 +27,9 @@ type Source interface {
 	Snapshot() []session.Session
 	// Subscribe returns the source's live event stream and a cancel function.
 	Subscribe() (<-chan registry.Event, func())
-	// Call invokes a control method on the source with already node-local params
-	// and returns the raw JSON result.
+	// Call invokes a control method with already node-local params, returning raw JSON.
 	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
-	// Done is closed when the source disconnects. For the in-process source this
-	// never fires (the local engine does not disconnect).
+	// Done is closed when the source disconnects (never fires for the in-process source).
 	Done() <-chan struct{}
 }
 

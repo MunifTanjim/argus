@@ -54,13 +54,9 @@ const (
 	CompactChunk // context compression boundary
 )
 
-// InferenceCycle is one LLM call plus the tool calls it dispatched. Tool
-// results arrive as meta entries within the cycle's item range; the next
-// non-meta assistant entry starts the next cycle.
-//
-// Cycles index into Chunk.Items via StartItem (inclusive) and EndItem
-// (exclusive). The items themselves keep their existing flat ordering --
-// this is a derived view, not a replacement structure.
+// InferenceCycle is one LLM call plus its dispatched tool calls. A derived
+// view over Chunk.Items: [StartItem, EndItem). The next non-meta assistant
+// entry starts the next cycle.
 type InferenceCycle struct {
 	Index       int    // 0-based, per chunk
 	StartItem   int    // inclusive index into Chunk.Items
@@ -73,8 +69,7 @@ type InferenceCycle struct {
 	DurationMs  int64 // wall time from this assistant entry to the next, or to chunk end
 }
 
-// Chunk is the output of the pipeline. Each chunk represents one visible unit
-// in the conversation timeline.
+// Chunk is one visible unit in the conversation timeline.
 type Chunk struct {
 	Type      ChunkType
 	Timestamp time.Time
@@ -99,10 +94,9 @@ type Chunk struct {
 	IsError bool // bash stderr present or task killed
 }
 
-// BuildChunks folds classified messages into display chunks.
-// The algorithm buffers consecutive AI messages and flushes them into a single
-// AI chunk whenever a User or System message appears (or at end of input).
-// TeammateMsg entries fold into the current AI buffer rather than starting new chunks.
+// BuildChunks folds classified messages into display chunks. Consecutive AI
+// messages buffer into one chunk, flushed when a User/System message appears
+// or at EOF. Teammate/memory entries fold into the AI buffer.
 func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 	var chunks []Chunk
 	var aiBuf []AIMsg
@@ -124,9 +118,8 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 				Timestamp: m.Timestamp,
 				UserText:  m.Text,
 			}
-			// Slash commands: the next entry may be the expanded skill prompt
-			// (isMeta=true with text content, no tool_result blocks). Attach
-			// it to this user chunk instead of letting it fall into the AI buffer.
+			// Slash commands: the next entry may be the expanded skill prompt;
+			// attach it here instead of letting it fall into the AI buffer.
 			if strings.HasPrefix(m.Text, "/") && i+1 < len(msgs) {
 				if expanded := extractExpandedPrompt(msgs[i+1]); expanded != "" {
 					c.ExpandedPrompt = expanded
@@ -145,9 +138,8 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 		case AIMsg:
 			aiBuf = append(aiBuf, m)
 		case TeammateMsg:
-			// Fold teammate messages into the AI buffer as synthetic AIMsg
-			// with a "teammate" content block. This keeps them within the
-			// AI turn rather than splitting it.
+			// Fold into the AI buffer as a synthetic meta AIMsg so the teammate
+			// message stays within the AI turn rather than splitting it.
 			aiBuf = append(aiBuf, AIMsg{
 				Timestamp: m.Timestamp,
 				IsMeta:    true,
@@ -159,9 +151,8 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 				}},
 			})
 		case MemoryLoadMsg:
-			// Same fold pattern as TeammateMsg. Memory loads happen mid-turn
-			// (after the user submits, before the assistant replies) and
-			// belong with the surrounding AI turn, not as a standalone chunk.
+			// Same fold pattern as TeammateMsg: memory loads happen mid-turn
+			// and belong with the surrounding AI turn, not a standalone chunk.
 			aiBuf = append(aiBuf, AIMsg{
 				Timestamp: m.Timestamp,
 				IsMeta:    true,

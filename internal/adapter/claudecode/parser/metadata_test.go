@@ -58,8 +58,7 @@ func TestScanSessionMetadata_NotOngoingInterrupted(t *testing.T) {
 func TestScanSessionMetadata_MultiTurn(t *testing.T) {
 	meta := scanSessionMetadata(filepath.Join("testdata", "multi_turn.jsonl"))
 
-	// 3 user messages + 3 first-AI-after-user = 6 turns.
-	// a3 is a continuation after tool_result, not a new turn (awaitingAIGroup already false after a2).
+	// 3 user + 3 first-AI-after-user = 6 turns; a3 is a continuation, not a turn.
 	if meta.turnCount != 6 {
 		t.Errorf("turnCount = %d, want 6", meta.turnCount)
 	}

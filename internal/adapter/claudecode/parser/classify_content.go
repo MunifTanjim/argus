@@ -16,17 +16,17 @@ func firstSubmatch(s string, re *regexp.Regexp) string {
 	return m[1]
 }
 
-// extractTeammateID extracts the teammate_id attribute from a teammate-message XML tag.
+// extractTeammateID returns the teammate_id attribute from a teammate-message tag.
 func extractTeammateID(s string) string { return firstSubmatch(s, teammateIDRe) }
 
-// extractTeammateColor extracts the color attribute from a teammate-message XML tag.
+// extractTeammateColor returns the color attribute from a teammate-message tag.
 func extractTeammateColor(s string) string { return firstSubmatch(s, teammateColorRe) }
 
-// extractTeammateContent extracts the inner text content from a teammate-message XML wrapper.
+// extractTeammateContent returns the inner text of a teammate-message wrapper.
 func extractTeammateContent(s string) string {
 	m := teammateContentRe.FindStringSubmatch(s)
 	if m == nil {
-		return s // fallback to full string if no match
+		return s // no match: fall back to full string
 	}
 	return strings.TrimSpace(m[1])
 }
@@ -39,15 +39,15 @@ func parseTimestamp(s string) time.Time {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t
 	}
-	// Try the format without timezone that Claude sometimes emits.
+	// Claude sometimes emits a timezone-less timestamp.
 	if t, err := time.Parse("2006-01-02T15:04:05.999999999", s); err == nil {
 		return t
 	}
 	return time.Time{}
 }
 
-// extractAssistantDetails pulls thinking count, tool calls, and structured
-// content blocks from an assistant message's content array.
+// extractAssistantDetails returns the thinking count, tool calls, and content
+// blocks from an assistant message's content array.
 func extractAssistantDetails(raw json.RawMessage) (int, []ToolCall, []ContentBlock) {
 	var blocks []contentBlockJSON
 	if err := json.Unmarshal(raw, &blocks); err != nil {
@@ -96,11 +96,11 @@ func extractAssistantDetails(raw json.RawMessage) (int, []ToolCall, []ContentBlo
 func extractMetaBlocks(raw json.RawMessage, textFallback string) []ContentBlock {
 	var blocks []contentBlockJSON
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		// String content or unparseable -> single text block.
+		// String content or unparseable: single text block.
 		return []ContentBlock{{Type: "text", Text: textFallback}}
 	}
 
-	// Verify we got actual tool_result blocks, not some other array.
+	// Require actual tool_result blocks, not just any array.
 	hasToolResult := false
 	for _, b := range blocks {
 		if b.Type == "tool_result" {

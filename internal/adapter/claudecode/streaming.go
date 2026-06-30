@@ -6,11 +6,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 )
 
-// StreamingTranscript incrementally folds a growing transcript (session or
-// subagent) file. It keeps a byte cursor, the accumulated classified msgs, and
-// the cumulative subagent links, so each Refresh parses only newly appended
-// lines and re-folds in memory. Output matches ReadStreamingView of the same
-// file content. Not safe for concurrent use.
+// StreamingTranscript incrementally folds a growing transcript file. A byte
+// cursor plus accumulated msgs and links let each Refresh parse only newly
+// appended lines and re-fold in memory. Output matches ReadStreamingView of the
+// same content. Not safe for concurrent use.
 type StreamingTranscript struct {
 	path       string
 	rootPath   string // session root, for resolving sibling subagent files (flat dir)
@@ -20,11 +19,10 @@ type StreamingTranscript struct {
 	links      map[string]string // agentID -> toolUseID (cumulative)
 }
 
-// NewStreamingTranscript returns a folder positioned at the start of the file.
-// rootPath is the session root used to resolve subagent files (pass path itself
-// for a session root). isSubagent clears the sidechain flag while reading a
-// subagent file. Nested children are linked for both session and subagent files;
-// linking is suppressed past MaxSubagentDepth.
+// NewStreamingTranscript returns a folder positioned at the file start. rootPath
+// resolves subagent files (pass path itself for a session root). isSubagent
+// clears the sidechain flag while reading a subagent file. Nested children are
+// linked, suppressed past MaxSubagentDepth.
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) *StreamingTranscript {
 	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}}
 }

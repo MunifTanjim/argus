@@ -30,16 +30,14 @@ func newRootCmd(version string) *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			// Honor the configured log level so an embedded node's buffered logs
-			// (shown in the TUI Logs tab) respect cfg.Log.Level. Unlike `start`,
-			// the TUI must not install the global stderr handler (logger.Init):
-			// stderr output would corrupt the alt-screen.
+			// Apply the log level for an embedded node's buffered logs, but unlike
+			// `start` don't install the stderr handler (logger.Init): it would corrupt
+			// the alt-screen.
 			if err := applyLogLevel(cfg); err != nil {
 				return fail(cmd, err)
 			}
 
-			// Any embedded node spawned below is tied to this context, so it stops
-			// when the TUI exits — nothing lingers.
+			// Any embedded node spawned below is tied to ctx, so it stops with the TUI.
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -53,9 +51,9 @@ func newRootCmd(version string) *cobra.Command {
 			var logs *logbuf.Buffer
 			switch {
 			case cfg.Gateway.URL != "":
-				// The TUI drives the gateway so it sees the whole fleet. If no local node
-				// is running, spawn an ephemeral one that enrolls with the same gateway, so
-				// this machine joins the fleet too; otherwise the running node enrolls itself.
+				// The TUI drives the gateway to see the whole fleet. With no local node,
+				// spawn an ephemeral one enrolled on the same gateway so this machine joins
+				// too; otherwise the running node enrolls itself.
 				if running {
 					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				} else {
@@ -93,9 +91,8 @@ func newRootCmd(version string) *cobra.Command {
 
 	cmd.SetVersionTemplate("argus {{.Version}}\n")
 
-	// --config is persistent so subcommands (start, hook) share it. Other flags default
-	// to zero values; real defaults come from config (viper), so a flag only overrides
-	// config/env when set. See resolveConfig / config.Load.
+	// --config is persistent so subcommands share it. Other flags default to zero; real
+	// defaults come from config (viper), so a flag only overrides when set.
 	cmd.PersistentFlags().String("config", "", "config file (default: $XDG_CONFIG_HOME/argus/config.yaml) [$ARGUS_CONFIG]")
 
 	addClientFlags(cmd.Flags())
@@ -110,15 +107,13 @@ func newRootCmd(version string) *cobra.Command {
 	return cmd
 }
 
-// errSilent is returned by RunE when a command has already printed its own
-// diagnostics; main() still exits non-zero, but cobra prints nothing more
-// (the root command sets SilenceErrors). Its message must stay empty: main()
-// guards on identity and never prints it.
+// errSilent is returned by RunE when a command already printed its diagnostics; main()
+// exits non-zero but prints nothing more. Its message must stay empty: main() guards on
+// identity and never prints it.
 var errSilent = errors.New("")
 
 // fail prints a diagnostic prefixed with the command path (e.g. "argus start") and
-// returns errSilent, so callers report once and exit non-zero without cobra
-// re-printing. Centralizes the StdErrF + errSilent pattern and keeps prefixes correct.
+// returns errSilent, so callers report once and exit non-zero without cobra re-printing.
 func fail(cmd *cobra.Command, err error) error {
 	shell.StdErrF("%s: %v\n", cmd.CommandPath(), err)
 	return errSilent

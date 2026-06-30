@@ -97,11 +97,8 @@ type CompactMsg struct {
 
 func (CompactMsg) classifiedMsg() {}
 
-// MemoryLoadMsg represents a nested memory file being loaded into context —
-// e.g. a CLAUDE.md pulled in because the user changed directories. Surfaced
-// from type=attachment entries with attachment.type=="nested_memory" and
-// rendered as a single "Loaded <path>" pill folded into the surrounding AI
-// turn (parallels how TeammateMsg folds in).
+// MemoryLoadMsg represents a nested memory file (e.g. a CLAUDE.md) loaded into
+// context. Rendered as a "Loaded <path>" pill folded into the AI turn, like TeammateMsg.
 type MemoryLoadMsg struct {
 	Timestamp   time.Time
 	DisplayPath string // relative path shown to the user ("claude-code/CLAUDE.md")

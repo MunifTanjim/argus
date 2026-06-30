@@ -7,13 +7,9 @@ import (
 )
 
 // -- Colors ---------------------------------------------------------------
-// All colors resolve at init via initTheme(hasDarkBg). Before Bubble Tea
-// enters alt-screen, Run() detects the background and calls initTheme once.
-// After that, every color is a concrete color.Color -- no runtime lookup.
-//
-// Light values: ANSI 0-15 for accents (palette-adaptive), 256-color for grays
-// (predictable). ANSI 7/15 (white) are invisible on light backgrounds -- never
-// use them for Light values. Dark values: ANSI 256-color codes tuned for dark.
+// Colors resolve once at init via initTheme(hasDarkBg), before alt-screen.
+// Gotcha: ANSI 7/15 (white) are invisible on light backgrounds -- never use
+// them for Light values.
 //
 // Ported from kylesnowschwartz/tail-claude theme.go.
 
@@ -89,9 +85,8 @@ var (
 )
 
 // -- Semantic text styles -----------------------------------------------------
-// Reusable styles for the four text hierarchy levels plus common bold/accent
-// combos. Safe to chain (.Width(), .Padding(), etc.) since lipgloss styles are
-// immutable value types -- each method returns a copy.
+// Safe to chain (.Width(), .Padding(), etc.): lipgloss styles are immutable
+// value types, each method returns a copy.
 
 var (
 	StylePrimaryBold     lipgloss.Style
@@ -104,8 +99,8 @@ var (
 	StyleSearchHighlight lipgloss.Style
 )
 
-// initTheme resolves all colors for the detected background and rebuilds
-// styles. Called once in Run() before Bubble Tea starts.
+// initTheme resolves all colors for the detected background and rebuilds styles.
+// Called once in Run() before Bubble Tea starts.
 func initTheme(hasDarkBg bool) {
 	ld := lipgloss.LightDark(hasDarkBg)
 

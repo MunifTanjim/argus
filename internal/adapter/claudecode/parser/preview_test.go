@@ -133,8 +133,7 @@ func TestScanPreview_DoesNotFilterIsMeta(t *testing.T) {
 	if preview != "Tool result: some data here" {
 		t.Errorf("preview = %q, want %q", preview, "Tool result: some data here")
 	}
-	// Turn count is 0 here because isMeta user messages aren't counted as
-	// conversation turns. That's correct -- the test is about preview extraction.
+	// isMeta user messages don't count as turns; this test only checks preview.
 }
 
 func TestScanPreview_TeammateMessageNotFiltered(t *testing.T) {

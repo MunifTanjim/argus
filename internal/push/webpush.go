@@ -24,9 +24,9 @@ import (
 // b64 is the unpadded base64url encoding Web Push uses throughout.
 var b64 = base64.RawURLEncoding
 
-// encryptWebPush encrypts payload for a Web Push subscription per RFC 8291 using
-// the aes128gcm content coding (RFC 8188). p256dhB64/authB64 are the subscription
-// keys (base64url, unpadded) from the device. It returns the HTTP request body.
+// encryptWebPush encrypts payload for a Web Push subscription (RFC 8291, aes128gcm
+// content coding RFC 8188), returning the HTTP request body. p256dhB64/authB64 are
+// the device's subscription keys (base64url, unpadded).
 func encryptWebPush(p256dhB64, authB64 string, payload []byte) ([]byte, error) {
 	uaPub, err := b64.DecodeString(p256dhB64)
 	if err != nil {

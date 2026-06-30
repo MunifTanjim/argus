@@ -7,14 +7,9 @@ import (
 	"unicode"
 )
 
-// ProjectName returns a display name for a project directory.
-//
-// If cwd is inside a git repository (including worktrees and submodules),
-// resolves to the main repository root directory name. For worktree
-// directories named "project-branch", trims the branch suffix so the
-// display shows the canonical project name.
-//
-// Falls back to filepath.Base(cwd) if no .git is found.
+// ProjectName returns a display name for a project directory. Inside a git
+// repo (incl. worktrees/submodules), uses the main repo root's name; otherwise
+// falls back to filepath.Base(cwd) with any branch suffix trimmed.
 func ProjectName(cwd, gitBranch string) string {
 	if cwd == "" {
 		return ""
@@ -25,20 +20,15 @@ func ProjectName(cwd, gitBranch string) string {
 		return filepath.Base(root)
 	}
 
-	// No git repo found. Try trimming branch suffix from the directory name
-	// (handles offline worktree paths where the worktree directory exists
-	// but its .git file points to a non-existent main repo).
+	// No git repo: trim branch suffix from the dir name (handles offline
+	// worktrees whose .git points to a non-existent main repo).
 	name := filepath.Base(cleaned)
 	name = trimBranchSuffix(name, gitBranch)
 	return name
 }
 
-// findGitRepoRoot walks up from dir looking for .git. Handles both .git
-// directories (normal repos) and .git files (worktrees/submodules). For
-// .git files, reads the gitdir reference and resolves via commondir to
-// find the main repository root.
-//
-// Returns empty string if no .git is found.
+// findGitRepoRoot walks up from dir looking for .git, resolving .git files
+// (worktrees/submodules) to the main repo root via commondir. Returns "" if none.
 func findGitRepoRoot(dir string) string {
 	if dir == "" {
 		return ""
@@ -84,9 +74,8 @@ func findGitRepoRoot(dir string) string {
 	}
 }
 
-// repoRootFromGitFile resolves the main repository root from a .git file.
-// Reads the gitdir reference, then checks commondir to find the real .git
-// directory. Falls back to parsing the worktrees path structure.
+// repoRootFromGitFile resolves the main repo root from a .git file via its
+// gitdir + commondir, falling back to parsing the worktrees path structure.
 func repoRootFromGitFile(repoDir, gitFilePath string) string {
 	gitDir := readGitDirFromFile(gitFilePath)
 	if gitDir == "" {
@@ -136,8 +125,8 @@ func readGitDirFromFile(path string) string {
 	return ""
 }
 
-// readCommonDir reads the commondir file from a git directory (used by
-// worktrees to reference the main repo's .git).
+// readCommonDir reads a git dir's commondir file (worktrees use it to point
+// at the main repo's .git).
 func readCommonDir(gitDir string) string {
 	b, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
 	if err != nil {
@@ -153,11 +142,9 @@ func readCommonDir(gitDir string) string {
 	return filepath.Clean(filepath.Join(gitDir, value))
 }
 
-// trimBranchSuffix strips a git branch name suffix from a directory name.
-// Worktree directories are commonly named "project-branch-name". This
-// normalizes back to the project name. Default branches (main, master,
-// trunk, develop, dev) are not trimmed -- a directory called "project-main"
-// is likely named intentionally.
+// trimBranchSuffix strips a branch-name suffix from a dir named
+// "project-branch-name". Default branches (main/master/trunk/develop/dev) are
+// kept -- "project-main" is likely intentional.
 func trimBranchSuffix(name, gitBranch string) string {
 	branch := strings.TrimSpace(gitBranch)
 	if name == "" || branch == "" {
@@ -184,9 +171,8 @@ func trimBranchSuffix(name, gitBranch string) string {
 	return name
 }
 
-// normalizeBranchToken converts a branch name to a comparable token.
-// Slashes, dashes, underscores, dots, and spaces become single dashes.
-// Letters are lowered. Other characters become dashes.
+// normalizeBranchToken lowercases a branch name and collapses any run of
+// non-alphanumeric characters into a single dash.
 func normalizeBranchToken(branch string) string {
 	var b strings.Builder
 	b.Grow(len(branch))
@@ -212,8 +198,7 @@ func normalizeBranchToken(branch string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-// isDefaultBranch returns true for common default branch names that should
-// not be trimmed from directory names.
+// isDefaultBranch reports common default branch names (not trimmed from dir names).
 func isDefaultBranch(branch string) bool {
 	switch strings.ToLower(strings.TrimSpace(branch)) {
 	case "main", "master", "trunk", "develop", "dev":
@@ -223,15 +208,9 @@ func isDefaultBranch(branch string) bool {
 	}
 }
 
-// ProjectDirForPath returns the Claude CLI projects directory for an absolute
-// path. Claude Code encodes paths by replacing "/", ".", and "_" with "-",
-// then stores sessions under ~/.claude/projects/<encoded>. Example:
-//
-//	/Users/kyle/Code/proj -> ~/.claude/projects/-Users-kyle-Code-proj
-//	/Users/kyle/.config    -> ~/.claude/projects/-Users-kyle--config
-//
-// Symlinks are resolved so the encoded path matches what Claude Code produces
-// (e.g. macOS /tmp -> /private/tmp).
+// ProjectDirForPath returns the ~/.claude/projects/<encoded> directory for an
+// absolute path. Symlinks are resolved first so the encoding matches what
+// Claude Code produces (e.g. macOS /tmp -> /private/tmp).
 func ProjectDirForPath(absPath string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -244,14 +223,9 @@ func ProjectDirForPath(absPath string) (string, error) {
 	return filepath.Join(home, ".claude", "projects", encoded), nil
 }
 
-// encodePath encodes an absolute filesystem path into a Claude Code project
-// directory name. Three characters are replaced with "-": path separators,
-// dots, and underscores. The encoding is lossy (cannot be reversed for paths
-// containing literal dashes).
-//
-// Verified empirically against Claude Code's on-disk output across 273
-// project directories including dotfile paths (.claude, .config), worktree
-// paths (.claude/worktrees/), and macOS temp paths (containing underscores).
+// encodePath encodes an absolute path into a Claude Code project dir name by
+// replacing separators, dots, and underscores with "-". Lossy (literal dashes
+// can't be reversed). Verified empirically against Claude Code's on-disk output.
 func encodePath(absPath string) string {
 	r := strings.NewReplacer(
 		string(filepath.Separator), "-",
@@ -261,28 +235,21 @@ func encodePath(absPath string) string {
 	return r.Replace(absPath)
 }
 
-// CurrentProjectDir returns the Claude CLI projects directory for the current
-// working directory. If the CWD is inside a git worktree, resolves to the
-// main working tree root so we find sessions stored under the original
-// project path.
+// CurrentProjectDir returns the Claude projects directory for the CWD,
+// resolving a worktree CWD to the main repo root (where sessions are stored).
 func CurrentProjectDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 
-	// If we're in a git worktree, the CWD differs from the main repo root.
-	// Claude stores sessions under the main repo path, so resolve it.
 	cwd = ResolveGitRoot(cwd)
 
 	return ProjectDirForPath(cwd)
 }
 
-// ResolveGitRoot returns the git toplevel for the given directory. If the
-// directory is inside a git worktree, it resolves to the main working tree
-// root via the .git file's gitdir reference and commondir.
-//
-// Falls back to the original path if anything fails (not a git repo, etc).
+// ResolveGitRoot returns the git toplevel for dir (resolving worktrees to the
+// main working tree root), or dir itself if it's not a git repo.
 func ResolveGitRoot(dir string) string {
 	if root := findGitRepoRoot(dir); root != "" {
 		return root

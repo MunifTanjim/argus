@@ -1,8 +1,6 @@
-// Package logbuf is a bounded, concurrency-safe in-memory ring of log lines.
-// The TUI attaches it to the embedded node's logger (via an io.Writer-backed
-// slog handler) so the node's operational output can be tailed in a Logs tab
-// instead of being discarded. It implements io.Writer: each newline-terminated
-// record written becomes one stored line.
+// Package logbuf is a bounded, concurrency-safe in-memory ring of log lines, used
+// by the TUI to tail the embedded node's output in a Logs tab. It implements
+// io.Writer: each newline-terminated record becomes one stored line.
 package logbuf
 
 import (
@@ -28,9 +26,9 @@ func New(max int) *Buffer {
 	return &Buffer{max: max, notify: make(chan struct{}, 1)}
 }
 
-// Write appends p, splitting on newlines into stored lines. A trailing partial
-// line (no newline yet) is held until a later Write completes it. It never errors
-// and always reports len(p) consumed, so it is a well-behaved io.Writer for slog.
+// Write appends p, splitting on newlines into stored lines; a trailing partial line
+// is held until a later Write completes it. Never errors and always reports len(p),
+// so it is a well-behaved io.Writer for slog.
 func (b *Buffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	b.carry = append(b.carry, p...)
@@ -68,9 +66,8 @@ func (b *Buffer) Lines() []string {
 	return out
 }
 
-// LinesRange returns a snapshot copy of up to n lines starting at offset off
-// (clamped to the buffer). The TUI uses it to copy only the visible window each
-// render instead of the whole ring.
+// LinesRange returns a snapshot of up to n lines from offset off (clamped). Lets the
+// TUI copy only the visible window per render instead of the whole ring.
 func (b *Buffer) LinesRange(off, n int) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -88,7 +85,6 @@ func (b *Buffer) Len() int {
 	return len(b.lines)
 }
 
-// Notify yields a value shortly after lines are appended. Sends are coalesced
-// (single-slot channel); use it only as a "something changed" signal and read
-// the content via Lines.
+// Notify signals shortly after lines are appended (coalesced, single-slot). Use only
+// as a "something changed" hint; read content via Lines.
 func (b *Buffer) Notify() <-chan struct{} { return b.notify }

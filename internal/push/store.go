@@ -11,10 +11,9 @@ import (
 	"time"
 )
 
-// Store persists one push target per device as a JSON file, keyed by a stable
-// device id the app supplies. Keying by device (not by endpoint) means a device
-// re-registering with a new endpoint replaces its old record rather than leaving a
-// stale one behind. Safe for concurrent use.
+// Store persists one push target per device as a JSON file. Keyed by device (not
+// endpoint) so re-registering with a new endpoint replaces the old record rather
+// than leaving a stale one. Safe for concurrent use.
 type Store struct {
 	dir string
 	now func() time.Time
@@ -40,9 +39,8 @@ func storeID(deviceID string) string {
 
 func (s *Store) path(id string) string { return filepath.Join(s.dir, id+".json") }
 
-// Upsert records (or refreshes) a device's target, replacing any previous one for
-// that device. A new record gets CreatedAt; an existing one keeps it and bumps
-// LastSeen.
+// Upsert records (or refreshes) a device's target. A new record gets CreatedAt;
+// an existing one keeps it and bumps LastSeen.
 func (s *Store) Upsert(deviceID string, t Target) error {
 	if deviceID == "" {
 		return fmt.Errorf("push: empty device id")

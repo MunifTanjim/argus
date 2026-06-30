@@ -64,9 +64,8 @@ func TestCycles_SimpleSingleResponse(t *testing.T) {
 	}
 }
 
-// TestCycles_MultipleCycles: three non-meta messages with a meta tool-result
-// between each. Should produce three cycles. Meta entries belong to the
-// preceding cycle's item range.
+// TestCycles_MultipleCycles: meta tool-results between non-meta messages fold
+// into the preceding cycle, yielding three cycles.
 func TestCycles_MultipleCycles(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	msgs := []parser.ClassifiedMsg{

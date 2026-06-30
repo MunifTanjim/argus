@@ -7,10 +7,9 @@ import (
 	"time"
 )
 
-// OngoingStalenessThreshold is the maximum time since last file modification
-// before a session is considered dead regardless of content. Claude Code writes
-// on every API response and tool call, so 2 minutes of silence means the
-// process is gone.
+// OngoingStalenessThreshold: max idle time before a session is considered dead.
+// Claude Code writes on every API response/tool call, so 2 min of silence means
+// the process is gone.
 const OngoingStalenessThreshold = 2 * time.Minute
 
 // activityType classifies events for ongoing detection.
@@ -44,59 +43,46 @@ func (a activity) isAIActivity() bool {
 // approvePattern matches approve: true in SendMessage shutdown_response input.
 var approvePattern = regexp.MustCompile(`"approve"\s*:\s*true`)
 
-// isShutdownApproval checks if a tool_use block is a SendMessage shutdown_response
-// with approve: true.
+// isShutdownApproval reports whether a tool_use is a SendMessage
+// shutdown_response with approve: true.
 func isShutdownApproval(toolName string, toolInput json.RawMessage) bool {
 	if toolName != "SendMessage" {
 		return false
 	}
-	// Quick structural check: parse and inspect the fields.
 	var fields struct {
 		Type    string `json:"type"`
 		Approve *bool  `json:"approve"`
 	}
 	if err := json.Unmarshal(toolInput, &fields); err != nil {
-		// Fallback to regex for malformed JSON.
-		return approvePattern.Match(toolInput)
+		return approvePattern.Match(toolInput) // fallback for malformed JSON
 	}
 	return fields.Type == "shutdown_response" && fields.Approve != nil && *fields.Approve
 }
 
-// IsOngoing reports whether the session appears to still be in progress.
-// A session is ongoing if either:
+// IsOngoing reports whether the session is still in progress. Ongoing if either
+// (1) there's AI activity after the last ending event (text output, interruption,
+// ExitPlanMode, shutdown approval), or (2) any agent/task call is still pending.
 //
-//  1. There's AI activity (thinking, tool_use, tool_result) after the last
-//     "ending event" (text output, interruption, ExitPlanMode, shutdown approval).
-//  2. Any tool call is still awaiting a result (pending tool calls).
-//
-// Condition 2 catches team sessions where the parent writes text output after
-// receiving partial agent results. The activity-based check (1) only looks
-// forward from the last ending event, so it misses still-running agents whose
-// tool_use appeared earlier in the sequence.
-//
-// If no ending event exists, it's ongoing if there's any AI activity at all.
-//
-// For chunks without structured items (old-style), falls back to checking
-// whether the last chunk is an AI chunk without a stop_reason of "end_turn".
+// Condition 2 catches team sessions where the parent emits text after partial
+// agent results, which would otherwise mask still-running agents whose tool_use
+// appeared earlier. With no ending event, ongoing if there's any AI activity.
+// For old-style chunks lacking items, falls back to the last AI chunk's stop_reason.
 func IsOngoing(chunks []Chunk) bool {
 	if len(chunks) == 0 {
 		return false
 	}
 
-	// A trailing user prompt means Claude is processing the request.
-	// Callers apply staleness thresholds to handle dead sessions where
-	// the user typed but Claude never responded.
+	// Trailing user prompt: Claude is processing. Callers apply staleness
+	// thresholds to catch dead sessions where Claude never responded.
 	if chunks[len(chunks)-1].Type == UserChunk {
 		return true
 	}
 
-	// Collect activities from structured items across all chunks.
 	var activities []activity
 	actIdx := 0
 	hasItems := false
 
-	// Track tool_use IDs that are shutdown approvals so their tool_results
-	// are also treated as ending events.
+	// Shutdown-approval tool IDs, so their tool_results also count as ending events.
 	shutdownToolIDs := make(map[string]bool)
 
 	for _, chunk := range chunks {
@@ -134,7 +120,6 @@ func IsOngoing(chunks []Chunk) bool {
 					actIdx++
 				}
 
-				// If this tool call has a result, track it too.
 				if item.ToolResult != "" {
 					if shutdownToolIDs[item.ToolID] {
 						activities = append(activities, activity{typ: actInterruption, index: actIdx})
@@ -156,22 +141,17 @@ func IsOngoing(chunks []Chunk) bool {
 		}
 	}
 
-	// If we had items, use the activity-based detection.
 	if hasItems {
 		if isOngoingFromActivities(activities) {
 			return true
 		}
-		// Activity sequence says complete, but check for pending agents.
-		// This catches team sessions where the parent writes text output after
-		// receiving some agent results, masking still-running agents earlier
-		// in the activity sequence. Only agent/task calls are checked — regular
-		// tools (Read, Bash, Write) can legitimately lack results after
-		// interruptions or context compaction without meaning the session is ongoing.
+		// Activities look complete, but a pending agent/task call still means
+		// ongoing (see condition 2 above). Only agent/task calls count — regular
+		// tools can lack results after interruptions/compaction.
 		return hasPendingAgents(chunks)
 	}
 
-	// Fallback for old-style chunks without structured items:
-	// ongoing if the last AI chunk has no end_turn stop reason.
+	// Old-style fallback: ongoing if the last AI chunk has no end_turn stop reason.
 	for i := len(chunks) - 1; i >= 0; i-- {
 		if chunks[i].Type == AIChunk {
 			return chunks[i].StopReason != "end_turn"
@@ -181,12 +161,9 @@ func IsOngoing(chunks []Chunk) bool {
 	return false
 }
 
-// hasPendingAgents checks whether any agent/task tool call is still awaiting a
-// result. Checks ItemSubagent items (Task, Agent, Skill) and ItemToolCall
-// items where ToolName is "Task" or "Agent" — regular tools (Read, Bash,
-// Write, etc.) execute and return within seconds, so a missing result means
-// the session was interrupted or the JSONL is incomplete, not evidence of
-// ongoing work.
+// hasPendingAgents reports whether any agent/task call still awaits a result.
+// Only Task/Agent calls count — regular tools return within seconds, so their
+// missing result signals interruption/incomplete JSONL, not ongoing work.
 func hasPendingAgents(chunks []Chunk) bool {
 	for _, chunk := range chunks {
 		if chunk.Type != AIChunk {
@@ -214,7 +191,6 @@ func isOngoingFromActivities(activities []activity) bool {
 		return false
 	}
 
-	// Find the index of the last ending event.
 	lastEndingIdx := -1
 	for i := len(activities) - 1; i >= 0; i-- {
 		if activities[i].isEndingEvent() {
@@ -297,11 +273,10 @@ func scanOngoingAssistant(e *metadataScanEntry, activityIndex *int,
 func scanOngoingUser(e *metadataScanEntry, activityIndex *int,
 	lastEndingIndex *int, hasAny, hasAfter *bool, shutdownIDs, pendingToolIDs map[string]bool) {
 
-	// Check for user-rejected tool use at the entry level.
 	isRejection := isToolUseRejection(e.ToolResult)
 
-	// String-content user entries (e.g. "[Request interrupted by user...]") fail
-	// array unmarshal. Check them before attempting block parsing.
+	// String-content user entries (e.g. "[Request interrupted...]") fail array
+	// unmarshal, so check them before block parsing.
 	var text string
 	if err := json.Unmarshal(e.Message.Content, &text); err == nil {
 		if strings.HasPrefix(text, "[Request interrupted by user") {

@@ -110,19 +110,9 @@ func TestReadSession_NoiseFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSession(%q) error: %v", path, err)
 	}
-	// noise.jsonl has 11 lines total. After filtering:
-	// - u1 (user) -> UserChunk
-	// - n1 (system type) -> filtered
-	// - n2 (summary type) -> CompactChunk
-	// - a1 (assistant with thinking/tools) -> starts AI buffer
-	// - sc1 (sidechain) -> filtered
-	// - n3 (synthetic) -> filtered
-	// - m1 (meta user) -> AIMsg (merges into AI buffer with a1)
-	// - n4 (system-reminder wrapped) -> filtered
-	// - n5 (empty stdout) -> filtered
-	// - n6 (interruption) -> filtered
-	// - u2 (user) -> flushes AI buffer -> UserChunk
-	// Result: UserChunk, CompactChunk, AIChunk, UserChunk = 4 chunks
+	// noise.jsonl: after filtering, expect UserChunk, CompactChunk, AIChunk,
+	// UserChunk (sidechain/synthetic/system-reminder/empty/interruption dropped;
+	// meta user merges into the AI buffer).
 	if len(chunks) != 4 {
 		t.Fatalf("len(chunks) = %d, want 4", len(chunks))
 	}
@@ -242,10 +232,8 @@ func TestFindTitleMatches(t *testing.T) {
 	})
 
 	t.Run("scanner skips large content lines", func(t *testing.T) {
-		// A real session has many KB-sized content lines. The title scanner
-		// must not parse them — it should reject by length and substring.
-		// This session has one huge bogus assistant line and the title at
-		// the bottom, mimicking a late /rename.
+		// The title scanner must reject KB-sized content lines by length/substring
+		// rather than parse them. Huge line + trailing title mimics a late /rename.
 		heavy := filepath.Join(root, "-heavy-proj")
 		if err := os.MkdirAll(heavy, 0o755); err != nil {
 			t.Fatal(err)

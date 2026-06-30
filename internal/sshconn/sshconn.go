@@ -1,8 +1,7 @@
-// Package sshconn provides a net.Conn-backed transport that tunnels a connection
-// through a managed `ssh -W` child process. The node uses it to reach a gateway that
-// binds loopback on a machine reachable over SSH, without exposing the gateway publicly:
-// ssh carries the bytes (and provides encryption + auth), and its stdio is adapted
-// to a net.Conn the WebSocket uplink dials over.
+// Package sshconn provides a net.Conn that tunnels through a managed `ssh -W` child
+// process. The node uses it to reach a loopback-bound gateway over SSH without
+// exposing it publicly: ssh carries the bytes (with its encryption + auth) and its
+// stdio is adapted to a net.Conn the WebSocket uplink dials over.
 package sshconn
 
 import (
@@ -16,12 +15,9 @@ import (
 	"time"
 )
 
-// command builds the ssh invocation that forwards stdio to remoteHostPort on the
-// SSH host. sshPort, when non-empty, sets the SSH port (ssh -p); empty defers to the
-// user's ssh config / 22. It is a package var so tests can substitute a fake binary.
-//
-// BatchMode=yes makes a headless node fail fast instead of blocking on a password
-// prompt (it relies on keys/agent); everything else defers to the user's ssh config.
+// command builds the ssh invocation forwarding stdio to remoteHostPort. A package var
+// so tests can substitute a fake binary. BatchMode=yes makes a headless node fail
+// fast (relying on keys/agent) instead of blocking on a password prompt.
 var command = func(sshDest, remoteHostPort, sshPort string) *exec.Cmd {
 	args := []string{"-W", remoteHostPort, "-o", "BatchMode=yes"}
 	if sshPort != "" {
@@ -31,13 +27,11 @@ var command = func(sshDest, remoteHostPort, sshPort string) *exec.Cmd {
 	return exec.Command("ssh", args...)
 }
 
-// Dial spawns a fresh `ssh -W <remoteHostPort> <sshDest>` (with `-p <sshPort>` when
-// sshPort is non-empty) and returns its stdio as a net.Conn. Callers wrap this in an
-// http.Transport.DialContext closure (dropping the dialed network/address — ssh, not
-// the caller, decides where the bytes go). ssh's stderr is streamed to log so auth and
-// host-key failures surface. The process is detached from any request context and lives
-// until the returned conn is closed, so the long-lived uplink outlives the short
-// handshake request context.
+// Dial spawns `ssh -W <remoteHostPort> <sshDest>` and returns its stdio as a net.Conn.
+// Callers wrap this in an http.Transport.DialContext closure (ssh decides where the
+// bytes go, so the dialed address is dropped). The process is detached from any request
+// context and lives until the conn is closed, so the long-lived uplink outlives the
+// handshake request context. ssh's stderr is logged so auth/host-key failures surface.
 func Dial(sshDest, remoteHostPort, sshPort string, log *slog.Logger) (net.Conn, error) {
 	cmd := command(sshDest, remoteHostPort, sshPort)
 
@@ -61,8 +55,7 @@ func Dial(sshDest, remoteHostPort, sshPort string, log *slog.Logger) (net.Conn, 
 	return &execConn{r: stdout, w: stdin, cmd: cmd}, nil
 }
 
-// logLines streams a reader's lines to log at Warn (ssh writes diagnostics — auth
-// failures, host-key prompts — to stderr).
+// logLines streams a reader's lines to log at Warn (ssh writes diagnostics to stderr).
 func logLines(r io.Reader, log *slog.Logger) {
 	if log == nil {
 		_, _ = io.Copy(io.Discard, r)

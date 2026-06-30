@@ -11,8 +11,7 @@ import (
 // registerHandlers wires the RPC handlers onto srv. The handler implementations
 // live in handlers_session.go / handlers_hook.go / handlers_history.go.
 func (d *Node) registerHandlers(srv *api.Server) {
-	// ping is a no-op latency probe; it does no work so the round trip measures the
-	// connection, not the handler.
+	// ping is a no-op latency probe: round trip measures the connection, not the handler.
 	srv.Handle(api.MethodPing, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
 	srv.Handle(api.MethodSessionsList, d.handleSessionsList)
 	srv.Handle(api.MethodNodeIdentify, d.handleNodeIdentify)

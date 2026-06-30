@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// ToolStats aggregates per-tool usage over a sequence of chunks. Sorted by
-// CallCount descending when returned by AggregateToolStats.
+// ToolStats aggregates per-tool usage. Sorted by CallCount descending when
+// returned by AggregateToolStats.
 type ToolStats struct {
 	Name            string
 	CallCount       int
@@ -15,16 +15,9 @@ type ToolStats struct {
 	ErrorCount      int
 }
 
-// AggregateToolStats walks chunks and returns per-tool counts.
-//
-// Subagent dispatches (ItemSubagent) are counted under "Task" -- they share
-// the dispatch tool name even when the underlying type is "Skill" or "Agent".
-// The breakdown of subagent types is the stats view's job, not the
-// aggregator's.
-//
-// Duration sums only include results where DurationMs > 0. The concurrent-
-// task suppression already zeros inflated durations, so this is the right
-// floor for "trustworthy" totals.
+// AggregateToolStats returns per-tool counts. Subagent dispatches count under
+// "Task". Duration sums only count results where DurationMs > 0 (inflated
+// concurrent-task durations are already zeroed upstream).
 func AggregateToolStats(chunks []Chunk) []ToolStats {
 	byName := make(map[string]*ToolStats)
 
@@ -65,8 +58,7 @@ func AggregateToolStats(chunks []Chunk) []ToolStats {
 	return out
 }
 
-// toolStatsName returns the name to attribute to a DisplayItem in the stats
-// aggregation, or "" to skip non-tool items.
+// toolStatsName returns the stats name for an item, or "" to skip non-tool items.
 func toolStatsName(it DisplayItem) string {
 	switch it.Type {
 	case ItemToolCall:
@@ -78,10 +70,8 @@ func toolStatsName(it DisplayItem) string {
 	}
 }
 
-// toolAbbrev maps full tool names to single-character display tokens for
-// the compact picker suffix ("47R 12B 3E"). Collisions are accepted -- the
-// suffix is informational, not authoritative. Lowercase is used to
-// disambiguate visually similar tools (Glob vs Grep, TodoWrite vs Task).
+// toolAbbrev maps tool names to single-char display tokens ("47R 12B 3E").
+// Collisions are fine; lowercase disambiguates similar tools (Glob/Grep).
 var toolAbbrev = map[string]string{
 	"Read":         "R",
 	"Write":        "W",
@@ -97,9 +87,8 @@ var toolAbbrev = map[string]string{
 	"LSP":          "L",
 }
 
-// ToolAbbrev returns the single-character abbreviation for a tool name,
-// falling back to the first character of the name when unknown. Unknown
-// tools return "" only when name is empty.
+// ToolAbbrev returns the single-char abbreviation for a tool name, falling
+// back to the first character (or "" for an empty name).
 func ToolAbbrev(name string) string {
 	if abbr, ok := toolAbbrev[name]; ok {
 		return abbr
@@ -110,8 +99,7 @@ func ToolAbbrev(name string) string {
 	return string([]rune(name)[0])
 }
 
-// TopTools returns the n highest-call-count tools as a compact display
-// string: "47R 12B 3E". Empty when stats is empty or n <= 0.
+// TopTools returns the n highest-call-count tools as "47R 12B 3E".
 func TopTools(stats []ToolStats, n int) string {
 	if n <= 0 || len(stats) == 0 {
 		return ""

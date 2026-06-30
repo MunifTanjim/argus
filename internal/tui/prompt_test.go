@@ -30,7 +30,7 @@ func promptModel(ix *session.Interaction) model {
 	return m
 }
 
-// question builds a single-question AskUserQuestion interaction.
+// question builds a single-question interaction.
 func question(q session.QuestionSpec) *session.Interaction {
 	return &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{q}}
 }
@@ -128,8 +128,8 @@ func TestPromptIdleTextComposeThenSubmit(t *testing.T) {
 }
 
 func TestPromptIdleShiftEnterInsertsNewline(t *testing.T) {
-	// Sanity: with Kitty disambiguation (always on in Bubble Tea v2), shift+enter
-	// stringifies distinctly. Guards the key the composer matches on.
+	// Kitty disambiguation (always on in Bubble Tea v2) makes shift+enter
+	// stringify distinctly; guards the key the composer matches on.
 	if got := (tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}).String(); got != "shift+enter" {
 		t.Fatalf("shift+enter String() = %q, want shift+enter", got)
 	}
@@ -392,8 +392,7 @@ func TestMultiQuestionAnswersIndependent(t *testing.T) {
 	}
 }
 
-// TestNavigationDoesNotSelect: moving the highlight with arrows must not select
-// an option — only Enter commits.
+// TestNavigationDoesNotSelect verifies arrows only move the highlight; Enter commits.
 func TestNavigationDoesNotSelect(t *testing.T) {
 	ix := multiQuestion()
 	m := promptModel(ix)
@@ -425,7 +424,7 @@ func TestNavigationDoesNotSelect(t *testing.T) {
 	}
 }
 
-// TestSubmitOmitsUnanswered: only confirmed questions are sent.
+// TestSubmitOmitsUnanswered verifies only confirmed questions are sent.
 func TestSubmitOmitsUnanswered(t *testing.T) {
 	ix := multiQuestion()
 	m := promptModel(ix)
@@ -439,8 +438,7 @@ func TestSubmitOmitsUnanswered(t *testing.T) {
 	}
 }
 
-// TestSingleSelectRadioRender: single-select options render radio glyphs; the
-// chosen option shows the filled radio only after it is committed.
+// TestSingleSelectRadioRender verifies the filled radio shows only after commit.
 func TestSingleSelectRadioRender(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A", "B"}})
 	m := promptModel(ix)
@@ -646,9 +644,8 @@ func TestPromptQuestionCTypesIntoCustomAnswer(t *testing.T) {
 	// While editing a custom answer, "c" must type, not trigger chat.
 	q := session.QuestionSpec{Question: "Pick", Options: []string{"A"}}
 	m := promptModel(question(q))
-	// One option means the "type your own" row is index 1; arrow-down moves the
-	// cursor onto it, which makes otherActive true (the free-text field accepts
-	// input) for a single-select question.
+	// With one option the "type your own" row is index 1; arrow-down lands on it,
+	// activating the free-text field.
 	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
 	if m.qSel(0) != otherIndex(&q) {
@@ -667,8 +664,7 @@ func TestPromptQuestionCTypesIntoCustomAnswer(t *testing.T) {
 
 func TestSubmitDecisionOptionlessIsNoOp(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionPermission})
-	// An interaction with no Options must not send a decision (server always
-	// sends Options; an optionless one is a defensive no-op, never a silent allow).
+	// No Options must be a defensive no-op, never a silent allow.
 	ix := &session.Interaction{Kind: session.InteractionPermission}
 	m.prompt.decisionSel = 0
 	_, cmd := m.submitDecision(ix)

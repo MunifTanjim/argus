@@ -39,8 +39,7 @@ func NewClient(conn net.Conn) *Client {
 			}
 		},
 	})
-	// Close the events channel once the connection ends. Safe because no further
-	// OnNotify fires after the read loop (and thus Done) completes.
+	// Close events once the connection ends; safe since no OnNotify fires after Done.
 	go func() {
 		<-c.peer.Done()
 		close(c.events)

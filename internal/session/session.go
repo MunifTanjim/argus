@@ -1,31 +1,26 @@
-// Package session defines the core model argus tracks for every AI coding tool
-// session it discovers or manages. It is transport- and tool-agnostic: the
-// registry stores these, adapters populate them, and clients render them.
+// Package session defines argus's transport- and tool-agnostic model for every AI
+// coding tool session it discovers or manages.
 package session
 
-// Status is the lifecycle/activity state of a session, driven authoritatively by
-// tool hooks where available and by a tmux fallback heuristic otherwise.
+// Status is the lifecycle/activity state of a session, driven by tool hooks where
+// available and a tmux fallback heuristic otherwise.
 type Status string
 
 const (
-	// StatusDiscovered means the session was found (e.g. a tmux pane running
-	// claude) but no authoritative hook event has arrived yet.
+	// StatusDiscovered: found (e.g. a tmux pane) but no hook event yet.
 	StatusDiscovered Status = "discovered"
-	// StatusWorking means the tool is actively processing (between a prompt
-	// submission and a stop, or running a tool call).
+	// StatusWorking: actively processing (between prompt submit and stop, or a tool call).
 	StatusWorking Status = "working"
-	// StatusAwaitingInput means the tool is blocked on the user (e.g. a
-	// permission prompt).
+	// StatusAwaitingInput: blocked on the user (e.g. a permission prompt).
 	StatusAwaitingInput Status = "awaiting_input"
-	// StatusIdle means the tool finished responding and is waiting for the
-	// next prompt.
+	// StatusIdle: finished responding, waiting for the next prompt.
 	StatusIdle Status = "idle"
-	// StatusDead means the underlying process/pane is gone.
+	// StatusDead: the underlying process/pane is gone.
 	StatusDead Status = "dead"
 )
 
-// Label is the human-readable status word clients display next to the glyph. The
-// server owns this string so wording stays consistent across clients.
+// Label is the display word clients show next to the glyph. The server owns this
+// string so wording stays consistent across clients.
 func (s Status) Label() string {
 	switch s {
 	case StatusWorking:
@@ -56,9 +51,7 @@ const (
 )
 
 // Frontend classifies where a session's UI lives, which determines whether argus
-// can drive its terminal. tmux sessions have a pane and are fully controllable;
-// vscode/external sessions are paneless (hook-only) and support decisions but not
-// terminal control.
+// can drive its terminal (only tmux panes are controllable).
 type Frontend string
 
 const (
@@ -105,8 +98,8 @@ const (
 	InteractionIdle InteractionKind = "idle"
 )
 
-// QuestionSpec is one question within an AskUserQuestion interaction. A single
-// AskUserQuestion call may carry several (1-4), each independently answered.
+// QuestionSpec is one question within an AskUserQuestion interaction (a call may
+// carry 1-4, each independently answered).
 type QuestionSpec struct {
 	Header      string `json:"header,omitempty"`       // short category label (chip)
 	Question    string `json:"question,omitempty"`     // the question prompt
@@ -117,22 +110,18 @@ type QuestionSpec struct {
 	OptionPreviews     []string `json:"option_previews,omitempty"`
 }
 
-// DecisionOption is a server-built choice for a permission/plan decision. The
-// client renders Label and, on selection, echoes Value back in
-// RespondParams.OptionValue; the node maps Value to the hook decision. Reject
-// marks the choice that denies (and surfaces a free-text reason field).
+// DecisionOption is a server-built choice for a permission/plan decision. The client
+// renders Label and echoes Value back; the node maps Value to the hook decision.
 type DecisionOption struct {
 	Label  string `json:"label"`
 	Value  string `json:"value"`
-	Reject bool   `json:"reject,omitempty"`
-	// Placeholder is the prompt shown in the free-text field a reject option
-	// opens (e.g. "Tell Claude what to change"). Only meaningful when Reject.
+	Reject bool   `json:"reject,omitempty"` // denies; surfaces a free-text reason field
+	// Placeholder prompts the reject free-text field (e.g. "Tell Claude what to change").
 	Placeholder string `json:"placeholder,omitempty"`
 }
 
-// Interaction is a pending request for the user, surfaced so a client can render
-// it natively and submit a response. It is set while a session is
-// StatusAwaitingInput and cleared when the session moves on.
+// Interaction is a pending user request, surfaced so a client can render it natively
+// and respond. Set while StatusAwaitingInput, cleared when the session moves on.
 type Interaction struct {
 	Kind      InteractionKind `json:"kind"`
 	Message   string          `json:"message,omitempty"`    // hook notification text
@@ -141,15 +130,13 @@ type Interaction struct {
 	// Questions holds the AskUserQuestion question(s) (>=1 when Kind is question).
 	Questions []QuestionSpec `json:"questions,omitempty"`
 	Plan      string         `json:"plan,omitempty"` // ExitPlanMode plan text
-	// Options, when set, are the server-built decision choices the client renders
-	// verbatim (e.g. ExitPlanMode approve variants). The client sends the chosen
-	// Value back unchanged; the node maps it to allow/deny + permission mode.
+	// Options, when set, are server-built decision choices the client renders verbatim;
+	// the chosen Value is sent back unchanged and mapped to allow/deny + permission mode.
 	Options []DecisionOption `json:"options,omitempty"`
 }
 
-// Summary is a cached transcript digest for list views. Computed node-side on
-// hook events so clients never parse transcripts. All fields are comparable
-// (tested with == against zero).
+// Summary is a cached transcript digest for list views, computed node-side on hook
+// events so clients never parse transcripts. All fields are comparable.
 type Summary struct {
 	Model        string  `json:"model,omitempty"`         // raw, e.g. "claude-opus-4-8"
 	HasContext   bool    `json:"has_context,omitempty"`   // whether ContextPct is meaningful
@@ -195,16 +182,13 @@ type Session struct {
 	Interaction *Interaction `json:"interaction,omitempty"`
 
 	// Origin fields — populated only when surfaced through a gateway.
-	// NodeID is the originating node (also the composite ID prefix);
-	// NodeLabel is its human-friendly name (e.g. hostname).
-	NodeID    string `json:"node_id,omitempty"`
-	NodeLabel string `json:"node_label,omitempty"`
-	// Offline marks a session whose originating node is currently disconnected
-	// from the gateway: kept visible (greyed) for a grace period before removal.
+	NodeID    string `json:"node_id,omitempty"`    // originating node (also composite ID prefix)
+	NodeLabel string `json:"node_label,omitempty"` // human-friendly name (e.g. hostname)
+	// Offline marks a session whose node is disconnected: kept visible (greyed) for
+	// a grace period before removal.
 	Offline bool `json:"offline,omitempty"`
 }
 
-// Controllable reports whether argus can drive the session's terminal (send
-// text/keys, capture, kill, focus). Only tmux-pane sessions are controllable;
-// vscode/external sessions support decisions but not terminal control.
+// Controllable reports whether argus can drive the session's terminal. Only
+// tmux-pane sessions are controllable.
 func (s Session) Controllable() bool { return s.Tmux.PaneID != "" }

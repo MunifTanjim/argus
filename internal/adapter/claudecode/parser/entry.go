@@ -28,26 +28,20 @@ type Entry struct {
 	GitBranch      string `json:"gitBranch"`
 	PermissionMode string `json:"permissionMode"` // "default", "acceptEdits", "bypassPermissions", "plan"
 
-	// Tool result metadata (present on isMeta user entries for tool results).
-	// ToolUseResult holds structured output from the tool execution. For
-	// regular tools this is a JSON object (agentId, status, usage, etc.);
-	// for MCP tools it can be a JSON array (the raw tool output).
-	// Stored as RawMessage to tolerate both shapes without breaking ParseEntry.
-	// Use ToolUseResultMap() to access it as key-value pairs when needed.
+	// ToolUseResult is a tool's structured output: a JSON object for regular
+	// tools, but a JSON array for MCP tools — RawMessage tolerates both. Use
+	// ToolUseResultMap() for object access.
 	ToolUseResult   json.RawMessage `json:"toolUseResult"`
 	SourceToolUseID string          `json:"sourceToolUseID"`
 
-	// Summary entries (type=summary) use leafUuid instead of uuid and carry
-	// the compression title in Summary rather than message.content.
+	// Summary entries use leafUuid (not uuid) and carry the compression title
+	// in Summary (not message.content).
 	LeafUUID string `json:"leafUuid"`
 	Summary  string `json:"summary"`
 
-	// Attachment payload for type=attachment entries. Claude Code 2.1+ emits
-	// these for various UI side-events; we currently surface only
-	// attachment.type == "nested_memory" (the "Loaded X" pill).
-	// Other subtypes (hook responses, skill listings, permission snapshots)
-	// are dropped silently by Classify. The content body is intentionally
-	// omitted — we display the path, not the loaded file contents.
+	// Attachment payload (Claude Code 2.1+ UI side-events). Only nested_memory
+	// (the "Loaded X" pill) is surfaced; other subtypes are dropped by Classify.
+	// Body omitted by design — we show the path, not file contents.
 	Attachment struct {
 		Type        string `json:"type"`
 		DisplayPath string `json:"displayPath"`

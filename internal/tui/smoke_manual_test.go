@@ -8,9 +8,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
 
-// TestSmokeRealTranscript exercises the parser + chunk builder + card viewer
-// against a real on-disk transcript when ARGUS_TRANSCRIPT is set. Skipped
-// otherwise.
+// TestSmokeRealTranscript exercises parser + chunk builder + viewer against a
+// real on-disk transcript; runs only when ARGUS_TRANSCRIPT is set.
 func TestSmokeRealTranscript(t *testing.T) {
 	path := os.Getenv("ARGUS_TRANSCRIPT")
 	if path == "" {

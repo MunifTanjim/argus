@@ -26,13 +26,9 @@ type ToolCallSummary struct {
 	Summary string
 }
 
-// FindLastOutput scans display items in reverse to find the last meaningful output.
-// Priority order:
-//  1. Last ItemOutput with non-empty Text
-//  2. Last ItemToolCall or ItemSubagent with non-empty ToolResult
-//  3. nil (no output found)
+// FindLastOutput finds the last meaningful output, in priority order:
+// last output text, then last tool result, then tool-call names as fallback.
 func FindLastOutput(items []DisplayItem) *LastOutput {
-	// First pass: look for last output text
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
 		if item.Type == ItemOutput && item.Text != "" {
@@ -43,7 +39,6 @@ func FindLastOutput(items []DisplayItem) *LastOutput {
 		}
 	}
 
-	// Second pass: look for last tool result (includes subagent results)
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
 		if (item.Type == ItemToolCall || item.Type == ItemSubagent) && item.ToolResult != "" {
@@ -56,9 +51,7 @@ func FindLastOutput(items []DisplayItem) *LastOutput {
 		}
 	}
 
-	// Third pass: collect tool call names as fallback (no output, no results).
-	// This covers turns where the assistant only made tool calls without
-	// producing any text output or receiving results yet.
+	// Fallback: turns where the assistant only made tool calls, no output/results yet.
 	const maxToolCalls = 5
 	var calls []ToolCallSummary
 	for _, item := range items {

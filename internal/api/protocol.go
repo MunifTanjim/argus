@@ -10,10 +10,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
 
-// ErrNoTerminalControl is returned for pane-bound actions (capture, input, key,
-// kill, focus) targeting a session argus cannot drive — a paneless vscode/external
-// session. Clients use it to distinguish "unsupported for this frontend" from a
-// real failure and to gate the action's UI.
+// ErrNoTerminalControl is returned for pane-bound actions on a session argus
+// cannot drive (paneless vscode/external). Clients gate the action's UI on it.
 var ErrNoTerminalControl = errors.New("session has no terminal control")
 
 const jsonrpcVersion = "2.0"
@@ -26,8 +24,8 @@ const (
 	MethodSessionEvent    = "session.event"    // notification: registry.Event
 	// MethodSessionTranscriptView returns the grouped, display-ready chunk view.
 	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: claudecode.TranscriptView
-	// MethodSessionToolDetail returns one tool item's full input/result, fetched
-	// on demand (transcript chunks ship without these heavy bodies).
+	// MethodSessionToolDetail returns one tool item's full body, fetched on demand
+	// (transcript chunks ship without these heavy bodies).
 	MethodSessionToolDetail = "sessions.toolDetail" // request: ToolDetailParams; result: ToolDetail
 	MethodSessionCapture    = "sessions.capture"    // request: SessionRef; result: CaptureResult
 	MethodSessionInput      = "sessions.input"      // request: InputParams; result: nil
@@ -42,14 +40,11 @@ const (
 	MethodSessionsHistorySessions   = "sessions.historySessions"   // request: HistorySessionsParams; result: session.HistorySessionPage
 	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: claudecode.TranscriptView
 	// MethodSessionHistoryToolDetail is the history counterpart of
-	// MethodSessionToolDetail: one tool item's full input/result from a past
-	// session's transcript, addressed by node-local path.
+	// MethodSessionToolDetail, addressed by node-local path.
 	MethodSessionHistoryToolDetail = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
-	// MethodNodeIdentify is called by the gateway over a node uplink to learn the
-	// node's stable id and label before aggregating it.
+	// MethodNodeIdentify lets the gateway learn a node's id and label over the uplink.
 	MethodNodeIdentify = "node.identify" // request: no params; result: IdentifyResult
-	// MethodServerInfo returns server-wide metadata (version + connected nodes)
-	// for a connected client to display.
+	// MethodServerInfo returns server-wide metadata (version + connected nodes).
 	MethodServerInfo = "server.info" // request: no params; result: ServerInfo
 	// MethodTranscriptSubscribe opens a streaming transcript subscription.
 	MethodTranscriptSubscribe = "transcript.subscribe" // request: TranscriptSubscribeParams; result: TranscriptDelta
@@ -58,43 +53,35 @@ const (
 	// MethodTranscriptDelta is a server->client push of new/changed chunks.
 	MethodTranscriptDelta = "transcript.delta" // notification: TranscriptDelta
 	// Client-token management (gateway only, admin/master-token connections).
-	// MethodClientsPairStart mints a temporary token and returns it with the
-	// gateway's public base URL so the caller can render a pairing QR.
+	// MethodClientsPairStart mints a temporary token + public URL for a pairing QR.
 	MethodClientsPairStart = "clients.pairStart" // request: no params; result: PairStartResult
-	// MethodClientsPairAwait blocks until the minted token's device connects, or
-	// the call's deadline elapses.
+	// MethodClientsPairAwait blocks until the minted token's device connects, or the deadline elapses.
 	MethodClientsPairAwait = "clients.pairAwait" // request: PairAwaitParams; result: PairAwaitResult
 	// MethodClientsList returns the persisted client tokens.
 	MethodClientsList = "clients.list" // request: no params; result: []ClientTokenInfo
 	// MethodClientsRemove revokes a client token by deleting its record.
 	MethodClientsRemove = "clients.remove" // request: ClientRemoveParams; result: nil
-	// Push-notification device registration (gateway only). A client registers the
-	// target its OS push backend gave it so the gateway can reach the device when
-	// the app is backgrounded or killed.
 	// MethodPushRegister records (or refreshes) a device's push target, keyed by
-	// the caller's device_id (so re-registration replaces the prior endpoint).
+	// device_id (so re-registration replaces the prior endpoint).
 	MethodPushRegister = "push.register" // request: PushRegisterParams; result: nil
 	// MethodPushUnregister drops a device's push target (called on unpair).
 	MethodPushUnregister = "push.unregister" // request: PushDeviceRef; result: nil
-	// MethodPushTest sends a test notification to the device's registered target
-	// through the real backend, so it can verify end-to-end delivery.
+	// MethodPushTest sends a test notification through the real backend to verify delivery.
 	MethodPushTest = "push.test" // request: PushDeviceRef; result: nil
-	// MethodPushVAPIDKey returns the gateway's VAPID public key so a device can
-	// register a Web Push subscription bound to it (e.g. the embedded FCM
-	// distributor). Empty Key means Web Push is unavailable.
+	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
+	// subscribe with. Empty Key means Web Push is unavailable.
 	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
 	MethodPushDesktop  = "push.desktop"  // request: push.Notification; result: nil (render on node if opted in)
 )
 
-// PushVAPIDKey carries the gateway's VAPID public key (base64url, uncompressed
-// P-256 point) — the applicationServerKey a device subscribes with.
+// PushVAPIDKey carries the gateway's VAPID public key (the applicationServerKey a
+// device subscribes with).
 type PushVAPIDKey struct {
 	Key string `json:"key,omitempty"`
 }
 
-// PushRegisterParams registers a device's Web Push target. DeviceID is a stable
-// per-device id (the storage key). Endpoint is the distributor URL the gateway
-// POSTs to; P256dh/Auth are the Web Push subscription keys (RFC 8291).
+// PushRegisterParams registers a device's Web Push target. DeviceID is the stable
+// storage key; Endpoint is the distributor URL; P256dh/Auth are subscription keys.
 type PushRegisterParams struct {
 	DeviceID string `json:"device_id"`
 	Endpoint string `json:"endpoint,omitempty"`
@@ -107,8 +94,8 @@ type PushDeviceRef struct {
 	DeviceID string `json:"device_id"`
 }
 
-// PairStartResult carries a freshly minted client token plus the gateway's
-// public base URL (no path) used to build the pairing QR.
+// PairStartResult carries a freshly minted client token plus the gateway's public
+// base URL for the pairing QR.
 type PairStartResult struct {
 	Token string `json:"token"`
 	URL   string `json:"url"`
@@ -137,23 +124,21 @@ type ClientRemoveParams struct {
 }
 
 // NodeCapabilities describes what a node supports, so clients can gate features
-// per node. Reported by node.identify and server.info; grows as new capabilities
-// are added.
+// per node. Reported by node.identify and server.info.
 type NodeCapabilities struct {
 	// SpawnSession reports whether the node can spawn sessions (tmux present).
 	SpawnSession bool `json:"spawn_session"`
 }
 
-// ServerInfo carries server-wide metadata for a connected client (e.g. the
-// settings screen): the server binary's version and the currently connected
-// nodes. Served by the gateway, which aggregates the nodes.
+// ServerInfo carries server-wide metadata for a connected client: server version
+// and connected nodes. Served by the gateway.
 type ServerInfo struct {
 	Version string     `json:"version"`
 	Nodes   []NodeInfo `json:"nodes"`
 }
 
-// IdentifyResult announces a node's identity to the gateway. ID is the stable
-// node id (the composite-id prefix and routing key); Label is human-friendly.
+// IdentifyResult announces a node's identity to the gateway. ID is the stable node
+// id (composite-id prefix and routing key).
 type IdentifyResult struct {
 	ID           string           `json:"id"`
 	Label        string           `json:"label"`
@@ -161,8 +146,8 @@ type IdentifyResult struct {
 	Capabilities NodeCapabilities `json:"capabilities"`
 }
 
-// NodeInfo identifies a node connected to the gateway. It is the unit returned in
-// server.info; ID is the routing key a client passes to sessions.spawn (as node_id).
+// NodeInfo identifies a node connected to the gateway (the unit in server.info).
+// ID is the routing key a client passes to sessions.spawn as node_id.
 type NodeInfo struct {
 	ID           string           `json:"id"`
 	Label        string           `json:"label"`
@@ -171,8 +156,6 @@ type NodeInfo struct {
 }
 
 // SpawnParams launches a new Claude Code session on argus's private tmux server.
-// NodeID, set by a gateway client, selects which node spawns the session; the
-// node itself ignores it.
 type SpawnParams struct {
 	NodeID  string `json:"node_id,omitempty"` // gateway routing key; ignored node-side
 	Name    string `json:"name,omitempty"`    // tmux session name; blank = node-generated default
@@ -187,9 +170,8 @@ type SpawnResult struct {
 	PaneID    string `json:"pane_id"`
 }
 
-// HistorySessionsParams lists one project's past sessions. NodeID selects the
-// owning node (gateway routing key; ignored node-side); ProjectDir is that node's
-// local project path from a HistoryProject. Limit <= 0 returns all from Offset.
+// HistorySessionsParams lists one project's past sessions. ProjectDir is the
+// owning node's local project path; Limit <= 0 returns all from Offset.
 type HistorySessionsParams struct {
 	NodeID     string `json:"node_id,omitempty"`
 	ProjectDir string `json:"project_dir"`
@@ -197,9 +179,8 @@ type HistorySessionsParams struct {
 	Offset     int    `json:"offset,omitempty"`
 }
 
-// HistoryTranscriptParams reads a past session's transcript by its node-local path.
-// NodeID selects the owning node (gateway routing key; ignored node-side).
-// AgentID, when set, selects a nested subagent trace within that transcript.
+// HistoryTranscriptParams reads a past session's transcript by node-local path.
+// AgentID selects a nested subagent trace.
 type HistoryTranscriptParams struct {
 	NodeID         string `json:"node_id,omitempty"`
 	TranscriptPath string `json:"transcript_path"`
@@ -215,17 +196,16 @@ type SessionRef struct {
 type TranscriptParams = SessionRef
 
 // ToolDetailParams selects one tool item's full body in a live session's
-// transcript. AgentID selects a subagent trace file; empty means the session
-// transcript. ToolID is the tool_use id carried on the (stripped) chunk item.
+// transcript. AgentID selects a subagent trace; ToolID is the tool_use id from
+// the (stripped) chunk item.
 type ToolDetailParams struct {
 	SessionID string `json:"session_id"`
 	AgentID   string `json:"agent_id,omitempty"`
 	ToolID    string `json:"tool_id"`
 }
 
-// HistoryToolDetailParams is the history counterpart: a tool item's full body in
-// a past session's transcript, addressed by node-local path. NodeID selects the
-// owning node (gateway routing key; ignored node-side).
+// HistoryToolDetailParams is the history counterpart of ToolDetailParams,
+// addressed by node-local path.
 type HistoryToolDetailParams struct {
 	NodeID         string `json:"node_id,omitempty"`
 	TranscriptPath string `json:"transcript_path"`
@@ -246,10 +226,9 @@ type CaptureResult struct {
 	Screen string `json:"screen"`
 }
 
-// InputParams sends text to a session. When Submit is true an Enter key is sent
-// after the text. When Prepare is true the pane is first normalized for input
-// (exit tmux copy mode; if Claude vim mode is on, leave it in insert) — set for
-// discrete composer sends, not live key streaming.
+// InputParams sends text to a session. Submit appends an Enter. Prepare first
+// normalizes the pane for input (exit copy mode; leave vim mode in insert) — set
+// for discrete composer sends, not live key streaming.
 type InputParams struct {
 	SessionID string `json:"session_id"`
 	Text      string `json:"text"`
@@ -263,10 +242,9 @@ type KeyParams struct {
 	Keys      []string `json:"keys"`
 }
 
-// RespondParams answers a pending interaction (see session.Interaction).
-// Preferred path: the node has a parked PermissionRequest hook for the session
-// and turns this into the hook's decision JSON (Behavior, Reason, Answers). If no
-// hook is parked (older Claude, or an idle prompt) it falls back to pane
+// RespondParams answers a pending interaction (see session.Interaction). Preferred
+// path: a parked PermissionRequest hook turns this into the hook's decision JSON
+// (Behavior, Reason, Answers). Without a parked hook it falls back to pane
 // keystrokes (Kind/OptionIndex/Text).
 type RespondParams struct {
 	SessionID string `json:"session_id"`
@@ -281,9 +259,8 @@ type RespondParams struct {
 	// SetMode, on an allow decision (e.g. ExitPlanMode approval), switches the
 	// session's permission mode: "acceptEdits" | "default" | "auto".
 	SetMode string `json:"set_mode,omitempty"`
-	// OptionValue echoes a server-built DecisionOption.Value the user picked. The
-	// node maps it to behavior/set-mode: "deny" → deny; "allow" → plain allow;
-	// any other value → allow + setMode <value>.
+	// OptionValue echoes a server-built DecisionOption.Value. Node maps it:
+	// "deny" → deny; "allow" → plain allow; any other → allow + setMode <value>.
 	OptionValue string `json:"option_value,omitempty"`
 
 	// Keystroke fallback (no parked hook / idle).
@@ -292,9 +269,8 @@ type RespondParams struct {
 	Text        string `json:"text,omitempty"`
 }
 
-// HookResult is the node's reply to a hook.event call. Output, when non-empty,
-// is the hookSpecificOutput JSON the `argus hook` command prints to stdout for
-// Claude Code (used by the blocking PermissionRequest path).
+// HookResult is the node's reply to a hook.event call. Output is the
+// hookSpecificOutput JSON `argus hook` prints to stdout (blocking PermissionRequest path).
 type HookResult struct {
 	Output string `json:"output,omitempty"`
 }
@@ -343,16 +319,14 @@ const (
 
 // Application-defined error codes (outside the JSON-RPC reserved range).
 const (
-	// CodePushGone marks a push.test against a permanently dead target (HTTP
-	// 404/410). The gateway has already pruned the stale registration; the client
-	// uses this to force a fresh endpoint from its distributor rather than
-	// re-registering the same dead one.
+	// CodePushGone marks a push.test against a permanently dead target (404/410).
+	// The gateway has already pruned it; the client should fetch a fresh endpoint
+	// rather than re-register the dead one.
 	CodePushGone = 410
 )
 
 // TranscriptSubscribeParams opens a subscription. AgentID selects a subagent
-// trace; empty means the session transcript. HaveChunks is how many chunks the
-// client already has cached (0 = none), used to send a minimal catch-up.
+// trace. HaveChunks is the client's cached chunk count, for a minimal catch-up.
 type TranscriptSubscribeParams struct {
 	SubID      string `json:"sub_id"`
 	SessionID  string `json:"session_id"`

@@ -8,10 +8,9 @@ import (
 	"strings"
 )
 
-// Claude Code writes a live status file per running process at
-// ~/.claude/sessions/<pid>.json. It is the fastest way to learn a session's id,
-// cwd, and name at discovery time -- before any hook fires -- so the dashboard can
-// show full info immediately.
+// Claude Code writes a live status file per process at ~/.claude/sessions/
+// <pid>.json — the fastest way to learn a session's id, cwd, and name at
+// discovery, before any hook fires.
 
 // procSession is the subset of ~/.claude/sessions/<pid>.json that argus uses.
 type procSession struct {
@@ -21,8 +20,8 @@ type procSession struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Version   string `json:"version"`
-	// Entrypoint is how the session was launched: "cli" (terminal) or
-	// "claude-vscode" (VSCode extension). It is the authoritative frontend signal.
+	// Entrypoint is how the session launched ("cli" or "claude-vscode"); the
+	// authoritative frontend signal.
 	Entrypoint string `json:"entrypoint"`
 }
 
@@ -59,10 +58,9 @@ func readProcSession(dir string, pid int) (procSession, bool) {
 	return ps, true
 }
 
-// listProcSessions reads every ~/.claude/sessions/<pid>.json and returns the
-// parsed procSession for each, with the pid taken from the filename. Dirs,
-// non-.json entries, and unparseable/idless files are skipped. Returns nil on an
-// empty or unreadable dir. Used by discovery's paneless (VSCode) pass.
+// listProcSessions reads every ~/.claude/sessions/<pid>.json, skipping dirs,
+// non-.json entries, and unparseable/idless files. Returns nil on an empty or
+// unreadable dir.
 func listProcSessions(dir string) []procSession {
 	if dir == "" {
 		return nil
@@ -87,11 +85,10 @@ func listProcSessions(dir string) []procSession {
 	return out
 }
 
-// findProcSessionByID scans the sessions dir for the proc-session file whose
-// sessionId matches id. Files are pid-keyed, but a hook only carries the claude
-// session id, so a scan is required. The dir holds only a handful of small files,
-// so a per-hook scan is cheap. ok is false on empty dir/id, a read error, or no
-// match.
+// findProcSessionByID scans the sessions dir for the file whose sessionId matches.
+// Files are pid-keyed but a hook only carries the session id, so a scan is needed;
+// the dir holds few small files so it's cheap. ok is false on empty dir/id, a read
+// error, or no match.
 func findProcSessionByID(dir, sessionID string) (procSession, bool) {
 	if dir == "" || sessionID == "" {
 		return procSession{}, false

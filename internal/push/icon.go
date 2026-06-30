@@ -15,9 +15,8 @@ var (
 )
 
 // materializeIcon writes the embedded argus icon to a stable cache path once and
-// returns that path. ok is false if the icon can't be written (renderers then
-// skip the custom icon and fall back to the platform default). Safe for
-// concurrent use.
+// returns it. ok is false if it can't be written (renderers then fall back to the
+// platform default). Safe for concurrent use.
 func materializeIcon() (path string, ok bool) {
 	iconOnce.Do(func() {
 		dir, err := os.UserCacheDir()

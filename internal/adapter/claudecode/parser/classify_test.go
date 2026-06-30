@@ -652,13 +652,9 @@ func TestClassify_SummaryProducesCompactMsg(t *testing.T) {
 	}
 }
 
-// TestClassify_ToolResultWithoutIsMeta verifies that tool_result entries
-// where isMeta is not set (null in JSONL -> false in Go) are still classified
-// correctly. In practice, Claude Code writes isMeta=null on all tool_result
-// entries; our fix detects them by content rather than by the flag.
+// TestClassify_ToolResultWithoutIsMeta: tool_result entries with isMeta unset
+// (the real-world shape) are detected by content, not the flag.
 func TestClassify_ToolResultWithoutIsMeta(t *testing.T) {
-	// Real JSONL shape: type=user, isMeta absent (false), content is an array
-	// with tool_result blocks containing tool_use_id.
 	content := json.RawMessage(`[
 		{"type":"tool_result","tool_use_id":"toolu_abc","content":[{"type":"text","text":"On branch main\nnothing to commit"}]}
 	]`)
@@ -691,9 +687,8 @@ func TestClassify_ToolResultWithoutIsMeta(t *testing.T) {
 	}
 }
 
-// TestClassify_ToolPipelineEndToEnd verifies the full path from Entry -> Classify
-// -> BuildChunks when isMeta is not set on the tool_result entry. This is the
-// real-world case that was silently dropping tool results and their tokens.
+// TestClassify_ToolPipelineEndToEnd: Entry -> Classify -> BuildChunks with
+// isMeta unset. Regression guard against silently dropping tool results/tokens.
 func TestClassify_ToolPipelineEndToEnd(t *testing.T) {
 	assistantContent := json.RawMessage(`[
 		{"type":"tool_use","id":"toolu_abc","name":"Bash","input":{"command":"git status","description":"Check git status"}}
@@ -952,8 +947,8 @@ func TestClassify_AttachmentNestedMemoryEmptyPathDropped(t *testing.T) {
 }
 
 func TestClassify_AttachmentOtherSubtypesDropped(t *testing.T) {
-	// Every attachment subtype except nested_memory is infrastructure and
-	// must drop silently. Exhaustive per the 2.1.114 observed list.
+	// All attachment subtypes except nested_memory are infra and drop silently
+	// (list observed in 2.1.114).
 	subtypes := []string{
 		"async_hook_response",
 		"hook_success",

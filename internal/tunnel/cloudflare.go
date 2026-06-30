@@ -15,16 +15,14 @@ import (
 // quickURLRe matches the public URL cloudflared prints for a quick tunnel.
 var quickURLRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 
-// Cloudflare runs cloudflared in one of three modes, selected by which fields
-// are set (resolveTunnel gates them mutually exclusive):
+// Cloudflare runs cloudflared in one of three modes by which fields are set:
 //
-//   - quick: neither Token nor Tunnel set. Ephemeral, unauthenticated tunnel
-//     with a printed *.trycloudflare.com URL.
-//   - remotely-managed: Token set. A tunnel whose hostname/ingress is configured
-//     on Cloudflare's side; run with --token.
-//   - locally-managed: Tunnel set. argus creates the tunnel (if absent), routes
-//     a DNS record for Hostname to it, then runs it. Credentials live in
-//     ~/.cloudflared/<UUID>.json; argus owns the lifecycle (create + route).
+//   - quick: neither Token nor Tunnel set. Ephemeral unauthenticated tunnel with a
+//     printed *.trycloudflare.com URL.
+//   - remotely-managed: Token set. Hostname/ingress configured on Cloudflare's side;
+//     run with --token.
+//   - locally-managed: Tunnel set. argus creates the tunnel (if absent), routes a DNS
+//     record for Hostname to it, then runs it (credentials in ~/.cloudflared/<UUID>.json).
 type Cloudflare struct {
 	Bin      string // path to the cloudflared binary
 	Token    string // remotely-managed tunnel token
@@ -45,8 +43,8 @@ func (c Cloudflare) Command(origin string) (CommandSpec, error) {
 	}
 	switch {
 	case c.Tunnel != "":
-		// Locally-managed: a catch-all ingress (--url) to the loopback gateway; the
-		// credentials file is resolved by name from ~/.cloudflared.
+		// Locally-managed: catch-all ingress (--url) to the gateway; credentials
+		// resolved by name from ~/.cloudflared.
 		return CommandSpec{Path: c.Bin, Args: append(base, "run", "--url", origin, c.Tunnel)}, nil
 	case c.Token != "":
 		return CommandSpec{Path: c.Bin, Args: append(base, "run", "--token", c.Token)}, nil
@@ -55,15 +53,10 @@ func (c Cloudflare) Command(origin string) (CommandSpec, error) {
 	}
 }
 
-// cfLevelByToken maps cloudflared's text-log level tokens to slog levels.
-// cloudflared's own INFO is chatty heartbeat/connection noise, so it maps to
-// Debug (below argus's info threshold). This lets a quick tunnel run cloudflared
-// at --loglevel info — needed because its public-URL banner is printed at info —
-// without that banner's sibling lines surfacing as argus info. The URL itself is
-// pulled out by ExtractURL and printed by the supervisor's report callback
-// regardless of log level. FTL maps to Error rather than a fatal level:
-// classification only sets the log level, and we never want a tunnel line to
-// escalate beyond Error.
+// cfLevelByToken maps cloudflared's log-level tokens to slog levels. INF → Debug:
+// cloudflared's INFO is chatty noise, but quick mode must run at --loglevel info to
+// emit its URL banner (extracted separately via ExtractURL), so demote it below
+// argus's info threshold. FTL → Error, never fatal: classification only sets a level.
 var cfLevelByToken = map[string]slog.Level{
 	"DBG": slog.LevelDebug,
 	"INF": slog.LevelDebug,
@@ -72,9 +65,9 @@ var cfLevelByToken = map[string]slog.Level{
 	"FTL": slog.LevelError,
 }
 
-// ClassifyLine implements LineClassifier. cloudflared's text format is
-// "<timestamp> <LVL> <message>", so the level token is among the first fields; lines
-// without a recognizable token (continuations, panics) default to Info.
+// ClassifyLine implements LineClassifier. cloudflared's format is
+// "<timestamp> <LVL> <message>", so the level token is among the first fields;
+// lines without one (continuations, panics) default to Info.
 func (c Cloudflare) ClassifyLine(line string) slog.Level {
 	for i, f := range strings.Fields(line) {
 		if i >= 3 {
@@ -89,7 +82,7 @@ func (c Cloudflare) ClassifyLine(line string) slog.Level {
 
 func (c Cloudflare) ExtractURL(line string) (string, bool) {
 	if c.Token != "" || c.Tunnel != "" {
-		return "", false // configured/known hostname is not printed by cloudflared
+		return "", false // configured hostname is not printed by cloudflared
 	}
 	if m := quickURLRe.FindString(line); m != "" {
 		return m, true
@@ -97,10 +90,9 @@ func (c Cloudflare) ExtractURL(line string) (string, bool) {
 	return "", false
 }
 
-// Prepare implements LifecycleProvider. For a locally-managed tunnel it ensures
-// the tunnel exists (creating it if absent), routes a DNS record for Hostname to
-// it, and returns the resulting public URL. Quick and remotely-managed modes
-// need no setup and return ("", nil).
+// Prepare implements LifecycleProvider. For a locally-managed tunnel it ensures the
+// tunnel exists, routes a DNS record for Hostname to it, and returns the public URL.
+// Quick and remotely-managed modes need no setup and return ("", nil).
 func (c Cloudflare) Prepare(ctx context.Context) (string, error) {
 	if c.Tunnel == "" {
 		return "", nil
@@ -116,8 +108,7 @@ func (c Cloudflare) Prepare(ctx context.Context) (string, error) {
 		}
 	}
 
-	// --overwrite-dns makes the route idempotent across restarts (and points an
-	// existing record at this tunnel).
+	// --overwrite-dns makes the route idempotent across restarts.
 	if _, stderr, err := c.exec(ctx, c.tunnelArgs("route", "dns", "--overwrite-dns", c.Tunnel, c.Hostname)...); err != nil {
 		return "", fmt.Errorf("route dns %s -> %s: %w: %s", c.Hostname, c.Tunnel, err, bytes.TrimSpace(stderr))
 	}
@@ -125,8 +116,8 @@ func (c Cloudflare) Prepare(ctx context.Context) (string, error) {
 	return "https://" + c.Hostname, nil
 }
 
-// tunnelExists reports whether a tunnel named c.Tunnel already exists, by parsing
-// `cloudflared tunnel list --output json` and matching on name.
+// tunnelExists reports whether a tunnel named c.Tunnel exists, by parsing
+// `cloudflared tunnel list --output json`.
 func (c Cloudflare) tunnelExists(ctx context.Context) (bool, error) {
 	stdout, stderr, err := c.exec(ctx, c.tunnelArgs("list", "--output", "json")...)
 	if err != nil {
@@ -146,18 +137,16 @@ func (c Cloudflare) tunnelExists(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-// tunnelArgs builds args for a `cloudflared tunnel <sub...>` invocation. The
-// origin certificate (needed by create/route/list) is resolved by cloudflared
-// itself from --origin-cert / TUNNEL_ORIGIN_CERT / its default path; the child
-// inherits argus's environment, so no flag is injected here.
+// tunnelArgs builds args for a `cloudflared tunnel <sub...>` call. cloudflared
+// resolves the origin cert itself (from --origin-cert / TUNNEL_ORIGIN_CERT / default
+// path); the child inherits argus's env, so no flag is injected here.
 func (c Cloudflare) tunnelArgs(sub ...string) []string {
 	return append([]string{"tunnel"}, sub...)
 }
 
-// cmdRunner runs a one-shot command to completion and returns its stdout and
-// stderr separately. Keeping them apart matters: cloudflared writes machine output
-// (e.g. `tunnel list --output json`) to stdout but logs to stderr, so merging them
-// corrupts parsed output. The real implementation execs c.Bin; tests inject a fake.
+// cmdRunner runs a one-shot command, returning stdout and stderr separately:
+// cloudflared writes machine output (e.g. list --output json) to stdout but logs to
+// stderr, so merging them corrupts parsing. Real impl execs c.Bin; tests inject a fake.
 type cmdRunner func(ctx context.Context, name string, args ...string) (stdout, stderr []byte, err error)
 
 func (c Cloudflare) exec(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {

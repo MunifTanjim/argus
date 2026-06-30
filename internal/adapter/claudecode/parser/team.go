@@ -29,18 +29,10 @@ type TeamSnapshot struct {
 	Deleted       bool              // true after TeamDelete
 }
 
-// ReconstructTeams replays tool call events from lead chunks and linked
-// worker processes to build the final task board state for each team.
-//
-// Phase 1 walks lead chunks chronologically for TeamCreate, TaskCreate,
-// TaskUpdate, TeamDelete, and team Task spawns. Task IDs are assigned
-// sequentially per team — Claude Code's task system numbers them from 1.
-//
-// Phase 2 walks worker chunks for TaskUpdate events that modify task
-// status and ownership. If a worker update has no explicit owner field,
-// the worker's own name (from its ID) is used as fallback.
-//
-// Phase 3 populates member colors from worker TeammateColor metadata.
+// ReconstructTeams replays lead and worker tool-call events into per-team task
+// board state. Phase 1 walks lead chunks for Team/Task events (task IDs numbered
+// from 1 per team); Phase 2 applies worker TaskUpdates; Phases 3-4 populate
+// member colors and ongoing state from worker metadata.
 func ReconstructTeams(chunks []Chunk, workers []SubagentProcess) []TeamSnapshot {
 	var teams []TeamSnapshot
 	activeIdx := -1
@@ -192,10 +184,9 @@ func addTeamSpawnMember(input json.RawMessage, teams []TeamSnapshot) {
 	}
 }
 
-// applyWorkerTaskUpdates scans a worker's chunks for TaskUpdate calls and
-// applies them to the team's tasks. If the update has no explicit owner
-// field, the worker's own name is used as fallback — workers typically
-// claim tasks by setting themselves as owner, but the field is optional.
+// applyWorkerTaskUpdates applies a worker's TaskUpdate calls to the team's tasks.
+// Falls back to the worker's own name as owner when the update omits one (the
+// owner field is optional but workers usually claim tasks for themselves).
 func applyWorkerTaskUpdates(chunks []Chunk, team *TeamSnapshot, workerName string) {
 	for i := range chunks {
 		if chunks[i].Type != AIChunk {
@@ -264,9 +255,8 @@ func parseInputFields(input json.RawMessage) map[string]json.RawMessage {
 	return fields
 }
 
-// ReadTeamSessionMeta reads just the first line of a JSONL file and returns
-// the teamName and agentName top-level fields. Returns ("", "") for
-// non-team sessions or on any error. Cheap: no full parse.
+// ReadTeamSessionMeta reads only the first JSONL line for the top-level teamName
+// and agentName fields. Returns ("", "") for non-team sessions or any error.
 func ReadTeamSessionMeta(path string) (teamName, agentName string) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -323,22 +313,17 @@ func extractTeamSpecs(chunks []Chunk) []teamSpec {
 	return specs
 }
 
-// DiscoverTeamSessions finds team agent session files that live as top-level
-// .jsonl files in the project directory (not in subagents/). These are created
-// when Task is called with team_name + name parameters.
-//
-// Discovery: scan the project directory for .jsonl files whose first entry has
-// teamName + agentName matching a team Task call in the parent chunks.
-// Each match is parsed via readSubagentSession and returned with
-// ID = "agentName@teamName" so Phase 1 of LinkSubagents can match it
-// against the parent's toolUseResult agent_id field.
+// DiscoverTeamSessions finds team agent sessions, which live as top-level
+// .jsonl files in the project dir (not in subagents/) and are created by Task
+// calls with team_name + name. Matches files whose first entry's teamName/agentName
+// correspond to a team Task call, returning each with ID = "agentName@teamName"
+// so Phase 1 of LinkSubagents can link it.
 func DiscoverTeamSessions(sessionPath string, parentChunks []Chunk) ([]SubagentProcess, error) {
 	specs := extractTeamSpecs(parentChunks)
 	if len(specs) == 0 {
 		return nil, nil
 	}
 
-	// Build a lookup set for quick matching.
 	type specKey struct{ team, agent string }
 	wanted := make(map[specKey]bool, len(specs))
 	for _, s := range specs {
@@ -431,8 +416,8 @@ func filterTeamTasks(items []*DisplayItem, matched map[string]bool) []*DisplayIt
 	return out
 }
 
-// IsTeamTask checks whether a Task DisplayItem's input contains both
-// team_name and name keys, marking it as a team member spawn.
+// IsTeamTask reports whether a Task's input has both team_name and name keys,
+// marking it as a team member spawn.
 func IsTeamTask(it *DisplayItem) bool {
 	if len(it.ToolInput) == 0 {
 		return false

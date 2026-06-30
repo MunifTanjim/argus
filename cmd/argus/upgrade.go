@@ -15,9 +15,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/util"
 )
 
-// upgradeAssetPattern builds the release-asset glob for the given platform.
-// Release assets are versioned (<binary>-<tag>-<os>-<arch>); the wildcard
-// matches the latest tag, mirroring scripts/install.sh.
+// upgradeAssetPattern builds the release-asset glob (<binary>-<tag>-<os>-<arch>); the
+// wildcard matches the latest tag, mirroring scripts/install.sh.
 func upgradeAssetPattern(goos, goarch string) string {
 	return fmt.Sprintf("%s-*-%s-%s", config.BinaryName, goos, goarch)
 }

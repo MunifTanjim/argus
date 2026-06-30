@@ -23,29 +23,22 @@ type PeerOptions struct {
 	Dispatch DispatchFunc
 	// OnNotify receives notifications the remote end sends. Nil drops them.
 	OnNotify func(Notification)
-	// BaseContext, when non-nil, is the parent of the context passed to each
-	// served request (so connection-scoped values like an auth Principal flow to
-	// handlers). Defaults to context.Background().
+	// BaseContext is the parent of each served request's context (so values like
+	// an auth Principal flow to handlers). Defaults to context.Background().
 	BaseContext context.Context
-	// KeepaliveInterval, when > 0, makes the peer send a ping every interval. A
-	// ping that does not get a reply within KeepaliveTimeout closes the peer
-	// (firing Done), so a half-open link that never errors on read is still
-	// detected. Zero disables keepalive.
+	// KeepaliveInterval > 0 pings the remote every interval; used to detect a
+	// half-open link that never errors on read. Zero disables keepalive.
 	KeepaliveInterval time.Duration
-	// KeepaliveTimeout bounds how long each keepalive ping waits for its reply.
-	// Defaults to KeepaliveInterval when zero. Ignored unless KeepaliveInterval
-	// is set.
+	// KeepaliveTimeout bounds each ping's wait for a reply. Defaults to KeepaliveInterval.
 	KeepaliveTimeout time.Duration
 	// KeepaliveFailureThreshold is how many consecutive failed pings close the
-	// peer. A single answered ping resets the count, so a transient blip is
-	// tolerated. Defaults to 1 (close on the first failure) when zero.
+	// peer; an answered ping resets the count. Defaults to 1.
 	KeepaliveFailureThreshold int
 }
 
-// Peer is one end of a symmetric JSON-RPC 2.0 connection: it can both issue
-// requests/notifications and serve inbound ones over a single stream. The unix
-// client and each accepted server connection are both Peers; the gateway↔node
-// uplink uses a Peer directly so both sides can call each other.
+// Peer is one end of a symmetric JSON-RPC 2.0 connection: it both issues and
+// serves requests/notifications over a single stream. The gateway↔node uplink uses
+// a Peer directly so both sides can call each other.
 type Peer struct {
 	rwc io.ReadWriteCloser
 
@@ -90,10 +83,8 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 }
 
 // keepalive pings the remote every interval and closes the peer after threshold
-// consecutive pings fail to get a reply within timeout. An answered ping resets
-// the streak, so a transient blip is tolerated. This catches a half-open
-// connection whose read side never errors, which the read loop alone would not
-// notice. It stops when the peer closes.
+// consecutive failed pings (an answered ping resets the streak). Catches a
+// half-open connection whose read side never errors. Stops when the peer closes.
 func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 	if timeout <= 0 {
 		timeout = interval
@@ -140,9 +131,8 @@ func (p *Peer) Call(method string, params, out any) error {
 	return p.CallContext(context.Background(), method, params, out)
 }
 
-// CallContext is Call with a context: if ctx is cancelled or its deadline passes
-// before the reply arrives, it abandons the request and returns ctx.Err(). The
-// pending slot is reclaimed so a late reply is discarded rather than leaked.
+// CallContext is Call with a context: on cancel/deadline it abandons the request
+// and returns ctx.Err(), reclaiming the pending slot so a late reply isn't leaked.
 func (p *Peer) CallContext(ctx context.Context, method string, params, out any) error {
 	var rawParams json.RawMessage
 	if params != nil {
@@ -161,7 +151,6 @@ func (p *Peer) CallContext(ctx context.Context, method string, params, out any) 
 	p.pending[id] = resCh
 	p.mu.Unlock()
 
-	// forget reclaims the pending slot so a later reply is discarded, not leaked.
 	forget := func() {
 		p.mu.Lock()
 		delete(p.pending, id)

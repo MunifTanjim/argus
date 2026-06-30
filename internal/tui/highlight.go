@@ -13,8 +13,8 @@ import (
 )
 
 // jsonHighlighter colorizes JSON via Chroma, picking a style for the terminal
-// background and a formatter for its color depth. Ported from
-// kylesnowschwartz/tail-claude json_highlight.go.
+// background and a formatter for its color depth.
+// Ported from kylesnowschwartz/tail-claude json_highlight.go.
 type jsonHighlighter struct {
 	lexer     chroma.Lexer
 	formatter chroma.Formatter

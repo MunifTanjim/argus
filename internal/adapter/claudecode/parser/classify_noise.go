@@ -8,9 +8,7 @@ import (
 // --- Hard noise detection ---
 
 // noiseEntryTypes are entry types that never produce visible messages.
-// Note: "summary" is handled separately as CompactMsg, not noise.
-// "attachment" is handled by the dedicated branch in Classify: nested_memory
-// surfaces as MemoryLoadMsg, everything else drops.
+// "summary" (CompactMsg) and "attachment" (Classify branch) are handled elsewhere.
 var noiseEntryTypes = map[string]bool{
 	"system":                true,
 	"file-history-snapshot": true,
@@ -38,16 +36,13 @@ var systemOutputTags = []string{
 var emptyStdout = "<local-command-stdout></local-command-stdout>"
 var emptyStderr = "<local-command-stderr></local-command-stderr>"
 
-// hasUserContent checks whether the raw content has real user text or images.
-// String content is always considered real (already checked for system tags).
-// Array content needs at least one text or image block.
+// hasUserContent reports whether raw content has real user text or images.
 func hasUserContent(raw json.RawMessage, strContent string) bool {
-	// If ExtractText produced a non-empty string and raw is a JSON string, it's real.
+	// JSON string content is already system-tag-checked, so non-empty means real.
 	if len(raw) > 0 && raw[0] == '"' {
 		return strings.TrimSpace(strContent) != ""
 	}
 
-	// Array content: check for text or image blocks.
 	var blocks []textBlockJSON
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return false
@@ -60,12 +55,11 @@ func hasUserContent(raw json.RawMessage, strContent string) bool {
 	return false
 }
 
-// isUserNoise returns true if a user-type entry is noise that should be dropped.
-// Checks: hard noise tag wrapping, empty command output, interruption messages.
+// isUserNoise reports whether a user-type entry is droppable noise:
+// hard-noise-tag wrapping, empty command output, or interruption messages.
 func isUserNoise(raw json.RawMessage, contentStr string) bool {
 	trimmed := strings.TrimSpace(contentStr)
 
-	// Wrapped entirely in a hard noise tag.
 	for _, tag := range hardNoiseTags {
 		closeTag := strings.Replace(tag, "<", "</", 1)
 		if strings.HasPrefix(trimmed, tag) && strings.HasSuffix(trimmed, closeTag) {
@@ -85,9 +79,8 @@ func isUserNoise(raw json.RawMessage, contentStr string) bool {
 	return isArrayInterruption(raw)
 }
 
-// extractToolSearchMatches parses the toolUseResult field for ToolSearch
-// responses, returning the list of loaded tool names. Returns nil if the
-// field is absent or doesn't contain a matches array.
+// extractToolSearchMatches returns the loaded tool names from a ToolSearch
+// toolUseResult, or nil if absent.
 func extractToolSearchMatches(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
@@ -101,8 +94,7 @@ func extractToolSearchMatches(raw json.RawMessage) []string {
 	return result.Matches
 }
 
-// isArrayInterruption checks if content is an array with a single text block
-// starting with "[Request interrupted by user".
+// isArrayInterruption reports whether content is a single "[Request interrupted by user" text block.
 func isArrayInterruption(raw json.RawMessage) bool {
 	var blocks []textBlockJSON
 	if err := json.Unmarshal(raw, &blocks); err != nil {

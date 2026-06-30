@@ -21,8 +21,8 @@ import (
 
 func (m model) Init() tea.Cmd { return tea.Batch(m.refreshCmd(), spinResumeCmd()) }
 
-// spinResumeCmd fires on a timer to re-arm the list spinner; registry events also
-// re-arm it, but this guarantees it resumes even when no event arrives.
+// spinResumeCmd re-arms the list spinner on a timer, so it resumes even when no
+// registry event arrives.
 func spinResumeCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return spinResumeMsg{} })
 }
@@ -36,8 +36,8 @@ func (m model) refreshCmd() tea.Cmd {
 	}
 }
 
-// resyncCmd fetches the authoritative session list after a reconnect and replaces the
-// model's map with it (so sessions removed while disconnected are dropped).
+// resyncCmd fetches the authoritative session list after a reconnect (so sessions
+// removed while disconnected are dropped).
 func (m model) resyncCmd() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
@@ -68,16 +68,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 			}
 		case m.idleComposerActive():
-			// Idle reply composer: append the paste (newlines and all); the
-			// composer renders multi-line and submits it via sendInputCmd.
+			// Idle reply composer: append the paste verbatim (newlines and all).
 			m.prompt.reasonText += msg.Content
 		}
 	case notificationMsg:
 		return m, m.applyEvent(api.Notification(msg))
 	case connStateMsg:
 		if msg.connected {
-			// Reconnected: resync authoritatively (drops sessions removed while away);
-			// live events resume via the stable Events() stream.
+			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
 			if m.mode == modeSession && m.activeSub.subID != "" {
 				ref := m.activeSub
@@ -131,9 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript.chunks, m.transcript.err = msg.chunks, msg.err
 		m.transcript.cursor, m.transcript.scroll = 0, 0
 	case histSubagentMsg:
-		// Fill the deepest pending history-drill frame for this agent. The user
-		// may have drilled into a leaf above it, so match by agentID rather than
-		// assuming topFrame().
+		// Match by agentID, not topFrame(): the user may have drilled into a leaf above this frame.
 		if msg.err == nil {
 			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
 				if m.transcript.detailStack[i].agentID == msg.agentID {
@@ -144,8 +140,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case toolDetailMsg:
-		// File the fetched body (or, on error, a done entry with an empty body so
-		// the loading placeholder clears and we don't retry on every render).
+		// On error, file a done entry with empty body so the placeholder clears and we don't retry.
 		e := toolBodyEntry{done: true}
 		if msg.err == nil {
 			e.toolInput, e.result, e.resultIsError = msg.detail.ToolInput, msg.detail.Result, msg.detail.ResultIsError
@@ -156,9 +151,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break // stale subscription (view changed)
 		}
 		if msg.ref.agentID != "" {
-			// Subagent delta: update the cache and fold into the frame that owns
-			// this subscription. The user may have drilled into a leaf above the
-			// subagent frame, so we must not assume topFrame() is the right one.
+			// Subagent delta: update the cache and fold into the owning frame. Match
+			// by subID, not topFrame() (the user may have drilled into a leaf above it).
 			m.transcriptCache[msg.ref.key()] = cachedTranscript{chunks: applyDelta(m.transcriptCache[msg.ref.key()].chunks, msg.delta)}
 			for i := range m.transcript.detailStack {
 				if m.transcript.detailStack[i].subID == msg.delta.SubID {
@@ -186,7 +180,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
 		}
 	case logTickMsg:
-		// New log lines arrived; returning re-renders, which re-reads the buffer.
+		// Returning re-renders, which re-reads the log buffer.
 		return m, nil
 	case jumpResultMsg:
 		// On success the client has already switched away; only surface failures.
@@ -203,9 +197,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// idleComposerActive reports whether the idle free-text reply composer is the
-// focused input (session dock focused on an idle interaction). Used to route
-// pastes into the composer the same way handlePromptKey routes keystrokes.
+// idleComposerActive reports whether the idle free-text composer is focused, so
+// pastes route into it the same way handlePromptKey routes keystrokes.
 func (m model) idleComposerActive() bool {
 	if m.mode != modeSession || m.focus != focusDock {
 		return false
@@ -233,10 +226,9 @@ func (m model) anyWorking() bool {
 	return false
 }
 
-// maybeSpin starts the list spinner tick when the list is showing a working session
-// and a tick isn't already scheduled. The tick self-stops once those conditions no
-// longer hold (see the spinTickMsg handler), and is restarted by the periodic
-// resume tick (spinResumeCmd) and by registry events.
+// maybeSpin starts the list spinner tick when the list shows a working session and
+// none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
+// spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
 	if m.mode == modeList && !m.spinning && m.anyWorking() {
 		m.spinning = true
@@ -275,10 +267,9 @@ func (m model) spawnCmd(cwd, nodeID, prompt string) tea.Cmd {
 	}
 }
 
-// fetchSpawnNodes asks which nodes can be a spawn target (via server.info) so New
-// can route (and gate) the spawn. A gateway returns every connected node; a plain
-// local node returns just itself (empty ID) with its tmux/spawn capability. A call
-// error yields no nodes, leaving node_id empty for an immediate local spawn.
+// fetchSpawnNodes asks server.info which nodes can be spawn targets (gateway →
+// every node; plain local → just itself). A call error yields no nodes, leaving
+// node_id empty for an immediate local spawn.
 func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
@@ -304,8 +295,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		if json.Unmarshal(n.Params, &d) != nil {
 			return nil
 		}
-		// Match by sub_id to the active subscription.
-		if d.SubID != m.activeSub.subID {
+		if d.SubID != m.activeSub.subID { // only the active subscription
 			return nil
 		}
 		return func() tea.Msg { return transcriptDeltaMsg{ref: m.activeSub, delta: d} }
@@ -335,8 +325,8 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	return tea.Batch(cmd, m.maybeSpin())
 }
 
-// bellCmd rings the terminal bell by writing BEL to stderr, which is outside the
-// alt-screen frame so it doesn't disturb the rendered UI.
+// bellCmd rings the terminal bell via BEL on stderr (outside the alt-screen frame,
+// so it doesn't disturb the UI).
 func bellCmd() tea.Cmd {
 	return func() tea.Msg {
 		shell.StdErr("\a")
@@ -351,10 +341,8 @@ func (m *model) reorder() {
 	}
 	sort.Slice(m.order, func(i, j int) bool {
 		a, b := m.sessions[m.order[i]], m.sessions[m.order[j]]
-		// Awaiting-input sessions surface first in one cross-host "Needs you" group
-		// (rendered by listView), matching the mobile app. Then sessions group by
-		// host (label asc), id ascending within a host. Local sessions share the
-		// empty label.
+		// Awaiting-input first (one cross-host "Needs you" group), then by host
+		// (label asc), then id asc. Local sessions share the empty label.
 		ai := a.Status == session.StatusAwaitingInput
 		bi := b.Status == session.StatusAwaitingInput
 		if ai != bi {
@@ -371,9 +359,8 @@ func (m *model) reorder() {
 }
 
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// The screen view is a live terminal passthrough: every key goes to the pane
-	// (incl. esc → Claude interrupt, ctrl+c → Claude SIGINT); ctrl+] leaves. Route
-	// it before the global quit so ctrl+c reaches Claude.
+	// Screen view is a live passthrough (ctrl+c → Claude SIGINT, ctrl+] leaves).
+	// Route it before the global quit so ctrl+c reaches Claude.
 	if m.mode == modeScreen {
 		return m.handleScreenKey(msg)
 	}
@@ -415,8 +402,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleLogsKey(msg)
 	}
 
-	// modeList: any key dismisses a transient flash before dispatching. The jump
-	// action sets it afterwards, so its message survives until the next keypress.
+	// modeList: any key dismisses a transient flash before dispatching (the jump
+	// action re-sets it afterwards, so it survives to the next keypress).
 	m.flash = ""
 	if mm, cmd, ok := m.dispatch(msg, listTable); ok {
 		return mm, cmd
@@ -468,10 +455,8 @@ func (m model) actListHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// cardListPageStep is how many cards a half-page jump (ctrl-u/ctrl-d) moves in a
-// card list, estimated from the viewport height and a card's nominal line count
-// (box edges + two body lines + a blank separator). Shared by the session list
-// and the history project/session lists.
+// cardListPageStep is how many cards a half-page jump moves, estimated from the
+// viewport height and a card's nominal line count (~5). Shared by all card lists.
 func (m model) cardListPageStep() int {
 	const cardLines = 5
 	return max(1, max(1, m.height-4)/cardLines/2)
@@ -499,8 +484,7 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.activeSub = ref
 	have := len(m.transcriptCache[ref.key()].chunks)
 	m.transcript.chunks = m.transcriptCache[ref.key()].chunks // show cached immediately
-	// Open pinned to the bottom (newest content); the catch-up delta is then
-	// detected at-bottom and keeps tailing. See restoreChunkCursor's follow path.
+	// Open pinned to the bottom so the catch-up delta keeps tailing (see restoreChunkCursor).
 	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
 	m.transcript.scroll = m.maxScroll()
 	return m, m.subscribeCmd(ref, have)
@@ -521,10 +505,8 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
 }
 
-// actListJump jumps the user's tmux client to the selected session's window,
-// when that session runs on this machine's default tmux server. When the jump
-// can't be made (not inside tmux, wrong server, another machine), it sets a
-// transient flash explaining why and does nothing else.
+// actListJump jumps the user's tmux client to the selected session's window, or
+// sets a flash explaining why the jump was refused (see planJump).
 func (m model) actListJump(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
@@ -539,9 +521,8 @@ func (m model) actListJump(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, jumpCmd(paneID)
 }
 
-// planJump is the pure decision behind actListJump: given the selected session,
-// this machine's hostname, and the $TMUX value, it returns the pane to reveal,
-// or an empty pane and a human-readable reason the jump was refused.
+// planJump is the pure decision behind actListJump: returns the pane to reveal, or
+// an empty pane and a human-readable reason the jump was refused.
 func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason string) {
 	switch {
 	case tmuxEnv == "":
@@ -559,9 +540,8 @@ func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason strin
 	}
 }
 
-// sameMachine reports whether a session's tmux pane is on this machine. An empty
-// NodeID means a local/embedded node (no gateway), which is always this machine;
-// on a gateway, the node's hostname-derived identity must match.
+// sameMachine reports whether a session's tmux pane is on this machine. Empty
+// NodeID means a local/embedded node (always this machine).
 func sameMachine(s session.Session, hostname string) bool {
 	return s.NodeID == "" || s.NodeLabel == hostname || s.NodeID == hostname
 }
@@ -585,8 +565,8 @@ func machineLabel(s session.Session) string {
 type jumpResultMsg struct{ err error }
 
 // jumpCmd reveals the pane on the local default tmux server. switch-client runs
-// against the caller's own client (it inherits $TMUX), so the user's terminal
-// follows; the TUI keeps running in its now-background pane.
+// against the caller's own client, so the user's terminal follows; the TUI keeps
+// running in its now-background pane.
 func jumpCmd(paneID string) tea.Cmd {
 	return func() tea.Msg {
 		return jumpResultMsg{err: tmux.New("").Reveal(context.Background(), paneID)}
@@ -618,8 +598,7 @@ func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) actListRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// While disconnected, "refresh" means "try to reconnect now" rather than an RPC
-	// over a dead connection.
+	// While disconnected, "refresh" means "reconnect now" rather than an RPC over a dead connection.
 	if m.reconnecting {
 		m.client.Reconnect()
 		return m, nil
@@ -636,8 +615,8 @@ func (m model) actListQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// handleScreenKey drives the live terminal passthrough: ctrl+] leaves; every other
-// key is translated to a tmux key and enqueued (in order) for the sender goroutine.
+// handleScreenKey drives the live passthrough: ctrl+] leaves; every other key is
+// translated to a tmux key and enqueued for the sender goroutine.
 func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+]" {
 		m.mode = modeList
@@ -662,9 +641,8 @@ var namedKeys = map[string]string{
 	"space": " ",
 }
 
-// tmuxKeyFor translates a key press into a paneKey for tmux send-keys. Printable
-// text passes through literally; recognized special/chord keys map to tmux names;
-// anything else is ignored (ok=false).
+// tmuxKeyFor translates a key press into a paneKey for tmux send-keys. Unrecognized
+// keys yield ok=false.
 func tmuxKeyFor(msg tea.KeyPressMsg) (paneKey, bool) {
 	s := msg.String()
 	if n, ok := namedKeys[s]; ok {

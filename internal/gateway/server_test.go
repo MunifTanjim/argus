@@ -304,10 +304,6 @@ func TestTranscriptUnsubscribeHandlerRemovesAndRoutes(t *testing.T) {
 // The full end-to-end path through serveNode's OnNotify (including the orphaned
 // unsubscribe branch) is covered by TestServeNodeOnNotifyDeltaBranch.
 func TestGatewayForwardsTranscriptDeltaToSubscriber(t *testing.T) {
-	// gateway with one source "d1"; client subscribes with sub_id "k".
-	// when the source pushes transcript.delta{sub_id:"k"}, the client receives it.
-	// a second non-subscribing client must NOT receive it.
-
 	a := New(time.Second)
 	srv := NewServer(a, nil, nil)
 

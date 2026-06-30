@@ -77,10 +77,9 @@ func (d *Node) connSubsFor(n api.Notifier) *connSubs {
 }
 
 // getOrCreateConnSubs returns the per-connection registry for n, creating it on
-// first use. Direct node clients are pre-registered in OnConnect; connections
-// that reach handlers another way (the gateway uplink, or an in-process gateway
-// forwarding a client's ctx) are registered lazily here and dropped when their
-// context ends.
+// first use. Direct clients are pre-registered in OnConnect; connections reaching
+// handlers another way (gateway uplink, in-process gateway) are registered lazily
+// here and dropped when their context ends.
 func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSubs {
 	d.subsMu.Lock()
 	cs, ok := d.conns[n]
@@ -190,14 +189,11 @@ func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawM
 	return nil, nil
 }
 
-// pollTranscript re-folds the subscription's transcript every interval (reading
-// only newly appended bytes via the StreamingTranscript) and pushes a delta when
-// chunks change. `sent` is the FULL chunk list the client ends up holding after
-// the catch-up (its own cached prefix [0,from) plus the resent tail chunks[from:]),
-// not just the slice returned by subscribe. diffChunks therefore returns an index
-// into the full list, which is exactly the from_index the client applies. Do not
-// pass chunks[from:] here: comparing a tail slice against the full fold would
-// report from_index=0 every tick and resend the whole transcript.
+// pollTranscript re-folds the transcript every interval and pushes a delta when
+// chunks change. `sent` must be the FULL chunk list the client holds (cached
+// prefix plus resent tail), not chunks[from:]: diffChunks compares against the
+// full fold to compute the from_index. Passing a tail slice would report
+// from_index=0 every tick and resend the whole transcript.
 func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID string, st *claudecode.StreamingTranscript, sent []claudecode.Chunk) {
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {

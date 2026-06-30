@@ -15,11 +15,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// connect returns a client that recovers from temporary connection failures: it dials
-// the node/gateway through a Dialer and re-dials with backoff if the connection drops.
-// With a gateway URL it dials the gateway over WebSocket; otherwise it connects to the
-// local node's unix socket (the node must already be running; use connectLocalSpawn to
-// start one first).
+// connect returns a client that re-dials with backoff if the connection drops. With a
+// gateway URL it dials over WebSocket; otherwise the local node's unix socket (which
+// must already be running — use connectLocalSpawn to start one first).
 func connect(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
@@ -38,10 +36,8 @@ func connect(ctx context.Context, gatewayURL, token, socket string) (*api.Reconn
 	return c, nil
 }
 
-// gatewayDialer builds the Dialer connect uses. With a gateway URL it resolves
-// it once and dials over WebSocket; otherwise it dials the local node socket.
-// The local node must already be listening — startup spawns it explicitly (see
-// connectLocalSpawn) rather than dialing one into existence here.
+// gatewayDialer builds the Dialer connect uses: WebSocket for a gateway URL, else the
+// local node socket. The local node must already be listening (see connectLocalSpawn).
 func gatewayDialer(gatewayURL, token, socket string) (api.Dialer, error) {
 	if gatewayURL != "" {
 		wsURL, gatewayClient, err := resolveGatewayURL(gatewayURL, routeClient, nil)
@@ -57,9 +53,8 @@ func gatewayDialer(gatewayURL, token, socket string) (api.Dialer, error) {
 	}, nil
 }
 
-// localNodeRunning reports whether a node is already listening on the socket.
-// A nodeAbsent error (missing or refused socket) means "not running"; any other
-// dial error is returned so the caller can treat it as a real failure.
+// localNodeRunning reports whether a node is already listening on the socket. A
+// nodeAbsent error means "not running"; any other dial error is returned as a real failure.
 func localNodeRunning(socket string) (bool, error) {
 	conn, err := net.Dial("unix", socket)
 	if err == nil {
@@ -72,19 +67,16 @@ func localNodeRunning(socket string) (bool, error) {
 	return false, err
 }
 
-// connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it
-// to accept, then connects. The embedded node stops when ctx is cancelled. It also
-// returns the node's in-memory log buffer for the TUI's Logs tab.
+// connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it to
+// accept, then connects. Returns the node's log buffer for the TUI's Logs tab.
 func connectLocalSpawn(ctx context.Context, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
 	return connectLocalSpawnWithGateway(ctx, "", token, socket)
 }
 
-// connectLocalSpawnWithGateway starts an ephemeral embedded node (tied to ctx) and
-// waits for it to accept. When gatewayURL is empty (an isolated spawn) it connects
-// the TUI over the node's local socket. When gatewayURL is set (a connected spawn)
-// the node dials that upstream gateway so this machine joins the fleet, and the TUI
-// connects to the gateway instead — so it sees the whole fleet, including this
-// machine via the uplink. The node and its uplink stop when ctx is cancelled.
+// connectLocalSpawnWithGateway starts an ephemeral embedded node (tied to ctx). Empty
+// gatewayURL (isolated spawn): the TUI drives the local socket. Set gatewayURL
+// (connected spawn): the node uplinks to that gateway so this machine joins the fleet,
+// and the TUI drives the gateway so it sees the whole fleet, this machine included.
 func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
 	var wsURL string
 	var gatewayClient *http.Client
@@ -94,10 +86,8 @@ func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket
 			shell.StdErrF("argus: %v\n", err)
 			return nil, nil, err
 		}
-		// Probe the gateway synchronously so an unreachable host or rejected token is
-		// reported here, before the TUI takes the screen. d.ConnectGateway (below)
-		// retries silently in the background — without this probe a bad URL/token
-		// would leave the node permanently un-enrolled with no feedback to the user.
+		// Probe synchronously so a bad host/token is reported before the TUI takes the
+		// screen; d.ConnectGateway (below) only retries silently in the background.
 		probe, err := api.DialWSConn(ctx, wsURL, token, gatewayClient)
 		if err != nil {
 			shell.StdErrF("argus: cannot reach gateway at %s: %v\n", gatewayURL, err)
@@ -115,8 +105,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket
 		return nil, nil, err
 	}
 	conn.Close() // probe only; the client opens its own connection
-	// Isolated spawn: drive the local node directly. Connected spawn: drive the
-	// gateway (client route) so the TUI sees the whole fleet, this machine included.
+	// Isolated spawn drives the local node; connected spawn drives the gateway.
 	client, err := connect(ctx, gatewayURL, token, socket)
 	if err != nil {
 		return nil, nil, err
@@ -124,19 +113,16 @@ func connectLocalSpawnWithGateway(ctx context.Context, gatewayURL, token, socket
 	return client, logs, nil
 }
 
-// nodeAbsent reports whether a dial error means "no node is listening": a
-// missing socket file (ENOENT) or a stale one with no listener (ECONNREFUSED).
+// nodeAbsent reports whether a dial error means "no node is listening": a missing
+// socket (ENOENT) or a stale one with no listener (ECONNREFUSED).
 func nodeAbsent(err error) bool {
 	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
-// startEmbeddedNode runs a node in-process, serving the unix socket until ctx
-// is cancelled. Its operational logs are routed to an in-memory buffer (returned
-// alongside the node) so the TUI can tail them in its Logs tab; nothing is
-// written to stderr, so the alt-screen stays clean. Unlike `argus start` it does
-// not reconcile installed Claude Code hooks: this launch is ephemeral and may run
-// from a different binary path than the installed one, so rewriting global hook
-// config here would be surprising.
+// startEmbeddedNode runs a node in-process until ctx is cancelled. Logs go to an
+// in-memory buffer (returned) for the TUI's Logs tab, not stderr, to keep the
+// alt-screen clean. Unlike `argus start` it does not reconcile installed Claude Code
+// hooks: this ephemeral launch may run from a different binary path than the install.
 func startEmbeddedNode(ctx context.Context, socket string) (*node.Node, *logbuf.Buffer) {
 	d := node.New()
 	logs := logbuf.New(1000)

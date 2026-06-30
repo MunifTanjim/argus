@@ -14,9 +14,8 @@ const (
 	argusTmuxEnv   = "/tmp/tmux-1000/argus,1234,0"
 )
 
-// planJump gates the `O` jump: it must refuse anything that isn't a same-machine
-// default-server session reachable from a default-server tmux client, and return
-// the pane id otherwise.
+// planJump must refuse anything but a same-machine default-server session
+// reachable from a default-server tmux client; otherwise it returns the pane id.
 func TestPlanJump(t *testing.T) {
 	defaultLocal := session.Session{ // same machine (no gateway), default server
 		Tmux: session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: "%3"},

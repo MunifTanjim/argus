@@ -8,10 +8,9 @@ import (
 	"github.com/mdp/qrterminal/v3"
 )
 
-// pairingURI converts a gateway public URL (http/https) into the argus mobile
-// pairing URI: argus://pair?url=<wss base>&token=<token>. The URL is a base
-// (scheme://host[:port], no path); the app appends the implicit /client route,
-// mirroring the TUI client's hub-url resolver.
+// pairingURI converts a gateway public URL into the mobile pairing URI
+// argus://pair?url=<wss base>&token=<token>. The url is a base (no path); the app
+// appends the implicit /client route, mirroring the TUI's hub-url resolver.
 func pairingURI(publicURL, token string) (string, error) {
 	u, err := url.Parse(publicURL)
 	if err != nil {
@@ -35,9 +34,8 @@ func pairingURI(publicURL, token string) (string, error) {
 	return "argus://pair?" + q.Encode(), nil
 }
 
-// printPairingQR renders the pairing URI as a terminal QR plus the raw line, so
-// the mobile app can scan it (or the user can copy it). Callers print their own
-// surrounding context.
+// printPairingQR renders the pairing URI as a terminal QR plus the raw line (scan or
+// copy). Callers print their own surrounding context.
 func printPairingQR(w io.Writer, publicURL, token string) error {
 	uri, err := pairingURI(publicURL, token)
 	if err != nil {

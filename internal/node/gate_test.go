@@ -61,11 +61,10 @@ func waitParkedID(t *testing.T, d *Node) string {
 	return ""
 }
 
-// TestPermissionRequestParksWithoutViewer verifies the node parks and resolves a
-// PermissionRequest even when no TUI ever pinged it: the blocked hook returns the
-// decision the TUI sends via sessions.respond. This guards the fix that removed the
-// viewer-presence gate, which used to drop the prompt when no recent heartbeat
-// existed — leaving the TUI's Allow/Deny a silent no-op.
+// TestPermissionRequestParksWithoutViewer: the node parks and resolves a
+// PermissionRequest even when no TUI ever pinged it. Guards the removed
+// viewer-presence gate, which used to make the TUI's Allow/Deny a silent no-op
+// without a recent heartbeat.
 func TestPermissionRequestParksWithoutViewer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

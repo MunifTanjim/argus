@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// TestParsePaneSeparators verifies that parsePane handles the field separator
-// both as a raw 0x1F byte (tmux <3.4) and as the literal "\037" octal escape
-// that tmux >=3.4 emits for non-printable bytes in -F output.
+// TestParsePaneSeparators checks parsePane handles both the raw 0x1F separator
+// (tmux <3.4) and the "\037" escape (tmux >=3.4).
 func TestParsePaneSeparators(t *testing.T) {
 	fields := []string{
 		"%0", "work", "1", "0", "9416", "bash",
@@ -77,9 +76,8 @@ func TestPaneFocusedEscapedSep(t *testing.T) {
 	}
 }
 
-// TestIsFocusedDetached checks that a detached session's pane (no client attached)
-// is never reported focused — the no-false-positive case we can verify headlessly
-// (attaching a client needs a real terminal).
+// TestIsFocusedDetached checks a detached pane is never reported focused — the
+// no-false-positive case verifiable headlessly (attaching needs a real terminal).
 func TestIsFocusedDetached(t *testing.T) {
 	c := testClient(t)
 	ctx := context.Background()
@@ -108,9 +106,8 @@ func TestIsFocusedNoServer(t *testing.T) {
 	}
 }
 
-// testClient returns a Client bound to a throwaway, isolated tmux server socket
-// and ensures the server is killed when the test finishes. Tests are skipped if
-// tmux is not installed.
+// testClient returns a Client on a throwaway tmux socket, killed at test end.
+// Skips if tmux is not installed.
 func testClient(t *testing.T) *Client {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {

@@ -93,9 +93,8 @@ func newPingCmd() *cobra.Command {
 	return cmd
 }
 
-// runPings sends count ping RPCs over client, waiting interval between them (not after the
-// last), and reports each result. It returns the successful round-trip durations. A
-// cancelled ctx stops the loop early.
+// runPings sends count ping RPCs, waiting interval between them, reports each result, and
+// returns the successful round-trip durations. A cancelled ctx stops the loop early.
 func runPings(ctx context.Context, client pinger, count int, interval time.Duration, report func(i int, rtt time.Duration, err error)) []time.Duration {
 	var rtts []time.Duration
 	for i := 0; i < count; i++ {

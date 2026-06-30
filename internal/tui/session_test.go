@@ -13,8 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// recordingClient records Call invocations by method name. It is minimal — just
-// enough for subscription tests; all calls succeed with zero results.
+// recordingClient records Call method names; all calls succeed with zero results.
 type recordingClient struct {
 	mu    sync.Mutex
 	calls []string
@@ -39,9 +38,8 @@ func (c *recordingClient) calledMethods() []string {
 	return out
 }
 
-// runCmd executes a tea.Cmd synchronously, including recursively expanding any
-// tea.BatchMsg returned by tea.Batch. This drives all side-effects (e.g. client
-// Call invocations) so tests can assert on the recorded calls.
+// runCmd runs a tea.Cmd synchronously, recursing into tea.BatchMsg, so tests can
+// assert on the side-effects (e.g. client Call invocations) it triggers.
 func runCmd(cmd tea.Cmd) {
 	if cmd == nil {
 		return
@@ -374,11 +372,10 @@ func TestDetailEscPopsThenLeaves(t *testing.T) {
 	}
 }
 
-// TestSubagentLeafBackDoesNotTearDownSubscription is the regression test for
-// Finding 1: when the user is 3 frames deep (root → subagent → leaf) and presses
-// Back, the first Back must pop only the leaf frame without touching the subagent
-// subscription. Only the second Back (at the subagent frame) should unsubscribe
-// the subagent and restore the session stream.
+// TestSubagentLeafBackDoesNotTearDownSubscription (regression, "Finding 1"): from
+// 3 frames deep (root → subagent → leaf), the first Back must pop only the leaf
+// without touching the subagent subscription; only the second Back unsubscribes
+// the subagent and restores the session stream.
 func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 	rc := &recordingClient{}
 

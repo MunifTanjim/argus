@@ -184,8 +184,7 @@ func TestDiscoverSubagents_EmptySubagentsDir(t *testing.T) {
 
 // --- LinkSubagents tests ---
 
-// writeParentSession creates a temp JSONL file with tool result entries
-// containing structured toolUseResult and sourceToolUseID fields.
+// writeParentSession writes a temp JSONL file from the given entry lines.
 func writeParentSession(t *testing.T, entries []string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "parent.jsonl")
@@ -242,9 +241,8 @@ func makeTeamTaskChunk(toolID, subagentType, desc, teamName, memberName string) 
 	}
 }
 
-// makeTeamSubagentWithSummary builds a SubagentProcess whose first UserChunk
-// contains a <teammate-message summary="..."> tag, matching real JSONL format.
-// Phase 2 matches by comparing this summary to the Task call's SubagentDesc.
+// makeTeamSubagentWithSummary builds a team SubagentProcess with a TeamSummary;
+// Phase 2 matches that summary against the Task call's SubagentDesc.
 func makeTeamSubagentWithSummary(id string, startTime time.Time, summary string) parser.SubagentProcess {
 	return parser.SubagentProcess{
 		ID:          id,
@@ -607,21 +605,13 @@ func TestLinkSubagents_TeamContinuationFile(t *testing.T) {
 // --- Integration test: full pipeline from JSONL fixtures ---
 
 func TestTeamLinkingIntegration(t *testing.T) {
-	// Exercises the full pipeline from JSONL on disk through
-	// DiscoverSubagents -> ReadSession -> BuildChunks -> LinkSubagents.
-	//
-	// The fixture has 3 team Task calls in the parent with team-style
-	// agent_ids ("name@team") that can't match by UUID, forcing Phase 2
-	// (summary matching). A 4th continuation file has no summary attribute
-	// and must NOT match.
-	//
-	// This test would have failed with the original bug where
-	// ExtractTeamMessageSummary operated on chunk text (post-Classify)
-	// instead of raw entry content (pre-Classify).
+	// Full pipeline: DiscoverSubagents -> ReadSession -> BuildChunks -> LinkSubagents.
+	// Fixture has 3 team Task calls with "name@team" agent_ids that can't match by
+	// UUID (forces Phase 2 summary matching) plus a 4th continuation file with no
+	// summary that must NOT match. Regression guard: TeamSummary must be extracted
+	// from raw entry content, not post-Classify chunk text.
 	parentPath := filepath.Join("testdata", "team-parent.jsonl")
 
-	// Step 1: Discover subagents — exercises readSubagentSession which
-	// extracts TeamSummary from raw entry content before Classify strips it.
 	procs, err := parser.DiscoverSubagents(parentPath)
 	if err != nil {
 		t.Fatalf("DiscoverSubagents: %v", err)
@@ -1033,8 +1023,7 @@ func TestTeamSessionDiscoveryAndLinking(t *testing.T) {
 		if len(p.Chunks) == 0 {
 			t.Errorf("%s: Chunks is empty — execution trace won't render", p.ID)
 		}
-		// At least one AI chunk with a model — the trace view extracts the model
-		// name from the first AI chunk to show in the header.
+		// Trace header reads the model from the first AI chunk.
 		hasAI := false
 		for _, c := range p.Chunks {
 			if c.Type == parser.AIChunk && c.Model != "" {

@@ -1,8 +1,7 @@
-// Package logger is argus's logging entry point: it reads the resolved config
-// (config.LogLevel / config.LogFormat) and installs the global slog handler via Init,
-// and exposes scoped loggers. The portable Logger type, custom levels, and attribute
-// rendering live in the sibling logger/log package, which knows nothing about config —
-// keeping config-aware wiring separate from the reusable logging core.
+// Package logger is argus's logging entry point: it installs the global slog handler
+// from config and exposes scoped loggers. The reusable logging core (Logger type,
+// custom levels, attr rendering) lives in the sibling logger/log package, kept free
+// of config dependencies.
 package logger
 
 import (
@@ -33,10 +32,9 @@ const (
 
 type Logger = log.Logger
 
-// Init builds the global slog handler from the resolved config (config.LogLevel and
-// config.LogFormat) and installs it as the default. It must be called once, after the
-// config is loaded, before operational logging begins. config.LogLevel is a
-// *slog.LevelVar, so later level changes still take effect on the built handler.
+// Init builds the global slog handler from config and installs it as default. Call
+// once after config is loaded. config.LogLevel is a *slog.LevelVar, so later level
+// changes still take effect on the built handler.
 func Init() {
 	w := os.Stderr
 
@@ -55,10 +53,9 @@ func Init() {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-// prettyHandler builds the tint+scope-prefix handler used for human-readable
-// output, at the globally configured level (config.LogLevel). It is the single
-// source of the stderr format so anything reusing it (e.g. NewBufferLogger)
-// stays in lockstep with `argus start`.
+// prettyHandler builds the tint+scope-prefix handler for human-readable output. The
+// single source of the stderr format, so reusers (e.g. NewBufferLogger) stay in
+// lockstep with `argus start`.
 func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 	return slogpfx.NewHandler(
 		tint.NewHandler(w, &tint.Options{
@@ -73,14 +70,10 @@ func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 	)
 }
 
-// NewBufferLogger builds a logger that writes pretty, color, scope-prefixed
-// records to w at the globally configured level (config.LogLevel). The TUI uses
-// it to capture the embedded node's logs into an in-memory buffer and tail them
-// in its Logs tab, so the formatting matches `argus start` exactly. Color stays
-// on (NoColor false): the buffer is rendered in the TUI's interactive alt-screen,
-// not a pipe, and we want parity with the stderr logs (faded keys). The tab
-// renders the buffered lines as-is, so the escapes pass through to the terminal;
-// the view windows by line count and never truncates mid-line, so ANSI is safe.
+// NewBufferLogger builds a pretty, color, scope-prefixed logger writing to w, used
+// by the TUI to tail the embedded node's logs in its Logs tab with formatting that
+// matches `argus start`. Color stays on for parity with stderr logs: the tab renders
+// in the alt-screen (not a pipe) and never truncates mid-line, so ANSI is safe.
 func NewBufferLogger(w io.Writer) *slog.Logger {
 	return slog.New(prettyHandler(w, false))
 }

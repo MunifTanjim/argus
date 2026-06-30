@@ -40,10 +40,9 @@ type cachedTranscript struct {
 	chunks []claudecode.Chunk
 }
 
-// toolBodyEntry caches one tool item's on-demand-fetched body (see
-// sessions.toolDetail). Transcript chunks ship without ToolInput/Result; the
-// detail view fetches them per tool when a body becomes visible. done marks a
-// completed fetch (so an empty body isn't retried or shown as "loading").
+// toolBodyEntry caches one tool's on-demand-fetched body (see sessions.toolDetail).
+// Transcript chunks ship without ToolInput/Result; fetched per tool when visible.
+// done marks a completed fetch so an empty body isn't retried or shown as loading.
 type toolBodyEntry struct {
 	toolInput     string
 	result        string
@@ -104,19 +103,17 @@ type model struct {
 
 	history historyState // read-only browsing of past sessions on disk
 
-	// Logs tab: present only when the TUI spawned an embedded node (logs != nil).
-	// logsScroll is the absolute top-line offset when paused; logsFollow pins the
-	// view to the newest line and ignores logsScroll. Note: once the ring buffer is
-	// at capacity, a paused offset addresses shifting content as old lines evict —
-	// acceptable drift for a tail view.
+	// Logs tab: present only with an embedded node (logs != nil). logsScroll is the
+	// absolute top-line offset when paused; logsFollow pins to the newest line and
+	// ignores logsScroll. Gotcha: at ring capacity a paused offset addresses
+	// shifting content as old lines evict — acceptable drift for a tail view.
 	logs       *logbuf.Buffer
 	logsScroll int
 	logsFollow bool
 }
 
-// transcriptState is the transcript viewer: the parsed chunks plus the scroll/cursor/
-// fold/drill-down view state and the markdown/JSON render caches. Reused by the live
-// session view and the read-only history transcript.
+// transcriptState is the transcript viewer: parsed chunks plus scroll/cursor/fold/
+// drill-down state and render caches. Reused by the live and history views.
 type transcriptState struct {
 	chunks      []claudecode.Chunk
 	err         error
@@ -129,8 +126,8 @@ type transcriptState struct {
 	jsonHL      *jsonHighlighter              // JSON syntax highlighter for tool bodies
 }
 
-// historyState holds the read-only History view: the project list, the drilled-into
-// project's session list (paginated), and the open historical transcript's title.
+// historyState holds the read-only History view: the project list, a project's
+// paginated session list, and the open transcript's title.
 type historyState struct {
 	projects   []session.HistoryProject
 	projCursor int
@@ -141,8 +138,8 @@ type historyState struct {
 	hasMore    bool
 	loading    bool
 	title      string // header for the open historical transcript
-	// openNodeID/openPath address the open historical transcript for follow-up
-	// per-tool detail fetches (sessions.historyToolDetail).
+	// openNodeID/openPath address the open transcript for per-tool detail fetches
+	// (sessions.historyToolDetail).
 	openNodeID string
 	openPath   string
 }
@@ -171,8 +168,8 @@ func (m model) sessionInteraction() *session.Interaction {
 	return m.sessions[m.selectedID].Interaction
 }
 
-// interactionKey is a stable identity for a pending interaction: it changes when a
-// different prompt appears but stays equal across re-publishes of the same one.
+// interactionKey is a stable identity for a pending interaction: changes for a
+// different prompt, stays equal across re-publishes of the same one.
 func interactionKey(ix *session.Interaction) string {
 	if ix == nil {
 		return ""
@@ -181,9 +178,9 @@ func interactionKey(ix *session.Interaction) string {
 	return string(b)
 }
 
-// syncPromptDraft resets the compose draft when the open session's pending
-// interaction changes identity (a new prompt, or cleared), so a stale draft never
-// carries over. A re-publish of the same interaction keeps the in-progress draft.
+// syncPromptDraft resets the compose draft when the pending interaction changes
+// identity (new or cleared) so a stale draft never carries over. A re-publish of
+// the same interaction keeps the in-progress draft.
 func (m *model) syncPromptDraft() {
 	k := interactionKey(m.sessions[m.selectedID].Interaction)
 	if k != m.prompt.key {

@@ -1,6 +1,5 @@
-// Package node wires argus's components together: the registry, the Claude
-// Code discoverer over both tmux servers, and the JSON-RPC API server. It is
-// the in-process core behind the argusd command.
+// Package node is the in-process core behind argusd: registry, Claude Code
+// discoverer over both tmux servers, and the JSON-RPC API server.
 package node
 
 import (
@@ -51,9 +50,8 @@ type Node struct {
 	conns  map[api.Notifier]*connSubs // per-connection transcript subscriptions
 }
 
-// SetLogger routes the node's operational logging (scan/notify/cleanup failures)
-// to l. Off by default so an embedded node never writes to a TUI's stderr; the
-// standalone `start` command enables it.
+// SetLogger routes operational logging to l. Off by default so an embedded node
+// never writes to a TUI's stderr; the standalone `start` command enables it.
 func (d *Node) SetLogger(l *slog.Logger) {
 	if l != nil {
 		d.log = l
@@ -68,19 +66,17 @@ func (d *Node) scan(ctx context.Context) {
 	}
 }
 
-// SetDesktopNotify enables (or disables) rendering of push.desktop notifications
-// on this node's machine, wiring the click command so a clicked notification
-// focuses the session, and (re)building the notifier so render failures log
-// through the node's logger. Call before Run — not safe once the API server is
-// serving (it mutates fields read by handler goroutines).
+// SetDesktopNotify toggles rendering of push.desktop notifications on this
+// machine; click wires a clicked notification to focus the session. Call before
+// Run — not safe once serving (mutates fields read by handler goroutines).
 func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.desktopNotify = enabled
 	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
-// SetIdentity overrides the node's id and label (defaults derive from the
-// hostname). The id is the routing key the gateway namespaces sessions under, so it
-// must be stable across reconnects and unique within a fleet.
+// SetIdentity overrides the node's id and label (default: hostname). The id is
+// the gateway's routing key, so it must be stable across reconnects and unique
+// within a fleet.
 func (d *Node) SetIdentity(id, label string) {
 	if id != "" {
 		d.id = id
@@ -120,10 +116,9 @@ func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
 	return c, nil
 }
 
-// resolveLocal maps a bare or composite "<nodeID>:<localID>" session id to a
-// session local to this node, stripping this node's own prefix first (a composite
-// id this node owns is locally addressable once unprefixed). A foreign or unknown
-// id yields resolve's error. Shared by the focus-click and focus-suppression paths.
+// resolveLocal resolves a bare or composite "<nodeID>:<localID>" id to a local
+// session, stripping this node's own prefix first. Foreign/unknown ids yield
+// resolve's error. Shared by the focus-click and focus-suppression paths.
 func (d *Node) resolveLocal(id string) (session.Session, *tmux.Client, error) {
 	if nodeID, local, ok := session.SplitCompositeID(id); ok && nodeID == d.id {
 		id = local
@@ -163,9 +158,8 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	if host == "" {
 		host = "argusd"
 	}
-	// Probe tmux once at construction: spawn (and pane control) needs it, so a
-	// node without it advertises no spawn support rather than failing at use. The
-	// probe is bounded so a wedged tmux binary can't hang startup.
+	// Probe tmux once so a node without it advertises no spawn support rather than
+	// failing at use. Bounded so a wedged tmux binary can't hang startup.
 	var caps api.NodeCapabilities
 	if c, ok := clients[session.TmuxServerArgus]; ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -195,10 +189,8 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		d.registerConn(n)
 		events, cancel := reg.Subscribe()
 		// Send the current snapshot first so a fresh client is in sync. A client may
-		// hang up before/while we stream it — e.g. a liveness probe that connects and
-		// immediately closes (localNodeRunning). That's expected: stop on the first
-		// failed notify rather than spamming one per session against a dead connection.
-		// The live-event loop below treats a dropped client the same way (silent return).
+		// hang up mid-stream (e.g. a liveness probe); stop on the first failed notify
+		// rather than spamming one per session against a dead connection.
 		for _, s := range reg.Snapshot() {
 			if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
 				break
@@ -232,16 +224,14 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 }
 
 // Run scans once at startup and serves the API on the unix socket until ctx is
-// cancelled. Further discovery is on demand. The socket (and a stale leftover)
-// are managed automatically.
+// cancelled. The socket (and a stale leftover) are managed automatically.
 func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return err
 	}
-	// A leftover socket is only safe to remove if no node is actually listening
-	// on it. Probe first: if a live node answers, refuse rather than unlink it
-	// out from under the running node (which would orphan it and let teardown of
-	// either node delete the other's socket). Only a stale/dead socket is removed.
+	// Probe a leftover socket before removing it: if a live node answers, refuse
+	// rather than unlink it out from under the running node (which would orphan it).
+	// Only a stale/dead socket is removed.
 	if _, err := os.Stat(socketPath); err == nil {
 		if conn, derr := net.Dial("unix", socketPath); derr == nil {
 			conn.Close()
@@ -266,8 +256,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		}
 	}()
 
-	// Scan once at startup; subsequent scans are on demand (client refresh,
-	// hook events, spawn/kill).
+	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go d.scan(ctx)
 
 	// Close the listener when the context is done so Serve returns.
@@ -283,9 +272,8 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	return err
 }
 
-// nodeAbsent reports whether a dial error means no node is listening: a missing
-// socket file (ENOENT) or a stale one with no listener (ECONNREFUSED). Any other
-// error is a real problem and should not be treated as "safe to remove".
+// nodeAbsent reports whether a dial error means no node is listening (ENOENT or
+// ECONNREFUSED). Any other error is real and must not be treated as safe-to-remove.
 func nodeAbsent(err error) bool {
 	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }

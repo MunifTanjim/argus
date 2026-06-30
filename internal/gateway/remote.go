@@ -9,10 +9,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// RemoteSource is a node reached over the WebSocket uplink, adapted to the
-// Source interface via the symmetric Peer: snapshots and control calls are
-// requests the gateway issues down the link; live events arrive as the node's
-// session.event notifications (decoded into the events channel by the caller).
+// RemoteSource is a node reached over the WebSocket uplink, adapted to Source:
+// snapshots and control calls are requests down the link; live events arrive as
+// the node's session.event notifications (decoded into events by the caller).
 type RemoteSource struct {
 	id, label, version string
 	caps               api.NodeCapabilities
@@ -21,7 +20,7 @@ type RemoteSource struct {
 }
 
 // NewRemoteSource wraps an accepted node uplink. events must be the channel the
-// peer's OnNotify decodes session.event notifications into.
+// peer's OnNotify decodes session.event into.
 func NewRemoteSource(id, label, version string, caps api.NodeCapabilities, peer *api.Peer, events <-chan registry.Event) *RemoteSource {
 	return &RemoteSource{id: id, label: label, version: version, caps: caps, peer: peer, events: events}
 }
@@ -42,9 +41,8 @@ func (r *RemoteSource) Subscribe() (<-chan registry.Event, func()) {
 	return r.events, func() {}
 }
 
-// Call forwards a control request to the node and returns the raw JSON result.
-// The context bounds the wait so a wedged node can't block the caller (e.g. a
-// gateway Fanout) past its deadline.
+// Call forwards a control request to the node. The context bounds the wait so a
+// wedged node can't block the caller past its deadline.
 func (r *RemoteSource) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	var out json.RawMessage
 	if err := r.peer.CallContext(ctx, method, params, &out); err != nil {

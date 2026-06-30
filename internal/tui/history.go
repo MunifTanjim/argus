@@ -57,8 +57,8 @@ type histSubagentMsg struct {
 	err     error
 }
 
-// fetchHistSubagent one-shot fetches a nested subagent transcript in a past
-// session (history has no live subscription).
+// fetchHistSubagent one-shot fetches a nested subagent transcript (history has no
+// live subscription).
 func (m model) fetchHistSubagent(nodeID, path, agentID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
@@ -222,14 +222,14 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.transcript.expanded = make(map[string]bool)
 	m.toolBodies = make(map[string]toolBodyEntry) // per-transcript tool-body cache
 	m.mode = modeHistoryTranscript
-	// The transcript lives on the project's node (session items carry no id).
+	// Transcript lives on the project's node (session items carry no id).
 	return m, m.fetchHistTranscript(m.history.project.NodeID, s.TranscriptPath)
 }
 
 func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
-			if m.popDetail() { // was the root frame → back to the transcript
+			if m.popDetail() { // root frame → back to transcript
 				m.historyView = histTranscript
 			}
 			return m, nil
@@ -299,8 +299,8 @@ func (m model) historySessionsView() string {
 	return centerBlock(title+"\n\n"+body+"\n\n"+m.footer(binds...), cardW, m.width)
 }
 
-// renderCardList lays out multi-line cards separated by blank lines and windows
-// them to avail height, keeping the cursor card fully visible (mirrors listView).
+// renderCardList lays out blank-line-separated cards, windowed to avail height
+// with the cursor card kept fully visible (mirrors listView).
 func renderCardList(cards []string, cursor, avail int) string {
 	var lines []string
 	curStart, curEnd := 0, 0
@@ -319,7 +319,7 @@ func renderCardList(cards []string, cursor, avail int) string {
 
 func (m model) historyTranscriptView() string {
 	header := headerStyle.Render("argus · history") + dimStyle.Render("  "+truncate(m.history.title, 60))
-	body := m.historyBody() // reuses the live transcript/detail renderers (read-only)
+	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	footer := m.footer(transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold,
 		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back)
 	return header + "\n\n" + body + "\n\n" + footer
@@ -335,8 +335,8 @@ func historyWidth(m model) int {
 	return w
 }
 
-// historyCardChrome returns the border color and box glyphs for a history card,
-// matching the live session cards (heavy bright border when selected).
+// historyCardChrome returns a history card's border color and glyphs (heavy bright
+// border when selected), matching live session cards.
 func historyCardChrome(sel bool) (color.Color, cardChrome) {
 	if sel {
 		return ColorFocus, cardHeavy
@@ -349,8 +349,7 @@ func historyProjectRow(p session.HistoryProject, sel bool, w int) string {
 	titleLeft := dimStyle.Render("○") + " " + headlineStyle(sel).Render(p.Label)
 	titleRight := dimStyle.Render(relTime(p.LastActivity))
 
-	// The node is shown by the group header above; the card carries only its own
-	// counts and path.
+	// Node is shown by the group header above; card carries only counts and path.
 	body := []string{
 		dimStyle.Render(fmt.Sprintf("%d sessions", p.SessionCount)),
 		dimStyle.Render(p.Cwd),
@@ -358,15 +357,13 @@ func historyProjectRow(p session.HistoryProject, sel bool, w int) string {
 	return cardTitled(titleLeft, titleRight, body, w, border, chrome)
 }
 
-// historyNodeHeader renders a group header naming the origin node, shown above
-// that node's first project card.
+// historyNodeHeader renders a group header naming the origin node.
 func historyNodeHeader(p session.HistoryProject) string {
 	return Icon.Node.Render() + " " + StyleSecondaryBold.Render(nodeDisplayLabel(p))
 }
 
 // nodeDisplayLabel is the human name for a project's origin node, falling back to
-// the node id and then a local placeholder (direct node connections carry no
-// gateway-stamped node info).
+// the node id then a local placeholder (direct connections carry no node info).
 func nodeDisplayLabel(p session.HistoryProject) string {
 	if p.NodeLabel != "" {
 		return p.NodeLabel
@@ -377,9 +374,8 @@ func nodeDisplayLabel(p session.HistoryProject) string {
 	return "this machine"
 }
 
-// groupProjectsByNode reorders a recency-sorted project list so each node's
-// projects are contiguous, with groups in first-occurrence (newest-activity)
-// order and recency order preserved within each group.
+// groupProjectsByNode makes each node's projects contiguous, preserving the
+// recency order both across groups (by first occurrence) and within each group.
 func groupProjectsByNode(ps []session.HistoryProject) []session.HistoryProject {
 	var order []string
 	buckets := map[string][]session.HistoryProject{}
@@ -420,7 +416,7 @@ func historySessionRow(s session.HistorySession, sel bool, w int) string {
 		parts = append(parts, dimStyle.Render(formatDuration(s.DurationMs)))
 	}
 	body := []string{strings.Join(parts, dimStyle.Render(" · "))}
-	// A first-message preview, only when it adds something over the title.
+	// First-message preview, only when it differs from the title.
 	if s.FirstMessage != "" && s.FirstMessage != title {
 		body = append(body, StyleDim.Render(s.FirstMessage))
 	}

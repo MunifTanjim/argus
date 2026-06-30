@@ -12,9 +12,8 @@ import (
 // Claude Code hook event to the node.
 const HookMethod = "hook.event"
 
-// HookEvent is the payload `argus hook <event>` sends to the node. Payload is
-// the raw JSON Claude Code passed to the hook on stdin; TmuxPane/TmuxSocket come
-// from the hook process's environment ($TMUX_PANE / $TMUX) for correlation.
+// HookEvent is the payload `argus hook <event>` sends to the node. TmuxPane/
+// TmuxSocket come from the hook process's environment for pane correlation.
 type HookEvent struct {
 	Event      string          `json:"event"`       // hook_event_name, e.g. "Stop"
 	TmuxPane   string          `json:"tmux_pane"`   // $TMUX_PANE (e.g. "%3")
@@ -35,12 +34,11 @@ type hookPayload struct {
 	ToolInput        json.RawMessage `json:"tool_input"`
 	NotificationType string          `json:"notification_type"`
 	Message          string          `json:"message"`
-	// Reason is SessionEnd's end cause ("clear", "logout", "prompt_input_exit",
-	// "other", …). "clear" is special: /clear ends the session in place and
-	// immediately starts a fresh one, so it is not a real death.
+	// Reason is SessionEnd's end cause. "clear" is special: /clear ends in place
+	// and immediately starts a fresh session, so it is not a real death.
 	Reason string `json:"reason"`
-	// Source is SessionStart's start cause ("startup", "resume", "clear",
-	// "compact"). "clear" is the second half of /clear's end-then-start pair.
+	// Source is SessionStart's start cause. "clear" is the second half of /clear's
+	// end-then-start pair.
 	Source string `json:"source"`
 }
 
@@ -53,13 +51,11 @@ func statusFor(event string) (session.Status, bool) {
 	case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact":
 		return session.StatusWorking, true
 	case "Notification":
-		// Claude Code emits Notification for permission prompts and idle
-		// waiting — in all cases it wants the user's attention.
+		// Permission prompts and idle waiting both want the user's attention.
 		return session.StatusAwaitingInput, true
 	case "Stop":
-		// The turn ended; the session is now waiting for the user's next message.
-		// Surface it immediately rather than waiting for the delayed idle
-		// Notification (see replacesInteraction).
+		// Turn ended; surface awaiting-input immediately rather than waiting for
+		// the delayed idle Notification (see replacesInteraction).
 		return session.StatusAwaitingInput, true
 	case "SessionEnd":
 		return session.StatusDead, true
@@ -69,9 +65,7 @@ func statusFor(event string) (session.Status, bool) {
 }
 
 // interactionFor builds the pending user interaction implied by a hook event, or
-// nil when the event implies none. AskUserQuestion/ExitPlanMode are detected from
-// PreToolUse; permission comes from the authoritative PermissionRequest payload;
-// a Notification only ever implies an idle "awaiting input" interaction.
+// nil when none.
 func interactionFor(event string, p hookPayload, autoMode bool) *session.Interaction {
 	switch event {
 	case "PreToolUse":
@@ -83,19 +77,18 @@ func interactionFor(event string, p hookPayload, autoMode bool) *session.Interac
 		}
 		return nil
 	case "PermissionRequest":
-		// The decision point. Its payload carries tool_name + tool_input, so we
-		// build the interaction directly (no transcript read needed).
+		// Payload carries tool_name + tool_input, so build directly (no transcript
+		// read needed).
 		return permissionInteraction(p, autoMode)
 	case "Notification", "Stop":
-		// Both resolve to an idle "waiting for input" prompt. Notification is a
-		// generic attention signal; Stop means the turn ended.
+		// Both resolve to an idle "waiting for input" prompt.
 		return classifyNotification(p)
 	}
 	return nil
 }
 
-// replacesInteraction reports whether an event's interaction should overwrite any
-// prior one outright rather than defer to mergeInteraction. Stop ends the turn, so
+// replacesInteraction reports whether an event's interaction overwrites any prior
+// one outright rather than deferring to mergeInteraction. Stop ends the turn, so
 // its idle prompt supersedes a stale permission/question/plan the user may have
 // already resolved in their own terminal.
 func replacesInteraction(event string) bool {
@@ -184,8 +177,8 @@ func parsePlan(raw json.RawMessage, autoMode bool) *session.Interaction {
 		Plan string `json:"plan"`
 	}
 	_ = json.Unmarshal(raw, &in)
-	// Elevated option first: auto mode supersedes auto-accept-edits when
-	// available, so only one of them is offered. Manual approve follows, reject last.
+	// Elevated option first: auto mode supersedes auto-accept-edits, so only one
+	// is offered. Manual approve follows, reject last.
 	var opts []session.DecisionOption
 	if autoMode {
 		opts = append(opts, session.DecisionOption{Label: "Yes, and use auto mode", Value: "auto"})
@@ -205,21 +198,17 @@ func parsePlan(raw json.RawMessage, autoMode bool) *session.Interaction {
 }
 
 // classifyNotification turns a Notification payload into an idle "awaiting input"
-// interaction carrying only the message. A Notification never derives tool details:
-// it fires concurrently with PermissionRequest/PreToolUse but cannot reliably name
-// the right tool (e.g. a subagent's request carries the parent transcript, where
-// the still-pending Task tool would be misread). The authoritative tool-specific
-// interactions come from those hooks; an idle Notification must not clobber them
-// (see registry.mergeInteraction).
+// interaction carrying only the message. It never derives tool details: a
+// Notification fires concurrently with PermissionRequest/PreToolUse but can't
+// reliably name the right tool, so it must not clobber the authoritative
+// tool-specific interactions from those hooks (see registry.mergeInteraction).
 func classifyNotification(p hookPayload) *session.Interaction {
 	return &session.Interaction{Kind: session.InteractionIdle, Message: p.Message}
 }
 
-// frontendFor classifies a session's UI host from its launch entrypoint (read
-// from ~/.claude/sessions/<pid>.json) and whether it has a real tmux pane. The
-// VSCode extension reports entrypoint "claude-vscode" (paneless); the `claude`
-// CLI reports "cli" and may run in a tmux pane. An unknown entrypoint is treated
-// like cli.
+// frontendFor classifies a session's UI host from its launch entrypoint and
+// whether it has a real tmux pane. "claude-vscode" is the paneless VSCode
+// extension; "cli" (and unknown) is the terminal, which may run in a tmux pane.
 func frontendFor(entrypoint string, hasPane bool) session.Frontend {
 	if entrypoint == "claude-vscode" {
 		return session.FrontendVSCode
@@ -230,9 +219,8 @@ func frontendFor(entrypoint string, hasPane bool) session.Frontend {
 	return session.FrontendExternal
 }
 
-// serverFromSocket derives which logical tmux server a pane belongs to from the
-// $TMUX socket basename. argus's private socket is "argus"; everything else
-// (the user's default socket, typically "default") maps to the default server.
+// serverFromSocket maps a $TMUX socket basename to its logical tmux server.
+// argus's private socket is "argus"; everything else maps to the default server.
 func serverFromSocket(socketBasename string) session.TmuxServer {
 	if filepath.Base(socketBasename) == "argus" {
 		return session.TmuxServerArgus
@@ -252,22 +240,19 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	}
 	status, _ := statusFor(event) // empty status leaves it unchanged
 
-	// A pending interaction means the session is awaiting the user, overriding
-	// the base status. When there's no interaction the field is cleared (see
-	// ApplyHook).
+	// A pending interaction forces awaiting-input; no interaction clears the field
+	// (see ApplyHook).
 	ix := interactionFor(event, p, ev.AutoMode)
 	if ix != nil {
 		status = session.StatusAwaitingInput
 	}
 	replace := replacesInteraction(event)
 
-	// /clear resets the session in place: SessionEnd(reason=clear) immediately
-	// followed by SessionStart(source=clear). Map each to its true meaning rather
-	// than removing the session. The end drops the old conversation: idle, with the
-	// stale prompt cleared (ix stays nil → ApplyHook clears it). The start lands the
-	// fresh session on awaiting-input with an idle interaction so the respond/compose
-	// prompt shows (the list flags only awaiting-input sessions; the dock needs an
-	// interaction); replace forces that fresh prompt over anything still pending.
+	// /clear resets in place: SessionEnd(reason=clear) then SessionStart(source=
+	// clear). Map each to its true meaning instead of removing the session. End →
+	// idle, stale prompt cleared (ix nil). Start → awaiting-input with an idle
+	// interaction so the compose prompt shows (list flags only awaiting-input;
+	// dock needs an interaction); replace forces it over anything still pending.
 	switch {
 	case event == "SessionEnd" && p.Reason == "clear":
 		status = session.StatusIdle
@@ -277,20 +262,18 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		replace = true
 	}
 
-	// Refresh the cached transcript digest only on summary-relevant events.
+	// Refresh the transcript digest only on summary-relevant events.
 	var sum *session.Summary
 	if refreshesSummary(event) && p.TranscriptPath != "" {
 		sum = summarize(p.TranscriptPath)
 	}
 
-	// $TMUX/$TMUX_PANE are inherited by every child of the process that started
-	// tmux — including a `claude` run in a VSCode terminal opened from a tmux pane.
-	// Trust the inherited pane only for a genuine terminal (cli) session; the
-	// authoritative launch entrypoint comes from ~/.claude/sessions/<pid>.json. A
-	// non-cli (e.g. vscode) session must stay paneless, or discovery's next scan
-	// prunes it from a pane it never occupied. Unknown entrypoint (file missing or
-	// racy at the first SessionStart) trusts the pane: forcing paneless would race
-	// the scan and duplicate a real cli/tmux session; a later hook resolves it.
+	// $TMUX/$TMUX_PANE are inherited by every child of the tmux-starting process,
+	// including a `claude` in a VSCode terminal opened from a tmux pane. Trust the
+	// inherited pane only for a cli session; a non-cli (vscode) session must stay
+	// paneless or discovery prunes it from a pane it never occupied. Unknown
+	// entrypoint (file missing/racy at first SessionStart) trusts the pane to avoid
+	// racing the scan and duplicating a real cli session; a later hook resolves it.
 	entry, _ := findProcSessionByID(claudeSessionsDir(), p.SessionID)
 	terminal := entry.Entrypoint == "" || entry.Entrypoint == "cli"
 	paneID := ev.TmuxPane

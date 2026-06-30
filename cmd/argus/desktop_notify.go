@@ -11,10 +11,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/push"
 )
 
-// desktopClickCmd builds the command a desktop-notification click runs: it
-// invokes this same argus binary's hidden `_focus` subcommand against the local
-// node socket, carrying the session id. Used by both the gateway/uplink handler
-// path and the standalone-node watch path.
+// desktopClickCmd builds the command a notification click runs: this binary's
+// hidden `_focus` subcommand against the local node socket, carrying the session id.
 func desktopClickCmd(cfg *config.Config) func(string) []string {
 	bin := detectArgusBin()
 	socket := cfg.Socket
@@ -30,10 +28,9 @@ type fanouter interface {
 }
 
 // fanoutNotifier is a push.Sink that broadcasts a desktop notification to every
-// connected node via the push.desktop RPC. Each node renders it only if opted in
-// (see Node.handlePushDesktop), so headless nodes drop it cheaply. This sink lives
-// in cmd/argus (not internal/push) to avoid an import cycle: internal/gateway
-// already imports internal/push.
+// connected node via the push.desktop RPC; each node renders it only if opted in
+// (see Node.handlePushDesktop). Lives in cmd/argus, not internal/push, to avoid an
+// import cycle (internal/gateway already imports internal/push).
 type fanoutNotifier struct {
 	agg fanouter
 	log *slog.Logger

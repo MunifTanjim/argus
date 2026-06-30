@@ -12,11 +12,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// fetchToolBodyCmd fetches one tool item's heavy body (input/result) on demand,
-// keyed by its tool_use id. agentID selects the subagent trace the item belongs
-// to ("" = main transcript). It marks the cache entry loading to coalesce repeat
-// requests; nil is returned when the item isn't addressable or is already
-// loaded/loading. The live vs history RPC is chosen by the current view mode.
+// fetchToolBodyCmd lazily fetches one tool item's heavy body (input/result), keyed
+// by tool_use id; agentID selects the subagent trace ("" = main transcript). The
+// cache entry is marked loading to coalesce repeats; nil when not addressable or
+// already loaded/loading. Live vs history RPC is chosen by the view mode.
 func (m model) fetchToolBodyCmd(it claudecode.Item, agentID string) tea.Cmd {
 	if it.ToolID == "" {
 		return nil
@@ -47,13 +46,8 @@ func (m model) fetchToolBodyCmd(it claudecode.Item, agentID string) tea.Cmd {
 	}
 }
 
-// Per-tool detail bodies. toolDetailBody dispatches by tool name to a renderer
-// that lays out the tool's input and result in a readable, tool-specific way.
-// Unknown tools fall back to genericToolBody. Bodies are rendered at the given
-// inner width (the accent gutter is added by the caller).
-
-// toolDetailBody renders a tool-specific body, returning ok=false for tools with
-// no custom renderer (the caller then uses genericToolBody).
+// toolDetailBody renders a tool-specific body at the given inner width, returning
+// ok=false for tools with no custom renderer (caller then uses genericToolBody).
 func (m model) toolDetailBody(it claudecode.Item, width int) (string, bool) {
 	switch it.ToolName {
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
@@ -103,16 +97,14 @@ func resultLabelText(it claudecode.Item) string {
 	return "Result"
 }
 
-// hardWrap wraps s to width, breaking long tokens, and preserves ANSI styling.
-// lipgloss Width word-wraps then hard-wraps, so even a long no-space token (a path
-// or URL) is bounded rather than overflowing the screen.
+// hardWrap wraps s to width preserving ANSI styling; lipgloss hard-wraps so even a
+// long no-space token (path/URL) is bounded rather than overflowing.
 func hardWrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(max(width, 10)).Render(s)
 }
 
-// renderToolText highlights JSON, else renders plain readable text; either way the
-// output is wrapped to width (terminal default fg -- NOT dim) so long lines never
-// run off-screen.
+// renderToolText highlights JSON (else plain text) and wraps to width so long lines
+// never run off-screen.
 func (m model) renderToolText(s string, width int) string {
 	s = strings.TrimRight(s, "\n")
 	if m.transcript.jsonHL != nil {
@@ -140,8 +132,7 @@ func (m model) genericToolBody(it claudecode.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// editToolDetail renders Edit/Write/MultiEdit as a colored diff (via editDiff)
-// plus the tool result.
+// editToolDetail renders Edit/Write/MultiEdit as a colored diff plus the result.
 func (m model) editToolDetail(it claudecode.Item, width int) string {
 	var sb strings.Builder
 	if diff, ok := editDiff(it.ToolName, it.ToolInput); ok {
@@ -164,8 +155,8 @@ func unmarshalInput(raw string, v any) {
 	_ = json.Unmarshal([]byte(raw), v)
 }
 
-// bashDetail renders a Bash command as "$ cmd" (with an optional "# description")
-// followed by the result as readable text.
+// bashDetail renders a Bash command as "$ cmd" (with optional "# description")
+// followed by the result.
 func (m model) bashDetail(it claudecode.Item, width int) string {
 	var in struct {
 		Command     string `json:"command"`
@@ -178,8 +169,7 @@ func (m model) bashDetail(it claudecode.Item, width int) string {
 		sb.WriteString(StyleDim.Render("# "+in.Description) + "\n")
 	}
 	if in.Command != "" {
-		// Render prompt + command in one style call so the plain text "$ <cmd>"
-		// stays contiguous (a split Render inserts an ANSI reset between them).
+		// One Render call: a split would insert an ANSI reset between "$" and cmd.
 		sb.WriteString(StyleSecondaryBold.Render("$ "+in.Command) + "\n")
 	} else if it.ToolInput != "" {
 		sb.WriteString(m.renderToolText(it.ToolInput, width) + "\n")
@@ -192,8 +182,8 @@ func (m model) bashDetail(it claudecode.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// readDetail renders a file read: the file path header, then the file content
-// (which already carries line numbers from the Read tool) as readable text.
+// readDetail renders a file read: path header, then content (which already carries
+// line numbers from the Read tool).
 func (m model) readDetail(it claudecode.Item, width int) string {
 	var in struct {
 		FilePath string `json:"file_path"`
@@ -303,10 +293,9 @@ func (m model) globDetail(it claudecode.Item, width int) string {
 // AskUserQuestion result string.
 var askUserQuestionPair = regexp.MustCompile(`"([^"]+)"="([^"]*)"`)
 
-// parseAnsweredAnswers best-effort parses an AskUserQuestion result
-// ("Your questions have been answered: \"Q\"=\"A\", …") into a question→answer
-// map. The result is free text, so an unparseable string yields an empty map and
-// callers degrade gracefully (no marks) rather than dumping raw JSON.
+// parseAnsweredAnswers best-effort parses an AskUserQuestion result into a
+// question→answer map. The result is free text, so an unparseable string yields an
+// empty map and callers degrade gracefully (no marks).
 func parseAnsweredAnswers(result string) map[string]string {
 	out := map[string]string{}
 	for _, mt := range askUserQuestionPair.FindAllStringSubmatch(result, -1) {
@@ -315,14 +304,13 @@ func parseAnsweredAnswers(result string) map[string]string {
 	return out
 }
 
-// askUserQuestionPreviewCap bounds an option preview's height in the transcript
-// so a large ASCII mockup can't dominate the view (previewBox clips the rest).
+// askUserQuestionPreviewCap caps an option preview's height so a large ASCII mockup
+// can't dominate the view (previewBox clips the rest).
 const askUserQuestionPreviewCap = 12
 
-// askUserQuestionDetail renders an answered AskUserQuestion: each question's
-// header chip + prompt, its options with the chosen one(s) marked (◉/[x]) and
-// their descriptions/previews, plus an "Answer" line for any custom answer that
-// matches no option. Mirrors the live prompt dock (prompt.go) for consistency.
+// askUserQuestionDetail renders an answered AskUserQuestion: header chip + prompt,
+// options with the chosen one(s) marked (◉/[x]), and an "Answer" line for any
+// custom answer matching no option. Mirrors the live prompt dock (prompt.go).
 func (m model) askUserQuestionDetail(it claudecode.Item, width int) string {
 	var in struct {
 		Questions []struct {
@@ -355,9 +343,8 @@ func (m model) askUserQuestionDetail(it claudecode.Item, width int) string {
 			b.WriteString(m.renderMD(q.Question, width-2))
 		}
 
-		// The chosen answer(s) for this question, split so a multi-select answer
-		// ("A, B") matches several option labels. Pieces left unmatched are custom
-		// ("type your own") answers, surfaced on a trailing line.
+		// Split so a multi-select answer ("A, B") matches several option labels;
+		// unmatched pieces are custom answers, surfaced on a trailing line.
 		chosen := map[string]bool{}
 		for _, p := range strings.Split(answers[q.Question], ", ") {
 			if p = strings.TrimSpace(p); p != "" {

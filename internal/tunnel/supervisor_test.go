@@ -193,10 +193,8 @@ func TestSupervisorRestartsOnEarlyExit(t *testing.T) {
 		done <- sup.Run(ctx, Cloudflare{Bin: bin}, "http://127.0.0.1:8443", func(string) {})
 	}()
 
-	// Poll until at least two runs have appended a byte, proving a restart, rather
-	// than assuming a fixed wall-clock budget: a freshly-written binary's first
-	// exec can take hundreds of ms (e.g. macOS Gatekeeper scans it), which would
-	// otherwise race a tight timeout and kill the process before it ever runs.
+	// Poll for two runs (proving a restart) rather than a fixed budget: a freshly
+	// written binary's first exec can take hundreds of ms (e.g. macOS Gatekeeper).
 	deadline := time.After(5 * time.Second)
 	for {
 		if data, _ := os.ReadFile(counter); len(data) >= 2 {

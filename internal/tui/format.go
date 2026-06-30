@@ -193,15 +193,10 @@ func toolColor(name string) color.Color {
 	}
 }
 
-// sessionCard renders one session as a bordered card for the list: a titled top
-// edge with the repo as the left headline and the tmux coordinates
-// (name · pane · server) grouped on the right, a metadata line
-// (model · ctx% · tokens … relTime), and a task line (the awaiting-input hint or
-// the current-task summary). A working session's glyph is the animated spinner.
-// The unfocused card is muted to a calm baseline (neutral border, dimmed repo /
-// tmux / summary) so the focused card -- a bright-cyan heavy border with
-// full-strength text -- stands out. The status glyph and the awaiting-input hint
-// stay colored on every card as triage signals.
+// sessionCard renders one session as a bordered list card: repo headline + tmux
+// coordinates on the top edge, a model · ctx% · tokens … relTime meta line, and a
+// task line. Unfocused cards are muted so the focused one (heavy cyan border)
+// stands out; the status glyph and awaiting-input hint stay colored as triage cues.
 func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 	border, chrome := ColorBorder, cardRounded
 	if selected {
@@ -214,8 +209,7 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 	if s.Status == session.StatusWorking {
 		glyph, gcolor = SpinnerFrames[m.spin%len(SpinnerFrames)], ColorOngoing
 	}
-	// A session whose node dropped off the gateway reads as inactive: muted glyph,
-	// no spinner, regardless of its last-known status.
+	// Offline node: read as inactive (muted glyph, no spinner) regardless of status.
 	if s.Offline {
 		glyph, gcolor = "○", ColorBorder
 	}
@@ -230,9 +224,8 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 		titleLeft += " " + repoStyle.Render(truncate(s.Repo, 28))
 	}
 
-	// Right: tmux coordinates grouped as one contiguous span. Prefer Claude's own
-	// session name (known from discovery); fall back to the tmux session name. The
-	// name is omitted when both are empty (it would otherwise duplicate the pane id).
+	// Right: tmux coordinates. Prefer Claude's own session name, fall back to the
+	// tmux name; omit when both empty (it would otherwise duplicate the pane id).
 	var tmux []string
 	name := s.Name
 	if name == "" {
@@ -267,8 +260,8 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 		task = StyleDim.Render("(idle)")
 	}
 
-	// In the cross-host "Needs you" section the per-node header is replaced, so the
-	// node would otherwise be unknowable; surface it on the card itself.
+	// The cross-host "Needs you" section drops the per-node header, so surface the
+	// node on the card itself.
 	nodeLabel := ""
 	if s.Status == session.StatusAwaitingInput && m.grouped() {
 		nodeLabel = s.NodeLabel
@@ -280,10 +273,9 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 	return cardTitled(titleLeft, titleRight, []string{m.cardMeta(s, innerW, selected, nodeLabel), task}, cardW, border, chrome)
 }
 
-// cardMeta builds a session card's metadata line: model · ctx% · tokens on the left
-// (each omitted when unknown) and the relative last-activity on the right. On an
-// unfocused card the model badge is dimmed and a healthy ctx% is dimmed too; an
-// elevated ctx% (>=50%) keeps its warning color so it triages at a glance.
+// cardMeta builds a card's meta line: model · ctx% · tokens left, last-activity
+// right. Unfocused dims the model and a healthy ctx%; an elevated ctx% (>=50%)
+// keeps its warning color so it triages at a glance.
 func (m model) cardMeta(s session.Session, width int, selected bool, nodeLabel string) string {
 	var parts []string
 	if sum := s.Summary; sum != nil {
@@ -309,8 +301,7 @@ func (m model) cardMeta(s session.Session, width int, selected bool, nodeLabel s
 	if left == "" {
 		left = StyleDim.Render(statusWord(s)) // no summary yet: at least show status
 	}
-	// Node on the right, before the time, so the cross-host "Needs you" cards
-	// stay attributable to their host.
+	// Node before the time, so cross-host "Needs you" cards stay attributable.
 	var rights []string
 	if nodeLabel != "" {
 		rights = append(rights, StyleSecondary.Render(Icon.Node.Glyph+" "+nodeLabel))
@@ -330,10 +321,9 @@ var (
 	cardHeavy   = cardChrome{"┏", "┓", "┗", "┛", "━", "┃"} // focused
 )
 
-// cardTitled composes a card with a titled top edge using the given chrome (the
-// focused card uses cardHeavy, otherwise cardRounded). titleLeft sits after the
-// lead corner; titleRight before the tail corner; a border-colored rule fills the
-// gap. Body lines are framed by the vertical glyph, truncated and padded to cardW-4.
+// cardTitled composes a card with a titled top edge: titleLeft after the lead
+// corner, titleRight before the tail corner, a border-colored rule filling the gap.
+// Body lines are framed by the vertical glyph, truncated/padded to cardW-4.
 func cardTitled(titleLeft, titleRight string, body []string, cardW int, border color.Color, ch cardChrome) string {
 	bs := lipgloss.NewStyle().Foreground(border)
 	innerW := max(cardW-4, 10)
@@ -363,10 +353,8 @@ func cardTitled(titleLeft, titleRight string, body []string, cardW int, border c
 	return strings.Join(rows, "\n")
 }
 
-// accentBlock prefixes every line of content with a category-colored gutter,
-// giving each detail item a left accent rule. The bar glyph is the caller's
-// choice (a thin GlyphAccentBar normally, a heavy GlyphAccentBarFocused when the
-// item is focused).
+// accentBlock prefixes every content line with a category-colored gutter bar
+// (thin normally, heavy when focused — caller's choice).
 func accentBlock(content string, c color.Color, bar string) string {
 	pre := lipgloss.NewStyle().Foreground(c).Render(bar) + " "
 	lines := strings.Split(content, "\n")
@@ -376,10 +364,9 @@ func accentBlock(content string, c color.Color, bar string) string {
 	return strings.Join(lines, "\n")
 }
 
-// itemAccentColor returns the accent-rule color for a detail item: tools use their
-// category color; thinking and output are neutral grays, subagents use the task
-// color. No item uses ColorAccent — that is reserved for the focus highlight, so a
-// focused item's accent bar always differs from its own color.
+// itemAccentColor returns the accent-rule color for a detail item. No item uses
+// ColorAccent — it is reserved for the focus highlight, so a focused item's accent
+// bar always differs from its own color.
 func itemAccentColor(it claudecode.Item) color.Color {
 	switch it.Kind {
 	case claudecode.ItemThinking:

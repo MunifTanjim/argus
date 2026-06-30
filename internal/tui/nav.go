@@ -1,8 +1,7 @@
 package tui
 
-// Shared list-navigation helpers: cursor bounds arithmetic and viewport windowing,
-// used by the session list and the history project/session lists so the bounds and
-// scroll math live in one place.
+// Shared list-navigation helpers: cursor bounds and viewport windowing, used by
+// the session and history lists so the math lives in one place.
 
 // cursorUp returns the cursor moved up one, clamped at 0.
 func cursorUp(i int) int { return max(0, i-1) }

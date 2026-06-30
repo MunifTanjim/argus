@@ -13,14 +13,13 @@ const (
 	reconnectMaxBackoff  = 15 * time.Second
 )
 
-// Dialer establishes a new connection. It is called for the initial connect and for
-// every reconnect, so it must be safe to invoke repeatedly.
+// Dialer establishes a new connection. Called for the initial connect and every
+// reconnect, so it must be safe to invoke repeatedly.
 type Dialer func(ctx context.Context) (net.Conn, error)
 
-// ReconnectingClient is a consumer client that re-dials with capped exponential backoff
-// when its connection drops. It keeps a stable Events() stream across reconnects and
-// reports connection-state transitions on States(). Reconnect() forces an immediate
-// retry. Safe for concurrent use.
+// ReconnectingClient re-dials with capped exponential backoff when its connection
+// drops, keeping a stable Events() stream across reconnects and reporting state
+// transitions on States(). Reconnect() forces an immediate retry. Safe for concurrent use.
 type ReconnectingClient struct {
 	dial   Dialer
 	ctx    context.Context
@@ -34,8 +33,8 @@ type ReconnectingClient struct {
 	peer *Peer // nil while disconnected
 }
 
-// NewReconnectingClient dials once (returning any error so startup failure surfaces
-// immediately) and then maintains the connection until Close.
+// NewReconnectingClient dials once (so startup failure surfaces immediately) and
+// then maintains the connection until Close.
 func NewReconnectingClient(ctx context.Context, dial Dialer) (*ReconnectingClient, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	c := &ReconnectingClient{
@@ -77,8 +76,8 @@ func (c *ReconnectingClient) currentPeer() *Peer {
 	return c.peer
 }
 
-// supervise waits for the live peer to drop, then reconnects with backoff, emitting
-// connection-state transitions, until ctx ends.
+// supervise reconnects with backoff each time the live peer drops, emitting state
+// transitions, until ctx ends.
 func (c *ReconnectingClient) supervise() {
 	for {
 		p := c.currentPeer()
@@ -102,8 +101,8 @@ func (c *ReconnectingClient) supervise() {
 	}
 }
 
-// reconnect re-dials with capped exponential backoff. A Reconnect() kick short-circuits
-// the wait and resets the backoff. Returns false if ctx ended first.
+// reconnect re-dials with capped exponential backoff; a Reconnect() kick short-
+// circuits the wait and resets backoff. Returns false if ctx ended first.
 func (c *ReconnectingClient) reconnect() bool {
 	backoff := reconnectBaseBackoff
 	for {
@@ -132,7 +131,7 @@ func (c *ReconnectingClient) emitState(connected bool) {
 	}
 }
 
-// Events returns the stable notification stream. It is not closed on reconnect; it
+// Events returns the stable notification stream, not closed on reconnect; it
 // carries notifications from whichever connection is currently live.
 func (c *ReconnectingClient) Events() <-chan Notification { return c.events }
 
@@ -140,8 +139,7 @@ func (c *ReconnectingClient) Events() <-chan Notification { return c.events }
 // when it is re-established.
 func (c *ReconnectingClient) States() <-chan bool { return c.states }
 
-// Reconnect forces an immediate reconnect attempt (and resets backoff) when the client
-// is disconnected. It is a no-op while connected.
+// Reconnect forces an immediate reconnect attempt (and resets backoff). No-op while connected.
 func (c *ReconnectingClient) Reconnect() {
 	select {
 	case c.kick <- struct{}{}:
@@ -149,8 +147,7 @@ func (c *ReconnectingClient) Reconnect() {
 	}
 }
 
-// Call routes to the live peer, returning an error promptly when disconnected rather
-// than blocking.
+// Call routes to the live peer, erroring promptly when disconnected rather than blocking.
 func (c *ReconnectingClient) Call(method string, params, out any) error {
 	p := c.currentPeer()
 	if p == nil {

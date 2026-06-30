@@ -12,8 +12,8 @@ import (
 // ellipsis is the Unicode horizontal ellipsis used for text truncation.
 const ellipsis = "\u2026"
 
-// ToolSummary generates a human-readable summary for a tool call.
-// Returns the tool name as fallback when input is nil or unparseable.
+// ToolSummary returns a human-readable summary for a tool call, falling back
+// to the tool name when input is nil or unparseable.
 func ToolSummary(name string, input json.RawMessage) string {
 	if len(input) == 0 {
 		return name
@@ -335,13 +335,12 @@ func summaryDefault(name string, f map[string]json.RawMessage) string {
 
 // --- Helpers ---
 
-// ShortPath returns the last n segments of a file path.
-// Uses forward slashes for normalization. Returns the full path
-// if it has fewer than n segments.
+// ShortPath returns the last n forward-slash segments of a path, or the full
+// path if it has fewer than n segments.
 func ShortPath(fullPath string, n int) string {
 	normalized := filepath.ToSlash(fullPath)
 	parts := strings.Split(normalized, "/")
-	// Filter out empty segments (leading slash produces one).
+	// Drop empty segments (e.g. from a leading slash).
 	var segments []string
 	for _, p := range parts {
 		if p != "" {
@@ -354,7 +353,7 @@ func ShortPath(fullPath string, n int) string {
 	return strings.Join(segments[len(segments)-n:], "/")
 }
 
-// getString extracts a string field from a raw JSON map. Returns "" if missing or wrong type.
+// getString reads a string field, returning "" if missing or wrong type.
 func getString(fields map[string]json.RawMessage, key string) string {
 	raw, ok := fields[key]
 	if !ok {
@@ -367,7 +366,7 @@ func getString(fields map[string]json.RawMessage, key string) string {
 	return s
 }
 
-// getNumber extracts a numeric field from a raw JSON map. Returns 0 if missing or wrong type.
+// getNumber reads a numeric field, returning 0 if missing or wrong type.
 func getNumber(fields map[string]json.RawMessage, key string) int {
 	raw, ok := fields[key]
 	if !ok {
@@ -380,9 +379,8 @@ func getNumber(fields map[string]json.RawMessage, key string) int {
 	return int(n)
 }
 
-// Truncate shortens a string to maxLen runes, appending an ellipsis if truncated.
-// The result is exactly maxLen runes when truncation occurs.
-// Collapses newlines to spaces since summaries are single-line display strings.
+// Truncate shortens s to maxLen runes (exactly maxLen when truncated, with a
+// trailing ellipsis) and collapses newlines to spaces for single-line display.
 func Truncate(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	runes := []rune(s)
@@ -392,9 +390,8 @@ func Truncate(s string, maxLen int) string {
 	return string(runes[:maxLen-1]) + ellipsis
 }
 
-// TruncateWord shortens a string to maxLen runes, breaking at the nearest
-// preceding word boundary (space). Searches up to 20 characters back from
-// the cut point. Falls back to hard truncation if no space is found.
+// TruncateWord shortens s to maxLen runes, breaking at the nearest preceding
+// space within 20 chars of the cut, else hard-truncating.
 func TruncateWord(s string, maxLen int) string {
 	runes := []rune(s)
 	if len(runes) <= maxLen {

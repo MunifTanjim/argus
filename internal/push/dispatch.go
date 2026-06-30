@@ -24,9 +24,8 @@ func NewDispatcher(store *Store, sender Sender, log *slog.Logger) *Dispatcher {
 	return &Dispatcher{store: store, sender: sender, log: log}
 }
 
-// Send delivers n to every registered device. It is best-effort: per-device
-// failures are logged and skipped, and gone targets are pruned, so one bad device
-// never blocks the rest.
+// Send delivers n to every registered device. Best-effort: per-device failures
+// are logged and skipped, gone targets pruned, so one bad device never blocks the rest.
 func (d *Dispatcher) Send(ctx context.Context, n Notification) {
 	recs, err := d.store.List()
 	if err != nil {
@@ -52,8 +51,8 @@ func (d *Dispatcher) Send(ctx context.Context, n Notification) {
 // Notify makes *Dispatcher a Sink, delivering to every registered device.
 func (d *Dispatcher) Notify(ctx context.Context, n Notification) { d.Send(ctx, n) }
 
-// SendTo delivers n to a single device's target (e.g. the test endpoint). It
-// returns the sender's error and prunes the device when its target is gone.
+// SendTo delivers n to a single device (e.g. the test endpoint), pruning the
+// device when its target is gone.
 func (d *Dispatcher) SendTo(ctx context.Context, deviceID string, n Notification) error {
 	t, ok, err := d.store.Get(deviceID)
 	if err != nil {

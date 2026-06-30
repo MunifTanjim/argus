@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// copyFixture copies a testdata JSONL file into dir with the given name.
-// Returns the destination path.
+// copyFixture copies a testdata JSONL file into dir/name and returns the dest path.
 func copyFixture(t *testing.T, fixture, dir, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(fixture)
@@ -74,10 +73,8 @@ func TestSessionCache_DetectsFileChanges(t *testing.T) {
 	}
 	origTurns := sessions[0].TurnCount
 
-	// Overwrite with a different fixture that has more turns.
-	// Advance modTime so the cache sees the change — some filesystems have
-	// second-granularity timestamps, so a write within the same second may
-	// not update modTime.
+	// Overwrite with a fixture that has more turns. Advance modTime explicitly:
+	// second-granularity filesystems may not bump it on a same-second write.
 	data, err := os.ReadFile(fixtureMultiTurn)
 	if err != nil {
 		t.Fatalf("read multi_turn: %v", err)

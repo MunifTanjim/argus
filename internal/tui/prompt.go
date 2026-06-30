@@ -12,26 +12,19 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// The native prompt view renders a session's pending Interaction as argus's own
-// widget and lets the user compose an answer locally. Nothing is sent to Claude
-// until the user submits (Enter). On submit the node resolves the session's
-// parked PermissionRequest hook with the chosen decision (allow/deny, or for
-// AskUserQuestion the selected answers) — so the answer is delivered structurally,
-// not by keystrokes, and the prompt never appears in Claude's pane. Idle replies
-// still go through pane input; ctrl+s drops to the raw screen view as an escape
-// hatch.
+// Compose-then-submit prompt dock: nothing is sent to Claude until Enter. On
+// submit the node resolves the parked PermissionRequest hook structurally
+// (decision / answers), so the prompt never appears in Claude's pane. Idle
+// replies go through pane input; ctrl+s drops to the raw screen view.
 //
-// AskUserQuestion may carry several questions; they render as a tabbed panel (one
-// tab per question's header, ←/→ to navigate) with a trailing "Submit" tab that
-// reviews all answers. A single question hides the tabs and submits on Enter.
+// AskUserQuestion with several questions renders as a tabbed panel + trailing
+// "Submit" review tab; a single question hides the tabs and submits on Enter.
 
-// otherLabel is the synthetic last option on a question that lets the user type a
-// custom answer instead of picking a predefined one (matching Claude's own UI).
+// otherLabel is the synthetic "type your own" option (matches Claude's UI).
 const otherLabel = "✎ type your own…"
 
-// promptState is the compose-then-submit draft for the prompt dock; nothing is sent
-// until the user submits. Questions use the per-question slices (a multi-question
-// AskUserQuestion is a tabbed panel); permission/plan/idle use the scalar drafts.
+// promptState is the prompt dock draft. Questions use the per-question slices;
+// permission/plan/idle use the scalar drafts.
 type promptState struct {
 	tab         int            // active tab: 0..len-1 question, ==len → Submit tab
 	sel         []int          // highlighted option index per question (navigation only)
@@ -58,8 +51,7 @@ func (m model) numQuestions() int {
 	return len(ix.Questions)
 }
 
-// isMultiQuestion reports whether the pending question interaction has more than
-// one question (and therefore a tab bar + Submit tab).
+// isMultiQuestion reports whether the prompt has >1 question (so it gets a tab bar + Submit tab).
 func (m model) isMultiQuestion() bool { return m.numQuestions() > 1 }
 
 // onSubmitTab reports whether the active tab is the trailing Submit/review tab.
@@ -67,8 +59,7 @@ func (m model) onSubmitTab() bool {
 	return m.isMultiQuestion() && m.prompt.tab >= m.numQuestions()
 }
 
-// activeQuestion returns the question for the active tab, or nil (Submit tab /
-// non-question interaction).
+// activeQuestion returns the question for the active tab, or nil (Submit tab / non-question).
 func (m model) activeQuestion() *session.QuestionSpec {
 	ix := m.interaction()
 	if ix == nil || ix.Kind != session.InteractionQuestion {
@@ -80,9 +71,7 @@ func (m model) activeQuestion() *session.QuestionSpec {
 	return &ix.Questions[m.prompt.tab]
 }
 
-// decisionOptions returns the server-built option labels for a permission/plan
-// decision. The server always supplies these (allow/deny, plan approve variants);
-// the reject choice is flagged on the option itself.
+// decisionOptions returns the server-supplied option labels for a permission/plan decision.
 func decisionOptions(ix *session.Interaction) []string {
 	labels := make([]string, len(ix.Options))
 	for i, o := range ix.Options {
@@ -94,8 +83,8 @@ func decisionOptions(ix *session.Interaction) []string {
 	return labels
 }
 
-// decisionRejecting reports whether the highlighted decision option is the reject
-// choice (deny / keep planning) — which surfaces the reason field.
+// decisionRejecting reports whether the highlighted option is the reject choice
+// (deny / keep planning), which surfaces the reason field.
 func (m model) decisionRejecting(ix *session.Interaction) bool {
 	sel := m.prompt.decisionSel
 	return sel >= 0 && sel < len(ix.Options) && ix.Options[sel].Reject
@@ -117,8 +106,8 @@ func (m *model) resetPromptState() {
 	m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = nil, nil, nil, nil
 }
 
-// ensurePromptState sizes the per-question slices to n, preserving existing
-// entries, and clamps the active tab. promptChosen defaults to -1 (unanswered).
+// ensurePromptState sizes the per-question slices to n (preserving entries) and
+// clamps the active tab. chosen defaults to -1 (unanswered).
 func (m *model) ensurePromptState(n int) {
 	if n < 0 {
 		n = 0
@@ -189,8 +178,8 @@ func (m model) qChosen(tab int) int {
 	return -1
 }
 
-// qAnswered reports whether the question at tab has an explicit answer (derived
-// from the committed selection / toggles, never the navigation highlight).
+// qAnswered reports whether the question at tab has an explicit answer (committed
+// selection / toggles, never the navigation highlight).
 func (m model) qAnswered(tab int) bool {
 	ix := m.interaction()
 	if ix == nil || tab < 0 || tab >= len(ix.Questions) {
@@ -200,9 +189,8 @@ func (m model) qAnswered(tab int) bool {
 	return ok
 }
 
-// questionAnswer returns the committed answer for a question (string for
-// single-select, []string for multi) and whether it is answered. Navigation
-// (the highlight) never affects this — only Enter (single) / space toggles (multi).
+// questionAnswer returns the committed answer (string for single-select, []string
+// for multi) and whether it is answered. The navigation highlight never affects this.
 func (m model) questionAnswer(q *session.QuestionSpec, tab int) (any, bool) {
 	oIdx := otherIndex(q)
 	custom := strings.TrimSpace(m.qText(tab))
@@ -237,8 +225,8 @@ func (m model) questionAnswer(q *session.QuestionSpec, tab int) (any, bool) {
 	return nil, false
 }
 
-// otherActive reports whether the question's custom-answer entry is selected
-// (single) or toggled (multi), i.e. the free-text field should accept input.
+// otherActive reports whether the "type your own" entry is selected (single) or
+// toggled (multi), i.e. the free-text field should accept input.
 func (m model) otherActive(q *session.QuestionSpec, tab int) bool {
 	oi := otherIndex(q)
 	if q.MultiSelect {
@@ -248,8 +236,7 @@ func (m model) otherActive(q *session.QuestionSpec, tab int) bool {
 }
 
 // focusedOptionPreview returns the preview markdown for the active question's
-// selected option, or "" when there is none (multi-select, the "type your own"
-// row, the Submit tab, or an option without a preview).
+// highlighted option, or "" when there is none.
 func (m model) focusedOptionPreview() string {
 	q := m.activeQuestion()
 	if q == nil || q.MultiSelect {
@@ -284,18 +271,16 @@ func (m model) promptLines() ([]string, int) {
 	return m.promptLinesWidth(m.containerWidth())
 }
 
-// promptLinesWidth renders the dock body wrapped to width and returns the index of
-// the line that must stay visible (the active control). The dock windows around
-// this anchor so the controls never scroll out of view.
+// promptLinesWidth renders the dock body wrapped to width and returns the anchor
+// line index (the active control) that the dock windows around to keep visible.
 func (m model) promptLinesWidth(width int) ([]string, int) {
 	ix := m.interaction()
 	if ix == nil {
 		return []string{dimStyle.Render("(no pending interaction)")}, 0
 	}
 
-	// A paneless session's idle "compose" can't be delivered (argus has no pane to
-	// type into), so show a static indicator pointing the user to where the session
-	// lives instead of an editable composer. Decisions still render normally below.
+	// Paneless idle session: argus has no pane to deliver input to, so show a
+	// static "respond elsewhere" indicator instead of an editable composer.
 	if s := m.sessions[m.selectedID]; ix.Kind == session.InteractionIdle && !s.Controllable() {
 		label := StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend))
 		sub := dimStyle.Render("argus can't send input to this session")
@@ -332,9 +317,9 @@ type optionMarks struct {
 	chosen  int  // committed option index (radio); -1 = none
 }
 
-// renderOptions renders a selectable option list and returns the block plus the
-// line index (within the block) of the highlighted row. The highlight (cursor) is
-// navigation only; the committed selection is shown by the checkbox/radio marks.
+// renderOptions renders a selectable option list, returning the block and the
+// highlighted row's line index within it. The highlight is navigation only; the
+// committed selection shows via checkbox/radio marks.
 func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx int, otherText string, otherActive bool, descs []string, width int) (string, int) {
 	var b strings.Builder
 	anchor := 0
@@ -359,8 +344,7 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 				check = StyleDim.Render("○") + " "
 			}
 		}
-		// The "type your own" row is itself the editable field: typing fills it in
-		// place (cursor shown while it's active).
+		// The "type your own" row is itself the editable field: typing fills it in place.
 		label := StyleSecondary.Render(opt)
 		if i == otherIdx && (otherActive || otherText != "") {
 			text := "✎ " + otherText
@@ -380,8 +364,7 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 		}
 		b.WriteString(marker + check + label + "\n")
 
-		// Option description beneath the label (dimmed, indented under the label),
-		// like Claude's UI. Indent = cursor(2) + the check-mark column width.
+		// Dimmed description under the label. Indent = cursor(2) + check-mark column width.
 		if i != otherIdx && i < len(descs) {
 			if desc := strings.TrimSpace(descs[i]); desc != "" {
 				indent := "  "
@@ -404,9 +387,7 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 // chatHint is the footer affordance for the "Chat about this" action.
 func chatHint() string { return StyleDim.Render("c · chat about this") }
 
-// respondElsewhereLabel is the indicator shown in the dock for a paneless idle
-// session: argus cannot send input, so the user must respond where the session
-// actually lives.
+// respondElsewhereLabel points a paneless idle session's user to where it lives.
 func respondElsewhereLabel(f session.Frontend) string {
 	if f == session.FrontendVSCode {
 		return "Respond in VSCode"
@@ -466,8 +447,7 @@ func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int)
 	block, a := m.renderOptions(opts, m.prompt.decisionSel, optionMarks{chosen: -1}, -1, "", false, nil, width)
 	b.WriteString(block)
 	anchor := base + a
-	// The free-text field appears only on the reject choice (Claude-style), with
-	// the server-supplied placeholder when empty.
+	// The reason field appears only on the reject choice.
 	if m.decisionRejecting(ix) {
 		anchor = strings.Count(b.String(), "\n") + 1
 		b.WriteString("\n" + m.rejectInput(ix))
@@ -475,8 +455,7 @@ func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int)
 	return splitAnchor(&b, anchor)
 }
 
-// rejectInput renders the reject feedback field: "> " then the typed text, or
-// the reject option's placeholder (dim) when empty.
+// rejectInput renders the reject feedback field, or the option's placeholder when empty.
 func (m model) rejectInput(ix *session.Interaction) string {
 	ph := "reason (for deny)"
 	sel := m.prompt.decisionSel
@@ -538,8 +517,7 @@ func (m model) promptTabs(width int) string {
 	return row
 }
 
-// submitTabBody renders the review list and the Submit/Cancel actions; the anchor
-// is the actions block so it stays visible.
+// submitTabBody renders the answer review list and the Submit/Cancel actions.
 func (m model) submitTabBody(ix *session.Interaction, width int) (string, int) {
 	var b strings.Builder
 	b.WriteString(StyleAccentBold.Render("Review answers") + "\n\n")
@@ -561,14 +539,12 @@ func (m model) submitTabBody(ix *session.Interaction, width int) (string, int) {
 		b.WriteString(marker + label + "\n")
 	}
 	out := strings.TrimRight(b.String(), "\n")
-	// Anchor on the last action so windowing keeps the whole Submit/Cancel pair
-	// visible even when the content is taller than the viewport.
+	// Anchor on the last action so windowing keeps the Submit/Cancel pair visible.
 	anchor := strings.Count(out, "\n")
 	return out, anchor
 }
 
-// answerSummary describes a question's committed answer for the Submit review, or
-// "(not answered)" when it has no explicit selection.
+// answerSummary describes a question's committed answer for the Submit review.
 func (m model) answerSummary(q *session.QuestionSpec, tab int) string {
 	v, ok := m.questionAnswer(q, tab)
 	if !ok {
@@ -583,8 +559,8 @@ func (m model) answerSummary(q *session.QuestionSpec, tab int) string {
 	return StyleDim.Render("(not answered)")
 }
 
-// questionHeading is the single-question heading ("Claude is asking" + optional
-// header chip). Multi-question prompts carry headers in the tab bar instead.
+// questionHeading is the single-question heading; multi-question prompts carry
+// headers in the tab bar instead.
 func (m model) questionHeading(q *session.QuestionSpec) string {
 	h := StyleAccentBold.Render(Icon.Chat.Glyph + " Claude is asking")
 	if q.Header != "" {
@@ -593,8 +569,8 @@ func (m model) questionHeading(q *session.QuestionSpec) string {
 	return h
 }
 
-// headerChip renders a question's header as a padded chip (bold, on the border
-// background), shared by the live prompt heading and the transcript detail view.
+// headerChip renders a question's header as a padded chip, shared by the live
+// prompt heading and the transcript detail view.
 func headerChip(label string) string {
 	return lipgloss.NewStyle().Bold(true).
 		Foreground(ColorTextPrimary).Background(ColorBorder).
@@ -630,9 +606,7 @@ func interactionBody(m model, ix *session.Interaction, width int) string {
 		}
 		if ix.ToolInput != "" {
 			// Reuse the per-tool renderers (Bash → "$ cmd", Edit → diff, …) on a
-			// synthetic item; falls back to a readable Input block for other tools.
-			// hardWrap bounds the result to width (the detail view's detailItem wraps
-			// the body for us; here we wrap it ourselves).
+			// synthetic item; hardWrap bounds the result here (unlike the detail view).
 			it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
 			parts = append(parts, hardWrap(m.toolBody(it, width-2), width-2))
 		}
@@ -645,10 +619,8 @@ func interactionBody(m model, ix *session.Interaction, width int) string {
 	return ""
 }
 
-// previewBox renders an option's preview verbatim (monospace, so ASCII mockups and
-// code keep their shape) inside a rounded border, clipped to width×height. Each
-// source line stays on one row (truncated on the right) and excess rows collapse to
-// a "… more" marker, so the rendered box never exceeds the given dimensions.
+// previewBox renders an option's preview verbatim inside a rounded border, clipped
+// to width×height: lines truncate on the right, excess rows collapse to "… more".
 func previewBox(content string, width, height int) string {
 	iw := max(width-2, 10) // border eats 2 columns
 	ih := max(height-2, 1) // border eats 2 rows

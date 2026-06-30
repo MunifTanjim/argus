@@ -22,10 +22,10 @@ import (
 // Tool is the adapter's tool identifier, stored on every session it owns.
 const Tool = "claude-code"
 
-// runPS returns a snapshot of all processes as "<pid> <tty> <stat> <args...>"
-// lines. It is a package var so tests can stub it. Claude Code disguises its
-// process name as a version string, so tmux's pane_current_command is unreliable;
-// inspecting the real foreground process on each tty is authoritative.
+// runPS snapshots all processes as "<pid> <tty> <stat> <args...>" lines. A
+// package var so tests can stub it. Claude Code disguises its process name as a
+// version string, so tmux's pane_current_command is unreliable; the real
+// foreground process per tty is authoritative.
 var runPS = func() (string, error) {
 	cmd := shell.NewCommand("ps", "-ax", "-o", "pid=", "-o", "tty=", "-o", "stat=", "-o", "args=")
 	err := cmd.Run()
@@ -38,10 +38,9 @@ func normalizeTTY(tty string) string {
 	return strings.TrimPrefix(tty, "/dev/")
 }
 
-// parseClaudeProcs maps each claude pid (argv0 basename "claude") to its tty,
-// across all processes regardless of foreground state. A ttyless process (ps
-// shows "??") maps to "". Keys are the liveness set; values drive
-// pid→tty→pane correlation.
+// parseClaudeProcs maps each claude pid (argv0 basename "claude") to its tty.
+// A ttyless process (ps shows "??") maps to "". Keys are the liveness set;
+// values drive pid→tty→pane correlation.
 func parseClaudeProcs(psOut string) map[int]string {
 	out := map[int]string{}
 	for _, line := range strings.Split(psOut, "\n") {
@@ -65,8 +64,7 @@ func parseClaudeProcs(psOut string) map[int]string {
 	return out
 }
 
-// claudeProcs takes one ps snapshot and returns the claude pid→tty map (liveness
-// set + correlation source).
+// claudeProcs takes one ps snapshot and returns the claude pid→tty map.
 func claudeProcs() (map[int]string, error) {
 	out, err := runPS()
 	if err != nil {
@@ -85,10 +83,8 @@ type paneInfo struct {
 }
 
 // buildDiscovered correlates live proc-sessions to tmux panes and produces the
-// reconcile input. procs is pid→tty (a pid absent here is not alive → skipped);
-// paneByTTY maps a normalized tty to its pane; entries is the proc-session
-// listing. It sets structural + identity fields only — Summary/StatusHint are
-// filled by ScanOnce via the Discoverer's transcript cache.
+// reconcile input. A pid absent from procs is not alive and is skipped. Sets
+// structural + identity fields only — ScanOnce fills Summary/StatusHint.
 func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entries []procSession) []registry.DiscoveredSession {
 	var out []registry.DiscoveredSession
 	for _, ps := range entries {
@@ -143,11 +139,11 @@ type Discoverer struct {
 	servers []serverClient
 
 	sumMu    sync.Mutex
-	sumCache map[string]summaryEntry // transcript path → last computed summary and status hint
+	sumCache map[string]summaryEntry // transcript path → cached summary + status hint
 }
 
-// summaryEntry caches a transcript's computed summary and status hint, keyed by
-// its mod time so a scan only re-parses when the transcript actually changed.
+// summaryEntry caches a transcript's summary and status hint; modTime gates
+// re-parsing so a scan only re-reads a changed transcript.
 type summaryEntry struct {
 	modTime    time.Time
 	summary    *session.Summary
@@ -164,9 +160,9 @@ func NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 	return d
 }
 
-// cachedTranscript returns the summary and transcript-derived live status hint
-// for a transcript, recomputing only when the file's mod time changed since the
-// last scan. Returns (nil, "") when the path is empty or unreadable.
+// cachedTranscript returns a transcript's summary and live status hint,
+// recomputing only when its mod time changed. Returns (nil, "") when the path
+// is empty or unreadable.
 func (d *Discoverer) cachedTranscript(path string) (*session.Summary, session.Status) {
 	if path == "" {
 		return nil, ""
@@ -188,13 +184,12 @@ func (d *Discoverer) cachedTranscript(path string) (*session.Summary, session.St
 	return sum, hint
 }
 
-// ScanOnce scans every configured server once and reconciles the registry. An
-// error from one server does not stop the others; the last error is returned.
-// Discovery is on-demand: callers invoke this at startup and on triggers
-// (client refresh, hook events, spawn/kill) rather than on a timer.
+// ScanOnce scans every configured server once and reconciles the registry. One
+// server's error doesn't stop the others; the last error is returned. Discovery
+// is on-demand (startup + triggers), not timed.
 func (d *Discoverer) ScanOnce(ctx context.Context) error {
-	// ~/.claude/sessions is the enumeration source; ps is the liveness oracle.
-	// A ps failure skips the whole reconcile — never prune on a failed probe.
+	// ps is the liveness oracle: a ps failure skips the whole reconcile so we
+	// never prune on a failed probe.
 	procs, err := claudeProcs()
 	if err != nil {
 		return err

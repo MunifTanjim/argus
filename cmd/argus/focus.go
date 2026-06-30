@@ -8,12 +8,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// newFocusCmd builds `argus _focus <session_id>`: bring the user's tmux client to
-// the given session's pane on this (local) node. It is invoked by a desktop
-// notification click, so on success it is silent; an unknown/non-local session
-// is a non-zero exit (the expected no-op on a non-owning desktop). It always
-// dials the local node socket, never the gateway. Hidden: it's an internal hook
-// for notification clicks, not a command users run by hand.
+// newFocusCmd builds `argus _focus <session_id>`: bring tmux to the session's pane on
+// this local node. Invoked by a notification click, so it's silent on success and exits
+// non-zero on an unknown/non-local session (the expected no-op on a non-owning desktop).
+// Always dials the local socket, never the gateway. Hidden: internal, not user-facing.
 func newFocusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "_focus <session_id>",

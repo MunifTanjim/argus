@@ -17,9 +17,9 @@ const wsMessageType = websocket.MessageText
 // capture/transcript payloads are not rejected by the default 32 KiB limit.
 const wsReadLimit = 16 * 1024 * 1024
 
-// DialWS connects to a gateway over WebSocket and returns a consumer Client. token,
-// when non-empty, is sent as a Bearer Authorization header. httpClient may be nil
-// (uses the default); pass a custom client to supply a TLS config or pinned cert.
+// DialWS connects to a gateway over WebSocket and returns a consumer Client.
+// Non-empty token is sent as a Bearer header. httpClient may be nil (use a custom
+// one for a TLS config or pinned cert).
 func DialWS(ctx context.Context, url, token string, httpClient *http.Client) (*Client, error) {
 	conn, err := dialWS(ctx, url, token, httpClient)
 	if err != nil {
@@ -39,7 +39,7 @@ func DialWSPeer(ctx context.Context, url, token string, httpClient *http.Client,
 	return NewPeer(conn, opts), nil
 }
 
-// DialWSConn connects to a gateway over WebSocket and returns the raw net.Conn, for callers
+// DialWSConn connects over WebSocket and returns the raw net.Conn, for callers
 // (e.g. ReconnectingClient) that manage their own Peer over it.
 func DialWSConn(ctx context.Context, url, token string, httpClient *http.Client) (net.Conn, error) {
 	return dialWS(ctx, url, token, httpClient)
@@ -82,9 +82,8 @@ func BearerToken(r *http.Request) string {
 }
 
 // WSHandler returns an http.Handler that authenticates the bearer token, upgrades
-// the request to a WebSocket, and serves it through this Server's handler
-// registry. authorize may be nil to allow all connections (local/dev only). TLS
-// is applied by the enclosing http.Server, so this serves both ws:// and wss://.
+// to a WebSocket, and serves it through this Server's registry. nil authorize
+// allows all connections (local/dev only). TLS is applied by the enclosing http.Server.
 func (s *Server) WSHandler(authorize func(token string) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authorize != nil && !authorize(BearerToken(r)) {

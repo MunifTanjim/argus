@@ -11,10 +11,9 @@ import (
 	"time"
 )
 
-// Supervisor runs a Provider's CLI, scans its output for the public URL, and
-// keeps it alive: on an unexpected exit it restarts with capped backoff; on
-// context cancel it sends SIGTERM (then SIGKILL after KillGrace) and returns
-// the context error. A failure to start the process at all returns immediately.
+// Supervisor runs a Provider's CLI, scans its output for the public URL, and keeps
+// it alive: unexpected exit → restart with capped backoff; ctx cancel → SIGTERM
+// (then SIGKILL after KillGrace) and return ctx.Err(). A failed start returns at once.
 type Supervisor struct {
 	Logger     *slog.Logger
 	MinBackoff time.Duration // default 1s
@@ -56,8 +55,8 @@ func (s Supervisor) Run(ctx context.Context, p Provider, origin string, report f
 	log := s.logger()
 	backoff := s.minBackoff()
 
-	// One-time setup (create/route a named tunnel, etc.). A provider that knows
-	// its public URL ahead of time reports it here rather than via output scanning.
+	// One-time setup (create/route a named tunnel). A provider that knows its URL
+	// ahead of time reports it here instead of via output scanning.
 	if lp, ok := p.(LifecycleProvider); ok {
 		url, err := lp.Prepare(ctx)
 		if err != nil {
@@ -75,8 +74,7 @@ func (s Supervisor) Run(ctx context.Context, p Provider, origin string, report f
 		}
 
 		cmd := exec.CommandContext(ctx, spec.Path, spec.Args...)
-		// On ctx cancel, ask politely first; CommandContext escalates to SIGKILL
-		// after WaitDelay if the process is still running.
+		// On ctx cancel, SIGTERM first; CommandContext escalates to SIGKILL after WaitDelay.
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = s.killGrace()
 
@@ -95,9 +93,8 @@ func (s Supervisor) Run(ctx context.Context, p Provider, origin string, report f
 			sc := bufio.NewScanner(pr)
 			for sc.Scan() {
 				line := sc.Text()
-				// Log at the provider's own severity when it can classify the line, so
-				// steady-state chatter (cloudflared INFO) sits below the handler threshold
-				// while warnings/errors still surface. Unclassified providers default to Info.
+				// Log at the provider's own severity so steady-state chatter sits below
+				// the handler threshold while warnings/errors surface. Default Info.
 				level := slog.LevelInfo
 				if classify != nil {
 					level = classify.ClassifyLine(line)

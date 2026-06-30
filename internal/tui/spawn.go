@@ -10,8 +10,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// projectsForNode keeps the projects belonging to nodeID, preserving the
-// server's newest-first order. An empty nodeID (local or single-node) keeps all.
+// projectsForNode keeps projects belonging to nodeID (preserving order); an
+// empty nodeID keeps all.
 func projectsForNode(all []session.HistoryProject, nodeID string) []session.HistoryProject {
 	if nodeID == "" {
 		return all
@@ -34,30 +34,30 @@ const (
 	spawnStepPrompt
 )
 
-// spawnState drives the staged "new session" flow. It is the single source of
-// truth for what the spawn footer renders and what keys do.
+// spawnState drives the staged "new session" flow and is the source of truth for
+// the spawn footer and key handling.
 type spawnState struct {
 	step        spawnStep
-	nodes       []api.NodeInfo           // when ≥2, the node step is shown
-	allProjects []session.HistoryProject // unfiltered, as returned by the server
-	dirs        []session.HistoryProject // projects filtered to nodeID (the dir list)
+	nodes       []api.NodeInfo           // node step shown when ≥2
+	allProjects []session.HistoryProject // unfiltered, server order
+	dirs        []session.HistoryProject // projects filtered to nodeID
 	nodeID      string                   // chosen node ("" = local/single)
 	cursor      int                      // list cursor (node and dir steps)
 	custom      bool                     // dir step: free-text path entry active
 	cwd         string                   // resolved working directory
-	prompt      string                   // initial prompt buffer (mandatory; multi-line via shift+enter)
+	prompt      string                   // initial prompt (mandatory; multi-line via shift+enter)
 	fallbackCwd string                   // seeds custom path / empty-history case
 }
 
 func (s spawnState) active() bool { return s.step != spawnInactive }
 
-// dirCursorMax is the selectable row count in the dir step: one per project plus
-// the trailing "Custom path…" row.
+// dirCursorMax is the dir-step selectable row count: one per project plus the
+// trailing "Custom path…" row.
 func (s spawnState) dirCursorMax() int { return len(s.dirs) + 1 }
 
-// editText applies a keypress to a free-text buffer. It returns the new text and
-// whether Enter was pressed (submit). Mirrors the idle composer in
-// prompt_handlers.go: named keys via msg.String(), printable runes via msg.Text.
+// editText applies a keypress to a free-text buffer, returning the new text and
+// whether Enter (submit) was pressed. Mirrors the idle composer in
+// prompt_handlers.go.
 func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 	switch msg.String() {
 	case "enter":
@@ -75,11 +75,10 @@ func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 	return cur, false
 }
 
-// beginSpawn initializes the staged flow. With ≥2 nodes it starts at the node
-// step; otherwise it records the single node (if any) and drops to the dir step,
-// pre-selecting the most recent project. A lone node without tmux is left on the
-// node step so its disabled (no-spawn) state is visible rather than auto-selected.
-// Empty history opens free-text path entry seeded with fallbackCwd.
+// beginSpawn initializes the staged flow. ≥2 nodes start at the node step;
+// otherwise it records the single node and drops to the dir step. A lone node
+// without tmux stays on the node step so its disabled state is visible rather than
+// auto-selected.
 func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) {
 	m.spawn = spawnState{nodes: nodes, allProjects: projects, fallbackCwd: fallbackCwd}
 	if len(nodes) >= 2 {
@@ -88,7 +87,7 @@ func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProje
 	}
 	if len(nodes) == 1 {
 		if !nodes[0].Capabilities.SpawnSession {
-			m.spawn.step = spawnStepNode // surface the disabled node, don't auto-advance
+			m.spawn.step = spawnStepNode // surface the disabled node
 			return
 		}
 		m.spawn.nodeID = nodes[0].ID
@@ -125,7 +124,7 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.spawn.cursor < len(m.spawn.nodes) {
 				n := m.spawn.nodes[m.spawn.cursor]
 				if !n.Capabilities.SpawnSession {
-					return m, nil // disabled: tmux not available on this node
+					return m, nil // disabled: no tmux on this node
 				}
 				m.spawn.nodeID = n.ID
 				m.spawn.enterDirStep()

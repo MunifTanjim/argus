@@ -16,15 +16,13 @@ import (
 // (marked Offline) before the aggregator removes them.
 const DefaultOfflineGrace = 30 * time.Second
 
-// fanoutTimeout caps how long a single Fanout waits on a node's reply, so one
-// slow or wedged node can't stall a broadcast read for everyone. A node that
-// exceeds it gets a DeadlineExceeded error in-band, like any other failure.
+// fanoutTimeout caps how long a Fanout waits on a node's reply, so one slow node
+// can't stall a broadcast. A node that exceeds it gets a DeadlineExceeded in-band.
 const fanoutTimeout = 15 * time.Second
 
 // Aggregator maintains the merged session view across all sources and routes
-// control calls to the owning source. Its Snapshot/Subscribe pair mirrors the
-// registry's pub/sub so a gateway client consumes it exactly like a node's
-// registry — the wire protocol is identical.
+// control calls to the owning source. Its Snapshot/Subscribe mirrors the
+// registry's pub/sub, so a gateway client consumes it like a node's registry.
 type Aggregator struct {
 	grace time.Duration
 
@@ -55,9 +53,8 @@ func New(grace time.Duration) *Aggregator {
 	}
 }
 
-// Nodes lists the currently connected nodes (id + label), sorted by label, so a
-// client can choose a spawn target independent of which nodes already have
-// sessions.
+// Nodes lists the connected nodes sorted by label, so a client can pick a spawn
+// target independent of which nodes already have sessions.
 func (a *Aggregator) Nodes() []api.NodeInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -74,9 +71,8 @@ func (a *Aggregator) Nodes() []api.NodeInfo {
 	return out
 }
 
-// SoleNode returns the id of the only connected node, or "" when zero or more
-// than one are connected. Lets the gateway default a spawn target when the
-// client omits node_id and there's no ambiguity.
+// SoleNode returns the id of the only connected node, or "" when zero or more than
+// one are connected. Lets spawn default its target when there's no ambiguity.
 func (a *Aggregator) SoleNode() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -99,9 +95,8 @@ func (a *Aggregator) NodeLabel(nodeID string) string {
 	return ""
 }
 
-// AddSource registers a source and starts ingesting it. A source reconnecting
-// under the same node id replaces the prior one (and cancels its pending
-// removal), never duplicates it.
+// AddSource registers a source and starts ingesting it. A reconnect under the same
+// node id replaces the prior source (cancelling its pending removal), never duplicates.
 func (a *Aggregator) AddSource(src Source) {
 	a.mu.Lock()
 	if old, ok := a.sources[src.ID()]; ok {
@@ -113,8 +108,7 @@ func (a *Aggregator) AddSource(src Source) {
 	go a.ingest(st)
 }
 
-// halt stops a source's ingest goroutine and any pending removal timer. Caller
-// holds a.mu.
+// halt stops a source's ingest goroutine and pending removal timer. Caller holds a.mu.
 func (st *srcState) halt() {
 	if !st.halted {
 		st.halted = true
@@ -161,9 +155,8 @@ func (a *Aggregator) reconcile(nodeID, label string, snap []session.Session) {
 		s = withOrigin(s, nodeID, label)
 		present[s.ID] = true
 		a.sessions[s.ID] = s
-		// Replay: this restates existing state (a connect/reconnect snapshot), so
-		// downstream consumers like the push watcher don't treat it as a fresh
-		// transition and re-notify.
+		// Replay: a connect/reconnect snapshot restates existing state, so consumers
+		// like the push watcher don't treat it as a fresh transition and re-notify.
 		changed = append(changed, registry.Event{Type: registry.EventAdded, Session: s, Replay: true})
 	}
 	for id, s := range a.sessions {
@@ -265,8 +258,8 @@ func (a *Aggregator) Subscribe() (<-chan registry.Event, func()) {
 	}
 }
 
-// Route forwards a control call to the source owning the composite session id in
-// params, rewriting that id to the node-local form first.
+// Route forwards a control call to the source owning the composite session id,
+// rewriting that id to the node-local form first.
 func (a *Aggregator) Route(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	composite, err := sessionIDFromParams(params)
 	if err != nil {
@@ -289,9 +282,8 @@ func (a *Aggregator) Route(ctx context.Context, method string, params json.RawMe
 	return st.src.Call(ctx, method, local)
 }
 
-// RouteToNode forwards a non-session-addressed control call (e.g. sessions.spawn)
-// to a specific node by id, then rewrites any "session_id" in the result to its
-// composite (nodeID:id) form so the client can address the new session.
+// RouteToNode forwards a non-session-addressed call (e.g. sessions.spawn) to a node
+// by id, then composites any session_id in the result so the client can address it.
 func (a *Aggregator) RouteToNode(ctx context.Context, nodeID, method string, params json.RawMessage) (json.RawMessage, error) {
 	a.mu.Lock()
 	st := a.sources[nodeID]
@@ -305,7 +297,7 @@ func (a *Aggregator) RouteToNode(ctx context.Context, nodeID, method string, par
 	}
 	localID, idErr := sessionIDFromParams(res)
 	if idErr != nil || localID == "" {
-		return res, nil // no session_id to composite; pass result through
+		return res, nil // no session_id to composite
 	}
 	return rewriteSessionID(res, session.CompositeID(nodeID, localID))
 }
@@ -318,11 +310,10 @@ type FanoutResult struct {
 	Err    error
 }
 
-// Fanout calls method on every source and collects their raw results, tagged with
-// the source's id and label. Used for reads that aggregate across machines (e.g.
-// history projects). Sources are called concurrently so total latency is the
-// slowest node, not the sum; per-source errors (including the fanoutTimeout) are
-// returned in-band so one unreachable or slow node doesn't fail the whole call.
+// Fanout calls method on every source concurrently and collects results tagged
+// with each source's id and label (for reads that aggregate across machines).
+// Per-source errors (including fanoutTimeout) are returned in-band so one bad node
+// doesn't fail the whole call.
 func (a *Aggregator) Fanout(ctx context.Context, method string, params json.RawMessage) []FanoutResult {
 	a.mu.Lock()
 	type ref struct {

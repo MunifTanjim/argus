@@ -19,9 +19,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// clientRoutedMethods are the session-addressed control calls the gateway forwards to
-// the owning node (each carries a composite session_id). sessions.spawn is routed
-// separately (by node_id) since it has no session to address yet.
+// clientRoutedMethods are session-addressed control calls forwarded to the owning
+// node by their composite session_id. sessions.spawn routes by node_id instead (no
+// session to address yet).
 var clientRoutedMethods = []string{
 	api.MethodSessionTranscriptView,
 	api.MethodSessionToolDetail,
@@ -38,9 +38,8 @@ type subEntry struct {
 	nodeID string
 }
 
-// Server exposes an Aggregator over two WebSocket endpoints: /node for node
-// uplinks and /client for consumer clients. Auth predicates gate each (nil =
-// allow all, local/dev only).
+// Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
+// Auth predicates gate each; nil = allow all (local/dev only).
 type Server struct {
 	agg        *Aggregator
 	nodeAuth   func(token string) bool
@@ -48,12 +47,12 @@ type Server struct {
 	clientSrv  *api.Server
 
 	clientTokens *clienttoken.Store
-	pushStore    *push.Store            // registered device push targets (nil = push disabled)
-	pushSender   *push.Dispatcher       // routes a push to its backend (for push.test)
-	vapidPubKey  string                 // VAPID public key served to devices (push.vapidKey)
-	master       string                 // master token; a /client conn presenting it is admin
-	version      string                 // server binary version, served via server.info
-	publicURL    atomic.Pointer[string] // gateway's reachable base URL for pairing QRs
+	pushStore    *push.Store            // nil = push disabled
+	pushSender   *push.Dispatcher       // for push.test
+	vapidPubKey  string                 // served via push.vapidKey
+	master       string                 // a /client conn presenting it is admin
+	version      string                 // served via server.info
+	publicURL    atomic.Pointer[string] // base URL for pairing QRs
 
 	pairMu      sync.Mutex
 	pairWaiters map[string]<-chan struct{} // minted token -> "device connected" signal
@@ -73,33 +72,27 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 	return s
 }
 
-// SetClientTokens enables per-client token management: store backs the active
-// token set (and pending pairings), and master is the admin token that gates the
-// clients.* methods. Call before serving.
+// SetClientTokens enables per-client token management; master is the admin token
+// gating the clients.* methods. Call before serving.
 func (s *Server) SetClientTokens(store *clienttoken.Store, master string) {
 	s.clientTokens = store
 	s.master = master
 }
 
-// SetPush enables the push.register/unregister/test methods: store records paired
-// devices' push targets, and dispatcher routes a push to its backend (used by
-// push.test). Call before serving.
+// SetPush enables the push.register/unregister/test methods. Call before serving.
 func (s *Server) SetPush(store *push.Store, dispatcher *push.Dispatcher) {
 	s.pushStore = store
 	s.pushSender = dispatcher
 }
 
-// SetVAPIDPublicKey publishes the VAPID public key the app fetches (push.vapidKey)
-// to register a Web Push subscription bound to it (embedded FCM distributor).
+// SetVAPIDPublicKey publishes the VAPID public key devices fetch via push.vapidKey.
 func (s *Server) SetVAPIDPublicKey(key string) { s.vapidPubKey = key }
 
-// SetVersion records the server binary's version, served to clients via
-// server.info (e.g. the app's settings screen). Call before serving.
+// SetVersion records the server binary's version, served via server.info. Call before serving.
 func (s *Server) SetVersion(v string) { s.version = v }
 
-// SetPublicURL records the gateway's reachable base URL (scheme://host, no path),
-// returned by clients.pairStart so the pairing QR points back here. Safe to call
-// repeatedly (e.g. once the tunnel URL is known).
+// SetPublicURL records the gateway's reachable base URL (scheme://host) for the
+// pairing QR. Safe to call repeatedly, e.g. once the tunnel URL is known.
 func (s *Server) SetPublicURL(u string) { s.publicURL.Store(&u) }
 
 func (s *Server) getPublicURL() string {
@@ -147,8 +140,7 @@ func (s *Server) subsForClient(client api.Notifier) []subRef {
 // mustMarshal marshals v to JSON, ignoring errors (for well-known types only).
 func mustMarshal(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
-// routeByNodeID builds a handler that requires node_id in params and routes the
-// call to the owning node. Used by per-machine history methods.
+// routeByNodeID builds a handler that requires node_id and routes to that node.
 func (s *Server) routeByNodeID(method string) func(context.Context, json.RawMessage) (any, error) {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		nodeID, err := nodeIDFromParams(params)
@@ -170,10 +162,10 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// clientHandler authenticates a /client connection, tags it with an auth
-// Principal (admin when the master token is presented), and serves it. It mirrors
-// api.Server.WSHandler but threads the Principal so clients.* methods can require
-// admin, and so a minted client token can be promoted on its first connection.
+// clientHandler authenticates a /client connection and tags it with a Principal
+// (admin when the master token is presented). Mirrors api.Server.WSHandler but
+// threads the Principal so clients.* can require admin and a minted token can be
+// promoted on its first connection.
 func (s *Server) clientHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := api.BearerToken(r)
@@ -187,13 +179,12 @@ func (s *Server) clientHandler() http.Handler {
 		}
 		admin := s.master != "" && tok == s.master
 		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin})
-		s.clientSrv.ServeConnContext(ctx, conn) // blocks until the connection closes
+		s.clientSrv.ServeConnContext(ctx, conn) // blocks until the conn closes
 	})
 }
 
-// buildClientServer wires the client-facing JSON-RPC: reads served from the
-// merged view, control calls routed to the owning node, and a per-connection
-// stream of the merged event feed.
+// buildClientServer wires the client-facing JSON-RPC: reads from the merged view,
+// control calls routed to the owning node, and a per-connection merged event stream.
 func (s *Server) buildClientServer() *api.Server {
 	srv := api.NewServer()
 
@@ -203,10 +194,8 @@ func (s *Server) buildClientServer() *api.Server {
 	srv.Handle(api.MethodSessionsList, func(_ context.Context, _ json.RawMessage) (any, error) {
 		return s.agg.Snapshot(), nil
 	})
-	// Refresh fans the rescan out to every node, then returns the merged view.
-	// Per-node errors are ignored in-band (Fanout) so one unreachable node can't
-	// fail the whole refresh; each node's rescan also pushes its fresh sessions to
-	// subscribed clients over the event stream.
+	// Fan the rescan out to every node, then return the merged view. Per-node
+	// errors stay in-band so one unreachable node can't fail the whole refresh.
 	srv.Handle(api.MethodSessionsRefresh, func(ctx context.Context, params json.RawMessage) (any, error) {
 		s.agg.Fanout(ctx, api.MethodSessionsRefresh, params)
 		return s.agg.Snapshot(), nil
@@ -218,15 +207,13 @@ func (s *Server) buildClientServer() *api.Server {
 		})
 	}
 
-	// server.info returns server-wide metadata (version + connected nodes), the
-	// single source for both the about/settings view and the spawn target picker.
+	// server.info returns version + connected nodes (for settings view and spawn picker).
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
 	})
 
-	// sessions.spawn has no session_id to route on; route by an explicit node_id.
-	// When the client omits it and exactly one node is connected, spawn there —
-	// so a fresh single-node setup can create its first session without a picker.
+	// sessions.spawn routes by node_id (no session_id yet). With node_id omitted and
+	// exactly one node connected, default to it so a single-node setup needs no picker.
 	srv.Handle(api.MethodSessionSpawn, func(ctx context.Context, params json.RawMessage) (any, error) {
 		nodeID, err := nodeIDFromParams(params)
 		if err != nil {
@@ -240,8 +227,8 @@ func (s *Server) buildClientServer() *api.Server {
 		return s.agg.RouteToNode(ctx, nodeID, api.MethodSessionSpawn, params)
 	})
 
-	// History projects aggregate across all machines: fan out, stamp each project
-	// with its origin node, and order newest-first (RFC3339 UTC sorts lexically).
+	// History projects aggregate across machines: fan out, stamp origin node, order
+	// newest-first (RFC3339 UTC sorts lexically).
 	srv.Handle(api.MethodSessionsHistoryProjects, func(ctx context.Context, params json.RawMessage) (any, error) {
 		all := []session.HistoryProject{} // non-nil so empty marshals as [], not null
 		for _, r := range s.agg.Fanout(ctx, api.MethodSessionsHistoryProjects, params) {
@@ -261,13 +248,11 @@ func (s *Server) buildClientServer() *api.Server {
 		sort.SliceStable(all, func(i, j int) bool { return all[i].LastActivity > all[j].LastActivity })
 		return all, nil
 	})
-	// History transcript and tool detail are per-machine: route to the owning
-	// node by node_id.
+	// History transcript and tool detail are per-machine: route by node_id.
 	srv.Handle(api.MethodSessionsHistoryTranscript, s.routeByNodeID(api.MethodSessionsHistoryTranscript))
 	srv.Handle(api.MethodSessionHistoryToolDetail, s.routeByNodeID(api.MethodSessionHistoryToolDetail))
-	// History sessions route to the owning node, then stamp each session with that
-	// node's id/label (as historyProjects does for projects) so a client can open a
-	// transcript by the session's own node_id without tracking the project's node.
+	// History sessions route by node_id, then get stamped with that node's id/label
+	// so a client can open a transcript by the session's own node_id.
 	srv.Handle(api.MethodSessionsHistorySessions, func(ctx context.Context, params json.RawMessage) (any, error) {
 		nodeID, err := nodeIDFromParams(params)
 		if err != nil || nodeID == "" {
@@ -279,7 +264,7 @@ func (s *Server) buildClientServer() *api.Server {
 		}
 		var page session.HistorySessionPage
 		if json.Unmarshal(res, &page) != nil {
-			return res, nil // unexpected shape; pass through unchanged
+			return res, nil // unexpected shape; pass through
 		}
 		label := s.agg.NodeLabel(nodeID)
 		for i := range page.Items {
@@ -289,8 +274,8 @@ func (s *Server) buildClientServer() *api.Server {
 		return page, nil
 	})
 
-	// transcript.subscribe: record in the sub table, then route to the owning node.
-	// Registered explicitly (not via clientRoutedMethods) because it needs bookkeeping.
+	// transcript.subscribe: record in the sub table, then route to the owning node
+	// (registered explicitly because it needs that bookkeeping).
 	srv.Handle(api.MethodTranscriptSubscribe, func(ctx context.Context, params json.RawMessage) (any, error) {
 		client, ok := api.NotifierFrom(ctx)
 		if !ok {
@@ -330,8 +315,7 @@ func (s *Server) buildClientServer() *api.Server {
 		return nil, nil
 	})
 
-	// Stream the merged registry to each connected client: snapshot first, then
-	// live events (mirrors the node's OnConnect).
+	// Stream the merged registry to each client: snapshot first, then live events.
 	srv.OnConnect(func(n api.Notifier) func() {
 		events, cancel := s.agg.Subscribe()
 		for _, sess := range s.agg.Snapshot() {
@@ -369,9 +353,8 @@ func (s *Server) buildClientServer() *api.Server {
 	return srv
 }
 
-// registerPush wires the device push methods. They are open to any authenticated
-// /client connection (not admin-only): the paired device records the target its
-// push distributor handed it, keyed by a stable device id it supplies.
+// registerPush wires the device push methods. Open to any authenticated /client
+// (not admin-only): a device registers its push target keyed by a stable device id.
 func (s *Server) registerPush(srv *api.Server) {
 	unavailable := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push notifications not enabled on this gateway"}
 	badDevice := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push: device_id required"}
@@ -414,8 +397,7 @@ func (s *Server) registerPush(srv *api.Server) {
 		return nil, nil
 	})
 
-	// test sends a notification to the device's registered target through the real
-	// backend so it can confirm end-to-end delivery. Surfaces failures to the caller.
+	// test sends a notification through the real backend to confirm end-to-end delivery.
 	srv.Handle(api.MethodPushTest, func(ctx context.Context, params json.RawMessage) (any, error) {
 		if s.pushStore == nil || s.pushSender == nil {
 			return nil, unavailable
@@ -437,8 +419,7 @@ func (s *Server) registerPush(srv *api.Server) {
 		if err := s.pushSender.SendTo(sctx, p.DeviceID, n); err != nil {
 			code := api.CodeInternalError
 			if errors.Is(err, push.ErrGone) {
-				// Target is dead and already pruned; tell the client to mint a
-				// fresh endpoint instead of re-registering the same one.
+				// Target dead and already pruned; client should mint a fresh endpoint.
 				code = api.CodePushGone
 			}
 			return nil, &api.RPCError{Code: code, Message: err.Error()}
@@ -446,15 +427,13 @@ func (s *Server) registerPush(srv *api.Server) {
 		return nil, nil
 	})
 
-	// vapidKey serves the gateway's VAPID public key so a device can register a
-	// Web Push subscription bound to it (e.g. the embedded FCM distributor).
+	// vapidKey serves the gateway's VAPID public key for Web Push subscription.
 	srv.Handle(api.MethodPushVAPIDKey, func(_ context.Context, _ json.RawMessage) (any, error) {
 		return api.PushVAPIDKey{Key: s.vapidPubKey}, nil
 	})
 }
 
-// requireAdmin wraps h so it only runs for connections that presented the master
-// token (see clientHandler); other callers get an unauthorized error.
+// requireAdmin wraps h to run only for connections that presented the master token.
 func requireAdmin(h api.HandlerFunc) api.HandlerFunc {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		if !api.PrincipalFrom(ctx).Admin {
@@ -468,8 +447,7 @@ func requireAdmin(h api.HandlerFunc) api.HandlerFunc {
 func (s *Server) registerClientAdmin(srv *api.Server) {
 	unavailable := &api.RPCError{Code: api.CodeInvalidRequest, Message: "client token management not enabled on this gateway"}
 
-	// pairStart mints a temporary token, holds it pending, and returns it with the
-	// gateway's public base URL so the caller can render a pairing QR.
+	// pairStart mints a pending token and returns it with the public URL for a QR.
 	srv.Handle(api.MethodClientsPairStart, requireAdmin(func(context.Context, json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -485,8 +463,8 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		return api.PairStartResult{Token: tok, URL: s.getPublicURL()}, nil
 	}))
 
-	// pairAwait blocks until the minted token's device connects (its waiter channel
-	// is closed on promotion) or the pairing window elapses.
+	// pairAwait blocks until the token's device connects (waiter closed on promotion)
+	// or the pairing window elapses.
 	srv.Handle(api.MethodClientsPairAwait, requireAdmin(func(ctx context.Context, params json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -560,24 +538,22 @@ func (s *Server) nodeHandler() http.Handler {
 	})
 }
 
-// Node uplink keepalive: the gateway pings each node on this cadence so a
-// half-open link (node host vanished without a TCP FIN) is detected promptly
-// instead of lingering until an OS keepalive or a failed write. Closing the peer
-// after nodeKeepaliveFailures consecutive unanswered pings fires Done and flows
-// into the aggregator's normal offline → grace → removal path; requiring two
-// failures rides out a transient blip so a briefly busy node isn't dropped.
+// Node uplink keepalive: pings detect a half-open link (host vanished without a
+// TCP FIN) promptly. Closing after nodeKeepaliveFailures unanswered pings fires
+// Done into the aggregator's offline → grace → removal path; two failures ride out
+// a transient blip so a briefly busy node isn't dropped.
 const (
 	nodeKeepaliveInterval = 15 * time.Second
 	nodeKeepaliveTimeout  = 5 * time.Second
 	nodeKeepaliveFailures = 2
 )
 
-// serveNode adopts an accepted node uplink: decode its event notifications,
-// learn its identity, register it as a source, and block until it disconnects.
+// serveNode adopts an accepted node uplink: learn its identity, register it as a
+// source, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
 	events := make(chan registry.Event, 64)
 	// peerRef lets the OnNotify closure reference peer before NewPeer returns.
-	// Stored atomically to satisfy the race detector (OnNotify runs in a goroutine).
+	// Atomic to satisfy the race detector (OnNotify runs in a goroutine).
 	var peerRef atomic.Pointer[api.Peer]
 	peer := api.NewPeer(conn, api.PeerOptions{
 		KeepaliveInterval:         nodeKeepaliveInterval,
@@ -602,13 +578,11 @@ func (s *Server) serveNode(conn net.Conn) {
 				if client, ok := s.clientForSub(d.SubID); ok {
 					_ = client.Notify(api.MethodTranscriptDelta, d)
 				} else {
-					// Orphaned poller: the node is pushing deltas for a sub the gateway
-					// no longer tracks. Tell the node to stop. The node registers
-					// transcript.unsubscribe as a request handler (srv.Handle), so we
-					// must use Call, not Notify.
+					// Orphaned poller: node pushing deltas for an untracked sub. Tell it
+					// to stop. unsubscribe is a node request handler, so use Call not Notify.
 					p := peerRef.Load()
 					if p == nil {
-						return // setup race: peer not stored yet; node's poller dies with the link
+						return // setup race: peer not stored yet; poller dies with the link
 					}
 					go func() {
 						_ = p.Call(api.MethodTranscriptUnsubscribe,

@@ -96,11 +96,8 @@ func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 		t.Fatalf("setup: want awaiting with interaction, got %v / %+v", s.Status, s.Interaction)
 	}
 
-	// /clear fires SessionEnd(reason=clear) immediately followed by SessionStart(source=clear).
-	// Each maps to its true meaning: the end drops the old conversation — idle, stale prompt
-	// cleared — without removing the session, and the start lands the fresh session on
-	// awaiting-input with an idle interaction so the respond/compose prompt shows (the list
-	// flags only awaiting-input sessions; the dock needs an interaction).
+	// /clear = SessionEnd(reason=clear) then SessionStart(source=clear): end goes
+	// idle without removing the session, start lands fresh on awaiting-input.
 	mid, alive := ProcessHook(reg, hook("SessionEnd", map[string]any{"reason": "clear"}))
 	if !alive {
 		t.Fatal("SessionEnd(reason=clear) must not remove the session")

@@ -6,15 +6,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// This file is the single source of truth for the TUI's app keybindings. Each
-// binding carries both its keystrokes (for dispatch via key.Matches) and its help
-// text (for footers via the help bubble), so the two can never drift. The live
-// screen passthrough (namedKeys/tmuxKeyFor in tui.go) is intentionally NOT
-// here — it translates keys to tmux rather than binding app actions.
+// Single source of truth for app keybindings: each binding carries both its keys
+// (for key.Matches dispatch) and its help text (for footers), so the two can't
+// drift. The live screen passthrough (namedKeys/tmuxKeyFor) is deliberately not
+// here — it maps keys to tmux, not app actions.
 //
-// Help labels are display-only; a binding's footer label ("↑/↓", "g/G") need not
-// equal its actual keys. Paired actions (up/down, g/G) put the combined label on
-// one binding and leave the other's help empty so the footer shows one entry.
+// Help labels are display-only. Paired actions (up/down, g/G) put the combined
+// label on one binding and leave the other's help empty, so the footer shows one entry.
 
 // nb builds a binding from its keys plus a display label and description.
 func nb(keys []string, label, desc string) key.Binding {
@@ -22,7 +20,7 @@ func nb(keys []string, label, desc string) key.Binding {
 }
 
 // keyAction applies a matched key to the model. Method expressions (e.g.
-// model.actOpen) satisfy this, so dispatch tables can name model methods directly.
+// model.actOpen) satisfy this, so tables can name model methods directly.
 type keyAction = func(m model, msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 
 // keyTableEntry pairs a binding with the action it triggers.
@@ -114,8 +112,7 @@ var sessionKeys = struct {
 	Raw:   nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
 }
 
-// Prompt bindings (dock). These drive match-based dispatch (the prompt sub-views
-// are modal text editors) and the dock footers.
+// Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
 	Up, Down, TabPrev, TabNext, Submit, Next, Toggle, Read key.Binding
 }{
@@ -175,10 +172,9 @@ var screenLeave = nb([]string{"ctrl+]"}, "ctrl+]", "leave")
 
 // --- footers ------------------------------------------------------------------
 
-// footer renders a one-line help view from the given bindings (empty-help
-// bindings are skipped by the help bubble), so footers stay derived from the
-// binding set above. The renderer is built per call (it's a tiny value) so it
-// needs no model state and works for tests that build a model literal.
+// footer renders a one-line help view from the given bindings (empty-help ones are
+// skipped). Built per call so it needs no model state and works in tests with a
+// model literal.
 func (m model) footer(bindings ...key.Binding) string {
 	h := help.New()
 	h.Styles = help.DefaultStyles(m.hasDark)

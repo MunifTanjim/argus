@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// ProjectInfo is a lightweight aggregate of one Claude Code project directory,
-// built without reading every transcript: SessionCount and LastActivity come from
-// a cheap directory stat, and Cwd from a bounded scan of the newest transcript.
+// ProjectInfo is a lightweight aggregate of one Claude Code project directory:
+// counts/times come from a directory stat, Cwd from a bounded scan of the
+// newest transcript -- no full transcript reads.
 type ProjectInfo struct {
 	Dir          string    // absolute ~/.claude/projects/<encoded> path
 	Cwd          string    // working directory recorded in the newest transcript
@@ -19,10 +19,9 @@ type ProjectInfo struct {
 	LastActivity time.Time // newest transcript mod time
 }
 
-// ListProjects returns every Claude Code project directory with its session count,
-// last-activity time, and cwd, sorted newest-first. It is cheap: only the newest
-// transcript per project is opened (and only until its cwd is found). Projects with
-// no session transcripts are omitted.
+// ListProjects returns every Claude Code project with session count, last
+// activity, and cwd, sorted newest-first. Cheap: only the newest transcript
+// per project is opened. Projects with no transcripts are omitted.
 func ListProjects() ([]ProjectInfo, error) {
 	dirs, err := ListAllProjectDirs()
 	if err != nil {
@@ -71,9 +70,8 @@ func ListProjects() ([]ProjectInfo, error) {
 	return out, nil
 }
 
-// scanSessionCwd reads a transcript only until it finds the first non-empty cwd
-// (which appears on early entries), bounded to a small number of lines so a project
-// scan stays cheap even for huge transcripts.
+// scanSessionCwd reads a transcript until the first non-empty cwd, bounded to
+// maxLines so the scan stays cheap on huge transcripts.
 func scanSessionCwd(path string) string {
 	f, err := os.Open(path)
 	if err != nil {

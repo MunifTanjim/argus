@@ -13,14 +13,14 @@ const (
 	uplinkMaxBackoff  = 15 * time.Second
 )
 
-// ConnectGateway maintains an outbound uplink to the gateway at url until ctx is
-// cancelled, reconnecting with capped exponential backoff. token authenticates
-// as a node; httpClient may carry a TLS config (nil uses the default).
+// ConnectGateway maintains an outbound uplink to the gateway until ctx is
+// cancelled, reconnecting with capped exponential backoff. nil httpClient uses
+// the default.
 //
-// Over the uplink the node is a symmetric peer: it serves the gateway's control
-// requests through the same handler registry as local clients, and pushes its
-// registry changes up as session.event notifications. The gateway pulls the initial
-// snapshot via sessions.list, so only live events are streamed here.
+// The node is a symmetric peer: it serves the gateway's control requests through
+// the same handlers as local clients and pushes registry changes up as
+// session.event. The gateway pulls the initial snapshot via sessions.list, so
+// only live events stream here.
 func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient *http.Client) {
 	d.log.Info("connecting to gateway", "url", url)
 	backoff := uplinkBaseBackoff

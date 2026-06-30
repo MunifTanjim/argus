@@ -33,9 +33,8 @@ type tunnelOptions struct {
 // providerBinary maps a provider name to the CLI it runs (for PATH lookup).
 var providerBinary = map[string]string{"cloudflare": "cloudflared"}
 
-// resolveTunnel validates the options and builds the selected provider plus the
-// local origin URL. It returns (nil, "", nil) when no tunnel is requested. All
-// failure modes are pre-flight: callers fail fast before starting anything.
+// resolveTunnel validates the options and builds the provider plus local origin URL.
+// Returns (nil, "", nil) when no tunnel is requested. All failures are pre-flight.
 func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 	if o.provider == "" {
 		return nil, "", nil
@@ -68,12 +67,9 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 			name = "argus" // default name for the tunnel argus creates and owns
 		}
 		cfLog := cloudflaredLogLevel(o.logLevel)
-		// A quick tunnel's public *.trycloudflare.com URL is only emitted by
-		// cloudflared at info level (and below). argus's default mapping
-		// (info -> warn) would suppress it, leaving the tunnel with no printed URL,
-		// so floor quick mode at info. The resulting cloudflared INFO noise stays
-		// below the fold via ClassifyLine (INF -> Debug); the URL is still surfaced
-		// by ExtractURL + the supervisor's report callback.
+		// A quick tunnel's public URL is only emitted by cloudflared at info or
+		// below, but argus's default (info -> warn) would suppress it — so floor
+		// quick mode at info. The INFO noise stays below the fold via ClassifyLine.
 		if cfMode == "quick" && cfLog != "debug" {
 			cfLog = "info"
 		}
@@ -90,11 +86,8 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 	}
 }
 
-// cloudflaredLogLevel maps argus's log level to cloudflared's --loglevel, offset
-// by one tier at info: cloudflared's own info output is chatty heartbeat/connection
-// noise that argus treats as below-the-fold, so argus-info runs cloudflared at warn.
-// This filters the noise at the source (cutting the volume piped back) rather than
-// dropping it after the fact.
+// cloudflaredLogLevel maps argus's log level to cloudflared's --loglevel, offset at
+// info so cloudflared's chatty info output is filtered at the source.
 //
 //	argus              -> cloudflared
 //	trace, debug       -> debug
@@ -122,10 +115,9 @@ func resolveBin(bin, binName string) (string, error) {
 	return shell.ExecutablePath(binName), nil
 }
 
-// cloudflareMode resolves and validates the Cloudflare tunnel mode. explicit is
-// the suffix from --tunnel cloudflare:<mode> ("" when omitted); when empty the
-// mode is inferred from which --cloudflare-* params are set. It returns the
-// resolved mode ("quick", "remote", or "local") or a validation error.
+// cloudflareMode resolves and validates the tunnel mode. explicit is the suffix from
+// --tunnel cloudflare:<mode> ("" => infer from which --cloudflare-* params are set).
+// Returns "quick", "remote", or "local", or a validation error.
 func cloudflareMode(explicit string, o tunnelOptions) (string, error) {
 	hasRemote := o.cfToken != ""
 	hasLocal := o.cfHostname != "" || o.cfTunnelName != ""
@@ -171,10 +163,9 @@ func cloudflareMode(explicit string, o tunnelOptions) (string, error) {
 	return mode, nil
 }
 
-// cloudflareCertPath resolves the origin certificate path the way cloudflared
-// does: $TUNNEL_ORIGIN_CERT if set (isDefault=false), else ~/.cloudflared/cert.pem
-// (isDefault=true). The child cloudflared processes inherit this environment, so
-// they resolve the same path.
+// cloudflareCertPath resolves the origin cert path as cloudflared does:
+// $TUNNEL_ORIGIN_CERT (isDefault=false), else ~/.cloudflared/cert.pem (isDefault=true).
+// Child cloudflared processes inherit the env, so they resolve the same path.
 func cloudflareCertPath() (path string, isDefault bool, err error) {
 	if c := os.Getenv("TUNNEL_ORIGIN_CERT"); c != "" {
 		return c, false, nil
@@ -186,11 +177,9 @@ func cloudflareCertPath() (path string, isDefault bool, err error) {
 	return filepath.Join(home, ".cloudflared", "cert.pem"), true, nil
 }
 
-// ensureCloudflareLogin makes sure a locally-managed tunnel has the origin
-// certificate it needs (from `cloudflared tunnel login`). When the cert is
-// missing and we're on an interactive terminal using the default cert path, it
-// runs the (blocking, browser-based) login for the user; otherwise it fails fast
-// with guidance. It is a no-op for quick/remote tunnels (cf.Tunnel == "").
+// ensureCloudflareLogin ensures a locally-managed tunnel has its origin cert (from
+// `cloudflared tunnel login`). If missing, runs the browser-based login when interactive
+// and on the default path, else fails fast. No-op for quick/remote tunnels (cf.Tunnel == "").
 func ensureCloudflareLogin(ctx context.Context, cf tunnel.Cloudflare, interactive bool) error {
 	if cf.Tunnel == "" {
 		return nil
@@ -219,8 +208,8 @@ func ensureCloudflareLogin(ctx context.Context, cf tunnel.Cloudflare, interactiv
 	return nil
 }
 
-// originFromListen turns a gateway listen address (e.g. ":8443") into the loopback
-// origin URL the tunnel points at (the edge terminates tls, so it is plain http).
+// originFromListen turns a listen address (e.g. ":8443") into the loopback origin URL
+// the tunnel points at (plain http: the edge terminates TLS).
 func originFromListen(listenAddr string) (string, error) {
 	_, port, err := net.SplitHostPort(listenAddr)
 	if err != nil {

@@ -112,8 +112,7 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 			ToolInput: `{"file_path":"a.go","old_string":"short","new_string":"` + strings.Repeat("z", 200) + `"}`},
 	}
 	for name, it := range cases {
-		// The expanded body wraps under the accent gutter; the gutter adds 2
-		// columns, so lines must stay within width.
+		// Gutter adds 2 columns, so the wrapped body must stay within width.
 		out := m.detailItemBody(it, itemAccentColor(it), GlyphAccentBar, width)
 		if got := maxLineWidth(out); got > width {
 			t.Errorf("%s: line width %d > %d:\n%s", name, got, width, out)

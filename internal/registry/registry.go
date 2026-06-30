@@ -24,11 +24,9 @@ type Event struct {
 	Type    EventType       `json:"type"`
 	Session session.Session `json:"session"`
 
-	// Replay marks an event that re-states existing session state rather than
-	// reporting a fresh change — i.e. a snapshot the aggregator emits when a
-	// source connects or reconnects. It is a gateway-internal hint (never sent
-	// on the wire) so consumers like the push watcher can record the state
-	// without mistaking it for a live transition and re-notifying.
+	// Replay marks an event that re-states existing state (a connect/reconnect
+	// snapshot) rather than a fresh change. Gateway-internal, never sent on the wire,
+	// so consumers like the push watcher record it without re-notifying.
 	Replay bool `json:"-"`
 }
 
@@ -50,8 +48,8 @@ func New() *Registry {
 	}
 }
 
-// paneKey uniquely identifies a pane across servers (pane ids are unique per
-// server, so the server must be part of the key).
+// paneKey identifies a pane across servers; pane ids are only unique per server,
+// so the server must be part of the key.
 func paneKey(server session.TmuxServer, paneID string) string {
 	return string(server) + ":" + paneID
 }
@@ -79,9 +77,8 @@ func (r *Registry) Snapshot() []session.Session {
 	return out
 }
 
-// Subscribe returns a channel of events plus a cancel func. The channel is
-// buffered; if a subscriber falls behind, events are dropped for that
-// subscriber rather than blocking the registry.
+// Subscribe returns an event channel plus a cancel func. The channel is buffered;
+// events are dropped for a slow subscriber rather than blocking the registry.
 func (r *Registry) Subscribe() (<-chan Event, func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -112,9 +109,8 @@ func (r *Registry) publish(ev Event) {
 	}
 }
 
-// DiscoveredSession is the unified reconcile input: one Claude session found by a
-// discovery scan, optionally pinned to a tmux pane. Correlation is by pane key
-// when HasPane, else by claude session id.
+// DiscoveredSession is one reconcile input: a Claude session from a scan, optionally
+// pinned to a tmux pane. Correlated by pane key when HasPane, else by claude id.
 type DiscoveredSession struct {
 	ClaudeSessionID string
 	HasPane         bool
@@ -132,11 +128,10 @@ type DiscoveredSession struct {
 	StatusHint      session.Status
 }
 
-// ReconcileSessions syncs all of a tool's sessions to the scan's live set. It
-// adds new sessions, refreshes existing ones (correlating pane-first, else claude
-// id), and prunes any whose pane and claude id were both absent this scan. The
-// dual-or liveness rule keeps a session alive through a transient pane-correlation
-// miss (via its claude id) or a not-yet-filed session (via its pane).
+// ReconcileSessions syncs a tool's sessions to the scan's live set: add new,
+// refresh existing (correlating pane-first, else claude id), prune any whose pane
+// and claude id were both absent. The dual-or liveness rule keeps a session alive
+// through a transient pane-correlation miss (via claude id) or vice versa.
 func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -195,8 +190,8 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 			r.index.setClaude(f.ClaudeSessionID, s.ID)
 		}
 
-		// Frontend: a pane is always tmux; otherwise adopt the discovered frontend
-		// only while the record is still paneless. Never downgrade.
+		// A pane is always tmux; otherwise adopt the discovered frontend only while
+		// still paneless. Never downgrade.
 		if f.HasPane {
 			s.Frontend = session.FrontendTmux
 		} else if s.Tmux.PaneID == "" && f.Frontend != "" {
@@ -248,10 +243,9 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 	}
 }
 
-// applyStatusHint seeds a transcript-derived status onto a session that has no
-// authoritative (hook-derived) status yet — i.e. it is still StatusDiscovered.
-// An idle hint also synthesizes an idle Interaction so clients show the compose.
-// Caller holds r.mu.
+// applyStatusHint seeds a transcript-derived status onto a still-StatusDiscovered
+// session (no authoritative hook status yet). An idle hint also synthesizes an idle
+// Interaction so clients show the compose. Caller holds r.mu.
 func applyStatusHint(s *session.Session, hint session.Status) {
 	if hint == "" || s.Status != session.StatusDiscovered {
 		return
@@ -262,8 +256,8 @@ func applyStatusHint(s *session.Session, hint session.Status) {
 	}
 }
 
-// remove deletes a session from all indexes and publishes a removal event with
-// the given final status. Caller must hold r.mu.
+// remove deletes a session from all indices and publishes a removal event with the
+// given final status. Caller holds r.mu.
 func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	s := r.sessions[id]
 	if s == nil {
@@ -276,9 +270,8 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	r.publish(Event{Type: EventRemoved, Session: removed})
 }
 
-// ClearInteraction drops a session's pending interaction (e.g. after the user
-// answered a parked PermissionRequest) and, if it was awaiting input, moves it
-// back to working. Publishes an update so clients clear the alert promptly.
+// ClearInteraction drops a session's pending interaction and, if it was awaiting
+// input, moves it back to working. Publishes an update so clients clear the alert.
 func (r *Registry) ClearInteraction(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -293,9 +286,9 @@ func (r *Registry) ClearInteraction(id string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
-// HookUpdate carries the correlation keys and fields derived from a tool hook
-// event. Empty string fields are left unchanged on an existing session. A
-// non-empty Status sets the session status; StatusDead removes the session.
+// HookUpdate carries the correlation keys and fields from a tool hook event. Empty
+// string fields leave an existing session unchanged. A non-empty Status sets the
+// status; StatusDead removes the session.
 type HookUpdate struct {
 	Tool            string
 	Server          session.TmuxServer
@@ -304,24 +297,24 @@ type HookUpdate struct {
 	Cwd             string
 	Repo            string // git repo basename for Cwd, when known
 	TranscriptPath  string
-	// Frontend classifies the session's UI host; the adapter derives it from the
-	// hook env. Never downgrades a session that has a pane (see ApplyHook).
+	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
+	// session (see ApplyHook).
 	Frontend session.Frontend
 	Status   session.Status
 	// Summary is a refreshed transcript digest, or nil to keep the cached one.
 	Summary *session.Summary
-	// Interaction is the pending user request. Applied when Status is set:
-	// non-nil records the request, nil clears any prior one.
+	// Interaction is the pending user request, applied when Status is set: non-nil
+	// records it, nil clears any prior one.
 	Interaction *session.Interaction
 	// ReplaceInteraction bypasses mergeInteraction and sets Interaction directly.
-	// Used by the Stop hook: the turn has ended, so any prior interaction is stale
-	// and the idle "waiting for input" one must supersede it.
+	// Used by the Stop hook: the turn ended, so the idle prompt must supersede any
+	// stale pending interaction.
 	ReplaceInteraction bool
 }
 
-// ApplyHook correlates a hook event to a session (by pane, else by claude
-// session id) and enriches it, creating a hooked session if none matches.
-// Returns the resulting session and whether it still exists (false if removed).
+// ApplyHook correlates a hook event to a session (by pane, else claude id) and
+// enriches it, creating a hooked session if none matches. Returns the session and
+// whether it still exists (false if removed).
 func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -345,8 +338,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 
 	created := false
 	if s == nil {
-		// Create a session learned via hook. Prefer a pane-based ID so a later
-		// discovery scan correlates to the same record.
+		// Prefer a pane-based ID so a later discovery scan correlates to this record.
 		id := pKey
 		if id == "" {
 			id = "claude:" + u.ClaudeSessionID
@@ -376,14 +368,14 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	if u.TranscriptPath != "" {
 		s.TranscriptPath = u.TranscriptPath
 	}
-	// Set the frontend, but never downgrade a pane-bearing (tmux) session: if the
-	// session has a pane it is tmux regardless of what a later correlated hook says.
+	// Never downgrade a pane-bearing session: a pane means tmux, whatever a later
+	// correlated hook claims.
 	if s.Tmux.PaneID != "" {
 		s.Frontend = session.FrontendTmux
 	} else if u.Frontend != "" {
 		s.Frontend = u.Frontend
 	}
-	// Non-nil replaces the cached summary; nil keeps the prior digest.
+	// Non-nil replaces the cached summary; nil keeps it.
 	if u.Summary != nil {
 		s.Summary = u.Summary
 	}
@@ -396,10 +388,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 	if u.Status != "" {
 		s.Status = u.Status
-		// A status decision also (re)sets the pending interaction — but a bare
-		// Notification must not clobber a richer one (see mergeInteraction).
-		// Stop opts out via ReplaceInteraction since its turn-end idle supersedes
-		// whatever was pending.
+		// A status decision (re)sets the pending interaction, but a bare Notification
+		// must not clobber a richer one (see mergeInteraction). Stop opts out via
+		// ReplaceInteraction.
 		if u.ReplaceInteraction {
 			s.Interaction = u.Interaction
 		} else {
@@ -414,12 +405,10 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	return *s, true
 }
 
-// mergeInteraction prevents a low-information update (idle Notification, bare
-// permission with no ToolInput) from clobbering a richer pending interaction
-// (e.g. PermissionRequest's ToolInput, AskUserQuestion, ExitPlanMode). It keeps
-// the existing content and adopts only the newer message. A content-bearing update
-// still replaces, and nil still clears. Stop bypasses this via
-// HookUpdate.ReplaceInteraction.
+// mergeInteraction stops a low-information update (idle Notification, bare
+// permission) from clobbering a richer pending interaction (ToolInput, questions,
+// plan): it keeps the existing content but adopts the newer message. A content-bearing
+// update still replaces, and nil still clears. Stop bypasses this via ReplaceInteraction.
 func mergeInteraction(old, next *session.Interaction) *session.Interaction {
 	if next == nil || old == nil {
 		return next

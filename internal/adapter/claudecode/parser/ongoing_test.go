@@ -257,10 +257,8 @@ func TestIsOngoing_SubagentSpawnIsActivity(t *testing.T) {
 }
 
 func TestIsOngoing_PendingTaskMaskedByTextOutput(t *testing.T) {
-	// Simulates a team session where Agent A completed and Agent B is still
-	// running. The parent wrote text output after processing Agent A's result,
-	// which the activity-based check sees as the last ending event with no
-	// AI activity after it. But Agent B's Task tool call has no result yet.
+	// Team session: Agent A finished and the parent wrote text after it (looks
+	// like an ending event), but Agent B's Task call still has no result.
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	taskInputA := json.RawMessage(`{"subagent_type":"general-purpose","description":"Agent A"}`)
 	taskInputB := json.RawMessage(`{"subagent_type":"general-purpose","description":"Agent B"}`)
@@ -350,9 +348,8 @@ func TestIsOngoing_AllTasksCompleted(t *testing.T) {
 }
 
 func TestIsOngoing_PendingRegularToolCall(t *testing.T) {
-	// A regular tool call (not Task/Agent) without a result is NOT ongoing.
-	// Missing results on regular tools mean the session was interrupted or
-	// the JSONL is incomplete — not evidence of active work.
+	// A regular tool call (not Task/Agent) without a result is NOT ongoing:
+	// a missing result means interrupted/incomplete, not active work.
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
 		parser.AIMsg{

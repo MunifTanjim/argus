@@ -15,15 +15,12 @@ var StateDir = filepath.Join(xdg.StateHome, ProjectName)
 var RuntimeDir = resolveRuntimeDir()
 
 // RuntimeDirIsFallback reports whether RuntimeDir fell back to a temp-dir path
-// because the XDG runtime dir was unusable. `argus start` surfaces this so the
-// user understands why the local socket lives outside /run/user/<uid>.
+// because the XDG runtime dir was unusable. `argus start` surfaces this.
 var RuntimeDirIsFallback bool
 
-// resolveRuntimeDir returns argus's per-user runtime directory. It prefers the
-// XDG runtime dir (/run/user/<uid> on Linux), but that directory is created by
-// systemd-logind on login and is absent in sessions without one (su, cron, some
-// SSH setups, containers). When it is unusable, fall back to a per-user dir under
-// the system temp dir, as the XDG spec advises, and record that we did so.
+// resolveRuntimeDir prefers the XDG runtime dir (/run/user/<uid>), but it's absent
+// in sessions without systemd-logind (su, cron, some SSH, containers). Falls back to
+// a per-user temp dir, as the XDG spec advises.
 func resolveRuntimeDir() string {
 	if runtimeDirUsable(xdg.RuntimeDir) {
 		return filepath.Join(xdg.RuntimeDir, ProjectName)
@@ -32,9 +29,8 @@ func resolveRuntimeDir() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", ProjectName, os.Getuid()))
 }
 
-// runtimeDirUsable reports whether base exists and is a writable directory. It
-// probes writability with a temp entry it immediately removes, leaving no trace,
-// so this is safe to call at init from every argus command.
+// runtimeDirUsable reports whether base is a writable directory, probing with a temp
+// entry it immediately removes (safe to call at init from every command).
 func runtimeDirUsable(base string) bool {
 	if base == "" {
 		return false

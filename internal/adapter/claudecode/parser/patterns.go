@@ -47,8 +47,8 @@ var (
 	teammateProtocolRe = regexp.MustCompile(`^\s*\{\s*"type"\s*:\s*"(idle_notification|shutdown_approved|shutdown_request|teammate_terminated|task_assignment)"`)
 )
 
-// contentBlockJSON is the common shape for partially unmarshaling JSONL content blocks.
-// Different callers use different subsets of fields; unused fields unmarshal to zero values.
+// contentBlockJSON is the common shape for partially unmarshaling JSONL content
+// blocks; callers use different field subsets.
 type contentBlockJSON struct {
 	Type      string          `json:"type"`
 	ID        string          `json:"id"`
@@ -61,8 +61,7 @@ type contentBlockJSON struct {
 	IsError   bool            `json:"is_error"`
 }
 
-// textBlockJSON is a minimal content block for extracting text content.
-// Cheaper to unmarshal when only type and text are needed.
+// textBlockJSON is a minimal content block for cheaply extracting text.
 type textBlockJSON struct {
 	Type string `json:"type"`
 	Text string `json:"text"`

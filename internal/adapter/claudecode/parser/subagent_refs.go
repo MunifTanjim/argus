@@ -13,8 +13,8 @@ func subagentsDir(sessionPath string) string {
 	return filepath.Join(dir, base, "subagents")
 }
 
-// existingAgentIDs lists agent ids that have a non-empty file in the subagents
-// directory. Directory listing only — no file parsing.
+// existingAgentIDs lists agent ids with a non-empty file in the subagents dir
+// (directory listing only, no file parsing).
 func existingAgentIDs(sessionPath string) map[string]bool {
 	ids := map[string]bool{}
 	entries, err := os.ReadDir(subagentsDir(sessionPath))
@@ -42,8 +42,7 @@ func existingAgentIDs(sessionPath string) map[string]bool {
 }
 
 // AgentRefsFromLinks inverts agentID->toolUseID links to toolUseID->agentID,
-// keeping only agents whose subagent file currently exists under sessionPath
-// (directory listing only, no file parsing).
+// keeping only agents whose subagent file currently exists under sessionPath.
 func AgentRefsFromLinks(sessionPath string, links map[string]string) map[string]string {
 	exist := existingAgentIDs(sessionPath)
 	out := make(map[string]string, len(links))
@@ -56,9 +55,9 @@ func AgentRefsFromLinks(sessionPath string, links map[string]string) map[string]
 }
 
 // ChildAgentRefs maps tool_use_id -> child agentID for subagents spawned inside
-// the file at scanPath, keeping only children whose file exists under rootPath's
-// flat subagents dir. Pass scanPath == rootPath for a session root; pass a
-// subagent file path with the session root to resolve nested children.
+// scanPath, keeping only children whose file exists under rootPath's flat
+// subagents dir. Pass scanPath==rootPath for a session root; pass a subagent
+// path with the session root to resolve nested children.
 func ChildAgentRefs(scanPath, rootPath string) map[string]string {
 	links := scanAgentLinks(scanPath).agentToToolID
 	exist := existingAgentIDs(rootPath)

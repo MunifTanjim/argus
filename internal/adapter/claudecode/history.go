@@ -12,9 +12,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// ListHistoryProjects returns every Claude Code project discovered on disk, newest
-// activity first, for the read-only History view. NodeID/NodeLabel are left empty
-// (the gateway stamps them when aggregating across machines).
+// ListHistoryProjects returns every Claude Code project on disk, newest activity
+// first. NodeID/NodeLabel are left for the gateway to stamp when aggregating
+// across machines.
 func ListHistoryProjects() ([]session.HistoryProject, error) {
 	projects, err := parser.ListProjects()
 	if err != nil {
@@ -80,8 +80,8 @@ func ListHistorySessions(projectDir string, limit, offset int) (session.HistoryS
 	return session.HistorySessionPage{Items: items, HasMore: end < total}, nil
 }
 
-// ReadHistoryTranscript reads a past session's transcript by path, after confirming
-// it lives under the Claude projects root (so a client can't read arbitrary files).
+// ReadHistoryTranscript reads a past session's transcript by path, after
+// confirming it lives under the Claude projects root.
 func ReadHistoryTranscript(path string) (TranscriptView, error) {
 	clean, err := safeProjectsPath(path)
 	if err != nil {
@@ -100,9 +100,8 @@ func ReadHistorySubagentView(path, agentID string) (TranscriptView, bool, error)
 	return ReadSubagentView(clean, agentID)
 }
 
-// FindHistoryToolDetail returns one tool item's full body from a past session's
-// transcript, addressed by tool_use id, after the same projects-root path check
-// ReadHistoryTranscript applies.
+// FindHistoryToolDetail returns one tool item's full body (by tool_use id) from a
+// past session's transcript, after the projects-root path check.
 func FindHistoryToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
 	clean, err := safeProjectsPath(path)
 	if err != nil {

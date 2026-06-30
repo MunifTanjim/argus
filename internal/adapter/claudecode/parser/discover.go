@@ -9,18 +9,16 @@ import (
 	"time"
 )
 
-// DiscoverProjectSessions finds all session .jsonl files in a project directory,
-// scans each for metadata, and returns them sorted by modification time (newest first).
-// Subagent files (agent_*) are excluded.
+// DiscoverProjectSessions scans a project directory's session .jsonl files
+// (excluding agent_* subagent files) and returns them newest-first.
 func DiscoverProjectSessions(projectDir string) ([]SessionInfo, error) {
 	return discoverSessions(projectDir, func(path string, _ time.Time) sessionMetadata {
 		return scanSessionMetadata(path)
 	})
 }
 
-// ListAllProjectDirs returns every Claude Code project directory under
-// ~/.claude/projects. Used for name-based session lookup that spans projects;
-// name resolution inside a single project should prefer CurrentProjectDir.
+// ListAllProjectDirs returns every project directory under ~/.claude/projects.
+// For cross-project lookup; single-project resolution should prefer CurrentProjectDir.
 func ListAllProjectDirs() ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -41,9 +39,8 @@ func ListAllProjectDirs() ([]string, error) {
 	return dirs, nil
 }
 
-// SessionTitleRef is a lightweight session reference for name-based lookup.
-// It carries only the fields needed to open or display the session; full
-// metadata requires DiscoverProjectSessions.
+// SessionTitleRef is a lightweight session reference for name-based lookup;
+// full metadata requires DiscoverProjectSessions.
 type SessionTitleRef struct {
 	Path      string
 	SessionID string
@@ -51,13 +48,9 @@ type SessionTitleRef struct {
 	ModTime   time.Time
 }
 
-// scanSessionTitle reads a session file and returns its effective title
-// (custom-title wins over ai-title; last occurrence of each wins). It
-// avoids the full scanSessionMetadata pipeline — no preview extraction,
-// no ongoing detection, no turn counting, no JSON parsing of content
-// lines. Lines over titleLineCap bytes or lacking the "title" substring
-// are rejected before unmarshaling, so content-bearing entries cost only
-// a length check and a byte scan.
+// scanSessionTitle returns a session's effective title (custom-title beats
+// ai-title; last occurrence of each wins). Cheaper than scanSessionMetadata:
+// lines over titleLineCap or lacking "title" are skipped before unmarshaling.
 func scanSessionTitle(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -105,10 +98,8 @@ func scanSessionTitle(path string) string {
 	return ai
 }
 
-// discoverSessionTitles lists every titled session in a project directory.
-// Untitled sessions are omitted — they can't match a name lookup. Much
-// cheaper than DiscoverProjectSessions because it uses scanSessionTitle
-// instead of scanSessionMetadata.
+// discoverSessionTitles lists titled sessions in a project directory; untitled
+// ones are omitted since they can't match a name lookup.
 func discoverSessionTitles(projectDir string) ([]SessionTitleRef, error) {
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {
@@ -145,13 +136,9 @@ func discoverSessionTitles(projectDir string) ([]SessionTitleRef, error) {
 	return refs, nil
 }
 
-// FindTitleMatches searches the given project directories for titled sessions
-// whose Title (custom-title or ai-title) matches the query case-insensitively.
-// Exact matches win over substring matches; within a tier, newest-first order.
-//
-// This function reads only the title metadata from each session — it does not
-// scan conversation content — so cost scales with the number of session files,
-// not their total size.
+// FindTitleMatches finds titled sessions whose title matches query
+// case-insensitively. Exact matches beat substring matches; newest-first
+// within a tier. Reads only title metadata, not conversation content.
 func FindTitleMatches(query string, projectDirs []string) ([]SessionTitleRef, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -161,7 +148,7 @@ func FindTitleMatches(query string, projectDirs []string) ([]SessionTitleRef, er
 	for _, d := range projectDirs {
 		refs, err := discoverSessionTitles(d)
 		if err != nil {
-			continue // missing dir or permission error — skip
+			continue // missing dir or permission error
 		}
 		all = append(all, refs...)
 	}
@@ -185,15 +172,14 @@ func FindTitleMatches(query string, projectDirs []string) ([]SessionTitleRef, er
 	return partial, nil
 }
 
-// DiscoverAllProjectSessions finds sessions across multiple project directories
-// (main + worktree dirs). Calls DiscoverProjectSessions on each, merges results,
-// and sorts by ModTime descending. Missing directories are silently skipped.
+// DiscoverAllProjectSessions merges DiscoverProjectSessions across directories,
+// newest-first. Missing directories are silently skipped.
 func DiscoverAllProjectSessions(projectDirs []string) ([]SessionInfo, error) {
 	var all []SessionInfo
 	for _, dir := range projectDirs {
 		sessions, err := DiscoverProjectSessions(dir)
 		if err != nil {
-			continue // missing dir or permission error -- skip
+			continue // missing dir or permission error
 		}
 		all = append(all, sessions...)
 	}
@@ -208,9 +194,8 @@ func DiscoverAllProjectSessions(projectDirs []string) ([]SessionInfo, error) {
 // scanFn returns session metadata for a given file path and modTime.
 type scanFn func(path string, modTime time.Time) sessionMetadata
 
-// discoverSessions is the shared directory-walk logic for DiscoverProjectSessions
-// and its cached variant. The scan function determines how metadata is obtained
-// (direct scan vs cache lookup).
+// discoverSessions is the shared directory-walk for DiscoverProjectSessions and
+// its cached variant; scan determines direct-scan vs cache-lookup.
 func discoverSessions(projectDir string, scan scanFn) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {

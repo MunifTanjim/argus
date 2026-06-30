@@ -16,12 +16,10 @@ import (
 
 // Session-facing RPC handlers: reads from the registry and tmux control of panes.
 
-// submitDelay is the pause between injecting text and sending the submitting
-// Enter. Claude Code's TUI treats stdin that arrives in one read as a paste and
-// inserts it literally; a CR coalesced into that same read is swallowed, so the
-// message lands in the prompt but never submits. Holding the Enter back makes it
-// a separate read event, which submits reliably. It is a var so tests can tune
-// it. See TestSessionInputDelaysEnterAfterText.
+// submitDelay is the pause between injecting text and the submitting Enter. A CR
+// coalesced into the same stdin read as the text is swallowed (treated as paste),
+// so the message never submits; holding Enter back as a separate read fixes it.
+// See TestSessionInputDelaysEnterAfterText.
 var submitDelay = 75 * time.Millisecond
 
 func (d *Node) handleSessionsList(context.Context, json.RawMessage) (any, error) {
@@ -33,12 +31,11 @@ func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error)
 	return api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps}, nil
 }
 
-// handleServerInfo lets a client talking directly to a plain node (no gateway)
-// read the server version and enumerate spawn targets — here, just this node — so
-// it can gate the spawn UI on tmux availability instead of discovering it only
-// when the spawn fails. The node's ID is empty: a plain node has no routing
-// namespace, so the client addresses it implicitly (no node_id on sessions.spawn).
-// The gateway overrides this method with its own cross-node aggregation.
+// handleServerInfo lets a client talking directly to a plain node read the
+// version and spawn target (just this node) so it can gate the spawn UI on tmux
+// availability up front. The ID is empty: a plain node has no routing namespace,
+// so the client addresses it implicitly. The gateway overrides this with its own
+// cross-node aggregation.
 func (d *Node) handleServerInfo(context.Context, json.RawMessage) (any, error) {
 	return api.ServerInfo{
 		Version: d.version,
@@ -68,8 +65,8 @@ func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (
 	return claudecode.ReadTranscriptView(s.TranscriptPath)
 }
 
-// handleSessionToolDetail returns one tool item's full input/result, fetched on
-// demand by tool_use id (transcript chunks ship without these heavy bodies).
+// handleSessionToolDetail returns one tool item's full input/result by tool_use
+// id; transcript chunks ship without these heavy bodies.
 func (d *Node) handleSessionToolDetail(_ context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.ToolDetailParams](params)
 	if err != nil {
@@ -132,10 +129,10 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 				return nil, err
 			}
 		}
-		// Multi-line text must be pasted: sent as literal keystrokes, a raw LF
-		// is dropped and a raw CR submits the line, so newlines are lost either
-		// way. A bracketed paste preserves them. Single-line stays literal so
-		// interactive triggers (slash menus, @-mentions) still fire as typed.
+		// Multi-line must be pasted: as literal keystrokes a raw LF is dropped and a
+		// raw CR submits early, so newlines are lost; bracketed paste preserves them.
+		// Single-line stays literal so interactive triggers (slash menus, @-mentions)
+		// still fire as typed.
 		if strings.Contains(p.Text, "\n") {
 			if err := c.PasteText(ctx, s.Tmux.PaneID, p.Text); err != nil {
 				return nil, err
@@ -146,9 +143,7 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 		sentText = true
 	}
 	if p.Submit {
-		// When text was just injected, hold the Enter back so Claude's TUI
-		// reads it separately from the text (a coalesced CR is swallowed and
-		// never submits). See submitDelay.
+		// Hold Enter back after injecting text so the TUI reads it separately. See submitDelay.
 		if sentText {
 			if err := sleepCtx(ctx, submitDelay); err != nil {
 				return nil, err
@@ -189,9 +184,8 @@ func (d *Node) handleSessionKey(ctx context.Context, params json.RawMessage) (an
 	return nil, c.SendKeys(ctx, s.Tmux.PaneID, p.Keys...)
 }
 
-// defaultSessionName derives a tmux session name from a working directory when
-// the client leaves the name blank. The directory's base name is meaningful
-// (e.g. the repo folder); it falls back to "claude" for empty/root paths.
+// defaultSessionName derives a tmux session name from cwd's base (e.g. the repo
+// folder), falling back to "claude" for empty/root paths.
 func defaultSessionName(cwd string) string {
 	base := filepath.Base(strings.TrimSpace(cwd))
 	switch base {
@@ -201,8 +195,7 @@ func defaultSessionName(cwd string) string {
 	return base
 }
 
-// uniqueName returns base if it is free, otherwise base-2, base-3, … so the new
-// tmux session name does not collide with an existing one on the server.
+// uniqueName returns base, or base-2, base-3, … to avoid collisions with taken.
 func uniqueName(base string, taken map[string]bool) string {
 	if !taken[base] {
 		return base
@@ -215,9 +208,8 @@ func uniqueName(base string, taken map[string]bool) string {
 	}
 }
 
-// buildSpawnOpts assembles the tmux launch options for a spawn: the command
-// defaults to "claude", and a non-empty prompt is passed as the command's
-// argument so the new session starts working on it.
+// buildSpawnOpts assembles tmux launch options: command defaults to "claude",
+// and a non-empty prompt becomes the command's argument.
 func buildSpawnOpts(name, cwd, command, prompt string) tmux.NewSessionOpts {
 	if command == "" {
 		command = "claude"

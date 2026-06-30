@@ -17,9 +17,8 @@ func main() {
 	if err == nil {
 		return
 	}
-	// Commands that already printed their own diagnostic return errSilent; for
-	// everything else (cobra's usage errors — unknown command/flag/args) print the
-	// message ourselves, since the command tree silences cobra's own error output.
+	// Commands that printed their own diagnostic return errSilent; for everything else
+	// (cobra's usage errors) print it ourselves, since the tree silences cobra's output.
 	if err != errSilent {
 		shell.StdErrLn("argus:", err)
 	}

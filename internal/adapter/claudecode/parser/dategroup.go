@@ -19,23 +19,22 @@ type DateGroup struct {
 	Sessions []SessionInfo
 }
 
-// GroupSessionsByDate buckets sessions into date categories based on ModTime.
-// Returns only non-empty groups in display order. Sessions retain their input
-// order within each group (caller pre-sorts by ModTime descending).
+// GroupSessionsByDate buckets sessions into date categories by ModTime,
+// returning non-empty groups in display order. Input order is preserved
+// within each group (caller pre-sorts newest-first).
 func GroupSessionsByDate(sessions []SessionInfo) []DateGroup {
 	return groupSessionsByDateAt(sessions, time.Now())
 }
 
-// groupSessionsByDateAt is the testable core -- takes an explicit "now" time.
+// groupSessionsByDateAt is the testable core with an explicit "now".
 func groupSessionsByDateAt(sessions []SessionInfo, now time.Time) []DateGroup {
-	// Compute category boundaries in the local timezone.
+	// Boundaries in the local timezone.
 	loc := now.Location()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	yesterdayStart := todayStart.AddDate(0, 0, -1)
 	weekStart := todayStart.AddDate(0, 0, -7)
 	monthStart := todayStart.AddDate(0, 0, -30)
 
-	// Ordered categories for output.
 	categories := []DateCategory{DateToday, DateYesterday, DateThisWeek, DateThisMonth, DateOlder}
 	buckets := make(map[DateCategory][]SessionInfo, len(categories))
 

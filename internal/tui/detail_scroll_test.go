@@ -9,10 +9,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
 
-// TestDetailLineScrollThroughTallItem verifies that Down/Up scroll line-by-line
-// through a focused item taller than the viewport. Without this, the single
-// item leaves the cursor nowhere to move and the lower part stays unreachable
-// by line navigation.
+// TestDetailLineScrollThroughTallItem verifies Down/Up scroll line-by-line
+// through a focused item taller than the viewport (else its lower part is
+// unreachable, since a lone item gives the cursor nowhere to move).
 func TestDetailLineScrollThroughTallItem(t *testing.T) {
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {

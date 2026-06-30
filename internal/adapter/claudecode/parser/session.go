@@ -25,17 +25,16 @@ type SessionInfo struct {
 	PermissionMode string // last permission mode: "default", "acceptEdits", "bypassPermissions", "plan"
 }
 
-// SessionMeta holds session-level metadata extracted from a JSONL file.
-// Unlike SessionInfo (which is for the picker), SessionMeta is designed for
-// the info bar -- just the metadata fields, no picker-specific data.
+// SessionMeta holds session-level metadata for the info bar (vs. SessionInfo,
+// which carries picker-specific data).
 type SessionMeta struct {
 	Cwd            string
 	GitBranch      string
 	PermissionMode string
 }
 
-// ExtractSessionMeta returns session-level metadata from a JSONL file.
-// Reads the full file to capture the last permissionMode (mode can change mid-session).
+// ExtractSessionMeta returns session-level metadata from a JSONL file. Reads
+// the full file since permissionMode can change mid-session and we want the last.
 func ExtractSessionMeta(path string) SessionMeta {
 	m := scanSessionMetadata(path)
 	return SessionMeta{
@@ -55,9 +54,8 @@ func ReadSession(path string) ([]Chunk, error) {
 }
 
 // ReadSubagentSession reads one subagent JSONL file into chunks. Subagent files
-// mark every entry isSidechain=true, so the flag is cleared before classifying
-// (otherwise Classify drops them all). Mirrors readSubagentSession without the
-// team-metadata extraction.
+// mark every entry isSidechain=true, so the flag must be cleared or Classify
+// drops them all.
 func ReadSubagentSession(path string) ([]Chunk, error) {
 	msgs, _, _, err := ReadSessionIncremental(path, 0, true)
 	if err != nil {
@@ -67,17 +65,12 @@ func ReadSubagentSession(path string) ([]Chunk, error) {
 }
 
 // ReadSessionIncremental reads complete lines appended after offset and returns
-// the newly classified msgs, the subagent links (agentID -> toolUseID) found in
-// those lines, and the offset advanced to the end of the last NEWLINE-terminated
-// line. A trailing partial line (no \n yet) is not consumed; it is read on the
-// next call once complete. Oversized lines are skipped but still advance offset.
-// This is the building block for live tailing.
+// the new msgs, subagent links (agentID -> toolUseID), and the advanced offset.
+// A trailing partial line (no \n yet) is left for the next call. The building
+// block for live tailing.
 //
-// clearSidechain forces every entry's isSidechain flag off before classifying.
-// Subagent files mark all entries isSidechain=true (they run off the main
-// thread) but represent the subagent's own conversation, so streaming a
-// subagent file must clear the flag or Classify drops every entry. Mirrors
-// readSubagentSession's behavior for the live-tailing path.
+// clearSidechain forces isSidechain off before classifying, needed when tailing
+// a subagent file (see ReadSubagentSession) or Classify drops every entry.
 func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]ClassifiedMsg, map[string]string, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -93,8 +86,8 @@ func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]C
 		return nil, nil, offset, err
 	}
 
-	// Only process up to and including the last newline; defer any trailing
-	// partial line so a half-written final entry is re-read once complete.
+	// Process only through the last newline; defer any partial final line so a
+	// half-written entry is re-read once complete.
 	lastNL := bytes.LastIndexByte(data, '\n')
 	if lastNL < 0 {
 		return nil, nil, offset, nil // no complete line appended

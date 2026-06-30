@@ -8,9 +8,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config is the resolved argus configuration. Values come from (highest priority
-// first) command-line flags, environment variables, the config file, then built-in
-// defaults.
+// Config is the resolved argus configuration. Precedence: flags > env > file > defaults.
 type Config struct {
 	Socket  string
 	Token   string // shared gateway token: presented by clients/nodes, required by the gateway
@@ -55,8 +53,7 @@ type CloudflareConfig struct {
 	Hostname   string
 }
 
-// defaults are the built-in values, used when a key is set by neither a flag, an env
-// var, nor the config file.
+// defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                        GetRuntimePath("argus.sock"),
 	"token":                         "",
@@ -73,12 +70,9 @@ var defaults = map[string]any{
 	"tunnel.cloudflare.hostname":    "",
 }
 
-// Load configures v with argus's defaults, environment binding, and config file.
-// configPath, when non-empty, is read instead of the default ConfigDir/config.yaml.
-//
-// A missing default file is not an error; a missing explicit configPath is. Callers
-// may BindPFlag command flags onto v before reading values, so flags win over env,
-// which wins over the file, which wins over defaults.
+// Load configures v with argus's defaults, env binding, and config file. configPath,
+// when non-empty, is read instead of the default ConfigDir/config.yaml.
+// A missing default file is not an error; a missing explicit configPath is.
 func Load(v *viper.Viper, configPath string) error {
 	for key, val := range defaults {
 		v.SetDefault(key, val)
@@ -88,11 +82,9 @@ func Load(v *viper.Viper, configPath string) error {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 	// Preserve historical env var names where the derived ARGUS_<KEY_PATH> would differ.
-	// (token derives to ARGUS_TOKEN automatically as a top-level key.)
 	_ = v.BindEnv("tunnel.cloudflare.token", "ARGUS_CLOUDFLARE_TOKEN")
 	_ = v.BindEnv("tunnel.cloudflare.tunnel-name", "ARGUS_CLOUDFLARE_TUNNEL_NAME")
 	_ = v.BindEnv("tunnel.cloudflare.hostname", "ARGUS_CLOUDFLARE_HOSTNAME")
-	// gateway.url derives automatically to ARGUS_GATEWAY_URL via SetEnvKeyReplacer + AutomaticEnv.
 
 	v.SetConfigType("yaml")
 	if configPath != "" {
@@ -114,8 +106,8 @@ func Load(v *viper.Viper, configPath string) error {
 	return nil
 }
 
-// FromViper reads the resolved values out of v into a Config. Using explicit Get
-// calls (rather than Unmarshal) keeps bound-flag precedence predictable.
+// FromViper reads resolved values out of v into a Config. Explicit Get calls (not
+// Unmarshal) keep bound-flag precedence predictable.
 func FromViper(v *viper.Viper) Config {
 	return Config{
 		Socket: v.GetString("socket"),

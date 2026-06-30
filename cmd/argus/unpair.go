@@ -12,9 +12,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// newUnpairCmd builds `argus unpair [token]`: revoke a paired client token. With a
-// token argument it removes that token non-interactively; otherwise it lists the
-// gateway's tokens and shows a picker. Talks to the gateway over the wire.
+// newUnpairCmd builds `argus unpair [token]`: revoke a paired client token. With an
+// argument, removes it non-interactively; otherwise lists tokens and shows a picker.
 func newUnpairCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "unpair [token]",

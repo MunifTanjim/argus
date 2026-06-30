@@ -56,17 +56,15 @@ func (e DebugEntry) ExtraLineCount() int {
 	return strings.Count(e.Extra, "\n") + 1
 }
 
-// debugLineRe matches the start of a timestamped debug line.
-// Format: 2026-02-25T02:03:45.579Z [LEVEL] ...
+// debugLineRe matches a timestamped debug line: 2026-02-25T02:03:45.579Z [LEVEL] ...
 var debugLineRe = regexp.MustCompile(
 	`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+\[(DEBUG|WARN|ERROR)\]\s+(.*)$`)
 
 // debugCategoryRe extracts an optional [category] prefix from the message body.
-// Matches: [init], [MCP], [hooks], [API:auth], [Claude in Chrome], etc.
 var debugCategoryRe = regexp.MustCompile(`^\[([^\]]+)\]\s*(.*)$`)
 
-// isTimestampLine returns true if a line starts with a debug log timestamp.
-// Used to distinguish new entries from continuation lines (stack traces, JSON).
+// isTimestampLine reports whether a line starts a new entry vs. being a
+// continuation line (stack trace, JSON).
 func isTimestampLine(line string) bool {
 	// Fast path: check length and first char before regex.
 	if len(line) < 24 || line[0] < '0' || line[0] > '9' {
@@ -75,8 +73,8 @@ func isTimestampLine(line string) bool {
 	return debugLineRe.MatchString(line)
 }
 
-// ParseDebugLine parses a single timestamped debug line into a DebugEntry.
-// Returns false for continuation lines (lines that don't start with a timestamp).
+// ParseDebugLine parses a timestamped debug line. Returns false for
+// continuation lines (no leading timestamp).
 func ParseDebugLine(line string) (DebugEntry, bool) {
 	m := debugLineRe.FindStringSubmatch(line)
 	if m == nil {
@@ -91,7 +89,6 @@ func ParseDebugLine(line string) (DebugEntry, bool) {
 	level := parseLevel(m[2])
 	body := m[3]
 
-	// Extract optional category from the message body.
 	var category string
 	if cm := debugCategoryRe.FindStringSubmatch(body); cm != nil {
 		category = cm[1]
@@ -107,16 +104,13 @@ func ParseDebugLine(line string) (DebugEntry, bool) {
 	}, true
 }
 
-// ReadDebugLog reads a debug log file from the beginning and returns all entries.
-// Continuation lines are joined into the previous entry's Extra field.
-// Returns entries, final file offset, and any error.
+// ReadDebugLog reads a whole debug log. Returns entries, final offset, and error.
 func ReadDebugLog(path string) ([]DebugEntry, int64, error) {
 	return ReadDebugLogIncremental(path, 0)
 }
 
-// ReadDebugLogIncremental reads new lines from a debug log starting at the
-// given byte offset. Continuation lines (lines that don't start with a
-// timestamp) are appended to the previous entry's Extra field.
+// ReadDebugLogIncremental reads new lines starting at the given byte offset.
+// Continuation lines are appended to the previous entry's Extra field.
 func ReadDebugLogIncremental(path string, offset int64) ([]DebugEntry, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -144,7 +138,7 @@ func ReadDebugLogIncremental(path string, offset int64) ([]DebugEntry, int64, er
 			entry.LineNum = lineNum
 			entries = append(entries, entry)
 		} else if len(entries) > 0 && line != "" {
-			// Continuation line: append to previous entry's Extra.
+			// Continuation line: append to previous entry.
 			last := &entries[len(entries)-1]
 			if last.Extra == "" {
 				last.Extra = line
@@ -161,9 +155,8 @@ func ReadDebugLogIncremental(path string, offset int64) ([]DebugEntry, int64, er
 	return entries, bytesRead, nil
 }
 
-// CollapseDuplicates merges consecutive entries with identical Message text
-// into a single entry with Count reflecting the run length. Extra content
-// prevents collapsing -- multi-line entries are always kept separate.
+// CollapseDuplicates merges consecutive identical-Message entries into one,
+// with Count as the run length. Entries with Extra are never collapsed.
 func CollapseDuplicates(entries []DebugEntry) []DebugEntry {
 	if len(entries) == 0 {
 		return entries
@@ -189,7 +182,7 @@ func CollapseDuplicates(entries []DebugEntry) []DebugEntry {
 // FilterByLevel returns entries at or above the given minimum level.
 func FilterByLevel(entries []DebugEntry, minLevel DebugLevel) []DebugEntry {
 	if minLevel == LevelDebug {
-		return entries // no filtering needed
+		return entries
 	}
 
 	result := make([]DebugEntry, 0, len(entries)/2)
@@ -219,11 +212,9 @@ func FilterByText(entries []DebugEntry, query string) []DebugEntry {
 	return result
 }
 
-// DebugLogPath returns the debug log file path for a given session JSONL path.
-// Claude Code stores debug logs at ~/.claude/debug/{session-uuid}.txt.
-// Returns empty string if the debug file doesn't exist.
+// DebugLogPath returns the debug log path for a session JSONL path
+// (~/.claude/debug/{session-uuid}.txt), or "" if it doesn't exist.
 func DebugLogPath(sessionPath string) string {
-	// Extract the session UUID from the filename (strip .jsonl extension).
 	base := filepath.Base(sessionPath)
 	uuid := strings.TrimSuffix(base, ".jsonl")
 	if uuid == "" || uuid == base {
@@ -255,9 +246,8 @@ func parseLevel(s string) DebugLevel {
 	}
 }
 
-// countLinesBeforeOffset counts the number of newlines before the given byte
-// offset in a file. Used to compute correct line numbers for incremental reads.
-// Returns 0 on any error (conservative: line numbers will be off but not crash).
+// countLinesBeforeOffset counts newlines before a byte offset, for correct
+// line numbers on incremental reads. Returns 0 on error (line numbers off, no crash).
 func countLinesBeforeOffset(path string, offset int64) int {
 	if offset == 0 {
 		return 0

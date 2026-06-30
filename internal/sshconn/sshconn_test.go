@@ -16,17 +16,16 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// noDeadlineConn wraps a net.Conn but makes deadlines no-ops, matching execConn's
-// behavior. The spike asserts coder/websocket tolerates that.
+// noDeadlineConn makes deadlines no-ops, matching execConn, to assert
+// coder/websocket tolerates that.
 type noDeadlineConn struct{ net.Conn }
 
 func (noDeadlineConn) SetDeadline(time.Time) error      { return nil }
 func (noDeadlineConn) SetReadDeadline(time.Time) error  { return nil }
 func (noDeadlineConn) SetWriteDeadline(time.Time) error { return nil }
 
-// TestWebSocketOverCustomDialerNoDeadlines is the de-risking spike: it proves
-// api.DialWS (coder/websocket) works through an *http.Client whose Transport.DialContext
-// returns a connection with no-op deadlines — exactly how the ssh transport plugs in.
+// TestWebSocketOverCustomDialerNoDeadlines proves api.DialWS works through a
+// DialContext returning a conn with no-op deadlines — how the ssh transport plugs in.
 func TestWebSocketOverCustomDialerNoDeadlines(t *testing.T) {
 	srv := api.NewServer()
 	srv.Handle("echo", func(_ context.Context, params json.RawMessage) (any, error) {

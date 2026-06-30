@@ -11,9 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ErrCompletionNotEnabled means the completion file was written successfully, but
-// the shell is not configured to load completions. The install itself succeeded;
-// callers decide whether that warrants a non-zero exit.
+// ErrCompletionNotEnabled means the completion file was written but the shell isn't
+// configured to load completions. The install succeeded; callers decide the exit code.
 var ErrCompletionNotEnabled = errors.New("shell completion installed but not enabled")
 
 func InstallCommand() *cobra.Command {

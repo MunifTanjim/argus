@@ -13,10 +13,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// newPairCmd builds `argus pair`: ask the gateway for a fresh per-client token,
-// show its pairing QR, and wait for a device to connect with it. The token is
-// persisted on the gateway (and thus revocable via `argus unpair`) only once a
-// device actually connects.
+// newPairCmd builds `argus pair`: ask the gateway for a fresh per-client token, show its
+// pairing QR, and wait for a device to connect. The token is persisted (and thus
+// revocable via `argus unpair`) only once a device actually connects.
 func newPairCmd() *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -96,9 +95,8 @@ func newPairCmd() *cobra.Command {
 	return cmd
 }
 
-// addGatewayClientFlags registers the over-the-wire connection flags shared by
-// `pair`/`unpair`: the gateway URL and the master bearer token. (No --socket: these
-// commands always talk to a gateway.)
+// addGatewayClientFlags registers the over-the-wire flags shared by `pair`/`unpair`:
+// gateway URL and master bearer token. (No --socket: these always talk to a gateway.)
 func addGatewayClientFlags(f *pflag.FlagSet) {
 	f.String("gateway", "", "gateway to manage (the /client route is implicit): ws(s)://host, or ssh://[user@]host[:ssh-port][?port=N] [$ARGUS_GATEWAY_URL]")
 	f.String("token", "", "master bearer token for the gateway (admin) [$ARGUS_TOKEN]")

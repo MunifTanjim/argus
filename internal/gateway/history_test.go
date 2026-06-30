@@ -49,10 +49,8 @@ func TestFanoutTagsResultsByNode(t *testing.T) {
 	}
 }
 
-// historySessions routes to one node, but the gateway must stamp each returned
-// session with its owning node so a client can address its transcript by
-// node_id. Without this the node leaves node_id empty and transcript opens fail
-// with "requires node_id".
+// historySessions routes to one node; the gateway must stamp each returned session
+// with its owning node so a client can address its transcript by node_id.
 func TestHistorySessionsStampsNodeID(t *testing.T) {
 	a := New(time.Second)
 	home := newFakeSource("home", "home-box", sess("default:%1"))

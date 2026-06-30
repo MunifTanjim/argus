@@ -12,8 +12,7 @@ import (
 func TestLineReader(t *testing.T) {
 	tests := []struct {
 		name string
-		// maxLen overrides maxLineSize for testing. 0 means use a default
-		// large enough that no test line triggers the limit.
+		// maxLen overrides maxLineSize; 0 means effectively unlimited for the test.
 		maxLen int
 		input  string
 		want   []string
@@ -190,19 +189,15 @@ func TestLineReaderBytesReadNoTrailingNewline(t *testing.T) {
 	if lr.Err() != nil {
 		t.Fatalf("unexpected error: %v", lr.Err())
 	}
-	// "aaa\n" = 4 bytes, "bbb" = 3 bytes. bufio.ReadLine can't distinguish
-	// "line ended with \n" from "line ended at EOF", so the final line
-	// overcounts by 1 (adds +1 for a nonexistent \n). This matches the
-	// old bufio.Scanner behavior and is harmless for JSONL files which
-	// always end with \n.
+	// bufio.ReadLine can't tell "\n-terminated" from "EOF-terminated", so the
+	// final newline-less line overcounts by 1. Harmless for JSONL (always \n).
 	wantBytes := int64(len(input)) + 1
 	if lr.BytesRead() != wantBytes {
 		t.Errorf("BytesRead() = %d, want %d", lr.BytesRead(), wantBytes)
 	}
 }
 
-// newLineReaderWithMax creates a lineReader with a custom max line size
-// for testing. Production code uses newLineReader which defaults to maxLineSize.
+// newLineReaderWithMax is a test-only lineReader with a custom max line size.
 func newLineReaderWithMax(r io.Reader, max int) *lineReader {
 	lr := newLineReader(r)
 	lr.maxLen = max

@@ -99,14 +99,9 @@ func TestClassifyLiveStatusFreshnessGuard(t *testing.T) {
 }
 
 // TestClassifyLiveStatusEarlyUnpairedTool is the regression for an interrupted,
-// walked-away session stuck as working. ongoing_early_unpaired_tool has an early
-// tool_use whose result lands outside its merge buffer (folds to an empty
-// ToolResult) and a later completed turn whose trailing tool DOES have a result.
-// IsOngoing is true (AI activity after the last text output), but the only empty
-// ToolResult is a historical folding artifact, not active work — so a stale
-// transcript must reclassify idle. Before the trailing-chunk fix to
-// hasPendingWork, the early empty result bypassed the freshness guard and the
-// session stayed working forever.
+// walked-away session stuck as working: an early tool_use folds to an empty
+// ToolResult (a historical artifact), but only the trailing AI chunk should count
+// as pending, so a stale transcript must reclassify idle.
 func TestClassifyLiveStatusEarlyUnpairedTool(t *testing.T) {
 	f := copyFixture(t, "ongoing_early_unpaired_tool.jsonl")
 

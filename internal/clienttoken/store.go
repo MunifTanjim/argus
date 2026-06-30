@@ -1,11 +1,10 @@
-// Package clienttoken manages per-client gateway tokens: long-lived random
-// secrets, one per paired device, each persisted as its own file so a single
-// device can be revoked without rotating the shared gateway token.
+// Package clienttoken manages per-client gateway tokens: one long-lived random
+// secret per paired device, each its own file so a device can be revoked without
+// rotating the shared gateway token.
 //
-// A token is "active" once a file XDG_STATE_DIR/argus/client-tokens/<TOKEN>.json
-// exists; until then a freshly minted token is held "pending" in memory during
-// the pairing window so the gateway accepts the device's first connection, and
-// is promoted to a file the moment it authenticates.
+// A token is "active" once its file exists; a freshly minted token is held
+// "pending" in memory during the pairing window and promoted to a file the moment
+// the device authenticates.
 package clienttoken
 
 import (
@@ -68,8 +67,8 @@ func GenerateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// validToken guards against path traversal and junk: a token is exactly the
-// hex encoding of tokenBytes (lowercase 0-9a-f), so it is always a safe filename.
+// validToken guards against path traversal and junk: a valid token is exactly the
+// hex encoding of tokenBytes (lowercase 0-9a-f), so it's always a safe filename.
 func validToken(tok string) bool {
 	if len(tok) != tokenBytes*2 {
 		return false
@@ -86,9 +85,8 @@ func validToken(tok string) bool {
 func (s *Store) path(tok string) string { return filepath.Join(s.dir, tok+".json") }
 
 // Pend registers a minted token as accepted for the pairing window and returns a
-// channel closed when a device first authenticates with it. The token is auto-
-// dropped after PendTTL if no device connects; callers should also CancelPend on
-// their own timeout.
+// channel closed when a device first authenticates. Auto-dropped after PendTTL;
+// callers should also CancelPend on their own timeout.
 func (s *Store) Pend(tok string) <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,8 +105,7 @@ func (s *Store) expire(tok string, p *pending) {
 	}
 }
 
-// CancelPend removes a pending token that never connected (e.g. the pairing
-// command timed out). A no-op once the token has been promoted.
+// CancelPend removes a pending token that never connected. No-op once promoted.
 func (s *Store) CancelPend(tok string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,9 +122,9 @@ func (s *Store) Connected(tok string) bool {
 	return ok && p.connected
 }
 
-// Authorize reports whether tok may open a /client connection. A pending token
-// is promoted: its file is persisted, it is removed from the pending set, and its
-// waiter is signalled. An active token is accepted if its file still exists.
+// Authorize reports whether tok may open a /client connection. A pending token is
+// promoted (file persisted, waiter signalled); an active token is accepted if its
+// file still exists.
 func (s *Store) Authorize(tok string) bool {
 	if !validToken(tok) {
 		return false

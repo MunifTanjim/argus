@@ -30,9 +30,8 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // handleIdleKey composes a free-text reply, delivered via pane input on submit.
 func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// A paneless session's idle dock is informational only (see promptLinesWidth):
-	// argus has no pane to deliver input to, so swallow keys silently rather than
-	// flash a "terminal control unavailable" error the indicator already explains.
+	// Paneless idle dock is informational only: swallow keys silently (the
+	// indicator already explains there's no pane to deliver input to).
 	if !m.sessions[m.selectedID].Controllable() {
 		return m, nil
 	}
@@ -47,9 +46,8 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.sendInputCmd(id, txt)
 	case "shift+enter":
-		// Insert a newline instead of submitting, so replies can be multi-line.
-		// Only arrives where the terminal/tmux honor the Kitty keyboard protocol;
-		// pasting multi-line text is the universal path (see Update's PasteMsg).
+		// Newline instead of submit (multi-line replies). Only arrives where the
+		// Kitty keyboard protocol is honored; pasting is the universal path.
 		m.prompt.reasonText += "\n"
 	case "backspace":
 		if len(m.prompt.reasonText) > 0 {
@@ -105,14 +103,12 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 	}
 	accepts := m.otherActive(q, tab)
 
-	// "c" requests "Chat about this" — but only when not editing a custom answer
-	// (then it types, like any other letter).
+	// "c" = "Chat about this", unless editing a custom answer (then it types).
 	if !accepts && msg.String() == "c" {
 		return m.chatAboutQuestions(ix)
 	}
 
-	// j/k navigate options like the arrows, except while editing a custom answer
-	// (then they type, like any other letter).
+	// j/k navigate like arrows, unless editing a custom answer (then they type).
 	key := msg.String()
 	if !accepts {
 		switch key {
@@ -153,9 +149,8 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 	return m, nil
 }
 
-// commitQuestion records the highlighted option as the single-select answer
-// (multi-select uses its space toggles) and advances: a single question submits
-// immediately; in a multi-question set it moves to the next tab.
+// commitQuestion commits the highlighted single-select option (multi-select uses
+// space toggles) and advances: single question submits, multi moves to next tab.
 func (m model) commitQuestion(ix *session.Interaction) (tea.Model, tea.Cmd) {
 	tab := m.prompt.tab
 	q := &ix.Questions[tab]
@@ -193,10 +188,8 @@ func (m model) handleSubmitTabKey(msg tea.KeyPressMsg, ix *session.Interaction) 
 	return m, nil
 }
 
-// submitDecision sends a permission/plan decision by echoing the chosen server
-// option's Value (the node maps it to allow/deny + permission mode). The server
-// always supplies Options for permission/plan, so an out-of-range / optionless
-// selection is a defensive no-op rather than a silent allow.
+// submitDecision sends a permission/plan decision by echoing the chosen option's
+// Value. An out-of-range selection is a defensive no-op, never a silent allow.
 func (m model) submitDecision(ix *session.Interaction) (tea.Model, tea.Cmd) {
 	sel := m.prompt.decisionSel
 	if sel < 0 || sel >= len(ix.Options) {
@@ -226,8 +219,8 @@ func (m model) submitAll(ix *session.Interaction) (tea.Model, tea.Cmd) {
 	return m, m.respondCmd(id, p)
 }
 
-// questionAnswers builds the answers map across all answered questions (keyed by
-// question text); unanswered questions are omitted.
+// questionAnswers builds the answers map (keyed by question text) over the
+// answered questions; unanswered ones are omitted.
 func (m model) questionAnswers(ix *session.Interaction) api.RespondParams {
 	p := api.RespondParams{Kind: string(ix.Kind), Behavior: "allow", Answers: map[string]any{}}
 	for tab := range ix.Questions {

@@ -6,12 +6,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// logsAvail is the number of body lines the logs view shows: total height minus
-// the title line, the two blank separators, and the footer (4 chrome lines).
+// logsAvail is the body line count: total height minus 4 chrome lines (title, two
+// blanks, footer).
 func (m model) logsAvail() int { return max(1, m.height-4) }
 
-// hasLogsTab reports whether the Logs tab is available: it exists only when the
-// TUI spawned an embedded node and so holds its log buffer.
+// hasLogsTab reports whether the Logs tab exists (only when the TUI spawned an
+// embedded node and holds its log buffer).
 func (m model) hasLogsTab() bool { return m.logs != nil }
 
 // logsBottom is the top-line offset that shows the newest page.
@@ -36,9 +36,8 @@ func (m model) logsView() string {
 		return ""
 	}
 	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(modeLogs)
-	// Logs is a home tab: gutter-pad the header and footer so they line up with
-	// the Sessions/History tabs, but keep the log body flush-left at full width
-	// (logs need the horizontal room and read better left-aligned).
+	// Gutter-pad header and footer to line up with the other home tabs, but keep
+	// the log body flush-left at full width (logs read better left-aligned).
 	cardW := historyWidth(m)
 	gutter := strings.Repeat(" ", max(0, (m.width-cardW)/2))
 	var body string
@@ -78,10 +77,9 @@ var logsTable = []keyTableEntry{
 	{logsKeys.Back, model.actLogsToSessions},
 }
 
-// logsScrollBy moves the viewport by delta lines (negative = up), clamped to the
-// buffer, and re-engages follow when the move lands on the newest page. Callers
-// pass a delta rather than an absolute offset so it applies after logsUnfollow
-// has pinned the live bottom.
+// logsScrollBy moves the viewport by delta lines (negative = up), clamped, and
+// re-engages follow when landing on the newest page. Delta (not absolute offset)
+// so it applies after logsUnfollow pins the live bottom.
 func (m *model) logsScrollBy(delta int) {
 	m.logsUnfollow()
 	bottom := m.logsBottom()
@@ -109,9 +107,8 @@ func (m model) actLogsHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// actOpenLogs switches to the Logs tab. Shared by the Sessions (left/h) and
-// History (right/l) bindings. It is a no-op without a spawned node, keeping
-// those keys inert when there is no buffer to show.
+// actOpenLogs switches to the Logs tab. No-op without a spawned node, keeping the
+// Sessions/History bindings inert when there's no buffer.
 func (m model) actOpenLogs(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.hasLogsTab() {
 		return m, nil

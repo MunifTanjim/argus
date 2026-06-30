@@ -7,10 +7,8 @@ import (
 )
 
 // StyledIcon pairs an icon glyph with its default foreground color.
-// Centralizes glyph-color pairings so changes happen in one place.
-//
-// Ported from kylesnowschwartz/tail-claude icons.go. Requires a Nerd Font
-// patched terminal font (e.g. JetBrains Mono Nerd Font).
+// Requires a Nerd Font patched terminal font (e.g. JetBrains Mono Nerd Font).
+// Ported from kylesnowschwartz/tail-claude icons.go.
 type StyledIcon struct {
 	Glyph string
 	Color color.Color
@@ -31,8 +29,8 @@ func (s StyledIcon) WithColor(c color.Color) string {
 	return lipgloss.NewStyle().Foreground(c).Render(s.Glyph)
 }
 
-// Shared glyphs -- named so intentional reuse across icons is explicit.
-// All use Unicode escapes to prevent silent corruption by LLM tools.
+// Shared glyphs, named so reuse is explicit. Unicode escapes guard against silent
+// corruption by LLM tools.
 const (
 	glyphRobot        = "\U000F167A" // nf-md-robot_outline
 	glyphWrench       = "\U000F0BE0" // nf-md-wrench_outline
@@ -63,8 +61,8 @@ type taskIcons struct {
 	Pending StyledIcon
 }
 
-// iconSet holds every icon in the TUI, grouped by domain.
-// Codepoints from Font Awesome (U+F000-U+F2E0) and Material Design (U+F0001+).
+// iconSet holds every TUI icon, grouped by domain. Codepoints from Font Awesome
+// and Material Design.
 type iconSet struct {
 	Branch    StyledIcon
 	Chat      StyledIcon
@@ -107,12 +105,9 @@ const (
 // SpinnerFrames is a 10-frame braille spinner used for ongoing indicators.
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// initIcons builds all icon values from resolved theme colors.
-// Must be called after initTheme().
-//
-// All glyphs use explicit Unicode escapes (\uXXXX / \U000XXXXX) to prevent
-// silent corruption when LLM tools round-trip the file. Nerd Font codepoints
-// in the Private Use Area are particularly vulnerable to being dropped.
+// initIcons builds all icon values from resolved theme colors; call after initTheme.
+// Glyphs use explicit Unicode escapes: Nerd Font PUA codepoints are easily dropped
+// when LLM tools round-trip the file.
 func initIcons() {
 	Icon = iconSet{
 		Branch:    StyledIcon{"\uF418", ColorGitBranch}, // nf-pl-branch

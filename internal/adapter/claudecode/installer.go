@@ -8,13 +8,11 @@ import (
 	"strings"
 )
 
-// HookMarker is appended (as a shell comment) to every command argus installs,
-// so the installer can recognize and cleanly remove exactly its own hooks
-// without disturbing the user's other hooks.
+// HookMarker is appended (as a shell comment) to every installed command so the
+// installer can recognize and remove only its own hooks, leaving the user's.
 const HookMarker = "#argus-managed"
 
-// DefaultHookEvents are the Claude Code hook events argus registers to observe
-// session lifecycle and status.
+// DefaultHookEvents are the Claude Code hook events argus registers.
 var DefaultHookEvents = []string{
 	"SessionStart",
 	"UserPromptSubmit",
@@ -27,8 +25,8 @@ var DefaultHookEvents = []string{
 }
 
 // hookTimeout returns the per-event command timeout in seconds. PermissionRequest
-// blocks until the user answers in argus, so it gets a long timeout; the others
-// are fire-and-forget observers.
+// blocks until the user answers, so it gets a long timeout; others are
+// fire-and-forget observers.
 func hookTimeout(event string) int {
 	if event == "PermissionRequest" {
 		return 600
@@ -68,9 +66,9 @@ func managedCommand(argusBin, event string) string {
 }
 
 // Install adds argus's hooks for the given events to settings.json, preserving
-// all other settings and existing hooks. It is idempotent: re-running replaces
-// argus's managed entries rather than duplicating them. argusBin is the path to
-// the argus client binary the hooks will invoke.
+// other settings and existing hooks. Idempotent: re-running replaces argus's
+// managed entries rather than duplicating them. argusBin is the client binary
+// the hooks invoke.
 func Install(argusBin string, events []string) error {
 	path, err := SettingsPath()
 	if err != nil {
@@ -101,10 +99,9 @@ func Install(argusBin string, events []string) error {
 }
 
 // ReconcileIfInstalled brings argus's managed hooks in line with the current
-// DefaultHookEvents, but only when argus hooks are already installed — so a user
-// who never opted in is never auto-installed. This lets a freshly built argusd
-// self-heal stale hook sets (e.g. a newly added event like PermissionRequest)
-// without a manual reinstall. Returns the events whose managed entry was added.
+// DefaultHookEvents, but only when argus hooks are already installed — a user who
+// never opted in is never auto-installed. Lets a fresh argusd self-heal stale
+// hook sets without a manual reinstall. Returns the events newly added.
 func ReconcileIfInstalled(argusBin string) (added []string, err error) {
 	path, err := SettingsPath()
 	if err != nil {

@@ -23,9 +23,7 @@ type sessionMetadata struct {
 	permissionMode string // last non-empty permissionMode (mode can change mid-session)
 }
 
-// scanSessionMetadata extracts all session metadata in a single streaming pass:
-// preview extraction, ongoing detection, token accumulation, duration, model,
-// and turn counting.
+// scanSessionMetadata extracts all session metadata in a single streaming pass.
 func scanSessionMetadata(path string) sessionMetadata {
 	f, err := os.Open(path)
 	if err != nil {
@@ -39,19 +37,12 @@ func scanSessionMetadata(path string) sessionMetadata {
 	var commandFallback string
 	previewFound := false
 	linesRead := 0
-	// maxPreviewLines caps how many raw JSONL lines we scan for the session preview.
-	// 200 is generous enough to find the first real user message even in sessions
-	// that start with many system/meta entries, without scanning enormous files.
+	// Cap preview scan; generous enough to skip leading system/meta entries.
 	const maxPreviewLines = 200
 
 	// Turn counting: user message increments, then first qualifying AI response increments.
 	awaitingAIGroup := false
 
-	// Context tokens: we want the last assistant message's context snapshot.
-	// Streaming entries share a requestId with incrementally larger counts,
-	// but since we always overwrite, last-entry-wins naturally.
-
-	// Ongoing detection state.
 	var activityIndex int
 	lastEndingIndex := -1
 	hasAnyOngoingActivity := false
@@ -69,8 +60,6 @@ func scanSessionMetadata(path string) sessionMetadata {
 		}
 		linesRead++
 
-		// Parse the entry with a lightweight struct that captures toolUseResult
-		// as raw JSON for the ongoing detection edge case.
 		var raw metadataScanEntry
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			continue
@@ -135,7 +124,7 @@ func scanSessionMetadata(path string) sessionMetadata {
 			awaitingAIGroup = false
 		}
 
-		// --- Context token tracking (last assistant message's window snapshot) ---
+		// Last assistant message's window snapshot; last-entry-wins via overwrite.
 		if raw.Type == "assistant" && !raw.IsSidechain && raw.Message.Model != "<synthetic>" {
 			u := raw.Message.Usage
 			meta.contextTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
@@ -155,7 +144,7 @@ func scanSessionMetadata(path string) sessionMetadata {
 				&hasAnyOngoingActivity, &hasActivityAfterLastEnding, shutdownToolIDs, pendingToolIDs)
 		}
 
-		// --- Preview extraction (unchanged from scanSessionPreview) ---
+		// --- Preview extraction ---
 		if previewFound || linesRead > maxPreviewLines || raw.Type != "user" {
 			continue
 		}
@@ -200,22 +189,18 @@ func scanSessionMetadata(path string) sessionMetadata {
 		meta.firstMsg = strings.ReplaceAll(meta.firstMsg, "\n", " ")
 	}
 
-	// Default permissionMode when absent. Some Claude Code sessions omit the
-	// field entirely (inconsistent serialization). "default" is the correct
-	// label -- the session ran under the user's default permission mode.
+	// Some sessions omit permissionMode entirely; it means the default mode.
 	if meta.permissionMode == "" {
 		meta.permissionMode = "default"
 	}
 
-	// Finalize ongoing detection.
-	// Activity-based: is there AI activity after the last ending event?
+	// Finalize ongoing detection: is there AI activity after the last ending event?
 	if lastEndingIndex == -1 {
 		meta.isOngoing = hasAnyOngoingActivity
 	} else {
 		meta.isOngoing = hasActivityAfterLastEnding
 	}
-	// Pending tool calls override: a tool_use without a matching tool_result
-	// means work is still in progress, even if text output appeared after it.
+	// A tool_use without a matching tool_result means work is still in progress.
 	if !meta.isOngoing && len(pendingToolIDs) > 0 {
 		meta.isOngoing = true
 	}
@@ -229,8 +214,7 @@ func scanSessionMetadata(path string) sessionMetadata {
 }
 
 // metadataScanEntry is a lightweight struct for the metadata scan pass.
-// It captures toolUseResult as raw JSON because the field can be either a
-// string or an object, and we need the raw value for rejection detection.
+// toolUseResult is raw JSON since it can be a string or an object.
 type metadataScanEntry struct {
 	UUID           string          `json:"uuid"`
 	Type           string          `json:"type"`
@@ -258,9 +242,7 @@ type metadataScanEntry struct {
 	} `json:"message"`
 }
 
-// isUserChunkForTurnCount checks whether an entry qualifies as a user turn:
-// type=user, isMeta=false, not teammate, not sidechain, has real user content,
-// and doesn't start with system output tags.
+// isUserChunkForTurnCount reports whether an entry qualifies as a user turn.
 func isUserChunkForTurnCount(e *metadataScanEntry) bool {
 	if e.Type != "user" || e.IsMeta || e.IsSidechain {
 		return false

@@ -26,20 +26,18 @@ type Provider interface {
 	ExtractURL(line string) (string, bool)
 }
 
-// LineClassifier is an optional Provider extension: it maps a line of the backend's
-// output to the slog level it should be logged at. Supervisor uses it so a backend's
-// own severity (e.g. cloudflared's WRN/ERR) drives the argus log level, instead of
-// every line landing at Info. Providers that don't implement it default to Info.
+// LineClassifier is an optional Provider extension mapping an output line to its
+// slog level, so a backend's own severity (e.g. cloudflared WRN/ERR) drives the
+// argus log level instead of everything landing at Info. Default is Info.
 type LineClassifier interface {
 	ClassifyLine(line string) slog.Level
 }
 
-// LifecycleProvider is an optional Provider extension for backends that need a
-// one-time setup step before the long-lived run, and/or know their public URL
-// in advance (rather than scraping it from process output via ExtractURL).
-// Supervisor calls Prepare once, before starting the run loop.
+// LifecycleProvider is an optional Provider extension for backends needing one-time
+// setup before the run, and/or knowing their public URL in advance (vs. scraping it
+// via ExtractURL). Supervisor calls Prepare once before the run loop.
 type LifecycleProvider interface {
-	// Prepare runs once before the run loop. It returns the public URL when the
-	// backend knows it ahead of time ("" when it must be scraped from output).
+	// Prepare runs once before the run loop, returning the public URL when known
+	// ahead of time ("" when it must be scraped from output).
 	Prepare(ctx context.Context) (publicURL string, err error)
 }

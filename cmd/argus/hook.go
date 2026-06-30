@@ -14,12 +14,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// newHookCmd builds `argus hook <event>`, invoked by a Claude Code command hook
-// (hidden from help — it's an integration entry point, not a user command). It
-// reads the hook payload from stdin, enriches it with the tmux pane and server
-// derived from the environment, and forwards it to argusd. It is strictly
-// best-effort: any failure (node down, timeout) exits 0 so it never disrupts
-// Claude Code.
+// newHookCmd builds `argus hook <event>`, invoked by a Claude Code hook (hidden:
+// integration entry point, not user-facing). Reads the payload from stdin, enriches it
+// with tmux pane/server from the environment, and forwards to argusd. Strictly
+// best-effort: any failure exits 0 so it never disrupts Claude Code.
 func newHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:           "hook <event>",
@@ -48,10 +46,9 @@ func newHookCmd() *cobra.Command {
 				AutoMode:   os.Getenv("CLAUDE_CODE_ENABLE_AUTO_MODE") == "1",
 			}
 
-			// PermissionRequest is the decision point: block until argusd returns the
-			// user's decision, then print it to stdout for Claude Code. If argusd is
-			// unreachable or returns nothing, print nothing so Claude falls back to its
-			// own interactive prompt. Claude's own 600s hook timeout bounds the wait.
+			// PermissionRequest blocks until argusd returns the user's decision, then
+			// prints it for Claude Code. Print nothing on failure so Claude falls back to
+			// its own prompt. Claude's 600s hook timeout bounds the wait.
 			if event == "PermissionRequest" {
 				client, err := api.Dial(cfg.Socket)
 				if err != nil {

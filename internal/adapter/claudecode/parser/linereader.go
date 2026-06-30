@@ -9,15 +9,13 @@ const (
 	// initialBufSize is the starting buffer capacity for the line reader.
 	initialBufSize = 64 * 1024
 
-	// maxLineSize is the maximum allowed line length. Lines exceeding this
-	// are silently skipped rather than aborting the entire session.
-	// 64 MiB accommodates even the largest Claude API responses.
+	// maxLineSize: lines over this are skipped (not fatal). 64 MiB covers
+	// even the largest Claude API responses.
 	maxLineSize = 64 * 1024 * 1024
 )
 
-// lineReader reads JSONL files line by line, skipping lines that exceed
-// maxLineSize rather than aborting. The buffer starts small and grows on
-// demand. After iteration, call Err() to check for I/O errors (not EOF).
+// lineReader reads JSONL line by line, skipping over-long lines rather than
+// aborting. After iteration, call Err() to check for I/O errors (not EOF).
 type lineReader struct {
 	r         *bufio.Reader
 	maxLen    int // 0 means use maxLineSize constant
@@ -33,9 +31,8 @@ func newLineReader(r io.Reader) *lineReader {
 	}
 }
 
-// next returns the next non-empty line (without trailing newline) and true,
-// or ("", false) at EOF or I/O error. After the loop, call Err() to
-// distinguish EOF from I/O failure.
+// next returns the next non-empty line (no trailing newline) and true, or
+// ("", false) at EOF or I/O error. Use Err() to distinguish the two.
 func (lr *lineReader) next() (string, bool) {
 	for {
 		line, err := lr.readLine()
@@ -57,20 +54,15 @@ func (lr *lineReader) Err() error {
 	return lr.err
 }
 
-// BytesRead returns the total bytes consumed from the reader, including
-// skipped lines and newline delimiters. Used by tests and callers that
-// need byte-level accounting of the underlying reader.
+// BytesRead returns total bytes consumed, including skipped lines and newline
+// delimiters.
 func (lr *lineReader) BytesRead() int64 {
 	return lr.bytesRead
 }
 
-// readLine reads a full line, returning "" for blank/oversized lines and
-// a non-nil error only at EOF or read failure.
-//
-// Uses bufio.Reader.ReadLine() which returns isPrefix=true for partial
-// reads. When accumulated bytes exceed maxLineSize, the buffer is
-// discarded and the rest of the line is consumed (to keep bytesRead
-// accurate), then "" is returned so next() skips to the following line.
+// readLine reads a full line, returning "" for blank/oversized lines and a
+// non-nil error only at EOF or read failure. On oversize, the buffer is
+// dropped but the rest of the line is still consumed to keep bytesRead accurate.
 func (lr *lineReader) readLine() (string, error) {
 	lr.buf = lr.buf[:0]
 	oversized := false
@@ -82,22 +74,15 @@ func (lr *lineReader) readLine() (string, error) {
 
 		if err != nil {
 			if len(lr.buf) > 0 && err == io.EOF {
-				// Final line data was accumulated in previous iterations.
-				// No \n to count -- the line ended at EOF.
-				break
+				break // final line ended at EOF, no \n to count
 			}
 			return "", err
 		}
 
-		// bufio.ReadLine strips the \n delimiter but we still consumed it
-		// from the underlying reader. Add +1 when the line is complete.
-		//
-		// Caveat: ReadLine can't distinguish "line ended with \n" from
-		// "line ended at EOF without \n" -- both return (data, false, nil).
-		// This means BytesRead may overcount by 1 on the final line if the
-		// file lacks a trailing newline. That's harmless for JSONL tailing:
-		// real entries always end with \n, and the overcount exactly skips
-		// the \n that the next append will prepend.
+		// ReadLine strips \n but we consumed it, so add +1 on a complete line.
+		// Caveat: ReadLine can't tell "\n-terminated" from "EOF without \n",
+		// so BytesRead may overcount by 1 on a final line lacking a trailing
+		// newline. Harmless for JSONL tailing: real entries always end with \n.
 		if !isPrefix {
 			lr.bytesRead++
 		}

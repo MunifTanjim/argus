@@ -1,7 +1,5 @@
-// Package tui implements argus's terminal client: a Bubble Tea dashboard that
-// connects to argusd, lists sessions, reflects live registry events, shows a
-// session's transcript, and provides a live screen passthrough for direct pane
-// interaction.
+// Package tui is argus's Bubble Tea terminal client: session list, live registry
+// events, transcript view, and screen passthrough for direct pane interaction.
 package tui
 
 import (
@@ -14,9 +12,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
-// Client is the connection the TUI drives. Both *api.Client and
-// *api.ReconnectingClient satisfy it; the latter recovers from dropped connections,
-// surfacing transitions on States() and re-dialing on Reconnect().
+// Client is the connection the TUI drives. *api.ReconnectingClient also satisfies
+// it, surfacing connection transitions on States() and re-dialing on Reconnect().
 type Client interface {
 	Call(method string, params, out any) error
 	Events() <-chan api.Notification
@@ -25,11 +22,10 @@ type Client interface {
 	Close() error
 }
 
-// Run connects the TUI to the node and blocks until the user quits. When logs is
-// non-nil (the TUI spawned an embedded node), its lines are tailed in the Logs tab.
+// Run connects the TUI and blocks until the user quits. Non-nil logs (embedded
+// node) are tailed in the Logs tab.
 func Run(client Client, logs *logbuf.Buffer) error {
-	// Detect the terminal background ONCE, before Bubble Tea enters alt-screen.
-	// lipgloss queries it via OSC 11, which can fail once alt-screen is active.
+	// Detect background ONCE: the OSC 11 query can fail once alt-screen is active.
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
 	initIcons()
@@ -67,17 +63,16 @@ func Run(client Client, logs *logbuf.Buffer) error {
 	return err
 }
 
-// paneKey is one keystroke bound for a session's pane: either literal text (sent
-// with -l) or a named tmux key (Enter, Escape, BSpace, C-c, Up, ...).
+// paneKey is one keystroke for a session's pane: literal text or a named tmux key.
 type paneKey struct {
 	id      string
 	literal string
 	named   string
 }
 
-// sendKeyLoop drains keystrokes in arrival order and forwards them to the pane,
-// merging consecutive literals into one send-keys to limit tmux spawns (and make
-// paste cheap). A single goroutine guarantees the keys land in order.
+// sendKeyLoop forwards keystrokes to the pane in arrival order, coalescing
+// consecutive literals into one send-keys to limit tmux spawns (cheap paste).
+// A single goroutine guarantees ordering.
 func sendKeyLoop(client Client, keyCh chan paneKey) {
 	for k := range keyCh {
 		if k.named != "" {

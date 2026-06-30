@@ -13,19 +13,15 @@ import (
 // errNotFound is the sentinel the lookPath seam returns when a tool is absent.
 var errNotFound = errors.New("push: tool not found")
 
-// clickCmd builds the argv to run when a notification is activated, given the
-// session id from the notification's Data. nil disables click (renderers then
-// show title+body only). Injected by the wiring layer so internal/push stays
-// free of node/cmd dependencies — it only runs or embeds an opaque command.
+// clickCmd builds the argv to run when a notification is activated. nil disables
+// click. Injected by the wiring layer so internal/push stays free of node/cmd
+// dependencies — it only runs or embeds an opaque command.
 type clickCmd func(sessionID string) []string
 
-// OSNotifier renders a Notification as a native macOS desktop notification by
-// shelling out to Hammerspoon (`hs`, clickable) or osascript (title+body). It is
-// a Sink. Rendering is best-effort: a missing tool, unsupported OS, or command
-// failure is logged and swallowed. When click is non-nil and Hammerspoon is
-// available, clicking the notification runs click(sessionID).
-//
-// Only macOS is supported for now; other platforms log "unsupported OS".
+// OSNotifier is a Sink that renders a Notification as a native macOS desktop
+// notification via alerter/Hammerspoon (clickable) or osascript (title+body).
+// Best-effort: a missing tool, unsupported OS, or failure is logged and swallowed.
+// macOS only for now.
 type OSNotifier struct {
 	log   *slog.Logger
 	goos  string // runtime.GOOS; overridable in tests
@@ -71,10 +67,9 @@ func NewOSNotifier(log *slog.Logger, click clickCmd) *OSNotifier {
 	return o
 }
 
-// rendererName selects the renderer for the current platform and tooling. The
-// choice is static for an OSNotifier's lifetime (platform + tools on PATH +
-// whether click is set), so it's computed once and cached — Notify runs per
-// notification and each computeRendererName scans PATH (lookPath).
+// rendererName returns the selected renderer. The choice is static for the
+// notifier's lifetime, so it's computed once and cached (computeRendererName scans
+// PATH; Notify runs per notification).
 func (o *OSNotifier) rendererName() string {
 	o.nameOnce.Do(func() { o.nameVal = o.computeRendererName() })
 	return o.nameVal
@@ -100,24 +95,20 @@ func (o *OSNotifier) computeRendererName() string {
 }
 
 // detectHammerspoon reports whether the hs CLI can reach a running Hammerspoon
-// with the ipc bridge loaded. Best-effort: runs a trivial `hs -c`. When false,
-// selection uses osascript instead of a Hammerspoon renderer that would fail
-// every call (e.g. exit 69 when hs.ipc isn't loaded). Called only from the cached
-// computeRendererName, so it runs at most once per notifier.
+// with the ipc bridge loaded (trivial `hs -c`). When false, selection avoids a
+// Hammerspoon renderer that would fail every call (e.g. exit 69 without hs.ipc).
 func (o *OSNotifier) detectHammerspoon() bool {
 	return o.run(context.Background(), "hs", "-c", "_=1") == nil
 }
 
 // Notify renders n on the local desktop. Best-effort; failures are logged only.
 func (o *OSNotifier) Notify(ctx context.Context, n Notification) {
-	// Detach from caller cancellation: alerter blocks until the user clicks, but
-	// callers pass the peer connection ctx, which a reconnect would cancel mid-banner.
+	// Detach from caller cancellation: alerter blocks until clicked, but callers
+	// pass the peer conn ctx, which a reconnect would cancel mid-banner.
 	ctx = context.WithoutCancel(ctx)
 
-	// Brand the title: desktop notifications are delivered by Hammerspoon / the
-	// terminal, so (unlike mobile, which comes from the Argus app itself) nothing
-	// otherwise identifies them as argus. n is a value copy — this does not affect
-	// the mobile dispatch sink.
+	// Brand the title (desktop banners carry no app identity, unlike mobile). n is
+	// a value copy, so this doesn't affect the mobile dispatch sink.
 	n.Title = "Argus · " + n.Title
 
 	switch o.rendererName() {
@@ -132,18 +123,15 @@ func (o *OSNotifier) Notify(ctx context.Context, n Notification) {
 	}
 }
 
-// renderAlerter shows a clickable notification via the `alerter` binary, which
-// blocks until the user interacts and prints the result to stdout. On a content
-// or action click it runs the click command (argus focus → tmux switch-client).
-// --group de-dupes per session natively (a new notification replaces the prior
-// one for the same session). The call blocks, so it runs in its own goroutine and
-// Notify stays non-blocking. Selection already verified `alerter` is on PATH and
-// click != nil.
+// renderAlerter shows a clickable notification via `alerter`, which blocks until
+// the user interacts and prints the result to stdout; on click it runs the click
+// command. --group de-dupes per session natively. Runs in a goroutine so Notify
+// stays non-blocking. Selection already verified alerter is on PATH and click != nil.
 func (o *OSNotifier) renderAlerter(ctx context.Context, n Notification) {
 	sessionID := n.SessionID()
 	args := []string{"--title", n.Title, "--message", n.Body}
 	if icon, ok := o.iconPath(); ok {
-		args = append(args, "--app-icon", icon) // brand with the argus logo
+		args = append(args, "--app-icon", icon)
 	}
 	if sessionID != "" {
 		args = append(args, "--group", sessionID)
@@ -151,8 +139,7 @@ func (o *OSNotifier) renderAlerter(ctx context.Context, n Notification) {
 	go func() {
 		out, err := o.output(ctx, "alerter", args...)
 		if err != nil {
-			// alerter is on PATH but the call failed — fall back to a plain
-			// osascript banner so the user still gets a (non-clickable) notification.
+			// alerter failed — fall back to a non-clickable osascript banner.
 			o.log.Warn("desktop: alerter failed, falling back to osascript", "err", err)
 			o.renderPlain(ctx, n)
 			return
@@ -182,24 +169,19 @@ func (o *OSNotifier) renderPlain(ctx context.Context, n Notification) {
 	}
 }
 
-// renderHammerspoon shows the notification via a running Hammerspoon instance
-// (hs -c), whose click callback runs the click command out-of-process (which does
-// the tmux switch). It does NOT raise the GUI terminal window: there's no reliable
-// way to identify the user's terminal app, so we leave window focus alone rather
-// than activate the wrong app. Requires Hammerspoon + the hs CLI; selection
-// already verified `hs` is on PATH and click != nil.
+// renderHammerspoon shows the notification via a running Hammerspoon (hs -c),
+// whose click callback runs the click command out-of-process. It does NOT raise
+// the terminal window: there's no reliable way to identify the user's terminal
+// app, so we'd risk activating the wrong one. Selection already verified hs is on
+// PATH and click != nil.
 func (o *OSNotifier) renderHammerspoon(ctx context.Context, n Notification) {
 	sessionID := n.SessionID()
 	argv := o.click(sessionID)
-	// notifyExpr builds the notification; on click it runs the click command
-	// (argus focus → tmux switch-client).
 	notifyExpr := `hs.notify.new(function()` +
 		` hs.execute(` + luaQuote(shellJoin(argv)) + `, true)` +
 		` end, {title=` + luaQuote(n.Title) + `, informativeText=` + luaQuote(n.Body) + `, withdrawAfter=0})`
-	// De-dupe per session: Hammerspoon's Lua globals persist across `hs -c` calls,
-	// so keep one notification per session id in _argus and withdraw the previous
-	// before sending the new one — a session never stacks more than one banner. A
-	// notification with no session id (rare) is sent without de-duping.
+	// De-dupe per session: Lua globals persist across `hs -c` calls, so keep one
+	// notification per session in _argus and withdraw the previous before sending.
 	var lua string
 	if sessionID == "" {
 		lua = notifyExpr + `:send()`
@@ -212,10 +194,8 @@ func (o *OSNotifier) renderHammerspoon(ctx context.Context, n Notification) {
 			` _argus[k] = n; n:send()`
 	}
 	if err := o.run(ctx, "hs", "-c", lua); err != nil {
-		// hs is on PATH but the call failed — most often the hs.ipc bridge isn't
-		// loaded (exit 69, "can't access Hammerspoon message port"). Fall back to a
-		// plain osascript banner so the user still gets a (non-clickable)
-		// notification instead of nothing.
+		// hs call failed — most often the hs.ipc bridge isn't loaded (exit 69).
+		// Fall back to a non-clickable osascript banner.
 		o.log.Warn("desktop: hammerspoon notify failed, falling back to osascript", "err", err)
 		o.renderPlain(ctx, n)
 	}
@@ -261,8 +241,6 @@ func shellJoin(argv []string) string {
 func notifyArgv(goos string, n Notification) (name string, args []string, ok bool) {
 	switch goos {
 	case "darwin":
-		// osascript escapes are avoided by passing the script via -e with the text
-		// inlined; AppleScript string quoting is handled by escaping double quotes.
 		script := `display notification ` + appleQuote(n.Body) +
 			` with title ` + appleQuote(n.Title)
 		return "osascript", []string{"-e", script}, true

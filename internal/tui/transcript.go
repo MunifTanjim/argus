@@ -14,14 +14,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
 
-// The transcript viewer renders a Claude Code transcript as a vertical list of
-// chat cards, one per chunk (see claudecode.Chunk): assistant turns are
-// left-aligned bordered cards with a stats header, user turns are right-aligned
-// bubbles, and system/compact events are thin inline rows. A chunk-level cursor
-// selects a card; cards collapse to a "last output" preview and expand to a list
-// of item rows. Selection/expansion are keyed by stable chunk id so they survive
-// the 1s refresh. Full per-item bodies (diffs, tool results) live in the detail
-// drill-down view (detail.go).
+// Transcript viewer: one card per chunk, chunk-level cursor. Selection/expansion
+// are keyed by stable chunk id so they survive the 1s refresh. Full per-item
+// bodies (diffs, tool results) live in the detail drill-down (detail.go).
 
 const (
 	maxContentWidth   = 160 // cap card column width on very wide terminals
@@ -40,9 +35,8 @@ func (m model) containerWidth() int {
 	return w
 }
 
-// renderMD renders markdown at a given wrap width, caching both the per-width
-// renderer and the rendered output (keyed by width+content) so the periodic
-// refresh re-renders only what changed.
+// renderMD renders markdown at a wrap width. Caches both the per-width renderer
+// and the output (keyed by width+content) so the refresh re-renders only changes.
 func (m model) renderMD(text string, width int) string {
 	if width < 10 {
 		width = 10
@@ -73,9 +67,9 @@ func (m model) renderMD(text string, width int) string {
 }
 
 // glamourStyleConfig returns the markdown style for the detected background.
-// It nils Document.Color so body text inherits the terminal's foreground --
-// the bundled dark style hardcodes a light gray that is invisible on light
-// terminals -- and zeroes the document margin so cards aren't over-indented.
+// Nils Document.Color so body text inherits the terminal foreground (the bundled
+// dark style hardcodes a gray invisible on light terminals); zeroes the margin
+// so cards aren't over-indented.
 func glamourStyleConfig(hasDark bool) ansi.StyleConfig {
 	cfg := styles.LightStyleConfig
 	if hasDark {
@@ -203,9 +197,8 @@ func hiddenHint(n int) string {
 // -- Chunk rendering ----------------------------------------------------------
 
 // renderChunk renders one chunk to a styled multi-line block (no centering). The
-// cursor card keeps its selection indicator regardless of focus, but only wears
-// the accent border when the history region is focused (accent), so a focused
-// dock leaves the history visibly un-accented.
+// cursor card keeps its selection indicator regardless of focus but only takes
+// the accent border when the history region is focused.
 func (m model) renderChunk(i int, selected bool) string {
 	c := m.transcript.chunks[i]
 	accent := selected && m.historyFocused()
@@ -490,9 +483,8 @@ func (m model) layoutChunks() (lines []string, first []int) {
 }
 
 // viewportHeight is the line count of the scrollable history region. On the
-// session screen it equals the layout's history height so key-handler scroll
-// math matches what sessionView actually renders; elsewhere it falls back to a
-// fixed margin. sessionLayout must not call viewportHeight (no recursion).
+// session screen it equals the layout's history height so scroll math matches
+// what sessionView renders. NOTE: sessionLayout must not call this (recursion).
 func (m model) viewportHeight() int {
 	if m.mode == modeSession {
 		h, _ := m.sessionLayout()
@@ -511,9 +503,9 @@ func chunkSpan(i int, first []int, total int) (int, int) {
 	return start, end
 }
 
-// selectedChunkOverflow returns the selected chunk's [start,end) line span, the
-// viewport height, and whether the chunk is taller than the viewport. Smart j/k
-// use it to scroll through an oversized card before changing the selection.
+// selectedChunkOverflow returns the selected chunk's [start,end) line span,
+// viewport height, and whether it overflows. j/k scroll an oversized card before
+// moving the selection.
 func (m model) selectedChunkOverflow() (start, end, h int, overflow bool) {
 	lines, first := m.layoutChunks()
 	h = m.viewportHeight()
@@ -566,10 +558,9 @@ func (m model) chunkAtLine(line int) int {
 	return idx
 }
 
-// firstVisibleChunk and lastVisibleChunk return the first and last chunk whose
-// start line falls within the current viewport, falling back to chunkAtLine(scroll)
-// when no chunk starts on screen (a tall chunk fills it). j/k use these to
-// re-anchor selection to the on-screen cards after the user has line-scrolled.
+// firstVisibleChunk/lastVisibleChunk return the first/last chunk starting within
+// the viewport, falling back to chunkAtLine(scroll) when a tall chunk fills it.
+// j/k use these to re-anchor selection after line-scrolling.
 func (m model) firstVisibleChunk() int {
 	_, first := m.layoutChunks()
 	h := m.viewportHeight()
@@ -627,8 +618,8 @@ func (m *model) clampCursor() {
 }
 
 // restoreChunkCursor re-resolves the cursor to the same chunk id after a refresh
-// without moving the viewport (the reading position is preserved). When follow is
-// true the view stays pinned to the bottom so a live session keeps tailing.
+// without moving the viewport. When follow is true the view pins to the bottom so
+// a live session keeps tailing.
 func (m *model) restoreChunkCursor(id string, follow bool) {
 	m.transcript.cursor = -1
 	if id != "" {

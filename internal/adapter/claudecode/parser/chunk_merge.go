@@ -6,17 +6,14 @@ import (
 	"time"
 )
 
-// concurrentTaskDurationThreshold is the maximum plausible duration for a
-// non-Task tool (Bash, Read, Edit, etc.) before we suspect it's inflated by
-// concurrent background Task agents. When the same AI turn contains both
-// Task calls and non-Task calls, Claude Code delays writing tool_result
-// entries until all background agents complete, inflating wall-clock
-// durations for tools that actually finished in seconds.
+// concurrentTaskDurationThreshold: a non-Task tool exceeding this is assumed
+// inflated by concurrent background Task agents. Claude Code delays writing
+// tool_result entries until background agents finish, inflating wall-clock
+// durations for tools that actually completed in seconds.
 const concurrentTaskDurationThreshold int64 = 60_000 // 60 seconds
 
-// extractExpandedPrompt checks whether a classified message is an expanded
-// skill/command prompt — an isMeta=true AI message with only text blocks
-// (no tool_result). Returns the text content, or empty string if not a match.
+// extractExpandedPrompt returns the text of an expanded skill/command prompt
+// (a meta AI message with only text blocks, no tool_result), else "".
 func extractExpandedPrompt(msg ClassifiedMsg) string {
 	ai, ok := msg.(AIMsg)
 	if !ok || !ai.IsMeta || ai.Text == "" {
@@ -36,8 +33,8 @@ type pendingTool struct {
 	timestamp time.Time // tool_use message timestamp
 }
 
-// mergeAIBuffer collapses a buffer of consecutive AI messages into one AI chunk.
-// Populates both flat fields (backward compat) and structured Items.
+// mergeAIBuffer collapses consecutive AI messages into one AI chunk,
+// populating both flat fields (backward compat) and structured Items.
 func mergeAIBuffer(buf []AIMsg) Chunk {
 	var (
 		texts     []string
@@ -52,8 +49,8 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 	pending := make(map[string]pendingTool) // ToolID -> pending info
 	hasBlocks := false
 
-	// Per-message item-start positions, recorded BEFORE the message's blocks
-	// are appended to items. Used to derive InferenceCycle ranges below.
+	// Per-message item-start positions, recorded before appending blocks.
+	// Used to derive InferenceCycle ranges below.
 	itemStarts := make([]int, len(buf))
 
 	for i, m := range buf {
@@ -79,7 +76,6 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		hasBlocks = true
 
 		if !m.IsMeta {
-			// Non-meta messages: create display items from blocks.
 			for _, b := range m.Blocks {
 				switch b.Type {
 				case "thinking":
@@ -128,7 +124,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 				}
 			}
 		} else {
-			// Meta messages: match tool_result blocks and handle teammate blocks.
+			// Meta messages carry tool_result/teammate/memory_load blocks.
 			for _, b := range m.Blocks {
 				switch b.Type {
 				case "tool_result":
@@ -179,7 +175,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		ts = last
 	}
 
-	// Only set Items if we had any blocks to process.
+	// Leave Items nil unless there were blocks to process.
 	var finalItems []DisplayItem
 	if hasBlocks {
 		suppressInflatedDurations(items)
@@ -188,9 +184,9 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 
 	cycles := buildCycles(buf, itemStarts, items)
 
-	// Usage snapshot: last non-meta assistant message's usage. The Claude API
-	// reports input_tokens as the full context window per call, so the last
-	// call is the correct per-turn metric (not the sum across round trips).
+	// Usage snapshot: last non-meta message's usage. The Claude API reports
+	// input_tokens as the full context window per call, so the last call is
+	// the correct per-turn metric (not the sum across round trips).
 	var usage Usage
 	for i := len(buf) - 1; i >= 0; i-- {
 		if !buf[i].IsMeta && buf[i].Usage.TotalTokens() > 0 {
@@ -214,15 +210,10 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 	}
 }
 
-// buildCycles derives one InferenceCycle per non-meta AIMsg. Each cycle's
-// item range starts where its source message began appending and ends where
-// the next non-meta message began (or at len(items) for the last cycle).
-// Duration is the wall-clock gap to the next non-meta message, or to the
-// final buffer timestamp for the last cycle.
-//
-// Returns nil when buf has no non-meta messages (rare: meta-only chunks).
+// buildCycles derives one InferenceCycle per non-meta AIMsg, each spanning
+// from its message's item-start to the next non-meta message's (or len(items)).
+// Returns nil for meta-only buffers (rare).
 func buildCycles(buf []AIMsg, itemStarts []int, items []DisplayItem) []InferenceCycle {
-	// Indices of non-meta messages, in order.
 	nonMeta := make([]int, 0, len(buf))
 	for i, m := range buf {
 		if !m.IsMeta {
@@ -278,22 +269,12 @@ func buildCycles(buf []AIMsg, itemStarts []int, items []DisplayItem) []Inference
 	return cycles
 }
 
-// suppressInflatedDurations zeroes out non-Task tool durations that are
-// inflated by concurrent background Task agents in the same AI turn.
-//
-// When Claude Code runs Bash/Read/Edit alongside background Task calls,
-// the tool_result entry timestamps reflect wall-clock time (including the
-// wait for agents to complete), not the tool's actual execution time.
-// A git push that takes 3 seconds can show as 11 minutes.
-//
-// Heuristic: if the turn contains at least one Task (ItemSubagent) AND a
-// non-Task tool exceeds concurrentTaskDurationThreshold, the non-Task
-// duration is unreliable. Zero it to suppress display.
+// suppressInflatedDurations zeroes non-Task tool durations inflated by
+// concurrent background Task agents (see concurrentTaskDurationThreshold).
+// A 3-second git push can otherwise show as 11 minutes.
 func suppressInflatedDurations(items []DisplayItem) {
-	// Find the maximum subagent duration in this turn. Only suppress when
-	// a subagent itself ran long enough to plausibly inflate sibling durations.
-	// A short-lived subagent (e.g. a non-fork Skill completing in 200ms)
-	// can't cause inflation.
+	// Only suppress when a subagent ran long enough to plausibly inflate
+	// siblings; a 200ms Skill can't cause inflation.
 	var maxTaskDur int64
 	for i := range items {
 		if items[i].Type == ItemSubagent && items[i].DurationMs > maxTaskDur {
@@ -304,8 +285,8 @@ func suppressInflatedDurations(items []DisplayItem) {
 		return
 	}
 
-	// Zero out non-subagent tools whose duration exceeds the threshold,
-	// suggesting they waited for the same background work.
+	// Zero non-subagent tools over the threshold; they likely waited on the
+	// same background work.
 	for i := range items {
 		if items[i].Type == ItemSubagent || items[i].Type == ItemTeammateMessage {
 			continue
@@ -332,12 +313,12 @@ func extractSubagentInfo(input json.RawMessage) subagentInfo {
 
 	var info subagentInfo
 
-	// Inner unmarshal errors are intentionally ignored — these are optional string
-	// fields and "" is the correct default when absent or non-string.
+	// Inner unmarshal errors are ignored: these are optional string fields and
+	// "" is the right default when absent or non-string.
 	if raw, ok := fields["subagent_type"]; ok {
 		json.Unmarshal(raw, &info.Type)
 	}
-	// Try "description" first, then "prompt" as fallback.
+	// "description" first, then "prompt" as fallback.
 	if raw, ok := fields["description"]; ok {
 		json.Unmarshal(raw, &info.Description)
 	}

@@ -901,9 +901,8 @@ func TestBuildChunks_CompactChunkFlushesAIBuffer(t *testing.T) {
 }
 
 // --- Usage snapshot tests ---
-// The Claude API reports input_tokens as the full context window per API call,
-// not incremental. Chunk.Usage should reflect the last assistant message's
-// usage (a context-window snapshot), not the sum of all messages.
+// input_tokens is a per-call context-window snapshot, not incremental, so
+// Chunk.Usage takes the last assistant message's usage rather than a sum.
 
 func TestBuildChunks_UsageLastAssistantSnapshot(t *testing.T) {
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
@@ -1076,9 +1075,8 @@ func TestBuildChunks_ItemTokenCountMultipleTools(t *testing.T) {
 // --- Concurrent Task duration suppression ---
 
 func TestBuildChunks_ConcurrentTaskDuration(t *testing.T) {
-	// When a Bash tool_use coexists with a background Task in the same AI
-	// turn, the Bash tool_result timestamp is delayed by the Task's runtime.
-	// The Bash DurationMs should be zeroed to suppress the misleading display.
+	// A concurrent background Task inflates the Bash tool_result timestamp, so
+	// Bash DurationMs is zeroed to avoid showing a misleading duration.
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	bashResult := t0.Add(11 * time.Minute) // inflated: waited for Task agents
 	taskResult := t0.Add(11 * time.Minute)

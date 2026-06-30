@@ -5,14 +5,13 @@ import (
 	"strings"
 )
 
-// The chunk model is argus's stable, display-ready view of a transcript: it is
-// what the node ships over RPC and what the TUI renders. The actual JSONL
-// parsing is delegated to the vendored `parser` package and mapped into these
-// types by transcript.go, so this boundary stays fixed even if the parser changes.
+// The chunk model is argus's stable, display-ready view of a transcript, shipped
+// over RPC and rendered by the TUI. transcript.go maps the vendored parser's
+// output into these types, so this boundary stays fixed if the parser changes.
 
-// Usage is a per-call context-window snapshot. The Claude API reports
-// input_tokens as the full prompt size per call, so Context() (input + cache) is
-// the right per-turn context metric, not a sum across round trips.
+// Usage is a per-call context-window snapshot. The API reports input_tokens as
+// the full prompt size per call, so Context() (input + cache) is the per-turn
+// context metric, not a sum across round trips.
 type Usage struct {
 	Input         int `json:"input,omitempty"`
 	Output        int `json:"output,omitempty"`
@@ -71,12 +70,9 @@ type Item struct {
 	Trace        []Chunk `json:"trace,omitempty"`    // subagent execution trace (inline; history only)
 }
 
-// MarshalJSON omits the heavy ToolInput and Result bodies from the wire form:
-// transcript chunks ship with only the truncated InputPreview (and ToolID), and
-// clients fetch a tool's full input/result on demand via the sessions.toolDetail
-// RPC. The in-memory Item keeps both fields (node-side summary/lookup use them);
-// only serialization drops them. Applies on every send path because all Item
-// serialization — including inlined subagent traces — goes through here.
+// MarshalJSON drops the heavy ToolInput/Result bodies from the wire form; clients
+// fetch them on demand via sessions.toolDetail. The in-memory Item keeps both
+// fields for node-side summary/lookup. All Item serialization goes through here.
 func (it Item) MarshalJSON() ([]byte, error) {
 	type alias Item // avoid recursing into MarshalJSON
 	a := alias(it)
@@ -120,8 +116,8 @@ type TranscriptView struct {
 	Chunks []Chunk `json:"chunks"`
 }
 
-// LastOutput returns the most meaningful trailing item of an AI chunk for a
-// collapsed preview: the last text output, else the last tool call/result.
+// LastOutput returns the trailing item of an AI chunk for a collapsed preview:
+// the last text output, else the last tool call/result.
 func (c Chunk) LastOutput() (Item, bool) {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		if c.Items[i].Kind == ItemText && strings.TrimSpace(c.Items[i].Text) != "" {
@@ -136,10 +132,9 @@ func (c Chunk) LastOutput() (Item, bool) {
 	return Item{}, false
 }
 
-// MarshalJSON stamps previewItemId — the id of the chunk's preview item per
-// LastOutput — so clients render the collapsed preview from a server-chosen item
-// instead of re-deriving it. Applies to every send path (list, stream, subagent
-// traces) because all Chunk serialization goes through here.
+// MarshalJSON stamps previewItemId (LastOutput's id) so clients render the
+// collapsed preview from a server-chosen item instead of re-deriving it. All
+// Chunk serialization goes through here.
 func (c Chunk) MarshalJSON() ([]byte, error) {
 	type alias Chunk // avoid recursing into MarshalJSON
 	out := struct {

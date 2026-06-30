@@ -10,8 +10,8 @@ import (
 )
 
 // SubagentProcess holds a parsed subagent and its computed metadata.
-// Discovery fills ID, FilePath, Chunks, timing, usage, and Model.
-// LinkSubagents fills Description, SubagentType, and ParentTaskID.
+// Discovery fills timing/usage/Model; LinkSubagents fills Description,
+// SubagentType, and ParentTaskID.
 type SubagentProcess struct {
 	ID            string    // agentId from filename (agent-{id}.jsonl)
 	FilePath      string    // full path to subagent JSONL file
@@ -29,18 +29,8 @@ type SubagentProcess struct {
 	TeammateColor string // color attr from first <teammate-message> (team agents only)
 }
 
-// DiscoverSubagents finds and parses subagent files for a session.
-//
-// Takes the full path to a session JSONL file (e.g.
-// ~/.claude/projects/{projectId}/{sessionUUID}.jsonl) and derives the
-// subagents directory: {sessionDir}/{sessionUUID}/subagents/
-//
-// Filters out:
-//   - Empty files
-//   - Warmup agents (first user message content is exactly "Warmup")
-//   - Compact agents (agentId starts with "acompact")
-//
-// Returns parsed SubagentProcesses sorted by StartTime.
+// DiscoverSubagents parses subagent files under {sessionDir}/{sessionUUID}/subagents/,
+// skipping empty files, warmup agents, and compact agents. Result is sorted by StartTime.
 func DiscoverSubagents(sessionPath string) ([]SubagentProcess, error) {
 	dir := filepath.Dir(sessionPath)
 	base := strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
@@ -68,28 +58,22 @@ func DiscoverSubagents(sessionPath string) ([]SubagentProcess, error) {
 		agentID := strings.TrimPrefix(name, "agent-")
 		agentID = strings.TrimSuffix(agentID, ".jsonl")
 
-		// Filter compact agents (context compaction artifacts).
+		// Compact agents are context-compaction artifacts, not real subagents.
 		if strings.HasPrefix(agentID, "acompact") {
 			continue
 		}
 
 		filePath := filepath.Join(subagentsDir, name)
 
-		// Filter empty files.
 		info, err := de.Info()
 		if err != nil || info.Size() == 0 {
 			continue
 		}
 
-		// Filter warmup agents by checking first user message content.
 		if isWarmupAgent(filePath) {
 			continue
 		}
 
-		// Parse through the pipeline with sidechain filtering disabled.
-		// Subagent entries all have isSidechain=true (they run in the
-		// parent's sidechain context), but within the subagent file
-		// they're the main conversation.
 		chunks, teamSummary, teamColor, err := readSubagentSession(filePath)
 		if err != nil || len(chunks) == 0 {
 			continue
@@ -120,9 +104,8 @@ func DiscoverSubagents(sessionPath string) ([]SubagentProcess, error) {
 	return procs, nil
 }
 
-// isWarmupAgent reads just enough of a subagent file to check if the first
-// user message content is exactly "Warmup". Matches claude-devtools behavior:
-// the first entry with type=user and string content "Warmup" marks a warmup agent.
+// isWarmupAgent reports whether the first user message content is exactly
+// "Warmup". Matches claude-devtools behavior for marking warmup agents.
 func isWarmupAgent(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -130,9 +113,6 @@ func isWarmupAgent(path string) bool {
 	}
 	defer f.Close()
 
-	// Read just enough to find the first user entry. Subagent files are
-	// small-ish and the first entry is almost always the user message,
-	// so scanning a few lines is fine.
 	lr := newLineReader(f)
 	for {
 		line, ok := lr.next()
@@ -151,7 +131,7 @@ func isWarmupAgent(path string) bool {
 			continue
 		}
 
-		// Extract message.content -- could be a JSON string or array.
+		// content may be a JSON string or array; only string "Warmup" counts.
 		var msg struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -159,7 +139,6 @@ func isWarmupAgent(path string) bool {
 			return false
 		}
 
-		// Only string content "Warmup" counts.
 		var content string
 		if err := json.Unmarshal(msg.Content, &content); err != nil {
 			return false
@@ -188,13 +167,10 @@ func chunkTiming(chunks []Chunk) (start, end time.Time, durationMs int64) {
 	return
 }
 
-// readSubagentSession reads a subagent JSONL file and returns chunks plus
-// team metadata (summary and color). Both are extracted from the raw entry
-// content before Classify strips the XML tag attributes.
-//
-// Unlike ReadSession, it ignores the isSidechain flag since all entries
-// in subagent files are marked isSidechain=true but represent the
-// subagent's own main conversation.
+// readSubagentSession reads a subagent JSONL file, returning chunks plus team
+// summary/color (extracted before Classify strips XML attrs). Unlike ReadSession
+// it ignores isSidechain: subagent entries are all flagged isSidechain=true but
+// represent the subagent's own main conversation.
 func readSubagentSession(path string) ([]Chunk, string, string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -217,8 +193,8 @@ func readSubagentSession(path string) ([]Chunk, string, string, error) {
 			continue
 		}
 
-		// Extract team summary and color from the first user entry's
-		// <teammate-message> tag before Classify strips the XML attributes.
+		// Pull team summary/color from the first user entry's <teammate-message>
+		// tag before Classify strips the XML attributes.
 		if !extractedTeamMeta && entry.Type == "user" {
 			var contentStr string
 			if json.Unmarshal(entry.Message.Content, &contentStr) == nil {
@@ -257,9 +233,8 @@ func extractModel(chunks []Chunk) string {
 	return ""
 }
 
-// aggregateUsage returns the last AI chunk's usage snapshot. Each chunk already
-// holds the last assistant message's context-window snapshot, so the final
-// chunk's snapshot represents the subagent's context state at completion.
+// aggregateUsage returns the last non-zero AI chunk usage snapshot — the
+// subagent's context state at completion.
 func aggregateUsage(chunks []Chunk) Usage {
 	for i := len(chunks) - 1; i >= 0; i-- {
 		if chunks[i].Type == AIChunk && chunks[i].Usage.TotalTokens() > 0 {

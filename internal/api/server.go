@@ -19,8 +19,7 @@ type Notifier interface {
 }
 
 // Server dispatches JSON-RPC requests and streams notifications to clients. Each
-// accepted connection becomes a Peer whose inbound requests are routed through
-// the shared handler registry.
+// accepted connection becomes a Peer routed through the shared handler registry.
 type Server struct {
 	mu        sync.RWMutex
 	handlers  map[string]HandlerFunc
@@ -33,8 +32,8 @@ func NewServer() *Server {
 	return &Server{handlers: make(map[string]HandlerFunc)}
 }
 
-// SetLogger enables per-request logging through l (nil disables it). Each dispatched
-// request is logged once on completion with its method, duration, and error (if any).
+// SetLogger enables per-request logging through l (nil disables it). Each request
+// is logged once on completion (method, duration, error).
 func (s *Server) SetLogger(l *slog.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,16 +66,14 @@ func (s *Server) Serve(l net.Listener) error {
 	}
 }
 
-// ServeConn serves a single already-established connection until it closes. It is
-// exported so non-listener transports (e.g. an accepted WebSocket adapted to a
-// net.Conn) can reuse the same dispatch path.
+// ServeConn serves a single established connection until it closes. Exported so
+// non-listener transports (e.g. a WebSocket adapted to net.Conn) reuse the dispatch path.
 func (s *Server) ServeConn(netConn net.Conn) {
 	s.ServeConnContext(context.Background(), netConn)
 }
 
 // ServeConnContext is ServeConn with a connection-scoped base context, whose
-// values (e.g. an auth Principal set by the WebSocket handler) reach every
-// request served on the connection.
+// values (e.g. an auth Principal) reach every request served on the connection.
 func (s *Server) ServeConnContext(ctx context.Context, netConn net.Conn) {
 	peer := NewPeer(netConn, PeerOptions{Dispatch: s.dispatch, BaseContext: ctx})
 	defer peer.Close()
@@ -92,9 +89,8 @@ func (s *Server) ServeConnContext(ctx context.Context, netConn net.Conn) {
 	<-peer.Done()
 }
 
-// DispatchFunc returns a DispatchFunc bound to this server's handler registry,
-// so the same handlers can be served over a non-listener transport (e.g. the
-// node's gateway uplink, where the gateway issues control requests down the link).
+// DispatchFunc returns a DispatchFunc bound to this server's handler registry, so
+// the same handlers serve over a non-listener transport (e.g. the node's gateway uplink).
 func (s *Server) DispatchFunc() DispatchFunc { return s.dispatch }
 
 // dispatch routes an inbound request to the registered handler, or returns a

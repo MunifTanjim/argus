@@ -9,21 +9,16 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// Watch consumes a registry/aggregator event stream and dispatches a notification
-// each time a session transitions into StatusAwaitingInput — the moment it starts
-// blocking on the user (permission prompt, question, plan, or finished turn). It
-// fires only on the transition, not on every update, so a waiting session is
+// Watch dispatches a notification each time a session transitions into
+// StatusAwaitingInput. It fires only on the transition, so a waiting session is
 // announced once.
 //
-// Replay events (snapshots the aggregator emits when a source connects or
-// reconnects) only record the session's status; they never notify. This is what
-// keeps a gateway restart or node reconnect from re-announcing every already-
-// waiting session: the status map is rebuilt from the replay without firing, so
-// only genuine live transitions afterward notify.
+// Replay events (snapshots emitted on source connect/reconnect) only record
+// status, never notify — this keeps a gateway restart or node reconnect from
+// re-announcing every already-waiting session.
 //
-// Watch runs until ctx is cancelled or the stream closes; callers pass the
-// channel/cancel from Aggregator.Subscribe so the push package stays decoupled
-// from the gateway (no import cycle).
+// Runs until ctx is cancelled or the stream closes. Takes the channel as a param
+// (rather than importing the aggregator) to avoid an import cycle.
 func Watch(ctx context.Context, events <-chan registry.Event, sinks []Sink, log *slog.Logger) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -43,8 +38,7 @@ func Watch(ctx context.Context, events <-chan registry.Event, sinks []Sink, log 
 				continue
 			}
 			if ev.Replay {
-				// A snapshot re-stating existing state: record it so the live
-				// transition that put the session here isn't replayed as new.
+				// Record without firing so the original live transition isn't replayed as new.
 				prev[s.ID] = s.Status
 				continue
 			}
@@ -62,8 +56,8 @@ func Watch(ctx context.Context, events <-chan registry.Event, sinks []Sink, log 
 	}
 }
 
-// notificationFor renders a session's pending interaction into a user-facing
-// notification, with session_id (and node_id) in Data for deep-linking on tap.
+// notificationFor renders a session's pending interaction into a notification,
+// with session_id (and node_id) in Data for deep-linking on tap.
 func notificationFor(s session.Session) Notification {
 	title := s.Repo
 	if title == "" {

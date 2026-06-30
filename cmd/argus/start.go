@@ -25,16 +25,15 @@ import (
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
-// uplinkMode reports whether this node dials an upstream gateway (it then does
-// not listen). gatewayMode reports whether this node serves as a gateway: it has
-// no upstream and a token to require from incoming connections. A node with
-// neither is a local node (unix socket only).
+// uplinkMode reports whether this node dials an upstream gateway (then it doesn't
+// listen). gatewayMode reports whether it serves as a gateway (no upstream, a token to
+// require). Neither = a local node (unix socket only).
 func uplinkMode(cfg *config.Config) bool  { return cfg.Gateway.URL != "" }
 func gatewayMode(cfg *config.Config) bool { return cfg.Gateway.URL == "" && cfg.Token != "" }
 
-// newStartCmd builds `argus start`: it runs the local node (discovery + tmux
-// control + the unix-socket API that `argus hook` and a local TUI use), and
-// optionally serves as a gateway (no --gateway + token set) or connects to one (--gateway).
+// newStartCmd builds `argus start`: runs the local node (discovery + tmux control + the
+// unix-socket API), and optionally serves as a gateway (no --gateway + token set) or
+// connects to one (--gateway).
 func newStartCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "start",
@@ -71,9 +70,8 @@ func newStartCmd(version string) *cobra.Command {
 			d := node.New()
 			d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 			d.SetVersion(version)
-			// Standalone node: operational logs go to the configured logger (the embedded
-			// node, which shares a TUI's terminal, leaves logging at its discard default).
-			// The tunnel supervisor gets its own scope so its output lands in the same stream.
+			// Standalone node logs to the configured logger (the embedded node, sharing a
+			// TUI's terminal, stays at its discard default).
 			d.SetLogger(logger.Scoped("node").L)
 			clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
 			d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
@@ -81,9 +79,9 @@ func newStartCmd(version string) *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			// A locally-managed Cloudflare tunnel needs an origin certificate; run the
-			// interactive `cloudflared tunnel login` for the user when on a terminal, else
-			// fail fast. No-op for quick/remote tunnels and when already logged in.
+			// A locally-managed Cloudflare tunnel needs an origin cert: run interactive
+			// `cloudflared tunnel login` when on a terminal, else fail fast. No-op
+			// otherwise.
 			if cf, ok := tun.(tunnel.Cloudflare); ok {
 				if err := ensureCloudflareLogin(ctx, cf, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
 					return fail(cmd, err)
@@ -96,19 +94,17 @@ func newStartCmd(version string) *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			// Set when a background subsystem fails fatally and brings the node down;
-			// read after d.Run so the process exits non-zero (it already cancelled ctx).
+			// Set when a background subsystem fails fatally; read after d.Run so the
+			// process exits non-zero.
 			var nodeFailed atomic.Bool
 			httpSrv := serveGateway(ctx, cfg, d, tun, tunOrigin, stop, &nodeFailed)
 
-			// Plain local node (no gateway, no uplink): nothing upstream drives desktop
-			// notifications, so run a local Watch over our own registry that renders
-			// directly. Gateway mode reaches the co-located node via Fanout; uplink mode
-			// is driven by the remote gateway's push.desktop RPC.
+			// Plain local node: nothing upstream drives desktop notifications, so run a
+			// local Watch over our own registry. (Gateway mode reaches the node via
+			// Fanout; uplink mode via the gateway's push.desktop RPC.)
 			if cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !gatewayMode(cfg) {
 				events, cancel := d.Registry().Subscribe()
-				// Render through the node's focus-aware sink (same path as gateway-pushed
-				// notifications): it suppresses alerts for a session already on screen.
+				// Focus-aware sink: suppresses alerts for a session already on screen.
 				go func() {
 					defer cancel()
 					push.Watch(ctx, events, []push.Sink{d.DesktopSink()}, logger.Scoped("push").L)
@@ -132,8 +128,8 @@ func newStartCmd(version string) *cobra.Command {
 		},
 	}
 
-	// Flags default to zero values; real defaults come from config (viper), so a flag
-	// only overrides config/env when actually set. See resolveConfig / config.Load.
+	// Flags default to zero; real defaults come from config (viper), so a flag only
+	// overrides when set. See resolveConfig.
 	f := cmd.Flags()
 	f.String("socket", "", "unix socket path for the local JSON-RPC API (default: XDG runtime path)")
 	f.String("id", "", "stable node id announced to a gateway (default: hostname)")
@@ -155,10 +151,9 @@ func newStartCmd(version string) *cobra.Command {
 	return cmd
 }
 
-// gatewayBaseURL is a best-effort reachable base URL (scheme://host[:port], no
-// path) for this gateway, used as the pairing-QR default before a tunnel URL is
-// known. Falls back to the local hostname when the listener binds all interfaces;
-// `argus pair --url` overrides it when this guess is wrong.
+// gatewayBaseURL is a best-effort reachable base URL for this gateway, the pairing-QR
+// default before a tunnel URL is known. Falls back to the hostname when the listener
+// binds all interfaces; `argus pair --url` overrides a wrong guess.
 func gatewayBaseURL(cfg *config.Config) string {
 	if cfg.Gateway.URL != "" {
 		return cfg.Gateway.URL
@@ -187,8 +182,8 @@ func tokenAuth(want string) func(string) bool {
 	return func(got string) bool { return got == want }
 }
 
-// setupLogger resolves the log level/format from config and installs the global logger,
-// before anything logs. config.LogLevel is a *slog.LevelVar the handler reads live.
+// setupLogger resolves log level/format from config and installs the global logger
+// before anything logs.
 func setupLogger(cfg *config.Config) error {
 	if err := applyLogLevel(cfg); err != nil {
 		return err
@@ -198,10 +193,9 @@ func setupLogger(cfg *config.Config) error {
 	return nil
 }
 
-// applyLogLevel resolves cfg.Log.Level into the global config.LogLevel var WITHOUT
-// installing the global stderr handler (logger.Init). The TUI uses this so the
-// embedded node's buffered logger honors the configured level while leaving stderr
-// untouched — installing the stderr handler would corrupt the TUI's alt-screen.
+// applyLogLevel sets the global config.LogLevel WITHOUT installing the stderr handler
+// (logger.Init). The TUI uses this so the embedded node honors the level while leaving
+// stderr untouched — the stderr handler would corrupt the alt-screen.
 func applyLogLevel(cfg *config.Config) error {
 	var lvl applog.Level
 	if err := lvl.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
@@ -211,9 +205,9 @@ func applyLogLevel(cfg *config.Config) error {
 	return nil
 }
 
-// reconcileInstalledHooks keeps already-installed Claude Code hooks in sync with this
-// binary's event set, so a newly added hook takes effect without a manual reinstall.
-// Best-effort: a no-op if hooks were never installed, and failures are logged, not fatal.
+// reconcileInstalledHooks syncs already-installed Claude Code hooks with this binary's
+// event set, so a new hook takes effect without a manual reinstall. Best-effort: no-op
+// if never installed, failures logged not fatal.
 func reconcileInstalledHooks() {
 	log := logger.Scoped("hooks")
 	if added, err := claudecode.ReconcileIfInstalled(detectArgusBin()); err != nil {
@@ -223,8 +217,8 @@ func reconcileInstalledHooks() {
 	}
 }
 
-// connectGateway dials an upstream gateway in the background when one is configured, so
-// the node enrolls itself as a source. A no-op when no --gateway is set.
+// connectGateway dials an upstream gateway in the background to enroll the node as a
+// source. No-op when no --gateway is set.
 func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error {
 	if !uplinkMode(cfg) {
 		return nil
@@ -237,10 +231,9 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	return nil
 }
 
-// setupPush wires device push notifications (gateway mode): a device target store
-// behind push.register/unregister, a Web Push (UnifiedPush) sender signing with a
-// self-generated VAPID key, and a watcher that notifies registered devices when a
-// session needs the user. The watcher stops when ctx is cancelled.
+// setupPush wires device push notifications (gateway mode): a token store, a Web Push
+// (UnifiedPush) sender signing with a self-generated VAPID key, and a watcher that
+// notifies registered devices when a session needs the user.
 func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server) {
 	log := logger.Scoped("push")
 	store := push.NewStore(config.GetStatePath("push-tokens"))
@@ -263,11 +256,10 @@ func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Serve
 	}()
 }
 
-// serveGateway starts the co-located gateway in gateway mode (no --gateway + token set):
-// it aggregates the local node (in-process) plus nodes that dial in, serves clients over
-// WebSocket, and supervises the optional outbound tunnel. It returns the *http.Server
-// (nil when not in gateway mode) for the caller to shut down. A fatal listener/tunnel
-// error sets nodeFailed and calls stop.
+// serveGateway starts the co-located gateway (gateway mode only): aggregates the local
+// node plus dialed-in nodes, serves clients over WebSocket, supervises the optional
+// tunnel. Returns the *http.Server (nil when not in gateway mode) to shut down. A fatal
+// listener/tunnel error sets nodeFailed and calls stop.
 func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tunnel.Provider, tunOrigin string, stop context.CancelFunc, nodeFailed *atomic.Bool) *http.Server {
 	if !gatewayMode(cfg) {
 		return nil

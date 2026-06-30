@@ -11,16 +11,14 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 )
 
-// The detail drill-down view is a navigable, drill-in panel over a transcript
-// chunk. A frame stack (detailStack) holds the drill path: the root frame lists an
-// AI turn's items; drilling into a subagent pushes a frame listing its trace's
-// items; drilling into any item focuses it. A row cursor moves between items,
-// space expands/collapses an item inline, enter drills, and esc pops (returning to
-// the card list at the root). Non-AI chunks render as a simple scrolled body.
+// The detail drill-down: a frame stack (detailStack) over a transcript chunk. The
+// root frame lists an AI turn's items; drilling into a subagent pushes a frame of
+// its trace; drilling into any item focuses it. Non-AI chunks render as a scrolled
+// body.
 
-// detailFrame is one level of the detail drill stack: a navigable list of items
-// (an AI chunk's items, a subagent's flattened trace, or a single focused item),
-// or a pre-rendered body for non-AI chunks.
+// detailFrame is one level of the drill stack: a navigable item list (an AI
+// chunk's items, a subagent's flattened trace, or a single focused item) or a
+// pre-rendered body for non-AI chunks.
 type detailFrame struct {
 	label           string            // breadcrumb segment
 	subID           string            // subscription backing this frame (streamed subagent frames only)
@@ -48,10 +46,9 @@ func (f *detailFrame) toggle(i int) {
 	f.expanded[i] = !f.isExpanded(i)
 }
 
-// expandOutputs pre-expands the frame's Output (text) items so a subagent's
-// final output shows without a manual unfold, matching the root AI frame. Only
-// items without an existing override are touched, so it's safe to re-run as a
-// streamed trace grows (it won't re-expand an item the user collapsed).
+// expandOutputs pre-expands the frame's Output (text) items so final output shows
+// without a manual unfold. Only items without an existing override are touched, so
+// it's safe to re-run as a streamed trace grows (won't re-expand a user-collapsed item).
 func (f *detailFrame) expandOutputs() {
 	if f.expanded == nil {
 		f.expanded = map[int]bool{}
@@ -84,8 +81,7 @@ func flattenTrace(chunks []claudecode.Chunk) []claudecode.Item {
 	return items
 }
 
-// drillable reports whether entering an item opens a meaningful sub-trace (a
-// subagent with a known trace, either inlined or streamable).
+// drillable reports whether entering an item opens a meaningful sub-trace.
 func drillable(it claudecode.Item) bool {
 	return it.Kind == claudecode.ItemSubagent && it.HasTrace
 }
@@ -142,8 +138,8 @@ func (m *model) drillDetail() {
 		nf.label = subagentLabel(it)
 		nf.items = flattenTrace(it.Trace)
 		nf.defaultExpanded = false // children start collapsed
-		nf.agentID = it.AgentID    // the trace's items belong to this subagent
-		nf.expandOutputs()         // but pre-expand the subagent's Output items
+		nf.agentID = it.AgentID
+		nf.expandOutputs() // but pre-expand the subagent's Output items
 	} else {
 		nf.label = drillLabel(it)
 		nf.items = []claudecode.Item{it}
@@ -183,8 +179,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// detailTable maps detail-view bindings to their actions (see keys.go). Each
-// action mutates the top frame (a pointer into the shared detailStack backing).
+// detailTable maps detail-view bindings to actions. Each action mutates the top
+// frame (a pointer into the shared detailStack backing).
 var detailTable = []keyTableEntry{
 	{detailKeys.Down, model.actDetailDown},
 	{detailKeys.Up, model.actDetailUp},
@@ -199,8 +195,8 @@ var detailTable = []keyTableEntry{
 func (m model) actDetailDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := m.topFrame()
 	if f.items != nil {
-		// Scroll line-by-line through a cursor item taller than the viewport
-		// before advancing to the next item, so long bodies stay reachable.
+		// Scroll within a cursor item taller than the viewport before advancing,
+		// so long bodies stay reachable.
 		if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
 			f.scroll++
 		} else {
@@ -229,9 +225,8 @@ func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // cursorOverflow reports whether the cursor item is taller than the visible
-// content height h, returning h and the item's [start,end) line range. The
-// height matches detailBody's content area (breadcrumb + scroll indicator
-// reserved), so it agrees with ensureDetailVisible.
+// height h, returning h and the item's [start,end) line range. h matches
+// detailBody's content area so it agrees with ensureDetailVisible.
 func (m model) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
 	_, start, end = m.frameLines(f, m.containerWidth())
 	h = max(1, m.viewportHeight()-3)
@@ -244,7 +239,7 @@ func (m model) actDetailFold(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.toggle(f.cursor)
 		m.ensureDetailVisible()
 		if f.isExpanded(f.cursor) {
-			// Expanding a tool reveals its body; fetch it on demand.
+			// Expanding a tool reveals its body; fetch on demand.
 			return m, m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
 		}
 	}
@@ -267,18 +262,17 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	it := f.items[f.cursor]
 	if it.Kind == claudecode.ItemSubagent && it.HasTrace && len(it.Trace) == 0 && it.AgentID != "" {
 		if m.mode == modeHistoryTranscript {
-			// Past session: one-shot fetch the nested subagent transcript
-			// (history has no live subscription).
+			// Past session: one-shot fetch (no live subscription).
 			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 				label: subagentLabel(it), agentID: it.AgentID, expanded: map[int]bool{},
 			})
 			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, it.AgentID)
 		}
-		// Live session: stream the subagent trace into a new frame.
-		// Stash the current session subRef so we can restore it without a leak on pop.
+		// Live session: stream the subagent trace into a new frame. Stash the
+		// session subRef so pop can restore it without a leak.
 		m.sessionSub = m.activeSub
 		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: it.AgentID}
-		m.activeSub = ref // subagent stream becomes the active subscription while drilled in
+		m.activeSub = ref // subagent stream is active while drilled in
 		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},
 		})
@@ -286,7 +280,7 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.subscribeCmd(ref, have)
 	}
 	m.drillDetail() // inline (history) or focus a leaf item
-	// Focusing a tool leaf shows its body expanded; fetch it on demand.
+	// Focusing a tool leaf shows its body expanded; fetch on demand.
 	if nf := m.topFrame(); nf != nil && nf.focused && len(nf.items) == 1 {
 		return m, m.fetchToolBodyCmd(nf.items[0], nf.agentID)
 	}
@@ -389,9 +383,8 @@ func scrollHint(above, below, width int) string {
 		Align(lipgloss.Right).Render(txt)
 }
 
-// detailBody renders the active frame: a breadcrumb line, then the item list
-// sliced to the viewport (a row reserved for the scroll indicator on overflow),
-// centered to align with the transcript.
+// detailBody renders the active frame: breadcrumb + item list sliced to the
+// viewport (a row reserved for the scroll indicator on overflow), centered.
 func (m model) detailBody() string {
 	cw, tw := m.containerWidth(), m.width
 	f := m.topFrame()
@@ -421,8 +414,8 @@ func (m model) detailBody() string {
 	return centerBlock(prefix+body+"\n"+hint, cw, tw)
 }
 
-// renderDetail renders a non-AI chunk's body for a root detail frame. (AI chunks
-// are navigated as item frames, not rendered through here.)
+// renderDetail renders a non-AI chunk's body for a root frame. (AI chunks are
+// navigated as item frames instead.)
 func (m model) renderDetail(c claudecode.Chunk) string {
 	width := m.containerWidth()
 	switch c.Kind {
@@ -438,8 +431,8 @@ func (m model) renderDetail(c claudecode.Chunk) string {
 	}
 }
 
-// detailRowBlock renders one item for a frame: collapsed (one-line summary) or
-// expanded (full body), with the accent rule brightened when selected.
+// detailRowBlock renders one item: collapsed (one-line summary) or expanded (full
+// body), accent rule brightened when selected.
 func (m model) detailRowBlock(it claudecode.Item, expanded, selected bool, width int) string {
 	c := itemAccentColor(it)
 	bar := GlyphAccentBar
@@ -454,19 +447,18 @@ func (m model) detailRowBlock(it claudecode.Item, expanded, selected bool, width
 	if drillable(it) {
 		row += "  " + StyleDim.Render("↵")
 	}
-	// Keep the collapsed row to one line within the frame (the gutter eats 2 cols).
+	// One line; the gutter eats 2 cols.
 	return accentBlock(truncateLine(row, max(width-2, 10)), c, bar)
 }
 
-// truncateLine caps a styled string to width columns on a single line (ANSI-aware,
-// no wrapping).
+// truncateLine caps a styled string to width columns on one line (ANSI-aware).
 func truncateLine(s string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(s)
 }
 
 // detailItemBody renders an item's expanded body under an accent rule of color c.
-// The "┃ " gutter provides the indent, so the inner width is width-2. Subagents
-// show a header + drill hint (the trace is reached by drilling in, not inlined).
+// The "┃ " gutter eats 2 cols, so inner width is width-2. Subagents show a header
+// + drill hint (the trace is reached by drilling in, not inlined).
 func (m model) detailItemBody(it claudecode.Item, c color.Color, bar string, width int) string {
 	iw := max(width-2, 10)
 	switch it.Kind {
@@ -504,8 +496,7 @@ func (m model) detailItemBody(it claudecode.Item, c color.Color, bar string, wid
 	}
 }
 
-// joinItem joins an item header and body, omitting the separator when the body is
-// empty.
+// joinItem joins header and body, omitting the separator when body is empty.
 func joinItem(head, body string) string {
 	if body == "" {
 		return head
@@ -513,10 +504,9 @@ func joinItem(head, body string) string {
 	return head + "\n" + body
 }
 
-// toolBody renders a tool's input/result, using a per-tool renderer when one
-// exists and a readable generic Input/Result layout otherwise. The heavy bodies
-// (ToolInput/Result) are stripped from the wire and fetched on demand, so fill
-// them from the cache here; while a fetch is outstanding, show a placeholder.
+// toolBody renders a tool's input/result via a per-tool renderer or a generic
+// layout. Heavy bodies are stripped from the wire and fetched on demand, so fill
+// from the cache here; show a placeholder while a fetch is outstanding.
 func (m model) toolBody(it claudecode.Item, width int) string {
 	it, fetched := m.filledTool(it)
 	if !fetched && it.ToolID != "" {
@@ -528,10 +518,9 @@ func (m model) toolBody(it claudecode.Item, width int) string {
 	return m.genericToolBody(it, width)
 }
 
-// filledTool returns it with its on-demand body fields populated from the cache.
-// fetched reports whether a completed fetch exists for this tool (so the caller
-// can distinguish "not yet loaded" from "loaded but empty"). Items with no
-// ToolID (not addressable) are treated as already-resolved.
+// filledTool populates it's on-demand body fields from the cache. fetched
+// distinguishes "not yet loaded" from "loaded but empty". Items with no ToolID
+// (not addressable) are treated as already-resolved.
 func (m model) filledTool(it claudecode.Item) (claudecode.Item, bool) {
 	if it.ToolID == "" {
 		return it, true

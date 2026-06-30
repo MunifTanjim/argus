@@ -11,9 +11,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// decisionTimeout bounds how long a PermissionRequest hook blocks waiting for the
-// user, kept just under the hook's own 600s timeout so we return a fall-back
-// (no decision) before Claude kills the hook. A var so tests can shrink it.
+// decisionTimeout bounds how long a PermissionRequest hook blocks, kept just under
+// the hook's own 600s timeout so we fall back before Claude kills the hook.
 var decisionTimeout = 590 * time.Second
 
 // pendingDecision is a parked PermissionRequest awaiting the user's answer. The
@@ -37,8 +36,8 @@ type hookOut struct {
 	} `json:"hookSpecificOutput"`
 }
 
-// formatAnswer renders an answer value for the clarify message. Lists (multi-
-// select; []string from the TUI, []any from a client's JSON) join with ", ".
+// formatAnswer renders an answer value for the clarify message. Lists join with
+// ", " ([]string from the TUI, []any from a client's JSON).
 func formatAnswer(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -56,9 +55,8 @@ func formatAnswer(v any) string {
 	}
 }
 
-// buildClarifyMessage renders the "Chat about this" feedback: the templated
-// preamble followed by each question and its drafted answer (or a no-answer
-// marker). Mirrors Claude Code's onReject(feedback) text.
+// buildClarifyMessage renders the "Chat about this" feedback. Mirrors Claude
+// Code's onReject(feedback) text.
 func buildClarifyMessage(toolInput json.RawMessage, answers map[string]any) string {
 	var in struct {
 		Questions []struct {
@@ -86,9 +84,9 @@ func buildClarifyMessage(toolInput json.RawMessage, answers map[string]any) stri
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// buildDecision turns the user's structured answer into the PermissionRequest
-// hookSpecificOutput JSON. For AskUserQuestion (allow) it injects the answers,
-// echoing back the original questions array the tool requires.
+// buildDecision turns the user's answer into the PermissionRequest
+// hookSpecificOutput JSON. AskUserQuestion (allow) injects answers and echoes
+// back the original questions array the tool requires.
 func buildDecision(pd *pendingDecision, p api.RespondParams) string {
 	var out hookOut
 	out.HookSpecificOutput.HookEventName = "PermissionRequest"
@@ -127,8 +125,7 @@ func buildDecision(pd *pendingDecision, p api.RespondParams) string {
 		}
 		out.HookSpecificOutput.Decision.UpdatedInput = ui
 	}
-	// On approval, an optional permission-mode switch (e.g. ExitPlanMode →
-	// acceptEdits) so the session leaves plan mode in the chosen mode.
+	// Optional permission-mode switch on approval (e.g. ExitPlanMode → acceptEdits).
 	if behavior == "allow" && p.SetMode != "" {
 		out.HookSpecificOutput.Decision.UpdatedPermissions = []map[string]any{
 			{"type": "setMode", "destination": "session", "mode": p.SetMode},
@@ -167,11 +164,11 @@ func (d *Node) takePending(sid string) *pendingDecision {
 	return pd
 }
 
-// awaitDecision parks a PermissionRequest for sid and blocks until the user
-// answers in argus, the hook goes away (its connection closed because the prompt
-// was dismissed/answered in Claude), or the timeout fires. The pending interaction
-// is cleared on every exit so a stale prompt never lingers; on the non-answered
-// exits it returns "" so the hook prints nothing and Claude uses its own prompt.
+// awaitDecision parks a PermissionRequest and blocks until the user answers in
+// argus, the hook goes away (dismissed/answered in Claude → ctx cancel), or the
+// timeout fires. Clears the interaction on every exit so no stale prompt lingers;
+// non-answered exits return "" so the hook prints nothing and Claude uses its own
+// prompt.
 func (d *Node) awaitDecision(ctx context.Context, sid string, ev claudecode.HookEvent) string {
 	toolName, toolInput := claudecode.PermissionPayload(ev)
 	pd, cancel := d.park(sid, toolName, toolInput)

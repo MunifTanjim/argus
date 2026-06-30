@@ -6,33 +6,24 @@ import (
 )
 
 // LinkSubagents connects discovered subagent processes to their parent Task
-// tool calls in the parent session. Mutates processes in place.
+// tool calls, mutating processes in place and filling Description/SubagentType.
 //
-// Returns toolIDToColor: a map from tool_use_id to team color name, extracted
-// from toolUseResult entries in the parent session. Callers use this as a
-// fallback color source for Task items that have no linked SubagentProcess
-// (e.g. team agents whose JSONL lives outside the subagents/ directory).
+// Returns toolUseID->color, a fallback color source for Task items with no
+// linked SubagentProcess (e.g. team agents whose JSONL lives outside subagents/).
 //
-// Matching strategy (three phases):
-//  1. Result-based: scan parent session entries for toolUseResult containing
-//     agentId. Map agentId -> sourceToolUseID -> Task tool call.
-//  2. Team member: match the <teammate-message summary="..."> attribute from
-//     the subagent's first user message to the Task call's description.
-//     Only applies to Task calls with both team_name and name in input.
-//  3. Positional fallback: remaining unmatched non-team processes are paired
-//     with remaining unmatched non-team Task calls by time order (no wrap-around).
-//
-// Also populates Description and SubagentType from the parent Task call.
+// Matching runs in three phases: (1) result-based via toolUseResult.agentId,
+// (2) team-member match of <teammate-message summary> to Task description,
+// (3) positional pairing of remaining non-team procs/tasks by time order.
 func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSessionPath string) map[string]string {
-	// Always scan for colors, even without processes — team agents don't
-	// create subagent files but their toolUseResult entries carry color data.
+	// Scan even with no processes: team agents lack subagent files but their
+	// toolUseResult entries still carry color data.
 	links := scanAgentLinks(parentSessionPath)
 
 	if len(processes) == 0 {
 		return links.toolIDToColor
 	}
 
-	// Collect all Task tool DisplayItems from parent chunks.
+	// Collect Task tool DisplayItems from parent chunks.
 	var taskItems []*DisplayItem
 	for i := range parentChunks {
 		c := &parentChunks[i]
@@ -52,7 +43,6 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 		return links.toolIDToColor
 	}
 
-	// Build tool_use_id -> DisplayItem for enrichment.
 	toolIDToTask := make(map[string]*DisplayItem, len(taskItems))
 	for _, it := range taskItems {
 		toolIDToTask[it.ToolID] = it
@@ -61,7 +51,7 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 	matchedProcs := make(map[string]bool)
 	matchedTools := make(map[string]bool)
 
-	// Phase 1: Result-based matching via structured toolUseResult.agentId.
+	// Phase 1: result-based matching via toolUseResult.agentId.
 	for i := range processes {
 		toolID, ok := links.agentToToolID[processes[i].ID]
 		if !ok {
@@ -76,11 +66,8 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 		matchedTools[toolID] = true
 	}
 
-	// Phase 2: Team member matching by description -> teammate-message summary.
-	// Team Task calls have both team_name and name in input. Their agent_id
-	// is "name@team_name" (not a file UUID), so Phase 1 can't match them.
-	// Match by comparing the Task call's description to the summary attribute
-	// in the subagent's first <teammate-message> tag.
+	// Phase 2: team members match by description -> teammate-message summary.
+	// Their agent_id is "name@team_name" (not a file UUID), so Phase 1 misses them.
 	teamTaskItems := filterTeamTasks(taskItems, matchedTools)
 	if len(teamTaskItems) > 0 {
 		for _, it := range teamTaskItems {
@@ -104,9 +91,8 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 		}
 	}
 
-	// Phase 3: Positional fallback for non-team tasks (no wrap-around).
-	// Explicitly excludes team Task calls — they either matched in Phase 2
-	// or remain unmatched.
+	// Phase 3: positional fallback for non-team tasks (no wrap-around). Team
+	// Task calls are excluded — they either matched in Phase 2 or stay unmatched.
 	var unmatchedProcs []*SubagentProcess
 	for i := range processes {
 		if !matchedProcs[processes[i].ID] {
@@ -124,10 +110,9 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 		enrichProcess(unmatchedProcs[i], unmatchedTasks[i])
 	}
 
-	// Populate TeamColor from toolUseResult data for any linked process
-	// that doesn't already have a color. Team agents' own JSONL files
-	// don't carry their color (the first entry is from team-lead), but
-	// the teammate_spawned toolUseResult in the parent session does.
+	// Fill TeamColor from toolUseResult for linked processes lacking one: a team
+	// agent's own JSONL doesn't carry its color, but the parent's teammate_spawned
+	// result does.
 	for i := range processes {
 		if processes[i].TeammateColor == "" && processes[i].ParentTaskID != "" {
 			if color, ok := links.toolIDToColor[processes[i].ParentTaskID]; ok {
@@ -136,11 +121,8 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 		}
 	}
 
-	// Remap IDs for team workers discovered via DiscoverSubagents (hex UUID)
-	// to the "name@team" format that ReconstructTeams expects. Without this,
-	// team workers in subagents/ are invisible to the team task board —
-	// phases 2-4 of ReconstructTeams filter on splitWorkerID which requires
-	// the "@" separator.
+	// Remap team-worker IDs from hex UUID to "name@team" so ReconstructTeams
+	// (which filters on the "@" separator) can see them on the task board.
 	for i := range processes {
 		if processes[i].ParentTaskID == "" {
 			continue
@@ -160,16 +142,15 @@ func LinkSubagents(processes []SubagentProcess, parentChunks []Chunk, parentSess
 	return links.toolIDToColor
 }
 
-// agentLinkData holds the results of scanning a parent session for agent links.
+// agentLinkData holds the result of scanning a parent session for agent links.
 type agentLinkData struct {
 	agentToToolID map[string]string // agentId -> tool_use_id
 	toolIDToColor map[string]string // tool_use_id -> team color name
 }
 
-// agentLinkFromEntry returns the subagent link an entry contributes: the
-// toolUseResult.agentId (or agent_id) paired with the spawning Task call's
-// tool_use_id (sourceToolUseID, falling back to the first tool_result block's
-// tool_use_id). ok is false when the entry carries no agent link.
+// agentLinkFromEntry returns the link an entry contributes: toolUseResult.agentId
+// paired with the spawning Task's tool_use_id (sourceToolUseID, falling back to
+// the first tool_result block's id). ok is false when there's no agent link.
 func agentLinkFromEntry(e Entry) (agentID, toolUseID string, ok bool) {
 	resultMap := e.ToolUseResultMap()
 	if resultMap == nil {
@@ -192,19 +173,9 @@ func agentLinkFromEntry(e Entry) (agentID, toolUseID string, ok bool) {
 	return agentID, toolUseID, true
 }
 
-// scanAgentLinks reads a parent session JSONL file and builds maps from
-// agentId -> toolUseID (for Phase 1 linking) and toolUseID -> color
-// (for populating TeamColor after any linking phase).
-//
-// Matching strategy:
-//
-//	toolUseResult.agentId (or agent_id) -> sourceToolUseID
-//
-// Fallback when sourceToolUseID is missing: extract the first tool_result
-// block's tool_use_id from the message content.
-//
-// Color extraction: teammate_spawned toolUseResult entries carry a color
-// field. The tool_use_id links back to the spawning Task call.
+// scanAgentLinks reads a parent session JSONL and builds agentId->toolUseID
+// (Phase 1 linking) and toolUseID->color (TeamColor) maps. Color comes from
+// teammate_spawned toolUseResult entries.
 func scanAgentLinks(sessionPath string) agentLinkData {
 	data := agentLinkData{
 		agentToToolID: make(map[string]string),
@@ -233,7 +204,6 @@ func scanAgentLinks(sessionPath string) agentLinkData {
 			continue
 		}
 		data.agentToToolID[agentID] = toolUseID
-		// Extract team color from teammate_spawned results.
 		if color := getString(entry.ToolUseResultMap(), "color"); color != "" {
 			data.toolIDToColor[toolUseID] = color
 		}

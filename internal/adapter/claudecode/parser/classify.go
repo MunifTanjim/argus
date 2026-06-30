@@ -4,27 +4,22 @@ import (
 	"strings"
 )
 
-// Classify maps a raw Entry to one of the classified message types.
-// Returns false for noise entries (filtered out) and sidechain messages.
+// Classify maps a raw Entry to a classified message type.
+// Returns false for noise and sidechain entries.
 func Classify(e Entry) (ClassifiedMsg, bool) {
-	// Filter sidechain messages - we only care about main thread.
+	// Sidechain = off main thread; we only show the main thread.
 	if e.IsSidechain {
 		return nil, false
 	}
 
 	ts := parseTimestamp(e.Timestamp)
 
-	// 1. Hard noise: structural metadata types.
 	if noiseEntryTypes[e.Type] {
 		return nil, false
 	}
 
-	// Attachment entries (Claude Code 2.1+). Only nested_memory ("Loaded X")
-	// surfaces to users; every other attachment subtype — hook responses,
-	// skill listings, permission snapshots, mcp/tool deltas, output-style
-	// banners — is infrastructure and drops here. Keeping the enumeration
-	// tight preserves the "unknown → drop" invariant without widening
-	// ClassifiedMsg once per internal event type.
+	// Only nested_memory ("Loaded X") surfaces; every other attachment subtype
+	// is infrastructure. Enumerating tightly keeps the "unknown → drop" invariant.
 	if e.Type == "attachment" {
 		if e.Attachment.Type == "nested_memory" && e.Attachment.DisplayPath != "" {
 			return MemoryLoadMsg{
@@ -35,8 +30,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		return nil, false
 	}
 
-	// Summary entries become CompactMsg (context compression boundary).
-	// The title lives in e.Summary, not message.content.
+	// Summary entries are compression boundaries; title is in e.Summary, not content.
 	if e.Type == "summary" {
 		return CompactMsg{
 			Timestamp: ts,
@@ -44,28 +38,23 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}, true
 	}
 
-	// Hard noise: synthetic assistant messages.
 	if e.Type == "assistant" && e.Message.Model == "<synthetic>" {
 		return nil, false
 	}
 
-	// Get string content for user-type checks.
 	contentStr := ExtractText(e.Message.Content)
 
-	// Filter user-type noise (hard noise tags, empty output, interruptions).
 	if e.Type == "user" && isUserNoise(e.Message.Content, contentStr) {
 		return nil, false
 	}
 
-	// Teammate messages: classify as TeammateMsg.
 	if e.Type == "user" {
 		trimmed := strings.TrimSpace(contentStr)
 		if teammateMessageRe.MatchString(trimmed) {
 			innerContent := extractTeammateContent(trimmed)
 
-			// Filter protocol messages (idle notifications, shutdown, task
-			// assignments). These are JSON payloads from the team coordination
-			// system, not human-readable agent output.
+			// Drop team-coordination protocol JSON (idle/shutdown/assignments),
+			// keeping only human-readable agent output.
 			if teammateProtocolRe.MatchString(innerContent) {
 				return nil, false
 			}
@@ -82,7 +71,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 	}
 
-	// 2. System message: user entry starting with command output tag.
+	// System message: user entry wrapping command output.
 	if e.Type == "user" {
 		trimmed := strings.TrimSpace(contentStr)
 		if strings.HasPrefix(trimmed, localCommandStdoutTag) || strings.HasPrefix(trimmed, localCommandStderrTag) {
@@ -92,7 +81,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 			}, true
 		}
 
-		// Bash mode output (!bash inline execution).
+		// Inline !bash mode output.
 		if strings.HasPrefix(trimmed, bashStdoutTag) || strings.HasPrefix(trimmed, bashStderrTag) {
 			stderrContent := ""
 			if m := reBashStderr.FindStringSubmatch(contentStr); m != nil {
@@ -119,10 +108,8 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 	}
 
-	// ToolSearch results: deferred tool loading responses.
-	// These entries have text "Tool loaded." plus a toolUseResult with a
-	// matches array listing which tools were loaded. Without this check they
-	// appear as UserMsg("Tool loaded.") which starts a spurious user chunk.
+	// Deferred tool-load responses: "Tool loaded." + a matches array. Caught
+	// here so they don't become a UserMsg that starts a spurious user chunk.
 	if e.Type == "user" && strings.TrimSpace(contentStr) == "Tool loaded." {
 		if names := extractToolSearchMatches(e.ToolUseResult); len(names) > 0 {
 			return SystemMsg{
@@ -132,11 +119,10 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 	}
 
-	// 3. User message: type=user, not isMeta, has real content, not system output.
+	// User message: type=user, not isMeta, real content, not system output.
 	if e.Type == "user" && !e.IsMeta {
 		trimmed := strings.TrimSpace(contentStr)
 
-		// Exclude messages starting with system output tags.
 		excluded := false
 		for _, tag := range systemOutputTags {
 			if strings.HasPrefix(trimmed, tag) {
@@ -154,7 +140,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 	}
 
-	// 4. AI message: everything else (assistant messages, internal user messages with tool results).
+	// AI message: assistant responses.
 	if e.Type == "assistant" {
 		thinking, toolCalls, blocks := extractAssistantDetails(e.Message.Content)
 		stopReason := ""
@@ -178,11 +164,9 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}, true
 	}
 
-	// Fallback: remaining user messages -> AI message.
-	// Covers both isMeta=true entries (slash commands etc.) and tool_result
-	// entries where isMeta is null in the JSONL. extractMetaBlocks handles both:
-	// if the content has tool_result blocks it extracts them; otherwise it returns
-	// a text fallback that mergeAIBuffer silently ignores.
+	// Fallback for remaining user entries (isMeta slash commands, and
+	// tool_result entries where isMeta is null). extractMetaBlocks returns
+	// tool_result blocks if present, else a text fallback mergeAIBuffer ignores.
 	blocks := extractMetaBlocks(e.Message.Content, contentStr)
 	return AIMsg{
 		Timestamp: ts,

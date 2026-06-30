@@ -8,16 +8,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 )
 
-// writeFixtureSessionWithSubagent creates a temp dir with:
-//   - parent.jsonl: assistant tool_use (id "tool-1", name "Task") + user tool result
-//     with toolUseResult {"agentId":"aaa"} referencing tool-1
-//   - parent/subagents/agent-aaa.jsonl: one user + one assistant line
+// writeFixtureSessionWithSubagent writes a parent session (Task tool-1, result
+// linking agentId "aaa") plus its subagents/agent-aaa.jsonl. Returns the parent path.
 func writeFixtureSessionWithSubagent(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "parent.jsonl")
 
-	// Parent session: assistant emits a Task tool_use, then user returns toolUseResult.
 	parentLines := `{"uuid":"a1","type":"assistant","timestamp":"2025-06-15T10:00:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Task","input":{"subagent_type":"general-purpose","description":"Do something"}}],"model":"claude-sonnet-4-20250514","stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 {"uuid":"r1","type":"user","timestamp":"2025-06-15T10:00:05Z","isMeta":true,"sourceToolUseID":"tool-1","toolUseResult":{"agentId":"aaa","status":"completed"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"Done."}]}}
 `
@@ -25,7 +22,6 @@ func writeFixtureSessionWithSubagent(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	// Create subagents directory and agent-aaa.jsonl.
 	subDir := filepath.Join(dir, "parent", "subagents")
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		t.Fatal(err)

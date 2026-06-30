@@ -11,27 +11,24 @@ import (
 	"github.com/MunifTanjim/argus/internal/sshconn"
 )
 
-// Gateway WebSocket routes, appended by resolveGatewayURL per role. Kept as constants so
-// a typo can't silently produce a 404 at a call site.
+// Gateway WebSocket routes, appended by resolveGatewayURL per role.
 const (
 	routeNode   = "/node"   // node uplink endpoint
 	routeClient = "/client" // dashboard/client endpoint
 )
 
-// resolveGatewayURL turns a --gateway base into the WebSocket URL and *http.Client that
-// ConnectGateway / DialWS should use, appending the caller's role route ("/node" or
-// "/client"). The gateway URL carries no route path of its own — the route is determined
-// by the role, not the user — so a non-empty path is rejected.
+// resolveGatewayURL turns a --gateway base into the WebSocket URL and *http.Client to
+// use, appending the role route ("/node" or "/client"). The route is role-determined, so
+// a path on the gateway URL is rejected.
 //
-//   - ws:// or wss://  → "<scheme>://<host>[:port]<route>", nil client (default transport).
-//   - ssh://[user@]host[:ssh-port][?port=<gateway-port>] → a client that tunnels every dial
-//     through a managed `ssh -W` child to the gateway's loopback port on the SSH host, and
-//     "ws://<host>:<gateway-port><route>". The authority port is the SSH port (ssh -p); the
-//     "port" query is the gateway's loopback listener port (default 8443); SSH identity /
-//     jump hosts come from the user's ssh config. The forward target is always
-//     127.0.0.1:<gateway-port> — the gateway is expected to bind loopback.
+//   - ws:// or wss:// → "<scheme>://<host>[:port]<route>", nil client (default transport).
+//   - ssh://[user@]host[:ssh-port][?port=<gateway-port>] → a client tunneling every dial
+//     through a managed `ssh -W` child to 127.0.0.1:<gateway-port> on the SSH host, and
+//     "ws://<host>:<gateway-port><route>". Authority port is the SSH port (ssh -p); the
+//     "port" query is the gateway's loopback port (default 8443); identity/jump hosts come
+//     from ssh config. The gateway is expected to bind loopback.
 //
-// log receives the ssh child's stderr (auth / host-key failures); pass nil to discard.
+// log receives the ssh child's stderr (auth / host-key failures); nil to discard.
 func resolveGatewayURL(raw, route string, log *slog.Logger) (string, *http.Client, error) {
 	u, err := url.Parse(raw)
 	if err != nil {

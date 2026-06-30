@@ -19,10 +19,9 @@ var commandTagPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)<command-args>.*?</command-args>`),
 }
 
-// SanitizeContent removes noise XML tags and converts command tags into
-// a human-readable slash command format for display.
+// SanitizeContent strips noise XML tags and converts command tags into a
+// human-readable slash command for display.
 func SanitizeContent(s string) string {
-	// Command output messages: extract the inner content.
 	if IsCommandOutput(s) {
 		if out := ExtractCommandOutput(s); out != "" {
 			return out
@@ -36,18 +35,15 @@ func SanitizeContent(s string) string {
 		}
 	}
 
-	// Strip noise tags.
 	result := s
 	for _, pat := range noiseTagPatterns {
 		result = pat.ReplaceAllString(result, "")
 	}
-
-	// Strip remaining command tags.
 	for _, pat := range commandTagPatterns {
 		result = pat.ReplaceAllString(result, "")
 	}
 
-	// Strip bash-input tags but keep inner content (the command text).
+	// Keep the inner command text from bash-input tags.
 	result = reBashInput.ReplaceAllString(result, "$1")
 
 	return strings.TrimSpace(result)
@@ -69,20 +65,19 @@ func extractCommandDisplay(s string) string {
 	return name
 }
 
-// ExtractText pulls display text from a json.RawMessage that is either a
-// JSON string or an array of content blocks. Text blocks are joined with newlines.
+// ExtractText pulls display text from content that is either a JSON string or
+// an array of content blocks (text blocks joined with newlines).
 func ExtractText(content json.RawMessage) string {
 	if len(content) == 0 {
 		return ""
 	}
 
-	// Try string first (the common case for user messages).
+	// String is the common case for user messages.
 	var s string
 	if err := json.Unmarshal(content, &s); err == nil {
 		return s
 	}
 
-	// Array of content blocks.
 	var blocks []textBlockJSON
 	if err := json.Unmarshal(content, &blocks); err != nil {
 		return ""
@@ -98,7 +93,7 @@ func ExtractText(content json.RawMessage) string {
 }
 
 // ExtractCommandOutput returns the inner text from <local-command-stdout> or
-// <local-command-stderr> wrapper tags. Returns empty string if neither tag is found.
+// <local-command-stderr> tags, or "" if neither is present.
 func ExtractCommandOutput(s string) string {
 	if m := reStdout.FindStringSubmatch(s); m != nil {
 		return strings.TrimSpace(m[1])
@@ -115,8 +110,7 @@ func IsCommandOutput(s string) bool {
 }
 
 // extractBashOutput returns the inner text from <bash-stdout> or <bash-stderr>
-// wrapper tags. Tries stdout first, falls back to stderr. Same pattern as
-// ExtractCommandOutput but for inline !bash mode execution.
+// tags (stdout first), for inline !bash mode.
 func extractBashOutput(s string) string {
 	if m := reBashStdout.FindStringSubmatch(s); m != nil {
 		return strings.TrimSpace(m[1])
@@ -127,13 +121,12 @@ func extractBashOutput(s string) string {
 	return ""
 }
 
-// extractTaskNotification pulls the human-readable summary from a
-// <task-notification> XML wrapper. Falls back to stripping all XML tags.
+// extractTaskNotification pulls the summary from a <task-notification> wrapper,
+// falling back to stripping all XML tags.
 func extractTaskNotification(s string) string {
 	if m := reTaskNotifySummary.FindStringSubmatch(s); m != nil {
 		return strings.TrimSpace(m[1])
 	}
-	// Fallback: strip all XML-like tags and return what's left.
 	stripped := reXMLTag.ReplaceAllString(s, " ")
 	return strings.TrimSpace(reWhitespace.ReplaceAllString(stripped, " "))
 }

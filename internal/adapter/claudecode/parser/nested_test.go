@@ -8,8 +8,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 )
 
-// writeNestedFixture builds a session whose general-purpose subagent (A, depth 1)
-// spawns an Explore subagent (B, depth 2). Returns the session root path.
+// writeNestedFixture builds a session where subagent A (depth 1) spawns
+// subagent B (depth 2). Returns the session root path.
 func writeNestedFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -9,14 +9,13 @@ import (
 )
 
 // This file is the anti-corruption boundary between the vendored parser and
-// argus's own chunk model. The parser does all JSONL reading, classification,
-// chunk folding, and subagent discovery; we map its output into the stable
-// claudecode types the node RPC and TUI depend on. If the parser's types
-// change, only the mapping below needs fixing.
+// argus's chunk model: the parser does all JSONL work, we map its output into the
+// stable claudecode types. If the parser's types change, only this mapping needs
+// fixing.
 
-// ReadTranscriptView reads a transcript via the vendored parser and maps it into
-// argus's chunk model. Subagent items carry agentId + hasTrace; traces are NOT
-// inlined — each level is fetched on drill (see ReadSubagentView).
+// ReadTranscriptView reads a transcript via the parser and maps it into argus's
+// chunk model. Subagent items carry agentId + hasTrace; traces are NOT inlined,
+// each level is fetched on drill (see ReadSubagentView).
 func ReadTranscriptView(path string) (TranscriptView, error) {
 	pchunks, err := parser.ReadSession(path)
 	if err != nil {
@@ -88,8 +87,7 @@ func FindToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
 		}
 		path = sub
 		// Subagent files mark every entry isSidechain=true; ReadSubagentSession
-		// clears the flag so Classify keeps them (ReadSession would drop them all,
-		// leaving the tool unfindable). Mirrors ReadSubagentView.
+		// clears the flag so Classify keeps them (ReadSession would drop them all).
 		read = parser.ReadSubagentSession
 	}
 	pchunks, err := read(path)

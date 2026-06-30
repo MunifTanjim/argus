@@ -10,8 +10,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// grouped reports whether any session carries a node label (i.e. the client is
-// connected to a gateway), which turns on per-host grouping in the list view.
+// grouped reports whether any session carries a node label (gateway-connected),
+// turning on per-host grouping in the list view.
 func (m model) grouped() bool {
 	for _, s := range m.sessions {
 		if s.NodeLabel != "" {
@@ -21,8 +21,7 @@ func (m model) grouped() bool {
 	return false
 }
 
-// groupOffline reports whether every session from the given node is offline
-// (its uplink to the gateway is currently down).
+// groupOffline reports whether every session from the node is offline.
 func (m model) groupOffline(label string) bool {
 	seen := false
 	for _, s := range m.sessions {
@@ -36,15 +35,15 @@ func (m model) groupOffline(label string) bool {
 	return seen
 }
 
-// needsYouHeader labels the cross-host group of awaiting-input sessions shown at
-// the top of the list (mirrors the mobile "Needs you" section).
+// needsYouHeader labels the cross-host group of awaiting-input sessions at the top
+// of the list (mirrors the mobile "Needs you" section).
 func (m model) needsYouHeader() string {
 	return StyleAccentBold.Render("Needs you")
 }
 
-// sectionKey assigns a session to a list section: all awaiting-input sessions
-// share one cross-host "Needs you" section; every other session belongs to its
-// host's section. A header is drawn whenever this key changes between rows.
+// sectionKey assigns a session to a list section: awaiting-input sessions share
+// one cross-host "Needs you" section, others belong to their host. A header is
+// drawn whenever this key changes between rows.
 func sectionKey(s session.Session) string {
 	if s.Status == session.StatusAwaitingInput {
 		return "\x00needs-you"
@@ -52,8 +51,8 @@ func sectionKey(s session.Session) string {
 	return "host:" + s.NodeLabel
 }
 
-// groupHeader renders the per-host section header shown above a node's cards,
-// flagged when that node is currently disconnected from the gateway.
+// groupHeader renders the per-host section header, flagged when the node is
+// disconnected from the gateway.
 func (m model) groupHeader(label string) string {
 	name := label
 	if name == "" {
@@ -66,9 +65,8 @@ func (m model) groupHeader(label string) string {
 	return h
 }
 
-// Shared view styles, bound to resolved theme colors by initStyles(). They are
-// zero-valued (plain rendering) until Run() initializes the theme, which is fine
-// for tests that render without a theme.
+// Shared view styles, bound to theme colors by initStyles(). Zero-valued (plain
+// rendering) until Run() initializes the theme, which is fine for theme-less tests.
 var (
 	headerStyle lipgloss.Style
 	dimStyle    lipgloss.Style
@@ -87,8 +85,8 @@ func initStyles() {
 	asstStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorModelOpus)
 }
 
-// statusGlyph is the list marker for a status. Working sessions are drawn with an
-// animated spinner by the card renderer instead of this static dot.
+// statusGlyph is the list marker for a status. Working sessions use an animated
+// spinner from the card renderer instead of this static dot.
 func statusGlyph(s session.Status) string {
 	switch s {
 	case session.StatusWorking:
@@ -105,7 +103,7 @@ func statusGlyph(s session.Status) string {
 }
 
 // interactionHint renders a short, attention-colored summary of what a waiting
-// session needs, for the session list.
+// session needs.
 func interactionHint(ix *session.Interaction) string {
 	if ix == nil {
 		return StyleAccentBold.Render("needs input")
@@ -158,9 +156,8 @@ func (m model) View() tea.View {
 	return v
 }
 
-// homeTabs renders the home screen's Sessions / History (/ Logs) tab bar,
-// highlighting the active tab. The Logs tab shows only when the TUI spawned an
-// embedded node (see hasLogsTab). The active tab is passed in by the caller.
+// homeTabs renders the Sessions / History (/ Logs) tab bar, highlighting active.
+// The Logs tab shows only with an embedded node (see hasLogsTab).
 func (m model) homeTabs(active viewMode) string {
 	sess, hist, logs := StyleDim, StyleDim, StyleDim
 	switch active {
@@ -188,7 +185,7 @@ func (m model) listView() string {
 	}
 	title += "    " + m.homeTabs(modeList)
 
-	// Empty state: a warm welcome with the next steps that actually work here.
+	// Empty state: welcome + next steps.
 	if len(m.order) == 0 {
 		var b strings.Builder
 		b.WriteString(title + dimStyle.Render("  ·  your AI coding sessions, one place") + "\n\n")
@@ -206,8 +203,8 @@ func (m model) listView() string {
 		cardW = 30
 	}
 
-	// Render every card to lines, tracking the cursor card's line range so the
-	// window can keep it on screen. On a gateway, a host header precedes each group.
+	// Render cards to lines, tracking the cursor card's range so the window keeps
+	// it visible. On a gateway, a host header precedes each group.
 	grouped := m.grouped()
 	var lines []string
 	curStart, curEnd := 0, 0
@@ -232,8 +229,8 @@ func (m model) listView() string {
 		}
 	}
 
-	// Window to the available height (chrome: title + blank + blank + footer = 4),
-	// keeping the cursor card fully visible.
+	// Window to available height (chrome = 4: title + 2 blanks + footer), keeping
+	// the cursor card visible.
 	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-4))
 
 	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
@@ -249,11 +246,9 @@ func (m model) listView() string {
 	return centerBlock(inner, cardW, m.width)
 }
 
-// spawnView renders the active "new session" flow as a dedicated, vertically
-// scrolling screen. List steps (node, dir) render one choice per line, windowed
-// to the terminal height with the cursor kept visible; text steps (custom path,
-// name, command) render a labeled input line. Rows are width-clamped so a long
-// project list or long paths never overflow the screen.
+// spawnView renders the "new session" flow. List steps (node, dir) render one
+// choice per line, windowed with the cursor visible; text steps render a labeled
+// input line. Rows are width-clamped so long lists/paths never overflow.
 func (m model) spawnView() string {
 	cardW := historyWidth(m)
 	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") +
@@ -295,9 +290,9 @@ func (m model) spawnView() string {
 		for i, ln := range lines {
 			lines[i] = truncateLine(ln, cardW)
 		}
-		lines[len(lines)-1] += "▏" // cursor at the end; Split always yields ≥1 line
-		// Window to the height left after the label + blank, keeping the tail
-		// (where typing happens) visible so a long prompt never overflows.
+		lines[len(lines)-1] += "▏" // cursor at end; Split always yields ≥1 line
+		// Window to the height after label + blank, keeping the tail (where typing
+		// happens) visible.
 		if budget := max(1, avail-2); len(lines) > budget {
 			lines = lines[len(lines)-budget:]
 		}
@@ -309,9 +304,8 @@ func (m model) spawnView() string {
 	return centerBlock(title+"\n\n"+body+"\n\n"+footer, cardW, m.width)
 }
 
-// spawnChoiceRow renders one selectable row in the node/dir steps: a cursor
-// marker, the label, and an optional dimmed sub-line (e.g. the project path),
-// the whole row clamped to w so it never overflows the screen width.
+// spawnChoiceRow renders one selectable node/dir row: cursor marker, label, and
+// an optional dimmed sub-line (e.g. project path), clamped to w.
 func spawnChoiceRow(label, sub string, sel bool, w int) string {
 	marker, name := "  ", dimStyle.Render(label)
 	if sel {
@@ -337,14 +331,14 @@ func (m model) screenView() string {
 	if m.screenErr != nil {
 		body = dimStyle.Render("screen unavailable: " + m.screenErr.Error())
 	}
-	innerW := max(10, m.width-2)  // the rounded border eats 2 columns
+	innerW := max(10, m.width-2)  // rounded border eats 2 cols
 	visible := max(1, m.height-6) // header(1)+blank(1)+border(2)+blank(1)+footer(1)
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	if len(lines) > visible { // show the most recent screen content
+	if len(lines) > visible { // keep the most recent content
 		lines = lines[len(lines)-visible:]
 	}
-	// The captured lines carry tmux's SGR color escapes (-e); clip each to the box
-	// width (no reflow — keep it a 1:1 mirror) and reset so colors don't bleed.
+	// Lines carry tmux SGR escapes (-e); clip to box width (no reflow, 1:1 mirror)
+	// and reset so colors don't bleed.
 	for i, line := range lines {
 		line = truncateLine(line, innerW)
 		if m.screenErr == nil {
