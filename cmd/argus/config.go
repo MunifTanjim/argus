@@ -64,11 +64,16 @@ func addClientFlags(f *pflag.FlagSet) {
 func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
 	v := viper.New()
 
+	noConfig, _ := cmd.Flags().GetBool("no-config")
+
 	cfgPath := os.Getenv("ARGUS_CONFIG")
 	if f := cmd.Flags().Lookup("config"); f != nil && f.Changed {
 		cfgPath = f.Value.String()
 	}
-	if err := config.Load(v, cfgPath); err != nil {
+	if noConfig {
+		cfgPath = "" // also ignore $ARGUS_CONFIG
+	}
+	if err := config.Load(v, cfgPath, noConfig); err != nil {
 		return nil, err
 	}
 

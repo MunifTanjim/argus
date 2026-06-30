@@ -71,9 +71,10 @@ var defaults = map[string]any{
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
-// when non-empty, is read instead of the default ConfigDir/config.yaml.
+// when non-empty, is read instead of the default ConfigDir/config.yaml. skipFile skips
+// reading any config file, leaving only defaults and env.
 // A missing default file is not an error; a missing explicit configPath is.
-func Load(v *viper.Viper, configPath string) error {
+func Load(v *viper.Viper, configPath string, skipFile bool) error {
 	for key, val := range defaults {
 		v.SetDefault(key, val)
 	}
@@ -85,6 +86,10 @@ func Load(v *viper.Viper, configPath string) error {
 	_ = v.BindEnv("tunnel.cloudflare.token", "ARGUS_CLOUDFLARE_TOKEN")
 	_ = v.BindEnv("tunnel.cloudflare.tunnel-name", "ARGUS_CLOUDFLARE_TUNNEL_NAME")
 	_ = v.BindEnv("tunnel.cloudflare.hostname", "ARGUS_CLOUDFLARE_HOSTNAME")
+
+	if skipFile {
+		return nil
+	}
 
 	v.SetConfigType("yaml")
 	if configPath != "" {

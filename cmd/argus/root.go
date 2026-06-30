@@ -94,6 +94,10 @@ func newRootCmd(version string) *cobra.Command {
 	// --config is persistent so subcommands share it. Other flags default to zero; real
 	// defaults come from config (viper), so a flag only overrides when set.
 	cmd.PersistentFlags().String("config", "", "config file (default: $XDG_CONFIG_HOME/argus/config.yaml) [$ARGUS_CONFIG]")
+	// --no-config skips reading any config file (also ignores $ARGUS_CONFIG); defaults+env+flags still apply.
+	cmd.PersistentFlags().Bool("no-config", false, "do not read any config file")
+
+	cmd.MarkFlagsMutuallyExclusive("config", "no-config")
 
 	addClientFlags(cmd.Flags())
 

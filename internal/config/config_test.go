@@ -23,7 +23,7 @@ func isolateConfigDir(t *testing.T) {
 func load(t *testing.T, path string) config.Config {
 	t.Helper()
 	v := viper.New()
-	if err := config.Load(v, path); err != nil {
+	if err := config.Load(v, path, false); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	return config.FromViper(v)
@@ -109,7 +109,7 @@ func TestArgusGatewayEnv(t *testing.T) {
 func TestFlagOverridesEnv(t *testing.T) {
 	t.Setenv("ARGUS_GATEWAY_LISTEN_ADDR", ":9999")
 	v := viper.New()
-	if err := config.Load(v, ""); err != nil {
+	if err := config.Load(v, "", false); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
@@ -123,7 +123,7 @@ func TestFlagOverridesEnv(t *testing.T) {
 
 func TestExplicitMissingErrors(t *testing.T) {
 	v := viper.New()
-	if err := config.Load(v, filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
+	if err := config.Load(v, filepath.Join(t.TempDir(), "nope.yaml"), false); err == nil {
 		t.Error("explicit missing config path should error")
 	}
 }
@@ -131,7 +131,7 @@ func TestExplicitMissingErrors(t *testing.T) {
 func TestDefaultMissingOK(t *testing.T) {
 	isolateConfigDir(t)
 	v := viper.New()
-	if err := config.Load(v, ""); err != nil {
+	if err := config.Load(v, "", false); err != nil {
 		t.Errorf("missing default config should not error: %v", err)
 	}
 }
