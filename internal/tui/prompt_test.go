@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -711,7 +712,7 @@ func TestIdleDockInformationalForPaneless(t *testing.T) {
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
-	lines, _ := m.promptLinesWidth(80)
+	lines, _, _ := m.promptLinesWidth(80)
 	out := strings.Join(lines, "\n")
 	if !strings.Contains(out, "Respond in VSCode") {
 		t.Errorf("paneless idle dock should show the indicator, got:\n%s", out)
@@ -727,12 +728,137 @@ func TestIdleDockInformationalForPaneless(t *testing.T) {
 func TestIdleDockComposerForControllable(t *testing.T) {
 	// Default promptModel session is tmux/controllable with a pane.
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	lines, _ := m.promptLinesWidth(80)
+	lines, _, _ := m.promptLinesWidth(80)
 	out := strings.Join(lines, "\n")
 	if strings.Contains(out, "Respond in VSCode") {
 		t.Errorf("controllable idle dock must not show the indicator, got:\n%s", out)
 	}
 	if !strings.Contains(out, "> ") {
 		t.Errorf("controllable idle dock should show the composer, got:\n%s", out)
+	}
+}
+
+// TestDockScrollBodyPinsControls exercises the dock body windowing directly with
+// synthetic lines: the control block pins to the bottom while the body scrolls.
+func TestDockScrollBodyPinsControls(t *testing.T) {
+	m := testModel()
+	var lines []string
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("body-%02d", i))
+	}
+	lines = append(lines, "▸ Allow", "  Deny")
+	ctrlStart := 20 // options start
+	anchor := 20
+	height := 10 // bodyRegion=8 → ch=7 (one row reserved for the hint)
+	width := 40
+
+	// scroll=0: top of body + pinned controls; bottom of body hidden.
+	m.prompt.scroll = 0
+	out := m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	if got := len(strings.Split(out, "\n")); got != height {
+		t.Fatalf("rendered %d rows, want height %d:\n%s", got, height, out)
+	}
+	for _, want := range []string{"body-00", "Allow", "Deny"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("scroll=0 output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "body-19") {
+		t.Errorf("scroll=0 should hide the bottom of the body:\n%s", out)
+	}
+
+	// Max scroll: bottom of body visible, controls still pinned.
+	m.prompt.scroll = 13 // maxScroll = len(body)-ch = 20-7
+	out = m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	for _, want := range []string{"body-19", "Allow", "Deny"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("max scroll output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Over-scroll clamps to the bottom (still shows the last body line).
+	m.prompt.scroll = 999
+	out = m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	if !strings.Contains(out, "body-19") || !strings.Contains(out, "Deny") {
+		t.Errorf("over-scroll should clamp to the bottom:\n%s", out)
+	}
+	if got := len(strings.Split(out, "\n")); got != height {
+		t.Errorf("over-scroll rendered %d rows, want %d:\n%s", got, height, out)
+	}
+
+	// When everything fits, no scrolling/hint: all lines returned verbatim.
+	out = m.dockScrollBody(lines, 40, anchor, ctrlStart, width)
+	if out != strings.Join(lines, "\n") {
+		t.Errorf("fitting content should render whole:\n%s", out)
+	}
+}
+
+// TestDockScrollKeysRevealTallBody drives the real render + key path: ctrl+d/ctrl+u
+// scroll a too-tall prompt body while Allow/Deny stay pinned and reachable, and
+// up/down still move the selection.
+func TestDockScrollKeysRevealTallBody(t *testing.T) {
+	var msg []string
+	for i := 0; i < 40; i++ {
+		msg = append(msg, fmt.Sprintf("MK%02d", i))
+	}
+	m := promptModel(&session.Interaction{
+		Kind: session.InteractionPermission, ToolName: "Bash",
+		Message: strings.Join(msg, "\n"),
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true},
+		},
+	})
+
+	dockH := func() int { _, h := m.sessionLayout(); return h - 1 }
+	render := func() string { return m.dockBody(dockH()) }
+
+	out := render()
+	for _, want := range []string{"Allow", "Deny", "MK00"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("initial dock missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "MK39") {
+		t.Fatalf("bottom of a tall body should be hidden initially:\n%s", out)
+	}
+
+	// Scroll down until the bottom is revealed.
+	for i := 0; i < 20; i++ {
+		res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+		m = res.(model)
+	}
+	out = render()
+	if !strings.Contains(out, "MK39") {
+		t.Errorf("bottom should be visible after scrolling down:\n%s", out)
+	}
+	if !strings.Contains(out, "Allow") || !strings.Contains(out, "Deny") {
+		t.Errorf("controls must stay pinned while scrolled:\n%s", out)
+	}
+	maxScroll, _ := m.dockScrollGeom(dockH())
+	if maxScroll == 0 {
+		t.Fatal("expected the tall body to be scrollable")
+	}
+	if m.prompt.scroll != maxScroll {
+		t.Errorf("scroll = %d, want clamped max %d", m.prompt.scroll, maxScroll)
+	}
+
+	// Scroll back up past the top clamps to 0.
+	for i := 0; i < 30; i++ {
+		res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+		m = res.(model)
+	}
+	if m.prompt.scroll != 0 {
+		t.Errorf("scroll = %d, want 0 after scrolling up past the top", m.prompt.scroll)
+	}
+
+	// Up/down still moves the decision selection (not the scroll).
+	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = res.(model)
+	if m.prompt.decisionSel != 1 {
+		t.Errorf("down should select Deny; decisionSel=%d", m.prompt.decisionSel)
+	}
+	if m.prompt.scroll != 0 {
+		t.Errorf("selection should not change scroll; scroll=%d", m.prompt.scroll)
 	}
 }

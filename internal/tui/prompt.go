@@ -34,6 +34,7 @@ type promptState struct {
 	submitSel   int            // 0=Submit, 1=Cancel on the Submit tab
 	decisionSel int            // permission/plan option index (Allow/Deny)
 	reasonText  string         // permission/plan deny reason + idle reply buffer
+	scroll      int            // dock body scroll offset (lines above the pinned controls)
 	key         string         // identity of the interaction the draft belongs to
 }
 
@@ -103,6 +104,7 @@ func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
 func (m *model) resetPromptState() {
 	m.prompt.tab, m.prompt.submitSel, m.prompt.decisionSel = 0, 0, 0
 	m.prompt.reasonText = ""
+	m.prompt.scroll = 0
 	m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = nil, nil, nil, nil
 }
 
@@ -262,21 +264,23 @@ func (m model) respondCmd(id string, p api.RespondParams) tea.Cmd {
 
 // promptBody renders the dock body as a single string.
 func (m model) promptBody() string {
-	lines, _ := m.promptLines()
+	lines, _, _ := m.promptLines()
 	return strings.Join(lines, "\n")
 }
 
 // promptLines renders the dock body at the container width.
-func (m model) promptLines() ([]string, int) {
+func (m model) promptLines() ([]string, int, int) {
 	return m.promptLinesWidth(m.containerWidth())
 }
 
 // promptLinesWidth renders the dock body wrapped to width and returns the anchor
-// line index (the active control) that the dock windows around to keep visible.
-func (m model) promptLinesWidth(width int) ([]string, int) {
+// line index (the active control the dock windows around to keep visible) and
+// ctrlStart, the first line of the pinned control block: lines above ctrlStart
+// scroll, lines from ctrlStart on stay pinned at the dock bottom.
+func (m model) promptLinesWidth(width int) ([]string, int, int) {
 	ix := m.interaction()
 	if ix == nil {
-		return []string{dimStyle.Render("(no pending interaction)")}, 0
+		return []string{dimStyle.Render("(no pending interaction)")}, 0, 0
 	}
 
 	// Paneless idle session: argus has no pane to deliver input to, so show a
@@ -284,7 +288,7 @@ func (m model) promptLinesWidth(width int) ([]string, int) {
 	if s := m.sessions[m.selectedID]; ix.Kind == session.InteractionIdle && !s.Controllable() {
 		label := StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend))
 		sub := dimStyle.Render("argus can't send input to this session")
-		return strings.Split(label+"\n"+sub, "\n"), 0
+		return strings.Split(label+"\n"+sub, "\n"), 0, 0
 	}
 
 	switch ix.Kind {
@@ -306,6 +310,19 @@ func splitAnchor(b *strings.Builder, anchor int) ([]string, int) {
 		anchor = 0
 	}
 	return lines, anchor
+}
+
+// splitAnchorCtrl is splitAnchor plus a clamped ctrlStart (first pinned-control
+// line): lines above it scroll, lines from it on stay pinned to the dock bottom.
+func splitAnchorCtrl(b *strings.Builder, anchor, ctrlStart int) ([]string, int, int) {
+	lines, a := splitAnchor(b, anchor)
+	if ctrlStart < 0 {
+		ctrlStart = 0
+	}
+	if ctrlStart > len(lines) {
+		ctrlStart = len(lines)
+	}
+	return lines, a, ctrlStart
 }
 
 // optionMarks bundles the per-option selection affordances: multi-select
@@ -396,7 +413,7 @@ func respondElsewhereLabel(f session.Frontend) string {
 }
 
 // questionLines renders the tabbed question panel (or the active single question).
-func (m model) questionLines(ix *session.Interaction, width int) ([]string, int) {
+func (m model) questionLines(ix *session.Interaction, width int) ([]string, int, int) {
 	var b strings.Builder
 
 	if m.isMultiQuestion() {
@@ -405,10 +422,10 @@ func (m model) questionLines(ix *session.Interaction, width int) ([]string, int)
 
 	if m.onSubmitTab() {
 		base := strings.Count(b.String(), "\n")
-		body, a := m.submitTabBody(ix, width)
+		body, a, ctrl := m.submitTabBody(ix, width)
 		b.WriteString(body)
 		b.WriteString("\n\n" + chatHint())
-		return splitAnchor(&b, base+a)
+		return splitAnchorCtrl(&b, base+a, base+ctrl)
 	}
 
 	tab := m.prompt.tab
@@ -432,11 +449,12 @@ func (m model) questionLines(ix *session.Interaction, width int) ([]string, int)
 		otherIndex(q), m.qText(tab), m.otherActive(q, tab), q.OptionDescriptions, width)
 	b.WriteString(block)
 	b.WriteString("\n\n" + chatHint())
-	return splitAnchor(&b, base+a)
+	// Question text (and tab bar) above the options scroll; the option list pins.
+	return splitAnchorCtrl(&b, base+a, base)
 }
 
 // decisionLines renders a permission/plan allow-deny prompt with a deny reason.
-func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int) {
+func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int, int) {
 	var b strings.Builder
 	b.WriteString(promptHeading(ix) + "\n\n")
 	if body := interactionBody(m, ix, width); body != "" {
@@ -452,7 +470,8 @@ func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int)
 		anchor = strings.Count(b.String(), "\n") + 1
 		b.WriteString("\n" + m.rejectInput(ix))
 	}
-	return splitAnchor(&b, anchor)
+	// The plan/permission body above the options scrolls; options + reason pin.
+	return splitAnchorCtrl(&b, anchor, base)
 }
 
 // rejectInput renders the reject feedback field, or the option's placeholder when empty.
@@ -470,7 +489,7 @@ func (m model) rejectInput(ix *session.Interaction) string {
 }
 
 // idleLines renders the free-text composer for an idle interaction.
-func (m model) idleLines(ix *session.Interaction, width int) ([]string, int) {
+func (m model) idleLines(ix *session.Interaction, width int) ([]string, int, int) {
 	var b strings.Builder
 	b.WriteString(promptHeading(ix) + "\n\n")
 	if body := interactionBody(m, ix, width); body != "" {
@@ -478,7 +497,8 @@ func (m model) idleLines(ix *session.Interaction, width int) ([]string, int) {
 	}
 	anchor := strings.Count(b.String(), "\n")
 	b.WriteString(hardWrap(userStyle.Render("> ")+m.prompt.reasonText+"▏", width))
-	return splitAnchor(&b, anchor)
+	// The message body above scrolls; the reply composer pins to the bottom.
+	return splitAnchorCtrl(&b, anchor, anchor)
 }
 
 // promptTabs renders the header tab row (+ trailing Submit tab) for a
@@ -518,7 +538,9 @@ func (m model) promptTabs(width int) string {
 }
 
 // submitTabBody renders the answer review list and the Submit/Cancel actions.
-func (m model) submitTabBody(ix *session.Interaction, width int) (string, int) {
+// It returns the anchor (last action line) and ctrlStart (first action line):
+// the answer list above ctrlStart scrolls, the Submit/Cancel pair pins.
+func (m model) submitTabBody(ix *session.Interaction, width int) (string, int, int) {
 	var b strings.Builder
 	b.WriteString(StyleAccentBold.Render("Review answers") + "\n\n")
 	for tab := range ix.Questions {
@@ -531,6 +553,7 @@ func (m model) submitTabBody(ix *session.Interaction, width int) (string, int) {
 		b.WriteString(hardWrap(line, width) + "\n")
 	}
 	b.WriteString("\n")
+	ctrlStart := strings.Count(b.String(), "\n")
 	for i, act := range []string{"Submit", "Cancel"} {
 		marker, label := "  ", StyleSecondary.Render(act)
 		if i == m.prompt.submitSel {
@@ -541,7 +564,7 @@ func (m model) submitTabBody(ix *session.Interaction, width int) (string, int) {
 	out := strings.TrimRight(b.String(), "\n")
 	// Anchor on the last action so windowing keeps the Submit/Cancel pair visible.
 	anchor := strings.Count(out, "\n")
-	return out, anchor
+	return out, anchor, ctrlStart
 }
 
 // answerSummary describes a question's committed answer for the Submit review.

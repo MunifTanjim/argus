@@ -97,10 +97,21 @@ func (m model) historyFocused() bool {
 func (m model) sessionFooter() string {
 	switch {
 	case m.focus == focusDock:
-		if m.isMultiQuestion() {
-			return m.footer(promptKeys.Up, promptKeys.TabPrev, promptKeys.Next, promptKeys.Read)
+		multi := m.isMultiQuestion()
+		binds := []key.Binding{promptKeys.Up}
+		if multi {
+			binds = append(binds, promptKeys.TabPrev, promptKeys.Next)
+		} else {
+			binds = append(binds, promptKeys.Submit)
 		}
-		return m.footer(promptKeys.Up, promptKeys.Submit, promptKeys.Read, sessionKeys.Raw)
+		if m.dockScrolls() {
+			binds = append(binds, promptKeys.HalfUp)
+		}
+		binds = append(binds, promptKeys.Read)
+		if !multi {
+			binds = append(binds, sessionKeys.Raw)
+		}
+		return m.footer(binds...)
 	case m.historyView == histDetail:
 		return m.footer(detailKeys.Up, detailKeys.Fold, detailKeys.Drill, detailKeys.Back, detailKeys.Raw)
 	default:
@@ -206,7 +217,7 @@ func (m model) dockWidths() (leftW, rightW int, side bool) {
 func (m model) dockContentLines() int {
 	preview := m.focusedOptionPreview()
 	leftW, _, side := m.dockWidths()
-	leftLines, _ := m.promptLinesWidth(leftW)
+	leftLines, _, _ := m.promptLinesWidth(leftW)
 	if preview == "" {
 		return len(leftLines)
 	}
@@ -223,8 +234,8 @@ func (m model) dockContentLines() int {
 func (m model) dockBody(height int) string {
 	preview := m.focusedOptionPreview()
 	leftW, rightW, side := m.dockWidths()
-	lines, anchor := m.promptLinesWidth(leftW)
-	left := windowLines(strings.Join(lines, "\n"), height, anchor)
+	lines, anchor, ctrlStart := m.promptLinesWidth(leftW)
+	left := m.dockScrollBody(lines, height, anchor, ctrlStart, leftW)
 
 	switch {
 	case preview == "":
@@ -236,6 +247,96 @@ func (m model) dockBody(height int) string {
 		stacked := strings.Join(lines, "\n") + "\n" + previewBox(preview, leftW, max(3, height/2))
 		return windowLines(stacked, height, anchor)
 	}
+}
+
+// splitDock divides the dock lines into a scrollable body (above the controls)
+// and the pinned control block, for a dock of totalH rows. ok is false when the
+// content all fits, or the controls alone fill the dock (no room to pin and
+// scroll) — callers then fall back to the non-scrolling windowLines path.
+func splitDock(lines []string, totalH, ctrlStart int) (body, ctrl []string, ok bool) {
+	if totalH <= 0 || len(lines) <= totalH {
+		return nil, nil, false
+	}
+	if ctrlStart < 0 || ctrlStart > len(lines) {
+		ctrlStart = len(lines)
+	}
+	ctrl = lines[ctrlStart:]
+	// Empty controls = nothing to pin; controls filling the dock = nothing left to
+	// scroll. Either way, fall through to the non-scrolling path.
+	if len(ctrl) == 0 || len(ctrl) >= totalH {
+		return nil, nil, false
+	}
+	return lines[:ctrlStart], ctrl, true
+}
+
+// dockGeom resolves splitDock plus the visible body height: bodyH is the rows
+// available to the scrolling body, one fewer than the region when a scroll-hint
+// row is reserved (region >= 2). Shared by rendering and scroll-offset math so
+// the two can't drift. ok mirrors splitDock (false = body doesn't scroll).
+func dockGeom(lines []string, totalH, ctrlStart int) (body, ctrl []string, bodyH int, ok bool) {
+	body, ctrl, ok = splitDock(lines, totalH, ctrlStart)
+	if !ok {
+		return nil, nil, 0, false
+	}
+	region := totalH - len(ctrl) // >= 1 (splitDock guarantees len(ctrl) < totalH)
+	bodyH = region
+	if region >= 2 {
+		bodyH = region - 1 // reserve a row for the scroll hint
+	}
+	return body, ctrl, bodyH, true
+}
+
+// dockScrollBody renders the focused dock within height rows: the control block
+// (options / reply field) pins to the bottom while the body above scrolls by
+// m.prompt.scroll, with a ▲/▼ overflow hint. When the body fits it's returned
+// whole; when the controls themselves overflow it falls back to anchor windowing.
+func (m model) dockScrollBody(lines []string, height, anchor, ctrlStart, width int) string {
+	body, ctrl, bodyH, ok := dockGeom(lines, height, ctrlStart)
+	if !ok {
+		if len(lines) <= height {
+			return strings.Join(lines, "\n")
+		}
+		return windowLines(strings.Join(lines, "\n"), height, anchor)
+	}
+	scroll := max(0, min(m.prompt.scroll, len(body)-bodyH))
+	end := scroll + bodyH
+	out := strings.Join(body[scroll:end], "\n")
+	if bodyH < height-len(ctrl) { // a hint row was reserved
+		out += "\n" + scrollHint(scroll, len(body)-end, width)
+	}
+	return out + "\n" + strings.Join(ctrl, "\n")
+}
+
+// dockScrollGeom returns the max scroll offset and the half-page step for the
+// focused dock body at the given total height (0 / 1 when the body doesn't scroll).
+func (m model) dockScrollGeom(height int) (maxScroll, page int) {
+	leftW, _, _ := m.dockWidths()
+	lines, _, ctrlStart := m.promptLinesWidth(leftW)
+	body, _, bodyH, ok := dockGeom(lines, height, ctrlStart)
+	if !ok {
+		return 0, 1
+	}
+	return max(0, len(body)-bodyH), max(1, bodyH/2)
+}
+
+// dockScrolls reports whether the focused dock body currently overflows (so the
+// footer should advertise the scroll keys).
+func (m model) dockScrolls() bool {
+	if m.focus != focusDock || m.sessionInteraction() == nil {
+		return false
+	}
+	_, dockH := m.sessionLayout()
+	maxScroll, _ := m.dockScrollGeom(dockH - 1)
+	return maxScroll > 0
+}
+
+// scrollDock moves the dock body scroll offset by dir half-pages, clamped.
+func (m model) scrollDock(dir int) model {
+	_, dockH := m.sessionLayout()
+	maxScroll, page := m.dockScrollGeom(dockH - 1)
+	cur := min(m.prompt.scroll, maxScroll) // re-clamp first: a resize may have shrunk the body
+	m.prompt.scroll = max(0, min(cur+dir*page, maxScroll))
+	return m
 }
 
 // windowLines returns at most height lines from s, scrolled so the anchor stays

@@ -114,16 +114,18 @@ var sessionKeys = struct {
 
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
-	Up, Down, TabPrev, TabNext, Submit, Next, Toggle, Read key.Binding
+	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Toggle, Read key.Binding
 }{
-	Up:      nb([]string{"up", "ctrl+p"}, "↑/↓", "select"),
-	Down:    nb([]string{"down", "ctrl+n"}, "", ""),
-	TabPrev: nb([]string{"left"}, "←/→", "tabs"),
-	TabNext: nb([]string{"right"}, "", ""),
-	Submit:  nb([]string{"enter"}, "enter", "submit"),
-	Next:    nb([]string{"enter"}, "enter", "next"), // footer label for multi-question advance
-	Toggle:  nb([]string{" ", "space"}, "space", "toggle"),
-	Read:    nb([]string{"tab", "esc", "escape"}, "tab/esc", "read"),
+	Up:       nb([]string{"up", "ctrl+p"}, "↑/↓", "select"),
+	Down:     nb([]string{"down", "ctrl+n"}, "", ""),
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "ctrl+u/ctrl+d", "scroll"), // combined label; HalfDown's stays empty
+	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	TabPrev:  nb([]string{"left"}, "←/→", "tabs"),
+	TabNext:  nb([]string{"right"}, "", ""),
+	Submit:   nb([]string{"enter"}, "enter", "submit"),
+	Next:     nb([]string{"enter"}, "enter", "next"), // footer label for multi-question advance
+	Toggle:   nb([]string{" ", "space"}, "space", "toggle"),
+	Read:     nb([]string{"tab", "esc", "escape"}, "tab/esc", "read"),
 }
 
 var historyProjectsKeys = struct {

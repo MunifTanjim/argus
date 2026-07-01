@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -17,6 +18,17 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	}
+
+	// Scroll the dock body (plan / message text) independently of the pinned
+	// controls. These keys are never text or selection, so intercept them for
+	// every interaction kind before the per-kind handlers run.
+	switch {
+	case key.Matches(msg, promptKeys.HalfUp):
+		return m.scrollDock(-1), nil
+	case key.Matches(msg, promptKeys.HalfDown):
+		return m.scrollDock(1), nil
+	}
+
 	ix := s.Interaction
 	switch ix.Kind {
 	case session.InteractionIdle:
