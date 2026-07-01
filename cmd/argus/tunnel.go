@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 	"github.com/MunifTanjim/argus/internal/util"
@@ -27,6 +29,8 @@ type tunnelOptions struct {
 
 	externalURL string // --external-url: gateway's public URL when the tunnel is external
 
+	zrokName string // --zrok-name: reserved name selection ("namespace:name" or "name"; default "argus")
+
 	runGateway bool
 	listenAddr string
 
@@ -34,7 +38,7 @@ type tunnelOptions struct {
 }
 
 // providerBinary maps a provider name to the CLI it runs (for PATH lookup).
-var providerBinary = map[string]string{"cloudflare": "cloudflared"}
+var providerBinary = map[string]string{"cloudflare": "cloudflared", "zrok": "zrok2"}
 
 // tunnelFlagCompletions are the shell-completion candidates for --tunnel, each a
 // "value\tdescription" pair. Keeps the value list out of the (terse) flag help.
@@ -45,6 +49,7 @@ func tunnelFlagCompletions() []string {
 		"cloudflare:remote\tremotely-managed tunnel (--cloudflare-token)",
 		"cloudflare:local\tlocally-managed tunnel (--cloudflare-hostname)",
 		"external\texternally managed tunnel; public URL via --external-url",
+		"zrok\tnamed public zrok share (--zrok-name; prompts to enable if needed)",
 	}
 }
 
@@ -64,9 +69,11 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 	}
 	binName, ok := providerBinary[providerName]
 	if !ok {
-		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare, external)", providerName)
+		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare, zrok, external)", providerName)
 	}
 	switch providerName {
+	case "zrok":
+		return resolveZrokTunnel(mode, binName, o)
 	case "cloudflare":
 		cfMode, err := cloudflareMode(mode, o)
 		if err != nil {
@@ -102,6 +109,75 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 		// unreachable: providerBinary already gated unknown names
 		return nil, "", fmt.Errorf("unknown tunnel provider %q", providerName)
 	}
+}
+
+// resolveZrokTunnel builds the Zrok provider (zrok2). zrok's only mode is the named public
+// share, so the suffix must be empty or the "reserved" alias. --zrok-name carries the
+// reserved name (auto-created in Prepare); the environment is enabled in pre-flight.
+func resolveZrokTunnel(mode, binName string, o tunnelOptions) (tunnel.Provider, string, error) {
+	if mode != "" && mode != "reserved" {
+		return nil, "", fmt.Errorf("--tunnel zrok takes no mode (or zrok:reserved), got %q", mode)
+	}
+	if o.cfToken != "" || o.cfHostname != "" || o.cfTunnelName != "" || o.externalURL != "" {
+		return nil, "", fmt.Errorf("--cloudflare-*/--external-url flags are not valid with --tunnel zrok")
+	}
+	name := o.zrokName
+	if name == "" {
+		name = "argus" // default reserved name argus creates and owns
+	}
+	bin, err := resolveBin(o.bin, binName)
+	if err != nil {
+		return nil, "", err
+	}
+	origin, err := originFromListen(o.listenAddr)
+	if err != nil {
+		return nil, "", err
+	}
+	return &tunnel.Zrok{Bin: bin, Selection: name}, origin, nil
+}
+
+// zrokEnabled reports whether this host's zrok environment is enabled — whether
+// `zrok2 overview` can reach the account, the reliable cross-OS signal. A package var for
+// test injection.
+var zrokEnabled = func(ctx context.Context, bin string) bool {
+	return shell.NewCommandContext(ctx, bin, "overview", "--json").Run() == nil
+}
+
+// ensureZrokEnabled makes sure the zrok environment is enabled before the share runs.
+// When it isn't, it prompts for an account token at a terminal and enables with it, else
+// fails fast. Mirrors ensureCloudflareLogin (interactive setup belongs in pre-flight, not
+// the supervisor goroutine).
+func ensureZrokEnabled(ctx context.Context, bin string, interactive bool) error {
+	if zrokEnabled(ctx, bin) {
+		return nil
+	}
+	if !interactive {
+		return fmt.Errorf("zrok environment not enabled: run 'zrok2 enable <token>' first")
+	}
+	token, err := promptZrokToken()
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		return fmt.Errorf("no zrok account token provided")
+	}
+	shell.StdErrF("argus start: enabling zrok environment…\n")
+	cmd := shell.NewCommandContext(ctx, bin, "enable", token, "--headless")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("zrok2 enable: %w: %s", err, cmd.StdErr().TrimSpace())
+	}
+	return nil
+}
+
+// promptZrokToken reads a zrok account token from the terminal without echoing it.
+func promptZrokToken() (string, error) {
+	shell.StdErrF("argus start: zrok environment not enabled. Enter your zrok account token (empty to abort): ")
+	tok, err := term.ReadPassword(int(os.Stdin.Fd()))
+	shell.StdErrLn()
+	if err != nil {
+		return "", fmt.Errorf("read zrok token: %w", err)
+	}
+	return strings.TrimSpace(string(tok)), nil
 }
 
 // resolveExternalTunnel builds the External provider for a tunnel argus does not run

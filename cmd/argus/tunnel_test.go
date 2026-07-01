@@ -299,6 +299,113 @@ func TestResolveTunnelExternalRejectsQueryFragmentUserinfo(t *testing.T) {
 	}
 }
 
+// --- zrok (named public share over zrok2) ---
+
+func zrokOpts() tunnelOptions {
+	o := baseOpts()
+	o.provider = "zrok"
+	o.bin = "/usr/bin/zrok2" // non-empty => no PATH lookup
+	return o
+}
+
+func TestResolveTunnelZrokHappy(t *testing.T) {
+	o := zrokOpts()
+	o.zrokName = "myapp"
+	p, origin, err := resolveTunnel(o)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	z, ok := p.(*tunnel.Zrok)
+	if !ok {
+		t.Fatalf("provider type = %T", p)
+	}
+	if z.Selection != "myapp" {
+		t.Errorf("provider = %+v, want name myapp", z)
+	}
+	if origin != "http://127.0.0.1:8443" {
+		t.Errorf("origin = %q", origin)
+	}
+}
+
+func TestResolveTunnelZrokReservedAlias(t *testing.T) {
+	o := zrokOpts()
+	o.provider = "zrok:reserved"
+	o.zrokName = "myapp"
+	if _, _, err := resolveTunnel(o); err != nil {
+		t.Fatalf("zrok:reserved should be a valid alias, got %v", err)
+	}
+}
+
+func TestResolveTunnelZrokRejectsBadSuffix(t *testing.T) {
+	o := zrokOpts()
+	o.provider = "zrok:bogus"
+	o.zrokName = "myapp"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "zrok") {
+		t.Fatalf("err = %v, want bad-suffix error", err)
+	}
+}
+
+func TestResolveTunnelZrokDefaultsName(t *testing.T) {
+	o := zrokOpts() // no zrokName set
+	p, _, err := resolveTunnel(o)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	z, ok := p.(*tunnel.Zrok)
+	if !ok {
+		t.Fatalf("provider type = %T", p)
+	}
+	if z.Selection != "argus" {
+		t.Errorf("provider = %+v, want default name argus", z)
+	}
+}
+
+func TestResolveTunnelZrokRejectsOtherProviderFlags(t *testing.T) {
+	o := zrokOpts()
+	o.zrokName = "myapp"
+	o.cfToken = "tok"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "not valid with --tunnel zrok") {
+		t.Fatalf("err = %v, want cross-provider flag rejection", err)
+	}
+}
+
+func TestResolveTunnelZrokRequiresGatewayMode(t *testing.T) {
+	o := zrokOpts()
+	o.zrokName = "myapp"
+	o.runGateway = false
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "gateway mode") {
+		t.Fatalf("err = %v, want gateway-mode requirement", err)
+	}
+}
+
+// --- ensureZrokEnabled (overview-based detection + interactive enable) ---
+
+func TestEnsureZrokEnabledNoopWhenEnabled(t *testing.T) {
+	defer stubZrokEnabled(true)()
+	if err := ensureZrokEnabled(context.Background(), "zrok2", false); err != nil {
+		t.Fatalf("enabled env should be a no-op, got %v", err)
+	}
+}
+
+func TestEnsureZrokEnabledFailFastNonInteractive(t *testing.T) {
+	defer stubZrokEnabled(false)()
+	// Not enabled and not a terminal: must fail fast rather than block on a prompt.
+	err := ensureZrokEnabled(context.Background(), "zrok2", false)
+	if err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("err = %v, want fail-fast not-enabled guidance", err)
+	}
+}
+
+// stubZrokEnabled overrides the enabled-check and returns a restore func.
+func stubZrokEnabled(enabled bool) func() {
+	prev := zrokEnabled
+	zrokEnabled = func(context.Context, string) bool { return enabled }
+	return func() { zrokEnabled = prev }
+}
+
 // --- ensureCloudflareLogin (cert prerequisite for local tunnels) ---
 
 func TestEnsureCloudflareLoginNonLocalNoop(t *testing.T) {

@@ -46,6 +46,7 @@ type TunnelConfig struct {
 	Provider   string
 	Cloudflare CloudflareConfig
 	External   ExternalConfig
+	Zrok       ZrokConfig
 }
 
 type CloudflareConfig struct {
@@ -56,6 +57,10 @@ type CloudflareConfig struct {
 
 type ExternalConfig struct {
 	URL string // gateway's public URL when the tunnel is managed outside argus
+}
+
+type ZrokConfig struct {
+	Name string // reserved name selection ("namespace:name" or "name") for a stable URL
 }
 
 // defaults are the built-in fallback values for unset keys.
@@ -74,6 +79,7 @@ var defaults = map[string]any{
 	"tunnel.cloudflare.tunnel-name": "",
 	"tunnel.cloudflare.hostname":    "",
 	"tunnel.external.url":           "",
+	"tunnel.zrok.name":              "",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -93,6 +99,7 @@ func Load(v *viper.Viper, configPath string, skipFile bool) error {
 	_ = v.BindEnv("tunnel.cloudflare.tunnel-name", "ARGUS_CLOUDFLARE_TUNNEL_NAME")
 	_ = v.BindEnv("tunnel.cloudflare.hostname", "ARGUS_CLOUDFLARE_HOSTNAME")
 	_ = v.BindEnv("tunnel.external.url", "ARGUS_EXTERNAL_URL")
+	_ = v.BindEnv("tunnel.zrok.name", "ARGUS_ZROK_NAME")
 
 	if skipFile {
 		return nil
@@ -150,6 +157,9 @@ func FromViper(v *viper.Viper) Config {
 			},
 			External: ExternalConfig{
 				URL: v.GetString("tunnel.external.url"),
+			},
+			Zrok: ZrokConfig{
+				Name: v.GetString("tunnel.zrok.name"),
 			},
 		},
 	}

@@ -43,6 +43,26 @@ argus start --tunnel cloudflare:local --cloudflare-hostname argus.example.com --
 - The tunnel is named `argus`, you can override with `--cloudflare-tunnel-name` flag.
 - The hostname must be in a zone in the **same Cloudflare account** as the cert.
 
+## Zrok
+
+Provider: **[zrok](https://zrok.io)** v2 (requires `zrok2` on `PATH` and a zrok
+account — the hosted service or a self-hosted instance). Argus runs a public share at
+a stable URL backed by a reserved **name**:
+
+```sh
+argus start --token <TOKEN> --tunnel zrok --zrok-name argus
+```
+
+- `--zrok-name` is the reserved name (`name`, or `namespace:name`; the namespace
+  defaults to `public`, i.e. `https://myapp.shares.zrok.io`). Defaults to `argus`
+  (→ `https://argus.shares.zrok.io`) when unset. Argus creates the name if it doesn't
+  exist.
+- The environment must be **enabled** (`zrok2 enable`). If it isn't and you're at a
+  terminal, Argus prompts for your zrok account token and enables it for you; otherwise
+  run `zrok2 enable <token>` yourself first.
+- For a **self-hosted** instance, point the CLI at it with `ZROK2_API_ENDPOINT` (or
+  `zrok2 config set apiEndpoint …`); Argus's child `zrok2` inherits the environment.
+
 ::: tip
 A tunnel can't accidentally publish an open gateway — every gateway requires a
 `--token` regardless of how it's exposed. See [Multi Machine](/guide/multi-machine)

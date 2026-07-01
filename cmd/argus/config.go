@@ -49,6 +49,7 @@ var flagKeys = map[string]string{
 	"cloudflare-tunnel-name": "tunnel.cloudflare.tunnel-name",
 	"cloudflare-hostname":    "tunnel.cloudflare.hostname",
 	"external-url":           "tunnel.external.url",
+	"zrok-name":              "tunnel.zrok.name",
 }
 
 // addClientFlags registers the node/gateway-reaching flags shared by the root TUI
