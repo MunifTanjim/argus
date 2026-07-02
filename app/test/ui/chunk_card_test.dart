@@ -15,6 +15,23 @@ void main() {
     expect(find.textContaining('fix the bug'), findsOneWidget);
   });
 
+  testWidgets('long user chunk collapses and expands', (tester) async {
+    final long = List.generate(30, (i) => 'line $i').join('\n');
+    // Scrollable parent so tall expanded content doesn't trip an overflow.
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: ChunkCard(
+                    detailRef: const ToolDetailRef.live('s'),
+                    chunk: Chunk(id: 'u', kind: ChunkKind.user, text: long))))));
+    expect(find.text('Show more'), findsOneWidget);
+    expect(find.textContaining('line 29'), findsNothing); // hidden while collapsed
+    await tester.tap(find.text('Show more'));
+    await tester.pump();
+    expect(find.text('Show less'), findsOneWidget);
+    expect(find.textContaining('line 29'), findsOneWidget);
+  });
+
   testWidgets('ai chunk collapsed shows preview, expands on tap',
       (tester) async {
     const c = Chunk(

@@ -218,12 +218,48 @@ class _ChunkCardState extends State<ChunkCard> {
   }
 }
 
-class _UserBubble extends StatelessWidget {
+class _UserBubble extends StatefulWidget {
   const _UserBubble({required this.text});
   final String text;
 
   @override
+  State<_UserBubble> createState() => _UserBubbleState();
+}
+
+class _UserBubbleState extends State<_UserBubble> {
+  static const _maxLines = 10;
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final text = widget.text;
+    final lineCount = '\n'.allMatches(text).length + 1;
+    final long = lineCount > _maxLines || text.length > 600;
+
+    final Widget body;
+    if (long && !_expanded) {
+      // A plain-text preview keeps the collapsed height bounded; the full
+      // markdown renders once expanded.
+      final preview = text.split('\n').take(_maxLines).join('\n');
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(preview,
+              maxLines: _maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.text, fontSize: 14)),
+          _toggle('Show more'),
+        ],
+      );
+    } else if (long) {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [appMarkdown(text), _toggle('Show less')],
+      );
+    } else {
+      body = appMarkdown(text);
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, left: 40),
       child: Align(
@@ -235,11 +271,20 @@ class _UserBubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: appMarkdown(text),
+          child: body,
         ),
       ),
     );
   }
+
+  Widget _toggle(String label) => GestureDetector(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(label,
+              style: _mono.copyWith(color: AppColors.accent, fontSize: 11)),
+        ),
+      );
 }
 
 class _MetaRow extends StatelessWidget {
