@@ -83,49 +83,126 @@ class _DLine {
 }
 
 /// Renders an interleaved line-level diff of [oldS] → [newS].
-Widget _diff(String oldS, String newS) => _diffBox(_lineDiff(oldS, newS));
+Widget _diff(String oldS, String newS) => _DiffBox(_lineDiff(oldS, newS));
 
-Widget _diffBox(List<_DLine> lines) {
-  if (lines.isEmpty) return const SizedBox.shrink();
-  final spans = <TextSpan>[];
-  for (var i = 0; i < lines.length; i++) {
-    final l = lines[i];
-    final prefix = l.kind == _DKind.add
-        ? '+ '
-        : l.kind == _DKind.del
-            ? '- '
-            : '  ';
-    final color = l.kind == _DKind.add
-        ? _green
-        : l.kind == _DKind.del
-            ? _red
-            : AppColors.text;
-    final nl = i == lines.length - 1 ? '' : '\n';
-    spans.add(TextSpan(text: '$prefix${l.text}$nl', style: TextStyle(color: color)));
-  }
-  // Long-press copies the resulting ("after") text: context + additions, which
-  // is what you usually want to grab from a diff.
-  final after = lines
-      .where((l) => l.kind != _DKind.del)
-      .map((l) => l.text)
-      .join('\n');
-  return CopyOnLongPress(
-    text: after,
-    child: Container(
+/// A diff box with a thin header (label + wrap toggle), mirroring code blocks.
+/// Copy is intentionally omitted — a diff is for reading, not grabbing text.
+class _DiffBox extends StatefulWidget {
+  const _DiffBox(this.lines);
+
+  final List<_DLine> lines;
+
+  @override
+  State<_DiffBox> createState() => _DiffBoxState();
+}
+
+class _DiffBoxState extends State<_DiffBox> {
+  bool _wrap = false;
+  bool _lineNumbers = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.lines.isEmpty) return const SizedBox.shrink();
+    final content = _lineNumbers ? _numbered() : _plain();
+    return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: AppColors.card,
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Text.rich(TextSpan(children: spans, style: _mono)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.only(left: 8, right: 2),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('diff',
+                      style: _mono.copyWith(
+                          color: AppColors.dim, fontSize: 11)),
+                ),
+                codeBarButton(
+                  icon: Icons.format_list_numbered,
+                  active: _lineNumbers,
+                  tooltip:
+                      _lineNumbers ? 'Hide line numbers' : 'Show line numbers',
+                  onTap: () => setState(() => _lineNumbers = !_lineNumbers),
+                ),
+                codeBarButton(
+                  icon: Icons.wrap_text,
+                  active: _wrap,
+                  tooltip: _wrap ? 'Disable wrap' : 'Wrap lines',
+                  onTap: () => setState(() => _wrap = !_wrap),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: _wrap
+                ? content
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal, child: content),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
+
+  ({String prefix, Color color}) _style(_DKind kind) => switch (kind) {
+        _DKind.add => (prefix: '+ ', color: _green),
+        _DKind.del => (prefix: '- ', color: _red),
+        _DKind.context => (prefix: '  ', color: AppColors.text),
+      };
+
+  Widget _plain() {
+    final spans = <TextSpan>[];
+    for (var i = 0; i < widget.lines.length; i++) {
+      final l = widget.lines[i];
+      final s = _style(l.kind);
+      final nl = i == widget.lines.length - 1 ? '' : '\n';
+      spans.add(TextSpan(
+          text: '${s.prefix}${l.text}$nl', style: TextStyle(color: s.color)));
+    }
+    return Text.rich(TextSpan(children: spans, style: _mono), softWrap: _wrap);
+  }
+
+  // Numbers the new-side (context + additions); deletions get a blank gutter.
+  // No file offset is available, so numbering starts at 1.
+  Widget _numbered() {
+    final newCount =
+        widget.lines.where((l) => l.kind != _DKind.del).length;
+    final gutterWidth = newCount.toString().length * 9.0;
+    final rows = <Widget>[];
+    var newNo = 0;
+    for (final l in widget.lines) {
+      final isDel = l.kind == _DKind.del;
+      if (!isDel) newNo++;
+      final s = _style(l.kind);
+      final text = Text('${s.prefix}${l.text}',
+          style: _mono.copyWith(color: s.color), softWrap: _wrap);
+      rows.add(Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: gutterWidth,
+            child: Text(isDel ? '' : '$newNo',
+                textAlign: TextAlign.right,
+                style: _mono.copyWith(color: AppColors.dim)),
+          ),
+          const SizedBox(width: 8),
+          _wrap ? Expanded(child: text) : text,
+        ],
+      ));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+  }
 }
 
 /// Line-level LCS diff: context lines are plain, removals red, additions green.

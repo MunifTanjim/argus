@@ -82,7 +82,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       appBar: AppBar(title: Text(itemTitle(_item))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : CenteredBody(
+          : SafeArea(
+              top: false,
+              child: CenteredBody(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -101,6 +103,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                 ),
               ),
             ),
+          ),
     );
   }
 }

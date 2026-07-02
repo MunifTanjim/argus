@@ -31,11 +31,11 @@ Widget _header(String text) => Text(text,
     style:
         _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
 
-Widget _resultSection(Item it) {
+Widget _resultSection(Item it, {bool wrap = false}) {
   if ((it.result ?? '').isEmpty) return const SizedBox.shrink();
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-    codeBlock(it.result!),
+    codeBlock(it.result!, wrap: wrap),
   ]);
 }
 
@@ -47,7 +47,9 @@ Widget toolDetailBody(Item item) {
     case 'NotebookEdit':
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         editDiffView(item),
-        _resultSection(item),
+        // Edit results echo the changed file region; wrap so long lines stay
+        // readable without horizontal scrolling.
+        _resultSection(item, wrap: true),
       ]);
     case 'Bash':
       return _bash(item);
@@ -89,11 +91,22 @@ Widget _bash(Item it) {
     if (cmd.isNotEmpty)
       Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: CopyOnLongPress(
-          text: cmd,
-          child: Text('\$ $cmd',
-              style: _mono.copyWith(
-                  color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text('\$ $cmd',
+                  style: _mono.copyWith(
+                      color: AppColors.secondary, fontWeight: FontWeight.w700)),
+            ),
+            Builder(
+              builder: (ctx) => codeBarButton(
+                icon: Icons.copy,
+                tooltip: 'Copy',
+                onTap: () => copyToClipboard(ctx, cmd),
+              ),
+            ),
+          ],
         ),
       )
     else if ((it.toolInput ?? '').isNotEmpty)
@@ -106,7 +119,9 @@ Widget _read(Item it) {
   final path = toolInputStr(_input(it)['file_path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (path.isNotEmpty) _header(path),
-    if ((it.result ?? '').isNotEmpty) codeBlock(it.result!),
+    // Read output is already `cat -n` numbered — no need for our own gutter.
+    if ((it.result ?? '').isNotEmpty)
+      codeBlock(it.result!, lineNumberToggle: false),
   ]);
 }
 

@@ -18,6 +18,27 @@ void main() {
     expect(find.textContaining('total 0'), findsOneWidget);
   });
 
+  testWidgets('Bash command has an inline copy button', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Bash',
+        toolInput: '{"command":"ls -la"}')));
+    await tester.tap(find.byIcon(Icons.copy));
+    await tester.pump();
+    expect(find.text('Copied'), findsOneWidget);
+  });
+
+  testWidgets('Read result hides the line-number toggle', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Read',
+        toolInput: '{"file_path":"/a.dart"}',
+        result: '     1\tline one\n     2\tline two')));
+    expect(find.byIcon(Icons.format_list_numbered), findsNothing);
+  });
+
   testWidgets('Grep shows pattern header', (tester) async {
     await tester.pumpWidget(_wrap(const Item(
         id: 'i',

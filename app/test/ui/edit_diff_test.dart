@@ -52,4 +52,36 @@ void main() {
     expect(find.textContaining('- keep'), findsNothing);
     expect(find.textContaining('- tail'), findsNothing);
   });
+
+  testWidgets('diff header wrap toggle switches horizontal scrolling',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Edit',
+        toolInput:
+            '{"file_path":"/a.dart","old_string":"foo()","new_string":"bar()"}')));
+    expect(find.text('diff'), findsOneWidget);
+    expect(find.byType(SingleChildScrollView), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.wrap_text));
+    await tester.pump();
+    expect(find.byType(SingleChildScrollView), findsNothing);
+  });
+
+  testWidgets('diff has a line-number toggle numbering the new side',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Edit',
+        toolInput:
+            '{"file_path":"/a.dart","old_string":"keep\\nbefore\\ntail","new_string":"keep\\nafter\\ntail"}')));
+    expect(find.text('1'), findsNothing); // off by default
+    await tester.tap(find.byIcon(Icons.format_list_numbered));
+    await tester.pump();
+    // New side: keep(1), after(2), tail(3). The deleted "before" has no number.
+    expect(find.text('1'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget);
+  });
 }
