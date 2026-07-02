@@ -6,6 +6,7 @@ package adapters
 import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter/codex"
 )
 
 // All returns every registered tool adapter in priority order. The first entry
@@ -14,8 +15,20 @@ import (
 func All() []adapter.Adapter {
 	return []adapter.Adapter{
 		claudecode.New(),
+		codex.New(),
 	}
 }
 
 // Default returns the default adapter (All()[0]).
 func Default() adapter.Adapter { return All()[0] }
+
+// ByTool returns the registered adapter with the given Tool() id, or the default
+// adapter when tool is empty or unknown.
+func ByTool(tool string) adapter.Adapter {
+	for _, a := range All() {
+		if a.Tool() == tool {
+			return a
+		}
+	}
+	return Default()
+}

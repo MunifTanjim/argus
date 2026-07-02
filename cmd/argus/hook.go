@@ -15,14 +15,18 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// newHookCmd builds `argus hook <event>`, invoked by a Claude Code hook (hidden:
-// integration entry point, not user-facing). Reads the payload from stdin, enriches it
-// with tmux pane/server from the environment, and forwards to argusd. Strictly
-// best-effort: any failure exits 0 so it never disrupts Claude Code.
+// newHookCmd builds `argus hook [--tool <id>] <event>`, invoked by a tool's hook
+// (hidden: integration entry point, not user-facing). Reads the payload from
+// stdin, enriches it with tmux pane/server from the environment, and forwards to
+// argusd via the owning adapter's hook method. --tool selects the adapter and
+// defaults to Claude Code, so existing Claude hooks (`argus hook <event>`) work
+// unchanged. Strictly best-effort: any failure exits 0 so it never disrupts the
+// tool.
 func newHookCmd() *cobra.Command {
-	return &cobra.Command{
+	var tool string
+	cmd := &cobra.Command{
 		Use:           "hook <event>",
-		Short:         "Deliver a Claude Code hook event to argusd",
+		Short:         "Deliver a tool hook event to argusd",
 		Hidden:        true,
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
@@ -46,7 +50,7 @@ func newHookCmd() *cobra.Command {
 				Payload:    payload,
 				AutoMode:   os.Getenv("CLAUDE_CODE_ENABLE_AUTO_MODE") == "1",
 			}
-			hookMethod := adapters.Default().HookMethod()
+			hookMethod := adapters.ByTool(tool).HookMethod()
 
 			// PermissionRequest blocks until argusd returns the user's decision, then
 			// prints it for Claude Code. Print nothing on failure so Claude falls back to
@@ -83,4 +87,6 @@ func newHookCmd() *cobra.Command {
 			shell.Exit(0)
 		},
 	}
+	cmd.Flags().StringVar(&tool, "tool", "claude-code", "tool adapter this hook belongs to")
+	return cmd
 }

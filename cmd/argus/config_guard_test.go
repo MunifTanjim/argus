@@ -24,6 +24,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"interval":  true, // `ping` only
 		"url":       true, // `pair` only: QR base-URL override
 		"timeout":   true, // `pair` only: device-connect wait
+		"tool":      true, // `hook` only: selects the tool adapter, per-invocation
 	}
 
 	seen := map[string]bool{}
