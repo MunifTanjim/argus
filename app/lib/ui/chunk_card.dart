@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/chunk.dart';
 import '../state/tool_detail.dart';
+import '../util/model_name.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
 import 'item_row.dart';
@@ -115,7 +116,7 @@ class _ChunkCardState extends State<ChunkCard> {
           style: color == null ? _monoDim : _mono.copyWith(color: color)));
     }
 
-    if (c.model?.isNotEmpty ?? false) add(c.model!);
+    if (c.model?.isNotEmpty ?? false) add(formatModelName(c.model!));
     if (c.thinking > 0) add('✻ ${c.thinking}');
     if (c.toolCount > 0) add('▸ ${c.toolCount}');
     if (c.hasContext) {
