@@ -29,7 +29,7 @@ var DefaultHookEvents = []string{
 // fire-and-forget observers.
 func hookTimeout(event string) int {
 	if event == "PermissionRequest" {
-		return 600
+		return 1500
 	}
 	return 5
 }
