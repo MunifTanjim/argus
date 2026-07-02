@@ -15,7 +15,7 @@ import (
 
 // unifiedPushTTL is the Web Push message lifetime (seconds); push services require
 // a TTL header and reject the request without one.
-const unifiedPushTTL = "86400"
+const unifiedPushTTL = "1800"
 
 // messageID returns a random per-delivery id stamped into every payload so the
 // client can dedup replays: the UnifiedPush Android plugin buffers recent events
