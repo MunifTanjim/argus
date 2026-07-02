@@ -99,6 +99,25 @@ void main() {
     expect(find.text('Custom path…'), findsWidgets);
   });
 
+  testWidgets('duplicate project cwds do not crash the picker', (tester) async {
+    // Same cwd on two nodes would trip DropdownButton's one-item-per-value
+    // assertion if not deduped.
+    await tester.pumpWidget(_app([
+      const HistoryProject(
+          projectDir: '/a', cwd: '/home/u/argus', label: 'argus',
+          sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z', nodeId: 'n1'),
+      const HistoryProject(
+          projectDir: '/a', cwd: '/home/u/argus', label: 'argus',
+          sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z', nodeId: 'n2'),
+    ]));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byType(DropdownButton<String>).last);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('spawn fires with the typed prompt', (tester) async {
     final repo = _RecordingSpawnRepo();
     await tester.pumpWidget(_appWithRepo(repo));

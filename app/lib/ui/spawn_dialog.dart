@@ -150,10 +150,19 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
 
     final allProjects = ref.watch(historyProjectsProvider).value ??
         const <HistoryProject>[];
+    // Dedupe by cwd: the same path can appear on multiple nodes (or repeat in
+    // history), and the dropdown asserts one item per value.
+    final seenCwds = <String>{};
     final projects = [
       for (final p in allProjects)
-        if (_nodeId == null || (p.nodeId ?? '') == _nodeId) p,
+        if (_nodeId == null || (p.nodeId ?? '') == _nodeId)
+          if (seenCwds.add(p.cwd)) p,
     ];
+    // Drop a stale selection that no longer maps to an item, else the dropdown
+    // has zero matches for its value and asserts.
+    if (_selectedCwd != null && !seenCwds.contains(_selectedCwd)) {
+      _selectedCwd = null;
+    }
     _selectedCwd ??= projects.isNotEmpty ? projects.first.cwd : null;
 
     return SingleChildScrollView(
