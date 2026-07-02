@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/MunifTanjim/argus/compare/0.0.5...0.0.6) (2026-07-02)
+
+
+### Bug Fixes
+
+* **tui:** dedupe project cwds in spawn picker ([c3dde7c](https://github.com/MunifTanjim/argus/commit/c3dde7ca0f926eb08583416b9229eac9d36014f0))
+
 ## [0.0.5](https://github.com/MunifTanjim/argus/compare/0.0.4...0.0.5) (2026-07-02)
 
 
