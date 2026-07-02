@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../models/chunk.dart';
 import 'code_block.dart';
@@ -90,9 +89,12 @@ Widget _bash(Item it) {
     if (cmd.isNotEmpty)
       Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text('\$ $cmd',
-            style: _mono.copyWith(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        child: CopyOnLongPress(
+          text: cmd,
+          child: Text('\$ $cmd',
+              style: _mono.copyWith(
+                  color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        ),
       )
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
@@ -190,7 +192,7 @@ Widget _askUserQuestion(Item it) {
           style: _mono.copyWith(
               color: AppColors.accent, fontWeight: FontWeight.w700)));
     }
-    if (question.isNotEmpty) children.add(GptMarkdown(question));
+    if (question.isNotEmpty) children.add(appMarkdown(question));
     for (final opt
         in ((q['options'] as List?) ?? const []).cast<Map<String, dynamic>>()) {
       final label = toolInputStr(opt['label']);

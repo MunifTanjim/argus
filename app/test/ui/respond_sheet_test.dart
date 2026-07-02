@@ -60,6 +60,24 @@ void main() {
     expect(c.respondCalls.single['kind'], 'permission');
   });
 
+  testWidgets('permission renders formatted tool detail, not raw JSON',
+      (tester) async {
+    final c = _RecordingControl();
+    await _pumpSheet(
+        tester,
+        _session({
+          'kind': 'permission',
+          'tool_name': 'Bash',
+          'tool_input': '{"command":"ls -la","description":"list files"}',
+        }),
+        c);
+    await tester.pump();
+    // The per-tool renderer formats the command instead of dumping the JSON.
+    expect(find.textContaining('\$ ls -la'), findsOneWidget);
+    expect(find.textContaining('list files'), findsOneWidget);
+    expect(find.textContaining('"command"'), findsNothing);
+  });
+
   testWidgets('permission deny reveals reason and sends option_value deny',
       (tester) async {
     final c = _RecordingControl();

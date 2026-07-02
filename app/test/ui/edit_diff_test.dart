@@ -37,4 +37,19 @@ void main() {
     expect(find.textContaining('a1'), findsOneWidget);
     expect(find.textContaining('b2'), findsOneWidget);
   });
+
+  testWidgets('Edit interleaves changed lines and keeps context', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Edit',
+        toolInput:
+            '{"file_path":"/a.dart","old_string":"keep\\nbefore\\ntail","new_string":"keep\\nafter\\ntail"}')));
+    // Changed lines are marked +/-, the shared lines stay as plain context (so
+    // "keep"/"tail" are never shown as removed).
+    expect(find.textContaining('- before'), findsOneWidget);
+    expect(find.textContaining('+ after'), findsOneWidget);
+    expect(find.textContaining('- keep'), findsNothing);
+    expect(find.textContaining('- tail'), findsNothing);
+  });
 }

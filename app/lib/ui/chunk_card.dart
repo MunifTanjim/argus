@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../models/chunk.dart';
 import '../state/tool_detail.dart';
+import 'code_block.dart';
 import 'item_detail_screen.dart';
 import 'item_row.dart';
 import 'subagent_trace_screen.dart';
@@ -11,6 +11,14 @@ import 'theme.dart';
 const _redColor = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
 final _monoDim = _mono.copyWith(color: AppColors.dim);
+
+/// Context-pressure color, mirroring the TUI thresholds (50/80). A healthy
+/// context stays dim so it doesn't compete with the elevated states.
+Color _ctxColor(double pct) {
+  if (pct >= 80) return const Color(0xFFfb4934); // red
+  if (pct >= 50) return const Color(0xFFfabd2f); // yellow
+  return AppColors.dim;
+}
 
 class ChunkCard extends StatefulWidget {
   const ChunkCard({super.key, required this.detailRef, required this.chunk});
@@ -41,13 +49,6 @@ class _ChunkCardState extends State<ChunkCard> {
   }
 
   Widget _aiCard(Chunk c) {
-    final meta = <String>[
-      if (c.model != null && c.model!.isNotEmpty) c.model!,
-      if (c.hasContext) '${c.contextPct.round()}% ctx',
-      if (c.usage.total > 0) '${c.usage.total} tok',
-      if (c.durationMs > 0) '${(c.durationMs / 1000).toStringAsFixed(1)}s',
-    ].join('  ·  ');
-
     // The header (chevron + meta) is the only collapse target. Keeping the toggle
     // off the body means scrolling or drilling inside an expanded card can't
     // accidentally collapse it.
@@ -61,10 +62,7 @@ class _ChunkCardState extends State<ChunkCard> {
             Icon(_expanded ? Icons.expand_more : Icons.chevron_right,
                 size: 16, color: AppColors.dim),
             const SizedBox(width: 4),
-            Expanded(
-              child: Text(meta.isNotEmpty ? meta : 'response',
-                  style: _monoDim),
-            ),
+            Expanded(child: _metaLine(c)),
           ],
         ),
       ),
@@ -104,6 +102,32 @@ class _ChunkCardState extends State<ChunkCard> {
     );
   }
 
+  /// Builds the AI header meta line: model · ✻thinking · ▸tools · ctx% · tokens ·
+  /// duration. The context % is colored by pressure; everything else stays dim.
+  Widget _metaLine(Chunk c) {
+    final spans = <InlineSpan>[];
+    void add(String text, {Color? color}) {
+      if (spans.isNotEmpty) {
+        spans.add(TextSpan(text: '  ·  ', style: _monoDim));
+      }
+      spans.add(TextSpan(
+          text: text,
+          style: color == null ? _monoDim : _mono.copyWith(color: color)));
+    }
+
+    if (c.model?.isNotEmpty ?? false) add(c.model!);
+    if (c.thinking > 0) add('✻ ${c.thinking}');
+    if (c.toolCount > 0) add('▸ ${c.toolCount}');
+    if (c.hasContext) {
+      add('${c.contextPct.round()}% ctx', color: _ctxColor(c.contextPct));
+    }
+    if (c.usage.total > 0) add('${c.usage.total} tok');
+    if (c.durationMs > 0) add('${(c.durationMs / 1000).toStringAsFixed(1)}s');
+
+    if (spans.isEmpty) return Text('response', style: _monoDim);
+    return Text.rich(TextSpan(children: spans));
+  }
+
   Widget _collapsedBody(Chunk c) {
     final last = c.previewItem;
     final extra = c.items.length > 1
@@ -118,10 +142,13 @@ class _ChunkCardState extends State<ChunkCard> {
       return Text('(no output)', style: _monoDim);
     }
     if (last.kind == ItemKind.text) {
-      final firstLine = (last.text ?? '')
+      final lines = (last.text ?? '')
           .trim()
           .split('\n')
-          .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
+          .where((l) => l.trim().isNotEmpty)
+          .toList();
+      final firstLine = lines.isEmpty ? '' : lines.first;
+      final hidden = lines.length - 1;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -129,6 +156,13 @@ class _ChunkCardState extends State<ChunkCard> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: AppColors.text, fontSize: 14)),
+          // A single long text item gets a line-count hint; multi-item chunks
+          // already show the "N items" count via [extra].
+          if (hidden > 0 && c.items.length <= 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('… +$hidden more lines', style: _monoDim),
+            ),
           extra,
         ],
       );
@@ -146,7 +180,7 @@ class _ChunkCardState extends State<ChunkCard> {
         if ((it.text ?? '').trim().isEmpty) continue;
         widgets.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: GptMarkdown(it.text!),
+          child: appMarkdown(it.text!),
         ));
       } else {
         widgets.add(ItemRow(item: it, onTap: _drill(it)));
@@ -201,7 +235,7 @@ class _UserBubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: GptMarkdown(text),
+          child: appMarkdown(text),
         ),
       ),
     );

@@ -19,4 +19,14 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: codeBlock(''))));
     expect(find.byType(SizedBox), findsWidgets);
   });
+
+  testWidgets('CopyOnLongPress shows a Copied snackbar', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: Center(
+                child: CopyOnLongPress(text: 'x', child: Text('tap'))))));
+    await tester.longPress(find.text('tap'));
+    await tester.pump();
+    expect(find.text('Copied'), findsOneWidget);
+  });
 }

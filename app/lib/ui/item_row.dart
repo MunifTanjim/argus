@@ -5,6 +5,14 @@ import 'theme.dart';
 
 const _redColor = Color(0xFFfb4934);
 
+// Gruvbox-bright per-tool accents (the mobile counterpart to the TUI's Nerd
+// Font tool icons).
+const _blue = Color(0xFF83a598);
+const _green = Color(0xFFb8bb26);
+const _yellow = Color(0xFFfabd2f);
+const _orange = Color(0xFFfe8019);
+const _purple = Color(0xFFd3869b);
+
 class ItemRow extends StatelessWidget {
   const ItemRow({super.key, required this.item, this.onTap});
 
@@ -26,22 +34,29 @@ class ItemRow extends StatelessWidget {
         return const SizedBox.shrink();
       case ItemKind.thinking:
         return _row(
-          leading: '✻',
+          // The glyph is decorative; the "thinking" label carries the meaning.
+          leading: ExcludeSemantics(child: Text('✻', style: _monoDim)),
           label: 'thinking',
           labelColor: AppColors.dim,
           trailing: item.signature ? ' 🔒' : '',
           preview: item.text,
         );
       case ItemKind.tool:
+        final err = item.resultIsError;
+        final name = item.toolName ?? 'tool';
         return _row(
-          leading: '▸',
-          label: item.toolName ?? 'tool',
-          labelColor: item.resultIsError ? _redColor : AppColors.accent,
+          leading: Icon(_toolIcon(item.toolName), size: 14,
+              color: err ? _redColor : _toolColor(item.toolName)),
+          label: name,
+          labelColor: err ? _redColor : AppColors.accent,
+          // Error is color-only visually; announce it for screen readers.
+          labelSemantics: err ? '$name, error' : null,
           preview: item.inputPreview,
         );
       case ItemKind.subagent:
         return _row(
-          leading: '▸',
+          leading: const Icon(Icons.smart_toy_outlined,
+              size: 14, color: AppColors.accent),
           label: item.subagentType ?? 'subagent',
           labelColor: AppColors.accent,
           preview: item.subagentDesc,
@@ -50,10 +65,11 @@ class ItemRow extends StatelessWidget {
   }
 
   Widget _row({
-    required String leading,
+    required Widget leading,
     required String label,
     required Color labelColor,
     String trailing = '',
+    String? labelSemantics,
     String? preview,
   }) {
     final row = Padding(
@@ -61,8 +77,12 @@ class ItemRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$leading ', style: _monoDim),
+          Padding(
+            padding: const EdgeInsets.only(right: 6, top: 1),
+            child: leading,
+          ),
           Text('$label$trailing',
+              semanticsLabel: labelSemantics,
               style: _mono.copyWith(
                   color: labelColor, fontWeight: FontWeight.w600)),
           if (preview != null && preview.trim().isNotEmpty) ...[
@@ -74,12 +94,72 @@ class ItemRow extends StatelessWidget {
                   style: _monoDim),
             ),
           ],
-          if (onTap != null)
-            Text(' ›', style: _monoDim),
+          if (onTap != null) Text(' ›', style: _monoDim),
         ],
       ),
     );
     if (onTap == null) return row;
     return InkWell(onTap: onTap, child: row);
+  }
+}
+
+IconData _toolIcon(String? name) {
+  switch (name) {
+    case 'Read':
+    case 'NotebookRead':
+      return Icons.menu_book_outlined;
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return Icons.edit_outlined;
+    case 'Write':
+      return Icons.note_add_outlined;
+    case 'Bash':
+    case 'BashOutput':
+    case 'KillShell':
+      return Icons.terminal;
+    case 'Grep':
+      return Icons.search;
+    case 'Glob':
+    case 'LS':
+      return Icons.folder_open_outlined;
+    case 'Task':
+    case 'Agent':
+      return Icons.smart_toy_outlined;
+    case 'Skill':
+      return Icons.build_outlined;
+    case 'WebFetch':
+    case 'WebSearch':
+      return Icons.public;
+    case 'TodoWrite':
+      return Icons.checklist;
+    default:
+      return Icons.play_arrow;
+  }
+}
+
+Color _toolColor(String? name) {
+  switch (name) {
+    case 'Read':
+    case 'NotebookRead':
+    case 'WebFetch':
+    case 'WebSearch':
+      return _blue;
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+    case 'TodoWrite':
+      return _yellow;
+    case 'Write':
+      return _green;
+    case 'Bash':
+    case 'BashOutput':
+    case 'KillShell':
+    case 'Skill':
+      return _orange;
+    case 'Grep':
+      return _purple;
+    default:
+      return AppColors.accent;
   }
 }

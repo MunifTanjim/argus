@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../core/command.dart';
 import '../core/result.dart';
 import '../data/session_repository.dart';
+import '../models/chunk.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
+import 'theme.dart';
+import 'tool_detail.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
 Future<void> showRespondSheet(BuildContext context, Session session) {
@@ -137,14 +139,38 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   /// choice opens a free-text field prompted by its placeholder. The client only
   /// echoes the chosen value back.
   List<Widget> _serverDecision(Interaction ix, String kind) {
-    final detail = <Widget>[];
-    if ((ix.toolName ?? '').isNotEmpty) {
-      detail.add(
-        Text(ix.toolName!, style: const TextStyle(fontWeight: FontWeight.bold)),
-      );
+    final tool = ix.toolName ?? '';
+    final heading = kind == 'plan'
+        ? 'Plan review'
+        : (tool.isEmpty
+            ? 'Permission requested'
+            : 'Permission requested · $tool');
+
+    final detail = <Widget>[
+      Text(heading,
+          style: const TextStyle(
+              color: AppColors.secondary, fontWeight: FontWeight.w700)),
+    ];
+    if ((ix.message ?? '').isNotEmpty) {
+      detail.add(const SizedBox(height: 8));
+      detail.add(appMarkdown(ix.message!));
     }
-    if ((ix.toolInput ?? '').isNotEmpty) detail.add(codeBlock(ix.toolInput!));
-    if ((ix.plan ?? '').isNotEmpty) detail.add(GptMarkdown(ix.plan!));
+    // Reuse the transcript's per-tool renderers (Bash → "$ cmd", Edit → diff, …)
+    // so the prompt shows the same formatted detail as the TUI instead of raw
+    // JSON. A synthetic tool item is all toolDetailBody needs.
+    if ((ix.toolInput ?? '').isNotEmpty) {
+      detail.add(const SizedBox(height: 8));
+      detail.add(toolDetailBody(Item(
+        id: '',
+        kind: ItemKind.tool,
+        toolName: ix.toolName,
+        toolInput: ix.toolInput,
+      )));
+    }
+    if ((ix.plan ?? '').isNotEmpty) {
+      detail.add(const SizedBox(height: 8));
+      detail.add(appMarkdown(ix.plan!));
+    }
 
     final reject = ix.options.firstWhere(
       (o) => o.reject,
