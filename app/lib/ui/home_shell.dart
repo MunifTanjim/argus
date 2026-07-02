@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../pairing/gateway_store.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import 'history_screen.dart';
@@ -10,8 +9,7 @@ import 'session_list_screen.dart';
 import 'settings_screen.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
-  const HomeShell({super.key, required this.store});
-  final GatewayStore store;
+  const HomeShell({super.key});
 
   @override
   ConsumerState<HomeShell> createState() => _HomeShellState();
@@ -37,7 +35,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final tabs = [
       const SessionListScreen(),
       const HistoryScreen(),
-      SettingsScreen(store: widget.store),
+      const SettingsScreen(),
     ];
     // The tabs share one route, so back on a non-first tab would otherwise exit
     // the app. Intercept it to return to Sessions first; only exit from Sessions.

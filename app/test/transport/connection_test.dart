@@ -47,7 +47,33 @@ class PongLink implements RpcLink {
   }
 }
 
+class _Fatal implements FatalConnectError {
+  @override
+  final String message;
+  _Fatal(this.message);
+}
+
 void main() {
+  test('a fatal connect error stops redialing and surfaces the message',
+      () async {
+    var attempts = 0;
+    final mgr = ConnectionManager(
+      connect: () async {
+        attempts++;
+        throw _Fatal('host key changed — possible MITM');
+      },
+      baseBackoff: const Duration(milliseconds: 5),
+      maxBackoff: const Duration(milliseconds: 20),
+    );
+    mgr.start();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(mgr.state, ConnState.failed);
+    expect(mgr.failureMessage, contains('MITM'));
+    // Fatal ⇒ no backoff loop; a single dial, not repeated attempts.
+    expect(attempts, 1);
+    await mgr.stop();
+  });
+
   test('reaches connected and runs onConnected', () async {
     final link = FakeLink();
     var resynced = false;

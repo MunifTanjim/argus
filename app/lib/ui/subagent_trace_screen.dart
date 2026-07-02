@@ -119,6 +119,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
     final st = ref.watch(transcriptProvider(_key));
     final conn = ref.watch(connStateProvider);
+    final connError = ref.watch(connErrorProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -126,7 +127,8 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
         top: false, // AppBar insets top; bottom clears the system nav bar.
         child: Column(
           children: [
-            if (conn != ConnState.connected) _Banner(state: conn),
+            if (conn != ConnState.connected)
+              _Banner(state: conn, message: connError),
             Expanded(
                 child: TranscriptFeed(detailRef: _traceRef, chunks: st.chunks)),
           ],
@@ -137,23 +139,28 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 }
 
 class _Banner extends StatelessWidget {
-  const _Banner({required this.state});
+  const _Banner({required this.state, this.message});
   final ConnState state;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
+    final failed = state == ConnState.failed;
     final text = switch (state) {
       ConnState.connecting => 'Connecting…',
       ConnState.reconnecting => 'Reconnecting…',
       ConnState.disconnected => 'Disconnected',
       ConnState.connected => 'Connected',
+      ConnState.failed => message ?? 'Connection failed',
     };
     return Container(
       width: double.infinity,
-      color: AppColors.awaitingSurface,
+      color: failed ? AppColors.errorSurface : AppColors.awaitingSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(text,
-          style: const TextStyle(color: AppColors.secondary, fontSize: 12)),
+          style: TextStyle(
+              color: failed ? AppColors.error : AppColors.secondary,
+              fontSize: 12)),
     );
   }
 }

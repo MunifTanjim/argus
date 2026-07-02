@@ -175,19 +175,18 @@ class PushController {
     if (_target == null) await _active?.refresh();
   }
 
-  void detach() => _client = null;
-
-  /// Unpair: drop the device's target server-side and stop the backend.
-  Future<void> unregister() async {
+  /// Tell the currently-connected gateway to stop pushing to this device, then
+  /// detach. Called when the active connection is torn down (profile switch or
+  /// disconnect) so only the active gateway delivers notifications. Leaves the
+  /// push backend and stored endpoint intact so the next connect re-registers.
+  Future<void> unregisterFromCurrentGateway() async {
     final client = _client;
-    if (client != null && _deviceId != null) {
-      try {
-        await client.call('push.unregister', {'device_id': _deviceId});
-      } catch (_) {}
-    }
-    await _active?.stop();
-    _target = null;
-    await _targetStore.clear();
+    final deviceId = _deviceId;
+    _client = null;
+    _registeredTarget = null;
+    _registerInFlight = null;
+    if (client == null || deviceId == null) return;
+    await unregisterFromGateway(client, deviceId);
   }
 
   Future<void> dispose() async {

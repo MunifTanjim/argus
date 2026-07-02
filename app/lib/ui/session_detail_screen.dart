@@ -117,6 +117,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
     final st = ref.watch(transcriptProvider(_sid));
     final conn = ref.watch(connStateProvider);
+    final connError = ref.watch(connErrorProvider);
     final s = widget.session;
     final live = ref.watch(sessionsProvider)[_sid] ?? s;
     final title = live.displayTitle;
@@ -212,7 +213,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         top: false,
         child: Column(
           children: [
-            if (conn != ConnState.connected) _Banner(state: conn),
+            if (conn != ConnState.connected)
+              _Banner(state: conn, message: connError),
             Expanded(
               // Spinner until the first snapshot arrives, so an empty session
               // shows progress rather than a blank feed. error stops the spinner.
@@ -238,23 +240,28 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 }
 
 class _Banner extends StatelessWidget {
-  const _Banner({required this.state});
+  const _Banner({required this.state, this.message});
   final ConnState state;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
+    final failed = state == ConnState.failed;
     final text = switch (state) {
       ConnState.connecting => 'Connecting…',
       ConnState.reconnecting => 'Reconnecting…',
       ConnState.disconnected => 'Disconnected',
       ConnState.connected => 'Connected',
+      ConnState.failed => message ?? 'Connection failed',
     };
     return Container(
       width: double.infinity,
-      color: AppColors.awaitingSurface,
+      color: failed ? AppColors.errorSurface : AppColors.awaitingSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(text,
-          style: const TextStyle(color: AppColors.secondary, fontSize: 12)),
+          style: TextStyle(
+              color: failed ? AppColors.error : AppColors.secondary,
+              fontSize: 12)),
     );
   }
 }

@@ -70,4 +70,19 @@ void main() {
     expect(await fut, isFalse);
     expect(sent, hasLength(2));
   });
+
+  test('unregisterFromGateway sends push.unregister with the device id', () async {
+    final fut = unregisterFromGateway(client, 'dev-1');
+    await respond(0);
+    await fut;
+    final f = frame(sent.single);
+    expect(f['method'], 'push.unregister');
+    expect(f['params'], {'device_id': 'dev-1'});
+  });
+
+  test('unregisterFromGateway swallows an RPC error', () async {
+    final fut = unregisterFromGateway(client, 'dev-1');
+    await respond(0, ok: false);
+    await expectLater(fut, completes); // best-effort: does not throw
+  });
 }

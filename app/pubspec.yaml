@@ -43,6 +43,8 @@ dependencies:
   # provides the endpoint; messages render via flutter_local_notifications.
   flutter_local_notifications: ^19.0.0
   unifiedpush: ^6.0.0
+  dartssh2: ^2.21.1
+  basic_utils: ^5.8.2
 
 dev_dependencies:
   flutter_test:

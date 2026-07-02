@@ -25,3 +25,12 @@ Future<bool> registerWithRetry(
   }
   return false;
 }
+
+/// Best-effort: tell the gateway to forget this device's push target. Errors are
+/// swallowed — the connection may already be closing, and an offline gateway's
+/// record is pruned server-side on the next failed send.
+Future<void> unregisterFromGateway(RpcClient client, String deviceId) async {
+  try {
+    await client.call('push.unregister', {'device_id': deviceId});
+  } catch (_) {}
+}

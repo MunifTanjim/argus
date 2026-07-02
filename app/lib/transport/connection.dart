@@ -11,7 +11,14 @@ abstract class RpcLink {
   Future<void> close();
 }
 
-enum ConnState { disconnected, connecting, connected, reconnecting }
+enum ConnState { disconnected, connecting, connected, reconnecting, failed }
+
+/// A connect() failure that retrying cannot fix (e.g. a changed host key —
+/// possible MITM). The manager stops redialing and surfaces [message] instead
+/// of looping silently in backoff, so the user can act on it.
+abstract class FatalConnectError implements Exception {
+  String get message;
+}
 
 class ConnectionManager {
   ConnectionManager({
@@ -42,6 +49,9 @@ class ConnectionManager {
 
   final _states = StreamController<ConnState>.broadcast();
   ConnState _state = ConnState.disconnected;
+  // Set alongside ConnState.failed; the message for the user (e.g. the MITM
+  // warning). Cleared whenever a new dial starts.
+  String? _failureMessage;
   RpcClient? _client;
   RpcLink? _link;
   StreamController<RpcMessage>? _bridge;
@@ -57,6 +67,7 @@ class ConnectionManager {
 
   Stream<ConnState> get states => _states.stream;
   ConnState get state => _state;
+  String? get failureMessage => _failureMessage;
   RpcClient? get client => _client;
 
   void start() {
@@ -93,6 +104,7 @@ class ConnectionManager {
   Future<void> _dial() async {
     if (!_running) return;
     final gen = ++_gen;
+    _failureMessage = null;
     _setState(_attempt == 0 ? ConnState.connecting : ConnState.reconnecting);
     try {
       final link = await connect().timeout(dialTimeout);
@@ -130,6 +142,13 @@ class ConnectionManager {
       _attempt = 0;
       _setState(ConnState.connected);
       _startKeepalive(gen);
+    } on FatalConnectError catch (e) {
+      if (gen != _gen) return; // superseded by a newer dial
+      // Retrying can't fix this (e.g. changed host key). Stop and surface it
+      // instead of an indefinite silent reconnect loop.
+      await _teardownLink();
+      _failureMessage = e.message;
+      _setState(ConnState.failed);
     } catch (_) {
       if (gen != _gen) return; // superseded by a newer dial
       _onLinkLost();

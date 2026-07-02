@@ -2,7 +2,8 @@
 
 Let Argus manage a tunnel that routes a public URL back to the
 [gateway](/guide/multi-machine) — the easiest way to reach it from your phone (a
-reverse proxy works too; SSH is CLI-only).
+reverse proxy works too, and both the CLI and the app can reach it over
+[SSH](/guide/multi-machine#ssh-access)).
 
 ## Cloudflare
 

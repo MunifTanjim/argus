@@ -44,6 +44,17 @@ Revoke a device with `argus unpair`:
 argus unpair --gateway wss://gateway.argus --token <TOKEN>
 ```
 
+### Connect over SSH
+
+Instead of exposing the gateway publicly, the app can tunnel its connection over
+SSH — the same loopback-bound gateway the [CLI reaches over
+SSH](/guide/multi-machine#ssh-access). In the app's **manual entry** screen,
+switch to **SSH** and provide the host, user (optional — defaults to `root`),
+the gateway's loopback port (default `8443`), your token, and an OpenSSH private
+key (imported or app-generated). The key is stored in the device keystore; the
+host's key is pinned on first connect (trust-on-first-use) and a later change is
+rejected.
+
 ## Push Notification
 
 The app pings you the moment a session needs you — **even when backgrounded or

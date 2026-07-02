@@ -13,6 +13,8 @@ class AppColors {
   static const accent = Color(0xFF8ec07c); // aqua — non-status chrome
   static const awaitingSurface = Color(0xFF32281d);
   static const awaitingBorder = Color(0xFF7c5f1e);
+  static const error = Color(0xFFfb4934); // gruvbox red — fatal connection state
+  static const errorSurface = Color(0xFF3c1f1d);
 }
 
 ThemeData buildArgusTheme() {

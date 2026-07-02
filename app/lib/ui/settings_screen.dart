@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../pairing/gateway_store.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
+import '../state/profiles.dart';
 import '../state/grouping.dart';
-import '../state/push.dart';
+import '../transport/ssh_gateway.dart';
 import 'push_settings_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -14,12 +14,16 @@ const _monoStyle = TextStyle(fontFamily: 'monospace', color: AppColors.text);
 const _dimStyle = TextStyle(color: AppColors.dim);
 
 class SettingsScreen extends ConsumerWidget {
-  const SettingsScreen({super.key, required this.store});
-  final GatewayStore store;
+  const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final creds = ref.watch(credentialsProvider);
+    // Parse the SSH host:port once here; reused as both the visibility guard
+    // and the value the forget action operates on. isSshGatewayUrl only checks
+    // the scheme, so guard the full parse — a malformed persisted ssh:// url
+    // must not crash the settings screen render.
+    final sshHostPortValue = _sshHostPortOrNull(creds?.url);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: CenteredBody(
@@ -53,20 +57,54 @@ class SettingsScreen extends ConsumerWidget {
                     orElse: () => _unavailable,
                   ),
               const Spacer(),
+              if (sshHostPortValue != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: OutlinedButton(
+                    key: const Key('forget-host-key'),
+                    onPressed: () async {
+                      await ref
+                          .read(hostKeyStoreProvider)
+                          .forget(sshHostPortValue);
+                      // Redial now so a connection stuck on ConnState.failed
+                      // (rejected host key) recovers without waiting for a
+                      // resume; the new key is re-pinned trust-on-first-use.
+                      ref.read(gatewayProvider)?.reconnectNow();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(
+                          'Forgot host key for $sshHostPortValue. Reconnecting; it will be re-pinned.',
+                        ),
+                      ));
+                    },
+                    child: const Text('Forget SSH host key'),
+                  ),
+                ),
               OutlinedButton(
                 onPressed: () async {
-                  // Drop the device's push registration while still connected.
-                  await ref.read(pushControllerProvider).unregister();
-                  await store.clear();
+                  // Clearing credentials disposes the gateway, which unregisters
+                  // this device from it (see gatewayProvider).
+                  await ref.read(profileStoreProvider).clearActiveId();
                   ref.read(credentialsProvider.notifier).state = null;
                 },
-                child: const Text('Unpair'),
+                child: const Text('Disconnect'),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// The `host:port` of an ssh gateway url, or null if [url] is absent, not an
+/// ssh url, or malformed. Never throws — safe to call from build().
+String? _sshHostPortOrNull(String? url) {
+  if (url == null || !isSshGatewayUrl(url)) return null;
+  try {
+    return sshHostPort(parseSshGatewayUrl(url));
+  } on FormatException {
+    return null;
   }
 }
 

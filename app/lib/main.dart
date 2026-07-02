@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pairing/gateway_store.dart';
-import 'pairing/welcome_screen.dart';
+import 'pairing/legacy_migration.dart';
 import 'push/unifiedpush_background.dart';
 import 'state/gateway.dart';
+import 'state/profiles.dart';
 import 'state/push.dart';
 import 'transport/connection.dart';
 import 'ui/home_shell.dart';
+import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/theme.dart';
 
@@ -31,18 +33,23 @@ class ArgusApp extends ConsumerStatefulWidget {
 
 class _ArgusAppState extends ConsumerState<ArgusApp>
     with WidgetsBindingObserver {
-  final _store = GatewayStore(const FlutterSecureKv());
   bool _loaded = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _store.load().then((c) {
-      if (c != null) {
-        ref.read(credentialsProvider.notifier).state = c;
+    migrateLegacyOnce(const FlutterSecureKv()).then((_) async {
+      final creds = await restoreActiveCredentials(
+        ref.read(profileStoreProvider),
+        ref.read(keyLibraryStoreProvider),
+        ref.read(sshKeyStoreProvider),
+      );
+      if (creds != null) {
+        ref.read(credentialsProvider.notifier).state = creds;
       }
-      setState(() => _loaded = true);
+    }).whenComplete(() {
+      if (mounted) setState(() => _loaded = true);
     });
   }
 
@@ -78,11 +85,8 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : creds == null
-              ? WelcomeScreen(onPaired: (c) async {
-                  await _store.save(c);
-                  ref.read(credentialsProvider.notifier).state = c;
-                })
-              : HomeShell(store: _store),
+              ? const ProfilesScreen()
+              : const HomeShell(),
     );
   }
 }

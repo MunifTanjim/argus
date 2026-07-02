@@ -45,4 +45,14 @@ void main() {
         jsonDecode('{"type":"removed","session":$_s1}')));
     expect(c.read(sessionsProvider), isEmpty);
   });
+
+  test('clear empties the store', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final n = container.read(sessionsProvider.notifier);
+    n.replaceAll(parseSessions(jsonDecode('[$_s1]')));
+    expect(container.read(sessionsProvider), isNotEmpty);
+    n.clear();
+    expect(container.read(sessionsProvider), isEmpty);
+  });
 }

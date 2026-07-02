@@ -25,6 +25,8 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
     state = {for (final s in sessions) s.id: s};
   }
 
+  void clear() => state = const {};
+
   void apply(RegistryEvent ev) {
     state = applyEvent(state, ev);
   }
