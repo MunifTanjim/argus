@@ -79,6 +79,7 @@ class _CodeBlock extends StatefulWidget {
 class _CodeBlockState extends State<_CodeBlock> {
   late bool _wrap = widget.wrap;
   bool _lineNumbers = false;
+  bool _plain = false;
 
   @override
   Widget build(BuildContext context) {
@@ -88,15 +89,19 @@ class _CodeBlockState extends State<_CodeBlock> {
     // block — fall back to plain monospace.
     TextSpan span;
     String? detected;
-    try {
-      final result = _highlight.highlightAuto(
-          source, _candidates(pretty != null ? 'json' : widget.lang));
-      detected = result.language;
-      final renderer = TextSpanRenderer(_codeMono, _codeTheme);
-      result.render(renderer);
-      span = renderer.span ?? TextSpan(text: source, style: _codeMono);
-    } catch (_) {
+    if (_plain) {
       span = TextSpan(text: source, style: _codeMono);
+    } else {
+      try {
+        final result = _highlight.highlightAuto(
+            source, _candidates(pretty != null ? 'json' : widget.lang));
+        detected = result.language;
+        final renderer = TextSpanRenderer(_codeMono, _codeTheme);
+        result.render(renderer);
+        span = renderer.span ?? TextSpan(text: source, style: _codeMono);
+      } catch (_) {
+        span = TextSpan(text: source, style: _codeMono);
+      }
     }
     final label =
         (pretty != null ? 'json' : _alias(widget.lang)) ?? detected ?? 'text';
@@ -186,6 +191,12 @@ class _CodeBlockState extends State<_CodeBlock> {
                     _lineNumbers ? 'Hide line numbers' : 'Show line numbers',
                 onTap: () => setState(() => _lineNumbers = !_lineNumbers),
               ),
+            codeBarButton(
+              icon: Icons.format_color_reset,
+              active: _plain,
+              tooltip: _plain ? 'Enable highlight' : 'Disable highlight',
+              onTap: () => setState(() => _plain = !_plain),
+            ),
             codeBarButton(
               icon: Icons.wrap_text,
               active: _wrap,

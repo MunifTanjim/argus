@@ -18,15 +18,48 @@ void main() {
     expect(find.textContaining('total 0'), findsOneWidget);
   });
 
-  testWidgets('Bash command has an inline copy button', (tester) async {
+  testWidgets('Bash command renders as a copyable code block', (tester) async {
     await tester.pumpWidget(_wrap(const Item(
         id: 'i',
         kind: ItemKind.tool,
         toolName: 'Bash',
-        toolInput: '{"command":"ls -la"}')));
+        toolInput: '{"command":"echo one\\necho two"}')));
+    expect(find.text('bash'), findsOneWidget); // code block header label
     await tester.tap(find.byIcon(Icons.copy));
     await tester.pump();
     expect(find.text('Copied'), findsOneWidget);
+  });
+
+  for (final tool in const ['ExitPlanMode', 'EnterPlanMode']) {
+    testWidgets('$tool result is labelled markdown', (tester) async {
+      await tester.pumpWidget(_wrap(Item(
+          id: 'i',
+          kind: ItemKind.tool,
+          toolName: tool,
+          toolInput: '{"plan":"do things"}',
+          result: '## Plan\n\n- step one')));
+      expect(find.text('markdown'), findsOneWidget);
+    });
+  }
+
+  testWidgets('Web result is labelled markdown', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'WebFetch',
+        toolInput: '{"url":"https://x.dev"}',
+        result: '# Heading\n\nbody text')));
+    expect(find.text('markdown'), findsOneWidget);
+  });
+
+  testWidgets('Read infers language from the file extension', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'Read',
+        toolInput: '{"file_path":"/x/foo.py"}',
+        result: '     1\tprint("hi")')));
+    expect(find.text('python'), findsOneWidget); // .py → python, not auto-detect
   });
 
   testWidgets('Read result hides the line-number toggle', (tester) async {

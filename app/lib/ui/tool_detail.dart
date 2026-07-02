@@ -31,11 +31,11 @@ Widget _header(String text) => Text(text,
     style:
         _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
 
-Widget _resultSection(Item it, {bool wrap = false}) {
+Widget _resultSection(Item it, {bool wrap = false, String? lang}) {
   if ((it.result ?? '').isEmpty) return const SizedBox.shrink();
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-    codeBlock(it.result!, wrap: wrap),
+    codeBlock(it.result!, wrap: wrap, lang: lang),
   ]);
 }
 
@@ -68,18 +68,21 @@ Widget toolDetailBody(Item item) {
       return _todo(item);
     case 'AskUserQuestion':
       return _askUserQuestion(item);
+    case 'EnterPlanMode':
+    case 'ExitPlanMode':
+      return _generic(item, resultLang: 'markdown');
     default:
       return _generic(item);
   }
 }
 
-Widget _generic(Item it) =>
+Widget _generic(Item it, {String? resultLang}) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if ((it.toolInput ?? '').isNotEmpty) ...[
         _label('Input'),
         codeBlock(it.toolInput!),
       ],
-      _resultSection(it),
+      _resultSection(it, lang: resultLang),
     ]);
 
 Widget _bash(Item it) {
@@ -88,27 +91,10 @@ Widget _bash(Item it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (desc.isNotEmpty)
       Text('# $desc', style: _mono.copyWith(color: AppColors.dim)),
+    // Commands are frequently multi-line (heredocs, `&&` chains) — a bash code
+    // block gives highlighting, wrap, and copy for free.
     if (cmd.isNotEmpty)
-      Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text('\$ $cmd',
-                  style: _mono.copyWith(
-                      color: AppColors.secondary, fontWeight: FontWeight.w700)),
-            ),
-            Builder(
-              builder: (ctx) => codeBarButton(
-                icon: Icons.copy,
-                tooltip: 'Copy',
-                onTap: () => copyToClipboard(ctx, cmd),
-              ),
-            ),
-          ],
-        ),
-      )
+      codeBlock(cmd, lang: 'bash')
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
     _resultSection(it),
@@ -119,11 +105,86 @@ Widget _read(Item it) {
   final path = toolInputStr(_input(it)['file_path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (path.isNotEmpty) _header(path),
+    // Prefer the file extension; fall back to auto-detection when unknown.
     // Read output is already `cat -n` numbered — no need for our own gutter.
     if ((it.result ?? '').isNotEmpty)
-      codeBlock(it.result!, lineNumberToggle: false),
+      codeBlock(it.result!,
+          lang: _langFromPath(path), lineNumberToggle: false),
   ]);
 }
+
+/// Maps a file path's extension (or bare name) to a re_highlight grammar, or
+/// null when unknown so the highlighter auto-detects instead.
+String? _langFromPath(String path) {
+  final slash = path.lastIndexOf('/');
+  final name = (slash >= 0 ? path.substring(slash + 1) : path).toLowerCase();
+  final dot = name.lastIndexOf('.');
+  final key = dot > 0 ? name.substring(dot + 1) : name;
+  return _extLang[key];
+}
+
+const _extLang = <String, String>{
+  'dart': 'dart',
+  'go': 'go',
+  'py': 'python',
+  'pyi': 'python',
+  'js': 'javascript',
+  'mjs': 'javascript',
+  'cjs': 'javascript',
+  'jsx': 'javascript',
+  'ts': 'typescript',
+  'tsx': 'typescript',
+  'json': 'json',
+  'yaml': 'yaml',
+  'yml': 'yaml',
+  'toml': 'ini',
+  'ini': 'ini',
+  'cfg': 'ini',
+  'sh': 'bash',
+  'bash': 'bash',
+  'zsh': 'bash',
+  'rs': 'rust',
+  'md': 'markdown',
+  'markdown': 'markdown',
+  'html': 'xml',
+  'htm': 'xml',
+  'xml': 'xml',
+  'svg': 'xml',
+  'css': 'css',
+  'scss': 'scss',
+  'less': 'less',
+  'java': 'java',
+  'kt': 'kotlin',
+  'kts': 'kotlin',
+  'swift': 'swift',
+  'c': 'c',
+  'h': 'c',
+  'cpp': 'cpp',
+  'cc': 'cpp',
+  'cxx': 'cpp',
+  'hpp': 'cpp',
+  'hh': 'cpp',
+  'cs': 'csharp',
+  'rb': 'ruby',
+  'php': 'php',
+  'sql': 'sql',
+  'lua': 'lua',
+  'r': 'r',
+  'scala': 'scala',
+  'pl': 'perl',
+  'pm': 'perl',
+  'ex': 'elixir',
+  'exs': 'elixir',
+  'erl': 'erlang',
+  'clj': 'clojure',
+  'hs': 'haskell',
+  'ml': 'ocaml',
+  'proto': 'protobuf',
+  'graphql': 'graphql',
+  'gql': 'graphql',
+  'makefile': 'makefile',
+  'dockerfile': 'dockerfile',
+};
 
 Widget _grep(Item it) {
   final m = _input(it);
@@ -154,7 +215,8 @@ Widget _web(Item it) {
     if (head.isNotEmpty) _header(head),
     if (prompt.isNotEmpty)
       Text('# $prompt', style: _mono.copyWith(color: AppColors.dim)),
-    if ((it.result ?? '').isNotEmpty) codeBlock(it.result!),
+    // Web results come back as markdown.
+    if ((it.result ?? '').isNotEmpty) codeBlock(it.result!, lang: 'markdown'),
   ]);
 }
 

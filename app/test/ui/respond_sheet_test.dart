@@ -72,8 +72,9 @@ void main() {
         }),
         c);
     await tester.pump();
-    // The per-tool renderer formats the command instead of dumping the JSON.
-    expect(find.textContaining('\$ ls -la'), findsOneWidget);
+    // The per-tool renderer formats the command as a bash code block instead of
+    // dumping the JSON.
+    expect(find.textContaining('ls -la'), findsOneWidget);
     expect(find.textContaining('list files'), findsOneWidget);
     expect(find.textContaining('"command"'), findsNothing);
   });

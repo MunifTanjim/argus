@@ -57,6 +57,16 @@ void main() {
     expect(find.byType(SingleChildScrollView), findsOneWidget);
   });
 
+  testWidgets('highlight toggle switches to plain and back', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: codeBlock('final x = 1;', lang: 'dart'))));
+    expect(find.byTooltip('Disable highlight'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.format_color_reset));
+    await tester.pump();
+    expect(find.byTooltip('Enable highlight'), findsOneWidget);
+    expect(find.textContaining('final x = 1;'), findsOneWidget); // text kept
+  });
+
   testWidgets('line-number toggle shows a gutter numbered per line',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
