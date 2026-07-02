@@ -8,8 +8,8 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // shortModel turns "claude-opus-4-6" into "opus4.6".
@@ -88,7 +88,7 @@ func contextUsageColor(pct float64) color.Color {
 // last cycle's pressure. Shows growth across the turn's inference cycles when it
 // occurred ("ctx 31% → 67% (+220k)"), else a single "ctx 67%". Returns "" when
 // the chunk carries no context data.
-func formatContext(c claudecode.Chunk) string {
+func formatContext(c transcript.Chunk) string {
 	if !c.HasContext {
 		return ""
 	}
@@ -367,13 +367,13 @@ func accentBlock(content string, c color.Color, bar string) string {
 // itemAccentColor returns the accent-rule color for a detail item. No item uses
 // ColorAccent — it is reserved for the focus highlight, so a focused item's accent
 // bar always differs from its own color.
-func itemAccentColor(it claudecode.Item) color.Color {
+func itemAccentColor(it transcript.Item) color.Color {
 	switch it.Kind {
-	case claudecode.ItemThinking:
+	case transcript.ItemThinking:
 		return ColorTextDim
-	case claudecode.ItemText:
+	case transcript.ItemText:
 		return ColorTextSecondary
-	case claudecode.ItemSubagent:
+	case transcript.ItemSubagent:
 		return ColorToolTask
 	default:
 		return toolColor(it.ToolName)

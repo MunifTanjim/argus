@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // ErrNoTerminalControl is returned for pane-bound actions on a session argus
@@ -23,7 +23,7 @@ const (
 	MethodSessionsRefresh = "sessions.refresh" // request: no params; rescans, result: []session.Session
 	MethodSessionEvent    = "session.event"    // notification: registry.Event
 	// MethodSessionTranscriptView returns the grouped, display-ready chunk view.
-	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: claudecode.TranscriptView
+	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: transcript.TranscriptView
 	// MethodSessionToolDetail returns one tool item's full body, fetched on demand
 	// (transcript chunks ship without these heavy bodies).
 	MethodSessionToolDetail = "sessions.toolDetail" // request: ToolDetailParams; result: ToolDetail
@@ -38,7 +38,7 @@ const (
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
 	MethodSessionsHistorySessions   = "sessions.historySessions"   // request: HistorySessionsParams; result: session.HistorySessionPage
-	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: claudecode.TranscriptView
+	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: transcript.TranscriptView
 	// MethodSessionHistoryToolDetail is the history counterpart of
 	// MethodSessionToolDetail, addressed by node-local path.
 	MethodSessionHistoryToolDetail = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
@@ -344,5 +344,5 @@ type TranscriptUnsubscribeParams struct {
 type TranscriptDelta struct {
 	SubID     string             `json:"sub_id"`
 	FromIndex int                `json:"from_index"`
-	Chunks    []claudecode.Chunk `json:"chunks"`
+	Chunks    []transcript.Chunk `json:"chunks"`
 }

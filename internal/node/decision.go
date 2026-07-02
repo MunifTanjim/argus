@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
@@ -169,8 +169,8 @@ func (d *Node) takePending(sid string) *pendingDecision {
 // timeout fires. Clears the interaction on every exit so no stale prompt lingers;
 // non-answered exits return "" so the hook prints nothing and Claude uses its own
 // prompt.
-func (d *Node) awaitDecision(ctx context.Context, sid string, ev claudecode.HookEvent) string {
-	toolName, toolInput := claudecode.PermissionPayload(ev)
+func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid string, ev adapter.HookEvent) string {
+	toolName, toolInput := a.PermissionPayload(ev)
 	pd, cancel := d.park(sid, toolName, toolInput)
 	defer cancel()
 	select {

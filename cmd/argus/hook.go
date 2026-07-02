@@ -8,7 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -38,13 +39,14 @@ func newHookCmd() *cobra.Command {
 				shell.Exit(0)
 			}
 
-			ev := claudecode.HookEvent{
+			ev := adapter.HookEvent{
 				Event:      event,
 				TmuxPane:   os.Getenv("TMUX_PANE"),
 				TmuxSocket: tmux.SocketBaseFromEnv(os.Getenv("TMUX")),
 				Payload:    payload,
 				AutoMode:   os.Getenv("CLAUDE_CODE_ENABLE_AUTO_MODE") == "1",
 			}
+			hookMethod := adapters.Default().HookMethod()
 
 			// PermissionRequest blocks until argusd returns the user's decision, then
 			// prints it for Claude Code. Print nothing on failure so Claude falls back to
@@ -56,7 +58,7 @@ func newHookCmd() *cobra.Command {
 				}
 				defer client.Close()
 				var res api.HookResult
-				_ = client.Call(claudecode.HookMethod, ev, &res)
+				_ = client.Call(hookMethod, ev, &res)
 				if res.Output != "" {
 					fmt.Println(res.Output)
 				}
@@ -71,7 +73,7 @@ func newHookCmd() *cobra.Command {
 					return
 				}
 				defer client.Close()
-				_ = client.Call(claudecode.HookMethod, ev, nil)
+				_ = client.Call(hookMethod, ev, nil)
 			}()
 
 			select {

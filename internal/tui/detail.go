@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // The detail drill-down: a frame stack (detailStack) over a transcript chunk. The
@@ -23,7 +23,7 @@ type detailFrame struct {
 	label           string            // breadcrumb segment
 	subID           string            // subscription backing this frame (streamed subagent frames only)
 	agentID         string            // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
-	items           []claudecode.Item // navigable items; nil for a non-AI body frame
+	items           []transcript.Item // navigable items; nil for a non-AI body frame
 	body            string            // pre-rendered body (non-AI chunks)
 	cursor          int               // selected item index
 	scroll          int               // top line offset
@@ -54,7 +54,7 @@ func (f *detailFrame) expandOutputs() {
 		f.expanded = map[int]bool{}
 	}
 	for i, it := range f.items {
-		if it.Kind == claudecode.ItemText {
+		if it.Kind == transcript.ItemText {
 			if _, ok := f.expanded[i]; !ok {
 				f.expanded[i] = true
 			}
@@ -71,10 +71,10 @@ func (m model) topFrame() *detailFrame {
 }
 
 // flattenTrace collects the AI items across a subagent's trace chunks, in order.
-func flattenTrace(chunks []claudecode.Chunk) []claudecode.Item {
-	var items []claudecode.Item
+func flattenTrace(chunks []transcript.Chunk) []transcript.Item {
+	var items []transcript.Item
 	for _, c := range chunks {
-		if c.Kind == claudecode.ChunkAI {
+		if c.Kind == transcript.ChunkAI {
 			items = append(items, c.Items...)
 		}
 	}
@@ -82,18 +82,18 @@ func flattenTrace(chunks []claudecode.Chunk) []claudecode.Item {
 }
 
 // drillable reports whether entering an item opens a meaningful sub-trace.
-func drillable(it claudecode.Item) bool {
-	return it.Kind == claudecode.ItemSubagent && it.HasTrace
+func drillable(it transcript.Item) bool {
+	return it.Kind == transcript.ItemSubagent && it.HasTrace
 }
 
 // drillLabel is the breadcrumb segment for a focused single item.
-func drillLabel(it claudecode.Item) string {
+func drillLabel(it transcript.Item) string {
 	switch it.Kind {
-	case claudecode.ItemThinking:
+	case transcript.ItemThinking:
 		return "Thinking"
-	case claudecode.ItemText:
+	case transcript.ItemText:
 		return "Output"
-	case claudecode.ItemSubagent:
+	case transcript.ItemSubagent:
 		return subagentLabel(it)
 	default:
 		return it.ToolName
@@ -108,7 +108,7 @@ func (m *model) enterDetail() {
 	}
 	c := m.transcript.chunks[m.transcript.cursor]
 	f := detailFrame{expanded: map[int]bool{}, defaultExpanded: false}
-	if c.Kind == claudecode.ChunkAI {
+	if c.Kind == transcript.ChunkAI {
 		f.label = "Claude"
 		if c.Model != "" {
 			f.label = shortModel(c.Model)
@@ -142,7 +142,7 @@ func (m *model) drillDetail() {
 		nf.expandOutputs() // but pre-expand the subagent's Output items
 	} else {
 		nf.label = drillLabel(it)
-		nf.items = []claudecode.Item{it}
+		nf.items = []transcript.Item{it}
 		nf.defaultExpanded = true
 		nf.focused = true
 	}
@@ -158,11 +158,11 @@ func (m *model) popDetail() bool {
 }
 
 // detailable reports whether a chunk has enough content to warrant a detail view.
-func (m model) detailable(c claudecode.Chunk) bool {
+func (m model) detailable(c transcript.Chunk) bool {
 	switch c.Kind {
-	case claudecode.ChunkAI:
+	case transcript.ChunkAI:
 		return len(c.Items) > 0
-	case claudecode.ChunkUser:
+	case transcript.ChunkUser:
 		return c.Text != ""
 	default:
 		return c.Detail != ""
@@ -247,7 +247,7 @@ func (m model) actDetailFold(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // subagentLabel returns the breadcrumb label for a subagent item.
-func subagentLabel(it claudecode.Item) string {
+func subagentLabel(it transcript.Item) string {
 	if it.SubagentType != "" {
 		return it.SubagentType
 	}
@@ -260,7 +260,7 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	it := f.items[f.cursor]
-	if it.Kind == claudecode.ItemSubagent && it.HasTrace && len(it.Trace) == 0 && it.AgentID != "" {
+	if it.Kind == transcript.ItemSubagent && it.HasTrace && len(it.Trace) == 0 && it.AgentID != "" {
 		if m.mode == modeHistoryTranscript {
 			// Past session: one-shot fetch (no live subscription).
 			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
@@ -416,10 +416,10 @@ func (m model) detailBody() string {
 
 // renderDetail renders a non-AI chunk's body for a root frame. (AI chunks are
 // navigated as item frames instead.)
-func (m model) renderDetail(c claudecode.Chunk) string {
+func (m model) renderDetail(c transcript.Chunk) string {
 	width := m.containerWidth()
 	switch c.Kind {
-	case claudecode.ChunkUser:
+	case transcript.ChunkUser:
 		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(c.Timestamp))
 		return head + "\n\n" + m.renderMD(c.Text, width-2)
 	default:
@@ -433,7 +433,7 @@ func (m model) renderDetail(c claudecode.Chunk) string {
 
 // detailRowBlock renders one item: collapsed (one-line summary) or expanded (full
 // body), accent rule brightened when selected.
-func (m model) detailRowBlock(it claudecode.Item, expanded, selected bool, width int) string {
+func (m model) detailRowBlock(it transcript.Item, expanded, selected bool, width int) string {
 	c := itemAccentColor(it)
 	bar := GlyphAccentBar
 	if selected {
@@ -459,16 +459,16 @@ func truncateLine(s string, width int) string {
 // detailItemBody renders an item's expanded body under an accent rule of color c.
 // The "┃ " gutter eats 2 cols, so inner width is width-2. Subagents show a header
 // + drill hint (the trace is reached by drilling in, not inlined).
-func (m model) detailItemBody(it claudecode.Item, c color.Color, bar string, width int) string {
+func (m model) detailItemBody(it transcript.Item, c color.Color, bar string, width int) string {
 	iw := max(width-2, 10)
 	switch it.Kind {
-	case claudecode.ItemThinking:
+	case transcript.ItemThinking:
 		head := Icon.Thinking.Render() + " " + StyleSecondaryBold.Render("Thinking")
 		return accentBlock(head+"\n"+wrapDim(it.Text, iw), c, bar)
-	case claudecode.ItemText:
+	case transcript.ItemText:
 		head := Icon.Output.Render() + " " + StyleSecondaryBold.Render("Output")
 		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
-	case claudecode.ItemSubagent:
+	case transcript.ItemSubagent:
 		name := it.SubagentType
 		if name == "" {
 			name = "Subagent"
@@ -507,7 +507,7 @@ func joinItem(head, body string) string {
 // toolBody renders a tool's input/result via a per-tool renderer or a generic
 // layout. Heavy bodies are stripped from the wire and fetched on demand, so fill
 // from the cache here; show a placeholder while a fetch is outstanding.
-func (m model) toolBody(it claudecode.Item, width int) string {
+func (m model) toolBody(it transcript.Item, width int) string {
 	it, fetched := m.filledTool(it)
 	if !fetched && it.ToolID != "" {
 		return StyleDim.Render("loading…")
@@ -521,7 +521,7 @@ func (m model) toolBody(it claudecode.Item, width int) string {
 // filledTool populates it's on-demand body fields from the cache. fetched
 // distinguishes "not yet loaded" from "loaded but empty". Items with no ToolID
 // (not addressable) are treated as already-resolved.
-func (m model) filledTool(it claudecode.Item) (claudecode.Item, bool) {
+func (m model) filledTool(it transcript.Item) (transcript.Item, bool) {
 	if it.ToolID == "" {
 		return it, true
 	}

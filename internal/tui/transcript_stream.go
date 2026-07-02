@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // newSubID returns a globally-unique subscription id (the gateway keys on it).
@@ -18,12 +18,12 @@ func newSubID() string {
 }
 
 // applyDelta truncates chunks to d.FromIndex then appends d.Chunks.
-func applyDelta(chunks []claudecode.Chunk, d api.TranscriptDelta) []claudecode.Chunk {
+func applyDelta(chunks []transcript.Chunk, d api.TranscriptDelta) []transcript.Chunk {
 	from := d.FromIndex
 	if from > len(chunks) {
 		from = len(chunks)
 	}
-	out := make([]claudecode.Chunk, 0, from+len(d.Chunks))
+	out := make([]transcript.Chunk, 0, from+len(d.Chunks))
 	out = append(out, chunks[:from]...)
 	out = append(out, d.Chunks...)
 	return out

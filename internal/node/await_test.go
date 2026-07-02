@@ -55,7 +55,7 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 	d, id := setup()
 	ctx, cancel := context.WithCancel(context.Background())
 	out := make(chan string, 1)
-	go func() { out <- d.awaitDecision(ctx, id, ev) }()
+	go func() { out <- d.awaitDecision(ctx, d.adapterFor(""), id, ev) }()
 	waitParked(d, id)
 	cancel()
 	if got := <-out; got != "" {
@@ -69,7 +69,7 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 	d, id = setup()
 	old := decisionTimeout
 	decisionTimeout = 10 * time.Millisecond
-	got := d.awaitDecision(context.Background(), id, ev)
+	got := d.awaitDecision(context.Background(), d.adapterFor(""), id, ev)
 	decisionTimeout = old
 	if got != "" {
 		t.Errorf("timeout: out=%q want empty", got)
@@ -81,7 +81,7 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 	// 3. Answered in argus: returns the decision and clears.
 	d, id = setup()
 	out = make(chan string, 1)
-	go func() { out <- d.awaitDecision(context.Background(), id, ev) }()
+	go func() { out <- d.awaitDecision(context.Background(), d.adapterFor(""), id, ev) }()
 	waitParked(d, id)
 	d.pendingMu.Lock()
 	pd := d.pending[id]

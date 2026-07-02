@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
@@ -17,7 +16,10 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodNodeIdentify, d.handleNodeIdentify)
 	srv.Handle(api.MethodServerInfo, d.handleServerInfo)
 	srv.Handle(api.MethodSessionsRefresh, d.handleSessionsRefresh)
-	srv.Handle(claudecode.HookMethod, d.handleHook)
+	// Each adapter delivers its hook events over its own JSON-RPC method.
+	for _, a := range d.adapterList {
+		srv.Handle(a.HookMethod(), d.hookHandlerFor(a))
+	}
 	srv.Handle(api.MethodSessionTranscriptView, d.handleTranscriptView)
 	srv.Handle(api.MethodSessionToolDetail, d.handleSessionToolDetail)
 	srv.Handle(api.MethodSessionCapture, d.handleSessionCapture)

@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // histPageSize bounds each historySessions fetch (recent-first, "m" loads more).
@@ -42,7 +42,7 @@ func (m model) fetchHistSessions(nodeID, projectDir string, offset int) tea.Cmd 
 func (m model) fetchHistTranscript(nodeID, path string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		var view claudecode.TranscriptView
+		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
 			NodeID: nodeID, TranscriptPath: path,
 		}, &view)
@@ -53,7 +53,7 @@ func (m model) fetchHistTranscript(nodeID, path string) tea.Cmd {
 // histSubagentMsg carries a fetched nested subagent transcript for history mode.
 type histSubagentMsg struct {
 	agentID string
-	chunks  []claudecode.Chunk
+	chunks  []transcript.Chunk
 	err     error
 }
 
@@ -62,7 +62,7 @@ type histSubagentMsg struct {
 func (m model) fetchHistSubagent(nodeID, path, agentID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		var view claudecode.TranscriptView
+		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
 			NodeID: nodeID, TranscriptPath: path, AgentID: agentID,
 		}, &view)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -12,17 +13,10 @@ import (
 // Claude Code hook event to the node.
 const HookMethod = "hook.event"
 
-// HookEvent is the payload `argus hook <event>` sends to the node. TmuxPane/
-// TmuxSocket come from the hook process's environment for pane correlation.
-type HookEvent struct {
-	Event      string          `json:"event"`       // hook_event_name, e.g. "Stop"
-	TmuxPane   string          `json:"tmux_pane"`   // $TMUX_PANE (e.g. "%3")
-	TmuxSocket string          `json:"tmux_socket"` // basename of the $TMUX socket
-	Payload    json.RawMessage `json:"payload"`     // raw hook stdin JSON
-	// AutoMode reports $CLAUDE_CODE_ENABLE_AUTO_MODE=1 in the hook process's
-	// environment (the Claude session's env), gating the plan "auto mode" option.
-	AutoMode bool `json:"auto_mode"`
-}
+// HookEvent is the tool-agnostic hook envelope; it lives in the adapter package
+// so the node can decode it without importing claudecode. Aliased here to keep
+// the historical claudecode.HookEvent spelling working.
+type HookEvent = adapter.HookEvent
 
 // hookPayload is the subset of Claude Code's hook stdin JSON that argus uses.
 type hookPayload struct {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapters"
 )
 
 // newHooksCmd builds `argus hooks install|uninstall`, the opt-in command that
@@ -39,19 +39,21 @@ func newHooksInstallCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := claudecode.SettingsPath()
-			if err != nil {
-				return fail(cmd, err)
-			}
 			argusBin := bin
 			if argusBin == "" {
 				argusBin = detectArgusBin()
 			}
-			if err := claudecode.Install(argusBin, claudecode.DefaultHookEvents); err != nil {
-				return fail(cmd, err)
+			for _, a := range adapters.All() {
+				path, err := a.SettingsPath()
+				if err != nil {
+					return fail(cmd, err)
+				}
+				if err := a.Install(argusBin); err != nil {
+					return fail(cmd, err)
+				}
+				fmt.Printf("installed argus hooks for %s into %s\n", a.Tool(), path)
+				fmt.Printf("  events: %v\n", a.DefaultHookEvents())
 			}
-			fmt.Printf("installed argus hooks into %s\n", path)
-			fmt.Printf("  events: %v\n", claudecode.DefaultHookEvents)
 			fmt.Printf("  command: %s hook <event>\n", argusBin)
 			return nil
 		},
@@ -68,14 +70,16 @@ func newHooksUninstallCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := claudecode.SettingsPath()
-			if err != nil {
-				return fail(cmd, err)
+			for _, a := range adapters.All() {
+				path, err := a.SettingsPath()
+				if err != nil {
+					return fail(cmd, err)
+				}
+				if err := a.Uninstall(); err != nil {
+					return fail(cmd, err)
+				}
+				fmt.Printf("removed argus hooks for %s from %s\n", a.Tool(), path)
 			}
-			if err := claudecode.Uninstall(); err != nil {
-				return fail(cmd, err)
-			}
-			fmt.Printf("removed argus hooks from %s\n", path)
 			return nil
 		},
 	}

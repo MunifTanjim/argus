@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // TestDetailLineScrollThroughTallItem verifies Down/Up scroll line-by-line
@@ -17,10 +17,10 @@ func TestDetailLineScrollThroughTallItem(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		sb.WriteString("output-line-" + string(rune('A'+i%26)) + "\n")
 	}
-	m := detailTestModel(claudecode.Chunk{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
+	m := detailTestModel(transcript.Chunk{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
 		},
 	})
 	m.width, m.height = 80, 14 // short viewport

@@ -5,9 +5,9 @@ import (
 
 	"github.com/charmbracelet/glamour"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 type viewMode int
@@ -37,7 +37,7 @@ const (
 )
 
 type cachedTranscript struct {
-	chunks []claudecode.Chunk
+	chunks []transcript.Chunk
 }
 
 // toolBodyEntry caches one tool's on-demand-fetched body (see sessions.toolDetail).
@@ -115,7 +115,7 @@ type model struct {
 // transcriptState is the transcript viewer: parsed chunks plus scroll/cursor/fold/
 // drill-down state and render caches. Reused by the live and history views.
 type transcriptState struct {
-	chunks      []claudecode.Chunk
+	chunks      []transcript.Chunk
 	err         error
 	cursor      int                           // selected chunk index
 	scroll      int                           // top line offset into the rendered transcript

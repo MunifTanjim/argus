@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func TestTranscriptDeltaJSONTags(t *testing.T) {
-	d := TranscriptDelta{SubID: "s1", FromIndex: 2, Chunks: []claudecode.Chunk{{ID: "2"}}}
+	d := TranscriptDelta{SubID: "s1", FromIndex: 2, Chunks: []transcript.Chunk{{ID: "2"}}}
 	b, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)

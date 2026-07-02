@@ -14,7 +14,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/gateway"
@@ -220,15 +220,18 @@ func applyLogLevel(cfg *config.Config) error {
 	return nil
 }
 
-// reconcileInstalledHooks syncs already-installed Claude Code hooks with this binary's
-// event set, so a new hook takes effect without a manual reinstall. Best-effort: no-op
-// if never installed, failures logged not fatal.
+// reconcileInstalledHooks syncs each tool's already-installed hooks with this
+// binary's event set, so a new hook takes effect without a manual reinstall.
+// Best-effort: no-op if never installed, failures logged not fatal.
 func reconcileInstalledHooks() {
 	log := logger.Scoped("hooks")
-	if added, err := claudecode.ReconcileIfInstalled(detectArgusBin()); err != nil {
-		log.Error("reconcile hooks failed", "err", err)
-	} else if len(added) > 0 {
-		log.Info("reconciled argus hooks", "added", added)
+	bin := detectArgusBin()
+	for _, a := range adapters.All() {
+		if added, err := a.ReconcileIfInstalled(bin); err != nil {
+			log.Error("reconcile hooks failed", "tool", a.Tool(), "err", err)
+		} else if len(added) > 0 {
+			log.Info("reconciled argus hooks", "tool", a.Tool(), "added", added)
+		}
 	}
 }
 

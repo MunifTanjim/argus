@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 )
@@ -66,7 +67,7 @@ func subagentItemInChunks(chunks []claudecode.Chunk) (claudecode.Item, bool) {
 
 func TestHandleHistoryTranscript_NestedByAgentID(t *testing.T) {
 	root := writeHistoryNestedFixture(t)
-	d := &Node{}
+	d := &Node{adapterList: []adapter.Adapter{claudecode.New()}}
 	params, _ := json.Marshal(api.HistoryTranscriptParams{TranscriptPath: root, AgentID: "A"})
 	res, err := d.handleHistoryTranscript(context.Background(), params)
 	if err != nil {
@@ -81,7 +82,7 @@ func TestHandleHistoryTranscript_NestedByAgentID(t *testing.T) {
 
 func TestHandleHistoryTranscript_UnknownAgentID(t *testing.T) {
 	root := writeHistoryNestedFixture(t)
-	d := &Node{}
+	d := &Node{adapterList: []adapter.Adapter{claudecode.New()}}
 	params, _ := json.Marshal(api.HistoryTranscriptParams{TranscriptPath: root, AgentID: "nope"})
 	if _, err := d.handleHistoryTranscript(context.Background(), params); err == nil {
 		t.Fatal("expected error for unknown agent_id")

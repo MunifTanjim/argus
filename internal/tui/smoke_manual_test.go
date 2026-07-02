@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // TestSmokeRealTranscript exercises parser + chunk builder + viewer against a
@@ -15,7 +16,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	if path == "" {
 		t.Skip("set ARGUS_TRANSCRIPT to run")
 	}
-	view, err := claudecode.ReadTranscriptView(path)
+	view, err := adapters.Default().ReadTranscriptView(path)
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 
 	// Dump the first AI card collapsed then expanded for eyeballing.
 	for i, c := range m.transcript.chunks {
-		if c.Kind != claudecode.ChunkAI {
+		if c.Kind != transcript.ChunkAI {
 			continue
 		}
 		m.transcript.expanded = map[string]bool{}
@@ -68,7 +69,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	for i, c := range m.transcript.chunks {
 		hasTrace := false
 		for _, it := range c.Items {
-			if it.Kind == claudecode.ItemSubagent && len(it.Trace) > 0 {
+			if it.Kind == transcript.ItemSubagent && len(it.Trace) > 0 {
 				hasTrace = true
 			}
 		}

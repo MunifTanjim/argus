@@ -7,9 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // Compose-then-submit prompt dock: nothing is sent to Claude until Enter. On
@@ -630,7 +630,7 @@ func interactionBody(m model, ix *session.Interaction, width int) string {
 		if ix.ToolInput != "" {
 			// Reuse the per-tool renderers (Bash → "$ cmd", Edit → diff, …) on a
 			// synthetic item; hardWrap bounds the result here (unlike the detail view).
-			it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
+			it := transcript.Item{Kind: transcript.ItemTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
 			parts = append(parts, hardWrap(m.toolBody(it, width-2), width-2))
 		}
 		return strings.Join(parts, "\n")

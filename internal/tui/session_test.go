@@ -8,9 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // recordingClient records Call method names; all calls succeed with zero results.
@@ -346,12 +346,12 @@ func TestFocusedDockExpandsToShowSubmitTab(t *testing.T) {
 }
 
 func TestDetailEscPopsThenLeaves(t *testing.T) {
-	sub := claudecode.Item{Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Read"}}}}}
+	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
 	m := sessionModel(nil)
-	m.transcript.chunks = []claudecode.Chunk{{ID: "a", Kind: claudecode.ChunkAI,
-		Items: []claudecode.Item{sub}}}
+	m.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI,
+		Items: []transcript.Item{sub}}}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
 	m.enterDetail()
@@ -390,12 +390,12 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 
 	// Populate a transcript chunk with a live subagent item (no inlined trace: it
 	// will be streamed).
-	agentItem := claudecode.Item{
-		Kind: claudecode.ItemSubagent, SubagentType: "explorer",
+	agentItem := transcript.Item{
+		Kind: transcript.ItemSubagent, SubagentType: "explorer",
 		HasTrace: true, AgentID: "agent42",
 	}
-	m.transcript.chunks = []claudecode.Chunk{
-		{ID: "a", Kind: claudecode.ChunkAI, Items: []claudecode.Item{agentItem}},
+	m.transcript.chunks = []transcript.Chunk{
+		{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{agentItem}},
 	}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
@@ -416,8 +416,8 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 		label:    "explorer",
 		subID:    subAgentSubID, // this is what Finding 1 requires to be set
 		expanded: map[int]bool{},
-		items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Read"},
+		items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Read"},
 		},
 	})
 	// Stack is now 2 deep: root + subagent.

@@ -65,15 +65,6 @@ func ReadStreamingView(path string) ([]Chunk, error) {
 	return foldChunks(pchunks, refs, nil), nil
 }
 
-// ToolDetail is one tool item's heavy body (input + result), looked up on demand.
-// Transcript chunks ship without these fields (see Item.MarshalJSON); clients
-// fetch them per tool via the sessions.toolDetail RPC.
-type ToolDetail struct {
-	ToolInput     string
-	Result        string
-	ResultIsError bool
-}
-
 // FindToolDetail returns the full input/result for the tool item with the given
 // tool_use id. agentID, when set, selects a subagent trace file (resolved
 // relative to the parent transcript path); empty searches the session transcript.

@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -24,10 +25,15 @@ import (
 
 // Node holds the wired-up core.
 type Node struct {
-	reg     *registry.Registry
-	disc    *claudecode.Discoverer
-	server  *api.Server
-	clients map[session.TmuxServer]*tmux.Client
+	reg *registry.Registry
+	// adapterList is the registered tool adapters in priority order; adapterList[0]
+	// is the default used for tool-agnostic paths (e.g. on-disk history). adapters
+	// indexes them by Tool() for routing live work by session.Tool.
+	adapterList []adapter.Adapter
+	adapters    map[string]adapter.Adapter
+	discs       []adapter.Discoverer
+	server      *api.Server
+	clients     map[session.TmuxServer]*tmux.Client
 
 	id      string // stable node id announced to the gateway (composite-id prefix)
 	label   string // human-friendly node name (e.g. hostname)
@@ -59,11 +65,23 @@ func (d *Node) SetLogger(l *slog.Logger) {
 	}
 }
 
-// scan rescans discovery once, logging (not swallowing) any failure.
+// scan rescans discovery once per adapter, logging (not swallowing) any failure.
 func (d *Node) scan(ctx context.Context) {
-	if err := d.disc.ScanOnce(ctx); err != nil {
-		d.log.Warn("discovery scan failed", "err", err)
+	for _, disc := range d.discs {
+		if err := disc.ScanOnce(ctx); err != nil {
+			d.log.Warn("discovery scan failed", "err", err)
+		}
 	}
+}
+
+// adapterFor returns the adapter owning the given session.Tool, falling back to
+// the default adapter (adapterList[0]) for empty/unknown tools — e.g. on-disk
+// history reads that are not tied to a live session.
+func (d *Node) adapterFor(tool string) adapter.Adapter {
+	if a, ok := d.adapters[tool]; ok {
+		return a
+	}
+	return d.adapterList[0]
 }
 
 // SetDesktopNotify toggles rendering of push.desktop notifications on this
@@ -155,7 +173,16 @@ func New() *Node {
 // inject isolated tmux servers.
 func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	reg := registry.New()
-	disc := claudecode.NewDiscoverer(reg, clients)
+
+	// Registered tool adapters (see internal/adapters). adapterList[0] is the
+	// default; adapterByTool routes live work by session.Tool.
+	adapterList := adapters.All()
+	adapterByTool := make(map[string]adapter.Adapter, len(adapterList))
+	discs := make([]adapter.Discoverer, 0, len(adapterList))
+	for _, a := range adapterList {
+		adapterByTool[a.Tool()] = a
+		discs = append(discs, a.NewDiscoverer(reg, clients))
+	}
 
 	host, _ := os.Hostname()
 	if host == "" {
@@ -171,11 +198,14 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	}
 
 	d := &Node{
-		reg: reg, disc: disc, clients: clients, id: host, label: host,
-		caps:    caps,
-		log:     slog.New(slog.DiscardHandler),
-		pending: map[string]*pendingDecision{},
-		conns:   map[api.Notifier]*connSubs{},
+		reg: reg, clients: clients, id: host, label: host,
+		adapterList: adapterList,
+		adapters:    adapterByTool,
+		discs:       discs,
+		caps:        caps,
+		log:         slog.New(slog.DiscardHandler),
+		pending:     map[string]*pendingDecision{},
+		conns:       map[api.Notifier]*connSubs{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {

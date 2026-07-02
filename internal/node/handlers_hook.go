@@ -4,24 +4,32 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// handleHook applies a Claude Code hook event to the registry. PermissionRequest
-// parks the hook and blocks until the user answers in argus, returning the
-// decision JSON. Claude's own prompt stays live in parallel — whoever answers
-// first wins. Answering in Claude's pane closes the connection (ctx cancel), so
-// blocking never hangs a session even with no TUI attached.
-func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, error) {
-	ev, err := api.Decode[claudecode.HookEvent](params)
+// hookHandlerFor binds an adapter to an RPC handler so its hook method routes to
+// that adapter's hook processing.
+func (d *Node) hookHandlerFor(a adapter.Adapter) api.HandlerFunc {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		return d.handleHook(ctx, a, params)
+	}
+}
+
+// handleHook applies a tool hook event to the registry via its owning adapter.
+// PermissionRequest parks the hook and blocks until the user answers in argus,
+// returning the decision JSON. The tool's own prompt stays live in parallel —
+// whoever answers first wins. Answering in the tool's pane closes the connection
+// (ctx cancel), so blocking never hangs a session even with no TUI attached.
+func (d *Node) handleHook(ctx context.Context, a adapter.Adapter, params json.RawMessage) (any, error) {
+	ev, err := api.Decode[adapter.HookEvent](params)
 	if err != nil {
 		return nil, err
 	}
-	s, alive := claudecode.ProcessHook(d.reg, ev)
-	event := claudecode.EventName(ev)
+	s, alive := a.ProcessHook(d.reg, ev)
+	event := a.EventName(ev)
 	api.LogAttr(ctx, "event", event)
-	if tool, _ := claudecode.PermissionPayload(ev); tool != "" {
+	if tool, _ := a.PermissionPayload(ev); tool != "" {
 		api.LogAttr(ctx, "tool", tool)
 	}
 	// ProcessHook already updated the firing session, so rescan only for lifecycle
@@ -34,7 +42,7 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	}
 
 	if alive && event == "PermissionRequest" {
-		return api.HookResult{Output: d.awaitDecision(ctx, s.ID, ev)}, nil
+		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, ev)}, nil
 	}
 	return api.HookResult{}, nil
 }
