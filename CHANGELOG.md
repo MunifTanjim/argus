@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.0.5](https://github.com/MunifTanjim/argus/compare/0.0.4...0.0.5) (2026-07-02)
+
+
+### Features
+
+* add command - config dir ([9bb7cf4](https://github.com/MunifTanjim/argus/commit/9bb7cf4044aa5fadade2283eb1d47a3880ba5f79))
+* add global --no-config flag ([7c2b4b8](https://github.com/MunifTanjim/argus/commit/7c2b4b8897bce3ecaba529b7cb4af17c45f669e0))
+* add tunnel provider - external ([87972fd](https://github.com/MunifTanjim/argus/commit/87972fdabc14de2add53c896b37888c2fc8d1ac3))
+* add tunnel provider - zrok ([ed096ea](https://github.com/MunifTanjim/argus/commit/ed096eac6c77fb319e2781b22d764feaebcd2cb2))
+* **app:** support ssh connection ([77813af](https://github.com/MunifTanjim/argus/commit/77813afbc8a03c0a87b38fedb2610eb24eb7ca54))
+* log hook event name on rpc request line ([9c042be](https://github.com/MunifTanjim/argus/commit/9c042be7608eeec442f91628b8e59e7b80e02e0c))
+* **tui:** add embedded-node logs tab ([9564e9d](https://github.com/MunifTanjim/argus/commit/9564e9dde18c934daaf7a4395b1df243ed64f174))
+
+
+### Bug Fixes
+
+* detach desktop notify from caller ctx ([e1dd467](https://github.com/MunifTanjim/argus/commit/e1dd4673f01bda931a26db9b4aced2fff264d4dc))
+* fire desktop notification from embedded node ([a58b688](https://github.com/MunifTanjim/argus/commit/a58b688e70d398d60557e312a1c2210790e9c437))
+* print public url for cloudflare quick tunnel ([54b54a6](https://github.com/MunifTanjim/argus/commit/54b54a63ea890013584588b09f9ef0979de154ab))
+* **tui:** scroll a too-tall prompt body in the focused dock ([5e4c0da](https://github.com/MunifTanjim/argus/commit/5e4c0da44b4d1fd60726f13c293f15d399b7a6cd))
+
 ## [0.0.4](https://github.com/MunifTanjim/argus/compare/0.0.3...0.0.4) (2026-06-29)
 
 
