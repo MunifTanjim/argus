@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -48,20 +50,28 @@ func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
 		return m.editToolDetail(it, width), true
 	case "Bash":
 		return m.bashDetail(it, width), true
+	case "exec_command":
+		return m.execCommandDetail(it, width), true
 	// BashOutput/KillShell carry a shell id, not a command, so they use the
 	// generic Input/Result layout (default branch).
 	case "Read", "NotebookRead":
 		return m.readDetail(it, width), true
 	case "TodoWrite":
 		return m.todoDetail(it, width), true
+	case "update_plan":
+		return m.planDetail(it, width), true
 	case "Grep":
 		return m.grepDetail(it, width), true
 	case "Glob", "LS":
 		return m.globDetail(it, width), true
-	case "WebFetch", "WebSearch":
+	case "WebFetch", "WebSearch", "web_search":
 		return m.webDetail(it, width), true
 	case "AskUserQuestion":
 		return m.askUserQuestionDetail(it, width), true
+	case "wait_agent":
+		return m.waitAgentDetail(it, width), true
+	case "close_agent":
+		return m.closeAgentDetail(it, width), true
 	default:
 		return "", false
 	}
@@ -171,8 +181,227 @@ func (m model) bashDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// readDetail renders a file read: path header, then content (which already carries
-// line numbers from the Read tool).
+func dumpLines(text string, width int) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, ln := range lines {
+		idx := strings.IndexByte(ln, ':')
+		if idx < 0 {
+			lines[i] = hardWrap(ln, width)
+			continue
+		}
+		key := strings.TrimSpace(ln[:idx])
+		val := strings.TrimSpace(ln[idx+1:])
+		lines[i] = hardWrap(StyleSecondaryBold.Render(key+":")+" "+val, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func prettyJSON(s string) string {
+	var buf bytes.Buffer
+	if json.Indent(&buf, []byte(s), "", "  ") != nil {
+		return s
+	}
+	return buf.String()
+}
+
+func (m model) execCommandDetail(it transcript.Item, width int) string {
+	var in struct {
+		Command         string `json:"cmd"`
+		Workdir         string `json:"workdir"`
+		YieldTimeMs     int    `json:"yield_time_ms"`
+		MaxOutputTokens int    `json:"max_output_tokens"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+
+	var sb strings.Builder
+	if in.Command != "" {
+		if in.Workdir != "" {
+			sb.WriteString(StyleDim.Render("# "+in.Workdir) + "\n")
+		}
+		sb.WriteString(StyleSecondaryBold.Render("$ "+in.Command) + "\n")
+		var meta []string
+		if in.YieldTimeMs > 0 {
+			meta = append(meta, fmt.Sprintf("yield %dms", in.YieldTimeMs))
+		}
+		if in.MaxOutputTokens > 0 {
+			meta = append(meta, fmt.Sprintf("max %d tokens", in.MaxOutputTokens))
+		}
+		if len(meta) > 0 {
+			sb.WriteString(StyleDim.Render(strings.Join(meta, " · ")) + "\n")
+		}
+	} else if it.ToolInput != "" {
+		sb.WriteString(dumpLines(prettyJSON(it.ToolInput), width) + "\n")
+	}
+
+	if it.Result != "" {
+		if sb.Len() > 0 {
+			sb.WriteString(sectionRule(width) + "\n")
+		}
+		sb.WriteString(sectionLabel(resultLabelText(it), it.ResultIsError) + "\n")
+		sb.WriteString(m.execCommandResultBody(it.Result, width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m model) execCommandResultBody(result string, width int) string {
+	const marker = "Output:\n"
+	idx := strings.Index(result, marker)
+	if idx < 0 {
+		return dumpLines(result, width)
+	}
+	head := dumpLines(result[:idx]+"Output:", width)
+	body := result[idx+len(marker):]
+	if body == "" {
+		return head
+	}
+	return head + "\n" + m.renderToolText(body, width)
+}
+
+func isAgentRefTool(name string) bool {
+	return name == "wait_agent" || name == "close_agent"
+}
+
+func agentDisplayName(it transcript.Item, agentID string) string {
+	for _, s := range it.Subagents {
+		if s.ID == agentID && s.Name != "" {
+			return s.Name
+		}
+	}
+	return agentID
+}
+
+func agentTargetNames(it transcript.Item) []string {
+	if len(it.Subagents) == 0 {
+		return nil
+	}
+	names := make([]string, len(it.Subagents))
+	for i, s := range it.Subagents {
+		if s.Name != "" {
+			names[i] = s.Name
+		} else {
+			names[i] = s.ID
+		}
+	}
+	return names
+}
+
+func agentToolLabel(it transcript.Item) string {
+	prefix := "Wait Agent"
+	if it.ToolName == "close_agent" {
+		prefix = "Close Agent"
+	}
+	names := agentTargetNames(it)
+	if len(names) == 0 {
+		return prefix
+	}
+	return prefix + ": " + strings.Join(names, ", ")
+}
+
+// agentStatusText extracts the (state, message) pair from a status object of
+// shape {"<state>":"<message>"}.
+func agentStatusText(raw json.RawMessage) (state, message string, ok bool) {
+	var m map[string]string
+	if json.Unmarshal(raw, &m) != nil || len(m) == 0 {
+		return "", "", false
+	}
+	for k, v := range m {
+		return k, v, true // exactly one key in practice
+	}
+	return "", "", false
+}
+
+func (m model) agentStatusBlock(name string, raw json.RawMessage, width int) string {
+	state, message, ok := agentStatusText(raw)
+	if !ok {
+		return StyleSecondaryBold.Render(name)
+	}
+	head := StyleSecondaryBold.Render(name) + ": " + StyleSecondary.Render(state)
+	if message == "" {
+		return head
+	}
+	return head + "\n" + m.renderMD(message, width)
+}
+
+func (m model) waitAgentDetail(it transcript.Item, width int) string {
+	var in struct {
+		Targets   []string `json:"targets"`
+		TimeoutMs int      `json:"timeout_ms"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+
+	var sb strings.Builder
+	if len(in.Targets) > 0 {
+		names := make([]string, len(in.Targets))
+		for i, id := range in.Targets {
+			names[i] = agentDisplayName(it, id)
+		}
+		sb.WriteString(StyleSecondaryBold.Render("Waiting on ") + strings.Join(names, ", "))
+		if in.TimeoutMs > 0 {
+			sb.WriteString(StyleDim.Render(fmt.Sprintf("  (timeout %dms)", in.TimeoutMs)))
+		}
+	} else if it.ToolInput != "" {
+		sb.WriteString(m.renderToolText(it.ToolInput, width))
+	}
+
+	if it.Result != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n" + sectionRule(width) + "\n")
+		}
+		sb.WriteString(sectionLabel(resultLabelText(it), it.ResultIsError) + "\n")
+		var out struct {
+			Status map[string]json.RawMessage `json:"status"`
+		}
+		if json.Unmarshal([]byte(it.Result), &out) == nil && len(out.Status) > 0 {
+			ids := in.Targets
+			if len(ids) == 0 {
+				for id := range out.Status {
+					ids = append(ids, id) // no input order to follow; best effort
+				}
+			}
+			var blocks []string
+			for _, id := range ids {
+				if raw, ok := out.Status[id]; ok {
+					blocks = append(blocks, m.agentStatusBlock(agentDisplayName(it, id), raw, width))
+				}
+			}
+			sb.WriteString(strings.Join(blocks, "\n"))
+		} else {
+			sb.WriteString(m.renderToolText(it.Result, width))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m model) closeAgentDetail(it transcript.Item, width int) string {
+	var in struct {
+		Target string `json:"target"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+
+	var sb strings.Builder
+	if in.Target != "" {
+		sb.WriteString(StyleSecondaryBold.Render("Closed ") + agentDisplayName(it, in.Target))
+	} else if it.ToolInput != "" {
+		sb.WriteString(m.renderToolText(it.ToolInput, width))
+	}
+
+	if it.Result != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n" + sectionRule(width) + "\n")
+		}
+		sb.WriteString(sectionLabel(resultLabelText(it), it.ResultIsError) + "\n")
+		var out struct {
+			PreviousStatus json.RawMessage `json:"previous_status"`
+		}
+		if json.Unmarshal([]byte(it.Result), &out) == nil && len(out.PreviousStatus) > 0 {
+			sb.WriteString(m.agentStatusBlock(agentDisplayName(it, in.Target), out.PreviousStatus, width))
+		} else {
+			sb.WriteString(m.renderToolText(it.Result, width))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 func (m model) readDetail(it transcript.Item, width int) string {
 	var in struct {
 		FilePath string `json:"file_path"`
@@ -222,7 +451,31 @@ func (m model) todoDetail(it transcript.Item, width int) string {
 	return strings.Join(rows, "\n")
 }
 
-// grepDetail renders a search query header ("pattern" in path) then the matches.
+func (m model) planDetail(it transcript.Item, width int) string {
+	var in struct {
+		Plan []struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		} `json:"plan"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+	if len(in.Plan) == 0 {
+		return m.genericToolBody(it, width)
+	}
+	var rows []string
+	for _, p := range in.Plan {
+		icon := Icon.Task.Pending
+		switch p.Status {
+		case "completed":
+			icon = Icon.Task.Done
+		case "in_progress":
+			icon = Icon.Task.Active
+		}
+		rows = append(rows, icon.Render()+" "+p.Step)
+	}
+	return strings.Join(rows, "\n")
+}
+
 func (m model) grepDetail(it transcript.Item, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`

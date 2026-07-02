@@ -605,7 +605,7 @@ func promptHeading(ix *session.Interaction) string {
 	case session.InteractionPermission:
 		s := "Permission requested"
 		if ix.ToolName != "" {
-			s += " · " + ix.ToolName
+			s += " · " + toolDisplayName(ix.ToolName)
 		}
 		return StyleAccentBold.Render(Icon.SystemErr.Glyph + " " + s)
 	case session.InteractionPlan:

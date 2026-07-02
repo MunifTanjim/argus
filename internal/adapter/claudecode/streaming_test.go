@@ -145,8 +145,9 @@ func TestStreamingTranscriptMatchesOneShotWithSubagent(t *testing.T) {
 	if sub == nil {
 		t.Fatal("no subagent item found — fixture does not exercise the link branch")
 	}
-	if sub.AgentID == "" || !sub.HasTrace {
-		t.Errorf("subagent item must carry AgentID + HasTrace, got AgentID=%q HasTrace=%v", sub.AgentID, sub.HasTrace)
+	sa := sub.Subagents[0]
+	if sa.ID == "" || !sa.HasTrace {
+		t.Errorf("subagent item must carry ID + HasTrace, got ID=%q HasTrace=%v", sa.ID, sa.HasTrace)
 	}
 }
 
@@ -252,8 +253,9 @@ func TestStreaming_NestedSubagentLinked(t *testing.T) {
 	if !ok {
 		t.Fatal("no subagent item in streamed agent-A trace")
 	}
-	if it.AgentID != "B" || !it.HasTrace {
-		t.Fatalf("nested item AgentID=%q HasTrace=%v, want B/true", it.AgentID, it.HasTrace)
+	sa := it.Subagents[0]
+	if sa.ID != "B" || !sa.HasTrace {
+		t.Fatalf("nested item ID=%q HasTrace=%v, want B/true", sa.ID, sa.HasTrace)
 	}
 }
 
@@ -289,8 +291,9 @@ func TestStreaming_RunningSubagentLinkedViaMeta(t *testing.T) {
 	if !ok {
 		t.Fatal("no subagent item found")
 	}
-	if it.AgentID != "R" || !it.HasTrace {
-		t.Fatalf("running subagent AgentID=%q HasTrace=%v, want R/true", it.AgentID, it.HasTrace)
+	sa := it.Subagents[0]
+	if sa.ID != "R" || !sa.HasTrace {
+		t.Fatalf("running subagent ID=%q HasTrace=%v, want R/true", sa.ID, sa.HasTrace)
 	}
 }
 
@@ -303,7 +306,8 @@ func TestStreaming_DepthCapSuppressesLink(t *testing.T) {
 	st := NewStreamingTranscript(subA, root, true)
 	chunks, _ := st.Refresh()
 	it, _ := subagentItem(chunks)
-	if it.AgentID != "" || it.HasTrace {
-		t.Fatalf("capped item AgentID=%q HasTrace=%v, want empty/false", it.AgentID, it.HasTrace)
+	sa := it.Subagents[0]
+	if sa.ID != "" || sa.HasTrace {
+		t.Fatalf("capped item ID=%q HasTrace=%v, want empty/false", sa.ID, sa.HasTrace)
 	}
 }

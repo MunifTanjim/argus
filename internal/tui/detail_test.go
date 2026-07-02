@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -245,11 +246,13 @@ func TestFlattenTraceNoUserChunk(t *testing.T) {
 
 func TestEnterDrillPopStack(t *testing.T) {
 	sub := transcript.Item{
-		Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"},
-			{Kind: transcript.ItemTool, ToolName: "Grep"},
-		}}},
+		Kind: transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+			Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+				{Kind: transcript.ItemTool, ToolName: "Read"},
+				{Kind: transcript.ItemTool, ToolName: "Grep"},
+			}}},
+		}},
 	}
 	m := testModel()
 	m.transcript.chunks = []transcript.Chunk{{
@@ -295,8 +298,8 @@ func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
 		t.Errorf("expanded row should show the result body:\n%s", expanded)
 	}
 
-	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
+	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
 	if !strings.Contains(m.detailRowBlock(sub, false, false, 60), "↵") {
 		t.Errorf("a drillable subagent row should show the drill affordance")
 	}
@@ -357,7 +360,7 @@ func TestFocusFrameDoesNotRenest(t *testing.T) {
 }
 
 func TestDrillableUsesHasTrace(t *testing.T) {
-	withTrace := transcript.Item{Kind: transcript.ItemSubagent, AgentID: "a1", HasTrace: true}
+	withTrace := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{ID: "a1", HasTrace: true}}}
 	if !drillable(withTrace) {
 		t.Error("subagent with HasTrace should be drillable")
 	}
@@ -368,9 +371,9 @@ func TestDrillableUsesHasTrace(t *testing.T) {
 }
 
 func TestDetailKeyNav(t *testing.T) {
-	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
 		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
+			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
 	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
 	m.width, m.height = 80, 30
@@ -395,10 +398,116 @@ func TestDetailKeyNav(t *testing.T) {
 	}
 }
 
+func TestDetailSubagentShowsNicknameAndInput(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{
+			Type:   "default",
+			Name:   "Volta",
+			Desc:   "This is the full task message given to the subagent and it is quite long",
+			Status: "closed",
+		}},
+	}
+	out := m.detailItemBody(it, itemAccentColor(it), GlyphAccentBar, 200)
+	if !strings.Contains(out, "Volta") {
+		t.Errorf("expected nickname Volta in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "default") {
+		t.Errorf("expected type default in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Input") {
+		t.Errorf("expected Input label in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "quite long") {
+		t.Errorf("expected full (untruncated) input message, got:\n%s", out)
+	}
+}
+
+// TestDrillIntoSubagentShowsNicknameAndInput verifies subagent identity and input
+// carry into the drilled-in trace frame.
+func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
+	sub := transcript.Item{
+		Kind: transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{
+			Type: "default", Name: "Volta", Status: "closed",
+			Desc:     "the full task message given to the subagent",
+			HasTrace: true,
+			Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+				{Kind: transcript.ItemTool, ToolName: "Read"},
+			}}},
+		}},
+	}
+	m := testModel()
+	m.transcript.chunks = []transcript.Chunk{{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{sub},
+	}}
+	m.transcript.cursor = 0
+	m.enterDetail()
+	m.drillDetail()
+
+	f := m.topFrame()
+	if f.label != "default · Volta" {
+		t.Errorf("breadcrumb label = %q, want nickname included", f.label)
+	}
+	if f.subagentName != "Volta" || f.subagentStatus != "closed" || f.subagentInput == "" {
+		t.Fatalf("frame missing subagent identity: name=%q status=%q input=%q",
+			f.subagentName, f.subagentStatus, f.subagentInput)
+	}
+	out := ansi.Strip(m.detailBody())
+	if !strings.Contains(out, "Volta") {
+		t.Errorf("expected nickname in drilled trace body, got:\n%s", out)
+	}
+	if !strings.Contains(out, "full task message") {
+		t.Errorf("expected full input in drilled trace body, got:\n%s", out)
+	}
+	if !strings.Contains(out, "closed") {
+		t.Errorf("expected status in drilled trace body (an expanded context), got:\n%s", out)
+	}
+	if !strings.Contains(out, "Read") {
+		t.Errorf("expected the trace's own items still rendered, got:\n%s", out)
+	}
+}
+
+// TestSubagentLabelStableAcrossExpand verifies the identity label stays stable
+// across collapse/expand.
+func TestSubagentLabelStableAcrossExpand(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{
+			Type:   "default",
+			Name:   "Volta",
+			Status: "closed",
+		}},
+	}
+	collapsed := ansi.Strip(m.detailRowBlock(it, false, false, 200))
+	expanded := ansi.Strip(m.detailRowBlock(it, true, false, 200))
+
+	const label = "Spawn Agent: Volta (default)"
+	collapsedCol := strings.Index(collapsed, label)
+	expandedCol := strings.Index(expanded, label)
+	if collapsedCol < 0 || expandedCol < 0 {
+		t.Fatalf("label not found: collapsed=%q expanded=%q", collapsed, expanded)
+	}
+	if collapsedCol != expandedCol {
+		t.Errorf("label column shifted: collapsed at %d, expanded at %d\ncollapsed: %q\nexpanded:  %q",
+			collapsedCol, expandedCol, collapsed, expanded)
+	}
+	if strings.Contains(collapsed, "closed") {
+		t.Errorf("collapsed row should not show status, got:\n%s", collapsed)
+	}
+	if !strings.Contains(expanded, "closed") {
+		t.Errorf("expanded row should show status, got:\n%s", expanded)
+	}
+}
+
 func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
 	sub := transcript.Item{
-		Kind: transcript.ItemSubagent, SubagentType: "Explore",
-		AgentID: "B", HasTrace: true, // Trace empty => lazy
+		Kind: transcript.ItemSubagent,
+		// Trace empty => lazy
+		Subagents: []transcript.Subagent{{Type: "Explore", ID: "B", HasTrace: true}},
 	}
 	m := testModel()
 	m.mode = modeHistoryTranscript

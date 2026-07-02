@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
@@ -148,12 +148,14 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	return d, logs
 }
 
-// reconcileEmbeddedHooks reconciles hooks best-effort, logging to the TUI's Logs tab.
+// reconcileEmbeddedHooks reconciles hooks best-effort (empty bin keeps the installed path).
 func reconcileEmbeddedHooks(log *slog.Logger) {
-	if added, err := claudecode.ReconcileKeepingInstalledBin(); err != nil {
-		log.Error("reconcile hooks failed", "err", err)
-	} else if len(added) > 0 {
-		log.Info("reconciled argus hooks", "added", added)
+	for _, a := range adapters.All() {
+		if added, err := a.ReconcileIfInstalled(""); err != nil {
+			log.Error("reconcile hooks failed", "agent", a.Agent(), "err", err)
+		} else if len(added) > 0 {
+			log.Info("reconciled argus hooks", "agent", a.Agent(), "added", added)
+		}
 	}
 }
 

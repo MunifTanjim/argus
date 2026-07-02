@@ -169,7 +169,7 @@ func dockSummary(ix *session.Interaction) string {
 		return "Question"
 	case session.InteractionPermission:
 		if ix.ToolName != "" {
-			return "Allow " + ix.ToolName + "?"
+			return "Allow " + toolDisplayName(ix.ToolName) + "?"
 		}
 		return "Permission request"
 	case session.InteractionPlan:

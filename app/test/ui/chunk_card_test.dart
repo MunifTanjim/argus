@@ -15,6 +15,22 @@ void main() {
     expect(find.textContaining('fix the bug'), findsOneWidget);
   });
 
+  testWidgets('shell chunk shows the command, output on expand', (tester) async {
+    const c = Chunk(
+      id: 'sh',
+      kind: ChunkKind.shell,
+      text: 'git status',
+      detail: 'On branch main\nnothing to commit',
+    );
+    await tester.pumpWidget(_wrap(c));
+    expect(find.text('Shell'), findsOneWidget);
+    expect(find.textContaining('git status'), findsOneWidget);
+    expect(find.textContaining('nothing to commit'), findsNothing);
+    await tester.tap(find.text('Shell'));
+    await tester.pump();
+    expect(find.textContaining('nothing to commit'), findsOneWidget);
+  });
+
   testWidgets('long user chunk collapses and expands', (tester) async {
     final long = List.generate(30, (i) => 'line $i').join('\n');
     // Scrollable parent so tall expanded content doesn't trip an overflow.

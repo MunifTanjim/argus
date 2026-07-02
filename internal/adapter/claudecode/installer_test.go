@@ -125,7 +125,7 @@ func TestReconcileIfInstalledAddsMissingEvents(t *testing.T) {
 	  "hooks": {
 	    "Stop": [
 	      { "hooks": [ { "type": "command", "command": "my-own-thing" } ] },
-	      { "hooks": [ { "type": "command", "command": "/bin/argus hook Stop #argus-managed", "timeout": 5 } ] }
+	      { "hooks": [ { "type": "command", "command": "/bin/argus hook --argus-managed --tool claude-code Stop", "timeout": 5 } ] }
 	    ]
 	  }
 	}`
@@ -221,8 +221,8 @@ func TestReconcileKeepingInstalledBinPreservesPath(t *testing.T) {
 	for event, groups := range hooks {
 		for _, g := range groups {
 			for _, c := range g.Hooks {
-				if isManaged(c) && managedCommandBin(c.Command) != "/opt/argus" {
-					t.Errorf("%s: managed bin rewritten to %q", event, managedCommandBin(c.Command))
+				if isManaged(c) && !strings.HasPrefix(c.Command, "/opt/argus hook ") {
+					t.Errorf("%s: managed bin rewritten in %q", event, c.Command)
 				}
 			}
 		}
@@ -266,5 +266,67 @@ func TestReconcileIfInstalledOptInPreserved(t *testing.T) {
 	_ = json.Unmarshal(top["hooks"], &hooks)
 	if _, ok := hooks["PermissionRequest"]; ok {
 		t.Error("reconcile auto-installed hooks for a non-opted-in user")
+	}
+}
+
+// TestReconcileMigratesLegacyMarker checks a pre-unified install (commands ending
+// in the "#argus-managed" shell comment, no --agent) is recognized and rewritten to
+// the current `--argus-managed --agent claude …` form, preserving user hooks.
+func TestReconcileMigratesLegacyMarker(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+
+	seed := `{
+	  "hooks": {
+	    "Stop": [
+	      { "hooks": [ { "type": "command", "command": "my-own-thing" } ] },
+	      { "hooks": [ { "type": "command", "command": "/bin/argus hook Stop #argus-managed", "timeout": 5 } ] }
+	    ],
+	    "SessionStart": [
+	      { "hooks": [ { "type": "command", "command": "/bin/argus hook SessionStart #argus-managed", "timeout": 5 } ] }
+	    ]
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReconcileIfInstalled("/bin/argus"); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+	if strings.Contains(content, "#argus-managed") {
+		t.Errorf("legacy marker not migrated away:\n%s", content)
+	}
+	if !strings.Contains(content, "/bin/argus hook --argus-managed --agent claude Stop") {
+		t.Errorf("Stop not rewritten to the unified form:\n%s", content)
+	}
+
+	top := readSettings(t, path)
+	hooks := map[string][]hookGroup{}
+	if err := json.Unmarshal(top["hooks"], &hooks); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range DefaultHookEvents {
+		if !hasManaged(hooks[e]) {
+			t.Errorf("event %q not managed after migration", e)
+		}
+	}
+	var foundUser bool
+	for _, g := range hooks["Stop"] {
+		for _, c := range g.Hooks {
+			if c.Command == "my-own-thing" {
+				foundUser = true
+			}
+		}
+	}
+	if !foundUser {
+		t.Error("user's own hook was dropped during migration")
 	}
 }

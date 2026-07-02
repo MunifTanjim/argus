@@ -68,7 +68,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	for i, c := range m.transcript.chunks {
 		hasTrace := false
 		for _, it := range c.Items {
-			if it.Kind == transcript.ItemSubagent && len(it.Trace) > 0 {
+			if s, ok := soleSubagent(it); ok && len(s.Trace) > 0 {
 				hasTrace = true
 			}
 		}

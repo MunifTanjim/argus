@@ -183,13 +183,16 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, traces map[st
 	case parser.ItemSubagent:
 		it.Kind = ItemSubagent
 		fillTool(&it, pit)
-		it.SubagentType = pit.SubagentType
-		it.SubagentDesc = pit.SubagentDesc
-		it.AgentID = agentRefs[pit.ToolID]
-		if traces != nil {
-			it.Trace = traces[pit.ToolID]
+		sub := Subagent{
+			ID:   agentRefs[pit.ToolID],
+			Type: pit.SubagentType,
+			Desc: pit.SubagentDesc,
 		}
-		it.HasTrace = len(it.Trace) > 0 || it.AgentID != ""
+		if traces != nil {
+			sub.Trace = traces[pit.ToolID]
+		}
+		sub.HasTrace = len(sub.Trace) > 0 || sub.ID != ""
+		it.Subagents = []Subagent{sub}
 	default: // ItemMemoryLoad and any future kinds: not surfaced
 		return Item{}, false
 	}

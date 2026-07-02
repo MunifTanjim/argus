@@ -21,10 +21,11 @@ func TestReadStreamingViewOmitsTraceSetsHasTrace(t *testing.T) {
 	if sub == nil {
 		t.Fatal("no subagent item found")
 	}
-	if sub.Trace != nil {
-		t.Errorf("streaming view must not inline Trace, got %d chunks", len(sub.Trace))
+	sa := sub.Subagents[0]
+	if sa.Trace != nil {
+		t.Errorf("streaming view must not inline Trace, got %d chunks", len(sa.Trace))
 	}
-	if sub.AgentID == "" || !sub.HasTrace {
-		t.Errorf("subagent item must carry AgentID + HasTrace, got AgentID=%q HasTrace=%v", sub.AgentID, sub.HasTrace)
+	if sa.ID == "" || !sa.HasTrace {
+		t.Errorf("subagent item must carry ID + HasTrace, got ID=%q HasTrace=%v", sa.ID, sa.HasTrace)
 	}
 }

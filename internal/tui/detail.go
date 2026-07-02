@@ -30,6 +30,12 @@ type detailFrame struct {
 	defaultExpanded bool              // default item expansion for this frame
 	expanded        map[int]bool      // per-item expand override (by item index)
 	focused         bool              // single-item focus frame: no further drilling
+
+	// Identity header for a subagent's drilled-in trace frame.
+	subagentType   string
+	subagentName   string
+	subagentStatus string
+	subagentInput  string
 }
 
 func (f *detailFrame) isExpanded(i int) bool {
@@ -84,9 +90,17 @@ func flattenTrace(chunks []transcript.Chunk) []transcript.Item {
 	return items
 }
 
+func soleSubagent(it transcript.Item) (transcript.Subagent, bool) {
+	if it.Kind == transcript.ItemSubagent && len(it.Subagents) == 1 {
+		return it.Subagents[0], true
+	}
+	return transcript.Subagent{}, false
+}
+
 // drillable reports whether entering an item opens a meaningful sub-trace.
 func drillable(it transcript.Item) bool {
-	return it.Kind == transcript.ItemSubagent && it.HasTrace
+	s, ok := soleSubagent(it)
+	return ok && s.HasTrace
 }
 
 func drillLabel(it transcript.Item) string {
@@ -100,7 +114,7 @@ func drillLabel(it transcript.Item) string {
 	case transcript.ItemSubagent:
 		return subagentLabel(it)
 	default:
-		return it.ToolName
+		return toolDisplayName(it.ToolName)
 	}
 }
 
@@ -113,7 +127,7 @@ func (m *model) enterDetail() {
 	c := m.transcript.chunks[m.transcript.cursor]
 	f := detailFrame{expanded: map[int]bool{}, defaultExpanded: false}
 	if c.Kind == transcript.ChunkAI {
-		f.label = "Claude"
+		_, f.label = m.assistantBrand()
 		if c.Model != "" {
 			f.label = shortModel(c.Model)
 		}
@@ -138,11 +152,15 @@ func (m *model) drillDetail() {
 		return // already focused on this leaf; nothing deeper to drill
 	}
 	nf := detailFrame{expanded: map[int]bool{}, agentID: f.agentID}
-	if drillable(it) {
+	if s, ok := soleSubagent(it); ok && s.HasTrace {
 		nf.label = subagentLabel(it)
-		nf.items = flattenTrace(it.Trace)
-		nf.defaultExpanded = false // children start collapsed
-		nf.agentID = it.AgentID
+		nf.items = flattenTrace(s.Trace)
+		nf.defaultExpanded = false
+		nf.agentID = s.ID
+		nf.subagentType = s.Type
+		nf.subagentName = s.Name
+		nf.subagentStatus = s.Status
+		nf.subagentInput = s.Desc
 		nf.expandOutputs()
 	} else {
 		nf.label = drillLabel(it)
@@ -250,10 +268,39 @@ func (m model) actDetailFold(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func subagentLabel(it transcript.Item) string {
-	if it.SubagentType != "" {
-		return it.SubagentType
+	s, _ := soleSubagent(it)
+	name := s.Type
+	if name == "" {
+		name = "Subagent"
 	}
-	return "Subagent"
+	if s.Name != "" {
+		return name + " · " + s.Name
+	}
+	return name
+}
+
+func spawnAgentLabel(agentType, nickname string) string {
+	label := "Spawn Agent"
+	if nickname != "" {
+		label += ": " + nickname
+	}
+	if agentType != "" {
+		label += " (" + agentType + ")"
+	}
+	return label
+}
+
+// subagentHeaderLines renders a spawn_agent's identity header and Input section.
+func subagentHeaderLines(agentType, nickname, status, input string, iw int) []string {
+	head := Icon.Subagent.Render() + " " + StylePrimaryBold.Render(spawnAgentLabel(agentType, nickname))
+	if status != "" {
+		head += " " + StyleSecondary.Render("["+status+"]")
+	}
+	lines := []string{hardWrap(head, iw)}
+	if input != "" {
+		lines = append(lines, StyleSecondaryBold.Render("Input")+"\n"+wrapDim(input, iw))
+	}
+	return lines
 }
 
 func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -262,21 +309,25 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	it := f.items[f.cursor]
-	if it.Kind == transcript.ItemSubagent && it.HasTrace && len(it.Trace) == 0 && it.AgentID != "" {
+	if s, ok := soleSubagent(it); ok && s.HasTrace && len(s.Trace) == 0 && s.ID != "" {
 		if m.mode == modeHistoryTranscript {
 			// Past session: one-shot fetch (no live subscription).
 			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
-				label: subagentLabel(it), agentID: it.AgentID, expanded: map[int]bool{},
+				label: subagentLabel(it), agentID: s.ID, expanded: map[int]bool{},
+				subagentType: s.Type, subagentName: s.Name,
+				subagentStatus: s.Status, subagentInput: s.Desc,
 			})
-			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, it.AgentID)
+			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, s.ID)
 		}
 		// Live session: stream the subagent trace into a new frame. Stash the
 		// session subRef so pop can restore it without a leak.
 		m.sessionSub = m.activeSub
-		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: it.AgentID, cacheKey: m.cacheKeyFor(m.selectedID)}
+		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: s.ID, cacheKey: m.cacheKeyFor(m.selectedID)}
 		m.activeSub = ref // subagent stream is active while drilled in
 		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},
+			subagentType: s.Type, subagentName: s.Name,
+			subagentStatus: s.Status, subagentInput: s.Desc,
 		})
 		have := len(m.transcriptCache[ref.key()].chunks)
 		return m, m.subscribeCmd(ref, have)
@@ -347,6 +398,13 @@ func (m model) detailBreadcrumb() string {
 	return StyleDim.Render(strings.Join(labels, " › "))
 }
 
+func (f *detailFrame) detailHeaderText(width int) string {
+	if f.subagentType == "" && f.subagentName == "" && f.subagentStatus == "" && f.subagentInput == "" {
+		return ""
+	}
+	return strings.Join(subagentHeaderLines(f.subagentType, f.subagentName, f.subagentStatus, f.subagentInput, width), "\n")
+}
+
 // ensureDetailVisible scrolls the active frame so the cursor item stays on screen.
 func (m *model) ensureDetailVisible() {
 	f := m.topFrame()
@@ -355,6 +413,9 @@ func (m *model) ensureDetailVisible() {
 	}
 	lines, start, end := m.frameLines(f, m.containerWidth())
 	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
+	if header := f.detailHeaderText(m.containerWidth()); header != "" {
+		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
+	}
 	if start < f.scroll {
 		f.scroll = start
 	} else if end > f.scroll+h {
@@ -402,6 +463,10 @@ func (m model) detailBody() string {
 		prefix = crumb + "\n\n"
 		bodyH = max(1, h-2)
 	}
+	if header := f.detailHeaderText(cw); header != "" {
+		prefix += header + "\n\n"
+		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
+	}
 	if len(lines) <= bodyH {
 		return centerBlock(prefix+strings.Join(lines, "\n"), cw, tw)
 	}
@@ -437,6 +502,31 @@ func (m model) renderDetail(c transcript.Chunk) string {
 			return head
 		}
 		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), width-2)
+	case transcript.ChunkShell:
+		label := StylePrimaryBold.Render("Shell")
+		if c.IsError {
+			label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
+		}
+		head := Icon.Shell.Render() + " " + label + "  " + StyleDim.Render(clockTime(c.Timestamp))
+		body := StyleSecondaryBold.Render("$") + " " + c.Text
+		if c.Detail != "" {
+			resultLabel := "Result"
+			if c.IsError {
+				resultLabel = "Error"
+			}
+			body += "\n\n" + sectionLabel(resultLabel, c.IsError) + "\n" + m.execCommandResultBody(c.Detail, width-2)
+		}
+		return head + "\n\n" + body
+	case transcript.ChunkSkill:
+		head := Icon.Skill.Render() + " " + StylePrimaryBold.Render("Skill") + "  " + StyleDim.Render(clockTime(c.Timestamp))
+		body := StyleSecondaryBold.Render(c.Text)
+		if c.Label != "" {
+			body += "\n" + StyleDim.Render(c.Label)
+		}
+		if c.Detail != "" {
+			body += "\n\n" + m.renderMD(c.Detail, width-2)
+		}
+		return head + "\n\n" + body
 	default:
 		head := Icon.System.Render() + " " + StyleSecondary.Render(c.Summary)
 		if c.Detail == "" {
@@ -482,29 +572,28 @@ func (m model) detailItemBody(it transcript.Item, c color.Color, bar string, wid
 		head := Icon.User.Render() + " " + StyleSecondaryBold.Render("Prompt")
 		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
 	case transcript.ItemSubagent:
-		name := it.SubagentType
-		if name == "" {
-			name = "Subagent"
+		// wait/close operate on existing agents: identity header + status body, no trace.
+		if isAgentRefTool(it.ToolName) {
+			head := Icon.Subagent.Render() + " " + StylePrimaryBold.Render(agentToolLabel(it))
+			return accentBlock(hardWrap(joinItem(head, m.toolBody(it, iw)), iw), c, bar)
 		}
-		head := Icon.Subagent.Render() + " " + StylePrimaryBold.Render(name)
-		if it.SubagentDesc != "" {
-			head += "  " + StyleSecondary.Render(truncate(it.SubagentDesc, 70))
-		}
-		if n := len(flattenTrace(it.Trace)); n > 0 {
+		s, _ := soleSubagent(it)
+		parts := subagentHeaderLines(s.Type, s.Name, s.Status, s.Desc, iw)
+		if n := len(flattenTrace(s.Trace)); n > 0 {
 			noun := "steps"
 			if n == 1 {
 				noun = "step"
 			}
-			hint := StyleDim.Render(fmt.Sprintf("↵ drill into %d %s", n, noun))
-			return accentBlock(hardWrap(head+"\n"+hint, iw), c, bar)
-		} else if it.HasTrace {
-			hint := StyleDim.Render("↵ drill in (streaming)")
-			return accentBlock(hardWrap(head+"\n"+hint, iw), c, bar)
+			parts = append(parts, StyleDim.Render(fmt.Sprintf("↵ drill into %d %s", n, noun)))
+		} else if s.HasTrace {
+			parts = append(parts, StyleDim.Render("↵ drill in (streaming)"))
+		} else if body := m.toolBody(it, iw); body != "" {
+			parts = append(parts, body)
 		}
-		body := m.toolBody(it, iw)
-		return accentBlock(hardWrap(joinItem(head, body), iw), c, bar)
+		return accentBlock(strings.Join(parts, "\n"), c, bar)
 	default: // tool
-		head := toolIcon(it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(it.ToolName)
+		name := toolDisplayName(it.ToolName)
+		head := toolIcon(it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(name)
 		if it.InputPreview != "" {
 			head += "  " + StyleSecondary.Render(truncate(it.InputPreview, 70))
 		}

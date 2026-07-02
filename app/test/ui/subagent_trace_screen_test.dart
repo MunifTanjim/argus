@@ -42,12 +42,16 @@ void main() {
     const item = Item(
       id: 'i',
       kind: ItemKind.subagent,
-      subagentType: 'Explore',
-      hasTrace: true,
-      trace: [
-        Chunk(id: 't', kind: ChunkKind.ai, previewItemId: 'ti', items: [
-          Item(id: 'ti', kind: ItemKind.text, text: 'searched everything'),
-        ]),
+      subagents: [
+        Subagent(
+          type: 'Explore',
+          hasTrace: true,
+          trace: [
+            Chunk(id: 't', kind: ChunkKind.ai, previewItemId: 'ti', items: [
+              Item(id: 'ti', kind: ItemKind.text, text: 'searched everything'),
+            ]),
+          ],
+        ),
       ],
     );
     await tester.pumpWidget(ProviderScope(
@@ -70,9 +74,8 @@ void main() {
     const item = Item(
       id: 'i',
       kind: ItemKind.subagent,
-      subagentType: 'Explore',
-      agentId: 'B',
-      hasTrace: true, // no inline trace => lazy history fetch
+      // no inline trace => lazy history fetch
+      subagents: [Subagent(type: 'Explore', id: 'B', hasTrace: true)],
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [

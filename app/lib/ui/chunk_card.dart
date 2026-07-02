@@ -33,6 +33,15 @@ Color _modelColor(String model) {
 String _fmtTokens(int n) =>
     n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
 
+// RFC3339 -> local HH:MM:SS.
+String _clockTime(String? ts) {
+  if (ts == null) return '';
+  final dt = DateTime.tryParse(ts)?.toLocal();
+  if (dt == null) return ts;
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}';
+}
+
 class ChunkCard extends StatefulWidget {
   const ChunkCard({super.key, required this.detailRef, required this.chunk});
 
@@ -55,6 +64,8 @@ class _ChunkCardState extends State<ChunkCard> {
         return _aiCard(widget.chunk);
       case ChunkKind.system:
         return _SystemCard(chunk: widget.chunk);
+      case ChunkKind.shell:
+        return _ShellCard(chunk: widget.chunk);
       case ChunkKind.compact:
         return _CompactDivider(summary: widget.chunk.summary);
       case ChunkKind.unknown:
@@ -251,8 +262,10 @@ class _ChunkCardState extends State<ChunkCard> {
             ),
           );
     }
+    final sub = it.soleSubagent;
     if (it.kind == ItemKind.subagent &&
-        (it.hasTrace || (it.agentId?.isNotEmpty ?? false))) {
+        sub != null &&
+        (sub.hasTrace || sub.id.isNotEmpty)) {
       return () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) =>
@@ -333,8 +346,6 @@ class _UserBubbleState extends State<_UserBubble> {
       );
 }
 
-/// System events (local command / bash / task-notify output) as a subtle
-/// bordered card. Tap toggles the detail body; mirrors the TUI system row.
 class _SystemCard extends StatefulWidget {
   const _SystemCard({required this.chunk});
   final Chunk chunk;
@@ -345,15 +356,6 @@ class _SystemCard extends StatefulWidget {
 
 class _SystemCardState extends State<_SystemCard> {
   bool _expanded = false;
-
-  // RFC3339 -> local HH:MM:SS, matching the TUI clockTime helper.
-  static String _clock(String? ts) {
-    if (ts == null) return '';
-    final dt = DateTime.tryParse(ts)?.toLocal();
-    if (dt == null) return ts;
-    String p(int n) => n.toString().padLeft(2, '0');
-    return '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -368,7 +370,7 @@ class _SystemCardState extends State<_SystemCard> {
         Icon(Icons.terminal, size: 13, color: err ? AppColors.error : AppColors.dim),
         const SizedBox(width: 6),
         Text('System', style: _mono.copyWith(color: labelColor)),
-        Text('  ·  ${_clock(c.timestamp)}', style: _monoDim),
+        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim),
         if (hasLabel) // preview after the timestamp (e.g. "Recap")
           Text('  ${c.label!}', style: _monoDim),
       ],
@@ -391,6 +393,70 @@ class _SystemCardState extends State<_SystemCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               header,
+              if (hasDetail && _expanded)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(c.detail!, style: _monoDim),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShellCard extends StatefulWidget {
+  const _ShellCard({required this.chunk});
+  final Chunk chunk;
+
+  @override
+  State<_ShellCard> createState() => _ShellCardState();
+}
+
+class _ShellCardState extends State<_ShellCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.chunk;
+    final err = c.isError;
+    final hasDetail = c.detail != null && c.detail!.isNotEmpty;
+
+    final header = Row(
+      children: [
+        Icon(Icons.terminal,
+            size: 13, color: err ? AppColors.error : AppColors.dim),
+        const SizedBox(width: 6),
+        Text('Shell',
+            style: _mono.copyWith(
+                color: err ? AppColors.error : AppColors.secondary)),
+        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: hasDetail ? () => setState(() => _expanded = !_expanded) : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('\$ ${c.text ?? ''}',
+                    style: _mono.copyWith(color: AppColors.text)),
+              ),
               if (hasDetail && _expanded)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),

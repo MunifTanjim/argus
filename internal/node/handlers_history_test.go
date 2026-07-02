@@ -75,8 +75,8 @@ func TestHandleHistoryTranscript_NestedByAgentID(t *testing.T) {
 	}
 	view := res.(claudecode.TranscriptView)
 	it, ok := subagentItemInChunks(view.Chunks)
-	if !ok || it.AgentID != "B" {
-		t.Fatalf("nested view should expose child B, got ok=%v agentID=%q", ok, it.AgentID)
+	if !ok || len(it.Subagents) == 0 || it.Subagents[0].ID != "B" {
+		t.Fatalf("nested view should expose child B, got ok=%v subagents=%+v", ok, it.Subagents)
 	}
 }
 

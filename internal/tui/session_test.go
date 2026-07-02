@@ -346,9 +346,9 @@ func TestFocusedDockExpandsToShowSubmitTab(t *testing.T) {
 }
 
 func TestDetailEscPopsThenLeaves(t *testing.T) {
-	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
 		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
+			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
 	m := sessionModel(nil)
 	m.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI,
 		Items: []transcript.Item{sub}}}
@@ -390,8 +390,8 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 	// Populate a transcript chunk with a live subagent item (no inlined trace: it
 	// will be streamed).
 	agentItem := transcript.Item{
-		Kind: transcript.ItemSubagent, SubagentType: "explorer",
-		HasTrace: true, AgentID: "agent42",
+		Kind:      transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}},
 	}
 	m.transcript.chunks = []transcript.Chunk{
 		{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{agentItem}},

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -259,6 +260,183 @@ func TestTranscriptViewRenders(t *testing.T) {
 	}
 	if !strings.Contains(out, "Claude") {
 		t.Errorf("expected Claude header in output, got:\n%s", out)
+	}
+}
+
+func TestTranscriptBrandFromTool(t *testing.T) {
+	m := loaded()
+	m.selectedID = "s1"
+	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
+	out := m.transcriptBody()
+	if !strings.Contains(out, "Codex") {
+		t.Errorf("expected Codex header for a codex session, got:\n%s", out)
+	}
+	if strings.Contains(out, "Claude") {
+		t.Errorf("codex session should not render Claude brand, got:\n%s", out)
+	}
+}
+
+func TestRenderShellCard(t *testing.T) {
+	m := testModel()
+	c := transcript.Chunk{
+		ID: "sh1", Kind: transcript.ChunkShell,
+		Text:   "echo hi",
+		Detail: "Exit code: 0\nDuration: 0.0417 seconds\nOutput:\nworld\n",
+	}
+	m.transcript.chunks = []transcript.Chunk{c}
+	m.transcript.expanded = map[string]bool{}
+
+	// AI-card style: the "Shell" header sits outside/above the card border; the
+	// command lives inside the card.
+	out := m.renderChunk(0, false)
+	headerIdx := strings.Index(out, "Shell")
+	borderIdx := strings.Index(out, "╭")
+	if headerIdx < 0 || borderIdx < 0 || headerIdx > borderIdx {
+		t.Fatalf("Shell header should sit above the card border:\n%s", out)
+	}
+	if !strings.Contains(out, "echo hi") {
+		t.Fatalf("collapsed card should show the command:\n%s", out)
+	}
+	if strings.Contains(out, "world") {
+		t.Fatalf("collapsed should not show the output:\n%s", out)
+	}
+
+	m.transcript.expanded["sh1"] = true
+	out = m.renderChunk(0, false)
+	if !strings.Contains(out, "echo hi") {
+		t.Fatalf("expanded should still show the command:\n%s", out)
+	}
+	if !strings.Contains(out, "world") {
+		t.Fatalf("expanded render missing output:\n%s", out)
+	}
+	if !strings.Contains(out, "Result") {
+		t.Fatalf("expanded render missing Result label:\n%s", out)
+	}
+}
+
+func TestRenderShellCardError(t *testing.T) {
+	m := testModel()
+	c := transcript.Chunk{
+		ID: "sh1", Kind: transcript.ChunkShell,
+		Text: "false", Detail: "Exit code: 1\nOutput:\n", IsError: true,
+	}
+	m.transcript.chunks = []transcript.Chunk{c}
+	m.transcript.expanded = map[string]bool{"sh1": true}
+	if out := m.renderChunk(0, false); !strings.Contains(out, "Error") {
+		t.Fatalf("expected Error label for nonzero exit, got:\n%s", out)
+	}
+}
+
+func TestRenderDetailShell(t *testing.T) {
+	m := testModel()
+	c := transcript.Chunk{
+		ID: "sh1", Kind: transcript.ChunkShell,
+		Text:   "echo hi",
+		Detail: "Exit code: 0\nOutput:\nworld\n",
+	}
+	out := m.renderDetail(c)
+	if !strings.Contains(out, "Shell") {
+		t.Fatalf("detail should show the Shell header:\n%s", out)
+	}
+	if !strings.Contains(out, "echo hi") {
+		t.Fatalf("detail should show the command:\n%s", out)
+	}
+	if !strings.Contains(out, "world") || !strings.Contains(out, "Result") {
+		t.Fatalf("detail should show the labeled output:\n%s", out)
+	}
+}
+
+func TestRenderSkillCard(t *testing.T) {
+	m := testModel()
+	c := transcript.Chunk{
+		ID: "sk1", Kind: transcript.ChunkSkill,
+		Text:   "superpowers:brainstorming",
+		Label:  "/Users/muniftanjim/.codex/plugins/cache/openai-curated/superpowers/3fdeeb49/skills/brainstorming/SKILL.md",
+		Detail: "# Brainstorming Ideas Into Designs\n\nHelp turn ideas into fully formed designs.",
+	}
+	m.transcript.chunks = []transcript.Chunk{c}
+	m.transcript.expanded = map[string]bool{}
+
+	collapsed := m.renderChunk(0, false)
+	// AI-card style: the "Skill" header sits above the card border; the name is inside.
+	headerIdx := strings.Index(collapsed, "Skill")
+	borderIdx := strings.Index(collapsed, "╭")
+	if headerIdx < 0 || borderIdx < 0 || headerIdx > borderIdx {
+		t.Fatalf("Skill header should sit above the card border:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "superpowers:brainstorming") {
+		t.Fatalf("collapsed render missing skill name:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "SKILL.md") || strings.Contains(collapsed, "Help turn ideas") {
+		t.Fatalf("collapsed render should not show path/body:\n%s", collapsed)
+	}
+
+	m.transcript.expanded["sk1"] = true
+	out := m.renderChunk(0, false)
+	if !strings.Contains(out, "SKILL.md") {
+		t.Fatalf("expanded render missing source path:\n%s", out)
+	}
+	if !strings.Contains(out, "Help turn ideas into fully formed designs.") {
+		t.Fatalf("expanded render missing body:\n%s", out)
+	}
+}
+
+func TestRenderDetailSkill(t *testing.T) {
+	m := testModel()
+	c := transcript.Chunk{
+		ID: "sk1", Kind: transcript.ChunkSkill,
+		Text:   "superpowers:brainstorming",
+		Label:  "/path/to/SKILL.md",
+		Detail: "# Brainstorming\n\nHelp turn ideas into designs.",
+	}
+	out := m.renderDetail(c)
+	if !strings.Contains(out, "Skill") {
+		t.Fatalf("detail should show the Skill header:\n%s", out)
+	}
+	if !strings.Contains(out, "superpowers:brainstorming") {
+		t.Fatalf("detail should show the skill name:\n%s", out)
+	}
+	if !strings.Contains(out, "SKILL.md") || !strings.Contains(out, "Help turn ideas into designs.") {
+		t.Fatalf("detail should show the path and body:\n%s", out)
+	}
+}
+
+func TestItemRowSubagentLabelHidesStatusAndDesc(t *testing.T) {
+	it := transcript.Item{
+		Kind: transcript.ItemSubagent,
+		Subagents: []transcript.Subagent{{
+			Type:   "default",
+			Name:   "Volta",
+			Status: "closed",
+			Desc:   "the full task message",
+		}},
+	}
+	out := itemRow(it)
+	if !strings.Contains(out, "Spawn Agent: Volta (default)") {
+		t.Errorf("expected new label format, got:\n%s", out)
+	}
+	if strings.Contains(out, "closed") {
+		t.Errorf("collapsed row should not show status (visible only when expanded), got:\n%s", out)
+	}
+	if strings.Contains(out, "full task message") {
+		t.Errorf("collapsed row should not show desc (moved to expanded Input), got:\n%s", out)
+	}
+}
+
+func TestItemRowAgentToolLabel(t *testing.T) {
+	wait := transcript.Item{
+		Kind: transcript.ItemSubagent, ToolName: "wait_agent",
+		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
+	}
+	if got := itemRow(wait); !strings.Contains(got, "Wait Agent: Volta") {
+		t.Errorf("wait_agent row = %q, want label 'Wait Agent: Volta'", got)
+	}
+	closeIt := transcript.Item{
+		Kind: transcript.ItemSubagent, ToolName: "close_agent",
+		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
+	}
+	if got := itemRow(closeIt); !strings.Contains(got, "Close Agent: Volta") {
+		t.Errorf("close_agent row = %q, want label 'Close Agent: Volta'", got)
 	}
 }
 

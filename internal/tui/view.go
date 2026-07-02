@@ -112,7 +112,7 @@ func interactionHint(ix *session.Interaction) string {
 	case session.InteractionPermission:
 		s := "needs permission"
 		if ix.ToolName != "" {
-			s += " · " + ix.ToolName
+			s += " · " + toolDisplayName(ix.ToolName)
 		}
 		return StyleAccentBold.Render(s)
 	case session.InteractionQuestion:

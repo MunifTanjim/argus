@@ -29,6 +29,8 @@ const (
 	ChunkAI      ChunkKind = "ai"
 	ChunkSystem  ChunkKind = "system"  // runtime event / meta row
 	ChunkCompact ChunkKind = "compact" // context-compression boundary
+	ChunkShell   ChunkKind = "shell"   // user ran `!cmd` directly in the CLI (codex)
+	ChunkSkill   ChunkKind = "skill"   // a skill file was loaded into context (codex)
 )
 
 type ItemKind string
@@ -37,9 +39,20 @@ const (
 	ItemThinking ItemKind = "thinking"
 	ItemText     ItemKind = "text"
 	ItemTool     ItemKind = "tool"
-	ItemSubagent ItemKind = "subagent" // Task/Agent tool that spawned a subagent
+	ItemSubagent ItemKind = "subagent" // a subagent op: spawn (drillable), or wait/close on one
 	ItemPrompt   ItemKind = "prompt"   // synthetic: injected TUI-side, never parser-emitted
 )
+
+// Subagent is one subagent an ItemSubagent references.
+type Subagent struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name,omitempty"`   // codex per-spawn nickname (e.g. "Volta")
+	Type     string  `json:"type,omitempty"`   // Explore, Plan, ... (claude); agent_type (codex)
+	Desc     string  `json:"desc,omitempty"`   // task/spawn message
+	Status   string  `json:"status,omitempty"` // codex: thread_spawn_edges status (running/closed)
+	HasTrace bool    `json:"hasTrace,omitempty"`
+	Trace    []Chunk `json:"trace,omitempty"` // inline execution trace (history only)
+}
 
 // Item is one structured element within an AI chunk.
 type Item struct {
@@ -56,12 +69,8 @@ type Item struct {
 	Result        string `json:"result,omitempty"`
 	ResultIsError bool   `json:"resultIsError,omitempty"`
 
-	// Subagent fields (ItemSubagent only).
-	SubagentType string  `json:"subagentType,omitempty"` // Explore, Plan, ...
-	SubagentDesc string  `json:"subagentDesc,omitempty"`
-	AgentID      string  `json:"agentId,omitempty"`  // linked subagent file id
-	HasTrace     bool    `json:"hasTrace,omitempty"` // a subagent trace exists (drillable)
-	Trace        []Chunk `json:"trace,omitempty"`    // subagent execution trace (inline; history only)
+	// Subagents lists the subagents this item references (ItemSubagent only).
+	Subagents []Subagent `json:"subagents,omitempty"`
 }
 
 // MarshalJSON drops ToolInput/Result from the wire form; clients fetch them on demand.
@@ -79,7 +88,8 @@ type Chunk struct {
 	Kind      ChunkKind `json:"kind"`
 	Timestamp string    `json:"timestamp,omitempty"`
 
-	// User chunk.
+	// User chunk. Also shell chunk: the command run. Also skill chunk: the skill
+	// identifier (e.g. "superpowers:brainstorming").
 	Text string `json:"text,omitempty"`
 
 	// AI chunk.
@@ -97,11 +107,11 @@ type Chunk struct {
 	ContextFirstPct    float64 `json:"contextFirstPct,omitempty"`    // first cycle, 0..100
 	ContextDeltaTokens int     `json:"contextDeltaTokens,omitempty"` // growth, >= 0
 
-	// System / compact chunk.
+	// System / compact / shell / skill chunk.
 	Summary string `json:"summary,omitempty"` // compact: the compression title
-	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap")
-	Detail  string `json:"detail,omitempty"`
-	IsError bool   `json:"isError,omitempty"`
+	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap"); skill: source file path
+	Detail  string `json:"detail,omitempty"`  // system/shell: detail text (shell: raw result scaffolding); skill: file body (markdown)
+	IsError bool   `json:"isError,omitempty"` // system: error flag; shell: nonzero exit code
 }
 
 type TranscriptView struct {

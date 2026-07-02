@@ -108,6 +108,86 @@ func TestBashDetail(t *testing.T) {
 	}
 }
 
+func TestExecCommandDetail(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "exec_command",
+		ToolInput: `{"cmd":"pwd","workdir":"/repo","yield_time_ms":1000,"max_output_tokens":2000}`,
+		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\n/repo\n",
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{
+		"# /repo", "$ pwd", "yield 1000ms", "max 2000 tokens",
+		"Chunk ID", "abc123", "Wall time", "0.0100 seconds", "Process exited with code 0", "Original token count", "5", "/repo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestExecCommandDetailOutputColonNotSplit(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "exec_command",
+		ToolInput: `{"cmd":"foo --help"}`,
+		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\nusage: foo [-h]\nnote: see docs\n",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "usage: foo [-h]") {
+		t.Errorf("output line with a colon should render verbatim:\n%s", out)
+	}
+	if !strings.Contains(out, "note: see docs") {
+		t.Errorf("output line with a colon should render verbatim:\n%s", out)
+	}
+}
+
+func TestExecCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "exec_command",
+		ToolInput: `{"session_id":"s1","chars":"y\n"}`,
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{`"session_id"`, `"s1"`, `"chars"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestExecCommandDetailNonZeroExit(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "exec_command", ResultIsError: true,
+		ToolInput: `{"cmd":"false"}`,
+		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 1\nOriginal token count: 0\nOutput:\n",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "Process exited with code 1") {
+		t.Errorf("missing exit code line:\n%s", out)
+	}
+	if !strings.Contains(out, "Error") {
+		t.Errorf("non-zero exit should label as Error:\n%s", out)
+	}
+}
+
+func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "exec_command",
+		ToolInput: `{"cmd":"echo hi"}`,
+		Result:    "hi",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "$ echo hi") {
+		t.Errorf("missing command line:\n%s", out)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("missing raw result:\n%s", out)
+	}
+}
+
 func TestReadDetail(t *testing.T) {
 	m := testModel()
 	it := transcript.Item{
@@ -135,7 +215,7 @@ func TestTodoWriteDetail(t *testing.T) {
 		]}`,
 	}
 	out := m.toolBody(it, 60)
-	if !strings.Contains(out, "✓") {
+	if !strings.Contains(out, Icon.Task.Done.Glyph) {
 		t.Errorf("missing done glyph:\n%s", out)
 	}
 	if !strings.Contains(out, "do A") {
@@ -160,7 +240,7 @@ func TestTodoWriteAllGlyphs(t *testing.T) {
 		]}`,
 	}
 	out := m.toolBody(it, 60)
-	for _, glyph := range []string{"✓", "⟳", "○"} {
+	for _, glyph := range []string{Icon.Task.Done.Glyph, Icon.Task.Active.Glyph, Icon.Task.Pending.Glyph} {
 		if !strings.Contains(out, glyph) {
 			t.Errorf("todo list missing %q glyph:\n%s", glyph, out)
 		}
@@ -176,6 +256,41 @@ func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 	out := m.toolBody(it, 60)
 	if !strings.Contains(out, "Result") || !strings.Contains(out, "updated") {
 		t.Errorf("empty todos should fall back to generic body:\n%s", out)
+	}
+}
+
+func TestUpdatePlanDetail(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "update_plan",
+		ToolInput: `{"plan":[
+			{"step":"do A","status":"completed"},
+			{"step":"do B","status":"in_progress"},
+			{"step":"do C","status":"pending"}
+		]}`,
+	}
+	out := m.toolBody(it, 60)
+	for _, glyph := range []string{Icon.Task.Done.Glyph, Icon.Task.Active.Glyph, Icon.Task.Pending.Glyph} {
+		if !strings.Contains(out, glyph) {
+			t.Errorf("plan list missing %q glyph:\n%s", glyph, out)
+		}
+	}
+	for _, step := range []string{"do A", "do B", "do C"} {
+		if !strings.Contains(out, step) {
+			t.Errorf("missing step %q:\n%s", step, out)
+		}
+	}
+}
+
+func TestUpdatePlanEmptyFallsBackToGeneric(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "update_plan",
+		ToolInput: `{"plan":[]}`, Result: "Plan updated",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "Result") || !strings.Contains(out, "Plan updated") {
+		t.Errorf("empty plan should fall back to generic body:\n%s", out)
 	}
 }
 
@@ -341,5 +456,68 @@ func TestWebDetail(t *testing.T) {
 	out = m.toolBody(search, 60)
 	if !strings.Contains(out, "golang lipgloss") {
 		t.Errorf("missing query:\n%s", out)
+	}
+}
+
+func TestWaitAgentDetailShowsNicknameAndStatus(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "wait_agent",
+		ToolInput: `{"targets":["019f278e-50a5-7f83-91f2-c30e8ac18e19"],"timeout_ms":30000}`,
+		Result:    `{"status":{"019f278e-50a5-7f83-91f2-c30e8ac18e19":{"completed":"role=subagent, result=ok"}}}`,
+		Subagents: []transcript.Subagent{
+			{ID: "019f278e-50a5-7f83-91f2-c30e8ac18e19", Name: "Volta"},
+		},
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "Volta") {
+		t.Errorf("expected nickname in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "019f278e") {
+		t.Errorf("raw agent id should not leak when nickname is known:\n%s", out)
+	}
+	if !strings.Contains(out, "completed") {
+		t.Errorf("expected status state in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "role=subagent, result=ok") {
+		t.Errorf("expected the agent's message in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "timeout 30000ms") {
+		t.Errorf("expected timeout in output, got:\n%s", out)
+	}
+}
+
+func TestWaitAgentDetailFallsBackToRawIDWithoutNickname(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "wait_agent",
+		ToolInput: `{"targets":["agent-xyz"]}`,
+		Result:    `{"status":{"agent-xyz":{"running":"still working"}}}`,
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "agent-xyz") {
+		t.Errorf("expected raw id fallback when no nickname known, got:\n%s", out)
+	}
+}
+
+func TestCloseAgentDetailShowsNicknameAndStatus(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "close_agent",
+		ToolInput: `{"target":"019f278e-50a5-7f83-91f2-c30e8ac18e19"}`,
+		Result:    `{"previous_status":{"completed":"all done here"}}`,
+		Subagents: []transcript.Subagent{
+			{ID: "019f278e-50a5-7f83-91f2-c30e8ac18e19", Name: "Volta"},
+		},
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "Volta") {
+		t.Errorf("expected nickname in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "019f278e") {
+		t.Errorf("raw agent id should not leak when nickname is known:\n%s", out)
+	}
+	if !strings.Contains(out, "all done here") {
+		t.Errorf("expected the agent's message in output, got:\n%s", out)
 	}
 }

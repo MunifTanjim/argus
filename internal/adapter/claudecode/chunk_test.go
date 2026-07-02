@@ -98,18 +98,22 @@ func TestReadTranscriptViewSubagentTrace(t *testing.T) {
 	if sub == nil {
 		t.Fatalf("no subagent item found in %+v", view.Chunks)
 	}
-	if sub.SubagentType != "Explore" {
-		t.Errorf("subagent type = %q, want Explore", sub.SubagentType)
+	if len(sub.Subagents) != 1 {
+		t.Fatalf("want 1 subagent, got %d", len(sub.Subagents))
 	}
-	if sub.AgentID != "abc123" {
-		t.Errorf("agent id = %q, want abc123", sub.AgentID)
+	sa := sub.Subagents[0]
+	if sa.Type != "Explore" {
+		t.Errorf("subagent type = %q, want Explore", sa.Type)
+	}
+	if sa.ID != "abc123" {
+		t.Errorf("agent id = %q, want abc123", sa.ID)
 	}
 	// Lazy contract: the item is drillable but its trace is NOT inlined.
-	if !sub.HasTrace {
+	if !sa.HasTrace {
 		t.Errorf("subagent item should be drillable (HasTrace)")
 	}
-	if len(sub.Trace) != 0 {
-		t.Errorf("trace should not be inlined, got %d chunks", len(sub.Trace))
+	if len(sa.Trace) != 0 {
+		t.Errorf("trace should not be inlined, got %d chunks", len(sa.Trace))
 	}
 	// The trace is fetched on demand via ReadSubagentView.
 	tv, ok, err := ReadSubagentView(session, "abc123")

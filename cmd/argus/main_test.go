@@ -47,9 +47,14 @@ func TestConnectGatewayBranch(t *testing.T) {
 	}
 }
 
-// connectLocalSpawn starts an embedded node when none is running; cancelling
-// ctx stops it and the socket becomes unconnectable.
+func sandboxHookDirs(t *testing.T) {
+	t.Helper()
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+}
+
 func TestConnectLocalSpawn(t *testing.T) {
+	sandboxHookDirs(t)
 	sock := shortSocket(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -85,6 +90,7 @@ func TestConnectLocalSpawn(t *testing.T) {
 // otherwise it silently drops every alert (gateway push.desktop RPC and the local
 // Watch both gate on this flag).
 func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
+	sandboxHookDirs(t)
 	sock := shortSocket(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -101,6 +107,7 @@ func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 // client at the gateway, so the returned client sees the fleet (this machine
 // included via the uplink), not just the local socket.
 func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
+	sandboxHookDirs(t)
 	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()

@@ -30,8 +30,8 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
   TranscriptSubscription? _sub;
   Future<Result<List<Chunk>>>? _histFuture;
 
-  bool get _inline => widget.item.trace.isNotEmpty;
-  String? get _agentId => widget.item.agentId;
+  bool get _inline => widget.item.soleSubagent?.trace.isNotEmpty ?? false;
+  String? get _agentId => widget.item.soleSubagent?.id;
   String? get _sessionId => widget.parentRef.sessionId;
   bool get _isHistory => widget.parentRef.isHistory;
   String get _key => '${_sessionId ?? ''}/${_agentId ?? ''}';
@@ -69,7 +69,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.item.subagentType ?? 'Subagent';
+    final title = widget.item.soleSubagent?.type ?? 'Subagent';
 
     if (_inline) {
       return Scaffold(
@@ -78,7 +78,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
           top: false, // AppBar insets top; bottom clears the system nav bar.
           child: TranscriptFeed(
               detailRef: _traceRef,
-              chunks: widget.item.trace,
+              chunks: widget.item.soleSubagent?.trace ?? const [],
               stickToBottom: false), // inlined trace is complete; read top-down
         ),
       );

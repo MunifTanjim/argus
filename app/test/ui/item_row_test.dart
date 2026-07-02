@@ -18,10 +18,19 @@ void main() {
     await tester.pumpWidget(_wrap(const Item(
         id: 'i',
         kind: ItemKind.subagent,
-        subagentType: 'Explore',
-        subagentDesc: 'find callers')));
+        subagents: [Subagent(type: 'Explore', desc: 'find callers')])));
     expect(find.textContaining('Explore'), findsOneWidget);
     expect(find.textContaining('find callers'), findsOneWidget);
+  });
+
+  testWidgets('wait_agent row shows the op and target names', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.subagent,
+        toolName: 'wait_agent',
+        subagents: [Subagent(id: 'a1', name: 'Volta'), Subagent(id: 'a2')])));
+    expect(find.text('Wait Agent'), findsOneWidget);
+    expect(find.textContaining('Volta, a2'), findsOneWidget);
   });
 
   testWidgets('thinking row shows label', (tester) async {

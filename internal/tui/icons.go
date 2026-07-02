@@ -79,6 +79,8 @@ type iconSet struct {
 	Output    StyledIcon
 	Selected  StyledIcon
 	Session   StyledIcon
+	Shell     StyledIcon
+	Skill     StyledIcon
 	Subagent  StyledIcon
 	System    StyledIcon
 	SystemErr StyledIcon
@@ -125,6 +127,8 @@ func initIcons() {
 		Memory:    StyledIcon{"\U000F01C0", ColorTextDim},       // nf-md-book_open_variant
 		Node:      StyledIcon{"\U000F0429", ColorTextSecondary}, // nf-md-server
 		Session:   StyledIcon{"\U000F0237", ColorTextDim},       // nf-md-fingerprint
+		Shell:     StyledIcon{"\uF120", ColorToolBash},          // nf-fa-terminal
+		Skill:     StyledIcon{"\uF19D", ColorToolSkill},         // nf-fa-graduation_cap
 		Subagent:  StyledIcon{glyphRobot, ColorAccent},
 		System:    StyledIcon{"\uF120", ColorTextMuted}, // nf-fa-terminal
 		SystemErr: StyledIcon{"\uF06A", ColorError},     // nf-fa-circle_exclamation
@@ -147,11 +151,28 @@ func initIcons() {
 			Misc:  StyledIcon{glyphWrench, ColorToolOther},
 		},
 		Task: taskIcons{
-			Done:    StyledIcon{"✓", ColorOngoing},   // check mark
-			Active:  StyledIcon{"⟳", ColorAccent},    // clockwise arrow
-			Pending: StyledIcon{"○", ColorTextMuted}, // white circle
+			Done:    StyledIcon{"\U000F0133", ColorOngoing},   // nf-md-checkbox_marked_circle
+			Active:  StyledIcon{"\U000F0996", ColorAccent},    // nf-md-progress_clock
+			Pending: StyledIcon{"\U000F0130", ColorTextMuted}, // nf-md-checkbox_blank_circle_outline
 		},
 	}
+}
+
+// toolDisplayName maps a raw tool name to a friendlier label for UI display.
+func toolDisplayName(name string) string {
+	switch name {
+	case "update_plan":
+		return "Update Plan"
+	case "exec_command":
+		return "Exec Command"
+	case "apply_patch":
+		return "Apply Patch"
+	case "view_image":
+		return "View Image"
+	case "web_search":
+		return "Web Search"
+	}
+	return name
 }
 
 // toolIcon returns the styled icon for a Claude Code tool by name. Error tools
@@ -161,13 +182,13 @@ func toolIcon(name string, isError bool) StyledIcon {
 		return Icon.Tool.Err
 	}
 	switch name {
-	case "Read":
+	case "Read", "view_image":
 		return Icon.Tool.Read
-	case "Edit", "MultiEdit", "NotebookEdit":
+	case "Edit", "MultiEdit", "NotebookEdit", "apply_patch":
 		return Icon.Tool.Edit
 	case "Write":
 		return Icon.Tool.Write
-	case "Bash", "BashOutput", "KillShell":
+	case "Bash", "BashOutput", "KillShell", "exec_command":
 		return Icon.Tool.Bash
 	case "Grep":
 		return Icon.Tool.Grep
@@ -177,7 +198,7 @@ func toolIcon(name string, isError bool) StyledIcon {
 		return Icon.Tool.Task
 	case "Skill":
 		return Icon.Tool.Skill
-	case "WebFetch", "WebSearch":
+	case "WebFetch", "WebSearch", "web_search":
 		return Icon.Tool.Web
 	default:
 		return Icon.Tool.Misc

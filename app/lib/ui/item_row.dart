@@ -53,12 +53,25 @@ class ItemRow extends StatelessWidget {
           preview: item.inputPreview,
         );
       case ItemKind.subagent:
+        // wait/close reference existing agents; label by op with target names.
+        if (item.toolName == 'wait_agent' || item.toolName == 'close_agent') {
+          return _row(
+            leading: const Icon(Icons.smart_toy_outlined,
+                size: 14, color: AppColors.accent),
+            label: item.toolName == 'wait_agent' ? 'Wait Agent' : 'Close Agent',
+            labelColor: AppColors.accent,
+            preview: item.subagents
+                .map((s) => s.name.isNotEmpty ? s.name : s.id)
+                .where((n) => n.isNotEmpty)
+                .join(', '),
+          );
+        }
         return _row(
           leading: const Icon(Icons.smart_toy_outlined,
               size: 14, color: AppColors.accent),
-          label: item.subagentType ?? 'subagent',
+          label: item.soleSubagent?.type ?? 'subagent',
           labelColor: AppColors.accent,
-          preview: item.subagentDesc,
+          preview: item.soleSubagent?.desc,
         );
     }
   }

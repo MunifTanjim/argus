@@ -4,12 +4,14 @@ package adapters
 import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter/codex"
 )
 
 // All returns every registered adapter in priority order. The first entry is the default.
 func All() []adapter.Adapter {
 	return []adapter.Adapter{
 		claudecode.New(),
+		codex.New(),
 	}
 }
 

@@ -43,6 +43,40 @@ ItemKind itemKindFromWire(String? s) {
   }
 }
 
+/// One subagent an [ItemKind.subagent] item references.
+class Subagent {
+  final String id;
+  final String name;
+  final String type;
+  final String desc;
+  final String status;
+  final bool hasTrace;
+  final List<Chunk> trace;
+
+  const Subagent({
+    this.id = '',
+    this.name = '',
+    this.type = '',
+    this.desc = '',
+    this.status = '',
+    this.hasTrace = false,
+    this.trace = const [],
+  });
+
+  factory Subagent.fromJson(Map<String, dynamic> j) => Subagent(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        type: j['type'] as String? ?? '',
+        desc: j['desc'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        hasTrace: j['hasTrace'] as bool? ?? false,
+        trace: (j['trace'] as List?)
+                ?.map((e) => Chunk.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+      );
+}
+
 class Item {
   final String id;
   final ItemKind kind;
@@ -54,11 +88,7 @@ class Item {
   final String? inputPreview;
   final String? result;
   final bool resultIsError;
-  final String? subagentType;
-  final String? subagentDesc;
-  final String? agentId;
-  final bool hasTrace;
-  final List<Chunk> trace;
+  final List<Subagent> subagents;
 
   const Item({
     required this.id,
@@ -71,12 +101,10 @@ class Item {
     this.inputPreview,
     this.result,
     this.resultIsError = false,
-    this.subagentType,
-    this.subagentDesc,
-    this.agentId,
-    this.hasTrace = false,
-    this.trace = const [],
+    this.subagents = const [],
   });
+
+  Subagent? get soleSubagent => subagents.length == 1 ? subagents.first : null;
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
         id: j['id'] as String? ?? '',
@@ -89,12 +117,8 @@ class Item {
         inputPreview: j['inputPreview'] as String?,
         result: j['result'] as String?,
         resultIsError: j['resultIsError'] as bool? ?? false,
-        subagentType: j['subagentType'] as String?,
-        subagentDesc: j['subagentDesc'] as String?,
-        agentId: j['agentId'] as String?,
-        hasTrace: j['hasTrace'] as bool? ?? false,
-        trace: (j['trace'] as List?)
-                ?.map((e) => Chunk.fromJson(e as Map<String, dynamic>))
+        subagents: (j['subagents'] as List?)
+                ?.map((e) => Subagent.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
       );
@@ -113,11 +137,7 @@ class Item {
         inputPreview: inputPreview,
         result: d.result,
         resultIsError: d.resultIsError,
-        subagentType: subagentType,
-        subagentDesc: subagentDesc,
-        agentId: agentId,
-        hasTrace: hasTrace,
-        trace: trace,
+        subagents: subagents,
       );
 }
 
@@ -137,7 +157,7 @@ class ToolDetail {
       );
 }
 
-enum ChunkKind { user, ai, system, compact, unknown }
+enum ChunkKind { user, ai, system, shell, compact, unknown }
 
 ChunkKind chunkKindFromWire(String? s) {
   switch (s) {
@@ -147,6 +167,8 @@ ChunkKind chunkKindFromWire(String? s) {
       return ChunkKind.ai;
     case 'system':
       return ChunkKind.system;
+    case 'shell':
+      return ChunkKind.shell;
     case 'compact':
       return ChunkKind.compact;
     default:

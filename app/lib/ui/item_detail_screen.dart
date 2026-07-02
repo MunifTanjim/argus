@@ -17,7 +17,7 @@ String itemTitle(Item it) {
     case ItemKind.text:
       return 'Output';
     case ItemKind.subagent:
-      return it.subagentType ?? 'Subagent';
+      return it.soleSubagent?.type ?? 'Subagent';
     case ItemKind.unknown:
       return 'Detail';
   }

@@ -13,6 +13,7 @@ type (
 	ChunkKind      = transcript.ChunkKind
 	ItemKind       = transcript.ItemKind
 	Item           = transcript.Item
+	Subagent       = transcript.Subagent
 	Chunk          = transcript.Chunk
 	TranscriptView = transcript.TranscriptView
 	ToolDetail     = transcript.ToolDetail

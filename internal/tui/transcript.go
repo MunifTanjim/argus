@@ -89,6 +89,10 @@ func (m model) chunkExpandable(c transcript.Chunk) bool {
 		return strings.Count(c.Text, "\n") >= maxCollapsedLines
 	case transcript.ChunkSystem:
 		return c.Detail != ""
+	case transcript.ChunkShell:
+		return c.Detail != "" || strings.Count(c.Text, "\n") >= maxCollapsedLines
+	case transcript.ChunkSkill:
+		return c.Detail != "" || c.Label != ""
 	default:
 		return false
 	}
@@ -203,6 +207,10 @@ func (m model) renderChunk(i int, selected bool) string {
 		return m.renderAICard(c, selected, accent)
 	case transcript.ChunkUser:
 		return m.renderUserCard(c, selected, accent)
+	case transcript.ChunkShell:
+		return m.renderShellCard(c, selected, accent)
+	case transcript.ChunkSkill:
+		return m.renderSkillCard(c, selected, accent)
 	case transcript.ChunkCompact:
 		return m.renderCompact(c)
 	default:
@@ -240,13 +248,23 @@ func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
 	return header + "\n" + indentBlock(card, sel+"  ")
 }
 
-// aiHeader builds the one-line stats header: left identity+stats, right metrics.
+// assistantBrand returns the AI author's icon and name for the open transcript.
+func (m model) assistantBrand() (StyledIcon, string) {
+	switch m.sessions[m.selectedID].Agent {
+	case "codex":
+		return Icon.Claude, "Codex"
+	default:
+		return Icon.Claude, "Claude"
+	}
+}
+
 func (m model) aiHeader(c transcript.Chunk, width int) string {
 	chev := ""
 	if m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
 	}
-	left := chev + Icon.Claude.RenderBold() + " " + StylePrimaryBold.Render("Claude")
+	icon, name := m.assistantBrand()
+	left := chev + icon.RenderBold() + " " + StylePrimaryBold.Render(name)
 	if c.Model != "" {
 		left += " " + lipgloss.NewStyle().Foreground(modelColor(c.Model)).Render(shortModel(c.Model))
 	}
@@ -322,6 +340,7 @@ func (m model) aiBody(c transcript.Chunk, cw int) string {
 
 func itemRow(it transcript.Item) string {
 	var indicator, name, summary string
+	padName := true
 	switch it.Kind {
 	case transcript.ItemThinking:
 		indicator, name, summary = Icon.Thinking.Render(), "Thinking", firstLine(it.Text)
@@ -331,20 +350,23 @@ func itemRow(it transcript.Item) string {
 		indicator, name, summary = Icon.User.Render(), "Prompt", firstLine(it.Text)
 	case transcript.ItemSubagent:
 		indicator = Icon.Subagent.Render()
-		name = it.SubagentType
-		if name == "" {
-			name = "Subagent"
+		if isAgentRefTool(it.ToolName) {
+			name = agentToolLabel(it)
+		} else {
+			s, _ := soleSubagent(it)
+			name = spawnAgentLabel(s.Type, s.Name)
 		}
-		summary = it.SubagentDesc
-		if summary == "" {
-			summary = it.InputPreview
-		}
+		padName = false // full identity label, not a short name column
 	default: // tool
 		indicator = toolIcon(it.ToolName, it.ResultIsError).Render()
-		name = it.ToolName
+		name = toolDisplayName(it.ToolName)
 		summary = it.InputPreview
 	}
-	nameStr := StylePrimaryBold.Render(fmt.Sprintf("%-12s", name))
+	nameFmt := name
+	if padName {
+		nameFmt = fmt.Sprintf("%-12s", name)
+	}
+	nameStr := StylePrimaryBold.Render(nameFmt)
 	if summary == "" {
 		return indicator + " " + nameStr
 	}
@@ -358,9 +380,9 @@ func toolPreview(it transcript.Item) string {
 		res = it.InputPreview
 	}
 	res = strings.ReplaceAll(res, "\n", " ")
-	name := it.ToolName
-	if it.Kind == transcript.ItemSubagent && it.SubagentType != "" {
-		name = it.SubagentType
+	name := toolDisplayName(it.ToolName)
+	if s, ok := soleSubagent(it); ok && s.Type != "" {
+		name = s.Type
 	}
 	out := icon.Render() + " " + StylePrimaryBold.Render(name)
 	if res != "" {
@@ -454,6 +476,119 @@ func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
 		Render(body)
 
 	return indentBlock(card, selIndicator(selected)+"  ")
+}
+
+func (m model) renderShellCard(c transcript.Chunk, selected, accent bool) string {
+	container := m.containerWidth()
+	fraction := 3 * container / 4
+	if container < maxContentWidth {
+		fraction = 7 * container / 8
+	}
+	cardW := max(fraction-4, 24)
+	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
+
+	sel := selIndicator(selected)
+	header := sel + "  " + m.shellHeader(c, cardW)
+	body := m.shellBody(c, iw)
+
+	borderColor := ColorBorder
+	if accent {
+		borderColor = ColorAccent
+	}
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(cardW).
+		Padding(0, 2).
+		Render(body)
+
+	return header + "\n" + indentBlock(card, sel+"  ")
+}
+
+func (m model) shellHeader(c transcript.Chunk, width int) string {
+	chev := ""
+	if m.chunkExpandable(c) {
+		chev = chevron(m.chunkExpanded(c)) + " "
+	}
+	label := StylePrimaryBold.Render("Shell")
+	if c.IsError {
+		label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
+	}
+	left := chev + Icon.Shell.Render() + " " + label
+	return spaceBetween(left, StyleDim.Render(clockTime(c.Timestamp)), width)
+}
+
+func (m model) shellBody(c transcript.Chunk, iw int) string {
+	if !m.chunkExpanded(c) {
+		text, hidden := truncateLines(c.Text, maxCollapsedLines)
+		body := StyleSecondaryBold.Render("$") + " " + text
+		if hidden > 0 {
+			body += "\n" + hiddenHint(hidden)
+		}
+		return body
+	}
+	var sb strings.Builder
+	sb.WriteString(StyleSecondaryBold.Render("$"))
+	sb.WriteString(" " + c.Text + "\n")
+	if c.Detail != "" {
+		label := "Result"
+		if c.IsError {
+			label = "Error"
+		}
+		sb.WriteString("\n" + sectionLabel(label, c.IsError) + "\n")
+		sb.WriteString(m.execCommandResultBody(c.Detail, iw))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m model) renderSkillCard(c transcript.Chunk, selected, accent bool) string {
+	container := m.containerWidth()
+	fraction := 3 * container / 4
+	if container < maxContentWidth {
+		fraction = 7 * container / 8
+	}
+	cardW := max(fraction-4, 24)
+	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
+
+	sel := selIndicator(selected)
+	header := sel + "  " + m.skillHeader(c, cardW)
+	body := m.skillBody(c, iw)
+
+	borderColor := ColorBorder
+	if accent {
+		borderColor = ColorAccent
+	}
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(cardW).
+		Padding(0, 2).
+		Render(body)
+
+	return header + "\n" + indentBlock(card, sel+"  ")
+}
+
+func (m model) skillHeader(c transcript.Chunk, width int) string {
+	chev := ""
+	if m.chunkExpandable(c) {
+		chev = chevron(m.chunkExpanded(c)) + " "
+	}
+	left := chev + Icon.Skill.Render() + " " + StylePrimaryBold.Render("Skill")
+	return spaceBetween(left, StyleDim.Render(clockTime(c.Timestamp)), width)
+}
+
+func (m model) skillBody(c transcript.Chunk, iw int) string {
+	body := StyleSecondaryBold.Render(c.Text)
+	if !m.chunkExpanded(c) {
+		return body
+	}
+	if c.Label != "" {
+		body += "\n" + StyleDim.Render(c.Label)
+	}
+	if c.Detail != "" {
+		body += "\n\n" + m.renderMD(c.Detail, iw)
+	}
+	return body
 }
 
 func (m model) renderCompact(c transcript.Chunk) string {
