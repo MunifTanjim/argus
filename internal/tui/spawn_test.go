@@ -405,3 +405,19 @@ func TestProjectsForNode(t *testing.T) {
 		t.Fatalf("empty node should return all")
 	}
 }
+
+func TestProjectsForNodeDedupesCwd(t *testing.T) {
+	all := []session.HistoryProject{
+		{Label: "argus", Cwd: "/a", NodeID: "home"},
+		{Label: "argus-dup", Cwd: "/a", NodeID: "work"},
+		{Label: "argus-again", Cwd: "/a", NodeID: "home"},
+		{Label: "scratch", Cwd: "/c", NodeID: "home"},
+	}
+	got := projectsForNode(all, "")
+	if len(got) != 2 || got[0].Label != "argus" || got[1].Label != "scratch" {
+		t.Fatalf("dedupe by cwd = %+v", got)
+	}
+	if len(projectsForNode(all, "home")) != 2 {
+		t.Fatalf("dedupe within node = %+v", projectsForNode(all, "home"))
+	}
+}
