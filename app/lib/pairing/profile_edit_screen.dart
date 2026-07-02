@@ -174,8 +174,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       body: CenteredBody(
         maxWidth: 480,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16,
-              16 + MediaQuery.of(context).viewInsets.bottom),
+          // Scaffold.resizeToAvoidBottomInset already shrinks the body for the
+          // keyboard; adding viewInsets here too would double-count and push the
+          // focused field off-screen.
+          padding: const EdgeInsets.all(16),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
