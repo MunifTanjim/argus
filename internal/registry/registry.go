@@ -34,7 +34,7 @@ type Event struct {
 type Registry struct {
 	mu       sync.Mutex
 	sessions map[string]*session.Session // internal ID -> session
-	index    *sessionIndex               // pane/claude-id correlation (see index.go)
+	index    *sessionIndex               // pane/agent-session correlation
 	subs     map[int]chan Event
 	nextSub  int
 }
@@ -109,35 +109,33 @@ func (r *Registry) publish(ev Event) {
 	}
 }
 
-// DiscoveredSession is one reconcile input: a Claude session from a scan, optionally
-// pinned to a tmux pane. Correlated by pane key when HasPane, else by claude id.
+// DiscoveredSession is one reconcile input. Correlated by pane key when HasPane,
+// else by agent session id.
 type DiscoveredSession struct {
-	ClaudeSessionID string
-	HasPane         bool
-	Server          session.TmuxServer
-	PaneID          string
-	SessionName     string
-	WindowIndex     int
-	CurrentPath     string
-	Frontend        session.Frontend // adapter-computed (tmux/vscode/external)
-	Name            string
-	Cwd             string
-	Repo            string
-	TranscriptPath  string
-	Summary         *session.Summary
-	StatusHint      session.Status
+	AgentSessionID string
+	HasPane        bool
+	Server         session.TmuxServer
+	PaneID         string
+	SessionName    string
+	WindowIndex    int
+	CurrentPath    string
+	Frontend       session.Frontend // adapter-computed (tmux/vscode/external)
+	Name           string
+	Cwd            string
+	Repo           string
+	TranscriptPath string
+	Summary        *session.Summary
+	StatusHint     session.Status
 }
 
-// ReconcileSessions syncs an agent's sessions to the scan's live set: add new,
-// refresh existing (correlating pane-first, else claude id), prune any whose pane
-// and claude id were both absent. The dual-or liveness rule keeps a session alive
-// through a transient pane-correlation miss (via claude id) or vice versa.
+// ReconcileSessions syncs an agent's sessions to the scan's live set. Liveness
+// is dual-or: pane OR agent session id keeps a session alive.
 func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	seenPane := map[string]bool{}
-	seenClaude := map[string]bool{}
+	seenAgentSession := map[string]bool{}
 
 	for _, f := range found {
 		paneK := ""
@@ -145,8 +143,8 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			paneK = paneKey(f.Server, f.PaneID)
 			seenPane[paneK] = true
 		}
-		if f.ClaudeSessionID != "" {
-			seenClaude[f.ClaudeSessionID] = true
+		if f.AgentSessionID != "" {
+			seenAgentSession[f.AgentSessionID] = true
 		}
 
 		var s *session.Session
@@ -155,8 +153,8 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 				s = r.sessions[id]
 			}
 		}
-		if s == nil && f.ClaudeSessionID != "" {
-			if id, ok := r.index.findByClaude(f.ClaudeSessionID); ok {
+		if s == nil && f.AgentSessionID != "" {
+			if id, ok := r.index.findByAgentSession(f.AgentSessionID); ok {
 				s = r.sessions[id]
 			}
 		}
@@ -165,7 +163,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if s == nil {
 			id := paneK
 			if id == "" {
-				id = "claude:" + f.ClaudeSessionID
+				id = agent + ":" + f.AgentSessionID
 			}
 			s = &session.Session{
 				ID:     id,
@@ -185,7 +183,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			s.Tmux.WindowIndex = f.WindowIndex
 			s.Tmux.CurrentPath = f.CurrentPath
 		}
-		r.reindexClaudeID(s, f.ClaudeSessionID)
+		r.reindexAgentSession(s, f.AgentSessionID)
 
 		// A pane is always tmux; otherwise adopt the discovered frontend only while
 		// still paneless. Never downgrade.
@@ -229,7 +227,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 				alive = true
 			}
 		}
-		if s.ClaudeSessionID != "" && seenClaude[s.ClaudeSessionID] {
+		if s.AgentSessionID != "" && seenAgentSession[s.AgentSessionID] {
 			alive = true
 		}
 		if !alive {
@@ -238,15 +236,15 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 	}
 }
 
-// reindexClaudeID re-keys the claude-id index when the id changes under a session
-// (/clear swaps it in place), dropping the superseded entry. Caller holds r.mu.
-func (r *Registry) reindexClaudeID(s *session.Session, claudeID string) {
-	if claudeID == "" || s.ClaudeSessionID == claudeID {
+// reindexAgentSession re-keys the index when the agent session id changes.
+// Caller holds r.mu.
+func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string) {
+	if agentSessionID == "" || s.AgentSessionID == agentSessionID {
 		return
 	}
-	r.index.clear("", s.ClaudeSessionID)
-	s.ClaudeSessionID = claudeID
-	r.index.setClaude(claudeID, s.ID)
+	r.index.clear("", s.AgentSessionID)
+	s.AgentSessionID = agentSessionID
+	r.index.setAgentSession(agentSessionID, s.ID)
 }
 
 // setTranscriptPath points the session at a new transcript, invalidating the
@@ -282,7 +280,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	s.Status = finalStatus
 	removed := *s
 	delete(r.sessions, id)
-	r.index.clear(paneK, s.ClaudeSessionID)
+	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(Event{Type: EventRemoved, Session: removed})
 }
 
@@ -306,13 +304,13 @@ func (r *Registry) ClearInteraction(id string) {
 // string fields leave an existing session unchanged. A non-empty Status sets the
 // status; StatusDead removes the session.
 type HookUpdate struct {
-	Agent           string
-	Server          session.TmuxServer
-	PaneID          string // from $TMUX_PANE; primary correlation key
-	ClaudeSessionID string
-	Cwd             string
-	Repo            string // git repo basename for Cwd, when known
-	TranscriptPath  string
+	Agent          string
+	Server         session.TmuxServer
+	PaneID         string // from $TMUX_PANE; primary correlation key
+	AgentSessionID string
+	Cwd            string
+	Repo           string // git repo basename for Cwd, when known
+	TranscriptPath string
 	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
 	// session (see ApplyHook).
 	Frontend session.Frontend
@@ -328,9 +326,8 @@ type HookUpdate struct {
 	ReplaceInteraction bool
 }
 
-// ApplyHook correlates a hook event to a session (by pane, else claude id) and
-// enriches it, creating a hooked session if none matches. Returns the session and
-// whether it still exists (false if removed).
+// ApplyHook correlates a hook event to a session (by pane, else agent session id),
+// creating one if none matches. Returns the session and whether it still exists.
 func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -346,8 +343,8 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 			s = r.sessions[id]
 		}
 	}
-	if s == nil && u.ClaudeSessionID != "" {
-		if id, ok := r.index.findByClaude(u.ClaudeSessionID); ok {
+	if s == nil && u.AgentSessionID != "" {
+		if id, ok := r.index.findByAgentSession(u.AgentSessionID); ok {
 			s = r.sessions[id]
 		}
 	}
@@ -357,7 +354,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		// Prefer a pane-based ID so a later discovery scan correlates to this record.
 		id := pKey
 		if id == "" {
-			id = "claude:" + u.ClaudeSessionID
+			id = u.Agent + ":" + u.AgentSessionID
 		}
 		s = &session.Session{ID: id, Agent: u.Agent, Status: session.StatusIdle, Source: session.SourceHooked}
 		if u.PaneID != "" {
@@ -371,7 +368,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		created = true
 	}
 
-	r.reindexClaudeID(s, u.ClaudeSessionID)
+	r.reindexAgentSession(s, u.AgentSessionID)
 	if u.Cwd != "" {
 		s.Cwd = u.Cwd
 	}

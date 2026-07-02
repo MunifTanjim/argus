@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // Session-facing RPC handlers: reads from the registry and tmux control of panes.
@@ -60,9 +60,9 @@ func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
 	if s.TranscriptPath == "" {
-		return claudecode.TranscriptView{}, nil
+		return transcript.TranscriptView{}, nil
 	}
-	return claudecode.ReadTranscriptView(s.TranscriptPath)
+	return d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
 }
 
 // handleSessionToolDetail returns one tool item's full input/result by tool_use
@@ -79,7 +79,7 @@ func (d *Node) handleSessionToolDetail(_ context.Context, params json.RawMessage
 	if s.TranscriptPath == "" {
 		return nil, fmt.Errorf("session has no transcript: %s", p.SessionID)
 	}
-	td, found, err := claudecode.FindToolDetail(s.TranscriptPath, p.AgentID, p.ToolID)
+	td, found, err := d.adapterFor(s.Agent).FindToolDetail(s.TranscriptPath, p.AgentID, p.ToolID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +89,7 @@ func (d *Node) handleSessionToolDetail(_ context.Context, params json.RawMessage
 	return toAPIToolDetail(td), nil
 }
 
-// toAPIToolDetail maps the adapter's ToolDetail to the wire type.
-func toAPIToolDetail(td claudecode.ToolDetail) api.ToolDetail {
+func toAPIToolDetail(td transcript.ToolDetail) api.ToolDetail {
 	return api.ToolDetail{ToolInput: td.ToolInput, Result: td.Result, ResultIsError: td.ResultIsError}
 }
 
@@ -126,7 +125,7 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	sentText := false
 	if p.Text != "" {
 		if p.Prepare {
-			if err := claudecode.PrepareTextInput(ctx, c, s.Tmux.PaneID); err != nil {
+			if err := d.adapterFor(s.Agent).PrepareTextInput(ctx, c, s.Tmux.PaneID); err != nil {
 				return nil, err
 			}
 		}

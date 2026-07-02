@@ -56,7 +56,7 @@ func TestScanOnceAttachesPaneFromProcSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected pane-keyed session argus:%s", pane.PaneID)
 	}
-	if s.Frontend != session.FrontendTmux || s.ClaudeSessionID != "c1" || s.Tmux.PaneID != pane.PaneID {
+	if s.Frontend != session.FrontendTmux || s.AgentSessionID != "c1" || s.Tmux.PaneID != pane.PaneID {
 		t.Fatalf("unexpected session: %+v", s)
 	}
 }
@@ -114,7 +114,7 @@ func TestScanOnceVSCodeNoPruneOnPSError(t *testing.T) {
 	t.Cleanup(func() { claudeSessionsDirOverride = "" })
 
 	reg := registry.New()
-	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode}})
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{{AgentSessionID: "vs-1", Frontend: session.FrontendVSCode}})
 
 	orig := runPS
 	t.Cleanup(func() { runPS = orig })
@@ -182,7 +182,7 @@ func TestBuildDiscovered(t *testing.T) {
 
 	by := map[string]registry.DiscoveredSession{}
 	for _, d := range buildDiscovered(procs, paneByTTY, entries) {
-		by[d.ClaudeSessionID] = d
+		by[d.AgentSessionID] = d
 	}
 	if len(by) != 3 {
 		t.Fatalf("want 3, got %d", len(by))

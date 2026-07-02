@@ -6,14 +6,14 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-func tmuxDisc(claudeID, paneID, name string, server session.TmuxServer) DiscoveredSession {
+func tmuxDisc(agentSessionID, paneID, name string, server session.TmuxServer) DiscoveredSession {
 	return DiscoveredSession{
-		ClaudeSessionID: claudeID,
-		HasPane:         true,
-		Server:          server,
-		PaneID:          paneID,
-		SessionName:     name,
-		Frontend:        session.FrontendTmux,
+		AgentSessionID: agentSessionID,
+		HasPane:        true,
+		Server:         server,
+		PaneID:         paneID,
+		SessionName:    name,
+		Frontend:       session.FrontendTmux,
 	}
 }
 
@@ -27,7 +27,7 @@ func TestReconcileSessionsAddsTmuxAndPrunes(t *testing.T) {
 		t.Fatalf("want 2, got %d", n)
 	}
 	s, ok := r.Get("default:%0")
-	if !ok || s.Frontend != session.FrontendTmux || s.Tmux.PaneID != "%0" || s.ClaudeSessionID != "c0" {
+	if !ok || s.Frontend != session.FrontendTmux || s.Tmux.PaneID != "%0" || s.AgentSessionID != "c0" {
 		t.Fatalf("default:%%0 wrong: ok=%v %+v", ok, s)
 	}
 
@@ -43,7 +43,7 @@ func TestReconcileSessionsAddsTmuxAndPrunes(t *testing.T) {
 func TestReconcileSessionsAddsVSCodeAndPrunes(t *testing.T) {
 	r := New()
 	r.ReconcileSessions("claude", []DiscoveredSession{
-		{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode, Name: "n"},
+		{AgentSessionID: "vs-1", Frontend: session.FrontendVSCode, Name: "n"},
 	})
 	s, ok := r.Get("claude:vs-1")
 	if !ok || s.Frontend != session.FrontendVSCode || s.Tmux.PaneID != "" || s.Source != session.SourceDiscovered {
@@ -58,7 +58,7 @@ func TestReconcileSessionsAddsVSCodeAndPrunes(t *testing.T) {
 func TestReconcileSessionsAttachesPaneOntoClaudeRecord(t *testing.T) {
 	r := New()
 	// Hook created a paneless record keyed by claude id.
-	r.ApplyHook(HookUpdate{Agent: "claude", ClaudeSessionID: "c1", Status: session.StatusWorking})
+	r.ApplyHook(HookUpdate{Agent: "claude", AgentSessionID: "c1", Status: session.StatusWorking})
 	// Discovery later correlates a pane for the same claude id.
 	r.ReconcileSessions("claude", []DiscoveredSession{
 		tmuxDisc("c1", "%5", "w", session.TmuxServerDefault),
@@ -88,7 +88,7 @@ func TestReconcileSessionsLearnsClaudeOntoPaneRecord(t *testing.T) {
 	if n := len(r.Snapshot()); n != 1 {
 		t.Fatalf("want 1, got %d", n)
 	}
-	id, ok := r.index.findByClaude("c0")
+	id, ok := r.index.findByAgentSession("c0")
 	if !ok || id != "default:%0" {
 		t.Fatalf("claude id not indexed onto pane record: ok=%v id=%q", ok, id)
 	}
@@ -102,7 +102,7 @@ func TestReconcileSessionsNeverDowngradesFrontend(t *testing.T) {
 	// Transient scan where the pane wasn't correlated but the claude id was:
 	// must keep the existing pane + tmux frontend (alive via claude id).
 	r.ReconcileSessions("claude", []DiscoveredSession{
-		{ClaudeSessionID: "c0", Frontend: session.FrontendExternal},
+		{AgentSessionID: "c0", Frontend: session.FrontendExternal},
 	})
 	s, _ := r.Get("default:%0")
 	if s.Frontend != session.FrontendTmux || s.Tmux.PaneID != "%0" {
@@ -133,19 +133,18 @@ func TestReconcileSessionsCrossServerLiveness(t *testing.T) {
 	}
 }
 
-// A /clear keeps the pane but swaps ClaudeSessionID + transcript path: discovery
-// must reset the stale summary and drop the superseded claude id from the index
-// (mirrors the ApplyHook path).
+// A /clear keeps the pane but swaps AgentSessionID + transcript path: discovery
+// must reset the stale summary and drop the superseded claude id from the index.
 func TestReconcileSessionsTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
 	r := New()
 	r.ReconcileSessions("claude", []DiscoveredSession{{
-		ClaudeSessionID: "c0", HasPane: true, Server: session.TmuxServerDefault,
+		AgentSessionID: "c0", HasPane: true, Server: session.TmuxServerDefault,
 		PaneID: "%0", Frontend: session.FrontendTmux,
 		TranscriptPath: "/tmp/c0.jsonl", Summary: &session.Summary{Task: "pre-clear"},
 	}})
 	// /clear on the same pane: new claude id + transcript, no fresh summary yet.
 	r.ReconcileSessions("claude", []DiscoveredSession{{
-		ClaudeSessionID: "c1", HasPane: true, Server: session.TmuxServerDefault,
+		AgentSessionID: "c1", HasPane: true, Server: session.TmuxServerDefault,
 		PaneID: "%0", Frontend: session.FrontendTmux,
 		TranscriptPath: "/tmp/c1.jsonl",
 	}})
@@ -156,13 +155,13 @@ func TestReconcileSessionsTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T
 	if s.Summary != nil {
 		t.Fatalf("transcript swap must reset the stale summary, got %+v", s.Summary)
 	}
-	if s.TranscriptPath != "/tmp/c1.jsonl" || s.ClaudeSessionID != "c1" {
+	if s.TranscriptPath != "/tmp/c1.jsonl" || s.AgentSessionID != "c1" {
 		t.Fatalf("swap not applied: %+v", s)
 	}
-	if _, ok := r.index.findByClaude("c0"); ok {
+	if _, ok := r.index.findByAgentSession("c0"); ok {
 		t.Error("superseded claude id should be cleared from the index")
 	}
-	if id, ok := r.index.findByClaude("c1"); !ok || id != s.ID {
+	if id, ok := r.index.findByAgentSession("c1"); !ok || id != s.ID {
 		t.Errorf("new claude id should resolve to the record: %q %v", id, ok)
 	}
 }

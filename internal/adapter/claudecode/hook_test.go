@@ -67,7 +67,7 @@ func TestProcessHookDrivesStatus(t *testing.T) {
 	if got.Status != session.StatusAwaitingInput {
 		t.Fatalf("want awaiting_input, got %q", got.Status)
 	}
-	if got.ClaudeSessionID != "sess-1" || got.TranscriptPath == "" {
+	if got.AgentSessionID != "sess-1" || got.TranscriptPath == "" {
 		t.Fatalf("hook fields not propagated: %+v", got)
 	}
 
@@ -324,7 +324,7 @@ func TestProcessHookVSCodeIgnoresInheritedPane(t *testing.T) {
 	// A discovery scan that does not list pane %5 must NOT prune the session;
 	// the unified scan still reports the live VSCode session (by claude id).
 	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
-		{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode},
+		{AgentSessionID: "vs-1", Frontend: session.FrontendVSCode},
 	})
 	if _, ok := reg.Get("claude:vs-1"); !ok {
 		t.Fatal("vscode session was pruned by reconcile — regression")

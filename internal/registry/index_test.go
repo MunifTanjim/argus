@@ -9,12 +9,12 @@ func TestSessionIndexFindSetClear(t *testing.T) {
 	}
 
 	x.setPane("default:%1", "s1")
-	x.setClaude("claude-1", "s1")
+	x.setAgentSession("claude-1", "s1")
 	if id, ok := x.findByPane("default:%1"); !ok || id != "s1" {
 		t.Errorf("findByPane = %q,%v want s1,true", id, ok)
 	}
-	if id, ok := x.findByClaude("claude-1"); !ok || id != "s1" {
-		t.Errorf("findByClaude = %q,%v want s1,true", id, ok)
+	if id, ok := x.findByAgentSession("claude-1"); !ok || id != "s1" {
+		t.Errorf("findByAgentSession = %q,%v want s1,true", id, ok)
 	}
 
 	// clear drops the session from BOTH indices — the invariant the type exists for.
@@ -22,7 +22,7 @@ func TestSessionIndexFindSetClear(t *testing.T) {
 	if _, ok := x.findByPane("default:%1"); ok {
 		t.Error("clear should drop the pane entry")
 	}
-	if _, ok := x.findByClaude("claude-1"); ok {
+	if _, ok := x.findByAgentSession("claude-1"); ok {
 		t.Error("clear should drop the claude entry")
 	}
 }

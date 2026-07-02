@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // ErrNoTerminalControl is returned for pane-bound actions on a session argus
@@ -18,12 +18,11 @@ const jsonrpcVersion = "2.0"
 
 // Method names exchanged over the wire.
 const (
-	MethodPing            = "ping"             // request: no params; result: nil (latency probe)
-	MethodSessionsList    = "sessions.list"    // request: no params; result: []session.Session
-	MethodSessionsRefresh = "sessions.refresh" // request: no params; rescans, result: []session.Session
-	MethodSessionEvent    = "session.event"    // notification: registry.Event
-	// MethodSessionTranscriptView returns the grouped, display-ready chunk view.
-	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: claudecode.TranscriptView
+	MethodPing                  = "ping"                    // request: no params; result: nil (latency probe)
+	MethodSessionsList          = "sessions.list"           // request: no params; result: []session.Session
+	MethodSessionsRefresh       = "sessions.refresh"        // request: no params; rescans, result: []session.Session
+	MethodSessionEvent          = "session.event"           // notification: registry.Event
+	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: transcript.TranscriptView
 	// MethodSessionToolDetail returns one tool item's full body, fetched on demand
 	// (transcript chunks ship without these heavy bodies).
 	MethodSessionToolDetail = "sessions.toolDetail" // request: ToolDetailParams; result: ToolDetail
@@ -38,19 +37,13 @@ const (
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
 	MethodSessionsHistorySessions   = "sessions.historySessions"   // request: HistorySessionsParams; result: session.HistorySessionPage
-	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: claudecode.TranscriptView
-	// MethodSessionHistoryToolDetail is the history counterpart of
-	// MethodSessionToolDetail, addressed by node-local path.
-	MethodSessionHistoryToolDetail = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
-	// MethodNodeIdentify lets the gateway learn a node's id and label over the uplink.
-	MethodNodeIdentify = "node.identify" // request: no params; result: IdentifyResult
-	// MethodServerInfo returns server-wide metadata (version + connected nodes).
-	MethodServerInfo = "server.info" // request: no params; result: ServerInfo
-	// MethodTranscriptSubscribe opens a streaming transcript subscription.
-	MethodTranscriptSubscribe = "transcript.subscribe" // request: TranscriptSubscribeParams; result: TranscriptDelta
-	// MethodTranscriptUnsubscribe closes a streaming transcript subscription.
-	MethodTranscriptUnsubscribe = "transcript.unsubscribe" // request: TranscriptUnsubscribeParams; result: nil
-	// MethodTranscriptDelta is a server->client push of new/changed chunks.
+	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: transcript.TranscriptView
+	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
+	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
+	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
+	MethodTranscriptSubscribe       = "transcript.subscribe"       // request: TranscriptSubscribeParams; result: TranscriptDelta
+	MethodTranscriptUnsubscribe     = "transcript.unsubscribe"     // request: TranscriptUnsubscribeParams; result: nil
+	// Server→client push.
 	MethodTranscriptDelta = "transcript.delta" // notification: TranscriptDelta
 	// Client-token management (gateway only, admin/master-token connections).
 	// MethodClientsPairStart mints a temporary token + public URL for a pairing QR.
@@ -344,5 +337,5 @@ type TranscriptUnsubscribeParams struct {
 type TranscriptDelta struct {
 	SubID     string             `json:"sub_id"`
 	FromIndex int                `json:"from_index"`
-	Chunks    []claudecode.Chunk `json:"chunks"`
+	Chunks    []transcript.Chunk `json:"chunks"`
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -83,7 +84,7 @@ func TestPermissionRequestParksWithoutViewer(t *testing.T) {
 	out := make(chan api.HookResult, 1)
 	go func() {
 		var res api.HookResult
-		_ = hookClient.Call(claudecode.HookMethod, permissionHook(), &res)
+		_ = hookClient.Call(adapter.HookMethod, permissionHook(), &res)
 		out <- res
 	}()
 
@@ -125,7 +126,7 @@ func TestPermissionRequestUnblocksOnHookDisconnect(t *testing.T) {
 	hookClient := dialWithRetry(t, socket)
 	go func() {
 		var res api.HookResult
-		_ = hookClient.Call(claudecode.HookMethod, permissionHook(), &res)
+		_ = hookClient.Call(adapter.HookMethod, permissionHook(), &res)
 	}()
 
 	sid := waitParkedID(t, d)

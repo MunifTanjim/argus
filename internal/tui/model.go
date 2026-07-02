@@ -5,9 +5,9 @@ import (
 
 	"github.com/charmbracelet/glamour"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 type viewMode int
@@ -37,7 +37,7 @@ const (
 )
 
 type cachedTranscript struct {
-	chunks []claudecode.Chunk
+	chunks []transcript.Chunk
 }
 
 // toolBodyEntry caches one tool's on-demand-fetched body (see sessions.toolDetail).
@@ -56,9 +56,8 @@ type subRef struct {
 	subID     string
 	sessionID string
 	agentID   string // empty = session transcript
-	// cacheKey discriminates the client chunk cache. It is the ClaudeSessionID, which
-	// changes on /clear (new transcript file), so cached pre-clear chunks aren't reused
-	// against the post-clear file. Falls back to sessionID when the id isn't known yet.
+	// cacheKey is the AgentSessionID, which changes on /clear (new transcript file)
+	// so pre-clear chunks aren't reused. Falls back to sessionID before a hook sets it.
 	cacheKey string
 }
 
@@ -123,7 +122,7 @@ type model struct {
 // transcriptState is the transcript viewer: parsed chunks plus scroll/cursor/fold/
 // drill-down state and render caches. Reused by the live and history views.
 type transcriptState struct {
-	chunks      []claudecode.Chunk
+	chunks      []transcript.Chunk
 	err         error
 	cursor      int                           // selected chunk index
 	scroll      int                           // top line offset into the rendered transcript
@@ -171,7 +170,6 @@ func newModel(client Client, hasDark bool, keyCh chan paneKey, logs *logbuf.Buff
 	}
 }
 
-// sessionInteraction returns the open session's pending interaction, or nil.
 func (m model) sessionInteraction() *session.Interaction {
 	return m.sessions[m.selectedID].Interaction
 }

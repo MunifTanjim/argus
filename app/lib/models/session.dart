@@ -144,7 +144,7 @@ class Interaction {
 class Session {
   final String id;
   final String agent;
-  final String? claudeSessionId;
+  final String? agentSessionId;
   final String? name;
   final TmuxLocation tmux;
   final String? cwd;
@@ -168,7 +168,7 @@ class Session {
     this.statusLabel = '',
     required this.source,
     this.frontend = FrontendKind.unknown,
-    this.claudeSessionId,
+    this.agentSessionId,
     this.name,
     this.cwd,
     this.transcriptPath,
@@ -183,7 +183,7 @@ class Session {
   factory Session.fromJson(Map<String, dynamic> j) => Session(
         id: j['id'] as String,
         agent: j['agent'] as String? ?? '',
-        claudeSessionId: j['claude_session_id'] as String?,
+        agentSessionId: j['agent_session_id'] as String?,
         name: j['name'] as String?,
         tmux: TmuxLocation.fromJson(j['tmux'] as Map<String, dynamic>),
         cwd: j['cwd'] as String?,

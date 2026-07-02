@@ -22,9 +22,9 @@ func TestSubscribeWorksWithoutRegisterConn(t *testing.T) {
 	tmp := writeTempTranscript(t)
 
 	s, _ := d.reg.ApplyHook(registry.HookUpdate{
-		ClaudeSessionID: "node1",
-		TranscriptPath:  tmp,
-		Status:          session.StatusIdle,
+		AgentSessionID: "node1",
+		TranscriptPath: tmp,
+		Status:         session.StatusIdle,
 	})
 
 	fn := &fakeNotifier{ch: make(chan api.Notification, 8)}
@@ -185,9 +185,9 @@ func TestSubscribePushesDeltaOnAppend(t *testing.T) {
 
 	// Insert a session pointing at the temp transcript.
 	s, _ := d.reg.ApplyHook(registry.HookUpdate{
-		ClaudeSessionID: "c1",
-		TranscriptPath:  tmp,
-		Status:          session.StatusIdle,
+		AgentSessionID: "c1",
+		TranscriptPath: tmp,
+		Status:         session.StatusIdle,
 	})
 
 	fn := &fakeNotifier{ch: make(chan api.Notification, 8)}

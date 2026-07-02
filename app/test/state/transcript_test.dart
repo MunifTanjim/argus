@@ -57,9 +57,6 @@ void main() {
     expect(c.read(_provider).chunks, isEmpty);
   });
 
-  // The detail screen keys transcriptProvider by ClaudeSessionID, which changes on
-  // /clear. Distinct keys hold independent chunks, so post-clear never reuses the
-  // pre-clear cache.
   test('provider family isolates chunks per key (pre/post-clear)', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
@@ -70,7 +67,7 @@ void main() {
     expect(c.read(transcriptProvider('c0')).chunks.map((x) => x.id),
         ['old0', 'old1']);
 
-    // New ClaudeSessionID after /clear ⇒ different key ⇒ empty store.
+    // New agent session id after /clear ⇒ different key ⇒ empty store.
     expect(c.read(transcriptProvider('c1')).chunks, isEmpty);
   });
 

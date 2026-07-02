@@ -2,15 +2,11 @@ package claudecode
 
 import (
 	"context"
+
+	"github.com/MunifTanjim/argus/internal/adapter"
 )
 
-// PaneController is the slice of *tmux.Client PrepareTextInput needs, as an
-// interface so the input logic is testable without a live tmux server.
-type PaneController interface {
-	PaneInMode(ctx context.Context, paneID string) (bool, error)
-	CancelMode(ctx context.Context, paneID string) error
-	SendKeys(ctx context.Context, paneID string, keys ...string) error
-}
+type PaneController = adapter.PaneController
 
 // PrepareTextInput readies a Claude Code pane for injected text: it exits any
 // tmux copy/view mode so keystrokes reach the program, then sends `i`+BSpace to

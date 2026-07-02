@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 type notificationMsg api.Notification
@@ -15,7 +15,7 @@ type connStateMsg struct{ connected bool }
 type sessionsReplacedMsg []session.Session
 type transcriptMsg struct {
 	id     string
-	chunks []claudecode.Chunk
+	chunks []transcript.Chunk
 	err    error
 }
 type captureMsg struct {
@@ -34,7 +34,7 @@ type histSessionsMsg struct {
 	err        error
 }
 type histTranscriptMsg struct {
-	chunks []claudecode.Chunk
+	chunks []transcript.Chunk
 	err    error
 }
 

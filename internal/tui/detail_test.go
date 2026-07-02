@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func TestFilledTool(t *testing.T) {
@@ -19,19 +19,19 @@ func TestFilledTool(t *testing.T) {
 	}
 
 	// No ToolID → not addressable → treated as already resolved (renders inline).
-	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolInput: "inline"}); !fetched {
+	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolInput: "inline"}); !fetched {
 		t.Error("item without ToolID should be reported as fetched")
 	}
 	// Outstanding fetch → not yet fetched (caller shows a placeholder).
-	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "loadingTool"}); fetched {
+	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "loadingTool"}); fetched {
 		t.Error("loading item should not be reported as fetched")
 	}
 	// Unknown id → not fetched.
-	if _, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "unknown"}); fetched {
+	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "unknown"}); fetched {
 		t.Error("unknown tool should not be reported as fetched")
 	}
 	// Completed fetch → fields filled from the cache.
-	got, fetched := m.filledTool(claudecode.Item{Kind: claudecode.ItemTool, ToolID: "doneTool"})
+	got, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "doneTool"})
 	if !fetched {
 		t.Fatal("done item should be reported as fetched")
 	}
@@ -40,9 +40,9 @@ func TestFilledTool(t *testing.T) {
 	}
 }
 
-func detailTestModel(c claudecode.Chunk) model {
+func detailTestModel(c transcript.Chunk) model {
 	m := testModel()
-	m.transcript.chunks = []claudecode.Chunk{c}
+	m.transcript.chunks = []transcript.Chunk{c}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
 	m.enterDetail()
@@ -61,11 +61,11 @@ func maxLineWidth(s string) int {
 }
 
 func TestDetailItemsHaveAccentRule(t *testing.T) {
-	m := detailTestModel(claudecode.Chunk{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{
-			{Kind: claudecode.ItemText, Text: "hello output"},
-			{Kind: claudecode.ItemTool, ToolName: "Bash",
+	m := detailTestModel(transcript.Chunk{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{
+			{Kind: transcript.ItemText, Text: "hello output"},
+			{Kind: transcript.ItemTool, ToolName: "Bash",
 				ToolInput: `{"command":"ls"}`, Result: "out"},
 		},
 	})
@@ -79,9 +79,9 @@ func TestDetailItemsHaveAccentRule(t *testing.T) {
 }
 
 func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
-	m := detailTestModel(claudecode.Chunk{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}},
+	m := detailTestModel(transcript.Chunk{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}},
 	})
 	m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
 	m.height = 40
@@ -103,12 +103,12 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 	longJSON := `{"k":"` + strings.Repeat("x", 200) + `"}`
 	m := testModel()
 
-	cases := map[string]claudecode.Item{
-		"bash command": {Kind: claudecode.ItemTool, ToolName: "Bash",
+	cases := map[string]transcript.Item{
+		"bash command": {Kind: transcript.ItemTool, ToolName: "Bash",
 			ToolInput: `{"command":"` + longCmd + `"}`},
-		"json result": {Kind: claudecode.ItemTool, ToolName: "UnknownTool",
+		"json result": {Kind: transcript.ItemTool, ToolName: "UnknownTool",
 			Result: longJSON},
-		"edit diff": {Kind: claudecode.ItemTool, ToolName: "Edit",
+		"edit diff": {Kind: transcript.ItemTool, ToolName: "Edit",
 			ToolInput: `{"file_path":"a.go","old_string":"short","new_string":"` + strings.Repeat("z", 200) + `"}`},
 	}
 	for name, it := range cases {
@@ -122,7 +122,7 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 
 func TestCollapsedRowFitsWidth(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash",
+	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
 		InputPreview: strings.Repeat("a long command preview ", 6)}
 	out := m.detailRowBlock(it, false, false, 40)
 	if got := maxLineWidth(out); got > 40 {
@@ -137,7 +137,7 @@ func TestCollapsedRowFitsWidth(t *testing.T) {
 // This is the color-independent focus cue.
 func TestDetailRowBarReflectsFocus(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash", InputPreview: "ls"}
+	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash", InputPreview: "ls"}
 
 	focused := m.detailRowBlock(it, false, true, 40)
 	if !strings.Contains(focused, GlyphAccentBarFocused) {
@@ -169,11 +169,11 @@ func TestPermissionPromptWrapsLongCommand(t *testing.T) {
 
 func TestDetailScrollHint(t *testing.T) {
 	// Build a chunk whose render far exceeds a tiny viewport.
-	var items []claudecode.Item
+	var items []transcript.Item
 	for i := 0; i < 40; i++ {
-		items = append(items, claudecode.Item{Kind: claudecode.ItemText, Text: "line of output"})
+		items = append(items, transcript.Item{Kind: transcript.ItemText, Text: "line of output"})
 	}
-	m := detailTestModel(claudecode.Chunk{ID: "a", Kind: claudecode.ChunkAI, Items: items})
+	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: items})
 	m.width, m.height = 80, 10
 
 	out := m.detailBody()
@@ -193,68 +193,68 @@ func TestDetailScrollHint(t *testing.T) {
 }
 
 func TestFlattenTracePrependsPrompt(t *testing.T) {
-	chunks := []claudecode.Chunk{
-		{Kind: claudecode.ChunkUser, Text: "find the bug"},
-		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemTool, ToolName: "Grep"}}},
-		{Kind: claudecode.ChunkUser, Text: "keep going"},
+	chunks := []transcript.Chunk{
+		{Kind: transcript.ChunkUser, Text: "find the bug"},
+		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Grep"}}},
+		{Kind: transcript.ChunkUser, Text: "keep going"},
 	}
 	items := flattenTrace(chunks)
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2", len(items))
 	}
-	if items[0].Kind != claudecode.ItemPrompt || items[0].Text != "find the bug" {
+	if items[0].Kind != transcript.ItemPrompt || items[0].Text != "find the bug" {
 		t.Errorf("items[0] = %+v, want ItemPrompt %q", items[0], "find the bug")
 	}
-	if items[1].Kind != claudecode.ItemTool {
+	if items[1].Kind != transcript.ItemTool {
 		t.Errorf("items[1].Kind = %q, want tool", items[1].Kind)
 	}
 }
 
 // Only chunk 0 is the prompt; a later user chunk (team-agent shape) is not hoisted.
 func TestFlattenTraceUserChunkAfterAINotPrompt(t *testing.T) {
-	chunks := []claudecode.Chunk{
-		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
-		{Kind: claudecode.ChunkUser, Text: "later message"},
+	chunks := []transcript.Chunk{
+		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
+		{Kind: transcript.ChunkUser, Text: "later message"},
 	}
 	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+	if len(items) != 1 || items[0].Kind != transcript.ItemText {
 		t.Fatalf("got %+v, want single text item (no prompt)", items)
 	}
 }
 
 func TestFlattenTraceBlankPromptSkipped(t *testing.T) {
-	chunks := []claudecode.Chunk{
-		{Kind: claudecode.ChunkUser, Text: "  \n "},
-		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
+	chunks := []transcript.Chunk{
+		{Kind: transcript.ChunkUser, Text: "  \n "},
+		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
 	}
 	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+	if len(items) != 1 || items[0].Kind != transcript.ItemText {
 		t.Fatalf("got %+v, want single text item (blank prompt skipped)", items)
 	}
 }
 
 func TestFlattenTraceNoUserChunk(t *testing.T) {
-	chunks := []claudecode.Chunk{
-		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
+	chunks := []transcript.Chunk{
+		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
 	}
 	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+	if len(items) != 1 || items[0].Kind != transcript.ItemText {
 		t.Fatalf("got %+v, want single text item", items)
 	}
 }
 
 func TestEnterDrillPopStack(t *testing.T) {
-	sub := claudecode.Item{
-		Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Read"},
-			{Kind: claudecode.ItemTool, ToolName: "Grep"},
+	sub := transcript.Item{
+		Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Read"},
+			{Kind: transcript.ItemTool, ToolName: "Grep"},
 		}}},
 	}
 	m := testModel()
-	m.transcript.chunks = []claudecode.Chunk{{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}, sub},
+	m.transcript.chunks = []transcript.Chunk{{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub},
 	}}
 	m.transcript.cursor = 0
 	m.enterDetail()
@@ -280,7 +280,7 @@ func TestEnterDrillPopStack(t *testing.T) {
 
 func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash",
+	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
 		ToolInput: `{"command":"ls"}`, Result: "out"}
 
 	collapsed := m.detailRowBlock(it, false, false, 60)
@@ -295,19 +295,19 @@ func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
 		t.Errorf("expanded row should show the result body:\n%s", expanded)
 	}
 
-	sub := claudecode.Item{Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemTool, ToolName: "Read"}}}}}
+	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
 	if !strings.Contains(m.detailRowBlock(sub, false, false, 60), "↵") {
 		t.Errorf("a drillable subagent row should show the drill affordance")
 	}
 }
 
 func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
-	m := detailTestModel(claudecode.Chunk{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{
-			{Kind: claudecode.ItemText, Text: "hello"},
-			{Kind: claudecode.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
+	m := detailTestModel(transcript.Chunk{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{
+			{Kind: transcript.ItemText, Text: "hello"},
+			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 		},
 	})
 	m.width, m.height = 80, 30
@@ -336,15 +336,15 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 // A non-drillable item focuses exactly once; further Enter presses on the focus
 // frame must not keep nesting the same item.
 func TestFocusFrameDoesNotRenest(t *testing.T) {
-	m := detailTestModel(claudecode.Chunk{
-		ID: "a", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
-		Items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
+	m := detailTestModel(transcript.Chunk{
+		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 		},
 	})
 	m.width, m.height = 80, 30
 
-	m.drillDetail() // focus the Bash item
+	m.drillDetail()
 	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
 		t.Fatalf("first drill should focus once: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
 	}
@@ -357,25 +357,24 @@ func TestFocusFrameDoesNotRenest(t *testing.T) {
 }
 
 func TestDrillableUsesHasTrace(t *testing.T) {
-	withTrace := claudecode.Item{Kind: claudecode.ItemSubagent, AgentID: "a1", HasTrace: true}
+	withTrace := transcript.Item{Kind: transcript.ItemSubagent, AgentID: "a1", HasTrace: true}
 	if !drillable(withTrace) {
 		t.Error("subagent with HasTrace should be drillable")
 	}
-	plain := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Read"}
+	plain := transcript.Item{Kind: transcript.ItemTool, ToolName: "Read"}
 	if drillable(plain) {
 		t.Error("non-subagent should not be drillable")
 	}
 }
 
 func TestDetailKeyNav(t *testing.T) {
-	sub := claudecode.Item{Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
-		Trace: []claudecode.Chunk{{Kind: claudecode.ChunkAI, Items: []claudecode.Item{
-			{Kind: claudecode.ItemTool, ToolName: "Read"}}}}}
-	m := detailTestModel(claudecode.Chunk{ID: "a", Kind: claudecode.ChunkAI,
-		Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "hi"}, sub}})
+	sub := transcript.Item{Kind: transcript.ItemSubagent, SubagentType: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}
+	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
+		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
 	m.width, m.height = 80, 30
 
-	// j moves the cursor.
 	res, _ := m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
 	m = res.(model)
 	if m.topFrame().cursor != 1 {
@@ -389,7 +388,6 @@ func TestDetailKeyNav(t *testing.T) {
 	if m.topFrame().isExpanded(1) == before {
 		t.Error("space should toggle the selected item's expansion")
 	}
-	// enter on the subagent drills in.
 	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	if len(m.transcript.detailStack) != 2 || m.topFrame().label != "explorer" {
@@ -398,15 +396,15 @@ func TestDetailKeyNav(t *testing.T) {
 }
 
 func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
-	sub := claudecode.Item{
-		Kind: claudecode.ItemSubagent, SubagentType: "Explore",
+	sub := transcript.Item{
+		Kind: transcript.ItemSubagent, SubagentType: "Explore",
 		AgentID: "B", HasTrace: true, // Trace empty => lazy
 	}
 	m := testModel()
 	m.mode = modeHistoryTranscript
 	m.history.openNodeID, m.history.openPath = "n1", "/p/sess.jsonl"
 	m.transcript.detailStack = []detailFrame{{
-		items: []claudecode.Item{sub}, cursor: 0, expanded: map[int]bool{},
+		items: []transcript.Item{sub}, cursor: 0, expanded: map[int]bool{},
 	}}
 	mm, cmd := m.actDetailDrill(tea.KeyPressMsg{})
 	got := mm.(model)

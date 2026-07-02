@@ -4,27 +4,26 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// handleHook applies a Claude Code hook event to the registry. PermissionRequest
-// parks the hook and blocks until the user answers in argus, returning the
-// decision JSON. Claude's own prompt stays live in parallel — whoever answers
-// first wins. Answering in Claude's pane closes the connection (ctx cancel), so
-// blocking never hangs a session even with no TUI attached.
+// handleHook applies an agent hook event. Blocking hooks park until the user
+// answers; the agent's own prompt stays live in parallel (whoever answers first wins).
 func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, error) {
-	ev, err := api.Decode[claudecode.HookEvent](params)
+	ev, err := api.Decode[adapter.HookEvent](params)
 	if err != nil {
 		return nil, err
 	}
-	if ev.Agent != "" && ev.Agent != claudecode.Agent {
+	a := adapters.ByAgent(ev.Agent)
+	if a == nil {
 		return api.HookResult{}, nil
 	}
-	s, alive := claudecode.ProcessHook(d.reg, ev)
-	event := claudecode.EventName(ev)
+	s, alive := a.ProcessHook(d.reg, ev)
+	event := a.EventName(ev)
 	api.LogAttr(ctx, "event", event)
-	if tool, _ := claudecode.PermissionPayload(ev); tool != "" {
+	if tool, _ := a.PermissionPayload(ev); tool != "" {
 		api.LogAttr(ctx, "tool", tool)
 	}
 	// ProcessHook already updated the firing session, so rescan only for lifecycle
@@ -37,7 +36,7 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	}
 
 	if alive && event == "PermissionRequest" {
-		return api.HookResult{Output: d.awaitDecision(ctx, s.ID, ev)}, nil
+		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, ev)}, nil
 	}
 	return api.HookResult{}, nil
 }

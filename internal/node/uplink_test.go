@@ -47,7 +47,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	d.SetIdentity("home", "home-box")
 	d.reg.ApplyHook(registry.HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%1",
-		ClaudeSessionID: "abc", Status: session.StatusWorking,
+		AgentSessionID: "abc", Status: session.StatusWorking,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,7 +100,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	events := c.Events()
 	d.reg.ApplyHook(registry.HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%2",
-		ClaudeSessionID: "def", Status: session.StatusWorking,
+		AgentSessionID: "def", Status: session.StatusWorking,
 	})
 	deadline := time.After(3 * time.Second)
 	for {

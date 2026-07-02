@@ -6,16 +6,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // userChunks builds n short user chunks — enough to overflow a small viewport.
-func userChunks(n int) []claudecode.Chunk {
-	out := make([]claudecode.Chunk, n)
+func userChunks(n int) []transcript.Chunk {
+	out := make([]transcript.Chunk, n)
 	for i := range out {
-		out[i] = claudecode.Chunk{ID: fmt.Sprintf("c%d", i), Kind: claudecode.ChunkUser, Text: fmt.Sprintf("message %d", i)}
+		out[i] = transcript.Chunk{ID: fmt.Sprintf("c%d", i), Kind: transcript.ChunkUser, Text: fmt.Sprintf("message %d", i)}
 	}
 	return out
 }

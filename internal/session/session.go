@@ -152,8 +152,8 @@ type Session struct {
 	ID string `json:"id"`
 	// Agent is the coding agent that owns this session (e.g. "claude").
 	Agent string `json:"agent"`
-	// ClaudeSessionID is the tool's own session id; empty until a hook fires.
-	ClaudeSessionID string `json:"claude_session_id,omitempty"`
+	// AgentSessionID is the tool's own session id; empty until a hook fires.
+	AgentSessionID string `json:"agent_session_id,omitempty"`
 	// Name is the tool's own session name (e.g. Claude's session name), when known.
 	Name string `json:"name,omitempty"`
 

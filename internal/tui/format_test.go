@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func TestStatusWordPrefersServerLabel(t *testing.T) {
@@ -37,15 +37,15 @@ func TestAccentBlockPrefixesEveryLine(t *testing.T) {
 }
 
 func TestItemAccentColor(t *testing.T) {
-	tool := claudecode.Item{Kind: claudecode.ItemTool, ToolName: "Bash"}
+	tool := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash"}
 	if itemAccentColor(tool) != ColorToolBash {
 		t.Error("tool item should use its tool color")
 	}
-	think := claudecode.Item{Kind: claudecode.ItemThinking}
+	think := transcript.Item{Kind: transcript.ItemThinking}
 	if itemAccentColor(think) != ColorTextDim {
 		t.Error("thinking item should use dim")
 	}
-	out := claudecode.Item{Kind: claudecode.ItemText}
+	out := transcript.Item{Kind: transcript.ItemText}
 	if itemAccentColor(out) != ColorTextSecondary {
 		t.Error("output item should use secondary (accent is reserved for focus)")
 	}

@@ -1,0 +1,75 @@
+// Package adapter defines the interface between argus's core and AI-coding-tool
+// integrations such as Claude Code, Codex, or Antigravity.
+package adapter
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/transcript"
+)
+
+// HookMethod is the JSON-RPC method every argus hook invocation calls.
+const HookMethod = "hook.event"
+
+// HookEvent is the payload argus hook <event> sends to the node.
+type HookEvent struct {
+	Agent      string          `json:"agent"`       // originating coding agent, e.g. "claude"
+	Event      string          `json:"event"`       // hook_event_name, e.g. "Stop"
+	TmuxPane   string          `json:"tmux_pane"`   // $TMUX_PANE (e.g. "%3")
+	TmuxSocket string          `json:"tmux_socket"` // basename of the $TMUX socket
+	Payload    json.RawMessage `json:"payload"`     // raw hook stdin JSON
+	// AutoMode reports whether the session enables plan auto mode.
+	AutoMode bool `json:"auto_mode"`
+}
+
+// PaneController is the tmux pane interface used by input preparation.
+type PaneController interface {
+	PaneInMode(ctx context.Context, paneID string) (bool, error)
+	CancelMode(ctx context.Context, paneID string) error
+	SendKeys(ctx context.Context, paneID string, keys ...string) error
+}
+
+// Discoverer scans for live sessions and reconciles them into the registry.
+type Discoverer interface {
+	ScanOnce(ctx context.Context) error
+}
+
+// StreamingTranscript incrementally folds a transcript file. Not safe for concurrent use.
+type StreamingTranscript interface {
+	Refresh() ([]transcript.Chunk, error)
+}
+
+type Adapter interface {
+	Agent() string
+
+	NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) Discoverer
+
+	// --- Hooks ---
+	ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool)
+	EventName(ev HookEvent) string
+	PermissionPayload(ev HookEvent) (toolName string, toolInput json.RawMessage)
+
+	ReadTranscriptView(path string) (transcript.TranscriptView, error)
+	ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error)
+	FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error)
+	NewStreamingTranscript(path, rootPath string, isSubagent bool) StreamingTranscript
+	SubagentFilePath(rootPath, agentID string) (string, bool)
+
+	ListHistoryProjects() ([]session.HistoryProject, error)
+	ListHistorySessions(projectDir string, limit, offset int) (session.HistorySessionPage, error)
+	ReadHistoryTranscript(path string) (transcript.TranscriptView, error)
+	ReadHistorySubagentView(path, agentID string) (transcript.TranscriptView, bool, error)
+	FindHistoryToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error)
+
+	PrepareTextInput(ctx context.Context, pc PaneController, paneID string) error
+
+	Install(argusBin string) error
+	ReconcileIfInstalled(argusBin string) (added []string, err error)
+	Uninstall() error
+	SettingsPath() (string, error)
+	DefaultHookEvents() []string
+}

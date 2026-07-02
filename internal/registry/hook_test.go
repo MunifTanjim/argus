@@ -15,18 +15,18 @@ func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 
 	// Then a hook arrives for that pane.
 	got, alive := r.ApplyHook(HookUpdate{
-		Agent:           "claude",
-		Server:          session.TmuxServerDefault,
-		PaneID:          "%0",
-		ClaudeSessionID: "sess-abc",
-		Cwd:             "/work",
-		TranscriptPath:  "/t/sess-abc.jsonl",
-		Status:          session.StatusWorking,
+		Agent:          "claude",
+		Server:         session.TmuxServerDefault,
+		PaneID:         "%0",
+		AgentSessionID: "sess-abc",
+		Cwd:            "/work",
+		TranscriptPath: "/t/sess-abc.jsonl",
+		Status:         session.StatusWorking,
 	})
 	if !alive {
 		t.Fatal("session should be alive")
 	}
-	if got.ClaudeSessionID != "sess-abc" || got.Status != session.StatusWorking {
+	if got.AgentSessionID != "sess-abc" || got.Status != session.StatusWorking {
 		t.Fatalf("hook not applied: %+v", got)
 	}
 	if got.Source != session.SourceDiscovered {
@@ -41,11 +41,11 @@ func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 	r := New()
 	got, alive := r.ApplyHook(HookUpdate{
-		Agent:           "claude",
-		Server:          session.TmuxServerArgus,
-		PaneID:          "%5",
-		ClaudeSessionID: "z",
-		Status:          session.StatusIdle,
+		Agent:          "claude",
+		Server:         session.TmuxServerArgus,
+		PaneID:         "%5",
+		AgentSessionID: "z",
+		Status:         session.StatusIdle,
 	})
 	if !alive || got.Source != session.SourceHooked {
 		t.Fatalf("want hooked session, got %+v alive=%v", got, alive)
@@ -218,9 +218,9 @@ func TestApplyHookCachesSummaryAndRepo(t *testing.T) {
 func TestApplyHookCorrelatesByClaudeIDAcrossReconcile(t *testing.T) {
 	r := New()
 	// Hook first (claude not yet discovered in tmux), keyed by pane.
-	r.ApplyHook(HookUpdate{Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0", ClaudeSessionID: "s1", Status: session.StatusIdle})
+	r.ApplyHook(HookUpdate{Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0", AgentSessionID: "s1", Status: session.StatusIdle})
 	// A later hook for same claude id but reporting no pane still finds it.
-	got, alive := r.ApplyHook(HookUpdate{Agent: "claude", ClaudeSessionID: "s1", Status: session.StatusWorking})
+	got, alive := r.ApplyHook(HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
 	if !alive || got.Status != session.StatusWorking {
 		t.Fatalf("expected correlation by claude id: %+v", got)
 	}
@@ -232,7 +232,7 @@ func TestApplyHookCorrelatesByClaudeIDAcrossReconcile(t *testing.T) {
 func TestApplyHookStoresFrontend(t *testing.T) {
 	r := New()
 	s, alive := r.ApplyHook(HookUpdate{
-		Agent: "claude", ClaudeSessionID: "vs1",
+		Agent: "claude", AgentSessionID: "vs1",
 		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
 	})
 	if !alive || s.Frontend != session.FrontendVSCode || s.Controllable() {
@@ -245,11 +245,11 @@ func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
 	// First: a tmux session via hook (pane present).
 	r.ApplyHook(HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
-		ClaudeSessionID: "s1", Frontend: session.FrontendTmux, Status: session.StatusIdle,
+		AgentSessionID: "s1", Frontend: session.FrontendTmux, Status: session.StatusIdle,
 	})
 	// Then: a later hook correlated by claude id arrives paneless/vscode — must NOT downgrade.
 	s, _ := r.ApplyHook(HookUpdate{
-		Agent: "claude", ClaudeSessionID: "s1",
+		Agent: "claude", AgentSessionID: "s1",
 		Frontend: session.FrontendVSCode, Status: session.StatusWorking,
 	})
 	if s.Frontend != session.FrontendTmux {
@@ -257,30 +257,30 @@ func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
 	}
 }
 
-// A /clear reuses the pane record but swaps ClaudeSessionID + transcript path: the
+// A /clear reuses the pane record but swaps AgentSessionID + transcript path: the
 // stale summary must reset and the superseded claude id must leave the index.
 func TestApplyHookTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
 	r := New()
 	r.ApplyHook(HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
-		ClaudeSessionID: "c0", TranscriptPath: "/tmp/c0.jsonl",
+		AgentSessionID: "c0", TranscriptPath: "/tmp/c0.jsonl",
 		Status: session.StatusIdle, Summary: &session.Summary{Task: "pre-clear"},
 	})
 	got, _ := r.ApplyHook(HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
-		ClaudeSessionID: "c1", TranscriptPath: "/tmp/c1.jsonl",
+		AgentSessionID: "c1", TranscriptPath: "/tmp/c1.jsonl",
 		Status: session.StatusAwaitingInput,
 	})
 	if got.Summary != nil {
 		t.Fatalf("transcript swap must reset the stale summary, got %+v", got.Summary)
 	}
-	if got.TranscriptPath != "/tmp/c1.jsonl" || got.ClaudeSessionID != "c1" {
+	if got.TranscriptPath != "/tmp/c1.jsonl" || got.AgentSessionID != "c1" {
 		t.Fatalf("swap not applied: %+v", got)
 	}
-	if _, ok := r.index.findByClaude("c0"); ok {
+	if _, ok := r.index.findByAgentSession("c0"); ok {
 		t.Error("superseded claude id should be cleared from the index")
 	}
-	if id, ok := r.index.findByClaude("c1"); !ok || id != got.ID {
+	if id, ok := r.index.findByAgentSession("c1"); !ok || id != got.ID {
 		t.Errorf("new claude id should resolve to the record: %q %v", id, ok)
 	}
 }

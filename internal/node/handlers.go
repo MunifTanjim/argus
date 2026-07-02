@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// registerHandlers wires the RPC handlers onto srv. The handler implementations
-// live in handlers_session.go / handlers_hook.go / handlers_history.go.
 func (d *Node) registerHandlers(srv *api.Server) {
 	// ping is a no-op latency probe: round trip measures the connection, not the handler.
 	srv.Handle(api.MethodPing, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
@@ -17,7 +15,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodNodeIdentify, d.handleNodeIdentify)
 	srv.Handle(api.MethodServerInfo, d.handleServerInfo)
 	srv.Handle(api.MethodSessionsRefresh, d.handleSessionsRefresh)
-	srv.Handle(claudecode.HookMethod, d.handleHook)
+	srv.Handle(adapter.HookMethod, d.handleHook)
 	srv.Handle(api.MethodSessionTranscriptView, d.handleTranscriptView)
 	srv.Handle(api.MethodSessionToolDetail, d.handleSessionToolDetail)
 	srv.Handle(api.MethodSessionCapture, d.handleSessionCapture)

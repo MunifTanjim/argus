@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // Transcript viewer: one card per chunk, chunk-level cursor. Selection/expansion
@@ -81,24 +81,20 @@ func glamourStyleConfig(hasDark bool) ansi.StyleConfig {
 	return cfg
 }
 
-// -- Expansion state ----------------------------------------------------------
-
-// chunkExpandable reports whether toggling a chunk's fold does anything.
-func (m model) chunkExpandable(c claudecode.Chunk) bool {
+func (m model) chunkExpandable(c transcript.Chunk) bool {
 	switch c.Kind {
-	case claudecode.ChunkAI:
+	case transcript.ChunkAI:
 		return len(c.Items) > 0
-	case claudecode.ChunkUser:
+	case transcript.ChunkUser:
 		return strings.Count(c.Text, "\n") >= maxCollapsedLines
-	case claudecode.ChunkSystem:
+	case transcript.ChunkSystem:
 		return c.Detail != ""
 	default:
 		return false
 	}
 }
 
-// chunkExpanded reports whether a chunk is expanded (defaults to collapsed).
-func (m model) chunkExpanded(c claudecode.Chunk) bool {
+func (m model) chunkExpanded(c transcript.Chunk) bool {
 	if v, ok := m.transcript.expanded[c.ID]; ok {
 		return v
 	}
@@ -203,18 +199,18 @@ func (m model) renderChunk(i int, selected bool) string {
 	c := m.transcript.chunks[i]
 	accent := selected && m.historyFocused()
 	switch c.Kind {
-	case claudecode.ChunkAI:
+	case transcript.ChunkAI:
 		return m.renderAICard(c, selected, accent)
-	case claudecode.ChunkUser:
+	case transcript.ChunkUser:
 		return m.renderUserCard(c, selected, accent)
-	case claudecode.ChunkCompact:
+	case transcript.ChunkCompact:
 		return m.renderCompact(c)
 	default:
 		return m.renderSystem(c, selected, accent)
 	}
 }
 
-func (m model) renderAICard(c claudecode.Chunk, selected, accent bool) string {
+func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
 	container := m.containerWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
@@ -245,7 +241,7 @@ func (m model) renderAICard(c claudecode.Chunk, selected, accent bool) string {
 }
 
 // aiHeader builds the one-line stats header: left identity+stats, right metrics.
-func (m model) aiHeader(c claudecode.Chunk, width int) string {
+func (m model) aiHeader(c transcript.Chunk, width int) string {
 	chev := ""
 	if m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
@@ -258,7 +254,7 @@ func (m model) aiHeader(c claudecode.Chunk, width int) string {
 	return spaceBetween(left, aiMeta(c), width)
 }
 
-func aiStats(c claudecode.Chunk) string {
+func aiStats(c transcript.Chunk) string {
 	var parts []string
 	if c.Thinking > 0 {
 		parts = append(parts, Icon.Thinking.Render()+" "+StyleSecondary.Render(strconv.Itoa(c.Thinking)))
@@ -272,7 +268,7 @@ func aiStats(c claudecode.Chunk) string {
 	return " " + Icon.Dot.Render() + " " + strings.Join(parts, "  ")
 }
 
-func aiMeta(c claudecode.Chunk) string {
+func aiMeta(c transcript.Chunk) string {
 	var parts []string
 	if c.Usage.Output > 0 {
 		parts = append(parts, Icon.Token.Render()+" "+StyleSecondary.Render(formatTokens(c.Usage.Output)))
@@ -289,15 +285,13 @@ func aiMeta(c claudecode.Chunk) string {
 	return strings.Join(parts, "  ")
 }
 
-// aiBody renders the card's inner content: collapsed shows a last-output
-// preview; expanded shows one-line item rows plus the final output text.
-func (m model) aiBody(c claudecode.Chunk, cw int) string {
+func (m model) aiBody(c transcript.Chunk, cw int) string {
 	if m.chunkExpanded(c) {
 		var rows []string
 		for _, it := range c.Items {
 			rows = append(rows, itemRow(it))
 		}
-		if lo, ok := c.LastOutput(); ok && lo.Kind == claudecode.ItemText {
+		if lo, ok := c.LastOutput(); ok && lo.Kind == transcript.ItemText {
 			rows = append(rows, "", m.renderMD(lo.Text, cw)) // expanded: full output
 		}
 		return strings.Join(rows, "\n")
@@ -314,7 +308,7 @@ func (m model) aiBody(c claudecode.Chunk, cw int) string {
 		return out
 	}
 	switch lo.Kind {
-	case claudecode.ItemText:
+	case transcript.ItemText:
 		text, hidden := truncateLines(lo.Text, maxCollapsedLines)
 		out := m.renderMD(text, cw)
 		if hidden > 0 {
@@ -326,17 +320,16 @@ func (m model) aiBody(c claudecode.Chunk, cw int) string {
 	}
 }
 
-// itemRow renders one structured item as a single line: icon + name + summary.
-func itemRow(it claudecode.Item) string {
+func itemRow(it transcript.Item) string {
 	var indicator, name, summary string
 	switch it.Kind {
-	case claudecode.ItemThinking:
+	case transcript.ItemThinking:
 		indicator, name, summary = Icon.Thinking.Render(), "Thinking", firstLine(it.Text)
-	case claudecode.ItemText:
+	case transcript.ItemText:
 		indicator, name, summary = Icon.Output.Render(), "Output", firstLine(it.Text)
-	case claudecode.ItemPrompt:
+	case transcript.ItemPrompt:
 		indicator, name, summary = Icon.User.Render(), "Prompt", firstLine(it.Text)
-	case claudecode.ItemSubagent:
+	case transcript.ItemSubagent:
 		indicator = Icon.Subagent.Render()
 		name = it.SubagentType
 		if name == "" {
@@ -358,8 +351,7 @@ func itemRow(it claudecode.Item) string {
 	return indicator + " " + nameStr + " " + StyleSecondary.Render(truncate(summary, 60))
 }
 
-// toolPreview renders a one-line preview of a tool/subagent last output.
-func toolPreview(it claudecode.Item) string {
+func toolPreview(it transcript.Item) string {
 	icon := toolIcon(it.ToolName, it.ResultIsError)
 	res := it.Result
 	if res == "" {
@@ -367,7 +359,7 @@ func toolPreview(it claudecode.Item) string {
 	}
 	res = strings.ReplaceAll(res, "\n", " ")
 	name := it.ToolName
-	if it.Kind == claudecode.ItemSubagent && it.SubagentType != "" {
+	if it.Kind == transcript.ItemSubagent && it.SubagentType != "" {
 		name = it.SubagentType
 	}
 	out := icon.Render() + " " + StylePrimaryBold.Render(name)
@@ -377,7 +369,7 @@ func toolPreview(it claudecode.Item) string {
 	return out
 }
 
-func (m model) renderUserCard(c claudecode.Chunk, selected, accent bool) string {
+func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string {
 	container := m.containerWidth()
 	maxBubble := container * 3 / 4
 	if maxBubble < 20 {
@@ -427,7 +419,7 @@ func (m model) renderUserCard(c claudecode.Chunk, selected, accent bool) string 
 	return header + "\n" + indentBlock(aligned, sel)
 }
 
-func (m model) renderSystem(c claudecode.Chunk, selected, accent bool) string {
+func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
 	container := m.containerWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
@@ -464,7 +456,7 @@ func (m model) renderSystem(c claudecode.Chunk, selected, accent bool) string {
 	return indentBlock(card, selIndicator(selected)+"  ")
 }
 
-func (m model) renderCompact(c claudecode.Chunk) string {
+func (m model) renderCompact(c transcript.Chunk) string {
 	container := m.containerWidth()
 	text := c.Summary
 	if text == "" {

@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -24,10 +25,13 @@ import (
 
 // Node holds the wired-up core.
 type Node struct {
-	reg     *registry.Registry
-	disc    *claudecode.Discoverer
-	server  *api.Server
-	clients map[session.TmuxServer]*tmux.Client
+	reg *registry.Registry
+	// adapterList holds agent adapters in priority order; [0] is the default.
+	adapterList []adapter.Adapter
+	adapters    map[string]adapter.Adapter
+	discs       []adapter.Discoverer
+	server      *api.Server
+	clients     map[session.TmuxServer]*tmux.Client
 
 	id      string // stable node id announced to the gateway (composite-id prefix)
 	label   string // human-friendly node name (e.g. hostname)
@@ -59,11 +63,20 @@ func (d *Node) SetLogger(l *slog.Logger) {
 	}
 }
 
-// scan rescans discovery once, logging (not swallowing) any failure.
+// scan rescans discovery, logging any failure.
 func (d *Node) scan(ctx context.Context) {
-	if err := d.disc.ScanOnce(ctx); err != nil {
-		d.log.Warn("discovery scan failed", "err", err)
+	for _, disc := range d.discs {
+		if err := disc.ScanOnce(ctx); err != nil {
+			d.log.Warn("discovery scan failed", "err", err)
+		}
 	}
+}
+
+func (d *Node) adapterFor(agent string) adapter.Adapter {
+	if a, ok := d.adapters[agent]; ok {
+		return a
+	}
+	return d.adapterList[0]
 }
 
 // SetDesktopNotify toggles rendering of push.desktop notifications on this
@@ -74,7 +87,6 @@ func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
-// DesktopNotifyEnabled reports whether this node renders desktop notifications.
 func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
 
 // SetIdentity overrides the node's id and label (default: hostname). The id is
@@ -155,7 +167,14 @@ func New() *Node {
 // inject isolated tmux servers.
 func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	reg := registry.New()
-	disc := claudecode.NewDiscoverer(reg, clients)
+
+	adapterList := adapters.All()
+	adapterByAgent := make(map[string]adapter.Adapter, len(adapterList))
+	discs := make([]adapter.Discoverer, 0, len(adapterList))
+	for _, a := range adapterList {
+		adapterByAgent[a.Agent()] = a
+		discs = append(discs, a.NewDiscoverer(reg, clients))
+	}
 
 	host, _ := os.Hostname()
 	if host == "" {
@@ -171,11 +190,14 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	}
 
 	d := &Node{
-		reg: reg, disc: disc, clients: clients, id: host, label: host,
-		caps:    caps,
-		log:     slog.New(slog.DiscardHandler),
-		pending: map[string]*pendingDecision{},
-		conns:   map[api.Notifier]*connSubs{},
+		reg: reg, clients: clients, id: host, label: host,
+		adapterList: adapterList,
+		adapters:    adapterByAgent,
+		discs:       discs,
+		caps:        caps,
+		log:         slog.New(slog.DiscardHandler),
+		pending:     map[string]*pendingDecision{},
+		conns:       map[api.Notifier]*connSubs{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {

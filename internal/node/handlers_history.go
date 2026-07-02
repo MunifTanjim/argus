@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
@@ -13,7 +12,7 @@ import (
 // ignore any node_id (the gateway uses it to route here); each scans this machine.
 
 func (d *Node) handleHistoryProjects(context.Context, json.RawMessage) (any, error) {
-	return claudecode.ListHistoryProjects()
+	return d.adapterFor("").ListHistoryProjects()
 }
 
 func (d *Node) handleHistorySessions(_ context.Context, params json.RawMessage) (any, error) {
@@ -24,7 +23,7 @@ func (d *Node) handleHistorySessions(_ context.Context, params json.RawMessage) 
 	if p.ProjectDir == "" {
 		return nil, fmt.Errorf("historySessions: project_dir is required")
 	}
-	return claudecode.ListHistorySessions(p.ProjectDir, p.Limit, p.Offset)
+	return d.adapterFor("").ListHistorySessions(p.ProjectDir, p.Limit, p.Offset)
 }
 
 func (d *Node) handleHistoryTranscript(_ context.Context, params json.RawMessage) (any, error) {
@@ -36,7 +35,7 @@ func (d *Node) handleHistoryTranscript(_ context.Context, params json.RawMessage
 		return nil, fmt.Errorf("historyTranscript: transcript_path is required")
 	}
 	if p.AgentID != "" {
-		v, found, err := claudecode.ReadHistorySubagentView(p.TranscriptPath, p.AgentID)
+		v, found, err := d.adapterFor("").ReadHistorySubagentView(p.TranscriptPath, p.AgentID)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +44,7 @@ func (d *Node) handleHistoryTranscript(_ context.Context, params json.RawMessage
 		}
 		return v, nil
 	}
-	return claudecode.ReadHistoryTranscript(p.TranscriptPath)
+	return d.adapterFor("").ReadHistoryTranscript(p.TranscriptPath)
 }
 
 func (d *Node) handleHistoryToolDetail(_ context.Context, params json.RawMessage) (any, error) {
@@ -56,7 +55,7 @@ func (d *Node) handleHistoryToolDetail(_ context.Context, params json.RawMessage
 	if p.TranscriptPath == "" {
 		return nil, fmt.Errorf("historyToolDetail: transcript_path is required")
 	}
-	td, found, err := claudecode.FindHistoryToolDetail(p.TranscriptPath, p.AgentID, p.ToolID)
+	td, found, err := d.adapterFor("").FindHistoryToolDetail(p.TranscriptPath, p.AgentID, p.ToolID)
 	if err != nil {
 		return nil, err
 	}

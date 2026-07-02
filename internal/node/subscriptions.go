@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // transcriptPollInterval is how often a subscription re-reads its file locally.
@@ -96,27 +96,28 @@ func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSub
 
 // resolveTranscriptPath returns the file to tail for a subscription: the session
 // transcript, or a subagent file when AgentID is set.
-func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, root string, err error) {
+func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, root string, a adapter.Adapter, err error) {
 	s, ok := d.reg.Get(p.SessionID)
 	if !ok {
-		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
+		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
 	}
 	if s.TranscriptPath == "" {
-		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
+		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
 	}
+	a = d.adapterFor(s.Agent)
 	if p.AgentID == "" {
-		return s.TranscriptPath, s.TranscriptPath, nil
+		return s.TranscriptPath, s.TranscriptPath, a, nil
 	}
-	sub, ok := parser.SubagentFilePath(s.TranscriptPath, p.AgentID)
+	sub, ok := a.SubagentFilePath(s.TranscriptPath, p.AgentID)
 	if !ok {
-		return "", "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
+		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
 	}
-	return sub, s.TranscriptPath, nil
+	return sub, s.TranscriptPath, a, nil
 }
 
 // diffChunks returns the first index at which cur differs from old, and whether
 // they differ. Folding only changes the tail, so the index is near the end.
-func diffChunks(old, cur []claudecode.Chunk) (from int, changed bool) {
+func diffChunks(old, cur []transcript.Chunk) (from int, changed bool) {
 	n := len(old)
 	if len(cur) < n {
 		n = len(cur)
@@ -156,12 +157,12 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
 	cs := d.getOrCreateConnSubs(ctx, n)
-	path, root, err := d.resolveTranscriptPath(p)
+	path, root, a, err := d.resolveTranscriptPath(p)
 	if err != nil {
 		return nil, err
 	}
 
-	st := claudecode.NewStreamingTranscript(path, root, p.AgentID != "")
+	st := a.NewStreamingTranscript(path, root, p.AgentID != "")
 	chunks, err := st.Refresh()
 	if err != nil {
 		return nil, err
@@ -194,7 +195,7 @@ func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawM
 // prefix plus resent tail), not chunks[from:]: diffChunks compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID string, st *claudecode.StreamingTranscript, sent []claudecode.Chunk) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID string, st adapter.StreamingTranscript, sent []transcript.Chunk) {
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)

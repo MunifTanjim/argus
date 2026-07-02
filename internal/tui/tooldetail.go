@@ -8,15 +8,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// fetchToolBodyCmd lazily fetches one tool item's heavy body (input/result), keyed
-// by tool_use id; agentID selects the subagent trace ("" = main transcript). The
-// cache entry is marked loading to coalesce repeats; nil when not addressable or
-// already loaded/loading. Live vs history RPC is chosen by the view mode.
-func (m model) fetchToolBodyCmd(it claudecode.Item, agentID string) tea.Cmd {
+func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 	if it.ToolID == "" {
 		return nil
 	}
@@ -46,9 +42,7 @@ func (m model) fetchToolBodyCmd(it claudecode.Item, agentID string) tea.Cmd {
 	}
 }
 
-// toolDetailBody renders a tool-specific body at the given inner width, returning
-// ok=false for tools with no custom renderer (caller then uses genericToolBody).
-func (m model) toolDetailBody(it claudecode.Item, width int) (string, bool) {
+func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
 	switch it.ToolName {
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
 		return m.editToolDetail(it, width), true
@@ -89,8 +83,7 @@ func sectionRule(width int) string {
 	return StyleMuted.Render(strings.Repeat(GlyphHRule, width))
 }
 
-// resultLabelText is "Result" or "Error" for a tool result.
-func resultLabelText(it claudecode.Item) string {
+func resultLabelText(it transcript.Item) string {
 	if it.ResultIsError {
 		return "Error"
 	}
@@ -115,8 +108,7 @@ func (m model) renderToolText(s string, width int) string {
 	return hardWrap(s, width)
 }
 
-// genericToolBody is the default Input/Result(/Error) layout.
-func (m model) genericToolBody(it claudecode.Item, width int) string {
+func (m model) genericToolBody(it transcript.Item, width int) string {
 	var sb strings.Builder
 	if it.ToolInput != "" {
 		sb.WriteString(sectionLabel("Input", false) + "\n")
@@ -132,8 +124,7 @@ func (m model) genericToolBody(it claudecode.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// editToolDetail renders Edit/Write/MultiEdit as a colored diff plus the result.
-func (m model) editToolDetail(it claudecode.Item, width int) string {
+func (m model) editToolDetail(it transcript.Item, width int) string {
 	var sb strings.Builder
 	if diff, ok := editDiff(it.ToolName, it.ToolInput); ok {
 		sb.WriteString(diff)
@@ -155,9 +146,7 @@ func unmarshalInput(raw string, v any) {
 	_ = json.Unmarshal([]byte(raw), v)
 }
 
-// bashDetail renders a Bash command as "$ cmd" (with optional "# description")
-// followed by the result.
-func (m model) bashDetail(it claudecode.Item, width int) string {
+func (m model) bashDetail(it transcript.Item, width int) string {
 	var in struct {
 		Command     string `json:"command"`
 		Description string `json:"description"`
@@ -184,7 +173,7 @@ func (m model) bashDetail(it claudecode.Item, width int) string {
 
 // readDetail renders a file read: path header, then content (which already carries
 // line numbers from the Read tool).
-func (m model) readDetail(it claudecode.Item, width int) string {
+func (m model) readDetail(it transcript.Item, width int) string {
 	var in struct {
 		FilePath string `json:"file_path"`
 	}
@@ -203,9 +192,7 @@ func (m model) readDetail(it claudecode.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// todoDetail renders a TodoWrite list with status glyphs. In-progress items show
-// their activeForm; others show content.
-func (m model) todoDetail(it claudecode.Item, width int) string {
+func (m model) todoDetail(it transcript.Item, width int) string {
 	var in struct {
 		Todos []struct {
 			Content    string `json:"content"`
@@ -236,7 +223,7 @@ func (m model) todoDetail(it claudecode.Item, width int) string {
 }
 
 // grepDetail renders a search query header ("pattern" in path) then the matches.
-func (m model) grepDetail(it claudecode.Item, width int) string {
+func (m model) grepDetail(it transcript.Item, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`
 		Glob    string `json:"glob"`
@@ -265,8 +252,7 @@ func (m model) grepDetail(it claudecode.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// globDetail renders a glob/LS pattern header then the matched paths.
-func (m model) globDetail(it claudecode.Item, width int) string {
+func (m model) globDetail(it transcript.Item, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
@@ -308,10 +294,7 @@ func parseAnsweredAnswers(result string) map[string]string {
 // can't dominate the view (previewBox clips the rest).
 const askUserQuestionPreviewCap = 12
 
-// askUserQuestionDetail renders an answered AskUserQuestion: header chip + prompt,
-// options with the chosen one(s) marked (◉/[x]), and an "Answer" line for any
-// custom answer matching no option. Mirrors the live prompt dock (prompt.go).
-func (m model) askUserQuestionDetail(it claudecode.Item, width int) string {
+func (m model) askUserQuestionDetail(it transcript.Item, width int) string {
 	var in struct {
 		Questions []struct {
 			Header      string `json:"header"`
@@ -400,8 +383,7 @@ func (m model) askUserQuestionDetail(it claudecode.Item, width int) string {
 	return strings.Join(blocks, "\n"+sectionRule(width)+"\n")
 }
 
-// webDetail renders a WebFetch URL or WebSearch query header then the result.
-func (m model) webDetail(it claudecode.Item, width int) string {
+func (m model) webDetail(it transcript.Item, width int) string {
 	var in struct {
 		URL    string `json:"url"`
 		Prompt string `json:"prompt"`

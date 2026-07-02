@@ -8,30 +8,25 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// newHookCmd builds `argus hook <event>`, invoked by a Claude Code hook (hidden:
-// integration entry point, not user-facing). Reads the payload from stdin, enriches it
-// with tmux pane/server from the environment, and forwards to argusd. Strictly
-// best-effort: any failure exits 0 so it never disrupts Claude Code.
+// newHookCmd builds the hidden `argus hook` command. Best-effort: any failure exits 0.
 func newHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "hook <event>",
-		Short:         "Deliver a Claude Code hook event to argusd",
+		Short:         "Deliver a tool hook event to argusd",
 		Hidden:        true,
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Run: func(cmd *cobra.Command, args []string) {
-			// --agent selects the adapter. Only claude-code exists today; other agents
-			// plug in here. Unknown agent → best-effort no-op so an old hook line never
-			// disrupts the client.
 			agent, _ := cmd.Flags().GetString("agent")
-			if agent != claudecode.Agent {
+			if adapters.ByAgent(agent) == nil {
 				shell.Exit(0)
 			}
 			event := ""
@@ -45,7 +40,7 @@ func newHookCmd() *cobra.Command {
 				shell.Exit(0)
 			}
 
-			ev := claudecode.HookEvent{
+			ev := adapter.HookEvent{
 				Agent:      agent,
 				Event:      event,
 				TmuxPane:   os.Getenv("TMUX_PANE"),
@@ -55,7 +50,7 @@ func newHookCmd() *cobra.Command {
 			}
 
 			// PermissionRequest blocks until argusd returns the user's decision, then
-			// prints it for Claude Code. Print nothing on failure so Claude falls back to
+			// prints it for the tool. Print nothing on failure so the tool falls back to
 			// its own prompt. claudecode.PermissionRequestHookTimeoutSeconds bounds the wait.
 			if event == "PermissionRequest" {
 				client, err := api.Dial(cfg.Socket)
@@ -64,7 +59,7 @@ func newHookCmd() *cobra.Command {
 				}
 				defer client.Close()
 				var res api.HookResult
-				_ = client.Call(claudecode.HookMethod, ev, &res)
+				_ = client.Call(adapter.HookMethod, ev, &res)
 				if res.Output != "" {
 					fmt.Println(res.Output)
 				}
@@ -79,7 +74,7 @@ func newHookCmd() *cobra.Command {
 					return
 				}
 				defer client.Close()
-				_ = client.Call(claudecode.HookMethod, ev, nil)
+				_ = client.Call(adapter.HookMethod, ev, nil)
 			}()
 
 			select {
@@ -89,7 +84,7 @@ func newHookCmd() *cobra.Command {
 			shell.Exit(0)
 		},
 	}
-	cmd.Flags().String("agent", claudecode.Agent, "coding agent the hook event originates from")
+	cmd.Flags().String("agent", adapters.Default().Agent(), "coding agent the hook event originates from")
 	// Marker flag installed into settings.json commands; parsed and ignored here.
 	cmd.Flags().Bool("argus-managed", false, "")
 	_ = cmd.Flags().MarkHidden("argus-managed")

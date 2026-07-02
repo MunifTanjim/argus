@@ -14,7 +14,7 @@ import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import '../support/fake_session_repository.dart';
 
-Session _s({String? claudeSessionId}) => Session.fromJson({
+Session _s({String? agentSessionId}) => Session.fromJson({
       'id': 'mac:%1',
       'agent': 't',
       'status': 'working',
@@ -29,7 +29,7 @@ Session _s({String? claudeSessionId}) => Session.fromJson({
       },
       'repo': 'argus',
       'node_label': 'mac',
-      'claude_session_id': ?claudeSessionId,
+      'agent_session_id': ?agentSessionId,
     });
 
 class _SeededTranscript extends TranscriptNotifier {
@@ -46,7 +46,7 @@ class _NoopSub implements TranscriptSubscription {
 }
 
 // Records the store each open() binds to, so a test can assert the screen
-// re-opens onto the new key when the ClaudeSessionID changes.
+// re-opens onto the new key when the agent session id changes.
 class _RecordingRepo implements TranscriptRepository {
   final List<TranscriptNotifier> stores = [];
   @override
@@ -156,10 +156,7 @@ void main() {
     expect(fake.killedIds, contains('mac:%1'));
   });
 
-  // A /clear sets a new ClaudeSessionID under the open session: the feed must
-  // switch to the fresh (post-clear) store and re-open the subscription onto it,
-  // never showing pre-clear chunks.
-  testWidgets('re-opens onto the new store when ClaudeSessionID changes',
+  testWidgets('re-opens onto the new store when agent session id changes',
       (tester) async {
     final repo = _RecordingRepo();
     await tester.pumpWidget(_app([
@@ -178,11 +175,11 @@ void main() {
     expect(find.textContaining('pre-clear line'), findsOneWidget);
     expect(repo.stores, hasLength(1));
 
-    // /clear arrives: same session id, new ClaudeSessionID.
+    // /clear arrives: same session id, new agent session id.
     final container =
         ProviderScope.containerOf(tester.element(find.byType(SessionDetailScreen)));
     container.read(sessionsProvider.notifier).replaceAll([
-      _s(claudeSessionId: 'c9'),
+      _s(agentSessionId: 'c9'),
     ]);
     await tester.pump();
 

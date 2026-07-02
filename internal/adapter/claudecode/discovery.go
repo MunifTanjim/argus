@@ -93,10 +93,10 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 			continue
 		}
 		d := registry.DiscoveredSession{
-			ClaudeSessionID: ps.SessionID,
-			Name:            ps.Name,
-			Cwd:             ps.Cwd,
-			Repo:            repoName(ps.Cwd),
+			AgentSessionID: ps.SessionID,
+			Name:           ps.Name,
+			Cwd:            ps.Cwd,
+			Repo:           repoName(ps.Cwd),
 		}
 		if tty != "" {
 			if pi, ok := paneByTTY[normalizeTTY(tty)]; ok {

@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func testModel() model {
@@ -22,18 +22,18 @@ func testModel() model {
 	}
 }
 
-func sampleChunks() []claudecode.Chunk {
-	return []claudecode.Chunk{
-		{ID: "u1", Kind: claudecode.ChunkUser, Text: "hello"},
-		{ID: "a1", Kind: claudecode.ChunkAI, Model: "claude-opus-4-8",
+func sampleChunks() []transcript.Chunk {
+	return []transcript.Chunk{
+		{ID: "u1", Kind: transcript.ChunkUser, Text: "hello"},
+		{ID: "a1", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
 			Thinking: 1, ToolCount: 1,
-			Usage: claudecode.Usage{Input: 1000, CacheRead: 500, Output: 30},
-			Items: []claudecode.Item{
-				{ID: "a1:0", Kind: claudecode.ItemThinking, Text: "reasoning"},
-				{ID: "a1:1", Kind: claudecode.ItemText, Text: "hi there"},
-				{ID: "a1:2", Kind: claudecode.ItemTool, ToolName: "Bash", InputPreview: "ls", Result: "out"},
+			Usage: transcript.Usage{Input: 1000, CacheRead: 500, Output: 30},
+			Items: []transcript.Item{
+				{ID: "a1:0", Kind: transcript.ItemThinking, Text: "reasoning"},
+				{ID: "a1:1", Kind: transcript.ItemText, Text: "hi there"},
+				{ID: "a1:2", Kind: transcript.ItemTool, ToolName: "Bash", InputPreview: "ls", Result: "out"},
 			}},
-		{ID: "s1", Kind: claudecode.ChunkSystem, Summary: "turn 1.0s"},
+		{ID: "s1", Kind: transcript.ChunkSystem, Summary: "turn 1.0s"},
 	}
 }
 
@@ -72,7 +72,6 @@ func TestSpaceKeyTogglesFold(t *testing.T) {
 	if !m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Error("space should expand the selected card")
 	}
-	// And toggles it shut again.
 	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: ' '})
 	m = res.(model)
 	if m.chunkExpanded(m.transcript.chunks[1]) {
@@ -117,7 +116,7 @@ func TestRestoreChunkCursorByID(t *testing.T) {
 	id := m.currentChunkID()
 
 	// Simulate a refresh that prepends a chunk, shifting indices.
-	m.transcript.chunks = append([]claudecode.Chunk{{ID: "new", Kind: claudecode.ChunkSystem, Summary: "new"}}, m.transcript.chunks...)
+	m.transcript.chunks = append([]transcript.Chunk{{ID: "new", Kind: transcript.ChunkSystem, Summary: "new"}}, m.transcript.chunks...)
 	m.restoreChunkCursor(id, false)
 
 	if m.currentChunkID() != id {

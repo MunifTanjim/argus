@@ -25,7 +25,7 @@ func desktopNodeWithSession(t *testing.T, paneID string, focused bool, sink push
 	})
 	d.SetIdentity("nodeA", "nodeA")
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{
-		{HasPane: true, Server: session.TmuxServerDefault, PaneID: paneID, ClaudeSessionID: "abc", Frontend: session.FrontendTmux},
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: paneID, AgentSessionID: "abc", Frontend: session.FrontendTmux},
 	})
 	d.SetDesktopNotify(true, nil) // builds an OSNotifier; replaced below
 	d.notifier = sink

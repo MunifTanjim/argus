@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // TestMain resolves theme colors and icons once so rendering helpers under test
@@ -48,8 +48,8 @@ func TestToolColorLookup(t *testing.T) {
 
 func TestGenericToolBodyReadableResult(t *testing.T) {
 	m := testModel() // jsonHL is nil → non-JSON path
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "UnknownTool",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "UnknownTool",
 		ToolInput: `{"x":1}`, Result: "plain non-json result line",
 	}
 	out := m.toolBody(it, 60)
@@ -66,8 +66,8 @@ func TestGenericToolBodyReadableResult(t *testing.T) {
 
 func TestGenericToolBodyError(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "UnknownTool",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "UnknownTool",
 		Result: "boom", ResultIsError: true,
 	}
 	out := m.toolBody(it, 60)
@@ -78,8 +78,8 @@ func TestGenericToolBodyError(t *testing.T) {
 
 func TestEditToolDetailShowsDiff(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "Edit",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "Edit",
 		ToolInput: `{"file_path":"a.go","old_string":"foo","new_string":"bar"}`,
 		Result:    "ok",
 	}
@@ -91,8 +91,8 @@ func TestEditToolDetailShowsDiff(t *testing.T) {
 
 func TestBashDetail(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "Bash",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "Bash",
 		ToolInput: `{"command":"ls -la","description":"list files"}`,
 		Result:    "total 5\nfile.go",
 	}
@@ -110,8 +110,8 @@ func TestBashDetail(t *testing.T) {
 
 func TestReadDetail(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "Read",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "Read",
 		ToolInput: `{"file_path":"/repo/main.go"}`,
 		Result:    "     1\tpackage main\n     2\tfunc main(){}",
 	}
@@ -126,8 +126,8 @@ func TestReadDetail(t *testing.T) {
 
 func TestTodoWriteDetail(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
 			{"content":"do A","status":"completed","activeForm":"doing A"},
 			{"content":"do B","status":"in_progress","activeForm":"doing B"},
@@ -151,8 +151,8 @@ func TestTodoWriteDetail(t *testing.T) {
 
 func TestTodoWriteAllGlyphs(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
 			{"content":"a","status":"completed"},
 			{"content":"b","status":"in_progress","activeForm":"doing b"},
@@ -169,8 +169,8 @@ func TestTodoWriteAllGlyphs(t *testing.T) {
 
 func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[]}`, Result: "updated",
 	}
 	out := m.toolBody(it, 60)
@@ -181,8 +181,8 @@ func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 
 func TestBashOutputUsesGeneric(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "BashOutput",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "BashOutput",
 		ToolInput: `{"bash_id":"123"}`, Result: "streamed output",
 	}
 	out := m.toolBody(it, 60)
@@ -197,8 +197,8 @@ func TestBashOutputUsesGeneric(t *testing.T) {
 
 func TestGrepDetail(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "Grep",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "Grep",
 		ToolInput: `{"pattern":"handler","glob":"*.go","path":"internal"}`,
 		Result:    "internal/x.go:10:func handler()",
 	}
@@ -216,8 +216,8 @@ func TestGrepDetail(t *testing.T) {
 
 func TestGlobDetail(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "Glob",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "Glob",
 		ToolInput: `{"pattern":"**/*.go"}`,
 		Result:    "a.go\nb.go",
 	}
@@ -247,8 +247,8 @@ func TestParseAnsweredAnswers(t *testing.T) {
 
 func TestAskUserQuestionDetailSingle(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
 			"multiSelect":false,"options":[
 				{"label":"Red","description":"warm hue"},
@@ -272,8 +272,8 @@ func TestAskUserQuestionDetailSingle(t *testing.T) {
 
 func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Toppings","question":"Choose toppings",
 			"multiSelect":true,"options":[
 				{"label":"Cheese"},{"label":"Olives"},{"label":"Onions"}
@@ -291,8 +291,8 @@ func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
 
 func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
 			"multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]}]}`,
 		Result: `Your questions have been answered: "Pick a color"="Chartreuse". Continue.`,
@@ -305,8 +305,8 @@ func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 
 func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 	m := testModel()
-	it := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[]}`, Result: "updated",
 	}
 	out := m.toolBody(it, 60)
@@ -317,8 +317,8 @@ func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 
 func TestWebDetail(t *testing.T) {
 	m := testModel()
-	fetch := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "WebFetch",
+	fetch := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "WebFetch",
 		ToolInput: `{"url":"https://example.com","prompt":"summarize"}`,
 		Result:    "the page says hi",
 	}
@@ -333,8 +333,8 @@ func TestWebDetail(t *testing.T) {
 		t.Errorf("should not show raw JSON input:\n%s", out)
 	}
 
-	search := claudecode.Item{
-		Kind: claudecode.ItemTool, ToolName: "WebSearch",
+	search := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "WebSearch",
 		ToolInput: `{"query":"golang lipgloss"}`,
 		Result:    "result list",
 	}

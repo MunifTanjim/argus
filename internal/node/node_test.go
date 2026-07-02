@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -70,7 +71,7 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 
 	// Register the shell pane as a session via a hook.
 	payload, _ := json.Marshal(map[string]string{"session_id": "sh-1"})
-	if err := client.Call(claudecode.HookMethod, claudecode.HookEvent{
+	if err := client.Call(adapter.HookMethod, claudecode.HookEvent{
 		Event: "SessionStart", TmuxPane: paneID, TmuxSocket: "argus", Payload: payload,
 	}, nil); err != nil {
 		t.Fatalf("hook call: %v", err)
@@ -196,7 +197,7 @@ func TestSpawnAndKillEndToEnd(t *testing.T) {
 
 	// Register the pane as a session so kill can resolve it, then kill.
 	payload, _ := json.Marshal(map[string]string{"session_id": "spawn-1"})
-	if err := client.Call(claudecode.HookMethod, claudecode.HookEvent{
+	if err := client.Call(adapter.HookMethod, claudecode.HookEvent{
 		Event: "SessionStart", TmuxPane: res.PaneID, TmuxSocket: "argus", Payload: payload,
 	}, nil); err != nil {
 		t.Fatalf("hook: %v", err)
@@ -270,7 +271,7 @@ func TestResolvePanelessReturnsNoTerminalControl(t *testing.T) {
 		session.TmuxServerDefault: tmux.New(""),
 	})
 	d.reg.ApplyHook(registry.HookUpdate{
-		Agent: "claude", ClaudeSessionID: "vs1",
+		Agent: "claude", AgentSessionID: "vs1",
 		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
 	})
 	_, _, err := d.resolve("claude:vs1")

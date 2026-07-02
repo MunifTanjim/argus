@@ -19,7 +19,7 @@ func focusTestNode(t *testing.T, sessID, paneID string) (*Node, *string) {
 	})
 	d.SetIdentity("nodeA", "nodeA")
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{
-		{HasPane: true, Server: session.TmuxServerDefault, PaneID: paneID, ClaudeSessionID: sessID, Frontend: session.FrontendTmux},
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: paneID, AgentSessionID: sessID, Frontend: session.FrontendTmux},
 	})
 	// ReconcileSessions sets ID = "default:<paneID>".
 	revealed := new(string)
