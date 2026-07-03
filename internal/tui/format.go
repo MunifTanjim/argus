@@ -158,10 +158,13 @@ func relTime(iso string) string {
 	}
 }
 
-// clockTime extracts the HH:MM:SS portion of an ISO timestamp, if present.
+// clockTime renders an ISO timestamp as HH:MM:SS in the viewer's local zone.
 func clockTime(ts string) string {
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return t.Local().Format("15:04:05")
+	}
 	if i := strings.IndexByte(ts, 'T'); i >= 0 && len(ts) >= i+9 {
-		return ts[i+1 : i+9]
+		return ts[i+1 : i+9] // unparseable: raw slice, server zone
 	}
 	return ts
 }
