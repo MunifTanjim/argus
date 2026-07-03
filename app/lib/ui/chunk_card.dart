@@ -360,6 +360,7 @@ class _SystemCardState extends State<_SystemCard> {
     final err = c.isError;
     final labelColor = err ? AppColors.error : AppColors.secondary;
     final hasDetail = c.detail != null && c.detail!.isNotEmpty;
+    final hasLabel = c.label != null && c.label!.isNotEmpty;
 
     final header = Row(
       children: [
@@ -367,6 +368,8 @@ class _SystemCardState extends State<_SystemCard> {
         const SizedBox(width: 6),
         Text('System', style: _mono.copyWith(color: labelColor)),
         Text('  ·  ${_clock(c.timestamp)}', style: _monoDim),
+        if (hasLabel) // preview after the timestamp (e.g. "Recap")
+          Text('  ${c.label!}', style: _monoDim),
       ],
     );
 

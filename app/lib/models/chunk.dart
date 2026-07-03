@@ -171,6 +171,7 @@ class Chunk {
   final double contextFirstPct;
   final int contextDeltaTokens;
   final String? summary;
+  final String? label;
   final String? detail;
   final bool isError;
   final String previewItemId;
@@ -192,6 +193,7 @@ class Chunk {
     this.contextFirstPct = 0,
     this.contextDeltaTokens = 0,
     this.summary,
+    this.label,
     this.detail,
     this.isError = false,
     this.previewItemId = '',
@@ -217,6 +219,7 @@ class Chunk {
         contextFirstPct: (j['contextFirstPct'] as num?)?.toDouble() ?? 0,
         contextDeltaTokens: (j['contextDeltaTokens'] as num?)?.toInt() ?? 0,
         summary: j['summary'] as String?,
+        label: j['label'] as String?,
         detail: j['detail'] as String?,
         isError: j['isError'] as bool? ?? false,
         previewItemId: j['previewItemId'] as String? ?? '',

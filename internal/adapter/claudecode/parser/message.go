@@ -73,6 +73,7 @@ type SystemMsg struct {
 	Timestamp time.Time
 	Output    string // extracted from stdout/stderr/notification tags
 	IsError   bool   // true when stderr is non-empty or task was killed
+	Label     string // preview shown after the timestamp (e.g. "Recap"); empty for none
 }
 
 func (SystemMsg) classifiedMsg() {}

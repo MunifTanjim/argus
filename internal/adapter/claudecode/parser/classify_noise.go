@@ -8,9 +8,9 @@ import (
 // --- Hard noise detection ---
 
 // noiseEntryTypes are entry types that never produce visible messages.
-// "summary" (CompactMsg) and "attachment" (Classify branch) are handled elsewhere.
+// "summary" (CompactMsg), "attachment", and "system" (each a Classify branch with
+// a surfaced subtype) are handled elsewhere.
 var noiseEntryTypes = map[string]bool{
-	"system":                true,
 	"file-history-snapshot": true,
 	"queue-operation":       true,
 	"progress":              true,

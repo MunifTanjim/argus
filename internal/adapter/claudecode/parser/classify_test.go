@@ -125,6 +125,43 @@ func TestClassify_SystemMessage(t *testing.T) {
 	}
 }
 
+func TestClassify_AwaySummarySurfaced(t *testing.T) {
+	e := parser.Entry{
+		Type:      "system",
+		Subtype:   "away_summary",
+		UUID:      "as1",
+		Timestamp: "2025-01-15T10:00:00Z",
+		Content:   json.RawMessage(`"You explored the parser and fixed a bug."`),
+	}
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("away_summary recap should surface")
+	}
+	sys, isSys := msg.(parser.SystemMsg)
+	if !isSys {
+		t.Fatalf("expected SystemMsg, got %T", msg)
+	}
+	if sys.Output != "You explored the parser and fixed a bug." {
+		t.Errorf("Output = %q", sys.Output)
+	}
+	if sys.Label != "Recap" {
+		t.Errorf("Label = %q, want Recap", sys.Label)
+	}
+}
+
+func TestClassify_OtherSystemStillNoise(t *testing.T) {
+	e := parser.Entry{
+		Type:      "system",
+		Subtype:   "post_tool_use",
+		UUID:      "sx1",
+		Timestamp: "2025-01-15T10:00:00Z",
+		Content:   json.RawMessage(`"internal bookkeeping"`),
+	}
+	if _, ok := parser.Classify(e); ok {
+		t.Fatal("non-away_summary system entries should remain noise")
+	}
+}
+
 func TestClassify_SidechainFiltered(t *testing.T) {
 	e := makeEntry("assistant", "sc1", "2025-01-15T10:00:00Z",
 		json.RawMessage(`[{"type":"text","text":"sidechain"}]`),

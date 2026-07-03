@@ -30,6 +30,17 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		return nil, false
 	}
 
+	// System side-events: only away_summary (the session recap) surfaces as a system
+	// card; every other subtype is infrastructure. Mirrors the attachment handling.
+	if e.Type == "system" {
+		if e.Subtype == "away_summary" {
+			if text := strings.TrimSpace(ExtractText(e.Content)); text != "" {
+				return SystemMsg{Timestamp: ts, Output: text, Label: "Recap"}, true
+			}
+		}
+		return nil, false
+	}
+
 	// Summary entries are compression boundaries; title is in e.Summary, not content.
 	if e.Type == "summary" {
 		return CompactMsg{

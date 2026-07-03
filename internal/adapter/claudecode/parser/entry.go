@@ -6,11 +6,15 @@ import "encoding/json"
 // Fields map directly to the on-disk format at ~/.claude/projects/{project}/{session}.jsonl.
 type Entry struct {
 	Type        string `json:"type"`
+	Subtype     string `json:"subtype"` // system entries only (e.g. "away_summary")
 	UUID        string `json:"uuid"`
 	Timestamp   string `json:"timestamp"`
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
-	Message     struct {
+	// Content is the top-level payload on system entries (the recap text on
+	// away_summary); distinct from Message.Content on user/assistant entries.
+	Content json.RawMessage `json:"content"`
+	Message struct {
 		Role       string          `json:"role"`
 		Content    json.RawMessage `json:"content"`
 		Model      string          `json:"model"`

@@ -159,7 +159,7 @@ func foldChunk(pc parser.Chunk, agentRefs map[string]string, traces map[string][
 		c.Summary = pc.Output
 	default: // SystemChunk
 		c.Kind = ChunkSystem
-		c.Summary = firstLineOf(pc.Output)
+		c.Label = pc.SystemLabel // preview after the timestamp (e.g. "Recap"); "" for none
 		c.Detail = pc.Output
 		c.IsError = pc.IsError
 	}

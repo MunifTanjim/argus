@@ -441,6 +441,9 @@ func (m model) renderSystem(c claudecode.Chunk, selected, accent bool) string {
 	}
 	body := icon.Render() + " " + label + "  " +
 		Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
+	if c.Label != "" { // preview after the timestamp (e.g. "Recap")
+		body += "  " + StyleDim.Render(c.Label)
+	}
 	if m.chunkExpanded(c) && c.Detail != "" {
 		body += "\n" + indentBlock(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), "  ")
 	}

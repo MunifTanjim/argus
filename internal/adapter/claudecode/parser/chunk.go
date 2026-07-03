@@ -90,8 +90,9 @@ type Chunk struct {
 	DurationMs    int64 // first to last message timestamp in chunk
 
 	// System chunk fields.
-	Output  string
-	IsError bool // bash stderr present or task killed
+	Output      string
+	IsError     bool   // bash stderr present or task killed
+	SystemLabel string // preview shown after the timestamp (e.g. "Recap"); empty for none
 }
 
 // BuildChunks folds classified messages into display chunks. Consecutive AI
@@ -130,10 +131,11 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 		case SystemMsg:
 			flush()
 			chunks = append(chunks, Chunk{
-				Type:      SystemChunk,
-				Timestamp: m.Timestamp,
-				Output:    m.Output,
-				IsError:   m.IsError,
+				Type:        SystemChunk,
+				Timestamp:   m.Timestamp,
+				Output:      m.Output,
+				IsError:     m.IsError,
+				SystemLabel: m.Label,
 			})
 		case AIMsg:
 			aiBuf = append(aiBuf, m)

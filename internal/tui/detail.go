@@ -430,6 +430,9 @@ func (m model) renderDetail(c claudecode.Chunk) string {
 			label = lipgloss.NewStyle().Foreground(ColorError).Render("System")
 		}
 		head := icon.Render() + " " + label + "  " + Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
+		if c.Label != "" { // preview after the timestamp (e.g. "Recap")
+			head += "  " + StyleDim.Render(c.Label)
+		}
 		if c.Detail == "" {
 			return head
 		}

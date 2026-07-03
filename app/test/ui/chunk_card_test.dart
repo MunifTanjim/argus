@@ -109,9 +109,9 @@ void main() {
     expect(find.textContaining('120 tok'), findsOneWidget);
   });
 
-  testWidgets('system chunk shows summary', (tester) async {
-    await tester.pumpWidget(_wrap(const Chunk(
-        id: 's', kind: ChunkKind.system, summary: 'context compacted')));
-    expect(find.textContaining('context compacted'), findsOneWidget);
+  testWidgets('system chunk shows label preview', (tester) async {
+    await tester.pumpWidget(_wrap(
+        const Chunk(id: 's', kind: ChunkKind.system, label: 'Recap')));
+    expect(find.textContaining('Recap'), findsOneWidget);
   });
 }

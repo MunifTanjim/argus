@@ -106,7 +106,8 @@ type Chunk struct {
 	ContextDeltaTokens int     `json:"contextDeltaTokens,omitempty"` // growth, >= 0
 
 	// System / compact chunk.
-	Summary string `json:"summary,omitempty"`
+	Summary string `json:"summary,omitempty"` // compact: the compression title
+	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap")
 	Detail  string `json:"detail,omitempty"`
 	IsError bool   `json:"isError,omitempty"`
 }
