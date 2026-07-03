@@ -128,11 +128,11 @@ type DiscoveredSession struct {
 	StatusHint      session.Status
 }
 
-// ReconcileSessions syncs a tool's sessions to the scan's live set: add new,
+// ReconcileSessions syncs an agent's sessions to the scan's live set: add new,
 // refresh existing (correlating pane-first, else claude id), prune any whose pane
 // and claude id were both absent. The dual-or liveness rule keeps a session alive
 // through a transient pane-correlation miss (via claude id) or vice versa.
-func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
+func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -169,7 +169,7 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 			}
 			s = &session.Session{
 				ID:     id,
-				Tool:   tool,
+				Agent:  agent,
 				Status: session.StatusDiscovered,
 				Source: session.SourceDiscovered,
 			}
@@ -218,7 +218,7 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 	}
 
 	for id, s := range r.sessions {
-		if s.Tool != tool {
+		if s.Agent != agent {
 			continue
 		}
 		pk := ""
@@ -302,11 +302,11 @@ func (r *Registry) ClearInteraction(id string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
-// HookUpdate carries the correlation keys and fields from a tool hook event. Empty
+// HookUpdate carries the correlation keys and fields from an agent hook event. Empty
 // string fields leave an existing session unchanged. A non-empty Status sets the
 // status; StatusDead removes the session.
 type HookUpdate struct {
-	Tool            string
+	Agent           string
 	Server          session.TmuxServer
 	PaneID          string // from $TMUX_PANE; primary correlation key
 	ClaudeSessionID string
@@ -359,7 +359,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		if id == "" {
 			id = "claude:" + u.ClaudeSessionID
 		}
-		s = &session.Session{ID: id, Tool: u.Tool, Status: session.StatusIdle, Source: session.SourceHooked}
+		s = &session.Session{ID: id, Agent: u.Agent, Status: session.StatusIdle, Source: session.SourceHooked}
 		if u.PaneID != "" {
 			s.Tmux.Server = u.Server
 			s.Tmux.PaneID = u.PaneID

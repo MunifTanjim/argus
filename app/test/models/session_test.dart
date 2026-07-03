@@ -6,7 +6,7 @@ import 'package:argus/models/registry_event.dart';
 
 const _sessionJson = '''
 {
-  "id":"macbook:%3","tool":"claude-code","status":"awaiting_input","source":"discovered",
+  "id":"macbook:%3","agent":"claude","status":"awaiting_input","source":"discovered",
   "tmux":{"server":"default","pane_id":"%3","session_name":"argus","window_index":0,"current_path":"/home/u/argus"},
   "repo":"argus",
   "summary":{"model":"claude-opus-4-8","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix bug","last_activity":"2026-06-20T10:00:00Z"},
@@ -33,7 +33,7 @@ void main() {
 
   test('parses a minimal session (omitted optionals)', () {
     final s = Session.fromJson(jsonDecode(
-        '{"id":"x:%1","tool":"claude-code","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":1,"current_path":"/p"}}'));
+        '{"id":"x:%1","agent":"claude","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":1,"current_path":"/p"}}'));
     expect(s.summary, isNull);
     expect(s.interaction, isNull);
     expect(s.repo, isNull);
@@ -42,7 +42,7 @@ void main() {
 
   test('parses an AskUserQuestion interaction with options', () {
     final s = Session.fromJson(jsonDecode(
-        '{"id":"x:%1","tool":"t","status":"awaiting_input","source":"hooked","tmux":{"server":"default","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"interaction":{"kind":"question","questions":[{"header":"DB","question":"Which db?","options":["pg","sqlite"],"option_descriptions":["relational","embedded"]}]}}'));
+        '{"id":"x:%1","agent":"t","status":"awaiting_input","source":"hooked","tmux":{"server":"default","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"interaction":{"kind":"question","questions":[{"header":"DB","question":"Which db?","options":["pg","sqlite"],"option_descriptions":["relational","embedded"]}]}}'));
     final q = s.interaction!.questions.single;
     expect(q.header, 'DB');
     expect(q.options, ['pg', 'sqlite']);
@@ -52,7 +52,7 @@ void main() {
 
   test('parses server status_label', () {
     final s = Session.fromJson({
-      'id': 's1', 'tool': 'claude-code', 'status': 'working', 'source': 'hooked',
+      'id': 's1', 'agent': 'claude', 'status': 'working', 'source': 'hooked',
       'status_label': 'working',
       'tmux': {'server': 'default', 'pane_id': '%1'},
     });

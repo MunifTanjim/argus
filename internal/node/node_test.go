@@ -270,7 +270,7 @@ func TestResolvePanelessReturnsNoTerminalControl(t *testing.T) {
 		session.TmuxServerDefault: tmux.New(""),
 	})
 	d.reg.ApplyHook(registry.HookUpdate{
-		Tool: "claude-code", ClaudeSessionID: "vs1",
+		Agent: "claude", ClaudeSessionID: "vs1",
 		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
 	})
 	_, _, err := d.resolve("claude:vs1")

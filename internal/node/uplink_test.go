@@ -46,7 +46,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.SetIdentity("home", "home-box")
 	d.reg.ApplyHook(registry.HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%1",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%1",
 		ClaudeSessionID: "abc", Status: session.StatusWorking,
 	})
 
@@ -99,7 +99,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	// Live event: a new session on the node streams through to the client.
 	events := c.Events()
 	d.reg.ApplyHook(registry.HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%2",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%2",
 		ClaudeSessionID: "def", Status: session.StatusWorking,
 	})
 	deadline := time.After(3 * time.Second)

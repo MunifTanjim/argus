@@ -11,7 +11,7 @@ import 'package:argus/ui/session_list_screen.dart';
 
 Session _s(String id, String host, String status) =>
     Session.fromJson(jsonDecode(
-        '{"id":"$id","tool":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
+        '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
 
 Widget _app(List<Override> overrides) => ProviderScope(
       overrides: overrides,

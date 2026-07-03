@@ -15,6 +15,7 @@ const HookMethod = "hook.event"
 // HookEvent is the payload `argus hook <event>` sends to the node. TmuxPane/
 // TmuxSocket come from the hook process's environment for pane correlation.
 type HookEvent struct {
+	Agent      string          `json:"agent"`       // originating coding agent, e.g. "claude"
 	Event      string          `json:"event"`       // hook_event_name, e.g. "Stop"
 	TmuxPane   string          `json:"tmux_pane"`   // $TMUX_PANE (e.g. "%3")
 	TmuxSocket string          `json:"tmux_socket"` // basename of the $TMUX socket
@@ -231,6 +232,12 @@ func serverFromSocket(socketBasename string) session.TmuxServer {
 // ProcessHook parses a hook event and applies it to the registry, returning the
 // resulting session and whether it still exists.
 func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
+	// Only claude-code events belong to this adapter. An empty agent is an older
+	// client that predates the field; treat it as claude-code.
+	if ev.Agent != "" && ev.Agent != Agent {
+		return session.Session{}, false
+	}
+
 	var p hookPayload
 	_ = json.Unmarshal(ev.Payload, &p)
 
@@ -285,7 +292,7 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	}
 
 	return reg.ApplyHook(registry.HookUpdate{
-		Tool:               Tool,
+		Agent:              Agent,
 		Server:             server,
 		PaneID:             paneID,
 		ClaudeSessionID:    p.SessionID,

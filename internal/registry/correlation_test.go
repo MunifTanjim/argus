@@ -12,12 +12,12 @@ import (
 func TestHookThenDiscoverySamePaneStaysSingle(t *testing.T) {
 	r := New()
 	r.ApplyHook(HookUpdate{
-		Tool:   "claude-code",
+		Agent:  "claude",
 		Server: session.TmuxServerDefault,
 		PaneID: "%0",
 		Status: session.StatusWorking,
 	})
-	r.ReconcileSessions("claude-code", []DiscoveredSession{
+	r.ReconcileSessions("claude", []DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", Frontend: session.FrontendTmux},
 	})
 

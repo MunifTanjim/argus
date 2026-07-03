@@ -63,7 +63,7 @@ func (f *fakeSource) lastCall() (callRecord, bool) {
 }
 
 func sess(id string) session.Session {
-	return session.Session{ID: id, Tool: "claude-code", Status: session.StatusWorking}
+	return session.Session{ID: id, Agent: "claude", Status: session.StatusWorking}
 }
 
 func eventually(t *testing.T, want func() bool) {

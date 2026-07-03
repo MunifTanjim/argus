@@ -16,7 +16,7 @@ import '../support/fake_session_repository.dart';
 
 Session _s({String? claudeSessionId}) => Session.fromJson({
       'id': 'mac:%1',
-      'tool': 't',
+      'agent': 't',
       'status': 'working',
       'source': 'hooked',
       'frontend': 'tmux',

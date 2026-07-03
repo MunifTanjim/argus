@@ -19,8 +19,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// Tool is the adapter's tool identifier, stored on every session it owns.
-const Tool = "claude-code"
+// Agent is the adapter's coding-agent identifier, stored on every session it owns.
+const Agent = "claude"
 
 // runPS snapshots all processes as "<pid> <tty> <stat> <args...>" lines. A
 // package var so tests can stub it. Claude Code disguises its process name as a
@@ -219,7 +219,7 @@ func (d *Discoverer) ScanOnce(ctx context.Context) error {
 	for i := range found {
 		found[i].Summary, found[i].StatusHint = d.cachedTranscript(found[i].TranscriptPath)
 	}
-	d.reg.ReconcileSessions(Tool, found)
+	d.reg.ReconcileSessions(Agent, found)
 	return lastErr
 }
 

@@ -5,12 +5,12 @@ import 'package:argus/state/grouping.dart';
 
 Session _s(String id, String host, String status, {bool offline = false}) =>
     Session.fromJson(jsonDecode(
-        '{"id":"$id","tool":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"$host","offline":$offline}'));
+        '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"$host","offline":$offline}'));
 
 Session _sn(String id, {String? nodeId, String? nodeLabel}) =>
     Session.fromJson(jsonDecode(jsonEncode({
       'id': id,
-      'tool': 't',
+      'agent': 't',
       'status': 'working',
       'source': 'hooked',
       'tmux': {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -170,6 +171,15 @@ func TestReconcileIfInstalledAddsMissingEvents(t *testing.T) {
 	}
 	if !foundUser {
 		t.Error("user's Stop hook was dropped")
+	}
+
+	// Legacy #argus-managed marker must be migrated to the --argus-managed flag.
+	for _, g := range hooks["Stop"] {
+		for _, c := range g.Hooks {
+			if isManaged(c) && strings.Contains(c.Command, legacyHookMarker) {
+				t.Errorf("legacy marker not migrated: %q", c.Command)
+			}
+		}
 	}
 
 	// Second run is a no-op.

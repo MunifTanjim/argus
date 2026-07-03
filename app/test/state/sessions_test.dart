@@ -5,9 +5,9 @@ import 'package:argus/models/registry_event.dart';
 import 'package:argus/state/sessions.dart';
 
 const _s1 =
-    '{"id":"mac:%1","tool":"t","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
+    '{"id":"mac:%1","agent":"t","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
 const _s1awaiting =
-    '{"id":"mac:%1","tool":"t","status":"awaiting_input","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
+    '{"id":"mac:%1","agent":"t","status":"awaiting_input","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
 
 void main() {
   test('parseSessions handles a list and null', () {

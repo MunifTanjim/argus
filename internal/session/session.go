@@ -150,8 +150,8 @@ type Summary struct {
 type Session struct {
 	// ID is argus's internal identifier (stable for the session's lifetime).
 	ID string `json:"id"`
-	// Tool is the adapter that owns this session (e.g. "claude-code").
-	Tool string `json:"tool"`
+	// Agent is the coding agent that owns this session (e.g. "claude").
+	Agent string `json:"agent"`
 	// ClaudeSessionID is the tool's own session id; empty until a hook fires.
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
 	// Name is the tool's own session name (e.g. Claude's session name), when known.

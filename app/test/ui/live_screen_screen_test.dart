@@ -32,7 +32,7 @@ class _FakeControl extends FakeSessionRepository {
 Session _makeSession() => Session.fromJson(
       jsonDecode(jsonEncode({
         'id': 'test-session-id',
-        'tool': 't',
+        'agent': 't',
         'status': 'active',
         'source': 'hooked',
         'repo': 'my-repo',

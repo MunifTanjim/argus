@@ -18,6 +18,9 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
+	if ev.Agent != "" && ev.Agent != claudecode.Agent {
+		return api.HookResult{}, nil
+	}
 	s, alive := claudecode.ProcessHook(d.reg, ev)
 	event := claudecode.EventName(ev)
 	api.LogAttr(ctx, "event", event)

@@ -11,7 +11,7 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 	ch, cancel := r.Subscribe()
 	defer cancel()
 
-	r.ReconcileSessions("claude-code", []DiscoveredSession{
+	r.ReconcileSessions("claude", []DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 
@@ -20,7 +20,7 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 		t.Fatalf("want added %%0, got %+v", ev)
 	}
 
-	r.ReconcileSessions("claude-code", nil)
+	r.ReconcileSessions("claude", nil)
 	ev = <-ch
 	if ev.Type != EventRemoved || ev.Session.Tmux.PaneID != "%0" {
 		t.Fatalf("want removed %%0, got %+v", ev)
@@ -30,7 +30,7 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 func TestSnapshotStampsStatusLabel(t *testing.T) {
 	r := New()
 	r.ApplyHook(HookUpdate{
-		Tool:   "claude-code",
+		Agent:  "claude",
 		Server: session.TmuxServerDefault,
 		PaneID: "%1",
 		Status: session.StatusWorking,

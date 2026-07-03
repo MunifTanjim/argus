@@ -19,7 +19,7 @@ import (
 // with tmux pane/server from the environment, and forwards to argusd. Strictly
 // best-effort: any failure exits 0 so it never disrupts Claude Code.
 func newHookCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:           "hook <event>",
 		Short:         "Deliver a Claude Code hook event to argusd",
 		Hidden:        true,
@@ -27,6 +27,13 @@ func newHookCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Run: func(cmd *cobra.Command, args []string) {
+			// --agent selects the adapter. Only claude-code exists today; other agents
+			// plug in here. Unknown agent → best-effort no-op so an old hook line never
+			// disrupts the client.
+			agent, _ := cmd.Flags().GetString("agent")
+			if agent != claudecode.Agent {
+				shell.Exit(0)
+			}
 			event := ""
 			if len(args) > 0 {
 				event = args[0]
@@ -39,6 +46,7 @@ func newHookCmd() *cobra.Command {
 			}
 
 			ev := claudecode.HookEvent{
+				Agent:      agent,
 				Event:      event,
 				TmuxPane:   os.Getenv("TMUX_PANE"),
 				TmuxSocket: tmux.SocketBaseFromEnv(os.Getenv("TMUX")),
@@ -81,4 +89,9 @@ func newHookCmd() *cobra.Command {
 			shell.Exit(0)
 		},
 	}
+	cmd.Flags().String("agent", claudecode.Agent, "coding agent the hook event originates from")
+	// Marker flag installed into settings.json commands; parsed and ignored here.
+	cmd.Flags().Bool("argus-managed", false, "")
+	_ = cmd.Flags().MarkHidden("argus-managed")
+	return cmd
 }

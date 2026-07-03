@@ -114,7 +114,7 @@ func TestScanOnceVSCodeNoPruneOnPSError(t *testing.T) {
 	t.Cleanup(func() { claudeSessionsDirOverride = "" })
 
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode}})
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode}})
 
 	orig := runPS
 	t.Cleanup(func() { runPS = orig })

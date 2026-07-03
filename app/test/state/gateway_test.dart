@@ -8,7 +8,7 @@ import 'package:argus/state/gateway.dart';
 import 'package:argus/state/sessions.dart';
 
 const _s1 =
-    '{"id":"mac:%1","tool":"t","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
+    '{"id":"mac:%1","agent":"t","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"mac"}';
 
 void main() {
   test('loadSessions populates the store from sessions.list', () async {

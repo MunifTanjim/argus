@@ -8,9 +8,13 @@ import (
 	"strings"
 )
 
-// HookMarker is appended (as a shell comment) to every installed command so the
+// HookMarker is a hidden flag appended to every installed command so the
 // installer can recognize and remove only its own hooks, leaving the user's.
-const HookMarker = "#argus-managed"
+const HookMarker = "--argus-managed"
+
+// legacyHookMarker is the shell-comment marker used before HookMarker. Detected
+// so existing installs are recognized and migrated to the flag on reconcile.
+const legacyHookMarker = "#argus-managed"
 
 // DefaultHookEvents are the Claude Code hook events argus registers.
 var DefaultHookEvents = []string{
@@ -63,10 +67,12 @@ type hookGroup struct {
 	Hooks   []hookCmd `json:"hooks"`
 }
 
-func isManaged(c hookCmd) bool { return strings.Contains(c.Command, HookMarker) }
+func isManaged(c hookCmd) bool {
+	return strings.Contains(c.Command, HookMarker) || strings.Contains(c.Command, legacyHookMarker)
+}
 
 func managedCommand(argusBin, event string) string {
-	return fmt.Sprintf("%s hook %s %s", argusBin, event, HookMarker)
+	return fmt.Sprintf("%s hook %s --agent %s %s", argusBin, HookMarker, Agent, event)
 }
 
 // managedCommandBin recovers the binary path from a command built by managedCommand.

@@ -24,7 +24,7 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 	setup := func() (*Node, string) {
 		d := newNode(map[session.TmuxServer]*tmux.Client{})
 		s, _ := d.reg.ApplyHook(registry.HookUpdate{
-			Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%9",
+			Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%9",
 			Status: session.StatusAwaitingInput,
 			Interaction: &session.Interaction{
 				Kind:      session.InteractionQuestion,

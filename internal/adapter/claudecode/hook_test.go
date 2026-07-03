@@ -42,7 +42,7 @@ func TestServerFromSocket(t *testing.T) {
 
 func TestProcessHookDrivesStatus(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 
@@ -79,7 +79,7 @@ func TestProcessHookDrivesStatus(t *testing.T) {
 
 func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	hook := func(event string, payload map[string]any) HookEvent {
@@ -124,7 +124,7 @@ func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 
 func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	raw, _ := json.Marshal(map[string]any{"source": "startup"})
@@ -143,7 +143,7 @@ func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 
 func TestProcessHookSessionStartResumeSurfacesRespondPrompt(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	raw, _ := json.Marshal(map[string]any{"source": "resume"})
@@ -163,7 +163,7 @@ func TestProcessHookSessionStartResumeSurfacesRespondPrompt(t *testing.T) {
 
 func TestProcessHookSessionEndRemovesOnGenuineEnd(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	end := func(reason string) HookEvent {
@@ -177,7 +177,7 @@ func TestProcessHookSessionEndRemovesOnGenuineEnd(t *testing.T) {
 
 func TestInteractionDetection(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	hook := func(event string, payload map[string]any) HookEvent {
@@ -323,7 +323,7 @@ func TestProcessHookVSCodeIgnoresInheritedPane(t *testing.T) {
 
 	// A discovery scan that does not list pane %5 must NOT prune the session;
 	// the unified scan still reports the live VSCode session (by claude id).
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{ClaudeSessionID: "vs-1", Frontend: session.FrontendVSCode},
 	})
 	if _, ok := reg.Get("claude:vs-1"); !ok {
@@ -376,7 +376,7 @@ func TestProcessHookUnknownEntrypointTrustsPane(t *testing.T) {
 
 func TestNotificationAlwaysIdle(t *testing.T) {
 	reg := registry.New()
-	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	notify := func(msg string) session.Session {

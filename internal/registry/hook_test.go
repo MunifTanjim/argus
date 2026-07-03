@@ -9,13 +9,13 @@ import (
 func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 	r := New()
 	// First discovered via tmux.
-	r.ReconcileSessions("claude-code", []DiscoveredSession{
+	r.ReconcileSessions("claude", []DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 
 	// Then a hook arrives for that pane.
 	got, alive := r.ApplyHook(HookUpdate{
-		Tool:            "claude-code",
+		Agent:           "claude",
 		Server:          session.TmuxServerDefault,
 		PaneID:          "%0",
 		ClaudeSessionID: "sess-abc",
@@ -41,7 +41,7 @@ func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 	r := New()
 	got, alive := r.ApplyHook(HookUpdate{
-		Tool:            "claude-code",
+		Agent:           "claude",
 		Server:          session.TmuxServerArgus,
 		PaneID:          "%5",
 		ClaudeSessionID: "z",
@@ -57,11 +57,11 @@ func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 
 func TestApplyHookStatusDeadRemoves(t *testing.T) {
 	r := New()
-	r.ReconcileSessions("claude-code", []DiscoveredSession{
+	r.ReconcileSessions("claude", []DiscoveredSession{
 		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
 	})
 	_, alive := r.ApplyHook(HookUpdate{
-		Tool:   "claude-code",
+		Agent:  "claude",
 		Server: session.TmuxServerDefault,
 		PaneID: "%0",
 		Status: session.StatusDead,
@@ -88,7 +88,7 @@ func TestApplyHookNotificationFallbackKeepsRicherInteraction(t *testing.T) {
 	}
 	apply := func(r *Registry, ix *session.Interaction, status session.Status) session.Session {
 		got, _ := r.ApplyHook(HookUpdate{
-			Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+			Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 			Status: status, Interaction: ix,
 		})
 		return got
@@ -166,7 +166,7 @@ func TestApplyHookReplaceInteractionSupersedesRicher(t *testing.T) {
 	idle := &session.Interaction{Kind: session.InteractionIdle}
 	apply := func(r *Registry, ix *session.Interaction, replace bool) session.Session {
 		got, _ := r.ApplyHook(HookUpdate{
-			Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+			Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 			Status: session.StatusAwaitingInput, Interaction: ix, ReplaceInteraction: replace,
 		})
 		return got
@@ -195,7 +195,7 @@ func TestApplyHookCachesSummaryAndRepo(t *testing.T) {
 	r := New()
 	sum := &session.Summary{Model: "claude-opus-4-8", HasContext: true, ContextPct: 42, Task: "do the thing"}
 	got, _ := r.ApplyHook(HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		Repo: "argus", Status: session.StatusWorking, Summary: sum,
 	})
 	if got.Summary == nil || got.Summary.Model != "claude-opus-4-8" || got.Repo != "argus" {
@@ -204,7 +204,7 @@ func TestApplyHookCachesSummaryAndRepo(t *testing.T) {
 
 	// A status-only update with no summary keeps the cached one (and repo).
 	got, _ = r.ApplyHook(HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		Status: session.StatusIdle,
 	})
 	if got.Summary == nil || got.Summary.Task != "do the thing" {
@@ -218,9 +218,9 @@ func TestApplyHookCachesSummaryAndRepo(t *testing.T) {
 func TestApplyHookCorrelatesByClaudeIDAcrossReconcile(t *testing.T) {
 	r := New()
 	// Hook first (claude not yet discovered in tmux), keyed by pane.
-	r.ApplyHook(HookUpdate{Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0", ClaudeSessionID: "s1", Status: session.StatusIdle})
+	r.ApplyHook(HookUpdate{Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0", ClaudeSessionID: "s1", Status: session.StatusIdle})
 	// A later hook for same claude id but reporting no pane still finds it.
-	got, alive := r.ApplyHook(HookUpdate{Tool: "claude-code", ClaudeSessionID: "s1", Status: session.StatusWorking})
+	got, alive := r.ApplyHook(HookUpdate{Agent: "claude", ClaudeSessionID: "s1", Status: session.StatusWorking})
 	if !alive || got.Status != session.StatusWorking {
 		t.Fatalf("expected correlation by claude id: %+v", got)
 	}
@@ -232,7 +232,7 @@ func TestApplyHookCorrelatesByClaudeIDAcrossReconcile(t *testing.T) {
 func TestApplyHookStoresFrontend(t *testing.T) {
 	r := New()
 	s, alive := r.ApplyHook(HookUpdate{
-		Tool: "claude-code", ClaudeSessionID: "vs1",
+		Agent: "claude", ClaudeSessionID: "vs1",
 		Frontend: session.FrontendVSCode, Status: session.StatusIdle,
 	})
 	if !alive || s.Frontend != session.FrontendVSCode || s.Controllable() {
@@ -244,12 +244,12 @@ func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
 	r := New()
 	// First: a tmux session via hook (pane present).
 	r.ApplyHook(HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		ClaudeSessionID: "s1", Frontend: session.FrontendTmux, Status: session.StatusIdle,
 	})
 	// Then: a later hook correlated by claude id arrives paneless/vscode — must NOT downgrade.
 	s, _ := r.ApplyHook(HookUpdate{
-		Tool: "claude-code", ClaudeSessionID: "s1",
+		Agent: "claude", ClaudeSessionID: "s1",
 		Frontend: session.FrontendVSCode, Status: session.StatusWorking,
 	})
 	if s.Frontend != session.FrontendTmux {
@@ -262,12 +262,12 @@ func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
 func TestApplyHookTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
 	r := New()
 	r.ApplyHook(HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		ClaudeSessionID: "c0", TranscriptPath: "/tmp/c0.jsonl",
 		Status: session.StatusIdle, Summary: &session.Summary{Task: "pre-clear"},
 	})
 	got, _ := r.ApplyHook(HookUpdate{
-		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		ClaudeSessionID: "c1", TranscriptPath: "/tmp/c1.jsonl",
 		Status: session.StatusAwaitingInput,
 	})

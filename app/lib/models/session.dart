@@ -143,7 +143,7 @@ class Interaction {
 
 class Session {
   final String id;
-  final String tool;
+  final String agent;
   final String? claudeSessionId;
   final String? name;
   final TmuxLocation tmux;
@@ -162,7 +162,7 @@ class Session {
 
   const Session({
     required this.id,
-    required this.tool,
+    required this.agent,
     required this.tmux,
     required this.status,
     this.statusLabel = '',
@@ -182,7 +182,7 @@ class Session {
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
         id: j['id'] as String,
-        tool: j['tool'] as String? ?? '',
+        agent: j['agent'] as String? ?? '',
         claudeSessionId: j['claude_session_id'] as String?,
         name: j['name'] as String?,
         tmux: TmuxLocation.fromJson(j['tmux'] as Map<String, dynamic>),

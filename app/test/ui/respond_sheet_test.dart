@@ -27,7 +27,7 @@ class _RecordingControl extends FakeSessionRepository {
 Session _session(Map<String, dynamic> interaction) =>
     Session.fromJson(jsonDecode(jsonEncode({
       'id': 'mac:%1',
-      'tool': 't',
+      'agent': 't',
       'status': 'awaiting',
       'source': 'hooked',
       'tmux': {
