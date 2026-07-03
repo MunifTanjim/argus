@@ -43,6 +43,7 @@ const (
 	ItemText     ItemKind = "text" // assistant output text
 	ItemTool     ItemKind = "tool"
 	ItemSubagent ItemKind = "subagent" // Task/Agent tool that spawned a subagent
+	ItemPrompt   ItemKind = "prompt"   // synthetic: injected TUI-side, never parser-emitted
 )
 
 // Item is one structured element within an AI chunk.

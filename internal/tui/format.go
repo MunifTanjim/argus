@@ -374,7 +374,7 @@ func itemAccentColor(it claudecode.Item) color.Color {
 	switch it.Kind {
 	case claudecode.ItemThinking:
 		return ColorTextDim
-	case claudecode.ItemText:
+	case claudecode.ItemText, claudecode.ItemPrompt:
 		return ColorTextSecondary
 	case claudecode.ItemSubagent:
 		return ColorToolTask

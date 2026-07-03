@@ -334,6 +334,8 @@ func itemRow(it claudecode.Item) string {
 		indicator, name, summary = Icon.Thinking.Render(), "Thinking", firstLine(it.Text)
 	case claudecode.ItemText:
 		indicator, name, summary = Icon.Output.Render(), "Output", firstLine(it.Text)
+	case claudecode.ItemPrompt:
+		indicator, name, summary = Icon.User.Render(), "Prompt", firstLine(it.Text)
 	case claudecode.ItemSubagent:
 		indicator = Icon.Subagent.Render()
 		name = it.SubagentType

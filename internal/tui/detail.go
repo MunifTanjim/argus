@@ -46,7 +46,7 @@ func (f *detailFrame) toggle(i int) {
 	f.expanded[i] = !f.isExpanded(i)
 }
 
-// expandOutputs pre-expands the frame's Output (text) items so final output shows
+// expandOutputs pre-expands the frame's Prompt and Output items so they show
 // without a manual unfold. Only items without an existing override are touched, so
 // it's safe to re-run as a streamed trace grows (won't re-expand a user-collapsed item).
 func (f *detailFrame) expandOutputs() {
@@ -54,7 +54,7 @@ func (f *detailFrame) expandOutputs() {
 		f.expanded = map[int]bool{}
 	}
 	for i, it := range f.items {
-		if it.Kind == claudecode.ItemText {
+		if it.Kind == claudecode.ItemText || it.Kind == claudecode.ItemPrompt {
 			if _, ok := f.expanded[i]; !ok {
 				f.expanded[i] = true
 			}
@@ -70,9 +70,13 @@ func (m model) topFrame() *detailFrame {
 	return &m.transcript.detailStack[len(m.transcript.detailStack)-1]
 }
 
-// flattenTrace collects the AI items across a subagent's trace chunks, in order.
+// flattenTrace collects a subagent trace's AI items. A subagent session opens with
+// its prompt as chunk 0 (a user chunk), surfaced as a leading synthetic ItemPrompt.
 func flattenTrace(chunks []claudecode.Chunk) []claudecode.Item {
 	var items []claudecode.Item
+	if len(chunks) > 0 && chunks[0].Kind == claudecode.ChunkUser && strings.TrimSpace(chunks[0].Text) != "" {
+		items = append(items, claudecode.Item{Kind: claudecode.ItemPrompt, Text: chunks[0].Text})
+	}
 	for _, c := range chunks {
 		if c.Kind == claudecode.ChunkAI {
 			items = append(items, c.Items...)
@@ -93,6 +97,8 @@ func drillLabel(it claudecode.Item) string {
 		return "Thinking"
 	case claudecode.ItemText:
 		return "Output"
+	case claudecode.ItemPrompt:
+		return "Prompt"
 	case claudecode.ItemSubagent:
 		return subagentLabel(it)
 	default:
@@ -483,6 +489,9 @@ func (m model) detailItemBody(it claudecode.Item, c color.Color, bar string, wid
 	case claudecode.ItemText:
 		head := Icon.Output.Render() + " " + StyleSecondaryBold.Render("Output")
 		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
+	case claudecode.ItemPrompt:
+		head := Icon.User.Render() + " " + StyleSecondaryBold.Render("Prompt")
+		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
 	case claudecode.ItemSubagent:
 		name := it.SubagentType
 		if name == "" {
@@ -493,7 +502,11 @@ func (m model) detailItemBody(it claudecode.Item, c color.Color, bar string, wid
 			head += "  " + StyleSecondary.Render(truncate(it.SubagentDesc, 70))
 		}
 		if n := len(flattenTrace(it.Trace)); n > 0 {
-			hint := StyleDim.Render(fmt.Sprintf("↵ drill into %d steps", n))
+			noun := "steps"
+			if n == 1 {
+				noun = "step"
+			}
+			hint := StyleDim.Render(fmt.Sprintf("↵ drill into %d %s", n, noun))
 			return accentBlock(hardWrap(head+"\n"+hint, iw), c, bar)
 		} else if it.HasTrace {
 			hint := StyleDim.Render("↵ drill in (streaming)")

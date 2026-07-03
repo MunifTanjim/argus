@@ -192,6 +192,57 @@ func TestDetailScrollHint(t *testing.T) {
 	}
 }
 
+func TestFlattenTracePrependsPrompt(t *testing.T) {
+	chunks := []claudecode.Chunk{
+		{Kind: claudecode.ChunkUser, Text: "find the bug"},
+		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemTool, ToolName: "Grep"}}},
+		{Kind: claudecode.ChunkUser, Text: "keep going"},
+	}
+	items := flattenTrace(chunks)
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	if items[0].Kind != claudecode.ItemPrompt || items[0].Text != "find the bug" {
+		t.Errorf("items[0] = %+v, want ItemPrompt %q", items[0], "find the bug")
+	}
+	if items[1].Kind != claudecode.ItemTool {
+		t.Errorf("items[1].Kind = %q, want tool", items[1].Kind)
+	}
+}
+
+// Only chunk 0 is the prompt; a later user chunk (team-agent shape) is not hoisted.
+func TestFlattenTraceUserChunkAfterAINotPrompt(t *testing.T) {
+	chunks := []claudecode.Chunk{
+		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
+		{Kind: claudecode.ChunkUser, Text: "later message"},
+	}
+	items := flattenTrace(chunks)
+	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+		t.Fatalf("got %+v, want single text item (no prompt)", items)
+	}
+}
+
+func TestFlattenTraceBlankPromptSkipped(t *testing.T) {
+	chunks := []claudecode.Chunk{
+		{Kind: claudecode.ChunkUser, Text: "  \n "},
+		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
+	}
+	items := flattenTrace(chunks)
+	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+		t.Fatalf("got %+v, want single text item (blank prompt skipped)", items)
+	}
+}
+
+func TestFlattenTraceNoUserChunk(t *testing.T) {
+	chunks := []claudecode.Chunk{
+		{Kind: claudecode.ChunkAI, Items: []claudecode.Item{{Kind: claudecode.ItemText, Text: "out"}}},
+	}
+	items := flattenTrace(chunks)
+	if len(items) != 1 || items[0].Kind != claudecode.ItemText {
+		t.Fatalf("got %+v, want single text item", items)
+	}
+}
+
 func TestEnterDrillPopStack(t *testing.T) {
 	sub := claudecode.Item{
 		Kind: claudecode.ItemSubagent, SubagentType: "explorer", HasTrace: true,
