@@ -486,13 +486,8 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.resetPromptState()
 	m.prompt.key = interactionKey(m.sessions[m.selectedID].Interaction)
 	ref := subRef{subID: newSubID(), sessionID: m.selectedID, cacheKey: m.cacheKeyFor(m.selectedID)}
-	m.activeSub = ref
-	have := len(m.transcriptCache[ref.key()].chunks)
-	m.transcript.chunks = m.transcriptCache[ref.key()].chunks // show cached immediately
-	// Open pinned to the bottom so the catch-up delta keeps tailing (see restoreChunkCursor).
-	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
-	m.transcript.scroll = m.maxScroll()
-	return m, m.subscribeCmd(ref, have)
+	cmd := m.bindStream(ref)
+	return m, cmd
 }
 
 func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {

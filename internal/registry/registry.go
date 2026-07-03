@@ -185,11 +185,7 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 			s.Tmux.WindowIndex = f.WindowIndex
 			s.Tmux.CurrentPath = f.CurrentPath
 		}
-		if f.ClaudeSessionID != "" && s.ClaudeSessionID != f.ClaudeSessionID {
-			r.index.clear("", s.ClaudeSessionID) // drop the superseded id (/clear swaps it)
-			s.ClaudeSessionID = f.ClaudeSessionID
-			r.index.setClaude(f.ClaudeSessionID, s.ID)
-		}
+		r.reindexClaudeID(s, f.ClaudeSessionID)
 
 		// A pane is always tmux; otherwise adopt the discovered frontend only while
 		// still paneless. Never downgrade.
@@ -208,10 +204,7 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 		if f.Repo != "" {
 			s.Repo = f.Repo
 		}
-		if f.TranscriptPath != "" && f.TranscriptPath != s.TranscriptPath {
-			s.TranscriptPath = f.TranscriptPath
-			s.Summary = nil // transcript swapped (/clear): the old digest is stale
-		}
+		setTranscriptPath(s, f.TranscriptPath)
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
@@ -243,6 +236,27 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 			r.remove(id, pk, session.StatusDead)
 		}
 	}
+}
+
+// reindexClaudeID re-keys the claude-id index when the id changes under a session
+// (/clear swaps it in place), dropping the superseded entry. Caller holds r.mu.
+func (r *Registry) reindexClaudeID(s *session.Session, claudeID string) {
+	if claudeID == "" || s.ClaudeSessionID == claudeID {
+		return
+	}
+	r.index.clear("", s.ClaudeSessionID)
+	s.ClaudeSessionID = claudeID
+	r.index.setClaude(claudeID, s.ID)
+}
+
+// setTranscriptPath points the session at a new transcript, invalidating the
+// now-stale summary digest (/clear swaps to a fresh file). Caller holds r.mu.
+func setTranscriptPath(s *session.Session, path string) {
+	if path == "" || path == s.TranscriptPath {
+		return
+	}
+	s.TranscriptPath = path
+	s.Summary = nil
 }
 
 // applyStatusHint seeds a transcript-derived status onto a still-StatusDiscovered
@@ -357,21 +371,14 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		created = true
 	}
 
-	if u.ClaudeSessionID != "" && s.ClaudeSessionID != u.ClaudeSessionID {
-		r.index.clear("", s.ClaudeSessionID) // drop the superseded id (/clear swaps it)
-		s.ClaudeSessionID = u.ClaudeSessionID
-		r.index.setClaude(u.ClaudeSessionID, s.ID)
-	}
+	r.reindexClaudeID(s, u.ClaudeSessionID)
 	if u.Cwd != "" {
 		s.Cwd = u.Cwd
 	}
 	if u.Repo != "" {
 		s.Repo = u.Repo
 	}
-	if u.TranscriptPath != "" && u.TranscriptPath != s.TranscriptPath {
-		s.TranscriptPath = u.TranscriptPath
-		s.Summary = nil // transcript swapped (/clear): the old digest is stale
-	}
+	setTranscriptPath(s, u.TranscriptPath)
 	// Never downgrade a pane-bearing session: a pane means tmux, whatever a later
 	// correlated hook claims.
 	if s.Tmux.PaneID != "" {

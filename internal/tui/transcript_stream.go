@@ -27,15 +27,21 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 		return nil
 	}
 	old := m.activeSub.subID
-	oldKey := m.activeSub.key()
+	delete(m.transcriptCache, m.activeSub.key()) // superseded transcript; free its chunks
+	m.transcript.err = nil                       // drop any stale pre-clear error
 	ref := subRef{subID: newSubID(), sessionID: m.selectedID, cacheKey: m.cacheKeyFor(m.selectedID)}
+	return tea.Batch(m.unsubscribeCmd(old), m.bindStream(ref))
+}
+
+// bindStream points the active subscription at ref, shows its cached chunks
+// immediately (empty for a fresh key), pins the view to the bottom so the catch-up
+// delta keeps tailing (see restoreChunkCursor), and returns the subscribe command.
+func (m *model) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
-	delete(m.transcriptCache, oldKey) // superseded transcript; free its chunks
-	m.transcript.chunks = m.transcriptCache[ref.key()].chunks // fresh key → empty
-	m.transcript.err = nil                                     // drop any stale pre-clear error
+	m.transcript.chunks = m.transcriptCache[ref.key()].chunks
 	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
 	m.transcript.scroll = m.maxScroll()
-	return tea.Batch(m.unsubscribeCmd(old), m.subscribeCmd(ref, len(m.transcript.chunks)))
+	return m.subscribeCmd(ref, len(m.transcript.chunks))
 }
 
 // cacheKeyFor returns the transcript-cache discriminator for a session: its
