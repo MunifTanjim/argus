@@ -141,6 +141,26 @@ func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 	}
 }
 
+func TestProcessHookSessionStartResumeSurfacesRespondPrompt(t *testing.T) {
+	reg := registry.New()
+	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
+	raw, _ := json.Marshal(map[string]any{"source": "resume"})
+	got, alive := ProcessHook(reg, HookEvent{Event: "SessionStart", TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
+	if !alive {
+		t.Fatal("SessionStart(source=resume) must keep the session")
+	}
+	// A resumed session is waiting for the user to continue: surface awaiting-input
+	// with the compose prompt, like /clear.
+	if got.Status != session.StatusAwaitingInput {
+		t.Fatalf("want awaiting-input after resume, got %q", got.Status)
+	}
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("respond prompt must show after SessionStart(resume), got %+v", got.Interaction)
+	}
+}
+
 func TestProcessHookSessionEndRemovesOnGenuineEnd(t *testing.T) {
 	reg := registry.New()
 	reg.ReconcileSessions(Tool, []registry.DiscoveredSession{

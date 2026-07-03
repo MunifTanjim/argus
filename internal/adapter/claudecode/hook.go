@@ -253,10 +253,12 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	// idle, stale prompt cleared (ix nil). Start → awaiting-input with an idle
 	// interaction so the compose prompt shows (list flags only awaiting-input;
 	// dock needs an interaction); replace forces it over anything still pending.
+	// resume (--resume/--continue//resume) reopens an existing conversation waiting
+	// on the user, so it surfaces the same compose prompt.
 	switch {
 	case event == "SessionEnd" && p.Reason == "clear":
 		status = session.StatusIdle
-	case event == "SessionStart" && p.Source == "clear":
+	case event == "SessionStart" && (p.Source == "clear" || p.Source == "resume"):
 		status = session.StatusAwaitingInput
 		ix = &session.Interaction{Kind: session.InteractionIdle}
 		replace = true
