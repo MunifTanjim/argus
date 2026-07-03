@@ -9,7 +9,6 @@ import 'item_row.dart';
 import 'subagent_trace_screen.dart';
 import 'theme.dart';
 
-const _redColor = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
 final _monoDim = _mono.copyWith(color: AppColors.dim);
 
@@ -42,8 +41,9 @@ class _ChunkCardState extends State<ChunkCard> {
       case ChunkKind.ai:
         return _aiCard(widget.chunk);
       case ChunkKind.system:
+        return _SystemCard(chunk: widget.chunk);
       case ChunkKind.compact:
-        return _MetaRow(chunk: widget.chunk);
+        return _CompactDivider(summary: widget.chunk.summary);
       case ChunkKind.unknown:
         return const SizedBox.shrink();
     }
@@ -288,27 +288,91 @@ class _UserBubbleState extends State<_UserBubble> {
       );
 }
 
-class _MetaRow extends StatelessWidget {
-  const _MetaRow({required this.chunk});
+/// System events (local command / bash / task-notify output) as a subtle
+/// bordered card. Tap toggles the detail body; mirrors the TUI system row.
+class _SystemCard extends StatefulWidget {
+  const _SystemCard({required this.chunk});
   final Chunk chunk;
 
   @override
+  State<_SystemCard> createState() => _SystemCardState();
+}
+
+class _SystemCardState extends State<_SystemCard> {
+  bool _expanded = false;
+
+  // RFC3339 -> HH:MM:SS, matching the TUI clockTime helper.
+  static String _clock(String? ts) {
+    if (ts == null) return '';
+    final i = ts.indexOf('T');
+    if (i >= 0 && ts.length >= i + 9) return ts.substring(i + 1, i + 9);
+    return ts;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final color = chunk.isError ? _redColor : AppColors.dim;
-    final glyph = chunk.kind == ChunkKind.compact ? '⊟' : '·';
+    final c = widget.chunk;
+    final err = c.isError;
+    final labelColor = err ? AppColors.error : AppColors.secondary;
+    final hasDetail = c.detail != null && c.detail!.isNotEmpty;
+
+    final header = Row(
+      children: [
+        Icon(Icons.terminal, size: 13, color: err ? AppColors.error : AppColors.dim),
+        const SizedBox(width: 6),
+        Text('System', style: _mono.copyWith(color: labelColor)),
+        Text('  ·  ${_clock(c.timestamp)}', style: _monoDim),
+      ],
+    );
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: 8), // match the AI card's edges
+      child: InkWell(
+        onTap: hasDetail ? () => setState(() => _expanded = !_expanded) : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              if (hasDetail && _expanded)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(c.detail!, style: _monoDim),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Context-compaction marker: centered label between horizontal rules.
+class _CompactDivider extends StatelessWidget {
+  const _CompactDivider({required this.summary});
+  final String? summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = (summary == null || summary!.isEmpty) ? 'Context compressed' : summary!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+      child: Row(
         children: [
-          Text('$glyph ${chunk.summary ?? ''}',
-              style: _mono.copyWith(color: color)),
-          if (chunk.detail != null && chunk.detail!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 14, top: 2),
-              child: Text(chunk.detail!,
-                  style: _monoDim),
-            ),
+          const Expanded(child: Divider(color: AppColors.border, height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(text, style: _monoDim),
+          ),
+          const Expanded(child: Divider(color: AppColors.border, height: 1)),
         ],
       ),
     );

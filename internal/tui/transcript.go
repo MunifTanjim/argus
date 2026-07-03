@@ -210,7 +210,7 @@ func (m model) renderChunk(i int, selected bool) string {
 	case claudecode.ChunkCompact:
 		return m.renderCompact(c)
 	default:
-		return m.renderSystem(c, selected)
+		return m.renderSystem(c, selected, accent)
 	}
 }
 
@@ -429,21 +429,38 @@ func (m model) renderUserCard(c claudecode.Chunk, selected, accent bool) string 
 	return header + "\n" + indentBlock(aligned, sel)
 }
 
-func (m model) renderSystem(c claudecode.Chunk, selected bool) string {
+func (m model) renderSystem(c claudecode.Chunk, selected, accent bool) string {
+	container := m.containerWidth()
+	fraction := 3 * container / 4
+	if container < maxContentWidth {
+		fraction = 7 * container / 8
+	}
+	cardW := max(fraction-4, 24) // match the AI card's right edge
+
 	icon := Icon.System
+	label := StyleSecondary.Render("System")
 	if c.IsError {
 		icon = Icon.SystemErr
+		label = lipgloss.NewStyle().Foreground(ColorError).Render("System")
 	}
-	sel := selIndicator(selected)
-	line := sel + icon.Render() + " " + StyleSecondary.Render("System") + "  " +
+	body := icon.Render() + " " + label + "  " +
 		Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
-	if c.Summary != "" {
-		line += "  " + StyleDim.Render(c.Summary)
-	}
 	if m.chunkExpanded(c) && c.Detail != "" {
-		return line + "\n" + indentBlock(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), "    ")
+		body += "\n" + indentBlock(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), "  ")
 	}
-	return line
+
+	borderColor := ColorBorder
+	if accent {
+		borderColor = ColorAccent
+	}
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(cardW).
+		Padding(0, 2).
+		Render(body)
+
+	return indentBlock(card, selIndicator(selected)+"  ")
 }
 
 func (m model) renderCompact(c claudecode.Chunk) string {

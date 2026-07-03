@@ -422,6 +422,18 @@ func (m model) renderDetail(c claudecode.Chunk) string {
 	case claudecode.ChunkUser:
 		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(c.Timestamp))
 		return head + "\n\n" + m.renderMD(c.Text, width-2)
+	case claudecode.ChunkSystem:
+		icon := Icon.System
+		label := StyleSecondary.Render("System")
+		if c.IsError {
+			icon = Icon.SystemErr
+			label = lipgloss.NewStyle().Foreground(ColorError).Render("System")
+		}
+		head := icon.Render() + " " + label + "  " + Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
+		if c.Detail == "" {
+			return head
+		}
+		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), width-2)
 	default:
 		head := Icon.System.Render() + " " + StyleSecondary.Render(c.Summary)
 		if c.Detail == "" {
