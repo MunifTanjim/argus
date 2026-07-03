@@ -298,11 +298,7 @@ func (m model) aiBody(c claudecode.Chunk, cw int) string {
 			rows = append(rows, itemRow(it))
 		}
 		if lo, ok := c.LastOutput(); ok && lo.Kind == claudecode.ItemText {
-			text, hidden := truncateLines(lo.Text, maxCollapsedLines)
-			rows = append(rows, "", m.renderMD(text, cw))
-			if hidden > 0 {
-				rows = append(rows, hiddenHint(hidden))
-			}
+			rows = append(rows, "", m.renderMD(lo.Text, cw)) // expanded: full output
 		}
 		return strings.Join(rows, "\n")
 	}
