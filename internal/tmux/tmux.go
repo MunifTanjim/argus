@@ -251,12 +251,18 @@ type CaptureOpts struct {
 	// FullScrollback captures from the start of history (-S -), not just the
 	// visible area.
 	FullScrollback bool
+	// NoJoin omits -J, so each output line is a physical pane row (wrapped lines
+	// stay wrapped) — matches exactly what the pane shows.
+	NoJoin bool
 }
 
 // CapturePane returns the rendered text of a pane. Wrapped lines are joined and
-// trailing spaces preserved (-J) for stable parsing.
+// trailing spaces preserved (-J) unless NoJoin is set.
 func (c *Client) CapturePane(ctx context.Context, paneID string, opts CaptureOpts) (string, error) {
-	sub := []string{"capture-pane", "-p", "-J", "-t", paneID}
+	sub := []string{"capture-pane", "-p", "-t", paneID}
+	if !opts.NoJoin {
+		sub = append(sub, "-J")
+	}
 	if opts.Escapes {
 		sub = append(sub, "-e")
 	}

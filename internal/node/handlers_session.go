@@ -104,7 +104,8 @@ func (d *Node) handleSessionCapture(ctx context.Context, params json.RawMessage)
 	if err != nil {
 		return nil, err
 	}
-	screen, err := c.CapturePane(ctx, s.Tmux.PaneID, tmux.CaptureOpts{Escapes: true})
+	// NoJoin: keep physical rows so the app renders the pane exactly (no wrap).
+	screen, err := c.CapturePane(ctx, s.Tmux.PaneID, tmux.CaptureOpts{Escapes: true, NoJoin: true})
 	if err != nil {
 		return nil, err
 	}

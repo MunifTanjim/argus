@@ -48,6 +48,8 @@ dependencies:
   unifiedpush: ^6.0.0
   dartssh2: ^2.21.1
   basic_utils: ^5.8.2
+  # Terminal emulator for the live tmux screen; fed capture-pane snapshots.
+  xterm: ^4.0.0
 
 dev_dependencies:
   flutter_test:
