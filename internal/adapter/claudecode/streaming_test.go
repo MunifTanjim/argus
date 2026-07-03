@@ -257,6 +257,43 @@ func TestStreaming_NestedSubagentLinked(t *testing.T) {
 	}
 }
 
+// A still-running subagent has no parent tool_result, so link-based refs miss
+// it; the meta.json sidecar links it so the item is drillable mid-run.
+func TestStreaming_RunningSubagentLinkedViaMeta(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "sess.jsonl")
+	if err := os.WriteFile(root, []byte(
+		`{"uuid":"u1","type":"user","timestamp":"2025-06-15T10:00:00Z","message":{"role":"user","content":"go"}}`+"\n"+
+			`{"uuid":"a1","type":"assistant","timestamp":"2025-06-15T10:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-run","name":"Task","input":{"subagent_type":"Explore","description":"d"}}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd := filepath.Join(dir, "sess", "subagents")
+	if err := os.MkdirAll(sd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "agent-R.jsonl"), []byte(
+		`{"uuid":"ru1","type":"user","timestamp":"2025-06-15T10:00:02Z","isSidechain":true,"message":{"role":"user","content":"d"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "agent-R.meta.json"),
+		[]byte(`{"agentType":"Explore","description":"d","toolUseId":"tool-run"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := NewStreamingTranscript(root, root, false)
+	chunks, err := st.Refresh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, ok := subagentItem(chunks)
+	if !ok {
+		t.Fatal("no subagent item found")
+	}
+	if it.AgentID != "R" || !it.HasTrace {
+		t.Fatalf("running subagent AgentID=%q HasTrace=%v, want R/true", it.AgentID, it.HasTrace)
+	}
+}
+
 func TestStreaming_DepthCapSuppressesLink(t *testing.T) {
 	root, subA := writeNestedStreamFixture(t)
 	if err := os.WriteFile(filepath.Join(filepath.Dir(subA), "agent-A.meta.json"),

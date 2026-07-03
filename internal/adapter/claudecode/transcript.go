@@ -53,15 +53,27 @@ func ReadSubagentView(rootPath, agentID string) (TranscriptView, bool, error) {
 	return TranscriptView{Chunks: foldChunks(pchunks, agentRefs, nil)}, true, nil
 }
 
+// addMetaRefs merges meta.json-derived refs (which link still-running subagents)
+// into agentRefs; existing link-based refs win. cache may be nil (no memoization).
+func addMetaRefs(agentRefs map[string]string, rootPath string, cache map[string]string) {
+	for tid, aid := range parser.MetaAgentRefs(rootPath, cache) {
+		if _, ok := agentRefs[tid]; !ok {
+			agentRefs[tid] = aid
+		}
+	}
+}
+
 // ReadStreamingView folds a transcript for live streaming: subagent items carry
 // AgentID + HasTrace but their Trace is NOT inlined (fetched via a separate
-// subscription). Subagent files are not parsed; linking uses the parent scan.
+// subscription). Linking uses the parent scan plus meta.json sidecars (so
+// still-running subagents link).
 func ReadStreamingView(path string) ([]Chunk, error) {
 	pchunks, err := parser.ReadSession(path)
 	if err != nil {
 		return nil, err
 	}
 	refs := parser.AgentIDsByToolID(path)
+	addMetaRefs(refs, path, nil)
 	return foldChunks(pchunks, refs, nil), nil
 }
 

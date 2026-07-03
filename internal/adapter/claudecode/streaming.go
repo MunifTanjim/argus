@@ -17,6 +17,7 @@ type StreamingTranscript struct {
 	offset     int64
 	msgs       []parser.ClassifiedMsg
 	links      map[string]string // agentID -> toolUseID (cumulative)
+	metaCache  map[string]string // agentID -> toolUseID, from meta.json sidecars
 }
 
 // NewStreamingTranscript returns a folder positioned at the file start. rootPath
@@ -24,7 +25,7 @@ type StreamingTranscript struct {
 // clears the sidechain flag while reading a subagent file. Nested children are
 // linked, suppressed past MaxSubagentDepth.
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) *StreamingTranscript {
-	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}}
+	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}, metaCache: map[string]string{}}
 }
 
 // Refresh reads newly appended lines, updates state, and returns the full folded
@@ -35,6 +36,7 @@ func (s *StreamingTranscript) Refresh() ([]Chunk, error) {
 		s.offset = 0
 		s.msgs = nil
 		s.links = map[string]string{}
+		s.metaCache = map[string]string{}
 	}
 
 	newMsgs, newLinks, newOffset, err := parser.ReadSessionIncremental(s.path, s.offset, s.isSubagent)
@@ -52,6 +54,9 @@ func (s *StreamingTranscript) Refresh() ([]Chunk, error) {
 	if s.isSubagent &&
 		parser.SpawnDepth(s.rootPath, parser.AgentIDFromPath(s.path)) >= parser.MaxSubagentDepth {
 		agentRefs = nil
+	} else {
+		// meta.json sidecars link still-running subagents (no tool_result yet).
+		addMetaRefs(agentRefs, s.rootPath, s.metaCache)
 	}
 	return foldChunks(pchunks, agentRefs, nil), nil
 }
