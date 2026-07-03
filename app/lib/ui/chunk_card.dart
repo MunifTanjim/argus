@@ -20,6 +20,19 @@ Color _ctxColor(double pct) {
   return AppColors.dim;
 }
 
+/// Per-family model color, mirroring the TUI modelColor mapping.
+Color _modelColor(String model) {
+  final m = model.toLowerCase();
+  if (m.contains('opus')) return const Color(0xFFd3869b); // purple
+  if (m.contains('sonnet')) return const Color(0xFF83a598); // blue
+  if (m.contains('haiku')) return const Color(0xFFb8bb26); // green
+  if (m.contains('fable')) return const Color(0xFFfe8019); // orange
+  return AppColors.secondary;
+}
+
+String _fmtTokens(int n) =>
+    n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
+
 class ChunkCard extends StatefulWidget {
   const ChunkCard({super.key, required this.detailRef, required this.chunk});
 
@@ -103,30 +116,62 @@ class _ChunkCardState extends State<ChunkCard> {
     );
   }
 
-  /// Builds the AI header meta line: model · ✻thinking · ▸tools · ctx% · tokens ·
-  /// duration. The context % is colored by pressure; everything else stays dim.
+  /// AI header: a colored model anchor + activity glyphs on the left, perf
+  /// metrics (tokens · ctx% · duration) right-aligned. Model color and the
+  /// pressure-colored ctx% give the eye anchors; everything else stays dim.
   Widget _metaLine(Chunk c) {
-    final spans = <InlineSpan>[];
-    void add(String text, {Color? color}) {
-      if (spans.isNotEmpty) {
-        spans.add(TextSpan(text: '  ·  ', style: _monoDim));
-      }
-      spans.add(TextSpan(
-          text: text,
-          style: color == null ? _monoDim : _mono.copyWith(color: color)));
+    final left = <Widget>[];
+    if (c.model?.isNotEmpty ?? false) {
+      left.add(Flexible(
+        child: Text(formatModelName(c.model!),
+            overflow: TextOverflow.ellipsis,
+            style: _mono.copyWith(color: _modelColor(c.model!))),
+      ));
     }
+    if (c.thinking > 0) left.add(_metaCount(Icons.lightbulb, c.thinking));
+    if (c.toolCount > 0) left.add(_metaCount(Icons.build, c.toolCount));
 
-    if (c.model?.isNotEmpty ?? false) add(formatModelName(c.model!));
-    if (c.thinking > 0) add('✻ ${c.thinking}');
-    if (c.toolCount > 0) add('▸ ${c.toolCount}');
+    final right = <Widget>[];
+    if (c.usage.total > 0) right.add(Text(_fmtTokens(c.usage.total), style: _monoDim));
     if (c.hasContext) {
-      add('${c.contextPct.round()}% ctx', color: _ctxColor(c.contextPct));
+      right.add(Text('${c.contextPct.round()}%',
+          style: _mono.copyWith(color: _ctxColor(c.contextPct))));
     }
-    if (c.usage.total > 0) add('${c.usage.total} tok');
-    if (c.durationMs > 0) add('${(c.durationMs / 1000).toStringAsFixed(1)}s');
+    if (c.durationMs > 0) {
+      right.add(Text('${(c.durationMs / 1000).toStringAsFixed(1)}s', style: _monoDim));
+    }
 
-    if (spans.isEmpty) return Text('response', style: _monoDim);
-    return Text.rich(TextSpan(children: spans));
+    if (left.isEmpty && right.isEmpty) return Text('response', style: _monoDim);
+
+    return Row(
+      children: [
+        Expanded(child: _spaced(left, 10)),
+        if (right.isNotEmpty) ...[
+          const SizedBox(width: 12),
+          _spaced(right, 10),
+        ],
+      ],
+    );
+  }
+
+  // Icon + count, e.g. thinking/tool tallies.
+  Widget _metaCount(IconData icon, int n) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.dim),
+          const SizedBox(width: 3),
+          Text('$n', style: _monoDim),
+        ],
+      );
+
+  // A min-width Row with uniform gaps between items.
+  Widget _spaced(List<Widget> items, double gap) {
+    final row = <Widget>[];
+    for (var i = 0; i < items.length; i++) {
+      if (i > 0) row.add(SizedBox(width: gap));
+      row.add(items[i]);
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: row);
   }
 
   Widget _collapsedBody(Chunk c) {

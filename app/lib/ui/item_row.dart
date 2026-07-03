@@ -34,9 +34,8 @@ class ItemRow extends StatelessWidget {
         return const SizedBox.shrink();
       case ItemKind.thinking:
         return _row(
-          // The glyph is decorative; the "thinking" label carries the meaning.
-          leading: ExcludeSemantics(child: Text('✻', style: _monoDim)),
-          label: 'thinking',
+          leading: const Icon(Icons.lightbulb, size: 14, color: AppColors.dim),
+          label: 'Thinking',
           labelColor: AppColors.dim,
           trailing: item.signature ? ' 🔒' : '',
           preview: item.text,
