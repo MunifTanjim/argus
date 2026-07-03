@@ -346,12 +346,13 @@ class _SystemCard extends StatefulWidget {
 class _SystemCardState extends State<_SystemCard> {
   bool _expanded = false;
 
-  // RFC3339 -> HH:MM:SS, matching the TUI clockTime helper.
+  // RFC3339 -> local HH:MM:SS, matching the TUI clockTime helper.
   static String _clock(String? ts) {
     if (ts == null) return '';
-    final i = ts.indexOf('T');
-    if (i >= 0 && ts.length >= i + 9) return ts.substring(i + 1, i + 9);
-    return ts;
+    final dt = DateTime.tryParse(ts)?.toLocal();
+    if (dt == null) return ts;
+    String p(int n) => n.toString().padLeft(2, '0');
+    return '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}';
   }
 
   @override
