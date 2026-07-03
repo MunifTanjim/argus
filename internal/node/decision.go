@@ -12,8 +12,8 @@ import (
 )
 
 // decisionTimeout bounds how long a PermissionRequest hook blocks, kept just under
-// the hook's own 600s timeout so we fall back before Claude kills the hook.
-var decisionTimeout = 590 * time.Second
+// the hook's own timeout so we fall back before Claude kills the hook.
+var decisionTimeout = (claudecode.PermissionRequestHookTimeoutSeconds - 10) * time.Second
 
 // pendingDecision is a parked PermissionRequest awaiting the user's answer. The
 // blocked hook handler waits on ch; MethodSessionRespond sends the decision JSON.

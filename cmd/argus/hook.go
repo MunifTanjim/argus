@@ -48,7 +48,7 @@ func newHookCmd() *cobra.Command {
 
 			// PermissionRequest blocks until argusd returns the user's decision, then
 			// prints it for Claude Code. Print nothing on failure so Claude falls back to
-			// its own prompt. Claude's 600s hook timeout bounds the wait.
+			// its own prompt. claudecode.PermissionRequestHookTimeoutSeconds bounds the wait.
 			if event == "PermissionRequest" {
 				client, err := api.Dial(cfg.Socket)
 				if err != nil {

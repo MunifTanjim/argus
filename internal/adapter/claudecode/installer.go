@@ -24,12 +24,16 @@ var DefaultHookEvents = []string{
 	"SessionEnd",
 }
 
+// PermissionRequestHookTimeoutSeconds is exported so node.decisionTimeout can
+// derive from it instead of hardcoding a copy.
+const PermissionRequestHookTimeoutSeconds = 1500
+
 // hookTimeout returns the per-event command timeout in seconds. PermissionRequest
 // blocks until the user answers, so it gets a long timeout; others are
 // fire-and-forget observers.
 func hookTimeout(event string) int {
 	if event == "PermissionRequest" {
-		return 1500
+		return PermissionRequestHookTimeoutSeconds
 	}
 	return 5
 }
