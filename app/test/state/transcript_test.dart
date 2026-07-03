@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/chunk.dart';
 import 'package:argus/state/transcript.dart';
+import 'package:argus/state/transcript_controller.dart';
 
 final _provider =
     NotifierProvider<TranscriptNotifier, TranscriptState>(TranscriptNotifier.new);
@@ -54,6 +55,23 @@ void main() {
     n.applyDelta(_d('s1', 0, const [])); // empty snapshot still counts as loaded
     expect(c.read(_provider).loaded, isTrue);
     expect(c.read(_provider).chunks, isEmpty);
+  });
+
+  // The detail screen keys transcriptProvider by ClaudeSessionID, which changes on
+  // /clear. Distinct keys hold independent chunks, so post-clear never reuses the
+  // pre-clear cache.
+  test('provider family isolates chunks per key (pre/post-clear)', () {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+
+    final pre = c.read(transcriptProvider('c0').notifier);
+    pre.setSubId('s1');
+    pre.applyDelta(_d('s1', 0, ['old0', 'old1']));
+    expect(c.read(transcriptProvider('c0')).chunks.map((x) => x.id),
+        ['old0', 'old1']);
+
+    // New ClaudeSessionID after /clear ⇒ different key ⇒ empty store.
+    expect(c.read(transcriptProvider('c1')).chunks, isEmpty);
   });
 
   test('loaded survives a re-subscribe (reconnect), no spinner flash', () {

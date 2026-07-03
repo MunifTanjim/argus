@@ -186,6 +186,7 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 			s.Tmux.CurrentPath = f.CurrentPath
 		}
 		if f.ClaudeSessionID != "" && s.ClaudeSessionID != f.ClaudeSessionID {
+			r.index.clear("", s.ClaudeSessionID) // drop the superseded id (/clear swaps it)
 			s.ClaudeSessionID = f.ClaudeSessionID
 			r.index.setClaude(f.ClaudeSessionID, s.ID)
 		}
@@ -207,8 +208,9 @@ func (r *Registry) ReconcileSessions(tool string, found []DiscoveredSession) {
 		if f.Repo != "" {
 			s.Repo = f.Repo
 		}
-		if f.TranscriptPath != "" {
+		if f.TranscriptPath != "" && f.TranscriptPath != s.TranscriptPath {
 			s.TranscriptPath = f.TranscriptPath
+			s.Summary = nil // transcript swapped (/clear): the old digest is stale
 		}
 		if f.Summary != nil {
 			s.Summary = f.Summary
@@ -356,6 +358,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 
 	if u.ClaudeSessionID != "" && s.ClaudeSessionID != u.ClaudeSessionID {
+		r.index.clear("", s.ClaudeSessionID) // drop the superseded id (/clear swaps it)
 		s.ClaudeSessionID = u.ClaudeSessionID
 		r.index.setClaude(u.ClaudeSessionID, s.ID)
 	}
@@ -365,8 +368,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	if u.Repo != "" {
 		s.Repo = u.Repo
 	}
-	if u.TranscriptPath != "" {
+	if u.TranscriptPath != "" && u.TranscriptPath != s.TranscriptPath {
 		s.TranscriptPath = u.TranscriptPath
+		s.Summary = nil // transcript swapped (/clear): the old digest is stale
 	}
 	// Never downgrade a pane-bearing session: a pane means tmux, whatever a later
 	// correlated hook claims.

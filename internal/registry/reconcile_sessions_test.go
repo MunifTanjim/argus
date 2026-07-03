@@ -132,3 +132,37 @@ func TestReconcileSessionsCrossServerLiveness(t *testing.T) {
 		t.Error("default:%%0 should survive")
 	}
 }
+
+// A /clear keeps the pane but swaps ClaudeSessionID + transcript path: discovery
+// must reset the stale summary and drop the superseded claude id from the index
+// (mirrors the ApplyHook path).
+func TestReconcileSessionsTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
+	r := New()
+	r.ReconcileSessions("claude-code", []DiscoveredSession{{
+		ClaudeSessionID: "c0", HasPane: true, Server: session.TmuxServerDefault,
+		PaneID: "%0", Frontend: session.FrontendTmux,
+		TranscriptPath: "/tmp/c0.jsonl", Summary: &session.Summary{Task: "pre-clear"},
+	}})
+	// /clear on the same pane: new claude id + transcript, no fresh summary yet.
+	r.ReconcileSessions("claude-code", []DiscoveredSession{{
+		ClaudeSessionID: "c1", HasPane: true, Server: session.TmuxServerDefault,
+		PaneID: "%0", Frontend: session.FrontendTmux,
+		TranscriptPath: "/tmp/c1.jsonl",
+	}})
+	s, ok := r.Get("default:%0")
+	if !ok {
+		t.Fatal("record missing after swap")
+	}
+	if s.Summary != nil {
+		t.Fatalf("transcript swap must reset the stale summary, got %+v", s.Summary)
+	}
+	if s.TranscriptPath != "/tmp/c1.jsonl" || s.ClaudeSessionID != "c1" {
+		t.Fatalf("swap not applied: %+v", s)
+	}
+	if _, ok := r.index.findByClaude("c0"); ok {
+		t.Error("superseded claude id should be cleared from the index")
+	}
+	if id, ok := r.index.findByClaude("c1"); !ok || id != s.ID {
+		t.Errorf("new claude id should resolve to the record: %q %v", id, ok)
+	}
+}

@@ -317,6 +317,11 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 			cmd = bellCmd()
 		}
 		m.sessions[ev.Session.ID] = ev.Session
+		// /clear swaps the open session's transcript in place; re-subscribe so the
+		// stale (pre-clear) stream is dropped and the new file streams from the start.
+		if c := m.resubscribeOnClear(prev, existed, ev.Session); c != nil {
+			cmd = tea.Batch(cmd, c)
+		}
 	case registry.EventRemoved:
 		delete(m.sessions, ev.Session.ID)
 	}
@@ -480,7 +485,7 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.toolBodies = make(map[string]toolBodyEntry) // per-session tool-body cache
 	m.resetPromptState()
 	m.prompt.key = interactionKey(m.sessions[m.selectedID].Interaction)
-	ref := subRef{subID: newSubID(), sessionID: m.selectedID}
+	ref := subRef{subID: newSubID(), sessionID: m.selectedID, cacheKey: m.cacheKeyFor(m.selectedID)}
 	m.activeSub = ref
 	have := len(m.transcriptCache[ref.key()].chunks)
 	m.transcript.chunks = m.transcriptCache[ref.key()].chunks // show cached immediately

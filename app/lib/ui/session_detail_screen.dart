@@ -38,6 +38,13 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
   String get _sid => widget.session.id;
 
+  // Transcript cache/store key: the ClaudeSessionID, which changes on /clear (new
+  // transcript file), so pre-clear chunks aren't reused against the post-clear file.
+  // Falls back to the argus id before a hook has set one.
+  String _keyFor(String? cid) =>
+      (cid != null && cid.isNotEmpty) ? cid : _sid;
+  String _cacheKey(Session? s) => _keyFor(s?.claudeSessionId);
+
   @override
   void initState() {
     super.initState();
@@ -91,9 +98,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
   void _open() {
     _sub?.dispose();
+    final live = ref.read(sessionsProvider)[_sid] ?? widget.session;
     _sub = ref.read(transcriptRepositoryProvider).open(
           sessionId: _sid,
-          store: ref.read(transcriptProvider(_sid).notifier),
+          store: ref.read(transcriptProvider(_cacheKey(live)).notifier),
         );
   }
 
@@ -114,12 +122,27 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         _open();
       }
     });
+    // Re-open when the transcript's cache key changes: a /clear swaps the session's
+    // ClaudeSessionID (new transcript file) in place, and the first hook sets it from
+    // null. Re-bind onto the new (empty) store and drop the superseded one so no
+    // pre-clear chunks survive or leak. Guarding on the *derived* key (not the raw id)
+    // treats the null→id first-set as a no-op key-wise unless it actually differs.
+    ref.listen<String?>(
+      sessionsProvider.select((m) => m[_sid]?.claudeSessionId),
+      (prev, next) {
+        final prevKey = _keyFor(prev);
+        final nextKey = _keyFor(next);
+        if (prevKey == nextKey) return;
+        _open();
+        ref.invalidate(transcriptProvider(prevKey));
+      },
+    );
 
-    final st = ref.watch(transcriptProvider(_sid));
-    final conn = ref.watch(connStateProvider);
-    final connError = ref.watch(connErrorProvider);
     final s = widget.session;
     final live = ref.watch(sessionsProvider)[_sid] ?? s;
+    final st = ref.watch(transcriptProvider(_cacheKey(live)));
+    final conn = ref.watch(connStateProvider);
+    final connError = ref.watch(connErrorProvider);
     final title = live.displayTitle;
 
     return Scaffold(

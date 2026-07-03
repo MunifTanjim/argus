@@ -56,13 +56,21 @@ type subRef struct {
 	subID     string
 	sessionID string
 	agentID   string // empty = session transcript
+	// cacheKey discriminates the client chunk cache. It is the ClaudeSessionID, which
+	// changes on /clear (new transcript file), so cached pre-clear chunks aren't reused
+	// against the post-clear file. Falls back to sessionID when the id isn't known yet.
+	cacheKey string
 }
 
 func (r subRef) key() string {
-	if r.agentID != "" {
-		return r.sessionID + "/" + r.agentID
+	base := r.cacheKey
+	if base == "" {
+		base = r.sessionID
 	}
-	return r.sessionID
+	if r.agentID != "" {
+		return base + "/" + r.agentID
+	}
+	return base
 }
 
 type model struct {

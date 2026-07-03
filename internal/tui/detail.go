@@ -271,7 +271,7 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Live session: stream the subagent trace into a new frame. Stash the
 		// session subRef so pop can restore it without a leak.
 		m.sessionSub = m.activeSub
-		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: it.AgentID}
+		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: it.AgentID, cacheKey: m.cacheKeyFor(m.selectedID)}
 		m.activeSub = ref // subagent stream is active while drilled in
 		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},

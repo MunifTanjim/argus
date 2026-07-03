@@ -256,3 +256,31 @@ func TestApplyHookNeverDowngradesTmuxFrontend(t *testing.T) {
 		t.Fatalf("frontend downgraded to %q, want tmux", s.Frontend)
 	}
 }
+
+// A /clear reuses the pane record but swaps ClaudeSessionID + transcript path: the
+// stale summary must reset and the superseded claude id must leave the index.
+func TestApplyHookTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		ClaudeSessionID: "c0", TranscriptPath: "/tmp/c0.jsonl",
+		Status: session.StatusIdle, Summary: &session.Summary{Task: "pre-clear"},
+	})
+	got, _ := r.ApplyHook(HookUpdate{
+		Tool: "claude-code", Server: session.TmuxServerDefault, PaneID: "%0",
+		ClaudeSessionID: "c1", TranscriptPath: "/tmp/c1.jsonl",
+		Status: session.StatusAwaitingInput,
+	})
+	if got.Summary != nil {
+		t.Fatalf("transcript swap must reset the stale summary, got %+v", got.Summary)
+	}
+	if got.TranscriptPath != "/tmp/c1.jsonl" || got.ClaudeSessionID != "c1" {
+		t.Fatalf("swap not applied: %+v", got)
+	}
+	if _, ok := r.index.findByClaude("c0"); ok {
+		t.Error("superseded claude id should be cleared from the index")
+	}
+	if id, ok := r.index.findByClaude("c1"); !ok || id != got.ID {
+		t.Errorf("new claude id should resolve to the record: %q %v", id, ok)
+	}
+}
