@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.0.6](https://github.com/MunifTanjim/argus/compare/0.0.5...0.0.6) (2026-07-03)
+
+
+### Features
+
+* **app:** improve live screen view ([c0b4c42](https://github.com/MunifTanjim/argus/commit/c0b4c4253a2833d8be53ad72ba18224f1d2b37bd))
+* **claudecode:** raise PermissionRequest hook timeout to 25 minutes ([8a99703](https://github.com/MunifTanjim/argus/commit/8a99703eb9d5579c645dddd057fe1619d84ef54d))
+* **claudecode:** show session recaps in the transcript ([f385bb5](https://github.com/MunifTanjim/argus/commit/f385bb5dd04eae63fe366dbe24698477c3cf7c04))
+* **claudecode:** support opening running subagents ([d3ed287](https://github.com/MunifTanjim/argus/commit/d3ed2871b9bee275f562b6bd7be853d8b928cd09))
+* reduce Web Push TTL to 30 minutes ([fd5e2e2](https://github.com/MunifTanjim/argus/commit/fd5e2e230ee89ea63842dba266bd9659b227df66))
+* render system chunks as bordered cards ([48161a5](https://github.com/MunifTanjim/argus/commit/48161a5f6149499976f468b7e9ceaf9a970ac1a4))
+* **tui:** show full output in expanded ai chunks ([d6c7652](https://github.com/MunifTanjim/argus/commit/d6c765239b961a5d1c06b00e5e23ff64cc7569af))
+
+
+### Bug Fixes
+
+* **claudecode:** handle /clear transcript swap correctly ([1ad0556](https://github.com/MunifTanjim/argus/commit/1ad055606ef9cba1925945c5026878242d2ac59b))
+* **claudecode:** mark resumed sessions as awaiting input ([e170294](https://github.com/MunifTanjim/argus/commit/e1702947ef6cebbc1db5aff170321a4dda16a94e))
+* **tui:** dedupe project cwds in spawn picker ([c3dde7c](https://github.com/MunifTanjim/argus/commit/c3dde7ca0f926eb08583416b9229eac9d36014f0))
+* **tui:** show clock times in viewer local timezone ([7689b86](https://github.com/MunifTanjim/argus/commit/7689b8670d0586d9bfbc17223ca446a0a1697ded))
+
 ## [0.0.5](https://github.com/MunifTanjim/argus/compare/0.0.4...0.0.5) (2026-07-02)
 
 
