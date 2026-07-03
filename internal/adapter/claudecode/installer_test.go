@@ -179,6 +179,64 @@ func TestReconcileIfInstalledAddsMissingEvents(t *testing.T) {
 	}
 }
 
+func TestReconcileKeepingInstalledBinPreservesPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+
+	// Installed from /opt/argus; an older set with only Stop managed.
+	seed := `{
+	  "hooks": {
+	    "Stop": [
+	      { "hooks": [ { "type": "command", "command": "/opt/argus hook Stop #argus-managed", "timeout": 5 } ] }
+	    ]
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := ReconcileKeepingInstalledBin()
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(added) == 0 {
+		t.Fatal("expected missing events to be added")
+	}
+
+	top := readSettings(t, path)
+	hooks := map[string][]hookGroup{}
+	_ = json.Unmarshal(top["hooks"], &hooks)
+	// Managed commands must keep /opt/argus, not the test binary's os.Executable().
+	for event, groups := range hooks {
+		for _, g := range groups {
+			for _, c := range g.Hooks {
+				if isManaged(c) && managedCommandBin(c.Command) != "/opt/argus" {
+					t.Errorf("%s: managed bin rewritten to %q", event, managedCommandBin(c.Command))
+				}
+			}
+		}
+	}
+	if !hasManaged(hooks["PermissionRequest"]) {
+		t.Error("PermissionRequest managed hook not added")
+	}
+}
+
+func TestReconcileKeepingInstalledBinOptInPreserved(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+
+	seed := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-own-thing"}]}]}}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	added, err := ReconcileKeepingInstalledBin()
+	if err != nil || len(added) != 0 {
+		t.Fatalf("opt-in: expected no-op, got added=%v err=%v", added, err)
+	}
+}
+
 func TestReconcileIfInstalledOptInPreserved(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)

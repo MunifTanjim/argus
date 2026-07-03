@@ -69,6 +69,14 @@ func managedCommand(argusBin, event string) string {
 	return fmt.Sprintf("%s hook %s %s", argusBin, event, HookMarker)
 }
 
+// managedCommandBin recovers the binary path from a command built by managedCommand.
+func managedCommandBin(command string) string {
+	if i := strings.Index(command, " hook "); i >= 0 {
+		return command[:i]
+	}
+	return ""
+}
+
 // Install adds argus's hooks for the given events to settings.json, preserving
 // other settings and existing hooks. Idempotent: re-running replaces argus's
 // managed entries rather than duplicating them. argusBin is the client binary
@@ -107,6 +115,20 @@ func Install(argusBin string, events []string) error {
 // never opted in is never auto-installed. Lets a fresh argusd self-heal stale
 // hook sets without a manual reinstall. Returns the events newly added.
 func ReconcileIfInstalled(argusBin string) (added []string, err error) {
+	return reconcile(argusBin)
+}
+
+// ReconcileKeepingInstalledBin reconciles hooks but keeps the binary path already in
+// settings.json, for callers whose own executable path is transient (the ephemeral
+// embedded node) and must not be written into the user's hooks.
+func ReconcileKeepingInstalledBin() (added []string, err error) {
+	return reconcile("")
+}
+
+// reconcile rebuilds the managed hook set to match DefaultHookEvents. An empty
+// argusBin keeps the binary path already in settings.json; otherwise it points the
+// managed commands at argusBin. No-op if argus hooks were never installed.
+func reconcile(argusBin string) (added []string, err error) {
 	path, err := SettingsPath()
 	if err != nil {
 		return nil, err
@@ -122,8 +144,12 @@ func ReconcileIfInstalled(argusBin string) (added []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if !anyManaged(hooks) {
+	managed, ok := firstManaged(hooks)
+	if !ok {
 		return nil, nil // opt-in preserved: don't auto-install
+	}
+	if argusBin == "" {
+		argusBin = managedCommandBin(managed.Command)
 	}
 
 	for _, event := range DefaultHookEvents {
@@ -186,13 +212,19 @@ func managedMatches(groups []hookGroup, argusBin, event string) bool {
 	return false
 }
 
-func anyManaged(hooks map[string][]hookGroup) bool {
+// firstManaged returns any argus-managed command across all events. Order is
+// unspecified, but every managed entry shares the same installed binary path.
+func firstManaged(hooks map[string][]hookGroup) (hookCmd, bool) {
 	for _, groups := range hooks {
-		if hasManaged(groups) {
-			return true
+		for _, g := range groups {
+			for _, c := range g.Hooks {
+				if isManaged(c) {
+					return c, true
+				}
+			}
 		}
 	}
-	return false
+	return hookCmd{}, false
 }
 
 func hasManaged(groups []hookGroup) bool {

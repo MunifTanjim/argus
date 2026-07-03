@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"syscall"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
@@ -131,16 +133,28 @@ func nodeAbsent(err error) bool {
 
 // startEmbeddedNode runs a node in-process until ctx is cancelled. Logs go to an
 // in-memory buffer (returned) for the TUI's Logs tab, not stderr, to keep the
-// alt-screen clean. Unlike `argus start` it does not reconcile installed Claude Code
-// hooks: this ephemeral launch may run from a different binary path than the install.
+// alt-screen clean. Like `argus start` it reconciles installed Claude Code hooks,
+// but keeps the installed binary path: this ephemeral launch may run from a
+// different path than the install, which must not be written into the user's hooks.
 func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer) {
 	d := node.New()
 	logs := logbuf.New(1000)
-	d.SetLogger(logger.NewBufferLogger(logs).With("scope", "node"))
+	log := logger.NewBufferLogger(logs)
+	d.SetLogger(log.With("scope", "node"))
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
+	reconcileEmbeddedHooks(log.With("scope", "hooks"))
 	go func() { _ = d.Run(ctx, socket) }()
 	return d, logs
+}
+
+// reconcileEmbeddedHooks reconciles hooks best-effort, logging to the TUI's Logs tab.
+func reconcileEmbeddedHooks(log *slog.Logger) {
+	if added, err := claudecode.ReconcileKeepingInstalledBin(); err != nil {
+		log.Error("reconcile hooks failed", "err", err)
+	} else if len(added) > 0 {
+		log.Info("reconciled argus hooks", "added", added)
+	}
 }
 
 // dialWithRetry polls the socket until a node accepts a connection or timeout.
