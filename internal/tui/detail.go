@@ -215,32 +215,35 @@ var detailTable = []keyTableEntry{
 
 func (m model) actDetailDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := m.topFrame()
-	if f.items != nil {
-		// Scroll within a cursor item taller than the viewport before advancing,
-		// so long bodies stay reachable.
-		if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
-			f.scroll++
-		} else {
-			f.cursor = min(len(f.items)-1, f.cursor+1)
-			m.ensureDetailVisible()
-		}
-	} else {
+	if f.items == nil {
 		f.scroll++
+		m.clampDetailScroll()
+		return m, nil
+	}
+	// Scroll within a cursor item taller than the viewport before advancing.
+	if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
+		f.scroll++
+		m.clampDetailScroll()
+	} else if f.cursor < len(f.items)-1 {
+		f.cursor++
+		m.ensureDetailVisible()
 	}
 	return m, nil
 }
 
 func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := m.topFrame()
-	if f.items != nil {
-		if _, start, _, ok := m.cursorOverflow(f); ok && f.scroll > start {
+	if f.items == nil {
+		if f.scroll > 0 {
 			f.scroll--
-		} else {
-			f.cursor = max(0, f.cursor-1)
-			m.ensureDetailVisible()
 		}
-	} else if f.scroll > 0 {
+		return m, nil
+	}
+	if _, start, _, ok := m.cursorOverflow(f); ok && f.scroll > start {
 		f.scroll--
+	} else if f.cursor > 0 {
+		f.cursor--
+		m.ensureDetailVisible()
 	}
 	return m, nil
 }
@@ -342,6 +345,7 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) actDetailHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.topFrame().scroll += max(1, m.viewportHeight()/2)
+	m.clampDetailScroll()
 	return m, nil
 }
 
@@ -365,7 +369,7 @@ func (m model) actDetailBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if f.items != nil {
 		f.cursor = max(0, len(f.items)-1)
 	}
-	m.ensureDetailVisible()
+	f.scroll = m.frameMaxScroll(f) // true bottom; works for body frames and tall items too
 	return m, nil
 }
 
@@ -432,7 +436,34 @@ func (m *model) ensureDetailVisible() {
 	}
 }
 
-// scrollHint renders a right-aligned "▲ N   ▼ N" indicator for hidden lines.
+func (m model) frameMaxScroll(f *detailFrame) int {
+	lines, _, _ := m.frameLines(f, m.containerWidth())
+	bodyH := m.viewportHeight()
+	if crumb := truncateLine(m.detailBreadcrumb(), m.containerWidth()); crumb != "" {
+		bodyH = max(1, bodyH-2)
+	}
+	if header := f.detailHeaderText(m.containerWidth()); header != "" {
+		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
+	}
+	if len(lines) <= bodyH {
+		return 0
+	}
+	return max(0, len(lines)-max(1, bodyH-1)) // bodyH-1: a row is reserved for the scroll hint
+}
+
+func (m *model) clampDetailScroll() {
+	f := m.topFrame()
+	if f == nil {
+		return
+	}
+	if maxS := m.frameMaxScroll(f); f.scroll > maxS {
+		f.scroll = maxS
+	}
+	if f.scroll < 0 {
+		f.scroll = 0
+	}
+}
+
 func scrollHint(above, below, width int) string {
 	var parts []string
 	if above > 0 {

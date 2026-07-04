@@ -42,9 +42,12 @@ func (m model) actSmartNext(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clampScrollNow()
 		return m, nil
 	}
-	m.transcript.cursor++
-	m.clampCursor()
-	m.ensureChunkVisible()
+	// At the last card, once it's fully scrolled, stay put: there's no card to
+	// advance to, and ensureChunkVisible would snap back to the card's top.
+	if m.transcript.cursor < len(m.transcript.chunks)-1 {
+		m.transcript.cursor++
+		m.ensureChunkVisible()
+	}
 	return m, nil
 }
 
@@ -61,9 +64,10 @@ func (m model) actSmartPrev(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clampScrollNow()
 		return m, nil
 	}
-	m.transcript.cursor--
-	m.clampCursor()
-	m.ensureChunkVisible()
+	if m.transcript.cursor > 0 {
+		m.transcript.cursor--
+		m.ensureChunkVisible()
+	}
 	return m, nil
 }
 

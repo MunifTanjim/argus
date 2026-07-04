@@ -252,6 +252,34 @@ func TestSmartTurnScrollsOversizedCard(t *testing.T) {
 	}
 }
 
+// TestSmartTurnAtLastCardStaysAtBottom verifies j on a fully-scrolled last card stays put.
+func TestSmartTurnAtLastCardStaysAtBottom(t *testing.T) {
+	m := testModel()
+	m.height = 6 // tiny viewport so the last card overflows it
+	m.transcript.chunks = []transcript.Chunk{
+		{ID: "u1", Kind: transcript.ChunkUser, Text: "hi"},
+		{ID: "u2", Kind: transcript.ChunkUser, Text: strings.Repeat("line\n", 40)},
+	}
+	m.transcript.cursor = 1 // last card
+
+	_, end, h, overflow := m.selectedChunkOverflow()
+	if !overflow {
+		t.Fatal("setup: last card should overflow the viewport")
+	}
+	m.transcript.scroll = end - h // scroll to the bottom of the tall last card
+	m.clampScrollNow()
+	bottom := m.transcript.scroll
+
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j'})
+	m = res.(model)
+	if m.transcript.scroll != bottom {
+		t.Fatalf("j at bottom of last card should stay put: %d -> %d", bottom, m.transcript.scroll)
+	}
+	if m.transcript.cursor != 1 {
+		t.Fatalf("cursor should stay on the last card, got %d", m.transcript.cursor)
+	}
+}
+
 func TestTranscriptViewRenders(t *testing.T) {
 	m := loaded()
 	out := m.transcriptBody()
