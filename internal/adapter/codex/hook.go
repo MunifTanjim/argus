@@ -27,8 +27,8 @@ func parsePayload(ev HookEvent) hookPayload {
 	return p
 }
 
-// EventName resolves the hook event name, preferring the explicit envelope field
-// and falling back to the payload's hook_event_name.
+func ShouldBlock(ev HookEvent) bool { return EventName(ev) == "PermissionRequest" }
+
 func EventName(ev HookEvent) string {
 	if ev.Event != "" {
 		return ev.Event

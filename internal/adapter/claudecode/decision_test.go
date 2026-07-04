@@ -1,11 +1,10 @@
-package node
+package claudecode
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
@@ -13,40 +12,35 @@ func TestBuildClarifyMessage(t *testing.T) {
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick a DB"},{"question":"Region?"}]}`)
 
 	// Answered + unanswered render distinctly.
-	out := claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
-		QuestionAction: "chat",
-		Answers:        map[string]any{"Pick a DB": "Postgres"},
-	})
+	msg := buildClarifyMessage(toolInput, map[string]any{"Pick a DB": "Postgres"})
 	for _, want := range []string{
 		"The user wants to clarify these questions.",
 		"Start by asking them what they would like to clarify.",
 		"Questions asked:",
-		`\"Pick a DB\"`,
-		"Answer: Postgres",
-		`\"Region?\"`,
-		"(No answer provided)",
+		`- "Pick a DB"`,
+		"  Answer: Postgres",
+		`- "Region?"`,
+		"  (No answer provided)",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("clarify message missing %q in:\n%s", want, out)
+		if !strings.Contains(msg, want) {
+			t.Errorf("clarify message missing %q in:\n%s", want, msg)
 		}
 	}
 
 	// Multi-select answers join with ", " (Go []string and JSON []any both work).
-	out = claudecode.FormatDecision("AskUserQuestion",
+	msg = buildClarifyMessage(
 		json.RawMessage(`{"questions":[{"question":"Langs"}]}`),
-		api.RespondParams{
-			QuestionAction: "chat",
-			Answers:        map[string]any{"Langs": []any{"Go", "Dart"}},
-		},
+		map[string]any{"Langs": []any{"Go", "Dart"}},
 	)
-	if !strings.Contains(out, "Answer: Go, Dart") {
-		t.Errorf("multi-select join missing in:\n%s", out)
+	if !strings.Contains(msg, "  Answer: Go, Dart") {
+		t.Errorf("multi-select join missing in:\n%s", msg)
 	}
 }
 
-func TestBuildDecisionChat(t *testing.T) {
+func TestFormatDecisionChat(t *testing.T) {
+	toolName := "AskUserQuestion"
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
-	out := claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
+	out := FormatDecision(toolName, toolInput, api.RespondParams{
 		QuestionAction: "chat",
 		Answers:        map[string]any{"Pick": "A"},
 	})
@@ -61,22 +55,22 @@ func TestBuildDecisionChat(t *testing.T) {
 	}
 }
 
-func TestBuildDecision(t *testing.T) {
+func TestFormatDecision(t *testing.T) {
 	// Deny carries the reason as the decision message.
-	out := claudecode.FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
+	out := FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
 	if !strings.Contains(out, `"behavior":"deny"`) || !strings.Contains(out, "use rg instead") {
 		t.Errorf("deny: %s", out)
 	}
 
 	// Plain permission allow: behavior allow, no updatedInput.
-	out = claudecode.FormatDecision("Bash", nil, api.RespondParams{Behavior: "allow"})
+	out = FormatDecision("Bash", nil, api.RespondParams{Behavior: "allow"})
 	if !strings.Contains(out, `"behavior":"allow"`) || strings.Contains(out, "updatedInput") {
 		t.Errorf("permission allow: %s", out)
 	}
 
 	// AskUserQuestion allow injects answers + echoes the original questions.
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
-	out = claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
+	out = FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		Behavior: "allow",
 		Answers:  map[string]any{"Pick": "A"},
 	})

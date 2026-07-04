@@ -15,6 +15,16 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
+func TestShouldBlockOnlyPermissionRequest(t *testing.T) {
+	block := ShouldBlock(HookEvent{Event: "PermissionRequest"})
+	if !block {
+		t.Fatal("PermissionRequest must block")
+	}
+	if ShouldBlock(HookEvent{Event: "PreToolUse"}) {
+		t.Fatal("PreToolUse must not block for codex")
+	}
+}
+
 func TestStatusFor(t *testing.T) {
 	cases := map[string]session.Status{
 		"SessionStart":      session.StatusIdle,

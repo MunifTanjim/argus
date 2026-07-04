@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -31,8 +33,14 @@ func (cxAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (sess
 
 func (cxAdapter) EventName(ev adapter.HookEvent) string { return EventName(ev) }
 
+func (cxAdapter) ShouldBlock(ev adapter.HookEvent) bool { return ShouldBlock(ev) }
+
 func (cxAdapter) PermissionPayload(ev adapter.HookEvent) (string, json.RawMessage) {
 	return PermissionPayload(ev)
+}
+
+func (cxAdapter) FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string {
+	return claudecode.FormatDecision(toolName, toolInput, p)
 }
 
 // --- Transcript ---

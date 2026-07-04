@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -24,6 +25,9 @@ type HookEvent struct {
 	Payload    json.RawMessage `json:"payload"`     // raw hook stdin JSON
 	// AutoMode reports whether the session enables plan auto mode.
 	AutoMode bool `json:"auto_mode"`
+	// Env carries whitelisted environment variables captured by argus hook.
+	// nil for agents that don't use it.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // PaneController is the tmux pane interface used by input preparation.
@@ -52,6 +56,12 @@ type Adapter interface {
 	ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool)
 	EventName(ev HookEvent) string
 	PermissionPayload(ev HookEvent) (toolName string, toolInput json.RawMessage)
+	// ShouldBlock reports whether the hook must wait for the user's decision.
+	ShouldBlock(ev HookEvent) bool
+	// FormatDecision renders the user's answer into the exact stdout the tool's
+	// hook expects (e.g. Claude's hookSpecificOutput JSON, Antigravity's
+	// {"allow_tool":...}). Called only for events where ShouldBlock returned true.
+	FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string
 
 	ReadTranscriptView(path string) (transcript.TranscriptView, error)
 	ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error)
