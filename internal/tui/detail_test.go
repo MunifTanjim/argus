@@ -63,7 +63,7 @@ func maxLineWidth(s string) int {
 
 func TestDetailItemsHaveAccentRule(t *testing.T) {
 	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{
 			{Kind: transcript.ItemText, Text: "hello output"},
 			{Kind: transcript.ItemTool, ToolName: "Bash",
@@ -81,7 +81,7 @@ func TestDetailItemsHaveAccentRule(t *testing.T) {
 
 func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
 	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}},
 	})
 	m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
@@ -256,7 +256,7 @@ func TestEnterDrillPopStack(t *testing.T) {
 	}
 	m := testModel()
 	m.transcript.chunks = []transcript.Chunk{{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub},
 	}}
 	m.transcript.cursor = 0
@@ -307,7 +307,7 @@ func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
 
 func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{
 			{Kind: transcript.ItemText, Text: "hello"},
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
@@ -340,7 +340,7 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 // frame must not keep nesting the same item.
 func TestFocusFrameDoesNotRenest(t *testing.T) {
 	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 		},
@@ -440,7 +440,7 @@ func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
 	}
 	m := testModel()
 	m.transcript.chunks = []transcript.Chunk{{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{sub},
 	}}
 	m.transcript.cursor = 0

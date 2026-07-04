@@ -128,8 +128,8 @@ func (m *model) enterDetail() {
 	f := detailFrame{expanded: map[int]bool{}, defaultExpanded: false}
 	if c.Kind == transcript.ChunkAI {
 		_, f.label = m.assistantBrand()
-		if c.Model != "" {
-			f.label = shortModel(c.Model)
+		if c.ModelName != "" {
+			f.label = c.ModelName
 		}
 		f.items = c.Items
 		f.expandOutputs()

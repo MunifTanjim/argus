@@ -26,7 +26,7 @@ func testModel() model {
 func sampleChunks() []transcript.Chunk {
 	return []transcript.Chunk{
 		{ID: "u1", Kind: transcript.ChunkUser, Text: "hello"},
-		{ID: "a1", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		{ID: "a1", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 			Thinking: 1, ToolCount: 1,
 			Usage: transcript.Usage{Input: 1000, CacheRead: 500, Output: 30},
 			Items: []transcript.Item{

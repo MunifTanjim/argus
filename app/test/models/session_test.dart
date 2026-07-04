@@ -9,7 +9,7 @@ const _sessionJson = '''
   "id":"macbook:%3","agent":"claude","status":"awaiting_input","source":"discovered",
   "tmux":{"server":"default","pane_id":"%3","session_name":"argus","window_index":0,"current_path":"/home/u/argus"},
   "repo":"argus",
-  "summary":{"model":"claude-opus-4-8","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix bug","last_activity":"2026-06-20T10:00:00Z"},
+  "summary":{"model_name":"Opus 4.8","model_color":"#d3869b","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix bug","last_activity":"2026-06-20T10:00:00Z"},
   "interaction":{"kind":"permission","tool_name":"bash","tool_input":"go test ./..."},
   "node_id":"macbook","node_label":"MacBook"
 }

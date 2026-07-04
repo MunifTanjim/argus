@@ -28,7 +28,8 @@ class TmuxLocation {
 }
 
 class Summary {
-  final String? model;
+  final String? modelName;
+  final String? modelColor;
   final bool hasContext;
   final double contextPct;
   final int tokens;
@@ -36,7 +37,8 @@ class Summary {
   final String? lastActivity;
 
   const Summary({
-    this.model,
+    this.modelName,
+    this.modelColor,
     this.hasContext = false,
     this.contextPct = 0,
     this.tokens = 0,
@@ -45,7 +47,8 @@ class Summary {
   });
 
   factory Summary.fromJson(Map<String, dynamic> j) => Summary(
-        model: j['model'] as String?,
+        modelName: j['model_name'] as String?,
+        modelColor: j['model_color'] as String?,
         hasContext: j['has_context'] as bool? ?? false,
         contextPct: (j['context_pct'] as num?)?.toDouble() ?? 0,
         tokens: (j['tokens'] as num?)?.toInt() ?? 0,

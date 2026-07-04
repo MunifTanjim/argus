@@ -133,8 +133,8 @@ func TestReadTranscriptViewGrouping(t *testing.T) {
 		t.Fatalf("no AI chunk in %+v", view.Chunks)
 	}
 	// a1 + a2 merge into one AI chunk (the tool-result-only turn doesn't split it).
-	if ai.Model != "claude-opus-4-8" {
-		t.Errorf("model = %q", ai.Model)
+	if ai.ModelName != "Opus 4.8" {
+		t.Errorf("model = %q", ai.ModelName)
 	}
 	if ai.Thinking != 1 || ai.ToolCount != 1 {
 		t.Errorf("stats: thinking=%d toolCount=%d", ai.Thinking, ai.ToolCount)

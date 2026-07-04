@@ -93,7 +93,8 @@ type Chunk struct {
 	Text string `json:"text,omitempty"`
 
 	// AI chunk.
-	Model      string `json:"model,omitempty"`
+	ModelName  string `json:"modelName,omitempty"`
+	ModelColor string `json:"modelColor,omitempty"` // hex like "#d3869b"; "" = uncolored
 	Items      []Item `json:"items,omitempty"`
 	Thinking   int    `json:"thinking,omitempty"`
 	ToolCount  int    `json:"toolCount,omitempty"` // tool_use + subagent count

@@ -12,37 +12,11 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// shortModel turns "claude-opus-4-6" into "opus4.6".
-func shortModel(m string) string {
-	m = strings.TrimPrefix(m, "claude-")
-	parts := strings.SplitN(m, "-", 2)
-	if len(parts) != 2 {
-		return m
-	}
-	family := parts[0]
-	// Keep major-minor only, dropping any dated/build suffix.
-	v := strings.SplitN(parts[1], "-", 3)
-	ver := v[0]
-	if len(v) >= 2 {
-		ver = v[0] + "-" + v[1]
-	}
-	if len(family) > 1 {
-		family = strings.ToUpper(string(family[0])) + family[1:]
-	}
-	return family + " " + strings.ReplaceAll(ver, "-", ".")
-}
-
-func modelColor(model string) color.Color {
-	switch {
-	case strings.Contains(model, "opus"):
-		return ColorModelOpus
-	case strings.Contains(model, "sonnet"):
-		return ColorModelSonnet
-	case strings.Contains(model, "haiku"):
-		return ColorModelHaiku
-	default:
+func modelColorOf(hex string) color.Color {
+	if hex == "" {
 		return ColorTextSecondary
 	}
+	return lipgloss.Color(hex)
 }
 
 // formatTokens formats a token count: 1234 -> "1.2k", 1234567 -> "1.2M".
@@ -276,12 +250,12 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 func (m model) cardMeta(s session.Session, width int, selected bool, nodeLabel string) string {
 	var parts []string
 	if sum := s.Summary; sum != nil {
-		if sum.Model != "" {
+		if sum.ModelName != "" {
 			st := StyleDim
 			if selected {
-				st = lipgloss.NewStyle().Foreground(modelColor(sum.Model))
+				st = lipgloss.NewStyle().Foreground(modelColorOf(sum.ModelColor))
 			}
-			parts = append(parts, st.Render(shortModel(sum.Model)))
+			parts = append(parts, st.Render(sum.ModelName))
 		}
 		if sum.HasContext {
 			st := StyleDim

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/chunk.dart';
 
 const _aiChunk = '''
-{"id":"c1","kind":"ai","timestamp":"2026-06-21T00:00:00Z","model":"claude-opus-4-8",
+{"id":"c1","kind":"ai","timestamp":"2026-06-21T00:00:00Z","modelName":"Opus 4.8","modelColor":"#d3869b",
  "items":[
    {"id":"i0","kind":"thinking","text":"hmm","signature":true},
    {"id":"i1","kind":"tool","toolName":"Bash","toolId":"t1","inputPreview":"ls -la","result":"ok"},
@@ -21,7 +21,8 @@ void main() {
   test('AI chunk parses items, usage and context', () {
     final c = Chunk.fromJson(jsonDecode(_aiChunk) as Map<String, dynamic>);
     expect(c.kind, ChunkKind.ai);
-    expect(c.model, 'claude-opus-4-8');
+    expect(c.modelName, 'Opus 4.8');
+    expect(c.modelColor, '#d3869b');
     expect(c.items.length, 3);
     expect(c.items[0].kind, ItemKind.thinking);
     expect(c.items[0].signature, isTrue);

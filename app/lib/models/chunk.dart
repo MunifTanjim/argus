@@ -183,7 +183,8 @@ class Chunk {
   final ChunkKind kind;
   final String? timestamp;
   final String? text;
-  final String? model;
+  final String? modelName;
+  final String? modelColor;
   final List<Item> items;
   final int thinking;
   final int toolCount;
@@ -205,7 +206,8 @@ class Chunk {
     required this.kind,
     this.timestamp,
     this.text,
-    this.model,
+    this.modelName,
+    this.modelColor,
     this.items = const [],
     this.thinking = 0,
     this.toolCount = 0,
@@ -228,7 +230,8 @@ class Chunk {
         kind: chunkKindFromWire(j['kind'] as String?),
         timestamp: j['timestamp'] as String?,
         text: j['text'] as String?,
-        model: j['model'] as String?,
+        modelName: j['modelName'] as String?,
+        modelColor: j['modelColor'] as String?,
         items: (j['items'] as List?)
                 ?.map((e) => Item.fromJson(e as Map<String, dynamic>))
                 .toList() ??

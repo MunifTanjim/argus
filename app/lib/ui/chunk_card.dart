@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/chunk.dart';
 import '../state/tool_detail.dart';
-import '../util/model_name.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
 import 'item_row.dart';
@@ -20,14 +19,10 @@ Color _ctxColor(double pct) {
   return AppColors.dim;
 }
 
-/// Per-family model color, mirroring the TUI modelColor mapping.
-Color _modelColor(String model) {
-  final m = model.toLowerCase();
-  if (m.contains('opus')) return const Color(0xFFd3869b); // purple
-  if (m.contains('sonnet')) return const Color(0xFF83a598); // blue
-  if (m.contains('haiku')) return const Color(0xFFb8bb26); // green
-  if (m.contains('fable')) return const Color(0xFFfe8019); // orange
-  return AppColors.secondary;
+Color? _hexColor(String? hex) {
+  if (hex == null || hex.length != 7 || !hex.startsWith('#')) return null;
+  final v = int.tryParse(hex.substring(1), radix: 16);
+  return v == null ? null : Color(0xFF000000 | v);
 }
 
 String _fmtTokens(int n) =>
@@ -134,11 +129,12 @@ class _ChunkCardState extends State<ChunkCard> {
   /// pressure-colored ctx% give the eye anchors; everything else stays dim.
   Widget _metaLine(Chunk c) {
     final left = <Widget>[];
-    if (c.model?.isNotEmpty ?? false) {
+    if (c.modelName?.isNotEmpty ?? false) {
       left.add(Flexible(
-        child: Text(formatModelName(c.model!),
+        child: Text(c.modelName!,
             overflow: TextOverflow.ellipsis,
-            style: _mono.copyWith(color: _modelColor(c.model!))),
+            style: _mono.copyWith(
+                color: _hexColor(c.modelColor) ?? AppColors.secondary)),
       ));
     }
     if (c.thinking > 0) left.add(_metaCount(Icons.lightbulb, c.thinking));

@@ -126,7 +126,8 @@ func foldChunk(pc parser.Chunk, agentRefs map[string]string, traces map[string][
 		c.Text = pc.UserText
 	case parser.AIChunk:
 		c.Kind = ChunkAI
-		c.Model = pc.Model
+		c.ModelName = modelDisplayName(pc.Model)
+		c.ModelColor = modelColorHex(pc.Model)
 		c.StopReason = pc.StopReason
 		c.DurationMs = pc.DurationMs
 		c.Thinking = pc.ThinkingCount

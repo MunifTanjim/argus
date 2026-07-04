@@ -398,12 +398,12 @@ func historySessionRow(s session.HistorySession, sel bool, w int) string {
 	titleRight := dimStyle.Render(relTime(s.LastActivity))
 
 	var parts []string
-	if s.Model != "" {
+	if s.ModelName != "" {
 		st := StyleDim
 		if sel {
-			st = lipgloss.NewStyle().Foreground(modelColor(s.Model))
+			st = lipgloss.NewStyle().Foreground(modelColorOf(s.ModelColor))
 		}
-		parts = append(parts, st.Render(shortModel(s.Model)))
+		parts = append(parts, st.Render(s.ModelName))
 	}
 	if s.TurnCount > 0 {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d turns", s.TurnCount)))

@@ -31,7 +31,8 @@ const _fullSessionJson = '''
   "title": "Fix the bug",
   "first_message": "Can you fix this bug?",
   "transcript_path": "/Users/user/.claude/projects/-Users-user-project/abc123.jsonl",
-  "model": "claude-opus-4",
+  "model_name": "Opus 4",
+  "model_color": "#d3869b",
   "last_activity": "2026-06-21T10:00:00Z",
   "tokens": 5000,
   "turn_count": 10,
@@ -111,7 +112,8 @@ void main() {
       expect(s.firstMessage, 'Can you fix this bug?');
       expect(s.transcriptPath,
           '/Users/user/.claude/projects/-Users-user-project/abc123.jsonl');
-      expect(s.model, 'claude-opus-4');
+      expect(s.modelName, 'Opus 4');
+      expect(s.modelColor, '#d3869b');
       expect(s.lastActivity, '2026-06-21T10:00:00Z');
       expect(s.tokens, 5000);
       expect(s.turnCount, 10);
@@ -127,7 +129,7 @@ void main() {
       expect(s.firstMessage, isNull);
       expect(s.transcriptPath,
           '/Users/user/.claude/projects/-Users-user-project/xyz789.jsonl');
-      expect(s.model, isNull);
+      expect(s.modelName, isNull);
       expect(s.lastActivity, '2026-06-20T08:00:00Z');
       expect(s.tokens, 0);
       expect(s.turnCount, 0);

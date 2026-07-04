@@ -138,7 +138,8 @@ type Interaction struct {
 // Summary is a cached transcript digest for list views, computed node-side on hook
 // events so clients never parse transcripts. All fields are comparable.
 type Summary struct {
-	Model        string  `json:"model,omitempty"`         // raw, e.g. "claude-opus-4-8"
+	ModelName    string  `json:"model_name,omitempty"`    // formatted, e.g. "Opus 4.8"
+	ModelColor   string  `json:"model_color,omitempty"`   // hex like "#d3869b"; "" = uncolored
 	HasContext   bool    `json:"has_context,omitempty"`   // whether ContextPct is meaningful
 	ContextPct   float64 `json:"context_pct,omitempty"`   // 0..100, latest turn
 	Tokens       int     `json:"tokens,omitempty"`        // latest turn prompt-side token count

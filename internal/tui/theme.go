@@ -29,10 +29,8 @@ var (
 	// Surfaces
 	ColorBorder color.Color
 
-	// Model family
-	ColorModelOpus   color.Color
-	ColorModelSonnet color.Color
-	ColorModelHaiku  color.Color
+	// Assistant accent (brand/selection markers, footers)
+	ColorAssistant color.Color
 
 	// Token highlight
 	ColorTokenHigh color.Color
@@ -119,10 +117,8 @@ func initTheme(hasDarkBg bool) {
 	// Surfaces
 	ColorBorder = ld(lipgloss.Color("250"), lipgloss.Color("60"))
 
-	// Model family
-	ColorModelOpus = ld(lipgloss.Color("1"), lipgloss.Color("204"))
-	ColorModelSonnet = ld(lipgloss.Color("4"), lipgloss.Color("75"))
-	ColorModelHaiku = ld(lipgloss.Color("2"), lipgloss.Color("114"))
+	// Assistant accent (brand/selection markers, footers)
+	ColorAssistant = ld(lipgloss.Color("1"), lipgloss.Color("204"))
 
 	// Token highlight
 	ColorTokenHigh = ld(lipgloss.Color("3"), lipgloss.Color("208"))

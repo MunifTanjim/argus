@@ -18,7 +18,7 @@ func TestDetailLineScrollThroughTallItem(t *testing.T) {
 		sb.WriteString("output-line-" + string(rune('A'+i%26)) + "\n")
 	}
 	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, Model: "claude-opus-4-8",
+		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
 		},

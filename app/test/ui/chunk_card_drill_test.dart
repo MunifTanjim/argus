@@ -10,7 +10,7 @@ import 'package:argus/ui/item_detail_screen.dart';
 void main() {
   testWidgets('tapping an expanded tool row pushes ItemDetailScreen',
       (tester) async {
-    const c = Chunk(id: 'a', kind: ChunkKind.ai, model: 'm', items: [
+    const c = Chunk(id: 'a', kind: ChunkKind.ai, modelName: 'm', items: [
       Item(
           id: 'i0',
           kind: ItemKind.tool,

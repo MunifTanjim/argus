@@ -82,7 +82,7 @@ func initStyles() {
 	dimStyle = StyleDim
 	cursorStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorOngoing)
 	userStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorInfo)
-	asstStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorModelOpus)
+	asstStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAssistant)
 }
 
 // statusGlyph is the list marker for a status. Working sessions use an animated

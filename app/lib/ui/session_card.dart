@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
-import '../util/model_name.dart';
 import 'status_style.dart';
 import 'theme.dart';
 
@@ -28,7 +27,7 @@ class SessionCard extends StatelessWidget {
     final nodeLabel = s.nodeLabel ?? s.nodeId ?? 'local';
 
     final meta = <String>[
-      if (s.summary?.model != null) formatModelName(s.summary!.model!),
+      if (s.summary?.modelName != null) s.summary!.modelName!,
       if (s.summary?.hasContext ?? false)
         '${s.summary!.contextPct.round()}% ctx',
       if ((s.summary?.tokens ?? 0) > 0) '${s.summary!.tokens} tok',

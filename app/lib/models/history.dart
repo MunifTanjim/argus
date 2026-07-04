@@ -36,7 +36,8 @@ class HistorySession {
   final String? title;
   final String? firstMessage;
   final String transcriptPath;
-  final String? model;
+  final String? modelName;
+  final String? modelColor;
   final String lastActivity;
   final int tokens;
   final int turnCount;
@@ -49,7 +50,8 @@ class HistorySession {
     this.title,
     this.firstMessage,
     required this.transcriptPath,
-    this.model,
+    this.modelName,
+    this.modelColor,
     required this.lastActivity,
     required this.tokens,
     required this.turnCount,
@@ -63,7 +65,8 @@ class HistorySession {
         title: j['title'] as String?,
         firstMessage: j['first_message'] as String?,
         transcriptPath: j['transcript_path'] as String? ?? '',
-        model: j['model'] as String?,
+        modelName: j['model_name'] as String?,
+        modelColor: j['model_color'] as String?,
         lastActivity: j['last_activity'] as String? ?? '',
         tokens: (j['tokens'] as num?)?.toInt() ?? 0,
         turnCount: (j['turn_count'] as num?)?.toInt() ?? 0,

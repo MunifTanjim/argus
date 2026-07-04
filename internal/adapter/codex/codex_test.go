@@ -195,7 +195,7 @@ func TestBuildDiscovered(t *testing.T) {
 	if pane.Cwd != "/pane/cwd" { // pane current path wins over DB cwd
 		t.Errorf("cwd = %q; want pane current path", pane.Cwd)
 	}
-	if pane.Summary == nil || pane.Summary.Model != "gpt-5.5" || pane.Summary.Tokens != 42 || pane.Summary.Task != "do a thing" {
+	if pane.Summary == nil || pane.Summary.ModelName != "gpt-5.5" || pane.Summary.Tokens != 42 || pane.Summary.Task != "do a thing" {
 		t.Errorf("summary not populated from DB: %+v", pane.Summary)
 	}
 
@@ -222,13 +222,12 @@ func TestBuildDiscovered(t *testing.T) {
 func TestSummaryForResolvesModelName(t *testing.T) {
 	names := map[string]string{"gpt-5.5": "GPT-5.5"}
 
-	// Known slug → display name.
 	s := summaryFor(threadMeta{model: "gpt-5.5", title: "t", tokens: 5}, names)
-	if s == nil || s.Model != "GPT-5.5" {
+	if s == nil || s.ModelName != "GPT-5.5" || s.ModelColor != modelBrandColor {
 		t.Errorf("model slug not resolved to display name: %+v", s)
 	}
 	s = summaryFor(threadMeta{model: "gpt-x"}, names)
-	if s == nil || s.Model != "gpt-x" {
+	if s == nil || s.ModelName != "gpt-x" {
 		t.Errorf("unknown slug should fall back to raw: %+v", s)
 	}
 	if s := summaryFor(threadMeta{}, names); s != nil {

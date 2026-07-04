@@ -11,7 +11,7 @@ void main() {
   testWidgets('renders glyph, repo, task and meta; fires onTap', (tester) async {
     var tapped = false;
     final s = _session(
-        '{"id":"mac:%1","agent":"claude","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus","summary":{"model":"claude-opus-4-8","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix the bug"},"node_label":"mac"}');
+        '{"id":"mac:%1","agent":"claude","status":"working","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus","summary":{"model_name":"Opus 4.8","model_color":"#d3869b","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix the bug"},"node_label":"mac"}');
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: SessionCard(session: s, onTap: () => tapped = true)),

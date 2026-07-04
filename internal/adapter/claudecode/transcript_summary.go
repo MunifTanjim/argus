@@ -28,8 +28,9 @@ func summarizeChunks(chunks []Chunk) *session.Summary {
 		if s.LastActivity == "" && c.Timestamp != "" {
 			s.LastActivity = c.Timestamp
 		}
-		if s.Model == "" && c.Kind == ChunkAI && c.Model != "" {
-			s.Model = c.Model
+		if s.ModelName == "" && c.Kind == ChunkAI && c.ModelName != "" {
+			s.ModelName = c.ModelName
+			s.ModelColor = c.ModelColor
 			if c.HasContext {
 				s.HasContext, s.ContextPct = true, c.ContextPct
 			}
@@ -38,7 +39,7 @@ func summarizeChunks(chunks []Chunk) *session.Summary {
 		if s.Task == "" && c.Kind == ChunkUser && strings.TrimSpace(c.Text) != "" {
 			s.Task = firstLineOf(c.Text)
 		}
-		if s.Model != "" && s.Task != "" && s.LastActivity != "" {
+		if s.ModelName != "" && s.Task != "" && s.LastActivity != "" {
 			break
 		}
 	}

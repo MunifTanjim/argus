@@ -71,7 +71,7 @@ void main() {
     const c = Chunk(
       id: 'a',
       kind: ChunkKind.ai,
-      model: 'claude-opus-4-8',
+      modelName: 'Opus 4.8',
       items: [
         Item(id: 'i0', kind: ItemKind.tool, toolName: 'Bash', inputPreview: 'ls'),
         Item(id: 'i1', kind: ItemKind.text, text: 'all done'),
@@ -97,7 +97,7 @@ void main() {
   const toggleChunk = Chunk(
     id: 'a',
     kind: ChunkKind.ai,
-    model: 'm',
+    modelName: 'm',
     items: [
       Item(id: 'i0', kind: ItemKind.tool, toolName: 'Bash', inputPreview: 'ls'),
       Item(id: 'i1', kind: ItemKind.text, text: 'all done'),
@@ -133,7 +133,7 @@ void main() {
     const c = Chunk(
       id: 'a',
       kind: ChunkKind.ai,
-      model: 'm',
+      modelName: 'm',
       hasContext: true,
       contextPct: 42,
       usage: Usage(input: 100, output: 20),

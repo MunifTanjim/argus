@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/result.dart';
 import '../data/history_repository.dart';
 import '../models/history.dart';
-import '../util/model_name.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
@@ -129,8 +128,8 @@ class _SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subtitleParts = <String>[
-      if (session.model != null && session.model!.isNotEmpty)
-        formatModelName(session.model!),
+      if (session.modelName != null && session.modelName!.isNotEmpty)
+        session.modelName!,
       if (session.turnCount > 0) '${session.turnCount} turns',
       if (session.lastActivity.isNotEmpty) relativeTime(session.lastActivity),
     ];

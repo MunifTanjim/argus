@@ -9,15 +9,15 @@ import (
 func TestSummarizeChunks(t *testing.T) {
 	chunks := []Chunk{
 		{Kind: ChunkUser, Text: "Revamp the list\nmore detail", Timestamp: "2026-06-14T10:00:00Z"},
-		{Kind: ChunkAI, Model: "claude-opus-4-8", HasContext: true, ContextPct: 42,
+		{Kind: ChunkAI, ModelName: "Opus 4.8", ModelColor: "#d3869b", HasContext: true, ContextPct: 42,
 			Usage: Usage{Input: 100000, CacheRead: 28000}, Timestamp: "2026-06-14T10:00:05Z"},
 	}
 	s := summarizeChunks(chunks)
 	if s == nil {
 		t.Fatal("expected a summary")
 	}
-	if s.Model != "claude-opus-4-8" {
-		t.Errorf("model = %q", s.Model)
+	if s.ModelName != "Opus 4.8" {
+		t.Errorf("model = %q", s.ModelName)
 	}
 	if !s.HasContext || s.ContextPct != 42 {
 		t.Errorf("context = %v/%v", s.HasContext, s.ContextPct)

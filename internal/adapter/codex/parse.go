@@ -38,7 +38,7 @@ func parseRollout(path string) ([]transcript.Chunk, error) {
 	}
 	ensureAI := func(ts string) *transcript.Chunk {
 		if ai == nil {
-			ai = &transcript.Chunk{Kind: transcript.ChunkAI, Timestamp: ts, Model: model}
+			ai = &transcript.Chunk{Kind: transcript.ChunkAI, Timestamp: ts, ModelName: model, ModelColor: modelColorFor(model)}
 		}
 		return ai
 	}
@@ -223,7 +223,15 @@ func displayModel(slug string, names map[string]string) string {
 	return slug
 }
 
-// setResult attaches a tool output to the matching call in the open AI chunk.
+const modelBrandColor = "#8ec07c"
+
+func modelColorFor(name string) string {
+	if name == "" {
+		return ""
+	}
+	return modelBrandColor
+}
+
 func setResult(ai *transcript.Chunk, callID, output string) {
 	if ai == nil {
 		return

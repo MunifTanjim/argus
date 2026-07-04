@@ -72,7 +72,7 @@ func TestSessionCardShowsRichMetadata(t *testing.T) {
 		ID: "s1", Status: session.StatusIdle, Repo: "argus",
 		Tmux: session.TmuxLocation{SessionName: "api-refactor", PaneID: "%3", Server: session.TmuxServerDefault},
 		Summary: &session.Summary{
-			Model: "claude-opus-4-8", HasContext: true, ContextPct: 42, Tokens: 128000,
+			ModelName: "Opus 4.8", HasContext: true, ContextPct: 42, Tokens: 128000,
 			Task: "Revamp the session list view", LastActivity: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 		},
 	}

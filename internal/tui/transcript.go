@@ -265,8 +265,8 @@ func (m model) aiHeader(c transcript.Chunk, width int) string {
 	}
 	icon, name := m.assistantBrand()
 	left := chev + icon.RenderBold() + " " + StylePrimaryBold.Render(name)
-	if c.Model != "" {
-		left += " " + lipgloss.NewStyle().Foreground(modelColor(c.Model)).Render(shortModel(c.Model))
+	if c.ModelName != "" {
+		left += " " + lipgloss.NewStyle().Foreground(modelColorOf(c.ModelColor)).Render(c.ModelName)
 	}
 	left += aiStats(c)
 	return spaceBetween(left, aiMeta(c), width)

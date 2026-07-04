@@ -21,7 +21,8 @@ type HistorySession struct {
 	Title          string `json:"title,omitempty"`         // custom/AI title, when present
 	FirstMessage   string `json:"first_message,omitempty"` // first user message (title fallback)
 	TranscriptPath string `json:"transcript_path"`         // node-local path; routing key for the view
-	Model          string `json:"model,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+	ModelColor     string `json:"model_color,omitempty"`
 	LastActivity   string `json:"last_activity"` // RFC3339 (UTC) transcript mod time
 	Tokens         int    `json:"tokens,omitempty"`
 	TurnCount      int    `json:"turn_count,omitempty"`

@@ -193,12 +193,12 @@ func TestApplyHookReplaceInteractionSupersedesRicher(t *testing.T) {
 // the cached digest. Repo persists likewise.
 func TestApplyHookCachesSummaryAndRepo(t *testing.T) {
 	r := New()
-	sum := &session.Summary{Model: "claude-opus-4-8", HasContext: true, ContextPct: 42, Task: "do the thing"}
+	sum := &session.Summary{ModelName: "Opus 4.8", HasContext: true, ContextPct: 42, Task: "do the thing"}
 	got, _ := r.ApplyHook(HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
 		Repo: "argus", Status: session.StatusWorking, Summary: sum,
 	})
-	if got.Summary == nil || got.Summary.Model != "claude-opus-4-8" || got.Repo != "argus" {
+	if got.Summary == nil || got.Summary.ModelName != "Opus 4.8" || got.Repo != "argus" {
 		t.Fatalf("summary/repo not stored: %+v repo=%q", got.Summary, got.Repo)
 	}
 
