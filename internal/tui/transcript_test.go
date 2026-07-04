@@ -44,6 +44,27 @@ func loaded() model {
 	return m
 }
 
+// TestUserChunkExpandableByWrappedLines verifies long-wrapping user chunks are collapsible.
+func TestUserChunkExpandableByWrappedLines(t *testing.T) {
+	m := testModel()
+	m.width = 80
+
+	short := transcript.Chunk{ID: "u1", Kind: transcript.ChunkUser, Text: "one line"}
+	if m.chunkExpandable(short) {
+		t.Error("short user chunk should not be expandable")
+	}
+
+	// One newline, but the line is far longer than the bubble width.
+	long := transcript.Chunk{ID: "u2", Kind: transcript.ChunkUser,
+		Text: strings.Repeat("word ", 400)}
+	if strings.Count(long.Text, "\n") >= maxCollapsedLines {
+		t.Fatal("fixture should have few source newlines")
+	}
+	if !m.chunkExpandable(long) {
+		t.Error("long-wrapping user chunk should be expandable")
+	}
+}
+
 func TestExpandDefaultsAndToggle(t *testing.T) {
 	m := loaded()
 	ai := m.transcript.chunks[1]
