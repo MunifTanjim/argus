@@ -92,13 +92,22 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 			}, true
 		}
 
+		// Inline !bash mode input.
+		if strings.HasPrefix(trimmed, bashInputTag) {
+			cmd := ""
+			if m := reBashInput.FindStringSubmatch(contentStr); m != nil {
+				cmd = strings.TrimSpace(m[1])
+			}
+			return ShellMsg{Timestamp: ts, Command: cmd}, true
+		}
+
 		// Inline !bash mode output.
 		if strings.HasPrefix(trimmed, bashStdoutTag) || strings.HasPrefix(trimmed, bashStderrTag) {
 			stderrContent := ""
 			if m := reBashStderr.FindStringSubmatch(contentStr); m != nil {
 				stderrContent = strings.TrimSpace(m[1])
 			}
-			return SystemMsg{
+			return ShellOutputMsg{
 				Timestamp: ts,
 				Output:    extractBashOutput(contentStr),
 				IsError:   stderrContent != "",

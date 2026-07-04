@@ -38,6 +38,75 @@ func writeSession(t *testing.T) string {
 	return parentPath
 }
 
+func TestReadTranscriptViewShellChunk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "22222222-2222-2222-2222-222222222222.jsonl")
+	session := `{"type":"user","uuid":"u1","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":"<bash-input>echo hi</bash-input>"}}
+{"type":"user","uuid":"u2","timestamp":"2026-06-12T10:00:01Z","message":{"role":"user","content":"<bash-stdout>hi</bash-stdout>"}}
+`
+	if err := os.WriteFile(path, []byte(session), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ReadTranscriptView(path)
+	if err != nil {
+		t.Fatalf("ReadTranscriptView: %v", err)
+	}
+	var shell *Chunk
+	for i := range view.Chunks {
+		if view.Chunks[i].Kind == ChunkShell {
+			shell = &view.Chunks[i]
+		}
+	}
+	if shell == nil {
+		t.Fatalf("no shell chunk found in %+v", view.Chunks)
+	}
+	if shell.Text != "echo hi" {
+		t.Errorf("Text = %q, want the command %q", shell.Text, "echo hi")
+	}
+	if shell.Detail != "hi" {
+		t.Errorf("Detail = %q, want the output %q", shell.Detail, "hi")
+	}
+}
+
+func TestReadTranscriptViewSkillChunk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "33333333-3333-3333-3333-333333333333.jsonl")
+	session := `{"type":"user","uuid":"u1","timestamp":"2026-07-04T10:00:00Z","message":{"role":"user","content":"<command-message>superpowers:brainstorming</command-message>\n<command-name>/superpowers:brainstorming</command-name>"}}
+{"type":"user","isMeta":true,"uuid":"u2","timestamp":"2026-07-04T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /Users/x/.claude/skills/brainstorming\n\n# Brainstorming Ideas Into Designs\n\nHelp turn ideas into designs."}]}}
+`
+	if err := os.WriteFile(path, []byte(session), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ReadTranscriptView(path)
+	if err != nil {
+		t.Fatalf("ReadTranscriptView: %v", err)
+	}
+	var user, skill *Chunk
+	for i := range view.Chunks {
+		switch view.Chunks[i].Kind {
+		case ChunkUser:
+			user = &view.Chunks[i]
+		case ChunkSkill:
+			skill = &view.Chunks[i]
+		}
+	}
+	if user == nil || user.Text != "/superpowers:brainstorming" {
+		t.Fatalf("user's slash command should stay its own chunk, got %+v", view.Chunks)
+	}
+	if skill == nil {
+		t.Fatalf("no skill chunk found in %+v", view.Chunks)
+	}
+	if skill.Text != "superpowers:brainstorming" {
+		t.Errorf("Text = %q, want the skill identifier", skill.Text)
+	}
+	if skill.Label != "/Users/x/.claude/skills/brainstorming" {
+		t.Errorf("Label = %q, want the source path", skill.Label)
+	}
+	if !strings.HasPrefix(skill.Detail, "# Brainstorming Ideas Into Designs") {
+		t.Errorf("Detail = %q, want the skill body", skill.Detail)
+	}
+}
+
 func TestReadTranscriptViewGrouping(t *testing.T) {
 	view, err := ReadTranscriptView(writeSession(t))
 	if err != nil {

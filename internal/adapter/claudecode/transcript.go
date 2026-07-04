@@ -146,6 +146,16 @@ func foldChunk(pc parser.Chunk, agentRefs map[string]string, traces map[string][
 	case parser.CompactChunk:
 		c.Kind = ChunkCompact
 		c.Summary = pc.Output
+	case parser.ShellChunk:
+		c.Kind = ChunkShell
+		c.Text = pc.ShellCommand
+		c.Detail = pc.Output
+		c.IsError = pc.IsError
+	case parser.SkillChunk:
+		c.Kind = ChunkSkill
+		c.Text = pc.UserText     // skill identifier
+		c.Label = pc.SystemLabel // source base directory
+		c.Detail = pc.Output     // skill file body
 	default: // SystemChunk
 		c.Kind = ChunkSystem
 		c.Label = pc.SystemLabel // preview after the timestamp (e.g. "Recap"); "" for none

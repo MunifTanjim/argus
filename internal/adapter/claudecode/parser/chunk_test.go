@@ -27,6 +27,86 @@ func TestBuildChunks_SingleUser(t *testing.T) {
 	}
 }
 
+func TestBuildChunks_SkillLoad(t *testing.T) {
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	msgs := []parser.ClassifiedMsg{
+		parser.UserMsg{Timestamp: t0, Text: "/superpowers:brainstorming a new feature"},
+		parser.AIMsg{Timestamp: t0, IsMeta: true, Text: "Base directory for this skill: /p/skills/brainstorming\n\n# Brainstorming\n\nHelp turn ideas into designs."},
+	}
+	chunks := parser.BuildChunks(msgs)
+	if len(chunks) != 2 {
+		t.Fatalf("len(chunks) = %d, want 2 (user command + skill)", len(chunks))
+	}
+	if chunks[0].Type != parser.UserChunk || chunks[0].UserText != "/superpowers:brainstorming a new feature" {
+		t.Errorf("chunks[0] = %+v, want the user's full slash command", chunks[0])
+	}
+	c := chunks[1]
+	if c.Type != parser.SkillChunk {
+		t.Errorf("Type = %d, want SkillChunk", c.Type)
+	}
+	if c.UserText != "superpowers:brainstorming" {
+		t.Errorf("name = %q, want superpowers:brainstorming (argument excluded)", c.UserText)
+	}
+	if c.SystemLabel != "/p/skills/brainstorming" {
+		t.Errorf("path = %q, want the base directory", c.SystemLabel)
+	}
+	if c.Output != "# Brainstorming\n\nHelp turn ideas into designs." {
+		t.Errorf("body = %q, want the skill markdown", c.Output)
+	}
+}
+
+func TestBuildChunks_SlashCommandNotSkill(t *testing.T) {
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
+		parser.UserMsg{Timestamp: t0, Text: "/model"},
+		parser.AIMsg{Timestamp: t0, IsMeta: true, Text: "Set model to opus."},
+	})
+	if len(chunks) != 1 || chunks[0].Type != parser.UserChunk {
+		t.Fatalf("want one UserChunk, got %+v", chunks)
+	}
+	if chunks[0].ExpandedPrompt != "Set model to opus." {
+		t.Errorf("expanded prompt = %q", chunks[0].ExpandedPrompt)
+	}
+}
+
+func TestBuildChunks_ShellPairsInputAndOutput(t *testing.T) {
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	msgs := []parser.ClassifiedMsg{
+		parser.ShellMsg{Timestamp: t0, Command: "ls -la"},
+		parser.ShellOutputMsg{Timestamp: t0.Add(time.Second), Output: "file.go", IsError: false},
+	}
+	chunks := parser.BuildChunks(msgs)
+	if len(chunks) != 1 {
+		t.Fatalf("len(chunks) = %d, want 1 (input+output pair into one shell chunk)", len(chunks))
+	}
+	c := chunks[0]
+	if c.Type != parser.ShellChunk {
+		t.Errorf("Type = %d, want ShellChunk", c.Type)
+	}
+	if c.ShellCommand != "ls -la" {
+		t.Errorf("ShellCommand = %q, want %q", c.ShellCommand, "ls -la")
+	}
+	if c.Output != "file.go" {
+		t.Errorf("Output = %q, want %q", c.Output, "file.go")
+	}
+	if c.IsError {
+		t.Error("IsError should be false for a clean run")
+	}
+}
+
+func TestBuildChunks_ShellOrphanOutput(t *testing.T) {
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
+		parser.ShellOutputMsg{Timestamp: t0, Output: "orphan", IsError: true},
+	})
+	if len(chunks) != 1 || chunks[0].Type != parser.ShellChunk {
+		t.Fatalf("want one ShellChunk, got %+v", chunks)
+	}
+	if chunks[0].Output != "orphan" || !chunks[0].IsError {
+		t.Errorf("orphan output not preserved: %+v", chunks[0])
+	}
+}
+
 func TestBuildChunks_UserAIUser(t *testing.T) {
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	msgs := []parser.ClassifiedMsg{

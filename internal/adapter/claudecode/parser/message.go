@@ -78,8 +78,23 @@ type SystemMsg struct {
 
 func (SystemMsg) classifiedMsg() {}
 
-// TeammateMsg represents a message from a teammate agent.
-// Folded into the AI turn during chunk building rather than starting a new user chunk.
+type ShellMsg struct {
+	Timestamp time.Time
+	Command   string
+}
+
+func (ShellMsg) classifiedMsg() {}
+
+type ShellOutputMsg struct {
+	Timestamp time.Time
+	Output    string
+	IsError   bool // stderr was non-empty
+}
+
+func (ShellOutputMsg) classifiedMsg() {}
+
+// TeammateMsg is folded into the AI turn during chunk building rather than
+// starting a new user chunk.
 type TeammateMsg struct {
 	Timestamp  time.Time
 	Text       string // sanitized inner content

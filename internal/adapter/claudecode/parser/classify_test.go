@@ -801,14 +801,14 @@ func TestClassify_BashOutputWithStderr(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Classify to succeed for bash output")
 	}
-	sys, isSys := msg.(parser.SystemMsg)
-	if !isSys {
-		t.Fatalf("expected SystemMsg, got %T", msg)
+	out, isOut := msg.(parser.ShellOutputMsg)
+	if !isOut {
+		t.Fatalf("expected ShellOutputMsg, got %T", msg)
 	}
-	if sys.Output != "fatal: not a git repository" {
-		t.Errorf("Output = %q, want %q", sys.Output, "fatal: not a git repository")
+	if out.Output != "fatal: not a git repository" {
+		t.Errorf("Output = %q, want %q", out.Output, "fatal: not a git repository")
 	}
-	if !sys.IsError {
+	if !out.IsError {
 		t.Error("IsError should be true when bash-stderr is present")
 	}
 }
@@ -821,14 +821,14 @@ func TestClassify_BashOutputStdoutOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Classify to succeed for bash stdout")
 	}
-	sys, isSys := msg.(parser.SystemMsg)
-	if !isSys {
-		t.Fatalf("expected SystemMsg, got %T", msg)
+	out, isOut := msg.(parser.ShellOutputMsg)
+	if !isOut {
+		t.Fatalf("expected ShellOutputMsg, got %T", msg)
 	}
-	if sys.Output != "hello world" {
-		t.Errorf("Output = %q, want %q", sys.Output, "hello world")
+	if out.Output != "hello world" {
+		t.Errorf("Output = %q, want %q", out.Output, "hello world")
 	}
-	if sys.IsError {
+	if out.IsError {
 		t.Error("IsError should be false when only stdout is present")
 	}
 }
@@ -1011,7 +1011,7 @@ func TestClassify_AttachmentOtherSubtypesDropped(t *testing.T) {
 	}
 }
 
-func TestClassify_BashInputStrippedInUserMsg(t *testing.T) {
+func TestClassify_BashInputIsShellMsg(t *testing.T) {
 	content := json.RawMessage(`"<bash-input>git push</bash-input>"`)
 	e := makeEntry("user", "bi1", "2025-01-15T10:00:00Z", content)
 
@@ -1019,11 +1019,11 @@ func TestClassify_BashInputStrippedInUserMsg(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Classify to succeed for bash input")
 	}
-	usr, isUsr := msg.(parser.UserMsg)
-	if !isUsr {
-		t.Fatalf("expected UserMsg, got %T", msg)
+	sh, isShell := msg.(parser.ShellMsg)
+	if !isShell {
+		t.Fatalf("expected ShellMsg, got %T", msg)
 	}
-	if usr.Text != "git push" {
-		t.Errorf("Text = %q, want %q (bash-input tags should be stripped)", usr.Text, "git push")
+	if sh.Command != "git push" {
+		t.Errorf("Command = %q, want %q (bash-input tags should be stripped)", sh.Command, "git push")
 	}
 }

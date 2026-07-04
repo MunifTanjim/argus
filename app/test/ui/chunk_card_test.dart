@@ -31,6 +31,24 @@ void main() {
     expect(find.textContaining('nothing to commit'), findsOneWidget);
   });
 
+  testWidgets('skill chunk shows the name, path/body on expand', (tester) async {
+    const c = Chunk(
+      id: 'sk',
+      kind: ChunkKind.skill,
+      text: 'superpowers:brainstorming',
+      label: '/path/to/SKILL.md',
+      detail: 'Help turn ideas into designs.',
+    );
+    await tester.pumpWidget(_wrap(c));
+    expect(find.text('Skill'), findsOneWidget);
+    expect(find.textContaining('superpowers:brainstorming'), findsOneWidget);
+    expect(find.textContaining('SKILL.md'), findsNothing);
+    await tester.tap(find.text('Skill'));
+    await tester.pump();
+    expect(find.textContaining('SKILL.md'), findsOneWidget);
+    expect(find.textContaining('Help turn ideas'), findsOneWidget);
+  });
+
   testWidgets('long user chunk collapses and expands', (tester) async {
     final long = List.generate(30, (i) => 'line $i').join('\n');
     // Scrollable parent so tall expanded content doesn't trip an overflow.

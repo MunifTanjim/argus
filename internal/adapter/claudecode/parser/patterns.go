@@ -13,6 +13,7 @@ const (
 
 // Bash mode tags -- inline command execution via !bash in Claude Code.
 const (
+	bashInputTag        = "<bash-input>"
 	bashStdoutTag       = "<bash-stdout>"
 	bashStderrTag       = "<bash-stderr>"
 	taskNotificationTag = "<task-notification>"

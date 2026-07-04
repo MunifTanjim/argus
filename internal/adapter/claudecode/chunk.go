@@ -24,6 +24,8 @@ const (
 	ChunkAI      = transcript.ChunkAI
 	ChunkSystem  = transcript.ChunkSystem
 	ChunkCompact = transcript.ChunkCompact
+	ChunkShell   = transcript.ChunkShell
+	ChunkSkill   = transcript.ChunkSkill
 
 	ItemThinking = transcript.ItemThinking
 	ItemText     = transcript.ItemText

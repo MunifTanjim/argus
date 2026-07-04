@@ -52,6 +52,8 @@ const (
 	AIChunk
 	SystemChunk
 	CompactChunk // context compression boundary
+	ShellChunk   // user ran `!cmd` directly in the CLI
+	SkillChunk   // a skill file loaded into context
 )
 
 // InferenceCycle is one LLM call plus its dispatched tool calls. A derived
@@ -93,6 +95,9 @@ type Chunk struct {
 	Output      string
 	IsError     bool   // bash stderr present or task killed
 	SystemLabel string // preview shown after the timestamp (e.g. "Recap"); empty for none
+
+	// Shell chunk: the !cmd command.
+	ShellCommand string
 }
 
 // BuildChunks folds classified messages into display chunks. Consecutive AI
@@ -119,10 +124,22 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 				Timestamp: m.Timestamp,
 				UserText:  m.Text,
 			}
-			// Slash commands: the next entry may be the expanded skill prompt;
-			// attach it here instead of letting it fall into the AI buffer.
+			// Skill loads emit a separate SkillChunk; other expanded prompts attach.
 			if strings.HasPrefix(m.Text, "/") && i+1 < len(msgs) {
-				if expanded := extractExpandedPrompt(msgs[i+1]); expanded != "" {
+				expanded := extractExpandedPrompt(msgs[i+1])
+				if name, path, body, ok := skillLoad(m.Text, expanded); ok {
+					chunks = append(chunks, c)
+					chunks = append(chunks, Chunk{
+						Type:        SkillChunk,
+						Timestamp:   m.Timestamp,
+						UserText:    name,
+						SystemLabel: path,
+						Output:      body,
+					})
+					i++ // consume the expanded prompt entry
+					continue
+				}
+				if expanded != "" {
 					c.ExpandedPrompt = expanded
 					i++ // consume the expanded prompt entry
 				}
@@ -169,6 +186,30 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 				Type:      CompactChunk,
 				Timestamp: m.Timestamp,
 				Output:    m.Text,
+			})
+		case ShellMsg:
+			flush()
+			sc := Chunk{
+				Type:         ShellChunk,
+				Timestamp:    m.Timestamp,
+				ShellCommand: m.Command,
+			}
+			if i+1 < len(msgs) {
+				if out, ok := msgs[i+1].(ShellOutputMsg); ok {
+					sc.Output = out.Output
+					sc.IsError = out.IsError
+					i++
+				}
+			}
+			chunks = append(chunks, sc)
+		case ShellOutputMsg:
+			// Orphan output (no preceding !cmd): surface rather than drop.
+			flush()
+			chunks = append(chunks, Chunk{
+				Type:      ShellChunk,
+				Timestamp: m.Timestamp,
+				Output:    m.Output,
+				IsError:   m.IsError,
 			})
 		}
 	}

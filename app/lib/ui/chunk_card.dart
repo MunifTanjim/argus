@@ -66,6 +66,8 @@ class _ChunkCardState extends State<ChunkCard> {
         return _SystemCard(chunk: widget.chunk);
       case ChunkKind.shell:
         return _ShellCard(chunk: widget.chunk);
+      case ChunkKind.skill:
+        return _SkillCard(chunk: widget.chunk);
       case ChunkKind.compact:
         return _CompactDivider(summary: widget.chunk.summary);
       case ChunkKind.unknown:
@@ -470,7 +472,73 @@ class _ShellCardState extends State<_ShellCard> {
   }
 }
 
-/// Context-compaction marker: centered label between horizontal rules.
+class _SkillCard extends StatefulWidget {
+  const _SkillCard({required this.chunk});
+  final Chunk chunk;
+
+  @override
+  State<_SkillCard> createState() => _SkillCardState();
+}
+
+class _SkillCardState extends State<_SkillCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.chunk;
+    final hasPath = c.label != null && c.label!.isNotEmpty;
+    final hasBody = c.detail != null && c.detail!.isNotEmpty;
+    final expandable = hasPath || hasBody;
+
+    final header = Row(
+      children: [
+        const Icon(Icons.school_outlined, size: 13, color: AppColors.dim),
+        const SizedBox(width: 6),
+        Text('Skill', style: _mono.copyWith(color: AppColors.secondary)),
+        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: expandable ? () => setState(() => _expanded = !_expanded) : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(c.text ?? '',
+                    style: _mono.copyWith(color: AppColors.text)),
+              ),
+              if (_expanded && hasPath)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(c.label!, style: _monoDim),
+                ),
+              if (_expanded && hasBody)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(c.detail!, style: _monoDim),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CompactDivider extends StatelessWidget {
   const _CompactDivider({required this.summary});
   final String? summary;
