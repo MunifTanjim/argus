@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/chunk.dart';
 import 'theme.dart';
 import 'tool_detail_antigravity.dart';
+import 'tool_detail_codex.dart';
 
 const _blue = Color(0xFF83a598);
 const _green = Color(0xFFb8bb26);
@@ -46,9 +47,9 @@ class ToolMeta {
   final ToolDetailBuilder? detail;
 }
 
-/// The tool→meta map. Claude Code and Codex tools still live in the
-/// item_row/tool_detail switches; for now this holds Antigravity's tools. All
-/// lookups consult this first and fall back to those switches.
+/// The tool→meta map for Antigravity and Codex tools. Claude Code tools still
+/// live in the item_row/tool_detail switches. All lookups consult this first and
+/// fall back to those switches.
 final Map<String, ToolMeta> toolRegistry = {
   'run_command': const ToolMeta(
       'Run Command', ToolCategory.bash, agyRunCommandDetail),
@@ -85,6 +86,24 @@ final Map<String, ToolMeta> toolRegistry = {
       'Send Message', ToolCategory.other, agySendMessageDetail),
   'schedule':
       const ToolMeta('Schedule', ToolCategory.other, agyScheduleDetail),
+
+  'exec_command': const ToolMeta(
+      'Exec Command', ToolCategory.bash, codexExecCommandDetail),
+  'apply_patch': const ToolMeta('Apply Patch', ToolCategory.edit),
+  'update_plan': const ToolMeta(
+      'Update Plan', ToolCategory.other, codexUpdatePlanDetail),
+  'view_image': const ToolMeta('View Image', ToolCategory.read),
+  'web_search':
+      const ToolMeta('Web Search', ToolCategory.web, codexWebSearchDetail),
+  'wait_agent': const ToolMeta(
+      'Wait Agent', ToolCategory.task, codexWaitAgentDetail),
+  'close_agent': const ToolMeta(
+      'Close Agent', ToolCategory.task, codexCloseAgentDetail),
+  'spawn_agent': const ToolMeta('Spawn Agent', ToolCategory.task),
 };
 
 ToolMeta? toolMeta(String? name) => name == null ? null : toolRegistry[name];
+
+/// Agent-reference ops render a status detail, not a trace.
+bool isAgentRefTool(String? name) =>
+    name == 'wait_agent' || name == 'close_agent';

@@ -7,6 +7,7 @@ import 'item_detail_screen.dart';
 import 'item_row.dart';
 import 'subagent_trace_screen.dart';
 import 'theme.dart';
+import 'tool_registry.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
 final _monoDim = _mono.copyWith(color: AppColors.dim);
@@ -252,7 +253,9 @@ class _ChunkCardState extends State<ChunkCard> {
   /// Tool rows open the tool detail; subagent rows with a trace (inline or
   /// streamable via agentId) open the subagent trace.
   VoidCallback? _drill(Item it) {
-    if (it.kind == ItemKind.tool) {
+    // Tools and codex wait/close (subagent-kind, but a status detail) open the
+    // item detail; a spawn/invoke subagent opens its trace.
+    if (it.kind == ItemKind.tool || isAgentRefTool(it.toolName)) {
       return () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) =>

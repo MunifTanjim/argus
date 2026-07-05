@@ -20,6 +20,9 @@ String itemTitle(Item it) {
     case ItemKind.text:
       return 'Output';
     case ItemKind.subagent:
+      // Registry display covers agent-ref ops; spawn/invoke falls back to type.
+      final meta = toolMeta(it.toolName);
+      if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.soleSubagent?.type ?? 'Subagent';
     case ItemKind.unknown:
       return 'Detail';
@@ -49,7 +52,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   Object? _error;
 
   bool get _needsFetch =>
-      widget.item.kind == ItemKind.tool &&
+      (widget.item.kind == ItemKind.tool ||
+          isAgentRefTool(widget.item.toolName)) &&
       (widget.item.toolId?.isNotEmpty ?? false) &&
       widget.item.toolInput == null &&
       widget.item.result == null;

@@ -84,10 +84,10 @@ type toolMeta struct {
 	detail   func(m model, it transcript.Item, width int) string
 }
 
-// toolRegistry is the authoritative tool→agent map. Claude Code and Codex tools
-// still live in the toolIcon/toolColor/toolDisplayName/toolDetailBody switches
-// (to migrate here later); for now it holds Antigravity's tools. All lookups
-// consult this map first and fall back to those switches.
+// toolRegistry is the authoritative tool→agent map for Antigravity and Codex
+// tools. Claude Code tools still live in the toolIcon/toolColor/toolDisplayName/
+// toolDetailBody switches (to migrate here later). All lookups consult this map
+// first and fall back to those switches.
 var toolRegistry = map[string]toolMeta{
 	// antigravity
 	"run_command":                {agentAntigravity, "Run Command", catBash, (model).runCommandDetail},
@@ -108,4 +108,14 @@ var toolRegistry = map[string]toolMeta{
 	"list_permissions":           {agentAntigravity, "List Permissions", catOther, (model).listPermissionsDetail},
 	"send_message":               {agentAntigravity, "Send Message", catOther, (model).sendMessageDetail},
 	"schedule":                   {agentAntigravity, "Schedule", catOther, (model).scheduleDetail},
+
+	// codex
+	"exec_command": {agentCodex, "Exec Command", catBash, (model).execCommandDetail},
+	"apply_patch":  {agentCodex, "Apply Patch", catEdit, nil},
+	"update_plan":  {agentCodex, "Update Plan", catOther, (model).planDetail},
+	"view_image":   {agentCodex, "View Image", catRead, nil},
+	"web_search":   {agentCodex, "Web Search", catWeb, (model).webDetail},
+	"wait_agent":   {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
+	"close_agent":  {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
+	"spawn_agent":  {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
 }

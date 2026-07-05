@@ -56,28 +56,20 @@ func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
 		return m.editToolDetail(it, width), true
 	case "Bash":
 		return m.bashDetail(it, width), true
-	case "exec_command":
-		return m.execCommandDetail(it, width), true
 	// BashOutput/KillShell carry a shell id, not a command, so they use the
 	// generic Input/Result layout (default branch).
 	case "Read", "NotebookRead":
 		return m.readDetail(it, width), true
 	case "TodoWrite":
 		return m.todoDetail(it, width), true
-	case "update_plan":
-		return m.planDetail(it, width), true
 	case "Grep":
 		return m.grepDetail(it, width), true
 	case "Glob", "LS":
 		return m.globDetail(it, width), true
-	case "WebFetch", "WebSearch", "web_search":
+	case "WebFetch", "WebSearch":
 		return m.webDetail(it, width), true
 	case "AskUserQuestion":
 		return m.askUserQuestionDetail(it, width), true
-	case "wait_agent":
-		return m.waitAgentDetail(it, width), true
-	case "close_agent":
-		return m.closeAgentDetail(it, width), true
 	default:
 		return "", false
 	}

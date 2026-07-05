@@ -168,18 +168,6 @@ func toolDisplayName(name string) string {
 		}
 		return name
 	}
-	switch name {
-	case "update_plan":
-		return "Update Plan"
-	case "exec_command":
-		return "Exec Command"
-	case "apply_patch":
-		return "Apply Patch"
-	case "view_image":
-		return "View Image"
-	case "web_search":
-		return "Web Search"
-	}
 	return name
 }
 
@@ -194,13 +182,13 @@ func toolIcon(name string, isError bool) StyledIcon {
 		return categoryIcon(meta.category)
 	}
 	switch name {
-	case "Read", "NotebookRead", "view_image":
+	case "Read", "NotebookRead":
 		return Icon.Tool.Read
-	case "Edit", "MultiEdit", "NotebookEdit", "apply_patch":
+	case "Edit", "MultiEdit", "NotebookEdit":
 		return Icon.Tool.Edit
 	case "Write":
 		return Icon.Tool.Write
-	case "Bash", "BashOutput", "KillShell", "exec_command":
+	case "Bash", "BashOutput", "KillShell":
 		return Icon.Tool.Bash
 	case "Grep":
 		return Icon.Tool.Grep
@@ -210,7 +198,7 @@ func toolIcon(name string, isError bool) StyledIcon {
 		return Icon.Tool.Task
 	case "Skill":
 		return Icon.Tool.Skill
-	case "WebFetch", "WebSearch", "web_search":
+	case "WebFetch", "WebSearch":
 		return Icon.Tool.Web
 	default:
 		return Icon.Tool.Misc

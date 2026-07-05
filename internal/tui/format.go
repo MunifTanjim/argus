@@ -142,13 +142,13 @@ func toolColor(name string) color.Color {
 		return categoryColor(meta.category)
 	}
 	switch name {
-	case "Read", "NotebookRead", "view_image":
+	case "Read", "NotebookRead":
 		return ColorToolRead
-	case "Edit", "MultiEdit", "NotebookEdit", "apply_patch":
+	case "Edit", "MultiEdit", "NotebookEdit":
 		return ColorToolEdit
 	case "Write":
 		return ColorToolWrite
-	case "Bash", "BashOutput", "KillShell", "exec_command":
+	case "Bash", "BashOutput", "KillShell":
 		return ColorToolBash
 	case "Grep":
 		return ColorToolGrep
@@ -158,7 +158,7 @@ func toolColor(name string) color.Color {
 		return ColorToolTask
 	case "Skill":
 		return ColorToolSkill
-	case "WebFetch", "WebSearch", "web_search":
+	case "WebFetch", "WebSearch":
 		return ColorToolWeb
 	default:
 		return ColorToolOther
