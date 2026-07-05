@@ -254,6 +254,8 @@ func (m model) assistantBrand() (StyledIcon, string) {
 	switch m.sessions[m.selectedID].Agent {
 	case "codex":
 		return Icon.Claude, "Codex"
+	case "antigravity":
+		return Icon.Claude, "Antigravity"
 	default:
 		return Icon.Claude, "Claude"
 	}

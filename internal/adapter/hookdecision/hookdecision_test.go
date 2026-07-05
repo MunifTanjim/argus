@@ -1,4 +1,4 @@
-package claudecode
+package hookdecision
 
 import (
 	"encoding/json"
@@ -11,7 +11,6 @@ import (
 func TestBuildClarifyMessage(t *testing.T) {
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick a DB"},{"question":"Region?"}]}`)
 
-	// Answered + unanswered render distinctly.
 	msg := buildClarifyMessage(toolInput, map[string]any{"Pick a DB": "Postgres"})
 	for _, want := range []string{
 		"The user wants to clarify these questions.",
@@ -27,7 +26,6 @@ func TestBuildClarifyMessage(t *testing.T) {
 		}
 	}
 
-	// Multi-select answers join with ", " (Go []string and JSON []any both work).
 	msg = buildClarifyMessage(
 		json.RawMessage(`{"questions":[{"question":"Langs"}]}`),
 		map[string]any{"Langs": []any{"Go", "Dart"}},
@@ -56,19 +54,16 @@ func TestFormatDecisionChat(t *testing.T) {
 }
 
 func TestFormatDecision(t *testing.T) {
-	// Deny carries the reason as the decision message.
 	out := FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
 	if !strings.Contains(out, `"behavior":"deny"`) || !strings.Contains(out, "use rg instead") {
 		t.Errorf("deny: %s", out)
 	}
 
-	// Plain permission allow: behavior allow, no updatedInput.
 	out = FormatDecision("Bash", nil, api.RespondParams{Behavior: "allow"})
 	if !strings.Contains(out, `"behavior":"allow"`) || strings.Contains(out, "updatedInput") {
 		t.Errorf("permission allow: %s", out)
 	}
 
-	// AskUserQuestion allow injects answers + echoes the original questions.
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
 	out = FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		Behavior: "allow",

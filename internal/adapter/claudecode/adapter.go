@@ -6,6 +6,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/adapter/hookdecision"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -33,6 +34,11 @@ func (ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (sess
 
 func (ccAdapter) EventName(ev adapter.HookEvent) string { return EventName(ev) }
 
+func (ccAdapter) RescanOnHook(ev adapter.HookEvent) bool {
+	e := EventName(ev)
+	return e == "SessionStart" || e == "SessionEnd"
+}
+
 func (ccAdapter) ShouldBlock(ev adapter.HookEvent) bool { return ShouldBlock(ev) }
 
 func (ccAdapter) PermissionPayload(ev adapter.HookEvent) (string, json.RawMessage) {
@@ -40,10 +46,10 @@ func (ccAdapter) PermissionPayload(ev adapter.HookEvent) (string, json.RawMessag
 }
 
 func (ccAdapter) FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string {
-	return FormatDecision(toolName, toolInput, p)
+	return hookdecision.FormatDecision(toolName, toolInput, p)
 }
 
-// --- Transcript (live) ---
+func (ccAdapter) HookOutput(adapter.HookEvent) string { return "" }
 
 func (ccAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 	return ReadTranscriptView(path)

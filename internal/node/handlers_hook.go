@@ -20,18 +20,16 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	if a == nil {
 		return api.HookResult{}, nil
 	}
+	api.LogAttr(ctx, "agent", ev.Agent)
 	s, alive := a.ProcessHook(d.reg, ev)
 	event := a.EventName(ev)
 	api.LogAttr(ctx, "event", event)
 	if tool, _ := a.PermissionPayload(ev); tool != "" {
 		api.LogAttr(ctx, "tool", tool)
 	}
-	// ProcessHook already updated the firing session, so rescan only for lifecycle
-	// events: SessionStart surfaces a new pane (and enriches Name), SessionEnd prunes
-	// a vanished one. Per-tool-call events come from known sessions — scanning them is
-	// pure ps+tmux churn.
-	switch event {
-	case "SessionStart", "SessionEnd":
+	// Rescan only for lifecycle events; per-tool-call hooks come from known
+	// sessions and scanning is pure churn.
+	if a.RescanOnHook(ev) {
 		go d.scan(context.Background())
 	}
 

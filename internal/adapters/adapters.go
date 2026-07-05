@@ -3,6 +3,7 @@ package adapters
 
 import (
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/adapter/antigravity"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/adapter/codex"
 )
@@ -12,6 +13,7 @@ func All() []adapter.Adapter {
 	return []adapter.Adapter{
 		claudecode.New(),
 		codex.New(),
+		antigravity.New(),
 	}
 }
 

@@ -158,8 +158,16 @@ func initIcons() {
 	}
 }
 
-// toolDisplayName maps a raw tool name to a friendlier label for UI display.
+// toolDisplayName maps a raw tool name to a friendlier label for UI display,
+// consulting the tool registry first (its display, or the raw name for a
+// registered tool without one) before the built-in switch.
 func toolDisplayName(name string) string {
+	if meta, ok := toolRegistry[name]; ok {
+		if meta.display != "" {
+			return meta.display
+		}
+		return name
+	}
 	switch name {
 	case "update_plan":
 		return "Update Plan"
@@ -175,14 +183,18 @@ func toolDisplayName(name string) string {
 	return name
 }
 
-// toolIcon returns the styled icon for a Claude Code tool by name. Error tools
-// always get the red error icon regardless of name.
+// toolIcon returns the styled icon for a tool by name. Error tools always get the
+// red error icon regardless of name. Registered tools resolve via their category;
+// the switch covers the not-yet-migrated Claude Code and Codex tools.
 func toolIcon(name string, isError bool) StyledIcon {
 	if isError {
 		return Icon.Tool.Err
 	}
+	if meta, ok := toolRegistry[name]; ok {
+		return categoryIcon(meta.category)
+	}
 	switch name {
-	case "Read", "view_image":
+	case "Read", "NotebookRead", "view_image":
 		return Icon.Tool.Read
 	case "Edit", "MultiEdit", "NotebookEdit", "apply_patch":
 		return Icon.Tool.Edit

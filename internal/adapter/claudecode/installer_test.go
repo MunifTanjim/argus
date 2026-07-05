@@ -269,9 +269,32 @@ func TestReconcileIfInstalledOptInPreserved(t *testing.T) {
 	}
 }
 
-// TestReconcileMigratesLegacyMarker checks a pre-unified install (commands ending
-// in the "#argus-managed" shell comment, no --agent) is recognized and rewritten to
-// the current `--argus-managed --agent claude …` form, preserving user hooks.
+func TestSavePreservesAngleBrackets(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+
+	seed := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sh -c 'env >> /tmp/x.txt'"}]}]}}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install("/usr/bin/argus", DefaultHookEvents); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `\u003e`) {
+		t.Errorf("'>' escaped as \\u003e in written file:\n%s", b)
+	}
+	if !strings.Contains(string(b), ">> /tmp/x.txt") {
+		t.Errorf("redirect not preserved verbatim:\n%s", b)
+	}
+}
+
 func TestReconcileMigratesLegacyMarker(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)

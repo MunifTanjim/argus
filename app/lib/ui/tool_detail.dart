@@ -6,6 +6,7 @@ import '../models/chunk.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
+import 'tool_registry.dart';
 
 const _red = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
@@ -40,6 +41,8 @@ Widget _resultSection(Item it, {bool wrap = false, String? lang}) {
 }
 
 Widget toolDetailBody(Item item) {
+  final detail = toolMeta(item.toolName)?.detail;
+  if (detail != null) return detail(item);
   switch (item.toolName) {
     case 'Edit':
     case 'MultiEdit':

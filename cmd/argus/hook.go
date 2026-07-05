@@ -67,6 +67,10 @@ func newHookCmd() *cobra.Command {
 				shell.Exit(0)
 			}
 
+			// Non-blocking: compute the agent's stdout answer locally so it arrives
+			// even if the daemon call times out.
+			out := a.HookOutput(ev)
+
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -81,6 +85,9 @@ func newHookCmd() *cobra.Command {
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
+			}
+			if out != "" {
+				fmt.Println(out)
 			}
 			shell.Exit(0)
 		},

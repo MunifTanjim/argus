@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/adapter/hookdecision"
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
@@ -13,7 +13,7 @@ func TestBuildClarifyMessage(t *testing.T) {
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick a DB"},{"question":"Region?"}]}`)
 
 	// Answered + unanswered render distinctly.
-	out := claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
+	out := hookdecision.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		QuestionAction: "chat",
 		Answers:        map[string]any{"Pick a DB": "Postgres"},
 	})
@@ -32,7 +32,7 @@ func TestBuildClarifyMessage(t *testing.T) {
 	}
 
 	// Multi-select answers join with ", " (Go []string and JSON []any both work).
-	out = claudecode.FormatDecision("AskUserQuestion",
+	out = hookdecision.FormatDecision("AskUserQuestion",
 		json.RawMessage(`{"questions":[{"question":"Langs"}]}`),
 		api.RespondParams{
 			QuestionAction: "chat",
@@ -46,7 +46,7 @@ func TestBuildClarifyMessage(t *testing.T) {
 
 func TestBuildDecisionChat(t *testing.T) {
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
-	out := claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
+	out := hookdecision.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		QuestionAction: "chat",
 		Answers:        map[string]any{"Pick": "A"},
 	})
@@ -63,20 +63,20 @@ func TestBuildDecisionChat(t *testing.T) {
 
 func TestBuildDecision(t *testing.T) {
 	// Deny carries the reason as the decision message.
-	out := claudecode.FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
+	out := hookdecision.FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
 	if !strings.Contains(out, `"behavior":"deny"`) || !strings.Contains(out, "use rg instead") {
 		t.Errorf("deny: %s", out)
 	}
 
 	// Plain permission allow: behavior allow, no updatedInput.
-	out = claudecode.FormatDecision("Bash", nil, api.RespondParams{Behavior: "allow"})
+	out = hookdecision.FormatDecision("Bash", nil, api.RespondParams{Behavior: "allow"})
 	if !strings.Contains(out, `"behavior":"allow"`) || strings.Contains(out, "updatedInput") {
 		t.Errorf("permission allow: %s", out)
 	}
 
 	// AskUserQuestion allow injects answers + echoes the original questions.
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
-	out = claudecode.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
+	out = hookdecision.FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		Behavior: "allow",
 		Answers:  map[string]any{"Pick": "A"},
 	})

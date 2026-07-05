@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/chunk.dart';
 import 'theme.dart';
+import 'tool_registry.dart';
 
 const _redColor = Color(0xFFfb4934);
 
@@ -42,7 +43,10 @@ class ItemRow extends StatelessWidget {
         );
       case ItemKind.tool:
         final err = item.resultIsError;
-        final name = item.toolName ?? 'tool';
+        final meta = toolMeta(item.toolName);
+        final name = (meta?.display.isNotEmpty ?? false)
+            ? meta!.display
+            : (item.toolName ?? 'tool');
         return _row(
           leading: Icon(_toolIcon(item.toolName), size: 14,
               color: err ? _redColor : _toolColor(item.toolName)),
@@ -116,6 +120,8 @@ class ItemRow extends StatelessWidget {
 }
 
 IconData _toolIcon(String? name) {
+  final meta = toolMeta(name);
+  if (meta != null) return categoryIcon(meta.category);
   switch (name) {
     case 'Read':
     case 'NotebookRead':
@@ -151,6 +157,8 @@ IconData _toolIcon(String? name) {
 }
 
 Color _toolColor(String? name) {
+  final meta = toolMeta(name);
+  if (meta != null) return categoryColor(meta.category);
   switch (name) {
     case 'Read':
     case 'NotebookRead':

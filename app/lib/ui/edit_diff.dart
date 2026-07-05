@@ -43,7 +43,7 @@ Widget editDiffView(Item item) {
               style: _mono.copyWith(color: AppColors.dim)),
         ));
       }
-      blocks.add(_diff(
+      blocks.add(diffView(
           toolInputStr(input['old_string']), toolInputStr(input['new_string'])));
       break;
     case 'MultiEdit':
@@ -57,18 +57,18 @@ Widget editDiffView(Item item) {
                 style: _mono.copyWith(color: AppColors.dim)),
           ));
         }
-        blocks.add(_diff(
+        blocks.add(diffView(
             toolInputStr(e['old_string']), toolInputStr(e['new_string'])));
       }
       break;
     case 'Write':
-      blocks.add(_diff('', toolInputStr(input['content'])));
+      blocks.add(diffView('', toolInputStr(input['content'])));
       break;
     case 'NotebookEdit':
-      blocks.add(_diff('', toolInputStr(input['new_source'])));
+      blocks.add(diffView('', toolInputStr(input['new_source'])));
       break;
     default:
-      blocks.add(_diff('', item.toolInput ?? ''));
+      blocks.add(diffView('', item.toolInput ?? ''));
   }
 
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
@@ -82,8 +82,8 @@ class _DLine {
   final _DKind kind;
 }
 
-/// Renders an interleaved line-level diff of [oldS] → [newS].
-Widget _diff(String oldS, String newS) => _DiffBox(_lineDiff(oldS, newS));
+/// Empty [oldS] yields an all-additions view.
+Widget diffView(String oldS, String newS) => _DiffBox(_lineDiff(oldS, newS));
 
 /// A diff box with a thin header (label + wrap toggle), mirroring code blocks.
 /// Copy is intentionally omitted — a diff is for reading, not grabbing text.

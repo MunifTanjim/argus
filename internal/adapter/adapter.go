@@ -55,13 +55,14 @@ type Adapter interface {
 	// --- Hooks ---
 	ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool)
 	EventName(ev HookEvent) string
+	RescanOnHook(ev HookEvent) bool
 	PermissionPayload(ev HookEvent) (toolName string, toolInput json.RawMessage)
 	// ShouldBlock reports whether the hook must wait for the user's decision.
 	ShouldBlock(ev HookEvent) bool
-	// FormatDecision renders the user's answer into the exact stdout the tool's
-	// hook expects (e.g. Claude's hookSpecificOutput JSON, Antigravity's
-	// {"allow_tool":...}). Called only for events where ShouldBlock returned true.
+	// FormatDecision renders the user's answer into the stdout the hook expects.
 	FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string
+	// HookOutput returns stdout for an unblocked hook. "" means print nothing.
+	HookOutput(ev HookEvent) string
 
 	ReadTranscriptView(path string) (transcript.TranscriptView, error)
 	ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error)

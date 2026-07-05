@@ -218,7 +218,7 @@ func saveJSONHooks(path string, hooks hookset.Map) error {
 	if len(hooks) == 0 {
 		delete(top, "hooks")
 	} else {
-		raw, err := json.Marshal(hooks)
+		raw, err := hookset.MarshalNoEscape(hooks)
 		if err != nil {
 			return err
 		}
@@ -230,14 +230,14 @@ func saveJSONHooks(path string, hooks hookset.Map) error {
 		}
 		return nil
 	}
-	out, err := json.MarshalIndent(top, "", "  ")
+	out, err := hookset.MarshalIndentNoEscape(top)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o600)
+	return os.WriteFile(path, out, 0o600)
 }
 
 func tomlStore() (store, error) {

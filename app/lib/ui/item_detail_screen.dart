@@ -7,10 +7,13 @@ import '../state/tool_detail.dart';
 import 'responsive.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
+import 'tool_registry.dart';
 
 String itemTitle(Item it) {
   switch (it.kind) {
     case ItemKind.tool:
+      final meta = toolMeta(it.toolName);
+      if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.toolName ?? 'Tool';
     case ItemKind.thinking:
       return 'Thinking';

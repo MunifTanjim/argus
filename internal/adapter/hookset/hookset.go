@@ -3,17 +3,38 @@
 package hookset
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 )
 
-// ManagedMarker is the token argus appends to every hook command it installs so it
-// can later recognize and remove only its own hooks. It is a hidden no-op flag on
-// `argus hook` rather than a shell-comment marker: a real argv token is detected
-// identically whether or not the tool runs the command through a shell, so this
-// works for Claude Code and Codex alike.
+// MarshalIndentNoEscape is json.MarshalIndent without HTML-escaping <, >, and &.
+func MarshalIndentNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// MarshalNoEscape marshals v to compact JSON without HTML-escaping <, >, and &.
+func MarshalNoEscape(v any) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
+}
+
+// ManagedMarker is the argv token argus uses to identify its own installed hooks.
 const ManagedMarker = "--argus-managed"
 
 // ManagedCommand builds the hook command argus installs for an agent and event.
@@ -51,6 +72,8 @@ type Spec struct {
 	Marker string
 	// LegacyMarker recognizes hooks from older installs for cleanup/migration.
 	LegacyMarker string
+	// Matcher is set on every managed group. "" omits it.
+	Matcher string
 	// Command builds the managed command for an event; Timeout its per-event timeout.
 	Command func(argusBin, event string) string
 	Timeout func(event string) int
@@ -124,11 +147,14 @@ func (s Spec) Uninstall() error {
 }
 
 func (s Spec) managedGroup(argusBin, event string) Group {
-	return Group{Hooks: []Cmd{{
-		Type:    "command",
-		Command: s.Command(argusBin, event),
-		Timeout: s.Timeout(event),
-	}}}
+	return Group{
+		Matcher: s.Matcher,
+		Hooks: []Cmd{{
+			Type:    "command",
+			Command: s.Command(argusBin, event),
+			Timeout: s.Timeout(event),
+		}},
+	}
 }
 
 func (s Spec) reconcileNeeded(hooks Map, argusBin string) bool {
@@ -147,14 +173,12 @@ func (s Spec) reconcileNeeded(hooks Map, argusBin string) bool {
 	return false
 }
 
-// managedMatches reports whether groups contain exactly the desired managed entry
-// (right command + timeout) for an event.
 func (s Spec) managedMatches(groups []Group, argusBin, event string) bool {
 	wantCmd := s.Command(argusBin, event)
 	for _, g := range groups {
 		for _, c := range g.Hooks {
 			if s.IsManaged(c) {
-				return c.Command == wantCmd && c.Timeout == s.Timeout(event)
+				return c.Command == wantCmd && c.Timeout == s.Timeout(event) && g.Matcher == s.Matcher
 			}
 		}
 	}

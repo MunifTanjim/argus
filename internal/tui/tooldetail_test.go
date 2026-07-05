@@ -188,6 +188,88 @@ func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
 	}
 }
 
+func TestRunCommandDetail(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "run_command",
+		ToolInput: `{"CommandLine":"git status","Cwd":"/repo","WaitMsBeforeAsync":5000,"toolSummary":"Check status"}`,
+		Result:    "Created At: 2026-07-04T22:06:13+06:00\nCompleted At: 2026-07-04T22:06:16+06:00\n\n\t\t\t\tThe command completed successfully.\n\t\t\t\tOutput:\n\t\t\t\tOn branch main\nnothing to commit\n\n",
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{
+		"# /repo", "$ git status",
+		"Created At", "Completed At", "The command completed successfully.",
+		"On branch main", "nothing to commit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\t\t\t\t") {
+		t.Errorf("scaffolding tab indent should be stripped:\n%s", out)
+	}
+}
+
+func TestRunCommandDetailOutputColonNotSplit(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "run_command",
+		ToolInput: `{"CommandLine":"foo --help","Cwd":"/repo"}`,
+		Result:    "Created At: x\n\n\t\t\t\tThe command completed successfully.\n\t\t\t\tOutput:\n\t\t\t\tusage: foo [-h]\nnote: see docs\n",
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{"usage: foo [-h]", "note: see docs"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output line with a colon should render verbatim:\n%s", out)
+		}
+	}
+}
+
+func TestRunCommandDetailBackgroundTaskNoOutput(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "run_command",
+		ToolInput: `{"CommandLine":"agy --print hi"}`,
+		Result:    "Created At: x\nTool is running as a background task with task id: t-1\nTask Description: agy --print hi\n",
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{"$ agy --print hi", "Tool is running as a background task", "t-1", "Task Description"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "run_command",
+		ToolInput: `{"Cwd":"/repo","WaitMsBeforeAsync":5000}`,
+	}
+	out := m.toolBody(it, 60)
+	for _, want := range []string{`"Cwd"`, `"/repo"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCommandDetailNonZeroExit(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "run_command", ResultIsError: true,
+		ToolInput: `{"CommandLine":"false"}`,
+		Result:    "Created At: x\n\n\t\t\t\tThe command failed with exit code: 2\n\t\t\t\tOutput:\n\t\t\t\tboom\n",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "The command failed with exit code") {
+		t.Errorf("missing failure line:\n%s", out)
+	}
+	if !strings.Contains(out, "Error") {
+		t.Errorf("error result should label as Error:\n%s", out)
+	}
+}
+
 func TestReadDetail(t *testing.T) {
 	m := testModel()
 	it := transcript.Item{

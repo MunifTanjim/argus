@@ -1,4 +1,6 @@
-package claudecode
+// Package hookdecision renders a user's permission answer into hookSpecificOutput
+// decision JSON.
+package hookdecision
 
 import (
 	"encoding/json"
@@ -8,7 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// hookOut is the PreToolUse/PermissionRequest decision envelope Claude reads.
+// hookOut is the decision envelope Claude Code reads from hook stdout.
 type hookOut struct {
 	HookSpecificOutput struct {
 		HookEventName string `json:"hookEventName"`
@@ -21,8 +23,6 @@ type hookOut struct {
 	} `json:"hookSpecificOutput"`
 }
 
-// formatAnswer renders an answer value for the clarify message. Lists join with
-// ", " ([]string from the TUI, []any from a client's JSON).
 func formatAnswer(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -40,8 +40,7 @@ func formatAnswer(v any) string {
 	}
 }
 
-// buildClarifyMessage renders the "Chat about this" feedback. Mirrors Claude
-// Code's onReject(feedback) text.
+// buildClarifyMessage renders feedback for the "Chat about this" action.
 func buildClarifyMessage(toolInput json.RawMessage, answers map[string]any) string {
 	var in struct {
 		Questions []struct {
@@ -69,14 +68,11 @@ func buildClarifyMessage(toolInput json.RawMessage, answers map[string]any) stri
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// FormatDecision renders a PermissionRequest answer into Claude Code's hookSpecificOutput JSON.
 func FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string {
 	var out hookOut
 	out.HookSpecificOutput.HookEventName = "PermissionRequest"
-	// A server-built option the client echoed back maps to behavior + set-mode.
 	switch p.OptionValue {
 	case "":
-		// No server option: use the explicit Behavior/SetMode fields.
 	case "deny":
 		p.Behavior = "deny"
 	case "allow":

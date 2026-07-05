@@ -45,6 +45,12 @@ func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 }
 
 func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
+	if meta, ok := toolRegistry[it.ToolName]; ok {
+		if meta.detail == nil {
+			return "", false
+		}
+		return meta.detail(m, it, width), true
+	}
 	switch it.ToolName {
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
 		return m.editToolDetail(it, width), true

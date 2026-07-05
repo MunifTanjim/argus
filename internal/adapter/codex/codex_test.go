@@ -867,8 +867,38 @@ command = "/usr/bin/user-script"
 	}
 }
 
-// TestConfigTOMLPreservesUserConfig ensures editing config.toml keeps unrelated
-// config (a nested table) and every documented field of the user's own hook.
+// TestSavePreservesAngleBrackets guards against json.Marshal HTML-escaping turning
+// > into >.
+func TestSavePreservesAngleBrackets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path, _ := SettingsPath()
+
+	// Seed a hooks.json with a user hook whose command has a >> redirect.
+	seed := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"sh -c 'env >> /tmp/x.txt'"}]}]}}`
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install("/usr/bin/argus", DefaultHookEvents); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `\u003e`) {
+		t.Errorf("'>' escaped as \\u003e in written file:\n%s", b)
+	}
+	if !strings.Contains(string(b), ">> /tmp/x.txt") {
+		t.Errorf("redirect not preserved verbatim:\n%s", b)
+	}
+}
+
 func TestConfigTOMLPreservesUserConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
