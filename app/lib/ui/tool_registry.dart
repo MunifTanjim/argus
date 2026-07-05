@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/chunk.dart';
 import 'theme.dart';
 import 'tool_detail_antigravity.dart';
+import 'tool_detail_claude.dart';
 import 'tool_detail_codex.dart';
 
 const _blue = Color(0xFF83a598);
@@ -11,9 +12,20 @@ const _yellow = Color(0xFFfabd2f);
 const _orange = Color(0xFFfe8019);
 const _purple = Color(0xFFd3869b);
 
-/// A tool's icon/color category. The single pairing point: [categoryIcon] and
-/// [categoryColor] are its only readers, so a tool's icon and color can't drift.
-enum ToolCategory { other, read, edit, write, bash, grep, glob, task, skill, web }
+/// A tool's icon/color category.
+enum ToolCategory {
+  other,
+  read,
+  edit,
+  write,
+  bash,
+  grep,
+  glob,
+  task,
+  todo,
+  skill,
+  web
+}
 
 IconData categoryIcon(ToolCategory c) => switch (c) {
       ToolCategory.read => Icons.menu_book_outlined,
@@ -23,6 +35,7 @@ IconData categoryIcon(ToolCategory c) => switch (c) {
       ToolCategory.grep => Icons.search,
       ToolCategory.glob => Icons.folder_open_outlined,
       ToolCategory.task => Icons.smart_toy_outlined,
+      ToolCategory.todo => Icons.checklist,
       ToolCategory.skill => Icons.build_outlined,
       ToolCategory.web => Icons.public,
       ToolCategory.other => Icons.play_arrow,
@@ -30,7 +43,7 @@ IconData categoryIcon(ToolCategory c) => switch (c) {
 
 Color categoryColor(ToolCategory c) => switch (c) {
       ToolCategory.read || ToolCategory.web => _blue,
-      ToolCategory.edit => _yellow,
+      ToolCategory.edit || ToolCategory.todo => _yellow,
       ToolCategory.write => _green,
       ToolCategory.bash || ToolCategory.skill => _orange,
       ToolCategory.grep => _purple,
@@ -47,9 +60,7 @@ class ToolMeta {
   final ToolDetailBuilder? detail;
 }
 
-/// The tool→meta map for Antigravity and Codex tools. Claude Code tools still
-/// live in the item_row/tool_detail switches. All lookups consult this first and
-/// fall back to those switches.
+/// Unregistered tools fall back to generic rendering.
 final Map<String, ToolMeta> toolRegistry = {
   'run_command': const ToolMeta(
       'Run Command', ToolCategory.bash, agyRunCommandDetail),
@@ -100,6 +111,38 @@ final Map<String, ToolMeta> toolRegistry = {
   'close_agent': const ToolMeta(
       'Close Agent', ToolCategory.task, codexCloseAgentDetail),
   'spawn_agent': const ToolMeta('Spawn Agent', ToolCategory.task),
+
+  'Read': const ToolMeta('', ToolCategory.read),
+  'NotebookRead': const ToolMeta('', ToolCategory.read),
+  'Edit': const ToolMeta('', ToolCategory.edit),
+  'MultiEdit': const ToolMeta('', ToolCategory.edit),
+  'NotebookEdit': const ToolMeta('', ToolCategory.edit),
+  'Write': const ToolMeta('', ToolCategory.write),
+  'Bash': const ToolMeta('', ToolCategory.bash),
+  'BashOutput': const ToolMeta('', ToolCategory.bash),
+  'KillShell': const ToolMeta('', ToolCategory.bash),
+  'Grep': const ToolMeta('', ToolCategory.grep),
+  'Glob': const ToolMeta('', ToolCategory.glob),
+  'LS': const ToolMeta('', ToolCategory.glob),
+  'WebFetch': const ToolMeta('', ToolCategory.web),
+  'WebSearch': const ToolMeta('', ToolCategory.web),
+  'AskUserQuestion': const ToolMeta('', ToolCategory.other),
+  'ExitPlanMode': const ToolMeta('', ToolCategory.other),
+  'EnterPlanMode': const ToolMeta('', ToolCategory.other),
+  'TodoWrite': const ToolMeta('', ToolCategory.todo),
+  'TaskCreate':
+      const ToolMeta('Task Create', ToolCategory.todo, claudeTaskCreateDetail),
+  'TaskUpdate':
+      const ToolMeta('Task Update', ToolCategory.todo, claudeTaskUpdateDetail),
+  'TaskList': const ToolMeta('Task List', ToolCategory.todo),
+  'TaskGet': const ToolMeta('Task Get', ToolCategory.todo),
+  'TaskOutput': const ToolMeta('Task Output', ToolCategory.todo),
+  'TaskStop': const ToolMeta('Task Stop', ToolCategory.todo),
+  'ToolSearch': const ToolMeta('Tool Search', ToolCategory.grep),
+  'LSP': const ToolMeta('LSP', ToolCategory.other),
+  'Task': const ToolMeta('', ToolCategory.task),
+  'Agent': const ToolMeta('', ToolCategory.task),
+  'Skill': const ToolMeta('', ToolCategory.skill),
 };
 
 ToolMeta? toolMeta(String? name) => name == null ? null : toolRegistry[name];

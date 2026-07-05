@@ -23,6 +23,7 @@ const (
 	catGrep
 	catGlob
 	catTask
+	catTodo
 	catSkill
 	catWeb
 )
@@ -43,6 +44,8 @@ func categoryIcon(c toolCategory) StyledIcon {
 		return Icon.Tool.Glob
 	case catTask:
 		return Icon.Tool.Task
+	case catTodo:
+		return Icon.Tool.Todo
 	case catSkill:
 		return Icon.Tool.Skill
 	case catWeb:
@@ -68,6 +71,8 @@ func categoryColor(c toolCategory) color.Color {
 		return ColorToolGlob
 	case catTask:
 		return ColorToolTask
+	case catTodo:
+		return ColorToolEdit
 	case catSkill:
 		return ColorToolSkill
 	case catWeb:
@@ -84,10 +89,7 @@ type toolMeta struct {
 	detail   func(m model, it transcript.Item, width int) string
 }
 
-// toolRegistry is the authoritative tool→agent map for Antigravity and Codex
-// tools. Claude Code tools still live in the toolIcon/toolColor/toolDisplayName/
-// toolDetailBody switches (to migrate here later). All lookups consult this map
-// first and fall back to those switches.
+// Unregistered tools fall back to the generic body and misc icon.
 var toolRegistry = map[string]toolMeta{
 	// antigravity
 	"run_command":                {agentAntigravity, "Run Command", catBash, (model).runCommandDetail},
@@ -108,6 +110,37 @@ var toolRegistry = map[string]toolMeta{
 	"list_permissions":           {agentAntigravity, "List Permissions", catOther, (model).listPermissionsDetail},
 	"send_message":               {agentAntigravity, "Send Message", catOther, (model).sendMessageDetail},
 	"schedule":                   {agentAntigravity, "Schedule", catOther, (model).scheduleDetail},
+
+	// claude code
+	"Read":            {agentClaude, "", catRead, (model).readDetail},
+	"NotebookRead":    {agentClaude, "", catRead, (model).readDetail},
+	"Edit":            {agentClaude, "", catEdit, (model).editToolDetail},
+	"MultiEdit":       {agentClaude, "", catEdit, (model).editToolDetail},
+	"NotebookEdit":    {agentClaude, "", catEdit, (model).editToolDetail},
+	"Write":           {agentClaude, "", catWrite, (model).editToolDetail},
+	"Bash":            {agentClaude, "", catBash, (model).bashDetail},
+	"BashOutput":      {agentClaude, "", catBash, nil},
+	"KillShell":       {agentClaude, "", catBash, nil},
+	"Grep":            {agentClaude, "", catGrep, (model).grepDetail},
+	"Glob":            {agentClaude, "", catGlob, (model).globDetail},
+	"LS":              {agentClaude, "", catGlob, (model).globDetail},
+	"WebFetch":        {agentClaude, "", catWeb, (model).webDetail},
+	"WebSearch":       {agentClaude, "", catWeb, (model).webDetail},
+	"AskUserQuestion": {agentClaude, "", catOther, (model).askUserQuestionDetail},
+	"ExitPlanMode":    {agentClaude, "", catOther, nil},
+	"EnterPlanMode":   {agentClaude, "", catOther, nil},
+	"TodoWrite":       {agentClaude, "", catTodo, (model).todoDetail},
+	"TaskCreate":      {agentClaude, "Task Create", catTodo, (model).taskCreateDetail},
+	"TaskUpdate":      {agentClaude, "Task Update", catTodo, (model).taskUpdateDetail},
+	"TaskList":        {agentClaude, "Task List", catTodo, nil},
+	"TaskGet":         {agentClaude, "Task Get", catTodo, nil},
+	"TaskOutput":      {agentClaude, "Task Output", catTodo, nil},
+	"TaskStop":        {agentClaude, "Task Stop", catTodo, nil},
+	"ToolSearch":      {agentClaude, "Tool Search", catGrep, nil},
+	"LSP":             {agentClaude, "LSP", catOther, nil},
+	"Task":            {agentClaude, "", catTask, nil},  // ItemSubagent: subagent view
+	"Agent":           {agentClaude, "", catTask, nil},  // ItemSubagent: subagent view
+	"Skill":           {agentClaude, "", catSkill, nil}, // ItemSubagent: subagent view
 
 	// codex
 	"exec_command": {agentCodex, "Exec Command", catBash, (model).execCommandDetail},

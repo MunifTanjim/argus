@@ -141,28 +141,7 @@ func toolColor(name string) color.Color {
 	if meta, ok := toolRegistry[name]; ok {
 		return categoryColor(meta.category)
 	}
-	switch name {
-	case "Read", "NotebookRead":
-		return ColorToolRead
-	case "Edit", "MultiEdit", "NotebookEdit":
-		return ColorToolEdit
-	case "Write":
-		return ColorToolWrite
-	case "Bash", "BashOutput", "KillShell":
-		return ColorToolBash
-	case "Grep":
-		return ColorToolGrep
-	case "Glob", "LS":
-		return ColorToolGlob
-	case "Task", "Agent":
-		return ColorToolTask
-	case "Skill":
-		return ColorToolSkill
-	case "WebFetch", "WebSearch":
-		return ColorToolWeb
-	default:
-		return ColorToolOther
-	}
+	return ColorToolOther
 }
 
 // sessionCard renders one session as a bordered list card: repo headline + tmux

@@ -49,6 +49,7 @@ type toolIcons struct {
 	Grep  StyledIcon
 	Glob  StyledIcon
 	Task  StyledIcon
+	Todo  StyledIcon
 	Skill StyledIcon
 	Web   StyledIcon
 	Misc  StyledIcon
@@ -146,6 +147,7 @@ func initIcons() {
 			Grep:  StyledIcon{glyphFolderSearch, ColorToolGrep},
 			Glob:  StyledIcon{glyphFolderSearch, ColorToolGlob},
 			Task:  StyledIcon{glyphRobot, ColorToolTask},
+			Todo:  StyledIcon{"\U000F0755", ColorToolEdit}, // nf-md-format_list_checks
 			Skill: StyledIcon{glyphWrench, ColorToolSkill},
 			Web:   StyledIcon{"\U000F059F", ColorToolWeb}, // nf-md-web
 			Misc:  StyledIcon{glyphWrench, ColorToolOther},
@@ -158,22 +160,13 @@ func initIcons() {
 	}
 }
 
-// toolDisplayName maps a raw tool name to a friendlier label for UI display,
-// consulting the tool registry first (its display, or the raw name for a
-// registered tool without one) before the built-in switch.
 func toolDisplayName(name string) string {
-	if meta, ok := toolRegistry[name]; ok {
-		if meta.display != "" {
-			return meta.display
-		}
-		return name
+	if meta, ok := toolRegistry[name]; ok && meta.display != "" {
+		return meta.display
 	}
 	return name
 }
 
-// toolIcon returns the styled icon for a tool by name. Error tools always get the
-// red error icon regardless of name. Registered tools resolve via their category;
-// the switch covers the not-yet-migrated Claude Code and Codex tools.
 func toolIcon(name string, isError bool) StyledIcon {
 	if isError {
 		return Icon.Tool.Err
@@ -181,26 +174,5 @@ func toolIcon(name string, isError bool) StyledIcon {
 	if meta, ok := toolRegistry[name]; ok {
 		return categoryIcon(meta.category)
 	}
-	switch name {
-	case "Read", "NotebookRead":
-		return Icon.Tool.Read
-	case "Edit", "MultiEdit", "NotebookEdit":
-		return Icon.Tool.Edit
-	case "Write":
-		return Icon.Tool.Write
-	case "Bash", "BashOutput", "KillShell":
-		return Icon.Tool.Bash
-	case "Grep":
-		return Icon.Tool.Grep
-	case "Glob", "LS":
-		return Icon.Tool.Glob
-	case "Task", "Agent":
-		return Icon.Tool.Task
-	case "Skill":
-		return Icon.Tool.Skill
-	case "WebFetch", "WebSearch":
-		return Icon.Tool.Web
-	default:
-		return Icon.Tool.Misc
-	}
+	return Icon.Tool.Misc
 }

@@ -3,11 +3,12 @@ package tui
 import "testing"
 
 func TestToolRegistryAttribution(t *testing.T) {
-	// The registry holds Antigravity and Codex tools; Claude Code tools still live
-	// in the switches. Guards against a mis-attributed entry.
+	// Every entry belongs to a known agent.
 	for name, meta := range toolRegistry {
-		if meta.agent != agentAntigravity && meta.agent != agentCodex {
-			t.Errorf("%q: agent = %q, want antigravity or codex", name, meta.agent)
+		switch meta.agent {
+		case agentClaude, agentCodex, agentAntigravity:
+		default:
+			t.Errorf("%q: unknown agent %q", name, meta.agent)
 		}
 	}
 }
@@ -25,6 +26,11 @@ func TestToolRegistryCoversKnownTools(t *testing.T) {
 		// codex
 		"exec_command", "apply_patch", "update_plan", "view_image", "web_search",
 		"wait_agent", "close_agent", "spawn_agent",
+		// claude code
+		"Read", "Edit", "MultiEdit", "Write", "Bash", "Grep", "Glob", "LS",
+		"WebFetch", "WebSearch", "AskUserQuestion", "ExitPlanMode", "TodoWrite",
+		"TaskCreate", "TaskUpdate", "TaskList", "ToolSearch", "LSP",
+		"Task", "Agent", "Skill",
 	}
 	for _, name := range known {
 		if _, ok := toolRegistry[name]; !ok {
@@ -48,23 +54,23 @@ func TestToolRegistryDrivesIconColorName(t *testing.T) {
 	}
 }
 
-func TestToolRegistryDetailCoverage(t *testing.T) {
-	// These intentionally have no toolDetailBody renderer: invoke_subagent and
-	// spawn_agent render via the subagent view (ItemSubagent); apply_patch and
-	// view_image fall to the generic Input/Result body. Every other tool has one.
-	noDetail := map[string]bool{
-		"invoke_subagent": true,
-		"spawn_agent":     true,
-		"apply_patch":     true,
-		"view_image":      true,
+func TestToolRegistryDetailRenderers(t *testing.T) {
+	// Tools with a dedicated detail body must keep their renderer wired.
+	withDetail := []string{
+		"run_command", "grep_search", "view_file", "write_to_file",
+		"exec_command", "update_plan", "web_search", "wait_agent", "close_agent",
+		"Bash", "Read", "Edit", "Grep", "Glob", "AskUserQuestion",
+		"TodoWrite", "TaskCreate", "TaskUpdate",
 	}
-	for name, meta := range toolRegistry {
-		hasDetail := meta.detail != nil
-		if noDetail[name] && hasDetail {
-			t.Errorf("%q should not have a detail renderer", name)
-		}
-		if !noDetail[name] && !hasDetail {
+	for _, name := range withDetail {
+		if toolRegistry[name].detail == nil {
 			t.Errorf("%q should have a detail renderer", name)
+		}
+	}
+	// Subagent-view tools never carry a toolDetailBody renderer.
+	for _, name := range []string{"invoke_subagent", "spawn_agent", "Task", "Agent"} {
+		if toolRegistry[name].detail != nil {
+			t.Errorf("%q should render via the subagent view, not a detail body", name)
 		}
 	}
 }

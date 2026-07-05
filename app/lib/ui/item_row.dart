@@ -6,14 +6,6 @@ import 'tool_registry.dart';
 
 const _redColor = Color(0xFFfb4934);
 
-// Gruvbox-bright per-tool accents (the mobile counterpart to the TUI's Nerd
-// Font tool icons).
-const _blue = Color(0xFF83a598);
-const _green = Color(0xFFb8bb26);
-const _yellow = Color(0xFFfabd2f);
-const _orange = Color(0xFFfe8019);
-const _purple = Color(0xFFd3869b);
-
 class ItemRow extends StatelessWidget {
   const ItemRow({super.key, required this.item, this.onTap});
 
@@ -48,8 +40,14 @@ class ItemRow extends StatelessWidget {
             ? meta!.display
             : (item.toolName ?? 'tool');
         return _row(
-          leading: Icon(_toolIcon(item.toolName), size: 14,
-              color: err ? _redColor : _toolColor(item.toolName)),
+          leading: Icon(
+              meta != null ? categoryIcon(meta.category) : Icons.play_arrow,
+              size: 14,
+              color: err
+                  ? _redColor
+                  : (meta != null
+                      ? categoryColor(meta.category)
+                      : AppColors.accent)),
           label: name,
           labelColor: err ? _redColor : AppColors.accent,
           // Error is color-only visually; announce it for screen readers.
@@ -119,67 +117,3 @@ class ItemRow extends StatelessWidget {
   }
 }
 
-IconData _toolIcon(String? name) {
-  final meta = toolMeta(name);
-  if (meta != null) return categoryIcon(meta.category);
-  switch (name) {
-    case 'Read':
-    case 'NotebookRead':
-      return Icons.menu_book_outlined;
-    case 'Edit':
-    case 'MultiEdit':
-    case 'NotebookEdit':
-      return Icons.edit_outlined;
-    case 'Write':
-      return Icons.note_add_outlined;
-    case 'Bash':
-    case 'BashOutput':
-    case 'KillShell':
-      return Icons.terminal;
-    case 'Grep':
-      return Icons.search;
-    case 'Glob':
-    case 'LS':
-      return Icons.folder_open_outlined;
-    case 'Task':
-    case 'Agent':
-      return Icons.smart_toy_outlined;
-    case 'Skill':
-      return Icons.build_outlined;
-    case 'WebFetch':
-    case 'WebSearch':
-      return Icons.public;
-    case 'TodoWrite':
-      return Icons.checklist;
-    default:
-      return Icons.play_arrow;
-  }
-}
-
-Color _toolColor(String? name) {
-  final meta = toolMeta(name);
-  if (meta != null) return categoryColor(meta.category);
-  switch (name) {
-    case 'Read':
-    case 'NotebookRead':
-    case 'WebFetch':
-    case 'WebSearch':
-      return _blue;
-    case 'Edit':
-    case 'MultiEdit':
-    case 'NotebookEdit':
-    case 'TodoWrite':
-      return _yellow;
-    case 'Write':
-      return _green;
-    case 'Bash':
-    case 'BashOutput':
-    case 'KillShell':
-    case 'Skill':
-      return _orange;
-    case 'Grep':
-      return _purple;
-    default:
-      return AppColors.accent;
-  }
-}

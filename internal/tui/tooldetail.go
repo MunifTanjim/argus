@@ -45,34 +45,11 @@ func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 }
 
 func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
-	if meta, ok := toolRegistry[it.ToolName]; ok {
-		if meta.detail == nil {
-			return "", false
-		}
-		return meta.detail(m, it, width), true
+	meta, ok := toolRegistry[it.ToolName]
+	if !ok || meta.detail == nil {
+		return "", false // unregistered, or registered with the generic body
 	}
-	switch it.ToolName {
-	case "Edit", "MultiEdit", "Write", "NotebookEdit":
-		return m.editToolDetail(it, width), true
-	case "Bash":
-		return m.bashDetail(it, width), true
-	// BashOutput/KillShell carry a shell id, not a command, so they use the
-	// generic Input/Result layout (default branch).
-	case "Read", "NotebookRead":
-		return m.readDetail(it, width), true
-	case "TodoWrite":
-		return m.todoDetail(it, width), true
-	case "Grep":
-		return m.grepDetail(it, width), true
-	case "Glob", "LS":
-		return m.globDetail(it, width), true
-	case "WebFetch", "WebSearch":
-		return m.webDetail(it, width), true
-	case "AskUserQuestion":
-		return m.askUserQuestionDetail(it, width), true
-	default:
-		return "", false
-	}
+	return meta.detail(m, it, width), true
 }
 
 // sectionLabel renders a bold section heading ("Input"/"Result"), red for errors.
@@ -526,8 +503,44 @@ func (m model) globDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// askUserQuestionPair matches the `"question"="answer"` pairs in an answered
-// AskUserQuestion result string.
+func (m model) taskCreateDetail(it transcript.Item, width int) string {
+	var in struct {
+		Subject     string `json:"subject"`
+		Description string `json:"description"`
+		ActiveForm  string `json:"activeForm"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+	if in.Subject == "" && it.ToolInput != "" {
+		return m.genericToolBody(it, width)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(StyleSecondaryBold.Render(in.Subject))
+	if in.ActiveForm != "" {
+		sb.WriteString("\n" + StyleDim.Render(in.ActiveForm))
+	}
+	if in.Description != "" {
+		sb.WriteString("\n" + m.renderToolText(in.Description, width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m model) taskUpdateDetail(it transcript.Item, width int) string {
+	var in struct {
+		TaskID string `json:"taskId"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+
+	var sb strings.Builder
+	if in.TaskID != "" {
+		sb.WriteString(StyleSecondaryBold.Render("Task "+in.TaskID) + "\n")
+	}
+	if it.ToolInput != "" {
+		sb.WriteString(dumpLines(prettyJSON(it.ToolInput), width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 var askUserQuestionPair = regexp.MustCompile(`"([^"]+)"="([^"]*)"`)
 
 // parseAnsweredAnswers best-effort parses an AskUserQuestion result into a
