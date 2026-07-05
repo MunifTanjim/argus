@@ -54,6 +54,14 @@ class ItemRow extends StatelessWidget {
           labelSemantics: err ? '$name, error' : null,
           preview: item.inputPreview,
         );
+      case ItemKind.skill:
+        return _row(
+          leading: Icon(categoryIcon(ToolCategory.skill),
+              size: 14, color: categoryColor(ToolCategory.skill)),
+          label: 'Skill',
+          labelColor: AppColors.accent,
+          preview: item.inputPreview,
+        );
       case ItemKind.subagent:
         // wait/close reference existing agents; label by op with target names.
         if (item.toolName == 'wait_agent' || item.toolName == 'close_agent') {

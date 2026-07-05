@@ -74,6 +74,8 @@ Widget toolDetailBody(Item item) {
     case 'EnterPlanMode':
     case 'ExitPlanMode':
       return _generic(item, resultLang: 'markdown');
+    case 'Skill':
+      return _generic(item, resultLang: 'markdown');
     default:
       return _generic(item);
   }

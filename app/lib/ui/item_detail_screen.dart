@@ -24,6 +24,8 @@ String itemTitle(Item it) {
       final meta = toolMeta(it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.soleSubagent?.type ?? 'Subagent';
+    case ItemKind.skill:
+      return 'Skill';
     case ItemKind.unknown:
       return 'Detail';
   }
@@ -53,6 +55,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
   bool get _needsFetch =>
       (widget.item.kind == ItemKind.tool ||
+          widget.item.kind == ItemKind.skill ||
           isAgentRefTool(widget.item.toolName)) &&
       (widget.item.toolId?.isNotEmpty ?? false) &&
       widget.item.toolInput == null &&

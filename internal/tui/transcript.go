@@ -379,8 +379,8 @@ func itemRow(it transcript.Item) string {
 func toolPreview(it transcript.Item) string {
 	icon := toolIcon(it.ToolName, it.ResultIsError)
 	res := it.Result
-	if res == "" {
-		res = it.InputPreview
+	if res == "" || it.Kind == transcript.ItemSkill {
+		res = it.InputPreview // skill result is the file body; preview its identifier
 	}
 	res = strings.ReplaceAll(res, "\n", " ")
 	name := toolDisplayName(it.ToolName)

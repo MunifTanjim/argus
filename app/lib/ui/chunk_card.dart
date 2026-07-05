@@ -253,9 +253,11 @@ class _ChunkCardState extends State<ChunkCard> {
   /// Tool rows open the tool detail; subagent rows with a trace (inline or
   /// streamable via agentId) open the subagent trace.
   VoidCallback? _drill(Item it) {
-    // Tools and codex wait/close (subagent-kind, but a status detail) open the
-    // item detail; a spawn/invoke subagent opens its trace.
-    if (it.kind == ItemKind.tool || isAgentRefTool(it.toolName)) {
+    // Tools, skills, and agent-ref ops (wait/close) open the item detail;
+    // a spawn/invoke subagent opens its trace.
+    if (it.kind == ItemKind.tool ||
+        it.kind == ItemKind.skill ||
+        isAgentRefTool(it.toolName)) {
       return () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) =>

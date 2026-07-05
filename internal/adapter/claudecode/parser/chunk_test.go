@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -694,7 +695,7 @@ func TestBuildChunks_Items_NonTaskToolStillToolCall(t *testing.T) {
 	}
 }
 
-func TestBuildChunks_Items_SkillToolCreatesSubagent(t *testing.T) {
+func TestBuildChunks_Items_SkillToolIsToolCall(t *testing.T) {
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	skillInput := json.RawMessage(`{"skill":"tmux-qa","args":"Run QA for tail-claude-mux"}`)
 
@@ -719,20 +720,14 @@ func TestBuildChunks_Items_SkillToolCreatesSubagent(t *testing.T) {
 	}
 
 	item := items[0]
-	if item.Type != parser.ItemSubagent {
-		t.Errorf("Type = %d, want ItemSubagent", item.Type)
-	}
-	if item.SubagentType != "tmux-qa" {
-		t.Errorf("SubagentType = %q, want tmux-qa", item.SubagentType)
-	}
-	if item.SubagentDesc != "Run QA for tail-claude-mux" {
-		t.Errorf("SubagentDesc = %q, want 'Run QA for tail-claude-mux'", item.SubagentDesc)
+	if item.Type != parser.ItemToolCall {
+		t.Errorf("Type = %d, want ItemToolCall (Skill is a tool call, not a subagent)", item.Type)
 	}
 	if item.ToolName != "Skill" {
 		t.Errorf("ToolName = %q, want Skill", item.ToolName)
 	}
-	if item.ToolCategory != parser.CategoryTask {
-		t.Errorf("ToolCategory = %q, want CategoryTask", item.ToolCategory)
+	if !strings.Contains(item.ToolSummary, "tmux-qa") {
+		t.Errorf("ToolSummary = %q, want to contain skill identifier tmux-qa", item.ToolSummary)
 	}
 }
 
@@ -765,14 +760,56 @@ func TestBuildChunks_Items_SkillToolWithResult(t *testing.T) {
 	}
 
 	item := items[0]
-	if item.Type != parser.ItemSubagent {
-		t.Errorf("Type = %d, want ItemSubagent", item.Type)
+	if item.Type != parser.ItemToolCall {
+		t.Errorf("Type = %d, want ItemToolCall", item.Type)
 	}
 	if item.ToolResult == "" {
-		t.Error("ToolResult should be populated for non-fork Skill")
+		t.Error("ToolResult should be populated from the tool_result")
 	}
 	if item.DurationMs != 200 {
 		t.Errorf("DurationMs = %d, want 200", item.DurationMs)
+	}
+}
+
+func TestBuildChunks_Items_SkillToolBodyAttaches(t *testing.T) {
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	skillInput := json.RawMessage(`{"skill":"superpowers:systematic-debugging"}`)
+	body := "Base directory for this skill: /skills/systematic-debugging\n\n# Systematic Debugging\n\nFind root cause first."
+
+	msgs := []parser.ClassifiedMsg{
+		parser.AIMsg{
+			Timestamp: t0,
+			Model:     "claude-opus-4-6",
+			Blocks: []parser.ContentBlock{
+				{Type: "tool_use", ToolID: "call_1", ToolName: "Skill", ToolInput: skillInput},
+			},
+		},
+		parser.AIMsg{
+			Timestamp: t0,
+			IsMeta:    true,
+			Blocks: []parser.ContentBlock{
+				{Type: "tool_result", ToolID: "call_1", Content: "Launching skill: superpowers:systematic-debugging"},
+			},
+		},
+		parser.AIMsg{
+			Timestamp: t0,
+			IsMeta:    true,
+			Text:      body,
+			Blocks:    []parser.ContentBlock{{Type: "text", Text: body}},
+		},
+	}
+	chunks := parser.BuildChunks(msgs)
+	items := chunks[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(Items) = %d, want 1", len(items))
+	}
+
+	got := items[0].ToolResult
+	if !strings.HasPrefix(got, "# Systematic Debugging") {
+		t.Errorf("ToolResult = %q, want the skill body with the base-dir line dropped", got)
+	}
+	if strings.Contains(got, "Base directory for this skill:") {
+		t.Errorf("ToolResult still contains the base-dir line: %q", got)
 	}
 }
 

@@ -41,7 +41,14 @@ func skillLoad(cmd, expanded string) (name, path, body string, ok bool) {
 	return name, path, body, true
 }
 
-// pendingTool tracks a tool_use DisplayItem awaiting its result.
+func skillToolBody(text string) (string, bool) {
+	if !strings.HasPrefix(text, skillBaseDirPrefix) {
+		return "", false
+	}
+	_, rest, _ := strings.Cut(text, "\n")
+	return strings.TrimSpace(rest), true
+}
+
 type pendingTool struct {
 	index     int       // index into the items slice
 	timestamp time.Time // tool_use message timestamp
@@ -106,7 +113,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 					})
 				case "tool_use":
 					inputLen := len(b.ToolInput)
-					if b.ToolName == "Task" || b.ToolName == "Agent" || b.ToolName == "Skill" {
+					if b.ToolName == "Task" || b.ToolName == "Agent" {
 						info := extractSubagentInfo(b.ToolInput)
 						items = append(items, DisplayItem{
 							Type:           ItemSubagent,
@@ -171,6 +178,17 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						Type: ItemMemoryLoad,
 						Text: b.DisplayPath,
 					})
+				case "text":
+					// Attach the skill file body to the most recent Skill item's result.
+					if body, ok := skillToolBody(b.Text); ok {
+						for j := len(items) - 1; j >= 0; j-- {
+							if items[j].Type == ItemToolCall && items[j].ToolName == "Skill" {
+								items[j].ToolResult = body
+								items[j].TokenCount += len(body) / 4
+								break
+							}
+						}
+					}
 				}
 			}
 		}
@@ -287,8 +305,6 @@ func buildCycles(buf []AIMsg, itemStarts []int, items []DisplayItem) []Inference
 // concurrent background Task agents (see concurrentTaskDurationThreshold).
 // A 3-second git push can otherwise show as 11 minutes.
 func suppressInflatedDurations(items []DisplayItem) {
-	// Only suppress when a subagent ran long enough to plausibly inflate
-	// siblings; a 200ms Skill can't cause inflation.
 	var maxTaskDur int64
 	for i := range items {
 		if items[i].Type == ItemSubagent && items[i].DurationMs > maxTaskDur {

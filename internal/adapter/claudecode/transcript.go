@@ -97,7 +97,7 @@ func FindToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
 	}
 	for _, c := range foldChunks(pchunks, nil, nil) {
 		for _, it := range c.Items {
-			if (it.Kind == ItemTool || it.Kind == ItemSubagent) && it.ToolID == toolID {
+			if (it.Kind == ItemTool || it.Kind == ItemSubagent || it.Kind == ItemSkill) && it.ToolID == toolID {
 				return ToolDetail{ToolInput: it.ToolInput, Result: it.Result, ResultIsError: it.ResultIsError}, true, nil
 			}
 		}
@@ -134,7 +134,7 @@ func foldChunk(pc parser.Chunk, agentRefs map[string]string, traces map[string][
 		c.Usage = transformUsage(pc.Usage)
 		c.Items = foldItems(pc.Items, agentRefs, traces)
 		for _, it := range c.Items {
-			if it.Kind == ItemTool || it.Kind == ItemSubagent {
+			if it.Kind == ItemTool || it.Kind == ItemSubagent || it.Kind == ItemSkill {
 				c.ToolCount++
 			}
 		}
@@ -189,7 +189,11 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, traces map[st
 		it.Kind = ItemText
 		it.Text = pit.Text
 	case parser.ItemToolCall:
-		it.Kind = ItemTool
+		if pit.ToolName == "Skill" {
+			it.Kind = ItemSkill
+		} else {
+			it.Kind = ItemTool
+		}
 		fillTool(&it, pit)
 	case parser.ItemSubagent:
 		it.Kind = ItemSubagent

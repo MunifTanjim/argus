@@ -26,7 +26,7 @@ class Usage {
   }
 }
 
-enum ItemKind { thinking, text, tool, subagent, unknown }
+enum ItemKind { thinking, text, tool, subagent, skill, unknown }
 
 ItemKind itemKindFromWire(String? s) {
   switch (s) {
@@ -38,6 +38,8 @@ ItemKind itemKindFromWire(String? s) {
       return ItemKind.tool;
     case 'subagent':
       return ItemKind.subagent;
+    case 'skill':
+      return ItemKind.skill;
     default:
       return ItemKind.unknown;
   }

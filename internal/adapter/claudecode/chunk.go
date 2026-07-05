@@ -31,5 +31,6 @@ const (
 	ItemText     = transcript.ItemText
 	ItemTool     = transcript.ItemTool
 	ItemSubagent = transcript.ItemSubagent
+	ItemSkill    = transcript.ItemSkill
 	ItemPrompt   = transcript.ItemPrompt
 )

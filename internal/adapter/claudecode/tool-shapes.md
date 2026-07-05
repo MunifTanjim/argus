@@ -20,8 +20,9 @@ The matching result arrives in the next `user` line's `message.content`:
 { "type": "tool_result", "tool_use_id": "toolu_…", "content": "…", "is_error": false }
 ```
 
-`content` is a string or an array of `{type:"text", text}` parts. `Task`, `Agent`,
-and `Skill` become `ItemSubagent` (drillable); the rest become `ItemTool`.
+`content` is a string or an array of `{type:"text", text}` parts. `Task` and
+`Agent` become `ItemSubagent` (drillable into the child trace); `Skill` becomes
+`ItemSkill`; the rest become `ItemTool`.
 
 ## A note on the task tools
 
@@ -105,11 +106,16 @@ chosen option(s).
 
 `subagent_type` drives the row/trace label; the drill loads the child agent's trace.
 
-## Skill — `ItemSubagent`
+## Skill — `ItemSkill`
 
 ```json
 { "skill": "superpowers:brainstorming" }
 ```
+
+A skill load into the current context (not a subagent spawn). The `skill`
+identifier drives the row label; the tool_result carries only "Launching
+skill…", so the skill file body — injected as a meta text turn right after the
+call — is attached as the item's result and surfaces on drill.
 
 ## TaskCreate
 

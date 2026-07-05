@@ -14,6 +14,16 @@ void main() {
     expect(find.textContaining('ls -la'), findsOneWidget);
   });
 
+  testWidgets('skill row shows Skill label and identifier', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.skill,
+        toolName: 'Skill',
+        inputPreview: 'superpowers:systematic-debugging')));
+    expect(find.text('Skill'), findsOneWidget);
+    expect(find.textContaining('superpowers:systematic-debugging'), findsOneWidget);
+  });
+
   testWidgets('subagent row shows type and desc', (tester) async {
     await tester.pumpWidget(_wrap(const Item(
         id: 'i',
