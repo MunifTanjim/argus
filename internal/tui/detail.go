@@ -221,6 +221,10 @@ func (m model) actDetailDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clampDetailScroll()
 		return m, nil
 	}
+	if !m.detailCursorVisible(f) {
+		f.cursor = m.firstVisibleItem(f) // re-anchor to viewport; don't jump from the off-screen cursor
+		return m, nil
+	}
 	// Scroll within a cursor item taller than the viewport before advancing.
 	if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
 		f.scroll++
@@ -238,6 +242,10 @@ func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if f.scroll > 0 {
 			f.scroll--
 		}
+		return m, nil
+	}
+	if !m.detailCursorVisible(f) {
+		f.cursor = m.lastVisibleItem(f) // re-anchor to viewport
 		return m, nil
 	}
 	if _, start, _, ok := m.cursorOverflow(f); ok && f.scroll > start {
@@ -416,17 +424,89 @@ func (f *detailFrame) detailHeaderText(width int) string {
 	return strings.Join(subagentHeaderLines(f.subagentType, f.subagentName, f.subagentStatus, f.subagentInput, width), "\n")
 }
 
-// ensureDetailVisible scrolls the active frame so the cursor item stays on screen.
+func (m model) detailBodyHeight(f *detailFrame) int {
+	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
+	if header := f.detailHeaderText(m.containerWidth()); header != "" {
+		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
+	}
+	return h
+}
+
+func (m model) frameItemStarts(f *detailFrame, width int) (first []int, total int) {
+	first = make([]int, len(f.items))
+	for i, it := range f.items {
+		if i > 0 {
+			total++ // blank separator
+		}
+		first[i] = total
+		block := m.detailRowBlock(it, f.isExpanded(i), i == f.cursor, width)
+		total += strings.Count(block, "\n") + 1
+	}
+	return first, total
+}
+
+func itemSpan(i int, first []int, total int) (int, int) {
+	start := first[i]
+	end := total
+	if i+1 < len(first) {
+		end = first[i+1] - 1
+	}
+	return start, end
+}
+
+func (m model) itemAtLine(f *detailFrame, line int) int {
+	first, _ := m.frameItemStarts(f, m.containerWidth())
+	idx := 0
+	for i, s := range first {
+		if s <= line {
+			idx = i
+		}
+	}
+	return idx
+}
+
+func (m model) detailCursorVisible(f *detailFrame) bool {
+	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
+		return false
+	}
+	first, total := m.frameItemStarts(f, m.containerWidth())
+	start, end := itemSpan(f.cursor, first, total)
+	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
+}
+
+func (m model) firstVisibleItem(f *detailFrame) int {
+	first, _ := m.frameItemStarts(f, m.containerWidth())
+	h := m.detailBodyHeight(f)
+	for i, s := range first {
+		if s >= f.scroll && s < f.scroll+h {
+			return i
+		}
+	}
+	return m.itemAtLine(f, f.scroll)
+}
+
+func (m model) lastVisibleItem(f *detailFrame) int {
+	first, _ := m.frameItemStarts(f, m.containerWidth())
+	h := m.detailBodyHeight(f)
+	last := -1
+	for i, s := range first {
+		if s >= f.scroll && s < f.scroll+h {
+			last = i
+		}
+	}
+	if last < 0 {
+		return m.itemAtLine(f, f.scroll)
+	}
+	return last
+}
+
 func (m *model) ensureDetailVisible() {
 	f := m.topFrame()
 	if f == nil || f.items == nil {
 		return
 	}
 	lines, start, end := m.frameLines(f, m.containerWidth())
-	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
-	if header := f.detailHeaderText(m.containerWidth()); header != "" {
-		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
-	}
+	h := m.detailBodyHeight(f)
 	if start < f.scroll {
 		f.scroll = start
 	} else if end > f.scroll+h {

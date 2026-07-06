@@ -106,6 +106,72 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 	}
 }
 
+// manyItemDetailModel builds a detail frame whose collapsed item list is far
+// taller than the viewport, so scrolling can push the cursor item off-screen.
+func manyItemDetailModel(t *testing.T) model {
+	t.Helper()
+	var items []transcript.Item
+	for i := 0; i < 30; i++ {
+		items = append(items, transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
+			ToolInput: `{"command":"ls"}`, Result: "out"})
+	}
+	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8", Items: items})
+	m.width, m.height = 80, 14
+	if m.frameMaxScroll(m.topFrame()) == 0 {
+		t.Fatal("fixture not tall enough to overflow")
+	}
+	return m
+}
+
+func (m model) cursorLineStart() int {
+	_, start, _ := m.frameLines(m.topFrame(), m.containerWidth())
+	return start
+}
+
+// TestDetailDownReanchorsToViewport verifies that after scrolling the cursor item
+// off the top with ctrl+d, Down re-anchors the cursor to a visible item instead
+// of moving from the stale off-screen cursor (which would snap the viewport back).
+func TestDetailDownReanchorsToViewport(t *testing.T) {
+	m := manyItemDetailModel(t)
+	k := tea.KeyPressMsg{}
+	for i := 0; i < 3; i++ { // scroll item 0 well off the top
+		mm, _ := m.actDetailHalfDown(k)
+		m = mm.(model)
+	}
+	s0 := m.topFrame().scroll
+	if s0 == 0 || m.cursorLineStart() >= s0 {
+		t.Fatalf("setup: cursor should be scrolled off-screen (scroll=%d, cursorStart=%d)", s0, m.cursorLineStart())
+	}
+
+	mm, _ := m.actDetailDown(k)
+	m = mm.(model)
+
+	if got := m.topFrame().scroll; got != s0 {
+		t.Fatalf("Down should not move the viewport when re-anchoring: scroll %d -> %d", s0, got)
+	}
+	if start := m.cursorLineStart(); start < s0 {
+		t.Fatalf("Down should select a visible item, cursor start=%d < scroll=%d", start, s0)
+	}
+}
+
+// TestDetailUpReanchorsToViewport is the mirror: with the cursor scrolled off the
+// bottom, Up re-anchors to a visible item rather than jumping to cursor-1.
+func TestDetailUpReanchorsToViewport(t *testing.T) {
+	m := manyItemDetailModel(t)
+	m.topFrame().cursor = 29 // last item, far below the top
+	m.topFrame().scroll = 0
+
+	mm, _ := m.actDetailUp(tea.KeyPressMsg{})
+	m = mm.(model)
+
+	if got := m.topFrame().scroll; got != 0 {
+		t.Fatalf("Up should not move the viewport when re-anchoring: scroll 0 -> %d", got)
+	}
+	if start := m.cursorLineStart(); start >= m.detailBodyHeight(m.topFrame()) {
+		t.Fatalf("Up should select a visible item, cursor start=%d below viewport", start)
+	}
+}
+
 // TestDetailHalfDownClampsScroll verifies ctrl+d clamps the scroll offset to the content bounds.
 func TestDetailHalfDownClampsScroll(t *testing.T) {
 	m := tallFocusedDetailModel(t)
