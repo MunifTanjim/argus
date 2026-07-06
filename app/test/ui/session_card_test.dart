@@ -26,6 +26,24 @@ void main() {
     expect(tapped, isTrue);
   });
 
+  testWidgets('shows agent badge when showAgent is set', (tester) async {
+    final s = _session(
+        '{"id":"mac:%1","agent":"codex","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus"}');
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SessionCard(session: s, showAgent: true)),
+    ));
+    expect(find.text('CODEX'), findsOneWidget);
+  });
+
+  testWidgets('no agent badge by default', (tester) async {
+    final s = _session(
+        '{"id":"mac:%1","agent":"codex","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus"}');
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SessionCard(session: s)),
+    ));
+    expect(find.text('CODEX'), findsNothing);
+  });
+
   testWidgets('falls back to id when no repo/name', (tester) async {
     final s = _session(
         '{"id":"mac:%9","agent":"t","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%9","session_name":"s","window_index":0,"current_path":"/p"}}');

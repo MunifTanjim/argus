@@ -80,6 +80,11 @@ var (
 	ColorTeamCyan   color.Color
 	ColorTeamOrange color.Color
 	ColorTeamPink   color.Color
+
+	// Per-agent accent colors for the session-list agent label.
+	ColorAgentClaude      color.Color
+	ColorAgentCodex       color.Color
+	ColorAgentAntigravity color.Color
 )
 
 // -- Semantic text styles -----------------------------------------------------
@@ -169,7 +174,10 @@ func initTheme(hasDarkBg bool) {
 	ColorTeamOrange = ld(lipgloss.Color("3"), lipgloss.Color("208"))
 	ColorTeamPink = ld(lipgloss.Color("5"), lipgloss.Color("211"))
 
-	// Rebuild styles with resolved colors.
+	ColorAgentClaude = ld(lipgloss.Color("3"), lipgloss.Color("208"))     // orange
+	ColorAgentCodex = ld(lipgloss.Color("2"), lipgloss.Color("114"))      // green
+	ColorAgentAntigravity = ld(lipgloss.Color("4"), lipgloss.Color("75")) // blue
+
 	StylePrimaryBold = lipgloss.NewStyle().Bold(true).Foreground(ColorTextPrimary)
 	StyleSecondary = lipgloss.NewStyle().Foreground(ColorTextSecondary)
 	StyleSecondaryBold = lipgloss.NewStyle().Bold(true).Foreground(ColorTextSecondary)

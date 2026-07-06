@@ -569,3 +569,34 @@ func TestDockSummaryLineIsSingleLine(t *testing.T) {
 		t.Fatalf("summary line missing question text: %q", ansi.Strip(line))
 	}
 }
+
+func TestMultiAgentDetection(t *testing.T) {
+	m := testModel()
+	m.sessions = map[string]session.Session{
+		"a": {ID: "a", Agent: "claude"},
+		"b": {ID: "b", Agent: "claude"},
+	}
+	m.order = []string{"a", "b"}
+	if m.multiAgent() {
+		t.Error("single-agent list should not be multiAgent")
+	}
+	m.sessions["b"] = session.Session{ID: "b", Agent: "codex"}
+	if !m.multiAgent() {
+		t.Error("mixed list should be multiAgent")
+	}
+}
+
+func TestSessionCardAgentLabelGated(t *testing.T) {
+	m := testModel()
+	s := session.Session{ID: "s1", Agent: "codex", Status: session.StatusIdle,
+		Tmux: session.TmuxLocation{SessionName: "work", PaneID: "%1", Server: session.TmuxServerDefault}}
+
+	shown := ansi.Strip(m.sessionCard(s, false, 78, true))
+	if !strings.Contains(shown, "Codex") {
+		t.Errorf("showAgent=true should render agent label:\n%s", shown)
+	}
+	hidden := ansi.Strip(m.sessionCard(s, false, 78, false))
+	if strings.Contains(hidden, "Codex") {
+		t.Errorf("showAgent=false should not render agent label:\n%s", hidden)
+	}
+}

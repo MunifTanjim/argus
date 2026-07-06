@@ -354,7 +354,7 @@ func historyProjectRow(p session.HistoryProject, sel bool, w int) string {
 		dimStyle.Render(fmt.Sprintf("%d sessions", p.SessionCount)),
 		dimStyle.Render(p.Cwd),
 	}
-	return cardTitled(titleLeft, titleRight, body, w, border, chrome)
+	return cardTitled(titleLeft, titleRight, body, w, border, chrome, "", nil)
 }
 
 func historyNodeHeader(p session.HistoryProject) string {
@@ -419,7 +419,7 @@ func historySessionRow(s session.HistorySession, sel bool, w int) string {
 	if s.FirstMessage != "" && s.FirstMessage != title {
 		body = append(body, StyleDim.Render(s.FirstMessage))
 	}
-	return cardTitled(titleLeft, titleRight, body, w, border, chrome)
+	return cardTitled(titleLeft, titleRight, body, w, border, chrome, "", nil)
 }
 
 // headlineStyle renders a card's title: bold/focused when selected, secondary otherwise.

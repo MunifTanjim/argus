@@ -13,6 +13,10 @@ Session _s(String id, String host, String status) =>
     Session.fromJson(jsonDecode(
         '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
 
+Session _sa(String id, String host, String status, String agent) =>
+    Session.fromJson(jsonDecode(
+        '{"id":"$id","agent":"$agent","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
+
 Widget _app(List<Override> overrides) => ProviderScope(
       overrides: overrides,
       child: const MaterialApp(home: SessionListScreen()),
@@ -30,6 +34,31 @@ void main() {
     await tester.pump();
     expect(find.text('▌ NEEDS YOU'), findsOneWidget);
     expect(find.textContaining('dev'), findsWidgets);
+  });
+
+  testWidgets('agent badges appear only when agents are mixed', (tester) async {
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _sa('dev:1', 'dev', 'working', 'claude'),
+            _sa('dev:2', 'dev', 'working', 'codex'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+    ]));
+    await tester.pump();
+    expect(find.text('CLAUDE'), findsOneWidget);
+    expect(find.text('CODEX'), findsOneWidget);
+  });
+
+  testWidgets('no agent badges when all one agent', (tester) async {
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _sa('dev:1', 'dev', 'working', 'claude'),
+            _sa('dev:2', 'dev', 'working', 'claude'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+    ]));
+    await tester.pump();
+    expect(find.text('CLAUDE'), findsNothing);
   });
 
   testWidgets('empty state when no sessions', (tester) async {

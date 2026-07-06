@@ -144,11 +144,21 @@ func toolColor(name string) color.Color {
 	return ColorToolOther
 }
 
-// sessionCard renders one session as a bordered list card: repo headline + tmux
-// coordinates on the top edge, a model · ctx% · tokens … relTime meta line, and a
-// task line. Unfocused cards are muted so the focused one (heavy cyan border)
-// stands out; the status glyph and awaiting-input hint stay colored as triage cues.
-func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
+func (m model) multiAgent() bool {
+	seen := ""
+	for _, s := range m.sessions {
+		if s.Agent == "" || s.Agent == seen {
+			continue
+		}
+		if seen != "" {
+			return true
+		}
+		seen = s.Agent
+	}
+	return false
+}
+
+func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgent bool) string {
 	border, chrome := ColorBorder, cardRounded
 	if selected {
 		border, chrome = ColorFocus, cardHeavy
@@ -221,7 +231,13 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int) string {
 		}
 	}
 
-	return cardTitled(titleLeft, titleRight, []string{m.cardMeta(s, innerW, selected, nodeLabel), task}, cardW, border, chrome)
+	agentTxt, agentCol := "", color.Color(nil)
+	if showAgent {
+		var accent color.Color
+		agentTxt, accent = agentLabel(s.Agent)
+		agentCol = agentLabelColor(accent, selected)
+	}
+	return cardTitled(titleLeft, titleRight, []string{m.cardMeta(s, innerW, selected, nodeLabel), task}, cardW, border, chrome, agentTxt, agentCol)
 }
 
 // cardMeta builds a card's meta line: model · ctx% · tokens left, last-activity
@@ -272,10 +288,7 @@ var (
 	cardHeavy   = cardChrome{"┏", "┓", "┗", "┛", "━", "┃"} // focused
 )
 
-// cardTitled composes a card with a titled top edge: titleLeft after the lead
-// corner, titleRight before the tail corner, a border-colored rule filling the gap.
-// Body lines are framed by the vertical glyph, truncated/padded to cardW-4.
-func cardTitled(titleLeft, titleRight string, body []string, cardW int, border color.Color, ch cardChrome) string {
+func cardTitled(titleLeft, titleRight string, body []string, cardW int, border color.Color, ch cardChrome, bottomLeft string, bottomColor color.Color) string {
 	bs := lipgloss.NewStyle().Foreground(border)
 	innerW := max(cardW-4, 10)
 	lead, tail := ch.tl+ch.h+" ", " "+ch.h+ch.tr
@@ -300,12 +313,25 @@ func cardTitled(titleLeft, titleRight string, body []string, cardW int, border c
 		pad := max(0, innerW-lipgloss.Width(content))
 		rows = append(rows, bs.Render(ch.v+" ")+content+strings.Repeat(" ", pad)+bs.Render(" "+ch.v))
 	}
-	rows = append(rows, bs.Render(ch.bl+strings.Repeat(ch.h, cardW-2)+ch.br))
+	rows = append(rows, cardBottom(ch, bs, cardW, bottomLeft, bottomColor))
 	return strings.Join(rows, "\n")
 }
 
-// accentBlock prefixes every content line with a category-colored gutter bar
-// (thin normally, heavy when focused — caller's choice).
+func cardBottom(ch cardChrome, bs lipgloss.Style, cardW int, label string, labelColor color.Color) string {
+	if label == "" {
+		return bs.Render(ch.bl + strings.Repeat(ch.h, cardW-2) + ch.br)
+	}
+	trail := " " + ch.h + ch.br // e.g. " ─╯"
+	maxLabel := max(1, cardW-lipgloss.Width(ch.bl)-2-lipgloss.Width(trail))
+	label = truncateLine(label, maxLabel)
+	labeled := lipgloss.NewStyle().Foreground(labelColor).Render(label)
+	dashN := cardW - lipgloss.Width(ch.bl) - lipgloss.Width(label) - 1 - lipgloss.Width(trail)
+	if dashN < 1 {
+		dashN = 1
+	}
+	return bs.Render(ch.bl+strings.Repeat(ch.h, dashN)+" ") + labeled + bs.Render(trail)
+}
+
 func accentBlock(content string, c color.Color, bar string) string {
 	pre := lipgloss.NewStyle().Foreground(c).Render(bar) + " "
 	lines := strings.Split(content, "\n")

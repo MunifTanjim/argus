@@ -206,6 +206,7 @@ func (m model) listView() string {
 	// Render cards to lines, tracking the cursor card's range so the window keeps
 	// it visible. On a gateway, a host header precedes each group.
 	grouped := m.grouped()
+	showAgent := m.multiAgent()
 	var lines []string
 	curStart, curEnd := 0, 0
 	for i, id := range m.order {
@@ -223,7 +224,7 @@ func (m model) listView() string {
 			}
 		}
 		start := len(lines)
-		lines = append(lines, strings.Split(m.sessionCard(s, i == m.cursor, cardW), "\n")...)
+		lines = append(lines, strings.Split(m.sessionCard(s, i == m.cursor, cardW, showAgent), "\n")...)
 		if i == m.cursor {
 			curStart, curEnd = start, len(lines)
 		}

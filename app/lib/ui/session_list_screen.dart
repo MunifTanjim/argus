@@ -27,6 +27,12 @@ class SessionListScreen extends ConsumerWidget {
     // When sessions span nodes, the "Needs you" section mixes hosts under one
     // header, so its cards must name their own node.
     final grouped = nodesFromSessions(sessions).isNotEmpty;
+    final multiAgent = sessions
+            .map((s) => s.agent)
+            .where((a) => a.isNotEmpty)
+            .toSet()
+            .length >
+        1;
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
 
@@ -68,6 +74,7 @@ class SessionListScreen extends ConsumerWidget {
                                 child: SessionCard(
                                   session: s,
                                   showNode: section.needsYou && grouped,
+                                  showAgent: multiAgent,
                                   onTap: () => Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>

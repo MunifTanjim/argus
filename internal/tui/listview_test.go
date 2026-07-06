@@ -76,7 +76,7 @@ func TestSessionCardShowsRichMetadata(t *testing.T) {
 			Task: "Revamp the session list view", LastActivity: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 		},
 	}
-	out := m.sessionCard(s, false, 78)
+	out := m.sessionCard(s, false, 78, false)
 
 	for _, want := range []string{
 		"╭", "╰", // card border
@@ -108,7 +108,7 @@ func TestSessionCardFocusUsesHeavyBorder(t *testing.T) {
 		ID:   "s1",
 		Tmux: session.TmuxLocation{SessionName: "api-refactor", PaneID: "%3"},
 	}
-	focused := m.sessionCard(s, true, 78)
+	focused := m.sessionCard(s, true, 78, false)
 	for _, want := range []string{"┏", "┗"} {
 		if !strings.Contains(focused, want) {
 			t.Errorf("focused card should use a heavy border (%q):\n%s", want, focused)
@@ -117,7 +117,7 @@ func TestSessionCardFocusUsesHeavyBorder(t *testing.T) {
 	if strings.Contains(focused, "╭") || strings.Contains(focused, "╰") {
 		t.Errorf("focused card should not use rounded corners:\n%s", focused)
 	}
-	unfocused := m.sessionCard(s, false, 78)
+	unfocused := m.sessionCard(s, false, 78, false)
 	if !strings.Contains(unfocused, "╭") || strings.Contains(unfocused, "┏") {
 		t.Errorf("unfocused card should keep the rounded border:\n%s", unfocused)
 	}
@@ -130,7 +130,7 @@ func TestSessionCardAwaitingShowsHint(t *testing.T) {
 		Tmux:        session.TmuxLocation{SessionName: "bugfix", PaneID: "%5"},
 		Interaction: &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"},
 	}
-	out := m.sessionCard(s, true, 78)
+	out := m.sessionCard(s, true, 78, false)
 	if !strings.Contains(out, "needs permission") || !strings.Contains(out, "Bash") {
 		t.Errorf("awaiting card should show the interaction hint:\n%s", out)
 	}
@@ -174,10 +174,10 @@ func TestSessionCardPrefersClaudeName(t *testing.T) {
 	}
 	withName := base
 	withName.Name = "claude-name"
-	if out := m.sessionCard(withName, false, 78); !strings.Contains(out, "claude-name") {
+	if out := m.sessionCard(withName, false, 78, false); !strings.Contains(out, "claude-name") {
 		t.Errorf("card should show Claude's name:\n%s", out)
 	}
-	if out := m.sessionCard(base, false, 78); !strings.Contains(out, "tmux-name") {
+	if out := m.sessionCard(base, false, 78, false); !strings.Contains(out, "tmux-name") {
 		t.Errorf("card should fall back to the tmux name:\n%s", out)
 	}
 }

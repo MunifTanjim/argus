@@ -2,12 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
+import 'agent_badge.dart';
 import 'status_style.dart';
 import 'theme.dart';
 
 class SessionCard extends StatelessWidget {
   const SessionCard(
-      {super.key, required this.session, this.onTap, this.showNode = false});
+      {super.key,
+      required this.session,
+      this.onTap,
+      this.showNode = false,
+      this.showAgent = false});
 
   final Session session;
   final VoidCallback? onTap;
@@ -16,6 +21,8 @@ class SessionCard extends StatelessWidget {
   /// section, where the per-node header is replaced and the node would
   /// otherwise be unknowable.
   final bool showNode;
+
+  final bool showAgent;
 
   static const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
 
@@ -57,6 +64,10 @@ class SessionCard extends StatelessWidget {
                     style: const TextStyle(
                         color: AppColors.text, fontWeight: FontWeight.w600)),
               ),
+              if (showAgent) ...[
+                const SizedBox(width: 8),
+                AgentBadge(agent: s.agent),
+              ],
               if (showNode) ...[
                 const SizedBox(width: 8),
                 const Icon(Icons.dns_outlined, size: 13, color: AppColors.dim),
