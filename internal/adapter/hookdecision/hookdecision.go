@@ -104,7 +104,16 @@ func FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondPar
 		}
 		out.HookSpecificOutput.Decision.UpdatedInput = ui
 	}
-	// Optional permission-mode switch on approval (e.g. ExitPlanMode → acceptEdits).
+	// Claude Code discards an `allow` for interaction-requiring tools (e.g.
+	// ExitPlanMode) unless updatedInput is echoed (anthropics/claude-code#74256).
+	// Echo the original tool_input so the approval and any setMode are honored.
+	if behavior == "allow" && out.HookSpecificOutput.Decision.UpdatedInput == nil {
+		var in map[string]any
+		if json.Unmarshal(toolInput, &in) == nil && len(in) > 0 {
+			out.HookSpecificOutput.Decision.UpdatedInput = in
+		}
+	}
+	// Permission-mode switch on approval (e.g. ExitPlanMode -> acceptEdits).
 	if behavior == "allow" && p.SetMode != "" {
 		out.HookSpecificOutput.Decision.UpdatedPermissions = []map[string]any{
 			{"type": "setMode", "destination": "session", "mode": p.SetMode},

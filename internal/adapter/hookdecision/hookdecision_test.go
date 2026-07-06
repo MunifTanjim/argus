@@ -75,3 +75,29 @@ func TestFormatDecision(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatDecisionExitPlanMode(t *testing.T) {
+	toolInput := json.RawMessage(`{"plan":"do the thing"}`)
+	out := FormatDecision("ExitPlanMode", toolInput, api.RespondParams{OptionValue: "acceptEdits"})
+	for _, want := range []string{
+		`"behavior":"allow"`,
+		`"updatedInput"`,
+		`"plan":"do the thing"`, // original tool_input echoed verbatim
+		`"type":"setMode"`,
+		`"mode":"acceptEdits"`,
+		`"destination":"session"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("exitplanmode allow: missing %q in %s", want, out)
+		}
+	}
+
+	// Reject keeps deny + message and injects no updatedInput.
+	out = FormatDecision("ExitPlanMode", toolInput, api.RespondParams{OptionValue: "deny", Reason: "rethink"})
+	if !strings.Contains(out, `"behavior":"deny"`) || !strings.Contains(out, "rethink") {
+		t.Errorf("exitplanmode deny: %s", out)
+	}
+	if strings.Contains(out, "updatedInput") || strings.Contains(out, "updatedPermissions") {
+		t.Errorf("exitplanmode deny: should not carry updatedInput/updatedPermissions in %s", out)
+	}
+}

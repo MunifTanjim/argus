@@ -49,6 +49,10 @@ func (d *Node) handleSessionRespond(_ context.Context, params json.RawMessage) (
 	}
 	if pd := d.takePending(p.SessionID); pd != nil {
 		pd.ch <- pd.format(p)
+		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "kind", p.Kind)
+	} else {
+		// No parked hook: log so a silently-dropped answer is visible.
+		d.log.Warn("respond with no parked decision, dropped", "session", p.SessionID, "kind", p.Kind)
 	}
 	return nil, nil
 }
