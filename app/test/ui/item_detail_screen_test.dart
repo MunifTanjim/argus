@@ -44,6 +44,24 @@ void main() {
     expect(fake.calls, 0, reason: 'inline body must not trigger a fetch');
   });
 
+  testWidgets('renders a thinking item body without fetching', (tester) async {
+    final fake = _FakeToolDetailApi(const ToolDetail());
+    await tester.pumpWidget(ProviderScope(
+      overrides: [toolDetailApiProvider.overrideWithValue(fake)],
+      child: const MaterialApp(
+        home: ItemDetailScreen(
+          detailRef: ToolDetailRef.live('s'),
+          item: Item(
+              id: 'i', kind: ItemKind.thinking, text: 'pondering the design'),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Thinking'), findsOneWidget, reason: 'app bar title');
+    expect(find.textContaining('pondering'), findsOneWidget);
+    expect(fake.calls, 0, reason: 'thinking has no tool body to fetch');
+  });
+
   testWidgets('fetches the tool body on open when stripped', (tester) async {
     final fake = _FakeToolDetailApi(
         const ToolDetail(toolInput: '{"command":"echo hi"}', result: 'hi'));

@@ -41,6 +41,9 @@ Widget _resultSection(Item it, {bool wrap = false, String? lang}) {
 }
 
 Widget toolDetailBody(Item item) {
+  if (item.kind == ItemKind.thinking) {
+    return appMarkdown(item.text ?? '');
+  }
   final detail = toolMeta(item.toolName)?.detail;
   if (detail != null) return detail(item);
   switch (item.toolName) {

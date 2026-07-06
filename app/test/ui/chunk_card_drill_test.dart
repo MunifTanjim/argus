@@ -34,4 +34,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailScreen), findsOneWidget);
   });
+
+  testWidgets('tapping an expanded thinking row with text drills in',
+      (tester) async {
+    const c = Chunk(id: 'a', kind: ChunkKind.ai, modelName: 'm', items: [
+      Item(id: 'i0', kind: ItemKind.thinking, text: 'reasoning here'),
+      Item(id: 'i1', kind: ItemKind.text, text: 'note'),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+        overrides: [gatewayProvider.overrideWithValue(null)],
+        child: const MaterialApp(
+            home: Scaffold(
+                body: ChunkCard(
+                    detailRef: ToolDetailRef.live('s'), chunk: c)))));
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Thinking'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailScreen), findsOneWidget);
+  });
+
+  testWidgets('a thinking row without text is not drillable', (tester) async {
+    const c = Chunk(id: 'a', kind: ChunkKind.ai, modelName: 'm', items: [
+      Item(id: 'i0', kind: ItemKind.thinking, text: ''),
+      Item(id: 'i1', kind: ItemKind.text, text: 'note'),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+        overrides: [gatewayProvider.overrideWithValue(null)],
+        child: const MaterialApp(
+            home: Scaffold(
+                body: ChunkCard(
+                    detailRef: ToolDetailRef.live('s'), chunk: c)))));
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Thinking'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailScreen), findsNothing);
+  });
 }
