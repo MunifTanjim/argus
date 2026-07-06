@@ -65,7 +65,8 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.project.label)),
-      body: _buildBody(),
+      // top: false — AppBar covers the top; bottom-only clears the nav bar.
+      body: SafeArea(top: false, child: _buildBody()),
     );
   }
 
