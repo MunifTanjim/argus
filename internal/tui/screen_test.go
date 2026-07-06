@@ -56,6 +56,7 @@ func screenModel() model {
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Tmux: session.TmuxLocation{PaneID: "%0"}}}
 	m.selectedID = "s1"
 	m.mode = modeScreen
+	m.screenReturn = modeList
 	m.keyCh = make(chan paneKey, 8)
 	return m
 }
@@ -78,7 +79,7 @@ func TestHandleScreenKeyEnqueuesAndLeaves(t *testing.T) {
 		t.Error("no key enqueued")
 	}
 
-	// ctrl+] leaves to the list and enqueues nothing.
+	// ctrl+] leaves to the origin (list here) and enqueues nothing.
 	res, _ = m.handleScreenKey(tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl})
 	m = res.(model)
 	if m.mode != modeList {
@@ -88,6 +89,18 @@ func TestHandleScreenKeyEnqueuesAndLeaves(t *testing.T) {
 	case k := <-m.keyCh:
 		t.Errorf("ctrl+] should not enqueue, got %+v", k)
 	default:
+	}
+}
+
+func TestHandleScreenKeyReturnsToOrigin(t *testing.T) {
+	// Entered from the session view: ctrl+] returns there, not to the list.
+	m := screenModel()
+	m.screenReturn = modeSession
+
+	res, _ := m.handleScreenKey(tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl})
+	m = res.(model)
+	if m.mode != modeSession {
+		t.Errorf("ctrl+]: mode=%v want session", m.mode)
 	}
 }
 

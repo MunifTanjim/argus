@@ -500,6 +500,7 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.selectedID = m.order[m.cursor]
+	m.screenReturn = m.mode
 	m.mode = modeScreen
 	m.screen, m.screenErr = "", nil
 	return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
@@ -615,11 +616,9 @@ func (m model) actListQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// handleScreenKey drives the live passthrough: ctrl+] leaves; every other key is
-// translated to a tmux key and enqueued for the sender goroutine.
 func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+]" {
-		m.mode = modeList
+		m.mode = m.screenReturn
 		return m, nil
 	}
 	if k, ok := tmuxKeyFor(msg); ok {

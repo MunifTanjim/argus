@@ -82,8 +82,9 @@ type model struct {
 	reconnecting bool // connection dropped; the client is retrying
 	hasDark      bool // terminal background; drives glamour/highlight styling
 
-	mode       viewMode
-	selectedID string
+	mode         viewMode
+	screenReturn viewMode // mode to restore when leaving the live screen (ctrl+])
+	selectedID   string
 
 	focus       focusArea   // session screen: which pane has focus
 	historyView historyKind // session screen: transcript or detail

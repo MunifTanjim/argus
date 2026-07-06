@@ -168,8 +168,8 @@ var logsKeys = struct {
 	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
 
-// screenLeave is the only app binding in the live-screen passthrough: it leaves
-// back to the list (every other key is forwarded to the pane). Footer-only.
+// screenLeave is the only app binding in live-screen passthrough; every other key
+// is forwarded to the pane.
 var screenLeave = nb([]string{"ctrl+]"}, "ctrl+]", "leave")
 
 // --- footers ------------------------------------------------------------------

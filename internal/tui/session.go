@@ -38,6 +38,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.flash = string(s.Frontend) + " session: terminal control unavailable"
 			return m, nil
 		}
+		m.screenReturn = m.mode
 		m.mode = modeScreen
 		m.screen, m.screenErr = "", nil
 		return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
