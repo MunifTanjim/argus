@@ -21,6 +21,20 @@ class NodeRef {
   });
 }
 
+class AgentInfo {
+  final String id;
+  final String name;
+  final String color;
+  final bool spawnable;
+
+  const AgentInfo({
+    required this.id,
+    required this.name,
+    required this.color,
+    required this.spawnable,
+  });
+}
+
 List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {
   final seen = <String, NodeRef>{};
   for (final s in sessions) {

@@ -16,9 +16,11 @@ import (
 type spawnPickClient struct {
 	nodes       []api.NodeInfo
 	projects    []session.HistoryProject
+	agents      []api.AgentInfo // agents.list reply (no spawnable agent → step skipped)
 	spawnCalled bool
 	spawnNodeID string
 	spawnCwd    string
+	spawnAgent  string
 	spawnPrompt string
 }
 
@@ -32,11 +34,16 @@ func (c *spawnPickClient) Call(method string, params, out any) error {
 		if p, ok := out.(*[]session.HistoryProject); ok {
 			*p = c.projects
 		}
+	case api.MethodAgentsList:
+		if p, ok := out.(*api.AgentsListResult); ok {
+			*p = api.AgentsListResult{Agents: c.agents}
+		}
 	case api.MethodSessionSpawn:
 		c.spawnCalled = true
 		if sp, ok := params.(api.SpawnParams); ok {
 			c.spawnNodeID = sp.NodeID
 			c.spawnCwd = sp.Cwd
+			c.spawnAgent = sp.Agent
 			c.spawnPrompt = sp.Prompt
 		}
 	}
@@ -48,8 +55,15 @@ func (c *spawnPickClient) States() <-chan bool             { return make(chan bo
 func (c *spawnPickClient) Reconnect()                      {}
 func (c *spawnPickClient) Close() error                    { return nil }
 
-// openSpawn runs actListNew and feeds the resulting spawnNodesMsg, returning the
-// model parked at its first spawn step.
+func pumpAgents(t *testing.T, m model, cmd tea.Cmd) model {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	mm, _ := m.Update(cmd())
+	return mm.(model)
+}
+
 func openSpawn(t *testing.T, c *spawnPickClient) model {
 	t.Helper()
 	m := newModel(c, false, nil, nil)
@@ -57,8 +71,8 @@ func openSpawn(t *testing.T, c *spawnPickClient) model {
 	if cmd == nil {
 		t.Fatal("actListNew returned no command")
 	}
-	mm, _ := m.Update(cmd())
-	return mm.(model)
+	mm, agentsCmd := m.Update(cmd())
+	return pumpAgents(t, mm.(model), agentsCmd)
 }
 
 // Multi-node: node step first; choosing a node filters the dir list; the spawn
@@ -80,8 +94,8 @@ func TestSpawnMultiNodeRoutesAndPicksDir(t *testing.T) {
 	}
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // cursor → beta
 	m = mm.(model)
-	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose beta → dir
-	m = mm.(model)
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose beta → agent probe
+	m = pumpAgents(t, mm.(model), cmd)                          // 0 agents → dir
 	if m.spawn.step != spawnStepDir || len(m.spawn.dirs) != 1 || m.spawn.dirs[0].Cwd != "/beta/1" {
 		t.Fatalf("dir step not filtered to beta: %+v", m.spawn.dirs)
 	}
@@ -91,7 +105,7 @@ func TestSpawnMultiNodeRoutesAndPicksDir(t *testing.T) {
 		t.Fatalf("step=%v want prompt", m.spawn.step)
 	}
 	// Empty prompt must NOT spawn (mandatory).
-	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	mm, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mm.(model)
 	if cmd != nil || c.spawnCalled {
 		t.Fatal("empty prompt should not spawn")
@@ -206,6 +220,59 @@ func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 	}
 	if len(m.spawn.dirs) != 1 || m.spawn.cursor != 0 {
 		t.Fatalf("most-recent not pre-selected: dirs=%+v cursor=%d", m.spawn.dirs, m.spawn.cursor)
+	}
+}
+
+// Two+ launchable agents surface the agent step; the chosen agent rides the spawn.
+func TestSpawnAgentStepSelects(t *testing.T) {
+	c := &spawnPickClient{
+		nodes:    []api.NodeInfo{{ID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
+		agents: []api.AgentInfo{
+			{ID: "claude", Name: "Claude", Color: "#fe8019", Spawnable: true},
+			{ID: "codex", Name: "Codex", Color: "#b8bb26", Spawnable: true},
+		},
+	}
+	m := openSpawn(t, c)
+	if m.spawn.step != spawnStepAgent || len(m.spawn.agents) != 2 {
+		t.Fatalf("expected agent step with 2 agents, got step=%v agents=%+v", m.spawn.step, m.spawn.agents)
+	}
+	m.width, m.height = 80, 24
+	if !strings.Contains(m.spawnView(), "Which agent?") {
+		t.Fatalf("agent view missing prompt:\n%s", m.spawnView())
+	}
+	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // cursor → codex
+	m = mm.(model)
+	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose codex → dir
+	m = mm.(model)
+	if m.spawn.step != spawnStepDir || m.spawn.agent != "codex" {
+		t.Fatalf("agent not chosen: step=%v agent=%q", m.spawn.step, m.spawn.agent)
+	}
+	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // pick dir → prompt
+	m = mm.(model)
+	for _, r := range "go" {
+		mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = mm.(model)
+	}
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	runCmd(cmd)
+	if !c.spawnCalled || c.spawnAgent != "codex" {
+		t.Fatalf("spawn agent=%q, want codex", c.spawnAgent)
+	}
+}
+
+// A single launchable agent is auto-selected without showing the picker.
+func TestSpawnSingleAgentSkipsStep(t *testing.T) {
+	c := &spawnPickClient{
+		nodes:    []api.NodeInfo{{ID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
+		agents: []api.AgentInfo{
+			{ID: "codex", Name: "Codex", Color: "#b8bb26", Spawnable: true},
+		},
+	}
+	m := openSpawn(t, c)
+	if m.spawn.step != spawnStepDir || m.spawn.agent != "codex" {
+		t.Fatalf("single agent should auto-select and skip to dir: step=%v agent=%q", m.spawn.step, m.spawn.agent)
 	}
 }
 

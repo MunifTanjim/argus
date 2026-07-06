@@ -127,8 +127,37 @@ func TestSpawnWithoutNodeIDAmbiguousFails(t *testing.T) {
 	}
 }
 
-// goneSender is a push.Sender that always reports its target gone, so push.test
-// can be exercised against the prune-and-report path.
+func TestAgentsListRouting(t *testing.T) {
+	a := New(time.Second)
+	home := newFakeSource("home", "home-box")
+	home.callResp = json.RawMessage(`{"agents":[{"id":"claude","name":"Claude","color":"#fe8019","spawnable":true},{"id":"codex","name":"Codex","color":"#b8bb26","spawnable":false}]}`)
+	a.AddSource(home)
+
+	srv := NewServer(a, nil, nil)
+	dispatch := srv.clientSrv.DispatchFunc()
+
+	// Omitted node_id with a single node → routed to it.
+	res, err := dispatch(context.Background(), api.MethodAgentsList, nil)
+	if err != nil {
+		t.Fatalf("list dispatch: %v", err)
+	}
+	raw, _ := json.Marshal(res)
+	var out api.AgentsListResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+	if len(out.Agents) != 2 || out.Agents[0].ID != "claude" || !out.Agents[0].Spawnable ||
+		out.Agents[1].ID != "codex" || out.Agents[1].Spawnable {
+		t.Fatalf("agents = %+v, want claude(spawnable) + codex(not)", out.Agents)
+	}
+
+	// A second node makes an omitted node_id ambiguous.
+	a.AddSource(newFakeSource("dev", "dev-box"))
+	if _, err := dispatch(context.Background(), api.MethodAgentsList, nil); err == nil {
+		t.Fatal("want error when node_id omitted with multiple nodes, got nil")
+	}
+}
+
 type goneSender struct{}
 
 func (goneSender) Send(context.Context, push.Target, push.Notification) error {

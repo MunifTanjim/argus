@@ -46,7 +46,18 @@ type spawnNodesMsg struct {
 	cwd      string
 	err      error
 }
-type screenTickMsg struct{} // screen refresh
+
+// nodeID identifies the probed node so a stale reply (node changed under a slow
+// probe) can be discarded.
+type spawnAgentsMsg struct {
+	nodeID string
+	agents []api.AgentInfo
+	err    error
+}
+
+// Successful spawns surface via registry events; only the error is acted on.
+type spawnResultMsg struct{ err error }
+type screenTickMsg struct{}
 type logTickMsg struct{}    // embedded-node logs changed; wake the render loop
 type spinResumeMsg struct{} // periodic kick that re-arms the list spinner
 type spinTickMsg struct{}   // list spinner animation frame

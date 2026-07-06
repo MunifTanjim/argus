@@ -29,6 +29,7 @@ class FakeSessionRepository implements SessionRepository {
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   }) async =>
       const Result.ok(null);
@@ -38,4 +39,8 @@ class FakeSessionRepository implements SessionRepository {
 
   @override
   Future<Result<List<NodeRef>>> nodes() async => const Result.ok(<NodeRef>[]);
+
+  @override
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
+      const Result.ok(<AgentInfo>[]);
 }

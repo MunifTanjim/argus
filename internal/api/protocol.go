@@ -23,16 +23,16 @@ const (
 	MethodSessionsRefresh       = "sessions.refresh"        // request: no params; rescans, result: []session.Session
 	MethodSessionEvent          = "session.event"           // notification: registry.Event
 	MethodSessionTranscriptView = "sessions.transcriptView" // request: TranscriptParams; result: transcript.TranscriptView
-	// MethodSessionToolDetail returns one tool item's full body, fetched on demand
-	// (transcript chunks ship without these heavy bodies).
-	MethodSessionToolDetail = "sessions.toolDetail" // request: ToolDetailParams; result: ToolDetail
-	MethodSessionCapture    = "sessions.capture"    // request: SessionRef; result: CaptureResult
-	MethodSessionInput      = "sessions.input"      // request: InputParams; result: nil
-	MethodSessionKey        = "sessions.key"        // request: KeyParams; result: nil
-	MethodSessionRespond    = "sessions.respond"    // request: RespondParams; result: nil
-	MethodSessionSpawn      = "sessions.spawn"      // request: SpawnParams; result: SpawnResult
-	MethodSessionKill       = "sessions.kill"       // request: SessionRef; result: nil
-	MethodSessionFocus      = "sessions.focus"      // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
+	MethodSessionToolDetail     = "sessions.toolDetail"     // request: ToolDetailParams; result: ToolDetail
+	MethodSessionCapture        = "sessions.capture"        // request: SessionRef; result: CaptureResult
+	MethodSessionInput          = "sessions.input"          // request: InputParams; result: nil
+	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
+	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
+	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
+	// Probed live per call.
+	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
+	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil
+	MethodSessionFocus = "sessions.focus" // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
@@ -148,13 +148,13 @@ type NodeInfo struct {
 	Capabilities NodeCapabilities `json:"capabilities"`
 }
 
-// SpawnParams launches a new Claude Code session on argus's private tmux server.
 type SpawnParams struct {
 	NodeID  string `json:"node_id,omitempty"` // gateway routing key; ignored node-side
 	Name    string `json:"name,omitempty"`    // tmux session name; blank = node-generated default
-	Cwd     string `json:"cwd,omitempty"`     // working directory
-	Command string `json:"command,omitempty"` // launch command (default: "claude")
-	Prompt  string `json:"prompt,omitempty"`  // initial prompt, passed to the command as its argument
+	Cwd     string `json:"cwd,omitempty"`
+	Agent   string `json:"agent,omitempty"`   // node resolves to a command; blank = default
+	Command string `json:"command,omitempty"` // explicit launch command; overrides Agent when set
+	Prompt  string `json:"prompt,omitempty"`  // initial prompt; how it reaches the CLI is agent-specific (an argument, or a flag like --prompt-interactive)
 }
 
 // SpawnResult identifies the newly created session.
@@ -163,8 +163,24 @@ type SpawnResult struct {
 	PaneID    string `json:"pane_id"`
 }
 
-// HistorySessionsParams lists one project's past sessions.
-// Limit <= 0 returns all from Offset.
+type AgentsListParams struct {
+	NodeID string `json:"node_id,omitempty"` // gateway routing key; empty = sole node
+}
+
+type AgentInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Color     string `json:"color"`
+	Spawnable bool   `json:"spawnable"`
+}
+
+// AgentsListResult lists every agent the node knows, in priority order (first =
+// default spawn target among the spawnable ones).
+type AgentsListResult struct {
+	Agents []AgentInfo `json:"agents"`
+}
+
+// HistorySessionsParams: Limit <= 0 returns all from Offset.
 type HistorySessionsParams struct {
 	NodeID     string `json:"node_id,omitempty"`
 	ProjectDir string `json:"project_dir"` // cwd merge key (node-local) shared across agents

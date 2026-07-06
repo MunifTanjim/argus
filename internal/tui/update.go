@@ -173,7 +173,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil { // no gateway node list (plain local node); nodeID stays empty
 			nodes = nil
 		}
-		m.beginSpawn(nodes, msg.projects, msg.cwd)
+		return m, m.beginSpawn(nodes, msg.projects, msg.cwd)
+	case spawnAgentsMsg:
+		m.applySpawnAgents(msg)
+		return m, nil
+	case spawnResultMsg:
+		if msg.err != nil {
+			m.flash = "spawn failed: " + msg.err.Error()
+		}
 		return m, nil
 	case screenTickMsg:
 		if m.mode == modeScreen {
@@ -257,13 +264,30 @@ func (m model) sendInputCmd(id, text string) tea.Cmd {
 	}
 }
 
-func (m model) spawnCmd(cwd, nodeID, prompt string) tea.Cmd {
+func (m model) spawnCmd(cwd, nodeID, agent, prompt string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		_ = client.Call(api.MethodSessionSpawn, api.SpawnParams{
-			NodeID: nodeID, Cwd: cwd, Prompt: prompt,
+		err := client.Call(api.MethodSessionSpawn, api.SpawnParams{
+			NodeID: nodeID, Cwd: cwd, Agent: agent, Prompt: prompt,
 		}, nil)
-		return nil // registry events will surface the new session
+		return spawnResultMsg{err: err} // a successful spawn surfaces via registry events
+	}
+}
+
+// fetchSpawnAgents probes the chosen node for launchable agents. Empty nodeID
+// (single-node setup) routes to the sole node.
+func (m model) fetchSpawnAgents(nodeID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.AgentsListResult
+		err := client.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: nodeID}, &res)
+		spawnable := make([]api.AgentInfo, 0, len(res.Agents))
+		for _, a := range res.Agents {
+			if a.Spawnable {
+				spawnable = append(spawnable, a)
+			}
+		}
+		return spawnAgentsMsg{nodeID: nodeID, agents: spawnable, err: err}
 	}
 }
 

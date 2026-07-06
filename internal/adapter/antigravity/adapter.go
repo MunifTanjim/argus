@@ -18,13 +18,22 @@ func New() adapter.Adapter { return agAdapter{} }
 
 var _ adapter.Adapter = agAdapter{}
 
-func (agAdapter) Agent() string { return Agent }
+func (agAdapter) Agent() string      { return Agent }
+func (agAdapter) AgentName() string  { return "Antigravity" }
+func (agAdapter) AgentColor() string { return "#83a598" } // blue
 
 func (agAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return NewDiscoverer(reg, clients)
 }
 
-// --- Hooks ---
+// SpawnCommand launches agy. --prompt-interactive keeps the session interactive
+// after the prompt runs (a bare positional arg is not a prompt).
+func (agAdapter) SpawnCommand(prompt string) (string, []string) {
+	if prompt == "" {
+		return "agy", nil
+	}
+	return "agy", []string{"--prompt-interactive", prompt}
+}
 
 func (agAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
 	return ProcessHook(reg, ev)

@@ -17,10 +17,14 @@ abstract class SessionRepository {
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
   Future<Result<List<NodeRef>>> nodes();
+
+  /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId);
 }
 
 /// [SessionRepository] backed by the gateway over JSON-RPC via [SessionService].
@@ -52,15 +56,20 @@ class SessionRepositoryRemote implements SessionRepository {
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   }) =>
-      _service.spawn(nodeId: nodeId, cwd: cwd, prompt: prompt);
+      _service.spawn(nodeId: nodeId, cwd: cwd, agent: agent, prompt: prompt);
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);
 
   @override
   Future<Result<List<NodeRef>>> nodes() => _service.nodes();
+
+  @override
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
+      _service.listAgents(nodeId);
 }
 
 final sessionRepositoryProvider = Provider<SessionRepository>(

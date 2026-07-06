@@ -151,7 +151,24 @@ func (s *Server) routeByNodeID(method string) func(context.Context, json.RawMess
 	}
 }
 
-// SetLogger enables per-request logging on the client-facing RPC server (nil disables).
+// routeByNodeIDOrSole defaults to the sole connected node when node_id is omitted,
+// so a single-node setup needs no picker.
+func (s *Server) routeByNodeIDOrSole(method string) func(context.Context, json.RawMessage) (any, error) {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		nodeID, err := nodeIDFromParams(params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: method + " requires node_id"}
+		}
+		if nodeID == "" {
+			if nodeID = s.agg.SoleNode(); nodeID == "" {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: method + " requires node_id"}
+			}
+		}
+		return s.agg.RouteToNode(ctx, nodeID, method, params)
+	}
+}
+
+// SetLogger enables per-request logging (nil disables).
 func (s *Server) SetLogger(l *slog.Logger) { s.clientSrv.SetLogger(l) }
 
 // Handler returns the gateway's HTTP handler with the /node and /client routes.
@@ -212,20 +229,8 @@ func (s *Server) buildClientServer() *api.Server {
 		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
 	})
 
-	// sessions.spawn routes by node_id (no session_id yet). With node_id omitted and
-	// exactly one node connected, default to it so a single-node setup needs no picker.
-	srv.Handle(api.MethodSessionSpawn, func(ctx context.Context, params json.RawMessage) (any, error) {
-		nodeID, err := nodeIDFromParams(params)
-		if err != nil {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "sessions.spawn requires node_id"}
-		}
-		if nodeID == "" {
-			if nodeID = s.agg.SoleNode(); nodeID == "" {
-				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "sessions.spawn requires node_id"}
-			}
-		}
-		return s.agg.RouteToNode(ctx, nodeID, api.MethodSessionSpawn, params)
-	})
+	srv.Handle(api.MethodSessionSpawn, s.routeByNodeIDOrSole(api.MethodSessionSpawn))
+	srv.Handle(api.MethodAgentsList, s.routeByNodeIDOrSole(api.MethodAgentsList))
 
 	// History projects aggregate across machines: fan out, stamp origin node, order
 	// newest-first (RFC3339 UTC sorts lexically).

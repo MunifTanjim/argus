@@ -2,9 +2,18 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-/// Display label for a session's agent id. Empty for a blank id; the raw id for
-/// an unknown agent. Keep in sync with internal/tui/agent.go.
-String agentLabel(String agent) => agent;
+String agentLabel(String agent) {
+  switch (agent) {
+    case 'claude':
+      return 'Claude';
+    case 'codex':
+      return 'Codex';
+    case 'antigravity':
+      return 'Antigravity';
+    default:
+      return agent;
+  }
+}
 
 Color agentColor(String agent) {
   switch (agent) {

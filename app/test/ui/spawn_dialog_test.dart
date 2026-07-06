@@ -18,16 +18,25 @@ class _FakeProjects extends HistoryProjectsViewModel {
 }
 
 class _RecordingSpawnRepo extends FakeSessionRepository {
+  _RecordingSpawnRepo({this.agents = const <AgentInfo>[]});
+  final List<AgentInfo> agents;
   String? spawnedPrompt;
+  String? spawnedAgent;
   @override
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   }) async {
     spawnedPrompt = prompt;
+    spawnedAgent = agent;
     return const Result.ok(null);
   }
+
+  @override
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
+      Result.ok(agents);
 }
 
 class _NodesRepo extends FakeSessionRepository {
@@ -42,6 +51,7 @@ class _FailingSpawnRepo extends FakeSessionRepository {
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   }) async =>
       const Result.error('backend error');
@@ -130,6 +140,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.spawnedPrompt, equals('the text'));
+  });
+
+  testWidgets('single agent is auto-selected and sent without a picker',
+      (tester) async {
+    final repo = _RecordingSpawnRepo(agents: const [
+      AgentInfo(id: 'codex', name: 'Codex', color: '#b8bb26', spawnable: true),
+    ]);
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+
+    // One agent → no picker (no DropdownMenuItem labeled Codex is shown).
+    expect(find.text('Codex'), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.pumpAndSettle();
+
+    expect(repo.spawnedAgent, equals('codex'));
+  });
+
+  testWidgets('agent picker appears with 2+ agents and the choice is sent',
+      (tester) async {
+    final repo = _RecordingSpawnRepo(agents: const [
+      AgentInfo(id: 'claude', name: 'Claude', color: '#fe8019', spawnable: true),
+      AgentInfo(id: 'codex', name: 'Codex', color: '#b8bb26', spawnable: true),
+    ]);
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+
+    // Default selection is the first agent, shown in the dropdown.
+    expect(find.text('Claude'), findsOneWidget);
+
+    // Open the picker and choose Codex.
+    await tester.tap(find.text('Claude'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Codex').last);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.pumpAndSettle();
+
+    expect(repo.spawnedAgent, equals('codex'));
   });
 
   testWidgets('node without tmux disables spawn and shows a hint',

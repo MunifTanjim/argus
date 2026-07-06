@@ -2,6 +2,9 @@ package node
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -81,23 +84,88 @@ func TestUniqueName(t *testing.T) {
 	}
 }
 
-func TestBuildSpawnOpts(t *testing.T) {
-	// Prompt becomes the command's argument; command defaults to claude.
-	o := buildSpawnOpts("argus", "/p", "", "fix the bug")
-	if o.Name != "argus" || o.Cwd != "/p" || o.Command != "claude" {
-		t.Fatalf("opts = %#v", o)
+func TestHandleAgentsList(t *testing.T) {
+	d := New()
+
+	dir := t.TempDir()
+	for _, bin := range []string{"claude", "codex"} { // agy intentionally absent
+		p := filepath.Join(dir, bin)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if len(o.Args) != 1 || o.Args[0] != "fix the bug" {
-		t.Fatalf("args = %#v, want [\"fix the bug\"]", o.Args)
+	t.Setenv("PATH", dir)
+
+	spawnableByID := func() map[string]bool {
+		r, err := d.handleAgentsList(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, a := range r.(api.AgentsListResult).Agents {
+			if a.ID == "" || a.Name == "" || a.Color == "" {
+				t.Fatalf("agent missing metadata: %+v", a)
+			}
+			m[a.ID] = a.Spawnable
+		}
+		return m
 	}
-	// No prompt → no args; explicit command preserved.
-	o2 := buildSpawnOpts("x", "/p", "zsh", "")
-	if o2.Command != "zsh" || len(o2.Args) != 0 {
-		t.Fatalf("opts2 = %#v", o2)
+
+	// Every known agent is listed; only those with a binary on PATH are spawnable.
+	d.caps.SpawnSession = true
+	got := spawnableByID()
+	if _, ok := got["antigravity"]; !ok {
+		t.Fatalf("antigravity should be listed even without a binary: %v", got)
 	}
-	// Explicit command + prompt: the prompt is appended as that command's arg.
-	o3 := buildSpawnOpts("x", "/p", "zsh", "hi")
-	if o3.Command != "zsh" || len(o3.Args) != 1 || o3.Args[0] != "hi" {
-		t.Fatalf("opts3 = %#v, want command=zsh args=[\"hi\"]", o3)
+	if !got["claude"] || !got["codex"] || got["antigravity"] {
+		t.Fatalf("spawnable flags = %v, want claude+codex true, antigravity false", got)
+	}
+
+	// No tmux → everything still listed, nothing spawnable.
+	d.caps.SpawnSession = false
+	for id, sp := range spawnableByID() {
+		if sp {
+			t.Fatalf("no-tmux: %s must not be spawnable", id)
+		}
+	}
+}
+
+func TestResolveSpawnCommand(t *testing.T) {
+	d := New()
+	// Default agent (empty) resolves to the first adapter, claude, with the prompt
+	// as its argument.
+	cmd, args := d.resolveSpawnCommand(api.SpawnParams{Prompt: "fix the bug"})
+	if cmd != "claude" || len(args) != 1 || args[0] != "fix the bug" {
+		t.Fatalf("default: cmd=%q args=%#v, want claude [\"fix the bug\"]", cmd, args)
+	}
+	// A named agent resolves to its own binary.
+	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "codex"}); cmd != "codex" {
+		t.Fatalf("codex: cmd=%q, want codex", cmd)
+	}
+	// An unknown agent falls back to the default adapter.
+	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "nope"}); cmd != "claude" {
+		t.Fatalf("unknown: cmd=%q, want claude", cmd)
+	}
+	// An explicit command overrides the agent; the prompt becomes its arg.
+	cmd, args = d.resolveSpawnCommand(api.SpawnParams{Agent: "codex", Command: "zsh", Prompt: "hi"})
+	if cmd != "zsh" || len(args) != 1 || args[0] != "hi" {
+		t.Fatalf("override: cmd=%q args=%#v, want zsh [\"hi\"]", cmd, args)
+	}
+}
+
+func TestHandleSessionSpawnRejectsMissingBinary(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.label = "boxy"
+	t.Setenv("PATH", t.TempDir()) // no agent CLI installed
+
+	// Name is set so the handler skips tmux ListPanes and reaches the PATH check.
+	params := []byte(`{"name":"s","cwd":"/tmp","agent":"claude","prompt":"hi"}`)
+	_, err := d.handleSessionSpawn(context.Background(), params)
+	if err == nil {
+		t.Fatal("spawn should be rejected when the agent binary is not on PATH")
+	}
+	if !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("error should name the missing binary, got %v", err)
 	}
 }

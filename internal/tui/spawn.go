@@ -34,6 +34,7 @@ type spawnStep int
 const (
 	spawnInactive spawnStep = iota
 	spawnStepNode
+	spawnStepAgent
 	spawnStepDir
 	spawnStepPrompt
 )
@@ -46,7 +47,9 @@ type spawnState struct {
 	allProjects []session.HistoryProject // unfiltered, server order
 	dirs        []session.HistoryProject // projects filtered to nodeID
 	nodeID      string                   // chosen node ("" = local/single)
-	cursor      int                      // list cursor (node and dir steps)
+	agent       string                   // chosen agent id ("" = node default)
+	agents      []api.AgentInfo          // agents launchable on the node; nil while probing
+	cursor      int                      // list cursor (node, agent, and dir steps)
 	custom      bool                     // dir step: free-text path entry active
 	cwd         string                   // resolved working directory
 	prompt      string                   // initial prompt (mandatory; multi-line via shift+enter)
@@ -79,24 +82,43 @@ func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 	return cur, false
 }
 
-// beginSpawn initializes the staged flow. ≥2 nodes start at the node step;
-// otherwise it records the single node and drops to the dir step. A lone node
-// without tmux stays on the node step so its disabled state is visible rather than
-// auto-selected.
-func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) {
+// beginSpawn initializes the staged flow. A lone node without tmux stays on the
+// node step so its disabled state is visible rather than auto-selected.
+func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) tea.Cmd {
 	m.spawn = spawnState{nodes: nodes, allProjects: projects, fallbackCwd: fallbackCwd}
 	if len(nodes) >= 2 {
 		m.spawn.step = spawnStepNode
-		return
+		return nil
 	}
 	if len(nodes) == 1 {
 		if !nodes[0].Capabilities.SpawnSession {
 			m.spawn.step = spawnStepNode // surface the disabled node
-			return
+			return nil
 		}
 		m.spawn.nodeID = nodes[0].ID
 	}
-	m.spawn.enterDirStep()
+	return m.startAgentStep() // 0 nodes → empty nodeID (sole node, server-side)
+}
+
+func (m *model) startAgentStep() tea.Cmd {
+	m.spawn.step = spawnStepAgent
+	m.spawn.agents = nil // loading
+	m.spawn.cursor = 0
+	return m.fetchSpawnAgents(m.spawn.nodeID)
+}
+
+func (m *model) applySpawnAgents(msg spawnAgentsMsg) {
+	if m.spawn.step != spawnStepAgent || msg.nodeID != m.spawn.nodeID {
+		return // flow moved on (cancelled), or the node changed under a slow probe
+	}
+	if msg.err != nil || len(msg.agents) <= 1 {
+		if len(msg.agents) == 1 {
+			m.spawn.agent = msg.agents[0].ID
+		}
+		m.spawn.enterDirStep()
+		return
+	}
+	m.spawn.agents = msg.agents // cursor stays 0 (set by startAgentStep; frozen while loading)
 }
 
 // enterDirStep filters projects to the chosen node, positions at the most recent,
@@ -131,6 +153,22 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					return m, nil // disabled: no tmux on this node
 				}
 				m.spawn.nodeID = n.ID
+				return m, m.startAgentStep()
+			}
+		}
+		return m, nil
+	case spawnStepAgent:
+		if m.spawn.agents == nil {
+			return m, nil // still probing; ignore keys but esc
+		}
+		switch msg.String() {
+		case "up", "k":
+			m.spawn.cursor = cursorUp(m.spawn.cursor)
+		case "down", "j":
+			m.spawn.cursor = cursorDown(m.spawn.cursor, len(m.spawn.agents))
+		case "enter":
+			if m.spawn.cursor < len(m.spawn.agents) {
+				m.spawn.agent = m.spawn.agents[m.spawn.cursor].ID
 				m.spawn.enterDirStep()
 			}
 		}
@@ -168,8 +206,9 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			cwd := strings.TrimSpace(m.spawn.cwd)
 			prompt := m.spawn.prompt
 			nodeID := m.spawn.nodeID
+			agent := m.spawn.agent
 			m.spawn = spawnState{}
-			return m, m.spawnCmd(cwd, nodeID, prompt)
+			return m, m.spawnCmd(cwd, nodeID, agent, prompt)
 		case "shift+enter", "ctrl+j":
 			// shift+enter needs the Kitty keyboard protocol; ctrl+j is a
 			// universally-transmitted fallback for inserting a newline.

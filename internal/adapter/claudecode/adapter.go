@@ -20,13 +20,20 @@ func New() adapter.Adapter { return ccAdapter{} }
 
 var _ adapter.Adapter = ccAdapter{}
 
-func (ccAdapter) Agent() string { return Agent }
+func (ccAdapter) Agent() string      { return Agent }
+func (ccAdapter) AgentName() string  { return "Claude" }
+func (ccAdapter) AgentColor() string { return "#fe8019" }
 
 func (ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return NewDiscoverer(reg, clients)
 }
 
-// --- Hooks ---
+func (ccAdapter) SpawnCommand(prompt string) (string, []string) {
+	if prompt == "" {
+		return "claude", nil
+	}
+	return "claude", []string{prompt}
+}
 
 func (ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
 	return ProcessHook(reg, ev)

@@ -4,9 +4,9 @@ import 'package:argus/ui/agent_badge.dart';
 
 void main() {
   test('agentLabel maps known ids and passes through unknown', () {
-    expect(agentLabel('claude'), 'claude');
-    expect(agentLabel('codex'), 'codex');
-    expect(agentLabel('antigravity'), 'antigravity');
+    expect(agentLabel('claude'), 'Claude');
+    expect(agentLabel('codex'), 'Codex');
+    expect(agentLabel('antigravity'), 'Antigravity');
     expect(agentLabel('future'), 'future');
     expect(agentLabel(''), '');
   });

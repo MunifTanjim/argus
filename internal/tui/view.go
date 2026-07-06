@@ -271,6 +271,20 @@ func (m model) spawnView() string {
 		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
 		footer = navFooter
+	case spawnStepAgent:
+		if m.spawn.agents == nil {
+			body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
+				dimStyle.Render("Detecting agents…")
+			footer = dimStyle.Render("esc cancel")
+			break
+		}
+		cards := make([]string, len(m.spawn.agents))
+		for i, a := range m.spawn.agents {
+			cards[i] = spawnChoiceRow(a.Name, "", i == m.spawn.cursor, cardW)
+		}
+		body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
+			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
+		footer = navFooter
 	case spawnStepDir:
 		if m.spawn.custom {
 			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +

@@ -61,13 +61,33 @@ class SessionService {
   Future<Result<void>> spawn({
     String? nodeId,
     String? cwd,
+    String? agent,
     required String prompt,
   }) =>
       _guard((c) => c.call('sessions.spawn', {
             'prompt': prompt,
             if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
             if (cwd != null && cwd.isNotEmpty) 'cwd': cwd,
+            if (agent != null && agent.isNotEmpty) 'agent': agent,
           }));
+
+  /// An empty [nodeId] targets the sole node.
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
+      _guard((c) async {
+        final r = await c.call('agents.list', {
+          if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
+        });
+        final list = (r as Map?)?['agents'] as List? ?? const [];
+        return [
+          for (final a in list)
+            AgentInfo(
+              id: (a as Map)['id'] as String? ?? '',
+              name: a['name'] as String? ?? '',
+              color: a['color'] as String? ?? '',
+              spawnable: a['spawnable'] as bool? ?? false,
+            ),
+        ];
+      });
 
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -208,20 +209,43 @@ func uniqueName(base string, taken map[string]bool) string {
 	}
 }
 
-// buildSpawnOpts assembles tmux launch options: command defaults to "claude",
-// and a non-empty prompt becomes the command's argument.
-func buildSpawnOpts(name, cwd, command, prompt string) tmux.NewSessionOpts {
-	if command == "" {
-		command = "claude"
+// resolveSpawnCommand: an explicit p.Command wins; otherwise the agent's adapter
+// owns construction (adapterFor falls back to the first adapter for unknown agents).
+func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []string) {
+	if p.Command != "" {
+		if p.Prompt != "" {
+			args = []string{p.Prompt}
+		}
+		return p.Command, args
 	}
-	opts := tmux.NewSessionOpts{Name: name, Cwd: cwd, Command: command}
-	if prompt != "" {
-		opts.Args = []string{prompt}
-	}
-	return opts
+	return d.adapterFor(p.Agent).SpawnCommand(p.Prompt)
 }
 
-// handleSessionSpawn launches a new Claude Code session on argus's private server.
+// handleAgentsList reports agents with spawnable flags. Probed live per call so an
+// agent installed after startup is offered.
+func (d *Node) handleAgentsList(_ context.Context, params json.RawMessage) (any, error) {
+	if _, err := api.Decode[api.AgentsListParams](params); err != nil {
+		return nil, err
+	}
+	agents := make([]api.AgentInfo, 0, len(d.adapterList))
+	for _, a := range d.adapterList {
+		name, _ := a.SpawnCommand("")
+		spawnable := false
+		if d.caps.SpawnSession && name != "" {
+			if _, err := exec.LookPath(name); err == nil {
+				spawnable = true
+			}
+		}
+		agents = append(agents, api.AgentInfo{
+			ID:        a.Agent(),
+			Name:      a.AgentName(),
+			Color:     a.AgentColor(),
+			Spawnable: spawnable,
+		})
+	}
+	return api.AgentsListResult{Agents: agents}, nil
+}
+
 func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SpawnParams](params)
 	if err != nil {
@@ -245,7 +269,15 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 		}
 		p.Name = uniqueName(defaultSessionName(p.Cwd), taken)
 	}
-	paneID, err := c.NewSession(ctx, buildSpawnOpts(p.Name, p.Cwd, p.Command, p.Prompt))
+	command, args := d.resolveSpawnCommand(p)
+	// Fail loudly rather than opening a tmux pane that dies "command not found".
+	if _, err := exec.LookPath(command); err != nil {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: fmt.Sprintf("cannot spawn: %q is not installed on node %s", command, d.label),
+		}
+	}
+	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: p.Name, Cwd: p.Cwd, Command: command, Args: args})
 	if err != nil {
 		return nil, err
 	}

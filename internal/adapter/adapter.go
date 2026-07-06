@@ -49,10 +49,15 @@ type StreamingTranscript interface {
 
 type Adapter interface {
 	Agent() string
+	AgentName() string
+	AgentColor() string
 
 	NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) Discoverer
 
-	// --- Hooks ---
+	// SpawnCommand returns the CLI command to launch a session.
+	// An empty name means the agent cannot be spawned.
+	SpawnCommand(prompt string) (name string, args []string)
+
 	ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool)
 	EventName(ev HookEvent) string
 	RescanOnHook(ev HookEvent) bool

@@ -9,6 +9,7 @@ import '../state/grouping.dart';
 import '../state/history_view_model.dart';
 import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
+import 'theme.dart';
 
 Future<void> showSpawnDialog(BuildContext context, WidgetRef ref) {
   return showDialog(
@@ -42,6 +43,10 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   String? _nodeId;
   String _prompt = '';
 
+  // null while probing; picker shows only when >=2.
+  List<AgentInfo>? _agents;
+  String? _agent;
+
   // Directory state
   String? _selectedCwd; // resolved when projects load or the user picks
   bool _customCwd = false;
@@ -57,6 +62,27 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       _nodeId = _defaultNodeId(nodes);
     }
     _loadNodes();
+    _loadAgents();
+  }
+
+  // Last call wins if the node changes mid-probe.
+  Future<void> _loadAgents() async {
+    final nodeId = _nodeId;
+    final result = await ref.read(sessionRepositoryProvider).listAgents(nodeId);
+    if (!mounted || nodeId != _nodeId) return;
+    switch (result) {
+      case Ok(:final value):
+        final spawnable = [for (final a in value) if (a.spawnable) a];
+        setState(() {
+          _agents = spawnable;
+          _agent = spawnable.isNotEmpty ? spawnable.first.id : null;
+        });
+      case Error():
+        setState(() {
+          _agents = const [];
+          _agent = null;
+        });
+    }
   }
 
   // Prefer a spawn-capable (tmux) node as the default selection; fall back to the
@@ -73,6 +99,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     if (!mounted) return;
     switch (result) {
       case Ok(:final value) when value.isNotEmpty:
+        final prevNodeId = _nodeId;
         setState(() {
           _remoteNodes = value;
           if (value.length >= 2 &&
@@ -80,6 +107,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
             _nodeId = _defaultNodeId(value);
           }
         });
+        if (_nodeId != prevNodeId) _loadAgents(); // re-probe the new target node
       case Ok():
       case Error():
         break; // fall back to session-derived nodes
@@ -106,6 +134,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     await _vm.spawn.execute(SpawnRequest(
       nodeId: _nodeId,
       cwd: _effectiveCwd(),
+      agent: _agent,
       prompt: _prompt.trim(),
     ));
     if (!mounted) return;
@@ -184,13 +213,33 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
                     ),
                   ),
               ],
-              onChanged: (v) => setState(() {
-                _nodeId = v;
-                // Reset directory selection when node changes
-                _selectedCwd = null;
-                _customCwd = false;
-                _customPath = '';
-              }),
+              onChanged: (v) {
+                setState(() {
+                  _nodeId = v;
+                  // Reset directory selection when node changes
+                  _selectedCwd = null;
+                  _customCwd = false;
+                  _customPath = '';
+                  _agents = null;
+                  _agent = null;
+                });
+                _loadAgents();
+              },
+            ),
+          if (_agents != null && _agents!.length >= 2)
+            DropdownButton<String>(
+              value: _agent,
+              isExpanded: true,
+              hint: const Text('Agent'),
+              items: [
+                for (final a in _agents!)
+                  DropdownMenuItem(
+                    value: a.id,
+                    child:
+                        Text(a.name, style: TextStyle(color: _hexColor(a.color))),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _agent = v),
             ),
           DropdownButton<String>(
             isExpanded: true,
@@ -246,8 +295,13 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
                 child: const Text('Cancel'),
               ),
               TextButton(
-                onPressed:
-                    (busy || _prompt.trim().isEmpty || !spawnable) ? null : _spawn,
+                // Block while agent probe is in flight: agent isn't known yet.
+                onPressed: (busy ||
+                        _prompt.trim().isEmpty ||
+                        !spawnable ||
+                        _agents == null)
+                    ? null
+                    : _spawn,
                 child: busy
                     ? const SizedBox(
                         width: 16,
@@ -262,4 +316,11 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       ),
     );
   }
+}
+
+Color _hexColor(String hex) {
+  final h = hex.startsWith('#') ? hex.substring(1) : hex;
+  final v = int.tryParse(h, radix: 16);
+  if (v == null || h.length != 6) return AppColors.dim;
+  return Color(0xFF000000 | v);
 }
