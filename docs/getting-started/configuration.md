@@ -81,3 +81,21 @@ degrades gracefully — a missing tool, a failed render, or a non-macOS host nev
 breaks anything, it just drops to the next best (or silently no-ops).
 
 Enable it on each machine you sit in front of; leave it off on headless boxes.
+
+## Mobile notifications
+
+`push.mobile.delay` (default `0s`) sets a grace period before a mobile push
+fires. With the default, mobile pushes are instant — the same moment in-app and
+desktop notifications go out.
+
+Set it to a non-zero duration to hold mobile pushes back:
+
+```yaml
+push:
+  mobile:
+    delay: 30s
+```
+
+When the delay elapses, the push fires only if the session is still awaiting
+input or idle — so answering at your desk within the window keeps the phone
+quiet. Desktop and in-app notifications are always instant.

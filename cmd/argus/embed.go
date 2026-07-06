@@ -108,7 +108,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		events, cancel := d.Registry().Subscribe()
 		go func() {
 			defer cancel()
-			push.Watch(ctx, events, []push.Sink{d.DesktopSink()}, logger.NewBufferLogger(logs).With("scope", "push"))
+			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.NewBufferLogger(logs).With("scope", "push"))
 		}()
 	}
 	conn, err := dialWithRetry(socket, 3*time.Second)

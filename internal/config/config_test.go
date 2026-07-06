@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -155,5 +156,27 @@ func TestPushDesktopFromEnv(t *testing.T) {
 	t.Setenv("ARGUS_PUSH_DESKTOP_ENABLED", "true")
 	if c := load(t, ""); !c.Push.Desktop.Enabled {
 		t.Fatal("push.desktop.enabled from env = false, want true")
+	}
+}
+
+func TestPushMobileDelayDefaultZero(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.Push.Mobile.Delay != 0 {
+		t.Fatalf("push.mobile.delay default = %v, want 0", c.Push.Mobile.Delay)
+	}
+}
+
+func TestPushMobileDelayFromFile(t *testing.T) {
+	path := writeConfig(t, "push:\n  mobile:\n    delay: 30s\n")
+	if c := load(t, path); c.Push.Mobile.Delay != 30*time.Second {
+		t.Fatalf("push.mobile.delay from file = %v, want 30s", c.Push.Mobile.Delay)
+	}
+}
+
+func TestPushMobileDelayFromEnv(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("ARGUS_PUSH_MOBILE_DELAY", "45s")
+	if c := load(t, ""); c.Push.Mobile.Delay != 45*time.Second {
+		t.Fatalf("push.mobile.delay from env = %v, want 45s", c.Push.Mobile.Delay)
 	}
 }

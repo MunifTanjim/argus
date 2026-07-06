@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -31,10 +32,19 @@ type NodeConfig struct {
 
 type PushConfig struct {
 	Desktop DesktopConfig
+	Mobile  MobileConfig
 }
 
 type DesktopConfig struct {
 	Enabled bool // render native desktop notifications on this node (opt-in)
+}
+
+// MobileConfig tunes device (mobile) push delivery.
+type MobileConfig struct {
+	// Delay is the grace period before a mobile push fires. 0 (default) or any
+	// non-positive value fires immediately. Re-checked when it elapses: sent
+	// only if the session is still awaiting input or idle.
+	Delay time.Duration
 }
 
 type LogConfig struct {
@@ -72,6 +82,7 @@ var defaults = map[string]any{
 	"node.id":                       "",
 	"node.label":                    "",
 	"push.desktop.enabled":          false,
+	"push.mobile.delay":             "0s",
 	"log.level":                     "info",
 	"log.format":                    "pretty",
 	"tunnel.provider":               "",
@@ -142,6 +153,9 @@ func FromViper(v *viper.Viper) Config {
 		Push: PushConfig{
 			Desktop: DesktopConfig{
 				Enabled: v.GetBool("push.desktop.enabled"),
+			},
+			Mobile: MobileConfig{
+				Delay: v.GetDuration("push.mobile.delay"),
 			},
 		},
 		Log: LogConfig{

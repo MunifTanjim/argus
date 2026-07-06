@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -20,7 +21,7 @@ func runWatch(t *testing.T, events []registry.Event) []Target {
 
 	ch := make(chan registry.Event)
 	done := make(chan struct{})
-	go func() { Watch(context.Background(), ch, []Sink{d}, nil); close(done) }()
+	go func() { Watch(context.Background(), ch, Sinks{Immediate: []Sink{d}}, nil); close(done) }()
 	for _, ev := range events {
 		ch <- ev
 	}
@@ -192,12 +193,122 @@ func TestWatchFansToAllSinks(t *testing.T) {
 	a, b := &recordSink{}, &recordSink{}
 	ch := make(chan registry.Event)
 	done := make(chan struct{})
-	go func() { Watch(context.Background(), ch, []Sink{a, b}, nil); close(done) }()
+	go func() { Watch(context.Background(), ch, Sinks{Immediate: []Sink{a, b}}, nil); close(done) }()
 	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput) // one transition
 	close(ch)
 	<-done
 
 	if len(a.n) != 1 || len(b.n) != 1 {
 		t.Fatalf("fan-out = a:%d b:%d, want 1 each", len(a.n), len(b.n))
+	}
+}
+
+func (r *recordSink) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.n)
+}
+
+func waitCount(t *testing.T, r *recordSink, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if r.count() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timeout: count = %d, want >= %d", r.count(), want)
+}
+
+func startDelayed(t *testing.T, delay time.Duration) (im, dl *recordSink, ch chan registry.Event) {
+	t.Helper()
+	im, dl = &recordSink{}, &recordSink{}
+	ch = make(chan registry.Event)
+	done := make(chan struct{})
+	go func() {
+		Watch(context.Background(), ch, Sinks{Immediate: []Sink{im}, Delayed: []Sink{dl}, Delay: delay}, nil)
+		close(done)
+	}()
+	t.Cleanup(func() { close(ch); <-done })
+	return
+}
+
+func TestWatchDelayedFiresAfterGrace(t *testing.T) {
+	im, dl, ch := startDelayed(t, 30*time.Millisecond)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	waitCount(t, im, 1) // immediate fires now
+	if got := dl.count(); got != 0 {
+		t.Fatalf("delayed fired before grace: %d", got)
+	}
+	waitCount(t, dl, 1) // delayed fires after grace
+}
+
+func TestWatchDelayedSuppressedWhenAnswered(t *testing.T) {
+	im, dl, ch := startDelayed(t, 50*time.Millisecond)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	waitCount(t, im, 1)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusWorking) // answered within window
+	time.Sleep(120 * time.Millisecond)                           // past the delay
+	if got := dl.count(); got != 0 {
+		t.Fatalf("delayed fired despite answer: %d", got)
+	}
+}
+
+func TestWatchDelayedFiresWhenIdleAtFireTime(t *testing.T) {
+	im, dl, ch := startDelayed(t, 30*time.Millisecond)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	waitCount(t, im, 1)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusIdle) // still needs attention
+	waitCount(t, dl, 1)
+}
+
+func TestWatchDelayedZeroFiresImmediately(t *testing.T) {
+	_, dl, ch := startDelayed(t, 0)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	waitCount(t, dl, 1) // no delay: fires on the transition
+}
+
+func TestWatchDelayedReArmsAfterLeavingAwaiting(t *testing.T) {
+	_, dl, ch := startDelayed(t, 40*time.Millisecond)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput) // arm T1
+	ch <- ev(registry.EventUpdated, "s1", session.StatusWorking)       // cancel T1 (answered)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput) // re-arm T2
+	waitCount(t, dl, 1)                                                // T2 fires after its grace
+	time.Sleep(60 * time.Millisecond)                                  // let any stale T1 signal surface
+	if got := dl.count(); got != 1 {
+		t.Fatalf("delayed fired %d times, want exactly 1 (T1 cancelled, T2 fires once)", got)
+	}
+}
+
+func TestWatchDelayedCancelledOnRemoval(t *testing.T) {
+	im, dl, ch := startDelayed(t, 50*time.Millisecond)
+	ch <- ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	waitCount(t, im, 1)
+	ch <- ev(registry.EventRemoved, "s1", session.StatusAwaitingInput) // gone within window
+	time.Sleep(120 * time.Millisecond)
+	if got := dl.count(); got != 0 {
+		t.Fatalf("delayed fired after removal: %d", got)
+	}
+}
+
+func TestWatchDelayedRendersLatestSnapshot(t *testing.T) {
+	_, dl, ch := startDelayed(t, 40*time.Millisecond)
+	// Arm with a permission interaction...
+	arm := ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	arm.Session.Interaction = &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"}
+	ch <- arm
+	// ...then update to a different interaction before the grace elapses (same
+	// awaiting status, so it refreshes the armed snapshot without re-arming).
+	upd := ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	upd.Session.Interaction = &session.Interaction{Kind: session.InteractionPlan}
+	ch <- upd
+
+	waitCount(t, dl, 1)
+	dl.mu.Lock()
+	body := dl.n[0].Body
+	dl.mu.Unlock()
+	if body != "Plan ready to review" {
+		t.Fatalf("delayed body = %q, want latest snapshot %q", body, "Plan ready to review")
 	}
 }

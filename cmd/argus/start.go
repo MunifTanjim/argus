@@ -116,7 +116,7 @@ func newStartCmd(version string) *cobra.Command {
 				// Focus-aware sink: suppresses alerts for a session already on screen.
 				go func() {
 					defer cancel()
-					push.Watch(ctx, events, []push.Sink{d.DesktopSink()}, logger.Scoped("push").L)
+					push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
 				}()
 			}
 
@@ -248,10 +248,8 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	return nil
 }
 
-// setupPush wires device push notifications (gateway mode): a token store, a Web Push
-// (UnifiedPush) sender signing with a self-generated VAPID key, and a watcher that
-// notifies registered devices when a session needs the user.
-func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server) {
+// setupPush wires device push notifications (gateway mode only).
+func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration) {
 	log := logger.Scoped("push")
 	store := push.NewStore(config.GetStatePath("push-tokens"))
 	// VAPID key (self-generated, persisted) signs Web Push requests; the public
@@ -269,7 +267,11 @@ func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Serve
 	broadcaster := fanoutNotifier{agg: agg, log: log.L}
 	go func() {
 		defer cancel()
-		push.Watch(ctx, events, []push.Sink{dispatcher, broadcaster}, log.L)
+		push.Watch(ctx, events, push.Sinks{
+			Immediate: []push.Sink{broadcaster},
+			Delayed:   []push.Sink{dispatcher},
+			Delay:     delay,
+		}, log.L)
 	}()
 }
 
@@ -295,7 +297,7 @@ func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tun
 	hsrv.SetVersion(version)
 	hsrv.SetPublicURL(gatewayBaseURL(cfg))
 	hsrv.SetLogger(gatewayLog.L)
-	setupPush(ctx, agg, hsrv)
+	setupPush(ctx, agg, hsrv, cfg.Push.Mobile.Delay)
 	httpSrv := &http.Server{Addr: cfg.Gateway.ListenAddr, Handler: hsrv.Handler()}
 	gatewayLog.Info("gateway listening", "addr", cfg.Gateway.ListenAddr)
 	go func() {
