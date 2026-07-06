@@ -249,9 +249,14 @@ func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
 	return header + "\n" + indentBlock(card, sel+"  ")
 }
 
-// assistantBrand returns the AI author's icon and name for the open transcript.
+// assistantBrand uses m.history.openAgent in history mode because the live
+// session isn't in m.sessions.
 func (m model) assistantBrand() (StyledIcon, string) {
-	switch m.sessions[m.selectedID].Agent {
+	agent := m.sessions[m.selectedID].Agent
+	if m.mode == modeHistoryTranscript {
+		agent = m.history.openAgent
+	}
+	switch agent {
 	case "codex":
 		return Icon.Claude, "Codex"
 	case "antigravity":

@@ -16,6 +16,7 @@ class _FakeHistoryRepository implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) async {
     final r = _result;
     if (r is Exception) return Result.error(r);

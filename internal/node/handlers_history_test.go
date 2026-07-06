@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // writeHistoryNestedFixture writes a session (general-purpose A → Explore B)
@@ -63,6 +64,23 @@ func subagentItemInChunks(chunks []claudecode.Chunk) (claudecode.Item, bool) {
 		}
 	}
 	return claudecode.Item{}, false
+}
+
+func TestHandleHistorySessions_EmptyProjectDirIsUnknownBucket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := &Node{adapterList: []adapter.Adapter{claudecode.New()}}
+	params, _ := json.Marshal(api.HistorySessionsParams{ProjectDir: ""})
+	res, err := d.handleHistorySessions(context.Background(), params)
+	if err != nil {
+		t.Fatalf("empty project_dir must be accepted (unknown bucket), got error: %v", err)
+	}
+	if _, ok := res.(session.HistorySessionPage); !ok {
+		t.Fatalf("expected HistorySessionPage, got %T", res)
+	}
 }
 
 func TestHandleHistoryTranscript_NestedByAgentID(t *testing.T) {

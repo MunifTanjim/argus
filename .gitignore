@@ -30,6 +30,7 @@ app/android/.gradle/
 
 # Superpowers workflow scratch (brainstorm/sdd state, briefs, diffs)
 .superpowers/
+/superpowers/
 docs/superpowers
 
 # local files

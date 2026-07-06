@@ -23,6 +23,7 @@ abstract class HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   });
 }
 
@@ -53,9 +54,13 @@ class HistoryRepositoryRemote implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) =>
       _api.transcript(
-          nodeId: nodeId, transcriptPath: transcriptPath, agentId: agentId);
+          nodeId: nodeId,
+          transcriptPath: transcriptPath,
+          agentId: agentId,
+          agent: agent);
 }
 
 final historyRepositoryProvider = Provider<HistoryRepository>(

@@ -223,11 +223,6 @@ func discoverSessions(projectDir string, scan scanFn) ([]SessionInfo, error) {
 		path := filepath.Join(projectDir, name)
 		meta := scan(path, info.ModTime())
 
-		// Skip ghost sessions (e.g. only file-history-snapshot entries).
-		if meta.turnCount == 0 {
-			continue
-		}
-
 		isOngoing := meta.isOngoing
 		if isOngoing && time.Since(info.ModTime()) > OngoingStalenessThreshold {
 			isOngoing = false

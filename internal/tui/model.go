@@ -146,10 +146,10 @@ type historyState struct {
 	hasMore    bool
 	loading    bool
 	title      string // header for the open historical transcript
-	// openNodeID/openPath address the open transcript for per-tool detail fetches
-	// (sessions.historyToolDetail).
+	// openNodeID/openPath/openAgent route per-tool detail fetches to the right adapter.
 	openNodeID string
 	openPath   string
+	openAgent  string // owning agent of the open transcript, for read routing
 }
 
 func newModel(client Client, hasDark bool, keyCh chan paneKey, logs *logbuf.Buffer) model {

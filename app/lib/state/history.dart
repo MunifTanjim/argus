@@ -60,6 +60,7 @@ class HistoryApi {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) =>
       _guard((c) async {
         // See sessions(): node_id is mandatory for gateway-routed history reads.
@@ -70,6 +71,7 @@ class HistoryApi {
           'node_id': nodeId,
           'transcript_path': transcriptPath,
           if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
+          if ((agent ?? '').isNotEmpty) 'agent': agent,
         };
         final result = await c.call('sessions.historyTranscript', params);
         final map = result as Map<String, dynamic>;

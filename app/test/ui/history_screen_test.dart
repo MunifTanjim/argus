@@ -30,6 +30,7 @@ class _FakeHistoryRepository implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) async =>
       const Result.ok([]);
 }
@@ -53,6 +54,7 @@ class _ThrowingHistoryRepository implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) async =>
       const Result.ok([]);
 }

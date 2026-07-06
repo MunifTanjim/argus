@@ -25,11 +25,11 @@ func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 	client := m.client
 	toolID := it.ToolID
 	if m.mode == modeHistoryTranscript {
-		nodeID, path := m.history.openNodeID, m.history.openPath
+		nodeID, path, agent := m.history.openNodeID, m.history.openPath, m.history.openAgent
 		return func() tea.Msg {
 			var td api.ToolDetail
 			err := client.Call(api.MethodSessionHistoryToolDetail, api.HistoryToolDetailParams{
-				NodeID: nodeID, TranscriptPath: path, AgentID: agentID, ToolID: toolID,
+				NodeID: nodeID, TranscriptPath: path, Agent: agent, AgentID: agentID, ToolID: toolID,
 			}, &td)
 			return toolDetailMsg{toolID: toolID, detail: td, err: err}
 		}

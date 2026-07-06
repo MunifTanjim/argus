@@ -150,7 +150,7 @@ func writeTitledSession(t *testing.T, dir, name, customTitle, aiTitle string) st
 	if aiTitle != "" {
 		lines = append(lines, `{"type":"ai-title","aiTitle":"`+aiTitle+`","sessionId":"`+name+`"}`)
 	}
-	// A real conversation turn so turnCount > 0 (else the session is skipped as a ghost).
+	// A real conversation turn so the session has representative metadata.
 	lines = append(lines,
 		`{"uuid":"u1","type":"user","timestamp":"2025-01-15T10:00:00Z","isSidechain":false,"isMeta":false,"message":{"role":"user","content":"hello"}}`,
 		`{"uuid":"a1","type":"assistant","timestamp":"2025-01-15T10:00:01Z","isSidechain":false,"isMeta":false,"message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}`,

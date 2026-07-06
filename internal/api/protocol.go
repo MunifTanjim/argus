@@ -163,11 +163,11 @@ type SpawnResult struct {
 	PaneID    string `json:"pane_id"`
 }
 
-// HistorySessionsParams lists one project's past sessions. ProjectDir is the
-// owning node's local project path; Limit <= 0 returns all from Offset.
+// HistorySessionsParams lists one project's past sessions.
+// Limit <= 0 returns all from Offset.
 type HistorySessionsParams struct {
 	NodeID     string `json:"node_id,omitempty"`
-	ProjectDir string `json:"project_dir"`
+	ProjectDir string `json:"project_dir"` // cwd merge key (node-local) shared across agents
 	Limit      int    `json:"limit,omitempty"`
 	Offset     int    `json:"offset,omitempty"`
 }
@@ -176,6 +176,7 @@ type HistorySessionsParams struct {
 // AgentID selects a nested subagent trace.
 type HistoryTranscriptParams struct {
 	NodeID         string `json:"node_id,omitempty"`
+	Agent          string `json:"agent,omitempty"` // owning agent; selects the adapter
 	TranscriptPath string `json:"transcript_path"`
 	AgentID        string `json:"agent_id,omitempty"`
 }
@@ -201,6 +202,7 @@ type ToolDetailParams struct {
 // addressed by node-local path.
 type HistoryToolDetailParams struct {
 	NodeID         string `json:"node_id,omitempty"`
+	Agent          string `json:"agent,omitempty"` // owning agent; selects the adapter
 	TranscriptPath string `json:"transcript_path"`
 	AgentID        string `json:"agent_id,omitempty"`
 	ToolID         string `json:"tool_id"`

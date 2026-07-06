@@ -110,22 +110,28 @@ func NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.Stre
 	return &streamingTranscript{path: path}
 }
 
-// History stubs: Codex history browsing not yet implemented.
+func ListHistoryProjects() ([]session.HistoryProject, error) { return listHistoryProjects() }
 
-func ListHistoryProjects() ([]session.HistoryProject, error) { return nil, nil }
-
-func ListHistorySessions(string, int, int) (session.HistorySessionPage, error) {
-	return session.HistorySessionPage{}, nil
+func ListHistorySessions(cwd string, limit, offset int) (session.HistorySessionPage, error) {
+	return listHistorySessions(cwd, limit, offset)
 }
 
-func ReadHistoryTranscript(string) (transcript.TranscriptView, error) {
-	return transcript.TranscriptView{}, nil
+func ReadHistoryTranscript(path string) (transcript.TranscriptView, error) {
+	clean, err := safeSessionsPath(path)
+	if err != nil {
+		return transcript.TranscriptView{}, err
+	}
+	return ReadTranscriptView(clean)
 }
 
 func ReadHistorySubagentView(string, string) (transcript.TranscriptView, bool, error) {
 	return transcript.TranscriptView{}, false, nil
 }
 
-func FindHistoryToolDetail(string, string, string) (transcript.ToolDetail, bool, error) {
-	return transcript.ToolDetail{}, false, nil
+func FindHistoryToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
+	clean, err := safeSessionsPath(path)
+	if err != nil {
+		return transcript.ToolDetail{}, false, err
+	}
+	return FindToolDetail(clean, agentID, toolID)
 }

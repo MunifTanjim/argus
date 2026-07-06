@@ -18,6 +18,7 @@ type HistoryProject struct {
 // It carries no live/tmux state; TranscriptPath + NodeID address its transcript.
 type HistorySession struct {
 	SessionID      string `json:"session_id"`
+	Agent          string `json:"agent,omitempty"`         // owning agent, stamped by the node
 	Title          string `json:"title,omitempty"`         // custom/AI title, when present
 	FirstMessage   string `json:"first_message,omitempty"` // first user message (title fallback)
 	TranscriptPath string `json:"transcript_path"`         // node-local path; routing key for the view

@@ -14,24 +14,28 @@ class ToolDetailRef {
   final String? nodeId;
   final String? transcriptPath;
   final String? agentId;
+  final String? agent;
 
   const ToolDetailRef({
     this.sessionId,
     this.nodeId,
     this.transcriptPath,
     this.agentId,
+    this.agent,
   });
 
   /// A live session transcript (optionally a subagent trace within it).
   const ToolDetailRef.live(this.sessionId, {this.agentId})
       : nodeId = null,
-        transcriptPath = null;
+        transcriptPath = null,
+        agent = null;
 
   /// A past session's transcript on a specific node.
   const ToolDetailRef.history({
     required this.nodeId,
     required this.transcriptPath,
     this.agentId,
+    this.agent,
   }) : sessionId = null;
 
   bool get isHistory => (transcriptPath ?? '').isNotEmpty;
@@ -42,6 +46,7 @@ class ToolDetailRef {
         nodeId: nodeId,
         transcriptPath: transcriptPath,
         agentId: agentId,
+        agent: agent,
       );
 }
 
@@ -67,6 +72,7 @@ class ToolDetailApi {
           'node_id': ref.nodeId,
           'transcript_path': ref.transcriptPath,
           if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
+          if ((ref.agent ?? '').isNotEmpty) 'agent': ref.agent,
           'tool_id': toolId,
         }) as Object;
       } else {

@@ -32,6 +32,7 @@ class _FakeRepo implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) async =>
       const Result.ok([]);
 }

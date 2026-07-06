@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/result.dart';
 import '../data/history_repository.dart';
 import '../models/history.dart';
+import 'agent_badge.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
@@ -82,6 +83,10 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
       return const Center(child: Text('No sessions in this project.'));
     }
 
+    final distinctAgents =
+        _items.map((s) => s.agent).where((a) => a.isNotEmpty).toSet();
+    final showAgent = distinctAgents.length > 1;
+
     return CenteredBody(
       child: ListView.builder(
         itemCount: _items.length + (_hasMore ? 1 : 0),
@@ -101,6 +106,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
           return _SessionCard(
             session: s,
             label: s.displayTitle,
+            showAgent: showAgent,
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -118,11 +124,13 @@ class _SessionCard extends StatelessWidget {
   const _SessionCard({
     required this.session,
     required this.label,
+    required this.showAgent,
     required this.onTap,
   });
 
   final HistorySession session;
   final String label;
+  final bool showAgent;
   final VoidCallback onTap;
 
   @override
@@ -139,6 +147,10 @@ class _SessionCard extends StatelessWidget {
       subtitle: subtitleParts.isNotEmpty
           ? Text(subtitleParts.join(' · '))
           : null,
+      trailing:
+          showAgent && session.agent.isNotEmpty
+              ? AgentBadge(agent: session.agent)
+              : null,
       onTap: onTap,
     );
   }

@@ -19,6 +19,7 @@ class _FakeHistoryRepository implements HistoryRepository {
     String? nodeId,
     required String transcriptPath,
     String? agentId,
+    String? agent,
   }) async {
     capturedAgentId = agentId;
     return Result.ok(_chunks);

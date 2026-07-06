@@ -39,12 +39,12 @@ func (m model) fetchHistSessions(nodeID, projectDir string, offset int) tea.Cmd 
 	}
 }
 
-func (m model) fetchHistTranscript(nodeID, path string) tea.Cmd {
+func (m model) fetchHistTranscript(nodeID, path, agent string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
-			NodeID: nodeID, TranscriptPath: path,
+			NodeID: nodeID, TranscriptPath: path, Agent: agent,
 		}, &view)
 		return histTranscriptMsg{chunks: view.Chunks, err: err}
 	}
@@ -57,14 +57,14 @@ type histSubagentMsg struct {
 	err     error
 }
 
-// fetchHistSubagent one-shot fetches a nested subagent transcript (history has no
-// live subscription).
-func (m model) fetchHistSubagent(nodeID, path, agentID string) tea.Cmd {
+// fetchHistSubagent one-shot fetches a subagent transcript (history has no live
+// subscription).
+func (m model) fetchHistSubagent(nodeID, path, agent, agentID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
-			NodeID: nodeID, TranscriptPath: path, AgentID: agentID,
+			NodeID: nodeID, TranscriptPath: path, Agent: agent, AgentID: agentID,
 		}, &view)
 		return histSubagentMsg{agentID: agentID, chunks: view.Chunks, err: err}
 	}
@@ -214,7 +214,7 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := m.history.sessions[m.history.sessCursor]
 	m.history.title = historySessionTitle(s)
 	// Address for follow-up per-tool detail fetches on this transcript.
-	m.history.openNodeID, m.history.openPath = m.history.project.NodeID, s.TranscriptPath
+	m.history.openNodeID, m.history.openPath, m.history.openAgent = m.history.project.NodeID, s.TranscriptPath, s.Agent
 	m.transcript.chunks, m.transcript.err = nil, nil
 	m.transcript.cursor, m.transcript.scroll = 0, 0
 	m.transcript.detailStack = nil
@@ -223,7 +223,7 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.toolBodies = make(map[string]toolBodyEntry) // per-transcript tool-body cache
 	m.mode = modeHistoryTranscript
 	// Transcript lives on the project's node (session items carry no id).
-	return m, m.fetchHistTranscript(m.history.project.NodeID, s.TranscriptPath)
+	return m, m.fetchHistTranscript(m.history.project.NodeID, s.TranscriptPath, s.Agent)
 }
 
 func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -286,9 +286,10 @@ func (m model) historySessionsView() string {
 		}
 		return centerBlock(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
 	}
+	showAgent := historyMultiAgent(m.history.sessions)
 	cards := make([]string, len(m.history.sessions))
 	for i, s := range m.history.sessions {
-		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW)
+		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
 	}
 	body := renderCardList(cards, m.history.sessCursor, max(1, m.height-4))
 	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open}
@@ -391,7 +392,7 @@ func groupProjectsByNode(ps []session.HistoryProject) []session.HistoryProject {
 	return out
 }
 
-func historySessionRow(s session.HistorySession, sel bool, w int) string {
+func historySessionRow(s session.HistorySession, sel bool, w int, showAgent bool) string {
 	border, chrome := historyCardChrome(sel)
 	title := historySessionTitle(s)
 	titleLeft := dimStyle.Render("○") + " " + headlineStyle(sel).Render(title)
@@ -419,7 +420,25 @@ func historySessionRow(s session.HistorySession, sel bool, w int) string {
 	if s.FirstMessage != "" && s.FirstMessage != title {
 		body = append(body, StyleDim.Render(s.FirstMessage))
 	}
-	return cardTitled(titleLeft, titleRight, body, w, border, chrome, "", nil)
+	agentTxt, agentCol := "", color.Color(nil)
+	if showAgent {
+		agentTxt, agentCol = agentLabel(s.Agent)
+	}
+	return cardTitled(titleLeft, titleRight, body, w, border, chrome, agentTxt, agentCol)
+}
+
+func historyMultiAgent(ss []session.HistorySession) bool {
+	seen := ""
+	for _, s := range ss {
+		if s.Agent == "" || s.Agent == seen {
+			continue
+		}
+		if seen != "" {
+			return true
+		}
+		seen = s.Agent
+	}
+	return false
 }
 
 // headlineStyle renders a card's title: bold/focused when selected, secondary otherwise.

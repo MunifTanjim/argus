@@ -23,6 +23,26 @@ func testModel() model {
 	}
 }
 
+func TestAssistantBrandResolvesAgent(t *testing.T) {
+	m := testModel()
+
+	// History transcript: brand comes from the opened history session's agent,
+	// not the (absent) live session.
+	m.mode = modeHistoryTranscript
+	m.history.openAgent = "antigravity"
+	if _, name := m.assistantBrand(); name != "Antigravity" {
+		t.Errorf("history brand = %q, want Antigravity", name)
+	}
+
+	// Live transcript: brand comes from the selected live session's agent.
+	m.mode = modeSession
+	m.selectedID = "s1"
+	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
+	if _, name := m.assistantBrand(); name != "Codex" {
+		t.Errorf("live brand = %q, want Codex", name)
+	}
+}
+
 func sampleChunks() []transcript.Chunk {
 	return []transcript.Chunk{
 		{ID: "u1", Kind: transcript.ChunkUser, Text: "hello"},

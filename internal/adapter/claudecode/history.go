@@ -30,8 +30,12 @@ func ListHistoryProjects() ([]session.HistoryProject, error) {
 		if label == "" || label == "." || label == string(filepath.Separator) {
 			label = filepath.Base(p.Dir)
 		}
+		key := p.Cwd
+		if key == "" {
+			key = p.Dir
+		}
 		out = append(out, session.HistoryProject{
-			ProjectDir:   p.Dir,
+			ProjectDir:   key,
 			Cwd:          p.Cwd,
 			Repo:         repo,
 			Label:        label,
@@ -44,10 +48,16 @@ func ListHistoryProjects() ([]session.HistoryProject, error) {
 }
 
 // ListHistorySessions returns a newest-first window of a project's past sessions.
-// limit <= 0 returns all from offset on. HasMore reports whether older sessions
-// remain beyond the window.
-func ListHistorySessions(projectDir string, limit, offset int) (session.HistorySessionPage, error) {
-	infos, err := parser.DiscoverProjectSessions(projectDir) // already sorted newest-first
+// limit <= 0 returns all from offset on.
+func ListHistorySessions(cwd string, limit, offset int) (session.HistorySessionPage, error) {
+	dir, err := resolveProjectDir(cwd)
+	if err != nil {
+		return session.HistorySessionPage{}, err
+	}
+	if dir == "" {
+		return session.HistorySessionPage{}, nil // no matching Claude project
+	}
+	infos, err := parser.DiscoverProjectSessions(dir) // already sorted newest-first
 	if err != nil {
 		return session.HistorySessionPage{}, err
 	}
@@ -132,4 +142,21 @@ func projectsRoot() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".claude", "projects"), nil
+}
+
+func resolveProjectDir(key string) (string, error) {
+	// An empty key matches no Claude project; Claude always keys by cwd.
+	if key == "" {
+		return "", nil
+	}
+	projects, err := parser.ListProjects()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range projects {
+		if p.Cwd == key || p.Dir == key {
+			return p.Dir, nil
+		}
+	}
+	return "", nil
 }

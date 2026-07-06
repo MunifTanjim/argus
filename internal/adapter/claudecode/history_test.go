@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // writeTranscript writes a minimal one-turn transcript (a single user message with
@@ -45,22 +47,27 @@ func TestListHistoryProjectsAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 2 {
-		t.Fatalf("want 2 projects, got %d: %+v", len(projects), projects)
+	byCwd := map[string]session.HistoryProject{}
+	for _, p := range projects {
+		byCwd[p.ProjectDir] = p // ProjectDir is now the cwd
 	}
-	// Newest-first: projB before projA.
-	if projects[0].Label != "projB" || projects[1].Label != "projA" {
-		t.Fatalf("project order/label wrong: %+v", projects)
+	if _, ok := byCwd["/work/projA"]; !ok {
+		t.Fatalf("expected project keyed by cwd /work/projA, got %+v", projects)
 	}
-	if projects[1].SessionCount != 2 { // agent_ excluded
-		t.Errorf("projA session count = %d, want 2", projects[1].SessionCount)
+	if byCwd["/work/projA"].SessionCount != 2 {
+		t.Errorf("projA session count = %d, want 2", byCwd["/work/projA"].SessionCount)
 	}
-	if projects[1].Cwd != "/work/projA" {
-		t.Errorf("projA cwd = %q, want /work/projA", projects[1].Cwd)
+
+	page, err := ListHistorySessions("/work/projA", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("ListHistorySessions(/work/projA) = %d items, want 2", len(page.Items))
 	}
 
 	// First page of projA: newest (s2) first, more remaining.
-	page, err := ListHistorySessions(projects[1].ProjectDir, 1, 0)
+	page, err = ListHistorySessions("/work/projA", 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +78,7 @@ func TestListHistoryProjectsAndSessions(t *testing.T) {
 		t.Errorf("newest session = %q, want s2", page.Items[0].SessionID)
 	}
 	// Second page: the older session, nothing more.
-	page2, err := ListHistorySessions(projects[1].ProjectDir, 1, 1)
+	page2, err := ListHistorySessions("/work/projA", 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

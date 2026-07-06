@@ -261,9 +261,10 @@ func TestScanPreview_CountsEntireFile(t *testing.T) {
 	}
 }
 
-// --- DiscoverProjectSessions tests ---
-
-func TestDiscoverProjectSessions_FiltersGhosts(t *testing.T) {
+// Zero-turn ("ghost") sessions are listed so the session list matches the
+// project's session count shown on the History projects page; only agent_*
+// subagent files are excluded.
+func TestDiscoverProjectSessions_ListsGhostsExcludesAgents(t *testing.T) {
 	dir := t.TempDir()
 
 	// Real session.
@@ -271,7 +272,7 @@ func TestDiscoverProjectSessions_FiltersGhosts(t *testing.T) {
 		userEntry("u1", "2025-01-15T10:00:00Z", "Hello"),
 		assistantEntry("a1", "2025-01-15T10:00:01Z", "Hi"),
 	)
-	// Ghost session (only snapshots).
+	// Ghost session (only snapshots) — still listed, matching the count.
 	writeJSONL(t, dir, "ghost-session.jsonl",
 		snapshotEntry("snap1"),
 	)
@@ -284,11 +285,18 @@ func TestDiscoverProjectSessions_FiltersGhosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("got %d sessions, want 1 (ghost and agent should be filtered)", len(sessions))
+	ids := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		ids[s.SessionID] = true
 	}
-	if sessions[0].SessionID != "real-session" {
-		t.Errorf("session ID = %q, want %q", sessions[0].SessionID, "real-session")
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2 (ghost listed, agent excluded): %v", len(sessions), ids)
+	}
+	if !ids["real-session"] || !ids["ghost-session"] {
+		t.Errorf("want real-session and ghost-session listed, got %v", ids)
+	}
+	if ids["agent_abc"] {
+		t.Error("agent_ subagent file should be excluded")
 	}
 }
 

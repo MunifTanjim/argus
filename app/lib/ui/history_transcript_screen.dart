@@ -33,6 +33,7 @@ class _HistoryTranscriptScreenState
     final result = await ref.read(historyRepositoryProvider).transcript(
           nodeId: widget.session.nodeId,
           transcriptPath: widget.session.transcriptPath,
+          agent: widget.session.agent,
         );
     if (!mounted) return;
     setState(() {
@@ -68,6 +69,7 @@ class _HistoryTranscriptScreenState
       detailRef: ToolDetailRef.history(
         nodeId: widget.session.nodeId,
         transcriptPath: widget.session.transcriptPath,
+        agent: widget.session.agent,
       ),
       chunks: chunks,
       emptyText: 'Empty transcript.',

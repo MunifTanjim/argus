@@ -149,8 +149,6 @@ func writeTempSession(t *testing.T, lines string) string {
 	return path
 }
 
-// Minimal user entry that gives scanSessionMetadata a non-zero turnCount
-// so the session isn't filtered as a ghost.
 const testUserEntry = `{"uuid":"u1","type":"user","timestamp":"2025-01-15T10:00:00Z","isSidechain":false,"isMeta":false,"message":{"role":"user","content":"hello"}}` + "\n"
 
 func TestScanSessionMetadata_CustomTitle(t *testing.T) {

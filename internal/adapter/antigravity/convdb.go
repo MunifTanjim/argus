@@ -74,6 +74,34 @@ func hasVersion(s string) bool {
 	return false
 }
 
+var fileURIRe = regexp.MustCompile(`file://([^\x00-\x1f"]+)`)
+
+// conversationWorkspace decodes the working directory from a conversation's
+// trajectory_metadata_blob workspace URI.
+func conversationWorkspace(convID string) string {
+	path := conversationDBPath(convID)
+	if path == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(2000)&_pragma=query_only(true)")
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	var blob []byte
+	if err := db.QueryRow(`SELECT data FROM trajectory_metadata_blob LIMIT 1`).Scan(&blob); err != nil {
+		return ""
+	}
+	m := fileURIRe.FindSubmatch(blob)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
+}
+
 // convIDFromPath extracts the conversation id from a brain transcript path
 // (.../brain/<id>/.system_generated/...). "" when the path has no brain segment.
 func convIDFromPath(path string) string {

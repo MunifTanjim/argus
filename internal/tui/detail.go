@@ -335,7 +335,7 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				subagentType: s.Type, subagentName: s.Name,
 				subagentStatus: s.Status, subagentInput: s.Desc,
 			})
-			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, s.ID)
+			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, m.history.openAgent, s.ID)
 		}
 		// Live session: stream the subagent trace into a new frame. Stash the
 		// session subRef so pop can restore it without a leak.

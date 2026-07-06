@@ -44,6 +44,7 @@ class HistorySession {
   final int durationMs;
   final String? nodeId;
   final String? nodeLabel;
+  final String agent;
 
   const HistorySession({
     required this.sessionId,
@@ -58,6 +59,7 @@ class HistorySession {
     required this.durationMs,
     this.nodeId,
     this.nodeLabel,
+    this.agent = '',
   });
 
   factory HistorySession.fromJson(Map<String, dynamic> j) => HistorySession(
@@ -73,6 +75,7 @@ class HistorySession {
         durationMs: (j['duration_ms'] as num?)?.toInt() ?? 0,
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
+        agent: j['agent'] as String? ?? '',
       );
 
   /// The label shown wherever a history session needs a title: title, else the
