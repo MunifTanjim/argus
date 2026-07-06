@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.0.7](https://github.com/MunifTanjim/argus/compare/0.0.6...0.0.7) (2026-07-06)
+
+
+### Features
+
+* **antigravity:** add initial adapter ([8cc773f](https://github.com/MunifTanjim/argus/commit/8cc773f2732b22fba45c598efb588beef3e825f0))
+* **app:** delay mobile push notifications ([d22e26d](https://github.com/MunifTanjim/argus/commit/d22e26d9a9465864753caf3d768e247a4c238901))
+* choose agent when spawning a session ([2ba126d](https://github.com/MunifTanjim/argus/commit/2ba126dff3d2da765832fea10f217db58e1ee843))
+* **claude:** emit shell and skill chunks ([062a726](https://github.com/MunifTanjim/argus/commit/062a726ecac1e1da5b901c3b1eb4b52fee2bc695))
+* **claude:** render teammate messages ([b0c081e](https://github.com/MunifTanjim/argus/commit/b0c081e32e0ecc0bf0079d20aa06693a5f1793c9))
+* **claude:** render tool items with a tool registry ([cc81906](https://github.com/MunifTanjim/argus/commit/cc81906e104e81a73e6b0c8cf486fbd39b1b5465))
+* **codex:** add initial adapter ([e519056](https://github.com/MunifTanjim/argus/commit/e5190561a8ae40b9b5669c0377688f9bc822b0de))
+* **codex:** render tool items with a tool registry ([13266a2](https://github.com/MunifTanjim/argus/commit/13266a222f9dd2787c1e1256225c886f07729452))
+* compute model name and color server-side ([a1e9572](https://github.com/MunifTanjim/argus/commit/a1e9572ffd33a9a382f3af860203cd4e818fbfd6))
+* multi-agent history tab (codex + antigravity) ([5a072a6](https://github.com/MunifTanjim/argus/commit/5a072a67aebe325f5a460fc98f072f2dc8c746d3))
+* prepare hook handler system for multiple agents ([80befe9](https://github.com/MunifTanjim/argus/commit/80befe952b8b8d16e79a5c6f08ee7126897bebe8))
+* reconcile hooks on embedded node startup ([7a13c76](https://github.com/MunifTanjim/argus/commit/7a13c763847073d87c9f176ee38bdcd2a677367b))
+* show session agent on cards ([6ca898b](https://github.com/MunifTanjim/argus/commit/6ca898b73f11a1a8f306ce5384c9874e060b1e21))
+* **tui:** show subagent prompt as first drill step ([ac911e0](https://github.com/MunifTanjim/argus/commit/ac911e07eb69ec07bbdc6eac6a11fe59a84a1756))
+
+
+### Bug Fixes
+
+* **claude:** fix ExitPlanMode response for latest claude ([6f19262](https://github.com/MunifTanjim/argus/commit/6f1926240c62c76fca64a410f373227a58f737e6))
+* **claude:** render skill tool properly ([115372e](https://github.com/MunifTanjim/argus/commit/115372ee219434f39ca9322faafbfaced6b09f31))
+* sync PermissionRequest interaction timeout with hook timeout ([0ade914](https://github.com/MunifTanjim/argus/commit/0ade914ee3d817892370842fe35cb7ccda512120))
+* **tui:** collapse user chunks by wrapped line count ([866f465](https://github.com/MunifTanjim/argus/commit/866f46509dac679b58990c85c6dedb1debf985f1))
+* **tui:** correct scroll bounds at transcript and detail extremes ([327767c](https://github.com/MunifTanjim/argus/commit/327767c1a5df9237b6d7d316d157335f6bb3d603))
+* **tui:** re-anchor detail cursor to viewport after ctrl+u/d ([1381a6a](https://github.com/MunifTanjim/argus/commit/1381a6a1ffba0f28213db82421a93c0d8b4472ed))
+* **tui:** return to originating page when leaving live screen ([de61443](https://github.com/MunifTanjim/argus/commit/de614438a4b2b2a505624487632121846ec3428d))
+
 ## [0.0.6](https://github.com/MunifTanjim/argus/compare/0.0.5...0.0.6) (2026-07-03)
 
 
