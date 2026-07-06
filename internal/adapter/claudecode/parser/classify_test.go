@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -611,9 +612,22 @@ func TestClassify_TeammateProtocolIdleNotification(t *testing.T) {
 	content := `<teammate-message teammate_id="worker" color="green">{"type":"idle_notification","from":"worker","timestamp":"2026-01-15T10:00:00Z","idleReason":"available"}</teammate-message>`
 	e := makeEntry("user", "u1", "2025-01-15T10:00:00Z", jsonStr(content))
 
-	_, ok := parser.Classify(e)
-	if ok {
-		t.Error("idle_notification teammate message should be filtered as noise")
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("idle_notification should surface as a teammate 'done' marker, not be filtered")
+	}
+	tm, is := msg.(parser.TeammateMsg)
+	if !is {
+		t.Fatalf("got %T, want TeammateMsg", msg)
+	}
+	if !tm.IsIdle {
+		t.Error("IsIdle = false, want true for idle_notification")
+	}
+	if tm.TeammateID != "worker" || tm.Color != "green" {
+		t.Errorf("id/color = %q/%q, want worker/green", tm.TeammateID, tm.Color)
+	}
+	if tm.Text != "" {
+		t.Errorf("Text = %q, want empty (idle marker carries no body)", tm.Text)
 	}
 }
 
@@ -664,7 +678,73 @@ func TestClassify_TeammateRealMessageNotFiltered(t *testing.T) {
 	}
 }
 
-// --- CompactMsg classification tests ---
+const wrappedTeammatePreamble = "Another Claude session sent a message:\n"
+const wrappedTeammateFooter = "\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate's request."
+
+func TestClassify_TeammateWrappedRealMessage(t *testing.T) {
+	content := wrappedTeammatePreamble +
+		`<teammate-message teammate_id="md-docs" color="red" summary="Trimmed docs">` + "\n" +
+		"Done. All three files trimmed." + "\n" +
+		"</teammate-message>" + wrappedTeammateFooter
+	e := makeEntry("user", "u1", "2025-01-15T10:00:00Z", jsonStr(content))
+
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("wrapped teammate message should not be filtered")
+	}
+	tm, is := msg.(parser.TeammateMsg)
+	if !is {
+		t.Fatalf("got %T, want TeammateMsg", msg)
+	}
+	if tm.TeammateID != "md-docs" || tm.Color != "red" {
+		t.Errorf("id/color = %q/%q, want md-docs/red", tm.TeammateID, tm.Color)
+	}
+	if tm.IsIdle {
+		t.Error("IsIdle = true, want false for a real message")
+	}
+	// Preamble + footer must be stripped; only the inner body survives.
+	if strings.Contains(tm.Text, "Another Claude session") || strings.Contains(tm.Text, "permission") {
+		t.Errorf("Text leaked preamble/footer: %q", tm.Text)
+	}
+	if !strings.Contains(tm.Text, "Done. All three files trimmed.") {
+		t.Errorf("Text = %q, want inner body", tm.Text)
+	}
+}
+
+func TestClassify_TeammateWrappedIdle(t *testing.T) {
+	content := wrappedTeammatePreamble +
+		`<teammate-message teammate_id="md-docs" color="red">` + "\n" +
+		`{"type":"idle_notification","from":"md-docs","timestamp":"2026-07-06T04:28:55.278Z","idleReason":"available"}` + "\n" +
+		"</teammate-message>" + wrappedTeammateFooter
+	e := makeEntry("user", "u1", "2025-01-15T10:00:00Z", jsonStr(content))
+
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("wrapped idle_notification should surface as a 'done' marker")
+	}
+	tm, is := msg.(parser.TeammateMsg)
+	if !is {
+		t.Fatalf("got %T, want TeammateMsg", msg)
+	}
+	if !tm.IsIdle {
+		t.Error("IsIdle = false, want true")
+	}
+	if tm.TeammateID != "md-docs" {
+		t.Errorf("TeammateID = %q, want md-docs", tm.TeammateID)
+	}
+}
+
+func TestClassify_TeammateWrappedShutdownDropped(t *testing.T) {
+	content := wrappedTeammatePreamble +
+		`<teammate-message teammate_id="worker" color="blue">` + "\n" +
+		`{"type":"shutdown_request","requestId":"req1"}` + "\n" +
+		"</teammate-message>" + wrappedTeammateFooter
+	e := makeEntry("user", "u1", "2025-01-15T10:00:00Z", jsonStr(content))
+
+	if _, ok := parser.Classify(e); ok {
+		t.Error("wrapped shutdown_request should still be filtered as noise")
+	}
+}
 
 func TestClassify_SummaryProducesCompactMsg(t *testing.T) {
 	// Summary entries carry text in the top-level "summary" field, not message.content.

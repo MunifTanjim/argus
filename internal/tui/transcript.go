@@ -352,6 +352,17 @@ func itemRow(it transcript.Item) string {
 	case transcript.ItemPrompt:
 		indicator, name, summary = Icon.User.Render(), "Prompt", firstLine(it.Text)
 	case transcript.ItemSubagent:
+		if s, ok := soleSubagent(it); ok && s.IsTeammate {
+			nameStr := lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color)).Render(s.Name)
+			summary = firstLine(it.Text)
+			if s.Idle {
+				summary = "is done"
+			}
+			if summary == "" {
+				return Icon.Teammate.Render() + " " + nameStr
+			}
+			return Icon.Teammate.Render() + " " + nameStr + " " + StyleSecondary.Render(truncate(summary, 60))
+		}
 		indicator = Icon.Subagent.Render()
 		if isAgentRefTool(it.ToolName) {
 			name = agentToolLabel(it)

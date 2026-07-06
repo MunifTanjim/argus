@@ -324,8 +324,34 @@ func itemAccentColor(it transcript.Item) color.Color {
 	case transcript.ItemText, transcript.ItemPrompt:
 		return ColorTextSecondary
 	case transcript.ItemSubagent:
+		if s, ok := soleSubagent(it); ok && s.IsTeammate {
+			return teamColor(s.Color)
+		}
 		return ColorToolTask
 	default:
 		return toolColor(it.ToolName)
+	}
+}
+
+func teamColor(name string) color.Color {
+	switch name {
+	case "blue":
+		return ColorTeamBlue
+	case "green":
+		return ColorTeamGreen
+	case "red":
+		return ColorTeamRed
+	case "yellow":
+		return ColorTeamYellow
+	case "purple":
+		return ColorTeamPurple
+	case "cyan":
+		return ColorTeamCyan
+	case "orange":
+		return ColorTeamOrange
+	case "pink":
+		return ColorTeamPink
+	default:
+		return ColorAccent
 	}
 }

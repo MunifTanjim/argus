@@ -84,7 +84,11 @@ func scanSessionMetadata(path string) sessionMetadata {
 			}
 			continue
 		case "last-prompt":
-			if raw.LastPrompt != "" {
+			// Skip teammate deliveries: last-prompt is a flattened one-line preview
+			// (newlines collapsed to spaces), so the (?m)^ gate can't match it; test
+			// for the tag substring instead. Keeps the session's "last prompt" the
+			// real user input, not a teammate message/idle notification.
+			if raw.LastPrompt != "" && !strings.Contains(raw.LastPrompt, "<teammate-message teammate_id=") {
 				meta.lastPrompt = raw.LastPrompt
 			}
 			continue

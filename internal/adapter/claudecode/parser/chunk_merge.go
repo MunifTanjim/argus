@@ -171,6 +171,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						Text:          b.Text,
 						TeammateID:    b.TeammateID,
 						TeammateColor: b.TeammateColor,
+						TeammateIdle:  b.TeammateIdle,
 						TokenCount:    len(b.Text) / 4,
 					})
 				case "memory_load":

@@ -187,6 +187,31 @@ func TestScanSessionMetadata_CustomTitleWinsOverAI(t *testing.T) {
 	}
 }
 
+func TestScanSessionMetadata_TeammateLastPromptSkipped(t *testing.T) {
+	// A teammate delivery arrives as a type=last-prompt entry (flattened one-line
+	// preview). It must not become the session's displayed last prompt.
+	realPrompt := `{"type":"last-prompt","lastPrompt":"fix the auth bug","leafUuid":"l1","sessionId":"abc"}`
+	teammatePrompt := `{"type":"last-prompt","lastPrompt":"Another Claude session sent a message: <teammate-message teammate_id=\"md-docs\" color=\"red\"> done </teammate-message>","leafUuid":"l2","sessionId":"abc"}`
+	path := writeTempSession(t, testUserEntry+realPrompt+"\n"+teammatePrompt)
+
+	meta := scanSessionMetadata(path)
+	if meta.lastPrompt != "fix the auth bug" {
+		t.Errorf("lastPrompt = %q, want the real user prompt (teammate delivery must be skipped)", meta.lastPrompt)
+	}
+}
+
+func TestScanSessionMetadata_TeammateNotTurnCounted(t *testing.T) {
+	// A wrapped teammate message arriving as a user entry must not count as a user turn.
+	teammate := `{"uuid":"u2","type":"user","timestamp":"2025-01-15T10:01:00Z","isSidechain":false,"isMeta":false,` +
+		`"message":{"role":"user","content":"Another Claude session sent a message:\n<teammate-message teammate_id=\"md-docs\" color=\"red\">\nhi there\n</teammate-message>"}}`
+	path := writeTempSession(t, testUserEntry+teammate)
+
+	meta := scanSessionMetadata(path)
+	if meta.turnCount != 1 {
+		t.Errorf("turnCount = %d, want 1 (teammate message must not add a turn)", meta.turnCount)
+	}
+}
+
 func TestScanSessionMetadata_ReAppendedTitleLastWins(t *testing.T) {
 	// Claude Code re-appends titles at EOF after compaction. Last value wins.
 	path := writeTempSession(t, testUserEntry+

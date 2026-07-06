@@ -31,6 +31,7 @@ type ContentBlock struct {
 	IsError       bool            // tool_result only
 	TeammateID    string          // teammate only
 	TeammateColor string          // teammate only: team color name
+	TeammateIdle  bool            // teammate only: idle_notification ("went idle / done")
 	DisplayPath   string          // memory_load only: path shown in the "Loaded X" pill
 }
 
@@ -100,6 +101,7 @@ type TeammateMsg struct {
 	Text       string // sanitized inner content
 	TeammateID string
 	Color      string // team color name (e.g. "blue", "green")
+	IsIdle     bool   // idle_notification: the teammate went idle / finished ("<id> is done")
 }
 
 func (TeammateMsg) classifiedMsg() {}

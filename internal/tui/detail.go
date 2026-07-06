@@ -60,7 +60,8 @@ func (f *detailFrame) expandOutputs() {
 		f.expanded = map[int]bool{}
 	}
 	for i, it := range f.items {
-		if it.Kind == transcript.ItemText || it.Kind == transcript.ItemPrompt {
+		teammateMsg := it.IsTeammate() && !it.Subagents[0].Idle
+		if it.Kind == transcript.ItemText || it.Kind == transcript.ItemPrompt || teammateMsg {
 			if _, ok := f.expanded[i]; !ok {
 				f.expanded[i] = true
 			}
@@ -272,6 +273,12 @@ func (m model) actDetailFold(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func subagentLabel(it transcript.Item) string {
 	s, _ := soleSubagent(it)
+	if s.IsTeammate {
+		if s.Name != "" {
+			return "Teammate · " + s.Name
+		}
+		return "Teammate"
+	}
 	name := s.Type
 	if name == "" {
 		name = "Subagent"
@@ -603,6 +610,15 @@ func (m model) detailItemBody(it transcript.Item, c color.Color, bar string, wid
 		head := Icon.User.Render() + " " + StyleSecondaryBold.Render("Prompt")
 		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
 	case transcript.ItemSubagent:
+		// Teammate: colored identity header + message body (or "is done" marker).
+		if s, ok := soleSubagent(it); ok && s.IsTeammate {
+			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color))
+			head := Icon.Teammate.Render() + " " + nameStyle.Render(s.Name)
+			if s.Idle {
+				return accentBlock(head+" "+StyleSecondary.Render("is done"), c, bar)
+			}
+			return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
+		}
 		// wait/close operate on existing agents: identity header + status body, no trace.
 		if isAgentRefTool(it.ToolName) {
 			head := Icon.Subagent.Render() + " " + StylePrimaryBold.Render(agentToolLabel(it))

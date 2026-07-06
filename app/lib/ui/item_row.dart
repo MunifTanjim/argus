@@ -63,7 +63,16 @@ class ItemRow extends StatelessWidget {
           preview: item.inputPreview,
         );
       case ItemKind.subagent:
-        // wait/close reference existing agents; label by op with target names.
+        final tm = item.soleSubagent;
+        if (tm?.isTeammate ?? false) {
+          final tc = teamColor(tm!.color);
+          return _row(
+            leading: Icon(Icons.forum_outlined, size: 14, color: tc),
+            label: tm.name.isNotEmpty ? tm.name : 'teammate',
+            labelColor: tc,
+            preview: tm.idle ? 'is done' : item.text,
+          );
+        }
         if (item.toolName == 'wait_agent' || item.toolName == 'close_agent') {
           return _row(
             leading: const Icon(Icons.smart_toy_outlined,
@@ -76,12 +85,18 @@ class ItemRow extends StatelessWidget {
                 .join(', '),
           );
         }
+        final sub = item.soleSubagent;
+        final type = sub?.type ?? '';
+        final name = sub?.name ?? '';
+        final label = name.isNotEmpty
+            ? (type.isNotEmpty ? '$name ($type)' : name)
+            : (type.isNotEmpty ? type : 'subagent');
         return _row(
           leading: const Icon(Icons.smart_toy_outlined,
               size: 14, color: AppColors.accent),
-          label: item.soleSubagent?.type ?? 'subagent',
+          label: label,
           labelColor: AppColors.accent,
-          preview: item.soleSubagent?.desc,
+          preview: sub?.desc,
         );
     }
   }

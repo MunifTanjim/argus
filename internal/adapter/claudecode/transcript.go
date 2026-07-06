@@ -134,6 +134,9 @@ func foldChunk(pc parser.Chunk, agentRefs map[string]string, traces map[string][
 		c.Usage = transformUsage(pc.Usage)
 		c.Items = foldItems(pc.Items, agentRefs, traces)
 		for _, it := range c.Items {
+			if it.IsTeammate() {
+				continue // peer chatter, not a tool call
+			}
 			if it.Kind == ItemTool || it.Kind == ItemSubagent || it.Kind == ItemSkill {
 				c.ToolCount++
 			}
@@ -185,9 +188,20 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, traces map[st
 	case parser.ItemThinking:
 		it.Kind = ItemThinking
 		it.Text = pit.Text
-	case parser.ItemOutput, parser.ItemTeammateMessage:
+	case parser.ItemOutput:
 		it.Kind = ItemText
 		it.Text = pit.Text
+	case parser.ItemTeammateMessage:
+		// A teammate is modeled as a subagent variant: identity on the Subagent,
+		// message body on the item Text.
+		it.Kind = ItemSubagent
+		it.Text = pit.Text
+		it.Subagents = []Subagent{{
+			Name:       pit.TeammateID,
+			Color:      pit.TeammateColor,
+			Idle:       pit.TeammateIdle,
+			IsTeammate: true,
+		}}
 	case parser.ItemToolCall:
 		if pit.ToolName == "Skill" {
 			it.Kind = ItemSkill
@@ -200,6 +214,7 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, traces map[st
 		fillTool(&it, pit)
 		sub := Subagent{
 			ID:   agentRefs[pit.ToolID],
+			Name: pit.TeamMemberName, // spawn name from Task/Agent "name" input (e.g. "codex-comments")
 			Type: pit.SubagentType,
 			Desc: pit.SubagentDesc,
 		}

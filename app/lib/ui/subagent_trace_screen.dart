@@ -69,7 +69,10 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.item.soleSubagent?.type ?? 'Subagent';
+    final sub = widget.item.soleSubagent;
+    final title = (sub?.name.isNotEmpty ?? false)
+        ? sub!.name
+        : (sub?.type ?? 'Subagent');
 
     if (_inline) {
       return Scaffold(

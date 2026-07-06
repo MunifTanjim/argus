@@ -20,10 +20,13 @@ String itemTitle(Item it) {
     case ItemKind.text:
       return 'Output';
     case ItemKind.subagent:
-      // Registry display covers agent-ref ops; spawn/invoke falls back to type.
+      final tm = it.soleSubagent;
+      if (tm?.isTeammate ?? false) {
+        return tm!.name.isNotEmpty ? tm.name : 'Teammate';
+      }
       final meta = toolMeta(it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
-      return it.soleSubagent?.type ?? 'Subagent';
+      return tm?.type ?? 'Subagent';
     case ItemKind.skill:
       return 'Skill';
     case ItemKind.unknown:

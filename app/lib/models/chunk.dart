@@ -45,13 +45,16 @@ ItemKind itemKindFromWire(String? s) {
   }
 }
 
-/// One subagent an [ItemKind.subagent] item references.
+/// Teammates are also modeled as subagents (with [isTeammate] set).
 class Subagent {
   final String id;
   final String name;
   final String type;
   final String desc;
   final String status;
+  final String color;
+  final bool isTeammate;
+  final bool idle;
   final bool hasTrace;
   final List<Chunk> trace;
 
@@ -61,6 +64,9 @@ class Subagent {
     this.type = '',
     this.desc = '',
     this.status = '',
+    this.color = '',
+    this.isTeammate = false,
+    this.idle = false,
     this.hasTrace = false,
     this.trace = const [],
   });
@@ -71,6 +77,9 @@ class Subagent {
         type: j['type'] as String? ?? '',
         desc: j['desc'] as String? ?? '',
         status: j['status'] as String? ?? '',
+        color: j['color'] as String? ?? '',
+        isTeammate: j['isTeammate'] as bool? ?? false,
+        idle: j['idle'] as bool? ?? false,
         hasTrace: j['hasTrace'] as bool? ?? false,
         trace: (j['trace'] as List?)
                 ?.map((e) => Chunk.fromJson(e as Map<String, dynamic>))
@@ -107,6 +116,8 @@ class Item {
   });
 
   Subagent? get soleSubagent => subagents.length == 1 ? subagents.first : null;
+
+  bool get isTeammate => soleSubagent?.isTeammate ?? false;
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
         id: j['id'] as String? ?? '',

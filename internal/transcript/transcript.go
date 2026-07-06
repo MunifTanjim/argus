@@ -44,15 +44,19 @@ const (
 	ItemPrompt   ItemKind = "prompt"   // synthetic: injected TUI-side, never parser-emitted
 )
 
-// Subagent is one subagent an ItemSubagent references.
+// Subagent is one referenced agent. A teammate is also modeled here with
+// IsTeammate set; its message body (if any) is on the item's Text.
 type Subagent struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name,omitempty"`   // codex per-spawn nickname (e.g. "Volta")
-	Type     string  `json:"type,omitempty"`   // Explore, Plan, ... (claude); agent_type (codex)
-	Desc     string  `json:"desc,omitempty"`   // task/spawn message
-	Status   string  `json:"status,omitempty"` // codex: thread_spawn_edges status (running/closed)
-	HasTrace bool    `json:"hasTrace,omitempty"`
-	Trace    []Chunk `json:"trace,omitempty"` // inline execution trace (history only)
+	ID         string  `json:"id"`
+	Name       string  `json:"name,omitempty"`   // codex per-spawn nickname (e.g. "Volta"); teammate id when IsTeammate
+	Type       string  `json:"type,omitempty"`   // agent subtype (e.g. Explore, Plan)
+	Desc       string  `json:"desc,omitempty"`   // task/spawn message
+	Status     string  `json:"status,omitempty"` // running/closed
+	Color      string  `json:"color,omitempty"`  // team color; teammate only
+	IsTeammate bool    `json:"isTeammate,omitempty"`
+	Idle       bool    `json:"idle,omitempty"` // teammate went idle / finished (IsTeammate only)
+	HasTrace   bool    `json:"hasTrace,omitempty"`
+	Trace      []Chunk `json:"trace,omitempty"` // inline execution trace (history only)
 }
 
 // Item is one structured element within an AI chunk.
@@ -70,7 +74,7 @@ type Item struct {
 	Result        string `json:"result,omitempty"`
 	ResultIsError bool   `json:"resultIsError,omitempty"`
 
-	// Subagents lists the subagents this item references (ItemSubagent only).
+	// Subagents (ItemSubagent only).
 	Subagents []Subagent `json:"subagents,omitempty"`
 }
 
@@ -120,8 +124,14 @@ type TranscriptView struct {
 	Chunks []Chunk `json:"chunks"`
 }
 
+// IsTeammate reports whether this item is a teammate message rather than a spawn.
+func (it Item) IsTeammate() bool {
+	return it.Kind == ItemSubagent && len(it.Subagents) == 1 && it.Subagents[0].IsTeammate
+}
+
 // LastOutput returns the trailing item of an AI chunk for a collapsed preview:
-// the last text output, else the last tool call/result.
+// the last text output, else the last tool call/result. Teammate items are
+// skipped — they're peer chatter, not this session's own output.
 func (c Chunk) LastOutput() (Item, bool) {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		if c.Items[i].Kind == ItemText && strings.TrimSpace(c.Items[i].Text) != "" {
@@ -129,8 +139,12 @@ func (c Chunk) LastOutput() (Item, bool) {
 		}
 	}
 	for i := len(c.Items) - 1; i >= 0; i-- {
-		if c.Items[i].Kind == ItemTool || c.Items[i].Kind == ItemSubagent || c.Items[i].Kind == ItemSkill {
-			return c.Items[i], true
+		it := c.Items[i]
+		if it.IsTeammate() {
+			continue
+		}
+		if it.Kind == ItemTool || it.Kind == ItemSubagent || it.Kind == ItemSkill {
+			return it, true
 		}
 	}
 	return Item{}, false

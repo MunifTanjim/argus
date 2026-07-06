@@ -52,3 +52,68 @@ func TestFoldItem_TaskToolStaysSubagent(t *testing.T) {
 		t.Errorf("Kind = %q, want ItemSubagent", it.Kind)
 	}
 }
+
+func TestFoldItem_SubagentCarriesSpawnName(t *testing.T) {
+	pit := parser.DisplayItem{
+		Type:           parser.ItemSubagent,
+		ToolName:       "Agent",
+		ToolID:         "call_1",
+		SubagentType:   "general-purpose",
+		TeamMemberName: "codex-comments",
+	}
+
+	it, ok := foldItem(pit, nil, nil, 0)
+	if !ok {
+		t.Fatal("foldItem dropped the Agent item")
+	}
+	if len(it.Subagents) != 1 {
+		t.Fatalf("Subagents = %d, want 1", len(it.Subagents))
+	}
+	if it.Subagents[0].Name != "codex-comments" {
+		t.Errorf("Subagent.Name = %q, want codex-comments", it.Subagents[0].Name)
+	}
+}
+
+func TestFoldItem_TeammateMessageBecomesTeammateSubagent(t *testing.T) {
+	pit := parser.DisplayItem{
+		Type:          parser.ItemTeammateMessage,
+		Text:          "Task #1 complete.",
+		TeammateID:    "md-docs",
+		TeammateColor: "red",
+	}
+
+	it, ok := foldItem(pit, nil, nil, 0)
+	if !ok {
+		t.Fatal("foldItem dropped the teammate item")
+	}
+	if !it.IsTeammate() {
+		t.Fatalf("Kind=%q Subagents=%+v, want a teammate ItemSubagent", it.Kind, it.Subagents)
+	}
+	s := it.Subagents[0]
+	if s.Name != "md-docs" || s.Color != "red" {
+		t.Errorf("name/color = %q/%q, want md-docs/red", s.Name, s.Color)
+	}
+	if s.Idle {
+		t.Error("Idle = true, want false for a real message")
+	}
+	if it.Text != "Task #1 complete." {
+		t.Errorf("Text = %q, want the message body", it.Text)
+	}
+}
+
+func TestFoldItem_TeammateIdleCarriesFlag(t *testing.T) {
+	pit := parser.DisplayItem{
+		Type:          parser.ItemTeammateMessage,
+		TeammateID:    "md-docs",
+		TeammateColor: "red",
+		TeammateIdle:  true,
+	}
+
+	it, ok := foldItem(pit, nil, nil, 0)
+	if !ok {
+		t.Fatal("foldItem dropped the idle teammate item")
+	}
+	if !it.IsTeammate() || !it.Subagents[0].Idle {
+		t.Errorf("IsTeammate=%v Idle=%v, want true/true", it.IsTeammate(), it.Subagents[0].Idle)
+	}
+}

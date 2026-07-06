@@ -63,15 +63,24 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		trimmed := strings.TrimSpace(contentStr)
 		if teammateMessageRe.MatchString(trimmed) {
 			innerContent := extractTeammateContent(trimmed)
+			teammateID := extractTeammateID(trimmed)
+			color := extractTeammateColor(trimmed)
 
-			// Drop team-coordination protocol JSON (idle/shutdown/assignments),
-			// keeping only human-readable agent output.
-			if teammateProtocolRe.MatchString(innerContent) {
+			// Team-coordination protocol JSON (idle/shutdown/assignments) is not
+			// human-readable output. Surface idle_notification as a "went idle / done"
+			// marker; drop the rest (shutdown handshakes, task assignments).
+			if m := teammateProtocolRe.FindStringSubmatch(innerContent); m != nil {
+				if m[1] == "idle_notification" {
+					return TeammateMsg{
+						Timestamp:  ts,
+						TeammateID: teammateID,
+						Color:      color,
+						IsIdle:     true,
+					}, true
+				}
 				return nil, false
 			}
 
-			teammateID := extractTeammateID(trimmed)
-			color := extractTeammateColor(trimmed)
 			text := SanitizeContent(innerContent)
 			return TeammateMsg{
 				Timestamp:  ts,

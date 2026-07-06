@@ -42,6 +42,7 @@ type DisplayItem struct {
 	// Teammate fields (ItemTeammateMessage only)
 	TeammateID    string
 	TeammateColor string // team color name (e.g. "blue", "green")
+	TeammateIdle  bool   // idle_notification: the teammate went idle / finished
 }
 
 // ChunkType discriminates the chunk categories.
@@ -167,6 +168,7 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 					Text:          m.Text,
 					TeammateID:    m.TeammateID,
 					TeammateColor: m.Color,
+					TeammateIdle:  m.IsIdle,
 				}},
 			})
 		case MemoryLoadMsg:

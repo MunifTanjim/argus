@@ -238,6 +238,30 @@ class _ChunkCardState extends State<ChunkCard> {
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: appMarkdown(it.text!),
         ));
+      } else if (it.isTeammate && !(it.soleSubagent?.idle ?? false)) {
+        // Attributed header (team color) + full message body.
+        final tm = it.soleSubagent!;
+        final tc = teamColor(tm.color);
+        widgets.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.forum_outlined, size: 14, color: tc),
+                const SizedBox(width: 6),
+                Text(tm.name.isNotEmpty ? tm.name : 'teammate',
+                    style: _mono.copyWith(
+                        color: tc, fontWeight: FontWeight.w600)),
+              ]),
+              if ((it.text ?? '').trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: appMarkdown(it.text!),
+                ),
+            ],
+          ),
+        ));
       } else {
         widgets.add(ItemRow(item: it, onTap: _drill(it)));
       }

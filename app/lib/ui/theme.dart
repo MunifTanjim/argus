@@ -17,6 +17,29 @@ class AppColors {
   static const errorSurface = Color(0xFF3c1f1d);
 }
 
+Color teamColor(String? name) {
+  switch (name) {
+    case 'blue':
+      return const Color(0xFF83a598);
+    case 'green':
+      return const Color(0xFFb8bb26);
+    case 'red':
+      return const Color(0xFFfb4934);
+    case 'yellow':
+      return const Color(0xFFfabd2f);
+    case 'purple':
+      return const Color(0xFFd3869b);
+    case 'cyan':
+      return const Color(0xFF8ec07c);
+    case 'orange':
+      return const Color(0xFFfe8019);
+    case 'pink':
+      return const Color(0xFFf7a1b0);
+    default:
+      return AppColors.accent;
+  }
+}
+
 ThemeData buildArgusTheme() {
   final scheme = ColorScheme.fromSeed(
     seedColor: AppColors.accent,

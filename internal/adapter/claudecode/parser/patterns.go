@@ -40,7 +40,9 @@ var (
 
 // Teammate message regexes -- used by classify.go, session.go, and subagent.go.
 var (
-	teammateMessageRe  = regexp.MustCompile(`^<teammate-message\s+teammate_id="[^"]+"`)
+	// (?m) so the tag matches at the start of any line: newer Claude Code
+	// wraps it in a preamble + footer that the extraction regexes strip.
+	teammateMessageRe  = regexp.MustCompile(`(?m)^<teammate-message\s+teammate_id="[^"]+"`)
 	teammateIDRe       = regexp.MustCompile(`teammate_id="([^"]+)"`)
 	teammateContentRe  = regexp.MustCompile(`(?s)<teammate-message[^>]*>(.*?)</teammate-message>`)
 	teammateSummaryRe  = regexp.MustCompile(`<teammate-message[^>]*\bsummary="([^"]+)"`)
