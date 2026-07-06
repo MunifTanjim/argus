@@ -10,12 +10,14 @@ answer prompts, spawn/interrupt/kill — without leaving the TUI.
 Start local in a terminal. Scale to a fleet across machines. Get a push
 notification on your phone when a session needs you.
 
-Argus supports **Claude Code** today, with room for more agents over time.
+Argus supports **Claude Code**, **Codex**, and **Antigravity** — supervise them
+side by side in one session list, with room for more agents over time.
 
 ## Highlights
 
-- **Zero-setup discovery** — finds Claude Code sessions in tmux. No per-session config.
-- **Live status** — working / waiting / idle / dead, from Claude Code hooks.
+- **Multi-agent** — Claude Code, Codex, and Antigravity, in one session list.
+- **Zero-setup discovery** — finds agent sessions in tmux. No per-session config.
+- **Live status** — working / waiting / idle / dead, from each agent's hooks.
 - **Transcripts** — full conversation, foldable, drill into tool calls.
 - **Live screen** — watch a session's terminal and type into it.
 - **Lifecycle control** — spawn, interrupt, kill, answer prompts in place.
@@ -24,9 +26,9 @@ Argus supports **Claude Code** today, with room for more agents over time.
 
 ## How it fits together
 
-Argus runs as a **node** on each machine: it discovers Claude Code sessions in
+Argus runs as a **node** on each machine: it discovers your agent sessions in
 tmux, tracks their status, and serves a local API that the TUI and the
-Claude Code hooks talk to.
+agents' hooks talk to.
 
 - On a **single machine**, you just run the [TUI](/guide/tui); it connects to
   that machine's local node automatically.

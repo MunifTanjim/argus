@@ -7,8 +7,13 @@ script below, or build from source.
 
 These are needed to *run* Argus, however you install it:
 
-- [tmux](https://github.com/tmux/tmux) — Argus discovers Claude Code sessions running in tmux
-- [Claude Code](https://www.claude.com/product/claude-code) — the AI coding agent Argus supervises
+- [tmux](https://github.com/tmux/tmux) — Argus discovers agent sessions running in tmux
+- At least one supported AI coding agent for Argus to supervise:
+  - [Claude Code](https://www.claude.com/product/claude-code) — run as `claude`
+  - [Codex](https://developers.openai.com/codex/cli) — the OpenAI Codex CLI, run as `codex`
+  - [Antigravity](https://antigravity.google/) — Google's terminal agent, run as `agy`
+
+Argus watches whichever of these you have installed — you don't need all three.
 
 ## Install Pre-built Binary
 
@@ -53,11 +58,12 @@ make install
 
 ## Install Hooks
 
-Install Argus's Claude Code hooks so it can track each session's status live:
+Install Argus's hooks so it can track each session's status live:
 
 ```sh
 argus hooks install
 ```
 
-This is safe to re-run and only touches its own entries. Without it, status still
-works but is less precise.
+This installs hooks for every supported agent you've set up — Claude Code, Codex,
+and Antigravity — and skips any agent that isn't installed. It's safe to re-run and
+only touches its own entries. Without it, status still works but is less precise.

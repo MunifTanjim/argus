@@ -1,14 +1,14 @@
 # Single Machine
 
-Once you've [installed Argus](/getting-started/installation), supervising Claude
-Code on one machine takes a few commands. This page explains what's happening
+Once you've [installed Argus](/getting-started/installation), supervising your
+agents on one machine takes a few commands. This page explains what's happening
 underneath — the node and how discovery works — so you can run Argus the way that
 fits you.
 
 ## Nodes
 
-A **node** is the background process that does the real work: it discovers Claude
-Code sessions, controls their tmux panes, and serves a local API (a unix socket)
+A **node** is the background process that does the real work: it discovers agent
+sessions, controls their tmux panes, and serves a local API (a unix socket)
 that the [TUI](/guide/tui) talks to. You don't talk to the node directly — the TUI
 does.
 
@@ -30,13 +30,14 @@ There are two ways a local node comes to life:
 
 ## Discovery
 
-Argus finds Claude Code sessions by scanning your tmux panes — there's no
-per-session setup. Just run `claude` inside a tmux session and it shows up:
+Argus finds agent sessions by scanning your tmux panes — there's no
+per-session setup. Just start a supported agent inside a tmux session and it
+shows up:
 
 ```sh
 tmux new -s work
 cd ~/code/my-project
-claude
+claude          # or codex, or agy — Argus discovers them all
 ```
 
 ## Keep an always-on node

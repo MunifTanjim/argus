@@ -1,8 +1,8 @@
 # TUI
 
 The TUI is Argus's terminal interface — open it with `argus`. It shows a live list
-of Claude Code sessions and lets you read transcripts, watch screens, and control
-sessions.
+of your agent sessions — Claude Code, Codex, and Antigravity — and lets you read
+transcripts, watch screens, and control sessions.
 
 ```sh
 argus

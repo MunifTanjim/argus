@@ -14,11 +14,14 @@ hero:
       link: https://github.com/MunifTanjim/argus
 
 features:
+  - title: Multi-agent
+    details: Claude Code, Codex, and Antigravity — supervised side by side in one session list.
+    link: /getting-started/introduction
   - title: Zero-setup discovery
-    details: Finds Claude Code sessions running in tmux automatically. No per-session configuration.
+    details: Finds agent sessions running in tmux automatically. No per-session configuration.
     link: /guide/single-machine
   - title: Live status
-    details: working / waiting / idle / dead, tracked live as each Claude Code session runs.
+    details: working / waiting / idle / dead, tracked live from each agent's hooks.
     link: /guide/tui
   - title: Transcripts
     details: Read the full conversation, foldable, and drill into individual tool calls.
