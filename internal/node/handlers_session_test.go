@@ -58,32 +58,6 @@ func TestServerInfoReportsSelf(t *testing.T) {
 	}
 }
 
-func TestDefaultSessionName(t *testing.T) {
-	cases := map[string]string{
-		"/Users/m/Dev/github/MunifTanjim/argus": "argus",
-		"/Users/m/Dev/work/cmp/":                "cmp",
-		"":                                      "claude",
-		"/":                                     "claude",
-		".":                                     "claude",
-		" ":                                     "claude",
-	}
-	for in, want := range cases {
-		if got := defaultSessionName(in); got != want {
-			t.Errorf("defaultSessionName(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestUniqueName(t *testing.T) {
-	taken := map[string]bool{"argus": true, "argus-2": true}
-	if got := uniqueName("argus", taken); got != "argus-3" {
-		t.Errorf("uniqueName collision = %q, want %q", got, "argus-3")
-	}
-	if got := uniqueName("cmp", taken); got != "cmp" {
-		t.Errorf("uniqueName free = %q, want %q", got, "cmp")
-	}
-}
-
 func TestHandleAgentsList(t *testing.T) {
 	d := New()
 

@@ -40,6 +40,24 @@ cd ~/code/my-project
 claude          # or codex, or agy — Argus discovers them all
 ```
 
+## Don't use tmux? Let Argus wrap it
+
+Argus can only watch the live screen and type into a session when the agent runs
+inside tmux (outside tmux, a session still shows up and works — it just loses those
+two features). `argus spawn` sets that up for you — it starts an agent inside tmux and
+drops you into it, with tmux invisible, so it feels like running the agent directly:
+
+```sh
+cd ~/code/my-project
+argus spawn claude          # or: argus spawn codex, argus spawn antigravity
+```
+
+You can also set a shell alias for this:
+
+```sh
+alias claude='argus spawn claude'
+```
+
 ## Keep an always-on node
 
 Running `argus` spawns an ephemeral node that dies when you quit. To keep Argus

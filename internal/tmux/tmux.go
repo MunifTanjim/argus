@@ -11,9 +11,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/MunifTanjim/argus/internal/shell"
 )
@@ -23,7 +26,8 @@ import (
 const fieldSep = "\x1f"
 
 // Client drives a single tmux server. A zero socket targets the user's default
-// server; a non-empty socket targets a private "tmux -L <socket>" server.
+// server; a non-empty socket targets a private "tmux -L <socket>" server that
+// argus owns and starts config-less (see args).
 type Client struct {
 	bin    string
 	socket string
@@ -34,11 +38,14 @@ func New(socket string) *Client {
 	return &Client{bin: "tmux", socket: socket}
 }
 
-// args prepends the binary's global flags (socket selection) to a subcommand.
+// args prepends tmux's global flags (socket selection) to a subcommand. Private
+// (argus-owned) sockets also start config-less ("-f /dev/null") so the user's
+// ~/.tmux.conf can't leak in; -f is a no-op once the server is running. The
+// default server is never given -f — argus must not alter the user's own tmux.
 func (c *Client) args(sub ...string) []string {
 	var a []string
 	if c.socket != "" {
-		a = append(a, "-L", c.socket)
+		a = append(a, "-L", c.socket, "-f", "/dev/null")
 	}
 	return append(a, sub...)
 }
@@ -363,6 +370,32 @@ func newSessionArgs(opts NewSessionOpts) []string {
 		sub = append(sub, opts.Args...)
 	}
 	return sub
+}
+
+// SetOption sets a tmux option on target (e.g. a session name):
+// `set-option -t <target> <option> <value>`.
+func (c *Client) SetOption(ctx context.Context, target, option, value string) error {
+	_, err := c.run(ctx, "set-option", "-t", target, option, value)
+	return err
+}
+
+// attachArgs builds the full argv (argv[0] included) for exec'ing into an
+// attached tmux client on this Client's server. Split out for testability.
+func (c *Client) attachArgs(bin, name string) []string {
+	return append([]string{bin}, c.args("attach-session", "-t", name)...)
+}
+
+// Attach hands the current terminal to tmux by replacing this process with
+// `tmux [-L socket] attach-session -t <name>` via syscall.Exec. tmux then owns
+// the real TTY — correct resize and signal handling — and the process exits with
+// tmux when the session ends. Does NOT return on success; use only from a CLI
+// foreground command, never from the node.
+func (c *Client) Attach(name string) error {
+	bin, err := exec.LookPath(c.bin)
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(bin, c.attachArgs(bin, name), os.Environ())
 }
 
 // KillPane kills a single pane. If it is the last pane in its session, the

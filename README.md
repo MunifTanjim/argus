@@ -21,6 +21,7 @@ notification on your phone when a session needs you.
 
 - **Multi-agent** — Claude Code, Codex, and Antigravity, in one session list.
 - **Zero-setup discovery** — finds agent sessions in tmux. No per-session config.
+- **Don't use tmux?** — `argus spawn` wraps an agent in tmux for you.
 - **Live status** — working / waiting / idle / dead, from each agent's hooks.
 - **Transcripts** — full conversation, foldable, drill into tool calls.
 - **Live screen** — watch a session's terminal and type into it.

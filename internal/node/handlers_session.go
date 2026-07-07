@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/spawn"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -185,30 +185,6 @@ func (d *Node) handleSessionKey(ctx context.Context, params json.RawMessage) (an
 	return nil, c.SendKeys(ctx, s.Tmux.PaneID, p.Keys...)
 }
 
-// defaultSessionName derives a tmux session name from cwd's base (e.g. the repo
-// folder), falling back to "claude" for empty/root paths.
-func defaultSessionName(cwd string) string {
-	base := filepath.Base(strings.TrimSpace(cwd))
-	switch base {
-	case "", ".", string(filepath.Separator):
-		return "claude"
-	}
-	return base
-}
-
-// uniqueName returns base, or base-2, base-3, … to avoid collisions with taken.
-func uniqueName(base string, taken map[string]bool) string {
-	if !taken[base] {
-		return base
-	}
-	for i := 2; ; i++ {
-		cand := fmt.Sprintf("%s-%d", base, i)
-		if !taken[cand] {
-			return cand
-		}
-	}
-}
-
 // resolveSpawnCommand: an explicit p.Command wins; otherwise the agent's adapter
 // owns construction (adapterFor falls back to the first adapter for unknown agents).
 func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []string) {
@@ -259,15 +235,7 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	}
 	c := d.clients[session.TmuxServerArgus]
 	if p.Name == "" {
-		taken := map[string]bool{}
-		// ListPanes error is intentionally ignored: on failure the dedup set is
-		// empty and any name collision will surface as a tmux new-session error.
-		if panes, err := c.ListPanes(ctx); err == nil {
-			for _, pn := range panes {
-				taken[pn.SessionName] = true
-			}
-		}
-		p.Name = uniqueName(defaultSessionName(p.Cwd), taken)
+		p.Name = spawn.SessionName(ctx, c, p.Cwd)
 	}
 	command, args := d.resolveSpawnCommand(p)
 	// Fail loudly rather than opening a tmux pane that dies "command not found".

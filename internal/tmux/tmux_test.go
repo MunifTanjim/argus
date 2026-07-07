@@ -286,3 +286,37 @@ func TestNewSessionArgsOmitsArgsWhenEmpty(t *testing.T) {
 		t.Fatalf("trailing element = %q, want \"claude\"", got[len(got)-1])
 	}
 }
+
+func TestAttachArgs(t *testing.T) {
+	// Private socket: argv includes -L <socket> and the config-less -f /dev/null.
+	priv := New("argus").attachArgs("/usr/bin/tmux", "work")
+	want := []string{"/usr/bin/tmux", "-L", "argus", "-f", "/dev/null", "attach-session", "-t", "work"}
+	if strings.Join(priv, " ") != strings.Join(want, " ") {
+		t.Fatalf("attachArgs = %#v, want %#v", priv, want)
+	}
+	// Default server: never touched — no -L, and no -f (argus must not alter how
+	// the user's own tmux loads its config).
+	def := New("").attachArgs("/usr/bin/tmux", "work")
+	if strings.Join(def, " ") != "/usr/bin/tmux attach-session -t work" {
+		t.Fatalf("default attachArgs = %#v", def)
+	}
+}
+
+func TestSetOption(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	if _, err := c.NewSession(ctx, NewSessionOpts{Name: "opt"}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := c.SetOption(ctx, "opt", "status", "off"); err != nil {
+		t.Fatalf("SetOption: %v", err)
+	}
+	// Confirm it took effect by reading the session's status option back.
+	out, err := c.run(ctx, "show-options", "-t", "opt", "-v", "status")
+	if err != nil {
+		t.Fatalf("show-options: %v", err)
+	}
+	if strings.TrimSpace(out) != "off" {
+		t.Fatalf("status = %q, want \"off\"", strings.TrimSpace(out))
+	}
+}
