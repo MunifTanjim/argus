@@ -89,6 +89,10 @@ func TestAlerterFiresClickOnContentClicked(t *testing.T) {
 	if !containsPair(gotArgs, "--app-icon", "/tmp/argus-icon.png") {
 		t.Fatalf("alerter args %v missing --app-icon", gotArgs)
 	}
+	// auto-close after 30 minutes so stale banners don't pile up
+	if !containsPair(gotArgs, "--timeout", "1800") {
+		t.Fatalf("alerter args %v missing --timeout 1800", gotArgs)
+	}
 }
 
 func TestAlerterNoClickOnTimeout(t *testing.T) {

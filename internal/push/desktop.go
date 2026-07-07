@@ -6,12 +6,17 @@ import (
 	"log/slog"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
 
 // errNotFound is the sentinel the lookPath seam returns when a tool is absent.
 var errNotFound = errors.New("push: tool not found")
+
+// alerterTimeoutSeconds auto-closes a desktop banner (and unblocks its goroutine)
+// after 30 minutes if the user never interacts.
+const alerterTimeoutSeconds = 30 * 60
 
 // clickCmd builds the argv to run when a notification is activated. nil disables
 // click. Injected by the wiring layer so internal/push stays free of node/cmd
@@ -124,12 +129,14 @@ func (o *OSNotifier) Notify(ctx context.Context, n Notification) {
 }
 
 // renderAlerter shows a clickable notification via `alerter`, which blocks until
-// the user interacts and prints the result to stdout; on click it runs the click
-// command. --group de-dupes per session natively. Runs in a goroutine so Notify
-// stays non-blocking. Selection already verified alerter is on PATH and click != nil.
+// the user interacts or --timeout elapses, printing the result to stdout; on click
+// it runs the click command. --group de-dupes per session natively. Runs in a
+// goroutine so Notify stays non-blocking. Selection already verified alerter is on
+// PATH and click != nil.
 func (o *OSNotifier) renderAlerter(ctx context.Context, n Notification) {
 	sessionID := n.SessionID()
-	args := []string{"--title", n.Title, "--message", n.Body}
+	args := []string{"--title", n.Title, "--message", n.Body,
+		"--timeout", strconv.Itoa(alerterTimeoutSeconds)}
 	if icon, ok := o.iconPath(); ok {
 		args = append(args, "--app-icon", icon)
 	}
