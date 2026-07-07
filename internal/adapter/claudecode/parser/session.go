@@ -74,6 +74,12 @@ func ReadSubagentSession(path string) ([]Chunk, error) {
 func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]ClassifiedMsg, map[string]string, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// A not-yet-created transcript (freshly launched session, subscribed
+			// before Claude writes its first line) reads as empty, not an error, so
+			// the subscription's poller can pick up content once the file appears.
+			return nil, nil, offset, nil
+		}
 		return nil, nil, offset, err
 	}
 	defer f.Close()

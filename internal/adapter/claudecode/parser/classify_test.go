@@ -163,6 +163,17 @@ func TestClassify_OtherSystemStillNoise(t *testing.T) {
 	}
 }
 
+func TestClassify_MetaSidecarsDropped(t *testing.T) {
+	// Startup/resume metadata sidecars carry no visible content and must not fold
+	// into an empty "(no output)" chunk.
+	for _, typ := range []string{"last-prompt", "mode"} {
+		e := parser.Entry{Type: typ, UUID: "m1", Timestamp: "2025-01-15T10:00:00Z"}
+		if _, ok := parser.Classify(e); ok {
+			t.Fatalf("%q entry should be dropped as noise", typ)
+		}
+	}
+}
+
 func TestClassify_SidechainFiltered(t *testing.T) {
 	e := makeEntry("assistant", "sc1", "2025-01-15T10:00:00Z",
 		json.RawMessage(`[{"type":"text","text":"sidechain"}]`),

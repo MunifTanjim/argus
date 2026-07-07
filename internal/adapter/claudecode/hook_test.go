@@ -132,12 +132,13 @@ func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 	if !alive {
 		t.Fatal("SessionStart(source=startup) must keep the session")
 	}
-	// A genuinely fresh session is idle with no pending prompt — only /clear surfaces one.
+	// Startup surfaces the idle compose prompt but keeps the status idle (not
+	// awaiting-input) so it doesn't fire a push on every launch.
 	if got.Status != session.StatusIdle {
 		t.Fatalf("want idle after startup, got %q", got.Status)
 	}
-	if got.Interaction != nil {
-		t.Fatalf("startup must not synthesize a respond prompt, got %+v", got.Interaction)
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("startup must surface the compose prompt, got %+v", got.Interaction)
 	}
 }
 

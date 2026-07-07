@@ -259,10 +259,18 @@ func setTranscriptPath(s *session.Session, path string) {
 
 // applyStatusHint seeds a transcript-derived status onto a still-StatusDiscovered
 // session (no authoritative hook status yet). An idle hint also synthesizes an idle
-// Interaction so clients show the compose. Caller holds r.mu.
+// Interaction so clients show the compose. A missing hint on a pane-bearing session
+// (freshly opened, no transcript yet) defaults to idle so clients can send the first
+// prompt. Caller holds r.mu.
 func applyStatusHint(s *session.Session, hint session.Status) {
-	if hint == "" || s.Status != session.StatusDiscovered {
+	if s.Status != session.StatusDiscovered {
 		return
+	}
+	if hint == "" {
+		if s.Tmux.PaneID == "" {
+			return // no pane = can't type into it, leave discovered
+		}
+		hint = session.StatusIdle
 	}
 	s.Status = hint
 	if hint == session.StatusIdle && s.Interaction == nil {

@@ -14,6 +14,10 @@ var noiseEntryTypes = map[string]bool{
 	"file-history-snapshot": true,
 	"queue-operation":       true,
 	"progress":              true,
+	// Session metadata sidecars with no visible content; without dropping them
+	// they render as an empty "(no output)" chunk.
+	"last-prompt": true,
+	"mode":        true,
 }
 
 // hardNoiseTags are XML tags whose sole presence means the entire message is noise.
