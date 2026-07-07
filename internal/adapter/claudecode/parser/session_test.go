@@ -39,6 +39,20 @@ func TestProjectDirForPath(t *testing.T) {
 	}
 }
 
+func TestReadSessionIncremental_MissingFileIsEmpty(t *testing.T) {
+	// A freshly launched session may be subscribed before Claude writes its first
+	// line. A missing file must read as empty (no error) so the subscription's
+	// poller can start and pick up content once the file appears.
+	path := filepath.Join(t.TempDir(), "not-created-yet.jsonl")
+	msgs, links, off, err := parser.ReadSessionIncremental(path, 0, false)
+	if err != nil {
+		t.Fatalf("missing file should not error, got %v", err)
+	}
+	if len(msgs) != 0 || len(links) != 0 || off != 0 {
+		t.Fatalf("missing file should read empty at offset 0, got msgs=%d links=%d off=%d", len(msgs), len(links), off)
+	}
+}
+
 func TestReadSession_ValidFile(t *testing.T) {
 	path := filepath.Join("testdata", "minimal.jsonl")
 	chunks, err := parser.ReadSession(path)

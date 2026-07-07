@@ -40,6 +40,38 @@ func TestReconcileSessionsAddsTmuxAndPrunes(t *testing.T) {
 	}
 }
 
+// A freshly opened pane-bearing session has no transcript yet, so discovery
+// carries no StatusHint. It must still land as idle with an idle Interaction so
+// clients show the compose to send the first prompt; a paneless one (can't be
+// typed into) stays discovered.
+func TestReconcileSessionsFreshPaneDefaultsIdle(t *testing.T) {
+	r := New()
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc("c0", "%0", "a", session.TmuxServerDefault), // no StatusHint
+		{AgentSessionID: "vs-1", Frontend: session.FrontendVSCode},
+	})
+
+	s, ok := r.Get("default:%0")
+	if !ok {
+		t.Fatal("pane session missing")
+	}
+	if s.Status != session.StatusIdle {
+		t.Fatalf("fresh pane session status: want idle, got %q", s.Status)
+	}
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("fresh pane session must synthesize idle interaction, got %+v", s.Interaction)
+	}
+
+	// Paneless: nothing to type into, stays discovered with no interaction.
+	vs, ok := r.Get("claude:vs-1")
+	if !ok {
+		t.Fatal("vscode session missing")
+	}
+	if vs.Status != session.StatusDiscovered || vs.Interaction != nil {
+		t.Fatalf("paneless session should stay discovered/no-interaction, got %q %+v", vs.Status, vs.Interaction)
+	}
+}
+
 func TestReconcileSessionsAddsVSCodeAndPrunes(t *testing.T) {
 	r := New()
 	r.ReconcileSessions("claude", []DiscoveredSession{

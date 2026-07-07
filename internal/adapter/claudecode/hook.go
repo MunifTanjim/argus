@@ -242,6 +242,10 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	// dock needs an interaction); replace forces it over anything still pending.
 	// resume (--resume/--continue//resume) reopens an existing conversation waiting
 	// on the user, so it surfaces the same compose prompt.
+	//
+	// A plain startup surfaces the idle interaction so clients can start the
+	// conversation, but keeps the status idle — awaiting-input would fire a push
+	// on every launch.
 	switch {
 	case event == "SessionEnd" && p.Reason == "clear":
 		status = session.StatusIdle
@@ -249,6 +253,8 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		status = session.StatusAwaitingInput
 		ix = &session.Interaction{Kind: session.InteractionIdle}
 		replace = true
+	case event == "SessionStart" && p.Source == "startup":
+		ix = &session.Interaction{Kind: session.InteractionIdle}
 	}
 
 	// Refresh the transcript digest only on summary-relevant events.
