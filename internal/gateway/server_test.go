@@ -464,3 +464,299 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 		}
 	}
 }
+
+// TestTerminalInputRejectsNonOwner verifies terminal.input is routed only for the
+// client that opened the term; a different client with the same term_id is rejected.
+func TestTerminalInputRejectsNonOwner(t *testing.T) {
+	a := New(time.Second)
+	src := newFakeSource("n1", "n1-box", sess("s1"))
+	src.callResp = json.RawMessage(`null`)
+	a.AddSource(src)
+	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
+	srv := NewServer(a, nil, nil)
+
+	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	srv.addTerm("t1", "n1", owner)
+
+	dispatch := srv.clientSrv.DispatchFunc()
+	params, _ := json.Marshal(api.TerminalInputParams{TermID: "t1", Data: "aGk="})
+
+	// Intruder is rejected and the node must not be called.
+	ctxIntruder := api.WithNotifier(context.Background(), intruder)
+	if _, err := dispatch(ctxIntruder, api.MethodTerminalInput, params); err == nil {
+		t.Fatal("want error for non-owner terminal.input, got nil")
+	}
+	if call, ok := src.lastCall(); ok && call.method == api.MethodTerminalInput {
+		t.Fatal("node received terminal.input from non-owner")
+	}
+
+	// Owner is routed through to the node.
+	ctxOwner := api.WithNotifier(context.Background(), owner)
+	if _, err := dispatch(ctxOwner, api.MethodTerminalInput, params); err != nil {
+		t.Fatalf("owner terminal.input: %v", err)
+	}
+	call, ok := src.lastCall()
+	if !ok || call.method != api.MethodTerminalInput {
+		t.Fatalf("node not called with terminal.input by owner: %+v", call)
+	}
+}
+
+// TestTerminalCloseRejectsNonOwner verifies a non-owner cannot close another
+// client's term: the request errors and the term stays in the table.
+func TestTerminalCloseRejectsNonOwner(t *testing.T) {
+	a := New(time.Second)
+	src := newFakeSource("n1", "n1-box", sess("s1"))
+	src.callResp = json.RawMessage(`null`)
+	a.AddSource(src)
+	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
+	srv := NewServer(a, nil, nil)
+
+	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	srv.addTerm("t1", "n1", owner)
+
+	dispatch := srv.clientSrv.DispatchFunc()
+	params, _ := json.Marshal(api.TerminalCloseParams{TermID: "t1"})
+
+	ctxIntruder := api.WithNotifier(context.Background(), intruder)
+	if _, err := dispatch(ctxIntruder, api.MethodTerminalClose, params); err == nil {
+		t.Fatal("want error for non-owner terminal.close, got nil")
+	}
+	// The term must survive a rejected close.
+	if _, ok := srv.clientForTerm("t1"); !ok {
+		t.Fatal("term dropped by non-owner close")
+	}
+
+	// Owner can close it: term is dropped and routed to the node.
+	ctxOwner := api.WithNotifier(context.Background(), owner)
+	if _, err := dispatch(ctxOwner, api.MethodTerminalClose, params); err != nil {
+		t.Fatalf("owner terminal.close: %v", err)
+	}
+	if _, ok := srv.clientForTerm("t1"); ok {
+		t.Fatal("term not dropped after owner close")
+	}
+}
+
+// TestTerminalOpenRejectsDuplicateTermID verifies terminal.open refuses an already-
+// open term_id, leaving the incumbent intact and never calling the node.
+func TestTerminalOpenRejectsDuplicateTermID(t *testing.T) {
+	a := New(time.Second)
+	src := newFakeSource("d1", "d1-box", sess("s1"))
+	src.callResp = json.RawMessage(`null`)
+	a.AddSource(src)
+	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
+	srv := NewServer(a, nil, nil)
+
+	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
+	srv.addTerm("t1", "d1", owner) // owner already holds t1
+
+	params, _ := json.Marshal(api.TerminalOpenParams{TermID: "t1", SessionID: session.CompositeID("d1", "s1")})
+	dispatch := srv.clientSrv.DispatchFunc()
+
+	ctxIntruder := api.WithNotifier(context.Background(), intruder)
+	if _, err := dispatch(ctxIntruder, api.MethodTerminalOpen, params); err == nil {
+		t.Fatal("want error opening an in-use term_id, got nil")
+	}
+	if c, ok := srv.clientForTerm("t1"); !ok || c != owner {
+		t.Fatal("existing term owner was overwritten by a duplicate open")
+	}
+	if call, ok := src.lastCall(); ok && call.method == api.MethodTerminalOpen {
+		t.Fatal("node received terminal.open for a duplicate term_id")
+	}
+}
+
+// TestOrphanTerminalOutputClosesOnce verifies the gateway asks the node to close an
+// orphaned term only once, even under a burst of output frames for it.
+func TestOrphanTerminalOutputClosesOnce(t *testing.T) {
+	a := New(time.Second)
+	srv := NewServer(a, nil, nil)
+
+	gatewayConn, nodeConn := net.Pipe()
+	defer gatewayConn.Close()
+
+	closes := make(chan string, 16)
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			switch method {
+			case api.MethodNodeIdentify:
+				return map[string]string{"id": "n1", "label": "n1-box"}, nil
+			case api.MethodTerminalClose:
+				var p api.TerminalCloseParams
+				_ = json.Unmarshal(params, &p)
+				closes <- p.TermID
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+
+	go srv.serveNode(gatewayConn)
+	eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["n1"] != nil
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := nodePeer.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: "orphan", Data: ""}); err != nil {
+			t.Fatalf("notify #%d: %v", i, err)
+		}
+	}
+
+	got := 0
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case id := <-closes:
+			if id == "orphan" {
+				got++
+			}
+		case <-deadline:
+			if got != 1 {
+				t.Fatalf("orphan close count = %d, want exactly 1 (debounced)", got)
+			}
+			return
+		}
+	}
+}
+
+// nodeGotTermClose reports whether the source recorded a terminal.close for termID.
+func nodeGotTermClose(src *fakeSource, termID string) bool {
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	for _, c := range src.calls {
+		if c.method == api.MethodTerminalClose {
+			var p api.TerminalCloseParams
+			if json.Unmarshal(c.params, &p) == nil && p.TermID == termID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestClientDisconnectClosesTerminals verifies per-connection cleanup drops a
+// client's open terminals and routes terminal.close to the node on disconnect.
+func TestClientDisconnectClosesTerminals(t *testing.T) {
+	a := New(time.Second)
+	src := newFakeSource("n1", "n1-box", sess("s1"))
+	src.callResp = json.RawMessage(`null`)
+	a.AddSource(src)
+	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
+	srv := NewServer(a, nil, nil)
+
+	// Real client connection served by the gateway; the app drives the other end.
+	gwConn, appConn := net.Pipe()
+	go srv.clientSrv.ServeConnContext(context.Background(), gwConn)
+	app := api.NewPeer(appConn, api.PeerOptions{})
+
+	if err := app.Call(api.MethodTerminalOpen, api.TerminalOpenParams{
+		TermID: "t1", SessionID: session.CompositeID("n1", "s1"), Cols: 80, Rows: 24,
+	}, nil); err != nil {
+		t.Fatalf("terminal.open: %v", err)
+	}
+	if _, ok := srv.clientForTerm("t1"); !ok {
+		t.Fatal("term t1 not recorded after open")
+	}
+
+	// Client drops its connection.
+	app.Close()
+
+	// Cleanup must drop the term and tell the node to close it.
+	eventually(t, func() bool {
+		_, tracked := srv.clientForTerm("t1")
+		return !tracked && nodeGotTermClose(src, "t1")
+	})
+	if _, ok := srv.clientForTerm("t1"); ok {
+		t.Fatal("term t1 still tracked after client disconnect")
+	}
+	if !nodeGotTermClose(src, "t1") {
+		t.Fatal("node did not receive terminal.close for the disconnected client's term")
+	}
+}
+
+// TestTerminalOutputRoutedToClient exercises serveNode's terminal.output path: a
+// table hit forwards to the client, an unknown term_id calls terminal.close back.
+func TestTerminalOutputRoutedToClient(t *testing.T) {
+	a := New(time.Second)
+	srv := NewServer(a, nil, nil)
+
+	// c1 is the client that opened terminal t1.
+	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
+	srv.addTerm("t1", "n1", c1)
+
+	// Set up a net.Pipe: gatewayConn is passed to serveNode; nodeConn is what
+	// "the node" sends on.
+	gatewayConn, nodeConn := net.Pipe()
+	defer gatewayConn.Close()
+
+	upstreamRequests := make(chan api.Notification, 8)
+
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			upstreamRequests <- api.Notification{Method: method, Params: params}
+			if method == api.MethodNodeIdentify {
+				type identResult struct {
+					ID    string `json:"id"`
+					Label string `json:"label"`
+				}
+				return identResult{ID: "n1", Label: "n1-box"}, nil
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+
+	// serveNode runs in background; it calls node.identify then blocks.
+	go srv.serveNode(gatewayConn)
+
+	// Wait for the identify call to be answered and source to be registered.
+	eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["n1"] != nil
+	})
+
+	// Node emits terminal.output for t1 (table hit): gateway must forward to c1.
+	if err := nodePeer.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: "t1", Data: "aGk="}); err != nil {
+		t.Fatalf("node notify: %v", err)
+	}
+
+	select {
+	case n := <-c1.ch:
+		if n.Method != api.MethodTerminalOutput {
+			t.Errorf("c1 method = %q, want %q", n.Method, api.MethodTerminalOutput)
+		}
+		var got api.TerminalOutput
+		if err := json.Unmarshal(n.Params, &got); err != nil || got.TermID != "t1" {
+			t.Errorf("c1 terminal output term_id = %q (err=%v), want t1", got.TermID, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("c1 did not receive terminal.output (table hit path)")
+	}
+
+	// Node emits terminal.output for an orphaned term (table miss).
+	// The gateway should call terminal.close back to the node.
+	if err := nodePeer.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: "orphan", Data: ""}); err != nil {
+		t.Fatalf("node notify (orphan): %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case req := <-upstreamRequests:
+			if req.Method == api.MethodTerminalClose {
+				var p api.TerminalCloseParams
+				if err := json.Unmarshal(req.Params, &p); err != nil || p.TermID != "orphan" {
+					t.Errorf("orphan close term_id = %q (err=%v), want orphan", p.TermID, err)
+				}
+				return
+			}
+			// Skip other calls (e.g. node.identify).
+		case <-deadline:
+			t.Fatal("gateway did not send terminal.close for orphaned term")
+		}
+	}
+}

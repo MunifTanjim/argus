@@ -18,6 +18,7 @@ type Config struct {
 	Push    PushConfig
 	Log     LogConfig
 	Tunnel  TunnelConfig
+	Tmux    TmuxConfig
 }
 
 type GatewayConfig struct {
@@ -73,6 +74,14 @@ type ZrokConfig struct {
 	Name string // reserved name selection ("namespace:name" or "name") for a stable URL
 }
 
+// TmuxConfig names the tmux mirror sessions spawned for terminal.* calls. The
+// prefix and suffix wrap the "argus-mirror-<termID>" marker so a reaper can
+// match them without touching unrelated sessions.
+type TmuxConfig struct {
+	MirrorSessionPrefix string
+	MirrorSessionSuffix string
+}
+
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                        GetRuntimePath("argus.sock"),
@@ -91,6 +100,8 @@ var defaults = map[string]any{
 	"tunnel.cloudflare.hostname":    "",
 	"tunnel.external.url":           "",
 	"tunnel.zrok.name":              "",
+	"tmux.mirror-session-prefix":    "_",
+	"tmux.mirror-session-suffix":    "_",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -136,6 +147,22 @@ func Load(v *viper.Viper, configPath string, skipFile bool) error {
 	return nil
 }
 
+// Validate checks resolved values for constraints that would otherwise fail
+// opaquely at runtime. Returns the first problem found.
+func (c Config) Validate() error {
+	// tmux session names cannot contain ':' or '.' (target-spec separators), so a
+	// mirror-session affix carrying either would silently break mirror creation.
+	for _, a := range []struct{ name, val string }{
+		{"tmux.mirror-session-prefix", c.Tmux.MirrorSessionPrefix},
+		{"tmux.mirror-session-suffix", c.Tmux.MirrorSessionSuffix},
+	} {
+		if strings.ContainsAny(a.val, ":.") {
+			return fmt.Errorf("%s %q must not contain ':' or '.' (tmux session name constraint)", a.name, a.val)
+		}
+	}
+	return nil
+}
+
 // FromViper reads resolved values out of v into a Config. Explicit Get calls (not
 // Unmarshal) keep bound-flag precedence predictable.
 func FromViper(v *viper.Viper) Config {
@@ -175,6 +202,10 @@ func FromViper(v *viper.Viper) Config {
 			Zrok: ZrokConfig{
 				Name: v.GetString("tunnel.zrok.name"),
 			},
+		},
+		Tmux: TmuxConfig{
+			MirrorSessionPrefix: v.GetString("tmux.mirror-session-prefix"),
+			MirrorSessionSuffix: v.GetString("tmux.mirror-session-suffix"),
 		},
 	}
 }

@@ -144,6 +144,35 @@ func TestPeerCallUnblocksOnClose(t *testing.T) {
 	}
 }
 
+// A peer whose remote end stops draining must not block a writer forever: the
+// write deadline fires, the send errors, and the peer closes itself.
+func TestPeerWriteDeadlineDropsStuckPeer(t *testing.T) {
+	ca, cb := net.Pipe()
+	defer cb.Close() // cb is never read, so any write to ca blocks until the deadline
+
+	p := NewPeer(ca, PeerOptions{WriteTimeout: 50 * time.Millisecond})
+	defer p.Close()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- p.Notify("x", map[string]int{"a": 1}) }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("want write-deadline error, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Notify did not return: write deadline not applied")
+	}
+
+	select {
+	case <-p.Done():
+		// good: the stuck peer dropped itself
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer not closed after write timeout")
+	}
+}
+
 // With keepalive on, a remote that stops answering pings (a half-open link that
 // never errors on read) is detected: the peer closes itself, firing Done.
 func TestPeerKeepaliveClosesOnUnresponsiveRemote(t *testing.T) {

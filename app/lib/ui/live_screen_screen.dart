@@ -1,57 +1,22 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
-import '../core/result.dart';
-import '../data/session_repository.dart';
+import '../data/terminal_repository.dart';
+import '../models/enums.dart';
 import '../models/session.dart';
-import '../state/live_screen_view_model.dart';
+import '../state/gateway.dart';
+import '../state/pty_keys.dart';
+import '../state/terminal_controller.dart';
+import '../transport/connection.dart';
+import '../util/utf8_stream.dart';
 import 'ansi_palette.dart';
-
-// Full-reset prefix written before each snapshot: clear scrollback, clear
-// screen, home the cursor. capture-pane gives a positioned full-screen dump,
-// so we overwrite in place rather than stream.
-const _clearScreen = '\x1b[3J\x1b[2J\x1b[H';
-
-// tmux capture uses bare LF line separators; a terminal needs CR+LF to avoid a
-// staircase. Normalise any CRLF first so we don't double the CR.
-String _crlf(String s) =>
-    s.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
 
 const _baseFontSize = 12.0;
 const _minFontSize = 6.0;
 const _maxFontSize = 40.0;
 const _fontFamily = 'monospace';
 const _padding = 8.0;
-
-// CSI / OSC / lone-ESC sequences, stripped when measuring visible line width.
-final _ansiEscape = RegExp(
-    r'\x1B\[[0-9;?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B.');
-
-// Widest visible line in columns, so the terminal grid can be sized to fit
-// without wrapping. Runes approximate cells (wide chars counted as one).
-int _measureCols(String screen) {
-  var max = 0;
-  for (final line in screen.split('\n')) {
-    final n = line.replaceAll('\r', '').replaceAll(_ansiEscape, '').runes.length;
-    if (n > max) max = n;
-  }
-  return max;
-}
-
-// Advance width of one monospace cell at [fontSize].
-double _cellWidth(double fontSize) {
-  final tp = TextPainter(
-    text: TextSpan(
-      text: 'WWWWWWWWWW',
-      style: TextStyle(fontFamily: _fontFamily, fontSize: fontSize),
-    ),
-    textDirection: TextDirection.ltr,
-  )..layout();
-  return tp.width / 10;
-}
 
 const _terminalTheme = TerminalTheme(
   cursor: ansiBrightBlack,
@@ -89,16 +54,19 @@ class LiveScreenScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
-  late final LiveScreenViewModel _vm;
   final Terminal _terminal = Terminal(maxLines: 4000);
-  int _cols = 80;
-  double _fontSize = _baseFontSize;
-  Timer? _timer;
   final TextEditingController _textController = TextEditingController();
+  TerminalSession? _attach;
+  // Reassembles UTF-8 codepoints split across output chunks. Reset per attach so
+  // a partial sequence from a dead attach can't corrupt the next one's first glyph.
+  Utf8StreamDecoder _decoder = Utf8StreamDecoder();
+  // Only TerminalView depends on the font size, so drive it through a notifier
+  // and rebuild just that subtree on pinch — not the input bar every frame.
+  final ValueNotifier<double> _fontSize = ValueNotifier(_baseFontSize);
 
-  // Manual pinch tracking via Listener so it never competes with the scroll
-  // views for the gesture arena. Zoom adjusts font size (crisp reflow), not a
-  // bitmap transform.
+  // Manual pinch tracking via Listener so it never competes with the terminal
+  // for the gesture arena. Zoom adjusts font size (crisp reflow); a smaller font
+  // means more cols/rows, which TerminalView forwards to the PTY via onResize.
   final Map<int, Offset> _pointers = {};
   double? _pinchStartDist;
   double _pinchStartFont = _baseFontSize;
@@ -107,7 +75,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     _pointers[e.pointer] = e.position;
     if (_pointers.length == 2) {
       _pinchStartDist = _pointerDistance();
-      _pinchStartFont = _fontSize;
+      _pinchStartFont = _fontSize.value;
     }
   }
 
@@ -116,9 +84,8 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     _pointers[e.pointer] = e.position;
     final start = _pinchStartDist;
     if (_pointers.length == 2 && start != null && start > 0) {
-      final f = (_pinchStartFont * _pointerDistance() / start)
+      _fontSize.value = (_pinchStartFont * _pointerDistance() / start)
           .clamp(_minFontSize, _maxFontSize);
-      if (f != _fontSize) setState(() => _fontSize = f);
     }
   }
 
@@ -135,62 +102,79 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   @override
   void initState() {
     super.initState();
-    _vm = LiveScreenViewModel(
-        ref.read(sessionRepositoryProvider), widget.session.id);
-    _vm.capture.addListener(_onCapture);
-    // Immediate capture on init.
-    _vm.capture.execute();
-    // Periodic polling every 750 ms; the command's running-guard drops ticks
-    // that would overlap an in-flight capture.
-    _timer = Timer.periodic(const Duration(milliseconds: 750), (_) {
-      _vm.capture.execute();
-    });
+    // Forward viewport resizes to the node so the remote PTY tracks the screen.
+    _terminal.onResize = (w, h, pw, ph) => _attach?.resize(w, h);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
-  void _onCapture() {
+  void _open() {
+    // Post-frame callbacks fire even if the element was disposed before the first
+    // frame (fast navigation away). Bail so we don't read a disposed Ref or leave
+    // a live attach that dispose() already ran past.
     if (!mounted) return;
-    // A failed capture is a transient gap (reconnect / dead pane); the next
-    // tick retries, so errors are intentionally dropped here.
-    if (_vm.capture.result case Ok(:final value)) {
-      _terminal.write(_clearScreen);
-      _terminal.write(_crlf(value));
-      final cols = _measureCols(value);
-      if (cols != _cols) setState(() => _cols = cols);
+    _attach?.dispose();
+    _decoder = Utf8StreamDecoder();
+    _attach = ref.read(terminalRepositoryProvider).open(
+          sessionId: widget.session.id,
+          cols: _terminal.viewWidth,
+          rows: _terminal.viewHeight,
+          onData: (bytes) {
+            if (mounted) _terminal.write(_decoder.add(bytes));
+          },
+          onExited: _onExited,
+          onError: (e) {
+            // Open failed: don't strand the user on a dead black screen. Surface
+            // the error and leave (the attach self-disposes its subscription).
+            if (!mounted) return;
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('attach failed: $e')));
+            Navigator.of(context).maybePop();
+          },
+        );
+    // No client yet (not connected): open() returns null, so there's nothing to
+    // stream. Tell the user instead of leaving a blank black terminal.
+    if (_attach == null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('not connected')));
     }
+  }
+
+  // Attach ended node-side: leave instead of showing a frozen screen. An evicted
+  // attach was booted because the session was opened elsewhere (last opener wins).
+  void _onExited(TerminalExitReason reason) {
+    if (!mounted) return;
+    final message = reason == TerminalExitReason.evicted
+        ? 'terminal opened elsewhere'
+        : 'terminal exited';
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+    Navigator.of(context).maybePop();
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
-    _vm.capture.removeListener(_onCapture);
-    _vm.dispose();
+    _attach?.dispose();
     _textController.dispose();
+    _fontSize.dispose();
     super.dispose();
   }
 
-  void _report(Result<void>? result) {
-    if (!mounted) return;
-    if (result case Error(:final error)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Failed: $error')));
-    }
-  }
-
-  Future<void> _sendKeys(List<String> keys) async {
-    await _vm.sendKeys.execute(keys);
-    _report(_vm.sendKeys.result);
-  }
-
-  Future<void> _sendRaw(String text) async {
-    _textController.clear();
-    await _vm.sendRaw.execute(text);
-    _report(_vm.sendRaw.result);
-  }
+  void _send(List<int> bytes) => _attach?.send(bytes);
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.session.displayTitle;
+    // Match the TUI: leave the live screen on disconnect rather than silently
+    // re-attaching. The gateway-side term is dead once the connection drops, so
+    // the user re-enters the screen (minting a fresh attach) after reconnect.
+    ref.listen<ConnState>(connStateProvider, (prev, next) {
+      if (prev == ConnState.connected && next != ConnState.connected && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('terminal detached')));
+        Navigator.of(context).maybePop();
+      }
+    });
 
+    final title = widget.session.displayTitle;
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       backgroundColor: Colors.black,
@@ -202,40 +186,26 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
               onPointerMove: _onPointerMove,
               onPointerUp: _onPointerUp,
               onPointerCancel: _onPointerUp,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Size the grid to the widest line so nothing wraps; wider-than-
-                  // viewport content scrolls horizontally. +1 col of slack absorbs
-                  // cell-metric rounding.
-                  final contentW =
-                      (_cols + 1) * _cellWidth(_fontSize) + _padding * 2;
-                  final width = contentW < constraints.maxWidth
-                      ? constraints.maxWidth
-                      : contentW;
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: width,
-                      height: constraints.maxHeight,
-                      child: TerminalView(
-                        _terminal,
-                        theme: _terminalTheme,
-                        textStyle: TerminalStyle(
-                            fontSize: _fontSize, fontFamily: _fontFamily),
-                        padding: const EdgeInsets.all(_padding),
-                        // Input goes through _InputBar / sendKeys, not the grid.
-                        readOnly: true,
-                      ),
-                    ),
-                  );
-                },
+              child: ValueListenableBuilder<double>(
+                valueListenable: _fontSize,
+                builder: (context, fontSize, _) => TerminalView(
+                  _terminal,
+                  theme: _terminalTheme,
+                  textStyle:
+                      TerminalStyle(fontSize: fontSize, fontFamily: _fontFamily),
+                  padding: const EdgeInsets.all(_padding),
+                  // Input goes through _InputBar (raw PTY bytes), not the grid.
+                  readOnly: true,
+                ),
               ),
             ),
           ),
           _InputBar(
             controller: _textController,
-            onSend: _sendRaw,
-            onKey: _sendKeys,
+            onInput: _send,
+            // Read at press time so cursor keys follow the remote terminal's
+            // application-cursor-key (DECCKM) state.
+            appCursorMode: () => _terminal.cursorKeysMode,
           ),
         ],
       ),
@@ -246,53 +216,54 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
 class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
-    required this.onSend,
-    required this.onKey,
+    required this.onInput,
+    required this.appCursorMode,
   });
 
   final TextEditingController controller;
-  final Future<void> Function(String text) onSend;
-  final Future<void> Function(List<String> keys) onKey;
+  final void Function(List<int> bytes) onInput;
+
+  /// Whether the remote terminal is in application-cursor-key mode (DECCKM),
+  /// evaluated per keypress so cursor keys emit the right escape sequence.
+  final bool Function() appCursorMode;
 
   @override
   State<_InputBar> createState() => _InputBarState();
 }
 
 class _InputBarState extends State<_InputBar> {
-  // One-shot modifiers: applied to the next key/char, then auto-cleared.
+  // One-shot modifiers: applied to the next char, then auto-cleared.
   bool _ctrl = false;
   bool _alt = false;
   bool _shift = false;
 
   bool get _hasMod => _ctrl || _alt || _shift;
 
+  // Only Ctrl/Alt modify a typed character; Shift shapes keycaps (Tab/Enter), not
+  // text. So armed Shift must not trigger the send-on-type path below.
+  bool get _hasCharMod => _ctrl || _alt;
+
   void _clearMods() {
     if (_hasMod) setState(() => _ctrl = _alt = _shift = false);
   }
 
-  // tmux modifier prefix; combinable, e.g. C-S-Up.
-  String _prefix({bool shift = true}) =>
-      '${_ctrl ? 'C-' : ''}${_alt ? 'M-' : ''}${shift && _shift ? 'S-' : ''}';
-
-  void _pressKey(String base) {
-    // tmux spells shift+Tab as BTab, not S-Tab.
-    if (_shift && base == 'Tab') {
-      widget.onKey(['${_prefix(shift: false)}BTab']);
-    } else {
-      widget.onKey(['${_prefix()}$base']);
-    }
+  void _pressKey(String name) {
+    widget.onInput(ptyKeyBytes(name,
+        shift: _shift, alt: _alt, appCursor: widget.appCursorMode()));
     _clearMods();
   }
 
-  // Send a single typed character with the active modifiers (e.g. Ctrl+c).
   void _pressChar(String ch) {
-    // Ctrl/Alt combos expect a bare letter; shift picks the case.
-    if ((_ctrl || _alt) && ch.length == 1) {
-      ch = _shift ? ch.toUpperCase() : ch.toLowerCase();
-    }
-    widget.onKey(['${_prefix()}$ch']);
+    widget.onInput(ptyTextBytes(ch, ctrl: _ctrl, alt: _alt));
     widget.controller.clear();
     _clearMods();
+  }
+
+  void _sendText() {
+    final text = widget.controller.text;
+    if (text.isEmpty) return;
+    widget.onInput(ptyTextBytes(text));
+    widget.controller.clear();
   }
 
   @override
@@ -303,52 +274,44 @@ class _InputBarState extends State<_InputBar> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final keys = <Widget>[
-                _keyButton(
-                    _label('Esc'), 'Escape', () => _pressKey('Escape')),
-                _keyButton(
-                    _icon(Icons.keyboard_tab), 'Tab', () => _pressKey('Tab')),
-                _modButton(_icon(Icons.keyboard_capslock), 'Shift', _shift,
-                    () => setState(() => _shift = !_shift)),
-                _modButton(_icon(Icons.keyboard_control_key), 'Ctrl', _ctrl,
-                    () => setState(() => _ctrl = !_ctrl)),
-                _modButton(_icon(Icons.keyboard_option_key), 'Alt', _alt,
-                    () => setState(() => _alt = !_alt)),
-                _keyButton(_icon(Icons.keyboard_return), 'Enter',
-                    () => _pressKey('Enter')),
-                _keyButton(_icon(Icons.keyboard_arrow_left), 'Left',
-                    () => _pressKey('Left')),
-                _keyButton(_icon(Icons.keyboard_arrow_down), 'Down',
-                    () => _pressKey('Down')),
-                _keyButton(_icon(Icons.keyboard_arrow_up), 'Up',
-                    () => _pressKey('Up')),
-                _keyButton(_icon(Icons.keyboard_arrow_right), 'Right',
-                    () => _pressKey('Right')),
-                _keyButton(_icon(Icons.backspace_outlined), 'Backspace',
-                    () => _pressKey('BSpace')),
-                ];
-                // Fill the width when keys fit; otherwise clamp to a min tap
-                // size and scroll.
-                final w = (constraints.maxWidth / keys.length)
-                    .clamp(36.0, double.infinity);
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: keys
-                        .map((b) => SizedBox(
-                              width: w,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 2),
-                                child: b,
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                );
-              },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              // Keys with a clear glyph use an icon; the rest fall back to a
+              // short text label. Modifiers pass `active:` to show armed state.
+              children: [
+                _keyRow([
+                  _capButton(_label('Esc'), 'Escape', () => _pressKey('escape')),
+                  _capButton(_icon(Icons.keyboard_tab), 'Tab',
+                      () => _pressKey('tab')),
+                  _capButton(_label('Home'), 'Home', () => _pressKey('home')),
+                  _capButton(_label('End'), 'End', () => _pressKey('end')),
+                  _capButton(_label('PgUp'), 'PageUp', () => _pressKey('pgup')),
+                  _capButton(_icon(Icons.keyboard_arrow_up), 'Up',
+                      () => _pressKey('up')),
+                  _capButton(_label('PgDn'), 'PageDown',
+                      () => _pressKey('pgdown')),
+                  _capButton(_icon(Icons.backspace_outlined), 'Backspace',
+                      () => _pressKey('backspace')),
+                ]),
+                const SizedBox(height: 4),
+                _keyRow([
+                  _capButton(_label('Del'), 'Delete', () => _pressKey('delete')),
+                  _capButton(_icon(Icons.keyboard_capslock), 'Shift',
+                      () => setState(() => _shift = !_shift), active: _shift),
+                  _capButton(_icon(Icons.keyboard_control_key), 'Ctrl',
+                      () => setState(() => _ctrl = !_ctrl), active: _ctrl),
+                  _capButton(_icon(Icons.keyboard_option_key), 'Alt',
+                      () => setState(() => _alt = !_alt), active: _alt),
+                  _capButton(_icon(Icons.keyboard_arrow_left), 'Left',
+                      () => _pressKey('left')),
+                  _capButton(_icon(Icons.keyboard_arrow_down), 'Down',
+                      () => _pressKey('down')),
+                  _capButton(_icon(Icons.keyboard_arrow_right), 'Right',
+                      () => _pressKey('right')),
+                  _capButton(_icon(Icons.keyboard_return), 'Enter',
+                      () => _pressKey('enter')),
+                ]),
+              ],
             ),
           ),
           // Text input row. While a modifier is armed, the next typed character
@@ -362,10 +325,14 @@ class _InputBarState extends State<_InputBar> {
                     controller: widget.controller,
                     style: const TextStyle(fontFamily: 'monospace'),
                     onChanged: (v) {
-                      if (_hasMod && v.isNotEmpty) {
-                        _pressChar(v.substring(v.length - 1));
+                      // With Ctrl/Alt armed, apply it to the last rune (not a
+                      // substring, so an emoji isn't split into a lone surrogate).
+                      // Shift is excluded above: it can't modify a character.
+                      if (_hasCharMod && v.isNotEmpty) {
+                        _pressChar(String.fromCharCode(v.runes.last));
                       }
                     },
+                    onSubmitted: (_) => _sendText(),
                     decoration: const InputDecoration(
                       isDense: true,
                       contentPadding:
@@ -375,13 +342,7 @@ class _InputBarState extends State<_InputBar> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    final text = widget.controller.text;
-                    if (text.isNotEmpty) widget.onSend(text);
-                  },
-                  child: const Text('Send'),
-                ),
+                ElevatedButton(onPressed: _sendText, child: const Text('Send')),
               ],
             ),
           ),
@@ -389,6 +350,18 @@ class _InputBarState extends State<_InputBar> {
       ),
     );
   }
+
+  // A full-width row of equal-width keycaps — no horizontal scroll.
+  Widget _keyRow(List<Widget> keys) => Row(
+        children: keys
+            .map((b) => Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: b,
+                  ),
+                ))
+            .toList(),
+      );
 
   // Compact terminal-like keycaps.
   static const _keycapFill = Color(0xFF2A2A2A);
@@ -404,33 +377,23 @@ class _InputBarState extends State<_InputBar> {
         backgroundColor: active ? _armedFill : _keycapFill,
         foregroundColor: active ? Colors.white : _keycapText,
         side: BorderSide(color: active ? _armedFill : _keycapBorder),
-        shape:
-            const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(6))),
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(6))),
       );
 
   // Icon color/size inherit from the button's foreground (active vs idle).
   Widget _icon(IconData d) => Icon(d, size: 16);
   Widget _label(String s) => Text(s, style: _btnStyle);
 
-  Widget _keyButton(Widget child, String tooltip, VoidCallback onPressed) =>
-      Tooltip(
-        message: tooltip,
-        preferBelow: false,
-        child: OutlinedButton(
-          style: _capStyle(active: false),
-          onPressed: onPressed,
-          child: child,
-        ),
-      );
-
-  Widget _modButton(
-          Widget child, String tooltip, bool active, VoidCallback onTap) =>
+  // One keycap. Modifiers pass active: true to render the armed highlight.
+  Widget _capButton(Widget child, String tooltip, VoidCallback onPressed,
+          {bool active = false}) =>
       Tooltip(
         message: tooltip,
         preferBelow: false,
         child: OutlinedButton(
           style: _capStyle(active: active),
-          onPressed: onTap,
+          onPressed: onPressed,
           child: child,
         ),
       );

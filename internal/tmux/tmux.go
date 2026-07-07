@@ -411,6 +411,113 @@ func (c *Client) KillSession(ctx context.Context, name string) error {
 	return err
 }
 
+// NewGroupedSession creates a detached session sharing target's windows (a session group).
+func (c *Client) NewGroupedSession(ctx context.Context, name, target string) error {
+	_, err := c.run(ctx, "new-session", "-d", "-s", name, "-t", target)
+	return err
+}
+
+func (c *Client) SelectWindow(ctx context.Context, target string) error {
+	_, err := c.run(ctx, "select-window", "-t", target)
+	return err
+}
+
+func (c *Client) SelectPane(ctx context.Context, paneID string) error {
+	_, err := c.run(ctx, "select-pane", "-t", paneID)
+	return err
+}
+
+// WindowInfo reports the state we must save/restore for a target window.
+type WindowInfo struct {
+	Panes      int
+	Zoomed     bool
+	Width      int
+	Height     int
+	ActivePane string
+}
+
+var windowInfoFormat = strings.Join([]string{
+	"#{window_panes}",
+	"#{window_zoomed_flag}",
+	"#{window_width}",
+	"#{window_height}",
+	"#{pane_id}", // active pane (display-message defaults to the active pane of target)
+}, fieldSep)
+
+// WindowIndexForPane returns the window index containing paneID.
+func (c *Client) WindowIndexForPane(ctx context.Context, paneID string) (int, error) {
+	out, err := c.run(ctx, "display-message", "-p", "-t", paneID, "#{window_index}")
+	if err != nil {
+		return 0, err
+	}
+	return atoi(strings.TrimSpace(out)), nil
+}
+
+func (c *Client) WindowInfo(ctx context.Context, target string) (WindowInfo, error) {
+	out, err := c.run(ctx, "display-message", "-p", "-t", target, windowInfoFormat)
+	if err != nil {
+		return WindowInfo{}, err
+	}
+	line := strings.ReplaceAll(strings.TrimRight(out, "\n"), `\037`, fieldSep)
+	f := strings.Split(line, fieldSep)
+	if len(f) != 5 {
+		return WindowInfo{}, fmt.Errorf("tmux: unexpected window info (%d fields): %q", len(f), line)
+	}
+	info := WindowInfo{
+		Panes:      atoi(f[0]),
+		Zoomed:     f[1] == "1",
+		Width:      atoi(f[2]),
+		Height:     atoi(f[3]),
+		ActivePane: f[4],
+	}
+	// A real window always has at least one pane. Panes==0 means tmux returned
+	// all-empty fields, which happens when the target session/window no longer
+	// exists (display-message exits 0 regardless).
+	if info.Panes == 0 {
+		return WindowInfo{}, fmt.Errorf("tmux: target not found: %q", target)
+	}
+	return info, nil
+}
+
+// SetPaneZoom makes the pane's window zoomed==zoom, toggling only when it differs
+// (resize-pane -Z is a toggle; window_zoomed_flag is window-global).
+func (c *Client) SetPaneZoom(ctx context.Context, target, paneID string, zoom bool) error {
+	info, err := c.WindowInfo(ctx, target)
+	if err != nil {
+		return err
+	}
+	if info.Zoomed == zoom {
+		return nil
+	}
+	_, err = c.run(ctx, "resize-pane", "-Z", "-t", paneID)
+	return err
+}
+
+// AttachCommand builds the `tmux attach-session` command (with this client's -L
+// socket) for running under a PTY.
+func (c *Client) AttachCommand(ctx context.Context, session string) *exec.Cmd {
+	return exec.CommandContext(ctx, c.bin, c.args("attach-session", "-t", session)...)
+}
+
+// ListSessions returns every session name on the server, or nil and no error
+// when no server is running.
+func (c *Client) ListSessions(ctx context.Context) ([]string, error) {
+	out, err := c.run(ctx, "list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		if noServer(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
 // KillServer terminates the entire tmux server for this client's socket. Used
 // mainly to tear down argus's private socket (and in tests).
 func (c *Client) KillServer(ctx context.Context) error {

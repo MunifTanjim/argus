@@ -1,29 +1,58 @@
 package tui
 
 import (
+	"encoding/base64"
 	"strings"
 	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// recordingClient records Call method names; all calls succeed with zero results.
+// recordingClient records Call method names and params; all calls succeed with
+// zero results.
 type recordingClient struct {
-	mu    sync.Mutex
-	calls []string
+	mu     sync.Mutex
+	calls  []string
+	params []any // parallel to calls
 }
 
-func (c *recordingClient) Call(method string, _, _ any) error {
+func (c *recordingClient) Call(method string, params, _ any) error {
 	c.mu.Lock()
 	c.calls = append(c.calls, method)
+	c.params = append(c.params, params)
 	c.mu.Unlock()
 	return nil
+}
+
+// terminalInputData concatenates the decoded payloads of every recorded
+// terminal.input call, in call order — so a test can assert byte ordering.
+func (c *recordingClient) terminalInputData(t *testing.T) string {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var b []byte
+	for i, m := range c.calls {
+		if m != api.MethodTerminalInput {
+			continue
+		}
+		p, ok := c.params[i].(api.TerminalInputParams)
+		if !ok {
+			t.Fatalf("terminal.input param #%d has type %T, want api.TerminalInputParams", i, c.params[i])
+		}
+		raw, err := base64.StdEncoding.DecodeString(p.Data)
+		if err != nil {
+			t.Fatalf("terminal.input #%d bad base64: %v", i, err)
+		}
+		b = append(b, raw...)
+	}
+	return string(b)
 }
 func (c *recordingClient) Events() <-chan api.Notification { return make(chan api.Notification) }
 func (c *recordingClient) States() <-chan bool             { return make(chan bool) }
@@ -502,18 +531,27 @@ func TestScreenViewHasBorderAndFits(t *testing.T) {
 	m.selectedID = "s1"
 	m.mode = modeScreen
 	m.width, m.height = 80, 24
-	var sb strings.Builder
-	for i := 0; i < 40; i++ {
-		sb.WriteString("\x1b[31msome colored pane line\x1b[0m\n")
+	cols, rows := m.termDims()
+	m.term = vt.NewEmulator(cols, rows)
+	m.termID = "s1"
+	// Fill every row to the full interior width; if the box interior is narrower
+	// than the emulator, rows wrap and the output overflows the viewport height.
+	fullRow := strings.Repeat("X", cols)
+	var content strings.Builder
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			content.WriteString("\r\n")
+		}
+		content.WriteString(fullRow)
 	}
-	m.screen = sb.String()
+	m.term.Write([]byte(content.String()))
 
 	out := m.screenView()
 	if !strings.Contains(out, "╮") || !strings.Contains(out, "╰") {
 		t.Errorf("screen view should be framed by a rounded border:\n%s", out)
 	}
 	if got := strings.Count(out, "\n") + 1; got > m.height {
-		t.Errorf("screen view rendered %d lines > height %d", got, m.height)
+		t.Errorf("screen view rendered %d lines > height %d (full-width rows wrapped)", got, m.height)
 	}
 }
 

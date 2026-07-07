@@ -8,8 +8,8 @@ import (
 
 // Single source of truth for app keybindings: each binding carries both its keys
 // (for key.Matches dispatch) and its help text (for footers), so the two can't
-// drift. The live screen passthrough (namedKeys/tmuxKeyFor) is deliberately not
-// here — it maps keys to tmux, not app actions.
+// drift. Live screen passthrough keys are not here — they are forwarded directly
+// to the PTY, not dispatched as app actions.
 //
 // Help labels are display-only. Paired actions (up/down, g/G) put the combined
 // label on one binding and leave the other's help empty, so the footer shows one entry.

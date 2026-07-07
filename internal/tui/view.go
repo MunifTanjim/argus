@@ -342,29 +342,33 @@ func (m model) screenView() string {
 	b.WriteString(headerStyle.Render("argus · "+s.Tmux.SessionName) +
 		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s))) + "\n\n")
 
-	body := m.screen
-	if m.screenErr != nil {
-		body = dimStyle.Render("screen unavailable: " + m.screenErr.Error())
+	var body string
+	switch {
+	case m.termErr != nil:
+		body = dimStyle.Render("terminal unavailable: " + m.termErr.Error())
+	case m.term != nil:
+		body = m.term.Render()
 	}
-	innerW := max(10, m.width-2)  // rounded border eats 2 cols
-	visible := max(1, m.height-6) // header(1)+blank(1)+border(2)+blank(1)+footer(1)
+	cols, visible := m.termDims()
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	if len(lines) > visible { // keep the most recent content
 		lines = lines[len(lines)-visible:]
 	}
-	// Lines carry tmux SGR escapes (-e); clip to box width (no reflow, 1:1 mirror)
-	// and reset so colors don't bleed.
+	// Lines carry SGR escapes; clip to the interior width and reset so colors
+	// don't bleed.
 	for i, line := range lines {
-		line = truncateLine(line, innerW)
-		if m.screenErr == nil {
+		line = truncateLine(line, cols)
+		if m.termErr == nil {
 			line += "\x1b[0m"
 		}
 		lines[i] = line
 	}
+	// lipgloss Width counts the border, so pass cols+2 to keep the interior at cols
+	// (Width(cols) would give a cols-2 interior and wrap every row).
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorBorder).
-		Width(innerW).
+		Width(cols + 2).
 		Render(strings.Join(lines, "\n"))
 	b.WriteString(box + "\n")
 

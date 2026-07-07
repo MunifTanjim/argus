@@ -2,30 +2,47 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/core/result.dart';
-import 'package:argus/data/session_repository.dart';
+import 'package:argus/data/terminal_repository.dart';
+import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/gateway.dart';
+import 'package:argus/state/terminal_controller.dart';
+import 'package:argus/transport/connection.dart';
 import 'package:argus/ui/live_screen_screen.dart';
-import '../support/fake_session_repository.dart';
 
-class _FakeControl extends FakeSessionRepository {
-  final sendKeysCalls = <List<String>>[];
-  final sendRawCalls = <List<String>>[];
+class _FakeSession implements TerminalSession {
+  _FakeSession(this.sends);
+  final List<List<int>> sends;
+  @override
+  void send(List<int> data) => sends.add(data);
+  @override
+  void resize(int cols, int rows) {}
+  @override
+  void dispose() {}
+}
+
+class _FakeTerminalRepo implements TerminalRepository {
+  _FakeTerminalRepo({this.returnNull = false});
+  // When true, open() returns null to mimic being disconnected (no client).
+  final bool returnNull;
+  final sends = <List<int>>[];
+  void Function(List<int>)? onData;
+  void Function(TerminalExitReason reason)? onExited;
+  int openCount = 0;
 
   @override
-  Future<Result<String>> capture(String sessionId) async =>
-      const Result.ok('screenX');
-
-  @override
-  Future<Result<void>> sendKeys(String sessionId, List<String> keys) async {
-    sendKeysCalls.add([sessionId, ...keys]);
-    return const Result.ok(null);
-  }
-
-  @override
-  Future<Result<void>> sendRaw(String sessionId, String text) async {
-    sendRawCalls.add([sessionId, text]);
-    return const Result.ok(null);
+  TerminalSession? open({
+    required String sessionId,
+    required int cols,
+    required int rows,
+    required void Function(List<int> data) onData,
+    void Function(TerminalExitReason reason)? onExited,
+    void Function(Object error)? onError,
+  }) {
+    openCount++;
+    this.onData = onData;
+    this.onExited = onExited;
+    return returnNull ? null : _FakeSession(sends);
   }
 }
 
@@ -46,98 +63,230 @@ Session _makeSession() => Session.fromJson(
       })) as Map<String, dynamic>,
     );
 
-Future<void> _pump(
-    WidgetTester tester, Session session, SessionRepository control) async {
+Future<void> _pump(WidgetTester tester, _FakeTerminalRepo repo) async {
   await tester.pumpWidget(ProviderScope(
-    overrides: [sessionRepositoryProvider.overrideWithValue(control)],
-    child: MaterialApp(home: LiveScreenScreen(session: session)),
+    overrides: [terminalRepositoryProvider.overrideWithValue(repo)],
+    child: MaterialApp(home: LiveScreenScreen(session: _makeSession())),
   ));
+  await tester.pump(); // run the post-frame _open()
+}
+
+// Pushes the screen onto a real navigator so Navigator.maybePop() has a route
+// to pop (the disconnect UX), unlike _pump which mounts it as the root home.
+Future<void> _pumpPushed(WidgetTester tester, _FakeTerminalRepo repo) async {
+  await tester.pumpWidget(ProviderScope(
+    overrides: [terminalRepositoryProvider.overrideWithValue(repo)],
+    child: MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => LiveScreenScreen(session: _makeSession()))),
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  ));
+  await tester.tap(find.text('go'));
+  await tester.pumpAndSettle();
+  await tester.pump(); // run the post-frame _open()
 }
 
 void main() {
-  testWidgets('renders captured screen content after first capture',
-      (tester) async {
-    final fake = _FakeControl();
-    final session = _makeSession();
-    await _pump(tester, session, fake);
-
-    // Let the immediate capture future resolve.
-    await tester.pump();
-
-    expect(find.textContaining('screenX'), findsOneWidget);
-
-    // Pump the widget away so dispose() cancels the Timer before test ends.
+  testWidgets('opens an attach after first frame', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    expect(repo.openCount, 1);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('tap Enter quick-key button calls sendKeys with Enter',
-      (tester) async {
-    final fake = _FakeControl();
-    final session = _makeSession();
-    await _pump(tester, session, fake);
+  testWidgets('tapping Enter sends CR as raw bytes', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    await tester.tap(find.byTooltip('Enter'));
     await tester.pump();
 
-    await tester.tap(find.text('↵'));
-    await tester.pump();
-
-    expect(fake.sendKeysCalls, isNotEmpty);
-    final call = fake.sendKeysCalls.last;
-    expect(call[0], session.id);
-    expect(call[1], 'Enter');
-
+    expect(repo.sends.last, [13]);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('entering text and tapping Send calls sendRaw', (tester) async {
-    final fake = _FakeControl();
-    final session = _makeSession();
-    await _pump(tester, session, fake);
+  testWidgets('arming Ctrl then typing a sends Ctrl+A (0x01)', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    await tester.tap(find.byTooltip('Ctrl')); // arm the one-shot Ctrl modifier
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'a');
     await tester.pump();
 
-    await tester.enterText(find.byType(TextField), 'hello world');
+    expect(repo.sends.last, [1]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('tapping a keycap keeps the keyboard up (modifier+type flow)',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue,
+        reason: 'keyboard up after focusing the field');
+    await tester.tap(find.byTooltip('Ctrl'));
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue,
+        reason: 'tapping a keycap must not dismiss the keyboard');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('entering text and tapping Send sends utf8 bytes', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    await tester.enterText(find.byType(TextField), 'ls');
     await tester.tap(find.text('Send'));
     await tester.pump();
 
-    expect(fake.sendRawCalls, isNotEmpty);
-    final call = fake.sendRawCalls.last;
-    expect(call[0], session.id);
-    expect(call[1], 'hello world');
-
+    expect(repo.sends.last, utf8.encode('ls'));
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('AppBar title uses repo when non-empty', (tester) async {
-    final fake = _FakeControl();
-    final session = _makeSession(); // repo = 'my-repo'
-    await _pump(tester, session, fake);
+  testWidgets('streamed output does not throw', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    repo.onData!(utf8.encode('hello\r\n'));
     await tester.pump();
-
-    expect(find.text('my-repo'), findsOneWidget);
-
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('capture error is swallowed and does not surface as exception',
-      (tester) async {
-    final throwingControl = _ThrowingControl();
-    final session = _makeSession();
-    await _pump(tester, session, throwingControl);
-
-    // Let the immediate capture future resolve (throws internally).
-    await tester.pump();
-
-    // Advance past a poll tick — should not throw.
-    await tester.pump(const Duration(milliseconds: 800));
 
     expect(tester.takeException(), isNull);
-
-    // Pump the widget away to cancel the timer before the test ends.
     await tester.pumpWidget(const SizedBox());
   });
-}
 
-class _ThrowingControl extends FakeSessionRepository {
-  @override
-  Future<Result<String>> capture(String sessionId) async =>
-      Result.error(StateError('client closed'));
+  testWidgets('leaves the screen on disconnect without re-attaching',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pumpPushed(tester, repo);
+    expect(find.byType(LiveScreenScreen), findsOneWidget);
+    expect(repo.openCount, 1);
+
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(LiveScreenScreen)));
+    // Enter connected, then drop: the screen pops (matches the TUI) and there
+    // is no silent re-attach.
+    container.read(connStateProvider.notifier).state = ConnState.connected;
+    await tester.pump();
+    container.read(connStateProvider.notifier).state = ConnState.reconnecting;
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LiveScreenScreen), findsNothing);
+    expect(repo.openCount, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('eviction shows "opened elsewhere" and leaves the screen',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pumpPushed(tester, repo);
+    expect(find.byType(LiveScreenScreen), findsOneWidget);
+
+    repo.onExited!(TerminalExitReason.evicted);
+    await tester.pump(); // show the snackbar and start the pop
+    expect(find.text('terminal opened elsewhere'), findsAtLeastNWidgets(1));
+
+    await tester.pumpAndSettle();
+    expect(find.byType(LiveScreenScreen), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('shows "not connected" when open returns null', (tester) async {
+    final repo = _FakeTerminalRepo(returnNull: true);
+    await _pump(tester, repo);
+    expect(repo.openCount, 1);
+    expect(find.text('not connected'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('renders all 16 keys across two rows', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    for (final tip in const [
+      'Escape', 'Tab', 'Home', 'End', 'PageUp', 'Up', 'PageDown', 'Backspace',
+      'Delete', 'Shift', 'Ctrl', 'Alt', 'Left', 'Down', 'Right', 'Enter',
+    ]) {
+      expect(find.byTooltip(tip), findsOneWidget, reason: 'missing key: $tip');
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Alt+Enter sends ESC+CR (meta-Enter for newline)', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('Alt')); // arm the one-shot Alt modifier
+    await tester.pump();
+    await tester.tap(find.byTooltip('Enter'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 13]);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('Shift+Enter sends ESC+CR (meta-Enter for newline)',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('Shift'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Enter'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 13]);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('tapping Home sends the home escape sequence', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('Home'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 72]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('tapping End sends the end escape sequence', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('End'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 70]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('tapping PageUp sends the pgup escape sequence', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('PageUp'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 53, 126]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('tapping PageDown sends the pgdown escape sequence',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('PageDown'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 54, 126]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('tapping Delete sends the delete escape sequence',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('Delete'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 51, 126]);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

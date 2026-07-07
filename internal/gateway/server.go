@@ -38,6 +38,55 @@ type subEntry struct {
 	nodeID string
 }
 
+// termEntry records a client's open terminal for routing output notifications.
+type termEntry struct {
+	client api.Notifier
+	nodeID string
+	relay  *termRelay // fans output out to the client off the node read loop
+}
+
+// termRelayBuffer is how many terminal.output frames may queue for one client
+// before it is considered non-draining: enough to absorb a momentary lag, bounded
+// so a truly stuck viewer is dropped rather than buffered unboundedly.
+const termRelayBuffer = 256
+
+// termRelay decouples a client's terminal.output fan-out from the node uplink's
+// single read loop: the loop enqueues without blocking, a dedicated goroutine
+// writes in order. Without it, one non-draining viewer stalls the read loop and
+// freezes every other session and terminal on that node.
+type termRelay struct {
+	ch       chan termFrame // the last frame has fin=true
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+// termFrame is one relayed notification. fin marks the terminating frame
+// (terminal.exited): the writer emits it, then returns.
+type termFrame struct {
+	method string
+	params any
+	fin    bool
+}
+
+// stopRelay ends the writer goroutine (idempotent). Safe to call concurrently
+// with a send: the channel is never closed, so a racing send can't panic.
+func (r *termRelay) stopRelay() { r.stopOnce.Do(func() { close(r.stop) }) }
+
+// relayTermOutput drains a term's frames to its client in order, stopping on the
+// terminating frame, a client write error, or stopRelay.
+func relayTermOutput(c api.Notifier, r *termRelay) {
+	for {
+		select {
+		case <-r.stop:
+			return
+		case f := <-r.ch:
+			if err := c.Notify(f.method, f.params); err != nil || f.fin {
+				return // client gone or final frame delivered
+			}
+		}
+	}
+}
+
 // Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
 // Auth predicates gate each; nil = allow all (local/dev only).
 type Server struct {
@@ -59,6 +108,9 @@ type Server struct {
 
 	subMu sync.Mutex
 	subs  map[string]subEntry // sub_id -> subscriber
+
+	termMu sync.Mutex
+	terms  map[string]termEntry // term_id -> open terminal
 }
 
 // NewServer builds a gateway Server over agg.
@@ -67,6 +119,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		agg: agg, nodeAuth: nodeAuth, clientAuth: clientAuth,
 		pairWaiters: map[string]<-chan struct{}{},
 		subs:        map[string]subEntry{},
+		terms:       map[string]termEntry{},
 	}
 	s.clientSrv = s.buildClientServer()
 	return s
@@ -102,10 +155,16 @@ func (s *Server) getPublicURL() string {
 	return ""
 }
 
-func (s *Server) addSub(subID, nodeID string, client api.Notifier) {
+// addSub records a subscription, refusing (ok=false) if the sub_id is already in
+// use so a reused id can't orphan the prior owner.
+func (s *Server) addSub(subID, nodeID string, client api.Notifier) bool {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
+	if _, exists := s.subs[subID]; exists {
+		return false
+	}
 	s.subs[subID] = subEntry{client: client, nodeID: nodeID}
+	return true
 }
 
 func (s *Server) dropSub(subID string) {
@@ -135,6 +194,61 @@ func (s *Server) subsForClient(client api.Notifier) []subRef {
 		}
 	}
 	return out
+}
+
+// addTerm records an open terminal, refusing (ok=false) if the term_id is already
+// in use so a reused/replayed id can't orphan the prior owner (leaking its node
+// mirror) or hijack its output routing.
+func (s *Server) addTerm(id, nodeID string, c api.Notifier) bool {
+	s.termMu.Lock()
+	if _, exists := s.terms[id]; exists {
+		s.termMu.Unlock()
+		return false
+	}
+	r := &termRelay{ch: make(chan termFrame, termRelayBuffer), stop: make(chan struct{})}
+	s.terms[id] = termEntry{client: c, nodeID: nodeID, relay: r}
+	s.termMu.Unlock()
+	go relayTermOutput(c, r)
+	return true
+}
+
+func (s *Server) dropTerm(id string) {
+	s.termMu.Lock()
+	e, ok := s.terms[id]
+	delete(s.terms, id)
+	s.termMu.Unlock()
+	if ok && e.relay != nil {
+		e.relay.stopRelay()
+	}
+}
+
+func (s *Server) clientForTerm(id string) (api.Notifier, bool) {
+	s.termMu.Lock()
+	defer s.termMu.Unlock()
+	e, ok := s.terms[id]
+	return e.client, ok
+}
+
+// termsForClient returns the open terminals owned by a client (for disconnect cleanup).
+func (s *Server) termsForClient(client api.Notifier) []subRef {
+	s.termMu.Lock()
+	defer s.termMu.Unlock()
+	var out []subRef
+	for id, e := range s.terms {
+		if e.client == client {
+			out = append(out, subRef{id, e.nodeID})
+		}
+	}
+	return out
+}
+
+// termIDFromParams extracts the term_id field from a JSON params blob.
+func termIDFromParams(params json.RawMessage) string {
+	var v struct {
+		TermID string `json:"term_id"`
+	}
+	_ = json.Unmarshal(params, &v)
+	return v.TermID
 }
 
 // mustMarshal marshals v to JSON, ignoring errors (for well-known types only).
@@ -294,14 +408,94 @@ func (s *Server) buildClientServer() *api.Server {
 		if !ok {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session id is not gateway-qualified: " + p.SessionID}
 		}
-		// Record before routing so an early delta finds its client.
-		s.addSub(p.SubID, nodeID, client)
+		// Record before routing so an early delta finds its client. Refuse a
+		// sub_id already in flight rather than overwriting the prior subscriber.
+		if !s.addSub(p.SubID, nodeID, client) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "sub_id already in use: " + p.SubID}
+		}
 		res, err := s.agg.Route(ctx, api.MethodTranscriptSubscribe, params)
 		if err != nil {
 			s.dropSub(p.SubID)
 			return nil, err
 		}
 		return res, nil
+	})
+
+	// terminal.open: record in the term table, then route to the owning node.
+	//
+	// Authorization: any authenticated /client may open a terminal on any session;
+	// the ownership checks below only bind a term_id to its opener. Terminal attach
+	// is full read+write shell access, so a client token is a fully privileged
+	// credential — same single-user/multi-device model as session.input.
+	srv.Handle(api.MethodTerminalOpen, func(ctx context.Context, params json.RawMessage) (any, error) {
+		client, ok := api.NotifierFrom(ctx)
+		if !ok {
+			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client notifier"}
+		}
+		p, err := api.Decode[api.TerminalOpenParams](params)
+		if err != nil {
+			return nil, err
+		}
+		nodeID, _, ok := session.SplitCompositeID(p.SessionID)
+		if !ok {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session id is not gateway-qualified: " + p.SessionID}
+		}
+		// Record before routing so early output finds its client. Refuse a term_id
+		// already in use rather than overwriting (which would orphan the prior
+		// owner and leak its node-side mirror).
+		if !s.addTerm(p.TermID, nodeID, client) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "term_id already in use: " + p.TermID}
+		}
+		res, err := s.agg.Route(ctx, api.MethodTerminalOpen, params)
+		if err != nil {
+			s.dropTerm(p.TermID)
+			return nil, err
+		}
+		return res, nil
+	})
+
+	// terminal.input / terminal.resize: look up node in the term table and route
+	// there — but only for the client that opened the term, so a client that
+	// learns another's term_id can't inject input into or resize its PTY.
+	for _, method := range []string{api.MethodTerminalInput, api.MethodTerminalResize} {
+		m := method
+		srv.Handle(m, func(ctx context.Context, params json.RawMessage) (any, error) {
+			client, ok := api.NotifierFrom(ctx)
+			if !ok {
+				return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client notifier"}
+			}
+			termID := termIDFromParams(params)
+			s.termMu.Lock()
+			e, ok := s.terms[termID]
+			s.termMu.Unlock()
+			if !ok || e.client != client {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown term_id: " + termID}
+			}
+			return s.agg.RouteToNode(ctx, e.nodeID, m, params)
+		})
+	}
+	// terminal.close: atomic read+delete under one lock hold to prevent a TOCTOU
+	// race where two concurrent closes both route to the node. Only the owning
+	// client may close its term (a non-owner is rejected and the term is kept).
+	srv.Handle(api.MethodTerminalClose, func(ctx context.Context, params json.RawMessage) (any, error) {
+		client, ok := api.NotifierFrom(ctx)
+		if !ok {
+			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client notifier"}
+		}
+		termID := termIDFromParams(params)
+		s.termMu.Lock()
+		e, owned := s.terms[termID]
+		if owned = owned && e.client == client; owned {
+			delete(s.terms, termID)
+		}
+		s.termMu.Unlock()
+		if !owned {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown term_id: " + termID}
+		}
+		if e.relay != nil {
+			e.relay.stopRelay()
+		}
+		return s.agg.RouteToNode(ctx, e.nodeID, api.MethodTerminalClose, params)
 	})
 
 	// transcript.unsubscribe: remove from the sub table and route to the node.
@@ -349,6 +543,11 @@ func (s *Server) buildClientServer() *api.Server {
 				s.dropSub(sub.subID)
 				_, _ = s.agg.RouteToNode(context.Background(), sub.nodeID,
 					api.MethodTranscriptUnsubscribe, mustMarshal(api.TranscriptUnsubscribeParams{SubID: sub.subID}))
+			}
+			for _, ref := range s.termsForClient(n) {
+				s.dropTerm(ref.subID)
+				_, _ = s.agg.RouteToNode(context.Background(), ref.nodeID,
+					api.MethodTerminalClose, mustMarshal(api.TerminalCloseParams{TermID: ref.subID}))
 			}
 		}
 	})
@@ -553,6 +752,11 @@ const (
 	nodeKeepaliveFailures = 2
 )
 
+// maxClosedOrphans caps the per-uplink debounce set for orphaned terminal output
+// so a long-lived node connection with heavy attach churn can't grow it without
+// bound. Far above any plausible count of concurrently-dying orphans.
+const maxClosedOrphans = 4096
+
 // serveNode adopts an accepted node uplink: learn its identity, register it as a
 // source, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
@@ -560,6 +764,10 @@ func (s *Server) serveNode(conn net.Conn) {
 	// peerRef lets the OnNotify closure reference peer before NewPeer returns.
 	// Atomic to satisfy the race detector (OnNotify runs in a goroutine).
 	var peerRef atomic.Pointer[api.Peer]
+	// closedOrphans debounces the terminal.close we send for output on an unknown
+	// term: a chatty dead term would otherwise spawn a goroutine + node Call per
+	// frame. Only touched from OnNotify, which the peer runs serially, so no lock.
+	closedOrphans := map[string]bool{}
 	peer := api.NewPeer(conn, api.PeerOptions{
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
@@ -593,6 +801,74 @@ func (s *Server) serveNode(conn net.Conn) {
 						_ = p.Call(api.MethodTranscriptUnsubscribe,
 							api.TranscriptUnsubscribeParams{SubID: d.SubID}, nil)
 					}()
+				}
+			case api.MethodTerminalOutput:
+				var o api.TerminalOutput
+				if json.Unmarshal(n.Params, &o) != nil {
+					return
+				}
+				s.termMu.Lock()
+				e, ok := s.terms[o.TermID]
+				s.termMu.Unlock()
+				if ok && e.relay != nil {
+					// Hand off to the term's relay goroutine so a viewer that has
+					// stopped draining can't stall this node's read loop.
+					select {
+					case <-e.relay.stop:
+						// Term is being torn down elsewhere (e.g. a concurrent
+						// close); drop this late frame.
+					case e.relay.ch <- termFrame{method: api.MethodTerminalOutput, params: o}:
+					default:
+						// Buffer full: the client isn't keeping up. Drop its connection
+						// so it re-attaches with a clean baseline, rather than blocking
+						// the loop or corrupting the stream by dropping chunks.
+						if closer, ok := e.client.(interface{ Close() error }); ok {
+							_ = closer.Close()
+						}
+					}
+				} else if !ok && !closedOrphans[o.TermID] {
+					// Orphaned output: node pushing to an untracked term. Tell it to
+					// close, once per term_id (ids are unique per attach, so a closed
+					// orphan won't legitimately reappear).
+					if len(closedOrphans) >= maxClosedOrphans {
+						// Bound memory on a long-lived uplink with churn. Ids are
+						// unique per attach, so at worst a still-chatty orphan gets
+						// one extra close after the reset.
+						closedOrphans = map[string]bool{}
+					}
+					closedOrphans[o.TermID] = true
+					if p := peerRef.Load(); p != nil {
+						go func() { _ = p.Call(api.MethodTerminalClose, api.TerminalCloseParams{TermID: o.TermID}, nil) }()
+					}
+				}
+			case api.MethodTerminalExited:
+				var o api.TerminalExited
+				if json.Unmarshal(n.Params, &o) != nil {
+					return
+				}
+				// PTY ended node-side: drop the dead term and route the exit through
+				// the relay as its terminating frame, so it lands after any queued
+				// output; fall back to a direct notify if the buffer is full.
+				s.termMu.Lock()
+				e, ok := s.terms[o.TermID]
+				delete(s.terms, o.TermID)
+				s.termMu.Unlock()
+				if !ok {
+					return
+				}
+				delivered := false
+				if e.relay != nil {
+					select {
+					case e.relay.ch <- termFrame{method: api.MethodTerminalExited, params: o, fin: true}:
+						delivered = true
+					default:
+					}
+				}
+				if !delivered {
+					if e.relay != nil {
+						e.relay.stopRelay()
+					}
+					_ = e.client.Notify(api.MethodTerminalExited, o)
 				}
 			}
 		},

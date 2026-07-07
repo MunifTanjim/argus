@@ -180,3 +180,30 @@ func TestPushMobileDelayFromEnv(t *testing.T) {
 		t.Fatalf("push.mobile.delay from env = %v, want 45s", c.Push.Mobile.Delay)
 	}
 }
+
+func TestTmuxMirrorSessionAffixDefaults(t *testing.T) {
+	isolateConfigDir(t)
+	c := load(t, "")
+	if c.Tmux.MirrorSessionPrefix != "_" || c.Tmux.MirrorSessionSuffix != "_" {
+		t.Fatalf("want _/_ got %q/%q", c.Tmux.MirrorSessionPrefix, c.Tmux.MirrorSessionSuffix)
+	}
+}
+
+func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
+	// Defaults are valid.
+	valid := config.Config{Tmux: config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid affixes should pass: %v", err)
+	}
+	// tmux session names can't contain '.' or ':'; a bad affix would silently
+	// break mirror creation, so it must be caught at load.
+	bad := []config.TmuxConfig{
+		{MirrorSessionPrefix: "a.b", MirrorSessionSuffix: "_"},
+		{MirrorSessionPrefix: "_", MirrorSessionSuffix: "x:y"},
+	}
+	for _, tc := range bad {
+		if err := (config.Config{Tmux: tc}).Validate(); err == nil {
+			t.Errorf("affix %+v should be rejected", tc)
+		}
+	}
+}

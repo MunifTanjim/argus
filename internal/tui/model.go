@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/vt"
 
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -95,9 +96,11 @@ type model struct {
 	sessionSub      subRef                      // stashed session subRef while drilled into a subagent
 	toolBodies      map[string]toolBodyEntry    // tool_use id -> on-demand-fetched body (cleared per open)
 
-	screen    string // last captured pane screen
-	screenErr error
-	keyCh     chan paneKey // ordered keystrokes for the screen-view sender goroutine
+	term      *vt.Emulator  // live terminal attach (nil when not attached)
+	termID    string        // active attach id (unique per attach; gateway/node key on it)
+	termStop  chan struct{} // closed to stop the emulator drain goroutine on detach
+	termErr   error         // terminal.open failure, shown in the box
+	termKeyCh chan termKey  // ordered keystroke queue drained by sendTermKeyLoop
 
 	prompt promptState // compose-then-submit draft for the prompt dock
 
@@ -152,13 +155,13 @@ type historyState struct {
 	openAgent  string // owning agent of the open transcript, for read routing
 }
 
-func newModel(client Client, hasDark bool, keyCh chan paneKey, logs *logbuf.Buffer) model {
+func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 	return model{
 		client:          client,
 		hasDark:         hasDark,
-		keyCh:           keyCh,
 		logs:            logs,
 		logsFollow:      true,
+		termKeyCh:       make(chan termKey, termKeyBuf),
 		sessions:        make(map[string]session.Session),
 		transcriptCache: make(map[string]cachedTranscript),
 		toolBodies:      make(map[string]toolBodyEntry),

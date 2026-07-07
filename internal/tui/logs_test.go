@@ -27,14 +27,14 @@ func fillLogs(b *logbuf.Buffer, n int) {
 }
 
 func TestLogsTabHiddenWithoutBuffer(t *testing.T) {
-	m := newModel(logsStubClient{}, false, nil, nil)
+	m := newModel(logsStubClient{}, false, nil)
 	if strings.Contains(m.homeTabs(modeList), "Logs") {
 		t.Error("Logs tab should be hidden when no buffer is present")
 	}
 }
 
 func TestLogsTabShownWithBuffer(t *testing.T) {
-	m := newModel(logsStubClient{}, false, nil, logbuf.New(10))
+	m := newModel(logsStubClient{}, false, logbuf.New(10))
 	if !strings.Contains(m.homeTabs(modeList), "Logs") {
 		t.Error("Logs tab should be shown when a buffer is present")
 	}
@@ -43,7 +43,7 @@ func TestLogsTabShownWithBuffer(t *testing.T) {
 func TestLogsFollowShowsNewest(t *testing.T) {
 	b := logbuf.New(1000)
 	fillLogs(b, 100)
-	m := newModel(logsStubClient{}, false, nil, b)
+	m := newModel(logsStubClient{}, false, b)
 	m.width, m.height = 80, 30 // avail = 26
 	m.mode = modeLogs
 	out := m.logsView()
@@ -58,7 +58,7 @@ func TestLogsFollowShowsNewest(t *testing.T) {
 func TestLogsScrollUpPausesFollowAndPins(t *testing.T) {
 	b := logbuf.New(1000)
 	fillLogs(b, 100)
-	m := newModel(logsStubClient{}, false, nil, b)
+	m := newModel(logsStubClient{}, false, b)
 	m.width, m.height = 80, 30 // avail = 26, bottom offset = 74
 	m.mode = modeLogs
 

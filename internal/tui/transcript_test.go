@@ -18,8 +18,9 @@ func testModel() model {
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
 		},
-		width:  80,
-		height: 24,
+		termKeyCh: make(chan termKey, termKeyBuf),
+		width:     80,
+		height:    24,
 	}
 }
 

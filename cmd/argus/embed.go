@@ -141,6 +141,7 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	logs := logbuf.New(1000)
 	log := logger.NewBufferLogger(logs)
 	d.SetLogger(log.With("scope", "node"))
+	d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))

@@ -2,11 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -56,17 +55,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Markdown wrap width changed; drop cached renderers/output.
 		m.transcript.mdRenderers = make(map[int]*glamour.TermRenderer)
 		m.transcript.mdCache = make(map[string]string)
+		if m.mode == modeScreen && m.term != nil {
+			cols, rows := m.termDims()
+			m.term.Resize(cols, rows)
+			return m, m.termResizeCmd(m.termID, cols, rows)
+		}
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":
 		case m.mode == modeScreen:
-			// Screen view: paste goes straight to the pane as literal text.
-			select {
-			case m.keyCh <- paneKey{id: m.selectedID, literal: msg.Content}:
-			default:
-			}
+			m.sendTermKey(m.termID, []byte(msg.Content))
+			return m, nil
 		case m.idleComposerActive():
 			// Idle reply composer: append the paste verbatim (newlines and all).
 			m.prompt.reasonText += msg.Content
@@ -85,6 +86,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.resyncCmd()
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
+		if m.mode == modeScreen {
+			m = m.detachScreen()
+			m.flash = "terminal detached"
+		}
 	case sessionsReplacedMsg:
 		m.sessions = make(map[string]session.Session, len(msg))
 		for _, s := range msg {
@@ -99,10 +104,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			atBottom := m.transcript.scroll >= m.maxScroll()
 			m.transcript.chunks, m.transcript.err = msg.chunks, msg.err
 			m.restoreChunkCursor(prevID, atBottom)
-		}
-	case captureMsg:
-		if msg.id == m.selectedID {
-			m.screen, m.screenErr = msg.screen, msg.err
 		}
 	case histProjectsMsg:
 		m.history.projects, m.history.err = groupProjectsByNode(msg.projects), msg.err
@@ -182,9 +183,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "spawn failed: " + msg.err.Error()
 		}
 		return m, nil
-	case screenTickMsg:
-		if m.mode == modeScreen {
-			return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
+	case termOpenedMsg:
+		if msg.termID == m.termID && msg.err != nil {
+			m.termErr = msg.err
 		}
 	case logTickMsg:
 		// Returning re-renders, which re-reads the log buffer.
@@ -214,10 +215,6 @@ func (m model) idleComposerActive() bool {
 	return ok && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle
 }
 
-func screenTickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return screenTickMsg{} })
-}
-
 func spinTickCmd() tea.Cmd {
 	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return spinTickMsg{} })
 }
@@ -244,23 +241,11 @@ func (m *model) maybeSpin() tea.Cmd {
 	return nil
 }
 
-func (m model) fetchCapture(id string) tea.Cmd {
-	client := m.client
-	return func() tea.Msg {
-		var r api.CaptureResult
-		err := client.Call(api.MethodSessionCapture, api.SessionRef{SessionID: id}, &r)
-		return captureMsg{id: id, screen: r.Screen, err: err}
-	}
-}
-
 func (m model) sendInputCmd(id, text string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		_ = client.Call(api.MethodSessionInput, api.InputParams{SessionID: id, Text: text, Submit: true, Prepare: true}, nil)
-		// Recapture immediately for snappy feedback.
-		var r api.CaptureResult
-		err := client.Call(api.MethodSessionCapture, api.SessionRef{SessionID: id}, &r)
-		return captureMsg{id: id, screen: r.Screen, err: err}
+		return nil
 	}
 }
 
@@ -314,6 +299,34 @@ func (m model) killCmd(id string) tea.Cmd {
 }
 
 func (m *model) applyEvent(n api.Notification) tea.Cmd {
+	if n.Method == api.MethodTerminalOutput {
+		var o api.TerminalOutput
+		if json.Unmarshal(n.Params, &o) != nil {
+			return nil
+		}
+		if o.TermID != m.termID || m.term == nil {
+			return nil
+		}
+		if raw, err := base64.StdEncoding.DecodeString(o.Data); err == nil {
+			_, _ = m.term.Write(raw)
+		}
+		return nil
+	}
+	if n.Method == api.MethodTerminalExited {
+		var o api.TerminalExited
+		if json.Unmarshal(n.Params, &o) != nil {
+			return nil
+		}
+		if o.TermID == m.termID && m.mode == modeScreen {
+			*m = m.detachScreen() // attach is gone node-side; leave it
+			if o.Reason == api.TermExitedEvicted {
+				m.flash = "terminal opened elsewhere"
+			} else {
+				m.flash = "terminal exited"
+			}
+		}
+		return nil
+	}
 	if n.Method == api.MethodTranscriptDelta {
 		var d api.TranscriptDelta
 		if json.Unmarshal(n.Params, &d) != nil {
@@ -523,11 +536,7 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}
-	m.selectedID = m.order[m.cursor]
-	m.screenReturn = m.mode
-	m.mode = modeScreen
-	m.screen, m.screenErr = "", nil
-	return m, tea.Batch(m.fetchCapture(m.selectedID), screenTickCmd())
+	return m.enterScreen(m.order[m.cursor])
 }
 
 // actListJump jumps the user's tmux client to the selected session's window, or
@@ -641,55 +650,21 @@ func (m model) actListQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "ctrl+]" {
-		m.mode = m.screenReturn
-		return m, nil
+	if isScreenLeave(msg) {
+		return m.leaveScreen()
 	}
-	if k, ok := tmuxKeyFor(msg); ok {
-		k.id = m.selectedID
-		select {
-		case m.keyCh <- k: // non-blocking; drop if the buffer is somehow full
-		default:
-		}
+	if b := ptyBytesFor(msg); b != nil {
+		m.sendTermKey(m.termID, b)
 	}
 	return m, nil
 }
 
-// namedKeys maps Bubble Tea key strings to tmux send-keys key names.
-var namedKeys = map[string]string{
-	"enter": "Enter", "tab": "Tab", "shift+tab": "BTab", "backspace": "BSpace",
-	"esc": "Escape", "escape": "Escape", "delete": "DC", "insert": "IC",
-	"up": "Up", "down": "Down", "left": "Left", "right": "Right",
-	"home": "Home", "end": "End", "pgup": "PageUp", "pgdown": "PageDown",
-	"space": " ",
-}
-
-// tmuxKeyFor translates a key press into a paneKey for tmux send-keys. Unrecognized
-// keys yield ok=false.
-func tmuxKeyFor(msg tea.KeyPressMsg) (paneKey, bool) {
-	s := msg.String()
-	if n, ok := namedKeys[s]; ok {
-		if n == " " {
-			return paneKey{literal: " "}, true
-		}
-		return paneKey{named: n}, true
+// isScreenLeave matches ctrl+] independent of how the terminal reports it.
+// msg.String() is unreliable (it prioritizes Text), so match on Code+Mod and the
+// raw 0x1d control byte instead.
+func isScreenLeave(msg tea.KeyPressMsg) bool {
+	if msg.Code == ']' && msg.Mod&tea.ModCtrl != 0 {
+		return true
 	}
-	// Ctrl / Alt chords: "ctrl+c" → "C-c", "alt+x" → "M-x" (single trailing key).
-	if rest, ok := strings.CutPrefix(s, "ctrl+"); ok && len(rest) == 1 {
-		return paneKey{named: "C-" + rest}, true
-	}
-	if rest, ok := strings.CutPrefix(s, "alt+"); ok && len(rest) == 1 {
-		return paneKey{named: "M-" + rest}, true
-	}
-	// Function keys f1..f12 → F1..F12.
-	if len(s) >= 2 && s[0] == 'f' {
-		if _, err := strconv.Atoi(s[1:]); err == nil {
-			return paneKey{named: "F" + s[1:]}, true
-		}
-	}
-	// Plain printable input (letters, digits, punctuation, unicode).
-	if msg.Text != "" {
-		return paneKey{literal: msg.Text}, true
-	}
-	return paneKey{}, false
+	return msg.Code == 0x1d // GS: ctrl+] as a raw control byte
 }

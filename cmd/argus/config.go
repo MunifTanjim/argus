@@ -86,5 +86,8 @@ func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
 	})
 
 	c := config.FromViper(v)
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
 	return &c, nil
 }

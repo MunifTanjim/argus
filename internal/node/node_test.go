@@ -253,6 +253,34 @@ func TestRunRefusesWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
+// TestMirrorName verifies mirrorName composes the expected reaper-recognizable name.
+func TestMirrorName(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.SetMirrorAffixes("_", "_")
+	got := d.mirrorName("t1")
+	want := "_argus-mirror-t1_"
+	if got != want {
+		t.Fatalf("mirrorName(%q) = %q, want %q", "t1", got, want)
+	}
+
+	// Custom affixes.
+	d.SetMirrorAffixes("<<", ">>")
+	if got := d.mirrorName("t2"); got != "<<argus-mirror-t2>>" {
+		t.Fatalf("mirrorName with custom affixes = %q", got)
+	}
+
+	// A live session id like "default:%63" carries ':' — illegal in a tmux session
+	// name — so mirrorName must sanitize it.
+	d.SetMirrorAffixes("_", "_")
+	got = d.mirrorName("default:%63")
+	if strings.ContainsAny(got, ":.") {
+		t.Fatalf("mirrorName(%q) = %q, must not contain ':' or '.'", "default:%63", got)
+	}
+	if want := "_argus-mirror-default-%63_"; got != want {
+		t.Fatalf("mirrorName sanitized = %q, want %q", got, want)
+	}
+}
+
 func dialWithRetry(t *testing.T, socket string) *api.Client {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

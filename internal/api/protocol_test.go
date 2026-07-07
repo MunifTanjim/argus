@@ -31,3 +31,14 @@ func TestTranscriptSubscribeParamsRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %+v, want %+v", out, in)
 	}
 }
+
+func TestTerminalOpenParamsDecode(t *testing.T) {
+	raw := json.RawMessage(`{"term_id":"t1","session_id":"n1-%3","cols":80,"rows":24}`)
+	p, err := Decode[TerminalOpenParams](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TermID != "t1" || p.SessionID != "n1-%3" || p.Cols != 80 || p.Rows != 24 {
+		t.Fatalf("bad decode: %+v", p)
+	}
+}

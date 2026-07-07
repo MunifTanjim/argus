@@ -34,7 +34,21 @@ type PeerOptions struct {
 	// KeepaliveFailureThreshold is how many consecutive failed pings close the
 	// peer; an answered ping resets the count. Defaults to 1.
 	KeepaliveFailureThreshold int
+	// WriteTimeout bounds how long a single frame write may block, so one stuck
+	// consumer can't wedge a shared writer (e.g. a slow terminal viewer blocking
+	// the node uplink). Exceeding it errors and closes the peer. Zero uses
+	// defaultWriteTimeout; a negative value disables the deadline.
+	WriteTimeout time.Duration
 }
+
+// defaultWriteTimeout bounds a blocked frame write when WriteTimeout is unset:
+// generous enough not to hit a slow-but-live consumer, short enough to drop a
+// truly stuck one before it starves the keepalive path.
+const defaultWriteTimeout = 10 * time.Second
+
+// writeDeadliner is the optional deadline support on the underlying transport
+// (net.Conn satisfies it; an in-memory pipe used in tests does too).
+type writeDeadliner interface{ SetWriteDeadline(time.Time) error }
 
 // Peer is one end of a symmetric JSON-RPC 2.0 connection: it both issues and
 // serves requests/notifications over a single stream. The gateway↔node uplink uses
@@ -49,8 +63,9 @@ type Peer struct {
 	nextID  int
 	pending map[int]chan message
 
-	dispatch DispatchFunc
-	onNotify func(Notification)
+	dispatch     DispatchFunc
+	onNotify     func(Notification)
+	writeTimeout time.Duration
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -65,15 +80,20 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 		base = context.Background()
 	}
 	ctx, cancel := context.WithCancel(base)
+	writeTimeout := opts.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = defaultWriteTimeout
+	}
 	p := &Peer{
-		rwc:      rwc,
-		bw:       bufio.NewWriter(rwc),
-		pending:  make(map[int]chan message),
-		dispatch: opts.Dispatch,
-		onNotify: opts.OnNotify,
-		ctx:      ctx,
-		cancel:   cancel,
-		closed:   make(chan struct{}),
+		rwc:          rwc,
+		bw:           bufio.NewWriter(rwc),
+		pending:      make(map[int]chan message),
+		dispatch:     opts.Dispatch,
+		onNotify:     opts.OnNotify,
+		writeTimeout: writeTimeout,
+		ctx:          ctx,
+		cancel:       cancel,
+		closed:       make(chan struct{}),
 	}
 	go p.readLoop()
 	if opts.KeepaliveInterval > 0 {
@@ -200,6 +220,21 @@ func (p *Peer) send(m message) error {
 	}
 	p.wmu.Lock()
 	defer p.wmu.Unlock()
+	if p.writeTimeout > 0 {
+		if wd, ok := p.rwc.(writeDeadliner); ok {
+			_ = wd.SetWriteDeadline(time.Now().Add(p.writeTimeout))
+		}
+	}
+	if err := p.writeFrame(b); err != nil {
+		// A failed or timed-out write leaves the frame half-emitted, so the stream
+		// is unusable: drop the peer rather than desync every later frame.
+		_ = p.Close()
+		return err
+	}
+	return nil
+}
+
+func (p *Peer) writeFrame(b []byte) error {
 	if _, err := p.bw.Write(b); err != nil {
 		return err
 	}

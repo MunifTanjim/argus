@@ -45,6 +45,12 @@ const (
 	MethodTranscriptUnsubscribe     = "transcript.unsubscribe"     // request: TranscriptUnsubscribeParams; result: nil
 	// Server→client push.
 	MethodTranscriptDelta = "transcript.delta" // notification: TranscriptDelta
+	MethodTerminalOpen    = "terminal.open"    // request: TerminalOpenParams; result: nil
+	MethodTerminalOutput  = "terminal.output"  // notification: TerminalOutput
+	MethodTerminalInput   = "terminal.input"   // request: TerminalInputParams; result: nil
+	MethodTerminalResize  = "terminal.resize"  // request: TerminalResizeParams; result: nil
+	MethodTerminalClose   = "terminal.close"   // request: TerminalCloseParams; result: nil
+	MethodTerminalExited  = "terminal.exited"  // notification: TerminalExited (server→client, PTY ended)
 	// Client-token management (gateway only, admin/master-token connections).
 	// MethodClientsPairStart mints a temporary token + public URL for a pairing QR.
 	MethodClientsPairStart = "clients.pairStart" // request: no params; result: PairStartResult
@@ -356,4 +362,53 @@ type TranscriptDelta struct {
 	SubID     string             `json:"sub_id"`
 	FromIndex int                `json:"from_index"`
 	Chunks    []transcript.Chunk `json:"chunks"`
+}
+
+// TerminalOpenParams opens a terminal session with the given dimensions.
+type TerminalOpenParams struct {
+	TermID    string `json:"term_id"`
+	SessionID string `json:"session_id"`
+	Cols      int    `json:"cols"`
+	Rows      int    `json:"rows"`
+}
+
+// TerminalOutput is server→client output from a terminal session (base64-encoded data).
+type TerminalOutput struct {
+	TermID string `json:"term_id"`
+	Data   string `json:"data"`
+}
+
+// TerminalExited notifies the client that a terminal attach ended. Reason tells
+// the client why so it can show a fitting message (see the TermExited* consts).
+type TerminalExited struct {
+	TermID string `json:"term_id"`
+	// Reason is why the attach ended; empty is treated as TermExitedProcess.
+	Reason string `json:"reason,omitempty"`
+}
+
+// Reasons carried by TerminalExited.Reason.
+const (
+	// TermExitedProcess: the PTY ended on its own (process exited / mirror died).
+	TermExitedProcess = "exited"
+	// TermExitedEvicted: booted because the same session was opened elsewhere
+	// (single-viewer enforcement; last opener wins).
+	TermExitedEvicted = "evicted"
+)
+
+// TerminalInputParams sends input data to a terminal session.
+type TerminalInputParams struct {
+	TermID string `json:"term_id"`
+	Data   string `json:"data"`
+}
+
+// TerminalResizeParams resizes a terminal session.
+type TerminalResizeParams struct {
+	TermID string `json:"term_id"`
+	Cols   int    `json:"cols"`
+	Rows   int    `json:"rows"`
+}
+
+// TerminalCloseParams closes a terminal session.
+type TerminalCloseParams struct {
+	TermID string `json:"term_id"`
 }

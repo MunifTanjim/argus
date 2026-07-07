@@ -62,6 +62,19 @@ InteractionKind interactionKindFromWire(String? s) {
   }
 }
 
+enum TerminalExitReason { exited, evicted }
+
+// Absent/unknown reasons mean the attach simply ended, so default to exited
+// (mirrors the node's empty-reason == process-exit contract).
+TerminalExitReason terminalExitReasonFromWire(String? s) {
+  switch (s) {
+    case 'evicted':
+      return TerminalExitReason.evicted;
+    default:
+      return TerminalExitReason.exited;
+  }
+}
+
 enum FrontendKind { tmux, vscode, external, unknown }
 
 FrontendKind frontendFromWire(String? s) {

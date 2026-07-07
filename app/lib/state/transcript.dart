@@ -1,8 +1,7 @@
-import 'dart:math';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chunk.dart';
+import '../util/id.dart';
 
 /// Truncates [chunks] to [d.fromIndex] (clamped), then appends [d.chunks].
 /// Mirrors internal/tui/transcript_stream.go applyDelta.
@@ -11,12 +10,7 @@ List<Chunk> applyDelta(List<Chunk> chunks, TranscriptDelta d) {
   return [...chunks.sublist(0, from), ...d.chunks];
 }
 
-final _rng = Random.secure();
-
-String newSubId() {
-  const hex = '0123456789abcdef';
-  return List.generate(16, (_) => hex[_rng.nextInt(16)]).join();
-}
+String newSubId() => newHexId();
 
 class TranscriptState {
   final String? subId;

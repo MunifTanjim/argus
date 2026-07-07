@@ -320,3 +320,28 @@ func TestSetOption(t *testing.T) {
 		t.Fatalf("status = %q, want \"off\"", strings.TrimSpace(out))
 	}
 }
+
+func TestGroupedMirrorLifecycle(t *testing.T) {
+	c := testClient(t) // isolated -L socket, killed on cleanup
+	ctx := context.Background()
+	// origin session with a shell
+	if _, err := c.NewSession(ctx, NewSessionOpts{Name: "origin", Command: "sh"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.NewGroupedSession(ctx, "_argus-mirror-t1_", "origin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetOption(ctx, "_argus-mirror-t1_", "status", "off"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := c.WindowInfo(ctx, "_argus-mirror-t1_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Panes != 1 || info.ActivePane == "" {
+		t.Fatalf("unexpected window info: %+v", info)
+	}
+	if err := c.KillSession(ctx, "_argus-mirror-t1_"); err != nil {
+		t.Fatal(err)
+	}
+}

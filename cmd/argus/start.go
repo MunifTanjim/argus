@@ -72,6 +72,7 @@ func newStartCmd(version string) *cobra.Command {
 			d := node.New()
 			d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 			d.SetVersion(version)
+			d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 			// Standalone node logs to the configured logger (the embedded node, sharing a
 			// TUI's terminal, stays at its discard default).
 			d.SetLogger(logger.Scoped("node").L)

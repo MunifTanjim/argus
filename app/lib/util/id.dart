@@ -13,3 +13,9 @@ String newId() {
   final ts = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
   return '${ts}_${_counter}_$rand';
 }
+
+/// A cryptographically-random 16-hex-char id for a live stream.
+String newHexId() {
+  const hex = '0123456789abcdef';
+  return List.generate(16, (_) => hex[_rand.nextInt(16)]).join();
+}

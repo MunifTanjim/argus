@@ -49,7 +49,12 @@ func (m model) cacheKeyFor(sessionID string) string {
 }
 
 // newSubID returns a globally-unique subscription id (the gateway keys on it).
-func newSubID() string {
+func newSubID() string { return randID() }
+
+// newTermID returns a globally-unique terminal-attach id (the gateway/node key on it).
+func newTermID() string { return randID() }
+
+func randID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])

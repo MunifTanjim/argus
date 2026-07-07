@@ -66,7 +66,7 @@ func pumpAgents(t *testing.T, m model, cmd tea.Cmd) model {
 
 func openSpawn(t *testing.T, c *spawnPickClient) model {
 	t.Helper()
-	m := newModel(c, false, nil, nil)
+	m := newModel(c, false, nil)
 	_, cmd := m.actListNew(tea.KeyPressMsg{})
 	if cmd == nil {
 		t.Fatal("actListNew returned no command")

@@ -18,11 +18,6 @@ type transcriptMsg struct {
 	chunks []transcript.Chunk
 	err    error
 }
-type captureMsg struct {
-	id     string
-	screen string
-	err    error
-}
 type histProjectsMsg struct {
 	projects []session.HistoryProject
 	err      error
@@ -57,7 +52,6 @@ type spawnAgentsMsg struct {
 
 // Successful spawns surface via registry events; only the error is acted on.
 type spawnResultMsg struct{ err error }
-type screenTickMsg struct{}
 type logTickMsg struct{}    // embedded-node logs changed; wake the render loop
 type spinResumeMsg struct{} // periodic kick that re-arms the list spinner
 type spinTickMsg struct{}   // list spinner animation frame

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +38,9 @@ type Node struct {
 	label   string // human-friendly node name (e.g. hostname)
 	version string // binary version, reported to clients via identify/server.info
 
+	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
+	mirrorSuffix string
+
 	caps api.NodeCapabilities // what this node supports (e.g. spawn = tmux present)
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
@@ -44,14 +48,25 @@ type Node struct {
 	desktopNotify bool      // render incoming push.desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
-	revealFn  func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
-	focusedFn func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
+	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
+	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
+	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
 
 	subsMu sync.Mutex
 	conns  map[api.Notifier]*connSubs // per-connection transcript subscriptions
+
+	termsMu sync.Mutex
+	terms   map[api.Notifier]*connTerms // per-connection live terminals
+
+	sessionTermsMu sync.Mutex
+	sessionTerms   map[string]*term // session id -> live terminal (single viewer per session)
+
+	// openMu serializes terminal.open so evict→setup→register is atomic; without it
+	// two concurrent opens of one session both register, defeating single-viewer.
+	openMu sync.Mutex
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -104,6 +119,28 @@ func (d *Node) SetIdentity(id, label string) {
 // SetVersion records the node's binary version, reported to clients via
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
+
+// SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
+// marker in tmux mirror-session names. Call before Run.
+func (d *Node) SetMirrorAffixes(prefix, suffix string) {
+	d.mirrorPrefix = prefix
+	d.mirrorSuffix = suffix
+}
+
+// mirrorMarker is the reaper's match anchor: every mirror session name contains it.
+const mirrorMarker = "argus-mirror-"
+
+// mirrorName composes the reaper-recognizable mirror session name for a term.
+// The term id is sanitized because tmux session names may not contain ':' or '.'.
+func (d *Node) mirrorName(termID string) string {
+	return d.mirrorPrefix + mirrorMarker + sanitizeTmuxName(termID) + d.mirrorSuffix
+}
+
+// sanitizeTmuxName replaces the characters tmux reserves in target specs so an
+// arbitrary term id is safe to embed in a session name.
+func sanitizeTmuxName(s string) string {
+	return strings.NewReplacer(":", "-", ".", "-").Replace(s)
+}
 
 // ID and Label report the node's identity (see SetIdentity).
 func (d *Node) ID() string      { return d.id }
@@ -191,13 +228,15 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	d := &Node{
 		reg: reg, clients: clients, id: host, label: host,
-		adapterList: adapterList,
-		adapters:    adapterByAgent,
-		discs:       discs,
-		caps:        caps,
-		log:         slog.New(slog.DiscardHandler),
-		pending:     map[string]*pendingDecision{},
-		conns:       map[api.Notifier]*connSubs{},
+		adapterList:  adapterList,
+		adapters:     adapterByAgent,
+		discs:        discs,
+		caps:         caps,
+		log:          slog.New(slog.DiscardHandler),
+		pending:      map[string]*pendingDecision{},
+		conns:        map[api.Notifier]*connSubs{},
+		terms:        map[api.Notifier]*connTerms{},
+		sessionTerms: map[string]*term{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
@@ -206,6 +245,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d.focusedFn = func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) {
 		return c.IsFocused(ctx, paneID)
 	}
+	d.restoreMirrorFn = d.restoreMirror
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
@@ -281,8 +321,16 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		}
 	}()
 
+	// Sweep orphaned mirror sessions left by unclean disconnects before any
+	// scan so stale sessions don't surface as live ones.
+	d.reapMirrors(context.Background())
+
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go d.scan(ctx)
+
+	// Detach any live terminal whose session ends, so a viewer never lands on the
+	// bare shell the agent leaves behind.
+	go d.watchSessionExits(ctx)
 
 	// Close the listener when the context is done so Serve returns.
 	go func() {
