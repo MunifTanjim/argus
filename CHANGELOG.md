@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.8](https://github.com/MunifTanjim/argus/compare/0.0.7...0.0.8) (2026-07-08)
+
+
+### Features
+
+* add command - spawn ([3bde4bc](https://github.com/MunifTanjim/argus/commit/3bde4bc5ef4c9a79dad7d961fd94c892bc658956))
+* auto-close desktop alerter after 30 minutes ([3117e0e](https://github.com/MunifTanjim/argus/commit/3117e0e102dd2f2825f1b098274b363029e554ce))
+
 ## [0.0.7](https://github.com/MunifTanjim/argus/compare/0.0.6...0.0.7) (2026-07-06)
 
 
