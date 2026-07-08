@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chunk.dart';
+import '../state/appearance.dart';
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -29,6 +31,10 @@ Color? _hexColor(String? hex) {
 String _fmtTokens(int n) =>
     n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
 
+// A text item that renders nothing (blank delta).
+bool _isBlankText(Item it) =>
+    it.kind == ItemKind.text && (it.text ?? '').trim().isEmpty;
+
 // RFC3339 -> local HH:MM:SS.
 String _clockTime(String? ts) {
   if (ts == null) return '';
@@ -38,18 +44,22 @@ String _clockTime(String? ts) {
   return '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}';
 }
 
-class ChunkCard extends StatefulWidget {
+class ChunkCard extends ConsumerStatefulWidget {
   const ChunkCard({super.key, required this.detailRef, required this.chunk});
 
   final ToolDetailRef detailRef;
   final Chunk chunk;
 
   @override
-  State<ChunkCard> createState() => _ChunkCardState();
+  ConsumerState<ChunkCard> createState() => _ChunkCardState();
 }
 
-class _ChunkCardState extends State<ChunkCard> {
+class _ChunkCardState extends ConsumerState<ChunkCard> {
   bool _expanded = false;
+  // Revealed tool-call groups, keyed by the item index where each run starts.
+  // Keys stay stable because transcript items are append-only, so a growing
+  // chunk never shifts an earlier group's start index.
+  final Set<int> _revealedToolGroups = {};
 
   @override
   Widget build(BuildContext context) {
@@ -230,14 +240,22 @@ class _ChunkCardState extends State<ChunkCard> {
   }
 
   List<Widget> _expandedBody(Chunk c) {
+    final collapseTools = ref
+        .watch(appearancePrefsProvider.select((p) => p.collapseToolCalls));
+
     final widgets = <Widget>[];
-    for (final it in c.items) {
+    final items = c.items;
+    var i = 0;
+    while (i < items.length) {
+      final it = items[i];
       if (it.kind == ItemKind.text) {
-        if ((it.text ?? '').trim().isEmpty) continue;
-        widgets.add(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: appMarkdown(it.text!),
-        ));
+        if ((it.text ?? '').trim().isNotEmpty) {
+          widgets.add(Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: appMarkdown(it.text!),
+          ));
+        }
+        i++;
       } else if (it.isTeammate && !(it.soleSubagent?.idle ?? false)) {
         // Attributed header (team color) + full message body.
         final tm = it.soleSubagent!;
@@ -262,15 +280,53 @@ class _ChunkCardState extends State<ChunkCard> {
             ],
           ),
         ));
+        i++;
+      } else if (collapseTools && it.kind == ItemKind.tool) {
+        // Fold each maximal run of consecutive tool calls behind one hint,
+        // keeping surrounding prose in reading order. Blank text items are
+        // transparent, so a stray empty delta doesn't split a run in two.
+        final start = i;
+        final group = <Item>[];
+        while (i < items.length &&
+            (items[i].kind == ItemKind.tool || _isBlankText(items[i]))) {
+          if (items[i].kind == ItemKind.tool) group.add(items[i]);
+          i++;
+        }
+        final revealed = _revealedToolGroups.contains(start);
+        if (revealed) {
+          for (final t in group) {
+            widgets.add(ItemRow(item: t, onTap: _drill(t)));
+          }
+        }
+        widgets.add(_toolsToggle(start, group.length, revealed));
       } else {
         widgets.add(ItemRow(item: it, onTap: _drill(it)));
+        i++;
       }
     }
+
     if (widgets.isEmpty) {
-      widgets.add(
-          Text('(no output)', style: _monoDim));
+      widgets.add(Text('(no output)', style: _monoDim));
     }
     return widgets;
+  }
+
+  // Reveal/hide affordance for one collapsed group of tool calls.
+  Widget _toolsToggle(int groupKey, int count, bool revealed) {
+    final noun = count == 1 ? 'tool call' : 'tool calls';
+    final label = revealed ? '▾ hide $noun' : '▸ $count $noun';
+    return InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: () => setState(() {
+        if (!_revealedToolGroups.remove(groupKey)) {
+          _revealedToolGroups.add(groupKey);
+        }
+      }),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Text(label, style: _monoDim),
+      ),
+    );
   }
 
   /// Returns a tap handler for drillable rows, or null for non-drillable ones.

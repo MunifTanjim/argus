@@ -6,6 +6,7 @@ import '../state/gateway.dart';
 import '../state/profiles.dart';
 import '../state/grouping.dart';
 import '../transport/ssh_gateway.dart';
+import 'appearance_screen.dart';
 import 'push_settings_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -37,6 +38,17 @@ class SettingsScreen extends ConsumerWidget {
                 child: SelectableText(
                   creds?.url ?? '(not paired)',
                   style: _monoStyle,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.palette_outlined),
+                title: const Text('Appearance'),
+                subtitle: const Text('Transcript display options'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AppearanceScreen()),
                 ),
               ),
               const SizedBox(height: 24),

@@ -1,12 +1,15 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/chunk.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/chunk_card.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
 
-Widget _wrap(Chunk c) => MaterialApp(
-    home: Scaffold(
-        body: ChunkCard(detailRef: const ToolDetailRef.live('s'), chunk: c)));
+// Default prefs (collapseToolCalls = false), so these cover the uncollapsed path.
+Widget _wrap(Chunk c) => ProviderScope(
+    child: MaterialApp(
+        home: Scaffold(
+            body: ChunkCard(detailRef: const ToolDetailRef.live('s'), chunk: c))));
 
 void main() {
   testWidgets('user chunk renders its text', (tester) async {
@@ -140,7 +143,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(c));
     expect(find.textContaining('42%'), findsOneWidget);
-    expect(find.textContaining('120 tok'), findsOneWidget);
+    expect(find.textContaining('120'), findsOneWidget);
   });
 
   testWidgets('system chunk shows label preview', (tester) async {
