@@ -5,25 +5,37 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
+// testSocketSeq keeps each test client's tmux socket unique, so -count and
+// parallel runs don't race KillServer against the next session's new-session.
+var testSocketSeq atomic.Uint64
+
 // newTestClient returns a Client on a throwaway tmux socket, killed at test end.
 // Skips if tmux is not installed.
 func newTestClient(t *testing.T) *tmux.Client {
+	c, _ := newTestClientSocket(t)
+	return c
+}
+
+// newTestClientSocket also returns the unique socket name, for tests that shell
+// out to tmux directly.
+func newTestClientSocket(t *testing.T) (*tmux.Client, string) {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
 	}
-	socket := "argus-test-" + t.Name()
+	socket := fmt.Sprintf("argus-test-%s-%d", t.Name(), testSocketSeq.Add(1))
 	c := tmux.New(socket)
 	t.Cleanup(func() {
 		_ = c.KillServer(context.Background())
 	})
-	return c
+	return c, socket
 }
 
 func TestSetupAndRestoreMirror(t *testing.T) {
@@ -54,9 +66,8 @@ func TestSetupAndRestoreMirror(t *testing.T) {
 // TestSetupMirror_MultiWindow verifies that setupMirror targets the agent pane's
 // window (not the origin session's currently active window) in a multi-window session.
 func TestSetupMirror_MultiWindow(t *testing.T) {
-	c := newTestClient(t)
+	c, socket := newTestClientSocket(t)
 	ctx := context.Background()
-	socket := fmt.Sprintf("argus-test-%s", t.Name())
 
 	// Create origin session; first pane lands in the server's base-index window.
 	firstPane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
@@ -132,7 +143,7 @@ func TestSetupMirror_MultiWindow(t *testing.T) {
 // TestLockdownMirror verifies setupMirror sets prefix=None, mouse=off, and
 // key-table=argus-locked, so a tmux prefix reaches the agent pane as literal input.
 func TestLockdownMirror(t *testing.T) {
-	c := newTestClient(t)
+	c, socket := newTestClientSocket(t)
 	ctx := context.Background()
 	pane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
 	if err != nil {
@@ -151,9 +162,6 @@ func TestLockdownMirror(t *testing.T) {
 	}
 	t.Cleanup(func() { d.restoreMirror(c, m) })
 
-	// Query the mirror session's effective options. newTestClient uses socket
-	// "argus-test-<t.Name()>" so we can invoke tmux directly.
-	socket := "argus-test-" + t.Name()
 	out, err := exec.Command("tmux", "-L", socket, "show-options", "-t", m.name).CombinedOutput()
 	if err != nil {
 		t.Fatalf("show-options: %v: %s", err, out)
