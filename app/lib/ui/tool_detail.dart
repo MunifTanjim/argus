@@ -78,7 +78,7 @@ Widget toolDetailBody(Item item) {
     case 'ExitPlanMode':
       return _generic(item, resultLang: 'markdown');
     case 'Skill':
-      return _generic(item, resultLang: 'markdown');
+      return _skill(item);
     default:
       return _generic(item);
   }
@@ -92,6 +92,23 @@ Widget _generic(Item it, {String? resultLang}) =>
       ],
       _resultSection(it, lang: resultLang),
     ]);
+
+Widget _skill(Item it) {
+  final name = toolInputStr(_input(it)['skill']);
+  final result = it.result ?? '';
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    _label('Skill'),
+    if (name.isNotEmpty)
+      _header(name)
+    else if ((it.toolInput ?? '').isNotEmpty)
+      codeBlock(it.toolInput!),
+    if (result.isNotEmpty) ...[
+      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
+      // The loaded skill body is markdown — render it, don't show the source.
+      appMarkdown(result),
+    ],
+  ]);
+}
 
 Widget _bash(Item it) {
   final m = _input(it);
