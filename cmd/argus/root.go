@@ -18,7 +18,7 @@ import (
 func newRootCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "argus",
-		Short:         "Watch and control all your AI coding sessions — from one place",
+		Short:         "Watch and control all your AI agents",
 		Version:       version,
 		Args:          cobra.NoArgs, // no subcommand → run the TUI; reject stray args
 		SilenceUsage:  true,

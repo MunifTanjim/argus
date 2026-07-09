@@ -1,0 +1,287 @@
+/* Brand color: Argus gold. Links use a darker gold in light mode for contrast,
+   the bright logo yellow in dark mode; the solid brand button is yellow with
+   dark text. */
+:root {
+  --vp-c-brand-1: #9a6b00;
+  --vp-c-brand-2: #855c00;
+  --vp-c-brand-3: #f5b301;
+  --vp-c-brand-soft: rgba(245, 179, 1, 0.14);
+
+  --vp-button-brand-bg: #f5b301;
+  --vp-button-brand-hover-bg: #ffbf1a;
+  --vp-button-brand-active-bg: #e0a300;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-text: #1a1a1a;
+  --vp-button-brand-hover-text: #1a1a1a;
+  --vp-button-brand-active-text: #1a1a1a;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #f5b301, #ffd257);
+}
+
+.dark {
+  --vp-c-brand-1: #f5b301;
+  --vp-c-brand-2: #ffc21f;
+  --vp-c-brand-3: #f5b301;
+  --vp-c-brand-soft: rgba(245, 179, 1, 0.16);
+}
+
+.VPHero .actions .action .VPButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Interactive showcase under the hero: TUI in front, mobile peeking behind.
+   Click a pane to swap which is in front. */
+.showcase {
+  max-width: 560px;
+  margin: 0 auto 8px;
+  padding: 0 16px 32px;
+  transition: max-width 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.showcase.zoomed {
+  max-width: 1040px;
+}
+
+.showcase-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+/* Zoom affordance: whole thing invites a click when compact. */
+.showcase:not(.zoomed) .pane {
+  cursor: zoom-in;
+}
+.showcase.zoomed .pane.front {
+  cursor: zoom-out;
+}
+.showcase.zoomed .pane.back {
+  cursor: pointer;
+}
+
+.pane {
+  position: absolute;
+  top: 50%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1),
+    filter 0.55s ease;
+}
+
+.pane video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: inherit;
+}
+
+.pane:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 4px;
+}
+
+/* Terminal UI: wide, anchored left. */
+.pane.tui {
+  left: 0;
+  width: 78%;
+  border: 1px solid var(--vp-c-divider);
+}
+
+.pane.tui.front {
+  transform: translateY(-50%) rotate(0) scale(1);
+  z-index: 3;
+}
+
+.pane.tui.back {
+  transform: translateY(-50%) translateX(-3%) rotate(-5deg) scale(0.9);
+  z-index: 1;
+  filter: brightness(0.62);
+}
+
+/* Mobile app: tall phone, anchored right, peeking from behind. */
+.pane.mobile {
+  right: 0;
+  width: 20%;
+}
+
+.pane.mobile.back {
+  transform: translateY(-50%) rotate(8deg) scale(1);
+  z-index: 1;
+  filter: brightness(0.85);
+}
+
+.pane.mobile.front {
+  transform: translateY(-50%) translateX(-28%) rotate(0) scale(1.25);
+  z-index: 3;
+}
+
+/* Nudge the back pane on hover to hint it's clickable. */
+.pane.back:hover {
+  filter: brightness(1);
+}
+
+/* Narrow screens: keep the overlapping stack and the front/back swap, but center
+   both panes and let the TUI grow to 95%. The portrait phone peeks from the
+   top/bottom (and tilted corners) behind the wide TUI. */
+@media (max-width: 640px) {
+  .showcase,
+  .showcase.zoomed {
+    max-width: 100%;
+    padding: 0 8px 28px;
+  }
+
+  /* Taller stage gives the portrait phone room to grow when focused, while still
+     containing it (no spill onto the hero above or the feature cards below). */
+  .showcase-stage {
+    aspect-ratio: 4 / 5;
+  }
+
+  /* Center both panes horizontally (per-pane selectors to override the
+     desktop .pane.tui/.pane.mobile left/right anchors — same specificity). */
+  .pane.tui {
+    width: 95%;
+    left: 50%;
+  }
+  .pane.tui.front {
+    transform: translate(-50%, -50%) rotate(0) scale(1);
+  }
+  .pane.tui.back {
+    transform: translate(-50%, -50%) rotate(-3deg) scale(0.94);
+  }
+
+  .pane.mobile {
+    width: 40%;
+    left: 50%;
+    right: auto;
+  }
+  .pane.mobile.back {
+    transform: translate(-50%, -50%) rotate(6deg) scale(1);
+  }
+  .pane.mobile.front {
+    transform: translate(-50%, -50%) rotate(0) scale(1.3);
+  }
+}
+
+.VPHero .actions .action:not(:first-child) .VPButton::before {
+  content: "";
+  width: 1.1em;
+  height: 1.1em;
+  background-color: currentColor;
+  -webkit-mask: var(--icon) no-repeat center / contain;
+  mask: var(--icon) no-repeat center / contain;
+}
+
+.VPHero .actions .action .VPButton[href="/getting-started/installation"] {
+  --icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' x2='12' y1='15' y2='3'/></svg>");
+}
+
+.VPHero .actions .action .VPButton[href*="github.com"] {
+  --icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23000' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/></svg>");
+}
+
+.VPHero .actions .action .VPButton[href*="buymeacoffee"] {
+  --icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/></svg>");
+}
+
+/* Demo videos embedded in guide pages. */
+.demo-video {
+  margin: 24px 0;
+}
+.demo-video video {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.demo-video figcaption {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+}
+
+/* Portrait (phone) recordings: cap to a phone-sized column and center, so the
+   tall video doesn't stretch the full content width. */
+.demo-video.portrait video {
+  width: auto;
+  max-width: 300px;
+  margin-inline: auto;
+}
+
+/* Respect reduced-motion: drop the showcase swap/zoom animation (videos are
+   also left paused by the components' scripts). */
+@media (prefers-reduced-motion: reduce) {
+  .pane,
+  .showcase {
+    transition: none !important;
+  }
+}
+
+/* Homepage "three scales" flow: Local → Fleet → Pocket. */
+.scales {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin: 24px 0 8px;
+}
+.scale {
+  flex: 1;
+  display: block;
+  padding: 22px 20px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  text-decoration: none !important;
+  color: inherit !important;
+  transition:
+    border-color 0.25s ease,
+    transform 0.25s ease;
+}
+.scale:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-3px);
+}
+.scale svg {
+  width: 28px;
+  height: 28px;
+  color: #f5b301;
+}
+.scale h3 {
+  margin: 12px 0 6px;
+  border: 0;
+  padding: 0;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.scale p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+.scale-arrow {
+  display: flex;
+  align-items: center;
+  font-size: 22px;
+  color: var(--vp-c-text-3);
+}
+@media (max-width: 640px) {
+  .scales {
+    flex-direction: column;
+  }
+  .scale-arrow {
+    justify-content: center;
+    transform: rotate(90deg);
+  }
+}

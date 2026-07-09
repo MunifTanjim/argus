@@ -1,12 +1,14 @@
 import { defineConfig } from "vitepress";
 
+const hostname = "https://argus.muniftanjim.dev";
+
 export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
   title: "Argus",
   description:
-    "Watch and control all your AI coding sessions — from one place.",
+    "Watch and control all your AI agents.",
 
   head: [
     [
@@ -19,7 +21,35 @@ export default defineConfig({
   ],
 
   sitemap: {
-    hostname: "https://argus.muniftanjim.dev",
+    hostname,
+  },
+
+  transformHead({ pageData, siteData }) {
+    const image = `${hostname}/og.png`;
+    const isHome = pageData.frontmatter.layout === "home";
+    const raw = (pageData.frontmatter.title as string) || pageData.title;
+    const title = raw && !isHome ? `${raw} | Argus` : "Argus";
+    const description =
+      (pageData.frontmatter.description as string) || siteData.description;
+    const path = pageData.relativePath
+      .replace(/(^|\/)index\.md$/, "$1")
+      .replace(/\.md$/, "");
+    const url = `${hostname}/${path}`;
+    return [
+      ["meta", { property: "og:type", content: "website" }],
+      ["meta", { property: "og:site_name", content: "Argus" }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:image", content: image }],
+      ["meta", { property: "og:image:width", content: "1200" }],
+      ["meta", { property: "og:image:height", content: "630" }],
+      ["meta", { property: "og:image:alt", content: "Argus" }],
+      ["meta", { name: "twitter:card", content: "summary_large_image" }],
+      ["meta", { name: "twitter:title", content: title }],
+      ["meta", { name: "twitter:description", content: description }],
+      ["meta", { name: "twitter:image", content: image }],
+    ];
   },
 
   themeConfig: {
@@ -56,10 +86,28 @@ export default defineConfig({
         icon: "github",
         link: "https://github.com/MunifTanjim/argus",
       },
+      {
+        icon: "discord",
+        link: "https://go.muniftanjim.dev/discord",
+      },
+      {
+        icon: "buymeacoffee",
+        link: "https://buymeacoffee.com/muniftanjim",
+      },
+      {
+        icon: "patreon",
+        link: "https://www.patreon.com/muniftanjim",
+      },
     ],
 
     editLink: {
       pattern: "https://github.com/MunifTanjim/argus/edit/main/docs/:path",
+    },
+
+    footer: {
+      message:
+        'Released under the <a href="https://github.com/MunifTanjim/argus/blob/main/LICENSE">MIT License</a>. · <a href="/privacy">Privacy</a>',
+      copyright: "© 2026 Munif Tanjim",
     },
 
     search: {

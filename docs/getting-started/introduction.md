@@ -1,6 +1,6 @@
 # Introduction
 
-**Watch and control all your AI coding sessions — from one place.**
+**Watch and control all your AI agents.**
 
 Run more than one AI coding agent and they scatter across tmux panes and
 machines. Argus pulls them into one view: which are working, which are stuck on a

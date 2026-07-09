@@ -5,6 +5,8 @@ mirrors the TUI — sessions, status, transcripts, live screen, prompts,
 history — and adds **Push Notification**: it pings you the moment a session needs
 you (a prompt, a question, a finished turn) **even when backgrounded or killed**.
 
+<DemoVideo src="/screenshots/demo-app.mp4" alt="Argus Android app — sessions, transcript, and history in your pocket" portrait />
+
 ## Install
 
 The app is in **Closed Testing** on Google Play — anyone can join:
