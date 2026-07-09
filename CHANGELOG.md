@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.9](https://github.com/MunifTanjim/argus/compare/0.0.8...0.0.9) (2026-07-09)
+
+
+### Features
+
+* **docs:** homepage tui/app showcase and revamp ([a46b12c](https://github.com/MunifTanjim/argus/commit/a46b12c59d242e0895276ed1302694744f7e0926))
+* **tui:** improve layout and spacing ([b8c1bbe](https://github.com/MunifTanjim/argus/commit/b8c1bbe797dcde4f01cfabcd75c452a1bed1a77b))
+* virtual terminal emulator for live screen ([f963ca3](https://github.com/MunifTanjim/argus/commit/f963ca316d0e1e29c2351829136999d49b1e5e59))
+
+
+### Bug Fixes
+
+* **claude:** accept input for new/empty sessions ([02ced2b](https://github.com/MunifTanjim/argus/commit/02ced2bca6709441154015df27975be9e0d21bc8))
+* tweak push notification delivery and ux on cold start ([65a588b](https://github.com/MunifTanjim/argus/commit/65a588b0916c5cd2c7a81e87612b8226d873ea4c))
+
 ## [0.0.8](https://github.com/MunifTanjim/argus/compare/0.0.7...0.0.8) (2026-07-08)
 
 
