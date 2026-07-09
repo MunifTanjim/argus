@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/session.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import 'history_screen.dart';
@@ -19,18 +20,34 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // A tap can set the pending session before this mounts (cold launch from a
+    // notification); ref.listen only sees later changes, so open it once here.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPending());
+  }
+
+  // Deep-link a tapped notification's session. Keep the request until its
+  // session is actually known, so a cold-launch tap opens once the list is
+  // fetched rather than being dropped while the list is still empty.
+  void _openPending() {
+    if (!mounted) return;
+    final id = ref.read(pendingPushSessionProvider);
+    if (id == null) return;
+    final session = ref.read(sessionsProvider)[id];
+    if (session == null) return;
+    ref.read(pendingPushSessionProvider.notifier).state = null;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SessionDetailScreen(session: session)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Deep-link: when a tapped notification sets a pending session id, open the
-    // session once it's known, then clear the request.
-    ref.listen<String?>(pendingPushSessionProvider, (_, id) {
-      if (id == null) return;
-      final session = ref.read(sessionsProvider)[id];
-      ref.read(pendingPushSessionProvider.notifier).state = null;
-      if (session == null) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => SessionDetailScreen(session: session)),
-      );
-    });
+    // Open on a new tap, and re-check when the session list arrives for a tap
+    // that pointed at a not-yet-known session.
+    ref.listen<String?>(pendingPushSessionProvider, (_, __) => _openPending());
+    ref.listen<Map<String, Session>>(sessionsProvider, (_, __) => _openPending());
 
     final tabs = [
       const SessionListScreen(),

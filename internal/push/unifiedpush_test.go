@@ -1,6 +1,9 @@
 package push
 
 import (
+	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/json"
 	"testing"
 )
@@ -27,6 +30,45 @@ func TestEncodePayloadStampsID(t *testing.T) {
 	}
 	if got.Title != "argus" || got.Body != "hi" || got.Data["session_id"] != "s1" {
 		t.Errorf("payload fields lost: %+v", got)
+	}
+}
+
+// TestBuildRequestSetsDeliveryHeaders ensures every POST carries TTL and a high
+// Urgency, so the embedded-FCM proxy sends high-priority FCM that Doze won't batch.
+func TestBuildRequestSetsDeliveryHeaders(t *testing.T) {
+	u := NewUnifiedPushSender(nil)
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	authSecret := make([]byte, 16)
+	if _, err := rand.Read(authSecret); err != nil {
+		t.Fatalf("auth secret: %v", err)
+	}
+	cases := []struct {
+		name   string
+		target Target
+	}{
+		{"plain endpoint", Target{Endpoint: "https://push.example/x"}},
+		{"web push", Target{
+			Endpoint: "https://push.example/x",
+			P256dh:   b64.EncodeToString(key.PublicKey().Bytes()),
+			Auth:     b64.EncodeToString(authSecret),
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := u.buildRequest(context.Background(), tc.target, []byte(`{"id":"x"}`))
+			if err != nil {
+				t.Fatalf("buildRequest: %v", err)
+			}
+			if got := req.Header.Get("TTL"); got != unifiedPushTTL {
+				t.Errorf("TTL = %q, want %q", got, unifiedPushTTL)
+			}
+			if got := req.Header.Get("Urgency"); got != unifiedPushUrgency {
+				t.Errorf("Urgency = %q, want %q", got, unifiedPushUrgency)
+			}
+		})
 	}
 }
 

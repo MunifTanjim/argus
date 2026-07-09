@@ -17,6 +17,10 @@ import (
 // a TTL header and reject the request without one.
 const unifiedPushTTL = "1800"
 
+// unifiedPushUrgency maps to FCM priority; "high" wakes the device immediately
+// instead of letting Doze batch the delivery.
+const unifiedPushUrgency = "high"
+
 // messageID returns a random per-delivery id stamped into every payload so the
 // client can dedup replays: the UnifiedPush Android plugin buffers recent events
 // and re-emits them (same id) to a freshly attached engine on Activity relaunch.
@@ -89,6 +93,7 @@ func (u *UnifiedPushSender) buildRequest(ctx context.Context, t Target, payload 
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("TTL", unifiedPushTTL)
+		req.Header.Set("Urgency", unifiedPushUrgency)
 		return req, nil
 	}
 
@@ -103,6 +108,7 @@ func (u *UnifiedPushSender) buildRequest(ctx context.Context, t Target, payload 
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Content-Encoding", "aes128gcm")
 	req.Header.Set("TTL", unifiedPushTTL)
+	req.Header.Set("Urgency", unifiedPushUrgency)
 	if u.vapid != nil {
 		if auth, verr := u.vapid.authHeader(t.Endpoint, time.Now()); verr == nil {
 			req.Header.Set("Authorization", auth)
