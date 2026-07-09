@@ -19,6 +19,11 @@ func ptyBytesFor(msg tea.KeyPressMsg) []byte {
 	if msg.Code == tea.KeyEnter && msg.Mod&(tea.ModAlt|tea.ModShift) != 0 {
 		return []byte("\x1b\r")
 	}
+	// Modified cursor/nav keys (Ctrl/Shift/Alt+Home/End/arrows/PgUp…). Matched on
+	// Code+Mod before the string switch, which only sees the bare keys.
+	if b := modifiedNavSeq(msg); b != nil {
+		return b
+	}
 	s := msg.String()
 	switch s {
 	case "enter":
@@ -82,6 +87,45 @@ var fnKeySeqs = map[int]string{
 	1: "\x1bOP", 2: "\x1bOQ", 3: "\x1bOR", 4: "\x1bOS",
 	5: "\x1b[15~", 6: "\x1b[17~", 7: "\x1b[18~", 8: "\x1b[19~",
 	9: "\x1b[20~", 10: "\x1b[21~", 11: "\x1b[23~", 12: "\x1b[24~",
+}
+
+// Cursor keys encode a held modifier as CSI 1;<param><final>; the ~-style nav
+// keys as CSI <num>;<param>~ (xterm). param = 1 + shift(1) + alt(2) + ctrl(4).
+var cursorFinals = map[rune]byte{
+	tea.KeyUp: 'A', tea.KeyDown: 'B', tea.KeyRight: 'C', tea.KeyLeft: 'D',
+	tea.KeyHome: 'H', tea.KeyEnd: 'F',
+}
+
+var tildeNums = map[rune]int{
+	tea.KeyInsert: 2, tea.KeyDelete: 3, tea.KeyPgUp: 5, tea.KeyPgDown: 6,
+}
+
+// modifiedNavSeq returns the xterm sequence for a cursor/nav key pressed with a
+// Ctrl/Shift/Alt modifier, or nil if msg isn't such a key or holds no relevant
+// modifier (bare keys fall through to the plain-key encoding). This form is what
+// programs expect for Ctrl+Home/End etc.; it applies regardless of DECCKM.
+func modifiedNavSeq(msg tea.KeyPressMsg) []byte {
+	mod := 0
+	if msg.Mod&tea.ModShift != 0 {
+		mod |= 1
+	}
+	if msg.Mod&tea.ModAlt != 0 {
+		mod |= 2
+	}
+	if msg.Mod&tea.ModCtrl != 0 {
+		mod |= 4
+	}
+	if mod == 0 {
+		return nil
+	}
+	param := strconv.Itoa(mod + 1)
+	if final, ok := cursorFinals[msg.Code]; ok {
+		return []byte("\x1b[1;" + param + string(final))
+	}
+	if num, ok := tildeNums[msg.Code]; ok {
+		return []byte("\x1b[" + strconv.Itoa(num) + ";" + param + "~")
+	}
+	return nil
 }
 
 // termOpenedMsg reports the result of a terminal.open request.

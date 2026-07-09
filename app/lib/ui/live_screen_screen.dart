@@ -249,7 +249,7 @@ class _InputBarState extends State<_InputBar> {
 
   void _pressKey(String name) {
     widget.onInput(ptyKeyBytes(name,
-        shift: _shift, alt: _alt, appCursor: widget.appCursorMode()));
+        shift: _shift, alt: _alt, ctrl: _ctrl, appCursor: widget.appCursorMode()));
     _clearMods();
   }
 

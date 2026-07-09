@@ -36,16 +36,57 @@ const _appCursorSeqs = <String, String>{
   'end': '\x1bOF',
 };
 
+// Modified-key encoding: cursor keys use CSI 1;<param><final>; the ~-style nav
+// keys use CSI <num>;<param>~. param = 1 + shift(1) + alt(2) + ctrl(4).
+const _cursorFinals = <String, String>{
+  'up': 'A',
+  'down': 'B',
+  'right': 'C',
+  'left': 'D',
+  'home': 'H',
+  'end': 'F',
+};
+
+const _tildeNums = <String, int>{
+  'insert': 2,
+  'delete': 3,
+  'pgup': 5,
+  'pgdown': 6,
+};
+
+// The xterm sequence for a cursor/nav key held with a modifier ([mod] a nonzero
+// bitmask), or null if [name] isn't such a key. Programs expect this form for
+// Ctrl+Home/End etc., and it applies regardless of DECCKM (app-cursor mode).
+String? _modifiedNavSeq(String name, int mod) {
+  final param = mod + 1;
+  final fin = _cursorFinals[name];
+  if (fin != null) return '\x1b[1;$param$fin';
+  final tildeNum = _tildeNums[name];
+  if (tildeNum != null) return '\x1b[$tildeNum;$param~';
+  return null;
+}
+
 /// Raw PTY bytes for a named key. [shift] affects Tab (back-tab) and Enter;
-/// [alt] affects Enter. [appCursor] emits the SS3 form of the cursor keys
-/// (DECCKM), which full-screen TUIs enable — pass the remote terminal's
-/// `cursorKeysMode`.
+/// [alt] affects Enter. [ctrl]/[shift]/[alt] on a cursor or ~-style nav key emit
+/// the xterm modified form (e.g. Ctrl+Home → CSI 1;5H). [appCursor] emits the SS3
+/// form of the cursor keys (DECCKM), which full-screen TUIs enable — pass the
+/// remote terminal's `cursorKeysMode`.
 List<int> ptyKeyBytes(String name,
-    {bool shift = false, bool alt = false, bool appCursor = false}) {
+    {bool shift = false,
+    bool alt = false,
+    bool ctrl = false,
+    bool appCursor = false}) {
   if (name == 'tab' && shift) return utf8.encode('\x1b[Z');
   // Alt+Enter / Shift+Enter → ESC+CR (meta-Enter): the sequence agent TUIs
   // (Claude Code and other Ink/readline apps) treat as "insert newline".
   if (name == 'enter' && (alt || shift)) return utf8.encode('\x1b\r');
+  // Modified cursor/nav keys take precedence over DECCKM: xterm emits the CSI
+  // form whenever a modifier is held, regardless of cursor-keys mode.
+  final mod = (shift ? 1 : 0) | (alt ? 2 : 0) | (ctrl ? 4 : 0);
+  if (mod != 0) {
+    final seq = _modifiedNavSeq(name, mod);
+    if (seq != null) return utf8.encode(seq);
+  }
   if (appCursor) {
     final app = _appCursorSeqs[name];
     if (app != null) return utf8.encode(app);
