@@ -261,7 +261,7 @@ func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // height h, returning h and the item's [start,end) line range. h matches
 // detailBody's content area so it agrees with ensureDetailVisible.
 func (m model) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
-	_, start, end = m.frameLines(f, m.containerWidth())
+	_, start, end = m.frameLines(f, m.transcriptWidth())
 	h = max(1, m.viewportHeight()-3)
 	return h, start, end, end-start > h
 }
@@ -392,7 +392,10 @@ func (m model) actDetailBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // [start,end) line range of the cursor item (0,0 for a non-AI body frame).
 func (m model) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
 	if f.items == nil {
-		return strings.Split(f.body, "\n"), 0, 0
+		// Flat body (non-AI chunk) has no accent gutter; indent to align with the
+		// breadcrumb/header and the padded session header.
+		body := indentBlock(f.body, strings.Repeat(" ", detailGutter))
+		return strings.Split(body, "\n"), 0, 0
 	}
 	for i, it := range f.items {
 		if i > 0 {
@@ -426,7 +429,7 @@ func (f *detailFrame) detailHeaderText(width int) string {
 
 func (m model) detailBodyHeight(f *detailFrame) int {
 	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
-	if header := f.detailHeaderText(m.containerWidth()); header != "" {
+	if header := f.detailHeaderText(m.transcriptWidth() - detailGutter); header != "" {
 		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
 	}
 	return h
@@ -455,7 +458,7 @@ func itemSpan(i int, first []int, total int) (int, int) {
 }
 
 func (m model) itemAtLine(f *detailFrame, line int) int {
-	first, _ := m.frameItemStarts(f, m.containerWidth())
+	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	idx := 0
 	for i, s := range first {
 		if s <= line {
@@ -469,13 +472,13 @@ func (m model) detailCursorVisible(f *detailFrame) bool {
 	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
 		return false
 	}
-	first, total := m.frameItemStarts(f, m.containerWidth())
+	first, total := m.frameItemStarts(f, m.transcriptWidth())
 	start, end := itemSpan(f.cursor, first, total)
 	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
 }
 
 func (m model) firstVisibleItem(f *detailFrame) int {
-	first, _ := m.frameItemStarts(f, m.containerWidth())
+	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	for i, s := range first {
 		if s >= f.scroll && s < f.scroll+h {
@@ -486,7 +489,7 @@ func (m model) firstVisibleItem(f *detailFrame) int {
 }
 
 func (m model) lastVisibleItem(f *detailFrame) int {
-	first, _ := m.frameItemStarts(f, m.containerWidth())
+	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	last := -1
 	for i, s := range first {
@@ -505,7 +508,7 @@ func (m *model) ensureDetailVisible() {
 	if f == nil || f.items == nil {
 		return
 	}
-	lines, start, end := m.frameLines(f, m.containerWidth())
+	lines, start, end := m.frameLines(f, m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	if start < f.scroll {
 		f.scroll = start
@@ -524,12 +527,12 @@ func (m *model) ensureDetailVisible() {
 }
 
 func (m model) frameMaxScroll(f *detailFrame) int {
-	lines, _, _ := m.frameLines(f, m.containerWidth())
+	lines, _, _ := m.frameLines(f, m.transcriptWidth())
 	bodyH := m.viewportHeight()
-	if crumb := truncateLine(m.detailBreadcrumb(), m.containerWidth()); crumb != "" {
+	if crumb := truncateLine(m.detailBreadcrumb(), m.transcriptWidth()); crumb != "" {
 		bodyH = max(1, bodyH-2)
 	}
-	if header := f.detailHeaderText(m.containerWidth()); header != "" {
+	if header := f.detailHeaderText(m.transcriptWidth() - detailGutter); header != "" {
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
 	if len(lines) <= bodyH {
@@ -567,26 +570,28 @@ func scrollHint(above, below, width int) string {
 // detailBody renders the active frame: breadcrumb + item list sliced to the
 // viewport (a row reserved for the scroll indicator on overflow), centered.
 func (m model) detailBody() string {
-	cw, tw := m.containerWidth(), m.width
+	cw, tw := m.transcriptWidth(), m.width
 	f := m.topFrame()
 	if f == nil {
-		return centerBlock(dimStyle.Render("(nothing to show)"), cw, tw)
+		return centerBlock(dimStyle.Render("(nothing to show)"), m.containerWidth(), tw)
 	}
 	lines, _, _ := m.frameLines(f, cw)
-	crumb := truncateLine(m.detailBreadcrumb(), cw)
+	// Align the breadcrumb/header with item text, which sits past the accent gutter.
+	gutter := strings.Repeat(" ", detailGutter)
+	crumb := truncateLine(m.detailBreadcrumb(), cw-detailGutter)
 	h := m.viewportHeight()
 	bodyH := h
 	prefix := ""
 	if crumb != "" {
-		prefix = crumb + "\n\n"
+		prefix = indentBlock(crumb, gutter) + "\n\n"
 		bodyH = max(1, h-2)
 	}
-	if header := f.detailHeaderText(cw); header != "" {
-		prefix += header + "\n\n"
+	if header := f.detailHeaderText(cw - detailGutter); header != "" {
+		prefix += indentBlock(header, gutter) + "\n\n"
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
 	if len(lines) <= bodyH {
-		return centerBlock(prefix+strings.Join(lines, "\n"), cw, tw)
+		return centerBlock(prefix+strings.Join(lines, "\n"), m.containerWidth(), tw)
 	}
 	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
 	scroll := min(f.scroll, len(lines)-ch)
@@ -596,11 +601,11 @@ func (m model) detailBody() string {
 	end := scroll + ch
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
-	return centerBlock(prefix+body+"\n"+hint, cw, tw)
+	return centerBlock(prefix+body+"\n"+hint, m.containerWidth(), tw)
 }
 
 func (m model) renderDetail(c transcript.Chunk) string {
-	width := m.containerWidth()
+	width := m.transcriptWidth() - detailGutter
 	switch c.Kind {
 	case transcript.ChunkUser:
 		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(c.Timestamp))

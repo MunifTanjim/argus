@@ -35,6 +35,16 @@ func (m model) containerWidth() int {
 	return w
 }
 
+// contentPadX is the right-edge padding for session content (transcript cards and
+// the dock body). The left edge carries the cursor-marker column instead, so
+// content reads flush-left with a marker + 1-cell gap.
+const contentPadX = 2
+
+// transcriptWidth is the card column width: the container minus the right padding.
+// centerBlock renders it against the full container, so on normal terminals the
+// left gutter is 0 (marker at the edge) and the right gutter is contentPadX.
+func (m model) transcriptWidth() int { return max(20, m.containerWidth()-contentPadX) }
+
 // renderMD renders markdown at a wrap width. Caches both the per-width renderer
 // and the output (keyed by width+content) so the refresh re-renders only changes.
 func (m model) renderMD(text string, width int) string {
@@ -182,6 +192,23 @@ func centerBlock(content string, contentWidth, termWidth int) string {
 	return strings.Join(lines, "\n")
 }
 
+// centerLine left-pads a single line so it sits centered in width. No-op when the
+// line already fills width.
+func centerLine(line string, width int) string {
+	pad := (width - lipgloss.Width(line)) / 2
+	if pad <= 0 {
+		return line
+	}
+	return strings.Repeat(" ", pad) + line
+}
+
+// pinFooter stacks body and a width-centered footer, filling the gap with blank
+// lines so the footer lands on the last row of a height-tall viewport.
+func pinFooter(body, footer string, width, height int) string {
+	gap := max(1, height-lipgloss.Height(body))
+	return body + strings.Repeat("\n", gap) + centerLine(footer, width)
+}
+
 // truncateLines caps content to maxLines, returning the text and hidden count.
 func truncateLines(content string, maxLines int) (string, int) {
 	lines := strings.Split(content, "\n")
@@ -220,7 +247,7 @@ func (m model) renderChunk(i int, selected bool) string {
 }
 
 func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -232,7 +259,7 @@ func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
 	cw := max(cardW-6, 20)
 
 	sel := selIndicator(selected)
-	header := sel + "  " + m.aiHeader(c, cardW)
+	header := sel + m.aiHeader(c, cardW)
 	body := m.aiBody(c, cw)
 
 	borderColor := ColorBorder
@@ -246,7 +273,7 @@ func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
 		Padding(0, 2).
 		Render(body)
 
-	return header + "\n" + indentBlock(card, sel+"  ")
+	return header + "\n" + indentBlock(card, sel)
 }
 
 // assistantBrand uses m.history.openAgent in history mode because the live
@@ -411,7 +438,7 @@ func toolPreview(it transcript.Item) string {
 }
 
 func (m model) userBubbleWidth() int {
-	return max(m.containerWidth()*3/4, 20)
+	return max(m.transcriptWidth()*3/4, 20)
 }
 
 func (m model) userBubbleInner() int {
@@ -419,7 +446,7 @@ func (m model) userBubbleInner() int {
 }
 
 func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	maxBubble := m.userBubbleWidth()
 	sel := selIndicator(selected)
 	expandable := m.chunkExpandable(c)
@@ -461,7 +488,7 @@ func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string 
 }
 
 func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -494,11 +521,11 @@ func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
 		Padding(0, 2).
 		Render(body)
 
-	return indentBlock(card, selIndicator(selected)+"  ")
+	return indentBlock(card, selIndicator(selected))
 }
 
 func (m model) renderShellCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -507,7 +534,7 @@ func (m model) renderShellCard(c transcript.Chunk, selected, accent bool) string
 	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
 
 	sel := selIndicator(selected)
-	header := sel + "  " + m.shellHeader(c, cardW)
+	header := sel + m.shellHeader(c, cardW)
 	body := m.shellBody(c, iw)
 
 	borderColor := ColorBorder
@@ -521,7 +548,7 @@ func (m model) renderShellCard(c transcript.Chunk, selected, accent bool) string
 		Padding(0, 2).
 		Render(body)
 
-	return header + "\n" + indentBlock(card, sel+"  ")
+	return header + "\n" + indentBlock(card, sel)
 }
 
 func (m model) shellHeader(c transcript.Chunk, width int) string {
@@ -561,7 +588,7 @@ func (m model) shellBody(c transcript.Chunk, iw int) string {
 }
 
 func (m model) renderSkillCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -570,7 +597,7 @@ func (m model) renderSkillCard(c transcript.Chunk, selected, accent bool) string
 	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
 
 	sel := selIndicator(selected)
-	header := sel + "  " + m.skillHeader(c, cardW)
+	header := sel + m.skillHeader(c, cardW)
 	body := m.skillBody(c, iw)
 
 	borderColor := ColorBorder
@@ -584,7 +611,7 @@ func (m model) renderSkillCard(c transcript.Chunk, selected, accent bool) string
 		Padding(0, 2).
 		Render(body)
 
-	return header + "\n" + indentBlock(card, sel+"  ")
+	return header + "\n" + indentBlock(card, sel)
 }
 
 func (m model) skillHeader(c transcript.Chunk, width int) string {
@@ -611,7 +638,7 @@ func (m model) skillBody(c transcript.Chunk, iw int) string {
 }
 
 func (m model) renderCompact(c transcript.Chunk) string {
-	container := m.containerWidth()
+	container := m.transcriptWidth()
 	text := c.Summary
 	if text == "" {
 		text = "Context compressed"
@@ -633,14 +660,13 @@ func (m model) renderCompact(c transcript.Chunk) string {
 // layoutChunks renders every chunk to display lines, recording each chunk's
 // first line index (for cursor scrolling). A blank separator precedes each card.
 func (m model) layoutChunks() (lines []string, first []int) {
-	container := m.containerWidth()
 	first = make([]int, len(m.transcript.chunks))
 	for i := range m.transcript.chunks {
 		if i > 0 {
 			lines = append(lines, "")
 		}
 		first[i] = len(lines)
-		block := centerBlock(m.renderChunk(i, i == m.transcript.cursor), container, m.width)
+		block := centerBlock(m.renderChunk(i, i == m.transcript.cursor), m.containerWidth(), m.width)
 		lines = append(lines, strings.Split(block, "\n")...)
 	}
 	return lines, first

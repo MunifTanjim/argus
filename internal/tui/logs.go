@@ -36,8 +36,8 @@ func (m model) logsView() string {
 		return ""
 	}
 	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(modeLogs)
-	// Gutter-pad header and footer to line up with the other home tabs, but keep
-	// the log body flush-left at full width (logs read better left-aligned).
+	// Gutter-pad the header to line up with the other home tabs, but keep the log
+	// body flush-left at full width (logs read better left-aligned).
 	cardW := historyWidth(m)
 	gutter := strings.Repeat(" ", max(0, (m.width-cardW)/2))
 	var body string
@@ -54,8 +54,8 @@ func (m model) logsView() string {
 		// Copy only the visible window, not the whole ring, on the render path.
 		body = strings.Join(m.logs.LinesRange(off, avail), "\n")
 	}
-	footer := m.footer(listKeys.TabPrev, logsKeys.Up, logsKeys.Bottom, logsKeys.Back)
-	return gutter + title + "\n\n" + body + "\n\n" + gutter + footer
+	footer := m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back)
+	return pinFooter(gutter+title+"\n\n"+body, footer, m.width, m.height)
 }
 
 func (m model) handleLogsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

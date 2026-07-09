@@ -270,11 +270,11 @@ func (m model) historyProjectsView() string {
 	body := renderCardList(cards, m.history.projCursor, max(1, m.height-4))
 	footer := m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
 		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back)
-	return centerBlock(title+"\n\n"+body+"\n\n"+footer, cardW, m.width)
+	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
 }
 
 func (m model) historySessionsView() string {
-	title := headerStyle.Render("argus · "+m.history.project.Label) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
+	title := headerStyle.Render("argus · history · "+m.history.project.Label) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
 	cardW := historyWidth(m)
 	if m.history.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
@@ -297,7 +297,7 @@ func (m model) historySessionsView() string {
 		binds = append(binds, historySessionsKeys.More)
 	}
 	binds = append(binds, historySessionsKeys.Back)
-	return centerBlock(title+"\n\n"+body+"\n\n"+m.footer(binds...), cardW, m.width)
+	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), m.footer(binds...), m.width, m.height)
 }
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
@@ -319,11 +319,19 @@ func renderCardList(cards []string, cursor, avail int) string {
 }
 
 func (m model) historyTranscriptView() string {
-	header := headerStyle.Render("argus · history") + dimStyle.Render("  "+truncate(m.history.title, 60))
+	parts := []string{"argus", "history"}
+	if lbl := m.history.project.Label; lbl != "" {
+		parts = append(parts, lbl)
+	}
+	header := headerStyle.Render(strings.Join(parts, " · "))
+	if m.history.title != "" {
+		header += dimStyle.Render("  " + truncate(m.history.title, 60))
+	}
+	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	footer := m.footer(transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold,
 		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back)
-	return header + "\n\n" + body + "\n\n" + footer
+	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
 }
 
 // --- row rendering ------------------------------------------------------------

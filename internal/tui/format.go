@@ -332,6 +332,10 @@ func cardBottom(ch cardChrome, bs lipgloss.Style, cardW int, label string, label
 	return bs.Render(ch.bl+strings.Repeat(ch.h, dashN)+" ") + labeled + bs.Render(trail)
 }
 
+// detailGutter is the width accentBlock prepends to each line (bar + space), used
+// to align non-accented detail lines (breadcrumb, header) with item text.
+const detailGutter = 2
+
 func accentBlock(content string, c color.Color, bar string) string {
 	pre := lipgloss.NewStyle().Foreground(c).Render(bar) + " "
 	lines := strings.Split(content, "\n")

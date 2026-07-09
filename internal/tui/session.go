@@ -134,12 +134,12 @@ func (m model) historyBody() string {
 // pending interaction; an unfocused dock collapses to rule + summary line
 // (dockH == 2); only the focused dock expands to the full option panel.
 // Chrome sessionView always draws: header(1) + 2 body-surrounding blanks +
-// footer(1) = 4, plus 1 for the history/dock rule when the dock is present.
+// footer(1) = 4. The history/dock rule is part of dockH, not chrome.
 func (m model) sessionLayout() (historyH, dockH int) {
 	if m.sessionInteraction() == nil {
 		return max(1, m.height-4), 0
 	}
-	avail := max(1, m.height-5) // chrome(4) + history/dock join(1)
+	avail := max(1, m.height-4) // header + 2 surrounding blanks + footer
 	if m.focus != focusDock {
 		return max(1, avail-2), 2
 	}
@@ -194,11 +194,15 @@ func (m model) dockSummaryLine(width int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, " ", hint)
 }
 
+// dockContentWidth is the dock body width after horizontal padding (contentPadX),
+// keeping the dock body aligned with the transcript cards above.
+func (m model) dockContentWidth() int { return max(1, m.containerWidth()-2*contentPadX) }
+
 // dockWidths splits the dock into an option-list column and a preview column.
 // side is false (single full-width column) when there's no preview or the
 // terminal is too narrow to split.
 func (m model) dockWidths() (leftW, rightW int, side bool) {
-	W := m.containerWidth()
+	W := m.dockContentWidth()
 	if m.focusedOptionPreview() == "" {
 		return W, 0, false
 	}
@@ -366,8 +370,20 @@ func windowLines(s string, height, anchor int) string {
 // dock holds focus.
 func (m model) sessionView() string {
 	s := m.sessions[m.selectedID]
-	header := headerStyle.Render("argus · "+s.Tmux.SessionName) +
+	name := s.Name
+	if name == "" {
+		name = s.Tmux.SessionName
+	}
+	parts := []string{"argus"}
+	if s.Repo != "" {
+		parts = append(parts, s.Repo)
+	}
+	if name != "" {
+		parts = append(parts, name)
+	}
+	header := headerStyle.Render(strings.Join(parts, " · ")) +
 		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
+	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 
 	body := m.historyBody()
 	if m.sessionInteraction() != nil {
@@ -379,13 +395,14 @@ func (m model) sessionView() string {
 		rule := lipgloss.NewStyle().Foreground(ruleColor).
 			Render(strings.Repeat("─", m.containerWidth()))
 		// Rule takes one dock line; focused gets the windowed body, unfocused a
-		// single summary line. Centered to align with the transcript above.
-		dockBody := m.dockSummaryLine(m.containerWidth())
+		// single summary line. Body is inset from the rule by contentPadX; centered
+		// to align with the transcript above.
+		dockBody := m.dockSummaryLine(m.dockContentWidth())
 		if m.focus == focusDock {
 			dockBody = m.dockBody(dockH - 1)
 		}
-		dock := rule + "\n" + dockBody
+		dock := rule + "\n" + indentBlock(dockBody, strings.Repeat(" ", contentPadX))
 		body = body + "\n" + centerBlock(dock, m.containerWidth(), m.width)
 	}
-	return header + "\n\n" + body + "\n\n" + m.sessionFooter()
+	return pinFooter(header+"\n\n"+body, m.sessionFooter(), m.width, m.height)
 }

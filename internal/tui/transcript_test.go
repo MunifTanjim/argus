@@ -418,6 +418,7 @@ func TestRenderDetailShell(t *testing.T) {
 
 func TestRenderSkillCard(t *testing.T) {
 	m := testModel()
+	m.width = 160 // wide enough that the source path renders without wrapping
 	c := transcript.Chunk{
 		ID: "sk1", Kind: transcript.ChunkSkill,
 		Text:   "superpowers:brainstorming",

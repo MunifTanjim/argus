@@ -192,9 +192,9 @@ func (m model) listView() string {
 		b.WriteString(StyleAccentBold.Render("Nothing here yet — welcome!") + "\n\n")
 		b.WriteString(StyleSecondary.Render("Start Claude Code in a tmux pane, or press ") +
 			StyleAccentBold.Render("n") +
-			StyleSecondary.Render(" to spawn one right here.") + "\n\n")
-		b.WriteString(m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, listKeys.Quit))
-		return b.String()
+			StyleSecondary.Render(" to spawn one right here."))
+		footer := m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, listKeys.Quit)
+		return pinFooter(b.String(), footer, m.width, m.height)
 	}
 
 	// Populated: centered, scrollable session cards.
@@ -243,8 +243,8 @@ func (m model) listView() string {
 		footer = asstStyle.Render(m.flash)
 	}
 
-	inner := title + "\n\n" + strings.Join(lines, "\n") + "\n\n" + footer
-	return centerBlock(inner, cardW, m.width)
+	block := centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, m.width)
+	return pinFooter(block, footer, m.width, m.height)
 }
 
 // spawnView renders the "new session" flow. List steps (node, dir) render one
@@ -316,7 +316,7 @@ func (m model) spawnView() string {
 		footer = dimStyle.Render("enter launch · shift+enter/ctrl+j newline · esc cancel")
 	}
 
-	return centerBlock(title+"\n\n"+body+"\n\n"+footer, cardW, m.width)
+	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
 }
 
 // spawnChoiceRow renders one selectable node/dir row: cursor marker, label, and
@@ -370,11 +370,10 @@ func (m model) screenView() string {
 		BorderForeground(ColorBorder).
 		Width(cols + 2).
 		Render(strings.Join(lines, "\n"))
-	b.WriteString(box + "\n")
+	b.WriteString(box)
 
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("keys go to the session · ") + m.footer(screenLeave))
-	return b.String()
+	footer := dimStyle.Render("keys go to the session · ") + m.footer(screenLeave)
+	return pinFooter(b.String(), footer, m.width, m.height)
 }
 
 func truncate(s string, n int) string {
