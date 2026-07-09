@@ -41,6 +41,28 @@ void main() {
     test('appCursor leaves delete as CSI', () => expect(ptyKeyBytes('delete', appCursor: true), [27, 91, 51, 126]));
     // Default (no DECCKM) keeps CSI arrows.
     test('default up stays CSI', () => expect(ptyKeyBytes('up'), [27, 91, 65]));
+
+    // Modified cursor/nav keys: xterm CSI encoding. Cursor keys use CSI 1;<mod><final>;
+    // the ~-style nav keys use CSI <num>;<mod>~. mod = 1 + shift(1) + alt(2) + ctrl(4).
+    test('ctrl+home → CSI 1;5H', () => expect(ptyKeyBytes('home', ctrl: true), [27, 91, 49, 59, 53, 72]));
+    test('ctrl+end → CSI 1;5F', () => expect(ptyKeyBytes('end', ctrl: true), [27, 91, 49, 59, 53, 70]));
+    test('ctrl+up → CSI 1;5A', () => expect(ptyKeyBytes('up', ctrl: true), [27, 91, 49, 59, 53, 65]));
+    test('shift+up → CSI 1;2A', () => expect(ptyKeyBytes('up', shift: true), [27, 91, 49, 59, 50, 65]));
+    test('alt+left → CSI 1;3D', () => expect(ptyKeyBytes('left', alt: true), [27, 91, 49, 59, 51, 68]));
+    test('ctrl+shift+end → CSI 1;6F',
+        () => expect(ptyKeyBytes('end', ctrl: true, shift: true), [27, 91, 49, 59, 54, 70]));
+    test('ctrl+delete → CSI 3;5~', () => expect(ptyKeyBytes('delete', ctrl: true), [27, 91, 51, 59, 53, 126]));
+    test('ctrl+insert → CSI 2;5~', () => expect(ptyKeyBytes('insert', ctrl: true), [27, 91, 50, 59, 53, 126]));
+    test('ctrl+pgup → CSI 5;5~', () => expect(ptyKeyBytes('pgup', ctrl: true), [27, 91, 53, 59, 53, 126]));
+    test('ctrl+pgdown → CSI 6;5~', () => expect(ptyKeyBytes('pgdown', ctrl: true), [27, 91, 54, 59, 53, 126]));
+    // All three modifiers together → param 8 (1 + shift(1) + alt(2) + ctrl(4)).
+    test('ctrl+shift+alt+end → CSI 1;8F',
+        () => expect(ptyKeyBytes('end', ctrl: true, shift: true, alt: true), [27, 91, 49, 59, 56, 70]));
+    // The modifier form wins over DECCKM app-cursor mode.
+    test('ctrl+home ignores appCursor',
+        () => expect(ptyKeyBytes('home', ctrl: true, appCursor: true), [27, 91, 49, 59, 53, 72]));
+    // A modifier on a non-nav key is dropped (unchanged behavior).
+    test('ctrl+space stays SP', () => expect(ptyKeyBytes('space', ctrl: true), [32]));
   });
 
   group('ptyTextBytes', () {

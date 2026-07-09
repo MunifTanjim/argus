@@ -261,6 +261,17 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('arming Ctrl then tapping Home sends CSI 1;5H', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    await tester.tap(find.byTooltip('Ctrl')); // arm the one-shot Ctrl modifier
+    await tester.pump();
+    await tester.tap(find.byTooltip('Home'));
+    await tester.pump();
+    expect(repo.sends.last, [27, 91, 49, 59, 53, 72]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('tapping PageUp sends the pgup escape sequence', (tester) async {
     final repo = _FakeTerminalRepo();
     await _pump(tester, repo);

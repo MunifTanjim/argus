@@ -87,16 +87,33 @@ func TestPtyBytesFor(t *testing.T) {
 		{"alt+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}, []byte("\x1b\r")},
 		{"shift+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}, []byte("\x1b\r")},
 		{"plain enter stays CR", tea.KeyPressMsg{Code: tea.KeyEnter}, []byte{'\r'}},
+		// Modified cursor/nav keys: xterm CSI encoding. Cursor keys use CSI 1;<mod><final>;
+		// the ~-style nav keys use CSI <num>;<mod>~. mod = 1 + shift(1) + alt(2) + ctrl(4).
+		{"ctrl+home", tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl}, []byte("\x1b[1;5H")},
+		{"ctrl+end", tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl}, []byte("\x1b[1;5F")},
+		{"ctrl+up", tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl}, []byte("\x1b[1;5A")},
+		{"shift+home", tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModShift}, []byte("\x1b[1;2H")},
+		{"alt+left", tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt}, []byte("\x1b[1;3D")},
+		{"ctrl+shift+end", tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl | tea.ModShift}, []byte("\x1b[1;6F")},
+		{"ctrl+delete", tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModCtrl}, []byte("\x1b[3;5~")},
+		{"ctrl+insert", tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl}, []byte("\x1b[2;5~")},
+		{"ctrl+pgup", tea.KeyPressMsg{Code: tea.KeyPgUp, Mod: tea.ModCtrl}, []byte("\x1b[5;5~")},
+		{"ctrl+pgdown", tea.KeyPressMsg{Code: tea.KeyPgDown, Mod: tea.ModCtrl}, []byte("\x1b[6;5~")},
+		// All three modifiers together → param 8 (1 + shift(1) + alt(2) + ctrl(4)).
+		{"ctrl+shift+alt+end", tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl | tea.ModShift | tea.ModAlt}, []byte("\x1b[1;8F")},
+		{"bare home stays CSI H", tea.KeyPressMsg{Code: tea.KeyHome}, []byte("\x1b[H")},
+		{"bare end stays CSI F", tea.KeyPressMsg{Code: tea.KeyEnd}, []byte("\x1b[F")},
+		// shift+up is a modified cursor key now, not an unencoded key.
+		{"shift+up", tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}, []byte("\x1b[1;2A")},
+		// A modifier on a non-nav key isn't caught by modifiedNavSeq; ctrl+a still
+		// falls through to the ctrl-chord branch.
+		{"ctrl+a falls through to chord", tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}, []byte{0x01}},
 	}
 	for _, tc := range cases {
 		got := ptyBytesFor(tc.msg)
 		if string(got) != string(tc.want) {
 			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
 		}
-	}
-	// A key with no PTY encoding yields nil.
-	if got := ptyBytesFor(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}); got != nil {
-		t.Errorf("shift+up: got %q want nil", got)
 	}
 }
 
