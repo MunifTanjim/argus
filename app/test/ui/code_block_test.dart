@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/code_block.dart';
 
@@ -100,5 +101,81 @@ void main() {
     await tester.tap(find.text('tap'));
     await tester.pump();
     expect(find.text('Copied'), findsOneWidget);
+  });
+
+  testWidgets('standalone codeBlock is wrapped in a SelectionArea',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: codeBlock('selectable code', lang: 'bash'))));
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('appMarkdown wraps prose in a SelectionArea', (tester) async {
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: appMarkdown('some **prose** here'))));
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('fenced code inside markdown does not nest a SelectionArea',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: appMarkdown('intro text\n\n```bash\necho hi\n```\n'))));
+    // Exactly one: the outer appMarkdown area. The nested code block must use
+    // selectable:false, so it adds no SelectionArea of its own.
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('tapping a markdown link opens the actions sheet', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: appMarkdown('see [docs](https://argus.muniftanjim.dev)'))));
+    await tester.tap(find.text('docs'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('https://argus.muniftanjim.dev'), findsOneWidget);
+    expect(find.text('Open link'), findsOneWidget);
+    expect(find.text('Copy link'), findsOneWidget);
+  });
+
+  testWidgets('Open link in the sheet calls openExternalUrl', (tester) async {
+    final tapped = <String>[];
+    final original = openExternalUrl;
+    openExternalUrl = (url) async => tapped.add(url);
+    addTearDown(() => openExternalUrl = original);
+
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: appMarkdown('see [docs](https://argus.muniftanjim.dev)'))));
+    await tester.tap(find.text('docs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open link'));
+    await tester.pumpAndSettle();
+
+    expect(tapped, ['https://argus.muniftanjim.dev']);
+  });
+
+  testWidgets('Copy link in the sheet copies the url to the clipboard',
+      (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied.add((call.arguments as Map)['text'] as String);
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: appMarkdown('see [docs](https://argus.muniftanjim.dev)'))));
+    await tester.tap(find.text('docs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copy link'));
+    await tester.pumpAndSettle();
+
+    expect(copied, ['https://argus.muniftanjim.dev']);
   });
 }
