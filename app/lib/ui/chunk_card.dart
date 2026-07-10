@@ -31,6 +31,14 @@ Color? _hexColor(String? hex) {
 String _fmtTokens(int n) =>
     n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
 
+// Formats milliseconds: 71000 -> "1m11s", 12000 -> "12s", 3500 -> "3.5s".
+String _fmtDuration(int ms) {
+  final secs = ms / 1000;
+  if (secs < 10) return '${secs.toStringAsFixed(1)}s';
+  final s = secs.round();
+  return s < 60 ? '${s}s' : '${s ~/ 60}m${s % 60}s';
+}
+
 // A text item that renders nothing (blank delta).
 bool _isBlankText(Item it) =>
     it.kind == ItemKind.text && (it.text ?? '').trim().isEmpty;
@@ -158,7 +166,7 @@ class _ChunkCardState extends ConsumerState<ChunkCard> {
           style: _mono.copyWith(color: _ctxColor(c.contextPct))));
     }
     if (c.durationMs > 0) {
-      right.add(Text('${(c.durationMs / 1000).toStringAsFixed(1)}s', style: _monoDim));
+      right.add(Text(_fmtDuration(c.durationMs), style: _monoDim));
     }
 
     if (left.isEmpty && right.isEmpty) return Text('response', style: _monoDim);
