@@ -2,16 +2,16 @@ package main
 
 import "testing"
 
-func TestUpgradeAssetPattern(t *testing.T) {
+func TestUpgradeAssetName(t *testing.T) {
 	tests := []struct {
-		goos, goarch, want string
+		tag, goos, goarch, want string
 	}{
-		{"linux", "amd64", "argus-*-linux-amd64"},
-		{"darwin", "arm64", "argus-*-darwin-arm64"},
+		{"0.0.9", "linux", "amd64", "argus-0.0.9-linux-amd64"},
+		{"0.0.9", "darwin", "arm64", "argus-0.0.9-darwin-arm64"},
 	}
 	for _, tt := range tests {
-		if got := upgradeAssetPattern(tt.goos, tt.goarch); got != tt.want {
-			t.Errorf("upgradeAssetPattern(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
+		if got := upgradeAssetName(tt.tag, tt.goos, tt.goarch); got != tt.want {
+			t.Errorf("upgradeAssetName(%q, %q, %q) = %q, want %q", tt.tag, tt.goos, tt.goarch, got, tt.want)
 		}
 	}
 }

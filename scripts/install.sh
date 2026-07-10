@@ -42,28 +42,65 @@ check_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
+fetch() {
+  local url="$1" output="${2:-}"
+  if check_command curl; then
+    if [ -n "$output" ]; then
+      curl -fsSL "$url" -o "$output"
+    else
+      curl -fsSL "$url"
+    fi
+  elif check_command wget; then
+    if [ -n "$output" ]; then
+      wget -qO "$output" "$url"
+    else
+      wget -qO- "$url"
+    fi
+  else
+    error "curl or wget is required but neither is installed."
+  fi
+}
+
+latest_tag() {
+  if check_command gh; then
+    gh release view --repo "$REPO" --json tagName --jq .tagName
+  else
+    fetch "https://api.github.com/repos/${REPO}/releases/latest" |
+      grep '"tag_name"' | head -n1 | cut -d'"' -f4
+  fi
+}
+
 main() {
   info "Installing $BINARY_NAME..."
 
-  local os arch asset_name install_path
+  local os arch tag asset_name download_url install_path
 
   os="$(detect_os)"
   arch="$(detect_arch)"
 
   info "Detected platform: ${os}-${arch}"
 
-  if ! check_command gh; then
-    error "gh (GitHub CLI) is required but not installed. Install it from https://cli.github.com"
-  fi
-
   mkdir -p "$INSTALL_DIR"
 
-  asset_name="${BINARY_NAME}-*-${os}-${arch}"
   install_path="${INSTALL_DIR}/${BINARY_NAME}"
 
+  tag="$(latest_tag)"
+  [ -n "$tag" ] || error "Failed to resolve latest release tag from ${REPO}."
+
+  info "Latest version: ${tag}"
+
+  asset_name="${BINARY_NAME}-${tag}-${os}-${arch}"
+
   info "Downloading ${asset_name} from ${REPO}..."
-  if ! gh release download --repo "$REPO" --pattern "$asset_name" --output "$install_path" --clobber; then
-    error "Failed to download binary. Please check if the release exists and you have access."
+  if check_command gh; then
+    if ! gh release download "$tag" --repo "$REPO" --pattern "$asset_name" --output "$install_path" --clobber; then
+      error "Failed to download binary. Please check if the release exists and you have access."
+    fi
+  else
+    download_url="https://github.com/${REPO}/releases/download/${tag}/${asset_name}"
+    if ! fetch "$download_url" "$install_path"; then
+      error "Failed to download binary. Please check if the release exists and you have access."
+    fi
   fi
 
   chmod +x "$install_path"

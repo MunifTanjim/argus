@@ -73,7 +73,7 @@ Install on macOS or Linux, wire up hooks, and watch:
 
 ```sh
 # install the latest release
-gh api -H "Accept: application/vnd.github.raw" repos/MunifTanjim/argus/contents/scripts/install.sh | bash
+curl -fsSL https://argus.muniftanjim.dev/install.sh | bash
 
 # let Argus track each session's status
 argus hooks install

@@ -18,22 +18,18 @@ Argus watches whichever of these you have installed — you don't need all three
 ## Install Pre-built Binary
 
 The script downloads the right binary for your platform from the latest
-[GitHub release](https://github.com/MunifTanjim/argus/releases). It uses the
-[GitHub CLI](https://cli.github.com/) (`gh`):
+[GitHub release](https://github.com/MunifTanjim/argus/releases). It needs only
+`curl` (or `wget`), and uses the [GitHub CLI](https://cli.github.com/) (`gh`)
+instead when it's installed:
 
 ```sh
-# if you don't already have gh
-brew install gh && gh auth login
-```
-
-```sh
-gh api -H "Accept: application/vnd.github.raw" repos/MunifTanjim/argus/contents/scripts/install.sh | bash
+curl -fsSL https://argus.muniftanjim.dev/install.sh | bash
 ```
 
 This installs the binary in `~/.local/bin/argus`. To install elsewhere, set `INSTALL_DIR`:
 
 ```sh
-gh api -H "Accept: application/vnd.github.raw" repos/MunifTanjim/argus/contents/scripts/install.sh | INSTALL_DIR=/usr/local/bin bash
+curl -fsSL https://argus.muniftanjim.dev/install.sh | INSTALL_DIR=/usr/local/bin bash
 ```
 
 Make sure the install directory is on your `PATH`.

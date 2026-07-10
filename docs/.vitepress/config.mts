@@ -1,10 +1,20 @@
+import { copyFileSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
 
 const hostname = "https://argus.muniftanjim.dev";
 
+// Served at the site root so `curl https://argus.muniftanjim.dev/install.sh` works
+const installScriptPath = fileURLToPath(
+  new URL("../../scripts/install.sh", import.meta.url),
+);
+
 export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
+
+  // Local Superpowers scratch (brainstorm/plan notes); not part of the docs site.
+  srcExclude: ["superpowers/**"],
 
   title: "Argus",
   description:
@@ -22,6 +32,24 @@ export default defineConfig({
 
   sitemap: {
     hostname,
+  },
+
+  buildEnd(siteConfig) {
+    copyFileSync(installScriptPath, `${siteConfig.outDir}/install.sh`);
+  },
+
+  vite: {
+    plugins: [
+      {
+        name: "serve-install-script",
+        configureServer(server) {
+          server.middlewares.use("/install.sh", (_req, res) => {
+            res.setHeader("Content-Type", "text/plain");
+            res.end(readFileSync(installScriptPath));
+          });
+        },
+      },
+    ],
   },
 
   transformHead({ pageData, siteData }) {
