@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pairing/gateway_store.dart';
@@ -21,7 +23,21 @@ Future<void> main(List<String> args) async {
   await initUnifiedPush();
   // Headless background launch: handle the push, don't build the UI.
   if (args.contains('--unifiedpush-bg')) return;
+  _registerAssetLicenses();
   runApp(const ProviderScope(child: ArgusApp()));
+}
+
+void _registerAssetLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['JetBrainsMono Nerd Font'],
+      await rootBundle.loadString('assets/fonts/LICENSE-JetBrainsMono'),
+    );
+    yield LicenseEntryWithLineBreaks(
+      const ['Noto Sans Symbols 2'],
+      await rootBundle.loadString('assets/fonts/LICENSE-NotoSansSymbols2'),
+    );
+  });
 }
 
 class ArgusApp extends ConsumerStatefulWidget {

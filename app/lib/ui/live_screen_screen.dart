@@ -15,7 +15,21 @@ import 'ansi_palette.dart';
 const _baseFontSize = 12.0;
 const _minFontSize = 6.0;
 const _maxFontSize = 40.0;
-const _fontFamily = 'monospace';
+// Bundled so terminal glyphs match a desktop terminal regardless of device fonts.
+const _fontFamily = 'JetBrainsMonoNerdFontMono';
+// NotoSansSymbols2 first so media-control symbols (⏺ ⏵ ⏸ …) render as text, not
+// color emoji; emoji last as a fallback. The rest cover CJK.
+const _fontFamilyFallback = <String>[
+  'NotoSansSymbols2',
+  'Noto Sans Mono CJK SC',
+  'Noto Sans Mono CJK TC',
+  'Noto Sans Mono CJK KR',
+  'Noto Sans Mono CJK JP',
+  'Noto Sans Mono CJK HK',
+  'monospace',
+  'Noto Color Emoji',
+  'sans-serif',
+];
 const _padding = 8.0;
 
 const _terminalTheme = TerminalTheme(
@@ -191,8 +205,11 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
                 builder: (context, fontSize, _) => TerminalView(
                   _terminal,
                   theme: _terminalTheme,
-                  textStyle:
-                      TerminalStyle(fontSize: fontSize, fontFamily: _fontFamily),
+                  textStyle: TerminalStyle(
+                    fontSize: fontSize,
+                    fontFamily: _fontFamily,
+                    fontFamilyFallback: _fontFamilyFallback,
+                  ),
                   padding: const EdgeInsets.all(_padding),
                   // Input goes through _InputBar (raw PTY bytes), not the grid.
                   readOnly: true,
