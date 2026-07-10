@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/shell"
 )
@@ -51,12 +52,38 @@ func (c *Client) args(sub ...string) []string {
 }
 
 // run executes a tmux subcommand and returns its stdout. Errors include stderr.
+//
+// On a private (argus-owned) socket a "server exited unexpectedly" is retried: the
+// server died mid-command, taking its state with it, so re-running against a fresh
+// server is safe and clears a transient hiccup under load. The user's default
+// server is never retried — that would spawn a server argus must not create.
 func (c *Client) run(ctx context.Context, sub ...string) (string, error) {
-	cmd := shell.NewCommandContext(ctx, c.bin, c.args(sub...)...)
-	if err := cmd.Run(); err != nil {
-		return cmd.StdOut().String(), &Error{Args: sub, Stderr: cmd.StdErr().TrimSpace().String(), Err: err}
+	const maxAttempts = 3
+	var lastErr *Error
+	for attempt := 0; ; attempt++ {
+		cmd := shell.NewCommandContext(ctx, c.bin, c.args(sub...)...)
+		if err := cmd.Run(); err != nil {
+			lastErr = &Error{Args: sub, Stderr: cmd.StdErr().TrimSpace().String(), Err: err}
+			if c.socket != "" && attempt < maxAttempts-1 && serverExited(lastErr) && ctx.Err() == nil {
+				// Brief backoff so a transient resource spike passes before we retry
+				// against a fresh server, instead of hammering the same bad instant.
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Duration(attempt+1) * 15 * time.Millisecond):
+					continue
+				}
+			}
+			return cmd.StdOut().String(), lastErr
+		}
+		return cmd.StdOut().String(), nil
 	}
-	return cmd.StdOut().String(), nil
+}
+
+// serverExited reports whether an error is tmux's "server exited unexpectedly":
+// the server vanished while a command was talking to it.
+func serverExited(err error) bool {
+	var te *Error
+	return errors.As(err, &te) && strings.Contains(te.Stderr, "server exited unexpectedly")
 }
 
 // Error wraps a failed tmux invocation.
@@ -85,7 +112,10 @@ func noServer(err error) bool {
 	s := te.Stderr
 	return strings.Contains(s, "no server running") ||
 		strings.Contains(s, "error connecting") ||
-		strings.Contains(s, "no current session")
+		strings.Contains(s, "no current session") ||
+		// A command that reaches the server as it exits (e.g. right after the last
+		// session is killed) sees this; the server is gone, so treat it as empty.
+		serverExited(err)
 }
 
 // SocketBaseFromEnv returns the tmux socket basename from a $TMUX value (format

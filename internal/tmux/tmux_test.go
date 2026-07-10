@@ -2,7 +2,11 @@ package tmux
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -130,6 +134,110 @@ func TestListPanesNoServer(t *testing.T) {
 	}
 	if len(panes) != 0 {
 		t.Fatalf("want 0 panes, got %d", len(panes))
+	}
+}
+
+func TestNoServerClassification(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"no server running on /tmp/tmux-501/argus", true},
+		{"error connecting to /tmp/tmux-501/argus", true},
+		{"no current session", true},
+		{"server exited unexpectedly", true},
+		{"can't find session: work", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		err := &Error{Args: []string{"list-panes"}, Stderr: tc.stderr}
+		if got := noServer(err); got != tc.want {
+			t.Errorf("noServer(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+	}
+	if noServer(errors.New("plain error")) {
+		t.Error("noServer(non-tmux error) = true, want false")
+	}
+}
+
+// fakeTmux writes a script that fails with the given stderr for its first
+// failCount invocations, then prints "ok" and exits 0. It records every call in a
+// counter file so the test can assert how many attempts happened.
+func fakeTmux(t *testing.T, stderr string, failCount int) (bin, counter string) {
+	t.Helper()
+	dir := t.TempDir()
+	counter = filepath.Join(dir, "calls")
+	bin = filepath.Join(dir, "faketmux")
+	script := "#!/bin/sh\n" +
+		"echo x >> " + counter + "\n" +
+		"n=$(wc -l < " + counter + ")\n" +
+		"if [ \"$n\" -le " + strconv.Itoa(failCount) + " ]; then echo '" + stderr + "' >&2; exit 1; fi\n" +
+		"echo ok\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, counter
+}
+
+func callCount(t *testing.T, counter string) int {
+	t.Helper()
+	b, err := os.ReadFile(counter)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(b), "\n")
+}
+
+// TestRunRetriesServerExited: a private socket retries the transient and succeeds.
+func TestRunRetriesServerExited(t *testing.T) {
+	bin, counter := fakeTmux(t, "server exited unexpectedly", 2)
+	c := &Client{bin: bin, socket: "priv"}
+	out, err := c.run(context.Background(), "list-panes")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if strings.TrimSpace(out) != "ok" {
+		t.Fatalf("out = %q, want ok", out)
+	}
+	if got := callCount(t, counter); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+// TestRunRetryBounded: a persistently-failing server exhausts the bounded retries.
+func TestRunRetryBounded(t *testing.T) {
+	bin, counter := fakeTmux(t, "server exited unexpectedly", 99)
+	c := &Client{bin: bin, socket: "priv"}
+	if _, err := c.run(context.Background(), "list-panes"); !serverExited(err) {
+		t.Fatalf("err = %v, want serverExited", err)
+	}
+	if got := callCount(t, counter); got != 3 {
+		t.Fatalf("attempts = %d, want 3 (bounded)", got)
+	}
+}
+
+// TestRunDefaultServerNoRetry: the user's default server is never retried, so it
+// can't spawn a server argus must not create.
+func TestRunDefaultServerNoRetry(t *testing.T) {
+	bin, counter := fakeTmux(t, "server exited unexpectedly", 99)
+	c := &Client{bin: bin, socket: ""}
+	if _, err := c.run(context.Background(), "list-panes"); !serverExited(err) {
+		t.Fatalf("err = %v, want serverExited", err)
+	}
+	if got := callCount(t, counter); got != 1 {
+		t.Fatalf("attempts = %d, want 1 (no retry on default server)", got)
+	}
+}
+
+// TestRunNoRetryOnOtherErrors: a non-transient error is returned immediately.
+func TestRunNoRetryOnOtherErrors(t *testing.T) {
+	bin, counter := fakeTmux(t, "can't find session: work", 99)
+	c := &Client{bin: bin, socket: "priv"}
+	if _, err := c.run(context.Background(), "list-panes"); err == nil {
+		t.Fatal("want error")
+	}
+	if got := callCount(t, counter); got != 1 {
+		t.Fatalf("attempts = %d, want 1 (no retry)", got)
 	}
 }
 
