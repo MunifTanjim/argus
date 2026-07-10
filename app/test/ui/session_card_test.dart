@@ -44,6 +44,22 @@ void main() {
     expect(find.text('CODEX'), findsNothing);
   });
 
+  testWidgets('shows the session name beside the repo', (tester) async {
+    final s = _session(
+        '{"id":"mac:%1","agent":"claude","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus","name":"auth-refactor"}');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SessionCard(session: s))));
+    expect(find.text('argus'), findsOneWidget);
+    expect(find.text('auth-refactor'), findsOneWidget);
+  });
+
+  testWidgets('omits the name line when it duplicates the title', (tester) async {
+    final s = _session(
+        '{"id":"mac:%1","agent":"claude","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"name":"auth-refactor"}');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SessionCard(session: s))));
+    // No repo, so name is the title — it appears exactly once (not twice).
+    expect(find.text('auth-refactor'), findsOneWidget);
+  });
+
   testWidgets('falls back to id when no repo/name', (tester) async {
     final s = _session(
         '{"id":"mac:%9","agent":"t","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%9","session_name":"s","window_index":0,"current_path":"/p"}}');

@@ -24,8 +24,6 @@ class SessionCard extends StatelessWidget {
 
   final bool showAgent;
 
-  static const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
-
   @override
   Widget build(BuildContext context) {
     final s = session;
@@ -73,10 +71,17 @@ class SessionCard extends StatelessWidget {
                 const Icon(Icons.dns_outlined, size: 13, color: AppColors.dim),
                 const SizedBox(width: 4),
                 Text(nodeLabel,
-                    style: _mono.copyWith(color: AppColors.dim, fontSize: 11)),
+                    style: mono.copyWith(color: AppColors.dim, fontSize: 11)),
               ],
             ],
           ),
+          if (s.displayName != null) ...[
+            const SizedBox(height: 2),
+            Text(s.displayName!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: mono.copyWith(color: AppColors.dim)),
+          ],
           if ((s.summary?.task ?? s.interaction?.message) != null) ...[
             const SizedBox(height: 4),
             Text(s.summary?.task ?? s.interaction!.message!,
@@ -86,7 +91,7 @@ class SessionCard extends StatelessWidget {
           ],
           if (meta.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(meta, style: _mono.copyWith(color: AppColors.dim)),
+            Text(meta, style: mono.copyWith(color: AppColors.dim)),
           ],
         ],
       ),
