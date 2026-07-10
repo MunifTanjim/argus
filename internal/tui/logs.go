@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // logsAvail is the body line count: total height minus 4 chrome lines (title, two
@@ -52,7 +53,20 @@ func (m model) logsView() string {
 		}
 		off = max(0, min(off, bottom))
 		// Copy only the visible window, not the whole ring, on the render path.
-		body = strings.Join(m.logs.LinesRange(off, avail), "\n")
+		// Each ring line wraps to >=1 display line; window of `avail` ring lines
+		// yields >=avail display lines, so clamping to avail fills the screen.
+		var disp []string
+		for _, ln := range m.logs.LinesRange(off, avail) {
+			disp = append(disp, strings.Split(ansi.Hardwrap(ln, m.width, false), "\n")...)
+		}
+		if len(disp) > avail {
+			if m.logsFollow {
+				disp = disp[len(disp)-avail:] // keep newest
+			} else {
+				disp = disp[:avail] // anchor top at scrolled line
+			}
+		}
+		body = strings.Join(disp, "\n")
 	}
 	footer := m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back)
 	return pinFooter(gutter+title+"\n\n"+body, footer, m.width, m.height)
