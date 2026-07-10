@@ -1,9 +1,9 @@
 package codex
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 )
 
@@ -77,18 +77,41 @@ type tokenUsage struct {
 // scanRollout decodes a rollout JSONL file, skipping malformed lines. A missing
 // file yields (nil, nil).
 func scanRollout(path string) ([]rolloutLine, error) {
-	b, err := os.ReadFile(path)
+	lines, _, err := scanRolloutFrom(path, 0)
+	return lines, err
+}
+
+// scanRolloutFrom reads complete lines appended after offset, deferring a trailing
+// partial line (no \n yet) for the next call. A missing file yields (nil, offset, nil).
+// Assumes every entry ends with \n (codex always terminates records); a file's final
+// line lacking one is treated as still-being-written.
+func scanRolloutFrom(path string, offset int64) ([]rolloutLine, int64, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, offset, nil
 		}
-		return nil, err
+		return nil, offset, err
 	}
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // base_instructions lines are long
+	defer f.Close()
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset, err
+	}
+
+	lastNL := bytes.LastIndexByte(data, '\n')
+	if lastNL < 0 {
+		return nil, offset, nil // no complete line appended
+	}
+	newOffset := offset + int64(lastNL) + 1
+
 	var out []rolloutLine
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+	for _, line := range bytes.Split(data[:lastNL+1], []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
@@ -98,5 +121,5 @@ func scanRollout(path string) ([]rolloutLine, error) {
 		}
 		out = append(out, rl)
 	}
-	return out, sc.Err()
+	return out, newOffset, nil
 }

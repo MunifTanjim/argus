@@ -13,8 +13,12 @@ func parseRollout(path string) ([]transcript.Chunk, error) {
 	if err != nil {
 		return nil, err
 	}
-	models := loadModelNames()
+	return foldRollout(lines, loadModelNames()), nil
+}
 
+// foldRollout folds a flat rollout line list into display chunks. Pure in its inputs,
+// so streaming can re-fold an accumulating line slice each Refresh.
+func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chunk {
 	var out []transcript.Chunk
 	var ai *transcript.Chunk // open AI chunk for the current turn
 	model := ""
@@ -145,7 +149,7 @@ func parseRollout(path string) ([]transcript.Chunk, error) {
 	}
 	flush()
 	stampIDs(out)
-	return out, nil
+	return out
 }
 
 func isScaffolding(text string) bool {

@@ -80,29 +80,43 @@ func SubagentFilePath(rootPath, agentID string) (string, bool) {
 	return "", false
 }
 
+// streamingTranscript tails a growing rollout: a byte cursor reads only newly
+// appended lines, which accumulate and re-fold in memory each Refresh.
 type streamingTranscript struct {
 	path   string
-	size   int64
+	offset int64
+	loaded bool
+	lines  []rolloutLine
+	models map[string]string
 	chunks []transcript.Chunk
 }
 
 func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
-	fi, err := os.Stat(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return s.chunks, nil // not written yet; return what we have
-		}
-		return nil, err
+	if fi, err := os.Stat(s.path); err == nil && fi.Size() < s.offset {
+		s.offset = 0 // truncation/rotation: rebuild from the start
+		s.loaded = false
+		s.lines = nil
+		s.chunks = nil
 	}
-	if fi.Size() == s.size && s.chunks != nil {
-		return s.chunks, nil
-	}
-	view, err := ReadTranscriptView(s.path)
+
+	newLines, newOffset, err := scanRolloutFrom(s.path, s.offset)
 	if err != nil {
 		return nil, err
 	}
-	s.size = fi.Size()
-	s.chunks = view.Chunks
+	if len(newLines) == 0 && s.loaded {
+		return s.chunks, nil // nothing appended; skip re-fold and its DB/glob work
+	}
+	s.loaded = true
+	s.lines = append(s.lines, newLines...)
+	s.offset = newOffset
+
+	// Re-load while empty: the cache may be written mid-session.
+	if s.models == nil {
+		s.models = loadModelNames()
+	}
+	chunks := foldRollout(s.lines, s.models)
+	stampSubagents(chunks)
+	s.chunks = chunks
 	return s.chunks, nil
 }
 
