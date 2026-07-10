@@ -6,6 +6,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/all.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'theme.dart';
 
@@ -27,10 +28,18 @@ String safeFence(String body) {
 
 /// Renders markdown with app-consistent code blocks: fenced code goes through the
 /// same [codeView] renderer standalone blocks use, so it gets syntax highlighting
-/// and is copyable.
-Widget appMarkdown(String data) => GptMarkdown(
-      data,
-      codeBuilder: (context, name, code, closed) => codeView(code, lang: name),
+/// and is copyable. Wrapped in a [SelectionArea] so prose (and fenced code, which
+/// renders with `selectable: false` to avoid a forbidden nested SelectionArea) is
+/// selectable via the native long-press → Copy toolbar.
+Widget appMarkdown(String data) => SelectionArea(
+      child: Builder(
+        builder: (context) => GptMarkdown(
+          data,
+          onLinkTap: (url, title) => showLinkActions(context, url),
+          codeBuilder: (context, name, code, closed) =>
+              codeView(code, lang: name, selectable: false),
+        ),
+      ),
     );
 
 /// Renders [body] as a standalone code block (see [codeView]).
@@ -47,17 +56,27 @@ Widget codeBlock(String body,
 ///
 /// Set [lineNumberToggle] false for content that already carries its own line
 /// numbers (e.g. the Read tool's `cat -n` output). [wrap] sets the initial line
-/// wrap state (still user-toggleable).
+/// wrap state (still user-toggleable). [selectable] controls whether the content
+/// region is wrapped in a [SelectionArea]; set to `false` when an ancestor
+/// [SelectionArea] already covers this block (e.g. inside [appMarkdown]).
 Widget codeView(String body,
-    {String? lang, bool lineNumberToggle = true, bool wrap = false}) {
+    {String? lang,
+    bool lineNumberToggle = true,
+    bool wrap = false,
+    bool selectable = true}) {
   // Show the box with a dim marker so an empty block still reads as "a block that
   // was empty" rather than a missing render.
   if (body.trim().isEmpty) {
     return _container(
-        Text('(empty)', style: _codeMono.copyWith(color: AppColors.dim)));
+        Text('(empty)', style: _codeMono.copyWith(color: AppColors.dim)),
+        selectable: selectable);
   }
   return _CodeBlock(
-      body: body, lang: lang, lineNumberToggle: lineNumberToggle, wrap: wrap);
+      body: body,
+      lang: lang,
+      lineNumberToggle: lineNumberToggle,
+      wrap: wrap,
+      selectable: selectable);
 }
 
 class _CodeBlock extends StatefulWidget {
@@ -65,12 +84,14 @@ class _CodeBlock extends StatefulWidget {
       {required this.body,
       this.lang,
       this.lineNumberToggle = true,
-      this.wrap = false});
+      this.wrap = false,
+      this.selectable = true});
 
   final String body;
   final String? lang;
   final bool lineNumberToggle;
   final bool wrap;
+  final bool selectable;
 
   @override
   State<_CodeBlock> createState() => _CodeBlockState();
@@ -125,15 +146,19 @@ class _CodeBlockState extends State<_CodeBlock> {
           _header(label),
           Padding(
             padding: const EdgeInsets.all(10),
-            child: _wrap
-                ? content
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal, child: content),
+            child: widget.selectable
+                ? SelectionArea(child: _scrollable(content))
+                : _scrollable(content),
           ),
         ],
       ),
     );
   }
+
+  Widget _scrollable(Widget content) => _wrap
+      ? content
+      : SingleChildScrollView(
+          scrollDirection: Axis.horizontal, child: content);
 
   Widget _numbered(List<List<_Run>> lines) {
     final gutterWidth = lines.length.toString().length * 9.0;
@@ -262,6 +287,55 @@ Widget codeBarButton({
       onPressed: onTap,
     );
 
+/// Presents a bottom sheet offering to open [url] externally or copy it, so a
+/// tapped link isn't launched without confirmation.
+void showLinkActions(BuildContext context, String url) {
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetCtx) {
+      ListTile action(IconData icon, String label, VoidCallback onTap) =>
+          ListTile(
+            leading: Icon(icon),
+            title: Text(label),
+            onTap: () {
+              Navigator.pop(sheetCtx);
+              onTap();
+            },
+          );
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(url,
+                  style: const TextStyle(color: AppColors.dim, fontSize: 13),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            action(Icons.open_in_new, 'Open link', () => openExternalUrl(url)),
+            action(Icons.copy, 'Copy link', () => copyToClipboard(context, url)),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// Opens [url] in the external browser. Overridable in tests. Malformed or
+/// unlaunchable URLs are ignored so a bad link can never crash the render.
+Future<void> Function(String url) openExternalUrl = _openExternalUrl;
+
+Future<void> _openExternalUrl(String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    // Unlaunchable URL (no handler, platform error): ignore.
+  }
+}
+
 /// Copies [text] to the clipboard and shows a brief confirmation snackbar when a
 /// messenger is available.
 void copyToClipboard(BuildContext context, String text) {
@@ -272,18 +346,21 @@ void copyToClipboard(BuildContext context, String text) {
   ));
 }
 
-Widget _container(Widget child) => Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.canvas,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.border),
-      ),
-      child:
-          SingleChildScrollView(scrollDirection: Axis.horizontal, child: child),
-    );
+Widget _container(Widget child, {bool selectable = true}) {
+  final inner =
+      SingleChildScrollView(scrollDirection: Axis.horizontal, child: child);
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.symmetric(vertical: 4),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.canvas,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: selectable ? SelectionArea(child: inner) : inner,
+  );
+}
 
 // Shared highlighter with all highlight.js grammars registered.
 final Highlight _highlight = Highlight()
