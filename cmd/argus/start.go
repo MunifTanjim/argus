@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -107,7 +108,27 @@ func newStartCmd(version string) *cobra.Command {
 			// Set when a background subsystem fails fatally; read after d.Run so the
 			// process exits non-zero.
 			var nodeFailed atomic.Bool
-			httpSrv := serveGateway(ctx, cfg, d, tun, tunOrigin, stop, &nodeFailed)
+			var httpSrv *http.Server
+			if gatewayMode(cfg) {
+				ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
+				if err != nil {
+					return fail(cmd, err)
+				}
+				httpSrv = serveGateway(ctx, gatewayServeOpts{
+					node:          d,
+					token:         cfg.Token,
+					listener:      ln,
+					log:           logger.New(context.Background()).L,
+					onFatal:       func() { nodeFailed.Store(true); stop() },
+					version:       version,
+					publicURL:     gatewayBaseURL(cfg),
+					enablePairing: true,
+					enablePush:    true,
+					pushDelay:     cfg.Push.Mobile.Delay,
+					tunnel:        tun,
+					tunnelOrigin:  tunOrigin,
+				})
+			}
 
 			// Plain local node: nothing upstream drives desktop notifications, so run a
 			// local Watch over our own registry. (Gateway mode reaches the node via
@@ -249,9 +270,92 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	return nil
 }
 
-// setupPush wires device push notifications (gateway mode only).
-func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration) {
-	log := logger.Scoped("push")
+// gatewayServeOpts configures serveGateway. Each capability is guarded by its own
+// flag so `argus start` (all on) and the embedded TUI gateway (tunnel off) share
+// one code path. The listener is pre-bound by the caller so bind errors surface
+// before backgrounding; log is the base (unscoped) logger — serveGateway derives
+// the gateway/tunnel/push scopes from it — injected so the embedded caller can
+// route to the TUI's log buffer instead of stderr.
+type gatewayServeOpts struct {
+	node          *node.Node
+	token         string
+	listener      net.Listener
+	log           *slog.Logger
+	onFatal       func() // listener/tunnel death handler; may be nil
+	version       string
+	publicURL     string
+	enablePairing bool
+	enablePush    bool
+	pushDelay     time.Duration
+	tunnel        tunnel.Provider
+	tunnelOrigin  string
+}
+
+// serveGateway starts the co-located gateway: aggregates the in-process node plus
+// dialed-in nodes, serves clients over o.listener, and (when enabled) wires
+// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
+// shut down.
+func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
+	d := o.node
+	agg := gateway.New(0)
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+
+	var store *clienttoken.Store
+	if o.enablePairing {
+		store = clienttoken.New(config.GetStatePath("client-tokens"))
+	}
+	// Client connections authenticate with the master token; when pairing is on,
+	// minted per-client tokens also pass.
+	token := o.token
+	clientAuth := func(tok string) bool {
+		return (token != "" && tok == token) || (store != nil && store.Authorize(tok))
+	}
+
+	gwLog := o.log.With("scope", "gateway")
+	hsrv := gateway.NewServer(agg, tokenAuth(o.token), clientAuth)
+	if store != nil {
+		hsrv.SetClientTokens(store, o.token)
+	}
+	hsrv.SetVersion(o.version)
+	hsrv.SetPublicURL(o.publicURL)
+	hsrv.SetLogger(gwLog)
+	if o.enablePush {
+		setupPush(ctx, agg, hsrv, o.pushDelay, o.log.With("scope", "push"))
+	}
+
+	httpSrv := &http.Server{Handler: hsrv.Handler()}
+	gwLog.Info("gateway listening", "addr", o.listener.Addr().String())
+	go func() {
+		if err := httpSrv.Serve(o.listener); err != nil && err != http.ErrServerClosed {
+			gwLog.Error("gateway listener failed", "err", err)
+			if o.onFatal != nil {
+				o.onFatal()
+			}
+		}
+	}()
+
+	if o.tunnel != nil {
+		tunLog := o.log.With("scope", "tunnel")
+		sup := tunnel.Supervisor{Logger: tunLog}
+		tunLog.Info("opening tunnel", "provider", o.tunnel.Name(), "origin", o.tunnelOrigin)
+		go func() {
+			rerr := sup.Run(ctx, o.tunnel, o.tunnelOrigin, func(u string) {
+				hsrv.SetPublicURL(u)
+				tunLog.Info("tunnel public URL; run `argus pair` to add a device", "url", u)
+			})
+			if rerr != nil && ctx.Err() == nil {
+				tunLog.Error("tunnel failed", "err", rerr)
+				if o.onFatal != nil {
+					o.onFatal()
+				}
+			}
+		}()
+	}
+	return httpSrv
+}
+
+// setupPush wires device push notifications (mobile dispatcher + desktop fanout).
+func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
 	store := push.NewStore(config.GetStatePath("push-tokens"))
 	// VAPID key (self-generated, persisted) signs Web Push requests; the public
 	// half is served to devices (push.vapidKey) to bind their subscription.
@@ -261,69 +365,17 @@ func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Serve
 	} else {
 		hsrv.SetVAPIDPublicKey(vapid.PublicKey())
 	}
-	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log.L)
+	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
 	hsrv.SetPush(store, dispatcher)
 
 	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log.L}
+	broadcaster := fanoutNotifier{agg: agg, log: log}
 	go func() {
 		defer cancel()
 		push.Watch(ctx, events, push.Sinks{
 			Immediate: []push.Sink{broadcaster},
 			Delayed:   []push.Sink{dispatcher},
 			Delay:     delay,
-		}, log.L)
+		}, log)
 	}()
-}
-
-// serveGateway starts the co-located gateway (gateway mode only): aggregates the local
-// node plus dialed-in nodes, serves clients over WebSocket, supervises the optional
-// tunnel. Returns the *http.Server (nil when not in gateway mode) to shut down. A fatal
-// listener/tunnel error sets nodeFailed and calls stop.
-func serveGateway(ctx context.Context, cfg *config.Config, d *node.Node, tun tunnel.Provider, tunOrigin string, stop context.CancelFunc, nodeFailed *atomic.Bool) *http.Server {
-	if !gatewayMode(cfg) {
-		return nil
-	}
-	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
-	// Client connections authenticate with either the master token (admin: the TUI
-	// and `argus pair`/`unpair`) or a minted per-client token (revocable devices).
-	store := clienttoken.New(config.GetStatePath("client-tokens"))
-	clientAuth := func(tok string) bool {
-		return (cfg.Token != "" && tok == cfg.Token) || store.Authorize(tok)
-	}
-	gatewayLog := logger.Scoped("gateway")
-	hsrv := gateway.NewServer(agg, tokenAuth(cfg.Token), clientAuth)
-	hsrv.SetClientTokens(store, cfg.Token)
-	hsrv.SetVersion(version)
-	hsrv.SetPublicURL(gatewayBaseURL(cfg))
-	hsrv.SetLogger(gatewayLog.L)
-	setupPush(ctx, agg, hsrv, cfg.Push.Mobile.Delay)
-	httpSrv := &http.Server{Addr: cfg.Gateway.ListenAddr, Handler: hsrv.Handler()}
-	gatewayLog.Info("gateway listening", "addr", cfg.Gateway.ListenAddr)
-	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			gatewayLog.Error("gateway listener failed", "err", err)
-			nodeFailed.Store(true)
-			stop() // bring the node down if the gateway can't serve
-		}
-	}()
-
-	if tun != nil {
-		tunnelLog := logger.Scoped("tunnel")
-		sup := tunnel.Supervisor{Logger: tunnelLog.L}
-		tunnelLog.Info("opening tunnel", "provider", tun.Name(), "origin", tunOrigin)
-		go func() {
-			rerr := sup.Run(ctx, tun, tunOrigin, func(u string) {
-				hsrv.SetPublicURL(u)
-				tunnelLog.Info("tunnel public URL; run `argus pair` to add a device", "url", u)
-			})
-			if rerr != nil && ctx.Err() == nil {
-				tunnelLog.Error("tunnel failed", "err", rerr)
-				nodeFailed.Store(true)
-				stop() // bring the node down if a requested tunnel can't come up
-			}
-		}()
-	}
-	return httpSrv
 }

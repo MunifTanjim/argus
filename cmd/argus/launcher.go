@@ -12,6 +12,7 @@ type launchKind int
 const (
 	launchQuit           launchKind = iota // user backed out; spawn nothing, exit cleanly
 	launchSpawnIsolated                    // start an ephemeral isolated node
+	launchSpawnGateway                     // start an ephemeral node that also serves a gateway
 	launchSpawnConnected                   // start an ephemeral connected node
 	launchGateway                          // connect to the entered gateway URL + token
 )
@@ -46,6 +47,7 @@ type launcherModel struct {
 	cursor         int  // menu cursor: menuSpawnIsolated, menuSpawnConnected, or menuGateway
 	spawnConnected bool // gateway form is for a connected spawn, not a plain gateway connect
 	field          int  // gateway form focus: 0 = url, 1 = token
+	hasToken       bool // a gateway token is set: the isolated spawn actually serves a gateway
 	urlIn          textinput.Model
 	tokenIn        textinput.Model
 	errMsg         string
@@ -61,7 +63,7 @@ func newLauncherModel(token string) launcherModel {
 	tok.EchoMode = textinput.EchoPassword
 	tok.SetWidth(48)
 	tok.SetValue(token)
-	return launcherModel{state: stateMenu, urlIn: url, tokenIn: tok}
+	return launcherModel{state: stateMenu, urlIn: url, tokenIn: tok, hasToken: token != ""}
 }
 
 func (m launcherModel) Init() tea.Cmd { return nil }
@@ -98,7 +100,11 @@ func (m launcherModel) updateMenu(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if m.cursor == menuSpawnIsolated {
-			m.choice = launchChoice{kind: launchSpawnIsolated}
+			kind := launchSpawnIsolated
+			if m.hasToken {
+				kind = launchSpawnGateway
+			}
+			m.choice = launchChoice{kind: kind}
 			return m, tea.Quit
 		}
 		// menuSpawnConnected and menuGateway both need a gateway URL + token, so
@@ -175,7 +181,11 @@ func (m launcherModel) View() tea.View {
 	var b string
 	title := lipgloss.NewStyle().Bold(true).Render("Argus — no node running")
 	if m.state == stateMenu {
-		items := []string{"Spawn isolated node (ephemeral)", "Spawn gateway connected node (ephemeral)", "Connect to gateway"}
+		spawnLabel := "Spawn isolated node (ephemeral)"
+		if m.hasToken {
+			spawnLabel = "Spawn gateway node (ephemeral)"
+		}
+		items := []string{spawnLabel, "Spawn gateway connected node (ephemeral)", "Connect to gateway"}
 		body := ""
 		for i, it := range items {
 			prefix := "  "

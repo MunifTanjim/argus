@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -159,5 +160,17 @@ func TestWindowSizeSetsInputWidth(t *testing.T) {
 	m = mm.(launcherModel)
 	if m.urlIn.Width() <= 0 {
 		t.Fatalf("urlIn width = %d, want > 0", m.urlIn.Width())
+	}
+}
+
+func TestLauncherMenuLabelReflectsToken(t *testing.T) {
+	withToken := newLauncherModel("secret").View().Content
+	if !strings.Contains(withToken, "Spawn gateway node (ephemeral)") {
+		t.Fatalf("token set should offer a gateway spawn, got:\n%s", withToken)
+	}
+
+	noToken := newLauncherModel("").View().Content
+	if !strings.Contains(noToken, "Spawn isolated node (ephemeral)") {
+		t.Fatalf("no token should offer an isolated spawn, got:\n%s", noToken)
 	}
 }

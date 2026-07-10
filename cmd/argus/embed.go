@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -111,7 +112,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.NewBufferLogger(logs).With("scope", "push"))
 		}()
 	}
-	conn, err := dialWithRetry(socket, 3*time.Second)
+	conn, err := dialWithRetry(func() (net.Conn, error) { return net.Dial("unix", socket) }, 3*time.Second)
 	if err != nil {
 		shell.StdErrF("argus: embedded node did not start at %s: %v\n", socket, err)
 		return nil, nil, err
@@ -123,6 +124,88 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		return nil, nil, err
 	}
 	return client, logs, nil
+}
+
+// connectLocalGateway starts an ephemeral embedded node AND a co-located gateway
+// (pairing + push, no tunnel), then points the TUI at that gateway over loopback
+// so it sees the whole fleet. Mirrors `argus start --token` minus the tunnel.
+func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+	// Bind before the TUI takes the screen so a port-in-use fails cleanly.
+	ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
+	if err != nil {
+		shell.StdErrF("argus: cannot bind gateway listener at %s: %v\n", cfg.Gateway.ListenAddr, err)
+		return nil, nil, err
+	}
+
+	// Drive the in-process gateway over loopback using the actually-bound address
+	// (cfg.Gateway.ListenAddr may specify port 0 or an unspecified host). The TUI
+	// reaches the node through the gateway's in-process source, so the node socket is
+	// never dialed here.
+	gwURL := "ws://" + loopbackDialAddr(ln.Addr().(*net.TCPAddr))
+
+	// A gateway that dies after startup can't recover on a fixed loopback port, so tear
+	// the whole embedded stack down (mirrors `argus start`); the TUI surfaces the drop
+	// as a disconnect.
+	ctx, cancel := context.WithCancel(ctx)
+
+	d, logs := startEmbeddedNode(ctx, cfg, socket)
+	baseLog := logger.NewBufferLogger(logs)
+	gwLog := baseLog.With("scope", "gateway")
+	httpSrv := serveGateway(ctx, gatewayServeOpts{
+		node:          d,
+		token:         cfg.Token,
+		listener:      ln,
+		log:           baseLog,
+		onFatal:       func() { gwLog.Error("embedded gateway stopped"); cancel() },
+		version:       version,
+		publicURL:     gwURL,
+		enablePairing: true,
+		enablePush:    true,
+		pushDelay:     cfg.Push.Mobile.Delay,
+	})
+	go func() {
+		<-ctx.Done()
+		sctx, sc := context.WithTimeout(context.Background(), 3*time.Second)
+		defer sc()
+		_ = httpSrv.Shutdown(sctx)
+	}()
+
+	wsURL, gwClient, err := resolveGatewayURL(gwURL, routeClient, nil)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	// serveGateway backgrounds Serve with no readiness signal, so wait for it to
+	// accept before connect() (which dials once and fails hard).
+	probe, err := dialWithRetry(func() (net.Conn, error) {
+		dctx, dc := context.WithTimeout(ctx, time.Second)
+		defer dc()
+		return api.DialWSConn(dctx, wsURL, cfg.Token, gwClient)
+	}, 3*time.Second)
+	if err != nil {
+		cancel()
+		shell.StdErrF("argus: embedded gateway did not accept at %s: %v\n", gwURL, err)
+		return nil, nil, err
+	}
+	probe.Close()
+
+	client, err := connect(ctx, gwURL, cfg.Token, socket)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return client, logs, nil
+}
+
+// loopbackDialAddr returns a host:port for reaching a listener from this host: its
+// bound port, and 127.0.0.1 when it binds an unspecified host (0.0.0.0/::), else its
+// concrete bound IP.
+func loopbackDialAddr(addr *net.TCPAddr) string {
+	host := "127.0.0.1"
+	if addr.IP != nil && !addr.IP.IsUnspecified() {
+		host = addr.IP.String()
+	}
+	return net.JoinHostPort(host, strconv.Itoa(addr.Port))
 }
 
 // nodeAbsent reports whether a dial error means "no node is listening": a missing
@@ -142,6 +225,8 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	log := logger.NewBufferLogger(logs)
 	d.SetLogger(log.With("scope", "node"))
 	d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
+	d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
+	d.SetVersion(version)
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))
@@ -160,11 +245,11 @@ func reconcileEmbeddedHooks(log *slog.Logger) {
 	}
 }
 
-// dialWithRetry polls the socket until a node accepts a connection or timeout.
-func dialWithRetry(socket string, timeout time.Duration) (net.Conn, error) {
+// dialWithRetry polls dial until it succeeds or timeout elapses.
+func dialWithRetry(dial func() (net.Conn, error), timeout time.Duration) (net.Conn, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		conn, err := net.Dial("unix", socket)
+		conn, err := dial()
 		if err == nil {
 			return conn, nil
 		}

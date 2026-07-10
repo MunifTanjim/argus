@@ -71,6 +71,8 @@ func newRootCmd(version string) *cobra.Command {
 					return nil
 				case launchSpawnIsolated:
 					client, logs, err = connectLocalSpawn(ctx, cfg, cfg.Token, cfg.Socket)
+				case launchSpawnGateway:
+					client, logs, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:

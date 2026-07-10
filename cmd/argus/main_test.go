@@ -51,6 +51,9 @@ func sandboxHookDirs(t *testing.T) {
 	t.Helper()
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	old := config.StateDir
+	config.StateDir = t.TempDir()
+	t.Cleanup(func() { config.StateDir = old })
 }
 
 func TestConnectLocalSpawn(t *testing.T) {
