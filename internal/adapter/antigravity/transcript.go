@@ -19,6 +19,10 @@ func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 
 func stampChunkModel(chunks []transcript.Chunk, convID string) {
 	name, color := conversationModel(convID)
+	stampChunkModelWith(chunks, name, color)
+}
+
+func stampChunkModelWith(chunks []transcript.Chunk, name, color string) {
 	if name == "" {
 		return
 	}
@@ -71,31 +75,44 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 	return transcript.ToolDetail{}, false, nil
 }
 
-// streamingTranscript re-folds on any file size change, returning the full chunk list.
+// streamingTranscript tails a growing transcript: a byte cursor reads only newly
+// appended lines, which accumulate and re-fold in memory each Refresh.
 type streamingTranscript struct {
-	path   string
-	convID string
-	size   int64
-	chunks []transcript.Chunk
+	path       string
+	convID     string
+	offset     int64
+	loaded     bool
+	lines      []line
+	modelName  string
+	modelColor string
+	chunks     []transcript.Chunk
 }
 
 func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
-	fi, err := os.Stat(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return s.chunks, nil
-		}
-		return nil, err
+	if fi, err := os.Stat(s.path); err == nil && fi.Size() < s.offset {
+		s.offset = 0 // truncation/rotation: rebuild from the start
+		s.loaded = false
+		s.lines = nil
+		s.chunks = nil
 	}
-	if fi.Size() == s.size && s.chunks != nil {
-		return s.chunks, nil
-	}
-	chunks, err := parseTranscript(s.path)
+
+	newLines, newOffset, err := scanTranscriptFrom(s.path, s.offset)
 	if err != nil {
 		return nil, err
 	}
-	stampChunkModel(chunks, s.convID)
-	s.size = fi.Size()
+	if len(newLines) == 0 && s.loaded {
+		return s.chunks, nil // nothing appended; skip re-fold and its DB work
+	}
+	s.loaded = true
+	s.lines = append(s.lines, newLines...)
+	s.offset = newOffset
+
+	// Re-query while empty: the model may land in the DB mid-session.
+	if s.modelName == "" {
+		s.modelName, s.modelColor = conversationModel(s.convID)
+	}
+	chunks := foldTranscript(s.lines)
+	stampChunkModelWith(chunks, s.modelName, s.modelColor)
 	s.chunks = chunks
 	return s.chunks, nil
 }

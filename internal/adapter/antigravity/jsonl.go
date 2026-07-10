@@ -1,9 +1,9 @@
 package antigravity
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 )
 
@@ -29,18 +29,41 @@ type line struct {
 // scanTranscript decodes a transcript_full.jsonl, skipping malformed lines. A
 // missing file yields (nil, nil).
 func scanTranscript(path string) ([]line, error) {
-	b, err := os.ReadFile(path)
+	lines, _, err := scanTranscriptFrom(path, 0)
+	return lines, err
+}
+
+// scanTranscriptFrom reads complete lines appended after offset, deferring a
+// trailing partial line (no \n yet) for the next call. A missing file yields
+// (nil, offset, nil). Assumes every entry ends with \n (agy always terminates
+// records); a file's final line lacking one is treated as still-being-written.
+func scanTranscriptFrom(path string, offset int64) ([]line, int64, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, offset, nil
 		}
-		return nil, err
+		return nil, offset, err
 	}
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // content/thinking blocks are long
+	defer f.Close()
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset, err
+	}
+
+	lastNL := bytes.LastIndexByte(data, '\n')
+	if lastNL < 0 {
+		return nil, offset, nil // no complete line appended
+	}
+	newOffset := offset + int64(lastNL) + 1
+
 	var out []line
-	for sc.Scan() {
-		raw := bytes.TrimSpace(sc.Bytes())
+	for _, raw := range bytes.Split(data[:lastNL+1], []byte{'\n'}) {
+		raw = bytes.TrimSpace(raw)
 		if len(raw) == 0 {
 			continue
 		}
@@ -50,5 +73,5 @@ func scanTranscript(path string) ([]line, error) {
 		}
 		out = append(out, l)
 	}
-	return out, sc.Err()
+	return out, newOffset, nil
 }

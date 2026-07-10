@@ -16,7 +16,12 @@ func parseTranscript(path string) ([]transcript.Chunk, error) {
 	if err != nil {
 		return nil, err
 	}
+	return foldTranscript(lines), nil
+}
 
+// foldTranscript folds a flat transcript line list into display chunks. Pure in its
+// input, so streaming can re-fold an accumulating line slice each Refresh.
+func foldTranscript(lines []line) []transcript.Chunk {
 	var chunks []transcript.Chunk
 	var ai *transcript.Chunk // current assistant turn
 	pendingIdx := -1         // index into ai.Items of a tool item awaiting its result line
@@ -88,7 +93,7 @@ func parseTranscript(path string) ([]transcript.Chunk, error) {
 		}
 	}
 	flush()
-	return chunks, nil
+	return chunks
 }
 
 // stripUserWrappers extracts the text from agy's <USER_REQUEST>...</USER_REQUEST>
