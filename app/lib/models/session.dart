@@ -214,6 +214,12 @@ class Session {
           ? name!
           : id;
 
+  /// The Claude session name, shown as a secondary label beside [displayTitle].
+  /// Null when it would duplicate the primary title (e.g. repo is empty, so the
+  /// name is already the title).
+  String? get displayName =>
+      (name?.isNotEmpty ?? false) && name != displayTitle ? name : null;
+
   /// Whether argus can drive this session's terminal. Derived from frontend:
   /// only tmux sessions are controllable; vscode/external are decision-only.
   bool get controllable => frontend == FrontendKind.tmux;

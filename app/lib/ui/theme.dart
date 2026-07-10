@@ -17,6 +17,8 @@ class AppColors {
   static const errorSurface = Color(0xFF3c1f1d);
 }
 
+const mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
+
 Color teamColor(String? name) {
   switch (name) {
     case 'blue':

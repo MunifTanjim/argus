@@ -78,6 +78,29 @@ void main() {
     expect(s.controllable, isFalse);
   });
 
+  Session withRepoName({String? repo, String? name}) => Session.fromJson({
+        'id': 's1',
+        'agent': 'claude',
+        'status': 'idle',
+        'source': 'discovered',
+        'tmux': {'server': 'default', 'pane_id': '%1'},
+        if (repo != null) 'repo': repo,
+        if (name != null) 'name': name,
+      });
+
+  test('displayName surfaces the session name beside a repo title', () {
+    expect(withRepoName(repo: 'argus', name: 'auth').displayName, 'auth');
+  });
+
+  test('displayName is null when it would duplicate the title', () {
+    // No repo: the name is already displayTitle.
+    expect(withRepoName(name: 'auth').displayName, isNull);
+    // Name equals repo: nothing to add.
+    expect(withRepoName(repo: 'argus', name: 'argus').displayName, isNull);
+    // No name at all.
+    expect(withRepoName(repo: 'argus').displayName, isNull);
+  });
+
   test('tmux session is controllable', () {
     final s = Session.fromJson({
       'id': 's1',

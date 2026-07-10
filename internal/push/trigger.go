@@ -147,6 +147,11 @@ func notificationFor(s session.Session) Notification {
 	if title == "" {
 		title = "argus session"
 	}
+	// Append the session name only when it adds info beyond the repo title. Skip
+	// when repo is empty: the name is already the title, so appending duplicates.
+	if s.Repo != "" && s.Name != "" && s.Name != s.Repo {
+		title += " · " + s.Name
+	}
 	if s.NodeLabel != "" {
 		title = s.NodeLabel + " · " + title
 	}

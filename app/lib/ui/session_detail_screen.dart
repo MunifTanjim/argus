@@ -142,27 +142,40 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
+        titleSpacing: 0,
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(statusGlyph(live.status),
-                style: TextStyle(
-                    fontFamily: 'monospace', color: statusColor(live.status))),
-            const SizedBox(width: 8),
-            Expanded(
-                child:
-                    Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-            if (live.frontend != FrontendKind.tmux)
-              Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: Chip(
-                  label: Text(live.frontend.name),
-                  padding: EdgeInsets.zero,
-                  labelPadding:
-                      const EdgeInsets.symmetric(horizontal: 6),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
+            Row(
+              children: [
+                Text(statusGlyph(live.status),
+                    style: TextStyle(
+                        fontFamily: 'monospace',
+                        color: statusColor(live.status))),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(title,
+                        maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (live.frontend != FrontendKind.tmux)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Chip(
+                      label: Text(live.frontend.name),
+                      padding: EdgeInsets.zero,
+                      labelPadding:
+                          const EdgeInsets.symmetric(horizontal: 6),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+              ],
+            ),
+            if (live.displayName != null)
+              Text(live.displayName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: mono.copyWith(color: AppColors.dim)),
           ],
         ),
         actions: [

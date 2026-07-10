@@ -14,7 +14,7 @@ import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import '../support/fake_session_repository.dart';
 
-Session _s({String? agentSessionId}) => Session.fromJson({
+Session _s({String? agentSessionId, String? name}) => Session.fromJson({
       'id': 'mac:%1',
       'agent': 't',
       'status': 'working',
@@ -30,6 +30,7 @@ Session _s({String? agentSessionId}) => Session.fromJson({
       'repo': 'argus',
       'node_label': 'mac',
       'agent_session_id': ?agentSessionId,
+      'name': ?name,
     });
 
 class _SeededTranscript extends TranscriptNotifier {
@@ -101,6 +102,17 @@ void main() {
     ]));
     await tester.pump();
     expect(find.textContaining('No transcript'), findsOneWidget);
+  });
+
+  testWidgets('shows the session name as an AppBar subtitle', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: _baseOverrides(),
+      child:
+          MaterialApp(home: SessionDetailScreen(session: _s(name: 'auth-refactor'))),
+    ));
+    await tester.pump();
+    expect(find.text('argus'), findsOneWidget);
+    expect(find.text('auth-refactor'), findsOneWidget);
   });
 
   testWidgets('shows terminal icon button in AppBar', (tester) async {

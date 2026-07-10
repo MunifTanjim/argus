@@ -167,6 +167,67 @@ func TestNotificationForRendersInteraction(t *testing.T) {
 	}
 }
 
+func TestNotificationForSurfacesSessionName(t *testing.T) {
+	cases := []struct {
+		name      string
+		sess      session.Session
+		wantTitle string
+		wantBody  string
+	}{
+		{
+			name: "named session in repo appends name to title",
+			sess: session.Session{
+				Repo: "argus", Name: "auth-refactor",
+				Interaction: &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"},
+			},
+			wantTitle: "argus · auth-refactor",
+			wantBody:  "Permission: Bash",
+		},
+		{
+			name:      "unnamed session leaves body unchanged",
+			sess:      session.Session{Repo: "argus", Interaction: &session.Interaction{Kind: session.InteractionPlan}},
+			wantTitle: "argus",
+			wantBody:  "Plan ready to review",
+		},
+		{
+			name:      "name equal to repo is not duplicated",
+			sess:      session.Session{Repo: "argus", Name: "argus"},
+			wantTitle: "argus",
+			wantBody:  "Needs your attention",
+		},
+		{
+			name:      "no repo: name is the title, not the body",
+			sess:      session.Session{Name: "auth-refactor"},
+			wantTitle: "auth-refactor",
+			wantBody:  "Needs your attention",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := notificationFor(tc.sess)
+			if n.Title != tc.wantTitle {
+				t.Errorf("Title = %q, want %q", n.Title, tc.wantTitle)
+			}
+			if n.Body != tc.wantBody {
+				t.Errorf("Body = %q, want %q", n.Body, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestNotificationForNodeLabelPrefixWithName(t *testing.T) {
+	n := notificationFor(session.Session{
+		Repo: "argus", Name: "auth-refactor", NodeLabel: "MacBook",
+		Interaction: &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"},
+	})
+	if want := "MacBook · argus · auth-refactor"; n.Title != want {
+		t.Errorf("Title = %q, want %q", n.Title, want)
+	}
+	if want := "Permission: Bash"; n.Body != want {
+		t.Errorf("Body = %q, want %q", n.Body, want)
+	}
+}
+
 func TestNotificationForCarriesSessionID(t *testing.T) {
 	n := notificationFor(session.Session{ID: "node1:abc", NodeID: "node1"})
 	if n.Data["session_id"] != "node1:abc" {
