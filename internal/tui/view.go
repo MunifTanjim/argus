@@ -1,6 +1,7 @@
 package tui
 
 import (
+	_ "embed"
 	"fmt"
 	"strings"
 
@@ -185,16 +186,9 @@ func (m model) listView() string {
 	}
 	title += "    " + m.homeTabs(modeList)
 
-	// Empty state: welcome + next steps.
+	// Empty state: centered welcome with the argus wordmark.
 	if len(m.order) == 0 {
-		var b strings.Builder
-		b.WriteString(title + dimStyle.Render("  ·  your AI coding sessions, one place") + "\n\n")
-		b.WriteString(StyleAccentBold.Render("Nothing here yet — welcome!") + "\n\n")
-		b.WriteString(StyleSecondary.Render("Start Claude Code in a tmux pane, or press ") +
-			StyleAccentBold.Render("n") +
-			StyleSecondary.Render(" to spawn one right here."))
-		footer := m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, listKeys.Quit)
-		return pinFooter(b.String(), footer, m.width, m.height)
+		return m.emptyListView(title)
 	}
 
 	// Populated: centered, scrollable session cards.
@@ -245,6 +239,67 @@ func (m model) listView() string {
 
 	block := centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, m.width)
 	return pinFooter(block, footer, m.width, m.height)
+}
+
+// argusMark is the pre-rendered truecolor logo (gold "A" in a white ring).
+//
+//go:embed logo.txt
+var argusMark string
+
+// argusMonogram is the "A" mark, ringed by a rounded border, for terminals too small
+// for the full logo.
+const argusMonogram = ` █████╗
+██╔══██╗
+███████║
+██╔══██║
+██║  ██║
+╚═╝  ╚═╝`
+
+// argusLogo renders the logo scaled to the viewport: the full mark when it fits, the
+// ringed "A" monogram on smaller screens, or a plain wordmark when tiny.
+func argusLogo(width, height int) string {
+	mark := strings.TrimRight(argusMark, "\n")
+	if width >= lipgloss.Width(mark)+2 && height >= lipgloss.Height(mark)+12 {
+		return mark
+	}
+	mono := lipgloss.NewStyle().Bold(true).Foreground(ColorTeamYellow).Render(argusMonogram)
+	ringed := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).
+		Padding(0, 3).
+		Render(mono)
+	if width >= lipgloss.Width(ringed)+2 && height >= lipgloss.Height(ringed)+10 {
+		return ringed
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(ColorTeamYellow).Render("argus")
+}
+
+// emptyListView renders the welcome screen: the argus logo, wordmark, tagline, and a
+// spawn hint, centered in the space between the tab bar and the footer.
+func (m model) emptyListView(title string) string {
+	textW := max(16, min(m.width-2, 52))
+	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
+	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
+		StyleAccentBold.Render("n") + dimStyle.Render(" to spawn one right here.")
+	welcome := lipgloss.JoinVertical(lipgloss.Center,
+		argusLogo(m.width, m.height),
+		"",
+		headerStyle.Render("Argus"),
+		center.Render(StyleSecondary.Render("Watch and control all your AI agents.")),
+		"",
+		center.Render(hint),
+	)
+
+	avail := max(1, m.height-4) // title + blank + welcome + footer
+	top := max(0, (avail-lipgloss.Height(welcome))/2)
+	block := strings.Repeat("\n", top) + centerBlock(welcome, lipgloss.Width(welcome), m.width)
+
+	cardW := min(m.containerWidth(), 78)
+	if cardW < 30 {
+		cardW = 30
+	}
+	footer := m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, listKeys.Quit)
+	return pinFooter(centerBlock(title, cardW, m.width)+"\n\n"+block, footer, m.width, m.height)
 }
 
 // spawnView renders the "new session" flow. List steps (node, dir) render one

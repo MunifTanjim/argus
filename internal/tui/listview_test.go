@@ -17,9 +17,9 @@ func TestListViewEmptyStateIsFriendly(t *testing.T) {
 	out := ansi.Strip(m.listView())
 
 	for _, want := range []string{
-		"your AI coding sessions, one place", // tagline
-		"welcome",                            // greeting
-		"n new · r refresh · q quit",         // trimmed footer
+		"Watch and control all your AI agents.", // tagline
+		"No sessions yet.",                      // greeting
+		"n new · r refresh · q quit",            // trimmed footer
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("empty welcome should contain %q:\n%s", want, out)
