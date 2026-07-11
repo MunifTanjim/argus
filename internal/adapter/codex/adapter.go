@@ -34,6 +34,10 @@ func (cxAdapter) SpawnCommand(prompt string) (string, []string) {
 	return "codex", []string{prompt}
 }
 
+func (cxAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
+	return "codex", []string{"resume", agentSessionID}, true
+}
+
 func (cxAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
 	return ProcessHook(reg, ev)
 }

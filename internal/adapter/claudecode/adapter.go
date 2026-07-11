@@ -35,6 +35,10 @@ func (ccAdapter) SpawnCommand(prompt string) (string, []string) {
 	return "claude", []string{prompt}
 }
 
+func (ccAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
+	return "claude", []string{"--resume", agentSessionID}, true
+}
+
 func (ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
 	return ProcessHook(reg, ev)
 }

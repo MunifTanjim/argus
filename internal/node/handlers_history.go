@@ -39,8 +39,10 @@ func (d *Node) handleHistorySessions(_ context.Context, params json.RawMessage) 
 			d.log.Warn("history sessions", "agent", a.Agent(), "err", err)
 			continue
 		}
+		_, _, resumable := a.ResumeCommand("")
 		for i := range page.Items {
 			page.Items[i].Agent = a.Agent()
+			page.Items[i].Resumable = resumable
 		}
 		all = append(all, page.Items...)
 	}

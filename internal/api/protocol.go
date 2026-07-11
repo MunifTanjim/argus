@@ -29,6 +29,7 @@ const (
 	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
 	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
+	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult
 	// Probed live per call.
 	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
 	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil
@@ -167,6 +168,21 @@ type SpawnParams struct {
 type SpawnResult struct {
 	SessionID string `json:"session_id"`
 	PaneID    string `json:"pane_id"`
+}
+
+// ResumeParams asks a node to resume a past session by its agent session id, in
+// the session's original working directory.
+type ResumeParams struct {
+	NodeID         string `json:"node_id,omitempty"` // gateway routing key; ignored node-side
+	Agent          string `json:"agent"`             // owning agent id
+	AgentSessionID string `json:"agent_session_id"`  // the tool's own session id to resume
+	Cwd            string `json:"cwd"`               // original working directory
+}
+
+// ResumeResult identifies the session to open, whether newly spawned or an
+// already-live session the resume jumped to.
+type ResumeResult struct {
+	SessionID string `json:"session_id"`
 }
 
 type AgentsListParams struct {
