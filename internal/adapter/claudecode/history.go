@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/histcache"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -48,7 +49,8 @@ func ListHistoryProjects() ([]session.HistoryProject, error) {
 }
 
 // ListHistorySessions returns a newest-first window of a project's past sessions.
-// limit <= 0 returns all from offset on.
+// limit <= 0 returns all from offset on. Per-session metadata is served from the
+// disk cache, keyed by each transcript's mod time + size.
 func ListHistorySessions(cwd string, limit, offset int) (session.HistorySessionPage, error) {
 	dir, err := resolveProjectDir(cwd)
 	if err != nil {
@@ -57,11 +59,36 @@ func ListHistorySessions(cwd string, limit, offset int) (session.HistorySessionP
 	if dir == "" {
 		return session.HistorySessionPage{}, nil // no matching Claude project
 	}
-	infos, err := parser.DiscoverProjectSessions(dir) // already sorted newest-first
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return session.HistorySessionPage{}, err
 	}
-	total := len(infos)
+	var items []session.HistorySession
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasSuffix(name, ".jsonl") || strings.HasPrefix(name, "agent_") {
+			continue
+		}
+		fi, err := de.Info()
+		if err != nil {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".jsonl")
+		if e, ok := histcache.Get(Agent, id, fi.ModTime(), fi.Size()); ok {
+			items = append(items, e.Session)
+			continue
+		}
+		in := parser.ScanSessionInfo(filepath.Join(dir, name), fi.ModTime())
+		hs := toHistorySession(in)
+		histcache.Put(Agent, id, fi.ModTime(), fi.Size(), histcache.Entry{Session: hs, Cwd: in.Cwd})
+		items = append(items, hs)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].LastActivity > items[j].LastActivity })
+
+	total := len(items)
 	if offset < 0 {
 		offset = 0
 	}
@@ -72,23 +99,24 @@ func ListHistorySessions(cwd string, limit, offset int) (session.HistorySessionP
 	if limit > 0 && offset+limit < end {
 		end = offset + limit
 	}
-	window := infos[offset:end]
-	items := make([]session.HistorySession, 0, len(window))
-	for _, in := range window {
-		items = append(items, session.HistorySession{
-			SessionID:      in.SessionID,
-			Title:          in.Title,
-			FirstMessage:   in.FirstMessage,
-			TranscriptPath: in.Path,
-			ModelName:      modelDisplayName(in.Model),
-			ModelColor:     modelColorHex(in.Model),
-			LastActivity:   in.ModTime.UTC().Format(time.RFC3339),
-			Tokens:         in.ContextTokens,
-			TurnCount:      in.TurnCount,
-			DurationMs:     in.DurationMs,
-		})
+	return session.HistorySessionPage{Items: items[offset:end], HasMore: end < total}, nil
+}
+
+// toHistorySession maps a scanned SessionInfo to the history list item, resolving
+// the model's display name and color.
+func toHistorySession(in parser.SessionInfo) session.HistorySession {
+	return session.HistorySession{
+		SessionID:      in.SessionID,
+		Title:          in.Title,
+		FirstMessage:   in.FirstMessage,
+		TranscriptPath: in.Path,
+		ModelName:      modelDisplayName(in.Model),
+		ModelColor:     modelColorHex(in.Model),
+		LastActivity:   in.ModTime.UTC().Format(time.RFC3339),
+		Tokens:         in.ContextTokens,
+		TurnCount:      in.TurnCount,
+		DurationMs:     in.DurationMs,
 	}
-	return session.HistorySessionPage{Items: items, HasMore: end < total}, nil
 }
 
 // ReadHistoryTranscript reads a past session's transcript by path, after

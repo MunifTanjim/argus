@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -26,6 +27,7 @@ func writeTranscript(t *testing.T, path, cwd string, mod time.Time) {
 func TestListHistoryProjectsAndSessions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	config.CacheDir = t.TempDir()
 	root := filepath.Join(home, ".claude", "projects")
 
 	projA := filepath.Join(root, "-work-projA")
@@ -84,6 +86,65 @@ func TestListHistoryProjectsAndSessions(t *testing.T) {
 	}
 	if len(page2.Items) != 1 || page2.HasMore || page2.Items[0].SessionID != "s1" {
 		t.Fatalf("page 1: items=%+v hasMore=%v", page2.Items, page2.HasMore)
+	}
+}
+
+// writeTranscriptMsg writes a one-turn transcript with an arbitrary user message,
+// used to prove the cache serves stale content until the mod time changes.
+func writeTranscriptMsg(t *testing.T, path, cwd, msg string, mod time.Time) {
+	t.Helper()
+	line := `{"uuid":"u1","type":"user","timestamp":"2025-01-15T10:00:00Z","isSidechain":false,"isMeta":false,"cwd":"` +
+		cwd + `","message":{"role":"user","content":"` + msg + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func firstMessage(t *testing.T, cwd string) string {
+	t.Helper()
+	page, err := ListHistorySessions(cwd, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(page.Items))
+	}
+	return page.Items[0].FirstMessage
+}
+
+func TestClaudeHistorySessionsCacheKeyedOnModTime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	config.CacheDir = t.TempDir()
+	proj := filepath.Join(home, ".claude", "projects", "-work-p")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(proj, "s1.jsonl")
+	mod := time.Now().Add(-time.Hour)
+	// "hello" and "world" are equal length, so the rewrite keeps the file size.
+	writeTranscriptMsg(t, path, "/work/p", "hello", mod)
+
+	if got := firstMessage(t, "/work/p"); got != "hello" { // warm the cache
+		t.Fatalf("first list first_message = %q, want hello", got)
+	}
+
+	// Same mod time + size ⇒ cache hit, the rewritten content is ignored.
+	writeTranscriptMsg(t, path, "/work/p", "world", mod)
+	if got := firstMessage(t, "/work/p"); got != "hello" {
+		t.Fatalf("cached first_message = %q, want hello", got)
+	}
+
+	// Bump mod time ⇒ cache miss ⇒ rescan picks up the new content.
+	newMod := time.Now()
+	if err := os.Chtimes(path, newMod, newMod); err != nil {
+		t.Fatal(err)
+	}
+	if got := firstMessage(t, "/work/p"); got != "world" {
+		t.Fatalf("rescanned first_message = %q, want world", got)
 	}
 }
 

@@ -221,35 +221,7 @@ func discoverSessions(projectDir string, scan scanFn) ([]SessionInfo, error) {
 		}
 
 		path := filepath.Join(projectDir, name)
-		meta := scan(path, info.ModTime())
-
-		isOngoing := meta.isOngoing
-		if isOngoing && time.Since(info.ModTime()) > OngoingStalenessThreshold {
-			isOngoing = false
-		}
-
-		// Resolve title: custom (user rename) wins over AI-generated.
-		title := meta.customTitle
-		if title == "" {
-			title = meta.aiTitle
-		}
-
-		sessions = append(sessions, SessionInfo{
-			Path:           path,
-			SessionID:      strings.TrimSuffix(name, ".jsonl"),
-			ModTime:        info.ModTime(),
-			Title:          title,
-			FirstMessage:   meta.firstMsg,
-			LastPrompt:     meta.lastPrompt,
-			TurnCount:      meta.turnCount,
-			IsOngoing:      isOngoing,
-			ContextTokens:  meta.contextTokens,
-			DurationMs:     meta.durationMs,
-			Model:          meta.model,
-			Cwd:            meta.cwd,
-			GitBranch:      meta.gitBranch,
-			PermissionMode: meta.permissionMode,
-		})
+		sessions = append(sessions, buildSessionInfo(path, info.ModTime(), scan(path, info.ModTime())))
 	}
 
 	sort.Slice(sessions, func(i, j int) bool {
@@ -257,4 +229,41 @@ func discoverSessions(projectDir string, scan scanFn) ([]SessionInfo, error) {
 	})
 
 	return sessions, nil
+}
+
+// ScanSessionInfo scans a single session file into a SessionInfo. modTime is the
+// caller's already-known file mod time, so no extra stat is done.
+func ScanSessionInfo(path string, modTime time.Time) SessionInfo {
+	return buildSessionInfo(path, modTime, scanSessionMetadata(path))
+}
+
+// buildSessionInfo assembles a SessionInfo from a file's scanned metadata.
+func buildSessionInfo(path string, modTime time.Time, meta sessionMetadata) SessionInfo {
+	isOngoing := meta.isOngoing
+	if isOngoing && time.Since(modTime) > OngoingStalenessThreshold {
+		isOngoing = false
+	}
+
+	// Resolve title: custom (user rename) wins over AI-generated.
+	title := meta.customTitle
+	if title == "" {
+		title = meta.aiTitle
+	}
+
+	return SessionInfo{
+		Path:           path,
+		SessionID:      strings.TrimSuffix(filepath.Base(path), ".jsonl"),
+		ModTime:        modTime,
+		Title:          title,
+		FirstMessage:   meta.firstMsg,
+		LastPrompt:     meta.lastPrompt,
+		TurnCount:      meta.turnCount,
+		IsOngoing:      isOngoing,
+		ContextTokens:  meta.contextTokens,
+		DurationMs:     meta.durationMs,
+		Model:          meta.model,
+		Cwd:            meta.cwd,
+		GitBranch:      meta.gitBranch,
+		PermissionMode: meta.permissionMode,
+	}
 }
