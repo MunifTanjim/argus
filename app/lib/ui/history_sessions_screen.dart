@@ -111,7 +111,8 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => HistoryTranscriptScreen(session: s),
+                builder: (_) =>
+                    HistoryTranscriptScreen(session: s, project: widget.project),
               ),
             ),
           );
@@ -148,10 +149,9 @@ class _SessionCard extends StatelessWidget {
       subtitle: subtitleParts.isNotEmpty
           ? Text(subtitleParts.join(' · '))
           : null,
-      trailing:
-          showAgent && session.agent.isNotEmpty
-              ? AgentBadge(agent: session.agent)
-              : null,
+      trailing: showAgent && session.agent.isNotEmpty
+          ? AgentBadge(agent: session.agent)
+          : null,
       onTap: onTap,
     );
   }

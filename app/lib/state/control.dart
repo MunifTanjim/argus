@@ -71,6 +71,22 @@ class SessionService {
             if (agent != null && agent.isNotEmpty) 'agent': agent,
           }));
 
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  }) =>
+      _guard((c) async {
+        final r = await c.call('sessions.resume', {
+          'agent': agent,
+          'agent_session_id': agentSessionId,
+          'cwd': cwd,
+          if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
+        }) as Map?;
+        return ResumeOutcome(sessionId: r?['session_id'] as String? ?? '');
+      });
+
   /// An empty [nodeId] targets the sole node.
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
       _guard((c) async {

@@ -6,6 +6,13 @@ import 'package:argus/state/grouping.dart';
 /// Base fake for [SessionRepository] where every method succeeds with a no-op
 /// result. Tests subclass this and override only the methods they exercise.
 class FakeSessionRepository implements SessionRepository {
+  FakeSessionRepository({
+    this.resumeResult = const Result.ok(ResumeOutcome(sessionId: '')),
+  });
+
+  final Result<ResumeOutcome> resumeResult;
+  Map<String, dynamic>? lastResumeArgs;
+
   @override
   Future<Result<void>> respond(Map<String, dynamic> params) async =>
       const Result.ok(null);
@@ -43,4 +50,20 @@ class FakeSessionRepository implements SessionRepository {
   @override
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
       const Result.ok(<AgentInfo>[]);
+
+  @override
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  }) async {
+    lastResumeArgs = {
+      'nodeId': nodeId,
+      'agent': agent,
+      'agentSessionId': agentSessionId,
+      'cwd': cwd,
+    };
+    return resumeResult;
+  }
 }

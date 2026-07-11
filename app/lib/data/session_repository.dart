@@ -25,6 +25,13 @@ abstract class SessionRepository {
 
   /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId);
+
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  });
 }
 
 /// [SessionRepository] backed by the gateway over JSON-RPC via [SessionService].
@@ -70,6 +77,20 @@ class SessionRepositoryRemote implements SessionRepository {
   @override
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
       _service.listAgents(nodeId);
+
+  @override
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  }) =>
+      _service.resume(
+        nodeId: nodeId,
+        agent: agent,
+        agentSessionId: agentSessionId,
+        cwd: cwd,
+      );
 }
 
 final sessionRepositoryProvider = Provider<SessionRepository>(

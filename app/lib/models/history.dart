@@ -45,6 +45,7 @@ class HistorySession {
   final String? nodeId;
   final String? nodeLabel;
   final String agent;
+  final bool resumable;
 
   const HistorySession({
     required this.sessionId,
@@ -60,6 +61,7 @@ class HistorySession {
     this.nodeId,
     this.nodeLabel,
     this.agent = '',
+    this.resumable = false,
   });
 
   factory HistorySession.fromJson(Map<String, dynamic> j) => HistorySession(
@@ -76,6 +78,7 @@ class HistorySession {
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
         agent: j['agent'] as String? ?? '',
+        resumable: j['resumable'] as bool? ?? false,
       );
 
   /// The label shown wherever a history session needs a title: title, else the
