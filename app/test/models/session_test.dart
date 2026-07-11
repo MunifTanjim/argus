@@ -9,6 +9,7 @@ const _sessionJson = '''
   "id":"macbook:%3","agent":"claude","status":"awaiting_input","source":"discovered",
   "tmux":{"server":"default","pane_id":"%3","session_name":"argus","window_index":0,"current_path":"/home/u/argus"},
   "repo":"argus",
+  "branch":"feat/session-git-branch",
   "summary":{"model_name":"Opus 4.8","model_color":"#d3869b","has_context":true,"context_pct":42.5,"tokens":12300,"task":"fix bug","last_activity":"2026-06-20T10:00:00Z"},
   "interaction":{"kind":"permission","tool_name":"bash","tool_input":"go test ./..."},
   "node_id":"macbook","node_label":"MacBook"
@@ -21,6 +22,7 @@ void main() {
     expect(s.id, 'macbook:%3');
     expect(s.status, SessionStatus.awaitingInput);
     expect(s.repo, 'argus');
+    expect(s.branch, 'feat/session-git-branch');
     expect(s.tmux.paneId, '%3');
     expect(s.tmux.server, TmuxServerKind.default_);
     expect(s.summary!.contextPct, 42.5);
@@ -37,6 +39,7 @@ void main() {
     expect(s.summary, isNull);
     expect(s.interaction, isNull);
     expect(s.repo, isNull);
+    expect(s.branch, isNull);
     expect(s.tmux.server, TmuxServerKind.argus);
   });
 

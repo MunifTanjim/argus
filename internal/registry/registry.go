@@ -308,6 +308,20 @@ func (r *Registry) ClearInteraction(id string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+// SetBranch updates a session's current git branch, publishing an update only
+// when it changes. No-op for an unknown id. Called when a client opens a session
+// (path-derived, so it catches a mid-session checkout).
+func (r *Registry) SetBranch(id, branch string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	if s == nil || s.Branch == branch {
+		return
+	}
+	s.Branch = branch
+	r.publish(Event{Type: EventUpdated, Session: *s})
+}
+
 // HookUpdate carries the correlation keys and fields from an agent hook event. Empty
 // string fields leave an existing session unchanged. A non-empty Status sets the
 // status; StatusDead removes the session.

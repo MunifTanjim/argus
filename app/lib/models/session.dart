@@ -157,6 +157,7 @@ class Session {
   final SessionSource source;
   final FrontendKind frontend;
   final String? repo;
+  final String? branch;
   final Summary? summary;
   final Interaction? interaction;
   final String? nodeId;
@@ -176,6 +177,7 @@ class Session {
     this.cwd,
     this.transcriptPath,
     this.repo,
+    this.branch,
     this.summary,
     this.interaction,
     this.nodeId,
@@ -196,6 +198,7 @@ class Session {
         source: sourceFromWire(j['source'] as String?),
         frontend: frontendFromWire(j['frontend'] as String?),
         repo: j['repo'] as String?,
+        branch: j['branch'] as String?,
         summary: j['summary'] == null
             ? null
             : Summary.fromJson(j['summary'] as Map<String, dynamic>),

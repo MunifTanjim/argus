@@ -14,7 +14,8 @@ import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import '../support/fake_session_repository.dart';
 
-Session _s({String? agentSessionId, String? name}) => Session.fromJson({
+Session _s({String? agentSessionId, String? name, String? branch}) =>
+    Session.fromJson({
       'id': 'mac:%1',
       'agent': 't',
       'status': 'working',
@@ -28,6 +29,7 @@ Session _s({String? agentSessionId, String? name}) => Session.fromJson({
         'current_path': '/p',
       },
       'repo': 'argus',
+      'branch': ?branch,
       'node_label': 'mac',
       'agent_session_id': ?agentSessionId,
       'name': ?name,
@@ -71,9 +73,9 @@ class _FakeSessionControl extends FakeSessionRepository {
   }
 }
 
-Widget _app(List<Override> overrides) => ProviderScope(
+Widget _app(List<Override> overrides, {Session? session}) => ProviderScope(
       overrides: overrides,
-      child: MaterialApp(home: SessionDetailScreen(session: _s())),
+      child: MaterialApp(home: SessionDetailScreen(session: session ?? _s())),
     );
 
 List<Override> _baseOverrides() => [
@@ -123,6 +125,21 @@ void main() {
     ]));
     await tester.pump();
     expect(find.byIcon(Icons.terminal), findsOneWidget);
+  });
+
+  testWidgets('shows branch icon with branch name tooltip when set',
+      (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides(),
+        session: _s(branch: 'feat/session-git-branch')));
+    await tester.pump();
+    expect(find.byIcon(Icons.commit), findsOneWidget);
+    expect(find.byTooltip('feat/session-git-branch'), findsOneWidget);
+  });
+
+  testWidgets('no branch icon when branch is absent', (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides()));
+    await tester.pump();
+    expect(find.byIcon(Icons.commit), findsNothing);
   });
 
   testWidgets('AppBar has overflow PopupMenuButton', (tester) async {
