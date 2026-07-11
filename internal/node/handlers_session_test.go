@@ -8,11 +8,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
+
+// fakeDiscoverer registers the target session on its Nth ScanOnce, modelling the
+// spawn→ps lag: the process only becomes visible to discovery after a few scans.
+type fakeDiscoverer struct {
+	calls    int
+	after    int
+	register func()
+}
+
+func (f *fakeDiscoverer) ScanOnce(context.Context) error {
+	f.calls++
+	if f.calls >= f.after {
+		f.register()
+	}
+	return nil
+}
+
+// The post-spawn rescan must retry until the session is registered, then stop as
+// soon as it appears (not run the full backoff schedule).
+func TestRescanUntilRegisteredStopsWhenFound(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{
+		session.TmuxServerArgus: tmux.New("argus-rescan-test"),
+	})
+	id := "argus:%7"
+	fd := &fakeDiscoverer{after: 3, register: func() {
+		d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
+			HasPane: true, Server: session.TmuxServerArgus, PaneID: "%7",
+			Frontend: session.FrontendTmux,
+		}})
+	}}
+	d.discs = []adapter.Discoverer{fd}
+
+	d.rescanUntilRegistered(id)
+
+	if _, ok := d.reg.Get(id); !ok {
+		t.Fatalf("session %s should be registered after retries", id)
+	}
+	if fd.calls != 3 {
+		t.Fatalf("rescan should stop as soon as the session appears: got %d scans, want 3", fd.calls)
+	}
+}
 
 // A node without tmux must advertise no spawn support and reject sessions.spawn
 // with an error, even if a client bypasses the UI gating.

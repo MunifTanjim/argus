@@ -214,7 +214,13 @@ func (m model) actHistSessResume(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	s := m.history.sessions[m.history.sessCursor]
-	if !s.Resumable {
+	return m.startHistoryResume(s.Resumable, m.history.project.NodeID, s.Agent, s.SessionID)
+}
+
+// startHistoryResume gates a resume on the session's resumability and a known
+// working directory, flashing the reason when it can't proceed.
+func (m model) startHistoryResume(resumable bool, nodeID, agent, sessionID string) (tea.Model, tea.Cmd) {
+	if !resumable {
 		m.flash = "resume not supported for this session"
 		return m, nil
 	}
@@ -222,7 +228,7 @@ func (m model) actHistSessResume(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.flash = "resume unavailable: unknown working directory"
 		return m, nil
 	}
-	return m, m.resumeCmd(m.history.project.NodeID, s.Agent, s.SessionID, m.history.project.Cwd)
+	return m, m.resumeCmd(nodeID, agent, sessionID, m.history.project.Cwd)
 }
 
 func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -258,15 +264,7 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 		return m, nil
 	}
 	if key.Matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript {
-		if !m.history.openResumable {
-			m.flash = "resume not supported for this session"
-			return m, nil
-		}
-		if m.history.project.Cwd == "" {
-			m.flash = "resume unavailable: unknown working directory"
-			return m, nil
-		}
-		return m, m.resumeCmd(m.history.openNodeID, m.history.openAgent, m.history.openSessionID, m.history.project.Cwd)
+		return m.startHistoryResume(m.history.openResumable, m.history.openNodeID, m.history.openAgent, m.history.openSessionID)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)

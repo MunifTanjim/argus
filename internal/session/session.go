@@ -9,6 +9,9 @@ type Status string
 const (
 	// StatusDiscovered: found (e.g. a tmux pane) but no hook event yet.
 	StatusDiscovered Status = "discovered"
+	// StatusStarting: has a tmux pane but hasn't reached the REPL yet (still at a
+	// startup gate — trust/theme/login). Not ready for input.
+	StatusStarting Status = "starting"
 	// StatusWorking: actively processing (between prompt submit and stop, or a tool call).
 	StatusWorking Status = "working"
 	// StatusAwaitingInput: blocked on the user (e.g. a permission prompt).
@@ -29,6 +32,8 @@ func (s Status) Label() string {
 		return "awaiting"
 	case StatusIdle:
 		return "idle"
+	case StatusStarting:
+		return "starting"
 	case StatusDiscovered:
 		return "discovered"
 	case StatusDead:

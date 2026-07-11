@@ -87,6 +87,9 @@ type paneInfo struct {
 // structural + identity fields only — ScanOnce fills Summary/StatusHint.
 func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entries []procSession) []registry.DiscoveredSession {
 	var out []registry.DiscoveredSession
+	// seenPaneK tracks panes already emitted (by either pass) so the pane-only pass
+	// never adds a second record for one pane — distinct pids can share a tty→pane.
+	seenPaneK := map[string]bool{}
 	for _, ps := range entries {
 		tty, alive := procs[ps.PID]
 		if !alive {
@@ -100,20 +103,11 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 		}
 		if tty != "" {
 			if pi, ok := paneByTTY[normalizeTTY(tty)]; ok {
-				d.HasPane = true
-				d.Server = pi.server
-				d.PaneID = pi.paneID
-				d.SessionName = pi.sessionName
-				d.WindowIndex = pi.windowIndex
-				d.CurrentPath = pi.currentPath
-				if pi.currentPath != "" {
-					d.Repo = repoName(pi.currentPath)
-				}
+				bindPane(&d, pi)
+				seenPaneK[registry.PaneKey(pi.server, pi.paneID)] = true
 			}
 		}
-		if d.HasPane {
-			d.Frontend = session.FrontendTmux
-		} else {
+		if !d.HasPane {
 			d.Frontend = frontendFor(ps.Entrypoint, false)
 		}
 		if ps.Cwd != "" {
@@ -123,7 +117,44 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 		}
 		out = append(out, d)
 	}
+
+	// Pane-only pass: a live claude on a pane with no proc-session file yet (stuck at
+	// the startup gate) is otherwise invisible and can't be opened to unblock. Skip
+	// paneless procs: their empty AgentSessionID collides on the shared "claude:" key.
+	for _, tty := range procs {
+		if tty == "" {
+			continue
+		}
+		pi, ok := paneByTTY[normalizeTTY(tty)]
+		if !ok {
+			continue
+		}
+		paneK := registry.PaneKey(pi.server, pi.paneID)
+		if seenPaneK[paneK] {
+			continue
+		}
+		seenPaneK[paneK] = true
+		var d registry.DiscoveredSession
+		bindPane(&d, pi)
+		d.Cwd = pi.currentPath
+		out = append(out, d)
+	}
 	return out
+}
+
+// bindPane sets d's pane fields and tmux frontend. Cwd is left to the caller: the
+// entries pass keeps the proc-session cwd, the pane-only pass adopts the pane's.
+func bindPane(d *registry.DiscoveredSession, pi paneInfo) {
+	d.HasPane = true
+	d.Server = pi.server
+	d.PaneID = pi.paneID
+	d.SessionName = pi.sessionName
+	d.WindowIndex = pi.windowIndex
+	d.CurrentPath = pi.currentPath
+	d.Frontend = session.FrontendTmux
+	if pi.currentPath != "" {
+		d.Repo = repoName(pi.currentPath)
+	}
 }
 
 // serverClient pairs a logical tmux server with its CLI client.

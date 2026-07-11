@@ -11,6 +11,8 @@ String statusGlyph(SessionStatus s) {
     case SessionStatus.idle:
     case SessionStatus.discovered:
       return '○';
+    case SessionStatus.starting:
+      return '◌';
     case SessionStatus.dead:
       return '×';
     case SessionStatus.unknown:
@@ -28,6 +30,7 @@ Color statusColor(SessionStatus s) {
       return const Color(0xFFfb4934);
     case SessionStatus.idle:
     case SessionStatus.discovered:
+    case SessionStatus.starting:
     case SessionStatus.unknown:
       return const Color(0xFF928374);
   }

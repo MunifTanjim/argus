@@ -118,6 +118,9 @@ func (m model) sessionFooter() string {
 		if m.sessionInteraction() != nil {
 			binds = append(binds, transcriptKeys.Answer)
 		}
+		if m.sessions[m.selectedID].Status == session.StatusStarting {
+			binds = append(binds, sessionKeys.Raw)
+		}
 		return m.footer(binds...)
 	}
 }
@@ -389,6 +392,10 @@ func (m model) sessionView() string {
 	header += dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
 	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 
+	if s.Status == session.StatusStarting {
+		return pinFooter(header+"\n\n"+startingNotice(m), m.sessionFooter(), m.width, m.height)
+	}
+
 	body := m.historyBody()
 	if m.sessionInteraction() != nil {
 		_, dockH := m.sessionLayout()
@@ -409,4 +416,14 @@ func (m model) sessionView() string {
 		body = body + "\n" + centerBlock(dock, m.containerWidth(), m.width)
 	}
 	return pinFooter(header+"\n\n"+body, m.sessionFooter(), m.width, m.height)
+}
+
+// startingNotice renders the startup-gate message centered in place of the
+// absent transcript.
+func startingNotice(m model) string {
+	lines := []string{
+		"Session is starting or waiting at a startup prompt.",
+		"Press " + sessionKeys.Raw.Help().Key + " to open the live screen and continue.",
+	}
+	return centerBlock(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth(), m.width)
 }

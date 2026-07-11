@@ -245,7 +245,28 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
-	return api.SpawnResult{SessionID: string(session.TmuxServerArgus) + ":" + paneID, PaneID: paneID}, nil
+	// Discovery registers the session, but only once the agent process is visible in
+	// ps — which can lag the pane's creation. Retry with backoff so the session shows
+	// up without a manual refresh, stopping early once it's registered.
+	sid := string(session.TmuxServerArgus) + ":" + paneID
+	go d.rescanUntilRegistered(sid)
+	return api.SpawnResult{SessionID: sid, PaneID: paneID}, nil
+}
+
+// rescanUntilRegistered rescans discovery with backoff until the given session id
+// appears in the registry or the attempts are exhausted. Covers the window between a
+// spawned pane existing and the agent process becoming visible to discovery's ps probe.
+func (d *Node) rescanUntilRegistered(id string) {
+	// Leading 0 scans immediately (Sleep(0) is a no-op) to catch the fast case, then
+	// backs off while waiting for the process to appear in ps.
+	backoffs := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, 750 * time.Millisecond, 1500 * time.Millisecond, 2 * time.Second}
+	for _, wait := range backoffs {
+		time.Sleep(wait)
+		d.scan(context.Background())
+		if _, ok := d.reg.Get(id); ok {
+			return
+		}
+	}
 }
 
 // launchPane opens a new tmux pane running command in cwd. A blank sessionName

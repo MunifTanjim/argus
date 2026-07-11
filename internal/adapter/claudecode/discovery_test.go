@@ -168,6 +168,111 @@ func TestCachedTranscriptStatusHint(t *testing.T) {
 	}
 }
 
+// TestBuildDiscoveredPaneOnly: a file-less live claude on a pane is emitted;
+// the other procs (see inline) are not.
+func TestBuildDiscoveredPaneOnly(t *testing.T) {
+	procs := map[int]string{
+		100: "ttys002", // has a proc-session file below → entries pass, not pane-only
+		500: "ttys003", // live on a pane, no file → pane-only
+		600: "ttys099", // tty but no pane → skipped
+		700: "",        // ttyless → skipped
+		800: "ttys002", // shares pid 100's tty/pane, no file → must not double-emit that pane
+	}
+	paneByTTY := map[string]paneInfo{
+		"ttys002": {server: session.TmuxServerArgus, paneID: "%0", sessionName: "s0", currentPath: "/repo/a"},
+		"ttys003": {server: session.TmuxServerArgus, paneID: "%1", sessionName: "s1", currentPath: "/repo/b"},
+	}
+	entries := []procSession{
+		{PID: 100, SessionID: "tmux-1", Entrypoint: "cli", Cwd: "/x"},
+	}
+
+	var paneOnly []registry.DiscoveredSession
+	full := map[string]registry.DiscoveredSession{}
+	for _, d := range buildDiscovered(procs, paneByTTY, entries) {
+		if d.AgentSessionID == "" {
+			paneOnly = append(paneOnly, d)
+		} else {
+			full[d.AgentSessionID] = d
+		}
+	}
+
+	// The pid with a file is emitted once (not double-counted by the pane-only pass).
+	if len(full) != 1 || full["tmux-1"].PaneID != "%0" {
+		t.Fatalf("entries pass: %+v", full)
+	}
+	// Only 500 is surfaced pane-only.
+	if len(paneOnly) != 1 {
+		t.Fatalf("want 1 pane-only session, got %d: %+v", len(paneOnly), paneOnly)
+	}
+	po := paneOnly[0]
+	if !po.HasPane || po.PaneID != "%1" || po.Frontend != session.FrontendTmux ||
+		po.AgentSessionID != "" || po.Cwd != "/repo/b" || po.Repo != repoName("/repo/b") {
+		t.Fatalf("pane-only session: %+v", po)
+	}
+}
+
+// TestScanOnceSurfacesStuckPaneThenUpgrades drives a real tmux pane. First scan sees
+// a live claude on that pane with no proc-session file (stuck at the trust/model
+// gate): it must surface as an attachable pane-keyed session. Once the proc-session
+// file appears, the next scan upgrades the same record in place with the session id.
+func TestScanOnceSurfacesStuckPaneThenUpgrades(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	ctx := context.Background()
+	client := tmux.New("argus-stuck-test")
+	t.Cleanup(func() { _ = client.KillServer(ctx) })
+	if _, err := client.NewSession(ctx, tmux.NewSessionOpts{Name: "s1"}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	panes, err := client.ListPanes(ctx)
+	if err != nil || len(panes) == 0 {
+		t.Fatalf("ListPanes: err=%v len=%d", err, len(panes))
+	}
+	pane := panes[0]
+	tty := normalizeTTY(pane.TTY)
+
+	dir := t.TempDir()
+	claudeSessionsDirOverride = dir
+	t.Cleanup(func() { claudeSessionsDirOverride = "" })
+
+	orig := runPS
+	t.Cleanup(func() { runPS = orig })
+	runPS = func() (string, error) { return "  4242 " + tty + " S+ claude", nil }
+
+	reg := registry.New()
+	d := NewDiscoverer(reg, map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: client})
+
+	// Stuck at the gate: live claude on the pane, no proc-session file yet.
+	if err := d.ScanOnce(ctx); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+	id := "argus:" + pane.PaneID
+	s, ok := reg.Get(id)
+	if !ok {
+		t.Fatalf("stuck session %s should be surfaced", id)
+	}
+	if !s.Controllable() || s.Frontend != session.FrontendTmux || s.AgentSessionID != "" {
+		t.Fatalf("stuck session should be an attachable pane-only record: %+v", s)
+	}
+
+	// Gate cleared: claude writes its proc-session file → next scan upgrades in place.
+	if err := os.WriteFile(filepath.Join(dir, "4242.json"),
+		[]byte(`{"pid":4242,"sessionId":"c1","cwd":"/repo","name":"n","entrypoint":"cli"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ScanOnce(ctx); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+	s2, ok := reg.Get(id)
+	if !ok {
+		t.Fatalf("session %s should survive the upgrade scan (not pruned)", id)
+	}
+	if s2.AgentSessionID != "c1" || s2.Tmux.PaneID != pane.PaneID {
+		t.Fatalf("session should upgrade in place with the session id: %+v", s2)
+	}
+}
+
 func TestBuildDiscovered(t *testing.T) {
 	procs := map[int]string{100: "ttys002", 200: "", 300: "ttys009"}
 	paneByTTY := map[string]paneInfo{
