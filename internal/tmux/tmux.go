@@ -281,6 +281,53 @@ func paneFocused(out, paneID string) (bool, error) {
 	return false, nil
 }
 
+// windowVisibleFormat drops pane_active (unlike focusFormat): a side-by-side pane
+// still shares its window's size and zoom, which is what a grouped mirror fights
+// over. session_name lets callers skip their own mirrors, which share the window.
+var windowVisibleFormat = strings.Join([]string{
+	"#{pane_id}",
+	"#{window_active}",
+	"#{session_attached}",
+	"#{session_name}",
+}, fieldSep)
+
+// WindowVisible reports whether paneID's window is the current window of an
+// attached client, skipping sessions for which ignore returns true (a nil ignore
+// counts every session). Empty paneID, or no server, is never visible.
+func (c *Client) WindowVisible(ctx context.Context, paneID string, ignore func(session string) bool) (bool, error) {
+	if paneID == "" {
+		return false, nil
+	}
+	out, err := c.run(ctx, "list-panes", "-a", "-F", windowVisibleFormat)
+	if err != nil {
+		if noServer(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return windowVisible(out, paneID, ignore)
+}
+
+// windowVisible scans windowVisibleFormat output and reports whether paneID's
+// window is current in a non-ignored attached session. A shared window appears
+// once per grouped session, so any matching line suffices.
+func windowVisible(out, paneID string, ignore func(session string) bool) (bool, error) {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		line = strings.ReplaceAll(line, `\037`, fieldSep)
+		f := strings.Split(line, fieldSep)
+		if len(f) != 4 {
+			return false, fmt.Errorf("tmux: unexpected window-visible format (%d fields): %q", len(f), line)
+		}
+		if f[0] == paneID && f[1] == "1" && atoi(f[2]) > 0 && (ignore == nil || !ignore(f[3])) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CaptureOpts controls capture-pane behavior.
 type CaptureOpts struct {
 	// Escapes includes color/attribute escape sequences (-e).

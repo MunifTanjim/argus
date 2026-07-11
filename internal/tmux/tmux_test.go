@@ -80,6 +80,65 @@ func TestPaneFocusedEscapedSep(t *testing.T) {
 	}
 }
 
+// TestWindowVisible checks the window-current / attached-client logic that decides
+// whether a pane's window is on a user's screen (ignores pane_active).
+func TestWindowVisible(t *testing.T) {
+	sep := "\x1f"
+	line := func(id, windowActive, attached, session string) string {
+		return strings.Join([]string{id, windowActive, attached, session}, sep)
+	}
+	out := strings.Join([]string{
+		line("%1", "1", "1", "origin"),       // visible: current window, attached
+		line("%2", "1", "0", "origin"),       // not visible: no client attached
+		line("%3", "0", "1", "origin"),       // not visible: window not current
+		line("%4", "1", "1", "origin"),       // visible: inactive pane still shares the window
+		line("%5", "1", "2", "origin"),       // visible: two clients attached
+		line("%6", "1", "1", "argus-mirror"), // ignored: our own mirror session
+	}, "\n") + "\n"
+
+	ignore := func(s string) bool { return s == "argus-mirror" }
+	want := map[string]bool{"%1": true, "%2": false, "%3": false, "%4": true, "%5": true, "%6": false, "%absent": false}
+	for id, exp := range want {
+		got, err := windowVisible(out, id, ignore)
+		if err != nil {
+			t.Fatalf("windowVisible(%q): %v", id, err)
+		}
+		if got != exp {
+			t.Errorf("windowVisible(%q) = %v, want %v", id, got, exp)
+		}
+	}
+}
+
+// TestWindowVisibleEscapedSep verifies the tmux >=3.4 "\037"-escaped separator is
+// normalized, matching parsePane's handling.
+func TestWindowVisibleEscapedSep(t *testing.T) {
+	got, err := windowVisible(strings.Join([]string{"%9", "1", "1", "origin"}, `\037`), "%9", nil)
+	if err != nil {
+		t.Fatalf("windowVisible: %v", err)
+	}
+	if !got {
+		t.Fatal("escaped-separator line not parsed as visible")
+	}
+}
+
+// TestWindowVisibleDetached checks a detached pane's window is never reported
+// visible — verifiable headlessly (attaching needs a real terminal).
+func TestWindowVisibleDetached(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	pane, err := c.NewSession(ctx, NewSessionOpts{Name: "s1"})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	visible, err := c.WindowVisible(ctx, pane, nil)
+	if err != nil {
+		t.Fatalf("WindowVisible: %v", err)
+	}
+	if visible {
+		t.Errorf("WindowVisible(%q) = true; want false (no client attached)", pane)
+	}
+}
+
 // TestIsFocusedDetached checks a detached pane is never reported focused — the
 // no-false-positive case verifiable headlessly (attaching needs a real terminal).
 func TestIsFocusedDetached(t *testing.T) {

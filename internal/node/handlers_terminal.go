@@ -214,6 +214,13 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
+	// A mirror grouped onto a window a local client is displaying fights that
+	// client over shared window size and zoom (visible glitching). Refuse instead.
+	if visible, err := c.WindowVisible(ctx, s.Tmux.PaneID, d.isMirror); err != nil {
+		return nil, err
+	} else if visible {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is visible in your local tmux; use the pane directly"}
+	}
 	cols, rows := clampSize(p.Cols, p.Rows)
 	ct := d.termsFor(ctx, n)
 	// Serialize the whole open so evict→setup→register is atomic: two concurrent

@@ -136,6 +136,13 @@ func (d *Node) mirrorName(termID string) string {
 	return d.mirrorPrefix + mirrorMarker + sanitizeTmuxName(termID) + d.mirrorSuffix
 }
 
+// isMirror reports whether name is one of argus's own grouped mirror sessions.
+func (d *Node) isMirror(name string) bool {
+	return strings.HasPrefix(name, d.mirrorPrefix) &&
+		strings.HasSuffix(name, d.mirrorSuffix) &&
+		strings.Contains(name, mirrorMarker)
+}
+
 // sanitizeTmuxName replaces the characters tmux reserves in target specs so an
 // arbitrary term id is safe to embed in a session name.
 func sanitizeTmuxName(s string) string {

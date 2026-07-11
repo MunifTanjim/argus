@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/session"
@@ -28,9 +27,7 @@ func (d *Node) reapMirrors(ctx context.Context) {
 			continue
 		}
 		for _, name := range names {
-			if strings.HasPrefix(name, d.mirrorPrefix) &&
-				strings.HasSuffix(name, d.mirrorSuffix) &&
-				strings.Contains(name, mirrorMarker) {
+			if d.isMirror(name) {
 				if err := c.KillSession(ctx, name); err != nil {
 					d.log.Warn("reap mirror", "name", name, "err", err)
 				}
