@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -74,6 +76,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":
+		case m.redact.inputActive:
+			m.redact.input += msg.Content
+			return m, nil
 		case m.mode == modeScreen:
 			m.sendTermKey(m.termID, []byte(msg.Content))
 			return m, nil
@@ -219,6 +224,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.flash = "exported: " + msg.path
 		}
+		return m, nil
+	case redactPreparedMsg:
+		if msg.err != nil {
+			m.flash = "redact failed: " + msg.err.Error()
+			return m, nil
+		}
+		r := msg.report
+		m.redact.report = &r
+		m.redact.tempPath = msg.tempPath
+		m.redact.outPath = msg.outPath
+		m.redact.pendingSave = true
+		m.redact.warnConfirm = len(r.Warnings) > 0 // extra ack when content can't be scrubbed
+		return m, nil
+	case redactDoneMsg:
+		switch {
+		case msg.err != nil:
+			m.flash = "redact failed: " + msg.err.Error()
+		case msg.sidecar != "":
+			m.flash = fmt.Sprintf("redacted with %d warning(s) (secrets remain); see %s",
+				len(msg.warnings), filepath.Base(msg.sidecar))
+		case len(msg.warnings) > 0:
+			m.flash = fmt.Sprintf("redacted with %d warning(s) (secrets remain): %s", len(msg.warnings), msg.path)
+		default:
+			m.flash = "redacted: " + msg.path
+		}
+		m.redact.report = nil
+		m.redact.warnConfirm = false
+		m.redact.tempPath = ""
 		return m, nil
 	case termOpenedMsg:
 		if msg.termID == m.termID && msg.err != nil {

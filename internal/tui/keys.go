@@ -68,6 +68,7 @@ var transcriptKeys = struct {
 	ScrollUp, ScrollDown, TurnNext, TurnPrev, CardNext, CardPrev, HalfUp, HalfDown key.Binding
 	Top, Bottom, Fold, Detail, ExpandAll, CollapseAll                              key.Binding
 	Raw, Answer, Export, Back, Resume                                              key.Binding
+	Redact, RedactSave, RedactList                                                 key.Binding
 }{
 	ScrollUp:    nb([]string{"up"}, "↑/↓", "scroll"),
 	ScrollDown:  nb([]string{"down"}, "", ""),
@@ -88,6 +89,9 @@ var transcriptKeys = struct {
 	Export:      nb([]string{"E"}, "E", "export"),
 	Back:        nb([]string{"esc", "escape", "q"}, "esc", "back"),
 	Resume:      nb([]string{"R"}, "R", "resume"),
+	Redact:      nb([]string{"d"}, "d", "redact"),
+	RedactList:  nb([]string{"D"}, "D", "redactions"),
+	RedactSave:  nb([]string{"W"}, "W", "save redacted"),
 }
 
 var detailKeys = struct {

@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/vt"
 
+	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -83,6 +84,11 @@ type model struct {
 	reconnecting bool // connection dropped; the client is retrying
 	hasDark      bool // terminal background; drives glamour/highlight styling
 	viewer       bool // offline viewer mode: opens directly in transcript view
+
+	redactMode   bool        // --redact: interactive redaction affordance in the viewer
+	bundlePath   string      // source .argus path (for the -redacted output name)
+	redactSrcDir string      // extracted cache dir to redact from
+	redact       redactState // queued literals + input/confirm state
 
 	mode         viewMode
 	screenReturn viewMode // mode to restore when leaving the live screen (ctrl+])
@@ -203,4 +209,19 @@ func (m *model) syncPromptDraft() {
 		m.resetPromptState()
 		m.prompt.key = k
 	}
+}
+
+// redactState holds queued secrets plus input/confirm state for interactive redaction.
+type redactState struct {
+	literals    []string
+	inputActive bool
+	input       string
+	listActive  bool
+	listCursor  int
+	listReturn  bool // input was opened from the list (D); reopen it when the input closes
+	pendingSave bool
+	warnConfirm bool // prepare found un-scrubbable content; require an extra ack before saving
+	report      *bundle.Report
+	tempPath    string // staged bundle awaiting confirmation; renamed to outPath on save
+	outPath     string // resolved sibling bundle path
 }

@@ -25,3 +25,14 @@ func TestViewCmdRejectsGarbage(t *testing.T) {
 		t.Fatal("expected error for non-gzip file")
 	}
 }
+
+func TestViewCmdRedactFlag(t *testing.T) {
+	cmd := newViewCmd()
+	f := cmd.Flags().Lookup("redact")
+	if f == nil {
+		t.Fatal("view command should define a --redact flag")
+	}
+	if f.Value.Type() != "bool" {
+		t.Fatalf("--redact should be a bool, got %s", f.Value.Type())
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -202,11 +203,18 @@ func centerLine(line string, width int) string {
 	return strings.Repeat(" ", pad) + line
 }
 
-// pinFooter stacks body and a width-centered footer, filling the gap with blank
-// lines so the footer lands on the last row of a height-tall viewport.
+// pinFooter stacks body and a width-centered footer on the last rows of a
+// height-tall viewport. A footer wider than the terminal wraps onto multiple lines
+// (rather than clipping) and the gap shrinks to keep them all on-screen.
 func pinFooter(body, footer string, width, height int) string {
-	gap := max(1, height-lipgloss.Height(body))
-	return body + strings.Repeat("\n", gap) + centerLine(footer, width)
+	footer = xansi.Wrap(footer, max(1, width), "")
+	fLines := strings.Split(footer, "\n")
+	for i, l := range fLines {
+		fLines[i] = centerLine(l, width)
+	}
+	// Reserve fH rows for the footer: total = bodyH + gap + (fH-1) == height.
+	gap := max(1, height-lipgloss.Height(body)-(len(fLines)-1))
+	return body + strings.Repeat("\n", gap) + strings.Join(fLines, "\n")
 }
 
 // truncateLines caps content to maxLines, returning the text and hidden count.

@@ -294,6 +294,12 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 	if mm, cmd, ok := m.takePendingExport(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.takePendingRedactSave(msg); ok {
+		return mm, cmd
+	}
+	if mm, cmd, ok := m.handleRedactKey(msg); ok {
+		return mm, cmd
+	}
 	if key.Matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			if m.popDetail() { // root frame → back to transcript
@@ -402,13 +408,17 @@ func renderCardList(cards []string, cursor, avail int) string {
 func (m model) historyTranscriptView() string {
 	header := centerBlock(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
+	if m.redactListActive() {
+		// The list (D) replaces the transcript body so the queued secrets are visible.
+		body = centerBlock(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
+	}
 
 	binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if !m.viewer {
 		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
 	}
 	binds = append(binds, transcriptKeys.Back)
-	footer := m.exportOrFlashFooter(m.footer(binds...))
+	footer := m.redactFooter(m.exportOrFlashFooter(m.footer(binds...)))
 	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
 }
 

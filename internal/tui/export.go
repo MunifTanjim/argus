@@ -96,17 +96,23 @@ func writeExportFile(filename string, data []byte) (string, error) {
 		return "", fmt.Errorf("export: node returned invalid filename %q", filename)
 	}
 	filename = base
-	target := filepath.Join(cwd, filename)
 	ext := filepath.Ext(filename)
 	stem := filename[:len(filename)-len(ext)]
-	for i := 1; ; i++ {
-		if _, statErr := os.Stat(target); statErr != nil {
-			break // free slot (not-exist) or unreadable; WriteFile surfaces real errors
-		}
-		target = filepath.Join(cwd, fmt.Sprintf("%s-%d%s", stem, i, ext))
-	}
+	target := nextAvailablePath(cwd, stem, ext)
 	if err := os.WriteFile(target, data, 0o644); err != nil {
 		return "", err
 	}
 	return target, nil
+}
+
+// nextAvailablePath returns dir/base+ext, adding a numeric "-N" suffix before
+// ext until it finds a name that does not exist on disk.
+func nextAvailablePath(dir, base, ext string) string {
+	target := filepath.Join(dir, base+ext)
+	for i := 1; ; i++ {
+		if _, err := os.Stat(target); err != nil {
+			return target // free slot (not-exist) or unreadable; caller surfaces real errors
+		}
+		target = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, i, ext))
+	}
 }

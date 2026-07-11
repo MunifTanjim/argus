@@ -85,7 +85,7 @@ func newViewerModel(client *fileClient, hasDark bool) model {
 
 // RunBundle extracts and validates the bundle before launching the TUI, so a bad
 // bundle errors out without ever opening the alt-screen.
-func RunBundle(bundlePath string) error {
+func RunBundle(bundlePath string, redact bool) error {
 	pruneOldExtractions()
 
 	dest, err := bundleExtractDir(bundlePath)
@@ -106,7 +106,7 @@ func RunBundle(bundlePath string) error {
 	if err != nil {
 		return err
 	}
-	return RunViewer(client)
+	return RunViewer(client, bundlePath, redact)
 }
 
 // extractPrefix marks argus view's extraction and temp dirs in TempDir so
@@ -228,12 +228,15 @@ func extractBundle(bundlePath, dest string) (bundle.Manifest, error) {
 
 // RunViewer runs the TUI as an offline viewer over an extracted .argus bundle,
 // opening directly in the transcript view.
-func RunViewer(client *fileClient) error {
+func RunViewer(client *fileClient, bundlePath string, redact bool) error {
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
 	initIcons()
 	initStyles()
 	m := newViewerModel(client, hasDark)
+	m.redactMode = redact
+	m.bundlePath = bundlePath
+	m.redactSrcDir = client.destDir
 	p := tea.NewProgram(m)
 	_, err := p.Run()
 	cerr := client.Close()
