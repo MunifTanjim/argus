@@ -102,59 +102,59 @@ func TestTerminalOpenStreamsAndCloses(t *testing.T) {
 }
 
 // TestTerminalOpenEvictsExistingViewer enforces one viewer per session: a second
-// open (on a different connection) boots the first with terminal.exited{evicted}.
+// open (on a different connection) boots the first with terminal.exited{evicted},
+// then owns the per-session index. Pipes stand in for PTYs so eviction is asserted
+// without depending on a real tmux mirror staying alive between the two opens.
 func TestTerminalOpenEvictsExistingViewer(t *testing.T) {
-	c := newTestClient(t)
-	ctx := context.Background()
-	pane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.restoreMirrorFn = func(*tmux.Client, *mirrorState) {}
+
+	// Viewer A on connection ctA, registered as the sole viewer of session "s".
+	nA := newRecordingNotifier()
+	rA, wA, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerDefault: c})
-	d.mirrorPrefix, d.mirrorSuffix = "_", "_"
+	defer wA.Close()
+	_, cancelA := context.WithCancel(context.Background())
+	ctA := newConnTerms()
+	tmA := &term{pty: rA, cancel: cancelA, sessionID: "s", termID: "tA", notifier: nA, ct: ctA}
+	ctA.m["tA"] = tmA
+	d.sessionTerms["s"] = tmA
+	go d.pumpTerm(tmA)
 
-	sessionID := seedSession(t, d, session.TmuxLocation{
-		Server: session.TmuxServerDefault, PaneID: pane,
-		SessionName: "origin", WindowIndex: 0,
-	})
-
-	// Viewer A on connection nA.
-	nA := newRecordingNotifier()
-	ctxA := api.WithNotifier(ctx, nA)
-	if _, err := d.handleTerminalOpen(ctxA, mustJSON(api.TerminalOpenParams{
-		TermID: "tA", SessionID: sessionID, Cols: 80, Rows: 24,
-	})); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-nA.outputs:
-	case <-time.After(3 * time.Second):
-		t.Fatal("viewer A: no output")
-	}
-
-	// Viewer B on a different connection opens the same session.
-	nB := newRecordingNotifier()
-	ctxB := api.WithNotifier(ctx, nB)
-	if _, err := d.handleTerminalOpen(ctxB, mustJSON(api.TerminalOpenParams{
-		TermID: "tB", SessionID: sessionID, Cols: 80, Rows: 24,
-	})); err != nil {
-		t.Fatal(err)
-	}
-
-	// A is booted with terminal.exited{evicted}.
+	// A second open evicts A before the new viewer registers (as handleTerminalOpen does).
+	d.evictSessionTerm("s")
 	if !waitEvicted(nA, "tA", 3*time.Second) {
 		t.Fatal("viewer A was not evicted")
 	}
 
+	// Viewer B on connection ctB registers as the new sole viewer.
+	nB := newRecordingNotifier()
+	rB, wB, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wB.Close()
+	_, cancelB := context.WithCancel(context.Background())
+	ctB := newConnTerms()
+	tmB := &term{pty: rB, cancel: cancelB, sessionID: "s", termID: "tB", notifier: nB, ct: ctB}
+	ctB.m["tB"] = tmB
+	d.sessionTerms["s"] = tmB
+	go d.pumpTerm(tmB)
+
 	// The session now maps to B's attach only.
 	d.sessionTermsMu.Lock()
-	cur := d.sessionTerms[sessionID]
+	cur := d.sessionTerms["s"]
 	d.sessionTermsMu.Unlock()
 	if cur == nil || cur.termID != "tB" {
 		t.Fatalf("sessionTerms should be owned by tB, got %+v", cur)
 	}
 
-	// B still streams, then closes cleanly.
+	// B streams what its pty produces.
+	if _, err := wB.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case m := <-nB.outputs:
 		if m.TermID != "tB" {
@@ -162,9 +162,6 @@ func TestTerminalOpenEvictsExistingViewer(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("viewer B: no output")
-	}
-	if _, err := d.handleTerminalClose(ctxB, mustJSON(api.TerminalCloseParams{TermID: "tB"})); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -393,52 +390,34 @@ func TestBootSessionTermDoesNotBlockOnStuckViewer(t *testing.T) {
 }
 
 // TestEvictedViewerGetsOnlyEvictedReason verifies the eviction path reports a
-// single, correctly-reasoned exit: A's pump read fails after it's evicted, but
-// since it no longer owns the term it must not emit a second exited{exited}.
+// single, correctly-reasoned exit: eviction deletes the term from ct.m before
+// closing the pty, so the pump's now-failing read finds it no longer owns the
+// term and must not emit a second exited{process} past the boot's evicted.
 func TestEvictedViewerGetsOnlyEvictedReason(t *testing.T) {
-	c := newTestClient(t)
-	ctx := context.Background()
-	pane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.restoreMirrorFn = func(*tmux.Client, *mirrorState) {}
+
+	n := newRecordingNotifier()
+	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerDefault: c})
-	d.mirrorPrefix, d.mirrorSuffix = "_", "_"
-	sessionID := seedSession(t, d, session.TmuxLocation{
-		Server: session.TmuxServerDefault, PaneID: pane,
-		SessionName: "origin", WindowIndex: 0,
-	})
+	defer w.Close()
+	_, cancel := context.WithCancel(context.Background())
+	ct := newConnTerms()
+	tm := &term{pty: r, cancel: cancel, sessionID: "s", termID: "t", notifier: n, ct: ct}
+	ct.m["t"] = tm
+	d.sessionTerms["s"] = tm
 
-	nA := newRecordingNotifier()
-	ctxA := api.WithNotifier(ctx, nA)
-	if _, err := d.handleTerminalOpen(ctxA, mustJSON(api.TerminalOpenParams{
-		TermID: "tA", SessionID: sessionID, Cols: 80, Rows: 24,
-	})); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-nA.outputs:
-	case <-time.After(3 * time.Second):
-		t.Fatal("viewer A: no output")
-	}
+	// Pump blocks reading the pipe; eviction closes it, failing that read.
+	go d.pumpTerm(tm)
 
-	// Viewer B evicts A.
-	nB := newRecordingNotifier()
-	ctxB := api.WithNotifier(ctx, nB)
-	if _, err := d.handleTerminalOpen(ctxB, mustJSON(api.TerminalOpenParams{
-		TermID: "tB", SessionID: sessionID, Cols: 80, Rows: 24,
-	})); err != nil {
-		t.Fatal(err)
-	}
+	d.bootSessionTerm("s", api.TermExitedEvicted)
 
-	// Collect every terminal.exited A receives over a window: exactly one, evicted.
-	reasons := collectExitReasons(nA, "tA", time.Second)
+	// Collect every terminal.exited over a window: exactly one, evicted.
+	reasons := collectExitReasons(n, "t", time.Second)
 	if len(reasons) != 1 || reasons[0] != api.TermExitedEvicted {
-		t.Fatalf("viewer A exit reasons = %v, want exactly [%s]", reasons, api.TermExitedEvicted)
-	}
-
-	if _, err := d.handleTerminalClose(ctxB, mustJSON(api.TerminalCloseParams{TermID: "tB"})); err != nil {
-		t.Fatal(err)
+		t.Fatalf("exit reasons = %v, want exactly [%s]", reasons, api.TermExitedEvicted)
 	}
 }
 
