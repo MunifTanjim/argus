@@ -96,6 +96,29 @@ func sessionModel(ix *session.Interaction) model {
 	return m
 }
 
+func TestSessionHeaderShowsBranch(t *testing.T) {
+	m := sessionModel(nil)
+	s := m.sessions["s1"]
+	s.Repo = "argus"
+	s.Branch = "feat/session-git-branch"
+	m.sessions["s1"] = s
+
+	out := ansi.Strip(m.sessionView())
+	if !strings.Contains(out, "feat/session-git-branch") {
+		t.Errorf("header missing branch name:\n%s", out)
+	}
+	if !strings.Contains(out, Icon.Branch.Glyph) {
+		t.Errorf("header missing branch glyph:\n%s", out)
+	}
+
+	// No branch → no branch glyph in the header.
+	s.Branch = ""
+	m.sessions["s1"] = s
+	if strings.Contains(ansi.Strip(m.sessionView()), Icon.Branch.Glyph) {
+		t.Error("branch glyph shown when branch is empty")
+	}
+}
+
 func TestSessionTabTogglesFocusOnlyWhenPending(t *testing.T) {
 	m := sessionModel(nil)
 	res, _ := m.handleSessionKey(tea.KeyPressMsg{Code: '\t'})

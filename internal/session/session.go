@@ -176,6 +176,11 @@ type Session struct {
 	// (path-derived, not from the transcript).
 	Repo string `json:"repo,omitempty"`
 
+	// Branch is the current git branch of the session directory, when known
+	// (path-derived, refreshed when a client opens the session). Empty outside a
+	// repo; a short commit SHA when HEAD is detached.
+	Branch string `json:"branch,omitempty"`
+
 	// Summary is the cached transcript digest for list views (nil until computed).
 	Summary *Summary `json:"summary,omitempty"`
 

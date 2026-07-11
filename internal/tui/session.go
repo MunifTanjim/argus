@@ -381,8 +381,12 @@ func (m model) sessionView() string {
 	if name != "" {
 		parts = append(parts, name)
 	}
-	header := headerStyle.Render(strings.Join(parts, " · ")) +
-		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
+	header := headerStyle.Render(strings.Join(parts, " · "))
+	if s.Branch != "" {
+		branch := Icon.Branch.Render() + lipgloss.NewStyle().Foreground(ColorGitBranch).Render(" "+s.Branch)
+		header += headerStyle.Render(" · ") + branch
+	}
+	header += dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
 	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 
 	body := m.historyBody()

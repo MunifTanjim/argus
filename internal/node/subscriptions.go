@@ -9,6 +9,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/gitmeta"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -96,23 +97,23 @@ func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSub
 
 // resolveTranscriptPath returns the file to tail for a subscription: the session
 // transcript, or a subagent file when AgentID is set.
-func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, root string, a adapter.Adapter, err error) {
+func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, root, cwd string, a adapter.Adapter, err error) {
 	s, ok := d.reg.Get(p.SessionID)
 	if !ok {
-		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
+		return "", "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session: " + p.SessionID}
 	}
 	if s.TranscriptPath == "" {
-		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
+		return "", "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session has no transcript: " + p.SessionID}
 	}
 	a = d.adapterFor(s.Agent)
 	if p.AgentID == "" {
-		return s.TranscriptPath, s.TranscriptPath, a, nil
+		return s.TranscriptPath, s.TranscriptPath, s.Cwd, a, nil
 	}
 	sub, ok := a.SubagentFilePath(s.TranscriptPath, p.AgentID)
 	if !ok {
-		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
+		return "", "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown subagent: " + p.AgentID}
 	}
-	return sub, s.TranscriptPath, a, nil
+	return sub, s.TranscriptPath, s.Cwd, a, nil
 }
 
 // diffChunks returns the first index at which cur differs from old, and whether
@@ -157,9 +158,16 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
 	cs := d.getOrCreateConnSubs(ctx, n)
-	path, root, a, err := d.resolveTranscriptPath(p)
+	path, root, cwd, a, err := d.resolveTranscriptPath(p)
 	if err != nil {
 		return nil, err
+	}
+
+	// Opening a session is a reliable moment to refresh its git branch: a
+	// mid-session checkout fires no agent hook, so we recompute from cwd here.
+	// Subagent opens (AgentID set) share the parent cwd, so skip them.
+	if p.AgentID == "" && cwd != "" {
+		d.reg.SetBranch(p.SessionID, gitmeta.Branch(cwd))
 	}
 
 	st := a.NewStreamingTranscript(path, root, p.AgentID != "")

@@ -154,9 +154,19 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                         fontFamily: 'monospace',
                         color: statusColor(live.status))),
                 const SizedBox(width: 8),
-                Expanded(
+                Flexible(
                     child: Text(title,
                         maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (live.branch?.isNotEmpty ?? false)
+                  Tooltip(
+                    message: live.branch!,
+                    triggerMode: TooltipTriggerMode.tap,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(Icons.commit, size: 18),
+                    ),
+                  ),
+                const Spacer(),
                 if (live.frontend != FrontendKind.tmux)
                   Padding(
                     padding: const EdgeInsets.only(left: 8),
