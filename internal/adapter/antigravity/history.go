@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/histcache"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -42,55 +43,68 @@ func listConvIDs() ([]string, error) {
 	return ids, nil
 }
 
-type convMeta struct {
-	id, cwd, transcriptPath, model, modelColor string
-	lastActivity                               time.Time
-}
-
-func scanConvMeta(id string) (convMeta, bool) {
-	tpath := transcriptPathFor(id)
-	if tpath == "" {
-		return convMeta{}, false
-	}
-	fi, err := os.Stat(tpath)
+// cachedConvs returns a history item (+cwd) for every conversation, served from
+// the disk cache keyed on the transcript file's mod time + size, so the sqlite
+// lookups for cwd/model run only when a conversation changes. Both list views
+// build on this.
+func cachedConvs() ([]histcache.Entry, error) {
+	ids, err := listConvIDs()
 	if err != nil {
-		return convMeta{}, false // no transcript on disk
+		return nil, err
 	}
-	cwd := conversationWorkspace(id) // "" bucketed as unknown
-	name, color := conversationModel(id)
-	return convMeta{
-		id:             id,
-		cwd:            cwd,
-		transcriptPath: tpath,
-		model:          name,
-		modelColor:     color,
-		lastActivity:   fi.ModTime(),
-	}, true
+	live := make(map[string]struct{}, len(ids))
+	out := make([]histcache.Entry, 0, len(ids))
+	for _, id := range ids {
+		tpath := transcriptPathFor(id)
+		if tpath == "" {
+			continue
+		}
+		fi, err := os.Stat(tpath)
+		if err != nil {
+			continue // no transcript on disk
+		}
+		live[id] = struct{}{}
+		if e, ok := histcache.Get(Agent, id, fi.ModTime(), fi.Size()); ok {
+			out = append(out, e)
+			continue
+		}
+		name, color := conversationModel(id)
+		e := histcache.Entry{
+			Cwd: conversationWorkspace(id), // "" bucketed as unknown
+			Session: session.HistorySession{
+				SessionID:      id,
+				TranscriptPath: tpath,
+				ModelName:      name,
+				ModelColor:     color,
+				LastActivity:   fi.ModTime().UTC().Format(time.RFC3339),
+			},
+		}
+		histcache.Put(Agent, id, fi.ModTime(), fi.Size(), e)
+		out = append(out, e)
+	}
+	histcache.Prune(Agent, live)
+	return out, nil
 }
 
 func listHistoryProjects() ([]session.HistoryProject, error) {
-	ids, err := listConvIDs()
+	entries, err := cachedConvs()
 	if err != nil {
 		return nil, err
 	}
 	type agg struct {
 		count int
-		last  time.Time
+		last  string // RFC3339 UTC; lexicographic compare is chronological
 	}
 	byCwd := map[string]*agg{}
-	for _, id := range ids {
-		m, ok := scanConvMeta(id)
-		if !ok {
-			continue
-		}
-		a := byCwd[m.cwd]
+	for _, e := range entries {
+		a := byCwd[e.Cwd]
 		if a == nil {
 			a = &agg{}
-			byCwd[m.cwd] = a
+			byCwd[e.Cwd] = a
 		}
 		a.count++
-		if m.lastActivity.After(a.last) {
-			a.last = m.lastActivity
+		if e.Session.LastActivity > a.last {
+			a.last = e.Session.LastActivity
 		}
 	}
 	out := make([]session.HistoryProject, 0, len(byCwd))
@@ -109,7 +123,7 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 			Repo:         repo,
 			Label:        label,
 			SessionCount: a.count,
-			LastActivity: a.last.UTC().Format(time.RFC3339),
+			LastActivity: a.last,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].LastActivity > out[j].LastActivity })
@@ -117,23 +131,16 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 }
 
 func listHistorySessions(cwd string, limit, offset int) (session.HistorySessionPage, error) {
-	ids, err := listConvIDs()
+	entries, err := cachedConvs()
 	if err != nil {
 		return session.HistorySessionPage{}, err
 	}
 	var items []session.HistorySession
-	for _, id := range ids {
-		m, ok := scanConvMeta(id)
-		if !ok || m.cwd != cwd {
+	for _, e := range entries {
+		if e.Cwd != cwd {
 			continue
 		}
-		items = append(items, session.HistorySession{
-			SessionID:      m.id,
-			TranscriptPath: m.transcriptPath,
-			ModelName:      m.model,
-			ModelColor:     m.modelColor,
-			LastActivity:   m.lastActivity.UTC().Format(time.RFC3339),
-		})
+		items = append(items, e.Session)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].LastActivity > items[j].LastActivity })
 	total := len(items)

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/session"
 	_ "modernc.org/sqlite"
 )
 
@@ -40,10 +42,73 @@ func writeConversation(t *testing.T, home, id, cwd string, mod time.Time) {
 	_ = os.Chtimes(tpath, mod, mod)
 }
 
+// setConvWorkspace overwrites a conversation db's workspace cwd.
+func setConvWorkspace(t *testing.T, home, id, cwd string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(home, "conversations", id+".db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	blob := []byte("\x0a\x2ffile://" + cwd)
+	if _, err := db.Exec(`UPDATE trajectory_metadata_blob SET data = ? WHERE id = 'main'`, blob); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAntigravityHistoryCacheKeyedOnTranscript(t *testing.T) {
+	home := t.TempDir()
+	homeDirOverride = home
+	t.Cleanup(func() { homeDirOverride = "" })
+	config.CacheDir = t.TempDir()
+	id := "11111111-1111-1111-1111-111111111111"
+	mod := time.Now().Add(-time.Hour)
+	writeConversation(t, home, id, "/work/proj", mod)
+
+	if _, err := ListHistoryProjects(); err != nil { // warm the cache
+		t.Fatal(err)
+	}
+
+	// Change the db's cwd but leave the transcript untouched (same mod time+size):
+	// cache stays valid, so the db change is not observed.
+	setConvWorkspace(t, home, id, "/work/other")
+	projects, err := ListHistoryProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasProject(projects, "/work/proj") || hasProject(projects, "/work/other") {
+		t.Fatalf("expected cached /work/proj, got %+v", projects)
+	}
+
+	// Touch the transcript ⇒ cache miss ⇒ the db is re-read.
+	tpath := transcriptPathFor(id)
+	newMod := time.Now()
+	if err := os.Chtimes(tpath, newMod, newMod); err != nil {
+		t.Fatal(err)
+	}
+	projects, err = ListHistoryProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasProject(projects, "/work/other") || hasProject(projects, "/work/proj") {
+		t.Fatalf("expected re-read /work/other, got %+v", projects)
+	}
+}
+
+func hasProject(ps []session.HistoryProject, cwd string) bool {
+	for _, p := range ps {
+		if p.ProjectDir == cwd {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAntigravityHistoryProjectsAndSessions(t *testing.T) {
 	home := t.TempDir()
 	homeDirOverride = home
 	t.Cleanup(func() { homeDirOverride = "" })
+	config.CacheDir = t.TempDir()
 	now := time.Now()
 	writeConversation(t, home, "11111111-1111-1111-1111-111111111111", "/work/proj", now.Add(-2*time.Hour))
 	writeConversation(t, home, "22222222-2222-2222-2222-222222222222", "/work/proj", now.Add(-1*time.Hour))
