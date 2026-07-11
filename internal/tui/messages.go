@@ -52,6 +52,15 @@ type spawnAgentsMsg struct {
 
 // Successful spawns surface via registry events; only the error is acted on.
 type spawnResultMsg struct{ err error }
+
+type resumeResultMsg struct {
+	sessionID string
+	err       error
+}
+
+// clearPendingResumeMsg drops a still-pending resume selection so a stale id can't
+// later match a reused tmux pane id.
+type clearPendingResumeMsg struct{ id string }
 type logTickMsg struct{}    // embedded-node logs changed; wake the render loop
 type spinResumeMsg struct{} // periodic kick that re-arms the list spinner
 type spinTickMsg struct{}   // list spinner animation frame

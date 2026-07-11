@@ -19,4 +19,4 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
 - **Sessions** — the session list, with live status at a glance.
 - **Transcript** — the full conversation, foldable, with tool-call detail.
 - **Live screen** — watch a session's terminal and type into it.
-- **History** — browse past projects and sessions.
+- **History** — browse past projects and sessions, and resume one to pick it back up.

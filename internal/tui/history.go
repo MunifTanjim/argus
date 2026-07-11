@@ -146,6 +146,7 @@ func (m model) actHistProjOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleHistorySessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.flash = "" // any key dismisses a transient flash; the action may re-set it
 	if mm, cmd, ok := m.dispatch(msg, historySessionsTable); ok {
 		return mm, cmd
 	}
@@ -160,6 +161,7 @@ var historySessionsTable = []keyTableEntry{
 	{historySessionsKeys.HalfUp, model.actHistSessHalfUp},
 	{historySessionsKeys.HalfDown, model.actHistSessHalfDown},
 	{historySessionsKeys.Open, model.actHistSessOpen},
+	{historySessionsKeys.Resume, model.actHistSessResume},
 	{historySessionsKeys.More, model.actHistSessMore},
 	{historySessionsKeys.Back, model.actHistSessBack},
 }
@@ -207,6 +209,22 @@ func (m model) actHistSessMore(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) actHistSessResume(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.history.sessCursor >= len(m.history.sessions) {
+		return m, nil
+	}
+	s := m.history.sessions[m.history.sessCursor]
+	if !s.Resumable {
+		m.flash = "resume not supported for this session"
+		return m, nil
+	}
+	if m.history.project.Cwd == "" {
+		m.flash = "resume unavailable: unknown working directory"
+		return m, nil
+	}
+	return m, m.resumeCmd(m.history.project.NodeID, s.Agent, s.SessionID, m.history.project.Cwd)
+}
+
 func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.history.sessCursor >= len(m.history.sessions) {
 		return m, nil
@@ -215,6 +233,7 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.history.title = historySessionTitle(s)
 	// Address for follow-up per-tool detail fetches on this transcript.
 	m.history.openNodeID, m.history.openPath, m.history.openAgent = m.history.project.NodeID, s.TranscriptPath, s.Agent
+	m.history.openSessionID, m.history.openResumable = s.SessionID, s.Resumable
 	m.transcript.chunks, m.transcript.err = nil, nil
 	m.transcript.cursor, m.transcript.scroll = 0, 0
 	m.transcript.detailStack = nil
@@ -227,6 +246,7 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.flash = "" // any key dismisses a transient flash; the action may re-set it
 	if key.Matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			if m.popDetail() { // root frame → back to transcript
@@ -236,6 +256,17 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 		}
 		m.mode = modeHistorySessions
 		return m, nil
+	}
+	if key.Matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript {
+		if !m.history.openResumable {
+			m.flash = "resume not supported for this session"
+			return m, nil
+		}
+		if m.history.project.Cwd == "" {
+			m.flash = "resume unavailable: unknown working directory"
+			return m, nil
+		}
+		return m, m.resumeCmd(m.history.openNodeID, m.history.openAgent, m.history.openSessionID, m.history.project.Cwd)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)
@@ -292,12 +323,16 @@ func (m model) historySessionsView() string {
 		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
 	}
 	body := renderCardList(cards, m.history.sessCursor, max(1, m.height-4))
-	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open}
+	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume}
 	if m.history.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
 	binds = append(binds, historySessionsKeys.Back)
-	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), m.footer(binds...), m.width, m.height)
+	footer := m.footer(binds...)
+	if m.flash != "" {
+		footer = asstStyle.Render(m.flash)
+	}
+	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
 }
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
@@ -330,7 +365,10 @@ func (m model) historyTranscriptView() string {
 	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	footer := m.footer(transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold,
-		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back)
+		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Resume, transcriptKeys.Back)
+	if m.flash != "" {
+		footer = asstStyle.Render(m.flash)
+	}
 	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
 }
 
