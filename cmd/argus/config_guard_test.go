@@ -26,6 +26,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"timeout":       true, // `pair` only: device-connect wait
 		"agent":         true, // `hook` only: selects the adapter, not a config key
 		"argus-managed": true, // `hook` only: install marker, parsed and ignored
+		"redact":        true, // `view` only: offline viewer flag, not a node/client setting
 	}
 
 	seen := map[string]bool{}

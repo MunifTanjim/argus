@@ -264,3 +264,31 @@ func extractEntry(destDir string, hdr *tar.Header, tr io.Reader, remaining *int6
 	}
 	return nil
 }
+
+// WriteDir writes a bundle from an already-extracted directory (manifest.json
+// plus a root/ subtree), such as one produced by RedactTree.
+func WriteDir(w io.Writer, dir string) error {
+	m, err := ReadManifest(dir)
+	if err != nil {
+		return err
+	}
+	var files []SourceFile
+	err = filepath.WalkDir(dir, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
+			return werr
+		}
+		if filepath.Base(p) == manifestName {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		files = append(files, SourceFile{ArchivePath: filepath.ToSlash(rel), SourcePath: p})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return Write(w, m, files)
+}
