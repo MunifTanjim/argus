@@ -281,51 +281,51 @@ func paneFocused(out, paneID string) (bool, error) {
 	return false, nil
 }
 
-// windowVisibleFormat drops pane_active (unlike focusFormat): a side-by-side pane
-// still shares its window's size and zoom, which is what a grouped mirror fights
-// over. session_name lets callers skip their own mirrors, which share the window.
-var windowVisibleFormat = strings.Join([]string{
+// paneWindowFormat pairs each pane with its window id (unique per server). Grouped
+// sessions share window objects, so panes on a shared window report the same id.
+var paneWindowFormat = strings.Join([]string{
 	"#{pane_id}",
-	"#{window_active}",
-	"#{session_attached}",
-	"#{session_name}",
+	"#{window_id}",
 }, fieldSep)
 
-// WindowVisible reports whether paneID's window is the current window of an
-// attached client, skipping sessions for which ignore returns true (a nil ignore
-// counts every session). Empty paneID, or no server, is never visible.
-func (c *Client) WindowVisible(ctx context.Context, paneID string, ignore func(session string) bool) (bool, error) {
-	if paneID == "" {
+// PanesShareWindow reports whether panes a and b are in the same tmux window. A
+// missing pane, an empty id, or no server is never a match.
+func (c *Client) PanesShareWindow(ctx context.Context, a, b string) (bool, error) {
+	if a == "" || b == "" {
 		return false, nil
 	}
-	out, err := c.run(ctx, "list-panes", "-a", "-F", windowVisibleFormat)
+	out, err := c.run(ctx, "list-panes", "-a", "-F", paneWindowFormat)
 	if err != nil {
 		if noServer(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	return windowVisible(out, paneID, ignore)
+	return panesShareWindow(out, a, b)
 }
 
-// windowVisible scans windowVisibleFormat output and reports whether paneID's
-// window is current in a non-ignored attached session. A shared window appears
-// once per grouped session, so any matching line suffices.
-func windowVisible(out, paneID string, ignore func(session string) bool) (bool, error) {
+// panesShareWindow scans paneWindowFormat output and reports whether a and b map to
+// the same, non-empty window id. Panes absent from the output never match.
+func panesShareWindow(out, a, b string) (bool, error) {
+	var winA, winB string
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
+		// Normalize tmux's vis-escaped separator before splitting (see parsePane).
 		line = strings.ReplaceAll(line, `\037`, fieldSep)
 		f := strings.Split(line, fieldSep)
-		if len(f) != 4 {
-			return false, fmt.Errorf("tmux: unexpected window-visible format (%d fields): %q", len(f), line)
+		if len(f) != 2 {
+			return false, fmt.Errorf("tmux: unexpected pane-window format (%d fields): %q", len(f), line)
 		}
-		if f[0] == paneID && f[1] == "1" && atoi(f[2]) > 0 && (ignore == nil || !ignore(f[3])) {
-			return true, nil
+		if f[0] == a {
+			winA = f[1]
+		}
+		if f[0] == b {
+			winB = f[1]
 		}
 	}
-	return false, nil
+	return winA != "" && winA == winB, nil
 }
 
 // CaptureOpts controls capture-pane behavior.

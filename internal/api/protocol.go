@@ -386,6 +386,10 @@ type TerminalOpenParams struct {
 	SessionID string `json:"session_id"`
 	Cols      int    `json:"cols"`
 	Rows      int    `json:"rows"`
+	// ClientPane is the caller's own tmux pane ($TMUX_PANE) when co-located on the
+	// session's server; empty otherwise (e.g. the mobile app). The node uses it to
+	// refuse an open that would share the agent pane's window.
+	ClientPane string `json:"client_pane,omitempty"`
 }
 
 // TerminalOutput is server→client output from a terminal session (base64-encoded data).

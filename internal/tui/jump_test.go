@@ -107,6 +107,73 @@ func TestPlanJump(t *testing.T) {
 	}
 }
 
+// TestClientPaneFor: the caller's pane is forwarded only when co-located; every
+// non-co-located case must return "" so the guard never compares across servers.
+func TestClientPaneFor(t *testing.T) {
+	defaultLocal := session.Session{ // same machine (no gateway), default server
+		Tmux: session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: "%3"},
+	}
+	const myPane = "%42"
+	cases := []struct {
+		name     string
+		s        session.Session
+		hostname string
+		tmuxEnv  string
+		tmuxPane string
+		want     string
+	}{
+		{
+			name:     "co-located returns the caller pane",
+			s:        defaultLocal,
+			tmuxEnv:  defaultTmuxEnv,
+			tmuxPane: myPane,
+			want:     myPane,
+		},
+		{
+			name:     "not inside tmux",
+			s:        defaultLocal,
+			tmuxEnv:  "",
+			tmuxPane: myPane,
+			want:     "",
+		},
+		{
+			name:     "caller on a different tmux server",
+			s:        defaultLocal,
+			tmuxEnv:  argusTmuxEnv,
+			tmuxPane: myPane,
+			want:     "",
+		},
+		{
+			name: "session on a different tmux server",
+			s: session.Session{
+				Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%9"},
+			},
+			tmuxEnv:  defaultTmuxEnv,
+			tmuxPane: myPane,
+			want:     "",
+		},
+		{
+			name: "session on another machine",
+			s: session.Session{
+				NodeID:    "box-2",
+				NodeLabel: "box-2",
+				Tmux:      session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: "%4"},
+			},
+			hostname: "box-1",
+			tmuxEnv:  defaultTmuxEnv,
+			tmuxPane: myPane,
+			want:     "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clientPaneFor(tc.s, tc.hostname, tc.tmuxEnv, tc.tmuxPane); got != tc.want {
+				t.Fatalf("clientPaneFor = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPlanJumpPanelessFrontendReason(t *testing.T) {
 	s := session.Session{
 		Frontend: session.FrontendVSCode,
