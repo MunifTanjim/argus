@@ -13,13 +13,27 @@ func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	stampChunkModel(chunks, convIDFromPath(path))
+	home := resolveHome(path)
+	name, color := conversationModelIn(home, convIDFromPath(path))
+	stampChunkModelWith(chunks, name, color)
+	stampSubagentTrace(chunks, home)
 	return transcript.TranscriptView{Chunks: chunks}, nil
 }
 
-func stampChunkModel(chunks []transcript.Chunk, convID string) {
-	name, color := conversationModel(convID)
-	stampChunkModelWith(chunks, name, color)
+// stampSubagentTrace recomputes each subagent's HasTrace against home, correcting
+// linkSubagent's live-home resolution for a bundle extracted under a temp dir.
+func stampSubagentTrace(chunks []transcript.Chunk, home string) {
+	for i := range chunks {
+		for j := range chunks[i].Items {
+			for k := range chunks[i].Items[j].Subagents {
+				sub := &chunks[i].Items[j].Subagents[k]
+				if sub.ID == "" {
+					continue
+				}
+				_, sub.HasTrace = childTranscriptPathIn(home, sub.ID)
+			}
+		}
+	}
 }
 
 func stampChunkModelWith(chunks []transcript.Chunk, name, color string) {
@@ -35,11 +49,12 @@ func stampChunkModelWith(chunks []transcript.Chunk, name, color string) {
 }
 
 func SubagentFilePath(rootPath, agentID string) (string, bool) {
-	return childTranscriptPath(agentID)
+	return childTranscriptPathIn(resolveHome(rootPath), agentID)
 }
 
 func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error) {
-	path, ok := childTranscriptPath(agentID)
+	home := resolveHome(rootPath)
+	path, ok := childTranscriptPathIn(home, agentID)
 	if !ok {
 		return transcript.TranscriptView{}, false, nil
 	}
@@ -47,7 +62,9 @@ func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
-	stampChunkModel(chunks, agentID)
+	name, color := conversationModelIn(home, agentID)
+	stampChunkModelWith(chunks, name, color)
+	stampSubagentTrace(chunks, home)
 	return transcript.TranscriptView{Chunks: chunks}, true, nil
 }
 
@@ -55,7 +72,7 @@ func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool
 // Empty agentID searches path itself.
 func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	if agentID != "" {
-		p, ok := childTranscriptPath(agentID)
+		p, ok := childTranscriptPathIn(resolveHome(path), agentID)
 		if !ok {
 			return transcript.ToolDetail{}, false, nil
 		}
@@ -80,6 +97,7 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 type streamingTranscript struct {
 	path       string
 	convID     string
+	home       string
 	offset     int64
 	loaded     bool
 	lines      []line
@@ -109,16 +127,21 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 
 	// Re-query while empty: the model may land in the DB mid-session.
 	if s.modelName == "" {
-		s.modelName, s.modelColor = conversationModel(s.convID)
+		s.modelName, s.modelColor = conversationModelIn(s.home, s.convID)
 	}
 	chunks := foldTranscript(s.lines)
 	stampChunkModelWith(chunks, s.modelName, s.modelColor)
+	stampSubagentTrace(chunks, s.home)
 	s.chunks = chunks
 	return s.chunks, nil
 }
 
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
-	return &streamingTranscript{path: path, convID: convIDFromPath(path)}
+	home := resolveHome(rootPath)
+	if home == "" {
+		home = resolveHome(path)
+	}
+	return &streamingTranscript{path: path, convID: convIDFromPath(path), home: home}
 }
 
 func ListHistoryProjects() ([]session.HistoryProject, error) { return listHistoryProjects() }

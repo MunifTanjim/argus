@@ -371,6 +371,7 @@ func (s *Server) buildClientServer() *api.Server {
 	// History transcript and tool detail are per-machine: route by node_id.
 	srv.Handle(api.MethodSessionsHistoryTranscript, s.routeByNodeID(api.MethodSessionsHistoryTranscript))
 	srv.Handle(api.MethodSessionHistoryToolDetail, s.routeByNodeID(api.MethodSessionHistoryToolDetail))
+	srv.Handle(api.MethodSessionExport, s.routeByNodeIDOrSole(api.MethodSessionExport))
 	// History sessions route by node_id, then get stamped with that node's id/label
 	// so a client can open a transcript by the session's own node_id.
 	srv.Handle(api.MethodSessionsHistorySessions, func(ctx context.Context, params json.RawMessage) (any, error) {

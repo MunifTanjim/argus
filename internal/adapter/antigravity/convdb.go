@@ -18,7 +18,16 @@ var modelSlugRe = regexp.MustCompile(`(?i)(?:gpt-oss|gpt|gemini|claude|grok|llam
 // on-disk source (transcript_full.jsonl carries none). Uses executor_metadata
 // (gen_metadata holds a placeholder enum for some families).
 func conversationModel(convID string) (name, color string) {
-	path := conversationDBPath(convID)
+	return conversationModelAt(conversationDBPath(convID))
+}
+
+// conversationModelIn reads the model from a conversation db under an explicit
+// home (an extracted bundle), instead of the live home.
+func conversationModelIn(home, convID string) (name, color string) {
+	return conversationModelAt(conversationDBPathIn(home, convID))
+}
+
+func conversationModelAt(path string) (name, color string) {
 	if path == "" {
 		return "", ""
 	}

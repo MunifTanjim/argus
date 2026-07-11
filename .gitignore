@@ -8,6 +8,9 @@
 *.out
 coverage.*
 
+# Exported session bundles
+*.argus
+
 # Editor / OS
 .DS_Store
 

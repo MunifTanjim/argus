@@ -59,6 +59,10 @@ func (agAdapter) FormatDecision(toolName string, toolInput json.RawMessage, p ap
 
 func (agAdapter) HookOutput(ev adapter.HookEvent) string { return HookOutput(EventName(ev)) }
 
+func (agAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
+	return collectSessionFiles(transcriptPath)
+}
+
 func (agAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 	return ReadTranscriptView(path)
 }

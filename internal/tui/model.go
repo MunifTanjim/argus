@@ -82,6 +82,7 @@ type model struct {
 	height       int
 	reconnecting bool // connection dropped; the client is retrying
 	hasDark      bool // terminal background; drives glamour/highlight styling
+	viewer       bool // offline viewer mode: opens directly in transcript view
 
 	mode         viewMode
 	screenReturn viewMode // mode to restore when leaving the live screen (ctrl+])
@@ -105,6 +106,7 @@ type model struct {
 	prompt promptState // compose-then-submit draft for the prompt dock
 
 	pendingKill     bool   // awaiting kill confirmation in list view
+	pendingExport   bool   // awaiting export confirmation in history transcript view
 	pendingResumeID string // resumed session id to select once it appears in the list
 	flash           string // transient list-view status (e.g. why a jump was refused)
 
@@ -141,15 +143,16 @@ type transcriptState struct {
 // historyState holds the read-only History view: the project list, a project's
 // paginated session list, and the open transcript's title.
 type historyState struct {
-	projects   []session.HistoryProject
-	projCursor int
-	err        error
-	project    session.HistoryProject // the project being drilled into
-	sessions   []session.HistorySession
-	sessCursor int
-	hasMore    bool
-	loading    bool
-	title      string // header for the open historical transcript
+	projects    []session.HistoryProject
+	projCursor  int
+	err         error
+	project     session.HistoryProject // the project being drilled into
+	sessions    []session.HistorySession
+	sessCursor  int
+	hasMore     bool
+	loading     bool
+	title       string                 // header for the open historical transcript
+	openSession session.HistorySession // retained for export metadata
 	// openNodeID/openPath/openAgent route per-tool detail fetches to the right adapter.
 	openNodeID    string
 	openPath      string

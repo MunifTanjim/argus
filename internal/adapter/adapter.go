@@ -5,6 +5,8 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -12,6 +14,38 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
+
+// BundleRoot is the archive subtree every bundled file is rooted under.
+const BundleRoot = "root"
+
+// BundledFile pairs a source file on disk with its path inside an export bundle.
+type BundledFile struct {
+	AbsPath string // source path on disk
+	RelPath string // path within the bundle (slash-separated, rooted at BundleRoot)
+}
+
+// RootedFile pairs p with its path inside an export bundle, rooted under
+// BundleRoot relative to home. ok is false when p escapes home.
+func RootedFile(home, p string) (BundledFile, bool) {
+	rel, err := filepath.Rel(home, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return BundledFile{}, false
+	}
+	return BundledFile{
+		AbsPath: p,
+		RelPath: filepath.ToSlash(filepath.Join(BundleRoot, rel)),
+	}, true
+}
+
+// WithinDir reports whether p lies inside dir (cleaned paths only, no symlink
+// resolution), confining an export entry to its session subtree.
+func WithinDir(dir, p string) bool {
+	rel, err := filepath.Rel(dir, p)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
 
 // HookMethod is the JSON-RPC method every argus hook invocation calls.
 const HookMethod = "hook.event"
@@ -73,6 +107,10 @@ type Adapter interface {
 	FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string
 	// HookOutput returns stdout for an unblocked hook. "" means print nothing.
 	HookOutput(ev HookEvent) string
+
+	// CollectSessionFiles returns every on-disk file the session consists of
+	// (transcript, subagents, team members, tasks, config). Vanished optionals are skipped.
+	CollectSessionFiles(transcriptPath string) ([]BundledFile, error)
 
 	ReadTranscriptView(path string) (transcript.TranscriptView, error)
 	ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error)

@@ -13,11 +13,11 @@ func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	stampSubagents(chunks)
+	stampSubagents(chunks, sessionsRootFrom(path))
 	return transcript.TranscriptView{Chunks: chunks}, nil
 }
 
-func stampSubagents(chunks []transcript.Chunk) {
+func stampSubagents(chunks []transcript.Chunk, sessionsRoot string) {
 	var edges map[string]string
 	if p, err := stateDBPath(); err == nil {
 		edges = loadSpawnEdges(p)
@@ -33,13 +33,14 @@ func stampSubagents(chunks []transcript.Chunk) {
 				continue
 			}
 			sub.Status = edges[sub.ID]
-			sub.HasTrace = findRolloutPath(sub.ID) != ""
+			sub.HasTrace = findRolloutPathIn(sessionsRoot, sub.ID) != ""
 		}
 	}
 }
 
 func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error) {
-	path := findRolloutPath(agentID)
+	sessionsRoot := sessionsRootFrom(rootPath)
+	path := findRolloutPathIn(sessionsRoot, agentID)
 	if path == "" {
 		return transcript.TranscriptView{}, false, nil
 	}
@@ -47,13 +48,13 @@ func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
-	stampSubagents(chunks) // nested spawns link one level deeper
+	stampSubagents(chunks, sessionsRoot) // nested spawns link one level deeper
 	return transcript.TranscriptView{Chunks: chunks}, true, nil
 }
 
 func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	if agentID != "" {
-		if p := findRolloutPath(agentID); p != "" {
+		if p := findRolloutPathIn(sessionsRootFrom(path), agentID); p != "" {
 			path = p
 		} else {
 			return transcript.ToolDetail{}, false, nil
@@ -74,7 +75,7 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 }
 
 func SubagentFilePath(rootPath, agentID string) (string, bool) {
-	if p := findRolloutPath(agentID); p != "" {
+	if p := findRolloutPathIn(sessionsRootFrom(rootPath), agentID); p != "" {
 		return p, true
 	}
 	return "", false
@@ -83,12 +84,13 @@ func SubagentFilePath(rootPath, agentID string) (string, bool) {
 // streamingTranscript tails a growing rollout: a byte cursor reads only newly
 // appended lines, which accumulate and re-fold in memory each Refresh.
 type streamingTranscript struct {
-	path   string
-	offset int64
-	loaded bool
-	lines  []rolloutLine
-	models map[string]string
-	chunks []transcript.Chunk
+	path         string
+	sessionsRoot string
+	offset       int64
+	loaded       bool
+	lines        []rolloutLine
+	models       map[string]string
+	chunks       []transcript.Chunk
 }
 
 func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
@@ -115,13 +117,17 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 		s.models = loadModelNames()
 	}
 	chunks := foldRollout(s.lines, s.models)
-	stampSubagents(chunks)
+	stampSubagents(chunks, s.sessionsRoot)
 	s.chunks = chunks
 	return s.chunks, nil
 }
 
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
-	return &streamingTranscript{path: path}
+	root := sessionsRootFrom(rootPath)
+	if root == "" {
+		root = sessionsRootFrom(path)
+	}
+	return &streamingTranscript{path: path, sessionsRoot: root}
 }
 
 func ListHistoryProjects() ([]session.HistoryProject, error) { return listHistoryProjects() }

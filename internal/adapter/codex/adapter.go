@@ -59,6 +59,10 @@ func (cxAdapter) FormatDecision(toolName string, toolInput json.RawMessage, p ap
 
 func (cxAdapter) HookOutput(adapter.HookEvent) string { return "" }
 
+func (cxAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
+	return collectSessionFiles(transcriptPath)
+}
+
 func (cxAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 	return ReadTranscriptView(path)
 }

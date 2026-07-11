@@ -30,7 +30,16 @@ func subagentChildID(resultContent string) string {
 
 // childTranscriptPath resolves a subagent's transcript_full.jsonl. ok is false when missing.
 func childTranscriptPath(convID string) (string, bool) {
-	p := transcriptPathFor(convID)
+	dir, err := homeDir()
+	if err != nil {
+		return "", false
+	}
+	return childTranscriptPathIn(dir, convID)
+}
+
+// childTranscriptPathIn resolves a subagent's transcript under an explicit home.
+func childTranscriptPathIn(home, convID string) (string, bool) {
+	p := transcriptPathForIn(home, convID)
 	if p == "" {
 		return "", false
 	}

@@ -38,4 +38,5 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodTerminalInput, d.handleTerminalInput)
 	srv.Handle(api.MethodTerminalResize, d.handleTerminalResize)
 	srv.Handle(api.MethodTerminalClose, d.handleTerminalClose)
+	srv.Handle(api.MethodSessionExport, d.handleExportBundle)
 }
