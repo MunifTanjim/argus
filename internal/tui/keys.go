@@ -67,7 +67,7 @@ var listKeys = struct {
 var transcriptKeys = struct {
 	ScrollUp, ScrollDown, TurnNext, TurnPrev, CardNext, CardPrev, HalfUp, HalfDown key.Binding
 	Top, Bottom, Fold, Detail, ExpandAll, CollapseAll                              key.Binding
-	Raw, Answer, Back                                                              key.Binding
+	Raw, Answer, Back, Resume                                                      key.Binding
 }{
 	ScrollUp:    nb([]string{"up"}, "↑/↓", "scroll"),
 	ScrollDown:  nb([]string{"down"}, "", ""),
@@ -86,6 +86,7 @@ var transcriptKeys = struct {
 	Raw:         nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
 	Answer:      nb([]string{"tab"}, "tab", "answer"),
 	Back:        nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Resume:      nb([]string{"R"}, "R", "resume"),
 }
 
 var detailKeys = struct {
@@ -143,7 +144,7 @@ var historyProjectsKeys = struct {
 }
 
 var historySessionsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back, Resume key.Binding
 }{
 	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:     nb([]string{"down", "j"}, "", ""),
@@ -154,6 +155,7 @@ var historySessionsKeys = struct {
 	Open:     nb([]string{"enter"}, "enter", "open"),
 	More:     nb([]string{"m"}, "m", "more"),
 	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Resume:   nb([]string{"R"}, "R", "resume"),
 }
 
 var logsKeys = struct {

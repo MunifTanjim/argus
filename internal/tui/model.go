@@ -104,8 +104,9 @@ type model struct {
 
 	prompt promptState // compose-then-submit draft for the prompt dock
 
-	pendingKill bool   // awaiting kill confirmation in list view
-	flash       string // transient list-view status (e.g. why a jump was refused)
+	pendingKill     bool   // awaiting kill confirmation in list view
+	pendingResumeID string // resumed session id to select once it appears in the list
+	flash           string // transient list-view status (e.g. why a jump was refused)
 
 	spawn spawnState // staged "new session" flow (node → dir → name → command)
 
@@ -150,9 +151,11 @@ type historyState struct {
 	loading    bool
 	title      string // header for the open historical transcript
 	// openNodeID/openPath/openAgent route per-tool detail fetches to the right adapter.
-	openNodeID string
-	openPath   string
-	openAgent  string // owning agent of the open transcript, for read routing
+	openNodeID    string
+	openPath      string
+	openAgent     string // owning agent of the open transcript, for read routing
+	openSessionID string // agent session id of the open transcript, for resume
+	openResumable bool   // whether the open session can be resumed
 }
 
 func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
