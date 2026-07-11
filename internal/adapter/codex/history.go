@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/histcache"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -107,29 +108,75 @@ func safeSessionsPath(path string) (string, error) {
 	return clean, nil
 }
 
-func listHistoryProjects() ([]session.HistoryProject, error) {
+// cachedRollouts returns a history item (+cwd) for every rollout file, served
+// from the disk cache and re-scanned only when a file changes. Both the projects
+// and sessions lists build on this, so a warm list avoids reading any rollout.
+// Files with no recorded cwd are skipped (as before).
+func cachedRollouts() ([]histcache.Entry, error) {
 	files, err := rolloutFiles()
+	if err != nil {
+		return nil, err
+	}
+	var modelNames map[string]string // loaded lazily, only on a cache miss
+	live := make(map[string]struct{}, len(files))
+	out := make([]histcache.Entry, 0, len(files))
+	for _, f := range files {
+		fi, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		id := threadIDFromName(filepath.Base(f))
+		live[id] = struct{}{}
+		if e, ok := histcache.Get(Agent, id, fi.ModTime(), fi.Size()); ok {
+			out = append(out, e)
+			continue
+		}
+		m, ok := scanMeta(f)
+		if !ok {
+			continue
+		}
+		if modelNames == nil {
+			modelNames = loadModelNames()
+		}
+		e := histcache.Entry{
+			Cwd: m.cwd,
+			Session: session.HistorySession{
+				SessionID:      m.id,
+				FirstMessage:   m.firstMessage,
+				TranscriptPath: f,
+				ModelName:      displayModel(m.model, modelNames),
+				ModelColor:     modelColorFor(m.model),
+				LastActivity:   m.lastActivity.UTC().Format(time.RFC3339),
+				Tokens:         m.tokens,
+				TurnCount:      m.turns,
+			},
+		}
+		histcache.Put(Agent, id, fi.ModTime(), fi.Size(), e)
+		out = append(out, e)
+	}
+	histcache.Prune(Agent, live)
+	return out, nil
+}
+
+func listHistoryProjects() ([]session.HistoryProject, error) {
+	entries, err := cachedRollouts()
 	if err != nil {
 		return nil, err
 	}
 	type agg struct {
 		count int
-		last  time.Time
+		last  string // RFC3339 UTC; lexicographic compare is chronological
 	}
 	byCwd := map[string]*agg{}
-	for _, f := range files {
-		m, ok := scanMeta(f)
-		if !ok {
-			continue
-		}
-		a := byCwd[m.cwd]
+	for _, e := range entries {
+		a := byCwd[e.Cwd]
 		if a == nil {
 			a = &agg{}
-			byCwd[m.cwd] = a
+			byCwd[e.Cwd] = a
 		}
 		a.count++
-		if m.lastActivity.After(a.last) {
-			a.last = m.lastActivity
+		if e.Session.LastActivity > a.last {
+			a.last = e.Session.LastActivity
 		}
 	}
 	out := make([]session.HistoryProject, 0, len(byCwd))
@@ -145,7 +192,7 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 			Repo:         repo,
 			Label:        label,
 			SessionCount: a.count,
-			LastActivity: a.last.UTC().Format(time.RFC3339),
+			LastActivity: a.last,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].LastActivity > out[j].LastActivity })
@@ -154,27 +201,16 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 
 // Agent is left unset; the node layer stamps it.
 func listHistorySessions(cwd string, limit, offset int) (session.HistorySessionPage, error) {
-	files, err := rolloutFiles()
+	entries, err := cachedRollouts()
 	if err != nil {
 		return session.HistorySessionPage{}, err
 	}
-	modelNames := loadModelNames()
 	var items []session.HistorySession
-	for _, f := range files {
-		m, ok := scanMeta(f)
-		if !ok || m.cwd != cwd {
+	for _, e := range entries {
+		if e.Cwd != cwd {
 			continue
 		}
-		items = append(items, session.HistorySession{
-			SessionID:      m.id,
-			FirstMessage:   m.firstMessage,
-			TranscriptPath: f,
-			ModelName:      displayModel(m.model, modelNames),
-			ModelColor:     modelColorFor(m.model),
-			LastActivity:   m.lastActivity.UTC().Format(time.RFC3339),
-			Tokens:         m.tokens,
-			TurnCount:      m.turns,
-		})
+		items = append(items, e.Session)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].LastActivity > items[j].LastActivity })
 	total := len(items)
