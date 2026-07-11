@@ -344,6 +344,7 @@ func (s *Server) buildClientServer() *api.Server {
 	})
 
 	srv.Handle(api.MethodSessionSpawn, s.routeByNodeIDOrSole(api.MethodSessionSpawn))
+	srv.Handle(api.MethodSessionResume, s.routeByNodeIDOrSole(api.MethodSessionResume))
 	srv.Handle(api.MethodAgentsList, s.routeByNodeIDOrSole(api.MethodAgentsList))
 
 	// History projects aggregate across machines: fan out, stamp origin node, order

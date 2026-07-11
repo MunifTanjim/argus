@@ -19,6 +19,7 @@ type HistoryProject struct {
 type HistorySession struct {
 	SessionID      string `json:"session_id"`
 	Agent          string `json:"agent,omitempty"`         // owning agent, stamped by the node
+	Resumable      bool   `json:"resumable,omitempty"`     // agent can resume this session by id
 	Title          string `json:"title,omitempty"`         // custom/AI title, when present
 	FirstMessage   string `json:"first_message,omitempty"` // first user message (title fallback)
 	TranscriptPath string `json:"transcript_path"`         // node-local path; routing key for the view

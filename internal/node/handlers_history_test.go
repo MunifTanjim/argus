@@ -106,3 +106,51 @@ func TestHandleHistoryTranscript_UnknownAgentID(t *testing.T) {
 		t.Fatal("expected error for unknown agent_id")
 	}
 }
+
+func TestHistorySessionsStampResumable(t *testing.T) {
+	// Seed a real Claude session under a temp HOME so the handler returns a
+	// non-empty page; every real adapter is resumable today, so each returned
+	// session must be stamped resumable. This asserts the stamping happens.
+	writeHistoryNestedFixture(t)
+	d := &Node{adapterList: []adapter.Adapter{claudecode.New()}}
+
+	pres, err := d.handleHistoryProjects(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("handleHistoryProjects: %v", err)
+	}
+	projects, ok := pres.([]session.HistoryProject)
+	if !ok {
+		t.Fatalf("expected []session.HistoryProject, got %T", pres)
+	}
+	var projectDir string
+	for _, p := range projects {
+		if p.SessionCount > 0 {
+			projectDir = p.ProjectDir
+			break
+		}
+	}
+	if projectDir == "" {
+		t.Fatal("fixture produced no project with sessions")
+	}
+
+	raw, err := json.Marshal(api.HistorySessionsParams{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := d.handleHistorySessions(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("handleHistorySessions: %v", err)
+	}
+	page, ok := res.(session.HistorySessionPage)
+	if !ok {
+		t.Fatalf("expected session.HistorySessionPage, got %T", res)
+	}
+	if len(page.Items) == 0 {
+		t.Fatal("expected at least one seeded session to exercise stamping")
+	}
+	for _, s := range page.Items {
+		if !s.Resumable {
+			t.Fatalf("session %q not stamped resumable", s.SessionID)
+		}
+	}
+}

@@ -233,10 +233,6 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 			Message: "spawn unavailable: tmux not found on node " + d.label,
 		}
 	}
-	c := d.clients[session.TmuxServerArgus]
-	if p.Name == "" {
-		p.Name = spawn.SessionName(ctx, c, p.Cwd)
-	}
 	command, args := d.resolveSpawnCommand(p)
 	// Fail loudly rather than opening a tmux pane that dies "command not found".
 	if _, err := exec.LookPath(command); err != nil {
@@ -245,13 +241,115 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 			Message: fmt.Sprintf("cannot spawn: %q is not installed on node %s", command, d.label),
 		}
 	}
-	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: p.Name, Cwd: p.Cwd, Command: command, Args: args})
+	paneID, err := d.launchPane(ctx, p.Name, command, args, p.Cwd)
 	if err != nil {
 		return nil, err
 	}
-	// Discovery will register it shortly; trigger a scan for immediacy.
-	go d.scan(context.Background())
 	return api.SpawnResult{SessionID: string(session.TmuxServerArgus) + ":" + paneID, PaneID: paneID}, nil
+}
+
+// launchPane opens a new tmux pane running command in cwd. A blank sessionName
+// gets a node-generated default. Discovery registers the pane shortly; a scan is
+// triggered for immediacy.
+func (d *Node) launchPane(ctx context.Context, sessionName, command string, args []string, cwd string) (string, error) {
+	c := d.clients[session.TmuxServerArgus]
+	if sessionName == "" {
+		sessionName = spawn.SessionName(ctx, c, cwd)
+	}
+	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args})
+	if err != nil {
+		return "", err
+	}
+	go d.scan(context.Background())
+	return paneID, nil
+}
+
+// resumeGraceWindow must outlast the discovery + agent-hook latency that
+// re-registers a resumed session under its own id, after which the registry check
+// takes over from the in-flight guard.
+var resumeGraceWindow = 30 * time.Second
+
+// handleSessionResume resumes a past session by its agent session id. If that
+// session is already running live (or a concurrent resume is launching it), it
+// returns that session rather than spawning a duplicate; otherwise it launches the
+// agent's resume command in the session's original cwd.
+func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.ResumeParams](params)
+	if err != nil {
+		return nil, err
+	}
+	if p.Agent == "" || p.AgentSessionID == "" {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "resume requires agent and agent_session_id",
+		}
+	}
+	// Resume must reopen in the session's original directory; an unknown cwd (e.g.
+	// some antigravity sessions) would launch the agent somewhere arbitrary.
+	if p.Cwd == "" {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "cannot resume: session working directory is unknown",
+		}
+	}
+	if !d.caps.SpawnSession {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "resume unavailable: tmux not found on node " + d.label,
+		}
+	}
+
+	key := p.Agent + "\x00" + p.AgentSessionID
+	d.resumeMu.Lock()
+	defer d.resumeMu.Unlock()
+
+	snap := d.reg.Snapshot()
+	// Jump to an already-live, controllable session with this agent session id.
+	for _, s := range snap {
+		if s.Agent == p.Agent && s.AgentSessionID == p.AgentSessionID && s.Controllable() {
+			return api.ResumeResult{SessionID: s.ID}, nil
+		}
+	}
+	// Don't relaunch while a prior resume of this session is in flight — a duplicate
+	// would race discovery. Jump to that pane if it's already live, else tell the
+	// caller to retry (a kill clears this guard immediately; see clearResuming).
+	if id, ok := d.resuming[key]; ok {
+		for _, s := range snap {
+			if s.ID == id && s.Controllable() {
+				return api.ResumeResult{SessionID: id}, nil
+			}
+		}
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "session was resumed moments ago; wait a few seconds and try again",
+		}
+	}
+
+	name, args, ok := d.adapterFor(p.Agent).ResumeCommand(p.AgentSessionID)
+	if !ok {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "resume not supported for agent " + p.Agent,
+		}
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: fmt.Sprintf("cannot resume: %q is not installed on node %s", name, d.label),
+		}
+	}
+	paneID, err := d.launchPane(ctx, "", name, args, p.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	sid := string(session.TmuxServerArgus) + ":" + paneID
+	d.resuming[key] = sid
+	time.AfterFunc(resumeGraceWindow, func() {
+		d.resumeMu.Lock()
+		delete(d.resuming, key)
+		d.resumeMu.Unlock()
+	})
+	return api.ResumeResult{SessionID: sid}, nil
 }
 
 // handleSessionKill kills a session's pane.
@@ -267,6 +365,19 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	if err := c.KillPane(ctx, s.Tmux.PaneID); err != nil {
 		return nil, err
 	}
+	d.clearResuming(s.ID)
 	go d.scan(context.Background())
 	return nil, nil
+}
+
+// clearResuming drops sid's in-flight guard so a session killed inside the grace
+// window can be resumed again immediately.
+func (d *Node) clearResuming(sid string) {
+	d.resumeMu.Lock()
+	defer d.resumeMu.Unlock()
+	for k, v := range d.resuming {
+		if v == sid {
+			delete(d.resuming, k)
+		}
+	}
 }

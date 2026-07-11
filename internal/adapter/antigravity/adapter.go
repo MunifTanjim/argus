@@ -35,6 +35,10 @@ func (agAdapter) SpawnCommand(prompt string) (string, []string) {
 	return "agy", []string{"--prompt-interactive", prompt}
 }
 
+func (agAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
+	return "agy", []string{"--conversation", agentSessionID}, true
+}
+
 func (agAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
 	return ProcessHook(reg, ev)
 }

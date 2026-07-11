@@ -2,12 +2,14 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
@@ -141,5 +143,119 @@ func TestHandleSessionSpawnRejectsMissingBinary(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "claude") {
 		t.Fatalf("error should name the missing binary, got %v", err)
+	}
+}
+
+func TestHandleSessionResumeRejectsNoTmux(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = false
+	d.label = "boxy"
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "x", Cwd: t.TempDir()})
+	if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
+		t.Fatal("expected error when tmux unavailable")
+	}
+}
+
+func TestHandleSessionResumeRejectsMissingBinary(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.label = "boxy"
+	t.Setenv("PATH", t.TempDir()) // no agent CLI installed
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "x", Cwd: t.TempDir()})
+	if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
+		t.Fatal("expected error when binary missing")
+	}
+}
+
+func TestHandleSessionResumeRejectsEmptyParams(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	for _, p := range []api.ResumeParams{
+		{Agent: "", AgentSessionID: "x", Cwd: t.TempDir()},
+		{Agent: "claude", AgentSessionID: "", Cwd: t.TempDir()},
+		{Agent: "claude", AgentSessionID: "x", Cwd: ""}, // unknown cwd
+	} {
+		raw, _ := json.Marshal(p)
+		if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
+			t.Fatalf("expected error for empty params %+v", p)
+		}
+	}
+}
+
+func TestHandleSessionResumeJumpsToInflightLivePane(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	// A live pane exists under id "argus:%7" but its agent session id hasn't been
+	// reported yet, so the by-agent-session check misses and the guard is consulted.
+	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
+		HasPane:     true,
+		Server:      session.TmuxServerArgus,
+		PaneID:      "%7",
+		SessionName: "proj",
+		CurrentPath: t.TempDir(),
+	}})
+	d.resuming["claude\x00sess-1"] = "argus:%7"
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "sess-1", Cwd: t.TempDir()})
+	res, err := d.handleSessionResume(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if r := res.(api.ResumeResult); r.SessionID != "argus:%7" {
+		t.Fatalf("got %#v, want in-flight session id argus:%%7", r)
+	}
+}
+
+func TestHandleSessionResumeErrorsWhenInflightPaneGone(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.resuming["claude\x00sess-1"] = "argus:%dead"
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "sess-1", Cwd: t.TempDir()})
+	if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
+		t.Fatal("expected error when the in-flight pane is gone")
+	}
+}
+
+func TestClearResumingOnKill(t *testing.T) {
+	d := New()
+	d.resuming["claude\x00sess-1"] = "argus:%7"
+	d.resuming["claude\x00sess-2"] = "argus:%8"
+	d.clearResuming("argus:%7")
+	if _, ok := d.resuming["claude\x00sess-1"]; ok {
+		t.Fatal("guard for the killed pane should be cleared")
+	}
+	if _, ok := d.resuming["claude\x00sess-2"]; !ok {
+		t.Fatal("guard for an unrelated pane must survive")
+	}
+}
+
+func TestHandleSessionResumeJumpsToLiveSession(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	// Seed a live, controllable session with a matching agent session id.
+	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
+		AgentSessionID: "live-1",
+		HasPane:        true,
+		Server:         session.TmuxServerArgus,
+		PaneID:         "%9",
+		SessionName:    "proj",
+		CurrentPath:    t.TempDir(),
+	}})
+	var live string
+	for _, s := range d.reg.Snapshot() {
+		if s.AgentSessionID == "live-1" {
+			live = s.ID
+		}
+	}
+	if live == "" {
+		t.Fatal("seed failed: no live session")
+	}
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "live-1", Cwd: t.TempDir()})
+	res, err := d.handleSessionResume(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	r := res.(api.ResumeResult)
+	if r.SessionID != live {
+		t.Fatalf("got %#v, want SessionID=%q", r, live)
 	}
 }

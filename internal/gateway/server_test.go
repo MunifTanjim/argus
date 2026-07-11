@@ -13,6 +13,27 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
+func TestResumeRoutesByNodeID(t *testing.T) {
+	a := New(time.Second)
+	home := newFakeSource("home", "home-box", sess("default:%1"))
+	home.callResp = json.RawMessage(`{"session_id":"default:%9"}`)
+	a.AddSource(home)
+	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
+
+	srv := NewServer(a, nil, nil)
+	dispatch := srv.clientSrv.DispatchFunc()
+	res, err := dispatch(context.Background(), api.MethodSessionResume,
+		json.RawMessage(`{"node_id":"home","agent":"claude","agent_session_id":"x","cwd":"/tmp"}`))
+	if err != nil {
+		t.Fatalf("resume dispatch: %v", err)
+	}
+	raw, _ := json.Marshal(res)
+	got, _ := sessionIDFromParams(raw)
+	if got != "home:default:%9" {
+		t.Fatalf("want composite session id, got %q (%s)", got, raw)
+	}
+}
+
 func TestClientServerSpawnRoutesByNodeID(t *testing.T) {
 	a := New(time.Second)
 	home := newFakeSource("home", "home-box", sess("default:%1"))

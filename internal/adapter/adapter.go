@@ -58,6 +58,11 @@ type Adapter interface {
 	// An empty name means the agent cannot be spawned.
 	SpawnCommand(prompt string) (name string, args []string)
 
+	// ResumeCommand returns the CLI invocation to resume a past session by its
+	// agent session id. ok=false means this agent cannot resume by id; probe with
+	// an empty id to test resume capability.
+	ResumeCommand(agentSessionID string) (name string, args []string, ok bool)
+
 	ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool)
 	EventName(ev HookEvent) string
 	RescanOnHook(ev HookEvent) bool

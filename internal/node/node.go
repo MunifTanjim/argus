@@ -67,6 +67,12 @@ type Node struct {
 	// openMu serializes terminal.open so evict→setup→register is atomic; without it
 	// two concurrent opens of one session both register, defeating single-viewer.
 	openMu sync.Mutex
+
+	// Discovery registers a launched pane asynchronously, so a rapid second resume
+	// can't see the first pane yet; the guard returns the launching session rather
+	// than spawning a duplicate.
+	resumeMu sync.Mutex
+	resuming map[string]string // agent+session key -> launched session id
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -244,6 +250,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		conns:        map[api.Notifier]*connSubs{},
 		terms:        map[api.Notifier]*connTerms{},
 		sessionTerms: map[string]*term{},
+		resuming:     map[string]string{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
