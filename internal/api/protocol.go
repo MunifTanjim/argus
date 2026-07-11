@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -70,9 +71,25 @@ const (
 	MethodPushTest = "push.test" // request: PushDeviceRef; result: nil
 	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
 	// subscribe with. Empty Key means Web Push is unavailable.
-	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
-	MethodPushDesktop  = "push.desktop"  // request: push.Notification; result: nil (render on node if opted in)
+	MethodPushVAPIDKey  = "push.vapidKey"         // request: no params; result: PushVAPIDKey
+	MethodPushDesktop   = "push.desktop"          // request: push.Notification; result: nil (render on node if opted in)
+	MethodSessionExport = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
 )
+
+// ExportBundleParams selects a session to export. Metadata is supplied by the
+// client (what it already displays) and written verbatim into the manifest.
+type ExportBundleParams struct {
+	NodeID         string          `json:"node_id,omitempty"` // gateway routing
+	Agent          string          `json:"agent"`
+	TranscriptPath string          `json:"transcript_path"`
+	Metadata       bundle.Metadata `json:"metadata"`
+}
+
+// ExportBundleResult carries the gzipped-tar bundle. Data marshals to base64.
+type ExportBundleResult struct {
+	Filename string `json:"filename"`
+	Data     []byte `json:"data"`
+}
 
 // PushVAPIDKey carries the gateway's VAPID public key (the applicationServerKey a
 // device subscribes with).

@@ -1,7 +1,9 @@
 package gitmeta
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -111,5 +113,53 @@ func TestBranchHeadWithCRLF(t *testing.T) {
 	writeFile(t, filepath.Join(dir, ".git", "HEAD"), "ref: refs/heads/main\r\n")
 	if got := Branch(dir); got != "main" {
 		t.Fatalf("Branch = %q, want %q", got, "main")
+	}
+}
+
+func TestIdentity(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.name", "Ada Lovelace")
+	git("config", "user.email", "ada@example.com")
+
+	name, email := Identity(ctx, dir)
+	if name != "Ada Lovelace" {
+		t.Errorf("name = %q, want %q", name, "Ada Lovelace")
+	}
+	if email != "ada@example.com" {
+		t.Errorf("email = %q, want %q", email, "ada@example.com")
+	}
+}
+
+func TestIdentityEmptyDir(t *testing.T) {
+	name, email := Identity(context.Background(), "")
+	if name != "" || email != "" {
+		t.Fatalf("Identity(\"\") = (%q, %q), want empty", name, email)
+	}
+}
+
+func TestIdentityNotARepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	// Isolate config so a developer's global/system identity can't leak in.
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	name, email := Identity(context.Background(), dir)
+	if name != "" || email != "" {
+		t.Fatalf("Identity(non-repo) = (%q, %q), want empty", name, email)
 	}
 }

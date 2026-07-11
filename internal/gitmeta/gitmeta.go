@@ -1,11 +1,14 @@
-// Package gitmeta derives lightweight git metadata (the current branch) for a
-// directory by reading git's on-disk files directly — no git subprocess.
+// Package gitmeta derives lightweight git metadata (branch, user identity) for a
+// directory.
 package gitmeta
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/MunifTanjim/argus/internal/shell"
 )
 
 // Branch returns the current branch of the git repository containing dir: the
@@ -34,6 +37,24 @@ func Branch(dir string) string {
 		return s[:7]
 	}
 	return ""
+}
+
+// Identity returns the git user.name and user.email for the repo containing dir.
+// Either is "" if unset or unavailable.
+func Identity(ctx context.Context, dir string) (name, email string) {
+	if dir == "" {
+		return "", ""
+	}
+	return gitConfig(ctx, dir, "user.name"), gitConfig(ctx, dir, "user.email")
+}
+
+// gitConfig returns a git config value resolved from dir, or "" if git fails.
+func gitConfig(ctx context.Context, dir, key string) string {
+	cmd := shell.NewCommandContext(ctx, "git", "-C", dir, "config", key)
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return cmd.StdOut().TrimSpace().String()
 }
 
 // findGitDir walks up from dir to the nearest ".git" entry and returns the git

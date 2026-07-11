@@ -234,15 +234,33 @@ func summaryFor(m threadMeta, modelNames map[string]string) *session.Summary {
 }
 
 func findRolloutPath(threadID string) string {
-	dir, err := codexHome()
-	if err != nil {
-		return ""
+	return findRolloutPathIn("", threadID)
+}
+
+// findRolloutPathIn globs for a thread's rollout under sessionsRoot; empty falls
+// back to the live ~/.codex/sessions.
+func findRolloutPathIn(sessionsRoot, threadID string) string {
+	if sessionsRoot == "" {
+		dir, err := codexHome()
+		if err != nil {
+			return ""
+		}
+		sessionsRoot = filepath.Join(dir, "sessions")
 	}
-	matches, err := filepath.Glob(filepath.Join(dir, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
+	matches, err := filepath.Glob(filepath.Join(sessionsRoot, "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
 	if err != nil || len(matches) == 0 {
 		return ""
 	}
 	return matches[0]
+}
+
+// sessionsRootFrom returns the sessions dir for a rollout laid out as
+// <root>/sessions/YYYY/MM/DD/rollout-*.jsonl. Empty in → empty out.
+func sessionsRootFrom(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(transcriptPath))))
 }
 
 // Falls back to dir's basename when no .git ancestor is found.

@@ -51,20 +51,60 @@ func sub(name string) (string, error) {
 // transcriptPathFor returns a conversation's transcript_full.jsonl path. Empty when
 // convID is blank/unsafe. The file need not exist.
 func transcriptPathFor(convID string) string {
-	dir, err := brainDir()
-	if err != nil || !safeConvID(convID) {
+	dir, err := homeDir()
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, convID, ".system_generated", "logs", "transcript_full.jsonl")
+	return transcriptPathForIn(dir, convID)
+}
+
+// transcriptPathForIn resolves a conversation's transcript under an explicit home
+// (e.g. an extracted bundle root), instead of the live ~/.gemini/antigravity-cli.
+func transcriptPathForIn(home, convID string) string {
+	if home == "" || !safeConvID(convID) {
+		return ""
+	}
+	return filepath.Join(home, "brain", convID, ".system_generated", "logs", "transcript_full.jsonl")
 }
 
 // conversationDBPath returns a conversation's sqlite db path. Empty when convID is blank/unsafe.
 func conversationDBPath(convID string) string {
 	dir, err := homeDir()
-	if err != nil || !safeConvID(convID) {
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "conversations", convID+".db")
+	return conversationDBPathIn(dir, convID)
+}
+
+func conversationDBPathIn(home, convID string) string {
+	if home == "" || !safeConvID(convID) {
+		return ""
+	}
+	return filepath.Join(home, "conversations", convID+".db")
+}
+
+// homeFromBrainPath derives the antigravity home from a transcript path laid out
+// as <home>/brain/<convID>/...; empty when the path has no brain segment.
+func homeFromBrainPath(p string) string {
+	parts := strings.Split(filepath.ToSlash(p), "/")
+	for i, seg := range parts {
+		if seg == "brain" {
+			return filepath.FromSlash(strings.Join(parts[:i], "/"))
+		}
+	}
+	return ""
+}
+
+// resolveHome picks the antigravity home for resolution: derived from rootPath
+// (an extracted bundle) when possible, else the live home.
+func resolveHome(rootPath string) string {
+	if h := homeFromBrainPath(rootPath); h != "" {
+		return h
+	}
+	if dir, err := homeDir(); err == nil {
+		return dir
+	}
+	return ""
 }
 
 func safeConvID(convID string) bool {

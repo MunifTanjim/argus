@@ -22,7 +22,12 @@ import (
 // appear before dropping the pending auto-select (see clearPendingResumeMsg).
 const resumeSelectTimeout = 30 * time.Second
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.refreshCmd(), spinResumeCmd()) }
+func (m model) Init() tea.Cmd {
+	if m.viewer {
+		return m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent)
+	}
+	return tea.Batch(m.refreshCmd(), spinResumeCmd())
+}
 
 // spinResumeCmd re-arms the list spinner on a timer, so it resumes even when no
 // registry event arrives.
@@ -206,6 +211,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearPendingResumeMsg:
 		if m.pendingResumeID == msg.id {
 			m.pendingResumeID = ""
+		}
+		return m, nil
+	case exportDoneMsg:
+		if msg.err != nil {
+			m.flash = "export failed: " + msg.err.Error()
+		} else {
+			m.flash = "exported: " + msg.path
 		}
 		return m, nil
 	case termOpenedMsg:

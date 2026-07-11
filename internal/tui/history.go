@@ -145,8 +145,36 @@ func (m model) actHistProjOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, m.fetchHistSessions(p.NodeID, p.ProjectDir, 0)
 }
 
+// takePendingExport consumes an armed export confirmation: "y" runs the export,
+// any other key cancels. ok reports that the key was handled here.
+func (m model) takePendingExport(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	if !m.pendingExport {
+		return m, nil, false
+	}
+	m.pendingExport = false
+	if msg.String() == "y" {
+		mm, cmd := m.actExportSession(msg)
+		return mm, cmd, true
+	}
+	return m, nil, true
+}
+
+// exportOrFlashFooter overrides footer with the export prompt or a transient flash.
+func (m model) exportOrFlashFooter(footer string) string {
+	switch {
+	case m.pendingExport:
+		return asstStyle.Render("export this session? y/n")
+	case m.flash != "":
+		return asstStyle.Render(m.flash)
+	}
+	return footer
+}
+
 func (m model) handleHistorySessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.flash = "" // any key dismisses a transient flash; the action may re-set it
+	if mm, cmd, ok := m.takePendingExport(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.dispatch(msg, historySessionsTable); ok {
 		return mm, cmd
 	}
@@ -162,8 +190,17 @@ var historySessionsTable = []keyTableEntry{
 	{historySessionsKeys.HalfDown, model.actHistSessHalfDown},
 	{historySessionsKeys.Open, model.actHistSessOpen},
 	{historySessionsKeys.Resume, model.actHistSessResume},
+	{transcriptKeys.Export, model.actHistSessExport},
 	{historySessionsKeys.More, model.actHistSessMore},
 	{historySessionsKeys.Back, model.actHistSessBack},
+}
+
+func (m model) actHistSessExport(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.history.sessCursor >= len(m.history.sessions) {
+		return m, nil
+	}
+	m.pendingExport = true
+	return m, nil
 }
 
 func (m model) actHistSessUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -237,6 +274,7 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	s := m.history.sessions[m.history.sessCursor]
 	m.history.title = historySessionTitle(s)
+	m.history.openSession = s
 	// Address for follow-up per-tool detail fetches on this transcript.
 	m.history.openNodeID, m.history.openPath, m.history.openAgent = m.history.project.NodeID, s.TranscriptPath, s.Agent
 	m.history.openSessionID, m.history.openResumable = s.SessionID, s.Resumable
@@ -253,6 +291,9 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.flash = "" // any key dismisses a transient flash; the action may re-set it
+	if mm, cmd, ok := m.takePendingExport(msg); ok {
+		return mm, cmd
+	}
 	if key.Matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			if m.popDetail() { // root frame → back to transcript
@@ -260,14 +301,24 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 			}
 			return m, nil
 		}
+		if m.viewer {
+			return m, tea.Quit
+		}
 		m.mode = modeHistorySessions
 		return m, nil
 	}
-	if key.Matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript {
+	if key.Matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript && !m.viewer {
 		return m.startHistoryResume(m.history.openResumable, m.history.openNodeID, m.history.openAgent, m.history.openSessionID)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)
+	}
+	if key.Matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
+		if m.viewer {
+			return m, nil
+		}
+		m.pendingExport = true
+		return m, nil
 	}
 	return m.handleTranscriptKey(msg)
 }
@@ -321,15 +372,12 @@ func (m model) historySessionsView() string {
 		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
 	}
 	body := renderCardList(cards, m.history.sessCursor, max(1, m.height-4))
-	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume}
+	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
 	if m.history.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
 	binds = append(binds, historySessionsKeys.Back)
-	footer := m.footer(binds...)
-	if m.flash != "" {
-		footer = asstStyle.Render(m.flash)
-	}
+	footer := m.exportOrFlashFooter(m.footer(binds...))
 	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
 }
 
@@ -352,6 +400,40 @@ func renderCardList(cards []string, cursor, avail int) string {
 }
 
 func (m model) historyTranscriptView() string {
+	header := centerBlock(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
+	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
+
+	binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold, transcriptKeys.Detail, transcriptKeys.Bottom}
+	if !m.viewer {
+		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
+	}
+	binds = append(binds, transcriptKeys.Back)
+	footer := m.exportOrFlashFooter(m.footer(binds...))
+	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
+}
+
+// historyTranscriptHeader renders the open-transcript header: a manifest-driven
+// summary offline (no live node/history breadcrumb), else the history breadcrumb.
+func (m model) historyTranscriptHeader() string {
+	if m.viewer {
+		s := m.history.openSession
+		title := s.Title
+		if title == "" {
+			title = s.FirstMessage
+		}
+		label := m.history.project.Label
+		if label == "" {
+			label = "session"
+		}
+		header := headerStyle.Render("argus · " + label)
+		if title != "" {
+			header += dimStyle.Render("  " + truncate(title, 50))
+		}
+		if s.ModelName != "" {
+			header += dimStyle.Render("  · " + s.ModelName)
+		}
+		return header
+	}
 	parts := []string{"argus", "history"}
 	if lbl := m.history.project.Label; lbl != "" {
 		parts = append(parts, lbl)
@@ -360,14 +442,7 @@ func (m model) historyTranscriptView() string {
 	if m.history.title != "" {
 		header += dimStyle.Render("  " + truncate(m.history.title, 60))
 	}
-	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
-	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
-	footer := m.footer(transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold,
-		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Resume, transcriptKeys.Back)
-	if m.flash != "" {
-		footer = asstStyle.Render(m.flash)
-	}
-	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
+	return header
 }
 
 // --- row rendering ------------------------------------------------------------
