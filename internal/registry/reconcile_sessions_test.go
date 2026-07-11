@@ -126,6 +126,106 @@ func TestReconcileSessionsLearnsClaudeOntoPaneRecord(t *testing.T) {
 	}
 }
 
+func TestReconcileSessionsPaneOnlyStarting(t *testing.T) {
+	r := New()
+	// Pane-only discovery record: has a pane, no AgentSessionID (still at a gate).
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%7"},
+	})
+	s, ok := r.Get("default:%7")
+	if !ok {
+		t.Fatal("pane-only session missing")
+	}
+	if s.Status != session.StatusStarting {
+		t.Fatalf("pane-only session status: want starting, got %q", s.Status)
+	}
+	if s.Interaction != nil {
+		t.Fatalf("starting session must not synthesize an interaction, got %+v", s.Interaction)
+	}
+}
+
+func TestReconcileSessionsStartingUpgradesToIdle(t *testing.T) {
+	r := New()
+	// First scan: pane-only, stuck at a startup gate.
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%7"},
+	})
+	// Second scan: proc-session file appeared → same pane now carries an
+	// AgentSessionID, still no transcript.
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%7", AgentSessionID: "sess-1"},
+	})
+	s, _ := r.Get("default:%7")
+	if s.Status != session.StatusIdle {
+		t.Fatalf("upgraded session status: want idle, got %q", s.Status)
+	}
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("upgraded session must synthesize idle interaction, got %+v", s.Interaction)
+	}
+}
+
+// A pane-only discovered session (no AgentSessionID — e.g. a claude stuck at a
+// startup gate before it writes its session id) must be created as an attachable
+// pane-keyed record and survive a later scan that still only sees the pane, so it
+// isn't pruned while the user is trying to open it.
+func TestReconcileSessionsPaneOnlyControllableAndSurvives(t *testing.T) {
+	r := New()
+	paneOnly := DiscoveredSession{
+		HasPane: true, Server: session.TmuxServerArgus, PaneID: "%3",
+		Frontend: session.FrontendTmux,
+	}
+	r.ReconcileSessions("claude", []DiscoveredSession{paneOnly})
+
+	s, ok := r.Get("argus:%3")
+	if !ok || !s.Controllable() || s.AgentSessionID != "" || s.Frontend != session.FrontendTmux {
+		t.Fatalf("pane-only session not created controllable: ok=%v %+v", ok, s)
+	}
+
+	// Still stuck: an identical pane-only scan must keep it alive.
+	r.ReconcileSessions("claude", []DiscoveredSession{paneOnly})
+	if _, ok := r.Get("argus:%3"); !ok {
+		t.Fatal("pane-only session should survive a rescan that still sees the pane")
+	}
+}
+
+// A pane-only session (no AgentSessionID) is kept alive solely by its pane. When
+// the process exits and the pane is gone from the scan, it has no claude id to
+// fall back on and must be pruned — e.g. a short-lived `claude -p` run.
+func TestReconcileSessionsPaneOnlyPrunedWhenPaneGone(t *testing.T) {
+	r := New()
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerArgus, PaneID: "%3", Frontend: session.FrontendTmux},
+	})
+	if _, ok := r.Get("argus:%3"); !ok {
+		t.Fatal("pane-only session should be created")
+	}
+	r.ReconcileSessions("claude", nil)
+	if _, ok := r.Get("argus:%3"); ok {
+		t.Error("pane-only session should be pruned once the pane is gone")
+	}
+}
+
+// A pane-only record must not clobber the cwd/repo a proc-session already set for
+// the same pane: the pane's current path can drift (the user cd's in a subshell)
+// while the authoritative launch cwd stays fixed.
+func TestReconcileSessionsPaneOnlyDoesNotOverwriteCwd(t *testing.T) {
+	r := New()
+	r.ReconcileSessions("claude", []DiscoveredSession{{
+		AgentSessionID: "c0", HasPane: true, Server: session.TmuxServerDefault,
+		PaneID: "%0", Frontend: session.FrontendTmux, Cwd: "/work/repo", Repo: "repo",
+	}})
+	// Transient scan: proc-session file unreadable, only the pane seen with a
+	// drifted current path.
+	r.ReconcileSessions("claude", []DiscoveredSession{{
+		HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0",
+		Frontend: session.FrontendTmux, Cwd: "/tmp/sub", Repo: "sub",
+	}})
+	s, _ := r.Get("default:%0")
+	if s.Cwd != "/work/repo" || s.Repo != "repo" {
+		t.Fatalf("pane-only scan overwrote authoritative cwd/repo: %+v", s)
+	}
+}
+
 func TestReconcileSessionsNeverDowngradesFrontend(t *testing.T) {
 	r := New()
 	r.ReconcileSessions("claude", []DiscoveredSession{
@@ -151,9 +251,8 @@ func TestReconcileSessionsCrossServerLiveness(t *testing.T) {
 	if n := len(r.Snapshot()); n != 2 {
 		t.Fatalf("same pane id on two servers = 2 sessions, got %d", n)
 	}
-	// Scan that finds only the default server's session must not prune argus's,
-	// because the global found-set still contains argus this call... so instead
-	// model a scan that genuinely no longer sees argus:
+	// A scan that no longer sees the argus pane must prune it, even though
+	// default:%0 shares the pane id.
 	r.ReconcileSessions("claude", []DiscoveredSession{
 		tmuxDisc("c0", "%0", "a", session.TmuxServerDefault),
 	})

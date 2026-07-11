@@ -48,9 +48,9 @@ func New() *Registry {
 	}
 }
 
-// paneKey identifies a pane across servers; pane ids are only unique per server,
+// PaneKey identifies a pane across servers; pane ids are only unique per server,
 // so the server must be part of the key.
-func paneKey(server session.TmuxServer, paneID string) string {
+func PaneKey(server session.TmuxServer, paneID string) string {
 	return string(server) + ":" + paneID
 }
 
@@ -140,7 +140,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 	for _, f := range found {
 		paneK := ""
 		if f.HasPane {
-			paneK = paneKey(f.Server, f.PaneID)
+			paneK = PaneKey(f.Server, f.PaneID)
 			seenPane[paneK] = true
 		}
 		if f.AgentSessionID != "" {
@@ -196,10 +196,14 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Name != "" {
 			s.Name = f.Name
 		}
-		if f.Cwd != "" {
+		// A pane-only record (no AgentSessionID) carries the pane's current path, not
+		// an authoritative proc-session cwd — only seed it, never overwrite a value a
+		// proc-session/hook already set (the user may have cd'd within the pane).
+		paneOnly := f.AgentSessionID == ""
+		if f.Cwd != "" && !(paneOnly && s.Cwd != "") {
 			s.Cwd = f.Cwd
 		}
-		if f.Repo != "" {
+		if f.Repo != "" && !(paneOnly && s.Repo != "") {
 			s.Repo = f.Repo
 		}
 		setTranscriptPath(s, f.TranscriptPath)
@@ -222,7 +226,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		pk := ""
 		alive := false
 		if s.Tmux.PaneID != "" {
-			pk = paneKey(s.Tmux.Server, s.Tmux.PaneID)
+			pk = PaneKey(s.Tmux.Server, s.Tmux.PaneID)
 			if seenPane[pk] {
 				alive = true
 			}
@@ -257,20 +261,22 @@ func setTranscriptPath(s *session.Session, path string) {
 	s.Summary = nil
 }
 
-// applyStatusHint seeds a transcript-derived status onto a still-StatusDiscovered
-// session (no authoritative hook status yet). An idle hint also synthesizes an idle
-// Interaction so clients show the compose. A missing hint on a pane-bearing session
-// (freshly opened, no transcript yet) defaults to idle so clients can send the first
-// prompt. Caller holds r.mu.
+// applyStatusHint seeds a transcript-derived status onto a still-provisional session
+// (StatusDiscovered/StatusStarting only). An idle hint also synthesizes an idle
+// Interaction so clients show the compose. Caller holds r.mu.
 func applyStatusHint(s *session.Session, hint session.Status) {
-	if s.Status != session.StatusDiscovered {
+	if s.Status != session.StatusDiscovered && s.Status != session.StatusStarting {
 		return
 	}
 	if hint == "" {
 		if s.Tmux.PaneID == "" {
 			return // no pane = can't type into it, leave discovered
 		}
-		hint = session.StatusIdle
+		if s.AgentSessionID == "" {
+			s.Status = session.StatusStarting // pane still at a startup gate, not ready
+			return
+		}
+		hint = session.StatusIdle // has a session id but no transcript yet: ready for the first prompt
 	}
 	s.Status = hint
 	if hint == session.StatusIdle && s.Interaction == nil {
@@ -356,7 +362,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 
 	pKey := ""
 	if u.PaneID != "" {
-		pKey = paneKey(u.Server, u.PaneID)
+		pKey = PaneKey(u.Server, u.PaneID)
 	}
 
 	var s *session.Session

@@ -11,8 +11,26 @@ import 'package:argus/state/gateway.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/transcript.dart';
 import 'package:argus/state/transcript_controller.dart';
+import 'package:argus/ui/interaction_bar.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import '../support/fake_session_repository.dart';
+
+Session _sStarting() => Session.fromJson({
+      'id': 'mac:%1',
+      'agent': 't',
+      'status': 'starting',
+      'source': 'discovered',
+      'frontend': 'tmux',
+      'tmux': {
+        'server': 'argus',
+        'pane_id': '%1',
+        'session_name': 's',
+        'window_index': 0,
+        'current_path': '/p',
+      },
+      'repo': 'argus',
+      'node_label': 'mac',
+    });
 
 Session _s({String? agentSessionId, String? name, String? branch}) =>
     Session.fromJson({
@@ -215,5 +233,20 @@ void main() {
     expect(find.textContaining('post-clear line'), findsOneWidget);
     expect(find.textContaining('pre-clear line'), findsNothing);
     expect(repo.stores, hasLength(2)); // re-opened onto the fresh store
+  });
+
+  testWidgets('starting session shows startup notice and no input bar',
+      (tester) async {
+    await tester.pumpWidget(_app(
+      [
+        gatewayProvider.overrideWithValue(null),
+        transcriptProvider('mac:%1')
+            .overrideWith(() => _SeededTranscript(const [])),
+      ],
+      session: _sStarting(),
+    ));
+    await tester.pump();
+    expect(find.textContaining('startup prompt'), findsOneWidget);
+    expect(find.byType(InteractionBar), findsNothing);
   });
 }

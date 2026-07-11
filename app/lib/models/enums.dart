@@ -1,9 +1,11 @@
-enum SessionStatus { discovered, working, awaitingInput, idle, dead, unknown }
+enum SessionStatus { discovered, starting, working, awaitingInput, idle, dead, unknown }
 
 SessionStatus statusFromWire(String? s) {
   switch (s) {
     case 'discovered':
       return SessionStatus.discovered;
+    case 'starting':
+      return SessionStatus.starting;
     case 'working':
       return SessionStatus.working;
     case 'awaiting_input':

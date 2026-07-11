@@ -96,6 +96,8 @@ func statusColor(s session.Status) color.Color {
 		return ColorOngoing
 	case session.StatusAwaitingInput:
 		return ColorAccent
+	case session.StatusStarting:
+		return ColorTextMuted
 	case session.StatusIdle:
 		return ColorTextDim
 	default: // dead / discovered

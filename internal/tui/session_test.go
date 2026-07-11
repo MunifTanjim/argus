@@ -439,8 +439,7 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 	}
 	m.transcriptCache = map[string]cachedTranscript{}
 
-	// Populate a transcript chunk with a live subagent item (no inlined trace: it
-	// will be streamed).
+	// A live subagent item with no inlined trace: it will be streamed.
 	agentItem := transcript.Item{
 		Kind:      transcript.ItemSubagent,
 		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}},
@@ -659,5 +658,43 @@ func TestSessionCardAgentLabelGated(t *testing.T) {
 	hidden := ansi.Strip(m.sessionCard(s, false, 78, false))
 	if strings.Contains(hidden, "Codex") {
 		t.Errorf("showAgent=false should not render agent label:\n%s", hidden)
+	}
+}
+
+func TestSessionFooterIncludesRawHintWhenStarting(t *testing.T) {
+	foot := func(m model) string { m.width = 120; return ansi.Strip(m.sessionFooter()) }
+
+	m := sessionModel(nil)
+	s := m.sessions["s1"]
+	s.Status = session.StatusStarting
+	m.sessions["s1"] = s
+
+	if !strings.Contains(foot(m), "ctrl+s") {
+		t.Errorf("starting session footer should include ctrl+s hint: %q", foot(m))
+	}
+
+	// Non-starting session should not include ctrl+s in the default footer.
+	s.Status = session.StatusIdle
+	m.sessions["s1"] = s
+	if strings.Contains(foot(m), "ctrl+s") {
+		t.Errorf("idle session footer should not include ctrl+s hint: %q", foot(m))
+	}
+}
+
+func TestSessionViewStartingShowsNotice(t *testing.T) {
+	m := sessionModel(nil)
+	s := m.sessions["s1"]
+	s.Status = session.StatusStarting
+	m.sessions["s1"] = s
+
+	out := ansi.Strip(m.sessionView())
+	if !strings.Contains(out, "startup prompt") {
+		t.Errorf("starting session should show the startup notice:\n%s", out)
+	}
+	if !strings.Contains(out, "live screen") {
+		t.Errorf("starting notice should point to the live screen:\n%s", out)
+	}
+	if !strings.Contains(out, "starting") {
+		t.Errorf("header should show the starting status word:\n%s", out)
 	}
 }

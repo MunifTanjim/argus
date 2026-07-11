@@ -96,6 +96,8 @@ func statusGlyph(s session.Status) string {
 		return "◆"
 	case session.StatusIdle:
 		return "○"
+	case session.StatusStarting:
+		return "◌"
 	case session.StatusDead:
 		return "✗"
 	default:
@@ -186,12 +188,12 @@ func (m model) listView() string {
 	}
 	title += "    " + m.homeTabs(modeList)
 
-	// Empty state: centered welcome with the argus wordmark.
+	// Empty state.
 	if len(m.order) == 0 {
 		return m.emptyListView(title)
 	}
 
-	// Populated: centered, scrollable session cards.
+	// Populated.
 	cardW := min(m.containerWidth(), 78)
 	if cardW < 30 {
 		cardW = 30

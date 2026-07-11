@@ -257,12 +257,14 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             if (conn != ConnState.connected)
               _Banner(state: conn, message: connError),
             Expanded(
-              // Spinner until the first snapshot arrives, so an empty session
-              // shows progress rather than a blank feed. error stops the spinner.
-              child: !st.loaded && st.error == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : TranscriptFeed(
-                      detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
+              // Spinner until the first snapshot arrives; error stops it.
+              child: switch (live.status) {
+                SessionStatus.starting => const _StartingNotice(),
+                _ when !st.loaded && st.error == null =>
+                  const Center(child: CircularProgressIndicator()),
+                _ => TranscriptFeed(
+                    detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
+              },
             ),
             if (live.interaction != null)
               InteractionBar(
@@ -303,6 +305,38 @@ class _Banner extends StatelessWidget {
           style: TextStyle(
               color: failed ? AppColors.error : AppColors.secondary,
               fontSize: 12)),
+    );
+  }
+}
+
+class _StartingNotice extends StatelessWidget {
+  const _StartingNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.hourglass_empty,
+                size: 48, color: AppColors.secondary),
+            SizedBox(height: 16),
+            Text(
+              'Session is starting or waiting at a startup prompt.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Tap the terminal icon to open the live screen and continue.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.secondary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
