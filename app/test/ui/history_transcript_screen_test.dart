@@ -36,7 +36,12 @@ class _FakeHistoryRepository implements HistoryRepository {
       const Result.ok(HistorySessionPage(items: [], hasMore: false));
 }
 
-HistorySession _session({String? title, String? firstMessage}) => HistorySession(
+HistorySession _session({
+  String? title,
+  String? firstMessage,
+  bool resumable = false,
+}) =>
+    HistorySession(
       sessionId: 'sess-1',
       title: title,
       firstMessage: firstMessage,
@@ -45,11 +50,27 @@ HistorySession _session({String? title, String? firstMessage}) => HistorySession
       tokens: 0,
       turnCount: 0,
       durationMs: 0,
+      resumable: resumable,
     );
 
-Widget _app(HistoryRepository repo, HistorySession session) => ProviderScope(
+HistoryProject _project({required String cwd}) => HistoryProject(
+      projectDir: '/home/user/project',
+      cwd: cwd,
+      label: 'Project',
+      sessionCount: 1,
+      lastActivity: '',
+    );
+
+Widget _app(
+  HistoryRepository repo,
+  HistorySession session, {
+  HistoryProject? project,
+}) =>
+    ProviderScope(
       overrides: [historyRepositoryProvider.overrideWithValue(repo)],
-      child: MaterialApp(home: HistoryTranscriptScreen(session: session)),
+      child: MaterialApp(
+        home: HistoryTranscriptScreen(session: session, project: project),
+      ),
     );
 
 void main() {
@@ -96,5 +117,24 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('sess-1'), findsOneWidget);
+  });
+
+  testWidgets('shows resume button when resumable and cwd is known',
+      (tester) async {
+    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    await tester.pumpWidget(_app(repo, _session(resumable: true),
+        project: _project(cwd: '/home/user/project')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Resume'), findsOneWidget);
+  });
+
+  testWidgets('hides resume button when cwd is unknown', (tester) async {
+    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    await tester.pumpWidget(_app(repo, _session(resumable: true),
+        project: _project(cwd: '')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Resume'), findsNothing);
   });
 }

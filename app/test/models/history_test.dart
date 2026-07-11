@@ -137,6 +137,16 @@ void main() {
       expect(s.nodeId, isNull);
       expect(s.nodeLabel, isNull);
     });
+
+    test('parses resumable true', () {
+      final s = HistorySession.fromJson({'resumable': true});
+      expect(s.resumable, isTrue);
+    });
+
+    test('defaults resumable to false when absent', () {
+      final s = HistorySession.fromJson(jsonDecode(_minimalSessionJson));
+      expect(s.resumable, isFalse);
+    });
   });
 
   group('HistorySessionPage.fromJson', () {

@@ -35,6 +35,11 @@ class AgentInfo {
   });
 }
 
+class ResumeOutcome {
+  final String sessionId;
+  const ResumeOutcome({required this.sessionId});
+}
+
 List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {
   final seen = <String, NodeRef>{};
   for (final s in sessions) {

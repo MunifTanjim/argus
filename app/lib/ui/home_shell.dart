@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/session.dart';
+import '../state/navigation.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import 'history_screen.dart';
@@ -17,8 +18,6 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
-  int _index = 0;
-
   @override
   void initState() {
     super.initState();
@@ -54,18 +53,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       const HistoryScreen(),
       const SettingsScreen(),
     ];
+    final index = ref.watch(homeTabProvider);
     // The tabs share one route, so back on a non-first tab would otherwise exit
     // the app. Intercept it to return to Sessions first; only exit from Sessions.
     return PopScope(
-      canPop: _index == 0,
+      canPop: index == homeTabSessions,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _index != 0) setState(() => _index = 0);
+        if (!didPop && index != homeTabSessions) {
+          ref.read(homeTabProvider.notifier).state = homeTabSessions;
+        }
       },
       child: Scaffold(
-        body: IndexedStack(index: _index, children: tabs),
+        body: IndexedStack(index: index, children: tabs),
         bottomNavigationBar: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() => _index = i),
+          selectedIndex: index,
+          onDestinationSelected: (i) =>
+              ref.read(homeTabProvider.notifier).state = i,
           destinations: const [
             NavigationDestination(
                 icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
