@@ -80,62 +80,78 @@ func TestPaneFocusedEscapedSep(t *testing.T) {
 	}
 }
 
-// TestWindowVisible checks the window-current / attached-client logic that decides
-// whether a pane's window is on a user's screen (ignores pane_active).
-func TestWindowVisible(t *testing.T) {
+// TestPanesShareWindow checks the pane→window-id pairing that decides whether two
+// panes sit in the same window (grouped sessions share window ids).
+func TestPanesShareWindow(t *testing.T) {
 	sep := "\x1f"
-	line := func(id, windowActive, attached, session string) string {
-		return strings.Join([]string{id, windowActive, attached, session}, sep)
+	line := func(id, window string) string {
+		return strings.Join([]string{id, window}, sep)
 	}
 	out := strings.Join([]string{
-		line("%1", "1", "1", "origin"),       // visible: current window, attached
-		line("%2", "1", "0", "origin"),       // not visible: no client attached
-		line("%3", "0", "1", "origin"),       // not visible: window not current
-		line("%4", "1", "1", "origin"),       // visible: inactive pane still shares the window
-		line("%5", "1", "2", "origin"),       // visible: two clients attached
-		line("%6", "1", "1", "argus-mirror"), // ignored: our own mirror session
+		line("%1", "@1"), // agent pane
+		line("%2", "@1"), // split sibling on the agent's window
+		line("%3", "@2"), // a different window
+		line("%4", "@1"), // grouped-session pane sharing the agent window
 	}, "\n") + "\n"
 
-	ignore := func(s string) bool { return s == "argus-mirror" }
-	want := map[string]bool{"%1": true, "%2": false, "%3": false, "%4": true, "%5": true, "%6": false, "%absent": false}
-	for id, exp := range want {
-		got, err := windowVisible(out, id, ignore)
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"%2", "%1", true},       // caller split into the agent's window
+		{"%4", "%1", true},       // caller attached to a grouped session on that window
+		{"%3", "%1", false},      // caller in a different window
+		{"%absent", "%1", false}, // caller pane not on this server
+		{"%1", "%absent", false}, // agent pane missing
+	}
+	for _, tc := range cases {
+		got, err := panesShareWindow(out, tc.a, tc.b)
 		if err != nil {
-			t.Fatalf("windowVisible(%q): %v", id, err)
+			t.Fatalf("panesShareWindow(%q,%q): %v", tc.a, tc.b, err)
 		}
-		if got != exp {
-			t.Errorf("windowVisible(%q) = %v, want %v", id, got, exp)
+		if got != tc.want {
+			t.Errorf("panesShareWindow(%q,%q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
 	}
 }
 
-// TestWindowVisibleEscapedSep verifies the tmux >=3.4 "\037"-escaped separator is
+// TestPanesShareWindowEscapedSep verifies the tmux >=3.4 "\037"-escaped separator is
 // normalized, matching parsePane's handling.
-func TestWindowVisibleEscapedSep(t *testing.T) {
-	got, err := windowVisible(strings.Join([]string{"%9", "1", "1", "origin"}, `\037`), "%9", nil)
+func TestPanesShareWindowEscapedSep(t *testing.T) {
+	out := strings.Join([]string{
+		strings.Join([]string{"%1", "@1"}, `\037`),
+		strings.Join([]string{"%2", "@1"}, `\037`),
+	}, "\n")
+	got, err := panesShareWindow(out, "%1", "%2")
 	if err != nil {
-		t.Fatalf("windowVisible: %v", err)
+		t.Fatalf("panesShareWindow: %v", err)
 	}
 	if !got {
-		t.Fatal("escaped-separator line not parsed as visible")
+		t.Fatal("escaped-separator lines not parsed as sharing a window")
 	}
 }
 
-// TestWindowVisibleDetached checks a detached pane's window is never reported
-// visible — verifiable headlessly (attaching needs a real terminal).
-func TestWindowVisibleDetached(t *testing.T) {
+// TestPanesShareWindowSingleServer checks two panes in one session's window share a
+// window, while a pane in another window does not — verifiable headlessly.
+func TestPanesShareWindowSingleServer(t *testing.T) {
 	c := testClient(t)
 	ctx := context.Background()
-	pane, err := c.NewSession(ctx, NewSessionOpts{Name: "s1"})
+	p1, err := c.NewSession(ctx, NewSessionOpts{Name: "s1"})
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	visible, err := c.WindowVisible(ctx, pane, nil)
+	p2, err := c.NewSession(ctx, NewSessionOpts{Name: "s2"})
 	if err != nil {
-		t.Fatalf("WindowVisible: %v", err)
+		t.Fatalf("new session: %v", err)
 	}
-	if visible {
-		t.Errorf("WindowVisible(%q) = true; want false (no client attached)", pane)
+	if same, err := c.PanesShareWindow(ctx, p1, p1); err != nil || !same {
+		t.Errorf("PanesShareWindow(%q,%q) = %v,%v; want true,nil", p1, p1, same, err)
+	}
+	if same, err := c.PanesShareWindow(ctx, p1, p2); err != nil || same {
+		t.Errorf("PanesShareWindow(%q,%q) = %v,%v; want false,nil", p1, p2, same, err)
+	}
+	if same, err := c.PanesShareWindow(ctx, p1, "%absent"); err != nil || same {
+		t.Errorf("PanesShareWindow(%q,absent) = %v,%v; want false,nil", p1, same, err)
 	}
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/base64"
+	"os"
 	"strconv"
 	"strings"
 
@@ -152,7 +153,9 @@ func (m model) enterScreen(id string) (model, tea.Cmd) {
 	m.term = vt.NewEmulator(cols, rows)
 	m.termStop = make(chan struct{})
 	go drainEmulator(m.term, m.termStop)
-	return m, m.termOpenCmd(id, termID, cols, rows)
+	host, _ := os.Hostname()
+	clientPane := clientPaneFor(m.sessions[id], host, os.Getenv("TMUX"), os.Getenv("TMUX_PANE"))
+	return m, m.termOpenCmd(id, termID, cols, rows, clientPane)
 }
 
 // drainEmulator discards the emulator's auto-generated query replies (DA/DSR/
@@ -191,11 +194,11 @@ func (m model) leaveScreen() (model, tea.Cmd) {
 	return m.detachScreen(), m.termCloseCmd(termID)
 }
 
-func (m model) termOpenCmd(id, termID string, cols, rows int) tea.Cmd {
+func (m model) termOpenCmd(id, termID string, cols, rows int, clientPane string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		err := client.Call(api.MethodTerminalOpen, api.TerminalOpenParams{
-			TermID: termID, SessionID: id, Cols: cols, Rows: rows,
+			TermID: termID, SessionID: id, Cols: cols, Rows: rows, ClientPane: clientPane,
 		}, nil)
 		return termOpenedMsg{termID: termID, err: err}
 	}

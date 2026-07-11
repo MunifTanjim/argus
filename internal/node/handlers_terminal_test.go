@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -97,6 +98,67 @@ func TestTerminalOpenStreamsAndCloses(t *testing.T) {
 	}
 
 	if _, err := d.handleTerminalClose(ctx, mustJSON(api.TerminalCloseParams{TermID: "t1"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTerminalOpenSharedWindowGuard: an open is refused only when the caller's pane
+// shares the agent pane's window. A pane shares a window with itself, so passing the
+// agent pane as ClientPane exercises the shared-window case.
+func TestTerminalOpenSharedWindowGuard(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+	pane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second, independent session gives us a pane in a different window.
+	other, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "elsewhere", Command: "sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerDefault: c})
+	d.mirrorPrefix, d.mirrorSuffix = "_", "_"
+	sessionID := seedSession(t, d, session.TmuxLocation{
+		Server: session.TmuxServerDefault, PaneID: pane,
+		SessionName: "origin", WindowIndex: 0,
+	})
+
+	notif := newRecordingNotifier()
+	octx := api.WithNotifier(ctx, notif)
+
+	// Caller in the agent's own window: refused with an invalid-request error.
+	_, err = d.handleTerminalOpen(octx, mustJSON(api.TerminalOpenParams{
+		TermID: "t1", SessionID: sessionID, Cols: 80, Rows: 24, ClientPane: pane,
+	}))
+	var rpcErr *api.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Fatalf("shared-window open err = %v, want RPCError{CodeInvalidRequest}", err)
+	}
+
+	// Caller in a different window: guard skipped, open proceeds and streams.
+	if _, err := d.handleTerminalOpen(octx, mustJSON(api.TerminalOpenParams{
+		TermID: "t2", SessionID: sessionID, Cols: 80, Rows: 24, ClientPane: other,
+	})); err != nil {
+		t.Fatalf("different-window open err = %v, want success", err)
+	}
+	select {
+	case <-notif.outputs:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no terminal.output after allowed open")
+	}
+	if _, err := d.handleTerminalClose(octx, mustJSON(api.TerminalCloseParams{TermID: "t2"})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remote caller (mobile app) sends no pane: guard skipped, open allowed even
+	// though the agent pane trivially shares its own window.
+	if _, err := d.handleTerminalOpen(octx, mustJSON(api.TerminalOpenParams{
+		TermID: "t3", SessionID: sessionID, Cols: 80, Rows: 24, ClientPane: "",
+	})); err != nil {
+		t.Fatalf("empty-ClientPane open err = %v, want success", err)
+	}
+	if _, err := d.handleTerminalClose(octx, mustJSON(api.TerminalCloseParams{TermID: "t3"})); err != nil {
 		t.Fatal(err)
 	}
 }

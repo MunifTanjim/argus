@@ -633,6 +633,17 @@ func sameMachine(s session.Session, hostname string) bool {
 	return s.NodeID == "" || s.NodeLabel == hostname || s.NodeID == hostname
 }
 
+// clientPaneFor returns this TUI's own tmux pane ($TMUX_PANE) when co-located with
+// the session (same tmux server, same machine), else "" — a pane id is meaningless
+// on another server, so the guard must not apply.
+func clientPaneFor(s session.Session, hostname, tmuxEnv, tmuxPane string) string {
+	coLocated := session.TmuxServer(tmux.SocketBaseFromEnv(tmuxEnv)) == s.Tmux.Server && sameMachine(s, hostname)
+	if !coLocated {
+		return ""
+	}
+	return tmuxPane
+}
+
 // nodeName picks the human-friendly name for a node: its label, else its id.
 func nodeName(label, id string) string {
 	if label != "" {
