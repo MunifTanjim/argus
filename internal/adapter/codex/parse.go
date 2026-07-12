@@ -24,6 +24,7 @@ func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chu
 	model := ""
 	firstCtxTokens := map[*transcript.Chunk]int{}
 	nicknames := map[string]string{} // agent id -> nickname, from each spawn seen so far
+	lastUserTurnID := ""             // turn_id of the trailing user chunk, for skill folding
 
 	flush := func() {
 		if ai != nil {
@@ -81,13 +82,31 @@ func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chu
 						})
 						continue
 					}
-					if name, path, body, ok := skillLoad(text); ok {
-						out = append(out, transcript.Chunk{
-							Kind: transcript.ChunkSkill, Timestamp: l.Timestamp,
-							Text: name, Label: path, Detail: body,
-						})
+					if name, _, body, ok := skillLoad(text); ok {
+						input, _ := json.Marshal(map[string]string{"skill": name})
+						item := transcript.Item{
+							Kind:         transcript.ItemSkill,
+							ToolName:     "Skill",
+							ToolID:       p.ID,
+							ToolInput:    string(input),
+							InputPreview: name,
+							Result:       body,
+						}
+						// The skill load is a follow-up to the user's invoking message; fold it in
+						// when the trailing chunk is that same-turn user message.
+						turn := p.turnID()
+						if n := len(out); n > 0 && out[n-1].Kind == transcript.ChunkUser && turnsMatch(lastUserTurnID, turn) {
+							out[n-1].Items = append(out[n-1].Items, item)
+						} else {
+							out = append(out, transcript.Chunk{
+								Kind: transcript.ChunkUser, Timestamp: l.Timestamp,
+								Items: []transcript.Item{item},
+							})
+						}
+						lastUserTurnID = turn
 						continue
 					}
+					lastUserTurnID = p.turnID()
 					out = append(out, transcript.Chunk{Kind: transcript.ChunkUser, Timestamp: l.Timestamp, Text: text})
 				case "assistant":
 					c := ensureAI(l.Timestamp)
@@ -181,6 +200,13 @@ func tagContent(s, tag string) string {
 		return ""
 	}
 	return strings.TrimSpace(s[i : i+j])
+}
+
+// turnsMatch reports whether two turn ids are compatible for folding a skill load
+// into the preceding user chunk: a positive mismatch blocks it, a missing id on
+// either side falls back to positional adjacency.
+func turnsMatch(a, b string) bool {
+	return a == "" || b == "" || a == b
 }
 
 func skillLoad(text string) (name, path, body string, ok bool) {
@@ -423,6 +449,9 @@ func stampIDs(chunks []transcript.Chunk) {
 		chunks[i].ID = strconv.Itoa(i)
 		for j := range chunks[i].Items {
 			chunks[i].Items[j].ID = strconv.Itoa(j)
+			if chunks[i].Items[j].Kind == transcript.ItemSkill && chunks[i].Items[j].ToolID == "" {
+				chunks[i].Items[j].ToolID = "skill:" + strconv.Itoa(i) + ":" + strconv.Itoa(j)
+			}
 		}
 	}
 }

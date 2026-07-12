@@ -18,6 +18,28 @@ void main() {
     expect(find.textContaining('fix the bug'), findsOneWidget);
   });
 
+  testWidgets('user chunk items collapse behind a count, expand on tap',
+      (tester) async {
+    const chunk = Chunk(id: 'c0', kind: ChunkKind.user, text: '/x', items: [
+      Item(
+          id: 'i0',
+          kind: ItemKind.skill,
+          toolName: 'Skill',
+          toolId: 'u-123',
+          inputPreview: 'reviewing-prs-like-munif'),
+    ]);
+    await tester.pumpWidget(_wrap(chunk));
+
+    // Collapsed: only the count is shown, no ItemRow.
+    expect(find.text('1 item'), findsOneWidget);
+    expect(find.text('Skill'), findsNothing);
+
+    await tester.tap(find.text('1 item'));
+    await tester.pump();
+
+    expect(find.text('Skill'), findsOneWidget); // ItemRow label
+  });
+
   testWidgets('shell chunk shows the command, output on expand', (tester) async {
     const c = Chunk(
       id: 'sh',
@@ -32,24 +54,6 @@ void main() {
     await tester.tap(find.text('Shell'));
     await tester.pump();
     expect(find.textContaining('nothing to commit'), findsOneWidget);
-  });
-
-  testWidgets('skill chunk shows the name, path/body on expand', (tester) async {
-    const c = Chunk(
-      id: 'sk',
-      kind: ChunkKind.skill,
-      text: 'superpowers:brainstorming',
-      label: '/path/to/SKILL.md',
-      detail: 'Help turn ideas into designs.',
-    );
-    await tester.pumpWidget(_wrap(c));
-    expect(find.text('Skill'), findsOneWidget);
-    expect(find.textContaining('superpowers:brainstorming'), findsOneWidget);
-    expect(find.textContaining('SKILL.md'), findsNothing);
-    await tester.tap(find.text('Skill'));
-    await tester.pump();
-    expect(find.textContaining('SKILL.md'), findsOneWidget);
-    expect(find.textContaining('Help turn ideas'), findsOneWidget);
   });
 
   testWidgets('long user chunk collapses and expands', (tester) async {

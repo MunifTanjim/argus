@@ -163,6 +163,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		if !excluded && hasUserContent(e.Message.Content, contentStr) {
 			return UserMsg{
 				Timestamp:      ts,
+				UUID:           e.UUID,
 				Text:           SanitizeContent(contentStr),
 				PermissionMode: e.PermissionMode,
 			}, true

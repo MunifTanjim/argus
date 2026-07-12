@@ -31,28 +31,54 @@ func TestBuildChunks_SingleUser(t *testing.T) {
 func TestBuildChunks_SkillLoad(t *testing.T) {
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	msgs := []parser.ClassifiedMsg{
-		parser.UserMsg{Timestamp: t0, Text: "/superpowers:brainstorming a new feature"},
+		parser.UserMsg{Timestamp: t0, UUID: "entry-uuid", Text: "/superpowers:brainstorming a new feature"},
 		parser.AIMsg{Timestamp: t0, IsMeta: true, Text: "Base directory for this skill: /p/skills/brainstorming\n\n# Brainstorming\n\nHelp turn ideas into designs."},
 	}
 	chunks := parser.BuildChunks(msgs)
-	if len(chunks) != 2 {
-		t.Fatalf("len(chunks) = %d, want 2 (user command + skill)", len(chunks))
+	if len(chunks) != 1 {
+		t.Fatalf("len(chunks) = %d, want 1 (skill folded into user chunk)", len(chunks))
 	}
-	if chunks[0].Type != parser.UserChunk || chunks[0].UserText != "/superpowers:brainstorming a new feature" {
-		t.Errorf("chunks[0] = %+v, want the user's full slash command", chunks[0])
+	c := chunks[0]
+	if c.Type != parser.UserChunk {
+		t.Errorf("Type = %d, want UserChunk", c.Type)
 	}
-	c := chunks[1]
-	if c.Type != parser.SkillChunk {
-		t.Errorf("Type = %d, want SkillChunk", c.Type)
+	if c.UserText != "/superpowers:brainstorming a new feature" {
+		t.Errorf("UserText = %q, want the user's full slash command", c.UserText)
 	}
-	if c.UserText != "superpowers:brainstorming" {
-		t.Errorf("name = %q, want superpowers:brainstorming (argument excluded)", c.UserText)
+	if len(c.Items) != 1 {
+		t.Fatalf("len(Items) = %d, want 1 (skill item)", len(c.Items))
 	}
-	if c.SystemLabel != "/p/skills/brainstorming" {
-		t.Errorf("path = %q, want the base directory", c.SystemLabel)
+	it := c.Items[0]
+	if it.Type != parser.ItemToolCall {
+		t.Errorf("Items[0].Type = %d, want ItemToolCall", it.Type)
 	}
-	if c.Output != "# Brainstorming\n\nHelp turn ideas into designs." {
-		t.Errorf("body = %q, want the skill markdown", c.Output)
+	if it.ToolName != "Skill" {
+		t.Errorf("ToolName = %q, want Skill", it.ToolName)
+	}
+	if it.ToolID != "entry-uuid" {
+		t.Errorf("ToolID = %q, want entry-uuid", it.ToolID)
+	}
+	if it.ToolSummary != "superpowers:brainstorming" {
+		t.Errorf("ToolSummary = %q, want superpowers:brainstorming (argument excluded)", it.ToolSummary)
+	}
+	if it.ToolResult != "# Brainstorming\n\nHelp turn ideas into designs." {
+		t.Errorf("ToolResult = %q, want the skill markdown", it.ToolResult)
+	}
+}
+
+func TestBuildChunks_SkillLoadFoldsIntoUserChunkItem(t *testing.T) {
+	msgs := []parser.ClassifiedMsg{
+		parser.UserMsg{UUID: "u-123", Text: "/reviewing-prs-like-munif"},
+		parser.AIMsg{IsMeta: true, Text: "Base directory for this skill: /home/u/.claude/skills/x\n\nDo it."},
+	}
+	chunks := parser.BuildChunks(msgs)
+	u := chunks[0]
+	if u.Type != parser.UserChunk || len(u.Items) != 1 {
+		t.Fatalf("want user chunk w/1 item, got %v/%d", u.Type, len(u.Items))
+	}
+	if it := u.Items[0]; it.ToolName != "Skill" || it.ToolID != "u-123" ||
+		it.ToolResult == "" || len(it.ToolInput) == 0 {
+		t.Fatalf("bad skill item: %+v", it)
 	}
 }
 

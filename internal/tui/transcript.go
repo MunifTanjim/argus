@@ -96,14 +96,15 @@ func (m model) chunkExpandable(c transcript.Chunk) bool {
 	case transcript.ChunkAI:
 		return len(c.Items) > 0
 	case transcript.ChunkUser:
+		if len(c.Items) > 0 {
+			return true
+		}
 		// Count wrapped display lines, not source lines.
 		return len(strings.Split(m.renderMD(c.Text, m.userBubbleInner()), "\n")) > maxCollapsedLines
 	case transcript.ChunkSystem:
 		return c.Detail != ""
 	case transcript.ChunkShell:
 		return c.Detail != "" || strings.Count(c.Text, "\n") >= maxCollapsedLines
-	case transcript.ChunkSkill:
-		return c.Detail != "" || c.Label != ""
 	default:
 		return false
 	}
@@ -237,8 +238,6 @@ func (m model) renderChunk(i int, selected bool) string {
 		return m.renderUserCard(c, selected, accent)
 	case transcript.ChunkShell:
 		return m.renderShellCard(c, selected, accent)
-	case transcript.ChunkSkill:
-		return m.renderSkillCard(c, selected, accent)
 	case transcript.ChunkCompact:
 		return m.renderCompact(c)
 	default:
@@ -465,7 +464,16 @@ func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string 
 	header := sel + strings.Repeat(" ", gap) + right
 
 	body := m.renderMD(c.Text, m.userBubbleInner())
-	if !expanded {
+	if expanded {
+		for _, it := range c.Items {
+			row := itemRow(it)
+			if body == "" {
+				body = row
+			} else {
+				body += "\n" + row
+			}
+		}
+	} else {
 		// Truncate wrapped display lines so long single lines collapse too.
 		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
 			body = t + "\n" + hiddenHint(hidden)
@@ -585,56 +593,6 @@ func (m model) shellBody(c transcript.Chunk, iw int) string {
 		sb.WriteString(m.execCommandResultBody(c.Detail, iw))
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-func (m model) renderSkillCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.transcriptWidth()
-	fraction := 3 * container / 4
-	if container < maxContentWidth {
-		fraction = 7 * container / 8
-	}
-	cardW := max(fraction-4, 24)
-	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
-
-	sel := selIndicator(selected)
-	header := sel + m.skillHeader(c, cardW)
-	body := m.skillBody(c, iw)
-
-	borderColor := ColorBorder
-	if accent {
-		borderColor = ColorAccent
-	}
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(cardW).
-		Padding(0, 2).
-		Render(body)
-
-	return header + "\n" + indentBlock(card, sel)
-}
-
-func (m model) skillHeader(c transcript.Chunk, width int) string {
-	chev := ""
-	if m.chunkExpandable(c) {
-		chev = chevron(m.chunkExpanded(c)) + " "
-	}
-	left := chev + Icon.Skill.Render() + " " + StylePrimaryBold.Render("Skill")
-	return spaceBetween(left, StyleDim.Render(clockTime(c.Timestamp)), width)
-}
-
-func (m model) skillBody(c transcript.Chunk, iw int) string {
-	body := StyleSecondaryBold.Render(c.Text)
-	if !m.chunkExpanded(c) {
-		return body
-	}
-	if c.Label != "" {
-		body += "\n" + StyleDim.Render(c.Label)
-	}
-	if c.Detail != "" {
-		body += "\n\n" + m.renderMD(c.Detail, iw)
-	}
-	return body
 }
 
 func (m model) renderCompact(c transcript.Chunk) string {

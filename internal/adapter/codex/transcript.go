@@ -65,7 +65,7 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 	}
 	for _, c := range chunks {
 		for _, it := range c.Items {
-			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent) && it.ToolID == toolID {
+			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent || it.Kind == transcript.ItemSkill) && it.ToolID == toolID {
 				return transcript.ToolDetail{ToolInput: it.ToolInput, Result: it.Result}, true, nil
 			}
 		}

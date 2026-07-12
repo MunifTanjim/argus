@@ -73,15 +73,17 @@ class _ChunkCardState extends ConsumerState<ChunkCard> {
   Widget build(BuildContext context) {
     switch (widget.chunk.kind) {
       case ChunkKind.user:
-        return _UserBubble(text: widget.chunk.text ?? '');
+        return _UserBubble(
+          text: widget.chunk.text ?? '',
+          items: widget.chunk.items,
+          onDrill: _drill,
+        );
       case ChunkKind.ai:
         return _aiCard(widget.chunk);
       case ChunkKind.system:
         return _SystemCard(chunk: widget.chunk);
       case ChunkKind.shell:
         return _ShellCard(chunk: widget.chunk);
-      case ChunkKind.skill:
-        return _SkillCard(chunk: widget.chunk);
       case ChunkKind.compact:
         return _CompactDivider(summary: widget.chunk.summary);
       case ChunkKind.unknown:
@@ -369,8 +371,10 @@ class _ChunkCardState extends ConsumerState<ChunkCard> {
 }
 
 class _UserBubble extends StatefulWidget {
-  const _UserBubble({required this.text});
+  const _UserBubble({required this.text, this.items = const [], this.onDrill});
   final String text;
+  final List<Item> items;
+  final VoidCallback? Function(Item)? onDrill;
 
   @override
   State<_UserBubble> createState() => _UserBubbleState();
@@ -379,10 +383,12 @@ class _UserBubble extends StatefulWidget {
 class _UserBubbleState extends State<_UserBubble> {
   static const _maxLines = 10;
   bool _expanded = false;
+  bool _itemsExpanded = false;
 
   @override
   Widget build(BuildContext context) {
     final text = widget.text;
+    final hasText = text.trim().isNotEmpty;
     final lineCount = '\n'.allMatches(text).length + 1;
     final long = lineCount > _maxLines || text.length > 600;
 
@@ -421,7 +427,13 @@ class _UserBubbleState extends State<_UserBubble> {
             borderRadius: BorderRadius.circular(6),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: body,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (hasText) body,
+              if (widget.items.isNotEmpty) _items(),
+            ],
+          ),
         ),
       ),
     );
@@ -435,6 +447,35 @@ class _UserBubbleState extends State<_UserBubble> {
               style: _mono.copyWith(color: AppColors.accent, fontSize: 11)),
         ),
       );
+
+  Widget _items() {
+    final items = widget.items;
+    final header = InkWell(
+      onTap: () => setState(() => _itemsExpanded = !_itemsExpanded),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_itemsExpanded ? Icons.expand_more : Icons.chevron_right,
+                size: 14, color: AppColors.dim),
+            const SizedBox(width: 2),
+            Text('${items.length} item${items.length == 1 ? '' : 's'}',
+                style: _monoDim),
+          ],
+        ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header,
+        if (_itemsExpanded)
+          for (final it in items)
+            ItemRow(item: it, onTap: widget.onDrill?.call(it)),
+      ],
+    );
+  }
 }
 
 class _SystemCard extends StatefulWidget {
@@ -549,73 +590,6 @@ class _ShellCardState extends State<_ShellCard> {
                     style: _mono.copyWith(color: AppColors.text)),
               ),
               if (hasDetail && _expanded)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(c.detail!, style: _monoDim),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SkillCard extends StatefulWidget {
-  const _SkillCard({required this.chunk});
-  final Chunk chunk;
-
-  @override
-  State<_SkillCard> createState() => _SkillCardState();
-}
-
-class _SkillCardState extends State<_SkillCard> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.chunk;
-    final hasPath = c.label != null && c.label!.isNotEmpty;
-    final hasBody = c.detail != null && c.detail!.isNotEmpty;
-    final expandable = hasPath || hasBody;
-
-    final header = Row(
-      children: [
-        const Icon(Icons.school_outlined, size: 13, color: AppColors.dim),
-        const SizedBox(width: 6),
-        Text('Skill', style: _mono.copyWith(color: AppColors.secondary)),
-        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim),
-      ],
-    );
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: expandable ? () => setState(() => _expanded = !_expanded) : null,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              header,
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(c.text ?? '',
-                    style: _mono.copyWith(color: AppColors.text)),
-              ),
-              if (_expanded && hasPath)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(c.label!, style: _monoDim),
-                ),
-              if (_expanded && hasBody)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(c.detail!, style: _monoDim),

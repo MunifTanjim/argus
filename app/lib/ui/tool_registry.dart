@@ -36,7 +36,7 @@ IconData categoryIcon(ToolCategory c) => switch (c) {
       ToolCategory.glob => Icons.folder_open_outlined,
       ToolCategory.task => Icons.smart_toy_outlined,
       ToolCategory.todo => Icons.checklist,
-      ToolCategory.skill => Icons.build_outlined,
+      ToolCategory.skill => Icons.school_outlined,
       ToolCategory.web => Icons.public,
       ToolCategory.other => Icons.play_arrow,
     };

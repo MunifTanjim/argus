@@ -170,7 +170,7 @@ class ToolDetail {
       );
 }
 
-enum ChunkKind { user, ai, system, shell, skill, compact, unknown }
+enum ChunkKind { user, ai, system, shell, compact, unknown }
 
 ChunkKind chunkKindFromWire(String? s) {
   switch (s) {
@@ -182,8 +182,6 @@ ChunkKind chunkKindFromWire(String? s) {
       return ChunkKind.system;
     case 'shell':
       return ChunkKind.shell;
-    case 'skill':
-      return ChunkKind.skill;
     case 'compact':
       return ChunkKind.compact;
     default:

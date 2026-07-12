@@ -30,7 +30,6 @@ const (
 	ChunkSystem  ChunkKind = "system"  // runtime event / meta row
 	ChunkCompact ChunkKind = "compact" // context-compression boundary
 	ChunkShell   ChunkKind = "shell"   // user ran `!cmd` directly in the CLI (codex)
-	ChunkSkill   ChunkKind = "skill"   // a skill file was loaded into context (codex)
 )
 
 type ItemKind string
@@ -93,8 +92,7 @@ type Chunk struct {
 	Kind      ChunkKind `json:"kind"`
 	Timestamp string    `json:"timestamp,omitempty"`
 
-	// User chunk. Also shell chunk: the command run. Also skill chunk: the skill
-	// identifier (e.g. "superpowers:brainstorming").
+	// User chunk. Also shell chunk: the command run.
 	Text string `json:"text,omitempty"`
 
 	// AI chunk.
@@ -113,10 +111,10 @@ type Chunk struct {
 	ContextFirstPct    float64 `json:"contextFirstPct,omitempty"`    // first cycle, 0..100
 	ContextDeltaTokens int     `json:"contextDeltaTokens,omitempty"` // growth, >= 0
 
-	// System / compact / shell / skill chunk.
+	// System / compact / shell chunk.
 	Summary string `json:"summary,omitempty"` // compact: the compression title
-	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap"); skill: source file path
-	Detail  string `json:"detail,omitempty"`  // system/shell: detail text (shell: raw result scaffolding); skill: file body (markdown)
+	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap")
+	Detail  string `json:"detail,omitempty"`  // system/shell: detail text (shell: raw result scaffolding)
 	IsError bool   `json:"isError,omitempty"` // system: error flag; shell: nonzero exit code
 }
 
