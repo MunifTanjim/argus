@@ -75,8 +75,9 @@ Widget toolDetailBody(Item item) {
     case 'AskUserQuestion':
       return _askUserQuestion(item);
     case 'EnterPlanMode':
-    case 'ExitPlanMode':
       return _generic(item, resultLang: 'markdown');
+    case 'ExitPlanMode':
+      return _exitPlanMode(item);
     case 'Skill':
       return _skill(item);
     default:
@@ -92,6 +93,92 @@ Widget _generic(Item it, {String? resultLang}) =>
       ],
       _resultSection(it, lang: resultLang),
     ]);
+
+// ExitPlanMode input carries a markdown `plan` and its `planFilePath`; the result
+// is the approval/rejection text. Render the plan (and result) as real markdown
+// rather than raw JSON / a highlighted code box.
+Widget _exitPlanMode(Item it) {
+  final m = _input(it);
+  final plan = toolInputStr(m['plan']);
+  final planFilePath = toolInputStr(m['planFilePath']);
+  final result = it.result ?? '';
+  final hasStructured = plan.isNotEmpty || planFilePath.isNotEmpty;
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (planFilePath.isNotEmpty) ...[
+      _label('Plan file'),
+      SelectableText(planFilePath,
+          style: _mono.copyWith(color: AppColors.secondary)),
+    ],
+    if (plan.isNotEmpty) ...[
+      _label('Plan'),
+      _CollapsibleMarkdown(plan),
+    ],
+    // Unknown/empty input shape (e.g. `{}`): fall back so nothing is dropped.
+    if (!hasStructured && (it.toolInput ?? '').isNotEmpty) ...[
+      _label('Input'),
+      codeBlock(it.toolInput!),
+    ],
+    if (result.isNotEmpty) ...[
+      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
+      appMarkdown(result),
+    ],
+  ]);
+}
+
+/// Renders [data] as markdown, collapsed to a clipped preview by default when
+/// long (matching the app's line/char-count collapse heuristic), with a
+/// Show more / Show less toggle.
+class _CollapsibleMarkdown extends StatefulWidget {
+  const _CollapsibleMarkdown(this.data);
+  final String data;
+
+  @override
+  State<_CollapsibleMarkdown> createState() => _CollapsibleMarkdownState();
+}
+
+class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
+  bool _expanded = false;
+  static const _collapsedHeight = 220.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final md = appMarkdown(widget.data);
+    final lines = '\n'.allMatches(widget.data).length + 1;
+    final long = lines > 12 || widget.data.length > 600;
+    if (!long) return md;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (_expanded)
+        md
+      else
+        // Clip the rendered markdown to a preview height: OverflowBox lets it lay
+        // out at its natural height (bounded width, so prose still wraps) while
+        // ClipRect trims everything past _collapsedHeight.
+        ClipRect(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: _collapsedHeight),
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              maxHeight: double.infinity,
+              child: md,
+            ),
+          ),
+        ),
+      GestureDetector(
+        key: const Key('plan-toggle'),
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(_expanded ? 'Show less' : 'Show more',
+              style: const TextStyle(
+                  color: AppColors.accent,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13)),
+        ),
+      ),
+    ]);
+  }
+}
 
 Widget _skill(Item it) {
   final name = toolInputStr(_input(it)['skill']);
@@ -234,14 +321,21 @@ Widget _glob(Item it) {
 
 Widget _web(Item it) {
   final m = _input(it);
-  final head = toolInputStr(m['url']).isNotEmpty ? toolInputStr(m['url']) : toolInputStr(m['query']);
+  final url = toolInputStr(m['url']);
+  final query = toolInputStr(m['query']);
   final prompt = toolInputStr(m['prompt']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (head.isNotEmpty) _header(head),
-    if (prompt.isNotEmpty)
-      Text('# $prompt', style: _mono.copyWith(color: AppColors.dim)),
-    // Web results come back as markdown.
-    if ((it.result ?? '').isNotEmpty) codeBlock(it.result!, lang: 'markdown'),
+    if (url.isNotEmpty) ...[_label('URL'), _header(url)],
+    if (query.isNotEmpty) ...[_label('Query'), _header(query)],
+    if (prompt.isNotEmpty) ...[
+      _label('Prompt'),
+      Text(prompt, style: _mono.copyWith(color: AppColors.dim)),
+    ],
+    if ((it.result ?? '').isNotEmpty) ...[
+      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
+      // Web results come back as markdown — render them, don't show the source.
+      appMarkdown(it.result!),
+    ],
   ]);
 }
 

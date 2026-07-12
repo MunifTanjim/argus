@@ -93,10 +93,14 @@ chosen option(s).
 ## ExitPlanMode / EnterPlanMode
 
 ```json
-{ "plan": "## markdown plan…" }
+{ "plan": "## markdown plan…", "planFilePath": "/…/plans/foo.md",
+  "allowedPrompts": [ { "tool": "Bash", "prompt": "…" } ] }
 ```
 
-`plan` may be absent (`{}`). The app renders the plan as markdown.
+`ExitPlanMode` carries the markdown `plan` and its `planFilePath`; `allowedPrompts`
+is a legacy field seen in older sessions and absent in newer ones.
+`EnterPlanMode`'s input is usually empty (`{}`). The app renders `plan` (and the
+result) as markdown; the result is the approval/rejection text.
 
 ## Agent / Task — subagent spawn (`ItemSubagent`)
 

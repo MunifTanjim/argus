@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/chunk.dart';
@@ -30,27 +32,73 @@ void main() {
     expect(find.text('Copied'), findsOneWidget);
   });
 
-  for (final tool in const ['ExitPlanMode', 'EnterPlanMode']) {
-    testWidgets('$tool result is labelled markdown', (tester) async {
+  testWidgets('EnterPlanMode result is labelled markdown', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'EnterPlanMode',
+        toolInput: '{}',
+        result: '## Plan\n\n- step one')));
+    expect(find.text('markdown'), findsOneWidget); // code block header label
+  });
+
+  testWidgets('ExitPlanMode shows plan file, plan and result as markdown',
+      (tester) async {
+    await tester.pumpWidget(_wrap(Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'ExitPlanMode',
+        toolInput: jsonEncode({
+          'plan': '## Heading\n\n- step one',
+          'planFilePath': '/home/u/.claude/plans/x.md',
+          'allowedPrompts': [
+            {'tool': 'Bash', 'prompt': 'y'}
+          ],
+        }),
+        result: '## Approved\n\nGo ahead now')));
+    // Plan file path rendered pretty, not as raw JSON.
+    expect(find.text('Plan file'), findsOneWidget);
+    expect(find.textContaining('/home/u/.claude/plans/x.md'), findsOneWidget);
+    // Plan and result render as markdown, not highlighted code blocks.
+    expect(find.text('markdown'), findsNothing);
+    expect(find.text('json'), findsNothing);
+    expect(find.textContaining('step one'), findsOneWidget);
+    expect(find.textContaining('Go ahead now'), findsOneWidget);
+  });
+
+  testWidgets('ExitPlanMode collapses a long plan behind a toggle',
+      (tester) async {
+    final longPlan = List.generate(30, (i) => '- item $i').join('\n');
+    await tester.pumpWidget(_wrap(Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'ExitPlanMode',
+        toolInput: jsonEncode({'plan': longPlan, 'planFilePath': '/p.md'}))));
+
+    expect(find.text('Show more'), findsOneWidget);
+    expect(find.text('Show less'), findsNothing);
+    await tester.tap(find.byKey(const Key('plan-toggle')));
+    await tester.pump();
+    expect(find.text('Show less'), findsOneWidget);
+  });
+
+  for (final tool in const ['WebFetch', 'WebSearch']) {
+    testWidgets('$tool result renders as markdown', (tester) async {
       await tester.pumpWidget(_wrap(Item(
           id: 'i',
           kind: ItemKind.tool,
           toolName: tool,
-          toolInput: '{"plan":"do things"}',
-          result: '## Plan\n\n- step one')));
-      expect(find.text('markdown'), findsOneWidget);
+          toolInput:
+              tool == 'WebFetch' ? '{"url":"https://x.dev"}' : '{"query":"q"}',
+          result: '# Heading\n\nbody text')));
+      expect(find.text('markdown'), findsNothing); // no code-block header
+      expect(find.textContaining('Heading'), findsOneWidget);
+      expect(find.textContaining('body text'), findsOneWidget);
+      // Input and output are clearly labelled.
+      expect(find.text(tool == 'WebFetch' ? 'URL' : 'Query'), findsOneWidget);
+      expect(find.text('Result'), findsOneWidget);
     });
   }
-
-  testWidgets('Web result is labelled markdown', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
-        id: 'i',
-        kind: ItemKind.tool,
-        toolName: 'WebFetch',
-        toolInput: '{"url":"https://x.dev"}',
-        result: '# Heading\n\nbody text')));
-    expect(find.text('markdown'), findsOneWidget);
-  });
 
   testWidgets('Read infers language from the file extension', (tester) async {
     await tester.pumpWidget(_wrap(const Item(
