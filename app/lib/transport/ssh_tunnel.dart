@@ -45,6 +45,20 @@ String? verifyKey(String pem, String? passphrase) {
   }
 }
 
+/// The OpenSSH `authorized_keys` line for [key]'s public half, derived from the
+/// stored private key (works for any key type dartssh2 can load). An optional
+/// [comment] is appended (the last, free-form field) to identify the key. Throws
+/// [SshTunnelException] if the key can't be parsed.
+String openSshPublicKeyLine(SshKey key, {String? comment}) {
+  final blob = parseIdentities(key).first.toPublicKey().encode();
+  // The wire blob's first field is the key type (e.g. "ssh-rsa"): a 4-byte
+  // big-endian length followed by that many bytes.
+  final len = (blob[0] << 24) | (blob[1] << 16) | (blob[2] << 8) | blob[3];
+  final type = ascii.decode(blob.sublist(4, 4 + len));
+  final line = '$type ${base64.encode(blob)}';
+  return (comment == null || comment.isEmpty) ? line : '$line $comment';
+}
+
 /// Map a failed [SSHClient.authenticated] into a user-facing exception. A
 /// rejected host key means the pinned fingerprint changed (a possible MITM),
 /// which needs a distinct, actionable message from a plain auth failure.

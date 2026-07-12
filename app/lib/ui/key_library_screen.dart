@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../pairing/profile.dart';
 import '../state/profiles.dart';
 import '../transport/library_key.dart';
+import '../transport/ssh_key_store.dart';
 import '../transport/ssh_keygen.dart';
 import '../transport/ssh_tunnel.dart';
 import '../util/id.dart';
@@ -27,6 +28,10 @@ class KeyLibraryScreen extends ConsumerWidget {
                 key: Key('key-${k.id}'),
                 title: Text(k.name),
                 subtitle: k.passphrase != null ? const Text('passphrase set') : null,
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) => _PublicKeyDialog(libKey: k),
+                ),
                 trailing: IconButton(
                   key: Key('key-delete-${k.id}'),
                   icon: const Icon(Icons.delete_outline),
@@ -88,7 +93,6 @@ class _GenerateTile extends ConsumerStatefulWidget {
 
 class _GenerateTileState extends ConsumerState<_GenerateTile> {
   bool _busy = false;
-  String? _pub;
 
   void _toast(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -96,6 +100,10 @@ class _GenerateTileState extends ConsumerState<_GenerateTile> {
   // Prompt for a name (defaulting to the next "Generated key #N") only after the
   // user asks to generate, then create the keypair.
   Future<void> _promptAndGenerate() async {
+    // Adding the key rebuilds the list, which can deactivate this (unkeyed) tile
+    // mid-await — so capture the Navigator up front (before any await) and open
+    // the reveal through it rather than this tile's (possibly dead) context.
+    final navigator = Navigator.of(context);
     final names = (ref.read(keysProvider).asData?.value ?? const <LibraryKey>[])
         .map((k) => k.name)
         .toList();
@@ -111,10 +119,14 @@ class _GenerateTileState extends ConsumerState<_GenerateTile> {
     setState(() => _busy = true);
     try {
       final g = await generateRsaSshKeyAsync();
-      await ref.read(keysProvider.notifier).add(
-            LibraryKey(id: newId(), name: name, pem: g.privatePem),
-          );
-      if (mounted) setState(() => _pub = g.publicKeyLine);
+      final libKey = LibraryKey(id: newId(), name: name, pem: g.privatePem);
+      await ref.read(keysProvider.notifier).add(libKey);
+      if (navigator.mounted) {
+        navigator.push(DialogRoute<void>(
+          context: navigator.context,
+          builder: (_) => _PublicKeyDialog(libKey: libKey),
+        ));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -122,34 +134,83 @@ class _GenerateTileState extends ConsumerState<_GenerateTile> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ListTile(
-          key: const Key('key-generate'),
-          leading: const Icon(Icons.add),
-          title: const Text('Generate keypair'),
-          trailing: _busy
-              ? const SizedBox(
-                  width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : null,
-          onTap: _busy ? null : _promptAndGenerate,
+    return ListTile(
+      key: const Key('key-generate'),
+      leading: const Icon(Icons.add),
+      title: const Text('Generate keypair'),
+      trailing: _busy
+          ? const SizedBox(
+              width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          : null,
+      onTap: _busy ? null : _promptAndGenerate,
+    );
+  }
+}
+
+/// Shows a saved key's OpenSSH public key (derived from the stored private key)
+/// with a copy button, so it can be added to a host's `authorized_keys` at any
+/// time — not just once at generation.
+class _PublicKeyDialog extends StatefulWidget {
+  const _PublicKeyDialog({required this.libKey});
+  final LibraryKey libKey;
+
+  @override
+  State<_PublicKeyDialog> createState() => _PublicKeyDialogState();
+}
+
+class _PublicKeyDialogState extends State<_PublicKeyDialog> {
+  // Deferred so the dialog paints (with a spinner) before deriving — parsing an
+  // encrypted key runs a bcrypt KDF that would otherwise block the first frame.
+  late final Future<String> _line = Future(
+    () => openSshPublicKeyLine(
+        SshKey(widget.libKey.pem, widget.libKey.passphrase),
+        comment: widget.libKey.name),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.libKey.name),
+      content: FutureBuilder<String>(
+        future: _line,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const SizedBox(
+              height: 48,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snap.hasError) {
+            final err = snap.error;
+            final msg = err is SshTunnelException ? err.message : '$err';
+            return Text(msg, key: const Key('key-public-error'));
+          }
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Add to the host's ~/.ssh/authorized_keys:"),
+              const SizedBox(height: 8),
+              SelectableText(snap.data!, key: const Key('key-public-line')),
+            ],
+          );
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
         ),
-        if (_pub != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Add to the host's ~/.ssh/authorized_keys:"),
-                SelectableText(_pub!),
-                TextButton(
-                  onPressed: () => Clipboard.setData(ClipboardData(text: _pub!)),
-                  child: const Text('Copy public key'),
-                ),
-              ],
-            ),
+        FutureBuilder<String>(
+          future: _line,
+          builder: (context, snap) => TextButton(
+            key: const Key('key-public-copy'),
+            onPressed: snap.hasData
+                ? () => Clipboard.setData(ClipboardData(text: snap.data!))
+                : null,
+            child: const Text('Copy public key'),
           ),
+        ),
       ],
     );
   }
