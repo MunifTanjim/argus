@@ -415,20 +415,33 @@ func TestParseRolloutSkillLoad(t *testing.T) {
 		t.Fatalf("chunks = %d, want 1", len(chunks))
 	}
 	c := chunks[0]
-	if c.Kind != transcript.ChunkSkill {
-		t.Fatalf("kind = %v, want ChunkSkill", c.Kind)
+	if c.Kind != transcript.ChunkUser {
+		t.Fatalf("kind = %v, want ChunkUser", c.Kind)
 	}
-	if c.Text != "superpowers:brainstorming" {
-		t.Fatalf("Text = %q, want skill name", c.Text)
+	if len(c.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(c.Items))
 	}
-	if want := "/Users/muniftanjim/.codex/plugins/cache/openai-curated/superpowers/3fdeeb49/skills/brainstorming/SKILL.md"; c.Label != want {
-		t.Fatalf("Label = %q, want %q", c.Label, want)
+	it := c.Items[0]
+	if it.Kind != transcript.ItemSkill {
+		t.Fatalf("item kind = %v, want ItemSkill", it.Kind)
 	}
-	if strings.Contains(c.Detail, "---") || strings.Contains(c.Detail, "description:") {
-		t.Fatalf("Detail should have frontmatter stripped, got %q", c.Detail)
+	if it.ToolName != "Skill" {
+		t.Fatalf("ToolName = %q, want Skill", it.ToolName)
 	}
-	if !strings.HasPrefix(c.Detail, "# Brainstorming Ideas Into Designs") {
-		t.Fatalf("Detail = %q, want it to start with the body heading", c.Detail)
+	if it.ToolID == "" {
+		t.Fatal("ToolID empty, want stable id from stampIDs")
+	}
+	if it.InputPreview != "superpowers:brainstorming" {
+		t.Fatalf("InputPreview = %q, want skill name", it.InputPreview)
+	}
+	if !strings.Contains(it.ToolInput, `"skill":"superpowers:brainstorming"`) {
+		t.Fatalf("ToolInput = %q, want JSON with skill name", it.ToolInput)
+	}
+	if strings.Contains(it.Result, "---") || strings.Contains(it.Result, "description:") {
+		t.Fatalf("Result should have frontmatter stripped, got %q", it.Result)
+	}
+	if !strings.HasPrefix(it.Result, "# Brainstorming Ideas Into Designs") {
+		t.Fatalf("Result = %q, want it to start with the body heading", it.Result)
 	}
 }
 
@@ -560,3 +573,87 @@ func TestParseRolloutSpawnNickname(t *testing.T) {
 }
 
 func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
+
+func passthrough(turnID string) *msgPassthrough {
+	if turnID == "" {
+		return nil
+	}
+	return &msgPassthrough{TurnID: turnID}
+}
+
+func skillUserLine(name, path, body, turnID string) rolloutLine {
+	text := "<skill>\n<name>" + name + "</name>\n<path>" + path + "</path>\n" + body + "\n</skill>"
+	return rolloutLine{
+		Timestamp: "2026-07-12T00:00:00.000Z",
+		Type:      "response_item",
+		Payload: rolloutPayload{
+			Type:        "message",
+			Role:        "user",
+			Content:     []rolloutContent{{Type: "input_text", Text: text}},
+			Passthrough: passthrough(turnID),
+		},
+	}
+}
+
+func userMessageLine(text, turnID string) rolloutLine {
+	return rolloutLine{
+		Timestamp: "2026-07-12T00:00:00.000Z",
+		Type:      "response_item",
+		Payload: rolloutPayload{
+			Type:        "message",
+			Role:        "user",
+			Content:     []rolloutContent{{Type: "input_text", Text: text}},
+			Passthrough: passthrough(turnID),
+		},
+	}
+}
+
+func TestFoldRollout_SkillFoldsIntoUserChunkItem(t *testing.T) {
+	lines := []rolloutLine{skillUserLine("reviewing", "/p", "# Body", "")}
+	chunks := foldRollout(lines, nil)
+	u := chunks[0]
+	if u.Kind != transcript.ChunkUser || len(u.Items) != 1 {
+		t.Fatalf("want user chunk w/1 item, got %v/%d", u.Kind, len(u.Items))
+	}
+	it := u.Items[0]
+	if it.Kind != transcript.ItemSkill || it.ToolName != "Skill" ||
+		it.ToolID == "" || it.Result == "" || it.ToolInput == "" {
+		t.Fatalf("bad skill item: %+v", it)
+	}
+}
+
+func TestFoldRollout_SkillMergesIntoInvokingUserChunk(t *testing.T) {
+	lines := []rolloutLine{
+		userMessageLine("$superpowers:brainstorming Hello", "t1"),
+		skillUserLine("superpowers:brainstorming", "/p", "# Body", "t1"),
+	}
+	chunks := foldRollout(lines, nil)
+	if len(chunks) != 1 {
+		t.Fatalf("want 1 merged chunk, got %d", len(chunks))
+	}
+	u := chunks[0]
+	if u.Kind != transcript.ChunkUser || u.Text != "$superpowers:brainstorming Hello" {
+		t.Fatalf("want user chunk carrying invoking text, got %v/%q", u.Kind, u.Text)
+	}
+	if len(u.Items) != 1 || u.Items[0].Kind != transcript.ItemSkill {
+		t.Fatalf("want 1 skill item folded in, got %+v", u.Items)
+	}
+}
+
+func TestFoldRollout_SkillDoesNotMergeOnTurnMismatch(t *testing.T) {
+	lines := []rolloutLine{
+		userMessageLine("earlier message", "t1"),
+		skillUserLine("superpowers:brainstorming", "/p", "# Body", "t2"),
+	}
+	chunks := foldRollout(lines, nil)
+	if len(chunks) != 2 {
+		t.Fatalf("want 2 chunks (turn mismatch blocks fold), got %d", len(chunks))
+	}
+	if len(chunks[0].Items) != 0 {
+		t.Fatalf("invoking chunk should keep no items, got %+v", chunks[0].Items)
+	}
+	if chunks[1].Kind != transcript.ChunkUser || len(chunks[1].Items) != 1 ||
+		chunks[1].Items[0].Kind != transcript.ItemSkill {
+		t.Fatalf("skill should stand alone, got %+v", chunks[1])
+	}
+}

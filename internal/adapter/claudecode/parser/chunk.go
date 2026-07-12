@@ -54,7 +54,6 @@ const (
 	SystemChunk
 	CompactChunk // context compression boundary
 	ShellChunk   // user ran `!cmd` directly in the CLI
-	SkillChunk   // a skill file loaded into context
 )
 
 // InferenceCycle is one LLM call plus its dispatched tool calls. A derived
@@ -125,24 +124,28 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 				Timestamp: m.Timestamp,
 				UserText:  m.Text,
 			}
-			// Skill loads emit a separate SkillChunk; other expanded prompts attach.
+			// Skill loads fold into the user chunk as a Skill item; other expanded prompts attach.
 			if strings.HasPrefix(m.Text, "/") && i+1 < len(msgs) {
 				expanded := extractExpandedPrompt(msgs[i+1])
-				if name, path, body, ok := skillLoad(m.Text, expanded); ok {
-					chunks = append(chunks, c)
-					chunks = append(chunks, Chunk{
-						Type:        SkillChunk,
-						Timestamp:   m.Timestamp,
-						UserText:    name,
-						SystemLabel: path,
-						Output:      body,
+				if name, _, body, ok := skillLoad(m.Text, expanded); ok {
+					input, _ := json.Marshal(map[string]string{"skill": name})
+					c.Items = append(c.Items, DisplayItem{
+						Type:         ItemToolCall,
+						ToolName:     "Skill",
+						ToolID:       m.UUID,
+						ToolInput:    json.RawMessage(input),
+						ToolSummary:  name,
+						ToolResult:   body,
+						ToolCategory: CategorizeToolName("Skill"),
+						TokenCount:   len(body) / 4,
 					})
-					i++ // consume the expanded prompt entry
+					chunks = append(chunks, c)
+					i++
 					continue
 				}
 				if expanded != "" {
 					c.ExpandedPrompt = expanded
-					i++ // consume the expanded prompt entry
+					i++
 				}
 			}
 			chunks = append(chunks, c)

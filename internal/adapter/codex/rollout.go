@@ -49,6 +49,20 @@ type rolloutPayload struct {
 	DurationMs int64 `json:"duration_ms"`
 	// event_msg agent/user text (unused; response_item is canonical)
 	Message string `json:"message"`
+
+	// response_item/message: per-message turn correlation.
+	Passthrough *msgPassthrough `json:"internal_chat_message_metadata_passthrough"`
+}
+
+type msgPassthrough struct {
+	TurnID string `json:"turn_id"`
+}
+
+func (p rolloutPayload) turnID() string {
+	if p.Passthrough == nil {
+		return ""
+	}
+	return p.Passthrough.TurnID
 }
 
 type rolloutContent struct {

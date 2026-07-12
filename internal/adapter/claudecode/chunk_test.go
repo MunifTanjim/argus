@@ -81,29 +81,25 @@ func TestReadTranscriptViewSkillChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	var user, skill *Chunk
-	for i := range view.Chunks {
-		switch view.Chunks[i].Kind {
-		case ChunkUser:
-			user = &view.Chunks[i]
-		case ChunkSkill:
-			skill = &view.Chunks[i]
-		}
+	if len(view.Chunks) != 1 || view.Chunks[0].Kind != ChunkUser {
+		t.Fatalf("want 1 user chunk, got %+v", view.Chunks)
 	}
-	if user == nil || user.Text != "/superpowers:brainstorming" {
-		t.Fatalf("user's slash command should stay its own chunk, got %+v", view.Chunks)
+	user := view.Chunks[0]
+	if user.Text != "/superpowers:brainstorming" {
+		t.Errorf("Text = %q, want the user's slash command", user.Text)
 	}
-	if skill == nil {
-		t.Fatalf("no skill chunk found in %+v", view.Chunks)
+	if len(user.Items) != 1 {
+		t.Fatalf("want 1 skill item in user chunk, got %d items", len(user.Items))
 	}
-	if skill.Text != "superpowers:brainstorming" {
-		t.Errorf("Text = %q, want the skill identifier", skill.Text)
+	it := user.Items[0]
+	if it.Kind != ItemSkill {
+		t.Errorf("Kind = %q, want ItemSkill", it.Kind)
 	}
-	if skill.Label != "/Users/x/.claude/skills/brainstorming" {
-		t.Errorf("Label = %q, want the source path", skill.Label)
+	if it.InputPreview != "superpowers:brainstorming" {
+		t.Errorf("InputPreview = %q, want the skill identifier", it.InputPreview)
 	}
-	if !strings.HasPrefix(skill.Detail, "# Brainstorming Ideas Into Designs") {
-		t.Errorf("Detail = %q, want the skill body", skill.Detail)
+	if !strings.HasPrefix(it.Result, "# Brainstorming Ideas Into Designs") {
+		t.Errorf("Result = %q, want the skill body", it.Result)
 	}
 }
 

@@ -65,6 +65,107 @@ func loaded() model {
 	return m
 }
 
+// TestUserChunkWithSkillItemExpandableAndDrillable verifies that a user chunk
+// carrying an ItemSkill is marked expandable and its item is reachable in the
+// detail drill-down.
+func TestUserChunkWithSkillItemExpandableAndDrillable(t *testing.T) {
+	m := testModel()
+	m.width = 80
+
+	skillItem := transcript.Item{
+		Kind:         transcript.ItemSkill,
+		ToolName:     "Skill",
+		ToolID:       "sk-001",
+		InputPreview: "superpowers:brainstorming",
+	}
+	c := transcript.Chunk{
+		ID:    "u1",
+		Kind:  transcript.ChunkUser,
+		Text:  "one line",
+		Items: []transcript.Item{skillItem},
+	}
+
+	// The chunk must be expandable even though the text is short.
+	if !m.chunkExpandable(c) {
+		t.Error("user chunk with skill item should be expandable")
+	}
+
+	// When expanded, the rendered card must surface a skill affordance.
+	m.transcript.chunks = []transcript.Chunk{c}
+	m.transcript.expanded[c.ID] = true
+	out := m.renderChunk(0, false)
+	if !strings.Contains(out, "Skill") {
+		t.Errorf("rendered user card should show a Skill affordance:\n%s", out)
+	}
+	if !strings.Contains(out, "superpowers:brainstorming") {
+		t.Errorf("rendered user card should show the skill name:\n%s", out)
+	}
+
+	// The detail frame surfaces the original message as a leading prompt, then the
+	// skill item so it can be drilled by ToolID.
+	dm := detailTestModel(c)
+	f := dm.topFrame()
+	if f == nil || len(f.items) != 2 {
+		t.Fatalf("detail frame should have 2 items, got %d", len(f.items))
+	}
+	if f.items[0].Kind != transcript.ItemPrompt || f.items[0].Text != "one line" {
+		t.Errorf("first detail item should be the original message prompt, got %+v", f.items[0])
+	}
+	if f.items[1].ToolID != "sk-001" {
+		t.Errorf("detail item ToolID = %q, want %q", f.items[1].ToolID, "sk-001")
+	}
+
+	// Drilling into the skill item should focus it (non-drillable leaf).
+	f.cursor = 1
+	dm.drillDetail()
+	if len(dm.transcript.detailStack) != 2 || !dm.topFrame().focused {
+		t.Fatalf("drill should focus the skill item: frames=%d focused=%v",
+			len(dm.transcript.detailStack), dm.topFrame().focused)
+	}
+}
+
+// TestTextlessUserChunkWithSkillItemDrillable verifies that a user chunk carrying an
+// ItemSkill but no Text (codex-style) is detailable and drillable end-to-end.
+func TestTextlessUserChunkWithSkillItemDrillable(t *testing.T) {
+	m := testModel()
+	m.width = 80
+
+	skillItem := transcript.Item{
+		Kind:         transcript.ItemSkill,
+		ToolName:     "Skill",
+		ToolID:       "sk-002",
+		InputPreview: "superpowers:brainstorming",
+	}
+	c := transcript.Chunk{
+		ID:    "u2",
+		Kind:  transcript.ChunkUser,
+		Text:  "", // codex style: no text
+		Items: []transcript.Item{skillItem},
+	}
+
+	// detailable must be true even with empty Text.
+	if !m.detailable(c) {
+		t.Error("text-less user chunk with skill item should be detailable")
+	}
+
+	// The detail frame must expose the item.
+	dm := detailTestModel(c)
+	f := dm.topFrame()
+	if f == nil || len(f.items) != 1 {
+		t.Fatalf("detail frame should have 1 item, got %d", len(f.items))
+	}
+	if f.items[0].ToolID != "sk-002" {
+		t.Errorf("detail item ToolID = %q, want %q", f.items[0].ToolID, "sk-002")
+	}
+
+	// Drilling into the skill item should focus it (non-drillable leaf).
+	dm.drillDetail()
+	if len(dm.transcript.detailStack) != 2 || !dm.topFrame().focused {
+		t.Fatalf("drill should focus the skill item: frames=%d focused=%v",
+			len(dm.transcript.detailStack), dm.topFrame().focused)
+	}
+}
+
 // TestUserChunkExpandableByWrappedLines verifies long-wrapping user chunks are collapsible.
 func TestUserChunkExpandableByWrappedLines(t *testing.T) {
 	m := testModel()
@@ -413,62 +514,6 @@ func TestRenderDetailShell(t *testing.T) {
 	}
 	if !strings.Contains(out, "world") || !strings.Contains(out, "Result") {
 		t.Fatalf("detail should show the labeled output:\n%s", out)
-	}
-}
-
-func TestRenderSkillCard(t *testing.T) {
-	m := testModel()
-	m.width = 160 // wide enough that the source path renders without wrapping
-	c := transcript.Chunk{
-		ID: "sk1", Kind: transcript.ChunkSkill,
-		Text:   "superpowers:brainstorming",
-		Label:  "/Users/muniftanjim/.codex/plugins/cache/openai-curated/superpowers/3fdeeb49/skills/brainstorming/SKILL.md",
-		Detail: "# Brainstorming Ideas Into Designs\n\nHelp turn ideas into fully formed designs.",
-	}
-	m.transcript.chunks = []transcript.Chunk{c}
-	m.transcript.expanded = map[string]bool{}
-
-	collapsed := m.renderChunk(0, false)
-	// AI-card style: the "Skill" header sits above the card border; the name is inside.
-	headerIdx := strings.Index(collapsed, "Skill")
-	borderIdx := strings.Index(collapsed, "╭")
-	if headerIdx < 0 || borderIdx < 0 || headerIdx > borderIdx {
-		t.Fatalf("Skill header should sit above the card border:\n%s", collapsed)
-	}
-	if !strings.Contains(collapsed, "superpowers:brainstorming") {
-		t.Fatalf("collapsed render missing skill name:\n%s", collapsed)
-	}
-	if strings.Contains(collapsed, "SKILL.md") || strings.Contains(collapsed, "Help turn ideas") {
-		t.Fatalf("collapsed render should not show path/body:\n%s", collapsed)
-	}
-
-	m.transcript.expanded["sk1"] = true
-	out := m.renderChunk(0, false)
-	if !strings.Contains(out, "SKILL.md") {
-		t.Fatalf("expanded render missing source path:\n%s", out)
-	}
-	if !strings.Contains(out, "Help turn ideas into fully formed designs.") {
-		t.Fatalf("expanded render missing body:\n%s", out)
-	}
-}
-
-func TestRenderDetailSkill(t *testing.T) {
-	m := testModel()
-	c := transcript.Chunk{
-		ID: "sk1", Kind: transcript.ChunkSkill,
-		Text:   "superpowers:brainstorming",
-		Label:  "/path/to/SKILL.md",
-		Detail: "# Brainstorming\n\nHelp turn ideas into designs.",
-	}
-	out := m.renderDetail(c)
-	if !strings.Contains(out, "Skill") {
-		t.Fatalf("detail should show the Skill header:\n%s", out)
-	}
-	if !strings.Contains(out, "superpowers:brainstorming") {
-		t.Fatalf("detail should show the skill name:\n%s", out)
-	}
-	if !strings.Contains(out, "SKILL.md") || !strings.Contains(out, "Help turn ideas into designs.") {
-		t.Fatalf("detail should show the path and body:\n%s", out)
 	}
 }
 

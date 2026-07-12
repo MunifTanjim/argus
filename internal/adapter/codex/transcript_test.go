@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -216,5 +217,49 @@ func TestFindToolDetail(t *testing.T) {
 	}
 	if det.Result != "Plan updated" {
 		t.Fatalf("result = %q, want 'Plan updated'", det.Result)
+	}
+}
+
+func TestFindToolDetailSkill(t *testing.T) {
+	dir := t.TempDir()
+	p := dir + "/r.jsonl"
+	text := "<skill>\n<name>test:skill</name>\n<path>/test/path/SKILL.md</path>\n# Skill Body\nSome skill content.\n</skill>"
+	line, err := json.Marshal(map[string]any{
+		"type": "response_item",
+		"payload": map[string]any{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]any{
+				{"type": "input_text", "text": text},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ReadTranscriptView(p)
+	if err != nil {
+		t.Fatalf("ReadTranscriptView: %v", err)
+	}
+	var toolID string
+	for _, c := range view.Chunks {
+		for _, it := range c.Items {
+			if it.Kind == transcript.ItemSkill {
+				toolID = it.ToolID
+			}
+		}
+	}
+	if toolID == "" {
+		t.Fatal("no skill item toolID found")
+	}
+	det, ok, err := FindToolDetail(p, "", toolID)
+	if err != nil || !ok {
+		t.Fatalf("FindToolDetail ok=%v err=%v", ok, err)
+	}
+	if det.Result != "# Skill Body\nSome skill content." {
+		t.Fatalf("result = %q, want skill body", det.Result)
 	}
 }

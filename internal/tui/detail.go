@@ -134,6 +134,13 @@ func (m *model) enterDetail() {
 		}
 		f.items = c.Items
 		f.expandOutputs()
+	} else if c.Kind == transcript.ChunkUser && len(c.Items) > 0 {
+		f.label = "You"
+		if strings.TrimSpace(c.Text) != "" {
+			f.items = append(f.items, transcript.Item{Kind: transcript.ItemPrompt, Text: c.Text})
+		}
+		f.items = append(f.items, c.Items...)
+		f.expandOutputs()
 	} else {
 		f.label = "detail"
 		f.body = m.renderDetail(c)
@@ -185,7 +192,7 @@ func (m model) detailable(c transcript.Chunk) bool {
 	case transcript.ChunkAI:
 		return len(c.Items) > 0
 	case transcript.ChunkUser:
-		return c.Text != ""
+		return c.Text != "" || len(c.Items) > 0
 	default:
 		return c.Detail != ""
 	}
@@ -638,16 +645,6 @@ func (m model) renderDetail(c transcript.Chunk) string {
 				resultLabel = "Error"
 			}
 			body += "\n\n" + sectionLabel(resultLabel, c.IsError) + "\n" + m.execCommandResultBody(c.Detail, width-2)
-		}
-		return head + "\n\n" + body
-	case transcript.ChunkSkill:
-		head := Icon.Skill.Render() + " " + StylePrimaryBold.Render("Skill") + "  " + StyleDim.Render(clockTime(c.Timestamp))
-		body := StyleSecondaryBold.Render(c.Text)
-		if c.Label != "" {
-			body += "\n" + StyleDim.Render(c.Label)
-		}
-		if c.Detail != "" {
-			body += "\n\n" + m.renderMD(c.Detail, width-2)
 		}
 		return head + "\n\n" + body
 	default:

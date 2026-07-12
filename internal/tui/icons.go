@@ -148,8 +148,8 @@ func initIcons() {
 			Glob:  StyledIcon{glyphFolderSearch, ColorToolGlob},
 			Task:  StyledIcon{glyphRobot, ColorToolTask},
 			Todo:  StyledIcon{"\U000F0755", ColorToolEdit}, // nf-md-format_list_checks
-			Skill: StyledIcon{glyphWrench, ColorToolSkill},
-			Web:   StyledIcon{"\U000F059F", ColorToolWeb}, // nf-md-web
+			Skill: StyledIcon{"", ColorToolSkill},         // nf-fa-graduation_cap
+			Web:   StyledIcon{"\U000F059F", ColorToolWeb},  // nf-md-web
 			Misc:  StyledIcon{glyphWrench, ColorToolOther},
 		},
 		Task: taskIcons{

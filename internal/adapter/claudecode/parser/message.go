@@ -14,6 +14,7 @@ type ClassifiedMsg interface {
 // UserMsg represents genuine user input that starts a new request cycle.
 type UserMsg struct {
 	Timestamp      time.Time
+	UUID           string // raw entry uuid; stable id for a skill item
 	Text           string // sanitized display text
 	PermissionMode string // "default", "acceptEdits", "bypassPermissions", "plan"; empty if not present
 }

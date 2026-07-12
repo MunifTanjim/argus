@@ -1,6 +1,8 @@
 package claudecode
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
@@ -115,5 +117,20 @@ func TestFoldItem_TeammateIdleCarriesFlag(t *testing.T) {
 	}
 	if !it.IsTeammate() || !it.Subagents[0].Idle {
 		t.Errorf("IsTeammate=%v Idle=%v, want true/true", it.IsTeammate(), it.Subagents[0].Idle)
+	}
+}
+
+func TestFindToolDetail_ResolvesUserChunkSkill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skill-session.jsonl")
+	const skillUUID = "skill-entry-uuid"
+	session := "{\"uuid\":\"skill-entry-uuid\",\"type\":\"user\",\"timestamp\":\"2025-01-15T10:00:00.000Z\",\"isSidechain\":false,\"isMeta\":false,\"message\":{\"role\":\"user\",\"content\":\"/superpowers:systematic-debugging\"}}\n" +
+		"{\"uuid\":\"meta-uuid\",\"type\":\"user\",\"timestamp\":\"2025-01-15T10:00:01.000Z\",\"isSidechain\":false,\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"Base directory for this skill: /p/skills\\n\\n# Systematic Debugging\\n\\nFind root cause first.\"}}\n"
+	if err := os.WriteFile(path, []byte(session), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	td, ok, err := FindToolDetail(path, "", skillUUID)
+	if err != nil || !ok || td.Result == "" {
+		t.Fatalf("want body, got ok=%v err=%v result=%q", ok, err, td.Result)
 	}
 }
