@@ -1,4 +1,6 @@
 // app/test/ui/profiles_screen_test.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +22,39 @@ class MemKv implements SecureKv {
   Future<void> write(String key, String value) async => m[key] = value;
   @override
   Future<void> delete(String key) async => m.remove(key);
+}
+
+/// A KV that holds open the active-profile-id write until [gate] completes, so a
+/// test can render a frame (swapping the app's home to the connected view and
+/// unmounting ProfilesScreen) while the connect flow is still mid-await.
+class GatedKv implements SecureKv {
+  final m = <String, String>{};
+  final gate = Completer<void>();
+  @override
+  Future<String?> read(String key) async => m[key];
+  @override
+  Future<void> write(String key, String value) async {
+    m[key] = value;
+    if (key == 'active_profile_id') await gate.future; // ProfileStore._activeKey
+  }
+
+  @override
+  Future<void> delete(String key) async => m.remove(key);
+}
+
+/// Mirrors main.dart's routing: swaps home ProfilesScreen -> connected view when
+/// credentials are set (this is what unmounts ProfilesScreen mid-connect).
+class _CredsRoutedApp extends ConsumerWidget {
+  const _CredsRoutedApp();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final creds = ref.watch(credentialsProvider);
+    return MaterialApp(
+      home: creds == null
+          ? const ProfilesScreen()
+          : const Scaffold(body: Center(child: Text('CONNECTED'))),
+    );
+  }
 }
 
 Future<ProviderContainer> _pump(WidgetTester tester,
@@ -82,6 +117,50 @@ void main() {
     expect(creds, isNotNull);
     expect(creds!.url, 'ssh://me@h?port=8443');
     expect((await activeKey.load())!.pem, 'PEM');
+  });
+
+  testWidgets(
+      'Connect dismisses the connection view even after home swaps to the connected view',
+      (tester) async {
+    final gatedKv = GatedKv();
+    final profiles = ProfileStore(gatedKv);
+    await profiles.add(const Profile(
+      id: 'p1', name: 'good', mode: ProfileMode.ssh, token: 'tok',
+      host: 'h', user: 'me', gatewayPort: 8443, keyId: 'k1',
+    ));
+    final keys = KeyLibraryStore(MemKv());
+    await keys.add(const LibraryKey(id: 'k1', name: 'k', pem: 'PEM', passphrase: 'pw'));
+
+    final container = ProviderContainer(overrides: [
+      profileStoreProvider.overrideWithValue(profiles),
+      keyLibraryStoreProvider.overrideWithValue(keys),
+      sshKeyStoreProvider.overrideWithValue(SshKeyStore(MemKv())),
+    ]);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const _CredsRoutedApp(),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('profile-p1')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('profile-submit')));
+
+    await tester.tap(find.byKey(const Key('profile-submit')));
+    // Let credentials get set and the home swap render (which unmounts
+    // ProfilesScreen) while the active-id write is still gated.
+    await tester.pump();
+    await tester.pump();
+    // Release the gated write; the connect flow finishes and must dismiss the
+    // editor even though ProfilesScreen (its parent context) is now gone.
+    gatedKv.gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(container.read(credentialsProvider), isNotNull);
+    expect(find.byKey(const Key('profile-submit')), findsNothing);
+    expect(find.text('CONNECTED'), findsOneWidget);
   });
 
   testWidgets('shows a crafted empty state with add and scan buttons',

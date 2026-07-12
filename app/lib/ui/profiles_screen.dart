@@ -109,6 +109,11 @@ class ProfilesScreen extends ConsumerWidget {
         initial: p,
         submitLabel: 'Connect',
         onSubmit: (edited) async {
+          // Capture the Navigator before any await: setting credentials swaps
+          // the app's home to the connected view, which unmounts ProfilesScreen
+          // (this context). A `context.mounted`-guarded pop would then be
+          // silently skipped, stranding the user on the connection view.
+          final navigator = Navigator.of(context);
           await ref.read(profilesProvider.notifier).save(edited);
           ref.read(connectionTestResultsProvider.notifier).clear(edited.id);
           final creds = await activateProfile(
@@ -118,7 +123,7 @@ class ProfilesScreen extends ConsumerWidget {
           );
           ref.read(credentialsProvider.notifier).state = creds;
           await ref.read(profileStoreProvider).saveActiveId(edited.id);
-          if (context.mounted) Navigator.of(context).pop();
+          if (navigator.mounted) navigator.pop();
         },
       ),
     ));
