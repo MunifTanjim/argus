@@ -46,7 +46,7 @@ void main() {
   testWidgets('thinking row shows label', (tester) async {
     await tester.pumpWidget(_wrap(
         const Item(id: 'i', kind: ItemKind.thinking, text: 'pondering')));
-    expect(find.textContaining('thinking'), findsOneWidget);
+    expect(find.textContaining('Thinking'), findsOneWidget);
   });
 
   testWidgets('text item renders nothing as a row', (tester) async {
