@@ -7,6 +7,7 @@ import 'package:argus/pairing/profile_store.dart';
 import 'package:argus/state/profiles.dart';
 import 'package:argus/transport/key_library_store.dart';
 import 'package:argus/transport/library_key.dart';
+import 'package:argus/transport/ssh_keygen.dart';
 import 'package:argus/ui/key_library_screen.dart';
 
 class MemKv implements SecureKv {
@@ -116,6 +117,22 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('key-generate-name')), findsNothing);
+  });
+
+  testWidgets('tapping a key reveals its public key with a copy button',
+      (tester) async {
+    // A real (small, fast) key so the screen can derive its public half.
+    final g = generateRsaSshKey(bits: 1024);
+    final keys = KeyLibraryStore(MemKv());
+    await keys.add(LibraryKey(id: 'k1', name: 'laptop', pem: g.privatePem));
+    await _pump(tester, keys: keys, profiles: ProfileStore(MemKv()));
+
+    await tester.tap(find.byKey(const Key('key-k1')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('key-public-line')), findsOneWidget);
+    expect(find.textContaining('ssh-rsa '), findsOneWidget);
+    expect(find.byKey(const Key('key-public-copy')), findsOneWidget);
   });
 
   testWidgets('import rejects a duplicate name', (tester) async {
