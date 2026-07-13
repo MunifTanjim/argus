@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.0.10](https://github.com/MunifTanjim/argus/compare/0.0.9...0.0.10) (2026-07-13)
+
+
+### Features
+
+* **app:** render plan and web tool results as markdown ([58c09d0](https://github.com/MunifTanjim/argus/commit/58c09d01ec226380034ea85c68825fb7c09952f5))
+* **app:** resume sessions from history ([dbdbe39](https://github.com/MunifTanjim/argus/commit/dbdbe398d1053575ec73f5dbe7c607b5d5bbee92))
+* **app:** show claude session name in ui and notifications ([35fe48f](https://github.com/MunifTanjim/argus/commit/35fe48f26a3a6b6b83055410120f3c4c974d95a8))
+* **cmd:** serve a gateway from the ephemeral node when a token is set ([475dd31](https://github.com/MunifTanjim/argus/commit/475dd31b68234d9b9ec1ec040d6195228ff51a9f))
+* install and upgrade without requiring gh ([2978895](https://github.com/MunifTanjim/argus/commit/2978895310dc2503a26c1c90acc70c6b0aa8ce6c))
+* render skill load as user chunk item ([e0bd426](https://github.com/MunifTanjim/argus/commit/e0bd426c34eb2059ee7a97f9d8c2b8417d754557))
+* resume sessions from history ([3061142](https://github.com/MunifTanjim/argus/commit/3061142cb21fb65e06d53ed747eb7a41777ad522))
+* show current git branch in session view ([b144e70](https://github.com/MunifTanjim/argus/commit/b144e70243ba83cd8a2dbdd3c22d16f252a1e539))
+* **tui:** add support for session export and view ([38e79a8](https://github.com/MunifTanjim/argus/commit/38e79a86070115f3fcd91d9853b24a4d79c6ec55))
+* **tui:** resume sessions from history ([3f80c6c](https://github.com/MunifTanjim/argus/commit/3f80c6c524b29dfd2319cbb98d46673cfdd637ee))
+* **tui:** revamp empty sessions list ([423b4f3](https://github.com/MunifTanjim/argus/commit/423b4f33422475a92f302e2c402b7f20371ebb01))
+* **tui:** support redacting secret from exported session ([032d14b](https://github.com/MunifTanjim/argus/commit/032d14b2363b50941d669043bd9bd4c1c8dd7a8b))
+
+
+### Bug Fixes
+
+* **claude:** surface sessions stuck at startup prompt ([99f0318](https://github.com/MunifTanjim/argus/commit/99f03189a70fe55f29f554635864fd2fadd5a44d))
+* encode modified cursor & nav keys in virtual terminal ([ff6b2f1](https://github.com/MunifTanjim/argus/commit/ff6b2f14e7eb9844f86827e5b5c5a08daa3e42c2))
+* prevent live screen for session on same tmux window ([345c2db](https://github.com/MunifTanjim/argus/commit/345c2dbf56f4770da4ed4cca30cba8ca9d4a31f3))
+* scope live screen guard to tui tmux window ([175bfb1](https://github.com/MunifTanjim/argus/commit/175bfb19b942ae5d92cf0b1383945f762f122cda))
+* tolerate transient tmux server-exit on private sockets ([0a90343](https://github.com/MunifTanjim/argus/commit/0a9034336072a192cec4f9e0a0491024d670ab24))
+* **tui:** wrap log lines to width in logs tab ([24fd3a5](https://github.com/MunifTanjim/argus/commit/24fd3a5e8151cd51262a7650a0c2b739eca24fd8))
+
+
+### Performance Improvements
+
+* **antigravity:** cache history session listing ([55e63ae](https://github.com/MunifTanjim/argus/commit/55e63ae15246be8618c2d31697215c99a73eebd0))
+* **antigravity:** tail transcript incrementally ([870f1ba](https://github.com/MunifTanjim/argus/commit/870f1ba5d441b683b3bbe330c43ea144073967d8))
+* **claudecode:** cache history session listing ([9ef831e](https://github.com/MunifTanjim/argus/commit/9ef831e9a75216ad186f91b978c840eefa5519e4))
+* **codex:** cache history session listing ([d383894](https://github.com/MunifTanjim/argus/commit/d38389431da9ee7402c5ae93535f0424f390510a))
+* **codex:** tail rollout incrementally ([63a8255](https://github.com/MunifTanjim/argus/commit/63a8255c817093d70c1e3b58c7661d5eb61d72ec))
+
 ## [0.0.9](https://github.com/MunifTanjim/argus/compare/0.0.8...0.0.9) (2026-07-09)
 
 
