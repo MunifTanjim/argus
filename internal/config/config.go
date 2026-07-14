@@ -58,6 +58,7 @@ type TunnelConfig struct {
 	Cloudflare CloudflareConfig
 	External   ExternalConfig
 	Zrok       ZrokConfig
+	Ngrok      NgrokConfig
 }
 
 type CloudflareConfig struct {
@@ -72,6 +73,10 @@ type ExternalConfig struct {
 
 type ZrokConfig struct {
 	Name string // reserved name selection ("namespace:name" or "name") for a stable URL
+}
+
+type NgrokConfig struct {
+	Domain string // reserved/custom domain ("" => the account's static dev domain)
 }
 
 // TmuxConfig names the tmux mirror sessions spawned for terminal.* calls. The
@@ -100,6 +105,7 @@ var defaults = map[string]any{
 	"tunnel.cloudflare.hostname":    "",
 	"tunnel.external.url":           "",
 	"tunnel.zrok.name":              "",
+	"tunnel.ngrok.domain":           "",
 	"tmux.mirror-session-prefix":    "_",
 	"tmux.mirror-session-suffix":    "_",
 }
@@ -122,6 +128,7 @@ func Load(v *viper.Viper, configPath string, skipFile bool) error {
 	_ = v.BindEnv("tunnel.cloudflare.hostname", "ARGUS_CLOUDFLARE_HOSTNAME")
 	_ = v.BindEnv("tunnel.external.url", "ARGUS_EXTERNAL_URL")
 	_ = v.BindEnv("tunnel.zrok.name", "ARGUS_ZROK_NAME")
+	_ = v.BindEnv("tunnel.ngrok.domain", "ARGUS_NGROK_DOMAIN")
 
 	if skipFile {
 		return nil
@@ -201,6 +208,9 @@ func FromViper(v *viper.Viper) Config {
 			},
 			Zrok: ZrokConfig{
 				Name: v.GetString("tunnel.zrok.name"),
+			},
+			Ngrok: NgrokConfig{
+				Domain: v.GetString("tunnel.ngrok.domain"),
 			},
 		},
 		Tmux: TmuxConfig{

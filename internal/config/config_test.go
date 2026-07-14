@@ -89,12 +89,16 @@ func TestPreservedEnvNames(t *testing.T) {
 	t.Setenv("ARGUS_TOKEN", "envtok")
 	t.Setenv("ARGUS_CLOUDFLARE_HOSTNAME", "h.example.com")
 	t.Setenv("ARGUS_CLOUDFLARE_TUNNEL_NAME", "tn")
+	t.Setenv("ARGUS_NGROK_DOMAIN", "argus.ngrok.app")
 	c := load(t, "")
 	if c.Token != "envtok" {
 		t.Errorf("ARGUS_TOKEN should map to token, got %q", c.Token)
 	}
 	if c.Tunnel.Cloudflare.Hostname != "h.example.com" || c.Tunnel.Cloudflare.TunnelName != "tn" {
 		t.Errorf("preserved cloudflare env names not mapped: %+v", c.Tunnel.Cloudflare)
+	}
+	if c.Tunnel.Ngrok.Domain != "argus.ngrok.app" {
+		t.Errorf("ARGUS_NGROK_DOMAIN should map to tunnel.ngrok.domain, got %q", c.Tunnel.Ngrok.Domain)
 	}
 }
 

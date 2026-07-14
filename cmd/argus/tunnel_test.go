@@ -406,6 +406,95 @@ func stubZrokEnabled(enabled bool) func() {
 	return func() { zrokEnabled = prev }
 }
 
+// --- ngrok (public tunnel over the ngrok agent) ---
+
+func ngrokOpts() tunnelOptions {
+	o := baseOpts()
+	o.provider = "ngrok"
+	o.bin = "/usr/bin/ngrok" // non-empty => no PATH lookup
+	return o
+}
+
+func TestResolveTunnelNgrokDefaultDevDomain(t *testing.T) {
+	p, origin, err := resolveTunnel(ngrokOpts()) // no domain, no mode => account dev domain
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	n, ok := p.(tunnel.Ngrok)
+	if !ok {
+		t.Fatalf("provider type = %T", p)
+	}
+	if n.Domain != "" {
+		t.Errorf("provider = %+v, want no domain (dev domain default)", n)
+	}
+	if origin != "http://127.0.0.1:8443" {
+		t.Errorf("origin = %q", origin)
+	}
+}
+
+func TestResolveTunnelNgrokReservedDomain(t *testing.T) {
+	o := ngrokOpts()
+	o.ngrokDomain = "argus.ngrok.app"
+	p, _, err := resolveTunnel(o)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if n := p.(tunnel.Ngrok); n.Domain != "argus.ngrok.app" {
+		t.Errorf("domain = %q, want argus.ngrok.app", n.Domain)
+	}
+}
+
+func TestResolveTunnelNgrokRejectsMode(t *testing.T) {
+	o := ngrokOpts()
+	o.provider = "ngrok:random"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "no mode suffix") {
+		t.Fatalf("err = %v, want no-mode-suffix error", err)
+	}
+}
+
+func TestResolveTunnelNgrokRejectsOtherProviderFlags(t *testing.T) {
+	o := ngrokOpts()
+	o.zrokName = "myapp"
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "not valid with --tunnel ngrok") {
+		t.Fatalf("err = %v, want cross-provider flag rejection", err)
+	}
+}
+
+func TestResolveTunnelNgrokRequiresGatewayMode(t *testing.T) {
+	o := ngrokOpts()
+	o.runGateway = false
+	_, _, err := resolveTunnel(o)
+	if err == nil || !strings.Contains(err.Error(), "gateway mode") {
+		t.Fatalf("err = %v, want gateway-mode requirement", err)
+	}
+}
+
+// --- ensureNgrokAuth (authtoken prerequisite) ---
+
+func TestEnsureNgrokAuthNoopWhenAuthed(t *testing.T) {
+	defer stubNgrokAuthed(true)()
+	if err := ensureNgrokAuth(context.Background(), "ngrok", false); err != nil {
+		t.Fatalf("authed should be a no-op, got %v", err)
+	}
+}
+
+func TestEnsureNgrokAuthFailFastNonInteractive(t *testing.T) {
+	defer stubNgrokAuthed(false)()
+	err := ensureNgrokAuth(context.Background(), "ngrok", false)
+	if err == nil || !strings.Contains(err.Error(), "authtoken") {
+		t.Fatalf("err = %v, want fail-fast authtoken guidance", err)
+	}
+}
+
+// stubNgrokAuthed overrides the authtoken-check and returns a restore func.
+func stubNgrokAuthed(authed bool) func() {
+	prev := ngrokAuthed
+	ngrokAuthed = func(context.Context, string) bool { return authed }
+	return func() { ngrokAuthed = prev }
+}
+
 // --- ensureCloudflareLogin (cert prerequisite for local tunnels) ---
 
 func TestEnsureCloudflareLoginNonLocalNoop(t *testing.T) {

@@ -31,6 +31,8 @@ type tunnelOptions struct {
 
 	zrokName string // --zrok-name: reserved name selection ("namespace:name" or "name"; default "argus")
 
+	ngrokDomain string // --ngrok-domain: reserved/custom domain ("" => the account's static dev domain)
+
 	runGateway bool
 	listenAddr string
 
@@ -38,7 +40,7 @@ type tunnelOptions struct {
 }
 
 // providerBinary maps a provider name to the CLI it runs (for PATH lookup).
-var providerBinary = map[string]string{"cloudflare": "cloudflared", "zrok": "zrok2"}
+var providerBinary = map[string]string{"cloudflare": "cloudflared", "zrok": "zrok2", "ngrok": "ngrok"}
 
 // tunnelFlagCompletions are the shell-completion candidates for --tunnel, each a
 // "value\tdescription" pair. Keeps the value list out of the (terse) flag help.
@@ -50,6 +52,7 @@ func tunnelFlagCompletions() []string {
 		"cloudflare:local\tlocally-managed tunnel (--cloudflare-hostname)",
 		"external\texternally managed tunnel; public URL via --external-url",
 		"zrok\tnamed public zrok share (--zrok-name; prompts to enable if needed)",
+		"ngrok\tpublic ngrok tunnel on the account's static dev domain (--ngrok-domain for a custom one)",
 	}
 }
 
@@ -69,11 +72,13 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 	}
 	binName, ok := providerBinary[providerName]
 	if !ok {
-		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare, zrok, external)", providerName)
+		return nil, "", fmt.Errorf("unknown tunnel provider %q (supported: cloudflare, zrok, ngrok, external)", providerName)
 	}
 	switch providerName {
 	case "zrok":
 		return resolveZrokTunnel(mode, binName, o)
+	case "ngrok":
+		return resolveNgrokTunnel(mode, binName, o)
 	case "cloudflare":
 		cfMode, err := cloudflareMode(mode, o)
 		if err != nil {
@@ -118,8 +123,8 @@ func resolveZrokTunnel(mode, binName string, o tunnelOptions) (tunnel.Provider, 
 	if mode != "" && mode != "reserved" {
 		return nil, "", fmt.Errorf("--tunnel zrok takes no mode (or zrok:reserved), got %q", mode)
 	}
-	if o.cfToken != "" || o.cfHostname != "" || o.cfTunnelName != "" || o.externalURL != "" {
-		return nil, "", fmt.Errorf("--cloudflare-*/--external-url flags are not valid with --tunnel zrok")
+	if o.cfToken != "" || o.cfHostname != "" || o.cfTunnelName != "" || o.externalURL != "" || o.ngrokDomain != "" {
+		return nil, "", fmt.Errorf("--cloudflare-*/--external-url/--ngrok-domain flags are not valid with --tunnel zrok")
 	}
 	name := o.zrokName
 	if name == "" {
@@ -176,6 +181,89 @@ func promptZrokToken() (string, error) {
 	shell.StdErrLn()
 	if err != nil {
 		return "", fmt.Errorf("read zrok token: %w", err)
+	}
+	return strings.TrimSpace(string(tok)), nil
+}
+
+// resolveNgrokTunnel builds the Ngrok provider: the default uses the account's static dev
+// domain, --ngrok-domain binds a reserved/custom one. Authtoken ensured in pre-flight.
+func resolveNgrokTunnel(mode, binName string, o tunnelOptions) (tunnel.Provider, string, error) {
+	if mode != "" {
+		return nil, "", fmt.Errorf("--tunnel ngrok takes no mode suffix (got %q)", mode)
+	}
+	if o.cfToken != "" || o.cfHostname != "" || o.cfTunnelName != "" || o.externalURL != "" || o.zrokName != "" {
+		return nil, "", fmt.Errorf("--cloudflare-*/--zrok-name/--external-url flags are not valid with --tunnel ngrok")
+	}
+	bin, err := resolveBin(o.bin, binName)
+	if err != nil {
+		return nil, "", err
+	}
+	origin, err := originFromListen(o.listenAddr)
+	if err != nil {
+		return nil, "", err
+	}
+	return tunnel.Ngrok{Bin: bin, Domain: o.ngrokDomain}, origin, nil
+}
+
+// ngrokAuthed reports whether ngrok has an authtoken, via NGROK_AUTHTOKEN or its config
+// file. A package var for test injection.
+var ngrokAuthed = func(ctx context.Context, bin string) bool {
+	if os.Getenv("NGROK_AUTHTOKEN") != "" {
+		return true
+	}
+	return ngrokConfigHasAuthtoken()
+}
+
+// ngrokConfigHasAuthtoken reports whether ngrok's config file holds a non-empty authtoken.
+// It reads <UserConfigDir>/ngrok/ngrok.yml, the same path the child agent resolves.
+func ngrokConfigHasAuthtoken() bool {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "ngrok", "ngrok.yml"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "authtoken:"); ok && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureNgrokAuth ensures ngrok has an authtoken before the tunnel runs: prompts and
+// stores one at a terminal, else fails fast. Mirrors ensureZrokEnabled.
+func ensureNgrokAuth(ctx context.Context, bin string, interactive bool) error {
+	if ngrokAuthed(ctx, bin) {
+		return nil
+	}
+	if !interactive {
+		return fmt.Errorf("ngrok authtoken not configured: set NGROK_AUTHTOKEN or run 'ngrok config add-authtoken <token>' first")
+	}
+	token, err := promptNgrokAuthtoken()
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		return fmt.Errorf("no ngrok authtoken provided")
+	}
+	shell.StdErrF("argus start: configuring ngrok authtoken…\n")
+	cmd := shell.NewCommandContext(ctx, bin, "config", "add-authtoken", token)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ngrok config add-authtoken: %w: %s", err, cmd.StdErr().TrimSpace())
+	}
+	return nil
+}
+
+// promptNgrokAuthtoken reads an ngrok authtoken from the terminal without echoing it.
+func promptNgrokAuthtoken() (string, error) {
+	shell.StdErrF("argus start: ngrok authtoken not configured. Enter your ngrok authtoken (empty to abort): ")
+	tok, err := term.ReadPassword(int(os.Stdin.Fd()))
+	shell.StdErrLn()
+	if err != nil {
+		return "", fmt.Errorf("read ngrok authtoken: %w", err)
 	}
 	return strings.TrimSpace(string(tok)), nil
 }

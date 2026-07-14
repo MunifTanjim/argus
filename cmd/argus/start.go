@@ -62,6 +62,7 @@ func newStartCmd(version string) *cobra.Command {
 				cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
 				externalURL:  cfg.Tunnel.External.URL,
 				zrokName:     cfg.Tunnel.Zrok.Name,
+				ngrokDomain:  cfg.Tunnel.Ngrok.Domain,
 				runGateway:   gatewayMode(cfg),
 				listenAddr:   cfg.Gateway.ListenAddr,
 				logLevel:     config.LogLevel.Level(),
@@ -95,6 +96,12 @@ func newStartCmd(version string) *cobra.Command {
 			// enable it when on a terminal, else fail fast.
 			if z, ok := tun.(*tunnel.Zrok); ok {
 				if err := ensureZrokEnabled(ctx, z.Bin, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
+					return fail(cmd, err)
+				}
+			}
+			// An ngrok tunnel needs an authtoken: prompt at a terminal, else fail fast.
+			if n, ok := tun.(tunnel.Ngrok); ok {
+				if err := ensureNgrokAuth(ctx, n.Bin, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
 					return fail(cmd, err)
 				}
 			}
@@ -174,12 +181,13 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("log-level", "", "log verbosity: trace, debug, info, warn, error, fatal (default info) [$ARGUS_LOG_LEVEL]")
 	f.String("log-format", "", "log format: pretty or json (default pretty) [$ARGUS_LOG_FORMAT]")
 
-	f.String("tunnel", "", "expose the gateway via a tunnel: cloudflare, zrok, or external")
+	f.String("tunnel", "", "expose the gateway via a tunnel: cloudflare, zrok, ngrok, or external")
 	f.String("cloudflare-token", "", "[remote] Cloudflare tunnel token [$ARGUS_CLOUDFLARE_TOKEN]")
 	f.String("cloudflare-tunnel-name", "", "[local] name of the tunnel argus creates (if absent) and runs (default: argus) [$ARGUS_CLOUDFLARE_TUNNEL_NAME]")
 	f.String("cloudflare-hostname", "", "[local] public hostname argus routes to the tunnel [$ARGUS_CLOUDFLARE_HOSTNAME]")
 	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
 	f.String("zrok-name", "", "[zrok] reserved name for a stable URL: 'namespace:name' or 'name' (default: argus) [$ARGUS_ZROK_NAME]")
+	f.String("ngrok-domain", "", "[ngrok] reserved/custom domain (default: the account's static dev domain) [$ARGUS_NGROK_DOMAIN]")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp

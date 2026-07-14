@@ -44,6 +44,27 @@ argus start --tunnel cloudflare:local --cloudflare-hostname argus.example.com --
 - The tunnel is named `argus`, you can override with `--cloudflare-tunnel-name` flag.
 - The hostname must be in a zone in the **same Cloudflare account** as the cert.
 
+## ngrok
+
+Provider: **[ngrok](https://ngrok.com)** (requires `ngrok` on `PATH` and an ngrok
+account). Argus runs a public HTTP tunnel to the gateway. By default it uses your
+account's free **static dev domain** — a stable URL, so pairing survives restarts:
+
+```sh
+argus start --token <TOKEN> --tunnel ngrok
+```
+
+- `--ngrok-domain <domain>` binds a **reserved/custom domain** instead. Reserve it in
+  the ngrok dashboard first (the agent doesn't provision it):
+
+  ```sh
+  argus start --token <TOKEN> --tunnel ngrok --ngrok-domain argus.example.com
+  ```
+
+- ngrok needs an **authtoken**. Set `NGROK_AUTHTOKEN`, or — if it's missing and you're
+  at a terminal — Argus prompts for one and stores it via `ngrok config add-authtoken`;
+  otherwise run that yourself first.
+
 ## Zrok
 
 Provider: **[zrok](https://zrok.io)** v2 (requires `zrok2` on `PATH` and a zrok
