@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -223,6 +225,124 @@ func TestCloudflarePrepareReusesWhenPresent(t *testing.T) {
 	}
 	if !rr.called("route") {
 		t.Error("must still route dns when reusing")
+	}
+}
+
+func TestCloudflarePrepareFailsWhenLocalCredentialsMissing(t *testing.T) {
+	// List returns a UUID but the <UUID>.json is absent: fail fast rather than
+	// defer to cloudflared's restart loop.
+	rr := &recordingRunner{replies: map[string]runnerReply{
+		"list": {stdout: []byte(`[{"id":"622328ce-e5f8-4e65-b156-7293d4744e74","name":"argus"}]`)},
+	}}
+	dir := t.TempDir()
+	t.Setenv("TUNNEL_CRED_FILE", "") // ensure default path resolution
+	c := Cloudflare{
+		Bin: "cloudflared", Tunnel: "argus", Hostname: "argus.example.com",
+		CredsDir: dir, runner: rr.run,
+	}
+
+	_, err := c.Prepare(context.Background())
+	if err == nil {
+		t.Fatal("Prepare must fail when credentials JSON is missing")
+	}
+	for _, want := range []string{"622328ce-e5f8-4e65-b156-7293d4744e74", "cloudflared tunnel delete argus", "missing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if rr.called("create") || rr.called("route") {
+		t.Error("must not create or route DNS when credentials are missing")
+	}
+}
+
+func TestCloudflarePrepareAcceptsLocalCredentialsFile(t *testing.T) {
+	dir := t.TempDir()
+	id := "622328ce-e5f8-4e65-b156-7293d4744e74"
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+	rr := &recordingRunner{replies: map[string]runnerReply{
+		"list":  {stdout: []byte(`[{"id":"` + id + `","name":"argus"}]`)},
+		"route": {},
+	}}
+	c := Cloudflare{
+		Bin: "cloudflared", Tunnel: "argus", Hostname: "argus.example.com",
+		CredsDir: dir, runner: rr.run,
+	}
+
+	if _, err := c.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if rr.called("create") {
+		t.Error("must not create when the tunnel already exists with local credentials")
+	}
+	if !rr.called("route") {
+		t.Error("must still route dns when reusing")
+	}
+}
+
+func TestCloudflarePrepareHonorsTunnelCredFileEnv(t *testing.T) {
+	dir := t.TempDir()
+	credFile := filepath.Join(dir, "custom-creds.json")
+	if err := os.WriteFile(credFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+	t.Setenv("TUNNEL_CRED_FILE", credFile)
+	rr := &recordingRunner{replies: map[string]runnerReply{
+		"list":  {stdout: []byte(`[{"id":"deadbeef","name":"argus"}]`)},
+		"route": {},
+	}}
+	c := Cloudflare{
+		Bin: "cloudflared", Tunnel: "argus", Hostname: "argus.example.com",
+		CredsDir: t.TempDir(), runner: rr.run, // deliberately empty dir
+	}
+	if _, err := c.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+}
+
+func TestCloudflarePrepareHonorsTunnelCredContentsEnv(t *testing.T) {
+	// Inline creds mean no file is read, so an absent <UUID>.json must not trip the check.
+	t.Setenv("TUNNEL_CRED_FILE", "")
+	t.Setenv("TUNNEL_CRED_CONTENTS", "{}")
+	rr := &recordingRunner{replies: map[string]runnerReply{
+		"list":  {stdout: []byte(`[{"id":"deadbeef","name":"argus"}]`)},
+		"route": {},
+	}}
+	c := Cloudflare{
+		Bin: "cloudflared", Tunnel: "argus", Hostname: "argus.example.com",
+		CredsDir: t.TempDir(), runner: rr.run, // deliberately empty dir
+	}
+	if _, err := c.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !rr.called("route") {
+		t.Error("must still route dns when credentials are supplied inline")
+	}
+}
+
+func TestCloudflarePrepareHonorsConfigCredentialsFile(t *testing.T) {
+	// config.yml's credentials-file: points creds outside the default <UUID>.json,
+	// so an existing file there satisfies the check.
+	dir := t.TempDir()
+	credFile := filepath.Join(dir, "custom-creds.json")
+	if err := os.WriteFile(credFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte("credentials-file: "+credFile+"\n"), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	t.Setenv("TUNNEL_CRED_FILE", "")
+	rr := &recordingRunner{replies: map[string]runnerReply{
+		"list":  {stdout: []byte(`[{"id":"deadbeef","name":"argus"}]`)},
+		"route": {},
+	}}
+	c := Cloudflare{
+		Bin: "cloudflared", Tunnel: "argus", Hostname: "argus.example.com",
+		CredsDir: dir, runner: rr.run,
+	}
+	if _, err := c.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
 	}
 }
 

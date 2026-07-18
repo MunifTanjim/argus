@@ -103,12 +103,22 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 		if cfMode == "quick" && cfLog != "debug" {
 			cfLog = "info"
 		}
+		// <UUID>.json creds live in the same dir as the origin cert.
+		var credsDir string
+		if cfMode == "local" {
+			cert, _, err := cloudflareCertPath()
+			if err != nil {
+				return nil, "", err
+			}
+			credsDir = filepath.Dir(cert)
+		}
 		return tunnel.Cloudflare{
 			Bin:      bin,
 			Token:    o.cfToken,
 			Tunnel:   name,
 			Hostname: o.cfHostname,
 			LogLevel: cfLog,
+			CredsDir: credsDir,
 		}, origin, nil
 	default:
 		// unreachable: providerBinary already gated unknown names
