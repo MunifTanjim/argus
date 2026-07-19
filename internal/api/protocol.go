@@ -74,7 +74,67 @@ const (
 	MethodPushVAPIDKey  = "push.vapidKey"         // request: no params; result: PushVAPIDKey
 	MethodPushDesktop   = "push.desktop"          // request: push.Notification; result: nil (render on node if opted in)
 	MethodSessionExport = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
+	// Changed-files review for a live session's working directory (vs HEAD).
+	MethodSessionChangedFiles = "sessions.changedFiles" // request: SessionRef; result: ChangedFilesResult
+	MethodSessionFileDiff     = "sessions.fileDiff"     // request: FileDiffParams; result: FileDiffResult
+	MethodSessionCommits      = "sessions.commits"      // request: SessionRef; result: CommitsResult
+	MethodSessionCommitFiles  = "sessions.commitFiles"  // request: CommitFilesParams; result: ChangedFilesResult
 )
+
+// ChangedFile is one entry in a session working directory's git status.
+type ChangedFile struct {
+	Path     string `json:"path"`                // current (working-tree) path
+	OrigPath string `json:"orig_path,omitempty"` // rename source (HEAD-side), else ""
+	Change   string `json:"change"`              // added|modified|deleted|renamed|untracked
+	Staged   bool   `json:"staged"`              // index differs from HEAD
+	Unstaged bool   `json:"unstaged,omitempty"`  // working tree differs from index
+}
+
+// ChangedFilesResult lists everything git status reports for the session's repo.
+type ChangedFilesResult struct {
+	Root  string        `json:"root,omitempty"` // repo top-level (for display)
+	Files []ChangedFile `json:"files"`
+}
+
+// Commit is one entry in a session's branch/unpushed commit log.
+type Commit struct {
+	SHA     string `json:"sha"`
+	Short   string `json:"short"`
+	Subject string `json:"subject"`
+	Author  string `json:"author"`
+	UnixSec int64  `json:"unix_sec"` // authored time; client formats
+}
+
+// CommitsResult carries the commit list. Unpushed is true when the scope is
+// unpushed-vs-remote.
+type CommitsResult struct {
+	Commits  []Commit `json:"commits"`
+	Unpushed bool     `json:"unpushed,omitempty"`
+}
+
+// CommitFilesParams selects one commit in a session's repo.
+type CommitFilesParams struct {
+	SessionID string `json:"session_id"`
+	SHA       string `json:"sha"`
+}
+
+// FileDiffParams selects one changed file in a session's working directory.
+type FileDiffParams struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	OrigPath  string `json:"orig_path,omitempty"` // rename source, so the old side resolves
+	Rev       string `json:"rev,omitempty"`       // commit sha; empty = HEAD vs worktree
+}
+
+// FileDiffResult carries a changed file's HEAD (old) and working-tree (new)
+// content. Either side is "" when absent; NotShown (both empty) marks binary or
+// oversized files.
+type FileDiffResult struct {
+	Path       string `json:"path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+	NotShown   bool   `json:"not_shown,omitempty"`
+}
 
 // ExportBundleParams selects a session to export. Metadata is supplied by the
 // client (what it already displays) and written verbatim into the manifest.

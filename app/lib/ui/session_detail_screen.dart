@@ -14,6 +14,7 @@ import '../state/sessions.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
+import 'changed_files_screen.dart';
 import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
 import 'respond_sheet.dart';
@@ -189,6 +190,15 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.difference),
+            tooltip: 'Changes',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ChangedFilesScreen(session: live),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Live screen',

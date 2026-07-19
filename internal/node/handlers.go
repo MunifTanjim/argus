@@ -39,4 +39,8 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodTerminalResize, d.handleTerminalResize)
 	srv.Handle(api.MethodTerminalClose, d.handleTerminalClose)
 	srv.Handle(api.MethodSessionExport, d.handleExportBundle)
+	srv.Handle(api.MethodSessionChangedFiles, d.handleChangedFiles)
+	srv.Handle(api.MethodSessionFileDiff, d.handleFileDiff)
+	srv.Handle(api.MethodSessionCommits, d.handleCommits)
+	srv.Handle(api.MethodSessionCommitFiles, d.handleCommitFiles)
 }
