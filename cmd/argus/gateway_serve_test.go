@@ -11,6 +11,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -47,6 +48,55 @@ func TestServeGatewayEnforcesToken(t *testing.T) {
 		t.Fatalf("gateway must accept the right token: %v", err)
 	}
 	conn.Close()
+}
+
+// A standalone gateway (nil node) must serve /client without crashing and report an
+// empty view until remote nodes dial in.
+func TestServeGatewayStandaloneNoNode(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	httpSrv := serveGateway(ctx, gatewayServeOpts{
+		node:     nil, // standalone: no local node
+		token:    "secret",
+		listener: ln,
+		log:      logger.NewBufferLogger(logbuf.New(50)),
+		version:  "test",
+	})
+	t.Cleanup(func() {
+		sctx, c := context.WithTimeout(context.Background(), time.Second)
+		defer c()
+		_ = httpSrv.Shutdown(sctx)
+	})
+
+	conn, err := api.DialWSConn(ctx, "ws://"+ln.Addr().String()+"/client", "secret", nil)
+	if err != nil {
+		t.Fatalf("dial /client: %v", err)
+	}
+	defer conn.Close()
+
+	client := api.NewClient(conn)
+	defer client.Close()
+
+	var info api.ServerInfo
+	if err := client.Call(api.MethodServerInfo, nil, &info); err != nil {
+		t.Fatalf("server.info: %v", err)
+	}
+	if len(info.Nodes) != 0 {
+		t.Errorf("standalone gateway must report no nodes, got %d", len(info.Nodes))
+	}
+
+	var sessions []session.Session
+	if err := client.Call(api.MethodSessionsList, nil, &sessions); err != nil {
+		t.Fatalf("sessions.list: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("standalone gateway must have no sessions, got %d", len(sessions))
+	}
 }
 
 // failingTunnel's Command errors immediately, so Supervisor.Run returns without a

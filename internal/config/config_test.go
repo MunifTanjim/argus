@@ -111,6 +111,35 @@ func TestArgusGatewayEnv(t *testing.T) {
 	}
 }
 
+func TestModeRoundTrips(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").Mode; got != "" {
+		t.Errorf("default mode = %q, want empty", got)
+	}
+
+	path := writeConfig(t, "mode: gateway\n")
+	if got := load(t, path).Mode; got != "gateway" {
+		t.Errorf("file mode = %q, want gateway", got)
+	}
+
+	t.Setenv("ARGUS_MODE", "node")
+	if got := load(t, "").Mode; got != "node" {
+		t.Errorf("ARGUS_MODE should map to mode, got %q", got)
+	}
+
+	v := viper.New()
+	if err := config.Load(v, path, false); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
+	fs.String("mode", "", "")
+	_ = fs.Set("mode", "node")
+	_ = v.BindPFlag("mode", fs.Lookup("mode"))
+	if got := config.FromViper(v).Mode; got != "node" {
+		t.Errorf("mode = %q, want flag 'node' to override file", got)
+	}
+}
+
 func TestFlagOverridesEnv(t *testing.T) {
 	t.Setenv("ARGUS_GATEWAY_LISTEN_ADDR", ":9999")
 	v := viper.New()

@@ -11,8 +11,10 @@ import (
 
 // Config is the resolved argus configuration. Precedence: flags > env > file > defaults.
 type Config struct {
-	Socket  string
-	Token   string // shared gateway token: presented by clients/nodes, required by the gateway
+	Socket string
+	Token  string // shared gateway token: presented by clients/nodes, required by the gateway
+	// Mode selects the run topology: "node", "gateway", or empty to infer from URL/token.
+	Mode    string
 	Gateway GatewayConfig
 	Node    NodeConfig
 	Push    PushConfig
@@ -93,6 +95,7 @@ var defaults = map[string]any{
 	"token":                         "",
 	"gateway.url":                   "",
 	"gateway.listen-addr":           ":8443",
+	"mode":                          "",
 	"node.id":                       "",
 	"node.label":                    "",
 	"push.desktop.enabled":          false,
@@ -176,6 +179,7 @@ func FromViper(v *viper.Viper) Config {
 	return Config{
 		Socket: v.GetString("socket"),
 		Token:  v.GetString("token"),
+		Mode:   v.GetString("mode"),
 		Gateway: GatewayConfig{
 			URL:        v.GetString("gateway.url"),
 			ListenAddr: v.GetString("gateway.listen-addr"),
