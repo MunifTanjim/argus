@@ -26,15 +26,179 @@ import (
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
-// uplinkMode reports whether this node dials an upstream gateway (then it doesn't
-// listen). gatewayMode reports whether it serves as a gateway (no upstream, a token to
-// require). Neither = a local node (unix socket only).
-func uplinkMode(cfg *config.Config) bool  { return cfg.Gateway.URL != "" }
-func gatewayMode(cfg *config.Config) bool { return cfg.Gateway.URL == "" && cfg.Token != "" }
+// Run topology. --mode is authoritative when set; an empty --mode infers from
+// URL/token: a gateway when a token is set with no upstream, otherwise a node.
+func runLocalNode(cfg *config.Config) bool { return cfg.Mode != "gateway" }
+func serveGatewayMode(cfg *config.Config) bool {
+	if cfg.Mode == "gateway" {
+		return true
+	}
+	return cfg.Mode == "" && cfg.Gateway.URL == "" && cfg.Token != ""
+}
+func uplinkMode(cfg *config.Config) bool { return cfg.Gateway.URL != "" }
+
+func validateMode(cfg *config.Config) error {
+	switch cfg.Mode {
+	case "":
+		return nil
+	case "node":
+		if cfg.Token != "" && cfg.Gateway.URL == "" {
+			return fmt.Errorf("--token in --mode node is for connecting to a gateway; add --gateway, or use --mode gateway to run one")
+		}
+		return nil
+	case "gateway":
+		if cfg.Token == "" {
+			return fmt.Errorf("--mode gateway requires --token")
+		}
+		if cfg.Gateway.URL != "" {
+			return fmt.Errorf("--mode gateway does not connect upstream; remove --gateway")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid --mode %q (use 'node' or 'gateway')", cfg.Mode)
+	}
+}
+
+// runStart is split from the cobra RunE so tests can drive the node/gateway wiring
+// with a cancellable context instead of a real signal.
+func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, cfg *config.Config, version string) error {
+	if err := validateMode(cfg); err != nil {
+		return fail(cmd, err)
+	}
+	if err := setupLogger(cfg); err != nil {
+		return fail(cmd, err)
+	}
+	local := runLocalNode(cfg)
+	serveGW := serveGatewayMode(cfg)
+	onTTY := isatty.IsTerminal(os.Stdin.Fd())
+	if local {
+		logger.Scoped("node").Info("starting argus node", "version", version)
+	} else {
+		logger.Scoped("gateway").Info("starting argus standalone gateway", "version", version)
+	}
+	if config.RuntimeDirIsFallback {
+		logger.Scoped("config").Warn("XDG runtime dir unavailable; using fallback", "dir", config.RuntimeDir)
+	}
+
+	tun, tunOrigin, err := resolveTunnel(tunnelOptions{
+		provider:     cfg.Tunnel.Provider,
+		cfToken:      cfg.Tunnel.Cloudflare.Token,
+		cfTunnelName: cfg.Tunnel.Cloudflare.TunnelName,
+		cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
+		externalURL:  cfg.Tunnel.External.URL,
+		zrokName:     cfg.Tunnel.Zrok.Name,
+		ngrokDomain:  cfg.Tunnel.Ngrok.Domain,
+		runGateway:   serveGW,
+		listenAddr:   cfg.Gateway.ListenAddr,
+		logLevel:     config.LogLevel.Level(),
+	})
+	if err != nil {
+		return fail(cmd, err)
+	}
+
+	// nil in a standalone gateway: no local node, discovery, or socket API.
+	var d *node.Node
+	if local {
+		d = node.New()
+		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
+		d.SetVersion(version)
+		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
+		// Standalone node logs to the configured logger (the embedded node, sharing a
+		// TUI's terminal, stays at its discard default).
+		d.SetLogger(logger.Scoped("node").L)
+		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
+		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
+	}
+
+	// A locally-managed Cloudflare tunnel needs an origin cert: run interactive
+	// `cloudflared tunnel login` when on a terminal, else fail fast. No-op
+	// otherwise.
+	if cf, ok := tun.(tunnel.Cloudflare); ok {
+		if err := ensureCloudflareLogin(ctx, cf, onTTY); err != nil {
+			return fail(cmd, err)
+		}
+	}
+	// A zrok share needs an enabled environment: prompt for an account token to
+	// enable it when on a terminal, else fail fast.
+	if z, ok := tun.(*tunnel.Zrok); ok {
+		if err := ensureZrokEnabled(ctx, z.Bin, onTTY); err != nil {
+			return fail(cmd, err)
+		}
+	}
+	// An ngrok tunnel needs an authtoken: prompt at a terminal, else fail fast.
+	if n, ok := tun.(tunnel.Ngrok); ok {
+		if err := ensureNgrokAuth(ctx, n.Bin, onTTY); err != nil {
+			return fail(cmd, err)
+		}
+	}
+
+	if local {
+		reconcileInstalledHooks()
+		if err := connectGateway(ctx, cfg, d); err != nil {
+			return fail(cmd, err)
+		}
+	}
+
+	// Set when a background subsystem fails fatally; read after the blocking
+	// wait so the process exits non-zero.
+	var nodeFailed atomic.Bool
+	var httpSrv *http.Server
+	if serveGW {
+		ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		httpSrv = serveGateway(ctx, gatewayServeOpts{
+			node:          d,
+			token:         cfg.Token,
+			listener:      ln,
+			log:           logger.New(context.Background()).L,
+			onFatal:       func() { nodeFailed.Store(true); stop() },
+			version:       version,
+			publicURL:     gatewayBaseURL(cfg),
+			enablePairing: true,
+			enablePush:    true,
+			pushDelay:     cfg.Push.Mobile.Delay,
+			tunnel:        tun,
+			tunnelOrigin:  tunOrigin,
+		})
+	}
+
+	// Plain local node: nothing upstream drives desktop notifications, so run a
+	// local Watch over our own registry. (Gateway mode reaches the node via
+	// Fanout; uplink mode via the gateway's push.desktop RPC.)
+	if local && cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !serveGW {
+		events, cancel := d.Registry().Subscribe()
+		// Focus-aware sink: suppresses alerts for a session already on screen.
+		go func() {
+			defer cancel()
+			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
+		}()
+	}
+
+	if d != nil {
+		err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
+	} else {
+		<-ctx.Done() // standalone gateway: block on the signal (no node to run)
+	}
+
+	if httpSrv != nil {
+		sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(sctx)
+	}
+	if err != nil {
+		return fail(cmd, err)
+	}
+	if nodeFailed.Load() {
+		return errSilent // a background subsystem already printed the cause
+	}
+	return nil
+}
 
 // newStartCmd builds `argus start`: runs the local node (discovery + tmux control + the
 // unix-socket API), and optionally serves as a gateway (no --gateway + token set) or
-// connects to one (--gateway).
+// connects to one (--gateway). See --mode to force a standalone gateway or node-only.
 func newStartCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "start",
@@ -47,122 +211,9 @@ func newStartCmd(version string) *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			if err := setupLogger(cfg); err != nil {
-				return fail(cmd, err)
-			}
-			logger.Scoped("node").Info("starting argus node", "version", version)
-			if config.RuntimeDirIsFallback {
-				logger.Scoped("config").Warn("XDG runtime dir unavailable; using fallback", "dir", config.RuntimeDir)
-			}
-
-			tun, tunOrigin, err := resolveTunnel(tunnelOptions{
-				provider:     cfg.Tunnel.Provider,
-				cfToken:      cfg.Tunnel.Cloudflare.Token,
-				cfTunnelName: cfg.Tunnel.Cloudflare.TunnelName,
-				cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
-				externalURL:  cfg.Tunnel.External.URL,
-				zrokName:     cfg.Tunnel.Zrok.Name,
-				ngrokDomain:  cfg.Tunnel.Ngrok.Domain,
-				runGateway:   gatewayMode(cfg),
-				listenAddr:   cfg.Gateway.ListenAddr,
-				logLevel:     config.LogLevel.Level(),
-			})
-			if err != nil {
-				return fail(cmd, err)
-			}
-
-			d := node.New()
-			d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
-			d.SetVersion(version)
-			d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
-			// Standalone node logs to the configured logger (the embedded node, sharing a
-			// TUI's terminal, stays at its discard default).
-			d.SetLogger(logger.Scoped("node").L)
-			clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
-			d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
-
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-
-			// A locally-managed Cloudflare tunnel needs an origin cert: run interactive
-			// `cloudflared tunnel login` when on a terminal, else fail fast. No-op
-			// otherwise.
-			if cf, ok := tun.(tunnel.Cloudflare); ok {
-				if err := ensureCloudflareLogin(ctx, cf, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
-					return fail(cmd, err)
-				}
-			}
-			// A zrok share needs an enabled environment: prompt for an account token to
-			// enable it when on a terminal, else fail fast.
-			if z, ok := tun.(*tunnel.Zrok); ok {
-				if err := ensureZrokEnabled(ctx, z.Bin, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
-					return fail(cmd, err)
-				}
-			}
-			// An ngrok tunnel needs an authtoken: prompt at a terminal, else fail fast.
-			if n, ok := tun.(tunnel.Ngrok); ok {
-				if err := ensureNgrokAuth(ctx, n.Bin, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
-					return fail(cmd, err)
-				}
-			}
-
-			reconcileInstalledHooks()
-
-			if err := connectGateway(ctx, cfg, d); err != nil {
-				return fail(cmd, err)
-			}
-
-			// Set when a background subsystem fails fatally; read after d.Run so the
-			// process exits non-zero.
-			var nodeFailed atomic.Bool
-			var httpSrv *http.Server
-			if gatewayMode(cfg) {
-				ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
-				if err != nil {
-					return fail(cmd, err)
-				}
-				httpSrv = serveGateway(ctx, gatewayServeOpts{
-					node:          d,
-					token:         cfg.Token,
-					listener:      ln,
-					log:           logger.New(context.Background()).L,
-					onFatal:       func() { nodeFailed.Store(true); stop() },
-					version:       version,
-					publicURL:     gatewayBaseURL(cfg),
-					enablePairing: true,
-					enablePush:    true,
-					pushDelay:     cfg.Push.Mobile.Delay,
-					tunnel:        tun,
-					tunnelOrigin:  tunOrigin,
-				})
-			}
-
-			// Plain local node: nothing upstream drives desktop notifications, so run a
-			// local Watch over our own registry. (Gateway mode reaches the node via
-			// Fanout; uplink mode via the gateway's push.desktop RPC.)
-			if cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !gatewayMode(cfg) {
-				events, cancel := d.Registry().Subscribe()
-				// Focus-aware sink: suppresses alerts for a session already on screen.
-				go func() {
-					defer cancel()
-					push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
-				}()
-			}
-
-			err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
-
-			if httpSrv != nil {
-				sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				_ = httpSrv.Shutdown(sctx)
-			}
-			if err != nil {
-				return fail(cmd, err)
-			}
-			if nodeFailed.Load() {
-				return errSilent // a background subsystem already printed the cause
-			}
-			return nil
+			return runStart(ctx, stop, cmd, cfg, version)
 		},
 	}
 
@@ -173,7 +224,9 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("id", "", "stable node id announced to a gateway (default: hostname)")
 	f.String("label", "", "human-friendly node name shown in clients (default: hostname)")
 
-	f.String("listen-addr", "", "address for the gateway's WebSocket listener when this node is a gateway (default :8443; terminate TLS via a tunnel, ssh, or a reverse proxy)")
+	f.String("mode", "", "run mode: 'node' (local node) or 'gateway' (standalone gateway, no local node); default: inferred from --token/--gateway [$ARGUS_MODE]")
+
+	f.String("listen-addr", "", "address for the gateway's WebSocket listener when serving as a gateway (see --mode) (default :8443; terminate TLS via a tunnel, ssh, or a reverse proxy)")
 
 	f.String("gateway", "", "connect to a gateway (the /node route is implicit): ws(s)://host, or ssh://[user@]host[:ssh-port][?port=N] to tunnel over SSH [$ARGUS_GATEWAY_URL]")
 	f.String("token", "", "gateway token: required from incoming clients/nodes when this node is a gateway, and presented to the --gateway it connects to (empty: allow all) [$ARGUS_TOKEN]")
@@ -191,6 +244,9 @@ func newStartCmd(version string) *cobra.Command {
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
+	})
+	_ = cmd.RegisterFlagCompletionFunc("mode", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"node", "gateway"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	return cmd
@@ -285,7 +341,7 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 // the gateway/tunnel/push scopes from it — injected so the embedded caller can
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
-	node          *node.Node
+	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
 	token         string
 	listener      net.Listener
 	log           *slog.Logger
@@ -304,9 +360,11 @@ type gatewayServeOpts struct {
 // client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
 // shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
-	d := o.node
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
+	if d := o.node; d != nil {
+		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	}
 
 	var store *clienttoken.Store
 	if o.enablePairing {
