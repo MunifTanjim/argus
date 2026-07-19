@@ -31,3 +31,10 @@ jobs:
           GH_TOKEN: ${{ steps.gh-token.outputs.token }}
           TAG_NAME: ${{ steps.release.outputs.tag_name }}
         run: gh workflow run --repo "${GITHUB_REPOSITORY}" publish.yml -f tag="${TAG_NAME}"
+
+      - name: Trigger App Release Build
+        if: ${{ steps.release.outputs['app--release_created'] }}
+        env:
+          GH_TOKEN: ${{ steps.gh-token.outputs.token }}
+          TAG_NAME: ${{ steps.release.outputs['app--tag_name'] }}
+        run: gh workflow run --repo "${GITHUB_REPOSITORY}" publish-app.yml -f tag="${TAG_NAME}"
