@@ -38,3 +38,5 @@ docs/superpowers
 
 # local files
 *.local.*
+/argus.e2e
+/e2e.log
