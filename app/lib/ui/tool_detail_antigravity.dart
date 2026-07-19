@@ -343,7 +343,7 @@ Widget agyWriteToFileDetail(Item it) {
       Text('● $path${overwrite ? '  (overwrite)' : ''}',
           style: _mono.copyWith(color: AppColors.dim)),
     if (code.isNotEmpty)
-      diffView('', code)
+      diffView('', code, lang: path)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
   ];
@@ -379,7 +379,8 @@ Widget _replaceDetail(Item it, {required bool multi}) {
             style: _mono.copyWith(color: AppColors.dim)),
       ));
       children.add(diffView(toolInputStr(c['TargetContent']),
-          toolInputStr(c['ReplacementContent'])));
+          toolInputStr(c['ReplacementContent']),
+          lang: path));
     }
     if (chunks.isEmpty && (it.toolInput ?? '').isNotEmpty) {
       children.add(codeBlock(it.toolInput!));
@@ -394,7 +395,7 @@ Widget _replaceDetail(Item it, {required bool multi}) {
     final target = toolInputStr(m['TargetContent']);
     final replacement = toolInputStr(m['ReplacementContent']);
     if (target.isNotEmpty || replacement.isNotEmpty) {
-      children.add(diffView(target, replacement));
+      children.add(diffView(target, replacement, lang: path));
     } else if ((it.toolInput ?? '').isNotEmpty) {
       children.add(codeBlock(it.toolInput!));
     }

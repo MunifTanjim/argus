@@ -7,6 +7,11 @@ String relativeTime(String? iso, [DateTime? now]) {
   if (iso == null || iso.isEmpty) return '';
   final then = DateTime.tryParse(iso);
   if (then == null) return '';
+  return relativeTimeFrom(then, now);
+}
+
+/// Like [relativeTime] but from an already-parsed [then].
+String relativeTimeFrom(DateTime then, [DateTime? now]) {
   final secs = ((now ?? DateTime.now()).difference(then).inMilliseconds / 1000)
       .clamp(0, double.infinity);
   const units = [

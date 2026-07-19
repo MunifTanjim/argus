@@ -30,6 +30,10 @@ var clientRoutedMethods = []string{
 	api.MethodSessionKey,
 	api.MethodSessionRespond,
 	api.MethodSessionKill,
+	api.MethodSessionChangedFiles,
+	api.MethodSessionFileDiff,
+	api.MethodSessionCommits,
+	api.MethodSessionCommitFiles,
 }
 
 // subEntry records a client's transcript subscription for routing delta notifications.

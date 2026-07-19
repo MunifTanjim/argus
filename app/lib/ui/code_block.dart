@@ -160,7 +160,7 @@ class _CodeBlockState extends State<_CodeBlock> {
       : SingleChildScrollView(
           scrollDirection: Axis.horizontal, child: content);
 
-  Widget _numbered(List<List<_Run>> lines) {
+  Widget _numbered(List<List<CodeRun>> lines) {
     final gutterWidth = lines.length.toString().length * 9.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -185,7 +185,7 @@ class _CodeBlockState extends State<_CodeBlock> {
     );
   }
 
-  Widget _lineText(List<_Run> runs) => Text.rich(
+  Widget _lineText(List<CodeRun> runs) => Text.rich(
         TextSpan(
           style: _codeMono,
           // A blank line still needs a glyph so its row keeps the line height.
@@ -239,17 +239,36 @@ class _CodeBlockState extends State<_CodeBlock> {
 }
 
 /// A styled text run within one line, from the flattened highlight tree.
-class _Run {
-  const _Run(this.text, this.style);
+class CodeRun {
+  const CodeRun(this.text, this.style);
   final String text;
   final TextStyle? style;
+}
+
+/// Highlights [source] into per-line styled runs aligned to `source.split('\n')`,
+/// falling back to one unstyled run per line on any highlighter error.
+List<List<CodeRun>> highlightLines(String source, {String? lang}) {
+  List<List<CodeRun>> plain() => [
+        for (final l in source.split('\n')) [if (l.isNotEmpty) CodeRun(l, null)]
+      ];
+  if (source.isEmpty) return const <List<CodeRun>>[];
+  try {
+    final result = _highlight.highlightAuto(source, _candidates(lang));
+    final renderer = TextSpanRenderer(_codeMono, _codeTheme);
+    result.render(renderer);
+    final span = renderer.span;
+    if (span == null) return plain();
+    return _spanLines(span);
+  } catch (_) {
+    return plain();
+  }
 }
 
 /// Flattens a highlighted [span] tree into per-line runs so a line-number gutter
 /// can align to each logical line. Text renders before children within a span,
 /// so the walk order matches on-screen order.
-List<List<_Run>> _spanLines(InlineSpan span) {
-  final lines = <List<_Run>>[<_Run>[]];
+List<List<CodeRun>> _spanLines(InlineSpan span) {
+  final lines = <List<CodeRun>>[<CodeRun>[]];
   void walk(InlineSpan s, TextStyle? inherited) {
     if (s is! TextSpan) return;
     final style = inherited == null ? s.style : inherited.merge(s.style);
@@ -257,8 +276,8 @@ List<List<_Run>> _spanLines(InlineSpan span) {
     if (text != null) {
       final parts = text.split('\n');
       for (var i = 0; i < parts.length; i++) {
-        if (i > 0) lines.add(<_Run>[]);
-        if (parts[i].isNotEmpty) lines.last.add(_Run(parts[i], style));
+        if (i > 0) lines.add(<CodeRun>[]);
+        if (parts[i].isNotEmpty) lines.last.add(CodeRun(parts[i], style));
       }
     }
     for (final c in s.children ?? const <InlineSpan>[]) {
@@ -405,20 +424,76 @@ String? _alias(String? name) {
     case 'zsh':
       return 'bash';
     case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
       return 'javascript';
     case 'ts':
+    case 'tsx':
       return 'typescript';
     case 'yml':
       return 'yaml';
     case 'py':
+    case 'pyi':
       return 'python';
     case 'rs':
       return 'rust';
     case 'md':
+    case 'markdown':
       return 'markdown';
+    case 'toml':
+    case 'cfg':
+      return 'ini';
+    case 'html':
+    case 'htm':
+    case 'svg':
+      return 'xml';
+    case 'kt':
+    case 'kts':
+      return 'kotlin';
+    case 'h':
+      return 'c';
+    case 'cc':
+    case 'cxx':
+    case 'hpp':
+    case 'hh':
+      return 'cpp';
+    case 'cs':
+      return 'csharp';
+    case 'rb':
+      return 'ruby';
+    case 'pl':
+    case 'pm':
+      return 'perl';
+    case 'ex':
+    case 'exs':
+      return 'elixir';
+    case 'erl':
+      return 'erlang';
+    case 'clj':
+      return 'clojure';
+    case 'hs':
+      return 'haskell';
+    case 'ml':
+      return 'ocaml';
+    case 'proto':
+      return 'protobuf';
+    case 'gql':
+      return 'graphql';
     default:
       return n;
   }
+}
+
+/// Highlight grammar for a file [path], keyed on its extension (or the bare
+/// filename for extensionless files like `Dockerfile`). Null when unresolved.
+String? langFromPath(String? path) {
+  final p = path?.trim();
+  if (p == null || p.isEmpty) return null;
+  final base = p.split('/').last.split('\\').last;
+  final dot = base.lastIndexOf('.');
+  final key = dot > 0 ? base.substring(dot + 1) : base;
+  return _alias(key);
 }
 
 /// Returns [body] re-indented as JSON when it parses as a JSON object/array,
