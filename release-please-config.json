@@ -13,6 +13,11 @@
         "release-please-config.json",
         "app"
       ]
+    },
+    "app": {
+      "release-type": "dart",
+      "component": "app",
+      "pull-request-title-pattern": "chore(app): release ${version}"
     }
   }
 }
