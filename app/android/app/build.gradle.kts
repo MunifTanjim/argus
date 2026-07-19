@@ -33,8 +33,10 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Both come from pubspec's `version: X.Y.Z+N`; release-please increments the
+        // +N build number on each release, and Flutter maps it to versionCode.
+        versionCode = flutter.versionCode
     }
 
     signingConfigs {

@@ -16,7 +16,12 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.0.0+13
+# version-name + build number, baselined at 13 to match the last published
+# versionCode. release-please bumps the semver and increments +N on each release,
+# so the first release is 0.0.14+14 and patch stays in step with the build number
+# (0.0.15+15, ...) until a breaking change bumps the minor. Flutter maps +N to
+# Android versionCode.
+version: 0.0.13+13
 
 environment:
   sdk: ^3.12.0
