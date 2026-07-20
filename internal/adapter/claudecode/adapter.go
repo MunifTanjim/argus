@@ -19,6 +19,7 @@ type ccAdapter struct{}
 func New() adapter.Adapter { return ccAdapter{} }
 
 var _ adapter.Adapter = ccAdapter{}
+var _ adapter.TaskSource = ccAdapter{}
 
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
@@ -64,6 +65,14 @@ func (ccAdapter) HookOutput(adapter.HookEvent) string { return "" }
 
 func (ccAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 	return collectSessionFiles(transcriptPath, claudeHome())
+}
+
+func (ccAdapter) ReadTasks(transcriptPath string) ([]api.Task, error) {
+	return ReadTasks(transcriptPath)
+}
+
+func (ccAdapter) TaskActivityCount(chunks []transcript.Chunk) (int, bool) {
+	return TaskActivityCount(chunks)
 }
 
 func (ccAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {

@@ -19,6 +19,7 @@ import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
 import 'respond_sheet.dart';
 import 'route_observer.dart';
+import 'session_tasks_screen.dart';
 import 'status_style.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
@@ -190,6 +191,15 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.checklist),
+            tooltip: 'Tasks',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SessionTasksScreen(session: live),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.difference),
             tooltip: 'Changes',
