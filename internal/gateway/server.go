@@ -34,6 +34,7 @@ var clientRoutedMethods = []string{
 	api.MethodSessionFileDiff,
 	api.MethodSessionCommits,
 	api.MethodSessionCommitFiles,
+	api.MethodSessionTasks,
 }
 
 // subEntry records a client's transcript subscription for routing delta notifications.
@@ -182,6 +183,13 @@ func (s *Server) clientForSub(subID string) (api.Notifier, bool) {
 	defer s.subMu.Unlock()
 	e, ok := s.subs[subID]
 	return e.client, ok
+}
+
+func (s *Server) subEntryFor(subID string) (subEntry, bool) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	e, ok := s.subs[subID]
+	return e, ok
 }
 
 // subRef identifies a subscription and the node it targets.
@@ -807,6 +815,17 @@ func (s *Server) serveNode(conn net.Conn) {
 						_ = p.Call(api.MethodTranscriptUnsubscribe,
 							api.TranscriptUnsubscribeParams{SubID: d.SubID}, nil)
 					}()
+				}
+			case api.MethodTasksChanged:
+				var tc api.TasksChanged
+				if json.Unmarshal(n.Params, &tc) != nil {
+					return
+				}
+				// A table miss is dropped silently: the transcript.delta branch above
+				// shares this sub's poller and already handles orphan unsubscribe.
+				if e, ok := s.subEntryFor(tc.SubID); ok {
+					tc.SessionID = session.CompositeID(e.nodeID, tc.SessionID)
+					_ = e.client.Notify(api.MethodTasksChanged, tc)
 				}
 			case api.MethodTerminalOutput:
 				var o api.TerminalOutput

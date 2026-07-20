@@ -83,10 +83,7 @@ func collectSessionFiles(transcriptPath, home string) ([]adapter.BundledFile, er
 	}
 
 	// tasks/ and teams/ dirs, keyed by session-<shortid> (first UUID segment).
-	short := base
-	if i := strings.IndexByte(short, '-'); i > 0 {
-		short = short[:i]
-	}
+	short := sessionShort(base)
 	addTree(filepath.Join(home, "tasks", "session-"+short))
 	addTree(filepath.Join(home, "teams", "session-"+short))
 

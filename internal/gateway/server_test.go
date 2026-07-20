@@ -486,6 +486,60 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 	}
 }
 
+// TestServeNodeCompositesTasksChanged verifies a tasks.changed pushed by a remote
+// node with a node-local session id reaches the client with a composite id, so the
+// client (which only knows composite ids) can match it.
+func TestServeNodeCompositesTasksChanged(t *testing.T) {
+	a := New(time.Second)
+	srv := NewServer(a, nil, nil)
+
+	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
+	srv.addSub("sub1", "d1", c1)
+
+	gatewayConn, nodeConn := net.Pipe()
+	defer gatewayConn.Close()
+
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return struct {
+					ID    string `json:"id"`
+					Label string `json:"label"`
+				}{ID: "d1", Label: "d1-box"}, nil
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+
+	go srv.serveNode(gatewayConn)
+	eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["d1"] != nil
+	})
+
+	if err := nodePeer.Notify(api.MethodTasksChanged, api.TasksChanged{SubID: "sub1", SessionID: "abcd"}); err != nil {
+		t.Fatalf("node notify: %v", err)
+	}
+
+	select {
+	case n := <-c1.ch:
+		if n.Method != api.MethodTasksChanged {
+			t.Fatalf("c1 method = %q, want %q", n.Method, api.MethodTasksChanged)
+		}
+		var got api.TasksChanged
+		if err := json.Unmarshal(n.Params, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.SessionID != "d1:abcd" {
+			t.Fatalf("session id = %q, want d1:abcd", got.SessionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("c1 did not receive tasks.changed")
+	}
+}
+
 // TestTerminalInputRejectsNonOwner verifies terminal.input is routed only for the
 // client that opened the term; a different client with the same term_id is rejected.
 func TestTerminalInputRejectsNonOwner(t *testing.T) {

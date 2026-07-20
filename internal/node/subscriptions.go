@@ -177,10 +177,20 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	}
 	from := clampFrom(p.HaveChunks, len(chunks))
 
+	// Task-change detection rides this subscription: only for the main session
+	// (not subagent views), and only when the agent persists a task list. It
+	// reuses the chunks the poller already folds each tick — no extra I/O.
+	var taskSignals func([]transcript.Chunk) (int, bool)
+	if p.AgentID == "" {
+		if ts, ok := a.(adapter.TaskSource); ok {
+			taskSignals = ts.TaskActivityCount
+		}
+	}
+
 	// Start the poller bound to the connection ctx.
 	pollCtx, cancel := context.WithCancel(ctx)
 	cs.add(p.SubID, cancel)
-	go d.pollTranscript(pollCtx, n, p.SubID, st, chunks)
+	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, chunks)
 
 	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Chunks: chunks[from:]}, nil
 }
@@ -203,12 +213,16 @@ func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawM
 // prefix plus resent tail), not chunks[from:]: diffChunks compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID string, st adapter.StreamingTranscript, sent []transcript.Chunk) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Chunk) (int, bool), sent []transcript.Chunk) {
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)
 		}
 	}()
+	var lastSignals int
+	if taskSignals != nil {
+		lastSignals, _ = taskSignals(sent) // seed from catch-up; don't fire on open
+	}
 	t := time.NewTicker(transcriptPollInterval)
 	defer t.Stop()
 	for {
@@ -219,6 +233,22 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID string,
 			cur, err := st.Refresh()
 			if err != nil {
 				continue // transient (file rotated/locked); try next tick
+			}
+			if taskSignals != nil {
+				// Count only grows; resync the baseline on a shrink (transcript
+				// rotation), but push only on a rise — and only once a task tool
+				// has appeared (hasTool). Without one, a teammate message is just
+				// chatter from a task-less team; those tasks are caught on open /
+				// manual refresh.
+				if c, hasTool := taskSignals(cur); c != lastSignals {
+					rose := c > lastSignals
+					lastSignals = c
+					if rose && hasTool {
+						if err := n.Notify(api.MethodTasksChanged, api.TasksChanged{SubID: subID, SessionID: sessionID}); err != nil {
+							return // connection gone
+						}
+					}
+				}
 			}
 			from, changed := diffChunks(sent, cur)
 			if !changed {

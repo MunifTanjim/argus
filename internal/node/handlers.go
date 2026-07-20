@@ -43,4 +43,5 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodSessionFileDiff, d.handleFileDiff)
 	srv.Handle(api.MethodSessionCommits, d.handleCommits)
 	srv.Handle(api.MethodSessionCommitFiles, d.handleCommitFiles)
+	srv.Handle(api.MethodSessionTasks, d.handleTasks)
 }

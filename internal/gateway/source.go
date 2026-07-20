@@ -56,11 +56,35 @@ func (s *InProcessSource) Snapshot() []session.Session                { return s
 func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }
 func (s *InProcessSource) Done() <-chan struct{}                      { return s.done }
 
-// Call dispatches to the local handlers and marshals the result.
+// Call dispatches to the local handlers and marshals the result. The ctx
+// notifier is wrapped so notifications the handler pushes back carry composite
+// session ids, matching what a remote node's relay produces.
 func (s *InProcessSource) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	if n, ok := api.NotifierFrom(ctx); ok {
+		ctx = api.WithNotifier(ctx, compositingNotifier{inner: n, nodeID: s.id})
+	}
 	res, err := s.dispatch(ctx, method, params)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(res)
+}
+
+// compositingNotifier rewrites node-local session ids to gateway composite ids
+// on the notifications a node pushes, so a client that only knows composite ids
+// can match them. Only tasks.changed needs this: transcript/terminal streams
+// route by sub_id/term_id, and session events are composited by the aggregator.
+type compositingNotifier struct {
+	inner  api.Notifier
+	nodeID string
+}
+
+func (c compositingNotifier) Notify(method string, params any) error {
+	if method == api.MethodTasksChanged {
+		if tc, ok := params.(api.TasksChanged); ok {
+			tc.SessionID = session.CompositeID(c.nodeID, tc.SessionID)
+			return c.inner.Notify(method, tc)
+		}
+	}
+	return c.inner.Notify(method, params)
 }
