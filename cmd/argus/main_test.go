@@ -36,7 +36,7 @@ func TestConnectGatewayBranch(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock")
+	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", false)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
 	}

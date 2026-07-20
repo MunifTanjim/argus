@@ -51,6 +51,7 @@ var flagKeys = map[string]string{
 	"external-url":           "tunnel.external.url",
 	"zrok-name":              "tunnel.zrok.name",
 	"ngrok-domain":           "tunnel.ngrok.domain",
+	"e2e":                    "gateway.e2e",
 }
 
 // addClientFlags registers the node/gateway-reaching flags shared by the root TUI
@@ -59,6 +60,7 @@ func addClientFlags(f *pflag.FlagSet) {
 	f.String("socket", "", "argusd JSON-RPC socket to connect to (default: XDG runtime path)")
 	f.String("gateway", "", "remote gateway (the /client route is implicit): ws(s)://host, or ssh://[user@]host[:ssh-port][?port=N]; overrides --socket [$ARGUS_GATEWAY_URL]")
 	f.String("token", "", "bearer token for the gateway [$ARGUS_TOKEN]")
+	f.Bool("e2e", false, "connect to the gateway over end-to-end encryption (relayed Noise channels); client-side, gateway URL only")
 }
 
 // resolveConfig builds cmd's effective config, layering (lowest first) defaults, the

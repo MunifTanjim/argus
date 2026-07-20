@@ -12,22 +12,35 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/tui"
 )
+
+// compile-time assertion: ReconnectingE2EClient must satisfy tui.Client.
+var _ tui.Client = (*client.ReconnectingE2EClient)(nil)
 
 // connect returns a client that re-dials with backoff if the connection drops. With a
 // gateway URL it dials over WebSocket; otherwise the local node's unix socket (which
 // must already be running — use connectLocalSpawn to start one first).
-func connect(ctx context.Context, gatewayURL, token, socket string) (*api.ReconnectingClient, error) {
+func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, err
+	}
+	if e2eEnabled && gatewayURL != "" {
+		c, err := client.NewReconnectingE2EClient(ctx, dial)
+		if err != nil {
+			shell.StdErrF("argus: cannot establish e2e session with gateway at %s: %v\n", gatewayURL, err)
+			return nil, err
+		}
+		return c, nil
 	}
 	c, err := api.NewReconnectingClient(ctx, dial)
 	if err != nil {
@@ -74,7 +87,7 @@ func localNodeRunning(socket string) (bool, error) {
 
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it to
 // accept, then connects. Returns the node's log buffer for the TUI's Logs tab.
-func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (tui.Client, *logbuf.Buffer, error) {
 	return connectLocalSpawnWithGateway(ctx, cfg, "", token, socket)
 }
 
@@ -82,7 +95,7 @@ func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket st
 // gatewayURL (isolated spawn): the TUI drives the local socket. Set gatewayURL
 // (connected spawn): the node uplinks to that gateway so this machine joins the fleet,
 // and the TUI drives the gateway so it sees the whole fleet, this machine included.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string) (tui.Client, *logbuf.Buffer, error) {
 	var wsURL string
 	var gatewayClient *http.Client
 	if gatewayURL != "" {
@@ -119,7 +132,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 	}
 	conn.Close() // probe only; the client opens its own connection
 	// Isolated spawn drives the local node; connected spawn drives the gateway.
-	client, err := connect(ctx, gatewayURL, token, socket)
+	client, err := connect(ctx, gatewayURL, token, socket, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,7 +142,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 // connectLocalGateway starts an ephemeral embedded node AND a co-located gateway
 // (pairing + push, no tunnel), then points the TUI at that gateway over loopback
 // so it sees the whole fleet. Mirrors `argus start --token` minus the tunnel.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (*api.ReconnectingClient, *logbuf.Buffer, error) {
+func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (tui.Client, *logbuf.Buffer, error) {
 	// Bind before the TUI takes the screen so a port-in-use fails cleanly.
 	ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
 	if err != nil {
@@ -189,7 +202,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	}
 	probe.Close()
 
-	client, err := connect(ctx, gwURL, cfg.Token, socket)
+	client, err := connect(ctx, gwURL, cfg.Token, socket, false)
 	if err != nil {
 		cancel()
 		return nil, nil, err

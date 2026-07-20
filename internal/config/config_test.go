@@ -193,6 +193,17 @@ func TestTmuxMirrorSessionAffixDefaults(t *testing.T) {
 	}
 }
 
+func TestGatewayE2ERoundTrips(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").Gateway.E2E; got != false {
+		t.Errorf("default gateway.e2e = %v, want false", got)
+	}
+	path := writeConfig(t, "gateway:\n  e2e: true\n")
+	if got := load(t, path).Gateway.E2E; got != true {
+		t.Errorf("file gateway.e2e = %v, want true", got)
+	}
+}
+
 func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 	// Defaults are valid.
 	valid := config.Config{Tmux: config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}}
