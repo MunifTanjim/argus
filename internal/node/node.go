@@ -24,6 +24,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Node holds the wired-up core.
@@ -78,6 +79,10 @@ type Node struct {
 	// than spawning a duplicate.
 	resumeMu sync.Mutex
 	resuming map[string]string // agent+session key -> launched session id
+
+	trust          *trustlog.SyncStore // locked-mode trust-log store; nil when off
+	trustPath      string              // on-disk chain path for persistence
+	trustPersistMu sync.Mutex          // serializes atomic temp-file+rename persist
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node

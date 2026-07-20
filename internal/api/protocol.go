@@ -84,6 +84,10 @@ const (
 	// relay.open pairs a client with a node into a chan_id E2E channel.
 	MethodRelayOpen  = "relay.open"  // request: RelayOpenParams; result: RelayOpenResult
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
+	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
+	// bytes the blind gateway relays but cannot forge/roll back.
+	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogChain (node/client fetch)
+	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -576,4 +580,11 @@ type RelayOpenResult struct {
 // RelayCloseParams tears down an E2E channel the client owns.
 type RelayCloseParams struct {
 	ChanID string `json:"chan_id"`
+}
+
+// TrustLogChain carries a marshaled trust-log chain (trustlog.MarshalChain output)
+// as opaque, self-authenticating bytes. Empty Chain means "no chain yet". Chain
+// marshals to base64 (Go encodes []byte as base64 in JSON).
+type TrustLogChain struct {
+	Chain []byte `json:"chain,omitempty"`
 }

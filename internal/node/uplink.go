@@ -69,6 +69,9 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 	defer resp.closeAll()
 	d.log.Info("gateway uplink established", "url", url)
 
+	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).
+	go d.runTrustSync(ctx, peer)
+
 	// Subscribe before the gateway pulls our snapshot so no live event is lost.
 	events, cancel := d.reg.Subscribe()
 	defer cancel()

@@ -4,6 +4,7 @@
 package client
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Tunable timeouts (vars so tests can shorten them).
@@ -54,6 +56,10 @@ type E2EClient struct {
 	termNode map[string]string    // term_id -> nodeID (terminal.open)
 
 	events chan api.Notification
+
+	trust     *trustlog.SyncStore // locked-mode trust-log store; nil when off
+	trustCtx  context.Context     // cancelled on Close, stops the sync ticker
+	trustStop context.CancelFunc
 }
 
 // NewE2EClient wraps a gateway connection, wiring the relay-frame demux. Generates
@@ -73,6 +79,21 @@ func NewE2EClient(conn net.Conn) (*E2EClient, error) {
 		events:   make(chan api.Notification, 256),
 	}
 	m.peer = api.NewPeer(conn, api.PeerOptions{OnRelayFrame: m.onRelayFrame})
+	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
+	return m, nil
+}
+
+// NewE2EClientWithGenesis is NewE2EClient plus a pinned trust-log genesis head, so
+// the client syncs and verifies the network's trust-log chain. Pass nil head to
+// disable trust-log sync (equivalent to NewE2EClient).
+func NewE2EClientWithGenesis(conn net.Conn, genesisHead []byte) (*E2EClient, error) {
+	m, err := NewE2EClient(conn)
+	if err != nil {
+		return nil, err
+	}
+	if genesisHead != nil {
+		m.trust = trustlog.NewSyncStore(genesisHead)
+	}
 	return m, nil
 }
 
@@ -83,7 +104,12 @@ func (m *E2EClient) Done() <-chan struct{} { return m.peer.Done() }
 func (m *E2EClient) Events() <-chan api.Notification { return m.events }
 
 // Close tears down the gateway connection.
-func (m *E2EClient) Close() error { return m.peer.Close() }
+func (m *E2EClient) Close() error {
+	if m.trustStop != nil {
+		m.trustStop()
+	}
+	return m.peer.Close()
+}
 
 // Connect discovers nodes and opens an E2E channel to each that advertises a key.
 func (m *E2EClient) Connect() error {
@@ -98,6 +124,10 @@ func (m *E2EClient) Connect() error {
 		if err := m.openChannel(nd); err != nil {
 			return fmt.Errorf("client: open channel to %s: %w", nd.ID, err)
 		}
+	}
+	if m.trust != nil {
+		m.syncTrustLog()
+		go m.trustSyncLoop()
 	}
 	return nil
 }
@@ -504,4 +534,49 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 		m.forget(id)
 		return fmt.Errorf("client: call timeout")
 	}
+}
+
+// clientTrustSyncInterval is how often the client re-pulls the trust-log chain.
+var clientTrustSyncInterval = 30 * time.Second
+
+// SetTrustSyncIntervalForTest overrides the client's trust-log sync cadence. Test-only.
+func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval = d }
+
+// syncTrustLog pulls the gateway's trust-log chain and ingests it (genesis-pinned;
+// a rollback/fork/tamper chain is rejected and the current view is kept).
+func (m *E2EClient) syncTrustLog() {
+	var got api.TrustLogChain
+	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
+		return
+	}
+	_, _ = m.trust.Ingest(got.Chain)
+}
+
+func (m *E2EClient) trustSyncLoop() {
+	t := time.NewTicker(clientTrustSyncInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.trustCtx.Done():
+			return
+		case <-m.peer.Done():
+			return
+		case <-t.C:
+			m.syncTrustLog()
+		}
+	}
+}
+
+// DeviceAuthorized reports whether pub is authorized by the synced trust log.
+// Always false when trust-log sync is off.
+func (m *E2EClient) DeviceAuthorized(pub []byte) bool {
+	return m.trust != nil && m.trust.DeviceAuthorized(pub)
+}
+
+// TrustHead returns the current trust-log HEAD (nil when off / not yet synced).
+func (m *E2EClient) TrustHead() []byte {
+	if m.trust == nil {
+		return nil
+	}
+	return m.trust.Head()
 }

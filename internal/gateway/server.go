@@ -121,6 +121,8 @@ type Server struct {
 	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
 	nextChan  atomic.Uint64            // chan_id allocator
+
+	trust *trustStore // opaque hold of the network's trust-log chain (blind)
 }
 
 // NewServer builds a gateway Server over agg.
@@ -133,6 +135,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 	}
 	s.channels = map[string]*relayChannel{}
 	s.nodePeers = map[string]*api.Peer{}
+	s.trust = &trustStore{}
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
 	return s
@@ -485,6 +488,12 @@ func (s *Server) buildClientServer() *api.Server {
 	// + online flag. Additive alongside server.info.
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+	})
+
+	// trustlog.pull serves the current (opaque) trust-log chain to a client. The
+	// client verifies it against its pinned genesis; the gateway never does.
+	srv.Handle(api.MethodTrustLogPull, func(context.Context, json.RawMessage) (any, error) {
+		return api.TrustLogChain{Chain: s.trust.current()}, nil
 	})
 
 	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
@@ -958,6 +967,26 @@ const (
 // bound. Far above any plausible count of concurrently-dying orphans.
 const maxClosedOrphans = 4096
 
+// nodeDispatch serves the requests a node issues down its uplink. Today that is
+// only trust-log distribution (offer + pull); everything else is method-not-found.
+// Kept separate from the client server so trustlog.offer is reachable ONLY here —
+// clients are supplicants and must not publish trust state.
+func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawMessage) (any, error) {
+	switch method {
+	case api.MethodTrustLogOffer:
+		p, err := api.Decode[api.TrustLogChain](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		s.trust.offer(p.Chain)
+		return nil, nil
+	case api.MethodTrustLogPull:
+		return api.TrustLogChain{Chain: s.trust.current()}, nil
+	default:
+		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+}
+
 // serveNode adopts an accepted node uplink: learn its identity, register it as a
 // source, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
@@ -973,6 +1002,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
+		Dispatch:                  s.nodeDispatch,
 		OnRelayFrame:              func(f api.RelayFrame) { s.forwardFromNode(f) },
 		OnNotify: func(n api.Notification) {
 			switch n.Method {

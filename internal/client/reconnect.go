@@ -18,9 +18,10 @@ const (
 // backoff and re-running discovery + handshakes on each reconnect. It satisfies
 // tui.Client with a stable Events()/States() stream across reconnects.
 type ReconnectingE2EClient struct {
-	dial   api.Dialer
-	ctx    context.Context
-	cancel context.CancelFunc
+	dial        api.Dialer
+	genesisHead []byte // pinned trust-log genesis; nil = trust-log sync off
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	events chan api.Notification
 	states chan bool
@@ -33,14 +34,25 @@ type ReconnectingE2EClient struct {
 // NewReconnectingE2EClient dials + handshakes once (so startup failure surfaces),
 // then maintains the connection until Close.
 func NewReconnectingE2EClient(ctx context.Context, dial api.Dialer) (*ReconnectingE2EClient, error) {
+	return newReconnecting(ctx, dial, nil)
+}
+
+// NewReconnectingE2EClientWithGenesis is NewReconnectingE2EClient plus a pinned
+// trust-log genesis head, so every (re)connection syncs the network's trust log.
+func NewReconnectingE2EClientWithGenesis(ctx context.Context, dial api.Dialer, genesisHead []byte) (*ReconnectingE2EClient, error) {
+	return newReconnecting(ctx, dial, genesisHead)
+}
+
+func newReconnecting(ctx context.Context, dial api.Dialer, genesisHead []byte) (*ReconnectingE2EClient, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	c := &ReconnectingE2EClient{
-		dial:   dial,
-		ctx:    cctx,
-		cancel: cancel,
-		events: make(chan api.Notification, 256),
-		states: make(chan bool, 8),
-		kick:   make(chan struct{}, 1),
+		dial:        dial,
+		genesisHead: genesisHead,
+		ctx:         cctx,
+		cancel:      cancel,
+		events:      make(chan api.Notification, 256),
+		states:      make(chan bool, 8),
+		kick:        make(chan struct{}, 1),
 	}
 	cur, err := c.connectOnce()
 	if err != nil {
@@ -55,12 +67,19 @@ func NewReconnectingE2EClient(ctx context.Context, dial api.Dialer) (*Reconnecti
 }
 
 // connectOnce dials, builds a fresh E2EClient, and completes discovery + handshakes.
+//
+// SECURITY(slice-5): the client builds a fresh, empty trust-log store each
+// reconnect and re-pulls from scratch — it keeps no persisted HEAD, so a
+// malicious gateway can serve a stale pre-revocation chain to a reconnecting
+// client. Harmless while the client enforces nothing; client persistence MUST
+// land together with client-side enforcement in Slice 5, or revocation is
+// defeatable by forcing a reconnect.
 func (c *ReconnectingE2EClient) connectOnce() (*E2EClient, error) {
 	conn, err := c.dial(c.ctx)
 	if err != nil {
 		return nil, err
 	}
-	cur, err := NewE2EClient(conn)
+	cur, err := NewE2EClientWithGenesis(conn, c.genesisHead)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -89,6 +108,7 @@ func (c *ReconnectingE2EClient) supervise() {
 		if c.ctx.Err() != nil {
 			return
 		}
+		cur.Close()
 		c.mu.Lock()
 		c.cur = nil
 		c.mu.Unlock()
@@ -149,6 +169,21 @@ func (c *ReconnectingE2EClient) emitState(connected bool) {
 	case c.states <- connected:
 	case <-c.ctx.Done():
 	}
+}
+
+// DeviceAuthorized reports whether pub is authorized by the live client's synced
+// trust log (false while disconnected or when trust-log sync is off).
+func (c *ReconnectingE2EClient) DeviceAuthorized(pub []byte) bool {
+	cur := c.current()
+	return cur != nil && cur.DeviceAuthorized(pub)
+}
+
+// TrustHead returns the live client's trust-log HEAD (nil while disconnected/off).
+func (c *ReconnectingE2EClient) TrustHead() []byte {
+	if cur := c.current(); cur != nil {
+		return cur.TrustHead()
+	}
+	return nil
 }
 
 // Call routes to the live E2E client, erroring promptly when disconnected.
