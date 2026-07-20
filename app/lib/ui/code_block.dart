@@ -26,21 +26,205 @@ String safeFence(String body) {
   return '`' * n;
 }
 
-/// Renders markdown with app-consistent code blocks: fenced code goes through the
-/// same [codeView] renderer standalone blocks use, so it gets syntax highlighting
-/// and is copyable. Wrapped in a [SelectionArea] so prose (and fenced code, which
-/// renders with `selectable: false` to avoid a forbidden nested SelectionArea) is
-/// selectable via the native long-press → Copy toolbar.
-Widget appMarkdown(String data) => SelectionArea(
-      child: Builder(
-        builder: (context) => GptMarkdown(
-          data,
-          onLinkTap: (url, title) => showLinkActions(context, url),
-          codeBuilder: (context, name, code, closed) =>
-              codeView(code, lang: name, selectable: false),
+/// Renders markdown with syntax-highlighted code blocks. Fenced code renders
+/// with `selectable: false` to avoid a forbidden nested SelectionArea. The
+/// toolbar's "Copy Markdown" action copies raw source since native Copy yields
+/// rendered text with the markup stripped.
+Widget appMarkdown(String data) => _SelectableMarkdown(data);
+
+class _SelectableMarkdown extends StatefulWidget {
+  const _SelectableMarkdown(this.data);
+  final String data;
+  @override
+  State<_SelectableMarkdown> createState() => _SelectableMarkdownState();
+}
+
+class _SelectableMarkdownState extends State<_SelectableMarkdown> {
+  // Mutated without setState — read only when "Copy Markdown" fires.
+  String? _selected;
+
+  @override
+  Widget build(BuildContext context) => SelectionArea(
+        onSelectionChanged: (c) => _selected = c?.plainText,
+        contextMenuBuilder: (_, state) =>
+            AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: [
+            ...state.contextMenuButtonItems,
+            ContextMenuButtonItem(
+              label: 'Copy Markdown',
+              onPressed: () {
+                final md = extractMarkdown(widget.data, _selected);
+                if (md == null) {
+                  _showSnack(context, "Couldn't copy markdown source");
+                } else {
+                  copyToClipboard(context, md);
+                }
+                state.hideToolbar();
+                state.clearSelection();
+              },
+            ),
+          ],
         ),
-      ),
-    );
+        child: Builder(
+          builder: (context) => GptMarkdown(
+            widget.data,
+            onLinkTap: (url, title) => showLinkActions(context, url),
+            codeBuilder: (context, name, code, closed) =>
+                codeView(code, lang: name, selectable: false),
+          ),
+        ),
+      );
+}
+
+/// Maps a rendered [selected] range back to the source lines it spans, returned
+/// verbatim; null when it can't be anchored. The render is flattened text with
+/// markup stripped, so matching is line-granular, not char-precise.
+///
+/// Matching is coarse: wide table selections fall back to the whole block.
+/// Per-line reconstruction would tighten it, if that ever matters.
+String? extractMarkdown(String source, String? selected) {
+  final sel = _collapse(selected ?? '');
+  if (sel.isEmpty) return null;
+  final lines = source.split('\n');
+  final range = _inferMarkdownRange(lines, sel);
+  if (range == null) return null;
+  return lines.sublist(range.$1, range.$2 + 1).join('\n');
+}
+
+final _wsRe = RegExp(r'\s+');
+final _blockquoteRe = RegExp(r'^\s*(>\s?)+');
+final _headingRe = RegExp(r'^\s*#{1,6}\s+');
+final _listMarkerRe = RegExp(r'^\s*([-*+]|\d+[.)])\s+');
+final _taskBoxRe = RegExp(r'^\s*\[[ xX]\]\s+');
+final _linkRe = RegExp(r'!?\[([^\]]*)\]\([^)]*\)');
+final _fenceRe = RegExp(r'^\s*(`{3,}|~{3,})');
+final _inlineCodeRe = RegExp(r'`[^`]+`');
+
+String _collapse(String s) => s.replaceAll(_wsRe, ' ').trim().toLowerCase();
+
+/// Strips markdown markers from a source [line] so it reads like its rendered
+/// text. Inline-code spans are left intact (backticks aside): their `* _ |`
+/// render literally, so stripping them would break the match.
+String _normalizeMdLine(String line) {
+  var s = line;
+  s = s.replaceFirst(_blockquoteRe, '');
+  s = s.replaceFirst(_headingRe, '');
+  s = s.replaceFirst(_listMarkerRe, '');
+  s = s.replaceFirst(_taskBoxRe, '');
+
+  final out = StringBuffer();
+  var i = 0;
+  for (final m in _inlineCodeRe.allMatches(s)) {
+    out.write(_stripInlineMarkers(s.substring(i, m.start)));
+    out.write(m[0]!.substring(1, m[0]!.length - 1));
+    i = m.end;
+  }
+  out.write(_stripInlineMarkers(s.substring(i)));
+  return _collapse(out.toString());
+}
+
+String _stripInlineMarkers(String s) => s
+    .replaceAllMapped(_linkRe, (m) => m[1] ?? '')
+    .replaceAll('**', '')
+    .replaceAll('__', '')
+    .replaceAll('~~', '')
+    .replaceAll('*', '')
+    .replaceAll('_', '')
+    .replaceAll('`', '')
+    .replaceAll('|', ' ');
+
+/// Anchors [sel] to an inclusive source line range, or null when unmatched.
+///
+/// Grows a contiguous run downward from the first matching line while the join
+/// of normalized lines stays a prefix of [sel]. Staying contiguous is what keeps
+/// it from jumping to a distant duplicate line.
+(int, int)? _inferMarkdownRange(List<String> lines, String sel) {
+  final norm = [for (final l in lines) _normalizeMdLine(l)];
+  final lead = sel.substring(0, sel.length < 24 ? sel.length : 24);
+
+  var start = -1;
+  for (var i = 0; i < norm.length; i++) {
+    if (norm[i].isEmpty) continue;
+    if (sel.startsWith(norm[i]) || norm[i].contains(lead)) {
+      start = i;
+      break;
+    }
+  }
+  if (start == -1) return null;
+
+  // The selection may begin mid-line, so start from where [lead] appears.
+  final p = norm[start].indexOf(lead);
+  var acc = p > 0 ? norm[start].substring(p) : norm[start];
+
+  var end = start;
+  if (!acc.startsWith(sel)) {
+    for (var j = start + 1; j < norm.length; j++) {
+      if (norm[j].isEmpty) continue;
+      final cand = '$acc ${norm[j]}';
+      if (sel.startsWith(cand)) {
+        acc = cand;
+        end = j;
+        if (acc.length >= sel.length) break; // whole selection consumed
+      } else if (cand.startsWith(sel)) {
+        end = j; // selection ends partway through this line
+        break;
+      } else {
+        break;
+      }
+    }
+  }
+  return _expandToConstructs(lines, start, end);
+}
+
+/// Grows [start]/[end] outward to fully cover any table or fenced-code block an
+/// anchor landed inside, so those are never copied half-cut.
+(int, int) _expandToConstructs(List<String> lines, int start, int end) {
+  // Single pass is safe because fence and table ranges are disjoint; a
+  // fixed-point loop would only be needed if overlapping constructs appear.
+  for (final (lo, hi) in [..._fenceRanges(lines), ..._tableRanges(lines)]) {
+    if (start > lo && start <= hi) start = lo;
+    if (end < hi && end >= lo) end = hi;
+  }
+  return (start, end);
+}
+
+/// Inclusive line ranges of fenced code blocks (``` or ~~~, 3+). An unclosed
+/// fence runs to the last line.
+List<(int, int)> _fenceRanges(List<String> lines) {
+  final out = <(int, int)>[];
+  int? open;
+  for (var i = 0; i < lines.length; i++) {
+    if (!_fenceRe.hasMatch(lines[i])) continue;
+    if (open == null) {
+      open = i;
+    } else {
+      out.add((open, i));
+      open = null;
+    }
+  }
+  if (open != null) out.add((open, lines.length - 1));
+  return out;
+}
+
+/// Inclusive line ranges of pipe tables (2+ contiguous lines starting with `|`).
+List<(int, int)> _tableRanges(List<String> lines) {
+  bool isRow(int k) => lines[k].trimLeft().startsWith('|');
+  final out = <(int, int)>[];
+  var i = 0;
+  while (i < lines.length) {
+    if (isRow(i)) {
+      final s = i;
+      while (i < lines.length && isRow(i)) {
+        i++;
+      }
+      if (i - s >= 2) out.add((s, i - 1));
+    } else {
+      i++;
+    }
+  }
+  return out;
+}
 
 /// Renders [body] as a standalone code block (see [codeView]).
 Widget codeBlock(String body,
@@ -359,9 +543,14 @@ Future<void> _openExternalUrl(String url) async {
 /// messenger is available.
 void copyToClipboard(BuildContext context, String text) {
   Clipboard.setData(ClipboardData(text: text));
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-    content: Text('Copied'),
-    duration: Duration(seconds: 1),
+  _showSnack(context, 'Copied');
+}
+
+/// Shows a brief snackbar with [message] when a messenger is available.
+void _showSnack(BuildContext context, String message) {
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+    content: Text(message),
+    duration: const Duration(seconds: 1),
   ));
 }
 

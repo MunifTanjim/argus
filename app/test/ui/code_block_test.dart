@@ -4,6 +4,58 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/code_block.dart';
 
 void main() {
+  test('extractMarkdown anchors a prose line, restoring its markers', () {
+    const src =
+        '# Title\n\nSome **bold** and a [link](http://x).\n\nTail para.';
+    expect(extractMarkdown(src, 'Some bold and a link.'),
+        'Some **bold** and a [link](http://x).');
+  });
+
+  test('extractMarkdown expands a table hit to the whole table', () {
+    const src = 'before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nafter';
+    // Cells serialize without pipes ("a b"), so the selection still anchors.
+    expect(extractMarkdown(src, 'a b'), '| a | b |\n|---|---|\n| 1 | 2 |');
+  });
+
+  test('extractMarkdown expands a fenced-code hit to include the fences', () {
+    const src = 'p\n\n```dart\nvoid main() {}\n```\n\nq';
+    expect(
+        extractMarkdown(src, 'void main() {}'), '```dart\nvoid main() {}\n```');
+  });
+
+  test('extractMarkdown spans multiple lines from lead to tail', () {
+    const src = 'one\ntwo\nthree\nfour';
+    expect(extractMarkdown(src, 'two three'), 'two\nthree');
+  });
+
+  test('extractMarkdown anchors to the first occurrence, not across duplicates',
+      () {
+    expect(extractMarkdown('alpha\nbeta\nalpha\ngamma', 'alpha'), 'alpha');
+  });
+
+  test('extractMarkdown expands a table data-row hit to the whole table', () {
+    const src = 'before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nafter';
+    expect(extractMarkdown(src, '1 2'), '| a | b |\n|---|---|\n| 1 | 2 |');
+  });
+
+  test('extractMarkdown restores markers across every spanned line', () {
+    const src = 'A **bold** word.\nAnother *italic* one.';
+    expect(extractMarkdown(src, 'A bold word. Another italic one.'), src);
+  });
+
+  test('extractMarkdown keeps inline-code markers, anchoring past them', () {
+    // Anchors the second line only if `|` inside inline code survives.
+    const src = 'First line.\nCall `foo(a|b)` now.';
+    expect(extractMarkdown(src, 'First line. Call foo(a|b) now.'), src);
+  });
+
+  test('extractMarkdown returns null when unanchorable', () {
+    const src = 'hello world';
+    expect(extractMarkdown(src, ''), isNull);
+    expect(extractMarkdown(src, 'nothing like this at all zzz'), isNull);
+    expect(extractMarkdown(src, null), isNull);
+  });
+
   test('safeFence is at least 3 and longer than any inner run', () {
     expect(safeFence('plain text'), '```');
     expect(safeFence('has ``` fence'), '````');
