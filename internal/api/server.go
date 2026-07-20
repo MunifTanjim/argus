@@ -21,10 +21,11 @@ type Notifier interface {
 // Server dispatches JSON-RPC requests and streams notifications to clients. Each
 // accepted connection becomes a Peer routed through the shared handler registry.
 type Server struct {
-	mu        sync.RWMutex
-	handlers  map[string]HandlerFunc
-	onConnect func(n Notifier) (cleanup func())
-	log       *slog.Logger // optional per-request logging; nil disables it
+	mu         sync.RWMutex
+	handlers   map[string]HandlerFunc
+	onConnect  func(n Notifier) (cleanup func())
+	relayFrame func(RelayFrame) // installed via SetRelayFrameHandler; nil drops relay frames
+	log        *slog.Logger     // optional per-request logging; nil disables it
 }
 
 // NewServer returns an empty Server.
@@ -55,6 +56,16 @@ func (s *Server) OnConnect(fn func(n Notifier) (cleanup func())) {
 	s.onConnect = fn
 }
 
+// SetRelayFrameHandler installs a handler invoked for every relay frame (one
+// carrying a Route header) on any connection this server serves. A single
+// connection-agnostic handler suffices because relay routing is keyed by chan_id.
+// Nil (the default) drops relay frames — preserving pre-relay behavior.
+func (s *Server) SetRelayFrameHandler(fn func(RelayFrame)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.relayFrame = fn
+}
+
 // Serve accepts connections on l until the listener is closed.
 func (s *Server) Serve(l net.Listener) error {
 	for {
@@ -75,7 +86,10 @@ func (s *Server) ServeConn(netConn net.Conn) {
 // ServeConnContext is ServeConn with a connection-scoped base context, whose
 // values (e.g. an auth Principal) reach every request served on the connection.
 func (s *Server) ServeConnContext(ctx context.Context, netConn net.Conn) {
-	peer := NewPeer(netConn, PeerOptions{Dispatch: s.dispatch, BaseContext: ctx})
+	s.mu.RLock()
+	relayFrame := s.relayFrame
+	s.mu.RUnlock()
+	peer := NewPeer(netConn, PeerOptions{Dispatch: s.dispatch, BaseContext: ctx, OnRelayFrame: relayFrame})
 	defer peer.Close()
 
 	s.mu.RLock()

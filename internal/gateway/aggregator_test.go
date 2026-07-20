@@ -19,6 +19,7 @@ type callRecord struct {
 
 type fakeSource struct {
 	id, label string
+	idPubKey  string
 	snap      []session.Session
 	events    chan registry.Event
 	done      chan struct{}
@@ -36,9 +37,10 @@ func newFakeSource(id, label string, snap ...session.Session) *fakeSource {
 	}
 }
 
-func (f *fakeSource) ID() string      { return f.id }
-func (f *fakeSource) Label() string   { return f.label }
-func (f *fakeSource) Version() string { return "" }
+func (f *fakeSource) ID() string             { return f.id }
+func (f *fakeSource) Label() string          { return f.label }
+func (f *fakeSource) Version() string        { return "" }
+func (f *fakeSource) IdentityPubKey() string { return f.idPubKey }
 func (f *fakeSource) Capabilities() api.NodeCapabilities {
 	return api.NodeCapabilities{SpawnSession: true}
 }
@@ -282,5 +284,55 @@ func TestNodeIDFromParams(t *testing.T) {
 	id, err := nodeIDFromParams(json.RawMessage(`{"node_id":"home","name":"x"}`))
 	if err != nil || id != "home" {
 		t.Fatalf("want home, got %q err %v", id, err)
+	}
+}
+
+func TestAggregatorRosterAndEvents(t *testing.T) {
+	a := New(50 * time.Millisecond)
+	sub, cancel := a.SubscribeRoster()
+	defer cancel()
+
+	src := newFakeSource("n1", "n1-box")
+	src.idPubKey = "PUB1"
+	a.AddSource(src)
+
+	// added
+	select {
+	case ev := <-sub:
+		if ev.Type != api.NodeEventAdded || ev.Node.ID != "n1" ||
+			ev.Node.IdentityPubKey != "PUB1" || !ev.Node.Online {
+			t.Fatalf("added event = %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no added roster event")
+	}
+
+	// snapshot
+	if r := a.Roster(); len(r) != 1 || r[0].ID != "n1" || r[0].IdentityPubKey != "PUB1" || !r[0].Online {
+		t.Fatalf("roster = %+v", r)
+	}
+
+	// offline on disconnect
+	close(src.done)
+	select {
+	case ev := <-sub:
+		if ev.Type != api.NodeEventOffline || ev.Node.Online {
+			t.Fatalf("offline event = %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no offline roster event")
+	}
+
+	// removed after grace
+	select {
+	case ev := <-sub:
+		if ev.Type != api.NodeEventRemoved {
+			t.Fatalf("removed event = %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no removed roster event")
+	}
+	if r := a.Roster(); len(r) != 0 {
+		t.Errorf("roster not empty after removal: %+v", r)
 	}
 }

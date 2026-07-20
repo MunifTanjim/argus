@@ -50,10 +50,13 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 // runUplink dials the gateway and pumps events until the connection or ctx ends. It
 // returns whether the dial succeeded (to drive backoff reset).
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
+	resp := d.newRelayResponder()
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		// The gateway issues control requests (capture/input/respond/...) down this
 		// link; serve them through the same handlers local clients use.
 		Dispatch: d.server.DispatchFunc(),
+		// Relayed E2E frames from clients are terminated by the responder.
+		OnRelayFrame: resp.onFrame,
 	})
 	if err != nil {
 		if ctx.Err() == nil {
@@ -61,7 +64,9 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		}
 		return false
 	}
+	resp.peer.Store(peer)
 	defer peer.Close()
+	defer resp.closeAll()
 	d.log.Info("gateway uplink established", "url", url)
 
 	// Subscribe before the gateway pulls our snapshot so no live event is lost.

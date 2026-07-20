@@ -23,6 +23,9 @@ type Source interface {
 	Version() string
 	// Capabilities reports what the node supports (e.g. spawn = tmux present).
 	Capabilities() api.NodeCapabilities
+	// IdentityPubKey is the node's Noise static public key (base64), for E2E channel
+	// setup. Empty when the node has no key (pre-E2E / co-located).
+	IdentityPubKey() string
 	// Snapshot returns the source's current sessions (node-local ids).
 	Snapshot() []session.Session
 	// Subscribe returns the source's live event stream and a cancel function.
@@ -37,6 +40,7 @@ type Source interface {
 // to the Source interface, with no serialization or network hop.
 type InProcessSource struct {
 	id, label, version string
+	identityPubKey     string
 	caps               api.NodeCapabilities
 	reg                *registry.Registry
 	dispatch           api.DispatchFunc
@@ -44,13 +48,14 @@ type InProcessSource struct {
 }
 
 // NewInProcessSource wraps a local registry and control dispatch as a Source.
-func NewInProcessSource(id, label, version string, caps api.NodeCapabilities, reg *registry.Registry, dispatch api.DispatchFunc) *InProcessSource {
-	return &InProcessSource{id: id, label: label, version: version, caps: caps, reg: reg, dispatch: dispatch, done: make(chan struct{})}
+func NewInProcessSource(id, label, version, identityPubKey string, caps api.NodeCapabilities, reg *registry.Registry, dispatch api.DispatchFunc) *InProcessSource {
+	return &InProcessSource{id: id, label: label, version: version, identityPubKey: identityPubKey, caps: caps, reg: reg, dispatch: dispatch, done: make(chan struct{})}
 }
 
 func (s *InProcessSource) ID() string                                 { return s.id }
 func (s *InProcessSource) Label() string                              { return s.label }
 func (s *InProcessSource) Version() string                            { return s.version }
+func (s *InProcessSource) IdentityPubKey() string                     { return s.identityPubKey }
 func (s *InProcessSource) Capabilities() api.NodeCapabilities         { return s.caps }
 func (s *InProcessSource) Snapshot() []session.Session                { return s.reg.Snapshot() }
 func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }

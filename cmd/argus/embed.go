@@ -227,6 +227,11 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 	d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 	d.SetVersion(version)
+	if kp, err := node.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
+		log.With("scope", "node").Warn("identity load failed; E2E unavailable", "err", err)
+	} else {
+		d.SetIdentityKey(kp)
+	}
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))

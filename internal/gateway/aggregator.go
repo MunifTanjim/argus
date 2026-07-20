@@ -26,17 +26,20 @@ const fanoutTimeout = 15 * time.Second
 type Aggregator struct {
 	grace time.Duration
 
-	mu       sync.Mutex
-	sessions map[string]session.Session // composite id -> session
-	sources  map[string]*srcState       // node id -> state
-	subs     map[int]chan registry.Event
-	nextSub  int
+	mu         sync.Mutex
+	sessions   map[string]session.Session // composite id -> session
+	sources    map[string]*srcState       // node id -> state
+	subs       map[int]chan registry.Event
+	nextSub    int
+	rosterSubs map[int]chan api.NodeEvent
+	nextRoster int
 }
 
 type srcState struct {
 	src    Source
 	stop   chan struct{}
 	halted bool
+	online bool
 	timer  *time.Timer // offline-removal timer; non-nil only while disconnected
 }
 
@@ -46,10 +49,11 @@ func New(grace time.Duration) *Aggregator {
 		grace = DefaultOfflineGrace
 	}
 	return &Aggregator{
-		grace:    grace,
-		sessions: make(map[string]session.Session),
-		sources:  make(map[string]*srcState),
-		subs:     make(map[int]chan registry.Event),
+		grace:      grace,
+		sessions:   make(map[string]session.Session),
+		sources:    make(map[string]*srcState),
+		subs:       make(map[int]chan registry.Event),
+		rosterSubs: make(map[int]chan api.NodeEvent),
 	}
 }
 
@@ -99,12 +103,16 @@ func (a *Aggregator) NodeLabel(nodeID string) string {
 // node id replaces the prior source (cancelling its pending removal), never duplicates.
 func (a *Aggregator) AddSource(src Source) {
 	a.mu.Lock()
+	evType := api.NodeEventAdded
 	if old, ok := a.sources[src.ID()]; ok {
 		old.halt()
+		evType = api.NodeEventOnline // reconnect
 	}
-	st := &srcState{src: src, stop: make(chan struct{})}
+	st := &srcState{src: src, stop: make(chan struct{}), online: true}
 	a.sources[src.ID()] = st
+	ev := api.NodeEvent{Type: evType, Node: descriptor(src.ID(), st)}
 	a.mu.Unlock()
+	a.publishRoster(ev)
 	go a.ingest(st)
 }
 
@@ -191,6 +199,7 @@ func (a *Aggregator) handleGone(st *srcState) {
 		a.mu.Unlock()
 		return
 	}
+	st.online = false
 	var updated []session.Session
 	for id, s := range a.sessions {
 		if s.NodeID == nodeID && !s.Offline {
@@ -200,8 +209,10 @@ func (a *Aggregator) handleGone(st *srcState) {
 		}
 	}
 	st.timer = time.AfterFunc(a.grace, func() { a.removeNode(nodeID, st) })
+	ev := api.NodeEvent{Type: api.NodeEventOffline, Node: descriptor(nodeID, st)}
 	a.mu.Unlock()
 
+	a.publishRoster(ev)
 	for _, s := range updated {
 		a.publish(registry.Event{Type: registry.EventUpdated, Session: s})
 	}
@@ -221,8 +232,10 @@ func (a *Aggregator) removeNode(nodeID string, st *srcState) {
 		}
 	}
 	delete(a.sources, nodeID)
+	ev := api.NodeEvent{Type: api.NodeEventRemoved, Node: descriptor(nodeID, st)}
 	a.mu.Unlock()
 
+	a.publishRoster(ev)
 	for _, s := range removed {
 		a.publish(registry.Event{Type: registry.EventRemoved, Session: s})
 	}
@@ -352,6 +365,61 @@ func nodeIDFromParams(params json.RawMessage) (string, error) {
 		}
 	}
 	return m.NodeID, nil
+}
+
+// descriptor builds the roster view of a source. Caller holds a.mu.
+func descriptor(id string, st *srcState) api.NodeDescriptor {
+	return api.NodeDescriptor{
+		ID:             id,
+		Label:          st.src.Label(),
+		Version:        st.src.Version(),
+		Capabilities:   st.src.Capabilities(),
+		IdentityPubKey: st.src.IdentityPubKey(),
+		Online:         st.online,
+	}
+}
+
+// Roster lists the connected nodes (online + within-grace offline) sorted by label,
+// each with its identity pubkey and online flag — the client's E2E discovery view.
+func (a *Aggregator) Roster() []api.NodeDescriptor {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]api.NodeDescriptor, 0, len(a.sources))
+	for id, st := range a.sources {
+		out = append(out, descriptor(id, st))
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+	return out
+}
+
+// SubscribeRoster returns the roster event stream and a cancel func, mirroring
+// Subscribe (buffered, drop-on-slow-consumer).
+func (a *Aggregator) SubscribeRoster() (<-chan api.NodeEvent, func()) {
+	ch := make(chan api.NodeEvent, 64)
+	a.mu.Lock()
+	id := a.nextRoster
+	a.nextRoster++
+	a.rosterSubs[id] = ch
+	a.mu.Unlock()
+	return ch, func() {
+		a.mu.Lock()
+		if _, ok := a.rosterSubs[id]; ok {
+			delete(a.rosterSubs, id)
+			close(ch)
+		}
+		a.mu.Unlock()
+	}
+}
+
+func (a *Aggregator) publishRoster(ev api.NodeEvent) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, ch := range a.rosterSubs {
+		select {
+		case ch <- ev:
+		default: // drop for a slow subscriber
+		}
+	}
 }
 
 func (a *Aggregator) publish(ev registry.Event) {

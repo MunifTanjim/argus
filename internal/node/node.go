@@ -4,6 +4,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -37,6 +39,9 @@ type Node struct {
 	id      string // stable node id announced to the gateway (composite-id prefix)
 	label   string // human-friendly node name (e.g. hostname)
 	version string // binary version, reported to clients via identify/server.info
+
+	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
+	identityPubB64 string      // base64 public half, announced to the gateway
 
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
@@ -125,6 +130,13 @@ func (d *Node) SetIdentity(id, label string) {
 // SetVersion records the node's binary version, reported to clients via
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
+
+// SetIdentityKey sets the node's Noise static keypair, whose public half is
+// announced to the gateway (identity_pubkey) for E2E channel setup. Call before Run.
+func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
+	d.identity = kp
+	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
 
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.

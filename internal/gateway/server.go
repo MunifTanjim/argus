@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,6 +116,11 @@ type Server struct {
 
 	termMu sync.Mutex
 	terms  map[string]termEntry // term_id -> open terminal
+
+	relayMu   sync.Mutex
+	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
+	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
+	nextChan  atomic.Uint64            // chan_id allocator
 }
 
 // NewServer builds a gateway Server over agg.
@@ -125,7 +131,10 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		subs:        map[string]subEntry{},
 		terms:       map[string]termEntry{},
 	}
+	s.channels = map[string]*relayChannel{}
+	s.nodePeers = map[string]*api.Peer{}
 	s.clientSrv = s.buildClientServer()
+	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
 	return s
 }
 
@@ -258,6 +267,131 @@ func termIDFromParams(params json.RawMessage) string {
 // mustMarshal marshals v to JSON, ignoring errors (for well-known types only).
 func mustMarshal(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
+// relayQueueDepth bounds a channel's per-direction pump queue. On overflow the
+// channel is torn down (a dropped Noise record would desync the AEAD counter),
+// isolated from other channels.
+const relayQueueDepth = 64
+
+// relayChannel is one client<->node E2E channel. The gateway forwards opaque
+// frames between the two peers by chan_id, never reading the sealed Body. Two pump
+// goroutines (one per direction) decouple the peers' read loops.
+type relayChannel struct {
+	chanID   string
+	client   *api.Peer
+	node     *api.Peer
+	toNode   chan []byte
+	toClient chan []byte
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+// addChannel records a channel and starts its two pump goroutines.
+func (s *Server) addChannel(chanID string, client, node *api.Peer) {
+	ch := &relayChannel{
+		chanID: chanID, client: client, node: node,
+		toNode: make(chan []byte, relayQueueDepth), toClient: make(chan []byte, relayQueueDepth),
+		stop: make(chan struct{}),
+	}
+	s.relayMu.Lock()
+	s.channels[chanID] = ch
+	s.relayMu.Unlock()
+	go s.relayPump(ch, ch.toNode, node)
+	go s.relayPump(ch, ch.toClient, client)
+}
+
+// dropChannel removes a channel and stops its pumps. It does not close the peers
+// (they may host other channels). Idempotent.
+func (s *Server) dropChannel(chanID string) {
+	s.relayMu.Lock()
+	ch, ok := s.channels[chanID]
+	if ok {
+		delete(s.channels, chanID)
+	}
+	s.relayMu.Unlock()
+	if ok {
+		ch.stopOnce.Do(func() { close(ch.stop) })
+	}
+}
+
+// dropChannelsWhere tears down every channel whose relayChannel matches pred. It
+// collects matches under relayMu, then drops them after unlocking (dropChannel
+// re-acquires the lock).
+func (s *Server) dropChannelsWhere(pred func(*relayChannel) bool) {
+	s.relayMu.Lock()
+	var toDrop []string
+	for cid, ch := range s.channels {
+		if pred(ch) {
+			toDrop = append(toDrop, cid)
+		}
+	}
+	s.relayMu.Unlock()
+	for _, cid := range toDrop {
+		s.dropChannel(cid)
+	}
+}
+
+// relayPump drains q and forwards each frame to dst verbatim. A write error (dst
+// gone or WriteTimeout) tears the channel down.
+func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
+	for {
+		select {
+		case <-ch.stop:
+			return
+		case raw := <-q:
+			if err := dst.SendRawFrame(raw); err != nil {
+				s.dropChannel(ch.chanID)
+				return
+			}
+		}
+	}
+}
+
+// enqueue hands a frame to a channel's pump. On a full queue it tears the channel
+// down (never drops a frame — that would desync the sealed stream).
+func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
+	select {
+	case <-ch.stop:
+	case q <- raw:
+	default:
+		s.dropChannel(ch.chanID)
+	}
+}
+
+func (s *Server) forwardFromClient(f api.RelayFrame) {
+	s.relayMu.Lock()
+	ch := s.channels[f.Route.ChanID]
+	s.relayMu.Unlock()
+	if ch != nil {
+		s.enqueue(ch, ch.toNode, f.Raw)
+	}
+}
+
+func (s *Server) forwardFromNode(f api.RelayFrame) {
+	s.relayMu.Lock()
+	ch := s.channels[f.Route.ChanID]
+	s.relayMu.Unlock()
+	if ch != nil {
+		s.enqueue(ch, ch.toClient, f.Raw)
+	}
+}
+
+// addNodePeer records a live node uplink as a relay.open target.
+func (s *Server) addNodePeer(id string, peer *api.Peer) {
+	s.relayMu.Lock()
+	s.nodePeers[id] = peer
+	s.relayMu.Unlock()
+}
+
+// removeNodePeer drops a node uplink and tears down every channel bound to it.
+func (s *Server) removeNodePeer(id string, peer *api.Peer) {
+	s.relayMu.Lock()
+	if s.nodePeers[id] == peer {
+		delete(s.nodePeers, id)
+	}
+	s.relayMu.Unlock()
+	s.dropChannelsWhere(func(ch *relayChannel) bool { return ch.node == peer })
+}
+
 // routeByNodeID builds a handler that requires node_id and routes to that node.
 func (s *Server) routeByNodeID(method string) func(context.Context, json.RawMessage) (any, error) {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
@@ -345,6 +479,51 @@ func (s *Server) buildClientServer() *api.Server {
 	// server.info returns version + connected nodes (for settings view and spawn picker).
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
+	})
+
+	// nodes.list is the E2E discovery view: each node's id/label/caps + Noise pubkey
+	// + online flag. Additive alongside server.info.
+	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
+		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+	})
+
+	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
+	srv.Handle(api.MethodRelayOpen, func(ctx context.Context, params json.RawMessage) (any, error) {
+		n, ok := api.NotifierFrom(ctx)
+		clientPeer, isPeer := n.(*api.Peer)
+		if !ok || !isPeer {
+			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client peer"}
+		}
+		p, err := api.Decode[api.RelayOpenParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		s.relayMu.Lock()
+		nodePeer := s.nodePeers[p.NodeID]
+		s.relayMu.Unlock()
+		if nodePeer == nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + p.NodeID}
+		}
+		chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
+		s.addChannel(chanID, clientPeer, nodePeer)
+		return api.RelayOpenResult{ChanID: chanID}, nil
+	})
+
+	// relay.close tears down a channel this client owns.
+	srv.Handle(api.MethodRelayClose, func(ctx context.Context, params json.RawMessage) (any, error) {
+		n, _ := api.NotifierFrom(ctx)
+		clientPeer, _ := n.(*api.Peer)
+		p, err := api.Decode[api.RelayCloseParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		s.relayMu.Lock()
+		ch := s.channels[p.ChanID]
+		s.relayMu.Unlock()
+		if ch != nil && ch.client == clientPeer {
+			s.dropChannel(p.ChanID)
+		}
+		return nil, nil
 	})
 
 	srv.Handle(api.MethodSessionSpawn, s.routeByNodeIDOrSole(api.MethodSessionSpawn))
@@ -520,11 +699,16 @@ func (s *Server) buildClientServer() *api.Server {
 		return nil, nil
 	})
 
-	// Stream the merged registry to each client: snapshot first, then live events.
+	// Stream the merged registry AND the node roster to each client: snapshots
+	// first, then live events (session.event + node.event) on one goroutine.
 	srv.OnConnect(func(n api.Notifier) func() {
 		events, cancel := s.agg.Subscribe()
 		for _, sess := range s.agg.Snapshot() {
 			_ = n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: sess})
+		}
+		rosterEvents, rosterCancel := s.agg.SubscribeRoster()
+		for _, nd := range s.agg.Roster() {
+			_ = n.Notify(api.MethodNodeEvent, api.NodeEvent{Type: api.NodeEventAdded, Node: nd})
 		}
 		done := make(chan struct{})
 		go func() {
@@ -539,12 +723,23 @@ func (s *Server) buildClientServer() *api.Server {
 					if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
 						return
 					}
+				case ev, ok := <-rosterEvents:
+					if !ok {
+						return
+					}
+					if err := n.Notify(api.MethodNodeEvent, ev); err != nil {
+						return
+					}
 				}
 			}
 		}()
 		return func() {
 			close(done)
 			cancel()
+			rosterCancel()
+			if clientPeer, ok := n.(*api.Peer); ok {
+				s.dropChannelsWhere(func(ch *relayChannel) bool { return ch.client == clientPeer })
+			}
 			for _, sub := range s.subsForClient(n) {
 				s.dropSub(sub.subID)
 				_, _ = s.agg.RouteToNode(context.Background(), sub.nodeID,
@@ -778,6 +973,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
+		OnRelayFrame:              func(f api.RelayFrame) { s.forwardFromNode(f) },
 		OnNotify: func(n api.Notification) {
 			switch n.Method {
 			case api.MethodSessionEvent:
@@ -886,6 +1082,8 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.Capabilities, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.Capabilities, peer, events))
+	s.addNodePeer(id.ID, peer)
+	defer s.removeNodePeer(id.ID, peer)
 	<-peer.Done()
 }

@@ -74,6 +74,11 @@ func newStartCmd(version string) *cobra.Command {
 			d := node.New()
 			d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 			d.SetVersion(version)
+			if kp, err := node.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
+				return fail(cmd, err)
+			} else {
+				d.SetIdentityKey(kp)
+			}
 			d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 			// Standalone node logs to the configured logger (the embedded node, sharing a
 			// TUI's terminal, stays at its discard default).
@@ -306,7 +311,7 @@ type gatewayServeOpts struct {
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	d := o.node
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.Capabilities(), d.Registry(), d.DispatchFunc()))
 
 	var store *clienttoken.Store
 	if o.enablePairing {
