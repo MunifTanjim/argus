@@ -192,27 +192,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.checklist),
-            tooltip: 'Tasks',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => SessionTasksScreen(session: live),
-              ),
-            ),
-          ),
-          if (live.branch?.isNotEmpty ?? false)
-            IconButton(
-              icon: const Icon(Icons.difference),
-              tooltip: 'Changes',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChangedFilesScreen(session: live),
-                ),
-              ),
-            ),
-          IconButton(
             icon: const Icon(Icons.terminal),
-            tooltip: 'Live screen',
+            tooltip: 'Live Screen',
             onPressed: live.controllable
                 ? () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -222,14 +203,27 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 : null,
           ),
           PopupMenuButton<String>(
+            position: PopupMenuPosition.under,
             onSelected: (value) async {
-              if (value == 'kill') {
+              if (value == 'tasks') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SessionTasksScreen(session: live),
+                  ),
+                );
+              } else if (value == 'changes') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ChangedFilesScreen(session: live),
+                  ),
+                );
+              } else if (value == 'kill') {
                 if (!live.controllable) return;
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
-                    title: const Text('Kill session?'),
-                    content: const Text('This cannot be undone.'),
+                    title: const Text('Kill Session?'),
+                    content: const Text('This cannot be undone!'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(ctx).pop(false),
@@ -259,10 +253,31 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem<String>(
+                value: 'tasks',
+                child: ListTile(
+                  leading: Icon(Icons.checklist),
+                  title: Text('Tasks'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              if (live.branch?.isNotEmpty ?? false)
+                const PopupMenuItem<String>(
+                  value: 'changes',
+                  child: ListTile(
+                    leading: Icon(Icons.difference),
+                    title: Text('Changes'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               PopupMenuItem<String>(
                 value: 'kill',
                 enabled: live.controllable,
-                child: const Text('Kill session'),
+                child: const ListTile(
+                  leading: Icon(Icons.dangerous),
+                  title: Text('Kill Session'),
+                  contentPadding: EdgeInsets.zero,
+                ),
               ),
             ],
           ),
