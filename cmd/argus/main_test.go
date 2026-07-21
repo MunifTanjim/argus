@@ -36,7 +36,7 @@ func TestConnectGatewayBranch(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", false)
+	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", false, nil)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
 	}
@@ -100,7 +100,10 @@ func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Push.Desktop.Enabled = true
-	d, _ := startEmbeddedNode(ctx, cfg, sock)
+	d, _, err := startEmbeddedNode(ctx, cfg, sock)
+	if err != nil {
+		t.Fatalf("startEmbeddedNode: %v", err)
+	}
 	if !d.DesktopNotifyEnabled() {
 		t.Fatal("embedded node should render desktop notifications when config enables them")
 	}

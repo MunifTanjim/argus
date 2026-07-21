@@ -2,9 +2,11 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -147,6 +149,66 @@ var _ trustCaller = (*fakePeer)(nil)
 
 // Compile-time check: runTrustSync exists and takes *api.Peer (used with context).
 var _ = (*Node).runTrustSync
+
+func TestLoadPinnedGenesisRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	d := New()
+	d.trustPath = filepath.Join(dir, "trustlog-chain")
+	head := bytes.Repeat([]byte{0x7E}, 32)
+	if err := d.writeGenesisHead(head); err != nil {
+		t.Fatalf("writeGenesisHead: %v", err)
+	}
+	got, err := LoadPinnedGenesis(filepath.Join(dir, "trustlog-genesis"))
+	if err != nil {
+		t.Fatalf("LoadPinnedGenesis: %v", err)
+	}
+	if !bytes.Equal(got, head) {
+		t.Fatalf("LoadPinnedGenesis = %x, want %x", got, head)
+	}
+	// Absent file: open mode is legitimate — must return (nil, nil).
+	absent, aerr := LoadPinnedGenesis(filepath.Join(dir, "absent"))
+	if aerr != nil {
+		t.Fatalf("absent genesis should return nil error, got: %v", aerr)
+	}
+	if absent != nil {
+		t.Fatal("absent genesis file should return nil head")
+	}
+	// Present but wrong-length: corrupt — must return an error (fail-closed).
+	corruptPath := filepath.Join(dir, "trustlog-genesis-corrupt")
+	if err := os.WriteFile(corruptPath, []byte("tooshort"), 0o600); err != nil {
+		t.Fatalf("write corrupt genesis: %v", err)
+	}
+	_, cerr := LoadPinnedGenesis(corruptPath)
+	if cerr == nil {
+		t.Fatal("corrupt genesis file (wrong length) should return an error")
+	}
+}
+
+func TestRunTrustSyncPollsLiveEnable(t *testing.T) {
+	trustSyncInterval.Store(int64(10 * time.Millisecond))
+	t.Cleanup(func() { trustSyncInterval.Store(int64(30 * time.Second)) })
+
+	// Build a chain + a fake peer serving it.
+	chain, head, device, _ := seedChain(t, true) // genesis+authorize (existing helper)
+	dir := t.TempDir()
+	d := New()
+	d.trustPath = filepath.Join(dir, "trustlog-chain")
+
+	fp := &fakePeer{pullChain: chain}
+	// runTrustSync must NOT early-return when trust is nil; start it, then enable.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.runTrustSyncLoop(ctx, fp) // test-only loop over trustCaller (see note)
+
+	// Enable after the loop is already running.
+	ss := trustlog.NewSyncStore(head)
+	if err := d.activateTrust(ss, head, d.trustPath); err != nil {
+		t.Fatalf("activateTrust: %v", err)
+	}
+	waitFor(t, "device authorized after live enable", func() bool {
+		return d.TrustStore() != nil && d.TrustStore().DeviceAuthorized(device)
+	})
+}
 
 func TestEnableTrustLogIgnoresCorruptDisk(t *testing.T) {
 	_, head, _, _ := seedChain(t, false)

@@ -25,7 +25,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 		client.SetTrustSyncIntervalForTest(30 * time.Second)
 	})
 
-	// Seed a chain: genesis + authorize one device.
+	// Seed a chain: genesis + authorize one device and the test client.
 	signer, err := trustlog.GenerateSigner()
 	if err != nil {
 		t.Fatalf("GenerateSigner: %v", err)
@@ -38,6 +38,15 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	device := []byte("device-key-0000000000000000000000")[:32]
 	if err := log.AuthorizeDevice(device, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	// The client needs a stable authorized key; node enforcement rejects ephemeral
+	// keys once a trust store is active.
+	clientKP, err := e2e.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("client keypair: %v", err)
+	}
+	if err := log.AuthorizeDevice(clientKP.Public, signer); err != nil {
+		t.Fatalf("AuthorizeDevice client: %v", err)
 	}
 
 	// Real gateway.
@@ -52,6 +61,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	// Real node with the seeded chain persisted, uplinked to the gateway.
 	dir := t.TempDir()
 	chainPath := filepath.Join(dir, "trustlog-chain")
+	// Write after all AuthorizeDevice calls so the persisted chain is complete.
 	if err := os.WriteFile(chainPath, trustlog.MarshalChain(log.Entries()), 0o600); err != nil {
 		t.Fatalf("seed chain: %v", err)
 	}
@@ -68,11 +78,12 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	}
 	go n.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
 
-	// Real client pinned to the same genesis.
+	// Real client pinned to the same genesis. clientKP is authorized in the
+	// genesis chain so the locked node accepts its handshake.
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
-	c, err := client.NewReconnectingE2EClientWithGenesis(ctx, dial, genesisHead)
+	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, genesisHead, clientKP, "")
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}

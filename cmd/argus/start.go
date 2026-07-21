@@ -83,6 +83,34 @@ func newStartCmd(version string) *cobra.Command {
 			// Standalone node logs to the configured logger (the embedded node, sharing a
 			// TUI's terminal, stays at its discard default).
 			d.SetLogger(logger.Scoped("node").L)
+			if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+				logger.Scoped("node").Warn("signer key load failed; locked mode unavailable", "err", err)
+			} else {
+				d.SetSignerKey(kp)
+			}
+			// Prefer explicit config; else re-enable from the node's persisted
+			// genesis (written by lock.init) so a reboot stays locked.
+			// Fail-closed: a non-empty but unusable lock.genesis must not start the node open.
+			head, herr := lockGenesisHead(cfg)
+			if herr != nil {
+				return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to start open): %w", herr))
+			}
+			if head == nil {
+				ph, perr := node.LoadPinnedGenesis(config.GetStatePath("trustlog-genesis"))
+				if perr != nil {
+					return fail(cmd, fmt.Errorf("persisted genesis unusable (refusing to start open): %w", perr))
+				}
+				head = ph
+			}
+			// Always set the chain path so lock.init has somewhere to persist.
+			chainPath := config.GetStatePath("trustlog-chain")
+			if head != nil {
+				if err := d.EnableTrustLog(head, chainPath); err != nil {
+					return fail(cmd, fmt.Errorf("locked mode configured but enabling trust log failed (refusing to start open): %w", err))
+				}
+			} else {
+				d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
+			}
 			clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
 			d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 
@@ -311,7 +339,7 @@ type gatewayServeOpts struct {
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	d := o.node
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
 
 	var store *clienttoken.Store
 	if o.enablePairing {

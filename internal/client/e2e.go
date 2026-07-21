@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -21,11 +23,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
-// Tunable timeouts (vars so tests can shorten them).
-var (
-	handshakeTimeout = 10 * time.Second
-	callTimeout      = 30 * time.Second
-)
+// Tunable timeouts.
+var callTimeout = 30 * time.Second
+
+// handshakeTimeoutNs is how long an initiator waits for the responder's msg2.
+// Stored as nanoseconds in an atomic so SetHandshakeTimeoutForTest is race-free
+// when background goroutines read it concurrently.
+var handshakeTimeoutNs atomic.Int64
 
 // nodeChan is one established E2E channel to a node.
 type nodeChan struct {
@@ -58,17 +62,16 @@ type E2EClient struct {
 	events chan api.Notification
 
 	trust     *trustlog.SyncStore // locked-mode trust-log store; nil when off
+	trustPath string              // locked-mode chain persist path; "" = no persistence
 	trustCtx  context.Context     // cancelled on Close, stops the sync ticker
 	trustStop context.CancelFunc
 }
 
-// NewE2EClient wraps a gateway connection, wiring the relay-frame demux. Generates
-// an ephemeral client Noise static key.
-func NewE2EClient(conn net.Conn) (*E2EClient, error) {
-	static, err := e2e.GenerateKeyPair()
-	if err != nil {
-		return nil, err
-	}
+// NewE2EClientWithIdentity wraps a gateway connection with a caller-provided static
+// identity (persisted, for locked mode) and optional pinned genesis. chainPath, if
+// non-empty, seeds the trust store from disk on construction and persists it on each
+// advance (genesis-pinned Ingest rejects a rolled-back or tampered file).
+func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHead []byte, chainPath string) (*E2EClient, error) {
 	m := &E2EClient{
 		static:   static,
 		byNode:   map[string]*nodeChan{},
@@ -78,23 +81,41 @@ func NewE2EClient(conn net.Conn) (*E2EClient, error) {
 		termNode: map[string]string{},
 		events:   make(chan api.Notification, 256),
 	}
+	if genesisHead != nil {
+		m.trust = trustlog.NewSyncStore(genesisHead)
+		m.trustPath = chainPath
+		// Seed from a persisted chain so a reconnect resumes from the last verified
+		// HEAD (genesis-pinned Ingest rejects a rolled-back/tampered file).
+		if chainPath != "" {
+			if b, err := os.ReadFile(chainPath); err == nil && len(b) > 0 {
+				_, _ = m.trust.Ingest(b)
+			}
+		}
+	}
 	m.peer = api.NewPeer(conn, api.PeerOptions{OnRelayFrame: m.onRelayFrame})
 	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
 	return m, nil
+}
+
+// NewE2EClient wraps a gateway connection, wiring the relay-frame demux. Generates
+// an ephemeral client Noise static key.
+func NewE2EClient(conn net.Conn) (*E2EClient, error) {
+	static, err := e2e.GenerateKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	return NewE2EClientWithIdentity(conn, static, nil, "")
 }
 
 // NewE2EClientWithGenesis is NewE2EClient plus a pinned trust-log genesis head, so
 // the client syncs and verifies the network's trust-log chain. Pass nil head to
 // disable trust-log sync (equivalent to NewE2EClient).
 func NewE2EClientWithGenesis(conn net.Conn, genesisHead []byte) (*E2EClient, error) {
-	m, err := NewE2EClient(conn)
+	static, err := e2e.GenerateKeyPair()
 	if err != nil {
 		return nil, err
 	}
-	if genesisHead != nil {
-		m.trust = trustlog.NewSyncStore(genesisHead)
-	}
-	return m, nil
+	return NewE2EClientWithIdentity(conn, static, genesisHead, "")
 }
 
 // Done is closed when the underlying gateway connection drops.
@@ -111,33 +132,44 @@ func (m *E2EClient) Close() error {
 	return m.peer.Close()
 }
 
-// Connect discovers nodes and opens an E2E channel to each that advertises a key.
+// Connect discovers nodes and opens an E2E channel to each authorized node. In
+// locked mode it pulls the trust log first and silently skips nodes whose identity
+// is not authorized (fail-closed: an empty store opens nothing).
 func (m *E2EClient) Connect() error {
 	var roster api.NodesListResult
 	if err := m.peer.Call(api.MethodNodesList, nil, &roster); err != nil {
 		return fmt.Errorf("client: nodes.list: %w", err)
 	}
+	// Locked mode: pull the trust log before deciding which nodes to open. The store
+	// is already disk-seeded (last verified HEAD), so enforcement is correct even if
+	// this pull fails.
+	if m.trust != nil {
+		m.syncTrustLog()
+	}
 	for _, nd := range roster.Nodes {
 		if nd.IdentityPubKey == "" {
 			continue // no key: cannot open an E2E channel to this node
 		}
-		if err := m.openChannel(nd); err != nil {
+		pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+		if err != nil {
+			continue // bad key: skip (fail-closed; also can't open a channel anyway)
+		}
+		if m.trust != nil && !m.trust.DeviceAuthorized(pub) {
+			continue // unauthorized node: silent exclusion (fail-closed)
+		}
+		if err := m.openChannel(nd, pub); err != nil {
 			return fmt.Errorf("client: open channel to %s: %w", nd.ID, err)
 		}
 	}
 	if m.trust != nil {
-		m.syncTrustLog()
 		go m.trustSyncLoop()
 	}
 	return nil
 }
 
 // openChannel runs relay.open + the Noise IK initiator handshake for one node.
-func (m *E2EClient) openChannel(nd api.NodeDescriptor) error {
-	pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
-	if err != nil {
-		return fmt.Errorf("bad identity pubkey: %w", err)
-	}
+// pub is the decoded identity public key, already checked by Connect.
+func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	var res api.RelayOpenResult
 	if err := m.peer.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: nd.ID}, &res); err != nil {
 		return err
@@ -171,7 +203,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor) error {
 		return nil
 	case <-m.peer.Done():
 		return fmt.Errorf("connection closed during handshake")
-	case <-time.After(handshakeTimeout):
+	case <-time.After(time.Duration(handshakeTimeoutNs.Load())):
 		return fmt.Errorf("handshake timeout")
 	}
 }
@@ -537,10 +569,20 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 }
 
 // clientTrustSyncInterval is how often the client re-pulls the trust-log chain.
-var clientTrustSyncInterval = 30 * time.Second
+// Stored as nanoseconds in an atomic so SetTrustSyncIntervalForTest is race-free
+// when background goroutines read it concurrently.
+var clientTrustSyncInterval atomic.Int64
+
+func init() {
+	clientTrustSyncInterval.Store(int64(30 * time.Second))
+	handshakeTimeoutNs.Store(int64(10 * time.Second))
+}
+
+// SetHandshakeTimeoutForTest overrides the Noise handshake timeout. Test-only.
+func SetHandshakeTimeoutForTest(d time.Duration) { handshakeTimeoutNs.Store(int64(d)) }
 
 // SetTrustSyncIntervalForTest overrides the client's trust-log sync cadence. Test-only.
-func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval = d }
+func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval.Store(int64(d)) }
 
 // syncTrustLog pulls the gateway's trust-log chain and ingests it (genesis-pinned;
 // a rollback/fork/tamper chain is rejected and the current view is kept).
@@ -549,11 +591,53 @@ func (m *E2EClient) syncTrustLog() {
 	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
 		return
 	}
-	_, _ = m.trust.Ingest(got.Chain)
+	changed, err := m.trust.Ingest(got.Chain)
+	if err != nil || !changed || m.trustPath == "" {
+		return
+	}
+	// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
+	_ = m.persistTrustChain()
+}
+
+// persistTrustChain atomically writes the current chain to trustPath (temp file in
+// the same dir, then rename — a reader/reconnect never sees a partial file).
+func (m *E2EClient) persistTrustChain() error {
+	dir := filepath.Dir(m.trustPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".client-trustlog-chain-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, werr := tmp.Write(m.trust.Bytes()); werr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return werr
+	}
+	if serr := tmp.Sync(); serr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return serr
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		os.Remove(tmpName)
+		return cerr
+	}
+	if rerr := os.Rename(tmpName, m.trustPath); rerr != nil {
+		os.Remove(tmpName)
+		return rerr
+	}
+	if dh, derr := os.Open(filepath.Dir(m.trustPath)); derr == nil {
+		_ = dh.Sync()
+		dh.Close()
+	}
+	return nil
 }
 
 func (m *E2EClient) trustSyncLoop() {
-	t := time.NewTicker(clientTrustSyncInterval)
+	t := time.NewTicker(time.Duration(clientTrustSyncInterval.Load()))
 	defer t.Stop()
 	for {
 		select {

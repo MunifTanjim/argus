@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 func cloneBytes(b []byte) []byte {
@@ -192,3 +193,19 @@ func (l *Log) AddSigner(signerPub []byte, by SignerKey) error {
 func (l *Log) RemoveSigner(signerPub []byte, by SignerKey) error {
 	return l.appendEntry(KindRemoveSigner, signerPub, by)
 }
+
+// sortedKeys returns the map keys as sorted, freshly-copied byte slices.
+func sortedKeys(m map[string]bool) [][]byte {
+	out := make([][]byte, 0, len(m))
+	for k := range m {
+		out = append(out, []byte(k))
+	}
+	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i], out[j]) < 0 })
+	return out
+}
+
+// Signers returns the currently-trusted signer pubkeys (sorted copies).
+func (l *Log) Signers() [][]byte { return sortedKeys(l.signers) }
+
+// Devices returns the currently-authorized device pubkeys (sorted copies).
+func (l *Log) Devices() [][]byte { return sortedKeys(l.devices) }

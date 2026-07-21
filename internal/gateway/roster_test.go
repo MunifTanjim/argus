@@ -72,6 +72,23 @@ func TestNodesListAndNodeEventStream(t *testing.T) {
 	}
 }
 
+func TestRosterCarriesSignerPubKey(t *testing.T) {
+	a := New(time.Second)
+	// A source advertising both a Noise identity pubkey and an Ed25519 signer pubkey.
+	src := newFakeSource("n1", "node-1")
+	src.idPubKey = "id-pub-b64"
+	src.signerPubKey = "signer-pub-b64"
+	a.AddSource(src)
+
+	roster := a.Roster()
+	if len(roster) != 1 {
+		t.Fatalf("roster len = %d, want 1", len(roster))
+	}
+	if roster[0].SignerPubKey != "signer-pub-b64" {
+		t.Fatalf("SignerPubKey = %q, want %q", roster[0].SignerPubKey, "signer-pub-b64")
+	}
+}
+
 func TestServeNodeThreadsIdentityPubKey(t *testing.T) {
 	a := New(time.Second)
 	srv := NewServer(a, nil, nil)

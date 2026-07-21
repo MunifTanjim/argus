@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,6 +44,9 @@ type Node struct {
 
 	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
 	identityPubB64 string      // base64 public half, announced to the gateway
+
+	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log)
+	signerPubB64 string             // base64 public half, announced to the gateway roster
 
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
@@ -80,9 +84,9 @@ type Node struct {
 	resumeMu sync.Mutex
 	resuming map[string]string // agent+session key -> launched session id
 
-	trust          *trustlog.SyncStore // locked-mode trust-log store; nil when off
-	trustPath      string              // on-disk chain path for persistence
-	trustPersistMu sync.Mutex          // serializes atomic temp-file+rename persist
+	trust          atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
+	trustPath      string                             // on-disk chain path for persistence
+	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -142,6 +146,17 @@ func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 	d.identity = kp
 	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
 }
+
+// SetSignerKey sets the node's Ed25519 signer keypair, whose public half is
+// announced to the gateway roster (signer_pubkey) so a later `lock init` can
+// designate it as a trusted signer. Call before Run. The private half stays local.
+func (d *Node) SetSignerKey(kp trustlog.SignerKey) {
+	d.signer = kp
+	d.signerPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// SignerPubKey returns the base64 Ed25519 signer public half, or "" if unset.
+func (d *Node) SignerPubKey() string { return d.signerPubB64 }
 
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.

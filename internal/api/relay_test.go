@@ -115,7 +115,7 @@ func TestSendRawFrameRelaysVerbatimAndOpens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	nodeSess, msg2, err := e2e.Respond(nodeKey, prologue, msg1)
+	nodeSess, _, msg2, err := e2e.Respond(nodeKey, prologue, msg1)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}

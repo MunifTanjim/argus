@@ -58,7 +58,7 @@ func TestUplinkLogsEstablished(t *testing.T) {
 	defer cancel()
 	go d.ConnectGateway(ctx, wsURL(ts.URL)+"/node", "dtok", nil)
 
-	waitFor(t, func() bool { return strings.Contains(logs.String(), "gateway uplink established") })
+	waitFor(t, "gateway uplink established", func() bool { return strings.Contains(logs.String(), "gateway uplink established") })
 	if strings.Contains(logs.String(), "dial failed") {
 		t.Errorf("a successful uplink should not log a dial failure:\n%s", logs.String())
 	}
@@ -74,7 +74,7 @@ func TestUplinkLogsDialFailure(t *testing.T) {
 	// Nothing listens on this port: the dial fails fast and should be logged.
 	go d.ConnectGateway(ctx, "ws://127.0.0.1:1/node", "dtok", nil)
 
-	waitFor(t, func() bool { return strings.Contains(logs.String(), "gateway uplink dial failed") })
+	waitFor(t, "gateway uplink dial failed", func() bool { return strings.Contains(logs.String(), "gateway uplink dial failed") })
 }
 
 func TestRunLogsServingLocalAPI(t *testing.T) {
@@ -87,5 +87,5 @@ func TestRunLogsServingLocalAPI(t *testing.T) {
 	defer cancel()
 	go func() { _ = d.Run(ctx, sock) }()
 
-	waitFor(t, func() bool { return strings.Contains(logs.String(), "serving local API") })
+	waitFor(t, "serving local API", func() bool { return strings.Contains(logs.String(), "serving local API") })
 }

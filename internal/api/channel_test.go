@@ -18,7 +18,7 @@ func channelPair(t *testing.T) (client, node *Channel) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	nodeSess, msg2, err := e2e.Respond(nodeKey, prologue, msg1)
+	nodeSess, _, msg2, err := e2e.Respond(nodeKey, prologue, msg1)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}

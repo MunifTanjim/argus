@@ -46,8 +46,8 @@ func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
 }
 
 func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
-	clientTrustSyncInterval = 20 * time.Millisecond
-	t.Cleanup(func() { clientTrustSyncInterval = 30 * time.Second })
+	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
 
 	// Genesis-only chain first; an authorize appended later.
 	signer, _ := trustlog.GenerateSigner()

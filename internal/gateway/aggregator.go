@@ -375,6 +375,7 @@ func descriptor(id string, st *srcState) api.NodeDescriptor {
 		Version:        st.src.Version(),
 		Capabilities:   st.src.Capabilities(),
 		IdentityPubKey: st.src.IdentityPubKey(),
+		SignerPubKey:   st.src.SignerPubKey(),
 		Online:         st.online,
 	}
 }

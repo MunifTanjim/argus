@@ -83,3 +83,19 @@ func (s *Store) DeviceAuthorized(pub []byte) bool {
 func (s *Store) SignerTrusted(pub []byte) bool {
 	return s.log != nil && s.log.SignerTrusted(pub)
 }
+
+// Signers returns the current trusted signer set (empty if nothing ingested).
+func (s *Store) Signers() [][]byte {
+	if s.log == nil {
+		return [][]byte{}
+	}
+	return s.log.Signers()
+}
+
+// Devices returns the current authorized device set (empty if nothing ingested).
+func (s *Store) Devices() [][]byte {
+	if s.log == nil {
+		return [][]byte{}
+	}
+	return s.log.Devices()
+}

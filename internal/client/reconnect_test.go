@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -86,6 +87,46 @@ func TestReconnectingE2EClientReconnectsAndReHandshakes(t *testing.T) {
 	}
 	if out["text"] != "two" {
 		t.Fatalf("echo after reconnect = %v", out)
+	}
+}
+
+func TestReconnectingE2EClientLockedStableStaticAcrossReconnect(t *testing.T) {
+	dial, latest := reconnectDialer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	static, err := e2e.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+
+	c, err := NewReconnectingE2EClientLocked(ctx, dial, nil, static, "")
+	if err != nil {
+		t.Fatalf("NewReconnectingE2EClientLocked: %v", err)
+	}
+	defer c.Close()
+
+	// The reconnecting client must store the provided static.
+	if !bytes.Equal(c.static.Public, static.Public) || !bytes.Equal(c.static.Private, static.Private) {
+		t.Errorf("ReconnectingE2EClient.static does not match provided static")
+	}
+	// The first E2EClient must present the same static.
+	cur := c.current()
+	if !bytes.Equal(cur.static.Public, static.Public) || !bytes.Equal(cur.static.Private, static.Private) {
+		t.Errorf("initial E2EClient.static does not match provided static")
+	}
+
+	// Force a reconnect and verify the static is preserved across the reconnect.
+	latest().peer.Close()
+	if got := waitState(t, c); got != false {
+		t.Fatalf("first state = %v, want false (disconnected)", got)
+	}
+	if got := waitState(t, c); got != true {
+		t.Fatalf("second state = %v, want true (reconnected)", got)
+	}
+	cur2 := c.current()
+	if !bytes.Equal(cur2.static.Public, static.Public) || !bytes.Equal(cur2.static.Private, static.Private) {
+		t.Errorf("E2EClient.static changed across reconnect")
 	}
 }
 

@@ -222,3 +222,24 @@ func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 		}
 	}
 }
+
+func TestLockGenesisResolves(t *testing.T) {
+	// Default is empty.
+	v := viper.New()
+	if err := config.Load(v, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v).Lock.Genesis; got != "" {
+		t.Fatalf("default lock.genesis = %q, want empty", got)
+	}
+
+	// Env override binds.
+	t.Setenv("ARGUS_LOCK_GENESIS", "abc123==")
+	v2 := viper.New()
+	if err := config.Load(v2, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v2).Lock.Genesis; got != "abc123==" {
+		t.Fatalf("env lock.genesis = %q, want %q", got, "abc123==")
+	}
+}

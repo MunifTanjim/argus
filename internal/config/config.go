@@ -19,6 +19,7 @@ type Config struct {
 	Log     LogConfig
 	Tunnel  TunnelConfig
 	Tmux    TmuxConfig
+	Lock    LockConfig
 }
 
 type GatewayConfig struct {
@@ -91,6 +92,13 @@ type TmuxConfig struct {
 	MirrorSessionSuffix string
 }
 
+// LockConfig configures locked mode. Genesis is the base64-encoded trust-log
+// genesis HEAD this install is pinned to; "" means locked mode is not configured.
+// It is written by `argus lock init` (a later slice); users don't hand-set it.
+type LockConfig struct {
+	Genesis string
+}
+
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                        GetRuntimePath("argus.sock"),
@@ -113,6 +121,7 @@ var defaults = map[string]any{
 	"tunnel.ngrok.domain":           "",
 	"tmux.mirror-session-prefix":    "_",
 	"tmux.mirror-session-suffix":    "_",
+	"lock.genesis":                  "",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -222,6 +231,9 @@ func FromViper(v *viper.Viper) Config {
 		Tmux: TmuxConfig{
 			MirrorSessionPrefix: v.GetString("tmux.mirror-session-prefix"),
 			MirrorSessionSuffix: v.GetString("tmux.mirror-session-suffix"),
+		},
+		Lock: LockConfig{
+			Genesis: v.GetString("lock.genesis"),
 		},
 	}
 }

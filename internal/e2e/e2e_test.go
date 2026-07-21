@@ -3,6 +3,8 @@ package e2e
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -15,7 +17,7 @@ func newSessionPair(t *testing.T) (client, node *Session) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	node, msg2, err := Respond(nodeKey, prologue, msg1)
+	node, _, msg2, err := Respond(nodeKey, prologue, msg1)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestHandshakeRoundTripSealsBothDirections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	nodeSess, msg2, err := Respond(nodeKey, prologue, msg1)
+	nodeSess, _, msg2, err := Respond(nodeKey, prologue, msg1)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestWrongNodeKeyFailsHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	if _, _, err := Respond(imposter, prologue, msg1); err == nil {
+	if _, _, _, err := Respond(imposter, prologue, msg1); err == nil {
 		t.Fatal("responder with the wrong static key must fail the IK handshake")
 	}
 	_ = init
@@ -151,7 +153,7 @@ func TestPrologueMismatchFailsHandshake(t *testing.T) {
 	}
 	// Responder binds a different prologue (e.g. a relayed handshake replayed onto
 	// another channel) -> must not establish a session.
-	if _, _, err := Respond(nodeKey, []byte("chan-B"), msg1); err == nil {
+	if _, _, _, err := Respond(nodeKey, []byte("chan-B"), msg1); err == nil {
 		t.Fatal("prologue mismatch must fail the handshake")
 	}
 	_ = init
@@ -192,6 +194,44 @@ func TestOpenRejectsTruncatedFinalRecord(t *testing.T) {
 	}
 }
 
+func TestRespondReturnsInitiatorStatic(t *testing.T) {
+	nodeKP, _ := GenerateKeyPair()
+	clientKP, _ := GenerateKeyPair()
+	prologue := []byte("argus-test")
+
+	init, msg1, err := NewInitiator(clientKP, nodeKP.Public, prologue)
+	if err != nil {
+		t.Fatalf("NewInitiator: %v", err)
+	}
+	sess, clientStatic, msg2, err := Respond(nodeKP, prologue, msg1)
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	if !bytes.Equal(clientStatic, clientKP.Public) {
+		t.Fatalf("Respond client static = %x, want %x", clientStatic, clientKP.Public)
+	}
+	if _, err := init.Finish(msg2); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	_ = sess
+}
+
+func TestLoadOrCreateIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-identity.json")
+	kp1, err := LoadOrCreateIdentity(path)
+	if err != nil || len(kp1.Public) != 32 || len(kp1.Private) != 32 {
+		t.Fatalf("first: kp=%v err=%v", kp1, err)
+	}
+	fi, _ := os.Stat(path)
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("perms = %v, want 0600", fi.Mode().Perm())
+	}
+	kp2, err := LoadOrCreateIdentity(path)
+	if err != nil || !bytes.Equal(kp1.Public, kp2.Public) || !bytes.Equal(kp1.Private, kp2.Private) {
+		t.Fatal("second load returned a different key")
+	}
+}
+
 func TestFinishRejectsTamperedMsg2(t *testing.T) {
 	nodeKey, _ := GenerateKeyPair()
 	clientKey, _ := GenerateKeyPair()
@@ -200,7 +240,7 @@ func TestFinishRejectsTamperedMsg2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInitiator: %v", err)
 	}
-	_, msg2, err := Respond(nodeKey, prologue, msg1)
+	_, _, msg2, err := Respond(nodeKey, prologue, msg1)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}

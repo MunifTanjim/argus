@@ -27,6 +27,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"agent":         true, // `hook` only: selects the adapter, not a config key
 		"argus-managed": true, // `hook` only: install marker, parsed and ignored
 		"redact":        true, // `view` only: offline viewer flag, not a node/client setting
+		"signer":        true, // `lock init` only: one-shot signer list, not a persistent config key
 	}
 
 	seen := map[string]bool{}

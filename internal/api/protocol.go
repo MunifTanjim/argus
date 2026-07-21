@@ -88,6 +88,11 @@ const (
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogChain (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
+	// Locked-mode control (local unix-socket only; node-RPC for the lock CLI).
+	MethodLockInit   = "lock.init"   // request: LockInitParams; result: LockInitResult
+	MethodLockStatus = "lock.status" // request: no params; result: LockStatusResult
+	MethodLockSign   = "lock.sign"   // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke = "lock.revoke" // request: LockDeviceParams; result: LockDeviceResult
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -231,6 +236,7 @@ type IdentifyResult struct {
 	Version        string           `json:"version"` // node's binary version
 	Capabilities   NodeCapabilities `json:"capabilities"`
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"` // base64 Curve25519 static public (E2E)
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -252,6 +258,7 @@ type NodeDescriptor struct {
 	Version        string           `json:"version"`
 	Capabilities   NodeCapabilities `json:"capabilities"`
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"`
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`
 	Online         bool             `json:"online"`
 }
 
@@ -587,4 +594,42 @@ type RelayCloseParams struct {
 // marshals to base64 (Go encodes []byte as base64 in JSON).
 type TrustLogChain struct {
 	Chain []byte `json:"chain,omitempty"`
+}
+
+// LockDeviceParams identifies a device to authorize/revoke by its Curve25519
+// identity pubkey.
+type LockDeviceParams struct {
+	Device []byte `json:"device"`
+}
+
+// LockDeviceResult reports the trust-log HEAD after the sign/revoke.
+type LockDeviceResult struct {
+	Head []byte `json:"head"`
+}
+
+// LockInitParams enables locked mode. Signers are ADDITIONAL Ed25519 signer pubkeys
+// (the local node auto-includes its own); Devices are Curve25519 identity pubkeys to
+// authorize in the genesis (the current nodes).
+type LockInitParams struct {
+	Signers [][]byte `json:"signers,omitempty"`
+	Devices [][]byte `json:"devices,omitempty"`
+}
+
+// LockInitResult reports the new genesis head and the final signer count (so the CLI
+// can warn on a single signer).
+type LockInitResult struct {
+	Head        []byte `json:"head"`
+	SignerCount int    `json:"signer_count"`
+}
+
+// LockStatusResult is the audit view of a node's locked state.
+type LockStatusResult struct {
+	Enabled        bool     `json:"enabled"`
+	Head           []byte   `json:"head,omitempty"`
+	Signers        [][]byte `json:"signers,omitempty"`
+	DeviceCount    int      `json:"device_count"`
+	SignerTrusted  bool     `json:"signer_trusted"`
+	Authorized     bool     `json:"authorized"`
+	SignerPubKey   []byte   `json:"signer_pubkey,omitempty"`
+	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
 }

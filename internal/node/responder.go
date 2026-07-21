@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"sync"
 	"sync/atomic"
@@ -75,9 +76,21 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	if err != nil {
 		return
 	}
-	sess, msg2, err := e2e.Respond(r.static, api.ChannelPrologue(r.d.id, f.Route.ChanID), msg1)
+	sess, clientStatic, msg2, err := e2e.Respond(r.static, api.ChannelPrologue(r.d.id, f.Route.ChanID), msg1)
 	if err != nil {
 		return // wrong key/prologue: drop; client retries on a new chan
+	}
+	// Locked-mode enforcement (fail-closed): a node with a trust store accepts a
+	// channel only from an authorized client identity. Open mode (nil store) skips
+	// this. An empty/unsynced store authorizes no one, so it rejects all until the
+	// chain arrives — the correct fail-closed posture.
+	if st := r.d.trust.Load(); st != nil && !st.DeviceAuthorized(clientStatic) {
+		var fp string
+		if len(clientStatic) >= 8 {
+			fp = base64.StdEncoding.EncodeToString(clientStatic[:8])
+		}
+		r.d.log.Warn("rejected unauthorized client channel", "chan", f.Route.ChanID, "client", fp)
+		return
 	}
 	base, cancel := context.WithCancel(context.Background())
 	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel}

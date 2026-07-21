@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -54,6 +55,11 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
+			head, herr := lockGenesisHead(cfg)
+			if herr != nil {
+				return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to connect open): %w", herr))
+			}
+
 			var client tui.Client
 			var logs *logbuf.Buffer
 			switch {
@@ -62,13 +68,13 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, cfg.Gateway.E2E)
+					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, cfg.Gateway.E2E, head)
 				} else {
 					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				}
 			case running:
-				client, err = connect(ctx, "", cfg.Token, cfg.Socket, false)
+				client, err = connect(ctx, "", cfg.Token, cfg.Socket, false, nil)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -85,7 +91,7 @@ func newRootCmd(version string) *cobra.Command {
 					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
-					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, cfg.Gateway.E2E)
+					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, cfg.Gateway.E2E, head)
 				}
 			}
 			if err != nil {
@@ -112,7 +118,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	addClientFlags(cmd.Flags())
 
-	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd())
+	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd(), newLockCmd())
 
 	cmd.InitDefaultCompletionCmd()
 	if subcmd, _, _ := cmd.Find([]string{"completion"}); subcmd != nil && subcmd.Name() == "completion" {

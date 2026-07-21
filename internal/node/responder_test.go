@@ -12,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 func newE2ETestNode(t *testing.T) *Node {
@@ -157,5 +158,102 @@ func TestResponderStreamsNotifications(t *testing.T) {
 		case <-deadline:
 			t.Fatal("no test.note notification streamed over the channel")
 		}
+	}
+}
+
+// buildLockedResponder returns a relayResponder whose trust store authorizes only
+// authorizedClientPub. Any other client is rejected (fail-closed).
+func buildLockedResponder(t *testing.T, authorizedClientPub []byte) *relayResponder {
+	t.Helper()
+	d := newE2ETestNode(t)
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	lg, err := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHead := lg.Head()
+	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	chain := trustlog.MarshalChain(lg.Entries())
+	ss := trustlog.NewSyncStore(genesisHead)
+	if _, err := ss.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	d.trust.Store(ss)
+	return d.newRelayResponder()
+}
+
+// buildOpenResponder returns a relayResponder with no trust store (open mode):
+// any client's handshake establishes a channel.
+func buildOpenResponder(t *testing.T) *relayResponder {
+	t.Helper()
+	d := newE2ETestNode(t)
+	return d.newRelayResponder()
+}
+
+// runClientHandshake drives a Noise IK handshake from clientKP into r, waits
+// for msg2 (authorized) or a short timeout (rejected), and reports whether a
+// channel was established.
+func runClientHandshake(t *testing.T, r *relayResponder, clientKP e2e.KeyPair) bool {
+	t.Helper()
+	const chanID = "enforce-test-chan"
+
+	clientConn, nodeConn := net.Pipe()
+	fromNode := make(chan api.RelayFrame, 8)
+	clientPeer := api.NewPeer(clientConn, api.PeerOptions{
+		OnRelayFrame: func(f api.RelayFrame) {
+			select {
+			case fromNode <- f:
+			default:
+			}
+		},
+	})
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{OnRelayFrame: r.onFrame})
+	r.peer.Store(nodePeer)
+	t.Cleanup(func() { clientPeer.Close(); nodePeer.Close(); r.closeAll() })
+
+	init, msg1, err := e2e.NewInitiator(clientKP, r.static.Public, api.ChannelPrologue(r.d.id, chanID))
+	if err != nil {
+		t.Fatalf("NewInitiator: %v", err)
+	}
+	hf, _ := api.MarshalHandshakeFrame(chanID, msg1)
+	if err := clientPeer.SendRawFrame(hf); err != nil {
+		t.Fatalf("send handshake: %v", err)
+	}
+	_ = init
+
+	select {
+	case <-fromNode:
+		// msg2 received: node established the channel
+	case <-time.After(200 * time.Millisecond):
+		// no reply: node rejected the client
+	}
+	return r.lookup(chanID) != nil
+}
+
+func TestResponderEnforcesAuthorizedClient(t *testing.T) {
+	clientKP, _ := e2e.GenerateKeyPair()
+
+	// Authorized client → channel established.
+	r := buildLockedResponder(t, clientKP.Public)
+	if !runClientHandshake(t, r, clientKP) {
+		t.Fatal("authorized client should establish a channel")
+	}
+
+	// Unauthorized client (different key) → no channel.
+	other, _ := e2e.GenerateKeyPair()
+	r2 := buildLockedResponder(t, clientKP.Public) // authorizes clientKP, not other
+	if runClientHandshake(t, r2, other) {
+		t.Fatal("unauthorized client must be rejected (no channel)")
+	}
+
+	// Open mode (nil trust store) → any client establishes a channel.
+	rOpen := buildOpenResponder(t)
+	if !runClientHandshake(t, rOpen, other) {
+		t.Fatal("open-mode responder should accept any client")
 	}
 }

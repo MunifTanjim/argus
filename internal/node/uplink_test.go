@@ -17,7 +17,7 @@ import (
 
 func wsURL(u string) string { return "ws" + strings.TrimPrefix(u, "http") }
 
-func waitFor(t *testing.T, cond func() bool) {
+func waitFor(t *testing.T, desc string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -26,7 +26,7 @@ func waitFor(t *testing.T, cond func() bool) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("timeout waiting for condition")
+	t.Fatalf("timeout waiting for: %s", desc)
 }
 
 // End-to-end: a node dials the gateway, the gateway aggregates it under a composite id,
@@ -72,7 +72,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 		}
 		return l
 	}
-	waitFor(t, func() bool { return len(list()) == 1 })
+	waitFor(t, "session list has 1 entry", func() bool { return len(list()) == 1 })
 
 	s := list()[0]
 	if s.NodeID != "home" || s.NodeLabel != "home-box" {

@@ -6,9 +6,13 @@ package e2e
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/flynn/noise"
 )
@@ -29,6 +33,47 @@ func GenerateKeyPair() (KeyPair, error) {
 		return KeyPair{}, fmt.Errorf("e2e: generate keypair: %w", err)
 	}
 	return KeyPair{Private: dh.Private, Public: dh.Public}, nil
+}
+
+// persistedIdentity is the on-disk form of a Curve25519 identity keypair.
+type persistedIdentity struct {
+	Private string `json:"private"` // base64 Curve25519 private (32 bytes)
+	Public  string `json:"public"`  // base64 Curve25519 public (32 bytes)
+}
+
+// LoadOrCreateIdentity loads a persisted Curve25519 identity keypair, generating and
+// saving one on first use (0600 file under a 0700 dir). A stable identity lets a
+// locked network authorize this device's key once (argus lock sign) and keep it
+// valid across restarts.
+func LoadOrCreateIdentity(path string) (KeyPair, error) {
+	if b, err := os.ReadFile(path); err == nil {
+		var p persistedIdentity
+		if json.Unmarshal(b, &p) == nil {
+			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
+			pub, e2 := base64.StdEncoding.DecodeString(p.Public)
+			if e1 == nil && e2 == nil && len(priv) == 32 && len(pub) == 32 {
+				return KeyPair{Private: priv, Public: pub}, nil
+			}
+		}
+	}
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		return KeyPair{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return KeyPair{}, err
+	}
+	b, err := json.Marshal(persistedIdentity{
+		Private: base64.StdEncoding.EncodeToString(kp.Private),
+		Public:  base64.StdEncoding.EncodeToString(kp.Public),
+	})
+	if err != nil {
+		return KeyPair{}, err
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return KeyPair{}, err
+	}
+	return kp, nil
 }
 
 // maxChunk is the largest plaintext per Noise record: the 65535-byte record
@@ -85,27 +130,29 @@ func (i *Initiator) Finish(msg2 []byte) (*Session, error) {
 	return &Session{enc: cs0, dec: cs1}, nil
 }
 
-// Respond runs the responder (node) side of a Noise IK handshake: it consumes
-// the initiator's msg1 and returns the completed Session plus msg2 to send back.
-func Respond(static KeyPair, prologue, msg1 []byte) (*Session, []byte, error) {
+// Respond runs the responder (node) side of a Noise IK handshake: it consumes the
+// initiator's msg1 and returns the completed Session, the initiator's authenticated
+// static public key (for locked-mode authorization), and msg2 to send back.
+func Respond(static KeyPair, prologue, msg1 []byte) (*Session, []byte, []byte, error) {
 	hs, err := newHandshake(static, prologue, nil, false)
 	if err != nil {
-		return nil, nil, fmt.Errorf("e2e: new responder: %w", err)
+		return nil, nil, nil, fmt.Errorf("e2e: new responder: %w", err)
 	}
 	if _, cs0, cs1, err := hs.ReadMessage(nil, msg1); err != nil {
-		return nil, nil, fmt.Errorf("e2e: read msg1: %w", err)
+		return nil, nil, nil, fmt.Errorf("e2e: read msg1: %w", err)
 	} else if cs0 != nil || cs1 != nil {
-		return nil, nil, errors.New("e2e: handshake completed after msg1")
+		return nil, nil, nil, errors.New("e2e: handshake completed after msg1")
 	}
+	clientStatic := hs.PeerStatic() // authenticated initiator static (IK transmits it in msg1)
 	msg2, cs0, cs1, err := hs.WriteMessage(nil, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("e2e: write msg2: %w", err)
+		return nil, nil, nil, fmt.Errorf("e2e: write msg2: %w", err)
 	}
 	if cs0 == nil || cs1 == nil {
-		return nil, nil, errors.New("e2e: handshake incomplete after msg2")
+		return nil, nil, nil, errors.New("e2e: handshake incomplete after msg2")
 	}
 	// Responder: cs0 decrypts from peer, cs1 encrypts to peer (swapped vs initiator).
-	return &Session{enc: cs1, dec: cs0}, msg2, nil
+	return &Session{enc: cs1, dec: cs0}, clientStatic, msg2, nil
 }
 
 // Session is an established E2E channel: enc encrypts outbound messages, dec

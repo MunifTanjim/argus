@@ -1,16 +1,20 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // fakeGatewayNode is one peer that plays BOTH the gateway (answers nodes.list /
@@ -61,7 +65,7 @@ func (f *fakeGatewayNode) onFrame(fr api.RelayFrame) {
 		if err != nil {
 			return
 		}
-		sess, msg2, err := e2e.Respond(f.nodeKey, api.ChannelPrologue(f.nodeID, fr.Route.ChanID), msg1)
+		sess, _, msg2, err := e2e.Respond(f.nodeKey, api.ChannelPrologue(f.nodeID, fr.Route.ChanID), msg1)
 		if err != nil {
 			return
 		}
@@ -97,11 +101,13 @@ type fakeNode struct {
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
 // advertises all of them, relay.open{node_id} allocates a chan_id bound to that
 // node, and OnRelayFrame routes handshake/sealed frames to the right node by chan_id.
+// Set chain before Connect to serve a trust-log chain from trustlog.pull.
 type fakeMultiGateway struct {
 	peer   *api.Peer
 	nodes  map[string]*fakeNode // node id -> node
 	byChan map[string]*fakeNode // chan_id -> node
 	nextCh int
+	chain  []byte // served by trustlog.pull; nil = method-not-found
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -137,6 +143,11 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				chID := "c" + strconv.Itoa(g.nextCh)
 				g.byChan[chID] = n
 				return api.RelayOpenResult{ChanID: chID}, nil
+			case api.MethodTrustLogPull:
+				if g.chain == nil {
+					return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
+				}
+				return api.TrustLogChain{Chain: g.chain}, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},
@@ -155,7 +166,7 @@ func (g *fakeMultiGateway) onFrame(f api.RelayFrame) {
 		if err != nil {
 			return
 		}
-		sess, msg2, err := e2e.Respond(n.key, api.ChannelPrologue(n.id, f.Route.ChanID), msg1)
+		sess, _, msg2, err := e2e.Respond(n.key, api.ChannelPrologue(n.id, f.Route.ChanID), msg1)
 		if err != nil {
 			return
 		}
@@ -321,5 +332,108 @@ func (e *mismatch) Error() string {
 	return "seq mismatch: got " + strconv.Itoa(e.got) + " want " + strconv.Itoa(e.want)
 }
 
+// byNodeSnapshot returns a snapshot of the current byNode map (test-only accessor).
+func (m *E2EClient) byNodeSnapshot() map[string]*nodeChan {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]*nodeChan, len(m.byNode))
+	for k, v := range m.byNode {
+		out[k] = v
+	}
+	return out
+}
+
 // short timeouts keep the suite fast if something wedges
-func init() { callTimeout = 3 * time.Second; handshakeTimeout = 3 * time.Second }
+func init() { callTimeout = 3 * time.Second; handshakeTimeoutNs.Store(int64(3 * time.Second)) }
+
+func mustKP(t *testing.T) e2e.KeyPair {
+	t.Helper()
+	kp, err := e2e.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	return kp
+}
+
+// newE2EClientForTest writes chain (if provided) to chainPath, then constructs an
+// E2EClient pinned to head. The server end of the pipe is unused — we only assert
+// on the constructed trust state, not on the wire.
+func newE2EClientForTest(t *testing.T, head []byte, chainPath string, chain ...[]byte) (*E2EClient, error) {
+	t.Helper()
+	if len(chain) == 1 {
+		if err := os.WriteFile(chainPath, chain[0], 0o600); err != nil {
+			t.Fatalf("seed chain: %v", err)
+		}
+	}
+	_, cli := net.Pipe()
+	return NewE2EClientWithIdentity(cli, mustKP(t), head, chainPath)
+}
+
+func TestClientTrustStorePersists(t *testing.T) {
+	signer, _ := trustlog.GenerateSigner()
+	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	head := log.Head()
+	dev := bytes.Repeat([]byte{0x44}, 32)
+	_ = log.AuthorizeDevice(dev, signer)
+	chain := trustlog.MarshalChain(log.Entries())
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "client-trustlog-chain")
+
+	// A client seeded with the chain on disk authorizes the device immediately.
+	c1, err := newE2EClientForTest(t, head, path, chain)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if !c1.trust.DeviceAuthorized(dev) {
+		t.Fatal("client should load the persisted chain and authorize the device")
+	}
+
+	// Rollback resistance: ingesting a shorter (genesis-only) chain is rejected.
+	genesisOnly := trustlog.MarshalChain(log.Entries()[:1])
+	if changed, ierr := c1.trust.Ingest(genesisOnly); ierr == nil || changed {
+		t.Fatalf("shorter chain must be rejected: changed=%v err=%v", changed, ierr)
+	}
+}
+
+func TestClientSkipsUnauthorizedNode(t *testing.T) {
+	// Build a trust chain authorizing only nodeAuth's identity key.
+	signer, _ := trustlog.GenerateSigner()
+	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	head := lg.Head()
+
+	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
+	unauthNode := &fakeNode{id: "nodeUnauth", key: mustKP(t)}
+
+	// Only nodeAuth's Noise public key is authorized in the chain.
+	_ = lg.AuthorizeDevice(authNode.key.Public, signer)
+	chain := trustlog.MarshalChain(lg.Entries())
+
+	noop := func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return nil, nil, nil
+	}
+	authNode.handle = noop
+	unauthNode.handle = noop
+
+	gw, clientConn := newFakeMultiGateway(t, authNode, unauthNode)
+	gw.chain = chain
+	defer gw.peer.Close()
+
+	c, err := NewE2EClientWithGenesis(clientConn, head)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Connect(); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	snap := c.byNodeSnapshot()
+	if _, ok := snap["nodeAuth"]; !ok {
+		t.Fatal("authorized node should have a channel")
+	}
+	if _, ok := snap["nodeUnauth"]; ok {
+		t.Fatal("unauthorized node must be skipped (no channel)")
+	}
+}

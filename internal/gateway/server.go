@@ -1112,7 +1112,7 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.Capabilities, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.Capabilities, peer, events))
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
 	<-peer.Done()

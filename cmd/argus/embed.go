@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
@@ -28,14 +30,24 @@ var _ tui.Client = (*client.ReconnectingE2EClient)(nil)
 // connect returns a client that re-dials with backoff if the connection drops. With a
 // gateway URL it dials over WebSocket; otherwise the local node's unix socket (which
 // must already be running — use connectLocalSpawn to start one first).
-func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool) (tui.Client, error) {
+func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool, genesisHead []byte) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, err
 	}
 	if e2eEnabled && gatewayURL != "" {
-		c, err := client.NewReconnectingE2EClient(ctx, dial)
+		var c *client.ReconnectingE2EClient
+		if len(genesisHead) > 0 {
+			static, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
+			if ierr != nil {
+				shell.StdErrF("argus: client identity: %v\n", ierr)
+				return nil, ierr
+			}
+			c, err = client.NewReconnectingE2EClientLocked(ctx, dial, genesisHead, static, config.GetStatePath("client-trustlog-chain"))
+		} else {
+			c, err = client.NewReconnectingE2EClient(ctx, dial)
+		}
 		if err != nil {
 			shell.StdErrF("argus: cannot establish e2e session with gateway at %s: %v\n", gatewayURL, err)
 			return nil, err
@@ -113,7 +125,11 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		}
 		probe.Close()
 	}
-	d, logs := startEmbeddedNode(ctx, cfg, socket)
+	d, logs, serr := startEmbeddedNode(ctx, cfg, socket)
+	if serr != nil {
+		shell.StdErrF("argus: %v\n", serr)
+		return nil, nil, serr
+	}
 	if gatewayURL != "" {
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
 	} else if cfg.Push.Desktop.Enabled {
@@ -132,7 +148,7 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 	}
 	conn.Close() // probe only; the client opens its own connection
 	// Isolated spawn drives the local node; connected spawn drives the gateway.
-	client, err := connect(ctx, gatewayURL, token, socket, false)
+	client, err := connect(ctx, gatewayURL, token, socket, false, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -161,7 +177,12 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	// as a disconnect.
 	ctx, cancel := context.WithCancel(ctx)
 
-	d, logs := startEmbeddedNode(ctx, cfg, socket)
+	d, logs, serr := startEmbeddedNode(ctx, cfg, socket)
+	if serr != nil {
+		cancel()
+		shell.StdErrF("argus: %v\n", serr)
+		return nil, nil, serr
+	}
 	baseLog := logger.NewBufferLogger(logs)
 	gwLog := baseLog.With("scope", "gateway")
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
@@ -202,7 +223,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	}
 	probe.Close()
 
-	client, err := connect(ctx, gwURL, cfg.Token, socket, false)
+	client, err := connect(ctx, gwURL, cfg.Token, socket, false, nil)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -232,7 +253,16 @@ func nodeAbsent(err error) bool {
 // alt-screen clean. Like `argus start` it reconciles installed Claude Code hooks,
 // but keeps the installed binary path: this ephemeral launch may run from a
 // different path than the install, which must not be written into the user's hooks.
-func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer) {
+//
+// Fail-closed: a non-empty but unusable lock.genesis is returned as an error so the
+// node is never started in open mode when a genesis is configured.
+func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer, error) {
+	// Fail-closed: check genesis before any setup so a bad genesis is never silently ignored.
+	head, herr := lockGenesisHead(cfg)
+	if herr != nil {
+		return nil, nil, fmt.Errorf("lock.genesis is set but unusable: %w", herr)
+	}
+
 	d := node.New()
 	logs := logbuf.New(1000)
 	log := logger.NewBufferLogger(logs)
@@ -245,11 +275,34 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	} else {
 		d.SetIdentityKey(kp)
 	}
+	if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+		log.With("scope", "node").Warn("signer key load failed; locked mode unavailable", "err", err)
+	} else {
+		d.SetSignerKey(kp)
+	}
+	// Prefer explicit config; else re-enable from the node's persisted
+	// genesis (written by lock.init) so a reboot stays locked.
+	if head == nil {
+		ph, perr := node.LoadPinnedGenesis(config.GetStatePath("trustlog-genesis"))
+		if perr != nil {
+			return nil, nil, fmt.Errorf("persisted genesis unusable: %w", perr)
+		}
+		head = ph
+	}
+	// Always set the chain path so lock.init has somewhere to persist.
+	chainPath := config.GetStatePath("trustlog-chain")
+	if head != nil {
+		if err := d.EnableTrustLog(head, chainPath); err != nil {
+			return nil, nil, fmt.Errorf("locked mode configured but enabling trust log failed: %w", err)
+		}
+	} else {
+		d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
+	}
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))
 	go func() { _ = d.Run(ctx, socket) }()
-	return d, logs
+	return d, logs, nil
 }
 
 // reconcileEmbeddedHooks reconciles hooks best-effort (empty bin keeps the installed path).
