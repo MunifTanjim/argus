@@ -160,6 +160,19 @@ void main() {
     expect(find.byIcon(Icons.commit), findsNothing);
   });
 
+  testWidgets('shows Changes button when branch is set', (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides(),
+        session: _s(branch: 'feat/session-git-branch')));
+    await tester.pump();
+    expect(find.byIcon(Icons.difference), findsOneWidget);
+  });
+
+  testWidgets('no Changes button when branch is absent', (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides()));
+    await tester.pump();
+    expect(find.byIcon(Icons.difference), findsNothing);
+  });
+
   testWidgets('AppBar has overflow PopupMenuButton', (tester) async {
     await tester.pumpWidget(_app(_baseOverrides()));
     await tester.pump();

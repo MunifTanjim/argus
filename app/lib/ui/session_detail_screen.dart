@@ -200,15 +200,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.difference),
-            tooltip: 'Changes',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ChangedFilesScreen(session: live),
+          if (live.branch?.isNotEmpty ?? false)
+            IconButton(
+              icon: const Icon(Icons.difference),
+              tooltip: 'Changes',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChangedFilesScreen(session: live),
+                ),
               ),
             ),
-          ),
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Live screen',
