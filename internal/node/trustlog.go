@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
@@ -83,47 +84,13 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 	}
 }
 
-// persistChain writes chain bytes to trustPath atomically: it creates a temp
-// file in the same directory, writes the bytes, then renames it over trustPath.
-// Rename within a directory is atomic on POSIX, so readers and boot always see
-// either the old or the new file, never a truncated one. A dedicated mutex
-// ensures two goroutines (e.g. lingering + new uplink) never race the temp file
-// or the rename.
+// persistChain writes chain bytes to trustPath atomically via atomicfile.Write.
+// A dedicated mutex ensures two goroutines (e.g. lingering + new uplink) never
+// race the rename.
 func (d *Node) persistChain(chain []byte) error {
 	d.trustPersistMu.Lock()
 	defer d.trustPersistMu.Unlock()
-
-	dir := filepath.Dir(d.trustPath)
-	tmp, err := os.CreateTemp(dir, ".trustlog-chain-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-
-	if _, werr := tmp.Write(chain); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return werr
-	}
-	if serr := tmp.Sync(); serr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return serr
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return cerr
-	}
-	if rerr := os.Rename(tmpName, d.trustPath); rerr != nil {
-		os.Remove(tmpName)
-		return rerr
-	}
-	// Best-effort: fsync the directory so the rename is durable.
-	if dh, derr := os.Open(filepath.Dir(d.trustPath)); derr == nil {
-		_ = dh.Sync()
-		dh.Close()
-	}
-	return nil
+	return atomicfile.Write(d.trustPath, chain)
 }
 
 // persistTrust writes the current chain to disk. It is a no-op when the store
@@ -197,39 +164,7 @@ func LoadPinnedGenesis(path string) ([]byte, error) {
 func (d *Node) writeGenesisHead(head []byte) error {
 	d.trustPersistMu.Lock()
 	defer d.trustPersistMu.Unlock()
-	path := genesisHeadPath(d.trustPath)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".trustlog-genesis-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(head); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return werr
-	}
-	if serr := tmp.Sync(); serr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return serr
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return cerr
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
-		return rerr
-	}
-	// Best-effort: fsync the directory so the rename is durable.
-	if dh, derr := os.Open(filepath.Dir(path)); derr == nil {
-		_ = dh.Sync()
-		dh.Close()
-	}
-	return nil
+	return atomicfile.Write(genesisHeadPath(d.trustPath), head)
 }
 
 // activateTrust enables locked mode at runtime (lock.init): pin path, persist the

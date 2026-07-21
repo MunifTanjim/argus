@@ -30,7 +30,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateSigner: %v", err)
 	}
-	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}

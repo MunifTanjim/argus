@@ -53,8 +53,8 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 	resp := d.newRelayResponder()
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		// The gateway issues control requests (capture/input/respond/...) down this
-		// link; serve them through the same handlers local clients use.
-		Dispatch: d.server.DispatchFunc(),
+		// link; serve them through the remote-only surface (lock.* excluded).
+		Dispatch: d.remoteDispatch(),
 		// Relayed E2E frames from clients are terminated by the responder.
 		OnRelayFrame: resp.onFrame,
 	})

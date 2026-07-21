@@ -28,6 +28,7 @@ func cloneSigners(s [][]byte) [][]byte {
 func cloneEntry(e Entry) Entry {
 	e.Prev = cloneBytes(e.Prev)
 	e.Signers = cloneSigners(e.Signers)
+	e.Disablements = cloneSigners(e.Disablements)
 	e.Key = cloneBytes(e.Key)
 	e.Signer = cloneBytes(e.Signer)
 	e.Sig = cloneBytes(e.Sig)
@@ -38,10 +39,12 @@ func cloneEntry(e Entry) Entry {
 // and the trusted-signer / authorized-device state folded from them.
 // A Log is not safe for concurrent use.
 type Log struct {
-	entries []Entry
-	head    []byte
-	signers map[string]bool // trusted signer pubkey (string(bytes)) -> true
-	devices map[string]bool // authorized device pubkey -> true
+	entries      []Entry
+	head         []byte
+	signers      map[string]bool // trusted signer pubkey (string(bytes)) -> true
+	devices      map[string]bool // authorized device pubkey -> true
+	disablements [][]byte        // genesis disablement commitments
+	disabled     bool            // set by a valid KindDisable entry (sticky)
 }
 
 func newEmpty() *Log {
@@ -58,15 +61,16 @@ func containsBytes(set [][]byte, b []byte) bool {
 }
 
 // NewGenesis starts a log with an initial trusted signer set, self-signed by `by`
-// (which must be one of `signers`).
-func NewGenesis(signers [][]byte, by SignerKey) (*Log, error) {
+// (which must be one of `signers`). disablements is an optional list of Argon2id
+// commitments of disablement secrets; pass nil if not needed.
+func NewGenesis(signers [][]byte, by SignerKey, disablements [][]byte) (*Log, error) {
 	if len(signers) == 0 {
 		return nil, errors.New("trustlog: genesis requires at least one signer")
 	}
 	if !containsBytes(signers, by.Public) {
 		return nil, errors.New("trustlog: genesis signer must be in the signer set")
 	}
-	e := Entry{Kind: KindGenesis, Signers: cloneSigners(signers)}
+	e := Entry{Kind: KindGenesis, Signers: cloneSigners(signers), Disablements: cloneSigners(disablements)}
 	sign(&e, by)
 	l := newEmpty()
 	if err := l.apply(&e); err != nil {
@@ -96,6 +100,7 @@ func (l *Log) apply(e *Entry) error {
 		for _, s := range e.Signers {
 			l.signers[string(s)] = true
 		}
+		l.disablements = cloneSigners(e.Disablements)
 	} else {
 		if len(l.entries) == 0 {
 			return errors.New("trustlog: first entry must be genesis")
@@ -103,26 +108,38 @@ func (l *Log) apply(e *Entry) error {
 		if !bytes.Equal(e.Prev, l.head) {
 			return errors.New("trustlog: entry does not extend the current head")
 		}
-		if !l.signers[string(e.Signer)] {
-			return errors.New("trustlog: entry not signed by a trusted signer")
+		if l.disabled {
+			return errors.New("trustlog: log is disabled; no further entries accepted")
 		}
-		switch e.Kind {
-		case KindAddSigner:
-			l.signers[string(e.Key)] = true
-		case KindRemoveSigner:
-			if !l.signers[string(e.Key)] {
-				return errors.New("trustlog: cannot remove an unknown signer")
+		if e.Kind == KindDisable {
+			// Authorized by a disablement secret (Key), NOT a trusted signer — recovery
+			// must work when signers are lost. verifySig above already bound the entry.
+			if !containsBytes(l.disablements, DisablementCommitment(e.Key)) {
+				return errors.New("trustlog: disable secret does not match any genesis commitment")
 			}
-			if len(l.signers) == 1 {
-				return errors.New("trustlog: cannot remove the last signer")
+			l.disabled = true
+		} else {
+			if !l.signers[string(e.Signer)] {
+				return errors.New("trustlog: entry not signed by a trusted signer")
 			}
-			delete(l.signers, string(e.Key))
-		case KindAuthorizeDevice:
-			l.devices[string(e.Key)] = true
-		case KindRevokeDevice:
-			delete(l.devices, string(e.Key))
-		default:
-			return errors.New("trustlog: unknown entry kind")
+			switch e.Kind {
+			case KindAddSigner:
+				l.signers[string(e.Key)] = true
+			case KindRemoveSigner:
+				if !l.signers[string(e.Key)] {
+					return errors.New("trustlog: cannot remove an unknown signer")
+				}
+				if len(l.signers) == 1 {
+					return errors.New("trustlog: cannot remove the last signer")
+				}
+				delete(l.signers, string(e.Key))
+			case KindAuthorizeDevice:
+				l.devices[string(e.Key)] = true
+			case KindRevokeDevice:
+				delete(l.devices, string(e.Key))
+			default:
+				return errors.New("trustlog: unknown entry kind")
+			}
 		}
 	}
 	l.entries = append(l.entries, *e)
@@ -136,6 +153,16 @@ func (l *Log) appendEntry(kind Kind, key []byte, by SignerKey) error {
 	sign(&e, by)
 	return l.apply(&e)
 }
+
+// Disable appends a KindDisable entry revealing `secret`; it is accepted only if
+// secret's commitment is in the genesis. `by` may be any keypair (its signature only
+// binds the entry into the chain — a disablement secret, not signer trust, authorizes).
+func (l *Log) Disable(secret []byte, by SignerKey) error {
+	return l.appendEntry(KindDisable, secret, by)
+}
+
+// Disabled reports whether the log has been disabled by a valid disablement secret.
+func (l *Log) Disabled() bool { return l.disabled }
 
 // AuthorizeDevice records a device pubkey as authorized (signed by a trusted signer).
 func (l *Log) AuthorizeDevice(devicePub []byte, by SignerKey) error {

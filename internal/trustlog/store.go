@@ -74,6 +74,9 @@ func (s *Store) Head() []byte {
 	return s.log.Head()
 }
 
+// Disabled reports whether the log has been disabled by a valid disablement secret.
+func (s *Store) Disabled() bool { return s.log != nil && s.log.Disabled() }
+
 // DeviceAuthorized reports whether pub is authorized by the current chain.
 func (s *Store) DeviceAuthorized(pub []byte) bool {
 	return s.log != nil && s.log.DeviceAuthorized(pub)

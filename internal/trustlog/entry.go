@@ -38,18 +38,20 @@ const (
 	KindRemoveSigner                    // removes a trusted signer (Key = signer pubkey)
 	KindAuthorizeDevice                 // authorizes a device (Key = device pubkey)
 	KindRevokeDevice                    // revokes a device (Key = device pubkey)
+	KindDisable                         // disables the log (Key = revealed disablement secret; authorized by commitment, not a signer)
 )
 
 // Entry is one link in the trust log. Genesis carries the initial signer set in
 // Signers and is self-anchored (Signer is one of Signers). Every other entry has
 // Prev = the previous entry's hash and Signer = a currently-trusted signer.
 type Entry struct {
-	Kind    Kind
-	Prev    []byte   // hash of the previous entry; nil for genesis
-	Signers [][]byte // genesis only: initial trusted signer pubkeys
-	Key     []byte   // add/remove-signer or authorize/revoke-device target pubkey
-	Signer  []byte   // pubkey of the signer that signed this entry
-	Sig     []byte   // Ed25519 signature over sigBytes(entry)
+	Kind         Kind
+	Prev         []byte   // hash of the previous entry; nil for genesis
+	Signers      [][]byte // genesis only: initial trusted signer pubkeys
+	Disablements [][]byte // genesis only: Argon2id commitments of disablement secrets
+	Key          []byte   // add/remove-signer or authorize/revoke-device target pubkey
+	Signer       []byte   // pubkey of the signer that signed this entry
+	Sig          []byte   // Ed25519 signature over sigBytes(entry)
 }
 
 func putField(buf *bytes.Buffer, b []byte) {
@@ -70,6 +72,12 @@ func sigBytes(e *Entry) []byte {
 	buf.Write(cnt[:])
 	for _, s := range e.Signers {
 		putField(&buf, s)
+	}
+	var dcnt [4]byte
+	binary.BigEndian.PutUint32(dcnt[:], uint32(len(e.Disablements)))
+	buf.Write(dcnt[:])
+	for _, d := range e.Disablements {
+		putField(&buf, d)
 	}
 	putField(&buf, e.Key)
 	putField(&buf, e.Signer)

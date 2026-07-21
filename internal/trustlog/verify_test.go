@@ -7,7 +7,7 @@ import (
 func buildChain(t *testing.T) (*Log, SignerKey) {
 	t.Helper()
 	s, _ := GenerateSigner()
-	l, err := NewGenesis([][]byte{s.Public}, s)
+	l, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestLoadRejectsForgedSignerEdit(t *testing.T) {
 
 func TestAddSignerThenNewSignerCanAuthorize(t *testing.T) {
 	s1, _ := GenerateSigner()
-	l, _ := NewGenesis([][]byte{s1.Public}, s1)
+	l, _ := NewGenesis([][]byte{s1.Public}, s1, nil)
 	s2, _ := GenerateSigner()
 	if err := l.AddSigner(s2.Public, s1); err != nil {
 		t.Fatalf("AddSigner: %v", err)
@@ -112,7 +112,7 @@ func TestAddSignerThenNewSignerCanAuthorize(t *testing.T) {
 
 func TestRemoveLastSignerRejected(t *testing.T) {
 	s, _ := GenerateSigner()
-	l, _ := NewGenesis([][]byte{s.Public}, s)
+	l, _ := NewGenesis([][]byte{s.Public}, s, nil)
 	if err := l.RemoveSigner(s.Public, s); err == nil {
 		t.Error("removing the last signer must be rejected")
 	}
@@ -120,7 +120,7 @@ func TestRemoveLastSignerRejected(t *testing.T) {
 
 func TestEntriesDeepCopyIsolated(t *testing.T) {
 	s, _ := GenerateSigner()
-	l, _ := NewGenesis([][]byte{s.Public}, s)
+	l, _ := NewGenesis([][]byte{s.Public}, s, nil)
 	if err := l.AuthorizeDevice([]byte("dev-1"), s); err != nil {
 		t.Fatalf("authorize: %v", err)
 	}

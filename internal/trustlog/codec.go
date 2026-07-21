@@ -11,9 +11,10 @@ import (
 // Decode caps: chains arrive over the untrusted gateway relay, so every
 // attacker-controllable length/count is bounded before allocation.
 const (
-	maxField   = 1 << 20 // 1 MiB per field (keys/sigs/hashes are tiny; generous)
-	maxSigners = 1 << 12 // signers in a genesis
-	maxEntries = 1 << 16 // entries in a chain
+	maxField        = 1 << 20 // 1 MiB per field (keys/sigs/hashes are tiny; generous)
+	maxSigners      = 1 << 12 // signers in a genesis
+	maxDisablements = 1 << 12 // disablement commitments in a genesis
+	maxEntries      = 1 << 16 // entries in a chain
 )
 
 // MarshalEntry encodes an entry to its canonical wire form. It is identical to the
@@ -86,6 +87,18 @@ func readEntry(r *bytes.Reader) (Entry, error) {
 		e.Signers = make([][]byte, cnt)
 		for i := range e.Signers {
 			if e.Signers[i], err = getField(r); err != nil {
+				return Entry{}, err
+			}
+		}
+	}
+	dcnt, err := getCount(r, maxDisablements)
+	if err != nil {
+		return Entry{}, err
+	}
+	if dcnt > 0 {
+		e.Disablements = make([][]byte, dcnt)
+		for i := range e.Disablements {
+			if e.Disablements[i], err = getField(r); err != nil {
 				return Entry{}, err
 			}
 		}

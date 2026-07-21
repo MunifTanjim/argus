@@ -13,7 +13,7 @@ func lockedSyncStore(t *testing.T) (*SyncStore, SignerKey) {
 	if err != nil {
 		t.Fatalf("GenerateSigner: %v", err)
 	}
-	log, err := NewGenesis([][]byte{s1.Public}, s1)
+	log, err := NewGenesis([][]byte{s1.Public}, s1, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
@@ -59,6 +59,77 @@ func TestSyncStoreAppendRejectsUntrustedSigner(t *testing.T) {
 	}
 	if ss.DeviceAuthorized(dev) {
 		t.Fatal("device must not be authorized after a rejected append")
+	}
+}
+
+func TestSyncStoreDisable(t *testing.T) {
+	s, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	secret, err := GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	commitment := DisablementCommitment(secret)
+	log, err := NewGenesis([][]byte{s.Public}, s, [][]byte{commitment})
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHead := log.Head()
+	ss := NewSyncStore(genesisHead)
+	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
+		t.Fatalf("Ingest genesis: %v", err)
+	}
+
+	if ss.Disabled() {
+		t.Fatal("Disabled() should be false before Disable")
+	}
+
+	changed, err := ss.Disable(secret, s)
+	if err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if !changed {
+		t.Error("Disable should report changed=true")
+	}
+	if !ss.Disabled() {
+		t.Error("Disabled() should be true after Disable")
+	}
+}
+
+func TestSyncStoreDisableUnknownSecretErrors(t *testing.T) {
+	s, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	secret, err := GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	commitment := DisablementCommitment(secret)
+	log, err := NewGenesis([][]byte{s.Public}, s, [][]byte{commitment})
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	ss := NewSyncStore(log.Head())
+	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
+		t.Fatalf("Ingest genesis: %v", err)
+	}
+
+	wrongSecret, err := GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	changed, err := ss.Disable(wrongSecret, s)
+	if err == nil {
+		t.Error("Disable with unknown secret should return an error")
+	}
+	if changed {
+		t.Error("Disable with unknown secret should not report changed=true")
+	}
+	if ss.Disabled() {
+		t.Error("Disabled() should remain false after a rejected Disable")
 	}
 }
 

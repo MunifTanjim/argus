@@ -51,7 +51,7 @@ func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
 
 	// Genesis-only chain first; an authorize appended later.
 	signer, _ := trustlog.GenerateSigner()
-	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	head := log.Head()
 	genChain := trustlog.MarshalChain(log.Entries())
 	device := bytes.Repeat([]byte{0x22}, 32)

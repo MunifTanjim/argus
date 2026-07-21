@@ -371,7 +371,7 @@ func newE2EClientForTest(t *testing.T, head []byte, chainPath string, chain ...[
 
 func TestClientTrustStorePersists(t *testing.T) {
 	signer, _ := trustlog.GenerateSigner()
-	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	head := log.Head()
 	dev := bytes.Repeat([]byte{0x44}, 32)
 	_ = log.AuthorizeDevice(dev, signer)
@@ -399,7 +399,7 @@ func TestClientTrustStorePersists(t *testing.T) {
 func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	// Build a trust chain authorizing only nodeAuth's identity key.
 	signer, _ := trustlog.GenerateSigner()
-	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	head := lg.Head()
 
 	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
@@ -435,5 +435,63 @@ func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	}
 	if _, ok := snap["nodeUnauth"]; ok {
 		t.Fatal("unauthorized node must be skipped (no channel)")
+	}
+}
+
+func TestClientDisabledStoreConnectsAll(t *testing.T) {
+	// Build a trust chain with a disablement commitment, authorizing only nodeAuth.
+	signer, _ := trustlog.GenerateSigner()
+	secret, err := trustlog.GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	commitment := trustlog.DisablementCommitment(secret)
+	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{commitment})
+	head := lg.Head()
+
+	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
+	unauthNode := &fakeNode{id: "nodeUnauth", key: mustKP(t)}
+
+	_ = lg.AuthorizeDevice(authNode.key.Public, signer)
+	chain := trustlog.MarshalChain(lg.Entries())
+
+	noop := func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return nil, nil, nil
+	}
+	authNode.handle = noop
+	unauthNode.handle = noop
+
+	gw, clientConn := newFakeMultiGateway(t, authNode, unauthNode)
+	gw.chain = chain
+	defer gw.peer.Close()
+
+	c, err := NewE2EClientWithGenesis(clientConn, head)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	// Ingest the chain and disable the trust store before connecting, so
+	// enforcement is already off when Connect runs.
+	if _, err := c.trust.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if _, err := c.trust.Disable(secret, signer); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	// The fake gateway serves only the pre-disable chain (gw.chain). During
+	// Connect, syncTrustLog's Ingest rejects that shorter chain (rollback
+	// resistance), so the disabled state is preserved when channelling nodes.
+	if err := c.Connect(); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	snap := c.byNodeSnapshot()
+	if _, ok := snap["nodeAuth"]; !ok {
+		t.Fatal("authorized node should have a channel")
+	}
+	if _, ok := snap["nodeUnauth"]; !ok {
+		t.Fatal("disabled store must open a channel to the otherwise-unauthorized node")
 	}
 }

@@ -9,7 +9,7 @@ import (
 func buildStoreChain(t *testing.T) (genesisHead []byte, short, extended []byte, dev []byte) {
 	t.Helper()
 	s, _ := GenerateSigner()
-	l, err := NewGenesis([][]byte{s.Public}, s)
+	l, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("genesis: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestStoreRejectsForkAndTamper(t *testing.T) {
 
 func TestStoreRejectsGenuineFork(t *testing.T) {
 	s, _ := GenerateSigner()
-	la, err := NewGenesis([][]byte{s.Public}, s)
+	la, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("genesis A: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestStoreRejectsGenuineFork(t *testing.T) {
 		t.Fatalf("authorize A: %v", err)
 	}
 	// Same genesis (deterministic), divergent history: authorize a different device.
-	lb, err := NewGenesis([][]byte{s.Public}, s)
+	lb, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("genesis B: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestStoreRejectsGenuineFork(t *testing.T) {
 
 func TestStoreIngestIdenticalIsNoop(t *testing.T) {
 	s, _ := GenerateSigner()
-	l, err := NewGenesis([][]byte{s.Public}, s)
+	l, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("genesis: %v", err)
 	}

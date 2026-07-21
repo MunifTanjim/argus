@@ -76,6 +76,23 @@ func (s *SyncStore) Devices() [][]byte {
 	return s.store.Devices()
 }
 
+// Disabled reports whether the log has been disabled by a valid disablement secret.
+func (s *SyncStore) Disabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.Disabled()
+}
+
+// Disable appends a KindDisable entry revealing secret, signed by by. changed
+// reports whether the chain actually advanced (it always does on success, since a
+// disable is terminal and irreversible). Returns an error if the secret is unknown,
+// the store is empty, or the log is already disabled.
+func (s *SyncStore) Disable(secret []byte, by SignerKey) (changed bool, err error) {
+	return s.appendSigned(
+		func(*Store) bool { return false }, // never a no-op: always attempt the disable
+		func(l *Log) error { return l.Disable(secret, by) })
+}
+
 // appendSigned extends the live chain by one signer-signed entry under s.mu.
 // alreadyDone is evaluated under the lock to provide atomic idempotency: if it
 // returns true the call is a no-op (changed=false, err=nil). The cur==nil check

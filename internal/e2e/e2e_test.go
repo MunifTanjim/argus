@@ -232,6 +232,21 @@ func TestLoadOrCreateIdentity(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateIdentityUnreadable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	path := filepath.Join(t.TempDir(), "client-identity.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o000); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	defer os.Chmod(path, 0o600)
+	_, err := LoadOrCreateIdentity(path)
+	if err == nil {
+		t.Fatal("expected an error for an unreadable key file, got nil")
+	}
+}
+
 func TestFinishRejectsTamperedMsg2(t *testing.T) {
 	nodeKey, _ := GenerateKeyPair()
 	clientKey, _ := GenerateKeyPair()

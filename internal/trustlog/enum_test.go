@@ -9,7 +9,7 @@ import (
 func TestLogSignersAndDevices(t *testing.T) {
 	s1, _ := GenerateSigner()
 	s2, _ := GenerateSigner()
-	log, err := NewGenesis([][]byte{s1.Public}, s1)
+	log, err := NewGenesis([][]byte{s1.Public}, s1, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestLogSignersAndDevices(t *testing.T) {
 
 func TestSyncStoreEnumeration(t *testing.T) {
 	s1, _ := GenerateSigner()
-	log, _ := NewGenesis([][]byte{s1.Public}, s1)
+	log, _ := NewGenesis([][]byte{s1.Public}, s1, nil)
 	head := log.Head()
 	dev := bytes.Repeat([]byte{0x33}, 32)
 	_ = log.AuthorizeDevice(dev, s1)

@@ -137,6 +137,40 @@ func TestLockInitRebootRoundTrip(t *testing.T) {
 	}
 }
 
+func mustSigner(t *testing.T) trustlog.SignerKey {
+	t.Helper()
+	sk, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	return sk
+}
+
+func TestLockInitGeneratesDisablements(t *testing.T) {
+	d := newLockTestNode(t)
+	res, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 2})
+	if err != nil {
+		t.Fatalf("lock.init: %v", err)
+	}
+	if len(res.DisablementSecrets) != 2 {
+		t.Fatalf("got %d secrets, want 2", len(res.DisablementSecrets))
+	}
+	// A returned secret validly disables the resulting store (commitment is in genesis).
+	if changed, err := d.TrustStore().Disable(res.DisablementSecrets[0], mustSigner(t)); err != nil || !changed {
+		t.Fatalf("returned secret should disable: changed=%v err=%v", changed, err)
+	}
+	if !d.TrustStore().Disabled() {
+		t.Fatal("store should be disabled after a valid returned secret")
+	}
+}
+
+func TestLockInitNegativeGenDisablementsErrors(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{GenDisablements: -1}); err == nil {
+		t.Fatal("negative gen_disablements must error")
+	}
+}
+
 func callLockDevice(t *testing.T, d *Node, method string, dev []byte) (api.LockDeviceResult, error) {
 	t.Helper()
 	raw, _ := json.Marshal(api.LockDeviceParams{Device: dev})
@@ -212,20 +246,118 @@ func TestLockSignRequiresLocked(t *testing.T) {
 	}
 }
 
+func TestLockDisable(t *testing.T) {
+	d := newLockTestNode(t)
+	initRes, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Valid secret → disabled.
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: initRes.DisablementSecrets[0]})
+	out, err := d.handleLockDisable(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("lock.disable: %v", err)
+	}
+	res := out.(api.LockDisableResult)
+	if !res.Disabled || !d.TrustStore().Disabled() {
+		t.Fatal("store should be disabled")
+	}
+	if len(res.Head) == 0 {
+		t.Fatal("disable result Head must be non-empty")
+	}
+	// Second disable with the same secret must error: the log is terminal-disabled.
+	if _, err2 := d.handleLockDisable(context.Background(), raw); err2 == nil {
+		t.Fatal("second disable on an already-disabled log must error")
+	}
+}
+
+func TestLockDisableRejectsUnknownSecret(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	bad, _ := trustlog.GenerateDisablementSecret()
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: bad})
+	if _, err := d.handleLockDisable(context.Background(), raw); err == nil {
+		t.Fatal("unknown secret must be rejected")
+	}
+	if d.TrustStore().Disabled() {
+		t.Fatal("store must not be disabled by an unknown secret")
+	}
+}
+
+func TestLockDisableRequiresLocked(t *testing.T) {
+	d := newLockTestNode(t)
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: []byte("x")})
+	if _, err := d.handleLockDisable(context.Background(), raw); err == nil {
+		t.Fatal("disable on an unlocked node must error")
+	}
+}
+
+func TestLocalDisablePersistsAndReloads(t *testing.T) {
+	dir := t.TempDir()
+	chainPath := filepath.Join(dir, "trustlog-chain")
+
+	d := New()
+	d.SetTrustChainPath(chainPath)
+	if d.localDisabled() {
+		t.Fatal("fresh node must not be local-disabled")
+	}
+	if err := d.LocalDisable(); err != nil {
+		t.Fatalf("LocalDisable: %v", err)
+	}
+	if !d.localDisabled() {
+		t.Fatal("node should be local-disabled")
+	}
+	// A fresh node with the same state dir picks it up at boot.
+	d2 := New()
+	d2.SetTrustChainPath(chainPath)
+	d2.LoadLocalDisabled()
+	if !d2.localDisabled() {
+		t.Fatal("local-disable marker should survive reboot")
+	}
+}
+
 func TestLockStatusReflectsState(t *testing.T) {
 	d := newLockTestNode(t)
-	// Before init: disabled, but self keys reported.
+	// Before init: not enabled, self keys reported, not locally disabled.
 	raw0, _ := d.handleLockStatus(context.Background(), nil)
 	st0 := raw0.(api.LockStatusResult)
 	if st0.Enabled || len(st0.SignerPubKey) == 0 {
 		t.Fatalf("pre-init status = %+v", st0)
 	}
-	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+	if st0.LocalDisabled {
+		t.Fatalf("pre-init: LocalDisabled should be false, got %+v", st0)
+	}
+	initRes, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	raw1, _ := d.handleLockStatus(context.Background(), nil)
 	st1 := raw1.(api.LockStatusResult)
 	if !st1.Enabled || len(st1.Head) == 0 || !st1.SignerTrusted {
 		t.Fatalf("post-init status = %+v", st1)
+	}
+	if st1.Disabled {
+		t.Fatalf("post-init: Disabled should be false, got %+v", st1)
+	}
+	// Disable the log; status should reflect Disabled == true.
+	disableRaw, _ := json.Marshal(api.LockDisableParams{Secret: initRes.DisablementSecrets[0]})
+	if _, err := d.handleLockDisable(context.Background(), disableRaw); err != nil {
+		t.Fatalf("lock.disable: %v", err)
+	}
+	raw2, _ := d.handleLockStatus(context.Background(), nil)
+	st2 := raw2.(api.LockStatusResult)
+	if !st2.Disabled {
+		t.Fatalf("post-disable: Disabled should be true, got %+v", st2)
+	}
+	// Local disable; status should reflect LocalDisabled == true.
+	if err := d.LocalDisable(); err != nil {
+		t.Fatalf("LocalDisable: %v", err)
+	}
+	raw3, _ := d.handleLockStatus(context.Background(), nil)
+	st3 := raw3.(api.LockStatusResult)
+	if !st3.LocalDisabled {
+		t.Fatalf("post-local-disable: LocalDisabled should be true, got %+v", st3)
 	}
 }

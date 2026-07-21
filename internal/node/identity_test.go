@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/base64"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,6 +28,21 @@ func TestLoadOrCreateIdentityPersists(t *testing.T) {
 	}
 	if string(kp1.Private) != string(kp2.Private) || string(kp1.Public) != string(kp2.Public) {
 		t.Error("reload returned a different keypair; identity not persisted")
+	}
+}
+
+func TestLoadOrCreateIdentityUnreadable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	path := filepath.Join(t.TempDir(), "node-identity.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o000); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	defer os.Chmod(path, 0o600)
+	_, err := LoadOrCreateIdentity(path)
+	if err == nil {
+		t.Fatal("expected an error for an unreadable key file, got nil")
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -154,7 +154,7 @@ func (m *E2EClient) Connect() error {
 		if err != nil {
 			continue // bad key: skip (fail-closed; also can't open a channel anyway)
 		}
-		if m.trust != nil && !m.trust.DeviceAuthorized(pub) {
+		if m.trust != nil && !m.trust.Disabled() && !m.trust.DeviceAuthorized(pub) {
 			continue // unauthorized node: silent exclusion (fail-closed)
 		}
 		if err := m.openChannel(nd, pub); err != nil {
@@ -599,41 +599,9 @@ func (m *E2EClient) syncTrustLog() {
 	_ = m.persistTrustChain()
 }
 
-// persistTrustChain atomically writes the current chain to trustPath (temp file in
-// the same dir, then rename — a reader/reconnect never sees a partial file).
+// persistTrustChain atomically writes the current chain to trustPath.
 func (m *E2EClient) persistTrustChain() error {
-	dir := filepath.Dir(m.trustPath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".client-trustlog-chain-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(m.trust.Bytes()); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return werr
-	}
-	if serr := tmp.Sync(); serr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return serr
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return cerr
-	}
-	if rerr := os.Rename(tmpName, m.trustPath); rerr != nil {
-		os.Remove(tmpName)
-		return rerr
-	}
-	if dh, derr := os.Open(filepath.Dir(m.trustPath)); derr == nil {
-		_ = dh.Sync()
-		dh.Close()
-	}
-	return nil
+	return atomicfile.Write(m.trustPath, m.trust.Bytes())
 }
 
 func (m *E2EClient) trustSyncLoop() {

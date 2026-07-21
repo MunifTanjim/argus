@@ -84,6 +84,21 @@ func TestLoadOrCreateSignerRegeneratesOnCorrupt(t *testing.T) {
 	})
 }
 
+func TestLoadOrCreateSignerUnreadable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	path := filepath.Join(t.TempDir(), "signer-key.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o000); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	defer os.Chmod(path, 0o600)
+	_, err := LoadOrCreateSigner(path)
+	if err == nil {
+		t.Fatal("expected an error for an unreadable key file, got nil")
+	}
+}
+
 func TestSetSignerKeyExposesPub(t *testing.T) {
 	d := New()
 	if d.SignerPubKey() != "" {

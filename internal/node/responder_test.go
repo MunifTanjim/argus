@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -170,7 +171,7 @@ func buildLockedResponder(t *testing.T, authorizedClientPub []byte) *relayRespon
 	if err != nil {
 		t.Fatalf("GenerateSigner: %v", err)
 	}
-	lg, err := trustlog.NewGenesis([][]byte{signer.Public}, signer)
+	lg, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
@@ -255,5 +256,99 @@ func TestResponderEnforcesAuthorizedClient(t *testing.T) {
 	rOpen := buildOpenResponder(t)
 	if !runClientHandshake(t, rOpen, other) {
 		t.Fatal("open-mode responder should accept any client")
+	}
+}
+
+// buildDisabledLockedResponder returns a locked responder whose trust store is
+// Disabled (genesis carries the disablement commitment, then Disable is called).
+// authorizedClientPub is still in the chain, but enforcement must be off.
+func buildDisabledLockedResponder(t *testing.T, authorizedClientPub []byte) *relayResponder {
+	t.Helper()
+	d := newE2ETestNode(t)
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	secret, err := trustlog.GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	commitment := trustlog.DisablementCommitment(secret)
+	lg, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{commitment})
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHead := lg.Head()
+	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	chain := trustlog.MarshalChain(lg.Entries())
+	ss := trustlog.NewSyncStore(genesisHead)
+	if _, err := ss.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if _, err := ss.Disable(secret, signer); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	d.trust.Store(ss)
+	return d.newRelayResponder()
+}
+
+func TestResponderDisabledStoreAcceptsAll(t *testing.T) {
+	authorizedKP, _ := e2e.GenerateKeyPair()
+	unauthorized, _ := e2e.GenerateKeyPair()
+
+	// Disabled store: even an unauthorized client gets a channel.
+	r := buildDisabledLockedResponder(t, authorizedKP.Public)
+	if !runClientHandshake(t, r, unauthorized) {
+		t.Fatal("disabled store must accept unauthorized client (enforcement off)")
+	}
+}
+
+// buildLocalDisabledLockedResponder returns a locked responder whose per-node
+// local-disable flag is set. authorizedClientPub is the only authorized identity
+// in the trust store, but enforcement must be off via the local-disable escape hatch.
+func buildLocalDisabledLockedResponder(t *testing.T, authorizedClientPub []byte) *relayResponder {
+	t.Helper()
+	d := newE2ETestNode(t)
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	lg, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHead := lg.Head()
+	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	chain := trustlog.MarshalChain(lg.Entries())
+	ss := trustlog.NewSyncStore(genesisHead)
+	if _, err := ss.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	d.trust.Store(ss)
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+	if err := d.LocalDisable(); err != nil {
+		t.Fatalf("LocalDisable: %v", err)
+	}
+	return d.newRelayResponder()
+}
+
+func TestResponderLocalDisabledAcceptsAll(t *testing.T) {
+	authorizedKP, _ := e2e.GenerateKeyPair()
+	unauthorized, _ := e2e.GenerateKeyPair()
+
+	// Local-disable flag set: even an unauthorized client gets a channel.
+	r := buildLocalDisabledLockedResponder(t, authorizedKP.Public)
+	if !runClientHandshake(t, r, unauthorized) {
+		t.Fatal("local-disabled node must accept unauthorized client (enforcement off)")
+	}
+
+	// Sanity-check: without local-disable the same unauthorized client is rejected.
+	r2 := buildLockedResponder(t, authorizedKP.Public)
+	if runClientHandshake(t, r2, unauthorized) {
+		t.Fatal("unauthorized client must be rejected when local-disable is not set")
 	}
 }

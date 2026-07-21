@@ -36,7 +36,7 @@ func (d *Node) newRelayResponder() *relayResponder {
 	return &relayResponder{
 		d:        d,
 		static:   d.identity,
-		dispatch: d.server.DispatchFunc(),
+		dispatch: d.remoteDispatch(),
 		chans:    map[string]*chanState{},
 	}
 }
@@ -83,8 +83,9 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	// Locked-mode enforcement (fail-closed): a node with a trust store accepts a
 	// channel only from an authorized client identity. Open mode (nil store) skips
 	// this. An empty/unsynced store authorizes no one, so it rejects all until the
-	// chain arrives — the correct fail-closed posture.
-	if st := r.d.trust.Load(); st != nil && !st.DeviceAuthorized(clientStatic) {
+	// chain arrives — the correct fail-closed posture. Enforcement is bypassed when
+	// the store is Disabled() or the node's local-disable flag is set.
+	if st := r.d.trust.Load(); st != nil && !st.Disabled() && !r.d.localDisabled() && !st.DeviceAuthorized(clientStatic) {
 		var fp string
 		if len(clientStatic) >= 8 {
 			fp = base64.StdEncoding.EncodeToString(clientStatic[:8])

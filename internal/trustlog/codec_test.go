@@ -8,7 +8,7 @@ import (
 func sampleChain(t *testing.T) []Entry {
 	t.Helper()
 	s1, _ := GenerateSigner()
-	l, err := NewGenesis([][]byte{s1.Public}, s1)
+	l, err := NewGenesis([][]byte{s1.Public}, s1, nil)
 	if err != nil {
 		t.Fatalf("genesis: %v", err)
 	}
@@ -101,5 +101,44 @@ func TestUnmarshalChainRejectsTrailingBytes(t *testing.T) {
 	b := append(MarshalChain(entries), 0x00)
 	if _, err := UnmarshalChain(b); err == nil {
 		t.Error("UnmarshalChain must reject trailing bytes after the chain")
+	}
+}
+
+// TestChainRoundTripWithDisablement builds a genesis with a disablement commitment,
+// appends a KindDisable entry, marshals→unmarshals→Load, and asserts the reloaded
+// log reports Disabled()=true and reproduces the original head (decode→hash stable).
+func TestChainRoundTripWithDisablement(t *testing.T) {
+	s, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	secret, err := GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	commitment := DisablementCommitment(secret)
+	l, err := NewGenesis([][]byte{s.Public}, s, [][]byte{commitment})
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	if err := l.Disable(secret, s); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	originalHead := l.Head()
+
+	wire := MarshalChain(l.Entries())
+	decoded, err := UnmarshalChain(wire)
+	if err != nil {
+		t.Fatalf("UnmarshalChain: %v", err)
+	}
+	reloaded, err := Load(decoded)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reloaded.Disabled() {
+		t.Error("reloaded log should report Disabled()=true")
+	}
+	if !bytes.Equal(reloaded.Head(), originalHead) {
+		t.Error("reloaded log head differs from original (decode→hash not stable)")
 	}
 }

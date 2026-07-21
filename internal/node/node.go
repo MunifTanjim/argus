@@ -5,6 +5,7 @@ package node
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -87,6 +88,8 @@ type Node struct {
 	trust          atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
 	trustPath      string                             // on-disk chain path for persistence
 	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
+
+	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -200,9 +203,25 @@ func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 // aggregate it as an in-process source.
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
-// DispatchFunc exposes the node's control handlers so a co-located gateway can
-// route control calls into the local engine without a network hop.
-func (d *Node) DispatchFunc() api.DispatchFunc { return d.server.DispatchFunc() }
+// remoteDispatch is the control surface exposed to REMOTE callers (the gateway
+// uplink, E2E-relayed clients, a co-located gateway). It rejects lock.* methods:
+// locked-mode control is local-admin only (the CLI dials the local unix socket),
+// so a malicious gateway cannot disable enforcement or forge trust-log changes.
+func (d *Node) remoteDispatch() api.DispatchFunc {
+	full := d.server.DispatchFunc()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if strings.HasPrefix(method, "lock.") {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return full(ctx, method, params)
+	}
+}
+
+// DispatchFunc exposes a restricted control surface for co-located gateways: routes
+// non-lock.* calls into the local engine without a network hop. lock.* is local-
+// admin only (CLI dials the unix socket); a co-located gateway serves remote clients,
+// so it must not expose locked-mode control.
+func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
 
 // clientFor returns the tmux client for a session's server.
 func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {

@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -19,7 +20,8 @@ type persistedIdentity struct {
 // saving one on first use (0600 file under a 0700 dir), mirroring the VAPID key.
 // A stable identity keeps clients' pinned/cached node pubkey valid across restarts.
 func LoadOrCreateIdentity(path string) (e2e.KeyPair, error) {
-	if b, err := os.ReadFile(path); err == nil {
+	b, err := os.ReadFile(path)
+	if err == nil {
 		var p persistedIdentity
 		if json.Unmarshal(b, &p) == nil {
 			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
@@ -29,6 +31,9 @@ func LoadOrCreateIdentity(path string) (e2e.KeyPair, error) {
 			}
 		}
 	}
+	if err != nil && !os.IsNotExist(err) {
+		return e2e.KeyPair{}, fmt.Errorf("LoadOrCreateIdentity: reading key %s: %w", path, err)
+	}
 	kp, err := e2e.GenerateKeyPair()
 	if err != nil {
 		return e2e.KeyPair{}, err
@@ -36,7 +41,7 @@ func LoadOrCreateIdentity(path string) (e2e.KeyPair, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return e2e.KeyPair{}, err
 	}
-	b, err := json.Marshal(persistedIdentity{
+	b, err = json.Marshal(persistedIdentity{
 		Private: base64.StdEncoding.EncodeToString(kp.Private),
 		Public:  base64.StdEncoding.EncodeToString(kp.Public),
 	})

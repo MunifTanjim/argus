@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -22,7 +23,8 @@ type persistedSigner struct {
 // mode — so a later `lock init` can designate an already-existing key as a trusted
 // signer with no re-provisioning. The private half never leaves the node.
 func LoadOrCreateSigner(path string) (trustlog.SignerKey, error) {
-	if b, err := os.ReadFile(path); err == nil {
+	b, err := os.ReadFile(path)
+	if err == nil {
 		var p persistedSigner
 		if json.Unmarshal(b, &p) == nil {
 			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
@@ -32,6 +34,9 @@ func LoadOrCreateSigner(path string) (trustlog.SignerKey, error) {
 			}
 		}
 	}
+	if err != nil && !os.IsNotExist(err) {
+		return trustlog.SignerKey{}, fmt.Errorf("LoadOrCreateSigner: reading key %s: %w", path, err)
+	}
 	kp, err := trustlog.GenerateSigner()
 	if err != nil {
 		return trustlog.SignerKey{}, err
@@ -39,7 +44,7 @@ func LoadOrCreateSigner(path string) (trustlog.SignerKey, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return trustlog.SignerKey{}, err
 	}
-	b, err := json.Marshal(persistedSigner{
+	b, err = json.Marshal(persistedSigner{
 		Private: base64.StdEncoding.EncodeToString(kp.Private),
 		Public:  base64.StdEncoding.EncodeToString(kp.Public),
 	})

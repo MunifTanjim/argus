@@ -18,7 +18,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockSignCmd(), newLockRevokeCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
 	return cmd
 }
 
@@ -73,6 +73,7 @@ func gatherDevices(roster []api.NodeDescriptor) [][]byte {
 
 func newLockInitCmd() *cobra.Command {
 	var signers []string
+	var genDisablements int
 	cmd := &cobra.Command{
 		Use:           "init",
 		Short:         "Enable locked mode: create the trust log and authorize current nodes",
@@ -101,7 +102,7 @@ func newLockInitCmd() *cobra.Command {
 			devices := gatherDevices(roster)
 
 			// 2. lock.init on the local node.
-			res, err := lockInitOnNode(ctx, cfg, api.LockInitParams{Signers: sigPubs, Devices: devices})
+			res, err := lockInitOnNode(ctx, cfg, api.LockInitParams{Signers: sigPubs, Devices: devices, GenDisablements: genDisablements})
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -109,16 +110,23 @@ func newLockInitCmd() *cobra.Command {
 			// 3. Report.
 			head := base64.StdEncoding.EncodeToString(res.Head)
 			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", head, res.SignerCount)
-			if res.SignerCount < 2 {
-				shell.StdErrF("\nWARNING: only one signer. If this node is lost or compromised you cannot\n" +
-					"sign new devices or change the lock, and there is no recovery yet (disablement\n" +
-					"secrets are a later feature). Add a second signer: argus lock init --signer <node>\n")
+			for _, s := range res.DisablementSecrets {
+				shell.StdOutF("  disablement secret: %s\n", base64.StdEncoding.EncodeToString(s))
+			}
+			if len(res.DisablementSecrets) > 0 {
+				shell.StdErrF("\nSAVE the disablement secret(s) above NOW — shown only once. Each one disables\nlocked mode network-wide (break-glass recovery if signer keys are lost).\n")
+			}
+			if res.SignerCount < 2 && len(res.DisablementSecrets) == 0 {
+				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer (--signer <node>) or\ngenerate a disablement secret (--gen-disablements).\n")
+			} else if res.SignerCount < 2 {
+				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer <node>.\n")
 			}
 			shell.StdOutF("\nTo pin your other nodes and clients, set in their config:\n  lock.genesis: %s\n", head)
 			return nil
 		},
 	}
 	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer node (label or id); repeatable")
+	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
 	addClientFlags(cmd.Flags())
 	return cmd
 }
@@ -312,6 +320,80 @@ func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, de
 	return res, nil
 }
 
+func newLockDisableCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "disable <secret>",
+		Short:         "Disable locked mode network-wide using a disablement secret",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			secret, err := base64.StdEncoding.DecodeString(args[0])
+			if err != nil {
+				return fail(cmd, fmt.Errorf("secret must be base64: %w", err))
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dial, err := gatewayDialer("", "", cfg.Socket) // local node
+			if err != nil {
+				return fail(cmd, err)
+			}
+			conn, err := dial(ctx)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			c := api.NewClient(conn)
+			defer c.Close()
+			var res api.LockDisableResult
+			if err := c.Call(api.MethodLockDisable, api.LockDisableParams{Secret: secret}, &res); err != nil {
+				return fail(cmd, err)
+			}
+			shell.StdOutF("locked mode disabled network-wide\n  current HEAD (audit): %s\n", base64.StdEncoding.EncodeToString(res.Head))
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
+func newLockLocalDisableCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "local-disable",
+		Short:         "Disable locked-mode enforcement on THIS node only (persisted escape hatch)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dial, err := gatewayDialer("", "", cfg.Socket) // local node
+			if err != nil {
+				return fail(cmd, err)
+			}
+			conn, err := dial(ctx)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			c := api.NewClient(conn)
+			defer c.Close()
+			if err := c.Call(api.MethodLockLocalDisable, nil, nil); err != nil {
+				return fail(cmd, err)
+			}
+			shell.StdOutF("locked-mode enforcement disabled on this node\n")
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
 func b64OrNone(b []byte) string {
 	if len(b) == 0 {
 		return "(none)"
@@ -324,8 +406,17 @@ func printLockStatus(st api.LockStatusResult) {
 		shell.StdOutF("locked mode: disabled\n  this node signer: %s\n  this node identity: %s\n",
 			b64OrNone(st.SignerPubKey),
 			b64OrNone(st.IdentityPubKey))
+		if st.LocalDisabled {
+			shell.StdOutF("  local-disable: active\n")
+		}
 		return
 	}
 	shell.StdOutF("locked mode: enabled\n  current HEAD (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
 		base64.StdEncoding.EncodeToString(st.Head), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+	if st.Disabled {
+		shell.StdOutF("  network-wide disabled: true\n")
+	}
+	if st.LocalDisabled {
+		shell.StdOutF("  local-disable: active\n")
+	}
 }

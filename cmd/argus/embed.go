@@ -298,6 +298,7 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	} else {
 		d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
 	}
+	d.LoadLocalDisabled()
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))

@@ -26,6 +26,9 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 	}
+	if p.GenDisablements < 0 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "gen_disablements must be non-negative"}
+	}
 
 	// Signer set = self + additional (deduped). Validate lengths.
 	signerSet := [][]byte{append([]byte(nil), d.signer.Public...)}
@@ -45,7 +48,19 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 		}
 	}
 
-	tlog, err := trustlog.NewGenesis(signerSet, d.signer)
+	// Generate disablement secrets: keep only the commitments (in the genesis); return
+	// the raw secrets to the caller ONCE (over the local socket) for the operator to save.
+	var secrets, commitments [][]byte
+	for i := 0; i < p.GenDisablements; i++ {
+		secret, err := trustlog.GenerateDisablementSecret()
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "disablement secret: " + err.Error()}
+		}
+		secrets = append(secrets, secret)
+		commitments = append(commitments, trustlog.DisablementCommitment(secret))
+	}
+
+	tlog, err := trustlog.NewGenesis(signerSet, d.signer, commitments)
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "genesis: " + err.Error()}
 	}
@@ -65,7 +80,7 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 	if err := d.activateTrust(store, genesisHead, d.trustPath); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "activate: " + err.Error()}
 	}
-	return api.LockInitResult{Head: genesisHead, SignerCount: len(signerSet)}, nil
+	return api.LockInitResult{Head: genesisHead, SignerCount: len(signerSet), DisablementSecrets: secrets}, nil
 }
 
 // handleLockSign authorizes a device (lock.sign). Requires this node to be a trusted
@@ -114,11 +129,44 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 	return api.LockDeviceResult{Head: st.Head()}, nil
 }
 
+// handleLockDisable consumes a disablement secret (lock.disable): if its commitment is
+// in the genesis, it appends a KindDisable entry — authorized by the secret, not a
+// signer — flipping the log (and, via distribution, the whole network) to disabled.
+func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	p, err := api.Decode[api.LockDisableParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	changed, derr := st.Disable(p.Secret, d.signer)
+	if derr != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "disable: " + derr.Error()}
+	}
+	if changed {
+		if werr := d.persistTrust(); werr != nil {
+			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+		}
+	}
+	return api.LockDisableResult{Head: st.Head(), Disabled: st.Disabled()}, nil
+}
+
+// handleLockLocalDisable locally disables locked-mode enforcement on this node only.
+func (d *Node) handleLockLocalDisable(_ context.Context, _ json.RawMessage) (any, error) {
+	if err := d.LocalDisable(); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return nil, nil
+}
+
 // handleLockStatus returns the audit view of this node's locked state.
 func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, error) {
 	res := api.LockStatusResult{
 		SignerPubKey:   append([]byte(nil), d.signer.Public...),
 		IdentityPubKey: append([]byte(nil), d.identity.Public...),
+		LocalDisabled:  d.localDisabled(),
 	}
 	st := d.trust.Load()
 	if st == nil {
@@ -134,5 +182,6 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 	if len(d.identity.Public) > 0 {
 		res.Authorized = st.DeviceAuthorized(d.identity.Public)
 	}
+	res.Disabled = st.Disabled()
 	return res, nil
 }

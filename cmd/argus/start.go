@@ -111,6 +111,7 @@ func newStartCmd(version string) *cobra.Command {
 			} else {
 				d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
 			}
+			d.LoadLocalDisabled()
 			clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
 			d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 

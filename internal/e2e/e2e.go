@@ -46,7 +46,8 @@ type persistedIdentity struct {
 // locked network authorize this device's key once (argus lock sign) and keep it
 // valid across restarts.
 func LoadOrCreateIdentity(path string) (KeyPair, error) {
-	if b, err := os.ReadFile(path); err == nil {
+	b, err := os.ReadFile(path)
+	if err == nil {
 		var p persistedIdentity
 		if json.Unmarshal(b, &p) == nil {
 			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
@@ -56,6 +57,9 @@ func LoadOrCreateIdentity(path string) (KeyPair, error) {
 			}
 		}
 	}
+	if err != nil && !os.IsNotExist(err) {
+		return KeyPair{}, fmt.Errorf("LoadOrCreateIdentity: reading key %s: %w", path, err)
+	}
 	kp, err := GenerateKeyPair()
 	if err != nil {
 		return KeyPair{}, err
@@ -63,7 +67,7 @@ func LoadOrCreateIdentity(path string) (KeyPair, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return KeyPair{}, err
 	}
-	b, err := json.Marshal(persistedIdentity{
+	b, err = json.Marshal(persistedIdentity{
 		Private: base64.StdEncoding.EncodeToString(kp.Private),
 		Public:  base64.StdEncoding.EncodeToString(kp.Public),
 	})

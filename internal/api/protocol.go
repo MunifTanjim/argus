@@ -88,11 +88,15 @@ const (
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogChain (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
-	// Locked-mode control (local unix-socket only; node-RPC for the lock CLI).
-	MethodLockInit   = "lock.init"   // request: LockInitParams; result: LockInitResult
-	MethodLockStatus = "lock.status" // request: no params; result: LockStatusResult
-	MethodLockSign   = "lock.sign"   // request: LockDeviceParams; result: LockDeviceResult
-	MethodLockRevoke = "lock.revoke" // request: LockDeviceParams; result: LockDeviceResult
+	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
+	// lock.* method for the gateway uplink, E2E responder, and co-located gateway,
+	// so only the CLI (which dials the unix socket) can invoke these.
+	MethodLockInit         = "lock.init"         // request: LockInitParams; result: LockInitResult
+	MethodLockStatus       = "lock.status"       // request: no params; result: LockStatusResult
+	MethodLockSign         = "lock.sign"         // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
+	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -611,15 +615,28 @@ type LockDeviceResult struct {
 // (the local node auto-includes its own); Devices are Curve25519 identity pubkeys to
 // authorize in the genesis (the current nodes).
 type LockInitParams struct {
-	Signers [][]byte `json:"signers,omitempty"`
-	Devices [][]byte `json:"devices,omitempty"`
+	Signers         [][]byte `json:"signers,omitempty"`
+	Devices         [][]byte `json:"devices,omitempty"`
+	GenDisablements int      `json:"gen_disablements,omitempty"` // number of disablement secrets to generate
 }
 
 // LockInitResult reports the new genesis head and the final signer count (so the CLI
 // can warn on a single signer).
 type LockInitResult struct {
-	Head        []byte `json:"head"`
-	SignerCount int    `json:"signer_count"`
+	Head               []byte   `json:"head"`
+	SignerCount        int      `json:"signer_count"`
+	DisablementSecrets [][]byte `json:"disablement_secrets,omitempty"` // raw secrets, returned once for the operator to save
+}
+
+// LockDisableParams carries the raw disablement secret to consume.
+type LockDisableParams struct {
+	Secret []byte `json:"secret"`
+}
+
+// LockDisableResult reports the trust-log HEAD and disabled flag after lock.disable.
+type LockDisableResult struct {
+	Head     []byte `json:"head"`
+	Disabled bool   `json:"disabled"`
 }
 
 // LockStatusResult is the audit view of a node's locked state.
@@ -632,4 +649,6 @@ type LockStatusResult struct {
 	Authorized     bool     `json:"authorized"`
 	SignerPubKey   []byte   `json:"signer_pubkey,omitempty"`
 	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+	LocalDisabled  bool     `json:"local_disabled,omitempty"`
 }
