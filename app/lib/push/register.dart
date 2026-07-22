@@ -1,5 +1,5 @@
 import 'push_provider.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 
 /// Registers [target] for [deviceId] with the gateway over [client], keyed by the
 /// stable device id so re-registration replaces the prior endpoint. Retries a few
@@ -8,7 +8,7 @@ import '../transport/rpc_client.dart';
 ///
 /// Returns true once the gateway acknowledges, false if every attempt failed.
 Future<bool> registerWithRetry(
-  RpcClient client,
+  GatewayClient client,
   String deviceId,
   PushTarget target, {
   int attempts = 3,
@@ -29,7 +29,7 @@ Future<bool> registerWithRetry(
 /// Best-effort: tell the gateway to forget this device's push target. Errors are
 /// swallowed — the connection may already be closing, and an offline gateway's
 /// record is pruned server-side on the next failed send.
-Future<void> unregisterFromGateway(RpcClient client, String deviceId) async {
+Future<void> unregisterFromGateway(GatewayClient client, String deviceId) async {
   try {
     await client.call('push.unregister', {'device_id': deviceId});
   } catch (_) {}

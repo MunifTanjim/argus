@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 func newLockCmd() *cobra.Command {
@@ -413,6 +415,12 @@ func printLockStatus(st api.LockStatusResult) {
 	}
 	shell.StdOutF("locked mode: enabled\n  current HEAD (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
 		base64.StdEncoding.EncodeToString(st.Head), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+	if len(st.Signers) > 0 {
+		shell.StdOutF("  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
+		for _, s := range st.Signers {
+			shell.StdOutF("    signer: %s\n", base64.StdEncoding.EncodeToString(s))
+		}
+	}
 	if st.Disabled {
 		shell.StdOutF("  network-wide disabled: true\n")
 	}

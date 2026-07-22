@@ -125,6 +125,7 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
+		d.reevaluateTrustChannels()
 	}
 	return api.LockDeviceResult{Head: st.Head()}, nil
 }
@@ -149,6 +150,7 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
+		d.reevaluateTrustChannels()
 	}
 	return api.LockDisableResult{Head: st.Head(), Disabled: st.Disabled()}, nil
 }

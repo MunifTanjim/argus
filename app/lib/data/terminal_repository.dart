@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/enums.dart';
 import '../state/gateway.dart';
 import '../state/terminal_controller.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 
 /// UI-facing entry point for a live terminal attach, so screens don't construct
 /// a [TerminalAttach] against the raw client directly.
@@ -24,7 +24,7 @@ abstract class TerminalRepository {
 /// fresh on each open so reconnects use the new client.
 class TerminalRepositoryRemote implements TerminalRepository {
   TerminalRepositoryRemote(this._clientOf);
-  final RpcClient? Function() _clientOf;
+  final GatewayClient? Function() _clientOf;
 
   @override
   TerminalSession? open({

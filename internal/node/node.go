@@ -90,6 +90,8 @@ type Node struct {
 	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
+
+	activeResponder atomic.Pointer[relayResponder] // the current uplink responder, if any
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -408,6 +410,14 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		return nil // shutdown requested
 	}
 	return err
+}
+
+// reevaluateTrustChannels drops live client channels no longer authorized after a
+// trust-store advance. No-op when no uplink responder is active.
+func (d *Node) reevaluateTrustChannels() {
+	if r := d.activeResponder.Load(); r != nil {
+		r.reevaluate()
+	}
 }
 
 // nodeAbsent reports whether a dial error means no node is listening (ENOENT or

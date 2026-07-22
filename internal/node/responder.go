@@ -13,10 +13,11 @@ import (
 
 // chanState is one live E2E channel this node terminates (one client <-> this node).
 type chanState struct {
-	ch     *api.Channel
-	sendMu sync.Mutex // serializes Seal+SendRawFrame so enc nonce order == wire order
-	ctx    context.Context
-	cancel context.CancelFunc
+	ch           *api.Channel
+	sendMu       sync.Mutex // serializes Seal+SendRawFrame so enc nonce order == wire order
+	ctx          context.Context
+	cancel       context.CancelFunc
+	clientStatic []byte // Noise static public key of the authenticated client
 }
 
 // relayResponder terminates E2E channels arriving over the gateway uplink: it runs
@@ -94,7 +95,7 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 		return
 	}
 	base, cancel := context.WithCancel(context.Background())
-	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel}
+	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...)}
 	cs.ctx = api.WithNotifier(base, &channelNotifier{r: r, cs: cs})
 	r.mu.Lock()
 	r.chans[f.Route.ChanID] = cs
@@ -144,6 +145,46 @@ func (r *relayResponder) closeAll() {
 		delete(r.chans, id)
 	}
 	r.mu.Unlock()
+}
+
+// closeChan cancels and removes a live channel by id.
+func (r *relayResponder) closeChan(chanID string) {
+	r.mu.Lock()
+	cs := r.chans[chanID]
+	delete(r.chans, chanID)
+	r.mu.Unlock()
+	if cs != nil {
+		cs.cancel()
+	}
+}
+
+// reevaluate drops live channels whose client is no longer authorized by the
+// current trust store. A nil/Disabled/local-disabled store closes nothing.
+func (r *relayResponder) reevaluate() {
+	st := r.d.trust.Load()
+	if st == nil || st.Disabled() || r.d.localDisabled() {
+		return
+	}
+	r.mu.Lock()
+	type ent struct {
+		id     string
+		client []byte
+	}
+	var live []ent
+	for id, cs := range r.chans {
+		live = append(live, ent{id, cs.clientStatic})
+	}
+	r.mu.Unlock()
+	for _, e := range live {
+		if !st.DeviceAuthorized(e.client) {
+			var fp string
+			if len(e.client) >= 8 {
+				fp = base64.StdEncoding.EncodeToString(e.client[:8])
+			}
+			r.d.log.Warn("closing channel to now-unauthorized client", "chan", e.id, "client", fp)
+			r.closeChan(e.id)
+		}
+	}
 }
 
 // channelNotifier seals node->client notifications (session.event, transcript.delta,

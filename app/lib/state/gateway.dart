@@ -1,12 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../data/client_identity_store.dart';
+import '../data/trust_chain_store.dart';
+import '../e2e/e2e.dart';
 import '../models/registry_event.dart';
 import '../pairing/gateway_store.dart';
 import '../pairing/pairing_uri.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import '../transport/ssh_gateway.dart';
 import '../transport/ssh_hostkey_store.dart';
 import '../transport/ssh_key_store.dart';
@@ -15,6 +18,67 @@ import '../transport/ws_link.dart';
 import 'profiles.dart';
 import 'push.dart';
 import 'sessions.dart';
+
+class TrustAnchorTampered implements FatalConnectError {
+  @override
+  String get message =>
+      'Stored trust anchor failed verification — refusing to connect (possible tampering). '
+      'Clear app data to re-establish trust.';
+}
+
+bool _bytesEq(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// Builds a connected E2E client over a bridged link, with identity + trust
+/// persistence. TOFU on first use; a stored anchor is re-verified (fail-closed on
+/// tampering — never silently re-TOFU) and re-anchors the pull; the verified chain
+/// is persisted on advance.
+Future<GatewayClient> buildE2EClient(
+  Stream<RpcMessage> incoming,
+  void Function(String) send,
+  ClientIdentityStore identityStore,
+  TrustChainStore chainStore,
+) async {
+  final identity = await identityStore.loadOrCreate();
+  final seed = await chainStore.load();
+  if (seed != null) {
+    final probe = TrustStore.tofu();
+    try {
+      await probe.ingest(seed);
+    } catch (_) {
+      throw TrustAnchorTampered(); // do NOT re-TOFU a rejected anchor
+    }
+  }
+  final client = E2EClient(
+    incoming,
+    send,
+    identity,
+    tofu: true,
+    initialTrustChain: seed,
+    // Re-sync the trust log periodically so mid-session revocations take effect
+    // (channels to now-unauthorized nodes are dropped), persisting each advance.
+    trustResyncInterval: const Duration(seconds: 30),
+    onTrustChainAdvance: chainStore.save,
+  );
+  await client.connect();
+  final head = client.trustChainBytes;
+  // If connect() throws after an in-progress trust advance, the save below is
+  // skipped; the next successful reconnect re-pulls, re-advances, and persists.
+  if (head != null && (seed == null || !_bytesEq(head, seed))) {
+    await chainStore.save(head);
+  }
+  return client;
+}
+
+final clientIdentityStoreProvider =
+    Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
+final trustChainStoreProvider =
+    Provider<TrustChainStore>((ref) => TrustChainStore(const FlutterSecureKv()));
 
 final credentialsProvider = StateProvider<GatewayCredentials?>((ref) => null);
 
@@ -48,12 +112,12 @@ final connStateProvider =
 /// possible MITM), or null when not in a failed state.
 final connErrorProvider = StateProvider<String?>((ref) => null);
 
-Future<void> loadSessions(RpcClient client, SessionsNotifier store) async {
+Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.list');
   store.replaceAll(parseSessions(result));
 }
 
-Future<void> refreshSessions(RpcClient client, SessionsNotifier store) async {
+Future<void> refreshSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.refresh');
   store.replaceAll(parseSessions(result));
 }
@@ -78,8 +142,11 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final connError = ref.read(connErrorProvider.notifier);
   final profileStore = ref.read(profileStoreProvider);
   final testResults = ref.read(connectionTestResultsProvider.notifier);
+  final identityStore = ref.read(clientIdentityStoreProvider);
+  final chainStore = ref.read(trustChainStoreProvider);
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
+    clientFactory: (incoming, send) => buildE2EClient(incoming, send, identityStore, chainStore),
     onConnected: (client) async {
       await loadSessions(client, store);
       client.notifications.listen((m) => dispatchEvent(m, store));

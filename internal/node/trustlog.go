@@ -81,6 +81,7 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
+		d.reevaluateTrustChannels()
 	}
 }
 
@@ -184,5 +185,6 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHead []byte, chai
 		return err
 	}
 	d.trust.Store(store) // publish only after both persists succeed
+	d.reevaluateTrustChannels()
 	return nil
 }

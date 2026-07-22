@@ -33,11 +33,12 @@ var handshakeTimeoutNs atomic.Int64
 
 // nodeChan is one established E2E channel to a node.
 type nodeChan struct {
-	nodeID string
-	label  string
-	ch     atomic.Pointer[api.Channel] // set after the handshake; read on the read loop
-	sendMu sync.Mutex                  // serializes Seal+SendRawFrame (enc-nonce order)
-	hs     chan []byte                 // delivers the handshake msg2 during setup
+	nodeID      string
+	label       string
+	identityPub []byte                  // copy of the node's Noise identity public key
+	ch          atomic.Pointer[api.Channel] // set after the handshake; read on the read loop
+	sendMu      sync.Mutex              // serializes Seal+SendRawFrame (enc-nonce order)
+	hs          chan []byte             // delivers the handshake msg2 during setup
 }
 
 type pendingReply struct {
@@ -178,7 +179,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	if err != nil {
 		return err
 	}
-	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, hs: make(chan []byte, 1)}
+	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), hs: make(chan []byte, 1)}
 	m.mu.Lock()
 	m.byChanID[res.ChanID] = nc
 	m.mu.Unlock()
@@ -316,6 +317,28 @@ func (m *E2EClient) channelsSnapshot() []*nodeChan {
 		out = append(out, nc)
 	}
 	return out
+}
+
+// reevaluateChannels removes channels to nodes no longer authorized by the trust log.
+// A nil or Disabled store closes nothing. Does not tear down the gateway peer connection.
+func (m *E2EClient) reevaluateChannels() {
+	if m.trust == nil || m.trust.Disabled() {
+		return
+	}
+	m.mu.Lock()
+	var drop []*nodeChan
+	for _, nc := range m.byNode {
+		if !m.trust.DeviceAuthorized(nc.identityPub) {
+			drop = append(drop, nc)
+		}
+	}
+	for _, nc := range drop {
+		delete(m.byNode, nc.nodeID)
+		if ch := nc.ch.Load(); ch != nil {
+			delete(m.byChanID, ch.ID())
+		}
+	}
+	m.mu.Unlock()
 }
 
 // fanoutSessions calls method on every node channel, stamps composite origin, merges.
@@ -592,11 +615,14 @@ func (m *E2EClient) syncTrustLog() {
 		return
 	}
 	changed, err := m.trust.Ingest(got.Chain)
-	if err != nil || !changed || m.trustPath == "" {
+	if err != nil || !changed {
 		return
 	}
-	// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
-	_ = m.persistTrustChain()
+	if m.trustPath != "" {
+		// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
+		_ = m.persistTrustChain()
+	}
+	m.reevaluateChannels()
 }
 
 // persistTrustChain atomically writes the current chain to trustPath.

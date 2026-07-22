@@ -65,8 +65,10 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		return false
 	}
 	resp.peer.Store(peer)
+	d.activeResponder.Store(resp)
 	defer peer.Close()
 	defer resp.closeAll()
+	defer d.activeResponder.CompareAndSwap(resp, nil)
 	d.log.Info("gateway uplink established", "url", url)
 
 	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).
