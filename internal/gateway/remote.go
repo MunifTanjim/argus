@@ -1,30 +1,23 @@
 package gateway
 
 import (
-	"context"
-	"encoding/json"
-
 	"github.com/MunifTanjim/argus/internal/api"
-	"github.com/MunifTanjim/argus/internal/registry"
-	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// RemoteSource is a node reached over the WebSocket uplink, adapted to Source:
-// snapshots and control calls are requests down the link; live events arrive as
-// the node's session.event notifications (decoded into events by the caller).
+// RemoteSource is a node reached over the WebSocket uplink, adapted to Source.
+// The gateway is blind to sessions: it relays opaque E2E frames and tracks only
+// the node's liveness (online/offline/removed).
 type RemoteSource struct {
 	id, label, version string
 	identityPubKey     string
 	signerPubKey       string
 	caps               api.NodeCapabilities
 	peer               *api.Peer
-	events             <-chan registry.Event
 }
 
-// NewRemoteSource wraps an accepted node uplink. events must be the channel the
-// peer's OnNotify decodes session.event into.
-func NewRemoteSource(id, label, version, identityPubKey, signerPubKey string, caps api.NodeCapabilities, peer *api.Peer, events <-chan registry.Event) *RemoteSource {
-	return &RemoteSource{id: id, label: label, version: version, identityPubKey: identityPubKey, signerPubKey: signerPubKey, caps: caps, peer: peer, events: events}
+// NewRemoteSource wraps an accepted node uplink as a Source.
+func NewRemoteSource(id, label, version, identityPubKey, signerPubKey string, caps api.NodeCapabilities, peer *api.Peer) *RemoteSource {
+	return &RemoteSource{id: id, label: label, version: version, identityPubKey: identityPubKey, signerPubKey: signerPubKey, caps: caps, peer: peer}
 }
 
 func (r *RemoteSource) ID() string                         { return r.id }
@@ -33,26 +26,4 @@ func (r *RemoteSource) Version() string                    { return r.version }
 func (r *RemoteSource) IdentityPubKey() string             { return r.identityPubKey }
 func (r *RemoteSource) SignerPubKey() string               { return r.signerPubKey }
 func (r *RemoteSource) Capabilities() api.NodeCapabilities { return r.caps }
-
-// Snapshot pulls the node's current sessions via sessions.list.
-func (r *RemoteSource) Snapshot() []session.Session {
-	var out []session.Session
-	_ = r.peer.Call(api.MethodSessionsList, nil, &out)
-	return out
-}
-
-func (r *RemoteSource) Subscribe() (<-chan registry.Event, func()) {
-	return r.events, func() {}
-}
-
-// Call forwards a control request to the node. The context bounds the wait so a
-// wedged node can't block the caller past its deadline.
-func (r *RemoteSource) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
-	var out json.RawMessage
-	if err := r.peer.CallContext(ctx, method, params, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (r *RemoteSource) Done() <-chan struct{} { return r.peer.Done() }
+func (r *RemoteSource) Done() <-chan struct{}              { return r.peer.Done() }

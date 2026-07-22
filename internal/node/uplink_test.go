@@ -3,8 +3,12 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,9 +33,105 @@ func waitFor(t *testing.T, desc string, cond func() bool) {
 	t.Fatalf("timeout waiting for: %s", desc)
 }
 
-// End-to-end: a node dials the gateway, the gateway aggregates it under a composite id,
-// a client connected to the gateway sees the session and routes control calls back to
-// the originating node.
+// TestUplinkDispatchNarrow verifies that uplinkDispatch allows node.identify but
+// rejects all other methods with CodeMethodNotFound.
+func TestUplinkDispatchNarrow(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.SetIdentity("test-node", "test-box")
+
+	dispatch := d.uplinkDispatch()
+	ctx := context.Background()
+
+	// node.identify should be allowed (delegated); the node returns its identity.
+	result, err := dispatch(ctx, api.MethodNodeIdentify, nil)
+	if err != nil {
+		t.Fatalf("node.identify should succeed: %v", err)
+	}
+	id, ok := result.(api.IdentifyResult)
+	if !ok {
+		t.Fatalf("expected IdentifyResult, got %T", result)
+	}
+	if id.ID != "test-node" {
+		t.Errorf("expected ID=test-node, got %q", id.ID)
+	}
+
+	// Any other method must return CodeMethodNotFound.
+	for _, method := range []string{api.MethodSessionsList, "sessions.refresh", "lock.status", "terminal.open"} {
+		_, err := dispatch(ctx, method, nil)
+		var rpcErr *api.RPCError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeMethodNotFound {
+			t.Errorf("method %q: want CodeMethodNotFound, got err=%v", method, err)
+		}
+	}
+}
+
+// TestUplinkNoSessionEventPush verifies that after the uplink connects the node
+// does NOT push session.event notifications when its registry changes.
+func TestUplinkNoSessionEventPush(t *testing.T) {
+	var sessionEventCount atomic.Int32
+	connected := make(chan struct{})
+
+	// Fake gateway server: answers node.identify and records any session.event.
+	// Closes connected when the WebSocket handshake succeeds (uplink established).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := api.AcceptWS(w, r)
+		if err != nil {
+			return
+		}
+		select {
+		case <-connected:
+		default:
+			close(connected)
+		}
+		peer := api.NewPeer(conn, api.PeerOptions{
+			Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+				if method == api.MethodNodeIdentify {
+					return api.IdentifyResult{ID: "fake-gw"}, nil
+				}
+				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+			},
+			OnNotify: func(n api.Notification) {
+				if n.Method == api.MethodSessionEvent {
+					sessionEventCount.Add(1)
+				}
+			},
+		})
+		<-peer.Done()
+	}))
+	defer ts.Close()
+
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.SetIdentity("test-node", "test-box")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.ConnectGateway(ctx, wsURL(ts.URL), "", nil)
+
+	// Wait for the WebSocket handshake to complete before mutating the registry —
+	// a fixed sleep passes trivially if the connection is not yet up.
+	select {
+	case <-connected:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for node to connect to fake gateway")
+	}
+
+	// Mutate the node's registry several times to trigger events.
+	for i := 0; i < 3; i++ {
+		d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{
+			{AgentSessionID: fmt.Sprintf("sess-%d", i)},
+		})
+	}
+
+	// Allow any in-flight notifications time to arrive.
+	time.Sleep(100 * time.Millisecond)
+
+	if n := sessionEventCount.Load(); n > 0 {
+		t.Errorf("node pushed %d session.event(s) over the uplink; expected 0", n)
+	}
+}
+
+// End-to-end: a node dials the gateway and is visible to clients via server.info.
+// The gateway is blind to sessions; this test verifies node enrollment only.
 func TestNodeUplinkEndToEnd(t *testing.T) {
 	agg := gateway.New(time.Second)
 	hsrv := gateway.NewServer(agg,
@@ -41,14 +141,8 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	// Node with no tmux clients: control calls surface a node-side error, which
-	// proves the call was routed all the way to the node.
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.SetIdentity("home", "home-box")
-	d.reg.ApplyHook(registry.HookUpdate{
-		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%1",
-		AgentSessionID: "abc", Status: session.StatusWorking,
-	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -65,56 +159,17 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	}
 	defer c.Close()
 
-	list := func() []session.Session {
-		var l []session.Session
-		if err := c.Call(api.MethodSessionsList, nil, &l); err != nil {
-			t.Fatalf("list: %v", err)
+	// The node must appear in server.info once the uplink establishes.
+	waitFor(t, "node visible in server.info", func() bool {
+		var info api.ServerInfo
+		if err := c.Call(api.MethodServerInfo, nil, &info); err != nil {
+			return false
 		}
-		return l
-	}
-	waitFor(t, "session list has 1 entry", func() bool { return len(list()) == 1 })
-
-	s := list()[0]
-	if s.NodeID != "home" || s.NodeLabel != "home-box" {
-		t.Fatalf("origin not stamped: %+v", s)
-	}
-	if !strings.HasPrefix(s.ID, "home:") {
-		t.Fatalf("want composite id prefixed home:, got %q", s.ID)
-	}
-	composite := s.ID
-
-	// Routed control call reaches the node: capture fails there (no tmux client),
-	// and that node-side error propagates back to the client.
-	if err := c.Call(api.MethodSessionCapture, api.SessionRef{SessionID: composite}, &api.CaptureResult{}); err == nil {
-		t.Fatal("expected capture to fail at the node")
-	} else if !strings.Contains(err.Error(), "tmux client") {
-		t.Fatalf("want node-side tmux error, got %v", err)
-	}
-
-	// Routed read that succeeds at the node: empty transcript, no error.
-	if err := c.Call(api.MethodSessionTranscriptView, api.SessionRef{SessionID: composite}, nil); err != nil {
-		t.Fatalf("transcriptView should route and succeed: %v", err)
-	}
-
-	// Live event: a new session on the node streams through to the client.
-	events := c.Events()
-	d.reg.ApplyHook(registry.HookUpdate{
-		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%2",
-		AgentSessionID: "def", Status: session.StatusWorking,
+		for _, n := range info.Nodes {
+			if n.ID == "home" && strings.Contains(n.Label, "home-box") {
+				return true
+			}
+		}
+		return false
 	})
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case n := <-events:
-			var ev registry.Event
-			if json.Unmarshal(n.Params, &ev) != nil {
-				continue
-			}
-			if ev.Session.NodeID == "home" && strings.Contains(ev.Session.ID, "%2") {
-				return // success
-			}
-		case <-deadline:
-			t.Fatal("client never received the live %2 session event")
-		}
-	}
 }

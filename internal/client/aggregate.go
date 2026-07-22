@@ -9,8 +9,7 @@ import (
 )
 
 // sessionAddressed methods carry a composite session_id the client splits to a
-// node-local id and routes to that node. Mirrors the gateway's clientRoutedMethods
-// plus focus/subscribe/open.
+// node-local id and routes to that node.
 var sessionAddressed = map[string]bool{
 	api.MethodSessionTranscriptView: true,
 	api.MethodSessionToolDetail:     true,
@@ -47,6 +46,14 @@ var terminalHandleAddressed = map[string]bool{
 	api.MethodTerminalClose:  true,
 }
 
+// pushFanoutMethods are sent to every connected node (each holds its own device
+// store) rather than routed to one. push.vapidKey stays a gateway passthrough.
+var pushFanoutMethods = map[string]bool{
+	api.MethodPushRegister:   true,
+	api.MethodPushUnregister: true,
+	api.MethodPushTest:       true,
+}
+
 // compositeResultMethods return a node-local session_id in their result that must
 // be composited so the client can address it afterward.
 var compositeResultMethods = map[string]bool{
@@ -55,7 +62,7 @@ var compositeResultMethods = map[string]bool{
 }
 
 // withOrigin stamps a session with its node origin + composite id and clears
-// Offline (it is currently reported). Mirrors gateway aggregator.withOrigin.
+// Offline (it is currently reported).
 func withOrigin(s session.Session, nodeID, label string) session.Session {
 	s.ID = session.CompositeID(nodeID, s.ID)
 	s.NodeID = nodeID

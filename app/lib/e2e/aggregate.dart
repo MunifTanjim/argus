@@ -2,6 +2,19 @@
 /// Reproduces the gateway's node-qualified addressing so a blind gateway can relay
 /// while the client merges/routes across nodes.
 
+/// RPC error code returned from push.test (and nodes) when the push target is
+/// permanently gone (HTTP 404/410). Mirrors api.CodePushGone on the server side.
+const pushGoneCode = 410;
+
+/// Methods sent to every connected node channel. Each node holds its own device
+/// store, so register/unregister/test must reach all of them. push.vapidKey stays
+/// a gateway passthrough (the subscription is created once; nodes store the target).
+const Set<String> pushFanoutMethods = {
+  'push.register',
+  'push.unregister',
+  'push.test',
+};
+
 /// Methods carrying a composite session_id the client splits and routes to a node.
 const Set<String> sessionAddressed = {
   'sessions.transcriptView', 'sessions.toolDetail', 'sessions.capture', 'sessions.input',

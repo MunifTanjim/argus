@@ -56,8 +56,11 @@ type Node struct {
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
-	desktopNotify bool      // render incoming push.desktop notifications on this machine
+	desktopNotify bool      // render desktop notifications for this node's own sessions locally (via push.Watch/DesktopSink)
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
+
+	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
+	pushDeliverer atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
 
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
@@ -119,15 +122,23 @@ func (d *Node) adapterFor(agent string) adapter.Adapter {
 	return d.adapterList[0]
 }
 
-// SetDesktopNotify toggles rendering of push.desktop notifications on this
-// machine; click wires a clicked notification to focus the session. Call before
-// Run — not safe once serving (mutates fields read by handler goroutines).
+// SetDesktopNotify toggles whether this node renders desktop notifications for its
+// own sessions locally (via push.Watch/DesktopSink); click wires a clicked notification
+// to focus the session. Call before Run — not safe once serving (mutates fields read by handler goroutines).
 func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.desktopNotify = enabled
 	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
 func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
+
+// SetPushStore enables node-side push registration (register/unregister/test).
+// Call before Run.
+func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
+
+// SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
+// Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).
+func (d *Node) SetPushDeliverer(dv push.Deliverer) { d.pushDeliverer.Store(&dv) }
 
 // SetIdentity overrides the node's id and label (default: hostname). The id is
 // the gateway's routing key, so it must be stable across reconnects and unique

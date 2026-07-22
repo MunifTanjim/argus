@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -494,4 +495,95 @@ func TestClientDisabledStoreConnectsAll(t *testing.T) {
 	if _, ok := snap["nodeUnauth"]; !ok {
 		t.Fatal("disabled store must open a channel to the otherwise-unauthorized node")
 	}
+}
+
+func TestPushRegisterFansOutToAllNodes(t *testing.T) {
+	var mu sync.Mutex
+	received := map[string]int{}
+
+	makeHandler := func(id string) func(string, json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+			if method == api.MethodPushRegister {
+				mu.Lock()
+				received[id]++
+				mu.Unlock()
+			}
+			return nil, nil, nil
+		}
+	}
+
+	n1 := &fakeNode{id: "n1", key: mustKP(t), handle: makeHandler("n1")}
+	n2 := &fakeNode{id: "n2", key: mustKP(t), handle: makeHandler("n2")}
+	gw, clientConn := newFakeMultiGateway(t, n1, n2)
+	defer gw.peer.Close()
+
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("NewE2EClient: %v", err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if err := c.Call(api.MethodPushRegister, nil, nil); err != nil {
+		t.Fatalf("push.register: %v", err)
+	}
+
+	mu.Lock()
+	r1, r2 := received["n1"], received["n2"]
+	mu.Unlock()
+	if r1 != 1 || r2 != 1 {
+		t.Errorf("push.register reached n1=%d n2=%d times, want 1 each", r1, r2)
+	}
+}
+
+func TestPushTestReturnsGoneOnlyIfAllNodesGone(t *testing.T) {
+	gone := &api.RPCError{Code: api.CodePushGone, Message: "gone"}
+	okHandler := func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return nil, nil, nil
+	}
+	goneHandler := func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return nil, gone, nil
+	}
+
+	// partial success: n1 succeeds, n2 reports gone -> overall success
+	t.Run("partial-success", func(t *testing.T) {
+		n1 := &fakeNode{id: "n1", key: mustKP(t), handle: okHandler}
+		n2 := &fakeNode{id: "n2", key: mustKP(t), handle: goneHandler}
+		gw, clientConn := newFakeMultiGateway(t, n1, n2)
+		defer gw.peer.Close()
+		c, err := NewE2EClient(clientConn)
+		if err != nil {
+			t.Fatalf("NewE2EClient: %v", err)
+		}
+		defer c.Close()
+		if err := c.Connect(); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		if err := c.Call(api.MethodPushTest, nil, nil); err != nil {
+			t.Errorf("partial-success push.test should return nil, got %v", err)
+		}
+	})
+
+	// all gone: n1 gone, n2 gone -> CodePushGone
+	t.Run("all-gone", func(t *testing.T) {
+		n1 := &fakeNode{id: "n1", key: mustKP(t), handle: goneHandler}
+		n2 := &fakeNode{id: "n2", key: mustKP(t), handle: goneHandler}
+		gw, clientConn := newFakeMultiGateway(t, n1, n2)
+		defer gw.peer.Close()
+		c, err := NewE2EClient(clientConn)
+		if err != nil {
+			t.Fatalf("NewE2EClient: %v", err)
+		}
+		defer c.Close()
+		if err := c.Connect(); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		err = c.Call(api.MethodPushTest, nil, nil)
+		rpcErr, isRPC := err.(*api.RPCError)
+		if !isRPC || rpcErr.Code != api.CodePushGone {
+			t.Errorf("all-gone push.test: want CodePushGone, got %v", err)
+		}
+	})
 }

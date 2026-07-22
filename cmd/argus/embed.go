@@ -132,15 +132,13 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 	}
 	if gatewayURL != "" {
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
-	} else if cfg.Push.Desktop.Enabled {
-		// Isolated spawn has no gateway to drive alerts, so watch our own registry.
-		// (A connected spawn gets push.desktop RPCs from its gateway instead.)
-		events, cancel := d.Registry().Subscribe()
-		go func() {
-			defer cancel()
-			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.NewBufferLogger(logs).With("scope", "push"))
-		}()
+		// Connected spawn (uplink): give the node a push store so mobile alerts reach
+		// the gateway. The deliverer is set per-connection in ConnectGateway/runUplink.
+		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 	}
+	// Every embedded node watches its own registry for desktop + mobile alerts.
+	// Co-located gateway nodes have their Watch started by setupPush in serveGateway.
+	go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	conn, err := dialWithRetry(func() (net.Conn, error) { return net.Dial("unix", socket) }, 3*time.Second)
 	if err != nil {
 		shell.StdErrF("argus: embedded node did not start at %s: %v\n", socket, err)

@@ -171,16 +171,13 @@ func newStartCmd(version string) *cobra.Command {
 				})
 			}
 
-			// Plain local node: nothing upstream drives desktop notifications, so run a
-			// local Watch over our own registry. (Gateway mode reaches the node via
-			// Fanout; uplink mode via the gateway's push.desktop RPC.)
-			if cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !gatewayMode(cfg) {
-				events, cancel := d.Registry().Subscribe()
-				// Focus-aware sink: suppresses alerts for a session already on screen.
-				go func() {
-					defer cancel()
-					push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
-				}()
+			// Every node watches its own registry for desktop + mobile alerts. Gateway
+			// mode already started the co-located node's Watch in setupPush.
+			if !gatewayMode(cfg) {
+				if uplinkMode(cfg) {
+					d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+				}
+				go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 			}
 
 			err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
@@ -340,7 +337,7 @@ type gatewayServeOpts struct {
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	d := o.node
 	agg := gateway.New(0)
-	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+	agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.Capabilities()))
 
 	var store *clienttoken.Store
 	if o.enablePairing {
@@ -362,7 +359,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	hsrv.SetPublicURL(o.publicURL)
 	hsrv.SetLogger(gwLog)
 	if o.enablePush {
-		setupPush(ctx, agg, hsrv, o.pushDelay, o.log.With("scope", "push"))
+		setupPush(ctx, d, hsrv, o.pushDelay, o.log.With("scope", "push"))
 	}
 
 	httpSrv := &http.Server{Handler: hsrv.Handler()}
@@ -396,28 +393,19 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	return httpSrv
 }
 
-// setupPush wires device push notifications (mobile dispatcher + desktop fanout).
-func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
-	store := push.NewStore(config.GetStatePath("push-tokens"))
-	// VAPID key (self-generated, persisted) signs Web Push requests; the public
-	// half is served to devices (push.vapidKey) to bind their subscription.
+// setupPush wires blind push: the gateway holds the VAPID key and relays opaque
+// bodies (push.deliver); the co-located node watches its own registry and encrypts.
+func setupPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
 	vapid, err := push.LoadOrCreateVAPID(config.GetStatePath("vapid_key.pem"))
 	if err != nil {
 		log.Warn("vapid disabled", "err", err)
-	} else {
-		hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+		return
 	}
-	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
-	hsrv.SetPush(store, dispatcher)
+	hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+	hsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
 
-	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log}
-	go func() {
-		defer cancel()
-		push.Watch(ctx, events, push.Sinks{
-			Immediate: []push.Sink{broadcaster},
-			Delayed:   []push.Sink{dispatcher},
-			Delay:     delay,
-		}, log)
-	}()
+	// The co-located node stores its own device subscriptions and delivers in-process.
+	d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+	d.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
+	go d.StartPush(ctx, delay)
 }

@@ -35,10 +35,10 @@ var handshakeTimeoutNs atomic.Int64
 type nodeChan struct {
 	nodeID      string
 	label       string
-	identityPub []byte                  // copy of the node's Noise identity public key
+	identityPub []byte                      // copy of the node's Noise identity public key
 	ch          atomic.Pointer[api.Channel] // set after the handshake; read on the read loop
-	sendMu      sync.Mutex              // serializes Seal+SendRawFrame (enc-nonce order)
-	hs          chan []byte             // delivers the handshake msg2 during setup
+	sendMu      sync.Mutex                  // serializes Seal+SendRawFrame (enc-nonce order)
+	hs          chan []byte                 // delivers the handshake msg2 during setup
 }
 
 type pendingReply struct {
@@ -269,10 +269,10 @@ func (m *E2EClient) forget(id uint64) {
 	m.mu.Unlock()
 }
 
-// Call routes a client RPC over the E2E channels, reproducing the gateway's
-// aggregation: fanout+stamp for lists, composite-split for session-addressed,
-// node_id routing for node-addressed, handle routing for terminal calls, and
-// passthrough for gateway-native methods (server.info/nodes.list/push.*/clients.*).
+// Call routes a client RPC over the E2E channels: fanout+stamp for lists,
+// composite-split for session-addressed, node_id routing for node-addressed,
+// handle routing for terminal calls, per-node fanout for push register/unregister/test,
+// and passthrough for gateway-native methods (server.info/nodes.list/push.vapidKey/clients.*).
 func (m *E2EClient) Call(method string, params, out any) error {
 	raw, err := toRaw(params)
 	if err != nil {
@@ -293,7 +293,9 @@ func (m *E2EClient) Call(method string, params, out any) error {
 	case terminalHandleAddressed[method]:
 		id, _ := termIDFromParams(raw)
 		return m.routeByHandle(m.termNode, id, method, raw, out)
-	default: // gateway-native: server.info, nodes.list, ping, push.*, clients.*
+	case pushFanoutMethods[method]:
+		return m.fanoutPush(method, raw, out)
+	default: // gateway-native: server.info, nodes.list, ping, push.vapidKey, clients.*
 		return m.peer.Call(method, raw, out)
 	}
 }
@@ -358,7 +360,7 @@ func (m *E2EClient) fanoutSessions(method string, raw json.RawMessage, out any) 
 			defer wg.Done()
 			var ss []session.Session
 			if err := m.callNode(nc.nodeID, method, raw, &ss); err != nil {
-				return // one bad node doesn't fail the whole list (mirror Fanout)
+				return // one bad node doesn't fail the whole list
 			}
 			results[i] = res{sessions: ss, nodeID: nc.nodeID, label: nc.label}
 		}()
@@ -400,6 +402,62 @@ func (m *E2EClient) fanoutHistoryProjects(raw json.RawMessage, out any) error {
 	wg.Wait()
 	sort.SliceStable(all, func(i, j int) bool { return all[i].LastActivity > all[j].LastActivity })
 	return assign(out, all)
+}
+
+// fanoutPush fans out a push.register/unregister/test call to every connected
+// node channel (each node holds its own device store). Succeeds if at least one
+// node accepted; returns an aggregated error if all fail. For push.test,
+// surfaces CodePushGone only when every node reported gone.
+func (m *E2EClient) fanoutPush(method string, raw json.RawMessage, out any) error {
+	chans := m.channelsSnapshot()
+	if len(chans) == 0 {
+		return m.peer.Call(method, raw, out)
+	}
+	type nodeResult struct {
+		result json.RawMessage
+		err    error
+	}
+	results := make([]nodeResult, len(chans))
+	var wg sync.WaitGroup
+	for i, nc := range chans {
+		i, nc := i, nc
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var res json.RawMessage
+			err := m.callNode(nc.nodeID, method, raw, &res)
+			results[i] = nodeResult{result: res, err: err}
+		}()
+	}
+	wg.Wait()
+
+	var lastResult json.RawMessage
+	successCount := 0
+	var errs []error
+	goneCount := 0
+	for _, r := range results {
+		if r.err == nil {
+			successCount++
+			lastResult = r.result
+		} else {
+			errs = append(errs, r.err)
+			if rpcErr, ok := r.err.(*api.RPCError); ok && rpcErr.Code == api.CodePushGone {
+				goneCount++
+			}
+		}
+	}
+
+	if successCount > 0 {
+		return assignRaw(out, lastResult)
+	}
+	// All nodes failed.
+	if method == api.MethodPushTest && goneCount == len(results) {
+		return &api.RPCError{Code: api.CodePushGone, Message: "push target gone"}
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return fmt.Errorf("push fan-out: all %d nodes failed: %w", len(errs), errs[0])
 }
 
 // routeBySession splits the composite session_id, routes to that node with the

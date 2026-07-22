@@ -50,15 +50,17 @@ class LoopbackNode {
     } catch (_) {
       return; // decrypt failure: drop, no reply
     }
-    (List<int>? ok, String? err) handlerResult;
+    (List<int>? ok, ({int code, String message})? err) handlerResult;
     try {
       handlerResult = (handler(m.method!, params), null);
     } catch (e) {
-      handlerResult = (null, '$e');
+      final code = e is RpcError ? e.code : -32000;
+      final msg = e is RpcError ? e.message : '$e';
+      handlerResult = (null, (code: code, message: msg));
     }
     final inner = handlerResult.$2 != null
         ? utf8.encode(
-            '{"error":{"code":-32000,"message":${jsonEncode(handlerResult.$2)}}}')
+            '{"error":{"code":${handlerResult.$2!.code},"message":${jsonEncode(handlerResult.$2!.message)}}}')
         : utf8.encode('{"result":${utf8.decode(handlerResult.$1!)}}');
     final body = base64.encode(_session!.seal(inner));
     sendToClient('${jsonEncode({

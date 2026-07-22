@@ -2,25 +2,9 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/MunifTanjim/argus/internal/push"
 )
-
-// handlePushDesktop renders a gateway-pushed desktop notification, but only when
-// the node opted in; a non-opted-in node (e.g. headless) silently ignores it.
-// Always returns nil so the gateway's Fanout sees a clean reply.
-func (d *Node) handlePushDesktop(ctx context.Context, params json.RawMessage) (any, error) {
-	if !d.desktopNotify {
-		return nil, nil
-	}
-	var n push.Notification
-	if err := json.Unmarshal(params, &n); err != nil {
-		return nil, err
-	}
-	d.renderDesktop(ctx, n)
-	return nil, nil
-}
 
 // desktopSink adapts a Node into a push.Sink so the standalone push.Watch loop
 // renders through the same focus-aware path as gateway pushes.

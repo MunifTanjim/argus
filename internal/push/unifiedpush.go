@@ -43,76 +43,41 @@ func encodePayload(n Notification, id string) ([]byte, error) {
 	})
 }
 
-// UnifiedPushSender POSTs to a device-provided distributor endpoint. With
-// subscription keys it sends an encrypted Web Push request (RFC 8291) with TTL and
-// VAPID auth (RFC 8292); without keys (legacy plain endpoint) a plain JSON POST.
-// A 404/410 means the subscription is gone.
-type UnifiedPushSender struct {
-	client *http.Client
-	vapid  *VAPID // signs the VAPID header for Web Push; nil disables it
-}
-
-// NewUnifiedPushSender returns a sender with a bounded HTTP timeout. nil vapid
-// omits the VAPID header (Web Push services may then reject restricted subscriptions).
-func NewUnifiedPushSender(v *VAPID) *UnifiedPushSender {
-	return &UnifiedPushSender{client: &http.Client{Timeout: 10 * time.Second}, vapid: v}
-}
-
-func (u *UnifiedPushSender) Send(ctx context.Context, t Target, n Notification) error {
-	payload, err := encodePayload(n, messageID())
+// PostEncrypted POSTs a pre-encrypted aes128gcm Web Push body to endpoint, adding
+// the VAPID Authorization header (nil vapid omits it). Returns ErrGone on 404/410.
+// This is the blind-relay half: the caller supplies an opaque ciphertext it need
+// not have produced, so a gateway can deliver a body a node encrypted.
+func PostEncrypted(ctx context.Context, client *http.Client, vapid *VAPID, endpoint string, body []byte, ttl, urgency string) error {
+	if ttl == "" {
+		ttl = unifiedPushTTL
+	}
+	if urgency == "" {
+		urgency = unifiedPushUrgency
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-
-	req, err := u.buildRequest(ctx, t, payload)
-	if err != nil {
-		return err
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Encoding", "aes128gcm")
+	req.Header.Set("TTL", ttl)
+	req.Header.Set("Urgency", urgency)
+	if vapid != nil {
+		if auth, verr := vapid.authHeader(endpoint, time.Now()); verr == nil {
+			req.Header.Set("Authorization", auth)
+		}
 	}
-	resp, err := u.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-		return fmt.Errorf("%w: %s %s", ErrGone, resp.Status, t.Endpoint)
+		return fmt.Errorf("%w: %s %s", ErrGone, resp.Status, endpoint)
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("push: unifiedpush POST %s: %s: %s", t.Endpoint, resp.Status, bytes.TrimSpace(msg))
+		return fmt.Errorf("push: POST %s: %s: %s", endpoint, resp.Status, bytes.TrimSpace(msg))
 	}
 	return nil
-}
-
-// buildRequest builds the POST: an encrypted Web Push request when the target has
-// subscription keys, else a plain JSON POST.
-func (u *UnifiedPushSender) buildRequest(ctx context.Context, t Target, payload []byte) (*http.Request, error) {
-	if t.P256dh == "" || t.Auth == "" {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Endpoint, bytes.NewReader(payload))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("TTL", unifiedPushTTL)
-		req.Header.Set("Urgency", unifiedPushUrgency)
-		return req, nil
-	}
-
-	body, err := encryptWebPush(t.P256dh, t.Auth, payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("Content-Encoding", "aes128gcm")
-	req.Header.Set("TTL", unifiedPushTTL)
-	req.Header.Set("Urgency", unifiedPushUrgency)
-	if u.vapid != nil {
-		if auth, verr := u.vapid.authHeader(t.Endpoint, time.Now()); verr == nil {
-			req.Header.Set("Authorization", auth)
-		}
-	}
-	return req, nil
 }

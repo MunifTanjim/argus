@@ -73,8 +73,11 @@ const (
 	MethodPushTest = "push.test" // request: PushDeviceRef; result: nil
 	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
 	// subscribe with. Empty Key means Web Push is unavailable.
-	MethodPushVAPIDKey  = "push.vapidKey"         // request: no params; result: PushVAPIDKey
-	MethodPushDesktop   = "push.desktop"          // request: push.Notification; result: nil (render on node if opted in)
+	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
+	// MethodPushDeliver is a node->gateway request carrying an opaque, pre-encrypted
+	// Web Push body for the gateway to VAPID-sign and POST. The gateway never sees
+	// cleartext notification content.
+	MethodPushDeliver   = "push.deliver"          // node->gateway request: PushDeliverParams; result: PushDeliverResult
 	MethodSessionExport = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
 	// Changed-files review for a live session's working directory (vs HEAD).
 	MethodSessionChangedFiles = "sessions.changedFiles" // request: SessionRef; result: ChangedFilesResult
@@ -187,6 +190,21 @@ type PushRegisterParams struct {
 // PushDeviceRef identifies a device by its stable id (for unregister/test).
 type PushDeviceRef struct {
 	DeviceID string `json:"device_id"`
+}
+
+// PushDeliverParams carries an opaque, pre-encrypted (aes128gcm) Web Push body for
+// the gateway to deliver on a node's behalf. Ciphertext is base64 (std encoding).
+type PushDeliverParams struct {
+	Endpoint   string `json:"endpoint"`
+	Ciphertext string `json:"ciphertext"`
+	TTL        string `json:"ttl,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+}
+
+// PushDeliverResult reports delivery outcome. Gone means the subscription is dead
+// (404/410) and the node should prune its local record.
+type PushDeliverResult struct {
+	Gone bool `json:"gone,omitempty"`
 }
 
 // PairStartResult carries a freshly minted client token plus the gateway's public

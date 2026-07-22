@@ -255,6 +255,7 @@ class E2EClient implements GatewayClient {
     if (terminalHandleAddressed.contains(method)) {
       return _routeByHandle(_termNode, stringField(params, 'term_id'), method, params);
     }
+    if (pushFanoutMethods.contains(method)) return _fanoutPush(method, params);
     return _gateway.call(method, params); // gateway-native passthrough
   }
 
@@ -306,6 +307,40 @@ class E2EClient implements GatewayClient {
     all.sort((a, b) =>
         (b['last_activity'] as String? ?? '').compareTo(a['last_activity'] as String? ?? ''));
     return all;
+  }
+
+  /// Fans out a push.register/unregister/test call to every connected node channel.
+  /// Succeeds (at-least-one) if any node accepts. For push.test, returns
+  /// [pushGoneCode] only when every node reported gone. If no nodes are connected,
+  /// falls back to the gateway so a plain-RPC connection still works.
+  Future<Object?> _fanoutPush(String method, Object? params) async {
+    final nodeIds = _byNodeId.keys.toList();
+    if (nodeIds.isEmpty) return _gateway.call(method, params);
+    final results = await Future.wait(nodeIds.map((nodeId) async {
+      try {
+        return (null as Object?, await _callNodeDecoded(nodeId, method, params));
+      } on Object catch (e) {
+        return (e, null as Object?);
+      }
+    }));
+    Object? lastResult;
+    var successCount = 0;
+    final errors = <Object>[];
+    var goneCount = 0;
+    for (final (err, res) in results) {
+      if (err == null) {
+        successCount++;
+        lastResult = res;
+      } else {
+        errors.add(err);
+        if (err is RpcError && err.code == pushGoneCode) goneCount++;
+      }
+    }
+    if (successCount > 0) return lastResult;
+    if (method == 'push.test' && goneCount == nodeIds.length) {
+      throw const RpcError(pushGoneCode, 'push target gone');
+    }
+    throw errors.first;
   }
 
   String? _soleNode() => _byNodeId.length == 1 ? _byNodeId.keys.first : null;

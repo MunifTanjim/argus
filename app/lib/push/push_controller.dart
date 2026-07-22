@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../e2e/aggregate.dart' show pushGoneCode;
 import '../pairing/gateway_store.dart';
 import '../transport/gateway_client.dart';
 import 'device_id.dart';
@@ -13,12 +14,6 @@ import 'unifiedpush_provider.dart';
 /// The mobile app's Android applicationId — also the package of its embedded FCM
 /// distributor, preferred by default when no distributor has been chosen.
 const appPackageName = 'dev.muniftanjim.argus';
-
-/// RPC error code the gateway returns from push.test when the device's target is
-/// permanently gone (HTTP 404/410) — mirrors api.CodePushGone on the gateway. The
-/// gateway has already pruned the dead record; the client must mint a fresh
-/// endpoint (see [PushController.reregister] with force) rather than re-register it.
-const pushGoneCode = 410;
 
 /// PushController coordinates push end to end over UnifiedPush / Web Push. It
 /// activates a distributor (the embedded FCM one by default, or an external/chosen
