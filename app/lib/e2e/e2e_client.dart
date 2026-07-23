@@ -120,8 +120,9 @@ class E2EClient implements GatewayClient {
     return ctrl.stream;
   }
 
-  /// The per-node notification stream, decoded and (for session.event) stamped
-  /// with composite node origin — the aggregated view the app consumes.
+  /// The per-node notification stream, decoded and (for session.event and
+  /// tasks.changed) stamped with composite node origin — the aggregated view the
+  /// app consumes.
   Stream<({String method, Object? params})> get aggregatedEvents => events.map((e) {
         Object? params;
         try {
@@ -136,6 +137,11 @@ class E2EClient implements GatewayClient {
               ...params,
               'session': withOriginJson(sess, e.nodeId, _roster[e.nodeId]?.label),
             };
+          }
+        } else if (e.method == 'tasks.changed' && params is Map<String, dynamic>) {
+          final sid = params['session_id'];
+          if (sid is String && sid.isNotEmpty) {
+            params = {...params, 'session_id': compositeId(e.nodeId, sid)};
           }
         }
         return (method: e.method, params: params);

@@ -23,6 +23,7 @@ var sessionAddressed = map[string]bool{
 	api.MethodSessionCommits:        true,
 	api.MethodSessionCommitFiles:    true,
 	api.MethodSessionFocus:          true,
+	api.MethodSessionTasks:          true,
 	api.MethodTranscriptSubscribe:   true,
 	api.MethodTerminalOpen:          true,
 }
@@ -108,6 +109,21 @@ func sessionIDFromParams(p json.RawMessage) (string, error) { return stringField
 func nodeIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "node_id") }
 func subIDFromParams(p json.RawMessage) (string, error)     { return stringField(p, "sub_id") }
 func termIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "term_id") }
+
+// stampTasksChanged rewrites a tasks.changed notification's node-local session_id
+// to the composite id, so a client that only knows composite ids can match it.
+// Best-effort: returns params unchanged on any decode error.
+func stampTasksChanged(params json.RawMessage, nodeID string) json.RawMessage {
+	local, err := sessionIDFromParams(params)
+	if err != nil || local == "" {
+		return params
+	}
+	out, err := rewriteSessionID(params, session.CompositeID(nodeID, local))
+	if err != nil {
+		return params
+	}
+	return out
+}
 
 // stampEvent rewrites a session.event's node-local session with composite origin.
 // On any decode error it returns params unchanged (best-effort).

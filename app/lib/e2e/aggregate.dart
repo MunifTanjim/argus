@@ -20,7 +20,7 @@ const Set<String> sessionAddressed = {
   'sessions.transcriptView', 'sessions.toolDetail', 'sessions.capture', 'sessions.input',
   'sessions.key', 'sessions.respond', 'sessions.kill', 'sessions.changedFiles',
   'sessions.fileDiff', 'sessions.commits', 'sessions.commitFiles', 'sessions.focus',
-  'transcript.subscribe', 'terminal.open',
+  'sessions.tasks', 'transcript.subscribe', 'terminal.open',
 };
 
 /// Methods routed by an explicit node_id (or the sole node).

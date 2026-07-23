@@ -255,6 +255,8 @@ func (m *E2EClient) onRelayFrame(f api.RelayFrame) {
 		}
 		if f.Method == api.MethodSessionEvent {
 			params = stampEvent(params, nc.nodeID, nc.label)
+		} else if f.Method == api.MethodTasksChanged {
+			params = stampTasksChanged(params, nc.nodeID)
 		}
 		select {
 		case m.events <- api.Notification{Method: f.Method, Params: params}:

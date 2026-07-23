@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.11](https://github.com/MunifTanjim/argus/compare/0.0.10...0.0.11) (2026-07-21)
+
+
+### Features
+
+* add ngrok tunnel provider ([9714570](https://github.com/MunifTanjim/argus/commit/9714570255b0e9e81fe6dde43f192861bce35c9a))
+* **app:** add --mode flag for standalone gateway ([7e41a17](https://github.com/MunifTanjim/argus/commit/7e41a17a46fab6882acc82a07d17fcbaa695113b))
+* **app:** show claude session tasks ([b96fc67](https://github.com/MunifTanjim/argus/commit/b96fc6764d0c0826387b17a27f73acd9050f0c48))
+* **app:** support reviewing code changes for a session ([f367f5f](https://github.com/MunifTanjim/argus/commit/f367f5f26e32731b6c6fa9bee837d22b2136ee74))
+
+
+### Bug Fixes
+
+* fail fast if cloudflare tunnel creds missing ([62be8e1](https://github.com/MunifTanjim/argus/commit/62be8e116d7acf12534e67107b3b77c85694d03c))
+
 ## [0.0.10](https://github.com/MunifTanjim/argus/compare/0.0.9...0.0.10) (2026-07-13)
 
 

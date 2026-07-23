@@ -100,6 +100,8 @@ const (
 	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
 	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
 	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
+	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
+	MethodTasksChanged     = "tasks.changed"     // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -115,6 +117,31 @@ type ChangedFile struct {
 type ChangedFilesResult struct {
 	Root  string        `json:"root,omitempty"` // repo top-level (for display)
 	Files []ChangedFile `json:"files"`
+}
+
+// Task is one entry in a session's Claude Code task list (the TaskCreate/
+// TaskUpdate tools), read from ~/.claude/tasks/<session>/<id>.json.
+type Task struct {
+	ID          string   `json:"id"`
+	Subject     string   `json:"subject"`
+	Description string   `json:"description,omitempty"`
+	ActiveForm  string   `json:"active_form,omitempty"` // spinner label while in_progress
+	Status      string   `json:"status"`                // pending|in_progress|completed
+	Blocks      []string `json:"blocks,omitempty"`
+	BlockedBy   []string `json:"blocked_by,omitempty"`
+}
+
+// TasksResult is a session's current task list, ordered by numeric id.
+type TasksResult struct {
+	Tasks []Task `json:"tasks"`
+}
+
+// TasksChanged signals that a session's task list changed on disk; the client
+// re-pulls via sessions.tasks. SubID routes it through the gateway like a
+// transcript delta.
+type TasksChanged struct {
+	SubID     string `json:"sub_id"`
+	SessionID string `json:"session_id"`
 }
 
 // Commit is one entry in a session's branch/unpushed commit log.

@@ -40,6 +40,7 @@ var flagKeys = map[string]string{
 	"gateway":                "gateway.url",
 	"token":                  "token",
 	"listen-addr":            "gateway.listen-addr",
+	"mode":                   "mode",
 	"id":                     "node.id",
 	"label":                  "node.label",
 	"log-level":              "log.level",

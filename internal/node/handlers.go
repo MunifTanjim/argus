@@ -52,4 +52,5 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodLockRevoke, d.handleLockRevoke)
 	srv.Handle(api.MethodLockDisable, d.handleLockDisable)
 	srv.Handle(api.MethodLockLocalDisable, d.handleLockLocalDisable)
+	srv.Handle(api.MethodSessionTasks, d.handleTasks)
 }

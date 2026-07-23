@@ -160,29 +160,48 @@ void main() {
     expect(find.byIcon(Icons.commit), findsNothing);
   });
 
+  testWidgets('shows Changes item in overflow menu when branch is set',
+      (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides(),
+        session: _s(branch: 'feat/session-git-branch')));
+    await tester.pump();
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.difference), findsOneWidget);
+  });
+
+  testWidgets('no Changes item in overflow menu when branch is absent',
+      (tester) async {
+    await tester.pumpWidget(_app(_baseOverrides()));
+    await tester.pump();
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.difference), findsNothing);
+  });
+
   testWidgets('AppBar has overflow PopupMenuButton', (tester) async {
     await tester.pumpWidget(_app(_baseOverrides()));
     await tester.pump();
     expect(find.byType(PopupMenuButton<String>), findsOneWidget);
   });
 
-  testWidgets('opening overflow menu shows Kill session item', (tester) async {
+  testWidgets('opening overflow menu shows Kill Session item', (tester) async {
     await tester.pumpWidget(_app(_baseOverrides()));
     await tester.pump();
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
-    expect(find.text('Kill session'), findsOneWidget);
+    expect(find.text('Kill Session'), findsOneWidget);
   });
 
-  testWidgets('tapping Kill session shows confirm AlertDialog', (tester) async {
+  testWidgets('tapping Kill Session shows confirm AlertDialog', (tester) async {
     await tester.pumpWidget(_app(_baseOverrides()));
     await tester.pump();
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Kill session'));
+    await tester.tap(find.text('Kill Session'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.text('Kill session?'), findsOneWidget);
+    expect(find.text('Kill Session?'), findsOneWidget);
   });
 
   testWidgets('confirming kill calls SessionControl.kill with session id',
@@ -195,7 +214,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Kill session'));
+    await tester.tap(find.text('Kill Session'));
     await tester.pumpAndSettle();
     // Tap the destructive 'Kill' button in the dialog
     await tester.tap(find.text('Kill').last);

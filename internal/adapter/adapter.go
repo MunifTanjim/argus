@@ -81,6 +81,21 @@ type StreamingTranscript interface {
 	Refresh() ([]transcript.Chunk, error)
 }
 
+// TaskSource is an optional adapter capability for agents that persist a
+// structured task list (Claude Code's TaskCreate/TaskUpdate tools), so
+// change-detection and reads live server-side rather than in each client.
+type TaskSource interface {
+	// ReadTasks returns the session's current task list, ordered by id. A
+	// missing task store is empty, not an error.
+	ReadTasks(transcriptPath string) ([]api.Task, error)
+	// TaskActivityCount counts signals in the folded chunks that the task list
+	// may have changed. The poller re-reads the transcript each tick anyway, so
+	// this adds no I/O; the count only grows, so a rise means new activity to
+	// push. hasTaskTool reports whether any task-tool call is present, letting
+	// the caller gate teammate-only activity without a disk hit.
+	TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool)
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string

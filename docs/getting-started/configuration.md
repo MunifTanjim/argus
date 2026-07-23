@@ -18,6 +18,13 @@ Argus reads `$XDG_CONFIG_HOME/argus/config.yaml` by default (typically
 `$ARGUS_CONFIG`. A missing default file is fine; a missing explicit `--config`
 path is an error.
 
+`argus config dir` prints the config directory path — handy in scripts or when you
+can't remember where it lives:
+
+```sh
+argus config dir
+```
+
 A minimal example:
 
 ```yaml

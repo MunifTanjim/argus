@@ -85,6 +85,20 @@ argus start --token <TOKEN> --tunnel zrok --zrok-name argus
 - For a **self-hosted** instance, point the CLI at it with `ZROK2_API_ENDPOINT` (or
   `zrok2 config set apiEndpoint …`); Argus's child `zrok2` inherits the environment.
 
+## External
+
+Provider: **external** — a tunnel you manage yourself (a reverse proxy, ingress, or
+`ssh -R`) that already terminates TLS and forwards to the local gateway. Argus runs no
+process; it only records the public URL so pairing QRs point at the right host:
+
+```sh
+argus start --token <TOKEN> --tunnel external --external-url wss://argus.example.com
+```
+
+- `--external-url` is required — the gateway's public URL, `scheme://host[/base-path]`
+  with scheme `ws`, `wss`, `http`, or `https` (also `$ARGUS_EXTERNAL_URL`). No query,
+  fragment, or user info; it's echoed into pairing QRs.
+
 ::: tip
 A tunnel can't accidentally publish an open gateway — every gateway requires a
 `--token` regardless of how it's exposed. See [Multi Machine](/guide/multi-machine)
