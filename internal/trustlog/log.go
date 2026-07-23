@@ -40,15 +40,16 @@ func cloneEntry(e Entry) Entry {
 // A Log is not safe for concurrent use.
 type Log struct {
 	entries      []Entry
-	head         []byte
-	signers      map[string]bool // trusted signer pubkey (string(bytes)) -> true
-	devices      map[string]bool // authorized device pubkey -> true
-	disablements [][]byte        // genesis disablement commitments
-	disabled     bool            // set by a valid KindDisable entry (sticky)
+	tip          []byte
+	signers      map[string]bool   // trusted signer pubkey (string(bytes)) -> true
+	devices      map[string]bool   // authorized device pubkey -> true
+	deviceSigner map[string][]byte // device pubkey -> signer pubkey that authorized it
+	disablements [][]byte          // genesis disablement commitments
+	disabled     bool              // set by a valid KindDisable entry (sticky)
 }
 
 func newEmpty() *Log {
-	return &Log{signers: map[string]bool{}, devices: map[string]bool{}}
+	return &Log{signers: map[string]bool{}, devices: map[string]bool{}, deviceSigner: map[string][]byte{}}
 }
 
 func containsBytes(set [][]byte, b []byte) bool {
@@ -105,8 +106,8 @@ func (l *Log) apply(e *Entry) error {
 		if len(l.entries) == 0 {
 			return errors.New("trustlog: first entry must be genesis")
 		}
-		if !bytes.Equal(e.Prev, l.head) {
-			return errors.New("trustlog: entry does not extend the current head")
+		if !bytes.Equal(e.Prev, l.tip) {
+			return errors.New("trustlog: entry does not extend the current tip")
 		}
 		if l.disabled {
 			return errors.New("trustlog: log is disabled; no further entries accepted")
@@ -133,23 +134,35 @@ func (l *Log) apply(e *Entry) error {
 					return errors.New("trustlog: cannot remove the last signer")
 				}
 				delete(l.signers, string(e.Key))
+				// retroactive invalidation: drop devices whose authorizing signer is gone.
+				for dev, signer := range l.deviceSigner {
+					if bytes.Equal(signer, e.Key) {
+						delete(l.devices, dev)
+						delete(l.deviceSigner, dev)
+					}
+				}
 			case KindAuthorizeDevice:
+				if l.devices[string(e.Key)] {
+					return errors.New("trustlog: device already authorized")
+				}
 				l.devices[string(e.Key)] = true
+				l.deviceSigner[string(e.Key)] = cloneBytes(e.Signer)
 			case KindRevokeDevice:
 				delete(l.devices, string(e.Key))
+				delete(l.deviceSigner, string(e.Key))
 			default:
 				return errors.New("trustlog: unknown entry kind")
 			}
 		}
 	}
 	l.entries = append(l.entries, *e)
-	l.head = hashEntry(e)
+	l.tip = hashEntry(e)
 	return nil
 }
 
 // appendEntry builds, signs (by `by`), and applies a non-genesis entry.
 func (l *Log) appendEntry(kind Kind, key []byte, by SignerKey) error {
-	e := Entry{Kind: kind, Prev: cloneBytes(l.head), Key: cloneBytes(key)}
+	e := Entry{Kind: kind, Prev: cloneBytes(l.tip), Key: cloneBytes(key)}
 	sign(&e, by)
 	return l.apply(&e)
 }
@@ -180,9 +193,9 @@ func (l *Log) DeviceAuthorized(pub []byte) bool { return l.devices[string(pub)] 
 // SignerTrusted reports whether a signer pubkey is currently trusted.
 func (l *Log) SignerTrusted(pub []byte) bool { return l.signers[string(pub)] }
 
-// Head returns the current chain head (BLAKE2s of the latest entry) — the audit
+// Tip returns the current chain tip (BLAKE2s of the latest entry) — the audit
 // fingerprint compared out-of-band across nodes.
-func (l *Log) Head() []byte { return append([]byte(nil), l.head...) }
+func (l *Log) Tip() []byte { return append([]byte(nil), l.tip...) }
 
 // Entries returns a copy of the chain.
 func (l *Log) Entries() []Entry {
@@ -196,7 +209,7 @@ func (l *Log) Entries() []Entry {
 // Load folds and verifies a chain from genesis, reproducing its state. It rejects
 // any chain whose entries are tampered, reordered, rolled back onto a bad link,
 // or edited by an untrusted signer. The caller must independently trust the
-// genesis (e.g. by pinning Head() out-of-band) — Load proves the rest follows.
+// genesis (e.g. by pinning Tip() out-of-band) — Load proves the rest follows.
 func Load(entries []Entry) (*Log, error) {
 	l := newEmpty()
 	for i := range entries {

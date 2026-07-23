@@ -72,7 +72,7 @@ type E2EClient struct {
 // identity (persisted, for locked mode) and optional pinned genesis. chainPath, if
 // non-empty, seeds the trust store from disk on construction and persists it on each
 // advance (genesis-pinned Ingest rejects a rolled-back or tampered file).
-func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHead []byte, chainPath string) (*E2EClient, error) {
+func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []byte, chainPath string) (*E2EClient, error) {
 	m := &E2EClient{
 		static:   static,
 		byNode:   map[string]*nodeChan{},
@@ -82,11 +82,11 @@ func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHead []b
 		termNode: map[string]string{},
 		events:   make(chan api.Notification, 256),
 	}
-	if genesisHead != nil {
-		m.trust = trustlog.NewSyncStore(genesisHead)
+	if genesisHash != nil {
+		m.trust = trustlog.NewSyncStore(genesisHash)
 		m.trustPath = chainPath
 		// Seed from a persisted chain so a reconnect resumes from the last verified
-		// HEAD (genesis-pinned Ingest rejects a rolled-back/tampered file).
+		// tip (genesis-pinned Ingest rejects a rolled-back/tampered file).
 		if chainPath != "" {
 			if b, err := os.ReadFile(chainPath); err == nil && len(b) > 0 {
 				_, _ = m.trust.Ingest(b)
@@ -108,15 +108,15 @@ func NewE2EClient(conn net.Conn) (*E2EClient, error) {
 	return NewE2EClientWithIdentity(conn, static, nil, "")
 }
 
-// NewE2EClientWithGenesis is NewE2EClient plus a pinned trust-log genesis head, so
-// the client syncs and verifies the network's trust-log chain. Pass nil head to
+// NewE2EClientWithGenesis is NewE2EClient plus a pinned trust-log genesis hash, so
+// the client syncs and verifies the network's trust-log chain. Pass nil hash to
 // disable trust-log sync (equivalent to NewE2EClient).
-func NewE2EClientWithGenesis(conn net.Conn, genesisHead []byte) (*E2EClient, error) {
+func NewE2EClientWithGenesis(conn net.Conn, genesisHash []byte) (*E2EClient, error) {
 	static, err := e2e.GenerateKeyPair()
 	if err != nil {
 		return nil, err
 	}
-	return NewE2EClientWithIdentity(conn, static, genesisHead, "")
+	return NewE2EClientWithIdentity(conn, static, genesisHash, "")
 }
 
 // Done is closed when the underlying gateway connection drops.
@@ -711,10 +711,10 @@ func (m *E2EClient) DeviceAuthorized(pub []byte) bool {
 	return m.trust != nil && m.trust.DeviceAuthorized(pub)
 }
 
-// TrustHead returns the current trust-log HEAD (nil when off / not yet synced).
-func (m *E2EClient) TrustHead() []byte {
+// TrustTip returns the current trust-log tip (nil when off / not yet synced).
+func (m *E2EClient) TrustTip() []byte {
 	if m.trust == nil {
 		return nil
 	}
-	return m.trust.Head()
+	return m.trust.Tip()
 }

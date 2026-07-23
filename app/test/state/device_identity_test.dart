@@ -3,7 +3,7 @@ import 'package:argus/state/device_identity.dart';
 
 void main() {
   test('TrustSummary carries the status fields', () {
-    const s = TrustSummary(connected: true, isLocked: true, isAuthorized: false, isDisabled: false, head: null);
+    const s = TrustSummary(connected: true, isLocked: true, isAuthorized: false, isDisabled: false, tip: null);
     expect(s.connected, isTrue);
     expect(s.isLocked, isTrue);
     expect(s.isAuthorized, isFalse);

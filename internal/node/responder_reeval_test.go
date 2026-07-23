@@ -24,12 +24,12 @@ func buildReevalNode(t *testing.T, clientPub []byte) (*Node, trustlog.SignerKey,
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := lg.Head()
+	genesisHash := lg.Tip()
 	if err := lg.AuthorizeDevice(clientPub, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
 	}
 	chain := trustlog.MarshalChain(lg.Entries())
-	ss := trustlog.NewSyncStore(genesisHead)
+	ss := trustlog.NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(chain); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -147,12 +147,12 @@ func TestReevaluateDisabledStoreClosesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := lg.Head()
+	genesisHash := lg.Tip()
 	if err := lg.AuthorizeDevice(clientKP.Public, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
 	}
 	chain := trustlog.MarshalChain(lg.Entries())
-	ss := trustlog.NewSyncStore(genesisHead)
+	ss := trustlog.NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(chain); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}

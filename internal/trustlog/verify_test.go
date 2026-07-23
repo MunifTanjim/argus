@@ -35,7 +35,7 @@ func TestLoadReproducesState(t *testing.T) {
 	if !l2.DeviceAuthorized([]byte("dev-B")) {
 		t.Error("dev-B should be authorized after replay")
 	}
-	if string(l2.Head()) != string(l.Head()) {
+	if string(l2.Tip()) != string(l.Tip()) {
 		t.Error("replayed head must match the original")
 	}
 }
@@ -68,7 +68,7 @@ func TestLoadRejectsRollback(t *testing.T) {
 	}
 	// A truncated chain is internally valid but has a DIFFERENT head; a node pins
 	// the real head out-of-band, so the rollback is detected by the head mismatch.
-	if string(l2.Head()) == string(l.Head()) {
+	if string(l2.Tip()) == string(l.Tip()) {
 		t.Error("a rolled-back chain must have a different head than the full chain")
 	}
 	// And it exposes the stale state the attacker wanted (dev-A still authorized) —
@@ -124,7 +124,7 @@ func TestEntriesDeepCopyIsolated(t *testing.T) {
 	if err := l.AuthorizeDevice([]byte("dev-1"), s); err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
-	head := string(l.Head())
+	head := string(l.Tip())
 	got := l.Entries()
 	// Mutate the returned entries' byte fields; the log must be unaffected.
 	for i := range got {
@@ -135,7 +135,7 @@ func TestEntriesDeepCopyIsolated(t *testing.T) {
 			got[i].Sig[j] ^= 0xff
 		}
 	}
-	if string(l.Head()) != head {
+	if string(l.Tip()) != head {
 		t.Error("mutating Entries() output changed the log head — not deep-copied")
 	}
 	if !l.DeviceAuthorized([]byte("dev-1")) {

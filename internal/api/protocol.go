@@ -98,6 +98,8 @@ const (
 	MethodLockStatus       = "lock.status"       // request: no params; result: LockStatusResult
 	MethodLockSign         = "lock.sign"         // request: LockDeviceParams; result: LockDeviceResult
 	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockAddSigner    = "lock.addSigner"    // request: LockSignerParams; result: LockDeviceResult
+	MethodLockRemoveSigner = "lock.removeSigner" // request: LockSignerParams; result: LockDeviceResult
 	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
 	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
 	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
@@ -651,9 +653,14 @@ type LockDeviceParams struct {
 	Device []byte `json:"device"`
 }
 
-// LockDeviceResult reports the trust-log HEAD after the sign/revoke.
+// LockDeviceResult reports the trust-log tip after the sign/revoke.
 type LockDeviceResult struct {
-	Head []byte `json:"head"`
+	Tip []byte `json:"tip"`
+}
+
+// LockSignerParams identifies a signer to add/remove by its Ed25519 signer pubkey.
+type LockSignerParams struct {
+	Signer []byte `json:"signer"`
 }
 
 // LockInitParams enables locked mode. Signers are ADDITIONAL Ed25519 signer pubkeys
@@ -665,10 +672,10 @@ type LockInitParams struct {
 	GenDisablements int      `json:"gen_disablements,omitempty"` // number of disablement secrets to generate
 }
 
-// LockInitResult reports the new genesis head and the final signer count (so the CLI
-// can warn on a single signer).
+// LockInitResult reports the new genesis tip (hash) and the final signer count (so the
+// CLI can warn on a single signer).
 type LockInitResult struct {
-	Head               []byte   `json:"head"`
+	Tip                []byte   `json:"tip"`
 	SignerCount        int      `json:"signer_count"`
 	DisablementSecrets [][]byte `json:"disablement_secrets,omitempty"` // raw secrets, returned once for the operator to save
 }
@@ -678,16 +685,16 @@ type LockDisableParams struct {
 	Secret []byte `json:"secret"`
 }
 
-// LockDisableResult reports the trust-log HEAD and disabled flag after lock.disable.
+// LockDisableResult reports the trust-log tip and disabled flag after lock.disable.
 type LockDisableResult struct {
-	Head     []byte `json:"head"`
+	Tip      []byte `json:"tip"`
 	Disabled bool   `json:"disabled"`
 }
 
 // LockStatusResult is the audit view of a node's locked state.
 type LockStatusResult struct {
 	Enabled        bool     `json:"enabled"`
-	Head           []byte   `json:"head,omitempty"`
+	Tip            []byte   `json:"tip,omitempty"`
 	Signers        [][]byte `json:"signers,omitempty"`
 	DeviceCount    int      `json:"device_count"`
 	SignerTrusted  bool     `json:"signer_trusted"`

@@ -61,7 +61,7 @@ func TestLogSignersAndDevices(t *testing.T) {
 func TestSyncStoreEnumeration(t *testing.T) {
 	s1, _ := GenerateSigner()
 	log, _ := NewGenesis([][]byte{s1.Public}, s1, nil)
-	head := log.Head()
+	head := log.Tip()
 	dev := bytes.Repeat([]byte{0x33}, 32)
 	_ = log.AuthorizeDevice(dev, s1)
 	chain := MarshalChain(log.Entries())

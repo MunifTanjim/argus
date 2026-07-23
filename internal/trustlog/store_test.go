@@ -6,14 +6,14 @@ import (
 )
 
 // buildStoreChain returns a genesis head + two chain snapshots (short then extended).
-func buildStoreChain(t *testing.T) (genesisHead []byte, short, extended []byte, dev []byte) {
+func buildStoreChain(t *testing.T) (genesisHash []byte, short, extended []byte, dev []byte) {
 	t.Helper()
 	s, _ := GenerateSigner()
 	l, err := NewGenesis([][]byte{s.Public}, s, nil)
 	if err != nil {
 		t.Fatalf("genesis: %v", err)
 	}
-	gh := l.Head()
+	gh := l.Tip()
 	dev = []byte("device-1")
 	if err := l.AuthorizeDevice(dev, s); err != nil {
 		t.Fatalf("authorize: %v", err)
@@ -72,7 +72,7 @@ func TestStoreRejectsWrongGenesis(t *testing.T) {
 	// A store pinned to a DIFFERENT genesis must reject this chain.
 	st := NewStore([]byte("some-other-genesis-head-32bytes!"))
 	if err := st.Ingest(short); err == nil {
-		t.Error("Ingest must reject a chain whose genesis != pinned head")
+		t.Error("Ingest must reject a chain whose genesis != pinned genesis hash")
 	}
 }
 
@@ -99,7 +99,7 @@ func TestStoreRejectsGenuineFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("genesis A: %v", err)
 	}
-	gh := la.Head()
+	gh := la.Tip()
 	if err := la.AuthorizeDevice([]byte("dev-A"), s); err != nil {
 		t.Fatalf("authorize A: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestStoreRejectsGenuineFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("genesis B: %v", err)
 	}
-	if string(lb.Head()) != string(gh) {
+	if string(lb.Tip()) != string(gh) {
 		t.Fatal("expected identical (deterministic) genesis for both logs")
 	}
 	if err := lb.AuthorizeDevice([]byte("dev-B"), s); err != nil {
@@ -136,7 +136,7 @@ func TestStoreIngestIdenticalIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("genesis: %v", err)
 	}
-	gh := l.Head()
+	gh := l.Tip()
 	if err := l.AuthorizeDevice([]byte("d"), s); err != nil {
 		t.Fatalf("authorize: %v", err)
 	}

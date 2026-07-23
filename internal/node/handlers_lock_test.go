@@ -49,9 +49,9 @@ func TestLockInitBuildsGenesisAndAuthorizes(t *testing.T) {
 		t.Fatalf("SignerCount = %d, want 2 (self + other)", res.SignerCount)
 	}
 	ts := d.TrustStore()
-	// res.Head is the genesis head (for clients to pin); ts.Head() is the current head
+	// res.Tip is the genesis head (for clients to pin); ts.Tip() is the current head
 	// (after device entries), which differs once any device is authorized.
-	if ts == nil || len(res.Head) == 0 {
+	if ts == nil || len(res.Tip) == 0 {
 		t.Fatal("trust store not activated or no head returned")
 	}
 	if !ts.DeviceAuthorized(devA) {
@@ -85,8 +85,8 @@ func TestLockInitRefusesReinit(t *testing.T) {
 
 // TestLockInitClientSyncRoundTrip verifies that the head returned by lock.init is
 // the genesis head, so a fresh client-pinned SyncStore can Ingest the chain.
-// (Fails before Fix A: store.Head() is the current head after device entries, not
-// the genesis head, so NewSyncStore(res.Head).Ingest rejects the chain.)
+// (Fails before Fix A: store.Tip() is the current head after device entries, not
+// the genesis head, so NewSyncStore(res.Tip).Ingest rejects the chain.)
 func TestLockInitClientSyncRoundTrip(t *testing.T) {
 	d := newLockTestNode(t)
 	devA := bytes.Repeat([]byte{0xA1}, 32)
@@ -98,7 +98,7 @@ func TestLockInitClientSyncRoundTrip(t *testing.T) {
 	}
 
 	// Simulate a client that pinned the head from the lock.init result.
-	clientStore := trustlog.NewSyncStore(res.Head)
+	clientStore := trustlog.NewSyncStore(res.Tip)
 	if _, err := clientStore.Ingest(d.TrustStore().Bytes()); err != nil {
 		t.Fatalf("client Ingest failed (genesis head mismatch?): %v", err)
 	}
@@ -109,7 +109,7 @@ func TestLockInitClientSyncRoundTrip(t *testing.T) {
 
 // TestLockInitRebootRoundTrip verifies that the persisted genesis head allows a
 // rebooted node to re-enable locked mode via EnableTrustLog.
-// (Fails before Fix B: the persisted head is store.Head() which is the current
+// (Fails before Fix B: the persisted head is store.Tip() which is the current
 // head, so EnableTrustLog's Ingest rejects the chain, leaving the store empty.)
 func TestLockInitRebootRoundTrip(t *testing.T) {
 	d := newLockTestNode(t)
@@ -171,6 +171,62 @@ func TestLockInitNegativeGenDisablementsErrors(t *testing.T) {
 	}
 }
 
+func mustGenSigner(t *testing.T) trustlog.SignerKey {
+	t.Helper()
+	sk, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	return sk
+}
+
+func newLockedSignerNode(t *testing.T) *Node {
+	t.Helper()
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+		t.Fatalf("lock.init: %v", err)
+	}
+	return d
+}
+
+func callLockSigner(t *testing.T, d *Node, method string, pub []byte) (api.LockDeviceResult, error) {
+	t.Helper()
+	raw, _ := json.Marshal(api.LockSignerParams{Signer: pub})
+	var h func(context.Context, json.RawMessage) (any, error)
+	switch method {
+	case api.MethodLockAddSigner:
+		h = d.handleLockAddSigner
+	case api.MethodLockRemoveSigner:
+		h = d.handleLockRemoveSigner
+	default:
+		t.Fatalf("bad method %q", method)
+	}
+	res, err := h(context.Background(), raw)
+	if err != nil {
+		return api.LockDeviceResult{}, err
+	}
+	return res.(api.LockDeviceResult), nil
+}
+
+func TestHandleLockAddRemoveSigner(t *testing.T) {
+	d := newLockedSignerNode(t)
+	newSigner := mustGenSigner(t)
+	// add
+	if _, err := callLockSigner(t, d, api.MethodLockAddSigner, newSigner.Public); err != nil {
+		t.Fatalf("addSigner: %v", err)
+	}
+	if !d.TrustStore().SignerTrusted(newSigner.Public) {
+		t.Fatal("signer must be trusted after addSigner")
+	}
+	// remove
+	if _, err := callLockSigner(t, d, api.MethodLockRemoveSigner, newSigner.Public); err != nil {
+		t.Fatalf("removeSigner: %v", err)
+	}
+	if d.TrustStore().SignerTrusted(newSigner.Public) {
+		t.Fatal("signer must not be trusted after removeSigner")
+	}
+}
+
 func callLockDevice(t *testing.T, d *Node, method string, dev []byte) (api.LockDeviceResult, error) {
 	t.Helper()
 	raw, _ := json.Marshal(api.LockDeviceParams{Device: dev})
@@ -220,13 +276,13 @@ func TestLockSignIdempotent(t *testing.T) {
 	if _, err := callLockDevice(t, d, api.MethodLockSign, dev); err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	head1 := d.TrustStore().Head()
-	// Re-signing an already-authorized device is a no-op: HEAD must not advance.
+	head1 := d.TrustStore().Tip()
+	// Re-signing an already-authorized device is a no-op: tip must not advance.
 	if _, err := callLockDevice(t, d, api.MethodLockSign, dev); err != nil {
 		t.Fatalf("re-sign: %v", err)
 	}
-	if !bytes.Equal(d.TrustStore().Head(), head1) {
-		t.Fatal("re-signing an authorized device must not change HEAD")
+	if !bytes.Equal(d.TrustStore().Tip(), head1) {
+		t.Fatal("re-signing an authorized device must not change tip")
 	}
 }
 
@@ -262,7 +318,7 @@ func TestLockDisable(t *testing.T) {
 	if !res.Disabled || !d.TrustStore().Disabled() {
 		t.Fatal("store should be disabled")
 	}
-	if len(res.Head) == 0 {
+	if len(res.Tip) == 0 {
 		t.Fatal("disable result Head must be non-empty")
 	}
 	// Second disable with the same secret must error: the log is terminal-disabled.
@@ -335,7 +391,7 @@ func TestLockStatusReflectsState(t *testing.T) {
 	}
 	raw1, _ := d.handleLockStatus(context.Background(), nil)
 	st1 := raw1.(api.LockStatusResult)
-	if !st1.Enabled || len(st1.Head) == 0 || !st1.SignerTrusted {
+	if !st1.Enabled || len(st1.Tip) == 0 || !st1.SignerTrusted {
 		t.Fatalf("post-init status = %+v", st1)
 	}
 	if st1.Disabled {

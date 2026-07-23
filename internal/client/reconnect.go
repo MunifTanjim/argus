@@ -20,7 +20,7 @@ const (
 // tui.Client with a stable Events()/States() stream across reconnects.
 type ReconnectingE2EClient struct {
 	dial        api.Dialer
-	genesisHead []byte      // pinned trust-log genesis; nil = trust-log sync off
+	genesisHash []byte      // pinned trust-log genesis hash; nil = trust-log sync off
 	static      e2e.KeyPair // stable client identity; threaded into every E2EClient
 	chainPath   string      // locked-mode chain persist path; "" = no persistence
 	ctx         context.Context
@@ -44,30 +44,20 @@ func NewReconnectingE2EClient(ctx context.Context, dial api.Dialer) (*Reconnecti
 	return newReconnecting(ctx, dial, nil, static, "")
 }
 
-// NewReconnectingE2EClientWithGenesis is NewReconnectingE2EClient plus a pinned
-// trust-log genesis head, so every (re)connection syncs the network's trust log.
-func NewReconnectingE2EClientWithGenesis(ctx context.Context, dial api.Dialer, genesisHead []byte) (*ReconnectingE2EClient, error) {
-	static, err := e2e.GenerateKeyPair()
-	if err != nil {
-		return nil, err
-	}
-	return newReconnecting(ctx, dial, genesisHead, static, "")
-}
-
-// NewReconnectingE2EClientLocked pins a trust-log genesis AND a stable persisted
+// NewReconnectingE2EClientLocked pins a trust-log genesis hash AND a stable persisted
 // client identity — the locked-mode client: it presents the same authenticated
 // static across reconnects (the key a signer authorizes) and syncs the trust log.
 // chainPath, if non-empty, seeds the trust store from the last persisted chain on
 // reconnect (so a reconnect cannot be used to serve a stale pre-revocation chain).
-func NewReconnectingE2EClientLocked(ctx context.Context, dial api.Dialer, genesisHead []byte, static e2e.KeyPair, chainPath string) (*ReconnectingE2EClient, error) {
-	return newReconnecting(ctx, dial, genesisHead, static, chainPath)
+func NewReconnectingE2EClientLocked(ctx context.Context, dial api.Dialer, genesisHash []byte, static e2e.KeyPair, chainPath string) (*ReconnectingE2EClient, error) {
+	return newReconnecting(ctx, dial, genesisHash, static, chainPath)
 }
 
-func newReconnecting(ctx context.Context, dial api.Dialer, genesisHead []byte, static e2e.KeyPair, chainPath string) (*ReconnectingE2EClient, error) {
+func newReconnecting(ctx context.Context, dial api.Dialer, genesisHash []byte, static e2e.KeyPair, chainPath string) (*ReconnectingE2EClient, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	c := &ReconnectingE2EClient{
 		dial:        dial,
-		genesisHead: genesisHead,
+		genesisHash: genesisHash,
 		static:      static,
 		chainPath:   chainPath,
 		ctx:         cctx,
@@ -95,7 +85,7 @@ func (c *ReconnectingE2EClient) connectOnce() (*E2EClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	cur, err := NewE2EClientWithIdentity(conn, c.static, c.genesisHead, c.chainPath)
+	cur, err := NewE2EClientWithIdentity(conn, c.static, c.genesisHash, c.chainPath)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -194,10 +184,10 @@ func (c *ReconnectingE2EClient) DeviceAuthorized(pub []byte) bool {
 	return cur != nil && cur.DeviceAuthorized(pub)
 }
 
-// TrustHead returns the live client's trust-log HEAD (nil while disconnected/off).
-func (c *ReconnectingE2EClient) TrustHead() []byte {
+// TrustTip returns the live client's trust-log tip (nil while disconnected/off).
+func (c *ReconnectingE2EClient) TrustTip() []byte {
 	if cur := c.current(); cur != nil {
-		return cur.TrustHead()
+		return cur.TrustTip()
 	}
 	return nil
 }

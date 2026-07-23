@@ -125,7 +125,7 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
 			return false
 		}
-		st := trustlog.NewSyncStore(initRes.Head)
+		st := trustlog.NewSyncStore(initRes.Tip)
 		_, err = st.Ingest(got.Chain)
 		return err == nil && st.DeviceAuthorized(idA)
 	})
@@ -142,7 +142,7 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	// UNAUTHORIZED: the node has a trust store with no authorized clients.
 	// Connect() fails because the node drops the Noise handshake (no msg2 response),
 	// causing openChannel to time out after SetHandshakeTimeoutForTest duration.
-	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, "")
+	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
 	if unauthErr == nil {
 		cUnauth.Close()
 		t.Fatal("unauthorized client should be refused by the locked node")
@@ -162,7 +162,7 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	// AUTHORIZED: reconnect with the same key — the node now accepts the handshake.
 	// This is the "reconnect after authorize" step: a fresh Connect() with the same
 	// clientKP presents the same static, which the node now finds in its trust store.
-	cAuth, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, "")
+	cAuth, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
 	if err != nil {
 		t.Fatalf("authorized client should connect: %v", err)
 	}

@@ -154,7 +154,7 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
 			return false
 		}
-		st := trustlog.NewSyncStore(initRes.Head)
+		st := trustlog.NewSyncStore(initRes.Tip)
 		_, err = st.Ingest(got.Chain)
 		return err == nil && st.DeviceAuthorized(clientKP.Public)
 	})
@@ -165,7 +165,7 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
-	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, filepath.Join(dir, "client-chain"))
+	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, filepath.Join(dir, "client-chain"))
 	if err != nil {
 		t.Fatalf("locked client: %v", err)
 	}

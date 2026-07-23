@@ -15,6 +15,8 @@ var lockMethods = []string{
 	api.MethodLockStatus,
 	api.MethodLockSign,
 	api.MethodLockRevoke,
+	api.MethodLockAddSigner,
+	api.MethodLockRemoveSigner,
 	api.MethodLockDisable,
 	api.MethodLockLocalDisable,
 }

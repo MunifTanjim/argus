@@ -9,14 +9,14 @@ Map<String, dynamic> _tl() =>
         as Map<String, dynamic>)['trustlog'] as Map<String, dynamic>;
 
 void main() {
-  test('unmarshalChain decodes the Go chain; hashEntry(genesis) == pinned head', () {
+  test('unmarshalChain decodes the Go chain; hashEntry(genesis) == pinned genesis hash', () {
     final v = _tl();
     final entries = unmarshalChain(Uint8List.fromList(base64.decode(v['chain'] as String)));
     expect(entries.length, 2); // genesis + authorizeDevice
     expect(entries.first.kind, Kind.genesis);
     expect(hashEntry(entries.first),
         equals(Uint8List.fromList(base64.decode(v['genesis_head'] as String))));
-    // Folding the last entry's hash reproduces the Go head.
+    // Folding the last entry's hash reproduces the Go tip.
     expect(hashEntry(entries.last), equals(Uint8List.fromList(base64.decode(v['head'] as String))));
   });
 

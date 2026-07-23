@@ -30,7 +30,7 @@ var _ tui.Client = (*client.ReconnectingE2EClient)(nil)
 // connect returns a client that re-dials with backoff if the connection drops. With a
 // gateway URL it dials over WebSocket; otherwise the local node's unix socket (which
 // must already be running — use connectLocalSpawn to start one first).
-func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool, genesisHead []byte) (tui.Client, error) {
+func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool, genesisHash []byte) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
@@ -38,13 +38,13 @@ func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled b
 	}
 	if e2eEnabled && gatewayURL != "" {
 		var c *client.ReconnectingE2EClient
-		if len(genesisHead) > 0 {
+		if len(genesisHash) > 0 {
 			static, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 			if ierr != nil {
 				shell.StdErrF("argus: client identity: %v\n", ierr)
 				return nil, ierr
 			}
-			c, err = client.NewReconnectingE2EClientLocked(ctx, dial, genesisHead, static, config.GetStatePath("client-trustlog-chain"))
+			c, err = client.NewReconnectingE2EClientLocked(ctx, dial, genesisHash, static, config.GetStatePath("client-trustlog-chain"))
 		} else {
 			c, err = client.NewReconnectingE2EClient(ctx, dial)
 		}

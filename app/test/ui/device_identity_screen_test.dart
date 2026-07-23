@@ -57,7 +57,7 @@ void main() {
       isLocked: null,
       isAuthorized: false,
       isDisabled: false,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
@@ -71,7 +71,7 @@ void main() {
       isLocked: true,
       isAuthorized: true,
       isDisabled: false,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
@@ -86,7 +86,7 @@ void main() {
       isLocked: true,
       isAuthorized: false,
       isDisabled: false,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
@@ -108,7 +108,7 @@ void main() {
       isLocked: true,
       isAuthorized: false,
       isDisabled: true,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
@@ -124,7 +124,7 @@ void main() {
       isLocked: true,
       isAuthorized: false,
       isDisabled: false,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
@@ -143,7 +143,7 @@ void main() {
       isLocked: true,
       isAuthorized: true,
       isDisabled: false,
-      head: null,
+      tip: null,
       signers: [_fixedSigner],
     );
     await tester.pumpWidget(_app(summary, store));
@@ -171,7 +171,7 @@ void main() {
       isLocked: true,
       isAuthorized: true,
       isDisabled: false,
-      head: null,
+      tip: null,
     );
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();

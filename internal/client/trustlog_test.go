@@ -52,7 +52,7 @@ func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
 	// Genesis-only chain first; an authorize appended later.
 	signer, _ := trustlog.GenerateSigner()
 	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
-	head := log.Head()
+	head := log.Tip()
 	genChain := trustlog.MarshalChain(log.Entries())
 	device := bytes.Repeat([]byte{0x22}, 32)
 
@@ -69,7 +69,7 @@ func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 
-	waitClient(t, "genesis synced", func() bool { return c.TrustHead() != nil })
+	waitClient(t, "genesis synced", func() bool { return c.TrustTip() != nil })
 	if c.DeviceAuthorized(device) {
 		t.Fatal("device not yet authorized")
 	}

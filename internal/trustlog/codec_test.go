@@ -67,7 +67,7 @@ func TestChainRoundTrips(t *testing.T) {
 		t.Fatalf("Load(decoded): %v", err)
 	}
 	orig, _ := Load(entries)
-	if !bytes.Equal(l.Head(), orig.Head()) {
+	if !bytes.Equal(l.Tip(), orig.Tip()) {
 		t.Error("decoded chain head differs from original")
 	}
 }
@@ -124,7 +124,7 @@ func TestChainRoundTripWithDisablement(t *testing.T) {
 	if err := l.Disable(secret, s); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
-	originalHead := l.Head()
+	originalHead := l.Tip()
 
 	wire := MarshalChain(l.Entries())
 	decoded, err := UnmarshalChain(wire)
@@ -138,7 +138,7 @@ func TestChainRoundTripWithDisablement(t *testing.T) {
 	if !reloaded.Disabled() {
 		t.Error("reloaded log should report Disabled()=true")
 	}
-	if !bytes.Equal(reloaded.Head(), originalHead) {
+	if !bytes.Equal(reloaded.Tip(), originalHead) {
 		t.Error("reloaded log head differs from original (decode→hash not stable)")
 	}
 }

@@ -211,10 +211,10 @@ func TestGenerateVectors(t *testing.T) {
 
 	tlLog, err := trustlog.NewGenesis([][]byte{tlSigner.Public}, tlSigner, [][]byte{tlCommit})
 	must(t, err)
-	tlGenesisHead := tlLog.Head()
+	tlGenesisHash := tlLog.Tip()
 	must(t, tlLog.AuthorizeDevice(tlDeviceA, tlSigner))
 	tlChain := trustlog.MarshalChain(tlLog.Entries())
-	tlHead := tlLog.Head()
+	tlHead := tlLog.Tip()
 
 	// fork_chain: same genesis (same signer+disablements), diverges at entry 1 with device B.
 	tlForkLog, err := trustlog.NewGenesis([][]byte{tlSigner.Public}, tlSigner, [][]byte{tlCommit})
@@ -227,7 +227,7 @@ func TestGenerateVectors(t *testing.T) {
 	must(t, tlLog2.AuthorizeDevice(tlDeviceA, tlSigner))
 	must(t, tlLog2.Disable(tlSecret, tlSigner))
 	tlDisabledChain := trustlog.MarshalChain(tlLog2.Entries())
-	tlDisabledHead := tlLog2.Head()
+	tlDisabledHead := tlLog2.Tip()
 
 	wPriv := ed25519.NewKeyFromSeed(bytesFill(0xB2))
 	wSigner := trustlog.SignerKey{Public: wPriv.Public().(ed25519.PublicKey), Private: wPriv}
@@ -245,7 +245,7 @@ func TestGenerateVectors(t *testing.T) {
 	enfSigner := trustlog.SignerKey{Public: enfSignerPriv.Public().(ed25519.PublicKey), Private: enfSignerPriv}
 	enfLog, err := trustlog.NewGenesis([][]byte{enfSigner.Public}, enfSigner, nil)
 	must(t, err)
-	enfGenesisHead := enfLog.Head()
+	enfGenesisHash := enfLog.Tip()
 	must(t, enfLog.AuthorizeDevice(enfNodeAPub, enfSigner))
 	enfChain := trustlog.MarshalChain(enfLog.Entries())
 
@@ -259,6 +259,22 @@ func TestGenerateVectors(t *testing.T) {
 	reevInitialChain := trustlog.MarshalChain(reevLog.Entries())
 	must(t, reevLog.RevokeDevice(reevNodeBPub, enfSigner))
 	reevRevokeBChain := trustlog.MarshalChain(reevLog.Entries())
+
+	// ---- signer-removal parity vector (Go↔Dart cross-language pin) ----
+	// genesis trusts A,B → A authorizes devA → B authorizes devB → remove A (signed by B).
+	// Expected after replay: devA unauthorized, devB authorized.
+	srPrivA := ed25519.NewKeyFromSeed(bytesFill(0xA3))
+	srPrivB := ed25519.NewKeyFromSeed(bytesFill(0xA4))
+	srSignerA := trustlog.SignerKey{Public: srPrivA.Public().(ed25519.PublicKey), Private: srPrivA}
+	srSignerB := trustlog.SignerKey{Public: srPrivB.Public().(ed25519.PublicKey), Private: srPrivB}
+	srDevA := bytesFill(0xD3)
+	srDevB := bytesFill(0xD4)
+	srLog, err := trustlog.NewGenesis([][]byte{srSignerA.Public, srSignerB.Public}, srSignerA, nil)
+	must(t, err)
+	must(t, srLog.AuthorizeDevice(srDevA, srSignerA))
+	must(t, srLog.AuthorizeDevice(srDevB, srSignerB))
+	must(t, srLog.RemoveSigner(srSignerA.Public, srSignerB))
+	srChain := trustlog.MarshalChain(srLog.Entries())
 
 	sfSigners := [][]byte{bytesFill(0xC1), bytesFill(0xC2)}
 	sfWords := trustlog.SignerSetFingerprint(sfSigners)
@@ -294,24 +310,66 @@ func TestGenerateVectors(t *testing.T) {
 			"words":   sfWords,
 		},
 		"trustlog": map[string]any{
-			"genesis_head": b64(tlGenesisHead), "chain": b64(tlChain), "head": b64(tlHead),
+			"genesis_head": b64(tlGenesisHash), "chain": b64(tlChain), "head": b64(tlHead),
 			"device_a": b64(tlDeviceA), "device_b": b64(tlDeviceB),
 			"secret": b64(tlSecret), "commitment": b64(tlCommit),
 			"disabled_chain": b64(tlDisabledChain), "disabled_head": b64(tlDisabledHead),
 			"wrong_genesis_chain":      b64(tlWrongChain),
 			"fork_chain":               b64(tlForkChain),
-			"enforcement_genesis_head": b64(enfGenesisHead),
+			"enforcement_genesis_head": b64(enfGenesisHash),
 			"enforcement_chain":        b64(enfChain),
 			"enforcement_node_a_seed":  b64(enfNodeASeed),
 			"enforcement_node_b_seed":  b64(enfNodeBSeed),
 			"reeval_initial_chain":     b64(reevInitialChain),
 			"reeval_revoke_b_chain":    b64(reevRevokeBChain),
 		},
+		"signer_removal": map[string]any{
+			// genesis A,B → A authorizes devA → B authorizes devB → remove A (signed by B).
+			// After replay: devA unauthorized (A removed), devB authorized (B still trusted).
+			"chain": b64(srChain),
+			"dev_a": b64(srDevA),
+			"dev_b": b64(srDevB),
+		},
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	must(t, err)
 	must(t, os.MkdirAll("../../app/test/e2e/testdata", 0o755))
 	must(t, os.WriteFile("../../app/test/e2e/testdata/vectors.json", append(b, '\n'), 0o644))
+}
+
+// TestSignerRemovalGoldenVector loads the shared signer_removal section from the
+// cross-language golden vector file and asserts Go replays it identically to Dart.
+func TestSignerRemovalGoldenVector(t *testing.T) {
+	raw, err := os.ReadFile("../../app/test/e2e/testdata/vectors.json")
+	if err != nil {
+		t.Fatalf("read vectors.json: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatalf("unmarshal vectors.json: %v", err)
+	}
+	var sr map[string]string
+	if err := json.Unmarshal(top["signer_removal"], &sr); err != nil {
+		t.Fatalf("unmarshal signer_removal: %v", err)
+	}
+	chain, _ := base64.StdEncoding.DecodeString(sr["chain"])
+	devA, _ := base64.StdEncoding.DecodeString(sr["dev_a"])
+	devB, _ := base64.StdEncoding.DecodeString(sr["dev_b"])
+
+	entries, err := trustlog.UnmarshalChain(chain)
+	if err != nil {
+		t.Fatalf("UnmarshalChain: %v", err)
+	}
+	tlog, err := trustlog.Load(entries)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if tlog.DeviceAuthorized(devA) {
+		t.Error("devA must be unauthorized after its authorizing signer is removed")
+	}
+	if !tlog.DeviceAuthorized(devB) {
+		t.Error("devB must remain authorized (its authorizing signer B is still trusted)")
+	}
 }
 
 func buildFrame(m map[string]any) []byte {

@@ -34,7 +34,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := log.Head()
+	genesisHash := log.Tip()
 	device := []byte("device-key-0000000000000000000000")[:32]
 	if err := log.AuthorizeDevice(device, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
@@ -73,7 +73,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 		t.Fatalf("keypair: %v", err)
 	}
 	n.SetIdentityKey(kp)
-	if err := n.EnableTrustLog(genesisHead, chainPath); err != nil {
+	if err := n.EnableTrustLog(genesisHash, chainPath); err != nil {
 		t.Fatalf("EnableTrustLog: %v", err)
 	}
 	go n.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
@@ -83,7 +83,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
-	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, genesisHead, clientKP, "")
+	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, genesisHash, clientKP, "")
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}

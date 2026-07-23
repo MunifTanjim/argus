@@ -45,7 +45,7 @@ void main() {
 
     // Pinned client: genesis + chain → only node A is authorized.
     final pinnedLink = MultiNodeLoopbackLink({'A': a, 'B': b}, trustChain: enfChain);
-    final pinned = E2EClient(pinnedLink.incoming, pinnedLink.send, await generateKeyPair(), genesisHead: enfGenesis);
+    final pinned = E2EClient(pinnedLink.incoming, pinnedLink.send, await generateKeyPair(), genesisHash: enfGenesis);
     await pinned.connect();
     expect(pinned.connectedNodeIds.toSet(), equals({'A'}),
         reason: 'pinned: only authorized node A should be connected');
@@ -55,18 +55,18 @@ void main() {
     final disabledChain = Uint8List.fromList(base64.decode(v['disabled_chain'] as String));
     final disabledGenesis = Uint8List.fromList(base64.decode(v['genesis_head'] as String));
     final disabledLink = MultiNodeLoopbackLink({'A': a, 'B': b}, trustChain: disabledChain);
-    final disabledClient = E2EClient(disabledLink.incoming, disabledLink.send, await generateKeyPair(), genesisHead: disabledGenesis);
+    final disabledClient = E2EClient(disabledLink.incoming, disabledLink.send, await generateKeyPair(), genesisHash: disabledGenesis);
     await disabledClient.connect();
     expect(disabledClient.connectedNodeIds.toSet(), equals({'A', 'B'}),
         reason: 'disabled trust log: both nodes should connect');
     await disabledClient.close();
 
-    // Open-mode client: no genesisHead → no trust enforcement → all nodes connect.
+    // Open-mode client: no genesisHash → no trust enforcement → all nodes connect.
     final openLink = MultiNodeLoopbackLink({'A': a, 'B': b});
     final openClient = E2EClient(openLink.incoming, openLink.send, await generateKeyPair());
     await openClient.connect();
     expect(openClient.connectedNodeIds.toSet(), equals({'A', 'B'}),
-        reason: 'open mode (no genesisHead): both nodes should connect');
+        reason: 'open mode (no genesisHash): both nodes should connect');
     await openClient.close();
   });
 
@@ -76,7 +76,7 @@ void main() {
     final link = MultiNodeLoopbackLink({'A': a},
         trustChain: Uint8List.fromList(base64.decode(v['disabled_chain'] as String)));
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(),
-        genesisHead: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
+        genesisHash: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
         initialTrustChain: Uint8List.fromList(base64.decode(v['chain'] as String)));
     await client.connect();
     expect(client.trustChainBytes, equals(Uint8List.fromList(base64.decode(v['disabled_chain'] as String))));
@@ -89,7 +89,7 @@ void main() {
     final link = MultiNodeLoopbackLink({'A': a},
         trustChain: Uint8List.fromList(base64.decode(v['chain'] as String))); // gateway serves SHORT
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(),
-        genesisHead: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
+        genesisHash: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
         initialTrustChain: Uint8List.fromList(base64.decode(v['disabled_chain'] as String))); // anchored LONG
     await client.connect();
     // The gateway's shorter chain was rejected; the client keeps the longer anchor.
@@ -104,7 +104,7 @@ void main() {
     final link = MultiNodeLoopbackLink({'A': a},
         trustChain: Uint8List.fromList(base64.decode(v['chain'] as String)));
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(),
-        genesisHead: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
+        genesisHash: Uint8List.fromList(base64.decode(v['genesis_head'] as String)),
         initialTrustChain: tampered);
     await client.connect();
     expect(client.trustChainBytes, equals(Uint8List.fromList(base64.decode(v['chain'] as String))));
@@ -124,7 +124,7 @@ void main() {
 
     // No trustChain → pull returns '' → ingest skipped → trust store empty → fail-closed.
     final link = MultiNodeLoopbackLink({'A': a, 'B': b});
-    final client = E2EClient(link.incoming, link.send, await generateKeyPair(), genesisHead: enfGenesis);
+    final client = E2EClient(link.incoming, link.send, await generateKeyPair(), genesisHash: enfGenesis);
     await client.connect();
     expect(client.connectedNodeIds.toSet(), isEmpty,
         reason: 'empty trust log: no authorized nodes; fail-closed means 0 connections');
@@ -142,7 +142,7 @@ void main() {
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(), tofu: true); // NO pinned genesis
     await client.connect();
     expect(client.connectedNodeIds.toSet(), {'A'});
-    expect(client.trustHead, isNotNull);
+    expect(client.trustTip, isNotNull);
     await client.close();
   });
 

@@ -35,18 +35,19 @@ Future<bool> _verifySig(Entry e) async {
 
 /// A verified, folded trust-log chain. Load rejects tampering, reordering,
 /// rollback onto a bad link, and edits by an untrusted signer. The caller must
-/// independently trust the genesis (pin its head) — load proves the rest follows.
+/// independently trust the genesis (pin its tip) — load proves the rest follows.
 class TrustLog {
   final Set<String> _signers = {};
   final Set<String> _devices = {};
+  final Map<String, String> _deviceSigner = {};
   List<Uint8List> _disablements = const [];
   bool _disabled = false;
-  Uint8List _head = Uint8List(0);
+  Uint8List _tip = Uint8List(0);
   int _count = 0;
 
   bool deviceAuthorized(List<int> pub) => _devices.contains(_hex(pub));
   bool get disabled => _disabled;
-  Uint8List get head => _head;
+  Uint8List get tip => _tip;
   List<Uint8List> get signers =>
       _signers.map((h) => Uint8List.fromList([for (var i = 0; i < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16)])).toList();
 
@@ -76,8 +77,8 @@ class TrustLog {
     } else {
       if (_count == 0) throw const FormatException('trustlog: first entry must be genesis');
       final prev = e.prev;
-      if (prev == null || !_eq(prev, _head)) {
-        throw const FormatException('trustlog: entry does not extend head');
+      if (prev == null || !_eq(prev, _tip)) {
+        throw const FormatException('trustlog: entry does not extend tip');
       }
       if (_disabled) throw const FormatException('trustlog: disabled; no further entries');
       if (e.kind == Kind.disable) {
@@ -96,23 +97,37 @@ class TrustLog {
           case Kind.addSigner:
             _signers.add(_hex(e.key!));
           case Kind.removeSigner:
-            if (!_signers.contains(_hex(e.key!))) {
+            final removed = _hex(e.key!);
+            if (!_signers.contains(removed)) {
               throw const FormatException('trustlog: cannot remove an unknown signer');
             }
             if (_signers.length == 1) {
               throw const FormatException('trustlog: cannot remove the last signer');
             }
-            _signers.remove(_hex(e.key!));
+            _signers.remove(removed);
+            _deviceSigner.entries
+                .where((en) => en.value == removed)
+                .map((en) => en.key)
+                .toList()
+                .forEach((dev) {
+              _devices.remove(dev);
+              _deviceSigner.remove(dev);
+            });
           case Kind.authorizeDevice:
+            if (_devices.contains(_hex(e.key!))) {
+              throw const FormatException('trustlog: device already authorized');
+            }
             _devices.add(_hex(e.key!));
+            _deviceSigner[_hex(e.key!)] = _hex(e.signer!);
           case Kind.revokeDevice:
             _devices.remove(_hex(e.key!));
+            _deviceSigner.remove(_hex(e.key!));
           default:
             throw const FormatException('trustlog: unknown entry kind');
         }
       }
     }
     _count++;
-    _head = hashEntry(e);
+    _tip = hashEntry(e);
   }
 }

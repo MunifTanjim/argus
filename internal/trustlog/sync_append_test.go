@@ -17,11 +17,43 @@ func lockedSyncStore(t *testing.T) (*SyncStore, SignerKey) {
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	ss := NewSyncStore(log.Head())
+	ss := NewSyncStore(log.Tip())
 	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
 		t.Fatalf("Ingest genesis: %v", err)
 	}
 	return ss, s1
+}
+
+// newSyncStoreTwoSigners returns a SyncStore with a genesis trusted by two signers (a and b).
+func newSyncStoreTwoSigners(t *testing.T) (*SyncStore, SignerKey, SignerKey) {
+	t.Helper()
+	a, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner a: %v", err)
+	}
+	b, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner b: %v", err)
+	}
+	log, err := NewGenesis([][]byte{a.Public, b.Public}, a, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	ss := NewSyncStore(log.Tip())
+	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
+		t.Fatalf("Ingest genesis: %v", err)
+	}
+	return ss, a, b
+}
+
+// mustGenSigner generates a signer or fails the test.
+func mustGenSigner(t *testing.T) SignerKey {
+	t.Helper()
+	sk, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	return sk
 }
 
 func TestSyncStoreAuthorizeAndRevoke(t *testing.T) {
@@ -50,11 +82,11 @@ func TestSyncStoreAppendRejectsUntrustedSigner(t *testing.T) {
 	rogue, _ := GenerateSigner() // not in the signer set
 	dev := bytes.Repeat([]byte{0x5A}, 32)
 
-	headBefore := ss.Head()
+	headBefore := ss.Tip()
 	if changed, err := ss.AuthorizeDevice(dev, rogue); err == nil || changed {
 		t.Fatalf("untrusted signer should be rejected: changed=%v err=%v", changed, err)
 	}
-	if !bytes.Equal(ss.Head(), headBefore) {
+	if !bytes.Equal(ss.Tip(), headBefore) {
 		t.Fatal("state must be unchanged after a rejected append")
 	}
 	if ss.DeviceAuthorized(dev) {
@@ -76,8 +108,8 @@ func TestSyncStoreDisable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := log.Head()
-	ss := NewSyncStore(genesisHead)
+	genesisHash := log.Tip()
+	ss := NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
 		t.Fatalf("Ingest genesis: %v", err)
 	}
@@ -112,7 +144,7 @@ func TestSyncStoreDisableUnknownSecretErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	ss := NewSyncStore(log.Head())
+	ss := NewSyncStore(log.Tip())
 	if _, err := ss.Ingest(MarshalChain(log.Entries())); err != nil {
 		t.Fatalf("Ingest genesis: %v", err)
 	}
@@ -130,6 +162,27 @@ func TestSyncStoreDisableUnknownSecretErrors(t *testing.T) {
 	}
 	if ss.Disabled() {
 		t.Error("Disabled() should remain false after a rejected Disable")
+	}
+}
+
+func TestSyncStoreAddRemoveSigner(t *testing.T) {
+	s, a, b := newSyncStoreTwoSigners(t) // helper mirroring existing sync tests
+	newSigner := mustGenSigner(t)
+	changed, err := s.AddSigner(newSigner.Public, a)
+	mustNoErr(t, err)
+	if !changed || !s.SignerTrusted(newSigner.Public) {
+		t.Fatal("AddSigner must add and report changed")
+	}
+	// idempotent: adding again is a no-op.
+	changed, err = s.AddSigner(newSigner.Public, a)
+	mustNoErr(t, err)
+	if changed {
+		t.Error("AddSigner of an existing signer must be a no-op")
+	}
+	changed, err = s.RemoveSigner(newSigner.Public, b)
+	mustNoErr(t, err)
+	if !changed || s.SignerTrusted(newSigner.Public) {
+		t.Fatal("RemoveSigner must remove and report changed")
 	}
 }
 

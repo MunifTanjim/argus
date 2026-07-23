@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:cryptography_plus/cryptography_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
 
@@ -17,7 +18,7 @@ void main() {
     expect(store.deviceAuthorized(_b(v, 'device_a')), isTrue);
     expect(store.deviceAuthorized(_b(v, 'device_b')), isFalse);
     expect(store.disabled, isFalse);
-    expect(store.head, equals(_b(v, 'head')));
+    expect(store.tip, equals(_b(v, 'head')));
   });
 
   test('ingesting the same chain twice is a no-op (changed=false)', () async {
@@ -32,7 +33,7 @@ void main() {
     final store = TrustStore(_b(v, 'genesis_head'));
     expect(await store.ingest(_b(v, 'disabled_chain')), isTrue);
     expect(store.disabled, isTrue);
-    expect(store.head, equals(_b(v, 'disabled_head')));
+    expect(store.tip, equals(_b(v, 'disabled_head')));
   });
 
   test('wrong-genesis, tampered, and rollback chains are rejected', () async {
@@ -73,7 +74,7 @@ void main() {
     expect(await store.ingest(_b(v, 'chain')), isTrue);
     expect(store.locked, isTrue);
     expect(store.deviceAuthorized(_b(v, 'device_a')), isTrue);
-    expect(store.head, equals(_b(v, 'head')));
+    expect(store.tip, equals(_b(v, 'head')));
     expect(store.chainBytes, equals(_b(v, 'chain')));
   });
 
@@ -104,5 +105,92 @@ void main() {
     final v = _tl();
     final store = TrustStore(_b(v, 'genesis_head'));
     expect(store.locked, isTrue); // enforces even before ingest (fail-closed)
+  });
+
+  test('removing a signer retroactively invalidates devices it authorized', () async {
+    final ed = Ed25519();
+
+    Future<Entry> sign(SimpleKeyPair kp, Entry template) async {
+      final s = await ed.sign(sigBytes(template), keyPair: kp);
+      return Entry(
+        kind: template.kind,
+        prev: template.prev,
+        signers: template.signers,
+        disablements: template.disablements,
+        key: template.key,
+        signer: template.signer,
+        sig: Uint8List.fromList(s.bytes),
+      );
+    }
+
+    final kpA = await ed.newKeyPair();
+    final kpB = await ed.newKeyPair();
+    final kpDevA = await ed.newKeyPair();
+    final kpDevB = await ed.newKeyPair();
+
+    final pubA = Uint8List.fromList((await kpA.extractPublicKey()).bytes);
+    final pubB = Uint8List.fromList((await kpB.extractPublicKey()).bytes);
+    final pubDevA = Uint8List.fromList((await kpDevA.extractPublicKey()).bytes);
+    final pubDevB = Uint8List.fromList((await kpDevB.extractPublicKey()).bytes);
+
+    // Genesis: signers A and B, signed by A
+    final genesis = await sign(kpA, Entry(kind: Kind.genesis, signers: [pubA, pubB], signer: pubA));
+
+    // A authorizes devA
+    final e1 = await sign(kpA, Entry(kind: Kind.authorizeDevice, prev: hashEntry(genesis), key: pubDevA, signer: pubA));
+
+    // B authorizes devB
+    final e2 = await sign(kpB, Entry(kind: Kind.authorizeDevice, prev: hashEntry(e1), key: pubDevB, signer: pubB));
+
+    // Remove A (B remains — not the last signer)
+    final e3 = await sign(kpA, Entry(kind: Kind.removeSigner, prev: hashEntry(e2), key: pubA, signer: pubA));
+
+    final log = await TrustLog.load([genesis, e1, e2, e3]);
+    expect(log.deviceAuthorized(pubDevA), isFalse); // A removed → devA invalidated
+    expect(log.deviceAuthorized(pubDevB), isTrue);  // B still trusted → devB stays
+  });
+
+  test('double-authorize (same device, already authorized) is rejected on load', () async {
+    final ed = Ed25519();
+    final kpA = await ed.newKeyPair();
+    final pubA = Uint8List.fromList((await kpA.extractPublicKey()).bytes);
+    final kpB = await ed.newKeyPair();
+    final pubB = Uint8List.fromList((await kpB.extractPublicKey()).bytes);
+    final dev = Uint8List.fromList(List.filled(32, 0xDD));
+
+    Future<Entry> sign(SimpleKeyPair kp, Entry template) async {
+      final s = await ed.sign(sigBytes(template), keyPair: kp);
+      return Entry(
+        kind: template.kind, prev: template.prev, signers: template.signers,
+        disablements: template.disablements, key: template.key, signer: template.signer,
+        sig: Uint8List.fromList(s.bytes),
+      );
+    }
+
+    final genesis = await sign(kpA, Entry(kind: Kind.genesis, signers: [pubA, pubB], signer: pubA));
+    final e1 = await sign(kpA, Entry(kind: Kind.authorizeDevice, prev: hashEntry(genesis), key: dev, signer: pubA));
+    // Second authorize for the same already-authorized device — must be rejected.
+    final e2 = await sign(kpB, Entry(kind: Kind.authorizeDevice, prev: hashEntry(e1), key: dev, signer: pubB));
+
+    expect(
+      () => TrustLog.load([genesis, e1, e2]),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('signer-removal golden vector: devA unauthorized, devB authorized (Go↔Dart parity)', () async {
+    final raw = jsonDecode(File('test/e2e/testdata/vectors.json').readAsStringSync())
+        as Map<String, dynamic>;
+    final sr = raw['signer_removal'] as Map<String, dynamic>;
+    final chain = Uint8List.fromList(base64.decode(sr['chain'] as String));
+    final devA = Uint8List.fromList(base64.decode(sr['dev_a'] as String));
+    final devB = Uint8List.fromList(base64.decode(sr['dev_b'] as String));
+
+    final entries = unmarshalChain(chain);
+    final log = await TrustLog.load(entries);
+    expect(log.deviceAuthorized(devA), isFalse,
+        reason: 'devA must be unauthorized after its authorizing signer is removed');
+    expect(log.deviceAuthorized(devB), isTrue,
+        reason: 'devB must remain authorized (its authorizing signer B is still trusted)');
   });
 }

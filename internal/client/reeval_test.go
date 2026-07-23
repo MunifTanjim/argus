@@ -12,7 +12,7 @@ func TestReevaluateChannelsDropsRevoked(t *testing.T) {
 	// Build a trust chain authorizing both nodeA's and nodeB's identity keys.
 	signer, _ := trustlog.GenerateSigner()
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
-	head := lg.Head()
+	head := lg.Tip()
 
 	nodeA := &fakeNode{id: "nodeA", key: mustKP(t)}
 	nodeB := &fakeNode{id: "nodeB", key: mustKP(t)}
@@ -86,7 +86,7 @@ func TestReevaluateChannelsDisabledStoreDropsNothing(t *testing.T) {
 	}
 	commitment := trustlog.DisablementCommitment(secret)
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{commitment})
-	head := lg.Head()
+	head := lg.Tip()
 
 	nodeA := &fakeNode{id: "nodeA", key: mustKP(t)}
 	nodeB := &fakeNode{id: "nodeB", key: mustKP(t)}

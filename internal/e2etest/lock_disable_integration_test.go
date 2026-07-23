@@ -123,7 +123,7 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
 			return false
 		}
-		st := trustlog.NewSyncStore(initRes.Head)
+		st := trustlog.NewSyncStore(initRes.Tip)
 		_, err = st.Ingest(got.Chain)
 		return err == nil && st.DeviceAuthorized(idA)
 	})
@@ -140,7 +140,7 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	// REFUSED: the node has enforcement on; clientKP is not authorized.
 	// The node drops the Noise handshake (no msg2), so openChannel times out
 	// after SetHandshakeTimeoutForTest and NewReconnectingE2EClientLocked fails.
-	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, "")
+	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
 	if unauthErr == nil {
 		cUnauth.Close()
 		t.Fatal("unauthorized client should be refused by the locked node")
@@ -173,7 +173,7 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
 			return false
 		}
-		st := trustlog.NewSyncStore(initRes.Head)
+		st := trustlog.NewSyncStore(initRes.Tip)
 		_, err = st.Ingest(got.Chain)
 		return err == nil && st.Disabled()
 	})
@@ -181,7 +181,7 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	// SERVED: a fresh locked client using the same unsigned clientKP now connects
 	// because enforcement is off: the node skips the authorization check and the
 	// client-side opens channels to all nodes (Disabled() is true on both sides).
-	cPost, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, "")
+	cPost, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
 	if err != nil {
 		t.Fatalf("post-disable client should connect: %v", err)
 	}

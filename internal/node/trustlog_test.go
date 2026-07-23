@@ -24,7 +24,7 @@ func seedChain(t *testing.T, withDevice bool) (chain, head, device []byte, signe
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	head = log.Head()
+	head = log.Tip()
 	device = bytes.Repeat([]byte{0x11}, 32)
 	if withDevice {
 		if err := log.AuthorizeDevice(device, signer); err != nil {
@@ -155,8 +155,8 @@ func TestLoadPinnedGenesisRoundTrip(t *testing.T) {
 	d := New()
 	d.trustPath = filepath.Join(dir, "trustlog-chain")
 	head := bytes.Repeat([]byte{0x7E}, 32)
-	if err := d.writeGenesisHead(head); err != nil {
-		t.Fatalf("writeGenesisHead: %v", err)
+	if err := d.writeGenesisHash(head); err != nil {
+		t.Fatalf("writeGenesisHash: %v", err)
 	}
 	got, err := LoadPinnedGenesis(filepath.Join(dir, "trustlog-genesis"))
 	if err != nil {
@@ -224,7 +224,7 @@ func TestEnableTrustLogIgnoresCorruptDisk(t *testing.T) {
 	if d.TrustStore() == nil {
 		t.Fatal("TrustStore should be non-nil after EnableTrustLog")
 	}
-	if d.TrustStore().Head() != nil {
+	if d.TrustStore().Tip() != nil {
 		t.Fatal("Head should be nil when bad chain was ignored")
 	}
 	device := bytes.Repeat([]byte{0x22}, 32)

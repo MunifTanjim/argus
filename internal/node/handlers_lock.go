@@ -11,7 +11,7 @@ import (
 
 // handleLockInit establishes the trust log (lock.init): builds a genesis whose signer
 // set is this node plus the requested additional signers, authorizes the requested
-// devices, persists + activates it live, and returns the new head. Once-only.
+// devices, persists + activates it live, and returns the new genesis hash. Once-only.
 func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, error) {
 	if d.trust.Load() != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode already enabled"}
@@ -64,23 +64,28 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "genesis: " + err.Error()}
 	}
-	// Capture the genesis head before appending device entries; NewSyncStore pins
+	// Capture the genesis hash before appending device entries; NewSyncStore pins
 	// this for rollback/fork resistance (Ingest checks entries[0] hash against it).
-	genesisHead := tlog.Head()
+	genesisHash := tlog.Tip()
+	seenDev := map[string]bool{}
 	for _, dev := range p.Devices {
+		if seenDev[string(dev)] {
+			continue // skip duplicates — double-authorize is now rejected at the log level
+		}
+		seenDev[string(dev)] = true
 		if err := tlog.AuthorizeDevice(dev, d.signer); err != nil {
 			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "authorize: " + err.Error()}
 		}
 	}
 
-	store := trustlog.NewSyncStore(genesisHead)
+	store := trustlog.NewSyncStore(genesisHash)
 	if _, err := store.Ingest(trustlog.MarshalChain(tlog.Entries())); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "ingest: " + err.Error()}
 	}
-	if err := d.activateTrust(store, genesisHead, d.trustPath); err != nil {
+	if err := d.activateTrust(store, genesisHash, d.trustPath); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "activate: " + err.Error()}
 	}
-	return api.LockInitResult{Head: genesisHead, SignerCount: len(signerSet), DisablementSecrets: secrets}, nil
+	return api.LockInitResult{Tip: genesisHash, SignerCount: len(signerSet), DisablementSecrets: secrets}, nil
 }
 
 // handleLockSign authorizes a device (lock.sign). Requires this node to be a trusted
@@ -127,7 +132,52 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 		}
 		d.reevaluateTrustChannels()
 	}
-	return api.LockDeviceResult{Head: st.Head()}, nil
+	return api.LockDeviceResult{Tip: st.Tip()}, nil
+}
+
+// handleLockAddSigner adds a trusted signer (lock.addSigner). Requires this node to be
+// a trusted signer. Idempotent.
+func (d *Node) handleLockAddSigner(_ context.Context, params json.RawMessage) (any, error) {
+	return d.lockSigner(params, true)
+}
+
+// handleLockRemoveSigner removes a trusted signer (lock.removeSigner). Idempotent.
+func (d *Node) handleLockRemoveSigner(_ context.Context, params json.RawMessage) (any, error) {
+	return d.lockSigner(params, false)
+}
+
+// lockSigner is the shared body of lock.addSigner/removeSigner. add selects the op.
+func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockSignerParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	if len(p.Signer) != 32 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "signer must be a 32-byte ed25519 pubkey"}
+	}
+	var changed bool
+	if add {
+		changed, err = st.AddSigner(p.Signer, d.signer)
+	} else {
+		changed, err = st.RemoveSigner(p.Signer, d.signer)
+	}
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
+	}
+	if changed {
+		if werr := d.persistTrust(); werr != nil {
+			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+		}
+		d.reevaluateTrustChannels()
+	}
+	return api.LockDeviceResult{Tip: st.Tip()}, nil
 }
 
 // handleLockDisable consumes a disablement secret (lock.disable): if its commitment is
@@ -152,7 +202,7 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 		}
 		d.reevaluateTrustChannels()
 	}
-	return api.LockDisableResult{Head: st.Head(), Disabled: st.Disabled()}, nil
+	return api.LockDisableResult{Tip: st.Tip(), Disabled: st.Disabled()}, nil
 }
 
 // handleLockLocalDisable locally disables locked-mode enforcement on this node only.
@@ -175,7 +225,7 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 		return res, nil
 	}
 	res.Enabled = true
-	res.Head = st.Head()
+	res.Tip = st.Tip()
 	res.Signers = st.Signers()
 	res.DeviceCount = len(st.Devices())
 	if len(d.signer.Public) > 0 {

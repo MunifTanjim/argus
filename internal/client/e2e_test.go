@@ -373,7 +373,7 @@ func newE2EClientForTest(t *testing.T, head []byte, chainPath string, chain ...[
 func TestClientTrustStorePersists(t *testing.T) {
 	signer, _ := trustlog.GenerateSigner()
 	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
-	head := log.Head()
+	head := log.Tip()
 	dev := bytes.Repeat([]byte{0x44}, 32)
 	_ = log.AuthorizeDevice(dev, signer)
 	chain := trustlog.MarshalChain(log.Entries())
@@ -401,7 +401,7 @@ func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	// Build a trust chain authorizing only nodeAuth's identity key.
 	signer, _ := trustlog.GenerateSigner()
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
-	head := lg.Head()
+	head := lg.Tip()
 
 	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
 	unauthNode := &fakeNode{id: "nodeUnauth", key: mustKP(t)}
@@ -448,7 +448,7 @@ func TestClientDisabledStoreConnectsAll(t *testing.T) {
 	}
 	commitment := trustlog.DisablementCommitment(secret)
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{commitment})
-	head := lg.Head()
+	head := lg.Tip()
 
 	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
 	unauthNode := &fakeNode{id: "nodeUnauth", key: mustKP(t)}

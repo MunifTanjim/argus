@@ -15,23 +15,23 @@ type SyncStore struct {
 	store *Store
 }
 
-// NewSyncStore pins the out-of-band genesis head. Empty until the first Ingest.
-func NewSyncStore(genesisHead []byte) *SyncStore {
-	return &SyncStore{store: NewStore(genesisHead)}
+// NewSyncStore pins the out-of-band genesis hash. Empty until the first Ingest.
+func NewSyncStore(genesisHash []byte) *SyncStore {
+	return &SyncStore{store: NewStore(genesisHash)}
 }
 
 // Ingest adopts a candidate chain via the pinned Store. changed reports whether
-// the verified HEAD advanced (so a caller can persist / act only on real change).
+// the verified tip advanced (so a caller can persist / act only on real change).
 // An identical chain is a no-op (changed=false, err=nil); a rollback/fork/tamper
 // or wrong-genesis chain returns an error and leaves state untouched.
 func (s *SyncStore) Ingest(chain []byte) (changed bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	before := s.store.Head()
+	before := s.store.Tip()
 	if err := s.store.Ingest(chain); err != nil {
 		return false, err
 	}
-	return !bytes.Equal(before, s.store.Head()), nil
+	return !bytes.Equal(before, s.store.Tip()), nil
 }
 
 // Bytes returns the current marshaled chain (nil if nothing ingested yet).
@@ -41,11 +41,11 @@ func (s *SyncStore) Bytes() []byte {
 	return s.store.Bytes()
 }
 
-// Head returns the current verified HEAD (nil if empty).
-func (s *SyncStore) Head() []byte {
+// Tip returns the current verified tip (nil if empty).
+func (s *SyncStore) Tip() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.store.Head()
+	return s.store.Tip()
 }
 
 // DeviceAuthorized reports whether pub is authorized by the current chain.
@@ -119,11 +119,25 @@ func (s *SyncStore) appendSigned(alreadyDone func(*Store) bool, mutate func(*Log
 	if err := mutate(log); err != nil {
 		return false, err
 	}
-	before := s.store.Head()
+	before := s.store.Tip()
 	if err := s.store.Ingest(MarshalChain(log.Entries())); err != nil {
 		return false, err
 	}
-	return !bytes.Equal(before, s.store.Head()), nil
+	return !bytes.Equal(before, s.store.Tip()), nil
+}
+
+// AddSigner appends a signer-signed KindAddSigner for signerPub, signed by by.
+func (s *SyncStore) AddSigner(signerPub []byte, by SignerKey) (changed bool, err error) {
+	return s.appendSigned(
+		func(st *Store) bool { return st.SignerTrusted(signerPub) },
+		func(l *Log) error { return l.AddSigner(signerPub, by) })
+}
+
+// RemoveSigner appends a signer-signed KindRemoveSigner for signerPub, signed by by.
+func (s *SyncStore) RemoveSigner(signerPub []byte, by SignerKey) (changed bool, err error) {
+	return s.appendSigned(
+		func(st *Store) bool { return !st.SignerTrusted(signerPub) },
+		func(l *Log) error { return l.RemoveSigner(signerPub, by) })
 }
 
 // AuthorizeDevice appends a signer-signed authorization for devicePub, signed by by

@@ -41,14 +41,14 @@ class E2EClient implements GatewayClient {
     this._static, {
     this.handshakeTimeout = const Duration(seconds: 15),
     this.callTimeout = const Duration(seconds: 30),
-    Uint8List? genesisHead,
+    Uint8List? genesisHash,
     Uint8List? initialTrustChain,
     bool tofu = false,
     this.trustResyncInterval,
     this.onTrustChainAdvance,
   })  : _trust = tofu
             ? TrustStore.tofu()
-            : (genesisHead != null ? TrustStore(genesisHead) : null),
+            : (genesisHash != null ? TrustStore(genesisHash) : null),
         _initialTrustChain = initialTrustChain {
     _sub = _incoming.listen(_onMessage, onDone: _onDone, cancelOnError: false);
     _gateway = RpcClient(incoming: _gatewayCtrl.stream, sendFrame: _send);
@@ -71,7 +71,7 @@ class E2EClient implements GatewayClient {
   final Future<void> Function(Uint8List chain)? onTrustChainAdvance;
   Timer? _resyncTimer;
   Uint8List? get trustChainBytes => _trust?.chainBytes;
-  Uint8List? get trustHead => _trust?.head;
+  Uint8List? get trustTip => _trust?.tip;
   List<Uint8List>? get trustSigners => _trust?.signers;
 
   /// null when there is no trust store or the network is open (not locked);
@@ -148,7 +148,7 @@ class E2EClient implements GatewayClient {
       });
 
   /// Discovers nodes (nodes.list) and opens an E2E channel to each node that
-  /// advertises an identity key. When a genesis head is configured, pulls and
+  /// advertises an identity key. When a genesis hash is configured, pulls and
   /// ingests the trust log first, then skips any node whose identity key is not
   /// authorized (fail-closed: a failed pull leaves prior state in place).
   Future<void> connect() async {

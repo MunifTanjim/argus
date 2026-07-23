@@ -175,12 +175,12 @@ func buildLockedResponder(t *testing.T, authorizedClientPub []byte) *relayRespon
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := lg.Head()
+	genesisHash := lg.Tip()
 	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
 	}
 	chain := trustlog.MarshalChain(lg.Entries())
-	ss := trustlog.NewSyncStore(genesisHead)
+	ss := trustlog.NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(chain); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -278,12 +278,12 @@ func buildDisabledLockedResponder(t *testing.T, authorizedClientPub []byte) *rel
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := lg.Head()
+	genesisHash := lg.Tip()
 	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
 	}
 	chain := trustlog.MarshalChain(lg.Entries())
-	ss := trustlog.NewSyncStore(genesisHead)
+	ss := trustlog.NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(chain); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -319,12 +319,12 @@ func buildLocalDisabledLockedResponder(t *testing.T, authorizedClientPub []byte)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead := lg.Head()
+	genesisHash := lg.Tip()
 	if err := lg.AuthorizeDevice(authorizedClientPub, signer); err != nil {
 		t.Fatalf("AuthorizeDevice: %v", err)
 	}
 	chain := trustlog.MarshalChain(lg.Entries())
-	ss := trustlog.NewSyncStore(genesisHead)
+	ss := trustlog.NewSyncStore(genesisHash)
 	if _, err := ss.Ingest(chain); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}

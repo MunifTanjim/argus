@@ -8,7 +8,7 @@ import (
 
 // buildSyncChain returns a marshaled genesis[+authorize] chain and the pieces the
 // tests assert against.
-func buildSyncChain(t *testing.T, withDevice bool) (chain []byte, genesisHead []byte, signer SignerKey, device []byte) {
+func buildSyncChain(t *testing.T, withDevice bool) (chain []byte, genesisHash []byte, signer SignerKey, device []byte) {
 	t.Helper()
 	signer, err := GenerateSigner()
 	if err != nil {
@@ -18,14 +18,14 @@ func buildSyncChain(t *testing.T, withDevice bool) (chain []byte, genesisHead []
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
-	genesisHead = log.Head()
+	genesisHash = log.Tip()
 	device = bytes.Repeat([]byte{0xAB}, 32)
 	if withDevice {
 		if err := log.AuthorizeDevice(device, signer); err != nil {
 			t.Fatalf("AuthorizeDevice: %v", err)
 		}
 	}
-	return MarshalChain(log.Entries()), genesisHead, signer, device
+	return MarshalChain(log.Entries()), genesisHash, signer, device
 }
 
 func TestSyncStoreIngestReportsAdvance(t *testing.T) {
@@ -81,7 +81,7 @@ func TestSyncStoreConcurrent(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				_, _ = s.Ingest(genChain) // idempotent no-op
-				_ = s.Head()
+				_ = s.Tip()
 				_ = s.Bytes()
 				_ = s.SignerTrusted(nil)
 				_ = s.DeviceAuthorized(nil)

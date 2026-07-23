@@ -10,7 +10,7 @@ class TrustSummary {
     required this.isLocked,
     required this.isAuthorized,
     required this.isDisabled,
-    required this.head,
+    required this.tip,
     this.signers = const [],
   });
   const TrustSummary.disconnected()
@@ -18,14 +18,14 @@ class TrustSummary {
         isLocked = null,
         isAuthorized = false,
         isDisabled = false,
-        head = null,
+        tip = null,
         signers = const [];
 
   final bool connected;
   final bool? isLocked; // null = open network / unknown
   final bool isAuthorized;
   final bool isDisabled;
-  final Uint8List? head;
+  final Uint8List? tip;
   final List<Uint8List> signers;
 }
 
@@ -43,7 +43,7 @@ final trustSummaryProvider = Provider<TrustSummary>((ref) {
     isLocked: client.isLocked,
     isAuthorized: client.isAuthorized,
     isDisabled: client.isDisabled,
-    head: client.trustHead,
+    tip: client.trustTip,
     signers: client.trustSigners ?? const [],
   );
 });

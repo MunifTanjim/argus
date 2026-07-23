@@ -30,16 +30,16 @@ type trustCaller interface {
 	Call(method string, params, out any) error
 }
 
-// EnableTrustLog turns on locked-mode trust-log participation: it pins genesisHead
+// EnableTrustLog turns on locked-mode trust-log participation: it pins genesisHash
 // and loads any chain already persisted at path (rollback resistance across
-// reboots — a restarted node resumes from its last verified HEAD). Call before
+// reboots — a restarted node resumes from its last verified tip). Call before
 // ConnectGateway. A malformed/rolled-back on-disk chain is ignored (the store
 // stays empty rather than adopting it); genuine corruption surfaces on next sync.
-func (d *Node) EnableTrustLog(genesisHead []byte, path string) error {
+func (d *Node) EnableTrustLog(genesisHash []byte, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	sync := trustlog.NewSyncStore(genesisHead)
+	sync := trustlog.NewSyncStore(genesisHash)
 	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 		// A persisted chain we wrote ourselves; ingest is genesis-pinned so a
 		// tampered file is rejected rather than trusted.
@@ -137,9 +137,9 @@ func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
 	}
 }
 
-// genesisHeadPath is the state file holding the pinned genesis head, kept beside
+// genesisHashPath is the state file holding the pinned genesis hash, kept beside
 // the chain so a node's locked state is self-contained in its state dir.
-func genesisHeadPath(chainPath string) string {
+func genesisHashPath(chainPath string) string {
 	return filepath.Join(filepath.Dir(chainPath), "trustlog-genesis")
 }
 
@@ -161,19 +161,19 @@ func LoadPinnedGenesis(path string) ([]byte, error) {
 	return b, nil
 }
 
-// writeGenesisHead atomically persists the pinned genesis head beside the chain.
-func (d *Node) writeGenesisHead(head []byte) error {
+// writeGenesisHash atomically persists the pinned genesis hash beside the chain.
+func (d *Node) writeGenesisHash(hash []byte) error {
 	d.trustPersistMu.Lock()
 	defer d.trustPersistMu.Unlock()
-	return atomicfile.Write(genesisHeadPath(d.trustPath), head)
+	return atomicfile.Write(genesisHashPath(d.trustPath), hash)
 }
 
 // activateTrust enables locked mode at runtime (lock.init): pin path, persist the
-// chain + genesis head, then publish the store atomically. The per-uplink sync loop
+// chain + genesis hash, then publish the store atomically. The per-uplink sync loop
 // (polling the atomic store) then offers it to the gateway without a reconnect.
 // Persisting before Store ensures the node is either fully persisted+enabled or
 // error+not-enabled; it is never enabled-but-unpersisted.
-func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHead []byte, chainPath string) error {
+func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chainPath string) error {
 	d.trustPath = chainPath
 	if err := os.MkdirAll(filepath.Dir(chainPath), 0o700); err != nil {
 		return err
@@ -181,7 +181,7 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHead []byte, chai
 	if err := d.persistChain(store.Bytes()); err != nil {
 		return err
 	}
-	if err := d.writeGenesisHead(genesisHead); err != nil {
+	if err := d.writeGenesisHash(genesisHash); err != nil {
 		return err
 	}
 	d.trust.Store(store) // publish only after both persists succeed

@@ -166,7 +166,7 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	// distributed to other nodes (e.g. via config or CLI output) so they can boot
 	// locked. Simulate that here by enabling node B's trust store with the genesis
 	// head; its sync loop then pulls the chain from the gateway.
-	if err := nodeB.EnableTrustLog(initRes.Head, chainPathB); err != nil {
+	if err := nodeB.EnableTrustLog(initRes.Tip, chainPathB); err != nil {
 		t.Fatalf("EnableTrustLog node B: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	waitFor(t, "node B converges on node A's head", func() bool {
 		stB := nodeB.TrustStore()
 		stA := nodeA.TrustStore()
-		return stB != nil && stA != nil && bytes.Equal(stB.Head(), stA.Head())
+		return stB != nil && stA != nil && bytes.Equal(stB.Tip(), stA.Tip())
 	})
 
 	// A genesis-pinned client pulls the chain from the gateway and sees node A
@@ -186,7 +186,7 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
-	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Head, clientKP, "")
+	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}

@@ -20,7 +20,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
 	return cmd
 }
 
@@ -110,8 +110,8 @@ func newLockInitCmd() *cobra.Command {
 			}
 
 			// 3. Report.
-			head := base64.StdEncoding.EncodeToString(res.Head)
-			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", head, res.SignerCount)
+			tip := base64.StdEncoding.EncodeToString(res.Tip)
+			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", tip, res.SignerCount)
 			for _, s := range res.DisablementSecrets {
 				shell.StdOutF("  disablement secret: %s\n", base64.StdEncoding.EncodeToString(s))
 			}
@@ -123,7 +123,7 @@ func newLockInitCmd() *cobra.Command {
 			} else if res.SignerCount < 2 {
 				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer <node>.\n")
 			}
-			shell.StdOutF("\nTo pin your other nodes and clients, set in their config:\n  lock.genesis: %s\n", head)
+			shell.StdOutF("\nTo pin your other nodes and clients, set in their config:\n  lock.genesis: %s\n", tip)
 			return nil
 		},
 	}
@@ -136,7 +136,7 @@ func newLockInitCmd() *cobra.Command {
 func newLockStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "status",
-		Short:         "Show locked-mode status (HEAD fingerprint, signers, this node's roles)",
+		Short:         "Show locked-mode status (tip fingerprint, signers, this node's roles)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -257,7 +257,75 @@ func newLockSignCmd() *cobra.Command {
 	return newLockDeviceCmd("sign", "Authorize a device", api.MethodLockSign)
 }
 func newLockRevokeCmd() *cobra.Command {
-	return newLockDeviceCmd("revoke", "Revoke a device", api.MethodLockRevoke)
+	return newLockDeviceCmd("revoke-device", "Revoke a device", api.MethodLockRevoke)
+}
+
+func newLockAddSignerCmd() *cobra.Command {
+	return newLockSignerCmd("add-signer", "Add a trusted signer", api.MethodLockAddSigner)
+}
+func newLockRemoveSignerCmd() *cobra.Command {
+	return newLockSignerCmd("remove-signer", "Remove a trusted signer", api.MethodLockRemoveSigner)
+}
+
+func newLockSignerCmd(use, short, method string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           use + " <signer>",
+		Short:         short + " (node label/id or base64 signer pubkey)",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Resolve the signer pubkey: node label/id via roster, or raw base64.
+			var pub []byte
+			roster, _ := fetchRoster(ctx, cfg) // best-effort
+			pubs, rerr := resolveSigners(roster, []string{args[0]})
+			if rerr != nil || len(pubs) != 1 {
+				// Fallback: try raw base64 32-byte signer pubkey.
+				raw, berr := base64.StdEncoding.DecodeString(args[0])
+				if berr != nil || len(raw) != 32 {
+					if rerr != nil {
+						return fail(cmd, fmt.Errorf("resolve signer %q: %w", args[0], rerr))
+					}
+					return fail(cmd, fmt.Errorf("resolve signer %q: not a known node and not a valid 32-byte base64 pubkey", args[0]))
+				}
+				pub = raw
+			} else {
+				pub = pubs[0]
+			}
+			res, err := lockSignerOnNode(ctx, cfg, method, pub)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, base64.StdEncoding.EncodeToString(res.Tip))
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
+func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, signer []byte) (api.LockDeviceResult, error) {
+	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
+	if err != nil {
+		return api.LockDeviceResult{}, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return api.LockDeviceResult{}, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var res api.LockDeviceResult
+	if err := c.Call(method, api.LockSignerParams{Signer: signer}, &res); err != nil {
+		return api.LockDeviceResult{}, err
+	}
+	return res, nil
 }
 
 func newLockDeviceCmd(use, short, method string) *cobra.Command {
@@ -295,7 +363,7 @@ func newLockDeviceCmd(use, short, method string) *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			shell.StdOutF("%s ok\n  current HEAD (audit): %s\n", use, base64.StdEncoding.EncodeToString(res.Head))
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, base64.StdEncoding.EncodeToString(res.Tip))
 			return nil
 		},
 	}
@@ -354,7 +422,7 @@ func newLockDisableCmd() *cobra.Command {
 			if err := c.Call(api.MethodLockDisable, api.LockDisableParams{Secret: secret}, &res); err != nil {
 				return fail(cmd, err)
 			}
-			shell.StdOutF("locked mode disabled network-wide\n  current HEAD (audit): %s\n", base64.StdEncoding.EncodeToString(res.Head))
+			shell.StdOutF("locked mode disabled network-wide\n  current tip (audit): %s\n", base64.StdEncoding.EncodeToString(res.Tip))
 			return nil
 		},
 	}
@@ -413,8 +481,8 @@ func printLockStatus(st api.LockStatusResult) {
 		}
 		return
 	}
-	shell.StdOutF("locked mode: enabled\n  current HEAD (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
-		base64.StdEncoding.EncodeToString(st.Head), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+	shell.StdOutF("locked mode: enabled\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
+		base64.StdEncoding.EncodeToString(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
 	if len(st.Signers) > 0 {
 		shell.StdOutF("  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
 		for _, s := range st.Signers {

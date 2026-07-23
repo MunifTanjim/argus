@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+// newGenesisTwoSigners creates a Log trusted by two signers (a and b) and returns both keys.
+func newGenesisTwoSigners(t *testing.T) (*Log, SignerKey, SignerKey) {
+	t.Helper()
+	a, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner a: %v", err)
+	}
+	b, err := GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner b: %v", err)
+	}
+	l, err := NewGenesis([][]byte{a.Public, b.Public}, a, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	return l, a, b
+}
+
+// mustNoErr fails the test immediately if err is non-nil.
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGenesisAndDeviceAuthorization(t *testing.T) {
 	s, _ := GenerateSigner()
 	l, err := NewGenesis([][]byte{s.Public}, s, nil)
@@ -36,12 +62,12 @@ func TestGenesisAndDeviceAuthorization(t *testing.T) {
 func TestHeadAdvancesPerEntry(t *testing.T) {
 	s, _ := GenerateSigner()
 	l, _ := NewGenesis([][]byte{s.Public}, s, nil)
-	h0 := l.Head()
+	h0 := l.Tip()
 	if len(h0) != 32 {
 		t.Fatalf("head len = %d", len(h0))
 	}
 	_ = l.AuthorizeDevice([]byte("d"), s)
-	h1 := l.Head()
+	h1 := l.Tip()
 	if bytes.Equal(h0, h1) {
 		t.Error("head must advance after an entry")
 	}
@@ -145,7 +171,7 @@ func TestDisableIsTerminal(t *testing.T) {
 	// Load path: a properly-chained entry after a disable must be rejected with
 	// the disabled error, not a Prev-mismatch error (the duplicate-KindDisable
 	// sub-test above hits the Prev-mismatch path instead of the disabled guard).
-	disableHead := log.Head()
+	disableHead := log.Tip()
 	after := Entry{
 		Kind: KindAuthorizeDevice,
 		Prev: disableHead,
@@ -168,7 +194,58 @@ func TestGenesisCommitmentsAreInHead(t *testing.T) {
 	// + hashed → tamper-evident, part of the pin).
 	other, _ := GenerateDisablementSecret()
 	b, _ := NewGenesis([][]byte{signer.Public}, signer, [][]byte{DisablementCommitment(other)})
-	if bytes.Equal(a.Head(), b.Head()) {
+	if bytes.Equal(a.Tip(), b.Tip()) {
 		t.Fatal("genesis head must depend on the disablement commitments")
+	}
+}
+
+func TestRemoveSignerInvalidatesItsDevices(t *testing.T) {
+	// genesis trusts signers A and B; A authorizes devA, B authorizes devB.
+	l, a, b := newGenesisTwoSigners(t) // helper: returns *Log + two SignerKeys
+	devA := bytes.Repeat([]byte{0xA}, 32)
+	devB := bytes.Repeat([]byte{0xB}, 32)
+	mustNoErr(t, l.AuthorizeDevice(devA, a))
+	mustNoErr(t, l.AuthorizeDevice(devB, b))
+
+	// remove signer A (signed by B) -> devA invalidated, devB stays.
+	mustNoErr(t, l.RemoveSigner(a.Public, b))
+	if l.DeviceAuthorized(devA) {
+		t.Error("device authorized by removed signer A must be invalidated")
+	}
+	if !l.DeviceAuthorized(devB) {
+		t.Error("device authorized by still-trusted signer B must remain")
+	}
+
+	// reload from bytes reproduces the same state (invalidation is in replay).
+	l2, err := Load(l.Entries())
+	mustNoErr(t, err)
+	if l2.DeviceAuthorized(devA) || !l2.DeviceAuthorized(devB) {
+		t.Error("reload must reproduce invalidation state")
+	}
+}
+
+func TestReauthorizeBySurvivingSignerKeepsDevice(t *testing.T) {
+	// Reachable path: authorize by A → revoke → authorize by B → remove A → still authorized.
+	l, a, b := newGenesisTwoSigners(t)
+	dev := bytes.Repeat([]byte{0xC}, 32)
+	mustNoErr(t, l.AuthorizeDevice(dev, a)) // authorized by A
+	mustNoErr(t, l.RevokeDevice(dev, b))    // revoke so B can re-authorize without double-authorize
+	mustNoErr(t, l.AuthorizeDevice(dev, b)) // now authorized by B
+	mustNoErr(t, l.RemoveSigner(a.Public, b))
+	if !l.DeviceAuthorized(dev) {
+		t.Error("device re-authorized by surviving signer B must remain")
+	}
+}
+
+func TestDoubleAuthorizeRejected(t *testing.T) {
+	l, a, b := newGenesisTwoSigners(t)
+	dev := bytes.Repeat([]byte{0xD}, 32)
+	mustNoErr(t, l.AuthorizeDevice(dev, a))
+	if err := l.AuthorizeDevice(dev, b); err == nil {
+		t.Error("a second AuthorizeDevice for an already-authorized device must return a non-nil error")
+	}
+	// Device must still be authorized (guard must not have cleared it).
+	if !l.DeviceAuthorized(dev) {
+		t.Error("device must remain authorized after a rejected re-authorization attempt")
 	}
 }
