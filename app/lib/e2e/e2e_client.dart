@@ -167,9 +167,20 @@ class E2EClient implements GatewayClient {
       }
       try {
         final pull = await _gateway.call('trustlog.pull');
-        final chain = pull is Map ? pull['chain'] : null;
-        if (chain is String && chain.isNotEmpty) {
-          await _trust.ingest(Uint8List.fromList(base64.decode(chain)));
+        if (pull is Map) {
+          // The pull result carries a list of competing branches (chains).
+          // Each element is a base64-encoded chain; ingest all in order so the
+          // genesis-pinned fork-choice resolves the winner.
+          final chains = pull['chains'];
+          if (chains is List) {
+            for (final c in chains) {
+              if (c is String && c.isNotEmpty) {
+                try {
+                  await _trust.ingest(Uint8List.fromList(base64.decode(c)));
+                } catch (_) {/* bad branch: skip, keep best state so far */}
+              }
+            }
+          }
         }
       } catch (_) {/* keep prior/seeded state (fail-closed) */}
     }
@@ -203,9 +214,18 @@ class E2EClient implements GatewayClient {
     final before = trust.chainBytes;
     try {
       final pull = await _gateway.call('trustlog.pull');
-      final chain = pull is Map ? pull['chain'] : null;
-      if (chain is! String || chain.isEmpty) return;
-      await trust.ingest(Uint8List.fromList(base64.decode(chain)));
+      if (pull is Map) {
+        final chains = pull['chains'];
+        if (chains is List) {
+          for (final c in chains) {
+            if (c is String && c.isNotEmpty) {
+              try {
+                await trust.ingest(Uint8List.fromList(base64.decode(c)));
+              } catch (_) {/* bad branch: skip */}
+            }
+          }
+        }
+      }
     } catch (_) {
       return; // keep the current verified view (fail-closed)
     }

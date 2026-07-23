@@ -104,6 +104,62 @@ func TestUnmarshalChainRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+// TestCodecRevokeSignerRoundTrip marshals a KindRevokeSigner entry, unmarshals it, and
+// asserts CoSigns + Signers + Replaces survive byte-identically and hashEntry is stable.
+func TestCodecRevokeSignerRoundTrip(t *testing.T) {
+	a, _ := GenerateSigner()
+	b, _ := GenerateSigner()
+	c, _ := GenerateSigner()
+
+	// newRevokeSignerEntry builds the entry with CoSigns over sigBytes (Signer/Sig nil).
+	// Signers holds the revoked set; CoSigns holds the co-signatures from surviving signers.
+	rke := newRevokeSignerEntry([]byte("prevhash-32-bytes-padding-000000"), [][]byte{c.Public}, nil, []SignerKey{a, b})
+	originalHash := hashEntry(&rke)
+
+	// Marshal the entry, unmarshal, check byte-identity and hash stability.
+	wire := MarshalEntry(rke)
+	got, err := UnmarshalEntry(wire)
+	if err != nil {
+		t.Fatalf("UnmarshalEntry: %v", err)
+	}
+	// Re-marshal must be byte-identical.
+	if !bytes.Equal(MarshalEntry(got), wire) {
+		t.Error("KindRevokeSigner entry did not round-trip byte-identically")
+	}
+	// Hash must be preserved (proves wire == pre-hash bytes used by hashEntry).
+	if !bytes.Equal(hashEntry(&got), originalHash) {
+		t.Error("hashEntry changed across marshal/unmarshal for KindRevokeSigner")
+	}
+	// CoSigns must survive.
+	if len(got.CoSigns) != len(rke.CoSigns) {
+		t.Fatalf("CoSigns len: got %d want %d", len(got.CoSigns), len(rke.CoSigns))
+	}
+	for i := range rke.CoSigns {
+		if !bytes.Equal(got.CoSigns[i].Signer, rke.CoSigns[i].Signer) {
+			t.Errorf("CoSigns[%d].Signer mismatch", i)
+		}
+		if !bytes.Equal(got.CoSigns[i].Sig, rke.CoSigns[i].Sig) {
+			t.Errorf("CoSigns[%d].Sig mismatch", i)
+		}
+	}
+	// Signers (revoked set) must survive.
+	if len(got.Signers) != len(rke.Signers) {
+		t.Fatalf("Signers len: got %d want %d", len(got.Signers), len(rke.Signers))
+	}
+	for i := range rke.Signers {
+		if !bytes.Equal(got.Signers[i], rke.Signers[i]) {
+			t.Errorf("Signers[%d] mismatch", i)
+		}
+	}
+	// validCoSigns must still pass after the round-trip.
+	trusted := map[string]bool{string(a.Public): true, string(b.Public): true}
+	at := func(pub []byte) bool { return trusted[string(pub)] }
+	n, ok := validCoSigns(&got, at, false)
+	if !ok || n != 2 {
+		t.Fatalf("validCoSigns after decode: want n=2 ok=true, got n=%d ok=%v", n, ok)
+	}
+}
+
 // TestChainRoundTripWithDisablement builds a genesis with a disablement commitment,
 // appends a KindDisable entry, marshals→unmarshals→Load, and asserts the reloaded
 // log reports Disabled()=true and reproduces the original head (decode→hash stable).

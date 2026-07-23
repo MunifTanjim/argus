@@ -89,21 +89,25 @@ const (
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
-	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogChain (node/client fetch)
+	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogPullResult (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method for the gateway uplink, E2E responder, and co-located gateway,
 	// so only the CLI (which dials the unix socket) can invoke these.
-	MethodLockInit         = "lock.init"         // request: LockInitParams; result: LockInitResult
-	MethodLockStatus       = "lock.status"       // request: no params; result: LockStatusResult
-	MethodLockSign         = "lock.sign"         // request: LockDeviceParams; result: LockDeviceResult
-	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
-	MethodLockAddSigner    = "lock.addSigner"    // request: LockSignerParams; result: LockDeviceResult
-	MethodLockRemoveSigner = "lock.removeSigner" // request: LockSignerParams; result: LockDeviceResult
-	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
-	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
-	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
-	MethodTasksChanged     = "tasks.changed"     // notification: TasksChanged (server→client)
+	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
+	MethodLockStatus             = "lock.status"             // request: no params; result: LockStatusResult
+	MethodLockSign               = "lock.sign"               // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke             = "lock.revoke"             // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockAddSigner          = "lock.addSigner"          // request: LockSignerParams; result: LockDeviceResult
+	MethodLockRemoveSigner       = "lock.removeSigner"       // request: LockSignerParams; result: LockDeviceResult
+	MethodLockDisable            = "lock.disable"            // request: LockDisableParams; result: LockDisableResult
+	MethodLockLocalDisable       = "lock.localDisable"       // request: no params; result: nil
+	MethodLockRevokeSignerStart  = "lock.revokeSignerStart"  // request: LockRevokeSignerStartParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
+	MethodLockLog                = "lock.log"                // request: no params; result: LockLogResult
+	MethodSessionTasks           = "sessions.tasks"          // request: SessionRef; result: TasksResult
+	MethodTasksChanged           = "tasks.changed"           // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -647,6 +651,23 @@ type TrustLogChain struct {
 	Chain []byte `json:"chain,omitempty"`
 }
 
+// TrustLogPullResult is the response to a trustlog.pull request. Chains holds all
+// competing trust-log branches the blind gateway currently holds, each as opaque
+// marshalled bytes (trustlog.MarshalChain output). Ordered by descending entry
+// count (longest branch first). Empty when nothing has been offered yet; a
+// single-branch network returns a one-element list.
+//
+// Wire shape (for Task 6 / Dart mirror):
+//
+//	{"chains": ["<base64>", ...]}   // array of base64-encoded branch bytes
+//
+// Each element decodes to the raw binary produced by trustlog.MarshalChain (the
+// same format as TrustLogChain.Chain). Clients ingest every element in order;
+// their genesis-pinned SyncStore/fork-choice picks the winning branch.
+type TrustLogPullResult struct {
+	Chains [][]byte `json:"chains"`
+}
+
 // LockDeviceParams identifies a device to authorize/revoke by its Curve25519
 // identity pubkey.
 type LockDeviceParams struct {
@@ -689,6 +710,58 @@ type LockDisableParams struct {
 type LockDisableResult struct {
 	Tip      []byte `json:"tip"`
 	Disabled bool   `json:"disabled"`
+}
+
+// LockRevokeSignerStartParams begins a revoke-signer co-signing ceremony.
+// Revoked is the list of signer pubkeys to revoke (required, non-empty).
+// Replaces is an optional list of replacement signer pubkeys added atomically.
+// ForkFrom overrides the fork-point hash; nil = auto-select (parent of the revoked
+// signer's earliest action, erasing it from the chain).
+type LockRevokeSignerStartParams struct {
+	Revoked  [][]byte `json:"revoked"`
+	Replaces [][]byte `json:"replaces,omitempty"`
+	ForkFrom []byte   `json:"fork_from,omitempty"`
+}
+
+// LockRevokeSignerBlobResult carries the serialized PendingRevoke blob produced
+// by lock.revokeSignerStart and lock.revokeSignerCosign.
+type LockRevokeSignerBlobResult struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerCosignParams carries the PendingRevoke blob to co-sign.
+type LockRevokeSignerCosignParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishParams carries the completed PendingRevoke blob to finalize
+// and ingest into the node's trust store.
+type LockRevokeSignerFinishParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishResult reports the new trust-log tip after the revocation
+// entry has been ingested and the chain has been persisted.
+type LockRevokeSignerFinishResult struct {
+	Tip []byte `json:"tip"`
+}
+
+// LockLogEntry summarises one entry in the trust-log chain, as returned by lock.log.
+type LockLogEntry struct {
+	Index       int      `json:"index"`
+	Kind        string   `json:"kind"`                   // genesis|add-signer|remove-signer|authorize-device|revoke-device|revoke-signer|disable
+	Target      []byte   `json:"target,omitempty"`       // single-key entries: the target pubkey
+	Signers     [][]byte `json:"signers,omitempty"`      // genesis: initial signer set
+	Revoked     [][]byte `json:"revoked,omitempty"`      // revoke-signer: revoked signer pubkeys
+	Replaces    [][]byte `json:"replaces,omitempty"`     // revoke-signer: replacement signer pubkeys
+	CoSignCount int      `json:"cosign_count,omitempty"` // revoke-signer: number of co-signs
+}
+
+// LockLogResult is the reply to lock.log.
+type LockLogResult struct {
+	Entries []LockLogEntry `json:"entries"`
+	Tip     []byte         `json:"tip,omitempty"`
+	Signers [][]byte       `json:"signers,omitempty"` // current trusted signer set (for fingerprint computation)
 }
 
 // LockStatusResult is the audit view of a node's locked state.

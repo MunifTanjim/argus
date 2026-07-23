@@ -32,6 +32,14 @@ func cloneEntry(e Entry) Entry {
 	e.Key = cloneBytes(e.Key)
 	e.Signer = cloneBytes(e.Signer)
 	e.Sig = cloneBytes(e.Sig)
+	if e.CoSigns != nil {
+		cs := make([]CoSign, len(e.CoSigns))
+		for i, c := range e.CoSigns {
+			cs[i] = CoSign{Signer: cloneBytes(c.Signer), Sig: cloneBytes(c.Sig)}
+		}
+		e.CoSigns = cs
+	}
+	e.Replaces = cloneSigners(e.Replaces)
 	return e
 }
 
@@ -82,7 +90,8 @@ func NewGenesis(signers [][]byte, by SignerKey, disablements [][]byte) (*Log, er
 
 // apply verifies an entry against current state and folds it in.
 func (l *Log) apply(e *Entry) error {
-	if !verifySig(e) {
+	// KindRevokeSigner is authenticated by co-signs, not a single Signer+Sig pair.
+	if e.Kind != KindRevokeSigner && !verifySig(e) {
 		return errors.New("trustlog: bad signature")
 	}
 	if e.Kind == KindGenesis {
@@ -112,7 +121,26 @@ func (l *Log) apply(e *Entry) error {
 		if l.disabled {
 			return errors.New("trustlog: log is disabled; no further entries accepted")
 		}
-		if e.Kind == KindDisable {
+		if e.Kind == KindRevokeSigner {
+			// Authorized by co-signs from the signers trusted at the current head.
+			// When Replaces is set, the revoked signers may also co-sign their own
+			// succession (voluntary rotation); otherwise only remaining signers count.
+			if _, ok := validCoSigns(e, func(p []byte) bool { return l.signers[string(p)] }, len(e.Replaces) > 0); !ok {
+				return errors.New("trustlog: revoke-signer lacks enough valid co-signs")
+			}
+			// Add replacement signers before computing the remaining count so that
+			// revoking the last signer is only valid when a replacement is provided.
+			for _, r := range e.Replaces {
+				l.signers[string(r)] = true
+			}
+			if remainingAfterRevoke(l.signers, e.Signers) < 1 {
+				return errors.New("trustlog: revoke-signer would leave zero signers")
+			}
+			for _, r := range e.Signers {
+				delete(l.signers, string(r))
+				l.dropDevicesAuthorizedBy(r)
+			}
+		} else if e.Kind == KindDisable {
 			// Authorized by a disablement secret (Key), NOT a trusted signer — recovery
 			// must work when signers are lost. verifySig above already bound the entry.
 			if !containsBytes(l.disablements, DisablementCommitment(e.Key)) {
@@ -134,13 +162,7 @@ func (l *Log) apply(e *Entry) error {
 					return errors.New("trustlog: cannot remove the last signer")
 				}
 				delete(l.signers, string(e.Key))
-				// retroactive invalidation: drop devices whose authorizing signer is gone.
-				for dev, signer := range l.deviceSigner {
-					if bytes.Equal(signer, e.Key) {
-						delete(l.devices, dev)
-						delete(l.deviceSigner, dev)
-					}
-				}
+				l.dropDevicesAuthorizedBy(e.Key) // retroactive: drop devices whose signer is gone
 			case KindAuthorizeDevice:
 				if l.devices[string(e.Key)] {
 					return errors.New("trustlog: device already authorized")
@@ -158,6 +180,32 @@ func (l *Log) apply(e *Entry) error {
 	l.entries = append(l.entries, *e)
 	l.tip = hashEntry(e)
 	return nil
+}
+
+// remainingAfterRevoke returns how many signers remain in the set after removing
+// the distinct revoked pubkeys (callers add any replacements to signers first).
+func remainingAfterRevoke(signers map[string]bool, revoked [][]byte) int {
+	remaining := len(signers)
+	seen := map[string]bool{}
+	for _, r := range revoked {
+		rs := string(r)
+		if signers[rs] && !seen[rs] {
+			seen[rs] = true
+			remaining--
+		}
+	}
+	return remaining
+}
+
+// dropDevicesAuthorizedBy removes every device whose authorizing signer is pub —
+// retroactive invalidation when that signer is removed or revoked.
+func (l *Log) dropDevicesAuthorizedBy(pub []byte) {
+	for dev, signer := range l.deviceSigner {
+		if bytes.Equal(signer, pub) {
+			delete(l.devices, dev)
+			delete(l.deviceSigner, dev)
+		}
+	}
 }
 
 // appendEntry builds, signs (by `by`), and applies a non-genesis entry.
@@ -221,6 +269,15 @@ func Load(entries []Entry) (*Log, error) {
 		return nil, errors.New("trustlog: empty chain")
 	}
 	return l, nil
+}
+
+// RevokeSigner revokes one or more signers by building and applying a
+// KindRevokeSigner entry co-signed by `by`. replaces optionally lists replacement
+// signer pubkeys added atomically. The co-sign count must exceed the number of
+// revoked signers; post-apply signer count must be ≥1.
+func (l *Log) RevokeSigner(revoked [][]byte, replaces [][]byte, by []SignerKey) error {
+	e := newRevokeSignerEntry(cloneBytes(l.tip), revoked, replaces, by)
+	return l.apply(&e)
 }
 
 // AddSigner records a new trusted signer (signed by an existing trusted signer).

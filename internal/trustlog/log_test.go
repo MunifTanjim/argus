@@ -249,3 +249,128 @@ func TestDoubleAuthorizeRejected(t *testing.T) {
 		t.Error("device must remain authorized after a rejected re-authorization attempt")
 	}
 }
+
+func TestApplyRevokeSignerRemovesSignersAndDevices(t *testing.T) {
+	l, a, b := newGenesisTwoSigners(t)
+	// add a third signer c so a 2-co-sign revoke of one signer is valid (2 > 1 revoked).
+	c := mustGenSigner(t)
+	mustNoErr(t, l.AddSigner(c.Public, a))
+	devC := bytes.Repeat([]byte{0xCC}, 32)
+	mustNoErr(t, l.AuthorizeDevice(devC, c)) // authorized by c
+
+	// revoke c, co-signed by a and b (2 valid co-signs > 1 revoked signer).
+	e := newRevokeSignerEntry(l.Tip(), [][]byte{c.Public}, nil, []SignerKey{a, b})
+	if err := l.apply(&e); err != nil {
+		t.Fatalf("apply revoke-signer: %v", err)
+	}
+	if l.SignerTrusted(c.Public) {
+		t.Fatal("c must be revoked")
+	}
+	if l.DeviceAuthorized(devC) {
+		t.Fatal("device authorized by revoked c must be invalidated")
+	}
+
+	// surviving signers a and b must still be trusted.
+	if !l.SignerTrusted(a.Public) {
+		t.Error("a must still be trusted")
+	}
+	if !l.SignerTrusted(b.Public) {
+		t.Error("b must still be trusted")
+	}
+
+	// reload via Load reproduces the same state.
+	l2, err := Load(l.Entries())
+	mustNoErr(t, err)
+	if l2.SignerTrusted(c.Public) {
+		t.Error("reload: c must be revoked")
+	}
+	if l2.DeviceAuthorized(devC) {
+		t.Error("reload: device authorized by revoked c must be invalidated")
+	}
+}
+
+func TestRevokeSignerCannotRevokeEntireSignerSet(t *testing.T) {
+	l, a, b := newGenesisTwoSigners(t)
+	// Try to revoke both a and b with co-signs from a and b.
+	// Because co-signers in the revoked set don't count, validCoSigns returns 0,
+	// which fails the quorum (0 > 2 is false) — the error is the co-sign check,
+	// not the last-signer guard.
+	e := newRevokeSignerEntry(l.Tip(), [][]byte{a.Public, b.Public}, nil, []SignerKey{a, b})
+	err := l.apply(&e)
+	if err == nil {
+		t.Fatal("revoking the entire signer set must be rejected")
+	}
+	if !strings.Contains(err.Error(), "lacks enough valid co-signs") {
+		t.Fatalf("expected co-sign error, got: %v", err)
+	}
+}
+
+func TestRevokeSignerInsufficientCoSignsRejected(t *testing.T) {
+	l, a, _ := newGenesisTwoSigners(t)
+	c := mustGenSigner(t)
+	mustNoErr(t, l.AddSigner(c.Public, a))
+	// Only one co-sign (a) for revoking c — but 1 is not > 1 revoked signer.
+	e := newRevokeSignerEntry(l.Tip(), [][]byte{c.Public}, nil, []SignerKey{a})
+	if err := l.apply(&e); err == nil {
+		t.Fatal("revoke-signer with insufficient co-signs must be rejected")
+	}
+}
+
+// TestRevokeSignerWithReplacement: genesis {a,b}; revoke a, atomically add c as
+// replacement, co-signed by both a and b (2 > 1). After apply: a untrusted,
+// c trusted, b trusted, a's devices invalidated.
+func TestRevokeSignerWithReplacement(t *testing.T) {
+	l, a, b := newGenesisTwoSigners(t)
+	c := mustGenSigner(t)
+	devA := bytes.Repeat([]byte{0xAA}, 32)
+	mustNoErr(t, l.AuthorizeDevice(devA, a))
+
+	// revoke a, replace with c, co-signed by a and b.
+	// With Replaces set, validCoSignsWithReplaces allows the revoked signer (a) to count.
+	e := newRevokeSignerEntry(l.Tip(), [][]byte{a.Public}, [][]byte{c.Public}, []SignerKey{a, b})
+	if err := l.apply(&e); err != nil {
+		t.Fatalf("apply revoke-signer with replacement: %v", err)
+	}
+
+	if l.SignerTrusted(a.Public) {
+		t.Error("a must be revoked")
+	}
+	if !l.SignerTrusted(b.Public) {
+		t.Error("b must remain trusted")
+	}
+	if !l.SignerTrusted(c.Public) {
+		t.Error("c (replacement) must be trusted")
+	}
+	if l.DeviceAuthorized(devA) {
+		t.Error("device authorized by revoked a must be invalidated")
+	}
+
+	// reload via Load reproduces the same state.
+	l2, err := Load(l.Entries())
+	mustNoErr(t, err)
+	if l2.SignerTrusted(a.Public) {
+		t.Error("reload: a must be revoked")
+	}
+	if !l2.SignerTrusted(c.Public) {
+		t.Error("reload: c must be trusted")
+	}
+	if l2.DeviceAuthorized(devA) {
+		t.Error("reload: a's device must be invalidated")
+	}
+}
+
+// TestRevokeAllSignersWithoutReplacementRejected: revoking all signers without a
+// replacement must fail — the co-sign check fails because all co-signers are
+// in the revoked set and thus don't count.
+func TestRevokeAllSignersWithoutReplacementRejected(t *testing.T) {
+	l, a, b := newGenesisTwoSigners(t)
+	// Both a and b are revoked; neither can be a valid co-signer → 0 > 2 = false.
+	e := newRevokeSignerEntry(l.Tip(), [][]byte{a.Public, b.Public}, nil, []SignerKey{a, b})
+	err := l.apply(&e)
+	if err == nil {
+		t.Fatal("revoking all signers without replacement must be rejected")
+	}
+	if !strings.Contains(err.Error(), "lacks enough valid co-signs") {
+		t.Fatalf("expected co-sign error, got: %v", err)
+	}
+}

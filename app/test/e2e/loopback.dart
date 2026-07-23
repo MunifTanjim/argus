@@ -209,7 +209,9 @@ class MultiNodeLoopbackLink implements RpcLink {
         _push(jsonEncode({
           'jsonrpc': '2.0',
           'id': id,
-          'result': {'chain': tc == null ? '' : base64.encode(tc)},
+          // Wire format: chains is a list of base64-encoded branch bytes.
+          // Empty list when no chain has been offered yet.
+          'result': {'chains': tc == null ? <String>[] : [base64.encode(tc)]},
         }));
     }
   }

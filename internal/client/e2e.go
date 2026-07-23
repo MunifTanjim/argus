@@ -667,15 +667,25 @@ func SetHandshakeTimeoutForTest(d time.Duration) { handshakeTimeoutNs.Store(int6
 // SetTrustSyncIntervalForTest overrides the client's trust-log sync cadence. Test-only.
 func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval.Store(int64(d)) }
 
-// syncTrustLog pulls the gateway's trust-log chain and ingests it (genesis-pinned;
-// a rollback/fork/tamper chain is rejected and the current view is kept).
+// syncTrustLog pulls all competing trust-log branches from the gateway and ingests
+// each in order (genesis-pinned; the fork-choice in the store picks the winner;
+// rolled-back or tampered branches are silently skipped).
 func (m *E2EClient) syncTrustLog() {
-	var got api.TrustLogChain
-	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
+	var got api.TrustLogPullResult
+	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
 		return
 	}
-	changed, err := m.trust.Ingest(got.Chain)
-	if err != nil || !changed {
+	anyChanged := false
+	for _, chain := range got.Chains {
+		changed, err := m.trust.Ingest(chain)
+		if err != nil {
+			continue // rollback/fork/tamper/wrong-genesis: skip this branch
+		}
+		if changed {
+			anyChanged = true
+		}
+	}
+	if !anyChanged {
 		return
 	}
 	if m.trustPath != "" {

@@ -15,14 +15,27 @@ const (
 	maxSigners      = 1 << 12 // signers in a genesis
 	maxDisablements = 1 << 12 // disablement commitments in a genesis
 	maxEntries      = 1 << 16 // entries in a chain
+	maxCoSigns      = 1 << 12 // co-signs in a KindRevokeSigner entry
+	maxReplaces     = 1 << 12 // replacement signers in a KindRevokeSigner entry
 )
 
 // MarshalEntry encodes an entry to its canonical wire form. It is identical to the
 // bytes hashEntry covers, so decode→hash reproduces the original chain hash.
+// For KindRevokeSigner, sigBytes already covers Replaces, and CoSigns are
+// appended after Sig (mirroring hashEntry).
 func MarshalEntry(e Entry) []byte {
 	var buf bytes.Buffer
 	buf.Write(sigBytes(&e))
 	putField(&buf, e.Sig)
+	if e.Kind == KindRevokeSigner {
+		var cnt [4]byte
+		binary.BigEndian.PutUint32(cnt[:], uint32(len(e.CoSigns)))
+		buf.Write(cnt[:])
+		for _, cs := range e.CoSigns {
+			putField(&buf, cs.Signer)
+			putField(&buf, cs.Sig)
+		}
+	}
 	return buf.Bytes()
 }
 
@@ -109,8 +122,39 @@ func readEntry(r *bytes.Reader) (Entry, error) {
 	if e.Signer, err = getField(r); err != nil {
 		return Entry{}, err
 	}
+	if e.Kind == KindRevokeSigner {
+		rcnt, err := getCount(r, maxReplaces)
+		if err != nil {
+			return Entry{}, err
+		}
+		if rcnt > 0 {
+			e.Replaces = make([][]byte, rcnt)
+			for i := range e.Replaces {
+				if e.Replaces[i], err = getField(r); err != nil {
+					return Entry{}, err
+				}
+			}
+		}
+	}
 	if e.Sig, err = getField(r); err != nil {
 		return Entry{}, err
+	}
+	if e.Kind == KindRevokeSigner {
+		cscnt, err := getCount(r, maxCoSigns)
+		if err != nil {
+			return Entry{}, err
+		}
+		if cscnt > 0 {
+			e.CoSigns = make([]CoSign, cscnt)
+			for i := range e.CoSigns {
+				if e.CoSigns[i].Signer, err = getField(r); err != nil {
+					return Entry{}, err
+				}
+				if e.CoSigns[i].Sig, err = getField(r); err != nil {
+					return Entry{}, err
+				}
+			}
+		}
 	}
 	return e, nil
 }

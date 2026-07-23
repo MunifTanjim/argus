@@ -62,7 +62,11 @@ func (f *fakePeer) Call(method string, params, out any) error {
 	case api.MethodTrustLogOffer:
 		f.offered = append(f.offered, params.(api.TrustLogChain).Chain)
 	case api.MethodTrustLogPull:
-		*(out.(*api.TrustLogChain)) = api.TrustLogChain{Chain: f.pullChain}
+		var chains [][]byte
+		if f.pullChain != nil {
+			chains = [][]byte{f.pullChain}
+		}
+		*(out.(*api.TrustLogPullResult)) = api.TrustLogPullResult{Chains: chains}
 	}
 	return nil
 }

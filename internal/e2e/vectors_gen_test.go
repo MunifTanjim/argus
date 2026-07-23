@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/hmac"
 	"encoding/base64"
@@ -279,6 +280,105 @@ func TestGenerateVectors(t *testing.T) {
 	sfSigners := [][]byte{bytesFill(0xC1), bytesFill(0xC2)}
 	sfWords := trustlog.SignerSetFingerprint(sfSigners)
 
+	// ---- fork-choice parity vectors ----
+	// (a) co-signed-shorter-beats-longer-plain:
+	//   cur: genesis(A,B,C) -> C authorizes dev1 -> C authorizes dev2 (longer, plain)
+	//   cand: genesis(A,B,C) -> revoke-signer(C) co-signed by A,B (shorter, co-signed)
+	//   expected winner: cand (revoke branch); C not trusted; dev1,dev2 not authorized.
+	fcA := mustGenSignerSeed(t, 0xFA)
+	fcB := mustGenSignerSeed(t, 0xFB)
+	fcC := mustGenSignerSeed(t, 0xFC)
+	fcPubs := [][]byte{fcA.Public, fcB.Public, fcC.Public}
+	fcCur, err := trustlog.NewGenesis(fcPubs, fcA, nil)
+	must(t, err)
+	fcCand, err := trustlog.NewGenesis(fcPubs, fcA, nil)
+	must(t, err)
+	fcGenesisHash := fcCur.Tip()
+	fcDev1 := bytesFill2(0xD1, 32)
+	fcDev2 := bytesFill2(0xD2, 32)
+	must(t, fcCur.AuthorizeDevice(fcDev1, fcC))
+	must(t, fcCur.AuthorizeDevice(fcDev2, fcC))
+	must(t, fcCand.RevokeSigner([][]byte{fcC.Public}, nil, []trustlog.SignerKey{fcA, fcB}))
+	fcCurChain := trustlog.MarshalChain(fcCur.Entries())
+	fcCandChain := trustlog.MarshalChain(fcCand.Entries())
+	fcWinnerTip := fcCand.Tip()
+
+	// (b) puppet-attack vector:
+	//   honest: genesis(A,B,C) -> revoke-signer(C) co-signed by A,B
+	//   attacker: genesis(A,B,C) -> addSigner(P1) -> addSigner(P2) -> addSigner(P3) ->
+	//             revoke-signer(A,B) co-signed by C,P1,P2,P3
+	//   expected winner: honest; A,B trusted; C,P1,P2,P3 not trusted.
+	ppA := mustGenSignerSeed(t, 0xA5)
+	ppB := mustGenSignerSeed(t, 0xA6)
+	ppC := mustGenSignerSeed(t, 0xA7)
+	ppP1 := mustGenSignerSeed(t, 0xA8)
+	ppP2 := mustGenSignerSeed(t, 0xA9)
+	ppP3 := mustGenSignerSeed(t, 0xAA)
+	ppPubs := [][]byte{ppA.Public, ppB.Public, ppC.Public}
+	ppHonest, err := trustlog.NewGenesis(ppPubs, ppA, nil)
+	must(t, err)
+	ppAttacker, err := trustlog.NewGenesis(ppPubs, ppA, nil)
+	must(t, err)
+	ppGenesisHash := ppHonest.Tip()
+	must(t, ppHonest.RevokeSigner([][]byte{ppC.Public}, nil, []trustlog.SignerKey{ppA, ppB}))
+	must(t, ppAttacker.AddSigner(ppP1.Public, ppC))
+	must(t, ppAttacker.AddSigner(ppP2.Public, ppC))
+	must(t, ppAttacker.AddSigner(ppP3.Public, ppC))
+	must(t, ppAttacker.RevokeSigner([][]byte{ppA.Public, ppB.Public}, nil, []trustlog.SignerKey{ppC, ppP1, ppP2, ppP3}))
+	ppHonestChain := trustlog.MarshalChain(ppHonest.Entries())
+	ppAttackerChain := trustlog.MarshalChain(ppAttacker.Entries())
+	ppWinnerTip := ppHonest.Tip()
+
+	// (c) tie-break: two co-signed revoke branches with equal weight; winner = lowest tip hash.
+	// In 2-entry chains (genesis + revokeSigner), the tip IS hashEntry(entries[1]), the first
+	// diverging entry — so the winner has the lower tip.
+	tbA := mustGenSignerSeed(t, 0xB5)
+	tbB := mustGenSignerSeed(t, 0xB6)
+	tbC := mustGenSignerSeed(t, 0xB7)
+	tbD := mustGenSignerSeed(t, 0xB8)
+	tbPubs := [][]byte{tbA.Public, tbB.Public, tbC.Public, tbD.Public}
+	tbX, err := trustlog.NewGenesis(tbPubs, tbA, nil)
+	must(t, err)
+	tbY, err := trustlog.NewGenesis(tbPubs, tbA, nil)
+	must(t, err)
+	tbGenesisHash := tbX.Tip()
+	must(t, tbX.RevokeSigner([][]byte{tbC.Public}, nil, []trustlog.SignerKey{tbA, tbB}))
+	must(t, tbY.RevokeSigner([][]byte{tbD.Public}, nil, []trustlog.SignerKey{tbA, tbB}))
+	tbXChain := trustlog.MarshalChain(tbX.Entries())
+	tbYChain := trustlog.MarshalChain(tbY.Entries())
+	// winner = branch with lower first-diverging-entry hash (= tip for 2-entry chains)
+	tbXEntries, _ := trustlog.UnmarshalChain(tbXChain)
+	tbYEntries, _ := trustlog.UnmarshalChain(tbYChain)
+	tbXDivHash := trustlog.HashEntry(&tbXEntries[1])
+	tbYDivHash := trustlog.HashEntry(&tbYEntries[1])
+	tbWinnerTip := tbX.Tip()
+	if bytes.Compare(tbYDivHash, tbXDivHash) < 0 {
+		tbWinnerTip = tbY.Tip()
+	}
+
+	// (d) revoke-signer-with-replacement parity vector:
+	//   c_branch: genesis(A,B,C) -> C authorizes devC (longer, plain)
+	//   honest:   genesis(A,B,C) -> revoke-signer(C, replaces=D) co-signed by A,B (shorter, co-signed+replacement)
+	//   expected winner: honest; A,B,D trusted; C not trusted; devC not authorized.
+	rwrA := mustGenSignerSeed(t, 0xE4)
+	rwrB := mustGenSignerSeed(t, 0xE5)
+	rwrC := mustGenSignerSeed(t, 0xE6)
+	rwrD := mustGenSignerSeed(t, 0xE7)
+	rwrDevC := bytesFill(0xEC)
+	rwrPubs := [][]byte{rwrA.Public, rwrB.Public, rwrC.Public}
+	rwrHonest, err := trustlog.NewGenesis(rwrPubs, rwrA, nil)
+	must(t, err)
+	rwrCBranch, err := trustlog.NewGenesis(rwrPubs, rwrA, nil)
+	must(t, err)
+	rwrGenesisHash := rwrHonest.Tip()
+	// c's branch: C authorizes devC (longer, plain — will lose)
+	must(t, rwrCBranch.AuthorizeDevice(rwrDevC, rwrC))
+	// honest: revoke C, add D as replacement, co-signed by A,B (fork from genesis — will win)
+	must(t, rwrHonest.RevokeSigner([][]byte{rwrC.Public}, [][]byte{rwrD.Public}, []trustlog.SignerKey{rwrA, rwrB}))
+	rwrHonestChain := trustlog.MarshalChain(rwrHonest.Entries())
+	rwrCBranchChain := trustlog.MarshalChain(rwrCBranch.Entries())
+	rwrWinnerTip := rwrHonest.Tip()
+
 	out := map[string]any{
 		"protocol_name":  "Noise_IK_25519_ChaChaPoly_BLAKE2s",
 		"h0":             b64(h0),
@@ -330,6 +430,53 @@ func TestGenerateVectors(t *testing.T) {
 			"dev_a": b64(srDevA),
 			"dev_b": b64(srDevB),
 		},
+		"fork_choice": map[string]any{
+			// (a) co-signed shorter branch beats longer plain branch.
+			"cosigned_shorter_beats_longer": map[string]any{
+				"genesis_hash":   b64(fcGenesisHash),
+				"cur":            b64(fcCurChain),  // longer: C authorized dev1+dev2
+				"cand":           b64(fcCandChain), // shorter: A,B co-sign revoke-signer(C)
+				"winner_tip":     b64(fcWinnerTip), // cand must win
+				"winner_signers": []string{b64(fcA.Public), b64(fcB.Public)},
+				"winner_devices": []string{}, // dev1,dev2 must not be authorized
+				// devices authorized by C are invalidated when C is revoked
+				"loser_signer_not_trusted": b64(fcC.Public),
+				"loser_dev_a":              b64(fcDev1),
+				"loser_dev_b":              b64(fcDev2),
+			},
+			// (b) puppet-attack: attacker adds post-fork signers + high co-sign count, still loses.
+			"puppet_attack": map[string]any{
+				"genesis_hash":    b64(ppGenesisHash),
+				"honest_chain":    b64(ppHonestChain),   // A,B co-sign revoke-signer(C)
+				"attacker_chain":  b64(ppAttackerChain), // C adds P1,P2,P3 then {C,P1,P2,P3} co-sign revoke-signer(A,B)
+				"winner_tip":      b64(ppWinnerTip),     // honest must win
+				"winner_signer_a": b64(ppA.Public),      // A must stay trusted
+				"winner_signer_b": b64(ppB.Public),      // B must stay trusted
+				"loser_signer_c":  b64(ppC.Public),      // C must be revoked
+				"puppet_p1":       b64(ppP1.Public),     // P1 must never be trusted
+				"puppet_p2":       b64(ppP2.Public),
+				"puppet_p3":       b64(ppP3.Public),
+			},
+			// (c) tie-break: two co-signed revokes with equal weight; winner = lowest tip hash.
+			"tiebreak": map[string]any{
+				"genesis_hash": b64(tbGenesisHash),
+				"chain_x":      b64(tbXChain),
+				"chain_y":      b64(tbYChain),
+				"winner_tip":   b64(tbWinnerTip), // branch with lower first-diverging-entry hash
+			},
+			// (d) revoke-signer with replacement: co-signed+replacement beats plain longer branch.
+			"revoke_with_replacement": map[string]any{
+				"genesis_hash":    b64(rwrGenesisHash),
+				"honest_chain":    b64(rwrHonestChain),  // A,B co-sign revoke C + add D; fork from genesis
+				"c_branch":        b64(rwrCBranchChain), // C authorized devC (longer, plain)
+				"winner_tip":      b64(rwrWinnerTip),    // honest must win
+				"winner_signer_a": b64(rwrA.Public),     // A must stay trusted
+				"winner_signer_b": b64(rwrB.Public),     // B must stay trusted
+				"winner_signer_d": b64(rwrD.Public),     // D (replacement) must be trusted
+				"loser_signer_c":  b64(rwrC.Public),     // C must not be trusted
+				"loser_dev_c":     b64(rwrDevC),         // devC authorized by C must not be authorized
+			},
+		},
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	must(t, err)
@@ -372,6 +519,182 @@ func TestSignerRemovalGoldenVector(t *testing.T) {
 	}
 }
 
+// TestForkChoiceGoldenVectors loads the shared fork_choice section from vectors.json
+// and asserts Go resolves each scenario identically, pinning Go↔Dart parity.
+func TestForkChoiceGoldenVectors(t *testing.T) {
+	raw, err := os.ReadFile("../../app/test/e2e/testdata/vectors.json")
+	if err != nil {
+		t.Fatalf("read vectors.json: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatalf("unmarshal vectors.json: %v", err)
+	}
+	var fc map[string]json.RawMessage
+	if err := json.Unmarshal(top["fork_choice"], &fc); err != nil {
+		t.Fatalf("unmarshal fork_choice: %v", err)
+	}
+
+	// (a) co-signed shorter branch beats longer plain branch
+	t.Run("cosigned_shorter_beats_longer", func(t *testing.T) {
+		var v struct {
+			GenesisHash           string `json:"genesis_hash"`
+			Cur                   string `json:"cur"`
+			Cand                  string `json:"cand"`
+			WinnerTip             string `json:"winner_tip"`
+			LoserSignerNotTrusted string `json:"loser_signer_not_trusted"`
+			LoserDevA             string `json:"loser_dev_a"`
+			LoserDevB             string `json:"loser_dev_b"`
+		}
+		must(t, json.Unmarshal(fc["cosigned_shorter_beats_longer"], &v))
+		gh := decodeB64(t, v.GenesisHash)
+		cur := decodeB64(t, v.Cur)
+		cand := decodeB64(t, v.Cand)
+		wantTip := decodeB64(t, v.WinnerTip)
+		loserSigner := decodeB64(t, v.LoserSignerNotTrusted)
+		devA := decodeB64(t, v.LoserDevA)
+		devB := decodeB64(t, v.LoserDevB)
+
+		s := trustlog.NewStore(gh)
+		// ingest longer plain branch first
+		if err := s.Ingest(cur); err != nil {
+			t.Fatalf("ingest cur: %v", err)
+		}
+		// then ingest the shorter co-signed branch — must be adopted
+		if err := s.Ingest(cand); err != nil {
+			t.Fatalf("shorter co-signed branch must be adopted: %v", err)
+		}
+		if !bytes.Equal(s.Tip(), wantTip) {
+			t.Error("winner tip mismatch")
+		}
+		if s.SignerTrusted(loserSigner) {
+			t.Error("revoked signer must not be trusted after winning branch adopted")
+		}
+		if s.DeviceAuthorized(devA) || s.DeviceAuthorized(devB) {
+			t.Error("devices authorized by revoked signer must not be authorized")
+		}
+	})
+
+	// (b) puppet-attack: attacker's higher co-sign count still loses
+	t.Run("puppet_attack", func(t *testing.T) {
+		var v map[string]string
+		must(t, json.Unmarshal(fc["puppet_attack"], &v))
+		gh := decodeB64(t, v["genesis_hash"])
+		honest := decodeB64(t, v["honest_chain"])
+		attacker := decodeB64(t, v["attacker_chain"])
+		wantTip := decodeB64(t, v["winner_tip"])
+		sigA := decodeB64(t, v["winner_signer_a"])
+		sigB := decodeB64(t, v["winner_signer_b"])
+		sigC := decodeB64(t, v["loser_signer_c"])
+		p1 := decodeB64(t, v["puppet_p1"])
+		p2 := decodeB64(t, v["puppet_p2"])
+		p3 := decodeB64(t, v["puppet_p3"])
+
+		for _, order := range [][2][]byte{{honest, attacker}, {attacker, honest}} {
+			s := trustlog.NewStore(gh)
+			if err := s.Ingest(order[0]); err != nil {
+				t.Fatalf("ingest first: %v", err)
+			}
+			if err := s.Ingest(order[1]); err != nil {
+				t.Fatalf("ingest second: %v", err)
+			}
+			if !bytes.Equal(s.Tip(), wantTip) {
+				t.Error("puppet attack: winner tip mismatch")
+			}
+			if !s.SignerTrusted(sigA) || !s.SignerTrusted(sigB) {
+				t.Error("honest signers a,b must stay trusted")
+			}
+			if s.SignerTrusted(sigC) || s.SignerTrusted(p1) || s.SignerTrusted(p2) || s.SignerTrusted(p3) {
+				t.Error("compromised signer c and puppets must not be trusted")
+			}
+		}
+	})
+
+	// (c) tie-break: winner = branch with lower first-diverging-entry hash
+	t.Run("tiebreak", func(t *testing.T) {
+		var v map[string]string
+		must(t, json.Unmarshal(fc["tiebreak"], &v))
+		gh := decodeB64(t, v["genesis_hash"])
+		x := decodeB64(t, v["chain_x"])
+		y := decodeB64(t, v["chain_y"])
+		wantTip := decodeB64(t, v["winner_tip"])
+
+		for _, order := range [][2][]byte{{x, y}, {y, x}} {
+			s := trustlog.NewStore(gh)
+			must(t, s.Ingest(order[0]))
+			must(t, s.Ingest(order[1]))
+			if !bytes.Equal(s.Tip(), wantTip) {
+				t.Error("tie-break winner must be the same regardless of ingest order")
+			}
+		}
+	})
+}
+
+// TestRevokeWithReplacementGoldenVector loads the shared fork_choice.revoke_with_replacement
+// section from vectors.json and asserts Go resolves it identically to Dart, pinning Go↔Dart
+// parity for KindRevokeSigner with a Replaces field.
+func TestRevokeWithReplacementGoldenVector(t *testing.T) {
+	raw, err := os.ReadFile("../../app/test/e2e/testdata/vectors.json")
+	if err != nil {
+		t.Fatalf("read vectors.json: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatalf("unmarshal vectors.json: %v", err)
+	}
+	var fc map[string]json.RawMessage
+	if err := json.Unmarshal(top["fork_choice"], &fc); err != nil {
+		t.Fatalf("unmarshal fork_choice: %v", err)
+	}
+	var v map[string]string
+	if err := json.Unmarshal(fc["revoke_with_replacement"], &v); err != nil {
+		t.Fatalf("unmarshal revoke_with_replacement: %v", err)
+	}
+	gh := decodeB64(t, v["genesis_hash"])
+	honest := decodeB64(t, v["honest_chain"])
+	cBranch := decodeB64(t, v["c_branch"])
+	wantTip := decodeB64(t, v["winner_tip"])
+	sigA := decodeB64(t, v["winner_signer_a"])
+	sigB := decodeB64(t, v["winner_signer_b"])
+	sigD := decodeB64(t, v["winner_signer_d"]) // replacement signer
+	sigC := decodeB64(t, v["loser_signer_c"])
+	devC := decodeB64(t, v["loser_dev_c"])
+
+	for _, order := range [][2][]byte{{honest, cBranch}, {cBranch, honest}} {
+		s := trustlog.NewStore(gh)
+		if err := s.Ingest(order[0]); err != nil {
+			t.Fatalf("ingest first: %v", err)
+		}
+		if err := s.Ingest(order[1]); err != nil {
+			t.Fatalf("ingest second: %v", err)
+		}
+		if !bytes.Equal(s.Tip(), wantTip) {
+			t.Error("revoke_with_replacement: winner tip mismatch")
+		}
+		if !s.SignerTrusted(sigA) || !s.SignerTrusted(sigB) {
+			t.Error("honest signers a,b must stay trusted")
+		}
+		if !s.SignerTrusted(sigD) {
+			t.Error("replacement signer d must be trusted after revoke-with-replacement")
+		}
+		if s.SignerTrusted(sigC) {
+			t.Error("revoked signer c must not be trusted")
+		}
+		if s.DeviceAuthorized(devC) {
+			t.Error("devC authorized by revoked c must not be authorized")
+		}
+	}
+}
+
+func decodeB64(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatalf("base64 decode: %v", err)
+	}
+	return b
+}
+
 func buildFrame(m map[string]any) []byte {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -385,6 +708,15 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// mustGenSignerSeed generates a deterministic Ed25519 SignerKey from a 32-byte seed
+// (byte fill of v), used for reproducible fork-choice vector generation.
+func mustGenSignerSeed(t *testing.T, v byte) trustlog.SignerKey {
+	t.Helper()
+	seed := bytesFill(v)
+	priv := ed25519.NewKeyFromSeed(seed)
+	return trustlog.SignerKey{Public: priv.Public().(ed25519.PublicKey), Private: priv}
 }
 func bytesFill(v byte) []byte {
 	b := make([]byte, 32)

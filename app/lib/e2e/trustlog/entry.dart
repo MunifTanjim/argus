@@ -2,7 +2,8 @@ import 'dart:typed_data';
 
 /// Trust-log entry kinds (values match Go trustlog.Kind).
 enum Kind {
-  genesis(1), addSigner(2), removeSigner(3), authorizeDevice(4), revokeDevice(5), disable(6);
+  genesis(1), addSigner(2), removeSigner(3), authorizeDevice(4), revokeDevice(5), disable(6),
+  revokeSigner(7);
   const Kind(this.value);
   final int value;
   static Kind? fromValue(int v) {
@@ -13,8 +14,17 @@ enum Kind {
   }
 }
 
+/// One signer's co-signature over a co-signed entry's sigBytes (KindRevokeSigner only).
+class CoSign {
+  const CoSign({required this.signer, required this.sig});
+  final Uint8List signer;
+  final Uint8List sig;
+}
+
 /// One link in the trust log. Genesis carries the initial signer set + disablement
 /// commitments; every other entry has prev = the previous entry's hash.
+/// For KindRevokeSigner, signers = revoked pubkeys, replaces = replacement pubkeys,
+/// and coSigns = co-signatures from trusted signers.
 class Entry {
   Entry({
     required this.kind,
@@ -24,6 +34,8 @@ class Entry {
     this.key,
     this.signer,
     this.sig,
+    this.coSigns = const [],
+    this.replaces = const [],
   });
 
   final Kind kind;
@@ -33,6 +45,10 @@ class Entry {
   final Uint8List? key;
   final Uint8List? signer;
   final Uint8List? sig;
+  /// KindRevokeSigner only: co-signatures from trusted signers.
+  final List<CoSign> coSigns;
+  /// KindRevokeSigner only: replacement signer pubkeys added atomically.
+  final List<Uint8List> replaces;
 }
 
 /// Appends a 4-byte big-endian length prefix then the bytes (len 0 for null/empty).
@@ -50,7 +66,9 @@ void _putCount(BytesBuilder b, int n) {
   b.add(h);
 }
 
-/// The deterministic encoding an entry's signature covers: every field except sig.
+/// The deterministic encoding an entry's signature covers: every field except sig
+/// and coSigns. For KindRevokeSigner the replaces count+fields are appended so
+/// co-signs attest the full replacement set.
 Uint8List sigBytes(Entry e) {
   final b = BytesBuilder();
   b.addByte(e.kind.value);
@@ -65,5 +83,11 @@ Uint8List sigBytes(Entry e) {
   }
   putField(b, e.key);
   putField(b, e.signer);
+  if (e.kind == Kind.revokeSigner) {
+    _putCount(b, e.replaces.length);
+    for (final r in e.replaces) {
+      putField(b, r);
+    }
+  }
   return b.toBytes();
 }

@@ -148,7 +148,7 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				if g.chain == nil {
 					return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 				}
-				return api.TrustLogChain{Chain: g.chain}, nil
+				return api.TrustLogPullResult{Chains: [][]byte{g.chain}}, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},
@@ -390,10 +390,14 @@ func TestClientTrustStorePersists(t *testing.T) {
 		t.Fatal("client should load the persisted chain and authorize the device")
 	}
 
-	// Rollback resistance: ingesting a shorter (genesis-only) chain is rejected.
+	// Rollback resistance: ingesting a shorter (genesis-only) strict-prefix chain
+	// is a no-op that keeps the current chain (changed=false), never a rollback.
 	genesisOnly := trustlog.MarshalChain(log.Entries()[:1])
-	if changed, ierr := c1.trust.Ingest(genesisOnly); ierr == nil || changed {
-		t.Fatalf("shorter chain must be rejected: changed=%v err=%v", changed, ierr)
+	if changed, ierr := c1.trust.Ingest(genesisOnly); ierr != nil || changed {
+		t.Fatalf("shorter chain must be a no-op: changed=%v err=%v", changed, ierr)
+	}
+	if !c1.trust.DeviceAuthorized(dev) {
+		t.Fatal("state must remain on the longer chain after a rollback attempt")
 	}
 }
 

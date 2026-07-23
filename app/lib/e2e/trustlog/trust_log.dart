@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography_plus/cryptography_plus.dart';
 
-import 'codec.dart';
+import 'codec.dart' show hashEntry, validCoSigns;
 import 'disablement.dart';
 import 'entry.dart';
 
@@ -46,10 +46,28 @@ class TrustLog {
   int _count = 0;
 
   bool deviceAuthorized(List<int> pub) => _devices.contains(_hex(pub));
+  bool signerTrusted(List<int> pub) => _signers.contains(_hex(pub));
   bool get disabled => _disabled;
   Uint8List get tip => _tip;
-  List<Uint8List> get signers =>
-      _signers.map((h) => Uint8List.fromList([for (var i = 0; i < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16)])).toList();
+
+  static Uint8List _hexToBytes(String h) =>
+      Uint8List.fromList([for (var i = 0; i < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16)]);
+
+  // _sortedBytes decodes a hex set to bytes in lexicographic order.
+  static List<Uint8List> _sortedBytes(Set<String> hexSet) =>
+      hexSet.map(_hexToBytes).toList()
+        ..sort((a, b) {
+          for (var i = 0; i < a.length && i < b.length; i++) {
+            if (a[i] != b[i]) return a[i] - b[i];
+          }
+          return a.length - b.length;
+        });
+
+  List<Uint8List> get signers => _sortedBytes(_signers);
+  List<Uint8List> get devices => _sortedBytes(_devices);
+
+  /// Returns the signer set as hex strings (for efficient lookup in fork-choice).
+  Set<String> get signerHexSet => Set.unmodifiable(_signers);
 
   static Future<TrustLog> load(List<Entry> entries) async {
     final l = TrustLog();
@@ -61,7 +79,10 @@ class TrustLog {
   }
 
   Future<void> _apply(Entry e, int i) async {
-    if (!await _verifySig(e)) throw FormatException('trustlog: entry $i: bad signature');
+    // KindRevokeSigner is authorized by co-signs, not a single Signer+Sig — skip verifySig.
+    if (e.kind != Kind.revokeSigner && !await _verifySig(e)) {
+      throw FormatException('trustlog: entry $i: bad signature');
+    }
     if (e.kind == Kind.genesis) {
       if (_count != 0) throw const FormatException('trustlog: genesis must be first');
       if (e.signers.isEmpty) throw const FormatException('trustlog: genesis needs a signer');
@@ -81,7 +102,41 @@ class TrustLog {
         throw const FormatException('trustlog: entry does not extend tip');
       }
       if (_disabled) throw const FormatException('trustlog: disabled; no further entries');
-      if (e.kind == Kind.disable) {
+      if (e.kind == Kind.revokeSigner) {
+        // Authorized by co-signs from signers trusted at the current head.
+        // With replacements, the revoked signers may also co-sign (voluntary rotation).
+        final (_, ok) = await validCoSigns(e, (pub) => _signers.contains(_hex(pub)),
+            allowRevoked: e.replaces.isNotEmpty);
+        if (!ok) throw const FormatException('trustlog: revoke-signer lacks enough valid co-signs');
+        // Add replacement signers before computing the remaining count.
+        for (final r in e.replaces) {
+          _signers.add(_hex(r));
+        }
+        // Count remaining signers after revocation.
+        var remaining = _signers.length;
+        final seenRevoked = <String>{};
+        for (final r in e.signers) {
+          final rs = _hex(r);
+          if (_signers.contains(rs) && !seenRevoked.contains(rs)) {
+            seenRevoked.add(rs);
+            remaining--;
+          }
+        }
+        if (remaining < 1) throw const FormatException('trustlog: revoke-signer would leave zero signers');
+        // Remove revoked signers and invalidate their devices.
+        for (final r in e.signers) {
+          final rs = _hex(r);
+          _signers.remove(rs);
+          final toDrop = _deviceSigner.entries
+              .where((en) => en.value == rs)
+              .map((en) => en.key)
+              .toList();
+          for (final dev in toDrop) {
+            _devices.remove(dev);
+            _deviceSigner.remove(dev);
+          }
+        }
+      } else if (e.kind == Kind.disable) {
         final commit = await disablementCommitment(e.key ?? Uint8List(0));
         if (!_contains(_disablements, commit)) {
           throw const FormatException('trustlog: disable secret does not match a commitment');

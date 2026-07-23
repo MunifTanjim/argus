@@ -20,7 +20,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockRevokeSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
 	return cmd
 }
 
@@ -122,6 +122,9 @@ func newLockInitCmd() *cobra.Command {
 				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer (--signer <node>) or\ngenerate a disablement secret (--gen-disablements).\n")
 			} else if res.SignerCount < 2 {
 				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer <node>.\n")
+			}
+			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
+				shell.StdErrF("%s", w)
 			}
 			shell.StdOutF("\nTo pin your other nodes and clients, set in their config:\n  lock.genesis: %s\n", tip)
 			return nil
@@ -232,6 +235,113 @@ func lockStatusOnNode(ctx context.Context, cfg *config.Config) (api.LockStatusRe
 	return st, nil
 }
 
+// lockInitFewSignersWarning returns the warning text to print when the trust log has fewer
+// than 3 signers, because the revoke-signer co-signing ceremony requires ≥3 to out-vote
+// one compromised key. Returns "" for ≥3 signers.
+func lockInitFewSignersWarning(signerCount int) string {
+	if signerCount < 3 {
+		return "\nNote: fewer than 3 signers — 'lock revoke-signer' needs ≥3 signers to out-vote\none compromised key; with fewer, recovery is 'lock disable' + reinit.\n"
+	}
+	return ""
+}
+
+// signerCountAfterRevoke returns how many signers from current would remain after
+// removing the revoked set. Used to pre-check for a sole-root guard in revoke-signer.
+func signerCountAfterRevoke(current, revoked [][]byte) int {
+	revokedSet := make(map[string]bool, len(revoked))
+	for _, r := range revoked {
+		revokedSet[string(r)] = true
+	}
+	remaining := 0
+	for _, c := range current {
+		if !revokedSet[string(c)] {
+			remaining++
+		}
+	}
+	return remaining
+}
+
+// lockLogOnNode dials the LOCAL socket and calls lock.log.
+func lockLogOnNode(ctx context.Context, cfg *config.Config) (api.LockLogResult, error) {
+	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
+	if err != nil {
+		return api.LockLogResult{}, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return api.LockLogResult{}, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var res api.LockLogResult
+	if err := c.Call(api.MethodLockLog, nil, &res); err != nil {
+		return api.LockLogResult{}, err
+	}
+	return res, nil
+}
+
+// printLockLogEntry prints one trust-log entry to stdout.
+func printLockLogEntry(e api.LockLogEntry) {
+	switch e.Kind {
+	case "genesis":
+		shell.StdOutF("[%d] genesis: %d signer(s)\n", e.Index, len(e.Signers))
+		for _, s := range e.Signers {
+			shell.StdOutF("  signer: %s\n", base64.StdEncoding.EncodeToString(s))
+		}
+	case "add-signer":
+		shell.StdOutF("[%d] add-signer: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+	case "remove-signer":
+		shell.StdOutF("[%d] remove-signer: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+	case "authorize-device":
+		shell.StdOutF("[%d] authorize-device: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+	case "revoke-device":
+		shell.StdOutF("[%d] revoke-device: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+	case "revoke-signer":
+		shell.StdOutF("[%d] revoke-signer: %d revoked, %d co-sign(s)\n", e.Index, len(e.Revoked), e.CoSignCount)
+		for _, r := range e.Revoked {
+			shell.StdOutF("  revoked: %s\n", base64.StdEncoding.EncodeToString(r))
+		}
+		for _, r := range e.Replaces {
+			shell.StdOutF("  replaces: %s\n", base64.StdEncoding.EncodeToString(r))
+		}
+	case "disable":
+		shell.StdOutF("[%d] disable\n", e.Index)
+	default:
+		shell.StdOutF("[%d] %s\n", e.Index, e.Kind)
+	}
+}
+
+func newLockLogCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "log",
+		Short:         "Show trust-log history (read-only)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			res, err := lockLogOnNode(ctx, cfg)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			for _, e := range res.Entries {
+				printLockLogEntry(e)
+			}
+			if len(res.Signers) > 0 {
+				fp := strings.Join(trustlog.SignerSetFingerprint(res.Signers), " ")
+				shell.StdOutF("\ntip fingerprint: %s\n", fp)
+			}
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
 // resolveDevice maps a device argument to a 32-byte identity pubkey: a roster node's
 // label or id resolves to its IdentityPubKey; otherwise the arg is parsed as a raw
 // base64 pubkey (which must be 32 bytes).
@@ -282,22 +392,12 @@ func newLockSignerCmd(use, short, method string) *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			// Resolve the signer pubkey: node label/id via roster, or raw base64.
-			var pub []byte
 			roster, _ := fetchRoster(ctx, cfg) // best-effort
-			pubs, rerr := resolveSigners(roster, []string{args[0]})
-			if rerr != nil || len(pubs) != 1 {
-				// Fallback: try raw base64 32-byte signer pubkey.
-				raw, berr := base64.StdEncoding.DecodeString(args[0])
-				if berr != nil || len(raw) != 32 {
-					if rerr != nil {
-						return fail(cmd, fmt.Errorf("resolve signer %q: %w", args[0], rerr))
-					}
-					return fail(cmd, fmt.Errorf("resolve signer %q: not a known node and not a valid 32-byte base64 pubkey", args[0]))
-				}
-				pub = raw
-			} else {
-				pub = pubs[0]
+			pubs, err := resolveSignerArgs(roster, []string{args[0]})
+			if err != nil {
+				return fail(cmd, err)
 			}
+			pub := pubs[0]
 			res, err := lockSignerOnNode(ctx, cfg, method, pub)
 			if err != nil {
 				return fail(cmd, err)
@@ -388,6 +488,211 @@ func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, de
 		return api.LockDeviceResult{}, err
 	}
 	return res, nil
+}
+
+// resolveSignerArgs resolves a list of signer arguments to 32-byte Ed25519 pubkeys.
+// Each arg is first tried against the roster (by node label or id); if that fails,
+// it is parsed as a raw base64 32-byte pubkey (mirroring the Phase-2 pattern).
+func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, error) {
+	out := make([][]byte, 0, len(args))
+	for _, arg := range args {
+		pubs, rerr := resolveSigners(roster, []string{arg})
+		if rerr == nil && len(pubs) == 1 {
+			out = append(out, pubs[0])
+			continue
+		}
+		raw, berr := base64.StdEncoding.DecodeString(arg)
+		if berr != nil || len(raw) != 32 {
+			if rerr != nil {
+				return nil, fmt.Errorf("resolve signer %q: %w", arg, rerr)
+			}
+			return nil, fmt.Errorf("resolve signer %q: not a known node and not a valid 32-byte base64 pubkey", arg)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
+}
+
+// revokeSignerStartOnNode dials the LOCAL socket and calls lock.revokeSignerStart.
+func revokeSignerStartOnNode(ctx context.Context, cfg *config.Config, p api.LockRevokeSignerStartParams) (api.LockRevokeSignerBlobResult, error) {
+	dial, err := gatewayDialer("", "", cfg.Socket)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var res api.LockRevokeSignerBlobResult
+	if err := c.Call(api.MethodLockRevokeSignerStart, p, &res); err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	return res, nil
+}
+
+// revokeSignerCosignOnNode dials the LOCAL socket and calls lock.revokeSignerCosign.
+func revokeSignerCosignOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerBlobResult, error) {
+	dial, err := gatewayDialer("", "", cfg.Socket)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var res api.LockRevokeSignerBlobResult
+	if err := c.Call(api.MethodLockRevokeSignerCosign, api.LockRevokeSignerCosignParams{Blob: blob}, &res); err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	return res, nil
+}
+
+// revokeSignerFinishOnNode dials the LOCAL socket and calls lock.revokeSignerFinish.
+func revokeSignerFinishOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerFinishResult, error) {
+	dial, err := gatewayDialer("", "", cfg.Socket)
+	if err != nil {
+		return api.LockRevokeSignerFinishResult{}, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return api.LockRevokeSignerFinishResult{}, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var res api.LockRevokeSignerFinishResult
+	if err := c.Call(api.MethodLockRevokeSignerFinish, api.LockRevokeSignerFinishParams{Blob: blob}, &res); err != nil {
+		return api.LockRevokeSignerFinishResult{}, err
+	}
+	return res, nil
+}
+
+// newLockRevokeSignerCmd implements the three-phase revoke-signer co-signing ceremony:
+//
+//	Start:   argus lock revoke-signer <signer...> [--replacement <node>...] [--fork-from <hash>]
+//	Co-sign: argus lock revoke-signer --cosign <blob>
+//	Finish:  argus lock revoke-signer --finish <blob>
+func newLockRevokeSignerCmd() *cobra.Command {
+	var cosignBlob string
+	var finishBlob string
+	var replacements []string
+	var forkFrom string
+
+	cmd := &cobra.Command{
+		Use:           "revoke-signer",
+		Short:         "Revoke a signer via co-signing ceremony (start / --cosign / --finish)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cosignBlob != "" && finishBlob != "" {
+				return fail(cmd, fmt.Errorf("--cosign and --finish are mutually exclusive"))
+			}
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// --finish mode: finalize a completed blob and apply the revocation.
+			if finishBlob != "" {
+				if len(args) > 0 {
+					return fail(cmd, fmt.Errorf("--finish does not take positional arguments"))
+				}
+				blob, berr := base64.StdEncoding.DecodeString(finishBlob)
+				if berr != nil {
+					return fail(cmd, fmt.Errorf("--finish: invalid base64 blob: %w", berr))
+				}
+				res, ferr := revokeSignerFinishOnNode(ctx, cfg, blob)
+				if ferr != nil {
+					return fail(cmd, ferr)
+				}
+				shell.StdOutF("revocation applied\n  new tip (audit): %s\n", base64.StdEncoding.EncodeToString(res.Tip))
+				shell.StdErrF("\nRevocation propagates to the network within ~30s.\n")
+				return nil
+			}
+
+			// --cosign mode: add this node's co-sign to an existing blob.
+			if cosignBlob != "" {
+				if len(args) > 0 {
+					return fail(cmd, fmt.Errorf("--cosign does not take positional arguments"))
+				}
+				blob, berr := base64.StdEncoding.DecodeString(cosignBlob)
+				if berr != nil {
+					return fail(cmd, fmt.Errorf("--cosign: invalid base64 blob: %w", berr))
+				}
+				res, cerr := revokeSignerCosignOnNode(ctx, cfg, blob)
+				if cerr != nil {
+					return fail(cmd, cerr)
+				}
+				blobStr := base64.StdEncoding.EncodeToString(res.Blob)
+				shell.StdOutF("co-signed\n  blob: %s\n", blobStr)
+				shell.StdErrF("\nIf more co-signs are needed, run on another signer node:\n  argus lock revoke-signer --cosign %s\n", blobStr)
+				shell.StdErrF("When you have enough co-signs, run on any signer node:\n  argus lock revoke-signer --finish %s\n", blobStr)
+				return nil
+			}
+
+			// Start mode: begin the ceremony.
+			if len(args) == 0 {
+				return fail(cmd, fmt.Errorf("revoke-signer: specify signer(s) to revoke, or use --cosign / --finish"))
+			}
+			roster, _ := fetchRoster(ctx, cfg) // best-effort; nil roster → raw-base64 fallback
+			revoked, err := resolveSignerArgs(roster, args)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			// Sole-root guard: if revoking would leave zero signers without a replacement,
+			// fail immediately with a helpful message rather than letting the ceremony
+			// proceed to an unfinishable state.
+			if len(replacements) == 0 {
+				if st, serr := lockStatusOnNode(ctx, cfg); serr == nil && st.Enabled {
+					if signerCountAfterRevoke(st.Signers, revoked) < 1 {
+						return fail(cmd, fmt.Errorf(
+							"revocation would remove all signers and leave the log unrecoverable\n"+
+								"  use --replacement <node> to atomically add a successor signer, or\n"+
+								"  'argus lock disable <secret>' + reinit to abandon locked mode"))
+					}
+				}
+			}
+			var replaces [][]byte
+			if len(replacements) > 0 {
+				replaces, err = resolveSignerArgs(roster, replacements)
+				if err != nil {
+					return fail(cmd, fmt.Errorf("--replacement: %w", err))
+				}
+			}
+			var forkFromBytes []byte
+			if forkFrom != "" {
+				forkFromBytes, err = base64.StdEncoding.DecodeString(forkFrom)
+				if err != nil {
+					return fail(cmd, fmt.Errorf("--fork-from: invalid base64: %w", err))
+				}
+			}
+			res, serr := revokeSignerStartOnNode(ctx, cfg, api.LockRevokeSignerStartParams{
+				Revoked:  revoked,
+				Replaces: replaces,
+				ForkFrom: forkFromBytes,
+			})
+			if serr != nil {
+				return fail(cmd, serr)
+			}
+			blobStr := base64.StdEncoding.EncodeToString(res.Blob)
+			shell.StdOutF("revoke-signer started\n  blob: %s\n", blobStr)
+			shell.StdErrF("\nNext: run on another signer node:\n  argus lock revoke-signer --cosign %s\n", blobStr)
+			shell.StdErrF("After collecting enough co-signs, run on any signer node:\n  argus lock revoke-signer --finish <blob>\n")
+			shell.StdErrF("\nNote: entries appended after the fork point by revoked signers will be erased.\n")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cosignBlob, "cosign", "", "add this node's co-sign to a ceremony blob (from start or a prior --cosign)")
+	cmd.Flags().StringVar(&finishBlob, "finish", "", "finalize a completed ceremony blob and apply the revocation")
+	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer node (label/id or base64 pubkey); repeatable")
+	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "override the fork-point hash (base64); default: parent of revoked signer's earliest entry")
+	addClientFlags(cmd.Flags())
+	return cmd
 }
 
 func newLockDisableCmd() *cobra.Command {

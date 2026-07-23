@@ -36,7 +36,7 @@ void main() {
     expect(store.tip, equals(_b(v, 'disabled_head')));
   });
 
-  test('wrong-genesis, tampered, and rollback chains are rejected', () async {
+  test('wrong-genesis and tampered chains are rejected; short prefix is a no-op', () async {
     final v = _tl();
     // wrong genesis
     final s1 = TrustStore(_b(v, 'genesis_head'));
@@ -45,18 +45,27 @@ void main() {
     final tampered = Uint8List.fromList(_b(v, 'chain'))..[20] ^= 0xff;
     final s2 = TrustStore(_b(v, 'genesis_head'));
     expect(() => s2.ingest(tampered), throwsA(anything));
-    // rollback: ingest the 2-entry chain, then a 1-entry (genesis-only) chain is shorter
-    // (reuse disabled_chain which is longer, then the shorter original is a rollback)
+    // strict prefix (cand is shorter but valid prefix of cur): no-op, not an error.
+    // Ingest a 3-entry chain, then a 2-entry prefix — fork-choice returns false (keep cur).
     final s3 = TrustStore(_b(v, 'genesis_head'));
     expect(await s3.ingest(_b(v, 'disabled_chain')), isTrue); // 3 entries
-    expect(() => s3.ingest(_b(v, 'chain')), throwsA(isA<FormatException>())); // 2 < 3 rollback
+    expect(await s3.ingest(_b(v, 'chain')), isFalse); // strict prefix -> no-op
+    expect(s3.disabled, isTrue); // still on the 3-entry (disabled) chain
   });
 
-  test('fork chain (same genesis, diverges at entry 1) is rejected', () async {
+  test('fork chain (same genesis, diverges at entry 1) resolves deterministically', () async {
     final v = _tl();
-    final store = TrustStore(_b(v, 'genesis_head'));
-    expect(await store.ingest(_b(v, 'chain')), isTrue);
-    expect(() => store.ingest(_b(v, 'fork_chain')), throwsA(isA<FormatException>()));
+    // Both branches are equally-weighted plain forks; tie-break picks the lower tip hash.
+    // Ingest order must not matter.
+    final s1 = TrustStore(_b(v, 'genesis_head'));
+    expect(await s1.ingest(_b(v, 'chain')), isTrue);
+    await s1.ingest(_b(v, 'fork_chain')); // must not throw
+
+    final s2 = TrustStore(_b(v, 'genesis_head'));
+    expect(await s2.ingest(_b(v, 'fork_chain')), isTrue);
+    await s2.ingest(_b(v, 'chain')); // must not throw
+
+    expect(s1.tip, equals(s2.tip), reason: 'fork resolves to same winner regardless of order');
   });
 
   test('chainBytes is null before ingest and equals the adopted chain after', () async {
@@ -78,12 +87,13 @@ void main() {
     expect(store.chainBytes, equals(_b(v, 'chain')));
   });
 
-  test('tofu store: after adopt it is pinned — a divergent same-genesis chain is a fork', () async {
+  test('tofu store: after adopt it is pinned — a divergent same-genesis chain resolves via fork-choice', () async {
     final v = _tl();
     final store = TrustStore.tofu();
     await store.ingest(_b(v, 'chain'));
-    // fork_chain shares the genesis but diverges at entry 1 (added in F5).
-    expect(() => store.ingest(_b(v, 'fork_chain')), throwsA(isA<FormatException>()));
+    // fork_chain shares the genesis but diverges at entry 1; must resolve, not throw.
+    await store.ingest(_b(v, 'fork_chain'));
+    expect(store.tip, isNotNull);
   });
 
   test('tofu store: a longer same-genesis extension is adopted after the first', () async {

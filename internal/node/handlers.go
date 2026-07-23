@@ -54,5 +54,9 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodLockRemoveSigner, d.handleLockRemoveSigner)
 	srv.Handle(api.MethodLockDisable, d.handleLockDisable)
 	srv.Handle(api.MethodLockLocalDisable, d.handleLockLocalDisable)
+	srv.Handle(api.MethodLockRevokeSignerStart, d.handleLockRevokeSignerStart)
+	srv.Handle(api.MethodLockRevokeSignerCosign, d.handleLockRevokeSignerCosign)
+	srv.Handle(api.MethodLockRevokeSignerFinish, d.handleLockRevokeSignerFinish)
+	srv.Handle(api.MethodLockLog, d.handleLockLog)
 	srv.Handle(api.MethodSessionTasks, d.handleTasks)
 }

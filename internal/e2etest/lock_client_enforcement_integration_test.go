@@ -150,13 +150,15 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 			return false
 		}
 		defer pc.Close()
-		var got api.TrustLogChain
-		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
+		var got api.TrustLogPullResult
+		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
 			return false
 		}
 		st := trustlog.NewSyncStore(initRes.Tip)
-		_, err = st.Ingest(got.Chain)
-		return err == nil && st.DeviceAuthorized(clientKP.Public)
+		for _, chain := range got.Chains {
+			st.Ingest(chain) //nolint:errcheck
+		}
+		return st.DeviceAuthorized(clientKP.Public)
 	})
 
 	// Build the locked client: it syncs the trust log at Connect time, then for

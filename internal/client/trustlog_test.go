@@ -35,7 +35,11 @@ func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
 					}
 					cur := current
 					mu.Unlock()
-					return api.TrustLogChain{Chain: cur}, nil
+					var chains [][]byte
+					if cur != nil {
+						chains = [][]byte{cur}
+					}
+					return api.TrustLogPullResult{Chains: chains}, nil
 				}
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 			},

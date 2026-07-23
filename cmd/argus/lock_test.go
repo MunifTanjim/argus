@@ -9,6 +9,74 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
+func TestLockInitFewSignersWarning(t *testing.T) {
+	// Warning fires for 1 signer.
+	if w := lockInitFewSignersWarning(1); w == "" {
+		t.Error("lockInitFewSignersWarning(1) should return a non-empty warning")
+	}
+	// Warning fires for 2 signers.
+	if w := lockInitFewSignersWarning(2); w == "" {
+		t.Error("lockInitFewSignersWarning(2) should return a non-empty warning")
+	}
+	// No warning for 3 signers.
+	if w := lockInitFewSignersWarning(3); w != "" {
+		t.Errorf("lockInitFewSignersWarning(3) should return empty, got %q", w)
+	}
+	// No warning for >3 signers.
+	if w := lockInitFewSignersWarning(5); w != "" {
+		t.Errorf("lockInitFewSignersWarning(5) should return empty, got %q", w)
+	}
+	// Warning mentions revoke-signer and disable.
+	w2 := lockInitFewSignersWarning(2)
+	if !strings.Contains(w2, "revoke-signer") {
+		t.Errorf("warning should mention 'revoke-signer', got: %q", w2)
+	}
+	if !strings.Contains(w2, "disable") {
+		t.Errorf("warning should mention 'disable', got: %q", w2)
+	}
+}
+
+func TestSoleRootGuardDetectsZeroSigners(t *testing.T) {
+	s1 := bytes.Repeat([]byte{0x01}, 32)
+	s2 := bytes.Repeat([]byte{0x02}, 32)
+	s3 := bytes.Repeat([]byte{0x03}, 32)
+
+	// Revoking the sole signer → 0 remaining.
+	if n := signerCountAfterRevoke([][]byte{s1}, [][]byte{s1}); n != 0 {
+		t.Fatalf("sole-root: got %d, want 0", n)
+	}
+	// Revoking one of two signers → 1 remaining.
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s1}); n != 1 {
+		t.Fatalf("one-of-two: got %d, want 1", n)
+	}
+	// Revoking both of two signers → 0 remaining.
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s1, s2}); n != 0 {
+		t.Fatalf("both-of-two: got %d, want 0", n)
+	}
+	// Revoking a non-member → all remain.
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s3}); n != 2 {
+		t.Fatalf("non-member: got %d, want 2", n)
+	}
+	// Empty current → 0.
+	if n := signerCountAfterRevoke(nil, [][]byte{s1}); n != 0 {
+		t.Fatalf("nil current: got %d, want 0", n)
+	}
+}
+
+func TestLockLogCmdWiredInLockCmd(t *testing.T) {
+	cmd := newLockCmd()
+	found := false
+	for _, c := range cmd.Commands() {
+		if c.Name() == "log" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("'argus lock log' subcommand not registered in newLockCmd")
+	}
+}
+
 func TestResolveSigners(t *testing.T) {
 	sigB := base64.StdEncoding.EncodeToString([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 	roster := []api.NodeDescriptor{

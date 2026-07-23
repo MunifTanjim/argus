@@ -60,7 +60,9 @@ func (d *Node) TrustStore() *trustlog.SyncStore { return d.trust.Load() }
 func (d *Node) SetTrustChainPath(path string) { d.trustPath = path }
 
 // syncTrustOnce runs one offer/pull cycle over peer: publish our current chain
-// (if any), then pull the gateway's and ingest it, persisting on any advance.
+// (if any), then pull all retained gateway branches and ingest each in order.
+// The genesis-pinned store's fork-choice accepts the best valid branch; invalid
+// or rolled-back branches are silently skipped. A single advance triggers persist.
 func (d *Node) syncTrustOnce(peer trustCaller) {
 	st := d.trust.Load()
 	if st == nil {
@@ -69,15 +71,21 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 	if mine := st.Bytes(); mine != nil {
 		_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
 	}
-	var got api.TrustLogChain
-	if err := peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chain) == 0 {
+	var got api.TrustLogPullResult
+	if err := peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
 		return
 	}
-	changed, err := st.Ingest(got.Chain)
-	if err != nil {
-		return // rollback/fork/tamper/wrong-genesis: keep our chain
+	anyChanged := false
+	for _, chain := range got.Chains {
+		changed, err := st.Ingest(chain)
+		if err != nil {
+			continue // rollback/fork/tamper/wrong-genesis: skip this branch
+		}
+		if changed {
+			anyChanged = true
+		}
 	}
-	if changed {
+	if anyChanged {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}

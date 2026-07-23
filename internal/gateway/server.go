@@ -266,10 +266,11 @@ func (s *Server) buildClientServer() *api.Server {
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	})
 
-	// trustlog.pull serves the current (opaque) trust-log chain to a client. The
-	// client verifies it against its pinned genesis; the gateway never does.
+	// trustlog.pull serves all retained competing trust-log branches to a client.
+	// The client ingests each branch and its genesis-pinned fork-choice picks the
+	// winner; the gateway never verifies or interprets the chain internals.
 	srv.Handle(api.MethodTrustLogPull, func(context.Context, json.RawMessage) (any, error) {
-		return api.TrustLogChain{Chain: s.trust.current()}, nil
+		return api.TrustLogPullResult{Chains: s.trust.all()}, nil
 	})
 
 	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
@@ -485,7 +486,7 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 		s.trust.offer(p.Chain)
 		return nil, nil
 	case api.MethodTrustLogPull:
-		return api.TrustLogChain{Chain: s.trust.current()}, nil
+		return api.TrustLogPullResult{Chains: s.trust.all()}, nil
 	case api.MethodPushDeliver:
 		if s.pushDeliverer == nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push delivery not enabled on this gateway"}

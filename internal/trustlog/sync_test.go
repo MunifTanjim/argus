@@ -99,3 +99,128 @@ func mustUnmarshal(t *testing.T, b []byte) []Entry {
 	}
 	return e
 }
+
+// TestSyncTamperedChainRejected: a byte-flipped chain is rejected by Load before
+// fork-choice runs. A gateway holding no signer keys cannot forge valid signatures,
+// so any tampered chain is caught at decode/verify time.
+func TestSyncTamperedChainRejected(t *testing.T) {
+	genChain, gh, _, _ := buildSyncChain(t, true)
+	s := NewSyncStore(gh)
+	changed, err := s.Ingest(genChain)
+	if err != nil || !changed {
+		t.Fatalf("initial ingest: changed=%v err=%v", changed, err)
+	}
+	tipBefore := s.Tip()
+
+	tampered := append([]byte(nil), genChain...)
+	tampered[len(tampered)-1] ^= 0xff
+
+	changed, err = s.Ingest(tampered)
+	if err == nil {
+		t.Fatal("tampered chain must be rejected with an error")
+	}
+	if changed {
+		t.Fatal("tampered chain ingest must not report changed")
+	}
+	if !bytes.Equal(s.Tip(), tipBefore) {
+		t.Fatal("tip must be unchanged after rejecting a tampered chain")
+	}
+}
+
+// TestSyncStalePrefixIsNoop: a stale strict-prefix chain (shorter, no divergence)
+// is a silent no-op — changed=false, err=nil, state preserved. The gateway cannot
+// roll back state by replaying an older chain snapshot.
+func TestSyncStalePrefixIsNoop(t *testing.T) {
+	gh, short, extended, dev := buildStoreChain(t)
+	s := NewSyncStore(gh)
+
+	changed, err := s.Ingest(extended)
+	if err != nil || !changed {
+		t.Fatalf("initial ingest of extended chain: changed=%v err=%v", changed, err)
+	}
+	tipBefore := s.Tip()
+
+	changed, err = s.Ingest(short)
+	if err != nil {
+		t.Fatalf("strict-prefix ingest must not error: %v", err)
+	}
+	if changed {
+		t.Fatal("strict-prefix ingest must not report changed")
+	}
+	if s.DeviceAuthorized(dev) {
+		t.Error("device must remain revoked after no-op prefix ingest")
+	}
+	if !bytes.Equal(s.Tip(), tipBefore) {
+		t.Error("tip must be unchanged after no-op prefix ingest")
+	}
+}
+
+// TestSyncAdoptsValidCoSignedRevoke: a genuine co-signed signer-revocation branch
+// IS adopted (changed=true) even though it is shorter than the current attacker
+// branch. changed is tip-based — not length-based — so a shorter chain with a new
+// tip correctly reports changed=true.
+func TestSyncAdoptsValidCoSignedRevoke(t *testing.T) {
+	cur, cand, gh, c := forkFixtureCompromisedSigner(t)
+	s := NewSyncStore(gh)
+
+	changed, err := s.Ingest(cur)
+	if err != nil || !changed {
+		t.Fatalf("adopt attacker branch: changed=%v err=%v", changed, err)
+	}
+	if !s.SignerTrusted(c.Public) {
+		t.Fatal("c must be trusted before the co-signed revoke is ingested")
+	}
+
+	changed, err = s.Ingest(cand)
+	if err != nil {
+		t.Fatalf("co-signed revoke branch must be adopted: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed must be true when adopting a co-signed revoke (tip changes even if chain is shorter)")
+	}
+	if s.SignerTrusted(c.Public) {
+		t.Fatal("c must not be trusted after co-signed revoke is adopted")
+	}
+	if s.DeviceAuthorized(bytes.Repeat([]byte{0xA1}, 32)) || s.DeviceAuthorized(bytes.Repeat([]byte{0xA2}, 32)) {
+		t.Fatal("attacker devices must be deauthorized after adopting the revoke branch")
+	}
+	if !bytes.Equal(s.Bytes(), cand) {
+		t.Fatal("store must hold the co-signed revoke branch")
+	}
+}
+
+// TestSyncRejectsGatewayRollbackAfterRevoke: after a co-signed signer revocation
+// is adopted, a malicious gateway that re-offers the old pre-revoke chain cannot
+// win fork-choice — it holds no signer keys and cannot produce a co-signed branch
+// that outweighs the honest revocation. changed=false, state preserved.
+func TestSyncRejectsGatewayRollbackAfterRevoke(t *testing.T) {
+	cur, cand, gh, c := forkFixtureCompromisedSigner(t)
+	s := NewSyncStore(gh)
+
+	changed, err := s.Ingest(cand)
+	if err != nil || !changed {
+		t.Fatalf("adopt co-signed revoke: changed=%v err=%v", changed, err)
+	}
+	tipAfterRevoke := s.Tip()
+
+	// Gateway re-offers the old attacker chain (longer, single-signed by c).
+	changed, err = s.Ingest(cur)
+	if err != nil {
+		t.Fatalf("re-offering old chain must not error (fork resolves deterministically): %v", err)
+	}
+	if changed {
+		t.Fatal("re-offering the old pre-revoke chain must not change state")
+	}
+	if s.SignerTrusted(c.Public) {
+		t.Fatal("revoked signer c must remain untrusted after rollback attempt")
+	}
+	if s.DeviceAuthorized(bytes.Repeat([]byte{0xA1}, 32)) || s.DeviceAuthorized(bytes.Repeat([]byte{0xA2}, 32)) {
+		t.Fatal("attacker devices must remain deauthorized after rollback attempt")
+	}
+	if !bytes.Equal(s.Tip(), tipAfterRevoke) {
+		t.Fatal("tip must be unchanged after rollback attempt")
+	}
+	if !bytes.Equal(s.Bytes(), cand) {
+		t.Fatal("store must still hold the co-signed revoke branch after rollback attempt")
+	}
+}

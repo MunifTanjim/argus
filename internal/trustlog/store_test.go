@@ -55,14 +55,21 @@ func TestStoreAdoptsLongerExtension(t *testing.T) {
 }
 
 func TestStoreRejectsRollback(t *testing.T) {
-	gh, short, extended, _ := buildStoreChain(t)
+	gh, short, extended, dev := buildStoreChain(t)
 	st := NewStore(gh)
 	if err := st.Ingest(extended); err != nil {
 		t.Fatalf("ingest extended: %v", err)
 	}
-	// A shorter (stale) chain must be rejected — the rollback defense.
-	if err := st.Ingest(short); err == nil {
-		t.Error("Ingest must reject a shorter (rolled-back) chain")
+	// A shorter (stale) strict-prefix chain must NOT roll the state back: it is a
+	// no-op that keeps the current (longer) chain — the rollback defense.
+	if err := st.Ingest(short); err != nil {
+		t.Fatalf("strict-prefix rollback must be a no-op, got: %v", err)
+	}
+	if st.DeviceAuthorized(dev) {
+		t.Error("state must remain on the longer chain (device stays revoked)")
+	}
+	if !bytes.Equal(st.Bytes(), extended) {
+		t.Error("store must keep the current (longer) chain after a rollback attempt")
 	}
 }
 
@@ -93,6 +100,10 @@ func TestStoreRejectsForkAndTamper(t *testing.T) {
 	}
 }
 
+// TestStoreRejectsGenuineFork: a plain same-genesis fork (neither branch carries a
+// co-signed removal) no longer errors — it RESOLVES deterministically at the fork
+// point (weight tie → both plain, no removal → lowest first-diverging-entry hash
+// wins). The winner must be identical regardless of ingest order.
 func TestStoreRejectsGenuineFork(t *testing.T) {
 	s, _ := GenerateSigner()
 	la, err := NewGenesis([][]byte{s.Public}, s, nil)
@@ -114,19 +125,39 @@ func TestStoreRejectsGenuineFork(t *testing.T) {
 	if err := lb.AuthorizeDevice([]byte("dev-B"), s); err != nil {
 		t.Fatalf("authorize B: %v", err)
 	}
+	chainA := MarshalChain(la.Entries())
+	chainB := MarshalChain(lb.Entries())
 
-	st := NewStore(gh)
-	if err := st.Ingest(MarshalChain(la.Entries())); err != nil {
+	// Ingest A then B.
+	s1 := NewStore(gh)
+	if err := s1.Ingest(chainA); err != nil {
 		t.Fatalf("ingest A: %v", err)
 	}
-	if err := st.Ingest(MarshalChain(lb.Entries())); err == nil {
-		t.Error("Ingest must reject a same-genesis fork that diverges from current")
+	if err := s1.Ingest(chainB); err != nil {
+		t.Fatalf("plain fork must resolve, not error (A then B): %v", err)
 	}
-	if !st.DeviceAuthorized([]byte("dev-A")) {
-		t.Error("store must remain on chain A after rejecting the fork")
+	// Ingest B then A.
+	s2 := NewStore(gh)
+	if err := s2.Ingest(chainB); err != nil {
+		t.Fatalf("ingest B: %v", err)
 	}
-	if st.DeviceAuthorized([]byte("dev-B")) {
-		t.Error("forked chain B must not have been adopted")
+	if err := s2.Ingest(chainA); err != nil {
+		t.Fatalf("plain fork must resolve, not error (B then A): %v", err)
+	}
+	if !bytes.Equal(s1.Bytes(), s2.Bytes()) {
+		t.Fatal("plain fork winner must be identical regardless of ingest order")
+	}
+
+	// Winner is the branch with the lexicographically-lower first-diverging-entry
+	// hash (index 1 here; genesis is the shared prefix).
+	ha := hashEntry(&la.Entries()[1])
+	hb := hashEntry(&lb.Entries()[1])
+	winner := chainB
+	if bytes.Compare(ha, hb) < 0 {
+		winner = chainA
+	}
+	if !bytes.Equal(s1.Bytes(), winner) {
+		t.Fatal("plain fork must adopt the lexicographically-lower-first-entry branch")
 	}
 }
 

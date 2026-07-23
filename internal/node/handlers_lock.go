@@ -4,10 +4,30 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
+
+// loadCurrentLog is a convenience helper: it reads the current chain bytes from st,
+// unmarshals them, and loads a *Log for callers that need to reason about the log
+// state (e.g. the co-signing ceremony handlers).
+func loadCurrentLog(st *trustlog.SyncStore) ([]trustlog.Entry, *trustlog.Log, error) {
+	chain := st.Bytes()
+	if chain == nil {
+		return nil, nil, &api.RPCError{Code: api.CodeInternalError, Message: "no chain in trust store"}
+	}
+	entries, err := trustlog.UnmarshalChain(chain)
+	if err != nil {
+		return nil, nil, &api.RPCError{Code: api.CodeInternalError, Message: "unmarshal chain: " + err.Error()}
+	}
+	log, err := trustlog.Load(entries)
+	if err != nil {
+		return nil, nil, &api.RPCError{Code: api.CodeInternalError, Message: "load log: " + err.Error()}
+	}
+	return entries, log, nil
+}
 
 // handleLockInit establishes the trust log (lock.init): builds a genesis whose signer
 // set is this node plus the requested additional signers, authorizes the requested
@@ -211,6 +231,181 @@ func (d *Node) handleLockLocalDisable(_ context.Context, _ json.RawMessage) (any
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return nil, nil
+}
+
+// handleLockRevokeSignerStart begins a revoke-signer co-signing ceremony
+// (lock.revokeSignerStart). Requires this node to be a trusted signer. Selects a
+// fork point, builds a partial KindRevokeSigner entry, adds this node's co-sign,
+// and returns the serialized PendingRevoke blob for the caller to pass to other
+// signer nodes for additional co-signs.
+func (d *Node) handleLockRevokeSignerStart(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerStartParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	if len(p.Revoked) == 0 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "revoked must be non-empty"}
+	}
+	_, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := trustlog.StartRevoke(log, p.Revoked, p.Replaces, p.ForkFrom, d.signer)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "start revoke: " + err.Error()}
+	}
+	return api.LockRevokeSignerBlobResult{Blob: pr.Marshal()}, nil
+}
+
+// handleLockRevokeSignerCosign adds this node's co-sign to a PendingRevoke blob
+// (lock.revokeSignerCosign). Requires this node to be a trusted signer and trusted
+// at the blob's fork point. Returns the updated blob.
+func (d *Node) handleLockRevokeSignerCosign(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerCosignParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	pr, err := trustlog.UnmarshalPendingRevoke(p.Blob)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid blob: " + err.Error()}
+	}
+	_, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	pr, err = trustlog.AddCoSign(pr, log, d.signer)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cosign: " + err.Error()}
+	}
+	return api.LockRevokeSignerBlobResult{Blob: pr.Marshal()}, nil
+}
+
+// handleLockRevokeSignerFinish finalizes a completed revoke-signer ceremony
+// (lock.revokeSignerFinish). It requires the co-sign quorum to be satisfied
+// (Complete), then ingests the resulting KindRevokeSigner entry into the trust store
+// via a fork chain, persists the updated chain, and notifies dependent channels.
+// Returns the new trust-log tip.
+func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerFinishParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	pr, err := trustlog.UnmarshalPendingRevoke(p.Blob)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid blob: " + err.Error()}
+	}
+	entries, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	if !trustlog.Complete(pr, log) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "co-sign quorum not yet reached; collect more co-signs"}
+	}
+	newChain, err := trustlog.BuildRevokeChain(pr, entries)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "build revoke chain: " + err.Error()}
+	}
+	changed, err := st.Ingest(newChain)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "ingest: " + err.Error()}
+	}
+	if changed {
+		if werr := d.persistTrust(); werr != nil {
+			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+		}
+		d.reevaluateTrustChannels()
+	}
+	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
+}
+
+// kindString maps a trustlog.Kind to its wire string (matches the Kind constants in the
+// API and the CLI output: "genesis", "add-signer", etc.).
+func kindString(k trustlog.Kind) string {
+	switch k {
+	case trustlog.KindGenesis:
+		return "genesis"
+	case trustlog.KindAddSigner:
+		return "add-signer"
+	case trustlog.KindRemoveSigner:
+		return "remove-signer"
+	case trustlog.KindAuthorizeDevice:
+		return "authorize-device"
+	case trustlog.KindRevokeDevice:
+		return "revoke-device"
+	case trustlog.KindRevokeSigner:
+		return "revoke-signer"
+	case trustlog.KindDisable:
+		return "disable"
+	default:
+		return fmt.Sprintf("kind(%d)", k)
+	}
+}
+
+// handleLockLog returns the trust-log chain history (lock.log). Read-only; requires
+// locked mode to be enabled. The result carries per-entry summaries (kind, target,
+// co-sign count) and the current trusted signer set for fingerprint display.
+func (d *Node) handleLockLog(_ context.Context, _ json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	entries, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.LockLogEntry, len(entries))
+	for i, e := range entries {
+		le := api.LockLogEntry{Index: i, Kind: kindString(e.Kind)}
+		switch e.Kind {
+		case trustlog.KindGenesis:
+			le.Signers = make([][]byte, len(e.Signers))
+			for j, s := range e.Signers {
+				le.Signers[j] = append([]byte(nil), s...)
+			}
+		case trustlog.KindAddSigner, trustlog.KindRemoveSigner,
+			trustlog.KindAuthorizeDevice, trustlog.KindRevokeDevice:
+			le.Target = append([]byte(nil), e.Key...)
+		case trustlog.KindRevokeSigner:
+			le.Revoked = make([][]byte, len(e.Signers))
+			for j, s := range e.Signers {
+				le.Revoked[j] = append([]byte(nil), s...)
+			}
+			le.Replaces = make([][]byte, len(e.Replaces))
+			for j, s := range e.Replaces {
+				le.Replaces[j] = append([]byte(nil), s...)
+			}
+			le.CoSignCount = len(e.CoSigns)
+		case trustlog.KindDisable:
+			// Key is the revealed disablement secret — not exposed in the log API.
+		}
+		out[i] = le
+	}
+	return api.LockLogResult{
+		Entries: out,
+		Tip:     st.Tip(),
+		Signers: log.Signers(),
+	}, nil
 }
 
 // handleLockStatus returns the audit view of this node's locked state.

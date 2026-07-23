@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'codec.dart';
+import 'codec.dart' show hashEntry, unmarshalChain, validCoSigns;
 import 'entry.dart';
 import 'trust_log.dart';
 
@@ -12,17 +12,94 @@ bool _eq(Uint8List a, Uint8List b) {
   return true;
 }
 
+int _cmpBytes(Uint8List a, Uint8List b) {
+  for (var i = 0; i < a.length && i < b.length; i++) {
+    if (a[i] != b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+String _hex(List<int> b) {
+  final sb = StringBuffer();
+  for (final x in b) {
+    sb.write(x.toRadixString(16).padLeft(2, '0'));
+  }
+  return sb.toString();
+}
+
+/// foldSignersAt replays entries[0..p-1] and returns the trusted signer set at
+/// the fork point — the shared prefix's folded signers.
+Future<Set<String>> _foldSignersAt(List<Entry> entries, int p) async {
+  if (p == 0) return const {};
+  final l = await TrustLog.load(entries.sublist(0, p));
+  return l.signerHexSet;
+}
+
+/// weightAtFork scores a first-diverging entry using ONLY signers trusted at the
+/// fork point. A co-signed revoke counts its distinct valid co-signers in that set;
+/// post-fork puppets are absent → 0. Any other entry weighs 1 iff its single signer
+/// is trusted at the fork point.
+Future<int> _weightAtFork(Entry e, Set<String> forkSigners) async {
+  if (e.kind == Kind.revokeSigner) {
+    final (n, _) = await validCoSigns(e, (pub) => forkSigners.contains(_hex(pub)));
+    return n;
+  }
+  final signer = e.signer;
+  if (signer != null && forkSigners.contains(_hex(signer))) return 1;
+  return 0;
+}
+
+/// isRemoval reports whether e removes trust — the preferred sibling on a weight tie.
+bool _isRemoval(Entry e) => e.kind == Kind.revokeSigner || e.kind == Kind.removeSigner;
+
+/// forkChoice decides whether to adopt cand over the already-verified cur. Both
+/// slices are fully-verified chains sharing the pinned genesis (cur[0]==cand[0]).
+///
+/// Rules (mirrors Go forkChoice exactly):
+///   - Linear: cand prefix-preserves cur and is longer → adopt; identical → no-op;
+///     cand is a strict prefix of cur (shorter, no divergence) → keep cur.
+///   - True divergence: resolved at the FORK POINT. Each first-diverging entry is
+///     weighed ONLY by signers trusted at the fork point. Higher weight wins; tie →
+///     prefer a removal; tie → lexicographically-lowest hashEntry of the first-
+///     diverging entry. Every divergence resolves deterministically.
+Future<bool> _forkChoice(List<Entry> cur, List<Entry> cand) async {
+  var p = 0;
+  while (p < cur.length && p < cand.length && _eq(hashEntry(cur[p]), hashEntry(cand[p]))) {
+    p++;
+  }
+  if (p == cur.length) {
+    // cand extends (or equals) cur — adopt iff strictly longer.
+    return cand.length > p;
+  }
+  if (p == cand.length) {
+    // cand is a strict prefix of cur — keep cur (no-op).
+    return false;
+  }
+  // True divergence at index p. Fold the signer set from the shared prefix.
+  final forkSigners = await _foldSignersAt(cur, p);
+  final wcur = await _weightAtFork(cur[p], forkSigners);
+  final wcand = await _weightAtFork(cand[p], forkSigners);
+  if (wcand != wcur) return wcand > wcur;
+  // Tie on weight → prefer a removal.
+  final rcur = _isRemoval(cur[p]);
+  final rcand = _isRemoval(cand[p]);
+  if (rcur != rcand) return rcand;
+  // Final tie-break: globally-lowest first-diverging-entry hash.
+  return _cmpBytes(hashEntry(cand[p]), hashEntry(cur[p])) < 0;
+}
+
 /// Holds a verified chain pinned to an out-of-band genesis hash. ingest adopts a
-/// candidate only if it is a same-genesis, prefix-preserving, strictly-longer,
-/// fully-verified extension — the rollback/fork/tamper defense over the gateway.
+/// candidate that is a same-genesis, fully-verified linear extension, or — on a
+/// true fork — the winner of the fork-point resolution rule (the sibling first-
+/// diverging entry with more weight from signers trusted at the fork point; a co-
+/// signed key revocation beats a plain branch even when shorter).
 ///
 /// **Authenticity vs recency**: the pinned genesis provides AUTHENTICITY (the
 /// chain is genuinely signed by the declared signers), not RECENCY. With no prior
 /// or persisted chain, a malicious gateway can serve a genuinely-signed but STALE
 /// chain — one that predates a revoke or disable — and this store will accept it.
 /// Revocation is therefore not rollback-safe until a future persistence layer
-/// (F6) re-runs genesis-pinned ingest on the chain seeded from disk, making
-/// regression behind the last-seen tip detectable.
+/// re-runs genesis-pinned ingest on the chain seeded from disk.
 class TrustStore {
   TrustStore(Uint8List genesisHash)
       : _genesisHash = Uint8List.fromList(genesisHash),
@@ -43,16 +120,20 @@ class TrustStore {
   bool get disabled => _log?.disabled ?? false;
   Uint8List? get tip => _log?.tip;
   List<Uint8List>? get signers => _log?.signers;
+  List<Uint8List>? get devices => _log?.devices;
   Uint8List? get chainBytes => _chainBytes;
   bool deviceAuthorized(List<int> pub) => _log?.deviceAuthorized(pub) ?? false;
+  bool signerTrusted(List<int> pub) => _log?.signerTrusted(pub) ?? false;
 
   /// Whether locked-mode enforcement applies. A pinned store is always locked
   /// (constructed knowing the network is locked → fail-closed). A TOFU store is
   /// locked only after it has adopted a chain (an empty first pull ⇒ open network).
   bool get locked => _tofu ? _log != null : true;
 
-  /// Returns whether the verified tip advanced. Identical chain → false (no-op);
-  /// a rollback/fork/tamper/wrong-genesis chain throws and leaves state untouched.
+  /// Ingest decodes, verifies, and adopts a candidate chain. Adopts a linear
+  /// extension, resolves a true fork via forkChoice (every divergence resolves
+  /// deterministically), and is a no-op for an identical, strict-prefix, or
+  /// losing candidate. Returns whether the verified tip advanced.
   Future<bool> ingest(Uint8List chainBytes) async {
     final entries = unmarshalChain(chainBytes);
     if (entries.isEmpty) throw const FormatException('trustlog: empty chain');
@@ -66,21 +147,16 @@ class TrustStore {
       _chainBytes = Uint8List.fromList(chainBytes);
       return true;
     }
+    // Cheap genesis-pin check first — reject a wrong-genesis chain before the
+    // expensive full-chain signature verification in Load.
     if (!_eq(hashEntry(entries.first), _genesisHash!)) {
       throw const FormatException('trustlog: candidate genesis does not match pinned hash');
     }
     final cand = await TrustLog.load(entries); // verifies sigs, links, signer trust
     final cur = _entries;
     if (cur != null) {
-      if (entries.length < cur.length) {
-        throw const FormatException('trustlog: candidate shorter than current (rollback)');
-      }
-      for (var i = 0; i < cur.length; i++) {
-        if (!_eq(hashEntry(cur[i]), hashEntry(entries[i]))) {
-          throw const FormatException('trustlog: candidate diverges (fork)');
-        }
-      }
-      if (entries.length == cur.length) return false; // identical: no-op
+      final adopt = await _forkChoice(cur, entries);
+      if (!adopt) return false;
     }
     _log = cand;
     _entries = entries;
