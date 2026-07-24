@@ -220,3 +220,22 @@ func (s *Store) Length() int {
 	}
 	return len(s.log.Entries())
 }
+
+// currentLog returns a deep clone of the adopted log for in-place extension, or
+// nil if the store is empty. Mutating the clone never affects the store until
+// adoptExtension is called.
+func (s *Store) currentLog() *Log {
+	if s.log == nil {
+		return nil
+	}
+	return s.log.clone()
+}
+
+// adoptExtension adopts l as the current chain. l MUST be a verified linear
+// extension of the previously-adopted log (produced by cloning currentLog and
+// appending entries via the Log mutation methods, each of which verifies the new
+// entry). It refreshes the cached chain bytes.
+func (s *Store) adoptExtension(l *Log) {
+	s.log = l
+	s.chainBytes = MarshalChain(l.Entries())
+}

@@ -306,3 +306,30 @@ func (l *Log) Signers() [][]byte { return sortedKeys(l.signers) }
 
 // Devices returns the currently-authorized device pubkeys (sorted copies).
 func (l *Log) Devices() [][]byte { return sortedKeys(l.devices) }
+
+// clone returns a deep copy of the log: callers may mutate the copy (e.g. append
+// a new entry) without affecting the original adopted log.
+func (l *Log) clone() *Log {
+	c := &Log{
+		entries:      make([]Entry, len(l.entries)),
+		tip:          append([]byte(nil), l.tip...),
+		signers:      make(map[string]bool, len(l.signers)),
+		devices:      make(map[string]bool, len(l.devices)),
+		deviceSigner: make(map[string][]byte, len(l.deviceSigner)),
+		disablements: cloneSigners(l.disablements),
+		disabled:     l.disabled,
+	}
+	for i := range l.entries {
+		c.entries[i] = cloneEntry(l.entries[i])
+	}
+	for k, v := range l.signers {
+		c.signers[k] = v
+	}
+	for k, v := range l.devices {
+		c.devices[k] = v
+	}
+	for k, v := range l.deviceSigner {
+		c.deviceSigner[k] = append([]byte(nil), v...)
+	}
+	return c
+}

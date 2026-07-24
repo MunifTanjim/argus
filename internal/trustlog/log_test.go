@@ -374,3 +374,25 @@ func TestRevokeAllSignersWithoutReplacementRejected(t *testing.T) {
 		t.Fatalf("expected co-sign error, got: %v", err)
 	}
 }
+
+func TestLogCloneIsDeepAndIndependent(t *testing.T) {
+	// Build a small verified chain via the public helpers used elsewhere in tests.
+	g := genChain(t, 1, 6) // from gen_test.go (Task 3 step 3): seed=1, ~6 ops
+	orig, err := Load(g.entries)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cp := orig.clone()
+	if !bytes.Equal(cp.Tip(), orig.Tip()) {
+		t.Fatal("clone tip mismatch")
+	}
+	// Mutating the clone must not touch the original.
+	cp.signers["zzz"] = true
+	if orig.signers["zzz"] {
+		t.Fatal("clone shares the signers map with the original")
+	}
+	cp.entries = append(cp.entries, Entry{})
+	if len(cp.entries) == len(orig.entries) {
+		t.Fatal("clone shares the entries slice with the original")
+	}
+}

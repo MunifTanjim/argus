@@ -102,34 +102,24 @@ func (s *SyncStore) Disable(secret []byte, by SignerKey) (changed bool, err erro
 
 // appendSigned extends the live chain by one signer-signed entry under s.mu.
 // alreadyDone is evaluated under the lock to provide atomic idempotency: if it
-// returns true the call is a no-op (changed=false, err=nil). The cur==nil check
+// returns true the call is a no-op (changed=false, err=nil). The log==nil check
 // runs before alreadyDone so an empty store still errors. mutate applies the
 // authorize/revoke entry; a rejected mutate leaves state intact.
 func (s *SyncStore) appendSigned(alreadyDone func(*Store) bool, mutate func(*Log) error) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cur := s.store.Bytes()
-	if cur == nil {
+	log := s.store.currentLog()
+	if log == nil {
 		return false, errors.New("trustlog: no chain to extend")
 	}
 	if alreadyDone(s.store) {
 		return false, nil // idempotent no-op under the lock
 	}
-	entries, err := UnmarshalChain(cur)
-	if err != nil {
-		return false, err
-	}
-	log, err := Load(entries)
-	if err != nil {
-		return false, err
-	}
+	before := s.store.Tip()
 	if err := mutate(log); err != nil {
 		return false, err
 	}
-	before := s.store.Tip()
-	if err := s.store.Ingest(MarshalChain(log.Entries())); err != nil {
-		return false, err
-	}
+	s.store.adoptExtension(log)
 	return !bytes.Equal(before, s.store.Tip()), nil
 }
 
