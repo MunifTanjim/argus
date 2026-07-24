@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'bytes.dart' show compareBytes;
 import 'symmetric_state.dart' show blake2s;
 
 /// The PGP biometric word list (even-index, two-syllable words), lowercased.
@@ -79,7 +80,7 @@ const List<String> _fingerprintWords = [
 /// trustlog.SignerSetFingerprint.
 List<String> signerSetFingerprintWords(List<Uint8List> signers) {
   assert(_fingerprintWords.length == 256);
-  final sorted = [...signers]..sort(_compareBytes);
+  final sorted = [...signers]..sort(compareBytes);
   final buf = BytesBuilder();
   final len = Uint8List(4);
   for (final s in sorted) {
@@ -89,12 +90,4 @@ List<String> signerSetFingerprintWords(List<Uint8List> signers) {
   final digest = blake2s(buf.toBytes());
   final n = digest.length < 8 ? digest.length : 8;
   return [for (var i = 0; i < n; i++) _fingerprintWords[digest[i]]];
-}
-
-int _compareBytes(Uint8List a, Uint8List b) {
-  final n = a.length < b.length ? a.length : b.length;
-  for (var i = 0; i < n; i++) {
-    if (a[i] != b[i]) return a[i] - b[i];
-  }
-  return a.length - b.length;
 }

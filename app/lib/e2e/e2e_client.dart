@@ -8,6 +8,7 @@ import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
 import '../transport/rpc_client.dart';
 import 'aggregate.dart';
 import 'beacon.dart';
+import 'bytes.dart' show bytesEqual, hexEncode;
 import 'channel.dart';
 import 'handshake.dart';
 import 'keypair.dart';
@@ -39,14 +40,6 @@ class _BeaconMissState {
   _BeaconMissState({required this.tip, this.misses = 0});
   final Uint8List tip;
   int misses;
-}
-
-String _hex(List<int> b) {
-  final sb = StringBuffer();
-  for (final x in b) {
-    sb.write(x.toRadixString(16).padLeft(2, '0'));
-  }
-  return sb.toString();
 }
 
 /// Number of consecutive unreconciled ticks before the equivocation flag is set.
@@ -263,7 +256,7 @@ class E2EClient implements GatewayClient {
       // "was connected, now offline" from "never connected".
       if (desc.identityPubKey.isNotEmpty) {
         try {
-          _everConnected.add(_hex(base64.decode(desc.identityPubKey)));
+          _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
         } catch (_) {}
       }
     }));
@@ -299,7 +292,7 @@ class E2EClient implements GatewayClient {
       return; // keep the current verified view (fail-closed)
     }
     final after = trust.chainBytes;
-    final changed = after != null && (before == null || !_bytesEqual(before, after));
+    final changed = after != null && (before == null || !bytesEqual(before, after));
     if (changed) {
       await onTrustChainAdvance?.call(after!);
       _reevaluateChannels();
@@ -335,7 +328,7 @@ class E2EClient implements GatewayClient {
       // misses and false-positive the equivocation flag.
       if (desc != null && desc.identityPubKey.isNotEmpty) {
         try {
-          final key = _hex(base64.decode(desc.identityPubKey));
+          final key = hexEncode(base64.decode(desc.identityPubKey));
           _beacons.remove(key);
           _beaconCtr.remove(key);
           _beaconMiss.remove(key);
@@ -344,13 +337,6 @@ class E2EClient implements GatewayClient {
     }
   }
 
-  static bool _bytesEqual(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
 
   /// Aggregating RPC: reproduces the gateway's cross-node aggregation. Mirrors
   /// RpcClient.call's signature so the app can swap transports.
@@ -563,8 +549,8 @@ class E2EClient implements GatewayClient {
       return;
     }
     if (!await verifyBeacon(beacon)) return; // signature invalid: drop
-    if (!_bytesEqual(beacon.beaconPub, expectedBeaconPub)) return; // key mismatch: drop
-    final key = _hex(identityPub);
+    if (!bytesEqual(beacon.beaconPub, expectedBeaconPub)) return; // key mismatch: drop
+    final key = hexEncode(identityPub);
     final curCtr = _beaconCtr[key] ?? 0;
     if (beacon.counter <= curCtr) return; // stale or replayed: ignore
     _beacons[key] = beacon;
@@ -578,7 +564,7 @@ class E2EClient implements GatewayClient {
   void _pruneBeaconForDescriptor(NodeDescriptor nd) {
     if (nd.identityPubKey.isEmpty) return;
     try {
-      final key = _hex(base64.decode(nd.identityPubKey));
+      final key = hexEncode(base64.decode(nd.identityPubKey));
       _beacons.remove(key);
       _beaconCtr.remove(key);
       _beaconMiss.remove(key);
@@ -632,7 +618,7 @@ class E2EClient implements GatewayClient {
     // Build the complete set of hashes for every entry in the linear chain.
     final known = <String>{};
     for (final e in entries) {
-      known.add(_hex(hashEntry(e)));
+      known.add(hexEncode(hashEntry(e)));
     }
     // Build the set of currently-connected identity-pub hex keys.
     final connected = <String>{};
@@ -640,7 +626,7 @@ class E2EClient implements GatewayClient {
       final desc = _roster[nodeId];
       if (desc == null || desc.identityPubKey.isEmpty) continue;
       try {
-        connected.add(_hex(base64.decode(desc.identityPubKey)));
+        connected.add(hexEncode(base64.decode(desc.identityPubKey)));
       } catch (_) {}
     }
     for (final entry in _beacons.entries) {
@@ -656,13 +642,13 @@ class E2EClient implements GatewayClient {
         _beaconMiss.remove(key); // no tip yet: clear any prior miss
         continue;
       }
-      if (known.contains(_hex(b.tip))) {
+      if (known.contains(hexEncode(b.tip))) {
         _beaconMiss.remove(key); // tip reconciled: reset miss streak
         continue;
       }
       // Tip not in resolved chain: track consecutive unreconciled ticks.
       var ms = _beaconMiss[key];
-      if (ms == null || !_bytesEqual(ms.tip, b.tip)) {
+      if (ms == null || !bytesEqual(ms.tip, b.tip)) {
         ms = _BeaconMissState(tip: Uint8List.fromList(b.tip), misses: 1);
         _beaconMiss[key] = ms;
       } else {
@@ -670,7 +656,7 @@ class E2EClient implements GatewayClient {
       }
       if (ms.misses >= _beaconMissThreshold && !_equivocation) {
         developer.log(
-          'equivocation detected — node beacons diverge from resolved chain: key=$key tip=${_hex(b.tip)}',
+          'equivocation detected — node beacons diverge from resolved chain: key=$key tip=${hexEncode(b.tip)}',
           name: 'e2e',
           level: 900, // WARNING
         );
@@ -692,7 +678,7 @@ class E2EClient implements GatewayClient {
       if (desc == null || desc.identityPubKey.isEmpty) continue;
       try {
         final pub = base64.decode(desc.identityPubKey);
-        identHexToNode[_hex(pub)] = nodeId;
+        identHexToNode[hexEncode(pub)] = nodeId;
       } catch (_) {}
     }
     // Collect beacons with their source node ID.

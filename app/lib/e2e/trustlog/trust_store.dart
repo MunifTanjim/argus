@@ -1,31 +1,9 @@
 import 'dart:typed_data';
 
+import '../bytes.dart' show bytesEqual, compareBytes, hexEncode;
 import 'codec.dart' show hashEntry, unmarshalChain, validCoSigns;
 import 'entry.dart';
 import 'trust_log.dart';
-
-bool _eq(Uint8List a, Uint8List b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
-}
-
-int _cmpBytes(Uint8List a, Uint8List b) {
-  for (var i = 0; i < a.length && i < b.length; i++) {
-    if (a[i] != b[i]) return a[i] - b[i];
-  }
-  return a.length - b.length;
-}
-
-String _hex(List<int> b) {
-  final sb = StringBuffer();
-  for (final x in b) {
-    sb.write(x.toRadixString(16).padLeft(2, '0'));
-  }
-  return sb.toString();
-}
 
 /// foldSignersAt replays entries[0..p-1] and returns the trusted signer set at
 /// the fork point — the shared prefix's folded signers.
@@ -41,11 +19,11 @@ Future<Set<String>> _foldSignersAt(List<Entry> entries, int p) async {
 /// is trusted at the fork point.
 Future<int> _weightAtFork(Entry e, Set<String> forkSigners) async {
   if (e.kind == Kind.revokeSigner) {
-    final (n, _) = await validCoSigns(e, (pub) => forkSigners.contains(_hex(pub)));
+    final (n, _) = await validCoSigns(e, (pub) => forkSigners.contains(hexEncode(pub)));
     return n;
   }
   final signer = e.signer;
-  if (signer != null && forkSigners.contains(_hex(signer))) return 1;
+  if (signer != null && forkSigners.contains(hexEncode(signer))) return 1;
   return 0;
 }
 
@@ -64,7 +42,7 @@ bool _isRemoval(Entry e) => e.kind == Kind.revokeSigner || e.kind == Kind.remove
 ///     diverging entry. Every divergence resolves deterministically.
 Future<bool> _forkChoice(List<Entry> cur, List<Entry> cand) async {
   var p = 0;
-  while (p < cur.length && p < cand.length && _eq(hashEntry(cur[p]), hashEntry(cand[p]))) {
+  while (p < cur.length && p < cand.length && bytesEqual(hashEntry(cur[p]), hashEntry(cand[p]))) {
     p++;
   }
   if (p == cur.length) {
@@ -85,7 +63,7 @@ Future<bool> _forkChoice(List<Entry> cur, List<Entry> cand) async {
   final rcand = _isRemoval(cand[p]);
   if (rcur != rcand) return rcand;
   // Final tie-break: globally-lowest first-diverging-entry hash.
-  return _cmpBytes(hashEntry(cand[p]), hashEntry(cur[p])) < 0;
+  return compareBytes(hashEntry(cand[p]), hashEntry(cur[p])) < 0;
 }
 
 /// Holds a verified chain pinned to an out-of-band genesis hash. ingest adopts a
@@ -149,7 +127,7 @@ class TrustStore {
     }
     // Cheap genesis-pin check first — reject a wrong-genesis chain before the
     // expensive full-chain signature verification in Load.
-    if (!_eq(hashEntry(entries.first), _genesisHash!)) {
+    if (!bytesEqual(hashEntry(entries.first), _genesisHash!)) {
       throw const FormatException('trustlog: candidate genesis does not match pinned hash');
     }
     final cand = await TrustLog.load(entries); // verifies sigs, links, signer trust

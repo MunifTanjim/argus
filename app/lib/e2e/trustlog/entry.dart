@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../bytes.dart' show putUint32;
+
 /// Trust-log entry kinds (values match Go trustlog.Kind).
 enum Kind {
   genesis(1), addSigner(2), removeSigner(3), authorizeDevice(4), revokeDevice(5), disable(6),
@@ -54,16 +56,8 @@ class Entry {
 /// Appends a 4-byte big-endian length prefix then the bytes (len 0 for null/empty).
 void putField(BytesBuilder b, Uint8List? f) {
   final len = f?.length ?? 0;
-  final h = Uint8List(4);
-  ByteData.sublistView(h).setUint32(0, len, Endian.big);
-  b.add(h);
+  putUint32(b, len);
   if (len > 0) b.add(f!);
-}
-
-void _putCount(BytesBuilder b, int n) {
-  final h = Uint8List(4);
-  ByteData.sublistView(h).setUint32(0, n, Endian.big);
-  b.add(h);
 }
 
 /// The deterministic encoding an entry's signature covers: every field except sig
@@ -73,18 +67,18 @@ Uint8List sigBytes(Entry e) {
   final b = BytesBuilder();
   b.addByte(e.kind.value);
   putField(b, e.prev);
-  _putCount(b, e.signers.length);
+  putUint32(b, e.signers.length);
   for (final s in e.signers) {
     putField(b, s);
   }
-  _putCount(b, e.disablements.length);
+  putUint32(b, e.disablements.length);
   for (final d in e.disablements) {
     putField(b, d);
   }
   putField(b, e.key);
   putField(b, e.signer);
   if (e.kind == Kind.revokeSigner) {
-    _putCount(b, e.replaces.length);
+    putUint32(b, e.replaces.length);
     for (final r in e.replaces) {
       putField(b, r);
     }

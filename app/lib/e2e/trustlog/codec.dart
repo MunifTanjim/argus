@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography_plus/cryptography_plus.dart' show Ed25519, SimplePublicKey, KeyPairType, Signature;
 
+import '../bytes.dart' show putUint32;
 import '../symmetric_state.dart' show blake2s;
 import 'entry.dart';
 
@@ -12,13 +13,6 @@ const int _maxCoSigns = 1 << 12;
 const int _maxReplaces = 1 << 12;
 const int _maxEntries = 1 << 16;
 
-// Writes a 4-byte big-endian count (mirrors Go's binary.BigEndian.PutUint32).
-void _count32(BytesBuilder b, int n) {
-  final h = Uint8List(4);
-  ByteData.sublistView(h).setUint32(0, n, Endian.big);
-  b.add(h);
-}
-
 /// The chain hash of a full (signed) entry. Covers sigBytes ‖ putField(sig).
 /// For KindRevokeSigner, replaces is already in sigBytes; CoSigns are appended
 /// after Sig so the chain commits to the full co-signed payload (mirrors Go hashEntry).
@@ -27,7 +21,7 @@ Uint8List hashEntry(Entry e) {
   b.add(sigBytes(e));
   putField(b, e.sig);
   if (e.kind == Kind.revokeSigner) {
-    _count32(b, e.coSigns.length);
+    putUint32(b, e.coSigns.length);
     for (final cs in e.coSigns) {
       putField(b, cs.signer);
       putField(b, cs.sig);
