@@ -48,27 +48,26 @@ func (d *Node) handleBeaconDeliver(_ context.Context, params json.RawMessage) (a
 		return nil, nil // invalid sig: silently drop
 	}
 
-	// (b) Attribution: BeaconPub must be a roster-known peer's beacon_pubkey.
+	// (b) Attribution + (c) counter guard + accept — one atomic section. The read
+	// of the last accepted counter, the strictly-greater check, and the store
+	// update must not be split across separate locked regions: two concurrent
+	// deliveries could otherwise both read the same last counter, both pass the
+	// guard, then race their writes so a LOWER counter's write lands last —
+	// overwriting a newer beacon (a courier could use that to suppress a beacon
+	// whose tip revealed equivocation). VerifyBeacon (crypto) already ran above,
+	// outside the lock.
 	key := string(b.BeaconPub)
 	d.peerBeaconMu.Lock()
-	known := d.peerBeaconPubs[key]
-	lastCtr := d.peerBeaconCtr[key]
-	d.peerBeaconMu.Unlock()
-	if !known {
+	defer d.peerBeaconMu.Unlock()
+	if !d.peerBeaconPubs[key] {
 		return nil, nil // unknown beacon pub: drop
 	}
-
-	// (c) Counter guard: ignore stale or replayed beacons.
-	if b.Counter <= lastCtr {
+	if b.Counter <= d.peerBeaconCtr[key] {
 		return nil, nil // stale or replayed: ignore
 	}
-
-	// Accept: update stored beacon and reset any prior miss streak.
-	d.peerBeaconMu.Lock()
 	d.peerBeaconCtr[key] = b.Counter
 	d.peerBeacons[key] = b
 	delete(d.peerBeaconMiss, key) // new beacon supersedes any miss streak
-	d.peerBeaconMu.Unlock()
 
 	return nil, nil
 }
