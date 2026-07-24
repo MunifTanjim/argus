@@ -23,20 +23,20 @@ type diskTask struct {
 	BlockedBy   []string `json:"blockedBy"`
 }
 
-// taskDirs returns the two candidate task dirs for a session: primary keyed by
-// session-<short> (first UUID segment, newer Claude Code), fallback by the full
-// transcript UUID (older sessions). Empty when ~/.claude cannot be located.
-func taskDirs(transcriptPath string) (primary, fallback string) {
+// taskDirs returns candidate task dirs, most-likely first. The session-<short>
+// dir only exists under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS.
+func taskDirs(transcriptPath string) []string {
 	home := claudeHome()
 	if home == "" {
-		return "", ""
+		return nil
 	}
 	base := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
-	return filepath.Join(home, "tasks", "session-"+sessionShort(base)), filepath.Join(home, "tasks", base)
+	return []string{
+		filepath.Join(home, "tasks", base),
+		filepath.Join(home, "tasks", "session-"+sessionShort(base)),
+	}
 }
 
-// sessionShort is the session-<short> key Claude Code names a transcript's
-// tasks/ and teams/ dirs by.
 func sessionShort(base string) string {
 	if i := strings.IndexByte(base, '-'); i > 0 {
 		return base[:i]
@@ -44,23 +44,24 @@ func sessionShort(base string) string {
 	return base
 }
 
-// ReadTasks returns a session's current task list, ordered by numeric id. A
-// missing/empty task dir yields an empty slice, not an error.
+// ReadTasks returns a session's task list ordered by numeric id, from the first
+// candidate dir that has tasks. Missing dirs are not errors; a read error
+// surfaces only when no candidate yielded tasks.
 func ReadTasks(transcriptPath string) ([]api.Task, error) {
-	primary, fallback := taskDirs(transcriptPath)
-	if primary == "" {
-		return nil, nil
-	}
-	tasks, err := readTaskDir(primary)
-	if err != nil {
-		return nil, err
-	}
-	if len(tasks) == 0 {
-		if fb, ferr := readTaskDir(fallback); ferr == nil {
-			return fb, nil
+	var firstErr error
+	for _, dir := range taskDirs(transcriptPath) {
+		tasks, err := readTaskDir(dir)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if len(tasks) > 0 {
+			return tasks, nil
 		}
 	}
-	return tasks, nil
+	return nil, firstErr
 }
 
 func readTaskDir(dir string) ([]api.Task, error) {

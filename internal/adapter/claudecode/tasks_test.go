@@ -89,27 +89,27 @@ func TestReadTasks_FullUUIDFallback(t *testing.T) {
 	}
 }
 
-func TestReadTasks_PrimaryWinsOverFallback(t *testing.T) {
+func TestReadTasks_FullUUIDWinsOverSessionShort(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	claude := filepath.Join(home, ".claude")
 	tp := filepath.Join(claude, "projects", "-proj", "abcd1234-1111-2222-3333-444455556666.jsonl")
-	primary := filepath.Join(claude, "tasks", "session-abcd1234")
-	fallback := filepath.Join(claude, "tasks", "abcd1234-1111-2222-3333-444455556666")
-	for _, d := range []string{primary, fallback} {
+	fullUUID := filepath.Join(claude, "tasks", "abcd1234-1111-2222-3333-444455556666")
+	sessionShort := filepath.Join(claude, "tasks", "session-abcd1234")
+	for _, d := range []string{fullUUID, sessionShort} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writeTask(t, primary, "1", "in_progress")
-	writeTask(t, fallback, "9", "completed")
+	writeTask(t, fullUUID, "9", "completed")
+	writeTask(t, sessionShort, "1", "in_progress")
 
 	tasks, err := ReadTasks(tp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].ID != "1" {
-		t.Fatalf("primary should win: got %+v", tasks)
+	if len(tasks) != 1 || tasks[0].ID != "9" {
+		t.Fatalf("full-uuid should win: got %+v", tasks)
 	}
 }
 

@@ -82,10 +82,11 @@ func collectSessionFiles(transcriptPath, home string) ([]adapter.BundledFile, er
 		}
 	}
 
-	// tasks/ and teams/ dirs, keyed by session-<shortid> (first UUID segment).
-	short := sessionShort(base)
-	addTree(filepath.Join(home, "tasks", "session-"+short))
-	addTree(filepath.Join(home, "teams", "session-"+short))
+	// session-<short> dirs only exist under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS.
+	for _, key := range []string{base, "session-" + sessionShort(base)} {
+		addTree(filepath.Join(home, "tasks", key))
+		addTree(filepath.Join(home, "teams", key))
+	}
 
 	return out, nil
 }

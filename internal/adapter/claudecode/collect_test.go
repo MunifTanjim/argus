@@ -37,8 +37,10 @@ func TestCollectSessionFiles(t *testing.T) {
 	mkfile(main)
 	mkfile(filepath.Join(projects, uuid, "subagents", "agent-a.jsonl"))
 	mkfile(filepath.Join(projects, uuid, "subagents", "agent-a.meta.json"))
-	mkfile(filepath.Join(home, "tasks", "session-"+short, "1.json"))
-	mkfile(filepath.Join(home, "teams", "session-"+short, "config.json"))
+	mkfile(filepath.Join(home, "tasks", uuid, "1.json"))
+	mkfile(filepath.Join(home, "teams", uuid, "config.json"))
+	mkfile(filepath.Join(home, "tasks", "session-"+short, "2.json"))
+	mkfile(filepath.Join(home, "teams", "session-"+short, "team.json"))
 
 	files, err := collectSessionFiles(main, home)
 	if err != nil {
@@ -52,8 +54,10 @@ func TestCollectSessionFiles(t *testing.T) {
 		"root/projects/-proj/" + uuid + ".jsonl",
 		"root/projects/-proj/" + uuid + "/subagents/agent-a.jsonl",
 		"root/projects/-proj/" + uuid + "/subagents/agent-a.meta.json",
-		"root/tasks/session-" + short + "/1.json",
-		"root/teams/session-" + short + "/config.json",
+		"root/tasks/" + uuid + "/1.json",
+		"root/teams/" + uuid + "/config.json",
+		"root/tasks/session-" + short + "/2.json",
+		"root/teams/session-" + short + "/team.json",
 	}
 	sort.Strings(want)
 	for _, w := range want {
