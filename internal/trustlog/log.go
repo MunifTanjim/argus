@@ -173,6 +173,9 @@ func (l *Log) verify(e *Entry) error {
 		}
 		return nil
 	default:
+		if !l.signers[string(e.Signer)] {
+			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
 		return errors.New("trustlog: unknown entry kind")
 	}
 }
@@ -219,8 +222,11 @@ func (l *Log) fold(e *Entry) {
 // replaces first then calling remainingAfterRevoke).
 func remainingAfterRevokeWith(signers map[string]bool, replaces, revoked [][]byte) int {
 	withReplaces := len(signers)
+	seenReplaces := map[string]bool{}
 	for _, r := range replaces {
-		if !signers[string(r)] {
+		rs := string(r)
+		if !signers[rs] && !seenReplaces[rs] {
+			seenReplaces[rs] = true
 			withReplaces++
 		}
 	}

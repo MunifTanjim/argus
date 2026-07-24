@@ -30,7 +30,7 @@ func genChain(t *testing.T, seed int64, ops int) genResult {
 	}
 	devs := [][]byte{}
 	for i := 0; i < ops; i++ {
-		switch r.Intn(4) {
+		switch r.Intn(5) {
 		case 0: // authorize a fresh device
 			d, _ := GenerateSigner()
 			if err := l.AuthorizeDevice(d.Public, keys[r.Intn(len(keys))]); err == nil {
@@ -46,9 +46,30 @@ func genChain(t *testing.T, seed int64, ops int) genResult {
 			if err := l.AddSigner(ns.Public, keys[r.Intn(len(keys))]); err == nil {
 				keys = append(keys, ns)
 			}
-		case 3: // remove a signer (never the last)
+		case 3: // remove a signer (never the last); keep keys in sync
 			if len(keys) > 1 {
-				_ = l.RemoveSigner(keys[len(keys)-1].Public, keys[0])
+				if err := l.RemoveSigner(keys[len(keys)-1].Public, keys[0]); err == nil {
+					keys = keys[:len(keys)-1]
+				}
+			}
+		case 4: // revoke a signer co-signed by all others (need ≥3 so 2 can co-sign 1 revocation)
+			if len(keys) >= 3 {
+				revokedIdx := len(keys) - 1
+				revokedKey := keys[revokedIdx]
+				coSigners := keys[:revokedIdx]
+				var replacePub [][]byte
+				var newKey *SignerKey
+				if r.Intn(2) == 0 {
+					ns, _ := GenerateSigner()
+					replacePub = [][]byte{ns.Public}
+					newKey = &ns
+				}
+				if err := l.RevokeSigner([][]byte{revokedKey.Public}, replacePub, coSigners); err == nil {
+					keys = keys[:revokedIdx]
+					if newKey != nil {
+						keys = append(keys, *newKey)
+					}
+				}
 			}
 		}
 	}

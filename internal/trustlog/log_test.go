@@ -375,6 +375,100 @@ func TestRevokeAllSignersWithoutReplacementRejected(t *testing.T) {
 	}
 }
 
+// TestRemainingAfterRevokeWithMatchesMapReference verifies that remainingAfterRevokeWith
+// equals the reference (copy signers into fresh map, add every replace deduplicating
+// via map, then remainingAfterRevoke) for a range of inputs covering duplicate replaces,
+// replaces overlapping existing signers, and revoked pubkeys that are also in replaces.
+func TestRemainingAfterRevokeWithMatchesMapReference(t *testing.T) {
+	reference := func(signers map[string]bool, replaces, revoked [][]byte) int {
+		m := map[string]bool{}
+		for k, v := range signers {
+			m[k] = v
+		}
+		for _, r := range replaces {
+			m[string(r)] = true
+		}
+		return remainingAfterRevoke(m, revoked)
+	}
+
+	pub := func(b byte) []byte { return []byte{b} }
+
+	cases := []struct {
+		name     string
+		signers  map[string]bool
+		replaces [][]byte
+		revoked  [][]byte
+	}{
+		{
+			name:    "no replaces no revoked",
+			signers: map[string]bool{string(pub(1)): true, string(pub(2)): true},
+		},
+		{
+			name:     "replaces not in signers no duplicates",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(3)},
+			revoked:  [][]byte{pub(1)},
+		},
+		{
+			name:     "duplicate replaces not in signers",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(2)},
+			revoked:  [][]byte{pub(1)},
+		},
+		{
+			name:     "duplicate replaces with revoke of duplicate",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(2)},
+			revoked:  [][]byte{pub(2), pub(1)},
+		},
+		{
+			name:     "replaces overlapping existing signers",
+			signers:  map[string]bool{string(pub(1)): true, string(pub(2)): true},
+			replaces: [][]byte{pub(2), pub(3)},
+			revoked:  [][]byte{pub(2)},
+		},
+		{
+			name:     "revoked also in replaces",
+			signers:  map[string]bool{string(pub(1)): true, string(pub(2)): true},
+			replaces: [][]byte{pub(3)},
+			revoked:  [][]byte{pub(3), pub(1)},
+		},
+		{
+			name:     "duplicate replaces with revoked in replaces",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(2), pub(3)},
+			revoked:  [][]byte{pub(2), pub(1)},
+		},
+		{
+			name:     "all replaces duplicated revoked in replaces",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(2)},
+			revoked:  [][]byte{pub(2)},
+		},
+		{
+			name:     "empty signers with duplicate replaces",
+			signers:  map[string]bool{},
+			replaces: [][]byte{pub(1), pub(1), pub(2)},
+			revoked:  [][]byte{pub(1)},
+		},
+		{
+			name:     "no revoked many duplicate replaces",
+			signers:  map[string]bool{string(pub(1)): true},
+			replaces: [][]byte{pub(2), pub(2), pub(3), pub(3)},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := reference(tc.signers, tc.replaces, tc.revoked)
+			got := remainingAfterRevokeWith(tc.signers, tc.replaces, tc.revoked)
+			if got != want {
+				t.Errorf("remainingAfterRevokeWith = %d, want %d (reference)", got, want)
+			}
+		})
+	}
+}
+
 func TestLogCloneIsDeepAndIndependent(t *testing.T) {
 	// Build a small verified chain via the public helpers used elsewhere in tests.
 	g := genChain(t, 1, 6) // from gen_test.go (Task 3 step 3): seed=1, ~6 ops
