@@ -43,6 +43,20 @@ void main() {
         throwsA(isA<FatalConnectError>()));
   });
 
+  test('a lost stored anchor (anchored before, chain gone) refuses to connect (no re-TOFU)', () async {
+    final v = _tl();
+    final kv = _MemKv();
+    // Anchor a valid chain, then simulate the chain being lost while the marker remains.
+    await TrustChainStore(kv).save(Uint8List.fromList(base64.decode(v['chain'] as String)));
+    await kv.delete('e2e_trust_chain');
+    final node = LoopbackNode('A', await generateKeyPair(), (m, p) => Uint8List.fromList(utf8.encode('null')));
+    final link = MultiNodeLoopbackLink({'A': node},
+        trustChain: Uint8List.fromList(base64.decode(v['chain'] as String)));
+    await expectLater(
+        buildE2EClient(link.incoming, link.send, ClientIdentityStore(kv), TrustChainStore(kv)),
+        throwsA(isA<FatalConnectError>()));
+  });
+
   test('tofu first-connect: adopted chain is persisted in the store', () async {
     final v = _tl();
     final aKp = await keyPairFromSeed(base64.decode(v['enforcement_node_a_seed'] as String));

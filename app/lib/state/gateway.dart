@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -48,7 +49,14 @@ Future<GatewayClient> buildE2EClient(
   TrustChainStore chainStore,
 ) async {
   final identity = await identityStore.loadOrCreate();
-  final seed = await chainStore.load();
+  final Uint8List? seed;
+  try {
+    seed = await chainStore.load();
+  } on TrustAnchorLost {
+    // Anchored before, but the stored anchor is now missing/corrupt — fail closed
+    // (do NOT re-TOFU onto whatever the gateway serves).
+    throw TrustAnchorTampered();
+  }
   if (seed != null) {
     final probe = TrustStore.tofu();
     try {

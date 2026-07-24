@@ -34,4 +34,28 @@ void main() {
     await store.clear();
     expect(await store.load(), isNull);
   });
+
+  // M9: once a device has anchored (verified a chain), a subsequently missing or
+  // corrupt anchor must fail closed — not silently re-TOFU to whatever the gateway
+  // serves, which would lose rollback protection for a previously-verified user.
+
+  test('load throws when the anchor is gone after having anchored', () async {
+    final kv = _MemKv();
+    final store = TrustChainStore(kv);
+    await store.save(Uint8List.fromList([1, 2, 3]));
+    await kv.delete('e2e_trust_chain'); // storage lost the chain; anchored marker remains
+    expect(() => store.load(), throwsA(isA<TrustAnchorLost>()));
+  });
+
+  test('load throws when the anchor is corrupt after having anchored', () async {
+    final kv = _MemKv();
+    final store = TrustChainStore(kv);
+    await store.save(Uint8List.fromList([1, 2, 3]));
+    await kv.write('e2e_trust_chain', 'not base64 %%%');
+    expect(() => store.load(), throwsA(isA<TrustAnchorLost>()));
+  });
+
+  test('load returns null (first use) when never anchored', () async {
+    expect(await TrustChainStore(_MemKv()).load(), isNull);
+  });
 }
