@@ -39,49 +39,42 @@ func TestLoadOrCreateSignerRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadOrCreateSignerRegeneratesOnCorrupt(t *testing.T) {
-	t.Run("not json", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "signer-key.json")
-		if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-		kp, err := LoadOrCreateSigner(path)
-		if err != nil {
-			t.Fatalf("LoadOrCreateSigner: %v", err)
-		}
-		if len(kp.Public) != ed25519.PublicKeySize {
-			t.Fatal("expected a freshly generated key")
-		}
+// TestLoadOrCreateSignerFailsLoudOnCorrupt verifies a present-but-corrupt signer
+// key file is NOT silently regenerated (which would change the trusted signer);
+// LoadOrCreateSigner errors and leaves the file untouched.
+func TestLoadOrCreateSignerFailsLoudOnCorrupt(t *testing.T) {
+	badSizes, err := json.Marshal(struct {
+		Private string `json:"private"`
+		Public  string `json:"public"`
+	}{
+		Private: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, 32)),
+		Public:  base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x02}, 32)),
 	})
-
-	t.Run("wrong key sizes", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "signer-key.json")
-		// 32-byte private is invalid for Ed25519 (expects 64 bytes); 32-byte public is
-		// correct size but paired with a wrong private — loader must reject it.
-		bad := struct {
-			Private string `json:"private"`
-			Public  string `json:"public"`
-		}{
-			Private: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, 32)),
-			Public:  base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x02}, 32)),
-		}
-		data, err := json.Marshal(bad)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-		kp, err := LoadOrCreateSigner(path)
-		if err != nil {
-			t.Fatalf("LoadOrCreateSigner: %v", err)
-		}
-		if len(kp.Private) != ed25519.PrivateKeySize || len(kp.Public) != ed25519.PublicKeySize {
-			t.Fatalf("expected freshly generated key: priv=%d pub=%d", len(kp.Private), len(kp.Public))
-		}
-	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	cases := map[string][]byte{
+		"not json":        []byte("not json"),
+		"wrong key sizes": badSizes,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "signer-key.json")
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if _, err := LoadOrCreateSigner(path); err == nil {
+				t.Fatal("expected an error for a corrupt signer key file, got nil")
+			}
+			got, rerr := os.ReadFile(path)
+			if rerr != nil {
+				t.Fatalf("read back: %v", rerr)
+			}
+			if !bytes.Equal(got, content) {
+				t.Fatal("corrupt signer key file must not be overwritten with a fresh key")
+			}
+		})
+	}
 }
 
 func TestLoadOrCreateSignerUnreadable(t *testing.T) {
