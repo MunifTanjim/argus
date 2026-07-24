@@ -79,6 +79,17 @@ void main() {
       expect(msg.sublist(80, 88), equals([0, 0, 0, 0, 0, 0, 0, 3]));
       expect(msg.length, 88);
     });
+
+    test('length/counter above 2^32 encode big-endian across both halves', () {
+      final pub = Uint8List(32);
+      final tip = Uint8List(32);
+      // Values with a non-zero high 32-bit half, to catch a broken split.
+      final msg = beaconSigBytes(pub, tip, 0x0102030405, 0x1000000FF);
+      expect(msg.sublist(72, 80), equals([0, 0, 0, 0x01, 0x02, 0x03, 0x04, 0x05]),
+          reason: 'length must be 8-byte big-endian across both halves');
+      expect(msg.sublist(80, 88), equals([0, 0, 0, 0x01, 0x00, 0x00, 0x00, 0xFF]),
+          reason: 'counter must be 8-byte big-endian across both halves');
+    });
   });
 
   group('Beacon JSON round-trip', () {

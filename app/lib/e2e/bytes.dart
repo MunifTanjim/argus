@@ -42,3 +42,15 @@ void putUint32(BytesBuilder b, int n) {
   ByteData.sublistView(h).setUint32(0, n, Endian.big);
   b.add(h);
 }
+
+/// putUint64 appends n as an 8-byte big-endian integer (mirrors Go
+/// binary.BigEndian.PutUint64). Web-safe: it writes two 32-bit halves rather than
+/// using ByteData.setUint64, which throws under dart2js (Flutter web has no native
+/// 64-bit int) — the same technique cipher_state.dart uses for the Noise nonce.
+void putUint64(BytesBuilder b, int n) {
+  final h = Uint8List(8);
+  final bd = ByteData.sublistView(h);
+  bd.setUint32(0, (n ~/ 0x100000000) & 0xffffffff, Endian.big); // high 32 bits
+  bd.setUint32(4, n & 0xffffffff, Endian.big); // low 32 bits
+  b.add(h);
+}

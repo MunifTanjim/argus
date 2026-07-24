@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography_plus/cryptography_plus.dart';
 
+import 'bytes.dart' show putUint64;
 import 'ed25519.dart' show ed25519Verify;
 import 'trustlog/entry.dart' show putField;
 
@@ -65,12 +66,8 @@ Uint8List beaconSigBytes(Uint8List beaconPub, Uint8List tip, int length, int cou
   final b = BytesBuilder();
   putField(b, beaconPub); // 4-byte BE len + bytes
   putField(b, tip); // 4-byte BE len + bytes
-  final l8 = Uint8List(8);
-  ByteData.sublistView(l8).setUint64(0, length, Endian.big);
-  b.add(l8);
-  final c8 = Uint8List(8);
-  ByteData.sublistView(c8).setUint64(0, counter, Endian.big);
-  b.add(c8);
+  putUint64(b, length); // 8-byte BE, web-safe
+  putUint64(b, counter); // 8-byte BE, web-safe
   return b.toBytes();
 }
 
