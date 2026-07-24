@@ -2,20 +2,10 @@ package node
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 
+	"github.com/MunifTanjim/argus/internal/keyfile"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
-
-// persistedSigner is the on-disk form of the node's Ed25519 signer keypair.
-type persistedSigner struct {
-	Private string `json:"private"` // base64 Ed25519 private (64 bytes)
-	Public  string `json:"public"`  // base64 Ed25519 public (32 bytes)
-}
 
 // LoadOrCreateSigner loads the node's persisted Ed25519 signer keypair, generating
 // and saving one on first use (0600 file under a 0700 dir), mirroring the Noise
@@ -23,36 +13,18 @@ type persistedSigner struct {
 // mode — so a later `lock init` can designate an already-existing key as a trusted
 // signer with no re-provisioning. The private half never leaves the node.
 func LoadOrCreateSigner(path string) (trustlog.SignerKey, error) {
-	b, err := os.ReadFile(path)
-	if err == nil {
-		var p persistedSigner
-		if json.Unmarshal(b, &p) == nil {
-			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
-			pub, e2 := base64.StdEncoding.DecodeString(p.Public)
-			if e1 == nil && e2 == nil && len(priv) == ed25519.PrivateKeySize && len(pub) == ed25519.PublicKeySize {
-				return trustlog.SignerKey{Public: ed25519.PublicKey(pub), Private: ed25519.PrivateKey(priv)}, nil
-			}
-		}
+	return keyfile.LoadOrCreate(path, "LoadOrCreateSigner",
+		trustlog.GenerateSigner,
+		func(k trustlog.SignerKey) (priv, pub []byte) { return k.Private, k.Public },
+		signerFromBytes,
+	)
+}
+
+// signerFromBytes reconstructs an Ed25519 SignerKey from decoded bytes, rejecting
+// wrong-length halves. Shared by the signer and beacon key files.
+func signerFromBytes(priv, pub []byte) (trustlog.SignerKey, bool) {
+	if len(priv) != ed25519.PrivateKeySize || len(pub) != ed25519.PublicKeySize {
+		return trustlog.SignerKey{}, false
 	}
-	if err != nil && !os.IsNotExist(err) {
-		return trustlog.SignerKey{}, fmt.Errorf("LoadOrCreateSigner: reading key %s: %w", path, err)
-	}
-	kp, err := trustlog.GenerateSigner()
-	if err != nil {
-		return trustlog.SignerKey{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return trustlog.SignerKey{}, err
-	}
-	b, err = json.Marshal(persistedSigner{
-		Private: base64.StdEncoding.EncodeToString(kp.Private),
-		Public:  base64.StdEncoding.EncodeToString(kp.Public),
-	})
-	if err != nil {
-		return trustlog.SignerKey{}, err
-	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		return trustlog.SignerKey{}, err
-	}
-	return kp, nil
+	return trustlog.SignerKey{Public: ed25519.PublicKey(pub), Private: ed25519.PrivateKey(priv)}, true
 }

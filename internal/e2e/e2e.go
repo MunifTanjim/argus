@@ -6,15 +6,13 @@ package e2e
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/flynn/noise"
+
+	"github.com/MunifTanjim/argus/internal/keyfile"
 )
 
 // suite is the single fixed cipher suite for all argus E2E channels.
@@ -35,49 +33,21 @@ func GenerateKeyPair() (KeyPair, error) {
 	return KeyPair{Private: dh.Private, Public: dh.Public}, nil
 }
 
-// persistedIdentity is the on-disk form of a Curve25519 identity keypair.
-type persistedIdentity struct {
-	Private string `json:"private"` // base64 Curve25519 private (32 bytes)
-	Public  string `json:"public"`  // base64 Curve25519 public (32 bytes)
-}
-
 // LoadOrCreateIdentity loads a persisted Curve25519 identity keypair, generating and
 // saving one on first use (0600 file under a 0700 dir). A stable identity lets a
 // locked network authorize this device's key once (argus lock sign) and keep it
 // valid across restarts.
 func LoadOrCreateIdentity(path string) (KeyPair, error) {
-	b, err := os.ReadFile(path)
-	if err == nil {
-		var p persistedIdentity
-		if json.Unmarshal(b, &p) == nil {
-			priv, e1 := base64.StdEncoding.DecodeString(p.Private)
-			pub, e2 := base64.StdEncoding.DecodeString(p.Public)
-			if e1 == nil && e2 == nil && len(priv) == 32 && len(pub) == 32 {
-				return KeyPair{Private: priv, Public: pub}, nil
+	return keyfile.LoadOrCreate(path, "LoadOrCreateIdentity",
+		GenerateKeyPair,
+		func(kp KeyPair) (priv, pub []byte) { return kp.Private, kp.Public },
+		func(priv, pub []byte) (KeyPair, bool) {
+			if len(priv) != 32 || len(pub) != 32 {
+				return KeyPair{}, false
 			}
-		}
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return KeyPair{}, fmt.Errorf("LoadOrCreateIdentity: reading key %s: %w", path, err)
-	}
-	kp, err := GenerateKeyPair()
-	if err != nil {
-		return KeyPair{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return KeyPair{}, err
-	}
-	b, err = json.Marshal(persistedIdentity{
-		Private: base64.StdEncoding.EncodeToString(kp.Private),
-		Public:  base64.StdEncoding.EncodeToString(kp.Public),
-	})
-	if err != nil {
-		return KeyPair{}, err
-	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		return KeyPair{}, err
-	}
-	return kp, nil
+			return KeyPair{Private: priv, Public: pub}, true
+		},
+	)
 }
 
 // maxChunk is the largest plaintext per Noise record: the 65535-byte record

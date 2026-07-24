@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
@@ -102,7 +103,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
-		if kp, err := node.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
+		if kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
 			return fail(cmd, err)
 		} else {
 			d.SetIdentityKey(kp)
