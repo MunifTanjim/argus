@@ -34,11 +34,18 @@ func persistBeaconCounter(keyPath string, counter uint64) error {
 	return atomicfile.Write(keyPath+".counter", []byte(strconv.FormatUint(counter, 10)))
 }
 
-// makeBeacon builds and signs a fresh HEAD beacon, bumping the monotonic counter.
-// tip and length come from the current trust store (zero values when trust is off).
-// The caller must have a non-empty beacon private key (d.beacon.Private).
+// makeBeacon builds and signs a fresh HEAD beacon, bumping the monotonic counter
+// and persisting it (best-effort, when beaconCounterPath is set) so a restarted
+// node always seeds the counter above any value peers have already accepted —
+// regardless of which emission path (uplink offer, sync-tick offer, or identify
+// response) produced the beacon. tip and length come from the current trust store
+// (zero values when trust is off). The caller must have a non-empty beacon private
+// key (d.beacon.Private).
 func (d *Node) makeBeacon() api.Beacon {
 	counter := d.beaconCounter.Add(1)
+	if p := d.beaconCounterPath; p != "" {
+		_ = persistBeaconCounter(p, counter)
+	}
 	var tip []byte
 	var length int
 	if st := d.trust.Load(); st != nil {
@@ -50,8 +57,7 @@ func (d *Node) makeBeacon() api.Beacon {
 
 // emitBeacon produces a fresh beacon and offers it to the gateway over the active
 // uplink. It is a no-op when the beacon key is absent or no uplink is connected.
-// When beaconCounterPath is set, the new counter is persisted so a restarted node
-// seeds the counter above any value peers have already accepted.
+// The counter is persisted by makeBeacon.
 func (d *Node) emitBeacon() {
 	if len(d.beacon.Private) == 0 {
 		return
@@ -60,11 +66,7 @@ func (d *Node) emitBeacon() {
 	if peer == nil {
 		return
 	}
-	b := d.makeBeacon()
-	if p := d.beaconCounterPath; p != "" {
-		_ = persistBeaconCounter(p, b.Counter)
-	}
-	_ = peer.Call(api.MethodBeaconOffer, b, nil)
+	_ = peer.Call(api.MethodBeaconOffer, d.makeBeacon(), nil)
 }
 
 // LoadOrCreateBeaconKey loads the node's persisted Ed25519 beacon keypair,

@@ -207,7 +207,7 @@ func (d *Node) BeaconPub() string { return d.beaconPubB64 }
 // SetBeaconCounterPath enables beacon counter persistence. On call it reads the
 // counter from the sibling file (path + ".counter") and seeds beaconCounter so
 // the first emission after a restart is strictly greater than the last value
-// peers accepted before the restart. emitBeacon writes the updated counter back
+// peers accepted before the restart. makeBeacon writes the updated counter back
 // on every emission. Call before Run, after SetBeaconKey.
 func (d *Node) SetBeaconCounterPath(path string) {
 	d.beaconCounterPath = path
