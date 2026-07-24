@@ -131,4 +131,30 @@ void main() {
       assertHonestWins(store);
     });
   });
+
+  // --- (e) disablement dominance: a break-glass disabled chain beats a
+  // non-disabled competitor regardless of fork weight and ingest order ---
+  group('disablement_dominance', () {
+    late Map<String, dynamic> v;
+    setUp(() => v = _fc()['disablement_dominance'] as Map<String, dynamic>);
+
+    test('attacker adopted first — disabled chain must dominate and be adopted', () async {
+      final store = TrustStore(_b(v, 'genesis_hash'));
+      await store.ingest(_b(v, 'attacker_chain'));
+      await store.ingest(_b(v, 'disabled_chain'));
+      expect(store.disabled, isTrue, reason: 'disabled chain must win fork-choice');
+      expect(store.tip, equals(_b(v, 'winner_tip')));
+      expect(store.signerTrusted(_b(v, 'added_signer_b')), isFalse,
+          reason: 'attacker-added signer must not be trusted after the disable wins');
+    });
+
+    test('disabled adopted first — a non-disabled branch must not roll it back', () async {
+      final store = TrustStore(_b(v, 'genesis_hash'));
+      await store.ingest(_b(v, 'disabled_chain'));
+      await store.ingest(_b(v, 'attacker_chain'));
+      expect(store.disabled, isTrue, reason: 'a disablement must not be rolled back');
+      expect(store.tip, equals(_b(v, 'winner_tip')));
+      expect(store.signerTrusted(_b(v, 'added_signer_b')), isFalse);
+    });
+  });
 }

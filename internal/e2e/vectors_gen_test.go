@@ -379,6 +379,28 @@ func TestGenerateVectors(t *testing.T) {
 	rwrCBranchChain := trustlog.MarshalChain(rwrCBranch.Entries())
 	rwrWinnerTip := rwrHonest.Tip()
 
+	// ---- (e) disablement dominance: a disabled chain beats a non-disabled competitor ----
+	//   disabled_chain: genesis(A, commit) -> Disable(secret) signed by a NON-signer (fork weight 0)
+	//   attacker_chain: genesis(A, commit) -> addSigner(B) signed by trusted A (fork weight 1)
+	//   expected winner: disabled_chain in BOTH ingest orders — a break-glass disable
+	//   dominates fork-choice regardless of weight, so B is never trusted and disabled=true.
+	ddA := mustGenSignerSeed(t, 0xD1)
+	ddNon := mustGenSignerSeed(t, 0xD2) // signs the disable; not a trusted signer (weight 0)
+	ddB := mustGenSignerSeed(t, 0xD3)   // added on the attacker branch
+	ddSecret := bytesFill(0xD4)         // 32-byte disablement secret (deterministic)
+	ddCommit := trustlog.DisablementCommitment(ddSecret)
+	ddPubs := [][]byte{ddA.Public}
+	ddDisabled, err := trustlog.NewGenesis(ddPubs, ddA, [][]byte{ddCommit})
+	must(t, err)
+	ddAttacker, err := trustlog.NewGenesis(ddPubs, ddA, [][]byte{ddCommit})
+	must(t, err)
+	ddGenesisHash := ddDisabled.Tip()
+	must(t, ddDisabled.Disable(ddSecret, ddNon))
+	must(t, ddAttacker.AddSigner(ddB.Public, ddA))
+	ddDisabledChain := trustlog.MarshalChain(ddDisabled.Entries())
+	ddAttackerChain := trustlog.MarshalChain(ddAttacker.Entries())
+	ddWinnerTip := ddDisabled.Tip()
+
 	// ---- beacon parity vector (Go↔Dart cross-language pin) ----
 	// Deterministic Ed25519 beacon key from seed 0xBB*32; fixed tip 0xCC*32.
 	// Beacon encoding is inlined here to avoid an import cycle with internal/api
@@ -495,6 +517,15 @@ func TestGenerateVectors(t *testing.T) {
 				"winner_signer_d": b64(rwrD.Public),     // D (replacement) must be trusted
 				"loser_signer_c":  b64(rwrC.Public),     // C must not be trusted
 				"loser_dev_c":     b64(rwrDevC),         // devC authorized by C must not be authorized
+			},
+			// (e) disablement dominance: a break-glass disabled chain beats any
+			// non-disabled competitor sharing the genesis, regardless of fork weight.
+			"disablement_dominance": map[string]any{
+				"genesis_hash":   b64(ddGenesisHash),
+				"disabled_chain": b64(ddDisabledChain), // genesis -> Disable (weight-0 signer)
+				"attacker_chain": b64(ddAttackerChain), // genesis -> addSigner(B) by A (weight 1)
+				"winner_tip":     b64(ddWinnerTip),     // disabled must win both orders
+				"added_signer_b": b64(ddB.Public),      // B must NOT be trusted after disable wins
 			},
 		},
 	}
@@ -645,6 +676,33 @@ func TestForkChoiceGoldenVectors(t *testing.T) {
 			must(t, s.Ingest(order[1]))
 			if !bytes.Equal(s.Tip(), wantTip) {
 				t.Error("tie-break winner must be the same regardless of ingest order")
+			}
+		}
+	})
+
+	// (e) disablement dominance: a break-glass disabled chain beats a non-disabled
+	// competitor regardless of fork weight and ingest order.
+	t.Run("disablement_dominance", func(t *testing.T) {
+		var v map[string]string
+		must(t, json.Unmarshal(fc["disablement_dominance"], &v))
+		gh := decodeB64(t, v["genesis_hash"])
+		disabled := decodeB64(t, v["disabled_chain"])
+		attacker := decodeB64(t, v["attacker_chain"])
+		wantTip := decodeB64(t, v["winner_tip"])
+		addedB := decodeB64(t, v["added_signer_b"])
+
+		for _, order := range [][2][]byte{{disabled, attacker}, {attacker, disabled}} {
+			s := trustlog.NewStore(gh)
+			must(t, s.Ingest(order[0]))
+			must(t, s.Ingest(order[1]))
+			if !s.Disabled() {
+				t.Error("disabled chain must dominate fork-choice regardless of ingest order")
+			}
+			if !bytes.Equal(s.Tip(), wantTip) {
+				t.Error("winner must be the disabled chain")
+			}
+			if s.SignerTrusted(addedB) {
+				t.Error("attacker-added signer B must not be trusted after the disable wins")
 			}
 		}
 	})

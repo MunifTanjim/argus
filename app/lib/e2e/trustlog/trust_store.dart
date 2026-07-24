@@ -150,8 +150,22 @@ class TrustStore {
     final cand = await TrustLog.load(entries); // verifies sigs, links, signer trust
     final cur = _entries;
     if (cur != null) {
-      final adopt = await _forkChoice(cur, entries);
-      if (!adopt) return false;
+      // Disablement dominance (mirrors Go store.Ingest): a Load-verified disabled
+      // chain is break-glass and beats any non-disabled competitor sharing the
+      // genesis, regardless of fork-choice weight. A disable is authorized by a
+      // genesis-committed secret preimage (not signer votes) and is terminal, so
+      // this grants no new power — but it is required because the chain is persisted
+      // (not purged) on disable, so a non-disabled fork must never roll it back.
+      final curDisabled = _log?.disabled ?? false;
+      final candDisabled = cand.disabled;
+      if (curDisabled == candDisabled) {
+        final adopt = await _forkChoice(cur, entries);
+        if (!adopt) return false;
+      } else if (curDisabled) {
+        // Current disabled, candidate not: never roll back a disablement.
+        return false;
+      }
+      // else: candidate disabled, current not → dominates → adopt (fall through).
     }
     _log = cand;
     _entries = entries;

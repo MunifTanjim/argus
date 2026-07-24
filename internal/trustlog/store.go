@@ -53,13 +53,28 @@ func (s *Store) Ingest(chainBytes []byte) error {
 		return err
 	}
 	if s.log != nil {
-		cur := s.log.Entries()
-		adopt, err := forkChoice(cur, entries)
-		if err != nil {
-			return err
-		}
-		if !adopt {
-			return nil // keep current (no-op)
+		// Disablement dominance: a Load-verified disabled chain is break-glass and
+		// beats any non-disabled competitor sharing the genesis, regardless of
+		// fork-choice weight. A disable is authorized by a genesis-committed secret
+		// preimage (not signer votes) and is terminal, so this grants no new power —
+		// but it is REQUIRED because argus persists the chain rather than purging on
+		// disable: without it, an attacker with a signer key could fork before the
+		// disable and out-weight it, rolling the network back to enforcing.
+		switch curDisabled, candDisabled := s.log.Disabled(), cand.Disabled(); {
+		case curDisabled == candDisabled:
+			// Neither or both disabled: ordinary genesis-pinned fork resolution.
+			adopt, err := forkChoice(s.log.Entries(), entries)
+			if err != nil {
+				return err
+			}
+			if !adopt {
+				return nil // keep current (no-op)
+			}
+		case curDisabled:
+			// Current is disabled, candidate is not: never roll back a disablement.
+			return nil
+		default:
+			// Candidate is disabled, current is not: break-glass dominates — adopt.
 		}
 	}
 	s.log = cand
