@@ -132,6 +132,28 @@ void main() {
         reason: 'poll must re-arm when client.equivocation becomes true');
   });
 
+  test('startEquivPoll surfaces an existing equivocation immediately (not after the interval)',
+      () async {
+    final kp = await generateKeyPair();
+    final fc = _FakeE2EClient(kp);
+    addTearDown(fc.close);
+    fc._eq = true; // equivocation already present at connect time
+    final manager = _FakeManager();
+    manager._fakeClient = fc;
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final equivNotifier = container.read(equivocationProvider.notifier);
+
+    // A long interval: a periodic-only poll would not have ticked yet.
+    final poll = startEquivPoll(manager, equivNotifier, interval: const Duration(seconds: 30));
+    addTearDown(poll.cancel);
+
+    // No delay — the immediate first poll must have already surfaced it.
+    expect(container.read(equivocationProvider), isTrue,
+        reason: 'an equivocation present at connect must surface immediately, not after 30s');
+  });
+
   test('dispatchEvent applies session.event, ignores others', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);

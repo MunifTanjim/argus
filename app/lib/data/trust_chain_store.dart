@@ -17,7 +17,12 @@ class TrustChainStore {
     try {
       return Uint8List.fromList(base64.decode(v));
     } catch (_) {
-      return null; // corrupt: treat as absent (fail-closed; re-pulled + re-anchored)
+      // Undecodable stored chain: treat as absent so the client re-pulls and
+      // re-anchors (Trust-On-First-Use). NOTE: this is fail-OPEN for a corrupted
+      // anchor — a previously-verified device is silently re-TOFU'd, not warned.
+      // A decodable-but-content-tampered chain still fails closed downstream (the
+      // pinned TrustStore rejects a chain that doesn't extend its genesis).
+      return null;
     }
   }
 

@@ -84,20 +84,23 @@ Future<GatewayClient> buildE2EClient(
 bool equivocationOf(GatewayClient? client) =>
     client is E2EClient && client.equivocation;
 
-/// Starts the periodic equivocation poll and returns the [Timer] so the caller
-/// can cancel it on dispose. The poll writes [equivocationOf] unconditionally on
-/// every tick — no `!equivocation.state` guard — so a stale true left by a
-/// previous session is always cleared when the new [E2EClient] starts clean.
-/// [interval] defaults to 30 s (the trust-resync cadence); injectable for tests.
+/// Starts the equivocation poll and returns the [Timer] so the caller can cancel
+/// it on dispose. It polls once immediately — so an equivocation already present
+/// at connect surfaces without waiting a full [interval] — then on every tick.
+/// The poll writes [equivocationOf] unconditionally (no `!equivocation.state`
+/// guard) so a stale true left by a previous session is always cleared when the
+/// new [E2EClient] starts clean. [interval] defaults to 30 s (the trust-resync
+/// cadence); injectable for tests.
 @visibleForTesting
 Timer startEquivPoll(
   ConnectionManager manager,
   StateController<bool> equivocation, {
   Duration interval = const Duration(seconds: 30),
-}) =>
-    Timer.periodic(interval, (_) {
-      equivocation.state = equivocationOf(manager.client);
-    });
+}) {
+  void poll() => equivocation.state = equivocationOf(manager.client);
+  poll(); // surface an existing equivocation immediately, not only after the first tick
+  return Timer.periodic(interval, (_) => poll());
+}
 
 final clientIdentityStoreProvider =
     Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
