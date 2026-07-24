@@ -15,18 +15,24 @@ import (
 func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 	// Flags that are intentionally NOT config-backed.
 	exempt := map[string]bool{
-		"config":        true, // selects the config file itself; resolved before viper loads
-		"no-config":     true, // skips the config file entirely; resolved before viper loads
-		"help":          true, // cobra builtin
-		"version":       true, // cobra builtin
-		"bin":           true, // `hooks install` only; not a node/client setting
-		"count":         true, // `ping` only
-		"interval":      true, // `ping` only
-		"url":           true, // `pair` only: QR base-URL override
-		"timeout":       true, // `pair` only: device-connect wait
-		"agent":         true, // `hook` only: selects the adapter, not a config key
-		"argus-managed": true, // `hook` only: install marker, parsed and ignored
-		"redact":        true, // `view` only: offline viewer flag, not a node/client setting
+		"config":           true, // selects the config file itself; resolved before viper loads
+		"no-config":        true, // skips the config file entirely; resolved before viper loads
+		"help":             true, // cobra builtin
+		"version":          true, // cobra builtin
+		"bin":              true, // `hooks install` only; not a node/client setting
+		"count":            true, // `ping` only
+		"interval":         true, // `ping` only
+		"url":              true, // `pair` only: QR base-URL override
+		"timeout":          true, // `pair` only: device-connect wait
+		"agent":            true, // `hook` only: selects the adapter, not a config key
+		"argus-managed":    true, // `hook` only: install marker, parsed and ignored
+		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
+		"signer":           true, // `lock init` only: one-shot signer list, not a persistent config key
+		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
+		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a persistent config key
+		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a persistent config key
+		"replacement":      true, // `lock revoke-signer` only: one-shot replacement signer list
+		"fork-from":        true, // `lock revoke-signer` only: one-shot fork-point override
 	}
 
 	seen := map[string]bool{}

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/transport/connection.dart';
+import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/transport/jsonrpc.dart';
 
 class FakeLink implements RpcLink {
@@ -51,6 +52,34 @@ class _Fatal implements FatalConnectError {
   @override
   final String message;
   _Fatal(this.message);
+}
+
+/// A fake [GatewayClient] that records method names and drains the bridge
+/// stream so that [ConnectionManager._teardownLink] can complete its
+/// `await bridge?.close()`.
+class _FakeGatewayClient implements GatewayClient {
+  _FakeGatewayClient(Stream<RpcMessage> incoming) {
+    _drainSub = incoming.listen(null);
+  }
+
+  final List<String> calls = [];
+  final _notifyCtrl = StreamController<RpcMessage>.broadcast();
+  late final StreamSubscription<RpcMessage> _drainSub;
+
+  @override
+  Future<Object?> call(String method, [Object? params]) async {
+    calls.add(method);
+    return null;
+  }
+
+  @override
+  Stream<RpcMessage> get notifications => _notifyCtrl.stream;
+
+  @override
+  Future<void> close() async {
+    await _drainSub.cancel();
+    await _notifyCtrl.close();
+  }
 }
 
 void main() {
@@ -202,6 +231,27 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 150));
     expect(mgr.state, ConnState.connected);
     expect(attempts, 1);
+    await mgr.stop();
+  });
+
+  test('clientFactory is used and onConnected receives the factory client',
+      () async {
+    _FakeGatewayClient? fakeClient;
+    GatewayClient? receivedClient;
+    final mgr = ConnectionManager(
+      connect: () async => FakeLink(),
+      clientFactory: (incoming, send) => fakeClient = _FakeGatewayClient(incoming),
+      onConnected: (c) async => receivedClient = c,
+      keepaliveInterval: const Duration(milliseconds: 20),
+      keepaliveTimeout: const Duration(milliseconds: 20),
+      baseBackoff: const Duration(milliseconds: 5),
+      maxBackoff: const Duration(milliseconds: 20),
+    );
+    mgr.start();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(mgr.state, ConnState.connected);
+    expect(receivedClient, same(fakeClient));
+    expect(fakeClient?.calls, contains('ping'));
     await mgr.stop();
   });
 

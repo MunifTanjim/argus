@@ -21,11 +21,16 @@ type Config struct {
 	Log     LogConfig
 	Tunnel  TunnelConfig
 	Tmux    TmuxConfig
+	Lock    LockConfig
 }
 
 type GatewayConfig struct {
 	URL        string
 	ListenAddr string
+	// E2E opts the client into end-to-end encrypted transport to a gateway: it
+	// talks to nodes over relayed Noise channels instead of the gateway's cleartext
+	// aggregated API. Client-side only; ignored for local (unix-socket) connections.
+	E2E bool
 }
 
 type NodeConfig struct {
@@ -89,12 +94,20 @@ type TmuxConfig struct {
 	MirrorSessionSuffix string
 }
 
+// LockConfig configures locked mode. Genesis is the base64-encoded trust-log
+// genesis HEAD this install is pinned to; "" means locked mode is not configured.
+// It is written by `argus lock init` (a later slice); users don't hand-set it.
+type LockConfig struct {
+	Genesis string
+}
+
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                        GetRuntimePath("argus.sock"),
 	"token":                         "",
 	"gateway.url":                   "",
 	"gateway.listen-addr":           ":8443",
+	"gateway.e2e":                   false,
 	"mode":                          "",
 	"node.id":                       "",
 	"node.label":                    "",
@@ -111,6 +124,7 @@ var defaults = map[string]any{
 	"tunnel.ngrok.domain":           "",
 	"tmux.mirror-session-prefix":    "_",
 	"tmux.mirror-session-suffix":    "_",
+	"lock.genesis":                  "",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -183,6 +197,7 @@ func FromViper(v *viper.Viper) Config {
 		Gateway: GatewayConfig{
 			URL:        v.GetString("gateway.url"),
 			ListenAddr: v.GetString("gateway.listen-addr"),
+			E2E:        v.GetBool("gateway.e2e"),
 		},
 		Node: NodeConfig{
 			ID:    v.GetString("node.id"),
@@ -220,6 +235,9 @@ func FromViper(v *viper.Viper) Config {
 		Tmux: TmuxConfig{
 			MirrorSessionPrefix: v.GetString("tmux.mirror-session-prefix"),
 			MirrorSessionSuffix: v.GetString("tmux.mirror-session-suffix"),
+		},
+		Lock: LockConfig{
+			Genesis: v.GetString("lock.genesis"),
 		},
 	}
 }

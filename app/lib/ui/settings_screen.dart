@@ -7,6 +7,7 @@ import '../state/profiles.dart';
 import '../state/grouping.dart';
 import '../transport/ssh_gateway.dart';
 import 'appearance_screen.dart';
+import 'device_identity_screen.dart';
 import 'push_settings_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -28,81 +29,109 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: CenteredBody(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _LabeledField(
-                label: 'Gateway',
-                child: SelectableText(
-                  creds?.url ?? '(not paired)',
-                  style: _monoStyle,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.palette_outlined),
-                title: const Text('Appearance'),
-                subtitle: const Text('Transcript display options'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AppearanceScreen()),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.notifications_outlined),
-                title: const Text('Push notifications'),
-                subtitle: const Text('UnifiedPush distributor or FCM'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PushSettingsScreen()),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ref.watch(serverInfoProvider).maybeWhen(
-                    data: (info) => info == null ? _unavailable : _serverInfo(info),
-                    loading: () => _versionRow,
-                    orElse: () => _unavailable,
-                  ),
-              const Spacer(),
-              if (sshHostPortValue != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: OutlinedButton(
-                    key: const Key('forget-host-key'),
-                    onPressed: () async {
-                      await ref
-                          .read(hostKeyStoreProvider)
-                          .forget(sshHostPortValue);
-                      // Redial now so a connection stuck on ConnState.failed
-                      // (rejected host key) recovers without waiting for a
-                      // resume; the new key is re-pinned trust-on-first-use.
-                      ref.read(gatewayProvider)?.reconnectNow();
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(
-                          'Forgot host key for $sshHostPortValue. Reconnecting; it will be re-pinned.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _LabeledField(
+                      label: 'Gateway',
+                      child: SelectableText(
+                        creds?.url ?? '(not paired)',
+                        style: _monoStyle,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.palette_outlined),
+                      title: const Text('Appearance'),
+                      subtitle: const Text('Transcript display options'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const AppearanceScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.notifications_outlined),
+                      title: const Text('Push notifications'),
+                      subtitle: const Text('UnifiedPush distributor or FCM'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const PushSettingsScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.key_outlined),
+                      title: const Text('Device identity'),
+                      subtitle: const Text('Enroll & verify this device'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const DeviceIdentityScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ref.watch(serverInfoProvider).maybeWhen(
+                          data: (info) =>
+                              info == null ? _unavailable : _serverInfo(info),
+                          loading: () => _versionRow,
+                          orElse: () => _unavailable,
                         ),
-                      ));
-                    },
-                    child: const Text('Forget SSH host key'),
-                  ),
+                  ],
                 ),
-              OutlinedButton(
-                onPressed: () async {
-                  // Clearing credentials disposes the gateway, which unregisters
-                  // this device from it (see gatewayProvider).
-                  await ref.read(profileStoreProvider).clearActiveId();
-                  ref.read(credentialsProvider.notifier).state = null;
-                },
-                child: const Text('Disconnect'),
               ),
-            ],
-          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (sshHostPortValue != null) ...[
+                    OutlinedButton(
+                      key: const Key('forget-host-key'),
+                      onPressed: () async {
+                        await ref
+                            .read(hostKeyStoreProvider)
+                            .forget(sshHostPortValue);
+                        // Redial now so a connection stuck on ConnState.failed
+                        // (rejected host key) recovers without waiting for a
+                        // resume; the new key is re-pinned trust-on-first-use.
+                        ref.read(gatewayProvider)?.reconnectNow();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(
+                            'Forgot host key for $sshHostPortValue. Reconnecting; it will be re-pinned.',
+                          ),
+                        ));
+                      },
+                      child: const Text('Forget SSH host key'),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  OutlinedButton(
+                    onPressed: () async {
+                      // Clearing credentials disposes the gateway, which
+                      // unregisters this device from it (see gatewayProvider).
+                      await ref.read(profileStoreProvider).clearActiveId();
+                      ref.read(credentialsProvider.notifier).state = null;
+                    },
+                    child: const Text('Disconnect'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

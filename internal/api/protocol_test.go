@@ -42,3 +42,21 @@ func TestTerminalOpenParamsDecode(t *testing.T) {
 		t.Fatalf("bad decode: %+v", p)
 	}
 }
+
+func TestPushDeliverParamsRoundTrip(t *testing.T) {
+	in := PushDeliverParams{Endpoint: "https://p/ep", Ciphertext: "AAAA", TTL: "1800", Urgency: "high"}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out PushDeliverParams
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out != in {
+		t.Fatalf("round-trip: %+v != %+v", out, in)
+	}
+	if MethodPushDeliver != "push.deliver" {
+		t.Fatalf("method = %q", MethodPushDeliver)
+	}
+}

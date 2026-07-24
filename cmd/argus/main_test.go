@@ -36,14 +36,13 @@ func TestConnectGatewayBranch(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock")
+	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", false, nil)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
 	}
 	defer c.Close()
-	var out []any
-	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
-		t.Fatalf("refresh over gateway: %v", err)
+	if err := c.Call(api.MethodPing, nil, nil); err != nil {
+		t.Fatalf("ping over gateway: %v", err)
 	}
 }
 
@@ -90,8 +89,7 @@ func TestConnectLocalSpawn(t *testing.T) {
 }
 
 // An embedded node must opt into desktop notifications when config enables them;
-// otherwise it silently drops every alert (gateway push.desktop RPC and the local
-// Watch both gate on this flag).
+// otherwise it silently drops every alert (local push.Watch/DesktopSink gated on this flag).
 func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 	sandboxHookDirs(t)
 	sock := shortSocket(t)
@@ -100,7 +98,10 @@ func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Push.Desktop.Enabled = true
-	d, _ := startEmbeddedNode(ctx, cfg, sock)
+	d, _, err := startEmbeddedNode(ctx, cfg, sock)
+	if err != nil {
+		t.Fatalf("startEmbeddedNode: %v", err)
+	}
 	if !d.DesktopNotifyEnabled() {
 		t.Fatal("embedded node should render desktop notifications when config enables them")
 	}

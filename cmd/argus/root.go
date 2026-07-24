@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
-	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tui"
@@ -15,6 +15,14 @@ import (
 
 // newRootCmd builds the argus command tree. The root command with no subcommand
 // runs the TUI client; start/hooks/hook attach as subcommands.
+// warnE2ESpawnUnsupported notes, when e2e is requested on a path that spawns a local
+// node, that E2E is not yet supported there and the connection proceeds in plaintext.
+func warnE2ESpawnUnsupported(e2e bool) {
+	if e2e {
+		shell.StdErrF("argus: --e2e is not yet supported when spawning a local node; connecting in plaintext\n")
+	}
+}
+
 func newRootCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "argus",
@@ -47,7 +55,12 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			var client *api.ReconnectingClient
+			head, herr := lockGenesisHead(cfg)
+			if herr != nil {
+				return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to connect open): %w", herr))
+			}
+
+			var client tui.Client
 			var logs *logbuf.Buffer
 			switch {
 			case cfg.Gateway.URL != "":
@@ -55,12 +68,13 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, cfg.Gateway.E2E, head)
 				} else {
+					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				}
 			case running:
-				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
+				client, err = connect(ctx, "", cfg.Token, cfg.Socket, false, nil)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -74,9 +88,10 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnGateway:
 					client, logs, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
+					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
-					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
+					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, cfg.Gateway.E2E, head)
 				}
 			}
 			if err != nil {
@@ -103,7 +118,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	addClientFlags(cmd.Flags())
 
-	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd())
+	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd(), newLockCmd())
 
 	cmd.InitDefaultCompletionCmd()
 	if subcmd, _, _ := cmd.Find([]string{"completion"}); subcmd != nil && subcmd.Name() == "completion" {

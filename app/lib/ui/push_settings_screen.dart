@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../e2e/aggregate.dart' show pushGoneCode;
 import '../push/push_controller.dart';
 import '../state/push.dart';
 import '../transport/jsonrpc.dart';

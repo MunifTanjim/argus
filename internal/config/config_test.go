@@ -222,6 +222,17 @@ func TestTmuxMirrorSessionAffixDefaults(t *testing.T) {
 	}
 }
 
+func TestGatewayE2ERoundTrips(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").Gateway.E2E; got != false {
+		t.Errorf("default gateway.e2e = %v, want false", got)
+	}
+	path := writeConfig(t, "gateway:\n  e2e: true\n")
+	if got := load(t, path).Gateway.E2E; got != true {
+		t.Errorf("file gateway.e2e = %v, want true", got)
+	}
+}
+
 func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 	// Defaults are valid.
 	valid := config.Config{Tmux: config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}}
@@ -238,5 +249,26 @@ func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 		if err := (config.Config{Tmux: tc}).Validate(); err == nil {
 			t.Errorf("affix %+v should be rejected", tc)
 		}
+	}
+}
+
+func TestLockGenesisResolves(t *testing.T) {
+	// Default is empty.
+	v := viper.New()
+	if err := config.Load(v, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v).Lock.Genesis; got != "" {
+		t.Fatalf("default lock.genesis = %q, want empty", got)
+	}
+
+	// Env override binds.
+	t.Setenv("ARGUS_LOCK_GENESIS", "abc123==")
+	v2 := viper.New()
+	if err := config.Load(v2, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v2).Lock.Genesis; got != "abc123==" {
+		t.Fatalf("env lock.genesis = %q, want %q", got, "abc123==")
 	}
 }

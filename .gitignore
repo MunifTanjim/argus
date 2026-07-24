@@ -31,6 +31,9 @@ app/.flutter-plugins-dependencies
 app/ios/Pods/
 app/android/.gradle/
 
+# Claude Code local state (agent worktrees, plans, session scratch)
+.claude/
+
 # Superpowers workflow scratch (brainstorm/sdd state, briefs, diffs)
 .superpowers/
 /superpowers/
@@ -38,3 +41,5 @@ docs/superpowers
 
 # local files
 *.local.*
+/argus.e2e
+/e2e.log

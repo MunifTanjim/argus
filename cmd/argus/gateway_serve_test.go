@@ -11,7 +11,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
 	"github.com/MunifTanjim/argus/internal/node"
-	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -89,14 +88,9 @@ func TestServeGatewayStandaloneNoNode(t *testing.T) {
 	if len(info.Nodes) != 0 {
 		t.Errorf("standalone gateway must report no nodes, got %d", len(info.Nodes))
 	}
-
-	var sessions []session.Session
-	if err := client.Call(api.MethodSessionsList, nil, &sessions); err != nil {
-		t.Fatalf("sessions.list: %v", err)
-	}
-	if len(sessions) != 0 {
-		t.Errorf("standalone gateway must have no sessions, got %d", len(sessions))
-	}
+	// Note: session listing is client-side aggregation over per-node E2E channels in
+	// the blind gateway; the gateway itself serves no sessions.list. server.info (an
+	// empty roster) is the right node-less smoke check here.
 }
 
 // failingTunnel's Command errors immediately, so Supervisor.Run returns without a

@@ -27,7 +27,10 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodAgentsList, d.handleAgentsList)
 	srv.Handle(api.MethodSessionKill, d.handleSessionKill)
 	srv.Handle(api.MethodSessionFocus, d.handleSessionFocus)
-	srv.Handle(api.MethodPushDesktop, d.handlePushDesktop)
+	srv.Handle(api.MethodPushRegister, d.handlePushRegister)
+	srv.Handle(api.MethodPushUnregister, d.handlePushUnregister)
+	srv.Handle(api.MethodPushTest, d.handlePushTest)
+	srv.Handle(api.MethodPushVAPIDKey, d.handlePushVAPIDKey)
 	srv.Handle(api.MethodSessionsHistoryProjects, d.handleHistoryProjects)
 	srv.Handle(api.MethodSessionsHistorySessions, d.handleHistorySessions)
 	srv.Handle(api.MethodSessionsHistoryTranscript, d.handleHistoryTranscript)
@@ -43,5 +46,21 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodSessionFileDiff, d.handleFileDiff)
 	srv.Handle(api.MethodSessionCommits, d.handleCommits)
 	srv.Handle(api.MethodSessionCommitFiles, d.handleCommitFiles)
+	srv.Handle(api.MethodLockInit, d.handleLockInit)
+	srv.Handle(api.MethodLockStatus, d.handleLockStatus)
+	srv.Handle(api.MethodLockSign, d.handleLockSign)
+	srv.Handle(api.MethodLockRevoke, d.handleLockRevoke)
+	srv.Handle(api.MethodLockAddSigner, d.handleLockAddSigner)
+	srv.Handle(api.MethodLockRemoveSigner, d.handleLockRemoveSigner)
+	srv.Handle(api.MethodLockDisable, d.handleLockDisable)
+	srv.Handle(api.MethodLockLocalDisable, d.handleLockLocalDisable)
+	srv.Handle(api.MethodLockRevokeSignerStart, d.handleLockRevokeSignerStart)
+	srv.Handle(api.MethodLockRevokeSignerCosign, d.handleLockRevokeSignerCosign)
+	srv.Handle(api.MethodLockRevokeSignerFinish, d.handleLockRevokeSignerFinish)
+	srv.Handle(api.MethodLockLog, d.handleLockLog)
 	srv.Handle(api.MethodSessionTasks, d.handleTasks)
+	// beacon.deliver: peer beacon relay from the client courier. Reachable over the
+	// E2E (remote/responder) path; not a lock.* method, so remoteDispatch passes it
+	// through. The handler verifies the sig and roster attribution before acting.
+	srv.Handle(api.MethodBeaconDeliver, d.handleBeaconDeliver)
 }

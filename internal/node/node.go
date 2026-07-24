@@ -4,6 +4,8 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,16 +14,19 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Node holds the wired-up core.
@@ -38,6 +43,38 @@ type Node struct {
 	label   string // human-friendly node name (e.g. hostname)
 	version string // binary version, reported to clients via identify/server.info
 
+	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
+	identityPubB64 string      // base64 public half, announced to the gateway
+
+	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log)
+	signerPubB64 string             // base64 public half, announced to the gateway roster
+
+	beacon            trustlog.SignerKey       // node's Ed25519 beacon keypair (anti-equivocation; every node)
+	beaconPubB64      string                   // base64 public half, announced to the gateway roster
+	beaconCounter     atomic.Uint64            // monotonic emission counter; bumped by makeBeacon
+	beaconCounterPath string                   // path for counter persistence; "" = disabled
+	beaconEmitMu      sync.Mutex               // serializes counter increment+persist so persists commit in counter order
+	activeUplink      atomic.Pointer[api.Peer] // current gateway uplink peer for beacon.offer
+
+	// Peer beacon courier ingest state (guarded by peerBeaconMu).
+	// peerBeaconPubs is the set of roster-known peer beacon public keys
+	// (excludes self). Populated by syncRoster on each uplink tick.
+	// peerBeacons stores the latest counter-guarded accepted beacon per key.
+	// peerBeaconMiss tracks consecutive unreconciled ticks (N=2 guard).
+	// equivocation is set permanently once persistent peer beacon divergence is detected.
+	peerBeaconMu   sync.Mutex
+	peerBeaconPubs map[string]bool             // string(rawPub) → true
+	peerBeacons    map[string]api.Beacon       // string(rawPub) → latest accepted beacon
+	peerBeaconCtr  map[string]uint64           // string(rawPub) → last accepted counter
+	peerBeaconMiss map[string]*beaconMissState // string(rawPub) → miss streak
+	equivocation   atomic.Bool                 // set permanently on persistent peer beacon divergence
+
+	// beaconKnown caches the resolved chain's entry-hash set for the beacon
+	// consistency check, keyed on beaconKnownTip; rebuilt only when the tip
+	// advances. Guarded by peerBeaconMu.
+	beaconKnownTip []byte
+	beaconKnown    map[string]bool
+
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
 
@@ -45,8 +82,11 @@ type Node struct {
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
-	desktopNotify bool      // render incoming push.desktop notifications on this machine
+	desktopNotify bool      // render desktop notifications for this node's own sessions locally (via push.Watch/DesktopSink)
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
+
+	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
+	pushDeliverer atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
 
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
@@ -73,6 +113,14 @@ type Node struct {
 	// than spawning a duplicate.
 	resumeMu sync.Mutex
 	resuming map[string]string // agent+session key -> launched session id
+
+	trust          atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
+	trustPath      string                             // on-disk chain path for persistence
+	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
+
+	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
+
+	activeResponder atomic.Pointer[relayResponder] // the current uplink responder, if any
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -100,15 +148,23 @@ func (d *Node) adapterFor(agent string) adapter.Adapter {
 	return d.adapterList[0]
 }
 
-// SetDesktopNotify toggles rendering of push.desktop notifications on this
-// machine; click wires a clicked notification to focus the session. Call before
-// Run — not safe once serving (mutates fields read by handler goroutines).
+// SetDesktopNotify toggles whether this node renders desktop notifications for its
+// own sessions locally (via push.Watch/DesktopSink); click wires a clicked notification
+// to focus the session. Call before Run — not safe once serving (mutates fields read by handler goroutines).
 func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.desktopNotify = enabled
 	d.notifier = push.NewOSNotifier(d.log, click)
 }
 
 func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
+
+// SetPushStore enables node-side push registration (register/unregister/test).
+// Call before Run.
+func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
+
+// SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
+// Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).
+func (d *Node) SetPushDeliverer(dv push.Deliverer) { d.pushDeliverer.Store(&dv) }
 
 // SetIdentity overrides the node's id and label (default: hostname). The id is
 // the gateway's routing key, so it must be stable across reconnects and unique
@@ -125,6 +181,53 @@ func (d *Node) SetIdentity(id, label string) {
 // SetVersion records the node's binary version, reported to clients via
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
+
+// SetIdentityKey sets the node's Noise static keypair, whose public half is
+// announced to the gateway (identity_pubkey) for E2E channel setup. Call before Run.
+func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
+	d.identity = kp
+	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// SetSignerKey sets the node's Ed25519 signer keypair, whose public half is
+// announced to the gateway roster (signer_pubkey) so a later `lock init` can
+// designate it as a trusted signer. Call before Run. The private half stays local.
+func (d *Node) SetSignerKey(kp trustlog.SignerKey) {
+	d.signer = kp
+	d.signerPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// SignerPubKey returns the base64 Ed25519 signer public half, or "" if unset.
+func (d *Node) SignerPubKey() string { return d.signerPubB64 }
+
+// SetBeaconKey sets the node's Ed25519 beacon keypair, whose public half is
+// announced to the gateway roster (beacon_pubkey) for anti-equivocation. Call
+// before Run. The private half stays local.
+func (d *Node) SetBeaconKey(kp trustlog.SignerKey) {
+	d.beacon = kp
+	d.beaconPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// BeaconPub returns the base64 Ed25519 beacon public half, or "" if unset.
+func (d *Node) BeaconPub() string { return d.beaconPubB64 }
+
+// SetBeaconCounterPath enables beacon counter persistence. On call it reads the
+// counter from the sibling file (path + ".counter") and seeds beaconCounter so
+// the first emission after a restart is strictly greater than the last value
+// peers accepted before the restart. makeBeacon writes the updated counter back
+// on every emission. Call before Run, after SetBeaconKey.
+func (d *Node) SetBeaconCounterPath(path string) {
+	d.beaconCounterPath = path
+	if n := LoadBeaconCounter(path); n > 0 {
+		d.beaconCounter.Store(n)
+	}
+}
+
+// Equivocation reports whether this node has detected a trust-log equivocation
+// via the client courier: a peer's signed HEAD beacon whose tip could not be
+// reconciled with this node's own chain after the N=2 persistence guard. Once
+// set, this flag is never cleared for the lifetime of the node process.
+func (d *Node) Equivocation() bool { return d.equivocation.Load() }
 
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.
@@ -168,9 +271,25 @@ func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 // aggregate it as an in-process source.
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
-// DispatchFunc exposes the node's control handlers so a co-located gateway can
-// route control calls into the local engine without a network hop.
-func (d *Node) DispatchFunc() api.DispatchFunc { return d.server.DispatchFunc() }
+// remoteDispatch is the control surface exposed to REMOTE callers (the gateway
+// uplink, E2E-relayed clients, a co-located gateway). It rejects lock.* methods:
+// locked-mode control is local-admin only (the CLI dials the local unix socket),
+// so a malicious gateway cannot disable enforcement or forge trust-log changes.
+func (d *Node) remoteDispatch() api.DispatchFunc {
+	full := d.server.DispatchFunc()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if strings.HasPrefix(method, "lock.") {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return full(ctx, method, params)
+	}
+}
+
+// DispatchFunc exposes a restricted control surface for co-located gateways: routes
+// non-lock.* calls into the local engine without a network hop. lock.* is local-
+// admin only (CLI dials the unix socket); a co-located gateway serves remote clients,
+// so it must not expose locked-mode control.
+func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
 
 // clientFor returns the tmux client for a session's server.
 func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
@@ -241,16 +360,20 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	d := &Node{
 		reg: reg, clients: clients, id: host, label: host,
-		adapterList:  adapterList,
-		adapters:     adapterByAgent,
-		discs:        discs,
-		caps:         caps,
-		log:          slog.New(slog.DiscardHandler),
-		pending:      map[string]*pendingDecision{},
-		conns:        map[api.Notifier]*connSubs{},
-		terms:        map[api.Notifier]*connTerms{},
-		sessionTerms: map[string]*term{},
-		resuming:     map[string]string{},
+		adapterList:    adapterList,
+		adapters:       adapterByAgent,
+		discs:          discs,
+		caps:           caps,
+		log:            slog.New(slog.DiscardHandler),
+		pending:        map[string]*pendingDecision{},
+		conns:          map[api.Notifier]*connSubs{},
+		terms:          map[api.Notifier]*connTerms{},
+		sessionTerms:   map[string]*term{},
+		resuming:       map[string]string{},
+		peerBeaconPubs: map[string]bool{},
+		peerBeacons:    map[string]api.Beacon{},
+		peerBeaconCtr:  map[string]uint64{},
+		peerBeaconMiss: map[string]*beaconMissState{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
@@ -357,6 +480,14 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		return nil // shutdown requested
 	}
 	return err
+}
+
+// reevaluateTrustChannels drops live client channels no longer authorized after a
+// trust-store advance. No-op when no uplink responder is active.
+func (d *Node) reevaluateTrustChannels() {
+	if r := d.activeResponder.Load(); r != nil {
+		r.reevaluate()
+	}
 }
 
 // nodeAbsent reports whether a dial error means no node is listening (ENOENT or

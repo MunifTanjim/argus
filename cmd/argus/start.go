@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
@@ -102,11 +103,51 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		if kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
+			return fail(cmd, err)
+		} else {
+			d.SetIdentityKey(kp)
+		}
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		// Standalone node logs to the configured logger (the embedded node, sharing a
 		// TUI's terminal, stays at its discard default).
 		d.SetLogger(logger.Scoped("node").L)
-		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
+		if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+			logger.Scoped("node").Warn("signer key load failed; locked mode unavailable", "err", err)
+		} else {
+			d.SetSignerKey(kp)
+		}
+		if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+			logger.Scoped("node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+		} else {
+			d.SetBeaconKey(kp)
+			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+		}
+		// Prefer explicit config; else re-enable from the node's persisted
+		// genesis (written by lock.init) so a reboot stays locked.
+		// Fail-closed: a non-empty but unusable lock.genesis must not start the node open.
+		head, herr := lockGenesisHead(cfg)
+		if herr != nil {
+			return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to start open): %w", herr))
+		}
+		if head == nil {
+			ph, perr := node.LoadPinnedGenesis(config.GetStatePath("trustlog-genesis"))
+			if perr != nil {
+				return fail(cmd, fmt.Errorf("persisted genesis unusable (refusing to start open): %w", perr))
+			}
+			head = ph
+		}
+		// Always set the chain path so lock.init has somewhere to persist.
+		chainPath := config.GetStatePath("trustlog-chain")
+		if head != nil {
+			if err := d.EnableTrustLog(head, chainPath); err != nil {
+				return fail(cmd, fmt.Errorf("locked mode configured but enabling trust log failed (refusing to start open): %w", err))
+			}
+		} else {
+			d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
+		}
+		d.LoadLocalDisabled()
+		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and its local push Watch
 		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 	}
 
@@ -164,16 +205,14 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		})
 	}
 
-	// Plain local node: nothing upstream drives desktop notifications, so run a
-	// local Watch over our own registry. (Gateway mode reaches the node via
-	// Fanout; uplink mode via the gateway's push.desktop RPC.)
-	if local && cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !serveGW {
-		events, cancel := d.Registry().Subscribe()
-		// Focus-aware sink: suppresses alerts for a session already on screen.
-		go func() {
-			defer cancel()
-			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
-		}()
+	// Every local node watches its own registry for desktop + mobile alerts. A
+	// co-located gateway (serveGW) already started its node's Watch in setupPush;
+	// an uplink node also needs a push store so mobile delivery has device targets.
+	if local && !serveGW {
+		if uplinkMode(cfg) {
+			d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+		}
+		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	}
 
 	if d != nil {
@@ -363,7 +402,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
 	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
 	if d := o.node; d != nil {
-		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
+		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.BeaconPub(), d.Capabilities()))
 	}
 
 	var store *clienttoken.Store
@@ -386,7 +425,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	hsrv.SetPublicURL(o.publicURL)
 	hsrv.SetLogger(gwLog)
 	if o.enablePush {
-		setupPush(ctx, agg, hsrv, o.pushDelay, o.log.With("scope", "push"))
+		setupPush(ctx, o.node, hsrv, o.pushDelay, o.log.With("scope", "push"))
 	}
 
 	httpSrv := &http.Server{Handler: hsrv.Handler()}
@@ -420,28 +459,22 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	return httpSrv
 }
 
-// setupPush wires device push notifications (mobile dispatcher + desktop fanout).
-func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
-	store := push.NewStore(config.GetStatePath("push-tokens"))
-	// VAPID key (self-generated, persisted) signs Web Push requests; the public
-	// half is served to devices (push.vapidKey) to bind their subscription.
+// setupPush wires blind push: the gateway holds the VAPID key and relays opaque
+// bodies (push.deliver); the co-located node watches its own registry and encrypts.
+func setupPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
 	vapid, err := push.LoadOrCreateVAPID(config.GetStatePath("vapid_key.pem"))
 	if err != nil {
 		log.Warn("vapid disabled", "err", err)
-	} else {
-		hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+		return
 	}
-	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
-	hsrv.SetPush(store, dispatcher)
+	hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+	hsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
 
-	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log}
-	go func() {
-		defer cancel()
-		push.Watch(ctx, events, push.Sinks{
-			Immediate: []push.Sink{broadcaster},
-			Delayed:   []push.Sink{dispatcher},
-			Delay:     delay,
-		}, log)
-	}()
+	// The co-located node (nil in a standalone gateway) stores its own device
+	// subscriptions and delivers in-process.
+	if d != nil {
+		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+		d.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
+		go d.StartPush(ctx, delay)
+	}
 }
