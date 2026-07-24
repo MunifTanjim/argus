@@ -70,8 +70,8 @@ type E2EClient struct {
 	byChanID map[string]*nodeChan
 	pending  map[uint64]chan pendingReply
 	nextReq  uint64
-	subNode  map[string]string    // sub_id  -> nodeID (transcript.subscribe)
-	termNode map[string]string    // term_id -> nodeID (terminal.open)
+	subNode  map[string]string // sub_id  -> nodeID (transcript.subscribe)
+	termNode map[string]string // term_id -> nodeID (terminal.open)
 
 	events chan api.Notification
 
