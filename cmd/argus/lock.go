@@ -198,41 +198,33 @@ func fetchRoster(ctx context.Context, cfg *config.Config) ([]api.NodeDescriptor,
 	return r.Nodes, nil
 }
 
-// lockInitOnNode dials the LOCAL node socket and calls lock.init.
-func lockInitOnNode(ctx context.Context, cfg *config.Config, p api.LockInitParams) (api.LockInitResult, error) {
+// callLocal dials the LOCAL node socket, sends one RPC, and returns the decoded
+// result. It centralizes the dial→NewClient→Call→Close boilerplate every lock
+// subcommand shares.
+func callLocal[R any](ctx context.Context, cfg *config.Config, method string, params any) (R, error) {
+	var res R
 	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
 	if err != nil {
-		return api.LockInitResult{}, err
+		return res, err
 	}
 	conn, err := dial(ctx)
 	if err != nil {
-		return api.LockInitResult{}, err
+		return res, err
 	}
 	c := api.NewClient(conn)
 	defer c.Close()
-	var res api.LockInitResult
-	if err := c.Call(api.MethodLockInit, p, &res); err != nil {
-		return api.LockInitResult{}, err
+	if err := c.Call(method, params, &res); err != nil {
+		return res, err
 	}
 	return res, nil
 }
 
+func lockInitOnNode(ctx context.Context, cfg *config.Config, p api.LockInitParams) (api.LockInitResult, error) {
+	return callLocal[api.LockInitResult](ctx, cfg, api.MethodLockInit, p)
+}
+
 func lockStatusOnNode(ctx context.Context, cfg *config.Config) (api.LockStatusResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket)
-	if err != nil {
-		return api.LockStatusResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockStatusResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var st api.LockStatusResult
-	if err := c.Call(api.MethodLockStatus, nil, &st); err != nil {
-		return api.LockStatusResult{}, err
-	}
-	return st, nil
+	return callLocal[api.LockStatusResult](ctx, cfg, api.MethodLockStatus, nil)
 }
 
 // lockInitFewSignersWarning returns the warning text to print when the trust log has fewer
@@ -263,21 +255,7 @@ func signerCountAfterRevoke(current, revoked [][]byte) int {
 
 // lockLogOnNode dials the LOCAL socket and calls lock.log.
 func lockLogOnNode(ctx context.Context, cfg *config.Config) (api.LockLogResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
-	if err != nil {
-		return api.LockLogResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockLogResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockLogResult
-	if err := c.Call(api.MethodLockLog, nil, &res); err != nil {
-		return api.LockLogResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockLogResult](ctx, cfg, api.MethodLockLog, nil)
 }
 
 // printLockLogEntry prints one trust-log entry to stdout.
@@ -411,21 +389,7 @@ func newLockSignerCmd(use, short, method string) *cobra.Command {
 }
 
 func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, signer []byte) (api.LockDeviceResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
-	if err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockDeviceResult
-	if err := c.Call(method, api.LockSignerParams{Signer: signer}, &res); err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockSignerParams{Signer: signer})
 }
 
 func newLockDeviceCmd(use, short, method string) *cobra.Command {
@@ -473,21 +437,7 @@ func newLockDeviceCmd(use, short, method string) *cobra.Command {
 
 // lockDeviceOnNode dials the LOCAL node socket and calls the sign/revoke method.
 func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, device []byte) (api.LockDeviceResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket) // force local socket
-	if err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockDeviceResult
-	if err := c.Call(method, api.LockDeviceParams{Device: device}, &res); err != nil {
-		return api.LockDeviceResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockDeviceParams{Device: device})
 }
 
 // resolveSignerArgs resolves a list of signer arguments to 32-byte Ed25519 pubkeys.
@@ -515,59 +465,17 @@ func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, er
 
 // revokeSignerStartOnNode dials the LOCAL socket and calls lock.revokeSignerStart.
 func revokeSignerStartOnNode(ctx context.Context, cfg *config.Config, p api.LockRevokeSignerStartParams) (api.LockRevokeSignerBlobResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket)
-	if err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockRevokeSignerBlobResult
-	if err := c.Call(api.MethodLockRevokeSignerStart, p, &res); err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockRevokeSignerBlobResult](ctx, cfg, api.MethodLockRevokeSignerStart, p)
 }
 
 // revokeSignerCosignOnNode dials the LOCAL socket and calls lock.revokeSignerCosign.
 func revokeSignerCosignOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerBlobResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket)
-	if err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockRevokeSignerBlobResult
-	if err := c.Call(api.MethodLockRevokeSignerCosign, api.LockRevokeSignerCosignParams{Blob: blob}, &res); err != nil {
-		return api.LockRevokeSignerBlobResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockRevokeSignerBlobResult](ctx, cfg, api.MethodLockRevokeSignerCosign, api.LockRevokeSignerCosignParams{Blob: blob})
 }
 
 // revokeSignerFinishOnNode dials the LOCAL socket and calls lock.revokeSignerFinish.
 func revokeSignerFinishOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerFinishResult, error) {
-	dial, err := gatewayDialer("", "", cfg.Socket)
-	if err != nil {
-		return api.LockRevokeSignerFinishResult{}, err
-	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return api.LockRevokeSignerFinishResult{}, err
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-	var res api.LockRevokeSignerFinishResult
-	if err := c.Call(api.MethodLockRevokeSignerFinish, api.LockRevokeSignerFinishParams{Blob: blob}, &res); err != nil {
-		return api.LockRevokeSignerFinishResult{}, err
-	}
-	return res, nil
+	return callLocal[api.LockRevokeSignerFinishResult](ctx, cfg, api.MethodLockRevokeSignerFinish, api.LockRevokeSignerFinishParams{Blob: blob})
 }
 
 // newLockRevokeSignerCmd implements the three-phase revoke-signer co-signing ceremony:
@@ -713,18 +621,8 @@ func newLockDisableCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			dial, err := gatewayDialer("", "", cfg.Socket) // local node
+			res, err := callLocal[api.LockDisableResult](ctx, cfg, api.MethodLockDisable, api.LockDisableParams{Secret: secret})
 			if err != nil {
-				return fail(cmd, err)
-			}
-			conn, err := dial(ctx)
-			if err != nil {
-				return fail(cmd, err)
-			}
-			c := api.NewClient(conn)
-			defer c.Close()
-			var res api.LockDisableResult
-			if err := c.Call(api.MethodLockDisable, api.LockDisableParams{Secret: secret}, &res); err != nil {
 				return fail(cmd, err)
 			}
 			shell.StdOutF("locked mode disabled network-wide\n  current tip (audit): %s\n", base64.StdEncoding.EncodeToString(res.Tip))
@@ -748,17 +646,7 @@ func newLockLocalDisableCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			dial, err := gatewayDialer("", "", cfg.Socket) // local node
-			if err != nil {
-				return fail(cmd, err)
-			}
-			conn, err := dial(ctx)
-			if err != nil {
-				return fail(cmd, err)
-			}
-			c := api.NewClient(conn)
-			defer c.Close()
-			if err := c.Call(api.MethodLockLocalDisable, nil, nil); err != nil {
+			if _, err := callLocal[struct{}](ctx, cfg, api.MethodLockLocalDisable, nil); err != nil {
 				return fail(cmd, err)
 			}
 			shell.StdOutF("locked-mode enforcement disabled on this node\n")
