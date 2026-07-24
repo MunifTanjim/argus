@@ -41,8 +41,9 @@ func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error)
 		BeaconPubKey:   d.beaconPubB64,
 	}
 	if len(d.beacon.Private) > 0 {
-		b := d.makeBeacon()
-		res.Beacon = &b
+		if b, err := d.makeBeacon(); err == nil {
+			res.Beacon = &b
+		}
 	}
 	return res, nil
 }

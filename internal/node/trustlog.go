@@ -93,8 +93,9 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 		// Emit a fresh beacon directly over the sync peer so the gateway sees the
 		// updated tip immediately (without waiting for a reconnect/identify).
 		if len(d.beacon.Private) > 0 {
-			b := d.makeBeacon()
-			_ = peer.Call(api.MethodBeaconOffer, b, nil)
+			if b, err := d.makeBeacon(); err == nil {
+				_ = peer.Call(api.MethodBeaconOffer, b, nil)
+			}
 		}
 	}
 	// Cross-check stored peer beacons against the resolved chain on every tick

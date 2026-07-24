@@ -53,6 +53,7 @@ type Node struct {
 	beaconPubB64      string                   // base64 public half, announced to the gateway roster
 	beaconCounter     atomic.Uint64            // monotonic emission counter; bumped by makeBeacon
 	beaconCounterPath string                   // path for counter persistence; "" = disabled
+	beaconEmitMu      sync.Mutex               // serializes counter increment+persist so persists commit in counter order
 	activeUplink      atomic.Pointer[api.Peer] // current gateway uplink peer for beacon.offer
 
 	// Peer beacon courier ingest state (guarded by peerBeaconMu).

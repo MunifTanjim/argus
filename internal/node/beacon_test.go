@@ -13,6 +13,17 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
+// mustBeacon calls makeBeacon and fails the test if the counter could not be
+// persisted, returning the beacon for assertions.
+func mustBeacon(t *testing.T, d *Node) api.Beacon {
+	t.Helper()
+	b, err := d.makeBeacon()
+	if err != nil {
+		t.Fatalf("makeBeacon: %v", err)
+	}
+	return b
+}
+
 // TestBeaconCounterPersistsAcrossRestart verifies that the beacon counter is
 // written to a sibling file and seeded from it on the next node startup, so
 // peers never see the counter reset to 1 and drop fresh beacons as stale.
@@ -30,9 +41,9 @@ func TestBeaconCounterPersistsAcrossRestart(t *testing.T) {
 	d1.SetBeaconKey(kp)
 	d1.SetBeaconCounterPath(keyPath) // no file yet; seeds from 0
 
-	b1 := d1.makeBeacon() // counter=1
-	b2 := d1.makeBeacon() // counter=2
-	b3 := d1.makeBeacon() // counter=3
+	b1 := mustBeacon(t, d1) // counter=1
+	b2 := mustBeacon(t, d1) // counter=2
+	b3 := mustBeacon(t, d1) // counter=3
 	_ = b1
 	_ = b2
 	// Persist the current counter value (emitBeacon does this in production).
@@ -51,10 +62,34 @@ func TestBeaconCounterPersistsAcrossRestart(t *testing.T) {
 	d2.SetBeaconKey(kp)
 	d2.SetBeaconCounterPath(keyPath) // reads file → seeds counter at 3
 
-	b4 := d2.makeBeacon() // must be > b3.Counter
+	b4 := mustBeacon(t, d2) // must be > b3.Counter
 	if b4.Counter <= b3.Counter {
 		t.Fatalf("post-restart counter = %d, must be > %d (last pre-restart counter)",
 			b4.Counter, b3.Counter)
+	}
+}
+
+// TestMakeBeaconReturnsErrorWhenCounterPersistFails verifies that when the
+// counter cannot be durably written, makeBeacon returns an error so callers skip
+// emitting a counter that was never recorded (which, after a restart reseeds from
+// the last durable value, would be reused and read as equivocation).
+func TestMakeBeaconReturnsErrorWhenCounterPersistFails(t *testing.T) {
+	kp, err := LoadOrCreateBeaconKey(filepath.Join(t.TempDir(), "seed-key.json"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateBeaconKey: %v", err)
+	}
+	d := newNode(nil)
+	d.SetBeaconKey(kp)
+	// Place a regular file where a directory would need to be, so the atomic
+	// temp+rename write (which MkdirAll's the parent) fails.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if werr := os.WriteFile(blocker, []byte("x"), 0o600); werr != nil {
+		t.Fatalf("write blocker: %v", werr)
+	}
+	d.SetBeaconCounterPath(filepath.Join(blocker, "beacon-key.json"))
+
+	if _, err := d.makeBeacon(); err == nil {
+		t.Fatal("expected makeBeacon to return an error when the counter cannot be persisted")
 	}
 }
 
@@ -209,7 +244,7 @@ func TestMakeBeaconCounterAndState(t *testing.T) {
 	d.SetBeaconKey(kp)
 
 	// Without trust store: tip=nil, length=0, counter increments from 1.
-	b1 := d.makeBeacon()
+	b1 := mustBeacon(t, d)
 	if b1.Counter != 1 {
 		t.Fatalf("first beacon counter = %d, want 1", b1.Counter)
 	}
@@ -224,7 +259,7 @@ func TestMakeBeaconCounterAndState(t *testing.T) {
 	}
 
 	// Second call bumps counter.
-	b2 := d.makeBeacon()
+	b2 := mustBeacon(t, d)
 	if b2.Counter != 2 {
 		t.Fatalf("second beacon counter = %d, want 2", b2.Counter)
 	}
@@ -257,7 +292,7 @@ func TestMakeBeaconCounterAndState(t *testing.T) {
 	}
 	d.trust.Store(ss)
 
-	b3 := d.makeBeacon()
+	b3 := mustBeacon(t, d)
 	if b3.Counter != 3 {
 		t.Fatalf("third beacon counter = %d, want 3", b3.Counter)
 	}

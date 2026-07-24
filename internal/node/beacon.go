@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -35,16 +36,28 @@ func persistBeaconCounter(keyPath string, counter uint64) error {
 }
 
 // makeBeacon builds and signs a fresh HEAD beacon, bumping the monotonic counter
-// and persisting it (best-effort, when beaconCounterPath is set) so a restarted
-// node always seeds the counter above any value peers have already accepted —
-// regardless of which emission path (uplink offer, sync-tick offer, or identify
-// response) produced the beacon. tip and length come from the current trust store
-// (zero values when trust is off). The caller must have a non-empty beacon private
-// key (d.beacon.Private).
-func (d *Node) makeBeacon() api.Beacon {
+// and persisting it (when beaconCounterPath is set) so a restarted node always
+// seeds the counter above any value peers have already accepted — regardless of
+// which emission path (uplink offer, sync-tick offer, or identify response)
+// produced the beacon. tip and length come from the current trust store (zero
+// values when trust is off). The caller must have a non-empty beacon private key
+// (d.beacon.Private).
+//
+// The counter increment and its persist are serialized under beaconEmitMu so the
+// persists commit in counter order: without this, two goroutines could hand out
+// counters 10 and 11 but have 10's temp+rename land on disk after 11 was already
+// emitted, so a restart would reseed below an emitted counter and reuse it
+// (manufactured equivocation). If the persist fails an error is returned and the
+// beacon is NOT emitted, so no counter is ever advertised without first being
+// durably recorded.
+func (d *Node) makeBeacon() (api.Beacon, error) {
+	d.beaconEmitMu.Lock()
 	counter := d.beaconCounter.Add(1)
 	if p := d.beaconCounterPath; p != "" {
-		_ = persistBeaconCounter(p, counter)
+		if err := persistBeaconCounter(p, counter); err != nil {
+			d.beaconEmitMu.Unlock()
+			return api.Beacon{}, fmt.Errorf("node: persist beacon counter: %w", err)
+		}
 	}
 	var tip []byte
 	var length int
@@ -52,12 +65,14 @@ func (d *Node) makeBeacon() api.Beacon {
 		tip = st.Tip()
 		length = st.Length()
 	}
-	return api.SignBeacon(d.beacon.Private, d.beacon.Public, tip, length, counter)
+	d.beaconEmitMu.Unlock()
+	return api.SignBeacon(d.beacon.Private, d.beacon.Public, tip, length, counter), nil
 }
 
 // emitBeacon produces a fresh beacon and offers it to the gateway over the active
-// uplink. It is a no-op when the beacon key is absent or no uplink is connected.
-// The counter is persisted by makeBeacon.
+// uplink. It is a no-op when the beacon key is absent, no uplink is connected, or
+// the counter could not be persisted (makeBeacon returns an error) — never
+// emitting a counter that was not first durably recorded.
 func (d *Node) emitBeacon() {
 	if len(d.beacon.Private) == 0 {
 		return
@@ -66,7 +81,11 @@ func (d *Node) emitBeacon() {
 	if peer == nil {
 		return
 	}
-	_ = peer.Call(api.MethodBeaconOffer, d.makeBeacon(), nil)
+	b, err := d.makeBeacon()
+	if err != nil {
+		return
+	}
+	_ = peer.Call(api.MethodBeaconOffer, b, nil)
 }
 
 // LoadOrCreateBeaconKey loads the node's persisted Ed25519 beacon keypair,
