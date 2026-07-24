@@ -379,6 +379,20 @@ func TestGenerateVectors(t *testing.T) {
 	rwrCBranchChain := trustlog.MarshalChain(rwrCBranch.Entries())
 	rwrWinnerTip := rwrHonest.Tip()
 
+	// ---- beacon parity vector (Go↔Dart cross-language pin) ----
+	// Deterministic Ed25519 beacon key from seed 0xBB*32; fixed tip 0xCC*32.
+	// Beacon encoding is inlined here to avoid an import cycle with internal/api
+	// (which imports internal/e2e via channel.go). TestBeaconGoldenVector in
+	// internal/api/beacon_test.go asserts VerifyBeacon against the committed vector.
+	beaconSeed := bytesFill(0xBB)
+	beaconPriv := ed25519.NewKeyFromSeed(beaconSeed)
+	beaconPub := beaconPriv.Public().(ed25519.PublicKey)
+	beaconTip := bytesFill(0xCC)
+	const beaconLength = 7
+	const beaconCounter = uint64(3)
+	beaconSig := ed25519.Sign(beaconPriv, beaconSigBytesVec(beaconPub, beaconTip, beaconLength, beaconCounter))
+	tamperedTip := bytesFill(0xEE)
+
 	out := map[string]any{
 		"protocol_name":  "Noise_IK_25519_ChaChaPoly_BLAKE2s",
 		"h0":             b64(h0),
@@ -429,6 +443,12 @@ func TestGenerateVectors(t *testing.T) {
 			"chain": b64(srChain),
 			"dev_a": b64(srDevA),
 			"dev_b": b64(srDevB),
+		},
+		// beacon: cross-language parity vector for Beacon sign/verify (Go↔Dart).
+		// valid uses deterministic key+tip; tampered has the same sig with a wrong tip.
+		"beacon": map[string]any{
+			"valid":    map[string]any{"beacon_pub": b64(beaconPub), "tip": b64(beaconTip), "length": beaconLength, "counter": beaconCounter, "sig": b64(beaconSig)},
+			"tampered": map[string]any{"beacon_pub": b64(beaconPub), "tip": b64(tamperedTip), "length": beaconLength, "counter": beaconCounter, "sig": b64(beaconSig)},
 		},
 		"fork_choice": map[string]any{
 			// (a) co-signed shorter branch beats longer plain branch.
@@ -733,3 +753,27 @@ func bytesFill2(v byte, n int) []byte {
 	return b
 }
 func blake2sSum(d []byte) []byte { s := blake2s.Sum256(d); return s[:] }
+
+// beaconPutFieldVec appends a 4-byte big-endian length prefix + b to buf.
+// Mirrors api.beaconPutField; inlined here to avoid the api↔e2e import cycle.
+func beaconPutFieldVec(buf *bytes.Buffer, b []byte) {
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(b)))
+	buf.Write(n[:])
+	buf.Write(b)
+}
+
+// beaconSigBytesVec returns the deterministic signing payload for a beacon.
+// Mirrors api.beaconSigBytes; inlined here to avoid the api↔e2e import cycle.
+func beaconSigBytesVec(beaconPub, tip []byte, length int, counter uint64) []byte {
+	var buf bytes.Buffer
+	beaconPutFieldVec(&buf, beaconPub)
+	beaconPutFieldVec(&buf, tip)
+	var l [8]byte
+	binary.BigEndian.PutUint64(l[:], uint64(length))
+	buf.Write(l[:])
+	var c [8]byte
+	binary.BigEndian.PutUint64(c[:], counter)
+	buf.Write(c[:])
+	return buf.Bytes()
+}

@@ -216,6 +216,14 @@ class MultiNodeLoopbackLink implements RpcLink {
     }
   }
 
+  /// Pushes a gateway-level (non-routed) notification to the client, simulating
+  /// a server-sent [node.event] or similar gateway notification. This is how
+  /// tests inject offline/removed/beacon events without going through a node
+  /// channel.
+  void pushNotification(String method, Object? params) {
+    _push(jsonEncode({'jsonrpc': '2.0', 'method': method, 'params': params}));
+  }
+
   @override
   Future<void> close() async {
     if (!_ctrl.isClosed) await _ctrl.close();

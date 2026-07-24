@@ -678,6 +678,31 @@ func TestHandleLockLogIncludesRevokeSignerEntry(t *testing.T) {
 	}
 }
 
+// TestLockStatusEquivocationField verifies that handleLockStatus reports
+// equivocation=true when d.Equivocation() is true, and false otherwise.
+func TestLockStatusEquivocationField(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Initially no equivocation.
+	raw0, _ := d.handleLockStatus(context.Background(), nil)
+	st0 := raw0.(api.LockStatusResult)
+	if st0.Equivocation {
+		t.Fatal("Equivocation should be false on a fresh node")
+	}
+
+	// Set the flag directly via the atomic (mirrors what handleBeaconDeliver does).
+	d.equivocation.Store(true)
+
+	raw1, _ := d.handleLockStatus(context.Background(), nil)
+	st1 := raw1.(api.LockStatusResult)
+	if !st1.Equivocation {
+		t.Fatal("Equivocation should be true after flag is set")
+	}
+}
+
 func TestLockStatusReflectsState(t *testing.T) {
 	d := newLockTestNode(t)
 	// Before init: not enabled, self keys reported, not locally disabled.

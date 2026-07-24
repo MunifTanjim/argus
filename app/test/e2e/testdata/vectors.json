@@ -1,4 +1,20 @@
 {
+  "beacon": {
+    "tampered": {
+      "beacon_pub": "fVnFYj3UCnSqTVoyrGRdOz+V2urkwiviVHbdakhvc4I=",
+      "counter": 3,
+      "length": 7,
+      "sig": "v8G+zRwXthIpkYVbjnDCCOVIq5YzBC/ndebYKUTsYj0wtAuPE9gJTeXh022SGLANiwGRiCzTWpqIm2mq0BvsCQ==",
+      "tip": "7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u4="
+    },
+    "valid": {
+      "beacon_pub": "fVnFYj3UCnSqTVoyrGRdOz+V2urkwiviVHbdakhvc4I=",
+      "counter": 3,
+      "length": 7,
+      "sig": "v8G+zRwXthIpkYVbjnDCCOVIq5YzBC/ndebYKUTsYj0wtAuPE9gJTeXh022SGLANiwGRiCzTWpqIm2mq0BvsCQ==",
+      "tip": "zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw="
+    }
+  },
   "cipher_sample": {
     "ad": "YWQtYnl0ZXM=",
     "ciphertext": "oN4DaGEB+wHaMeZEDNp8Ili83vw4SqKEgbPh6LZXBP3GL6R3QyX9",

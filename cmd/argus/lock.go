@@ -800,4 +800,7 @@ func printLockStatus(st api.LockStatusResult) {
 	if st.LocalDisabled {
 		shell.StdOutF("  local-disable: active\n")
 	}
+	if st.Equivocation {
+		shell.StdErrF("\n⚠ equivocation detected: node beacons diverge — the gateway may be showing inconsistent trust-log views. Compare the tip fingerprint above across your nodes out-of-band (phone/chat) to confirm they match.\n")
+	}
 }

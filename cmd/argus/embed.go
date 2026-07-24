@@ -278,6 +278,12 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	} else {
 		d.SetSignerKey(kp)
 	}
+	if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+		log.With("scope", "node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+	} else {
+		d.SetBeaconKey(kp)
+		d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+	}
 	// Prefer explicit config; else re-enable from the node's persisted
 	// genesis (written by lock.init) so a reboot stays locked.
 	if head == nil {

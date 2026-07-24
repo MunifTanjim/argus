@@ -90,7 +90,17 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
+		// Emit a fresh beacon directly over the sync peer so the gateway sees the
+		// updated tip immediately (without waiting for a reconnect/identify).
+		if len(d.beacon.Private) > 0 {
+			b := d.makeBeacon()
+			_ = peer.Call(api.MethodBeaconOffer, b, nil)
+		}
 	}
+	// Cross-check stored peer beacons against the resolved chain on every tick
+	// (regardless of whether the chain advanced) so the N=2 persistence guard
+	// accumulates correctly.
+	d.checkPeerBeaconConsistency()
 }
 
 // persistChain writes chain bytes to trustPath atomically via atomicfile.Write.
@@ -131,19 +141,36 @@ func (d *Node) runTrustSync(ctx context.Context, peer *api.Peer) {
 // ends or the uplink drops. It polls the (atomic) trust store each tick, so a node
 // enabled live via lock.init begins syncing without a reconnect. syncTrustOnce is a
 // no-op while the store is unset.
+//
+// Roster sync (for peer beacon attribution) runs once at startup and every
+// rosterSyncEvery trust ticks, so peerBeaconPubs stays current without adding
+// an extra RPC to every tight-interval test tick.
 func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
+	// Populate roster-known beacon pubs before the first trust sync so that
+	// any beacon.deliver calls arriving immediately after connect are attributed.
+	d.syncRoster(peer)
 	d.syncTrustOnce(peer)
 	t := time.NewTicker(time.Duration(trustSyncInterval.Load()))
 	defer t.Stop()
+	ticks := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			ticks++
 			d.syncTrustOnce(peer)
+			if ticks%rosterSyncEvery == 0 {
+				d.syncRoster(peer)
+			}
 		}
 	}
 }
+
+// rosterSyncEvery controls how often the roster is re-fetched relative to the
+// trust-sync tick. 10 means one nodes.list per 10 trust ticks (e.g. once per
+// 5 minutes at the default 30 s interval). A reconnect always refreshes.
+const rosterSyncEvery = 10
 
 // genesisHashPath is the state file holding the pinned genesis hash, kept beside
 // the chain so a node's locked state is self-contained in its state dir.
@@ -194,5 +221,6 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 	}
 	d.trust.Store(store) // publish only after both persists succeed
 	d.reevaluateTrustChannels()
+	d.emitBeacon() // announce the new chain tip to the gateway
 	return nil
 }

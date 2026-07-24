@@ -80,9 +80,11 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 	}
 	resp.peer.Store(peer)
 	d.activeResponder.Store(resp)
+	d.activeUplink.Store(peer)
 	defer peer.Close()
 	defer resp.closeAll()
 	defer d.activeResponder.CompareAndSwap(resp, nil)
+	defer d.activeUplink.CompareAndSwap(peer, nil)
 	d.log.Info("gateway uplink established", "url", url)
 
 	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).

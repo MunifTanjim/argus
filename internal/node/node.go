@@ -49,6 +49,25 @@ type Node struct {
 	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log)
 	signerPubB64 string             // base64 public half, announced to the gateway roster
 
+	beacon            trustlog.SignerKey       // node's Ed25519 beacon keypair (anti-equivocation; every node)
+	beaconPubB64      string                   // base64 public half, announced to the gateway roster
+	beaconCounter     atomic.Uint64            // monotonic emission counter; bumped by makeBeacon
+	beaconCounterPath string                   // path for counter persistence; "" = disabled
+	activeUplink      atomic.Pointer[api.Peer] // current gateway uplink peer for beacon.offer
+
+	// Peer beacon courier ingest state (guarded by peerBeaconMu).
+	// peerBeaconPubs is the set of roster-known peer beacon public keys
+	// (excludes self). Populated by syncRoster on each uplink tick.
+	// peerBeacons stores the latest counter-guarded accepted beacon per key.
+	// peerBeaconMiss tracks consecutive unreconciled ticks (N=2 guard).
+	// equivocation is set permanently once persistent peer beacon divergence is detected.
+	peerBeaconMu   sync.Mutex
+	peerBeaconPubs map[string]bool             // string(rawPub) → true
+	peerBeacons    map[string]api.Beacon       // string(rawPub) → latest accepted beacon
+	peerBeaconCtr  map[string]uint64           // string(rawPub) → last accepted counter
+	peerBeaconMiss map[string]*beaconMissState // string(rawPub) → miss streak
+	equivocation   atomic.Bool                 // set permanently on persistent peer beacon divergence
+
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
 
@@ -173,6 +192,35 @@ func (d *Node) SetSignerKey(kp trustlog.SignerKey) {
 
 // SignerPubKey returns the base64 Ed25519 signer public half, or "" if unset.
 func (d *Node) SignerPubKey() string { return d.signerPubB64 }
+
+// SetBeaconKey sets the node's Ed25519 beacon keypair, whose public half is
+// announced to the gateway roster (beacon_pubkey) for anti-equivocation. Call
+// before Run. The private half stays local.
+func (d *Node) SetBeaconKey(kp trustlog.SignerKey) {
+	d.beacon = kp
+	d.beaconPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// BeaconPub returns the base64 Ed25519 beacon public half, or "" if unset.
+func (d *Node) BeaconPub() string { return d.beaconPubB64 }
+
+// SetBeaconCounterPath enables beacon counter persistence. On call it reads the
+// counter from the sibling file (path + ".counter") and seeds beaconCounter so
+// the first emission after a restart is strictly greater than the last value
+// peers accepted before the restart. emitBeacon writes the updated counter back
+// on every emission. Call before Run, after SetBeaconKey.
+func (d *Node) SetBeaconCounterPath(path string) {
+	d.beaconCounterPath = path
+	if n := LoadBeaconCounter(path); n > 0 {
+		d.beaconCounter.Store(n)
+	}
+}
+
+// Equivocation reports whether this node has detected a trust-log equivocation
+// via the client courier: a peer's signed HEAD beacon whose tip could not be
+// reconciled with this node's own chain after the N=2 persistence guard. Once
+// set, this flag is never cleared for the lifetime of the node process.
+func (d *Node) Equivocation() bool { return d.equivocation.Load() }
 
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.
@@ -305,16 +353,20 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	d := &Node{
 		reg: reg, clients: clients, id: host, label: host,
-		adapterList:  adapterList,
-		adapters:     adapterByAgent,
-		discs:        discs,
-		caps:         caps,
-		log:          slog.New(slog.DiscardHandler),
-		pending:      map[string]*pendingDecision{},
-		conns:        map[api.Notifier]*connSubs{},
-		terms:        map[api.Notifier]*connTerms{},
-		sessionTerms: map[string]*term{},
-		resuming:     map[string]string{},
+		adapterList:    adapterList,
+		adapters:       adapterByAgent,
+		discs:          discs,
+		caps:           caps,
+		log:            slog.New(slog.DiscardHandler),
+		pending:        map[string]*pendingDecision{},
+		conns:          map[api.Notifier]*connSubs{},
+		terms:          map[api.Notifier]*connTerms{},
+		sessionTerms:   map[string]*term{},
+		resuming:       map[string]string{},
+		peerBeaconPubs: map[string]bool{},
+		peerBeacons:    map[string]api.Beacon{},
+		peerBeaconCtr:  map[string]uint64{},
+		peerBeaconMiss: map[string]*beaconMissState{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {

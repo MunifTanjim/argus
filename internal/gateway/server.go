@@ -517,11 +517,33 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 // serveNode adopts an accepted node uplink: learn its identity, register it as a
 // source, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
+	// nodeID is set (under mu) once identify succeeds; beacon.offer handling reads it.
+	var mu sync.Mutex
+	var nodeID string
+
+	nodeDispatch := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method == api.MethodBeaconOffer {
+			mu.Lock()
+			id := nodeID
+			mu.Unlock()
+			if id == "" {
+				return nil, nil // not yet identified; drop
+			}
+			b, err := api.Decode[api.Beacon](params)
+			if err != nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid beacon: " + err.Error()}
+			}
+			s.agg.UpdateBeacon(id, &b)
+			return nil, nil
+		}
+		return s.nodeDispatch(ctx, method, params)
+	}
+
 	peer := api.NewPeer(conn, api.PeerOptions{
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
-		Dispatch:                  s.nodeDispatch,
+		Dispatch:                  nodeDispatch,
 		OnRelayFrame:              func(f api.RelayFrame) { s.forwardFromNode(f) },
 	})
 	defer peer.Close()
@@ -530,7 +552,11 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.Capabilities, peer))
+	mu.Lock()
+	nodeID = id.ID
+	mu.Unlock()
+
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.BeaconPubKey, id.Capabilities, peer, id.Beacon))
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
 	<-peer.Done()

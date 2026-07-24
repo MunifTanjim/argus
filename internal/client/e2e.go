@@ -4,14 +4,17 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +49,16 @@ type pendingReply struct {
 	rpcErr *api.RPCError
 }
 
+// beaconMissThreshold is the number of consecutive unreconciled ticks for the
+// same tip required before the equivocation flag is set.
+const beaconMissThreshold = 2
+
+// beaconMissState tracks consecutive unreconciled ticks for a single node's beacon tip.
+type beaconMissState struct {
+	tip    []byte
+	misses int
+}
+
 // E2EClient talks to nodes over end-to-end encrypted channels relayed by a blind
 // gateway.
 type E2EClient struct {
@@ -66,6 +79,20 @@ type E2EClient struct {
 	trustPath string              // locked-mode chain persist path; "" = no persistence
 	trustCtx  context.Context     // cancelled on Close, stops the sync ticker
 	trustStop context.CancelFunc
+
+	// Beacon cross-check state (guarded by mu).
+	// beacons maps string(identityPub) to the latest verified beacon for each node.
+	// beaconCtr tracks the last accepted counter per node for replay/stale detection.
+	// beaconMiss tracks consecutive unreconciled ticks per node; cleared on reconcile
+	// or when the node's counter advances (new beacon supersedes the miss streak).
+	// everConnected records identity pubs for which a channel was successfully opened at
+	// any point; used by checkBeaconConsistency to distinguish "once connected, now
+	// offline" (skip: stale beacon) from "never connected" (check: legitimate beacon).
+	beacons       map[string]api.Beacon
+	beaconCtr     map[string]uint64
+	beaconMiss    map[string]*beaconMissState
+	everConnected map[string]bool // string(identityPub) → true, never deleted
+	equivocation  bool            // set permanently once divergence is detected
 }
 
 // NewE2EClientWithIdentity wraps a gateway connection with a caller-provided static
@@ -74,13 +101,17 @@ type E2EClient struct {
 // advance (genesis-pinned Ingest rejects a rolled-back or tampered file).
 func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []byte, chainPath string) (*E2EClient, error) {
 	m := &E2EClient{
-		static:   static,
-		byNode:   map[string]*nodeChan{},
-		byChanID: map[string]*nodeChan{},
-		pending:  map[uint64]chan pendingReply{},
-		subNode:  map[string]string{},
-		termNode: map[string]string{},
-		events:   make(chan api.Notification, 256),
+		static:        static,
+		byNode:        map[string]*nodeChan{},
+		byChanID:      map[string]*nodeChan{},
+		pending:       map[uint64]chan pendingReply{},
+		subNode:       map[string]string{},
+		termNode:      map[string]string{},
+		events:        make(chan api.Notification, 256),
+		beacons:       map[string]api.Beacon{},
+		beaconCtr:     map[string]uint64{},
+		beaconMiss:    map[string]*beaconMissState{},
+		everConnected: map[string]bool{},
 	}
 	if genesisHash != nil {
 		m.trust = trustlog.NewSyncStore(genesisHash)
@@ -93,7 +124,7 @@ func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []b
 			}
 		}
 	}
-	m.peer = api.NewPeer(conn, api.PeerOptions{OnRelayFrame: m.onRelayFrame})
+	m.peer = api.NewPeer(conn, api.PeerOptions{OnRelayFrame: m.onRelayFrame, OnNotify: m.onPeerNotify})
 	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
 	return m, nil
 }
@@ -140,6 +171,12 @@ func (m *E2EClient) Connect() error {
 	var roster api.NodesListResult
 	if err := m.peer.Call(api.MethodNodesList, nil, &roster); err != nil {
 		return fmt.Errorf("client: nodes.list: %w", err)
+	}
+	// Seed the initial beacon map from the roster snapshot (before the trust-log pull
+	// so that the first syncTrustLog cross-check already has whatever beacons the
+	// gateway advertises on the roster).
+	for _, nd := range roster.Nodes {
+		m.ingestBeaconFromDescriptor(nd)
 	}
 	// Locked mode: pull the trust log before deciding which nodes to open. The store
 	// is already disk-seeded (last verified HEAD), so enforcement is correct even if
@@ -200,6 +237,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 		nc.ch.Store(api.NewChannel(res.ChanID, sess))
 		m.mu.Lock()
 		m.byNode[nd.ID] = nc
+		m.everConnected[string(pub)] = true // record for checkBeaconConsistency skip guard
 		m.mu.Unlock()
 		return nil
 	case <-m.peer.Done():
@@ -325,6 +363,8 @@ func (m *E2EClient) channelsSnapshot() []*nodeChan {
 
 // reevaluateChannels removes channels to nodes no longer authorized by the trust log.
 // A nil or Disabled store closes nothing. Does not tear down the gateway peer connection.
+// Also prunes beacon state for each dropped node so stale cached beacons cannot
+// accumulate misses and false-positive the equivocation flag.
 func (m *E2EClient) reevaluateChannels() {
 	if m.trust == nil || m.trust.Disabled() {
 		return
@@ -341,6 +381,11 @@ func (m *E2EClient) reevaluateChannels() {
 		if ch := nc.ch.Load(); ch != nil {
 			delete(m.byChanID, ch.ID())
 		}
+		// Prune beacon state so the revoked node's stale tip cannot accumulate misses.
+		key := string(nc.identityPub)
+		delete(m.beacons, key)
+		delete(m.beaconCtr, key)
+		delete(m.beaconMiss, key)
 	}
 	m.mu.Unlock()
 }
@@ -669,7 +714,8 @@ func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval.Stor
 
 // syncTrustLog pulls all competing trust-log branches from the gateway and ingests
 // each in order (genesis-pinned; the fork-choice in the store picks the winner;
-// rolled-back or tampered branches are silently skipped).
+// rolled-back or tampered branches are silently skipped). After a successful pull it
+// cross-checks all collected node beacons against the resolved chain.
 func (m *E2EClient) syncTrustLog() {
 	var got api.TrustLogPullResult
 	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
@@ -685,14 +731,19 @@ func (m *E2EClient) syncTrustLog() {
 			anyChanged = true
 		}
 	}
-	if !anyChanged {
-		return
+	if anyChanged {
+		if m.trustPath != "" {
+			// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
+			_ = m.persistTrustChain()
+		}
+		m.reevaluateChannels()
 	}
-	if m.trustPath != "" {
-		// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
-		_ = m.persistTrustChain()
-	}
-	m.reevaluateChannels()
+	// Cross-check all collected node beacons against the resolved chain on every
+	// successful pull — regardless of whether the chain advanced this tick.
+	m.checkBeaconConsistency()
+	// Courier each node's signed beacon to the other connected nodes so nodes can
+	// cross-check each other's tips without relying solely on the client's view.
+	m.deliverBeacons()
 }
 
 // persistTrustChain atomically writes the current chain to trustPath.
@@ -727,4 +778,263 @@ func (m *E2EClient) TrustTip() []byte {
 		return nil
 	}
 	return m.trust.Tip()
+}
+
+// onPeerNotify handles gateway-level notifications. It processes node.event
+// beacon updates (ingest the new beacon) and offline/removed events (prune the
+// node's beacon state so stale tips cannot accumulate misses after the node
+// leaves the roster or goes offline).
+func (m *E2EClient) onPeerNotify(n api.Notification) {
+	if n.Method != api.MethodNodeEvent {
+		return
+	}
+	var ev api.NodeEvent
+	if err := json.Unmarshal(n.Params, &ev); err != nil {
+		return
+	}
+	switch ev.Type {
+	case api.NodeEventBeacon:
+		m.ingestBeaconFromDescriptor(ev.Node)
+	case api.NodeEventOffline, api.NodeEventRemoved:
+		m.pruneBeaconForDescriptor(ev.Node)
+	}
+}
+
+// pruneBeaconForDescriptor removes beacon state for the node described by nd.
+// Used when a node goes offline or is removed from the roster so its stale
+// cached beacon tip cannot accumulate misses and false-positive the equivocation flag.
+func (m *E2EClient) pruneBeaconForDescriptor(nd api.NodeDescriptor) {
+	if nd.IdentityPubKey == "" {
+		return
+	}
+	pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+	if err != nil {
+		return
+	}
+	key := string(pub)
+	m.mu.Lock()
+	delete(m.beacons, key)
+	delete(m.beaconCtr, key)
+	delete(m.beaconMiss, key)
+	m.mu.Unlock()
+}
+
+// ingestBeaconFromDescriptor validates and stores the beacon from a NodeDescriptor.
+// Guards applied in order:
+//  1. nd.Beacon must be non-nil and nd.IdentityPubKey + nd.BeaconPubKey must be set.
+//  2. api.VerifyBeacon must pass (Ed25519 signature check).
+//  3. b.BeaconPub must equal the roster-announced BeaconPubKey (attribution check).
+//  4. b.Counter must be strictly greater than the last accepted counter for this node.
+//
+// A beacon that fails any guard is silently dropped (not flagged as equivocation).
+func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) {
+	if nd.Beacon == nil || nd.IdentityPubKey == "" || nd.BeaconPubKey == "" {
+		return
+	}
+	identityPub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+	if err != nil {
+		return
+	}
+	expectedBeaconPub, err := base64.StdEncoding.DecodeString(nd.BeaconPubKey)
+	if err != nil {
+		return
+	}
+	b := *nd.Beacon
+	if !api.VerifyBeacon(b) {
+		return // signature invalid: silently drop
+	}
+	if !bytes.Equal(b.BeaconPub, expectedBeaconPub) {
+		return // beacon's key doesn't match roster-announced key: drop
+	}
+	key := string(identityPub)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if b.Counter <= m.beaconCtr[key] {
+		return // stale or replayed: ignore
+	}
+	m.beacons[key] = b
+	m.beaconCtr[key] = b.Counter
+	delete(m.beaconMiss, key) // counter advanced: new beacon supersedes any miss streak
+}
+
+// buildChainHashSet parses chainBytes and returns the set of all entry hashes
+// present in the linear chain (every position from genesis through head). Returns
+// nil, nil when chainBytes is empty (no chain yet). Returns nil and a non-nil error
+// when the bytes cannot be parsed; callers must handle that case explicitly rather
+// than treating it as "consistent".
+func buildChainHashSet(chainBytes []byte) (map[string]bool, error) {
+	if len(chainBytes) == 0 {
+		return nil, nil
+	}
+	entries, err := trustlog.UnmarshalChain(chainBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	known := make(map[string]bool, len(entries))
+	for i := range entries {
+		known[string(trustlog.HashEntry(&entries[i]))] = true
+	}
+	return known, nil
+}
+
+// consistentTips checks whether each collected node beacon's Tip is present in the
+// client's linear chain history represented by known (the prebuilt hash set from
+// buildChainHashSet). A nil known means no chain is available yet; all beacons are
+// treated as consistent (nothing to compare against). A nil or empty Tip is skipped —
+// the node has no chain yet and cannot be blamed for divergence. Length is not checked
+// (lenient: a tip/length TOCTOU is possible; tip presence is authoritative).
+// Returns (true, "") when all beacons reconcile; (false, detail) otherwise.
+func consistentTips(beacons map[string]api.Beacon, known map[string]bool) (bool, string) {
+	if known == nil {
+		return true, "" // no chain yet; cannot compare
+	}
+	var misses []string
+	for key, b := range beacons {
+		if len(b.Tip) == 0 {
+			continue // node has no chain tip yet; not an equivocation
+		}
+		if !known[string(b.Tip)] {
+			misses = append(misses, fmt.Sprintf("key=%x tip=%x", []byte(key), b.Tip))
+		}
+	}
+	if len(misses) > 0 {
+		return false, strings.Join(misses, "; ")
+	}
+	return true, ""
+}
+
+// checkBeaconConsistency cross-checks all collected node beacons against the current
+// resolved trust-log chain. A beacon whose Tip is not present in the client's linear
+// chain history is tracked per-node: if the same unreconciled tip persists for
+// beaconMissThreshold consecutive ticks (meaning it cannot be attributed to propagation
+// lag, which reconciles on the next pull), equivocation is flagged. A tip that appears
+// in the chain on any tick resets that node's miss streak. Beacons for nodes not
+// currently connected are skipped (belt-and-suspenders: a legitimate fork that
+// orphans an offline node's cached tip must not trigger the flag). No-op when the
+// trust store is absent or the chain is empty.
+// The resolved chain is parsed once per tick (O(1) parse, not O(beacons)); when the
+// chain bytes cannot be parsed the tick is skipped entirely — miss state and the
+// equivocation flag are left untouched, avoiding both a false positive and a spurious
+// miss-streak reset.
+func (m *E2EClient) checkBeaconConsistency() {
+	if m.trust == nil {
+		return
+	}
+	chainBytes := m.trust.Bytes()
+	if len(chainBytes) == 0 {
+		return // not yet synced; nothing to compare
+	}
+	m.checkBeaconConsistencyWithChain(chainBytes)
+}
+
+// checkBeaconConsistencyWithChain is the inner implementation of
+// checkBeaconConsistency, exposed for testing with caller-supplied chain bytes
+// (including corrupt bytes to verify the parse-failure skip path).
+func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.beacons) == 0 {
+		return // no beacons yet: skip the chain parse/hash entirely
+	}
+	// Parse the resolved chain once per tick; reuse across all beacons.
+	known, err := buildChainHashSet(chainBytes)
+	if err != nil {
+		// Unparseable chain: cannot evaluate consistency this tick. Leave miss
+		// state and equivocation flag untouched to avoid a false positive or a
+		// spurious miss-streak reset.
+		log.Printf("client: warn: resolved chain unparseable, skipping beacon consistency check: %v", err)
+		return
+	}
+	// Build the set of currently connected identity pubs so we can skip
+	// beacons from nodes that have gone offline or been de-rostered.
+	connected := make(map[string]bool, len(m.byNode))
+	for _, nc := range m.byNode {
+		connected[string(nc.identityPub)] = true
+	}
+	for key, b := range m.beacons {
+		// Belt-and-suspenders: skip beacons for nodes that WERE connected (had an
+		// open channel) but are no longer connected. A legitimate fork that orphans
+		// an offline node's stale cached tip must not accumulate misses and trigger
+		// the flag. Nodes that report beacons but were NEVER connected (e.g. their
+		// identity key isn't authorized by the local chain) are NOT skipped — those
+		// beacons are still checked for equivocation.
+		if m.everConnected[key] && !connected[key] {
+			continue
+		}
+		if len(b.Tip) == 0 {
+			delete(m.beaconMiss, key) // no tip yet: clear any prior miss
+			continue
+		}
+		// Check tip-membership against the prebuilt hash set (parsed once above).
+		if ok, _ := consistentTips(map[string]api.Beacon{key: b}, known); ok {
+			delete(m.beaconMiss, key) // tip reconciled: reset miss streak
+			continue
+		}
+		// Tip not in resolved chain: track per-node consecutive misses.
+		ms := m.beaconMiss[key]
+		if ms == nil || !bytes.Equal(ms.tip, b.Tip) {
+			// Different tip than the recorded miss (or first miss): start fresh.
+			ms = &beaconMissState{tip: append([]byte(nil), b.Tip...), misses: 1}
+			m.beaconMiss[key] = ms
+		} else {
+			ms.misses++
+		}
+		if ms.misses >= beaconMissThreshold && !m.equivocation {
+			log.Printf("client: equivocation detected — node beacons diverge from resolved chain: key=%x tip=%x", []byte(key), b.Tip)
+			m.equivocation = true
+		}
+	}
+}
+
+// deliverBeacons couriers each collected node beacon to every OTHER connected
+// node via the beacon.deliver E2E method. A node's own beacon is never delivered
+// back to that same node. Delivery is best-effort (errors silently ignored) and
+// sequential — the use case is N=2–5 nodes and a 30-second interval.
+func (m *E2EClient) deliverBeacons() {
+	m.mu.Lock()
+	// Build identity pub → nodeID index from current channels.
+	identToNode := make(map[string]string, len(m.byNode))
+	for nodeID, nc := range m.byNode {
+		identToNode[string(nc.identityPub)] = nodeID
+	}
+	type entry struct {
+		beacon   api.Beacon
+		sourceID string // nodeID that owns this beacon
+	}
+	var todo []entry
+	for key, b := range m.beacons {
+		srcID := identToNode[key]
+		if srcID == "" {
+			continue // node disconnected since beacon was collected; skip
+		}
+		todo = append(todo, entry{beacon: b, sourceID: srcID})
+	}
+	targetIDs := make([]string, 0, len(m.byNode))
+	for nodeID := range m.byNode {
+		targetIDs = append(targetIDs, nodeID)
+	}
+	m.mu.Unlock()
+
+	for _, e := range todo {
+		b := e.beacon
+		for _, targetID := range targetIDs {
+			if targetID == e.sourceID {
+				continue // don't deliver a node's own beacon back to itself
+			}
+			_ = m.callNode(targetID, api.MethodBeaconDeliver, b, nil)
+		}
+	}
+}
+
+// Equivocation reports whether the client has detected a trust-log equivocation:
+// one or more nodes reported a HEAD beacon whose tip could not be reconciled with
+// the client's resolved chain after a pull. Once set, this flag is never cleared —
+// equivocation evidence persists for the lifetime of the client session.
+func (m *E2EClient) Equivocation() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.equivocation
 }

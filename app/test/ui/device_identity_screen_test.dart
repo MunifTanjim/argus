@@ -163,6 +163,37 @@ void main() {
     expect(find.textContaining(base64.encode(_fixedSigner)), findsOneWidget);
   });
 
+  testWidgets('equivocation banner shown when equivocation is true',
+      (tester) async {
+    final store = TrustChainStore(_TrackingKv());
+    const summary = TrustSummary(
+      connected: true,
+      isLocked: true,
+      isAuthorized: true,
+      isDisabled: false,
+      tip: null,
+      equivocation: true,
+    );
+    await tester.pumpWidget(_app(summary, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Trust-log equivocation detected'), findsOneWidget);
+  });
+
+  testWidgets('equivocation banner absent when equivocation is false',
+      (tester) async {
+    final store = TrustChainStore(_TrackingKv());
+    const summary = TrustSummary(
+      connected: true,
+      isLocked: true,
+      isAuthorized: true,
+      isDisabled: false,
+      tip: null,
+    );
+    await tester.pumpWidget(_app(summary, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Trust-log equivocation detected'), findsNothing);
+  });
+
   testWidgets('reset trust anchor confirm calls store.clear()', (tester) async {
     final kv = _TrackingKv();
     final store = TrustChainStore(kv);

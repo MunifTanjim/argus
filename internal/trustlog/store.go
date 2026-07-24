@@ -203,3 +203,11 @@ func (s *Store) Devices() [][]byte {
 	}
 	return s.log.Devices()
 }
+
+// Length returns the number of entries in the current chain (0 if empty).
+func (s *Store) Length() int {
+	if s.log == nil {
+		return 0
+	}
+	return len(s.log.Entries())
+}

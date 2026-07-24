@@ -151,6 +151,7 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
+		d.emitBeacon()
 	}
 	return api.LockDeviceResult{Tip: st.Tip()}, nil
 }
@@ -196,6 +197,7 @@ func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
+		d.emitBeacon()
 	}
 	return api.LockDeviceResult{Tip: st.Tip()}, nil
 }
@@ -221,6 +223,7 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
+		d.emitBeacon()
 	}
 	return api.LockDisableResult{Tip: st.Tip(), Disabled: st.Disabled()}, nil
 }
@@ -335,6 +338,7 @@ func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMe
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
+		d.emitBeacon()
 	}
 	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
 }
@@ -430,5 +434,6 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 		res.Authorized = st.DeviceAuthorized(d.identity.Public)
 	}
 	res.Disabled = st.Disabled()
+	res.Equivocation = d.Equivocation()
 	return res, nil
 }

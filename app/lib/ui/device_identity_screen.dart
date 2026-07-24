@@ -38,6 +38,10 @@ class DeviceIdentityScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(16),
           children: [
             _StatusCard(summary: summary),
+            if (summary.equivocation) ...[
+              const SizedBox(height: 8),
+              const _EquivocationBanner(),
+            ],
             const SizedBox(height: 8),
             ExpansionTile(
               initiallyExpanded: enrollExpanded,
@@ -121,6 +125,55 @@ class _StatusCard extends StatelessWidget {
       'Awaiting authorization',
       Icons.pending_outlined,
       const Color(0xFFfabd2f), // gruvbox yellow
+    );
+  }
+}
+
+class _EquivocationBanner extends StatelessWidget {
+  const _EquivocationBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: AppColors.awaitingSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.awaitingBorder),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.warning_amber_outlined,
+                    color: Color(0xFFfe8019), size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Trust-log equivocation detected',
+                    style: TextStyle(
+                      color: Color(0xFFfe8019),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            Text(
+              'The gateway may be showing inconsistent trust-log views across '
+              'your nodes — the app cannot fully verify what it relays. '
+              'Compare the fingerprint words on each node by running '
+              '`argus lock status` and confirming they match. '
+              'The app continues to work normally.',
+              style: TextStyle(color: AppColors.secondary, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

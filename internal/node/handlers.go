@@ -59,4 +59,8 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodLockRevokeSignerFinish, d.handleLockRevokeSignerFinish)
 	srv.Handle(api.MethodLockLog, d.handleLockLog)
 	srv.Handle(api.MethodSessionTasks, d.handleTasks)
+	// beacon.deliver: peer beacon relay from the client courier. Reachable over the
+	// E2E (remote/responder) path; not a lock.* method, so remoteDispatch passes it
+	// through. The handler verifies the sig and roster attribution before acting.
+	srv.Handle(api.MethodBeaconDeliver, d.handleBeaconDeliver)
 }

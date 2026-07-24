@@ -116,6 +116,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		} else {
 			d.SetSignerKey(kp)
 		}
+		if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+			logger.Scoped("node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+		} else {
+			d.SetBeaconKey(kp)
+			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+		}
 		// Prefer explicit config; else re-enable from the node's persisted
 		// genesis (written by lock.init) so a reboot stays locked.
 		// Fail-closed: a non-empty but unusable lock.genesis must not start the node open.
@@ -395,7 +401,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
 	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
 	if d := o.node; d != nil {
-		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.Capabilities()))
+		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.BeaconPub(), d.Capabilities()))
 	}
 
 	var store *clienttoken.Store

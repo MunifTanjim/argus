@@ -8,21 +8,25 @@ import (
 )
 
 type fakeSource struct {
-	id, label    string
-	idPubKey     string
-	signerPubKey string
-	done         chan struct{}
+	id, label     string
+	idPubKey      string
+	signerPubKey  string
+	beaconPubKey  string
+	initialBeacon *api.Beacon
+	done          chan struct{}
 }
 
 func newFakeSource(id, label string) *fakeSource {
 	return &fakeSource{id: id, label: label, done: make(chan struct{})}
 }
 
-func (f *fakeSource) ID() string             { return f.id }
-func (f *fakeSource) Label() string          { return f.label }
-func (f *fakeSource) Version() string        { return "" }
-func (f *fakeSource) IdentityPubKey() string { return f.idPubKey }
-func (f *fakeSource) SignerPubKey() string   { return f.signerPubKey }
+func (f *fakeSource) ID() string                { return f.id }
+func (f *fakeSource) Label() string             { return f.label }
+func (f *fakeSource) Version() string           { return "" }
+func (f *fakeSource) IdentityPubKey() string    { return f.idPubKey }
+func (f *fakeSource) SignerPubKey() string      { return f.signerPubKey }
+func (f *fakeSource) BeaconPubKey() string      { return f.beaconPubKey }
+func (f *fakeSource) LatestBeacon() *api.Beacon { return f.initialBeacon }
 func (f *fakeSource) Capabilities() api.NodeCapabilities {
 	return api.NodeCapabilities{SpawnSession: true}
 }

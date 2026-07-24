@@ -91,6 +91,15 @@ const (
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogPullResult (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
+	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
+	// for blind relay on the roster/node.event stream. The gateway never verifies it.
+	MethodBeaconOffer = "beacon.offer" // node->gateway request: Beacon; result: nil
+	// MethodBeaconDeliver is a client→node request carrying a signed HEAD beacon
+	// from a peer node. The receiving node verifies the sig against the
+	// roster-announced beacon_pubkey, counter-guards against replay, and
+	// consistency-checks the peer's tip against its own chain. Allowed over the
+	// E2E (remote) path; never a lock.* local-only method.
+	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method for the gateway uplink, E2E responder, and co-located gateway,
 	// so only the CLI (which dials the unix socket) can invoke these.
@@ -292,6 +301,8 @@ type IdentifyResult struct {
 	Capabilities   NodeCapabilities `json:"capabilities"`
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"` // base64 Curve25519 static public (E2E)
 	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"`   // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`          // current signed HEAD beacon (nil if no beacon key)
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -314,6 +325,8 @@ type NodeDescriptor struct {
 	Capabilities   NodeCapabilities `json:"capabilities"`
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"`
 	SignerPubKey   string           `json:"signer_pubkey,omitempty"`
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"` // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`        // latest signed HEAD beacon (gateway relays verbatim, never verifies)
 	Online         bool             `json:"online"`
 }
 
@@ -328,6 +341,7 @@ const (
 	NodeEventOnline  = "online"
 	NodeEventOffline = "offline"
 	NodeEventRemoved = "removed"
+	NodeEventBeacon  = "beacon" // node's HEAD beacon updated (gateway blind relay)
 )
 
 // NodeEvent is one roster change streamed to a client.
@@ -776,4 +790,5 @@ type LockStatusResult struct {
 	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
 	Disabled       bool     `json:"disabled,omitempty"`
 	LocalDisabled  bool     `json:"local_disabled,omitempty"`
+	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
 }

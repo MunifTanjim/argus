@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
@@ -75,6 +78,27 @@ Future<GatewayClient> buildE2EClient(
   return client;
 }
 
+/// Returns whether [client] is an [E2EClient] that has detected an equivocation.
+/// Extracted from the equivPoll callback in [gatewayProvider] for testability.
+@visibleForTesting
+bool equivocationOf(GatewayClient? client) =>
+    client is E2EClient && client.equivocation;
+
+/// Starts the periodic equivocation poll and returns the [Timer] so the caller
+/// can cancel it on dispose. The poll writes [equivocationOf] unconditionally on
+/// every tick — no `!equivocation.state` guard — so a stale true left by a
+/// previous session is always cleared when the new [E2EClient] starts clean.
+/// [interval] defaults to 30 s (the trust-resync cadence); injectable for tests.
+@visibleForTesting
+Timer startEquivPoll(
+  ConnectionManager manager,
+  StateController<bool> equivocation, {
+  Duration interval = const Duration(seconds: 30),
+}) =>
+    Timer.periodic(interval, (_) {
+      equivocation.state = equivocationOf(manager.client);
+    });
+
 final clientIdentityStoreProvider =
     Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
 final trustChainStoreProvider =
@@ -112,6 +136,10 @@ final connStateProvider =
 /// possible MITM), or null when not in a failed state.
 final connErrorProvider = StateProvider<String?>((ref) => null);
 
+/// Whether the active E2E client has detected a trust-log equivocation.
+/// Polled from the client on the trust-resync cadence; reset on disconnect.
+final equivocationProvider = StateProvider<bool>((ref) => false);
+
 Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.list');
   store.replaceAll(parseSessions(result));
@@ -140,6 +168,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final push = ref.read(pushControllerProvider);
   final connState = ref.read(connStateProvider.notifier);
   final connError = ref.read(connErrorProvider.notifier);
+  final equivocation = ref.read(equivocationProvider.notifier);
   final profileStore = ref.read(profileStoreProvider);
   final testResults = ref.read(connectionTestResultsProvider.notifier);
   final identityStore = ref.read(clientIdentityStoreProvider);
@@ -163,7 +192,13 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     connState.state = s;
     connError.state = s == ConnState.failed ? manager.failureMessage : null;
   });
+  // Poll the E2E client's equivocation flag on the trust-resync cadence so the
+  // UI reflects it without requiring a connection-state change to trigger a
+  // rebuild. See [startEquivPoll] for the unconditional-write rationale.
+  final equivPoll = startEquivPoll(manager, equivocation);
   ref.onDispose(() {
+    equivPoll.cancel();
+    equivocation.state = false; // reset per-session flag on disconnect
     statesSub.cancel();
     // Tell the outgoing gateway to stop pushing before the link closes, so only
     // the active connection delivers notifications. Non-blocking, best-effort.

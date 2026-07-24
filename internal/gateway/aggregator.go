@@ -30,6 +30,7 @@ type srcState struct {
 	halted bool
 	online bool
 	timer  *time.Timer // offline-removal timer; non-nil only while disconnected
+	beacon *api.Beacon // latest signed HEAD beacon (set on connect + beacon.offer; nil until first received)
 }
 
 // New returns an empty Aggregator. grace <= 0 uses DefaultOfflineGrace.
@@ -72,7 +73,7 @@ func (a *Aggregator) AddSource(src Source) {
 		old.halt()
 		evType = api.NodeEventOnline // reconnect
 	}
-	st := &srcState{src: src, stop: make(chan struct{}), online: true}
+	st := &srcState{src: src, stop: make(chan struct{}), online: true, beacon: src.LatestBeacon()}
 	a.sources[src.ID()] = st
 	ev := api.NodeEvent{Type: evType, Node: descriptor(src.ID(), st)}
 	a.mu.Unlock()
@@ -140,8 +141,26 @@ func descriptor(id string, st *srcState) api.NodeDescriptor {
 		Capabilities:   st.src.Capabilities(),
 		IdentityPubKey: st.src.IdentityPubKey(),
 		SignerPubKey:   st.src.SignerPubKey(),
+		BeaconPubKey:   st.src.BeaconPubKey(),
+		Beacon:         st.beacon,
 		Online:         st.online,
 	}
+}
+
+// UpdateBeacon records nodeID's latest signed HEAD beacon and broadcasts a
+// node.event so subscribed clients see the fresh beacon. The gateway never
+// verifies the beacon — it relays verbatim (Ed25519 can't be forged).
+func (a *Aggregator) UpdateBeacon(nodeID string, b *api.Beacon) {
+	a.mu.Lock()
+	st, ok := a.sources[nodeID]
+	if !ok {
+		a.mu.Unlock()
+		return
+	}
+	st.beacon = b
+	ev := api.NodeEvent{Type: api.NodeEventBeacon, Node: descriptor(nodeID, st)}
+	a.mu.Unlock()
+	a.publishRoster(ev)
 }
 
 // Roster lists the connected nodes (online + within-grace offline) sorted by label,

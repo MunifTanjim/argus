@@ -83,6 +83,13 @@ func (s *SyncStore) Disabled() bool {
 	return s.store.Disabled()
 }
 
+// Length returns the number of entries in the current chain (0 if empty).
+func (s *SyncStore) Length() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.Length()
+}
+
 // Disable appends a KindDisable entry revealing secret, signed by by. changed
 // reports whether the chain actually advanced (it always does on success, since a
 // disable is terminal and irreversible). Returns an error if the secret is unknown,

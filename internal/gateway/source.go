@@ -23,6 +23,12 @@ type Source interface {
 	// SignerPubKey is the node's Ed25519 signer public key (base64), advertised so a
 	// future `lock init` can designate it as a trusted signer. Empty when unset.
 	SignerPubKey() string
+	// BeaconPubKey is the node's Ed25519 beacon public key (base64), for
+	// anti-equivocation beacon verification. Empty when unset.
+	BeaconPubKey() string
+	// LatestBeacon is the initial signed HEAD beacon from the node's identify call
+	// (nil when the node has no beacon key or the beacon is unavailable).
+	LatestBeacon() *api.Beacon
 	// Done is closed when the source disconnects (never fires for the in-process source).
 	Done() <-chan struct{}
 }
@@ -33,13 +39,14 @@ type InProcessSource struct {
 	id, label, version string
 	identityPubKey     string
 	signerPubKey       string
+	beaconPubKey       string
 	caps               api.NodeCapabilities
 	done               chan struct{} // never closed: the local engine is always present
 }
 
 // NewInProcessSource wraps a local node as a Source.
-func NewInProcessSource(id, label, version, identityPubKey, signerPubKey string, caps api.NodeCapabilities) *InProcessSource {
-	return &InProcessSource{id: id, label: label, version: version, identityPubKey: identityPubKey, signerPubKey: signerPubKey, caps: caps, done: make(chan struct{})}
+func NewInProcessSource(id, label, version, identityPubKey, signerPubKey, beaconPubKey string, caps api.NodeCapabilities) *InProcessSource {
+	return &InProcessSource{id: id, label: label, version: version, identityPubKey: identityPubKey, signerPubKey: signerPubKey, beaconPubKey: beaconPubKey, caps: caps, done: make(chan struct{})}
 }
 
 func (s *InProcessSource) ID() string                         { return s.id }
@@ -47,5 +54,7 @@ func (s *InProcessSource) Label() string                      { return s.label }
 func (s *InProcessSource) Version() string                    { return s.version }
 func (s *InProcessSource) IdentityPubKey() string             { return s.identityPubKey }
 func (s *InProcessSource) SignerPubKey() string               { return s.signerPubKey }
+func (s *InProcessSource) BeaconPubKey() string               { return s.beaconPubKey }
+func (s *InProcessSource) LatestBeacon() *api.Beacon          { return nil }
 func (s *InProcessSource) Capabilities() api.NodeCapabilities { return s.caps }
 func (s *InProcessSource) Done() <-chan struct{}              { return s.done }
