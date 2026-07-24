@@ -93,6 +93,9 @@ type E2EClient struct {
 	beaconMiss    map[string]*beaconMissState
 	everConnected map[string]bool // string(identityPub) → true, never deleted
 	equivocation  bool            // set permanently once divergence is detected
+
+	beaconKnownTip []byte          // caches known-set key; guarded by mu
+	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
 }
 
 // NewE2EClientWithIdentity wraps a gateway connection with a caller-provided static
@@ -939,14 +942,25 @@ func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes []byte) {
 	if len(m.beacons) == 0 {
 		return // no beacons yet: skip the chain parse/hash entirely
 	}
-	// Parse the resolved chain once per tick; reuse across all beacons.
-	known, err := buildChainHashSet(chainBytes)
-	if err != nil {
-		// Unparseable chain: cannot evaluate consistency this tick. Leave miss
-		// state and equivocation flag untouched to avoid a false positive or a
-		// spurious miss-streak reset.
-		log.Printf("client: warn: resolved chain unparseable, skipping beacon consistency check: %v", err)
-		return
+	// Parse the resolved chain once per tick; cache keyed on the trust-log tip so
+	// the expensive UnmarshalChain+hash is skipped when the chain has not advanced.
+	var tip []byte
+	if m.trust != nil {
+		tip = m.trust.Tip()
+	}
+	known := m.beaconKnown
+	if known == nil || !bytes.Equal(tip, m.beaconKnownTip) {
+		var err error
+		known, err = buildChainHashSet(chainBytes)
+		if err != nil {
+			// Unparseable chain: cannot evaluate consistency this tick. Leave miss
+			// state and equivocation flag untouched to avoid a false positive or a
+			// spurious miss-streak reset.
+			log.Printf("client: warn: resolved chain unparseable, skipping beacon consistency check: %v", err)
+			return
+		}
+		m.beaconKnown = known
+		m.beaconKnownTip = tip
 	}
 	// Build the set of currently connected identity pubs so we can skip
 	// beacons from nodes that have gone offline or been de-rostered.

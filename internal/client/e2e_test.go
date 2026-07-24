@@ -501,6 +501,78 @@ func TestClientDisabledStoreConnectsAll(t *testing.T) {
 	}
 }
 
+// TestClientBeaconKnownSetCachedByTip verifies that checkBeaconConsistencyWithChain
+// caches the entry-hash set keyed on the resolved chain tip and reuses it on an
+// unchanged tick, then rebuilds it when the tip advances.
+func TestClientBeaconKnownSetCachedByTip(t *testing.T) {
+	signer, _ := trustlog.GenerateSigner()
+	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	head := lg.Tip()
+	_ = lg.AuthorizeDevice(bytes.Repeat([]byte{0x44}, 32), signer)
+	entries := lg.Entries()
+	chain := trustlog.MarshalChain(entries)
+	chainTip := trustlog.HashEntry(&entries[len(entries)-1])
+
+	_, cli := net.Pipe()
+	m, err := NewE2EClientWithIdentity(cli, mustKP(t), head, "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if _, err := m.trust.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// Add a beacon directly so the early-return guard does not skip the body.
+	key := string(bytes.Repeat([]byte{0xab}, 32))
+	m.mu.Lock()
+	m.beacons[key] = api.Beacon{Tip: chainTip}
+	m.mu.Unlock()
+
+	// Prime: first pass builds and caches the known-set.
+	m.checkBeaconConsistencyWithChain(chain)
+	m.mu.Lock()
+	tip1 := append([]byte(nil), m.beaconKnownTip...)
+	set1 := m.beaconKnown
+	m.mu.Unlock()
+	if set1 == nil || len(tip1) == 0 {
+		t.Fatal("expected known-set cached after first pass")
+	}
+
+	// Unchanged chain: mark the cached map with a sentinel key and verify the
+	// second pass does NOT replace it (same map instance ⇒ sentinel still present).
+	const sentinel = "\xff_beacon_cache_sentinel"
+	m.mu.Lock()
+	m.beaconKnown[sentinel] = true
+	m.mu.Unlock()
+
+	m.checkBeaconConsistencyWithChain(chain)
+
+	m.mu.Lock()
+	hasSentinel := m.beaconKnown[sentinel]
+	m.mu.Unlock()
+	if !hasSentinel {
+		t.Fatal("unchanged-chain tick must reuse the cached known-set, not rebuild it")
+	}
+
+	// Changed tip: extend the chain by one entry; the cache must rebuild.
+	// The sentinel must be gone (new map allocated for new tip).
+	_ = lg.AuthorizeDevice(bytes.Repeat([]byte{0x55}, 32), signer)
+	newChain := trustlog.MarshalChain(lg.Entries())
+	if _, err := m.trust.Ingest(newChain); err != nil {
+		t.Fatalf("Ingest extended chain: %v", err)
+	}
+
+	m.checkBeaconConsistencyWithChain(newChain)
+
+	m.mu.Lock()
+	hasSentinelAfter := m.beaconKnown[sentinel]
+	m.mu.Unlock()
+	if hasSentinelAfter {
+		t.Fatal("changed chain tip must rebuild the known-set, not reuse the stale cache")
+	}
+}
+
 func TestPushRegisterFansOutToAllNodes(t *testing.T) {
 	var mu sync.Mutex
 	received := map[string]int{}

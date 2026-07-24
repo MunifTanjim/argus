@@ -13,6 +13,56 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
+// TestBeaconKnownSetCachedByTip verifies that checkPeerBeaconConsistency caches
+// the entry-hash set keyed on the resolved chain tip and reuses it on an unchanged
+// tick, then rebuilds it when the tip advances.
+func TestBeaconKnownSetCachedByTip(t *testing.T) {
+	d, entries, _ := setupNodeWithTrust(t)
+	pub, priv := genBeaconKeyPair(t)
+	addPeerPub(d, pub)
+
+	// Use a chain-consistent tip so the check does not accumulate misses.
+	chainTip := trustlog.HashEntry(&entries[len(entries)-1])
+	b := api.SignBeacon(priv, pub, chainTip, len(entries), 1)
+	if _, err := d.handleBeaconDeliver(context.Background(), marshalBeacon(t, b)); err != nil {
+		t.Fatalf("handleBeaconDeliver: %v", err)
+	}
+
+	// Prime: first consistency pass builds and caches the known-set.
+	d.checkPeerBeaconConsistency()
+	tip1 := append([]byte(nil), d.beaconKnownTip...)
+	set1 := d.beaconKnown
+	if set1 == nil || len(tip1) == 0 {
+		t.Fatal("expected known-set cached after first pass")
+	}
+
+	// Unchanged chain: mark the cached map with a sentinel key and verify the
+	// second pass does NOT replace it (same map instance ⇒ sentinel still present).
+	const sentinel = "\xff_beacon_cache_sentinel"
+	d.beaconKnown[sentinel] = true
+	d.checkPeerBeaconConsistency()
+	if !d.beaconKnown[sentinel] {
+		t.Fatal("unchanged-chain tick must reuse the cached known-set, not rebuild it")
+	}
+
+	// Changed tip: replace the trust store with a fresh chain whose tip differs.
+	// The sentinel must be gone from d.beaconKnown (new map allocated for new tip).
+	signer2, _ := trustlog.GenerateSigner()
+	lg2, _ := trustlog.NewGenesis([][]byte{signer2.Public}, signer2, nil)
+	genesisHash2 := trustlog.HashEntry(&lg2.Entries()[0])
+	_ = lg2.AuthorizeDevice(bytes.Repeat([]byte{0x99}, 32), signer2)
+	ss2 := trustlog.NewSyncStore(genesisHash2)
+	if _, err := ss2.Ingest(trustlog.MarshalChain(lg2.Entries())); err != nil {
+		t.Fatalf("Ingest new chain: %v", err)
+	}
+	d.trust.Store(ss2)
+
+	d.checkPeerBeaconConsistency()
+	if d.beaconKnown[sentinel] {
+		t.Fatal("changed chain tip must rebuild the known-set, not reuse the stale cache")
+	}
+}
+
 // genBeaconKeyPair returns a fresh Ed25519 beacon keypair for test use.
 func genBeaconKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	t.Helper()

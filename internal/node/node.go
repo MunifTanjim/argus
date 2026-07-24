@@ -68,6 +68,12 @@ type Node struct {
 	peerBeaconMiss map[string]*beaconMissState // string(rawPub) → miss streak
 	equivocation   atomic.Bool                 // set permanently on persistent peer beacon divergence
 
+	// beaconKnown caches the resolved chain's entry-hash set for the beacon
+	// consistency check, keyed on beaconKnownTip; rebuilt only when the tip
+	// advances. Guarded by peerBeaconMu.
+	beaconKnownTip []byte
+	beaconKnown    map[string]bool
+
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
 

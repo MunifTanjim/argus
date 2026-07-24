@@ -97,13 +97,19 @@ func (d *Node) checkPeerBeaconConsistency() {
 	if len(d.peerBeacons) == 0 {
 		return // no peer beacons yet: skip the chain parse/hash entirely
 	}
-	entries, err := trustlog.UnmarshalChain(chainBytes)
-	if err != nil || len(entries) == 0 {
-		return // parse failure: be lenient rather than false-positive
-	}
-	known := make(map[string]bool, len(entries))
-	for i := range entries {
-		known[string(trustlog.HashEntry(&entries[i]))] = true
+	tip := st.Tip()
+	known := d.beaconKnown
+	if known == nil || !bytes.Equal(tip, d.beaconKnownTip) {
+		entries, err := trustlog.UnmarshalChain(chainBytes)
+		if err != nil || len(entries) == 0 {
+			return // parse failure: be lenient rather than false-positive
+		}
+		known = make(map[string]bool, len(entries))
+		for i := range entries {
+			known[string(trustlog.HashEntry(&entries[i]))] = true
+		}
+		d.beaconKnown = known
+		d.beaconKnownTip = tip
 	}
 	var toFlag []string
 	for key, b := range d.peerBeacons {
