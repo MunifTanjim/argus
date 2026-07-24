@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import '../bytes.dart' show putUint32;
+import '../bytes.dart' show compareBytes, putUint32;
 import '../ed25519.dart' show ed25519Verify;
 import '../symmetric_state.dart' show blake2s;
 import 'entry.dart';
@@ -12,18 +12,35 @@ const int _maxCoSigns = 1 << 12;
 const int _maxReplaces = 1 << 12;
 const int _maxEntries = 1 << 16;
 
+/// Returns e's co-signs sorted by signer, then by sig — the canonical order Go
+/// trustlog.canonicalCoSigns produces. Co-signs are covered by hashEntry but
+/// their order is committed by nothing, so a gateway could otherwise reorder them
+/// to make the client compute a different Tip than the node. Returns a sorted
+/// copy; the input is not mutated.
+List<CoSign> _canonicalCoSigns(List<CoSign> cs) {
+  final out = List<CoSign>.of(cs);
+  out.sort((a, b) {
+    final c = compareBytes(a.signer, b.signer);
+    if (c != 0) return c;
+    return compareBytes(a.sig, b.sig);
+  });
+  return out;
+}
+
 /// The chain hash of a full (signed) entry. Covers sigBytes ‖ putField(sig).
 /// For KindRevokeSigner, replaces is already in sigBytes; CoSigns are appended
-/// after Sig so the chain commits to the full co-signed payload (mirrors Go hashEntry).
+/// after Sig in canonical order so the chain commits to the full co-signed
+/// payload regardless of co-sign order (mirrors Go hashEntry).
 Uint8List hashEntry(Entry e) {
   final b = BytesBuilder();
   b.add(sigBytes(e));
   putField(b, e.sig);
   if (e.kind == Kind.revokeSigner) {
-    putUint32(b, e.coSigns.length);
-    for (final cs in e.coSigns) {
-      putField(b, cs.signer);
-      putField(b, cs.sig);
+    final cs = _canonicalCoSigns(e.coSigns);
+    putUint32(b, cs.length);
+    for (final c in cs) {
+      putField(b, c.signer);
+      putField(b, c.sig);
     }
   }
   return blake2s(b.toBytes());

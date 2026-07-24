@@ -21,19 +21,21 @@ const (
 
 // MarshalEntry encodes an entry to its canonical wire form. It is identical to the
 // bytes hashEntry covers, so decode→hash reproduces the original chain hash.
-// For KindRevokeSigner, sigBytes already covers Replaces, and CoSigns are
-// appended after Sig (mirroring hashEntry).
+// For KindRevokeSigner, sigBytes already covers Replaces, and CoSigns are appended
+// after Sig in canonical order (mirroring hashEntry) so the wire encoding of a
+// co-signed revoke is independent of co-sign gathering order.
 func MarshalEntry(e Entry) []byte {
 	var buf bytes.Buffer
 	buf.Write(sigBytes(&e))
 	putField(&buf, e.Sig)
 	if e.Kind == KindRevokeSigner {
+		cs := canonicalCoSigns(e.CoSigns)
 		var cnt [4]byte
-		binary.BigEndian.PutUint32(cnt[:], uint32(len(e.CoSigns)))
+		binary.BigEndian.PutUint32(cnt[:], uint32(len(cs)))
 		buf.Write(cnt[:])
-		for _, cs := range e.CoSigns {
-			putField(&buf, cs.Signer)
-			putField(&buf, cs.Sig)
+		for _, c := range cs {
+			putField(&buf, c.Signer)
+			putField(&buf, c.Sig)
 		}
 	}
 	return buf.Bytes()

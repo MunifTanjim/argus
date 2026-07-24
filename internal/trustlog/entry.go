@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"golang.org/x/crypto/blake2s"
 )
@@ -103,21 +104,43 @@ func sigBytes(e *Entry) []byte {
 	return buf.Bytes()
 }
 
+// canonicalCoSigns returns e's co-signs in a deterministic order — by Signer,
+// then by Sig — so the chain hash and wire encoding of a co-signed revoke are
+// independent of the order the co-signs were gathered in. Co-signs are covered by
+// hashEntry but their order is committed by nothing; without canonicalization two
+// honest nodes assembling the same co-sign set in different orders would compute
+// different entry hashes (a divergent Tip / spurious fork), and a relay could
+// reorder co-signs to grind the entry hash. Returns a sorted copy; the input is
+// not mutated.
+func canonicalCoSigns(cs []CoSign) []CoSign {
+	out := make([]CoSign, len(cs))
+	copy(out, cs)
+	sort.Slice(out, func(i, j int) bool {
+		if c := bytes.Compare(out[i].Signer, out[j].Signer); c != 0 {
+			return c < 0
+		}
+		return bytes.Compare(out[i].Sig, out[j].Sig) < 0
+	})
+	return out
+}
+
 // hashEntry is the chain hash of a full (signed) entry — it covers Sig, so Prev
 // commits to the exact signed predecessor. For KindRevokeSigner the CoSigns are
-// also included so the chain commits to the full co-signed payload. Replaces is
-// already covered through sigBytes.
+// also included (in canonical order) so the chain commits to the full co-signed
+// payload regardless of co-sign gathering order. Replaces is already covered
+// through sigBytes.
 func hashEntry(e *Entry) []byte {
 	var buf bytes.Buffer
 	buf.Write(sigBytes(e))
 	putField(&buf, e.Sig)
 	if e.Kind == KindRevokeSigner {
+		cs := canonicalCoSigns(e.CoSigns)
 		var cnt [4]byte
-		binary.BigEndian.PutUint32(cnt[:], uint32(len(e.CoSigns)))
+		binary.BigEndian.PutUint32(cnt[:], uint32(len(cs)))
 		buf.Write(cnt[:])
-		for _, cs := range e.CoSigns {
-			putField(&buf, cs.Signer)
-			putField(&buf, cs.Sig)
+		for _, c := range cs {
+			putField(&buf, c.Signer)
+			putField(&buf, c.Sig)
 		}
 	}
 	sum := blake2s.Sum256(buf.Bytes())
