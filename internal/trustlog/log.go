@@ -90,6 +90,17 @@ func NewGenesis(signers [][]byte, by SignerKey, disablements [][]byte) (*Log, er
 
 // apply verifies an entry against current state and folds it in.
 func (l *Log) apply(e *Entry) error {
+	if err := l.verify(e); err != nil {
+		return err
+	}
+	l.fold(e)
+	return nil
+}
+
+// verify runs every read-only check for e against the current state. It MUST NOT
+// mutate l. Splitting verification from folding lets fork-choice re-fold an
+// already-verified prefix (fold only) without paying re-verification.
+func (l *Log) verify(e *Entry) error {
 	// KindRevokeSigner is authenticated by co-signs, not a single Signer+Sig pair.
 	if e.Kind != KindRevokeSigner && !verifySig(e) {
 		return errors.New("trustlog: bad signature")
@@ -107,79 +118,128 @@ func (l *Log) apply(e *Entry) error {
 		if !containsBytes(e.Signers, e.Signer) {
 			return errors.New("trustlog: genesis signer not in its signer set")
 		}
+		return nil
+	}
+	if len(l.entries) == 0 {
+		return errors.New("trustlog: first entry must be genesis")
+	}
+	if !bytes.Equal(e.Prev, l.tip) {
+		return errors.New("trustlog: entry does not extend the current tip")
+	}
+	if l.disabled {
+		return errors.New("trustlog: log is disabled; no further entries accepted")
+	}
+	switch e.Kind {
+	case KindRevokeSigner:
+		if _, ok := validCoSigns(e, func(p []byte) bool { return l.signers[string(p)] }, len(e.Replaces) > 0); !ok {
+			return errors.New("trustlog: revoke-signer lacks enough valid co-signs")
+		}
+		if remainingAfterRevokeWith(l.signers, e.Replaces, e.Signers) < 1 {
+			return errors.New("trustlog: revoke-signer would leave zero signers")
+		}
+		return nil
+	case KindDisable:
+		if !containsBytes(l.disablements, DisablementCommitment(e.Key)) {
+			return errors.New("trustlog: disable secret does not match any genesis commitment")
+		}
+		return nil
+	case KindAddSigner:
+		if !l.signers[string(e.Signer)] {
+			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
+		return nil
+	case KindRemoveSigner:
+		if !l.signers[string(e.Signer)] {
+			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
+		if !l.signers[string(e.Key)] {
+			return errors.New("trustlog: cannot remove an unknown signer")
+		}
+		if len(l.signers) == 1 {
+			return errors.New("trustlog: cannot remove the last signer")
+		}
+		return nil
+	case KindAuthorizeDevice:
+		if !l.signers[string(e.Signer)] {
+			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
+		if l.devices[string(e.Key)] {
+			return errors.New("trustlog: device already authorized")
+		}
+		return nil
+	case KindRevokeDevice:
+		if !l.signers[string(e.Signer)] {
+			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
+		return nil
+	default:
+		return errors.New("trustlog: unknown entry kind")
+	}
+}
+
+// fold applies e's state transitions. It MUST NOT check anything — callers
+// guarantee e was already verified (Load calls verify first; foldSignersAt folds
+// an already-verified prefix). It always appends the entry and advances the tip.
+func (l *Log) fold(e *Entry) {
+	switch e.Kind {
+	case KindGenesis:
 		for _, s := range e.Signers {
 			l.signers[string(s)] = true
 		}
 		l.disablements = cloneSigners(e.Disablements)
-	} else {
-		if len(l.entries) == 0 {
-			return errors.New("trustlog: first entry must be genesis")
+	case KindRevokeSigner:
+		for _, r := range e.Replaces {
+			l.signers[string(r)] = true
 		}
-		if !bytes.Equal(e.Prev, l.tip) {
-			return errors.New("trustlog: entry does not extend the current tip")
+		for _, r := range e.Signers {
+			delete(l.signers, string(r))
+			l.dropDevicesAuthorizedBy(r)
 		}
-		if l.disabled {
-			return errors.New("trustlog: log is disabled; no further entries accepted")
-		}
-		if e.Kind == KindRevokeSigner {
-			// Authorized by co-signs from the signers trusted at the current head.
-			// When Replaces is set, the revoked signers may also co-sign their own
-			// succession (voluntary rotation); otherwise only remaining signers count.
-			if _, ok := validCoSigns(e, func(p []byte) bool { return l.signers[string(p)] }, len(e.Replaces) > 0); !ok {
-				return errors.New("trustlog: revoke-signer lacks enough valid co-signs")
-			}
-			// Add replacement signers before computing the remaining count so that
-			// revoking the last signer is only valid when a replacement is provided.
-			for _, r := range e.Replaces {
-				l.signers[string(r)] = true
-			}
-			if remainingAfterRevoke(l.signers, e.Signers) < 1 {
-				return errors.New("trustlog: revoke-signer would leave zero signers")
-			}
-			for _, r := range e.Signers {
-				delete(l.signers, string(r))
-				l.dropDevicesAuthorizedBy(r)
-			}
-		} else if e.Kind == KindDisable {
-			// Authorized by a disablement secret (Key), NOT a trusted signer — recovery
-			// must work when signers are lost. verifySig above already bound the entry.
-			if !containsBytes(l.disablements, DisablementCommitment(e.Key)) {
-				return errors.New("trustlog: disable secret does not match any genesis commitment")
-			}
-			l.disabled = true
-		} else {
-			if !l.signers[string(e.Signer)] {
-				return errors.New("trustlog: entry not signed by a trusted signer")
-			}
-			switch e.Kind {
-			case KindAddSigner:
-				l.signers[string(e.Key)] = true
-			case KindRemoveSigner:
-				if !l.signers[string(e.Key)] {
-					return errors.New("trustlog: cannot remove an unknown signer")
-				}
-				if len(l.signers) == 1 {
-					return errors.New("trustlog: cannot remove the last signer")
-				}
-				delete(l.signers, string(e.Key))
-				l.dropDevicesAuthorizedBy(e.Key) // retroactive: drop devices whose signer is gone
-			case KindAuthorizeDevice:
-				if l.devices[string(e.Key)] {
-					return errors.New("trustlog: device already authorized")
-				}
-				l.devices[string(e.Key)] = true
-				l.deviceSigner[string(e.Key)] = cloneBytes(e.Signer)
-			case KindRevokeDevice:
-				delete(l.devices, string(e.Key))
-				delete(l.deviceSigner, string(e.Key))
-			default:
-				return errors.New("trustlog: unknown entry kind")
-			}
-		}
+	case KindDisable:
+		l.disabled = true
+	case KindAddSigner:
+		l.signers[string(e.Key)] = true
+	case KindRemoveSigner:
+		delete(l.signers, string(e.Key))
+		l.dropDevicesAuthorizedBy(e.Key)
+	case KindAuthorizeDevice:
+		l.devices[string(e.Key)] = true
+		l.deviceSigner[string(e.Key)] = cloneBytes(e.Signer)
+	case KindRevokeDevice:
+		delete(l.devices, string(e.Key))
+		delete(l.deviceSigner, string(e.Key))
 	}
 	l.entries = append(l.entries, *e)
 	l.tip = hashEntry(e)
-	return nil
+}
+
+// remainingAfterRevokeWith returns how many signers remain after adding replaces
+// to the set then removing the distinct revoked pubkeys — computed WITHOUT
+// mutating signers (the read-only form used by verify, equivalent to adding
+// replaces first then calling remainingAfterRevoke).
+func remainingAfterRevokeWith(signers map[string]bool, replaces, revoked [][]byte) int {
+	withReplaces := len(signers)
+	for _, r := range replaces {
+		if !signers[string(r)] {
+			withReplaces++
+		}
+	}
+	seen := map[string]bool{}
+	present := func(k string) bool {
+		if signers[k] {
+			return true
+		}
+		return containsBytes(replaces, []byte(k))
+	}
+	remaining := withReplaces
+	for _, r := range revoked {
+		rs := string(r)
+		if present(rs) && !seen[rs] {
+			seen[rs] = true
+			remaining--
+		}
+	}
+	return remaining
 }
 
 // remainingAfterRevoke returns how many signers remain in the set after removing

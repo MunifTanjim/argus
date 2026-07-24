@@ -132,15 +132,13 @@ func forkChoice(cur, cand []Entry) (adoptCandidate bool, err error) {
 	return bytes.Compare(hashEntry(ecand), hashEntry(ecur)) < 0, nil
 }
 
-// foldSignersAt replays entries[0..p-1] and returns the trusted signer set at the
-// fork point — the shared prefix's folded signers. entries are already Load-verified,
-// so apply cannot fail here; the error path is defense-in-depth.
+// foldSignersAt replays the already-verified prefix entries[0:p] using fold only
+// (no signature/quorum re-verification — the prefix was verified when adopted)
+// and returns the signer set trusted at that fork point.
 func foldSignersAt(entries []Entry, p int) (map[string]bool, error) {
 	l := newEmpty()
 	for i := 0; i < p; i++ {
-		if err := l.apply(&entries[i]); err != nil {
-			return nil, err
-		}
+		l.fold(&entries[i])
 	}
 	return l.signers, nil
 }
