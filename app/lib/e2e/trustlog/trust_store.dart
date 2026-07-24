@@ -28,7 +28,12 @@ Future<Set<String>> foldSignersAtForTest(List<Entry> entries, int p) =>
 /// is trusted at the fork point.
 Future<int> _weightAtFork(Entry e, Set<String> forkSigners) async {
   if (e.kind == Kind.revokeSigner) {
-    final (n, _) = await validCoSigns(e, (pub) => forkSigners.contains(hexEncode(pub)));
+    // allowRevoked must match verify/Complete (replaces non-empty): for a voluntary
+    // succession the departing signer's co-sign counts toward quorum, so it must
+    // count toward fork weight too — else the revoke is undercounted and a competing
+    // removal from the compromised departing key can tie and win a lowest-hash flip.
+    final (n, _) = await validCoSigns(e, (pub) => forkSigners.contains(hexEncode(pub)),
+        allowRevoked: e.replaces.isNotEmpty);
     return n;
   }
   final signer = e.signer;

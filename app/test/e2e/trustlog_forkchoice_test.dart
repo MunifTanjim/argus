@@ -157,4 +157,32 @@ void main() {
       expect(store.signerTrusted(_b(v, 'added_signer_b')), isFalse);
     });
   });
+
+  // --- (f) succession weight: a voluntary-succession revoke (departing co-signer
+  // counts toward fork weight) beats a competing removal from that compromised key ---
+  group('succession_weight', () {
+    late Map<String, dynamic> v;
+    setUp(() => v = _fc()['succession_weight'] as Map<String, dynamic>);
+
+    void assertHonestWins(TrustStore store) {
+      expect(store.tip, equals(_b(v, 'winner_tip')), reason: 'succession revoke must win (weight 2 > 1)');
+      expect(store.signerTrusted(_b(v, 'winner_signer_b')), isTrue, reason: 'honest signer B must stay trusted');
+      expect(store.signerTrusted(_b(v, 'winner_signer_c')), isTrue, reason: 'replacement C must be trusted');
+      expect(store.signerTrusted(_b(v, 'loser_signer_a')), isFalse, reason: 'compromised A must be revoked');
+    }
+
+    test('attacker removal adopted first — succession revoke must win', () async {
+      final store = TrustStore(_b(v, 'genesis_hash'));
+      await store.ingest(_b(v, 'attacker_chain'));
+      await store.ingest(_b(v, 'honest_chain'));
+      assertHonestWins(store);
+    });
+
+    test('succession revoke adopted first — attacker removal must lose', () async {
+      final store = TrustStore(_b(v, 'genesis_hash'));
+      await store.ingest(_b(v, 'honest_chain'));
+      await store.ingest(_b(v, 'attacker_chain'));
+      assertHonestWins(store);
+    });
+  });
 }

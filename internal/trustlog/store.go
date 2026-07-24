@@ -164,9 +164,12 @@ func foldSignersAt(entries []Entry, p int) (map[string]bool, error) {
 // at the fork point (a Load-verified first-diverging entry's signer normally is).
 func weightAtFork(e *Entry, forkSigners map[string]bool) int {
 	if e.Kind == KindRevokeSigner {
-		// allowRevoked=false: deliberately conservative — the departing signer's
-		// co-sign does not inflate fork weight, which is fail-safe.
-		n, _ := validCoSigns(e, func(pub []byte) bool { return forkSigners[string(pub)] }, false)
+		// allowRevoked must match verify/Complete (len(Replaces) > 0): for a voluntary
+		// succession the departing signer's co-sign counts toward quorum, so it must
+		// count toward fork weight too — otherwise the revoke is undercounted and a
+		// competing removal from the compromised departing key can tie and win a
+		// lowest-hash coin-flip.
+		n, _ := validCoSigns(e, func(pub []byte) bool { return forkSigners[string(pub)] }, len(e.Replaces) > 0)
 		return n
 	}
 	if forkSigners[string(e.Signer)] {

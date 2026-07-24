@@ -401,6 +401,27 @@ func TestGenerateVectors(t *testing.T) {
 	ddAttackerChain := trustlog.MarshalChain(ddAttacker.Entries())
 	ddWinnerTip := ddDisabled.Tip()
 
+	// ---- (f) succession weight: a voluntary-succession revoke's departing co-signer
+	// counts toward fork weight, so it beats a competing removal from that same
+	// compromised key ----
+	//   honest:   genesis(A,B) -> revoke A, replace with C, co-signed by A (departing) + B  (weight 2)
+	//   attacker: genesis(A,B) -> removeSigner(B) signed by compromised A                    (weight 1)
+	//   expected winner: honest (2 > 1), both orders; A revoked, B and C trusted.
+	swA := mustGenSignerSeed(t, 0xF1)
+	swB := mustGenSignerSeed(t, 0xF2)
+	swC := mustGenSignerSeed(t, 0xF3)
+	swPubs := [][]byte{swA.Public, swB.Public}
+	swHonest, err := trustlog.NewGenesis(swPubs, swA, nil)
+	must(t, err)
+	swAttacker, err := trustlog.NewGenesis(swPubs, swA, nil)
+	must(t, err)
+	swGenesisHash := swHonest.Tip()
+	must(t, swHonest.RevokeSigner([][]byte{swA.Public}, [][]byte{swC.Public}, []trustlog.SignerKey{swA, swB}))
+	must(t, swAttacker.RemoveSigner(swB.Public, swA))
+	swHonestChain := trustlog.MarshalChain(swHonest.Entries())
+	swAttackerChain := trustlog.MarshalChain(swAttacker.Entries())
+	swWinnerTip := swHonest.Tip()
+
 	// ---- beacon parity vector (Go↔Dart cross-language pin) ----
 	// Deterministic Ed25519 beacon key from seed 0xBB*32; fixed tip 0xCC*32.
 	// Beacon encoding is inlined here to avoid an import cycle with internal/api
@@ -526,6 +547,18 @@ func TestGenerateVectors(t *testing.T) {
 				"attacker_chain": b64(ddAttackerChain), // genesis -> addSigner(B) by A (weight 1)
 				"winner_tip":     b64(ddWinnerTip),     // disabled must win both orders
 				"added_signer_b": b64(ddB.Public),      // B must NOT be trusted after disable wins
+			},
+			// (f) succession weight: a voluntary-succession revoke's departing co-signer
+			// counts toward fork weight (2), beating a competing removal (1) from that
+			// compromised key.
+			"succession_weight": map[string]any{
+				"genesis_hash":    b64(swGenesisHash),
+				"honest_chain":    b64(swHonestChain),   // revoke A + replace C, co-signed by departing A + B
+				"attacker_chain":  b64(swAttackerChain), // compromised A removes honest B
+				"winner_tip":      b64(swWinnerTip),     // honest must win (2 > 1), both orders
+				"winner_signer_b": b64(swB.Public),      // B must stay trusted
+				"winner_signer_c": b64(swC.Public),      // C (replacement) must be trusted
+				"loser_signer_a":  b64(swA.Public),      // compromised A must be revoked
 			},
 		},
 	}
@@ -703,6 +736,35 @@ func TestForkChoiceGoldenVectors(t *testing.T) {
 			}
 			if s.SignerTrusted(addedB) {
 				t.Error("attacker-added signer B must not be trusted after the disable wins")
+			}
+		}
+	})
+
+	// (f) succession weight: a voluntary-succession revoke (departing co-signer
+	// counts) beats a competing removal from that compromised key, both orders.
+	t.Run("succession_weight", func(t *testing.T) {
+		var v map[string]string
+		must(t, json.Unmarshal(fc["succession_weight"], &v))
+		gh := decodeB64(t, v["genesis_hash"])
+		honest := decodeB64(t, v["honest_chain"])
+		attacker := decodeB64(t, v["attacker_chain"])
+		wantTip := decodeB64(t, v["winner_tip"])
+		sigB := decodeB64(t, v["winner_signer_b"])
+		sigC := decodeB64(t, v["winner_signer_c"])
+		sigA := decodeB64(t, v["loser_signer_a"])
+
+		for _, order := range [][2][]byte{{honest, attacker}, {attacker, honest}} {
+			s := trustlog.NewStore(gh)
+			must(t, s.Ingest(order[0]))
+			must(t, s.Ingest(order[1]))
+			if !bytes.Equal(s.Tip(), wantTip) {
+				t.Error("succession revoke must win regardless of ingest order")
+			}
+			if !s.SignerTrusted(sigB) || !s.SignerTrusted(sigC) {
+				t.Error("honest signer B and replacement C must be trusted")
+			}
+			if s.SignerTrusted(sigA) {
+				t.Error("compromised signer A must be revoked")
 			}
 		}
 	})
