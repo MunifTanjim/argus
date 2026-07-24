@@ -25,6 +25,17 @@ void main() {
     expect(ct, equals(Uint8List.fromList(expectedCt)));
   });
 
+  test('encrypt/decrypt throw when the nonce is exhausted (no silent reuse)', () {
+    final key = Uint8List.fromList(List<int>.filled(32, 7));
+    // Seed at the maximum representable-without-loss nonce; the next op would
+    // overflow (native) or lose precision (web), so it must throw instead of
+    // silently reusing a nonce.
+    final enc = CipherState(key, initialNonce: cipherStateMaxNonce);
+    expect(() => enc.encryptWithAd(const [], const [1, 2, 3]), throwsStateError);
+    final dec = CipherState(key, initialNonce: cipherStateMaxNonce);
+    expect(() => dec.decryptWithAd(const [], List<int>.filled(20, 0)), throwsStateError);
+  });
+
   test('round-trips with a paired state and rejects a tampered tag', () {
     final key = Uint8List.fromList(List<int>.generate(32, (i) => i));
     final enc = CipherState(key);

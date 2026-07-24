@@ -172,7 +172,7 @@ class TrustLog {
       for (final s in e.signers) {
         _signers.add(hexEncode(s));
       }
-      _disablements = e.disablements;
+      _disablements = List<Uint8List>.of(e.disablements); // defensive copy (mirrors Go fold clone)
     } else if (e.kind == Kind.revokeSigner) {
       // Add replacement signers before removing revoked ones (mirrors Go fold order).
       for (final r in e.replaces) {
