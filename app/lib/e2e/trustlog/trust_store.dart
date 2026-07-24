@@ -5,13 +5,22 @@ import 'codec.dart' show hashEntry, unmarshalChain, validCoSigns;
 import 'entry.dart';
 import 'trust_log.dart';
 
-/// foldSignersAt replays entries[0..p-1] and returns the trusted signer set at
-/// the fork point — the shared prefix's folded signers.
+/// foldSignersAt replays the already-verified prefix entries[0:p] using fold
+/// only (no signature/quorum re-verification — the prefix was verified when
+/// adopted) and returns the signer set trusted at that fork point.
 Future<Set<String>> _foldSignersAt(List<Entry> entries, int p) async {
   if (p == 0) return const {};
-  final l = await TrustLog.load(entries.sublist(0, p));
+  final l = TrustLog();
+  for (var i = 0; i < p; i++) {
+    l.foldOnly(entries[i]);
+  }
   return l.signerHexSet;
 }
+
+/// Exposed for the differential test: same result as _foldSignersAt without
+/// going through a public Store ingest cycle.
+Future<Set<String>> foldSignersAtForTest(List<Entry> entries, int p) =>
+    _foldSignersAt(entries, p);
 
 /// weightAtFork scores a first-diverging entry using ONLY signers trusted at the
 /// fork point. A co-signed revoke counts its distinct valid co-signers in that set;
