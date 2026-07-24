@@ -24,6 +24,29 @@ void main() {
     expect(b.publicKey, equals(a.publicKey));
   });
 
+  test('concurrent first-run calls share one identity (single-flight)', () async {
+    final kv = _MemKv();
+    final store = ClientIdentityStore(kv);
+    // Fire several loadOrCreate calls before any has persisted. Without
+    // single-flight each generates its own keypair and returns a different one —
+    // the live client would handshake with one key while the UI shows another.
+    final results = await Future.wait([
+      store.loadOrCreate(),
+      store.loadOrCreate(),
+      store.loadOrCreate(),
+    ]);
+    final first = results.first;
+    for (final r in results) {
+      expect(r.privateKey, equals(first.privateKey),
+          reason: 'all concurrent callers must share one identity');
+      expect(r.publicKey, equals(first.publicKey));
+    }
+    // The persisted identity matches what the concurrent callers returned.
+    final later = await store.loadOrCreate();
+    expect(later.privateKey, equals(first.privateKey));
+    expect(later.publicKey, equals(first.publicKey));
+  });
+
   test('a corrupt stored value regenerates', () async {
     final kv = _MemKv();
     await kv.write('e2e_identity_priv', 'not-base64!!');

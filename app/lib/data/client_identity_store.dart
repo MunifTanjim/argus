@@ -13,9 +13,27 @@ class ClientIdentityStore {
   static const _privKey = 'e2e_identity_priv';
   static const _pubKey = 'e2e_identity_pub';
 
+  Future<KeyPair>? _inflight;
+
   /// Returns the persisted identity, generating + saving one on first use (or if
   /// the stored value is missing/corrupt).
-  Future<KeyPair> loadOrCreate() async {
+  ///
+  /// Single-flight: concurrent first-run callers share one in-flight result, so
+  /// the live client and the UI can never race into two different identities
+  /// (which would leave the device stuck "awaiting authorization" until a
+  /// reconnect). The cached future is cleared on failure so a later call retries.
+  Future<KeyPair> loadOrCreate() => _inflight ??= _loadOrCreate();
+
+  Future<KeyPair> _loadOrCreate() async {
+    try {
+      return await _loadOrCreateUncached();
+    } catch (_) {
+      _inflight = null; // allow a retry after a failure
+      rethrow;
+    }
+  }
+
+  Future<KeyPair> _loadOrCreateUncached() async {
     final priv = await _kv.read(_privKey);
     final pub = await _kv.read(_pubKey);
     if (priv != null && pub != null) {
