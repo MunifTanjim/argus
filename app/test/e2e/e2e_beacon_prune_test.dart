@@ -28,9 +28,101 @@ Future<void> _waitFor(String desc, bool Function() condition,
   fail('timed out waiting for: $desc');
 }
 
+/// Builds an [E2EClient] with a locked trust store (enforcement_chain) and one
+/// valid beacon for node A already ingested into [_beacons].  The client is
+/// ready for [debugCheckBeaconConsistency] calls without any resync.
+Future<E2EClient> _lockedClientWithBeacon() async {
+  final v = _tl();
+  final aKp = await keyPairFromSeed(_b(v, 'enforcement_node_a_seed'));
+  final a = LoopbackNode('A', aKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+  final link = MultiNodeLoopbackLink(
+    {'A': a},
+    trustChain: _b(v, 'enforcement_chain'),
+  );
+  final client = E2EClient(
+    link.incoming,
+    link.send,
+    await generateKeyPair(),
+    genesisHash: _b(v, 'enforcement_genesis_head'),
+  );
+  await client.connect();
+  // Seed one beacon for node A so _beacons is non-empty.
+  final (beaconPriv, beaconPub) = await generateBeaconKeyPair();
+  final beaconTip = Uint8List(32)..fillRange(0, 32, 0x01);
+  final beacon = await signBeacon(beaconPriv, beaconPub, beaconTip, 1, 1);
+  link.pushNotification('node.event', {
+    'type': 'beacon',
+    'node': {
+      'id': 'A',
+      'identity_pubkey': base64.encode(aKp.publicKey),
+      'beacon_pubkey': base64.encode(beaconPub),
+      'beacon': beacon.toJson(),
+    },
+  });
+  await Future<void>.delayed(const Duration(milliseconds: 20));
+  return client;
+}
+
 // Tests --------------------------------------------------------------------
 
 void main() {
+  group('beacon known-set cache', () {
+    test('beacon known-set is cached by tip across unchanged ticks', () async {
+      final c = await _lockedClientWithBeacon();
+      c.debugCheckBeaconConsistency();
+      final first = c.debugBeaconKnown;
+      expect(first, isNotNull);
+      c.debugCheckBeaconConsistency();
+      expect(identical(c.debugBeaconKnown, first), isTrue,
+          reason: 'unchanged-chain tick must reuse the cached set');
+      await c.close();
+    });
+
+    test('beacon known-set is rebuilt when chain tip advances', () async {
+      final v = _tl();
+      final aKp = await keyPairFromSeed(_b(v, 'enforcement_node_a_seed'));
+      final bKp = await keyPairFromSeed(_b(v, 'enforcement_node_b_seed'));
+      final a = LoopbackNode('A', aKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+      final b = LoopbackNode('B', bKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+      final link = MultiNodeLoopbackLink(
+        {'A': a, 'B': b},
+        trustChain: _b(v, 'reeval_initial_chain'),
+      );
+      final client = E2EClient(link.incoming, link.send, await generateKeyPair(), tofu: true);
+      await client.connect();
+
+      // Seed one beacon for node A.
+      final (beaconPriv, beaconPub) = await generateBeaconKeyPair();
+      final beaconTip = Uint8List(32)..fillRange(0, 32, 0x01);
+      final beacon = await signBeacon(beaconPriv, beaconPub, beaconTip, 1, 1);
+      link.pushNotification('node.event', {
+        'type': 'beacon',
+        'node': {
+          'id': 'A',
+          'identity_pubkey': base64.encode(aKp.publicKey),
+          'beacon_pubkey': base64.encode(beaconPub),
+          'beacon': beacon.toJson(),
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Build the initial known-set.
+      client.debugCheckBeaconConsistency();
+      final first = client.debugBeaconKnown;
+      expect(first, isNotNull);
+
+      // Advance chain tip (reeval_revoke_b_chain extends reeval_initial_chain).
+      link.trustChain = _b(v, 'reeval_revoke_b_chain');
+      await client.resyncNow(); // ingests new chain → tip changes → set rebuilt internally
+
+      // The set stored after the resync must be a fresh instance.
+      expect(identical(client.debugBeaconKnown, first), isFalse,
+          reason: 'advanced chain tip must trigger a rebuild of the cached set');
+
+      await client.close();
+    });
+  });
+
   group('beacon state pruning', () {
     test(
         '_reevaluateChannels prunes beacon state for a revoked node so the stale '

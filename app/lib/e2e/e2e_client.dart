@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../transport/gateway_client.dart';
 import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
 import '../transport/rpc_client.dart';
@@ -116,6 +118,11 @@ class E2EClient implements GatewayClient {
   /// Once set, this flag is never cleared for the lifetime of the session.
   bool get equivocation => _equivocation;
 
+  @visibleForTesting
+  void debugCheckBeaconConsistency() => _checkBeaconConsistency();
+  @visibleForTesting
+  Set<String>? get debugBeaconKnown => _beaconKnown;
+
   late final StreamSubscription<RpcMessage> _sub;
   final _gatewayCtrl = StreamController<RpcMessage>();
   late final RpcClient _gateway;
@@ -146,6 +153,8 @@ class E2EClient implements GatewayClient {
   final _beaconMiss = <String, _BeaconMissState>{};
   final _everConnected = <String>{}; // identity-pub hex; never removed
   bool _equivocation = false;
+  Uint8List? _beaconKnownTip; // caches the known-set key
+  Set<String>? _beaconKnown; // resolved chain entry-hash set for beacon checks
 
   Stream<NodeEvent> get events => _events.stream;
 
@@ -608,17 +617,22 @@ class E2EClient implements GatewayClient {
     final chainBytes = trust.chainBytes;
     if (chainBytes == null || chainBytes.isEmpty) return;
     if (_beacons.isEmpty) return; // no beacons yet: skip the chain parse/hash entirely
-    List<Entry> entries;
-    try {
-      entries = unmarshalChain(chainBytes);
-    } catch (_) {
-      return; // parse failure: be lenient rather than false-positive
-    }
-    if (entries.isEmpty) return;
-    // Build the complete set of hashes for every entry in the linear chain.
-    final known = <String>{};
-    for (final e in entries) {
-      known.add(hexEncode(hashEntry(e)));
+    final tip = trust.tip;
+    var known = _beaconKnown;
+    if (known == null || tip == null || !bytesEqual(tip, _beaconKnownTip ?? const [])) {
+      List<Entry> entries;
+      try {
+        entries = unmarshalChain(chainBytes);
+      } catch (_) {
+        return; // parse failure: be lenient rather than false-positive
+      }
+      if (entries.isEmpty) return;
+      known = <String>{};
+      for (final e in entries) {
+        known.add(hexEncode(hashEntry(e)));
+      }
+      _beaconKnown = known;
+      _beaconKnownTip = tip == null ? null : Uint8List.fromList(tip);
     }
     // Build the set of currently-connected identity-pub hex keys.
     final connected = <String>{};
