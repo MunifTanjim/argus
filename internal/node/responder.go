@@ -98,6 +98,14 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...)}
 	cs.ctx = api.WithNotifier(base, &channelNotifier{r: r, cs: cs})
 	r.mu.Lock()
+	if _, exists := r.chans[f.Route.ChanID]; exists {
+		// A channel for this id already exists (onFrame's lookup and this insert are
+		// not atomic). Drop the duplicate and free its context rather than overwriting
+		// — an overwrite would orphan the live channel's context until the uplink closes.
+		r.mu.Unlock()
+		cancel()
+		return
+	}
 	r.chans[f.Route.ChanID] = cs
 	r.mu.Unlock()
 	frame, err := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
