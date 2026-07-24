@@ -50,7 +50,7 @@ func (r *relayResponder) lookup(chanID string) *chanState {
 
 // onFrame handles a relay frame from a client (via the gateway) on the uplink read
 // loop. It runs synchronously so per-channel decrypt order matches wire order.
-func (r *relayResponder) onFrame(f api.RelayFrame) {
+func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 	peer := r.peer.Load()
 	if peer == nil {
 		return // setup race: peer not stored yet; the client re-establishes

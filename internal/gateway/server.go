@@ -179,20 +179,26 @@ func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
 	}
 }
 
-func (s *Server) forwardFromClient(f api.RelayFrame) {
+// forwardFromClient relays a client's frame to the channel's node — but only if
+// src actually owns the channel. Without this check any authenticated client could
+// inject into (or, by overflowing the queue, tear down) another client's channel
+// by guessing its sequential chan_id.
+func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	s.relayMu.Lock()
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
-	if ch != nil {
+	if ch != nil && ch.client == src {
 		s.enqueue(ch, ch.toNode, f.Raw)
 	}
 }
 
-func (s *Server) forwardFromNode(f api.RelayFrame) {
+// forwardFromNode relays a node's frame to the channel's client — but only if src
+// owns the channel, so a node cannot inject into another node's client channel.
+func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
 	s.relayMu.Lock()
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
-	if ch != nil {
+	if ch != nil && ch.node == src {
 		s.enqueue(ch, ch.toClient, f.Raw)
 	}
 }
@@ -544,7 +550,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
 		Dispatch:                  nodeDispatch,
-		OnRelayFrame:              func(f api.RelayFrame) { s.forwardFromNode(f) },
+		OnRelayFrame:              s.forwardFromNode,
 	})
 	defer peer.Close()
 

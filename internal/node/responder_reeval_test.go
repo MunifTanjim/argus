@@ -50,7 +50,7 @@ func reevalHandshake(t *testing.T, d *Node, clientKP e2e.KeyPair) (*relayRespond
 	clientConn, nodeConn := net.Pipe()
 	fromNode := make(chan api.RelayFrame, 8)
 	clientPeer := api.NewPeer(clientConn, api.PeerOptions{
-		OnRelayFrame: func(f api.RelayFrame) {
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) {
 			select {
 			case fromNode <- f:
 			default:

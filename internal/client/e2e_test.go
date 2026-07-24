@@ -60,7 +60,7 @@ func newFakeGatewayNode(t *testing.T, nodeID string) (*fakeGatewayNode, net.Conn
 	return f, clientConn
 }
 
-func (f *fakeGatewayNode) onFrame(fr api.RelayFrame) {
+func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 	if fr.Method == api.MethodE2EHandshake {
 		msg1, err := api.HandshakeFromFrame(fr)
 		if err != nil {
@@ -157,7 +157,7 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 	return g, clientConn
 }
 
-func (g *fakeMultiGateway) onFrame(f api.RelayFrame) {
+func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 	n := g.byChan[f.Route.ChanID]
 	if n == nil {
 		return

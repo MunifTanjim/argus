@@ -15,7 +15,7 @@ func TestPeerRoutesRelayFrameToHook(t *testing.T) {
 	ca, cb := net.Pipe()
 	got := make(chan RelayFrame, 1)
 	a := NewPeer(ca, PeerOptions{})
-	b := NewPeer(cb, PeerOptions{OnRelayFrame: func(f RelayFrame) { got <- f }})
+	b := NewPeer(cb, PeerOptions{OnRelayFrame: func(_ *Peer, f RelayFrame) { got <- f }})
 	defer a.Close()
 	defer b.Close()
 
@@ -56,7 +56,7 @@ func TestPeerNonRelayStillDispatches(t *testing.T) {
 	relayHits := int32(0)
 	a := NewPeer(ca, PeerOptions{})
 	b := NewPeer(cb, PeerOptions{
-		OnRelayFrame: func(RelayFrame) { atomic.AddInt32(&relayHits, 1) },
+		OnRelayFrame: func(*Peer, RelayFrame) { atomic.AddInt32(&relayHits, 1) },
 		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
 			return "pong-" + method, nil
 		},
@@ -131,12 +131,12 @@ func TestSendRawFrameRelaysVerbatimAndOpens(t *testing.T) {
 	gwNodeConn, ndConn := net.Pipe()
 
 	nodeGot := make(chan RelayFrame, 1)
-	node := NewPeer(ndConn, PeerOptions{OnRelayFrame: func(f RelayFrame) { nodeGot <- f }})
+	node := NewPeer(ndConn, PeerOptions{OnRelayFrame: func(_ *Peer, f RelayFrame) { nodeGot <- f }})
 	defer node.Close()
 
 	// The gateway holds both peer legs; forward client relay frames to the node verbatim.
 	var gwToNode *Peer
-	gwToClient := NewPeer(gwClConn, PeerOptions{OnRelayFrame: func(f RelayFrame) {
+	gwToClient := NewPeer(gwClConn, PeerOptions{OnRelayFrame: func(_ *Peer, f RelayFrame) {
 		_ = gwToNode.SendRawFrame(f.Raw)
 	}})
 	defer gwToClient.Close()

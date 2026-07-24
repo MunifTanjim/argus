@@ -24,8 +24,8 @@ type Server struct {
 	mu         sync.RWMutex
 	handlers   map[string]HandlerFunc
 	onConnect  func(n Notifier) (cleanup func())
-	relayFrame func(RelayFrame) // installed via SetRelayFrameHandler; nil drops relay frames
-	log        *slog.Logger     // optional per-request logging; nil disables it
+	relayFrame func(*Peer, RelayFrame) // installed via SetRelayFrameHandler; nil drops relay frames
+	log        *slog.Logger            // optional per-request logging; nil disables it
 }
 
 // NewServer returns an empty Server.
@@ -57,10 +57,11 @@ func (s *Server) OnConnect(fn func(n Notifier) (cleanup func())) {
 }
 
 // SetRelayFrameHandler installs a handler invoked for every relay frame (one
-// carrying a Route header) on any connection this server serves. A single
-// connection-agnostic handler suffices because relay routing is keyed by chan_id.
-// Nil (the default) drops relay frames — preserving pre-relay behavior.
-func (s *Server) SetRelayFrameHandler(fn func(RelayFrame)) {
+// carrying a Route header) on any connection this server serves. The handler
+// receives the source *Peer so it can enforce channel ownership (a relay frame
+// must come from the peer that owns the target chan_id). Nil (the default) drops
+// relay frames — preserving pre-relay behavior.
+func (s *Server) SetRelayFrameHandler(fn func(*Peer, RelayFrame)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.relayFrame = fn
@@ -89,6 +90,8 @@ func (s *Server) ServeConnContext(ctx context.Context, netConn net.Conn) {
 	s.mu.RLock()
 	relayFrame := s.relayFrame
 	s.mu.RUnlock()
+	// The handler receives the source Peer (supplied by the Peer itself) so it can
+	// enforce channel ownership. Nil relayFrame keeps the Peer dropping relay frames.
 	peer := NewPeer(netConn, PeerOptions{Dispatch: s.dispatch, BaseContext: ctx, OnRelayFrame: relayFrame})
 	defer peer.Close()
 

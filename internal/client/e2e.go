@@ -252,7 +252,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 
 // onRelayFrame demuxes inbound relay frames on the Peer read loop. It Opens every
 // sealed frame inline in arrival order (shared dec-nonce) and never blocks.
-func (m *E2EClient) onRelayFrame(f api.RelayFrame) {
+func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 	m.mu.Lock()
 	nc := m.byChanID[f.Route.ChanID]
 	m.mu.Unlock()

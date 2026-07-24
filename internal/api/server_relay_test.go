@@ -12,7 +12,8 @@ func TestServerRoutesRelayFramesToHandler(t *testing.T) {
 	srv := NewServer()
 	srv.Handle("ping", func(context.Context, json.RawMessage) (any, error) { return "pong", nil })
 	got := make(chan RelayFrame, 1)
-	srv.SetRelayFrameHandler(func(f RelayFrame) { got <- f })
+	gotPeer := make(chan *Peer, 1)
+	srv.SetRelayFrameHandler(func(p *Peer, f RelayFrame) { gotPeer <- p; got <- f })
 
 	gwConn, clConn := net.Pipe()
 	go srv.ServeConnContext(context.Background(), gwConn)
@@ -37,6 +38,9 @@ func TestServerRoutesRelayFramesToHandler(t *testing.T) {
 	case f := <-got:
 		if f.Route.ChanID != "c1" || f.Route.NodeID != "n1" || string(f.Body) != `"c2VhbGVk"` {
 			t.Errorf("relay frame = %+v body=%s", f.Route, f.Body)
+		}
+		if p := <-gotPeer; p == nil {
+			t.Error("relay handler must receive the non-nil source peer")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("relay frame not routed to handler")

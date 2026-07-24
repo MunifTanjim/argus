@@ -17,7 +17,7 @@ func adoptFakeNode(t *testing.T, srv *Server, id, pubkey string) (*api.Peer, cha
 	frames := make(chan api.RelayFrame, 32)
 	gwConn, nodeConn := net.Pipe()
 	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
-		OnRelayFrame: func(f api.RelayFrame) { frames <- f },
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) { frames <- f },
 		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
 			if method == api.MethodNodeIdentify {
 				return api.IdentifyResult{ID: id, Label: id + "-box", Version: "9",
@@ -43,7 +43,7 @@ func connectFakeClient(t *testing.T, srv *Server) (*api.Peer, chan api.RelayFram
 	gwConn, appConn := net.Pipe()
 	go srv.clientSrv.ServeConnContext(context.Background(), gwConn)
 	client := api.NewPeer(appConn, api.PeerOptions{
-		OnRelayFrame: func(f api.RelayFrame) { relayFrames <- f },
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) { relayFrames <- f },
 	})
 	return client, relayFrames
 }

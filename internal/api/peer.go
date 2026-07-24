@@ -23,10 +23,11 @@ type PeerOptions struct {
 	Dispatch DispatchFunc
 	// OnNotify receives notifications the remote end sends. Nil drops them.
 	OnNotify func(Notification)
-	// OnRelayFrame receives frames carrying a Route header (relayed E2E frames).
-	// Set on the gateway (to forward by chan_id) and on endpoints (to decrypt Body).
+	// OnRelayFrame receives frames carrying a Route header (relayed E2E frames),
+	// along with the source Peer so the gateway can enforce channel ownership. Set
+	// on the gateway (to forward by chan_id) and on endpoints (to decrypt Body).
 	// Nil drops relay frames — they never reach Dispatch/OnNotify/the pending path.
-	OnRelayFrame func(RelayFrame)
+	OnRelayFrame func(*Peer, RelayFrame)
 	// BaseContext is the parent of each served request's context (so values like
 	// an auth Principal flow to handlers). Defaults to context.Background().
 	BaseContext context.Context
@@ -69,7 +70,7 @@ type Peer struct {
 
 	dispatch     DispatchFunc
 	onNotify     func(Notification)
-	onRelayFrame func(RelayFrame)
+	onRelayFrame func(*Peer, RelayFrame)
 	writeTimeout time.Duration
 
 	ctx     context.Context
@@ -286,7 +287,7 @@ func (p *Peer) readLoop() {
 		}
 		if m.isRelay() {
 			if p.onRelayFrame != nil {
-				p.onRelayFrame(RelayFrame{
+				p.onRelayFrame(p, RelayFrame{
 					Method: m.Method,
 					ID:     m.ID,
 					Route:  *m.Route,

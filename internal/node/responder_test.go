@@ -39,7 +39,7 @@ func e2eNodePair(t *testing.T, d *Node) (cch *api.Channel, client *api.Peer, fro
 	resp.peer.Store(nodePeer)
 
 	fromNode = make(chan api.RelayFrame, 32)
-	client = api.NewPeer(clientConn, api.PeerOptions{OnRelayFrame: func(f api.RelayFrame) { fromNode <- f }})
+	client = api.NewPeer(clientConn, api.PeerOptions{OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) { fromNode <- f }})
 
 	init, msg1, err := e2e.NewInitiator(kpClient, d.identity.Public, api.ChannelPrologue(d.id, "c1"))
 	if err != nil {
@@ -206,7 +206,7 @@ func runClientHandshake(t *testing.T, r *relayResponder, clientKP e2e.KeyPair) b
 	clientConn, nodeConn := net.Pipe()
 	fromNode := make(chan api.RelayFrame, 8)
 	clientPeer := api.NewPeer(clientConn, api.PeerOptions{
-		OnRelayFrame: func(f api.RelayFrame) {
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) {
 			select {
 			case fromNode <- f:
 			default:
