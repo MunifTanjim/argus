@@ -926,17 +926,18 @@ func (m *E2EClient) checkBeaconConsistency() {
 	if m.trust == nil {
 		return
 	}
-	chainBytes := m.trust.Bytes()
+	chainBytes, tip := m.trust.BytesAndTip()
 	if len(chainBytes) == 0 {
 		return // not yet synced; nothing to compare
 	}
-	m.checkBeaconConsistencyWithChain(chainBytes)
+	m.checkBeaconConsistencyWithChain(chainBytes, tip)
 }
 
 // checkBeaconConsistencyWithChain is the inner implementation of
 // checkBeaconConsistency, exposed for testing with caller-supplied chain bytes
-// (including corrupt bytes to verify the parse-failure skip path).
-func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes []byte) {
+// and tip (both from a single BytesAndTip snapshot, or test-supplied).
+// Including corrupt bytes to verify the parse-failure skip path.
+func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes, tip []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.beacons) == 0 {
@@ -944,10 +945,6 @@ func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes []byte) {
 	}
 	// Parse the resolved chain once per tick; cache keyed on the trust-log tip so
 	// the expensive UnmarshalChain+hash is skipped when the chain has not advanced.
-	var tip []byte
-	if m.trust != nil {
-		tip = m.trust.Tip()
-	}
 	known := m.beaconKnown
 	if known == nil || !bytes.Equal(tip, m.beaconKnownTip) {
 		var err error

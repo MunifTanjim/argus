@@ -88,7 +88,7 @@ func (d *Node) checkPeerBeaconConsistency() {
 	if st == nil {
 		return
 	}
-	chainBytes := st.Bytes()
+	chainBytes, tip := st.BytesAndTip()
 	if len(chainBytes) == 0 {
 		return
 	}
@@ -97,7 +97,6 @@ func (d *Node) checkPeerBeaconConsistency() {
 	if len(d.peerBeacons) == 0 {
 		return // no peer beacons yet: skip the chain parse/hash entirely
 	}
-	tip := st.Tip()
 	known := d.beaconKnown
 	if known == nil || !bytes.Equal(tip, d.beaconKnownTip) {
 		entries, err := trustlog.UnmarshalChain(chainBytes)

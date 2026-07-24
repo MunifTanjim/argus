@@ -91,6 +91,60 @@ func TestSyncStoreConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// TestSyncStoreBytesAndTipConsistent verifies that BytesAndTip returns bytes
+// and tip from the same consistent snapshot: the tip must equal the hash of the
+// last entry of the unmarshaled chain, and both must match independent Bytes()
+// and Tip() reads taken immediately after (no concurrent mutation in this test).
+func TestSyncStoreBytesAndTipConsistent(t *testing.T) {
+	chain, genesisHash, signer, device := buildSyncChain(t, false)
+	s := NewSyncStore(genesisHash)
+	if _, err := s.Ingest(chain); err != nil {
+		t.Fatalf("Ingest genesis chain: %v", err)
+	}
+
+	// Extend to have more than one entry (genesis + device auth).
+	log, err := Load(mustUnmarshal(t, chain))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := log.AuthorizeDevice(device, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	extended := MarshalChain(log.Entries())
+	if _, err := s.Ingest(extended); err != nil {
+		t.Fatalf("Ingest extended chain: %v", err)
+	}
+
+	gotBytes, gotTip := s.BytesAndTip()
+
+	// Both values must be non-nil (we have a non-empty chain).
+	if len(gotBytes) == 0 {
+		t.Fatal("BytesAndTip: chain bytes must not be empty after ingest")
+	}
+	if len(gotTip) == 0 {
+		t.Fatal("BytesAndTip: tip must not be nil after ingest")
+	}
+
+	// Tip must equal the hash of the last entry of the unmarshaled chain.
+	entries, err := UnmarshalChain(gotBytes)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("UnmarshalChain of snapshot bytes: entries=%d err=%v", len(entries), err)
+	}
+	wantTip := HashEntry(&entries[len(entries)-1])
+	if !bytes.Equal(gotTip, wantTip) {
+		t.Fatalf("BytesAndTip tip=%x does not match last-entry hash %x", gotTip, wantTip)
+	}
+
+	// Snapshot must be consistent with independent Bytes()/Tip() reads
+	// (deterministic: no concurrent mutation here).
+	if !bytes.Equal(gotBytes, s.Bytes()) {
+		t.Fatal("BytesAndTip bytes differ from Bytes() on a quiescent store")
+	}
+	if !bytes.Equal(gotTip, s.Tip()) {
+		t.Fatal("BytesAndTip tip differs from Tip() on a quiescent store")
+	}
+}
+
 func mustUnmarshal(t *testing.T, b []byte) []Entry {
 	t.Helper()
 	e, err := UnmarshalChain(b)

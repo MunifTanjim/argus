@@ -530,7 +530,7 @@ func TestClientBeaconKnownSetCachedByTip(t *testing.T) {
 	m.mu.Unlock()
 
 	// Prime: first pass builds and caches the known-set.
-	m.checkBeaconConsistencyWithChain(chain)
+	m.checkBeaconConsistencyWithChain(chain, chainTip)
 	m.mu.Lock()
 	tip1 := append([]byte(nil), m.beaconKnownTip...)
 	set1 := m.beaconKnown
@@ -546,7 +546,7 @@ func TestClientBeaconKnownSetCachedByTip(t *testing.T) {
 	m.beaconKnown[sentinel] = true
 	m.mu.Unlock()
 
-	m.checkBeaconConsistencyWithChain(chain)
+	m.checkBeaconConsistencyWithChain(chain, chainTip)
 
 	m.mu.Lock()
 	hasSentinel := m.beaconKnown[sentinel]
@@ -558,12 +558,14 @@ func TestClientBeaconKnownSetCachedByTip(t *testing.T) {
 	// Changed tip: extend the chain by one entry; the cache must rebuild.
 	// The sentinel must be gone (new map allocated for new tip).
 	_ = lg.AuthorizeDevice(bytes.Repeat([]byte{0x55}, 32), signer)
-	newChain := trustlog.MarshalChain(lg.Entries())
+	newEntries := lg.Entries()
+	newChain := trustlog.MarshalChain(newEntries)
+	newChainTip := trustlog.HashEntry(&newEntries[len(newEntries)-1])
 	if _, err := m.trust.Ingest(newChain); err != nil {
 		t.Fatalf("Ingest extended chain: %v", err)
 	}
 
-	m.checkBeaconConsistencyWithChain(newChain)
+	m.checkBeaconConsistencyWithChain(newChain, newChainTip)
 
 	m.mu.Lock()
 	hasSentinelAfter := m.beaconKnown[sentinel]

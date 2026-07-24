@@ -48,6 +48,16 @@ func (s *SyncStore) Tip() []byte {
 	return s.store.Tip()
 }
 
+// BytesAndTip returns the current chain bytes and tip from one consistent
+// snapshot (a single lock acquisition), so a caller that caches keyed on the
+// tip never pairs a tip with bytes from a different chain version after a
+// concurrent Ingest.
+func (s *SyncStore) BytesAndTip() (chain, tip []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.Bytes(), s.store.Tip()
+}
+
 // DeviceAuthorized reports whether pub is authorized by the current chain.
 func (s *SyncStore) DeviceAuthorized(pub []byte) bool {
 	s.mu.Lock()

@@ -141,7 +141,7 @@ func TestCheckBeaconConsistencySkipsOnParseFailure(t *testing.T) {
 	}
 
 	// Call with unparseable chain bytes; must be a no-op.
-	c.checkBeaconConsistencyWithChain([]byte("not-valid-chain-bytes"))
+	c.checkBeaconConsistencyWithChain([]byte("not-valid-chain-bytes"), nil)
 
 	c.mu.Lock()
 	postMiss := c.beaconMiss[key]
