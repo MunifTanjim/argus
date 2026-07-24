@@ -94,6 +94,11 @@ func mustMarshal(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 // isolated from other channels.
 const relayQueueDepth = 64
 
+// maxChannelsPerClient caps how many relay channels one client connection may hold
+// open at once. Each channel costs two goroutines plus two relayQueueDepth buffers,
+// so an uncapped client could exhaust node/gateway resources.
+const maxChannelsPerClient = 64
+
 // relayChannel is one client<->node E2E channel. The gateway forwards opaque
 // frames between the two peers by chan_id, never reading the sealed Body. Two pump
 // goroutines (one per direction) decouple the peers' read loops.
@@ -292,9 +297,18 @@ func (s *Server) buildClientServer() *api.Server {
 		}
 		s.relayMu.Lock()
 		nodePeer := s.nodePeers[p.NodeID]
+		open := 0
+		for _, ch := range s.channels {
+			if ch.client == clientPeer {
+				open++
+			}
+		}
 		s.relayMu.Unlock()
 		if nodePeer == nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + p.NodeID}
+		}
+		if open >= maxChannelsPerClient {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this client"}
 		}
 		chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
 		s.addChannel(chanID, clientPeer, nodePeer)
