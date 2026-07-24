@@ -130,15 +130,17 @@ func TestCodecRevokeSignerRoundTrip(t *testing.T) {
 	if !bytes.Equal(hashEntry(&got), originalHash) {
 		t.Error("hashEntry changed across marshal/unmarshal for KindRevokeSigner")
 	}
-	// CoSigns must survive.
+	// CoSigns must survive, in canonical order (MarshalEntry sorts them by
+	// Signer then Sig, so the wire — and thus the round-trip — is order-independent).
 	if len(got.CoSigns) != len(rke.CoSigns) {
 		t.Fatalf("CoSigns len: got %d want %d", len(got.CoSigns), len(rke.CoSigns))
 	}
-	for i := range rke.CoSigns {
-		if !bytes.Equal(got.CoSigns[i].Signer, rke.CoSigns[i].Signer) {
+	want := canonicalCoSigns(rke.CoSigns)
+	for i := range want {
+		if !bytes.Equal(got.CoSigns[i].Signer, want[i].Signer) {
 			t.Errorf("CoSigns[%d].Signer mismatch", i)
 		}
-		if !bytes.Equal(got.CoSigns[i].Sig, rke.CoSigns[i].Sig) {
+		if !bytes.Equal(got.CoSigns[i].Sig, want[i].Sig) {
 			t.Errorf("CoSigns[%d].Sig mismatch", i)
 		}
 	}
