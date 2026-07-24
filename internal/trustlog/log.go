@@ -69,6 +69,28 @@ func containsBytes(set [][]byte, b []byte) bool {
 	return false
 }
 
+// hasDuplicateBytes reports whether set contains the same value more than once.
+func hasDuplicateBytes(set [][]byte) bool {
+	for i := range set {
+		for j := i + 1; j < len(set); j++ {
+			if bytes.Equal(set[i], set[j]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// overlapsBytes reports whether a and b share any value.
+func overlapsBytes(a, b [][]byte) bool {
+	for _, x := range a {
+		if containsBytes(b, x) {
+			return true
+		}
+	}
+	return false
+}
+
 // NewGenesis starts a log with an initial trusted signer set, self-signed by `by`
 // (which must be one of `signers`). disablements is an optional list of Argon2id
 // commitments of disablement secrets; pass nil if not needed.
@@ -105,12 +127,21 @@ func (l *Log) verify(e *Entry) error {
 	if e.Kind != KindRevokeSigner && !verifySig(e) {
 		return errors.New("trustlog: bad signature")
 	}
+	// Replaces and CoSigns are revoke-only fields; reject them on any other kind.
+	// Not wire-reachable (the codec parses them only for KindRevokeSigner) — a
+	// defense-in-depth guard for entries built through the Go API.
+	if e.Kind != KindRevokeSigner && (len(e.Replaces) > 0 || len(e.CoSigns) > 0) {
+		return errors.New("trustlog: Replaces/CoSigns set on a non-revoke entry")
+	}
 	if e.Kind == KindGenesis {
 		if len(l.entries) != 0 {
 			return errors.New("trustlog: genesis must be the first entry")
 		}
 		if len(e.Signers) == 0 {
 			return errors.New("trustlog: genesis requires at least one signer")
+		}
+		if hasDuplicateBytes(e.Signers) {
+			return errors.New("trustlog: genesis has duplicate signers")
 		}
 		if e.Prev != nil {
 			return errors.New("trustlog: genesis must have no prev")
@@ -131,6 +162,9 @@ func (l *Log) verify(e *Entry) error {
 	}
 	switch e.Kind {
 	case KindRevokeSigner:
+		if overlapsBytes(e.Signers, e.Replaces) {
+			return errors.New("trustlog: revoke-signer lists a pubkey in both revoked and replacements")
+		}
 		if _, ok := validCoSigns(e, func(p []byte) bool { return l.signers[string(p)] }, len(e.Replaces) > 0); !ok {
 			return errors.New("trustlog: revoke-signer lacks enough valid co-signs")
 		}

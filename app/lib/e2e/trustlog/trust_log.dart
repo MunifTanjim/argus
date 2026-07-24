@@ -8,6 +8,19 @@ import 'entry.dart';
 
 bool _contains(List<Uint8List> set, Uint8List b) => set.any((s) => bytesEqual(s, b));
 
+/// _hasDuplicate reports whether set contains the same value more than once.
+bool _hasDuplicate(List<Uint8List> set) {
+  for (var i = 0; i < set.length; i++) {
+    for (var j = i + 1; j < set.length; j++) {
+      if (bytesEqual(set[i], set[j])) return true;
+    }
+  }
+  return false;
+}
+
+/// _overlaps reports whether a and b share any value.
+bool _overlaps(List<Uint8List> a, List<Uint8List> b) => a.any((x) => _contains(b, x));
+
 Future<bool> _verifySig(Entry e) async {
   final signer = e.signer, sig = e.sig;
   if (signer == null || sig == null) return false;
@@ -66,6 +79,9 @@ class TrustLog {
     if (e.kind == Kind.genesis) {
       if (_count != 0) throw const FormatException('trustlog: genesis must be first');
       if (e.signers.isEmpty) throw const FormatException('trustlog: genesis needs a signer');
+      if (_hasDuplicate(e.signers)) {
+        throw const FormatException('trustlog: genesis has duplicate signers');
+      }
       if (e.prev != null) throw const FormatException('trustlog: genesis has no prev');
       final signer = e.signer!;
       if (!_contains(e.signers, signer)) {
@@ -79,6 +95,10 @@ class TrustLog {
       }
       if (_disabled) throw const FormatException('trustlog: disabled; no further entries');
       if (e.kind == Kind.revokeSigner) {
+        if (_overlaps(e.signers, e.replaces)) {
+          throw const FormatException(
+              'trustlog: revoke-signer lists a pubkey in both revoked and replacements');
+        }
         // Authorized by co-signs from signers trusted at the current head.
         // With replacements, the revoked signers may also co-sign (voluntary rotation).
         final (_, ok) = await validCoSigns(e, (pub) => _signers.contains(hexEncode(pub)),
