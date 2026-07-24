@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/MunifTanjim/argus/compare/0.0.11...0.0.12) (2026-07-24)
+
+
+### Bug Fixes
+
+* **claude:** resolve correct tasks and teams dir for a session ([5102e15](https://github.com/MunifTanjim/argus/commit/5102e15282207555edb29a853c3c503fa6b3c606))
+
 ## [0.0.11](https://github.com/MunifTanjim/argus/compare/0.0.10...0.0.11) (2026-07-21)
 
 
