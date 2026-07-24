@@ -15,6 +15,7 @@ import (
 type Store struct {
 	genesisHash []byte
 	log         *Log
+	chainBytes  []byte // raw bytes of the currently-adopted chain (for no-op fast path)
 }
 
 // NewStore pins the out-of-band genesis hash. The store is empty until Ingest.
@@ -28,6 +29,13 @@ func NewStore(genesisHash []byte) *Store {
 // strict-prefix, or losing candidate. The current state is never rolled back to a
 // non-winner.
 func (s *Store) Ingest(chainBytes []byte) error {
+	// Fast path: an identical re-ingest of the already-adopted chain (the common
+	// case — the gateway echoes a node's own chain every sync tick) is a no-op.
+	// The bytes match one we already verified, so skip the full-chain re-verify
+	// (Ed25519 per entry + Argon2id for any disablement) and deep clone.
+	if s.log != nil && bytes.Equal(chainBytes, s.chainBytes) {
+		return nil
+	}
 	entries, err := UnmarshalChain(chainBytes)
 	if err != nil {
 		return err
@@ -55,6 +63,7 @@ func (s *Store) Ingest(chainBytes []byte) error {
 		}
 	}
 	s.log = cand
+	s.chainBytes = append([]byte(nil), chainBytes...)
 	return nil
 }
 
