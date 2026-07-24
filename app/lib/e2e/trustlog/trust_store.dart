@@ -113,6 +113,14 @@ class TrustStore {
   /// deterministically), and is a no-op for an identical, strict-prefix, or
   /// losing candidate. Returns whether the verified tip advanced.
   Future<bool> ingest(Uint8List chainBytes) async {
+    // Fast path: an identical re-ingest of the already-adopted chain (the common
+    // case — the gateway echoes a node's own chain every sync tick) is a no-op.
+    // The bytes match one already verified, so skip the full-chain re-verify
+    // (async Ed25519 per entry + Argon2id for any disablement) and fork-choice walk.
+    final cb = _chainBytes;
+    if (_log != null && cb != null && bytesEqual(chainBytes, cb)) {
+      return false;
+    }
     final entries = unmarshalChain(chainBytes);
     if (entries.isEmpty) throw const FormatException('trustlog: empty chain');
     if (_genesisHash == null) {
