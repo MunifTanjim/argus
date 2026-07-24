@@ -1,8 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:cryptography_plus/cryptography_plus.dart' show Ed25519, SimplePublicKey, KeyPairType, Signature;
-
 import '../bytes.dart' show putUint32;
+import '../ed25519.dart' show ed25519Verify;
 import '../symmetric_state.dart' show blake2s;
 import 'entry.dart';
 
@@ -36,7 +35,6 @@ Uint8List hashEntry(Entry e) {
 /// co-sign (KindRevokeSigner with replacements — voluntary rotation).
 /// Mirrors Go validCoSigns exactly.
 Future<(int, bool)> validCoSigns(Entry e, bool Function(Uint8List) trusted, {bool allowRevoked = false}) async {
-  final ed25519 = Ed25519();
   final sb = sigBytes(e);
   // revoked set: signers listed in e.signers (the revoked pubkeys)
   final revoked = <String>{};
@@ -50,12 +48,9 @@ Future<(int, bool)> validCoSigns(Entry e, bool Function(Uint8List) trusted, {boo
   for (final cs in e.coSigns) {
     final ks = String.fromCharCodes(cs.signer);
     if (seen.contains(ks) || revoked.contains(ks) || !trusted(cs.signer)) continue;
-    if (cs.signer.length != 32) continue;
-    final ok = await ed25519.verify(
-      sb,
-      signature: Signature(cs.sig, publicKey: SimplePublicKey(cs.signer, type: KeyPairType.ed25519)),
-    );
-    if (!ok) continue;
+    // Total-function verify: a malformed (wrong-length) co-sign is skipped, not
+    // thrown — matching Go validCoSigns, so a junk co-sign can't reject the chain.
+    if (!await ed25519Verify(cs.signer, sb, cs.sig)) continue;
     seen.add(ks);
     n++;
   }

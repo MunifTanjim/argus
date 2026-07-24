@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography_plus/cryptography_plus.dart';
 
+import 'ed25519.dart' show ed25519Verify;
 import 'trustlog/entry.dart' show putField;
 
 final Ed25519 _ed25519 = Ed25519();
@@ -78,13 +79,11 @@ Uint8List beaconSigBytes(Uint8List beaconPub, Uint8List tip, int length, int cou
 /// Returns false if beaconPub is not 32 bytes, sig is empty, or the signature
 /// does not verify.
 Future<bool> verifyBeacon(Beacon b) async {
-  if (b.beaconPub.length != 32) return false;
-  if (b.sig.isEmpty) return false;
+  // Total-function verify: a wrong-length beaconPub/sig returns false rather than
+  // throwing, matching Go api.VerifyBeacon, so a malformed beacon from an
+  // untrusted gateway cannot crash connect().
   final msg = beaconSigBytes(b.beaconPub, b.tip, b.length, b.counter);
-  return _ed25519.verify(
-    msg,
-    signature: Signature(b.sig, publicKey: SimplePublicKey(b.beaconPub, type: KeyPairType.ed25519)),
-  );
+  return ed25519Verify(b.beaconPub, msg, b.sig);
 }
 
 /// Signs a beacon using the Ed25519 [privateKey] (64-byte seed+pub concatenation

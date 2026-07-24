@@ -1,21 +1,17 @@
 import 'dart:typed_data';
 
-import 'package:cryptography_plus/cryptography_plus.dart';
-
 import '../bytes.dart' show bytesEqual, compareBytes, hexDecode, hexEncode;
+import '../ed25519.dart' show ed25519Verify;
 import 'codec.dart' show hashEntry, validCoSigns;
 import 'disablement.dart';
 import 'entry.dart';
-
-final Ed25519 _ed25519 = Ed25519();
 
 bool _contains(List<Uint8List> set, Uint8List b) => set.any((s) => bytesEqual(s, b));
 
 Future<bool> _verifySig(Entry e) async {
   final signer = e.signer, sig = e.sig;
-  if (signer == null || signer.length != 32 || sig == null) return false;
-  return _ed25519.verify(sigBytes(e),
-      signature: Signature(sig, publicKey: SimplePublicKey(signer, type: KeyPairType.ed25519)));
+  if (signer == null || sig == null) return false;
+  return ed25519Verify(signer, sigBytes(e), sig);
 }
 
 /// A verified, folded trust-log chain. Load rejects tampering, reordering,
