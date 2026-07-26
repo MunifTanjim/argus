@@ -1,0 +1,113 @@
+# docker compose test harness for the feat/e2e-encryption-blind-gateway branch.dockerfi
+#
+#   cp docker/.env.example docker/.env
+#   docker compose -f docker/docker-compose.yml up -d --build
+#   docker compose -f docker/docker-compose.yml run --rm client
+#
+# See docker/README.md for the full walkthrough (open mode + locked mode).
+
+name: argus-e2e
+
+x-node-base: &node-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+    target: node
+  depends_on: [gateway]
+  environment:
+    ARGUS_GATEWAY_URL: ws://gateway:8443
+    ARGUS_TOKEN: ${ARGUS_TOKEN:-devtoken}
+    ARGUS_LOG_LEVEL: ${ARGUS_LOG_LEVEL:-info}
+    ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
+    # Locked mode: uncomment and set to the `lock.genesis` printed by
+    # `argus lock init`, then `docker compose up -d` to pin it (fail-closed).
+    # ARGUS_LOCK_GENESIS: ${ARGUS_LOCK_GENESIS:-}
+  restart: unless-stopped
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: gateway
+    command:
+      - start
+      - --mode=gateway
+      - --token=${ARGUS_TOKEN:-devtoken}
+      - --listen-addr=:8443
+    environment:
+      ARGUS_LOG_LEVEL: ${ARGUS_LOG_LEVEL:-info}
+      ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
+    ports:
+      - "${ARGUS_GATEWAY_PORT:-8443}:8443"
+    volumes:
+      - gw-home:/home/argus
+    restart: unless-stopped
+
+  node-a:
+    <<: *node-base
+    command:
+      [
+        "start",
+        "--gateway=ws://gateway:8443",
+        "--token=${ARGUS_TOKEN:-devtoken}",
+        "--id=node-a",
+        "--label=node-a",
+      ]
+    volumes:
+      - node-a-home:/home/agent
+
+  node-b:
+    <<: *node-base
+    command:
+      [
+        "start",
+        "--gateway=ws://gateway:8443",
+        "--token=${ARGUS_TOKEN:-devtoken}",
+        "--id=node-b",
+        "--label=node-b",
+      ]
+    volumes:
+      - node-b-home:/home/agent
+
+  node-c:
+    <<: *node-base
+    command:
+      [
+        "start",
+        "--gateway=ws://gateway:8443",
+        "--token=${ARGUS_TOKEN:-devtoken}",
+        "--id=node-c",
+        "--label=node-c",
+      ]
+    volumes:
+      - node-c-home:/home/agent
+
+  # The interactive TUI client. Not started by `up`; run on demand so it gets a
+  # TTY:  docker compose run --rm client
+  client:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: node
+    profiles: [client]
+    depends_on: [gateway]
+    stdin_open: true
+    tty: true
+    environment:
+      ARGUS_LOG_LEVEL: ${ARGUS_LOG_LEVEL:-info}
+      ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
+      # Pin the same genesis here for locked mode (see README step 2).
+      # ARGUS_LOCK_GENESIS: ${ARGUS_LOCK_GENESIS:-}
+    # entrypoint: "sh"
+    command: ["--gateway=ws://gateway:8443", "--token=${ARGUS_TOKEN:-devtoken}"]
+    # Stable client identity across runs — required for locked-mode authorization.
+    volumes:
+      - client-home:/home/agent
+
+volumes:
+  gw-home:
+  node-a-home:
+  node-b-home:
+  node-c-home:
+  client-home:

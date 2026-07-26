@@ -43,3 +43,6 @@ docs/superpowers
 *.local.*
 /argus.e2e
 /e2e.log
+
+# docker compose local env (copied from docker/.env.example)
+docker/.env
