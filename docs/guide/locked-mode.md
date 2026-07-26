@@ -97,7 +97,25 @@ This clears the pin and removes the local chain file (a chain from the old genes
 
 `unpin` and `lock local-disable` are independent: neither reads or writes the other's state. Unpinning never lifts a local-disable, and a local-disable never drops the pin.
 
-On a device pinned by `lock.genesis` in its config, `lock pin` and `lock unpin` both refuse: the config outranks the pin file, so remove `lock.genesis` from the config first.
+On a device pinned by `lock.genesis` in its config, `lock pin` refuses to write a different genesis: the config outranks the pin file, so remove `lock.genesis` from the config first.
+
+`lock unpin` is allowed there, and clears only the persisted pin — the device stays pinned to `lock.genesis` and keeps enforcing. The command says so explicitly instead of claiming the device has no trust root.
+
+### Recovering from a genesis pin conflict
+
+If `lock.genesis` in the config and the persisted pin file name **different** genesis hashes, `argus` refuses to start:
+
+```
+genesis pin conflict: lock.genesis is <X> but <path> holds <Y>; run `argus lock unpin` to drop the persisted pin
+```
+
+Run that command on the affected device:
+
+```sh
+argus lock unpin
+```
+
+It clears both roles' persisted pins — the client's directly, and the node's over its socket, or from disk when the node cannot start. The device is left pinned to `lock.genesis` alone, so it never comes back open. If it was `lock.genesis` that was wrong, remove it from the config instead and re-run `argus lock pin`.
 
 ## Anti-equivocation: signed HEAD beacons
 

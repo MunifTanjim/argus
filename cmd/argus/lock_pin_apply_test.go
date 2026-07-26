@@ -376,30 +376,108 @@ func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
 	}
 }
 
-// TestGuardUnpinRefusesAConfigPinnedDevice covers the flatly-wrong message: clearing
-// the file on a config-pinned device leaves it pinned and enforcing.
-func TestGuardUnpinRefusesAConfigPinnedDevice(t *testing.T) {
+// TestUnpinResolvesAConfigFileConflict is the escape hatch trustpin.Resolve's conflict
+// error names: a device with lock.genesis X and a pin file holding Y refuses to start,
+// and `lock unpin` is the only command that can clear the file.
+func TestUnpinResolvesAConfigFileConflict(t *testing.T) {
 	tempStateDir(t)
-	cfg := &config.Config{}
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x12))
-
-	err := guardUnpin(cfg)
-
-	if err == nil {
-		t.Fatal("unpin must refuse when the effective pin comes from the config")
+	if err := clientPinFile().Save(testGenesis(0x13)); err != nil {
+		t.Fatalf("seed client pin: %v", err)
 	}
-	if !strings.Contains(err.Error(), "lock.genesis") {
-		t.Fatalf("error must name the config key, got: %v", err)
+	if _, rerr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile()); rerr == nil {
+		t.Fatal("precondition: config X + file Y must be a conflict")
+	}
+
+	if err := unpinDevice(context.Background(), cfg); err != nil {
+		t.Fatalf("unpin must be able to clear the file it is documented to clear: %v", err)
+	}
+
+	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	if perr != nil {
+		t.Fatalf("the conflict must be gone after unpin: %v", perr)
+	}
+	if pin.Source != trustpin.SourceConfig {
+		t.Fatalf("the device must stay pinned by config, got source %s", pin.Source)
 	}
 }
 
-func TestGuardUnpinAllowsAFilePinnedDevice(t *testing.T) {
+func TestUnpinClearsAFilePin(t *testing.T) {
 	tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	if err := clientPinFile().Save(testGenesis(0x13)); err != nil {
 		t.Fatalf("seed client pin: %v", err)
 	}
 
-	if err := guardUnpin(&config.Config{}); err != nil {
+	if err := unpinDevice(context.Background(), cfg); err != nil {
 		t.Fatalf("a file-pinned device must be unpinnable: %v", err)
+	}
+
+	pin, perr := clientPinFile().Load()
+	if perr != nil || pin != nil {
+		t.Fatalf("client pin = %x (%v), want cleared", pin, perr)
+	}
+}
+
+// TestUnpinClearsAStoppedNodesPinWhenTheConfigStillPinsIt closes the loop on the
+// conflict: a node whose pin file disagrees with lock.genesis refuses to start, so it
+// can never answer the unpin RPC and only the CLI can clear its file.
+func TestUnpinClearsAStoppedNodesPinWhenTheConfigStillPinsIt(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x14))
+	if err := nodePinFile().Save(testGenesis(0x15)); err != nil {
+		t.Fatalf("seed node pin: %v", err)
+	}
+
+	if err := unpinDevice(context.Background(), cfg); err != nil {
+		t.Fatalf("unpinDevice: %v", err)
+	}
+
+	if _, rerr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile()); rerr != nil {
+		t.Fatalf("the node must be startable again after unpin: %v", rerr)
+	}
+}
+
+// TestUnpinLeavesAStoppedNodesPinAloneWithoutAConfigPin is the fail-closed direction:
+// with nothing left to pin the node, clearing its file behind its back would widen
+// what it accepts on its next start.
+func TestUnpinLeavesAStoppedNodesPinAloneWithoutAConfigPin(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	seeded := testGenesis(0x16)
+	if err := nodePinFile().Save(seeded); err != nil {
+		t.Fatalf("seed node pin: %v", err)
+	}
+
+	if err := unpinDevice(context.Background(), cfg); err != nil {
+		t.Fatalf("unpinDevice: %v", err)
+	}
+
+	pin, perr := nodePinFile().Load()
+	if perr != nil || !bytes.Equal(pin, seeded) {
+		t.Fatalf("node pin = %x (%v), want the untouched %x", pin, perr, seeded)
+	}
+}
+
+func TestUnpinSummaryNamesTheRemainingConfigPin(t *testing.T) {
+	genesis := testGenesis(0x17)
+
+	msg := unpinSummary(genesis)
+
+	if strings.Contains(msg, "no trust root") {
+		t.Fatalf("a config-pinned device is still pinned, got: %q", msg)
+	}
+	if !strings.Contains(msg, "lock.genesis") || !strings.Contains(msg, fingerprintOf(genesis)) {
+		t.Fatalf("message must name lock.genesis and what it pins to, got: %q", msg)
+	}
+}
+
+func TestUnpinSummarySaysNoTrustRootWithoutAConfigPin(t *testing.T) {
+	msg := unpinSummary(nil)
+
+	if !strings.Contains(msg, "no trust root") {
+		t.Fatalf("a fully unpinned device has no trust root, got: %q", msg)
 	}
 }

@@ -282,19 +282,65 @@ func guardExistingPin(pf *trustpin.File, genesis []byte) error {
 		base64.StdEncoding.EncodeToString(cur), fingerprintOf(cur))
 }
 
-// guardUnpin refuses to unpin a device whose effective pin comes from lock.genesis.
-// Clearing the file there would leave the device pinned and enforcing while the
-// command reported the opposite.
-func guardUnpin(cfg *config.Config) error {
+// unpinSummary states what the device is actually left with. lock.genesis outranks
+// the pin file, so on a config-pinned device unpin drops only the persisted copy;
+// reporting "no trust root" there would be false.
+func unpinSummary(cfgGenesis []byte) string {
+	if cfgGenesis == nil {
+		return "\nThis device now has no trust root. It will refuse all channels while the\nnetwork has a trust log, until you run `argus lock pin`.\n"
+	}
+	return fmt.Sprintf("\nlock.genesis in this device's config still pins it to\n  %s (%s)\nso it stays pinned and enforcing. Remove lock.genesis from the config to unpin\nthis device completely.\n",
+		base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+}
+
+// unpinLocalNode drops the node role's pin. A running node does it itself over the
+// socket. A node that is NOT running cannot, and a node whose pin file disagrees with
+// lock.genesis refuses to start at all — so the file is cleared here instead, but only
+// when the config still pins this device. Without a config pin, clearing a stopped
+// node's pin behind its back would widen what it accepts on its next start.
+func unpinLocalNode(ctx context.Context, cfg *config.Config, cfgGenesis []byte) {
+	_, err := callLocal[struct{}](ctx, cfg, api.MethodLockUnpin, nil)
+	if err == nil {
+		shell.StdOutF("  local node unpinned\n")
+		return
+	}
+	var rpcErr *api.RPCError
+	if cfgGenesis == nil || errors.As(err, &rpcErr) {
+		shell.StdErrF("note: local node unpin failed (%v) — it still holds its pin and is still enforcing\n  run `argus lock unpin` again when the node is reachable\n", err)
+		return
+	}
+	if cerr := nodePinFile().Clear(); cerr != nil {
+		shell.StdErrF("note: local node unpin failed (%v) and its persisted pin could not be cleared (%v)\n", err, cerr)
+		return
+	}
+	if rerr := os.Remove(config.GetStatePath("trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
+		shell.StdErrF("note: the node's stored chain could not be removed (%v)\n", rerr)
+	}
+	shell.StdOutF("  local node is not running; cleared its persisted pin\n")
+}
+
+// unpinDevice clears this device's persisted pins. It is deliberately allowed on a
+// config-pinned device: a pin file that disagrees with lock.genesis is a hard startup
+// failure whose error names this command as the way out, and clearing the file there
+// resolves the conflict while leaving the device pinned to lock.genesis — it never
+// opens anything it was refusing.
+func unpinDevice(ctx context.Context, cfg *config.Config) error {
 	cfgGenesis, err := configPin(cfg)
 	if err != nil {
 		return err
 	}
-	if cfgGenesis == nil {
-		return nil
+	if err := clientPinFile().Clear(); err != nil {
+		return err
 	}
-	return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  clearing the pin file would change nothing — the device stays pinned and enforcing;\n  remove lock.genesis from the config to unpin",
-		base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+	// A chain from the old genesis can never ingest again; leaving it behind
+	// only produces a confusing error on the next sync.
+	if rerr := os.Remove(config.GetStatePath("client-trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
+		return rerr
+	}
+	shell.StdOutF("cleared this device's persisted pin\n")
+	unpinLocalNode(ctx, cfg, cfgGenesis)
+	shell.StdErrF("%s", unpinSummary(cfgGenesis))
+	return nil
 }
 
 func newLockUnpinCmd() *cobra.Command {
@@ -312,25 +358,9 @@ func newLockUnpinCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			if gerr := guardUnpin(cfg); gerr != nil {
-				return fail(cmd, gerr)
+			if uerr := unpinDevice(ctx, cfg); uerr != nil {
+				return fail(cmd, uerr)
 			}
-
-			if cerr := clientPinFile().Clear(); cerr != nil {
-				return fail(cmd, cerr)
-			}
-			// A chain from the old genesis can never ingest again; leaving it behind
-			// only produces a confusing error on the next sync.
-			if rerr := os.Remove(config.GetStatePath("client-trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
-				return fail(cmd, rerr)
-			}
-			shell.StdOutF("unpinned this device\n")
-			if _, err := callLocal[struct{}](ctx, cfg, api.MethodLockUnpin, nil); err != nil {
-				shell.StdErrF("note: local node unpin failed (%v) — it still holds its pin and is still enforcing\n  run `argus lock unpin` again when the node is reachable\n", err)
-			} else {
-				shell.StdOutF("  local node unpinned\n")
-			}
-			shell.StdErrF("\nThis device now has no trust root. It will refuse all channels while the\nnetwork has a trust log, until you run `argus lock pin`.\n")
 			return nil
 		},
 	}
