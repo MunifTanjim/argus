@@ -24,6 +24,7 @@ import (
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -123,20 +124,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			d.SetBeaconKey(kp)
 			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
 		}
-		// Prefer explicit config; else re-enable from the node's persisted
-		// genesis (written by lock.init) so a reboot stays locked.
-		// Fail-closed: a non-empty but unusable lock.genesis must not start the node open.
-		head, herr := lockGenesisHead(cfg)
-		if herr != nil {
-			return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to start open): %w", herr))
+		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
+		if perr != nil {
+			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))
 		}
-		if head == nil {
-			ph, perr := node.LoadPinnedGenesis(config.GetStatePath("trustlog-genesis"))
-			if perr != nil {
-				return fail(cmd, fmt.Errorf("persisted genesis unusable (refusing to start open): %w", perr))
-			}
-			head = ph
-		}
+		head := pin.Genesis
+		d.SetPinSource(pin.Source.String())
 		// Always set the chain path so lock.init has somewhere to persist.
 		chainPath := config.GetStatePath("trustlog-chain")
 		if head != nil {

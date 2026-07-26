@@ -117,6 +117,8 @@ type Node struct {
 	trust          atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
 	trustPath      string                             // on-disk chain path for persistence
 	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
+	pinSource      string                             // "config", "file", or "none"
+	pinGenesis     []byte                             // copy of the resolved genesis hash
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 
@@ -222,6 +224,9 @@ func (d *Node) SetBeaconCounterPath(path string) {
 		d.beaconCounter.Store(n)
 	}
 }
+
+// SetPinSource records where the resolved genesis pin came from, for lock status.
+func (d *Node) SetPinSource(src string) { d.pinSource = src }
 
 // Equivocation reports whether this node has detected a trust-log equivocation
 // via the client courier: a peer's signed HEAD beacon whose tip could not be

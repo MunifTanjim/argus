@@ -10,6 +10,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // seedChain builds genesis[+authorize] and returns marshaled bytes + pieces.
@@ -154,7 +155,7 @@ var _ trustCaller = (*fakePeer)(nil)
 // Compile-time check: runTrustSync exists and takes *api.Peer (used with context).
 var _ = (*Node).runTrustSync
 
-func TestLoadPinnedGenesisRoundTrip(t *testing.T) {
+func TestWriteGenesisHashRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	d := New()
 	d.trustPath = filepath.Join(dir, "trustlog-chain")
@@ -162,15 +163,15 @@ func TestLoadPinnedGenesisRoundTrip(t *testing.T) {
 	if err := d.writeGenesisHash(head); err != nil {
 		t.Fatalf("writeGenesisHash: %v", err)
 	}
-	got, err := LoadPinnedGenesis(filepath.Join(dir, "trustlog-genesis"))
+	got, err := trustpin.New(filepath.Join(dir, "trustlog-genesis")).Load()
 	if err != nil {
-		t.Fatalf("LoadPinnedGenesis: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
 	if !bytes.Equal(got, head) {
-		t.Fatalf("LoadPinnedGenesis = %x, want %x", got, head)
+		t.Fatalf("Load = %x, want %x", got, head)
 	}
 	// Absent file: open mode is legitimate — must return (nil, nil).
-	absent, aerr := LoadPinnedGenesis(filepath.Join(dir, "absent"))
+	absent, aerr := trustpin.New(filepath.Join(dir, "absent")).Load()
 	if aerr != nil {
 		t.Fatalf("absent genesis should return nil error, got: %v", aerr)
 	}
@@ -182,7 +183,7 @@ func TestLoadPinnedGenesisRoundTrip(t *testing.T) {
 	if err := os.WriteFile(corruptPath, []byte("tooshort"), 0o600); err != nil {
 		t.Fatalf("write corrupt genesis: %v", err)
 	}
-	_, cerr := LoadPinnedGenesis(corruptPath)
+	_, cerr := trustpin.New(corruptPath).Load()
 	if cerr == nil {
 		t.Fatal("corrupt genesis file (wrong length) should return an error")
 	}

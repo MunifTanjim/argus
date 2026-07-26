@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -47,10 +48,11 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			head, herr := lockGenesisHead(cfg)
-			if herr != nil {
-				return fail(cmd, fmt.Errorf("lock.genesis is set but unusable (refusing to connect open): %w", herr))
+			pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+			if perr != nil {
+				return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
 			}
+			head := pin.Genesis
 
 			var client tui.Client
 			var logs *logbuf.Buffer

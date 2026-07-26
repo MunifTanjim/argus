@@ -21,6 +21,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -226,14 +227,12 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	}
 	probe.Close()
 
-	// startEmbeddedNode already validated the genesis; reuse it to open the loopback
-	// client in the same locked/open mode as the node.
-	head, herr := lockGenesisHead(cfg)
-	if herr != nil {
+	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	if perr != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("lock.genesis is set but unusable: %w", herr)
+		return nil, nil, fmt.Errorf("refusing to connect open: %w", perr)
 	}
-	client, err := connect(ctx, gwURL, cfg.Token, socket, head)
+	client, err := connect(ctx, gwURL, cfg.Token, socket, pin.Genesis)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -267,10 +266,9 @@ func nodeAbsent(err error) bool {
 // Fail-closed: a non-empty but unusable lock.genesis is returned as an error so the
 // node is never started in open mode when a genesis is configured.
 func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer, error) {
-	// Fail-closed: check genesis before any setup so a bad genesis is never silently ignored.
-	head, herr := lockGenesisHead(cfg)
-	if herr != nil {
-		return nil, nil, fmt.Errorf("lock.genesis is set but unusable: %w", herr)
+	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
+	if perr != nil {
+		return nil, nil, fmt.Errorf("refusing to start open: %w", perr)
 	}
 
 	d := node.New()
@@ -296,18 +294,10 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 		d.SetBeaconKey(kp)
 		d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
 	}
-	// Prefer explicit config; else re-enable from the node's persisted
-	// genesis (written by lock.init) so a reboot stays locked.
-	if head == nil {
-		ph, perr := node.LoadPinnedGenesis(config.GetStatePath("trustlog-genesis"))
-		if perr != nil {
-			return nil, nil, fmt.Errorf("persisted genesis unusable: %w", perr)
-		}
-		head = ph
-	}
+	d.SetPinSource(pin.Source.String())
 	// Always set the chain path so lock.init has somewhere to persist.
 	chainPath := config.GetStatePath("trustlog-chain")
-	if head != nil {
+	if head := pin.Genesis; head != nil {
 		if err := d.EnableTrustLog(head, chainPath); err != nil {
 			return nil, nil, fmt.Errorf("locked mode configured but enabling trust log failed: %w", err)
 		}

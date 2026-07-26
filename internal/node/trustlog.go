@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -11,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // trustSyncInterval is how often a connected node re-runs the offer/pull cycle.
@@ -48,6 +48,7 @@ func (d *Node) EnableTrustLog(genesisHash []byte, path string) error {
 		}
 	}
 	d.trustPath = path
+	d.pinGenesis = append([]byte(nil), genesisHash...)
 	d.trust.Store(sync)
 	return nil
 }
@@ -179,29 +180,11 @@ func genesisHashPath(chainPath string) string {
 	return filepath.Join(filepath.Dir(chainPath), "trustlog-genesis")
 }
 
-// LoadPinnedGenesis reads a persisted genesis head. Returns (nil, nil) when the file
-// is ABSENT (open mode is legitimate). Returns an error when the file EXISTS but is
-// unreadable or not a 32-byte hash — a corrupt persisted genesis must fail closed at
-// boot, never silently revert a locked node to open mode.
-func LoadPinnedGenesis(path string) ([]byte, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading persisted genesis %s: %w", path, err)
-	}
-	if len(b) != 32 {
-		return nil, fmt.Errorf("persisted genesis %s is %d bytes, want 32 (corrupt)", path, len(b))
-	}
-	return b, nil
-}
-
 // writeGenesisHash atomically persists the pinned genesis hash beside the chain.
 func (d *Node) writeGenesisHash(hash []byte) error {
 	d.trustPersistMu.Lock()
 	defer d.trustPersistMu.Unlock()
-	return atomicfile.Write(genesisHashPath(d.trustPath), hash)
+	return trustpin.New(genesisHashPath(d.trustPath)).Save(hash)
 }
 
 // activateTrust enables locked mode at runtime (lock.init): pin path, persist the
