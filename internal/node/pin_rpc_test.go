@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
@@ -112,6 +114,59 @@ func TestDropPinLeavesLocalDisableAlone(t *testing.T) {
 
 	if !d.localDisabled() {
 		t.Fatal("unpin and local-disable must stay orthogonal")
+	}
+}
+
+// gatedTrustPeer is a fake trust peer that blocks at the end of a
+// MethodTrustLogPull response until gate is closed. It forces detectUnpinnedChain's
+// trip decision to happen after whatever the caller does before closing gate —
+// reliably placing the test at the exact race window without depending on scheduler
+// timing.
+type gatedTrustPeer struct {
+	chains [][]byte
+	gate   chan struct{}
+}
+
+func (p *gatedTrustPeer) Call(method string, params, out any) error {
+	if method == api.MethodTrustLogPull {
+		if res, ok := out.(*api.TrustLogPullResult); ok {
+			res.Chains = p.chains
+		}
+		<-p.gate
+	}
+	return nil
+}
+
+// TestAdoptPinAndDetectRaceInvariant asserts that "trust store non-nil → not
+// quarantined" always holds when AdoptPin and detectUnpinnedChain race. The gated
+// peer blocks detectUnpinnedChain's pull call until AdoptPin completes, so the trip
+// decision always happens after the pin is adopted. Removing pinMu from the trip path
+// makes every iteration fail.
+func TestAdoptPinAndDetectRaceInvariant(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+
+	const iters = 200
+	for i := range iters {
+		d := New()
+		d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+
+		gate := make(chan struct{})
+		peer := &gatedTrustPeer{chains: [][]byte{chain}, gate: gate}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.syncTrustOnce(peer)
+		}()
+
+		_ = d.AdoptPin(genesis) // adopt while detect is blocked at peer.Call
+		close(gate)             // let detect proceed to the trip decision
+		wg.Wait()
+
+		if d.TrustStore() != nil && d.Quarantined() {
+			t.Fatalf("iter %d: trust store is set but node is quarantined", i)
+		}
 	}
 }
 

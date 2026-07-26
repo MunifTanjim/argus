@@ -235,11 +235,21 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 			continue
 		}
 		genesis := trustlog.HashEntry(&entries[0])
-		d.trustGate.Trip(genesis)
-		d.log.Warn("unpinned node saw a trust log; refusing all channels until pinned",
-			"genesis", base64.StdEncoding.EncodeToString(genesis),
-			"fix", "argus lock pin")
-		d.reevaluateTrustChannels()
+		// pinMu serializes the "store is nil → trip" decision against AdoptPin's
+		// "EnableTrustLog → Clear" sequence, closing the window where a concurrent
+		// adopt could have set the store and cleared the gate between our store-read
+		// above and this Trip call.
+		d.pinMu.Lock()
+		if d.trust.Load() == nil {
+			d.trustGate.Trip(genesis)
+			d.pinMu.Unlock()
+			d.log.Warn("unpinned node saw a trust log; refusing all channels until pinned",
+				"genesis", base64.StdEncoding.EncodeToString(genesis),
+				"fix", "argus lock pin")
+			d.reevaluateTrustChannels()
+		} else {
+			d.pinMu.Unlock()
+		}
 		return
 	}
 }
@@ -253,23 +263,30 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	if len(genesis) != trustpin.GenesisLen {
 		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
 	}
-	if len(d.pinGenesis) > 0 {
-		if bytes.Equal(d.pinGenesis, genesis) {
-			return nil
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		if len(d.pinGenesis) > 0 {
+			if bytes.Equal(d.pinGenesis, genesis) {
+				return nil
+			}
+			return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
 		}
-		return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
-	}
-	if d.trustPath == "" {
-		return errors.New("node: trust state path not configured")
-	}
-	if err := trustpin.New(genesisHashPath(d.trustPath)).Save(genesis); err != nil {
+		if d.trustPath == "" {
+			return errors.New("node: trust state path not configured")
+		}
+		if err := trustpin.New(genesisHashPath(d.trustPath)).Save(genesis); err != nil {
+			return err
+		}
+		if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
+			return err
+		}
+		d.pinSource = trustpin.SourceFile.String()
+		d.trustGate.Clear()
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
-		return err
-	}
-	d.pinSource = trustpin.SourceFile.String()
-	d.trustGate.Clear()
 	d.reevaluateTrustChannels()
 	return nil
 }
@@ -278,6 +295,8 @@ func (d *Node) AdoptPin(genesis []byte) error {
 // returns to unpinned and re-quarantines on the next sync if the network still
 // has a trust log. It deliberately does not touch the local-disable marker.
 func (d *Node) DropPin() error {
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
 	if d.trustPath == "" {
 		return errors.New("node: trust state path not configured")
 	}

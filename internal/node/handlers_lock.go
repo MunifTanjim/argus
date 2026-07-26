@@ -240,20 +240,20 @@ func (d *Node) handleLockPin(_ context.Context, raw json.RawMessage) (any, error
 	var p api.LockPinParams
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
 	}
 	if err := d.AdoptPin(p.Genesis); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
-	return struct{}{}, nil
+	return nil, nil
 }
 
 func (d *Node) handleLockUnpin(_ context.Context, _ json.RawMessage) (any, error) {
 	if err := d.DropPin(); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
 	}
-	return struct{}{}, nil
+	return nil, nil
 }
 
 // handleLockRevokeSignerStart begins a revoke-signer co-signing ceremony
