@@ -25,3 +25,22 @@ func TestSignerSetFingerprintDeterministicAndOrderIndependent(t *testing.T) {
 		t.Skip("different sets may coincide on word[0]; not asserting inequality")
 	}
 }
+
+func TestHashFingerprint(t *testing.T) {
+	hash := make([]byte, 32)
+	for i := range hash {
+		hash[i] = byte(i)
+	}
+	got := HashFingerprint(hash)
+	if len(got) != 8 {
+		t.Fatalf("len = %d, want 8 words", len(got))
+	}
+	for i, w := range got {
+		if want := fingerprintWordList[i]; w != want {
+			t.Fatalf("word %d = %q, want %q", i, w, want)
+		}
+	}
+	if HashFingerprint(nil) != nil && len(HashFingerprint(nil)) != 0 {
+		t.Fatal("nil hash should produce no words")
+	}
+}

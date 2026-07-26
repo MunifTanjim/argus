@@ -108,3 +108,8 @@ func SignerSetFingerprint(signers [][]byte) []string {
 	sum := blake2s.Sum256(buf.Bytes())
 	return fingerprintWords(sum[:])
 }
+
+// HashFingerprint is the human-verifiable word fingerprint of a raw hash (a
+// genesis or a chain tip): first 8 bytes mapped through the same word list as
+// SignerSetFingerprint, so the words match across argus and the Flutter client.
+func HashFingerprint(hash []byte) []string { return fingerprintWords(hash) }
