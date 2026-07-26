@@ -44,7 +44,7 @@ func New(socket string) *Client {
 // ~/.tmux.conf can't leak in; -f is a no-op once the server is running. The
 // default server is never given -f — argus must not alter the user's own tmux.
 func (c *Client) args(sub ...string) []string {
-	var a []string
+	a := []string{"-u"} // force UTF-8: a non-UTF-8 locale makes tmux rewrite fieldSep to "_"
 	if c.socket != "" {
 		a = append(a, "-L", c.socket, "-f", "/dev/null")
 	}

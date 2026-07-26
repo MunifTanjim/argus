@@ -471,16 +471,16 @@ func TestNewSessionArgsOmitsArgsWhenEmpty(t *testing.T) {
 }
 
 func TestAttachArgs(t *testing.T) {
-	// Private socket: argv includes -L <socket> and the config-less -f /dev/null.
+	// Private socket: argv includes -u, -L <socket> and the config-less -f /dev/null.
 	priv := New("argus").attachArgs("/usr/bin/tmux", "work")
-	want := []string{"/usr/bin/tmux", "-L", "argus", "-f", "/dev/null", "attach-session", "-t", "work"}
+	want := []string{"/usr/bin/tmux", "-u", "-L", "argus", "-f", "/dev/null", "attach-session", "-t", "work"}
 	if strings.Join(priv, " ") != strings.Join(want, " ") {
 		t.Fatalf("attachArgs = %#v, want %#v", priv, want)
 	}
 	// Default server: never touched — no -L, and no -f (argus must not alter how
 	// the user's own tmux loads its config).
 	def := New("").attachArgs("/usr/bin/tmux", "work")
-	if strings.Join(def, " ") != "/usr/bin/tmux attach-session -t work" {
+	if strings.Join(def, " ") != "/usr/bin/tmux -u attach-session -t work" {
 		t.Fatalf("default attachArgs = %#v", def)
 	}
 }
