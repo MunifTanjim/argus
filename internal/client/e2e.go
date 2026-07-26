@@ -39,9 +39,10 @@ type nodeChan struct {
 	nodeID      string
 	label       string
 	identityPub []byte                      // copy of the node's Noise identity public key
+	init        *e2e.Initiator              // consumed by the read loop when msg2 arrives
 	ch          atomic.Pointer[api.Channel] // set after the handshake; read on the read loop
 	sendMu      sync.Mutex                  // serializes Seal+SendRawFrame (enc-nonce order)
-	hs          chan []byte                 // delivers the handshake msg2 during setup
+	hs          chan error                  // handshake outcome, sent once ch is established
 }
 
 type pendingReply struct {
@@ -234,7 +235,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	if err != nil {
 		return err
 	}
-	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), hs: make(chan []byte, 1)}
+	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), init: init, hs: make(chan error, 1)}
 	m.mu.Lock()
 	m.byChanID[res.ChanID] = nc
 	m.mu.Unlock()
@@ -247,12 +248,10 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 		return err
 	}
 	select {
-	case msg2 := <-nc.hs:
-		sess, err := init.Finish(msg2)
+	case err := <-nc.hs:
 		if err != nil {
 			return err
 		}
-		nc.ch.Store(api.NewChannel(res.ChanID, sess))
 		m.mu.Lock()
 		m.byNode[nd.ID] = nc
 		m.everConnected[string(pub)] = true // record for checkBeaconConsistency skip guard
@@ -265,6 +264,21 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	}
 }
 
+// finishHandshake completes the Noise initiator for nc from an inbound msg2 frame
+// and establishes its channel. Runs on the Peer read loop.
+func (m *E2EClient) finishHandshake(nc *nodeChan, f api.RelayFrame) error {
+	msg2, err := api.HandshakeFromFrame(f)
+	if err != nil {
+		return err
+	}
+	sess, err := nc.init.Finish(msg2)
+	if err != nil {
+		return err
+	}
+	nc.ch.Store(api.NewChannel(f.Route.ChanID, sess))
+	return nil
+}
+
 // onRelayFrame demuxes inbound relay frames on the Peer read loop. It Opens every
 // sealed frame inline in arrival order (shared dec-nonce) and never blocks.
 func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
@@ -275,11 +289,14 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 		return
 	}
 	if f.Method == api.MethodE2EHandshake {
-		if msg2, err := api.HandshakeFromFrame(f); err == nil {
-			select {
-			case nc.hs <- msg2:
-			default:
-			}
+		// Finish inline: a node that pushes state the instant its channel is up
+		// (registry snapshot) sends the next frame right behind msg2, and a frame
+		// arriving before ch is stored would be dropped — losing that state and
+		// desyncing the shared dec-nonce for everything after it.
+		err := m.finishHandshake(nc, f)
+		select {
+		case nc.hs <- err:
+		default:
 		}
 		return
 	}

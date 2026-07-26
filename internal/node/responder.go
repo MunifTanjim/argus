@@ -18,6 +18,7 @@ type chanState struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	clientStatic []byte // Noise static public key of the authenticated client
+	stopStream   func() // ends the registry event stream; guarded by relayResponder.mu
 }
 
 // relayResponder terminates E2E channels arriving over the gateway uplink: it runs
@@ -96,7 +97,8 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	}
 	base, cancel := context.WithCancel(context.Background())
 	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...)}
-	cs.ctx = api.WithNotifier(base, &channelNotifier{r: r, cs: cs})
+	cn := &channelNotifier{r: r, cs: cs}
+	cs.ctx = api.WithNotifier(base, cn)
 	r.mu.Lock()
 	if _, exists := r.chans[f.Route.ChanID]; exists {
 		// A channel for this id already exists (onFrame's lookup and this insert are
@@ -110,9 +112,26 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	r.mu.Unlock()
 	frame, err := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
 	if err != nil {
+		r.closeChan(f.Route.ChanID)
 		return
 	}
-	_ = peer.SendRawFrame(frame)
+	if err := peer.SendRawFrame(frame); err != nil {
+		r.closeChan(f.Route.ChanID)
+		return
+	}
+	// Only now, with msg2 on the wire, may sealed frames follow: the client cannot
+	// open one until it has finished the handshake. A gateway-relayed client has no
+	// other way to learn the session list — there is no accept hook on this path.
+	stop := r.d.streamRegistry(cn)
+	r.mu.Lock()
+	live := r.chans[f.Route.ChanID] == cs
+	if live {
+		cs.stopStream = stop
+	}
+	r.mu.Unlock()
+	if !live {
+		stop() // channel closed while the stream was starting
+	}
 }
 
 // serve dispatches a decrypted request and seals the response back on the channel.
@@ -148,11 +167,18 @@ func (r *relayResponder) serve(cs *chanState, id *json.RawMessage, method string
 // clears the table. Called when the uplink ends.
 func (r *relayResponder) closeAll() {
 	r.mu.Lock()
+	var stops []func()
 	for id, cs := range r.chans {
 		cs.cancel()
+		if cs.stopStream != nil {
+			stops = append(stops, cs.stopStream)
+		}
 		delete(r.chans, id)
 	}
 	r.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
 }
 
 // closeChan cancels and removes a live channel by id.
@@ -160,9 +186,16 @@ func (r *relayResponder) closeChan(chanID string) {
 	r.mu.Lock()
 	cs := r.chans[chanID]
 	delete(r.chans, chanID)
+	var stop func()
+	if cs != nil {
+		stop = cs.stopStream
+	}
 	r.mu.Unlock()
 	if cs != nil {
 		cs.cancel()
+	}
+	if stop != nil {
+		stop()
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -159,6 +160,57 @@ func TestResponderStreamsNotifications(t *testing.T) {
 		case <-deadline:
 			t.Fatal("no test.note notification streamed over the channel")
 		}
+	}
+}
+
+// discovered builds a one-pane discovery input for paneID.
+func discovered(paneID string) []registry.DiscoveredSession {
+	return []registry.DiscoveredSession{{HasPane: true, Server: session.TmuxServerArgus, PaneID: paneID}}
+}
+
+// awaitSessionEvent reads frames until a session.event arrives and returns it.
+// Every frame is Opened in arrival order to keep the dec-nonce in sync.
+func awaitSessionEvent(t *testing.T, cch *api.Channel, fromNode chan api.RelayFrame) registry.Event {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case f := <-fromNode:
+			p, err := cch.OpenParams(f)
+			if err != nil {
+				t.Fatalf("open frame %q: %v", f.Method, err)
+			}
+			if f.Method != api.MethodSessionEvent {
+				continue
+			}
+			var ev registry.Event
+			if err := json.Unmarshal(p, &ev); err != nil {
+				t.Fatalf("decode session.event: %v", err)
+			}
+			return ev
+		case <-deadline:
+			t.Fatal("no session.event streamed over the E2E channel")
+		}
+	}
+}
+
+// A client reaching the node over the gateway gets its sessions the same way a
+// directly-connected one does: the registry snapshot on channel open, then every
+// subsequent change. Without this the session list is silently empty over E2E.
+func TestResponderStreamsRegistrySnapshotAndEvents(t *testing.T) {
+	d := newE2ETestNode(t)
+	d.reg.ReconcileSessions("claude", discovered("%1"))
+
+	cch, _, fromNode, cleanup := e2eNodePair(t, d)
+	defer cleanup()
+
+	if ev := awaitSessionEvent(t, cch, fromNode); ev.Session.ID != "argus:%1" {
+		t.Fatalf("snapshot event session = %q, want argus:%%1", ev.Session.ID)
+	}
+
+	d.reg.ReconcileSessions("claude", discovered("%2"))
+	if ev := awaitSessionEvent(t, cch, fromNode); ev.Session.ID != "argus:%2" {
+		t.Fatalf("live event session = %q, want argus:%%2", ev.Session.ID)
 	}
 }
 

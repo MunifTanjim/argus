@@ -30,6 +30,9 @@ type fakeGatewayNode struct {
 	// handle is invoked with (method, opened params) and returns (result, rpcErr,
 	// preNotify) — preNotify (if non-nil) is sealed as a notification BEFORE the response.
 	handle func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote)
+	// postHandshake, when set, is sealed and sent immediately after msg2 — the node
+	// pushing state the moment the channel exists, before any client request.
+	postHandshake *fakeNote
 }
 
 type fakeNote struct {
@@ -73,6 +76,10 @@ func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 		f.nodeCh = api.NewChannel(fr.Route.ChanID, sess)
 		hf, _ := api.MarshalHandshakeFrame(fr.Route.ChanID, msg2)
 		_ = f.peer.SendRawFrame(hf)
+		if n := f.postHandshake; n != nil {
+			nf, _ := f.nodeCh.SealNotificationFrame(n.method, api.RouteHeader{}, n.params)
+			_ = f.peer.SendRawFrame(nf)
+		}
 		return
 	}
 	if f.nodeCh == nil {
@@ -287,6 +294,43 @@ func TestE2EClientStreamsNotifications(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no notification delivered to Events()")
+	}
+}
+
+// A node that pushes as soon as its channel is up (registry snapshot) sends the
+// first sealed frame right behind msg2. The client must have the channel usable
+// by then: dropping that frame both loses the state and desyncs the dec-nonce,
+// killing every later frame on the channel.
+func TestE2EClientReceivesNotificationRightAfterHandshake(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	f.postHandshake = &fakeNote{method: "test.snapshot", params: json.RawMessage(`{"n":1}`)}
+	f.handle = func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return json.RawMessage(`{"ok":true}`), nil, nil
+	}
+
+	c, _ := NewE2EClient(clientConn)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	select {
+	case ev := <-c.Events():
+		if ev.Method != "test.snapshot" {
+			t.Fatalf("notification method = %q, want test.snapshot", ev.Method)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-handshake notification never reached Events()")
+	}
+
+	// The channel must still decrypt: a dropped frame would have desynced it.
+	var out map[string]any
+	if err := c.callNode("n1", "sessions.refresh", nil, &out); err != nil {
+		t.Fatalf("callNode after post-handshake notification: %v", err)
+	}
+	if out["ok"] != true {
+		t.Errorf("response = %v, want ok=true", out)
 	}
 }
 

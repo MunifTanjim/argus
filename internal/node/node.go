@@ -387,42 +387,48 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	srv := api.NewServer()
 	d.registerHandlers(srv)
 	// Stream registry changes to each connected client.
-	srv.OnConnect(func(n api.Notifier) func() {
-		d.registerConn(n)
-		events, cancel := reg.Subscribe()
-		// Send the current snapshot first so a fresh client is in sync. A client may
-		// hang up mid-stream (e.g. a liveness probe); stop on the first failed notify
-		// rather than spamming one per session against a dead connection.
-		for _, s := range reg.Snapshot() {
-			if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
-				break
-			}
-		}
-		done := make(chan struct{})
-		go func() {
-			for {
-				select {
-				case <-done:
-					return
-				case ev, ok := <-events:
-					if !ok {
-						return
-					}
-					if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
-						return
-					}
-				}
-			}
-		}()
-		return func() {
-			close(done)
-			cancel()
-			d.dropConn(n)
-		}
-	})
+	srv.OnConnect(d.streamRegistry)
 
 	d.server = srv
 	return d
+}
+
+// streamRegistry pushes the current session snapshot to n, then every subsequent
+// registry change, until the returned stop func runs. Both transports use it: a
+// direct socket connection (via OnConnect) and an E2E channel terminated from the
+// gateway uplink, which has no accept hook of its own.
+func (d *Node) streamRegistry(n api.Notifier) func() {
+	d.registerConn(n)
+	events, cancel := d.reg.Subscribe()
+	// Send the current snapshot first so a fresh client is in sync. A client may
+	// hang up mid-stream (e.g. a liveness probe); stop on the first failed notify
+	// rather than spamming one per session against a dead connection.
+	for _, s := range d.reg.Snapshot() {
+		if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
+			break
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case ev, ok := <-events:
+				if !ok {
+					return
+				}
+				if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		cancel()
+		d.dropConn(n)
+	}
 }
 
 // Run scans once at startup and serves the API on the unix socket until ctx is
