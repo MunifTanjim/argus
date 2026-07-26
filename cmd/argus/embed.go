@@ -131,10 +131,12 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		return nil, nil, serr
 	}
 	if gatewayURL != "" {
-		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
 		// Connected spawn (uplink): give the node a push store so mobile alerts reach
 		// the gateway. The deliverer is set per-connection in ConnectGateway/runUplink.
+		// Set before starting the uplink: runUplink reads pushStore, so assigning it
+		// afterwards races with that read.
 		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
 	}
 	// Every embedded node watches its own registry for desktop + mobile alerts.
 	// Co-located gateway nodes have their Watch started by setupPush in serveGateway.
