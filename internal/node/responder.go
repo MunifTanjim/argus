@@ -82,6 +82,10 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	if err != nil {
 		return // wrong key/prologue: drop; client retries on a new chan
 	}
+	if r.d.rejectsChannels() {
+		r.d.log.Warn("rejected client channel: node is unpinned on a locked network", "chan", f.Route.ChanID)
+		return
+	}
 	// Locked-mode enforcement (fail-closed): a node with a trust store accepts a
 	// channel only from an authorized client identity. Open mode (nil store) skips
 	// this. An empty/unsynced store authorizes no one, so it rejects all until the
@@ -202,6 +206,19 @@ func (r *relayResponder) closeChan(chanID string) {
 // reevaluate drops live channels whose client is no longer authorized by the
 // current trust store. A nil/Disabled/local-disabled store closes nothing.
 func (r *relayResponder) reevaluate() {
+	if r.d.rejectsChannels() {
+		r.mu.Lock()
+		ids := make([]string, 0, len(r.chans))
+		for id := range r.chans {
+			ids = append(ids, id)
+		}
+		r.mu.Unlock()
+		for _, id := range ids {
+			r.d.log.Warn("closing channel: node is unpinned on a locked network", "chan", id)
+			r.closeChan(id)
+		}
+		return
+	}
 	st := r.d.trust.Load()
 	if st == nil || st.Disabled() || r.d.localDisabled() {
 		return

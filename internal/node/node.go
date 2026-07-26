@@ -27,6 +27,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // Node holds the wired-up core.
@@ -119,6 +120,7 @@ type Node struct {
 	trustPersistMu sync.Mutex                         // serializes atomic temp-file+rename persist
 	pinSource      string                             // "config", "file", or "none"
 	pinGenesis     []byte                             // copy of the resolved genesis hash
+	trustGate      trustpin.Gate                      // fail-closed state when unpinned on a locked network
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 
@@ -233,6 +235,10 @@ func (d *Node) SetPinSource(src string) { d.pinSource = src }
 // reconciled with this node's own chain after the N=2 persistence guard. Once
 // set, this flag is never cleared for the lifetime of the node process.
 func (d *Node) Equivocation() bool { return d.equivocation.Load() }
+
+// Quarantined reports whether this node saw a trust log it has no pin to verify,
+// in which case it refuses all E2E channels until `argus lock pin` runs.
+func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.

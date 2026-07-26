@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -67,6 +68,7 @@ func (d *Node) SetTrustChainPath(path string) { d.trustPath = path }
 func (d *Node) syncTrustOnce(peer trustCaller) {
 	st := d.trust.Load()
 	if st == nil {
+		d.detectUnpinnedChain(peer)
 		return
 	}
 	if mine := st.Bytes(); mine != nil {
@@ -207,4 +209,34 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 	d.reevaluateTrustChannels()
 	d.emitBeacon() // announce the new chain tip to the gateway
 	return nil
+}
+
+// detectUnpinnedChain quarantines this node when the network has a trust log but
+// this node holds no pin to verify it against. The chain is only decoded, never
+// verified: anyone can mint a keypair and build a self-consistent chain, so
+// verification would prove nothing about who authored it.
+//
+// A hostile gateway can therefore quarantine unpinned nodes with a fabricated
+// chain. It can already refuse to relay at all, so this grants it no new power.
+func (d *Node) detectUnpinnedChain(peer trustCaller) {
+	if d.trustGate.Tripped() {
+		return
+	}
+	var got api.TrustLogPullResult
+	if err := peer.Call(api.MethodTrustLogPull, nil, &got); err != nil {
+		return
+	}
+	for _, chain := range got.Chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		genesis := trustlog.HashEntry(&entries[0])
+		d.trustGate.Trip(genesis)
+		d.log.Warn("unpinned node saw a trust log; refusing all channels until pinned",
+			"genesis", base64.StdEncoding.EncodeToString(genesis),
+			"fix", "argus lock pin")
+		d.reevaluateTrustChannels()
+		return
+	}
 }
