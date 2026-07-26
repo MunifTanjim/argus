@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,13 +38,10 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tmpDir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-	sockA := filepath.Join(tmpDir, "a.sock")
-	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(tmpDir, "a-chain"))
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(dir, "a-chain"))
 
 	// Wait until node A appears on the roster with its identity key populated.
 	waitFor(t, "node rostered with identity key", func() bool {
@@ -115,9 +112,9 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	secret := initRes.DisablementSecrets[0]
 
 	// Wait until the genesis (with idA authorized) has propagated to the gateway.
-	// The client syncs at Connect time; if the chain is empty the client-side 5b
-	// filter excludes node A and NewReconnectingE2EClientLocked returns nil
-	// instead of an error, which defeats the node-enforcement assertion below.
+	// The client syncs at Connect time; if the chain is empty the client-side
+	// filter excludes node A so no channel is attempted and node-side enforcement
+	// is never exercised.
 	waitFor(t, "genesis propagated to gateway", func() bool {
 		pc, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 		if err != nil {
@@ -144,13 +141,21 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
 
-	// REFUSED: the node has enforcement on; clientKP is not authorized.
-	// The node drops the Noise handshake (no msg2), so openChannel times out
-	// after SetHandshakeTimeoutForTest and NewReconnectingE2EClientLocked fails.
-	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
-	if unauthErr == nil {
-		cUnauth.Close()
-		t.Fatal("unauthorized client should be refused by the locked node")
+	// REFUSED: clientKP is not authorized. The node drops the Noise handshake (no
+	// msg2); Connect() returns nil, but byNode is empty so any node-addressed call
+	// fails with "no channel to node".
+	cUnauth, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
+	if err != nil {
+		t.Fatalf("Connect should succeed even for unauthorized client: %v", err)
+	}
+	defer cUnauth.Close()
+	var agentsUnauth api.AgentsListResult
+	unauthCallErr := cUnauth.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agentsUnauth)
+	if unauthCallErr == nil {
+		t.Fatal("unauthorized client should have no channel to node-a")
+	}
+	if !strings.Contains(unauthCallErr.Error(), "no channel to node") {
+		t.Fatalf("unexpected error (want \"no channel to node\"): %v", unauthCallErr)
 	}
 
 	// Disable enforcement: consume the disablement secret on node A.

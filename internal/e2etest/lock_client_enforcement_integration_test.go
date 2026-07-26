@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,14 +42,11 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tmpDir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-	sockA := filepath.Join(tmpDir, "a.sock")
-	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(tmpDir, "a-chain"))
-	_ = startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(tmpDir, "b.sock"), filepath.Join(tmpDir, "b-chain"))
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(dir, "a-chain"))
+	_ = startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(sd, "b.sock"), filepath.Join(dir, "b-chain"))
 
 	// Wait until both nodes are rostered with signer and identity keys.
 	waitFor(t, "both nodes rostered with keys", func() bool {
@@ -172,7 +168,7 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
-	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, filepath.Join(tmpDir, "client-chain"))
+	c, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, filepath.Join(dir, "client-chain"))
 	if err != nil {
 		t.Fatalf("locked client: %v", err)
 	}

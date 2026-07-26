@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,13 +22,12 @@ import (
 // invariant: a locked node refuses an unauthorized client's channel, then accepts
 // the same client identity after lock.sign.
 //
-// Adaptation from the task brief: because the node enforces authorization at
-// handshake time (by not responding with msg2), the client's Connect() fails
-// (handshake timeout) rather than succeeding with a subsequent call failure. The
-// invariant is proved with two client attempts — unauthorized (Connect fails) and
-// authorized (Connect + Call both succeed) — using the same clientKP identity.
-// SetHandshakeTimeoutForTest shortens the wait from 10 s to 300 ms so the
-// unauthorized phase is fast enough for -count=3 stability runs.
+// The node enforces authorization at handshake time (no msg2 for unauthorized
+// clients). Connect() still returns nil — unreachable nodes are skipped, not
+// fatal — but byNode stays empty so any node-addressed call fails with "no
+// channel to node". The invariant is proved with two client attempts using the
+// same clientKP: unauthorized (call fails) and authorized (call succeeds).
+// SetHandshakeTimeoutForTest shortens the wait from 10 s to 300 ms.
 func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	node.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	client.SetTrustSyncIntervalForTest(50 * time.Millisecond)
@@ -46,13 +45,10 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tmpDir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-	sockA := filepath.Join(tmpDir, "a.sock")
-	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(tmpDir, "a-chain"))
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(dir, "a-chain"))
 
 	// Wait until node A appears on the roster with its identity key populated.
 	waitFor(t, "node rostered with identity key", func() bool {
@@ -66,10 +62,9 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 			len(r.Nodes) == 1 && r.Nodes[0].IdentityPubKey != ""
 	})
 
-	// Capture node A's identity pubkey from the roster so it can be authorized
-	// in lock.init — the client-side enforcement (Slice 5b) silently skips nodes
-	// whose identity is not in Devices, so without this the client opens zero
-	// channels and NewReconnectingE2EClientLocked returns nil instead of an error.
+	// Capture node A's identity pubkey from the roster so it can be placed in
+	// Devices. Including idA lets the client-side filter attempt a channel to
+	// node A, which then lets node A's enforcement reject the unauthorized client.
 	var idA []byte
 	{
 		pc, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
@@ -146,13 +141,21 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
 	}
 
-	// UNAUTHORIZED: the node has a trust store with no authorized clients.
-	// Connect() fails because the node drops the Noise handshake (no msg2 response),
-	// causing openChannel to time out after SetHandshakeTimeoutForTest duration.
-	cUnauth, unauthErr := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
-	if unauthErr == nil {
-		cUnauth.Close()
-		t.Fatal("unauthorized client should be refused by the locked node")
+	// UNAUTHORIZED: the node drops the Noise handshake (no msg2); Connect() returns
+	// nil (unreachable nodes are skipped), but byNode is empty so any node-addressed
+	// call fails with "no channel to node".
+	cUnauth, err := client.NewReconnectingE2EClientLocked(ctx, dial, initRes.Tip, clientKP, "")
+	if err != nil {
+		t.Fatalf("Connect should succeed even for unauthorized client: %v", err)
+	}
+	defer cUnauth.Close()
+	var agentsUnauth api.AgentsListResult
+	unauthCallErr := cUnauth.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agentsUnauth)
+	if unauthCallErr == nil {
+		t.Fatal("unauthorized client should have no channel to node-a")
+	}
+	if !strings.Contains(unauthCallErr.Error(), "no channel to node") {
+		t.Fatalf("unexpected error (want \"no channel to node\"): %v", unauthCallErr)
 	}
 
 	// Authorize the client's identity on the signer node.

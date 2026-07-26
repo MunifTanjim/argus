@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -33,17 +32,14 @@ func TestLockSignRevoke(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	sockA := filepath.Join(dir, "a.sock")
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
 	chainPathA := filepath.Join(dir, "chainA")
 	chainPathB := filepath.Join(dir, "chainB")
 
 	startLockNode(t, ctx, "node-a", ts.URL, sockA, chainPathA)
-	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(dir, "b.sock"), chainPathB)
+	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(sd, "b.sock"), chainPathB)
 
 	// Wait until both nodes are rostered.
 	pollConn, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
@@ -123,13 +119,10 @@ func TestLockSignerAddRemove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	sockA := filepath.Join(dir, "a.sock")
-	sockB := filepath.Join(dir, "b.sock")
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	sockB := filepath.Join(sd, "b.sock")
 	chainPathA := filepath.Join(dir, "chainA")
 	chainPathB := filepath.Join(dir, "chainB")
 

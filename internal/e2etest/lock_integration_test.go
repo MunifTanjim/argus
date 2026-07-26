@@ -19,10 +19,31 @@ import (
 	"github.com/MunifTanjim/argus/internal/node"
 )
 
+// sockDir creates a short-path temporary directory for unix socket files.
+// macOS caps sockaddr_un.sun_path at 104 bytes; t.TempDir() embeds the full
+// test name, which exceeds that limit for names longer than ~32 characters.
+// t.Cleanup reports removal failures so leaks stay visible.
+func sockDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("sockDir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("sockDir cleanup: %v", err)
+		}
+	})
+	return dir
+}
+
 // startLockNode builds a node with signer+identity keys and a trust chain path,
 // uplinked to the gateway, serving its unix socket at socketPath. chainPath is
 // where lock state is persisted; callers pass it in so they can call
 // EnableTrustLog after lock.init distributes the genesis head.
+//
+// t.Cleanup waits for n.Run to return before proceeding, so callers can safely
+// remove the directories they passed in from their own cleanup.
 func startLockNode(t *testing.T, ctx context.Context, id, gwURL, socketPath, chainPath string) *node.Node {
 	t.Helper()
 	n := node.New()
@@ -33,13 +54,28 @@ func startLockNode(t *testing.T, ctx context.Context, id, gwURL, socketPath, cha
 		t.Fatalf("identity keypair: %v", err)
 	}
 	n.SetIdentityKey(kp)
-	sk, err := node.LoadOrCreateSigner(filepath.Join(t.TempDir(), "signer-key.json"))
+	signerDir, err := os.MkdirTemp("", "tqs")
 	if err != nil {
+		t.Fatalf("signer dir: %v", err)
+	}
+	sk, err := node.LoadOrCreateSigner(filepath.Join(signerDir, "signer-key.json"))
+	if err != nil {
+		_ = os.RemoveAll(signerDir)
 		t.Fatalf("signer keypair: %v", err)
 	}
 	n.SetSignerKey(sk)
 	n.SetTrustChainPath(chainPath)
-	go func() { _ = n.Run(ctx, socketPath) }()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = n.Run(ctx, socketPath)
+	}()
+	t.Cleanup(func() {
+		<-runDone
+		if err := os.RemoveAll(signerDir); err != nil {
+			t.Errorf("signer dir cleanup: %v", err)
+		}
+	})
 	go n.ConnectGateway(ctx, wsURL(gwURL, "/node"), "", nil)
 	return n
 }
@@ -99,16 +135,13 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tmpDir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-	sockA := filepath.Join(tmpDir, "a.sock")
-	chainPathA := filepath.Join(tmpDir, "chainA")
-	chainPathB := filepath.Join(tmpDir, "chainB")
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	chainPathA := filepath.Join(dir, "chainA")
+	chainPathB := filepath.Join(dir, "chainB")
 	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, chainPathA)
-	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(tmpDir, "b.sock"), chainPathB)
+	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(sd, "b.sock"), chainPathB)
 
 	// Wait until both nodes are on the roster with signer and identity keys.
 	pollConn, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)

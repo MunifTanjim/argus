@@ -59,11 +59,7 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	defer cancel()
 
 	// Real node with the seeded chain persisted, uplinked to the gateway.
-	dir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	dir := t.TempDir()
 	chainPath := filepath.Join(dir, "trustlog-chain")
 	// Write after all AuthorizeDevice calls so the persisted chain is complete.
 	if err := os.WriteFile(chainPath, trustlog.MarshalChain(log.Entries()), 0o600); err != nil {
@@ -80,7 +76,12 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	if err := n.EnableTrustLog(genesisHash, chainPath); err != nil {
 		t.Fatalf("EnableTrustLog: %v", err)
 	}
-	go n.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
+	gwDone := make(chan struct{})
+	go func() {
+		defer close(gwDone)
+		n.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
+	}()
+	t.Cleanup(func() { <-gwDone })
 
 	// Real client pinned to the same genesis. clientKP is authorized in the
 	// genesis chain so the locked node accepts its handshake.

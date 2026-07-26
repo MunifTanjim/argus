@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,20 +27,11 @@ func TestUnpinnedNodeQuarantinesThenRecoversOnPin(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// macOS caps unix socket paths at 104 bytes; t.TempDir() embeds the full
-	// test name, exceeding that limit for long names. os.MkdirTemp produces a
-	// short path. t.Cleanup swallows RemoveAll errors (unlike t.TempDir), which
-	// avoids spurious test failures from goroutines writing chain files during
-	// cleanup.
-	tmpDir, err := os.MkdirTemp("", "tq")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-
-	sockA := filepath.Join(tmpDir, "a.sock")
-	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(tmpDir, "a-chain"))
-	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(tmpDir, "b.sock"), filepath.Join(tmpDir, "b-chain"))
+	dir := t.TempDir()
+	sd := sockDir(t)
+	sockA := filepath.Join(sd, "a.sock")
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(dir, "a-chain"))
+	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(sd, "b.sock"), filepath.Join(dir, "b-chain"))
 
 	waitFor(t, "both nodes rostered", func() bool {
 		pc, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
