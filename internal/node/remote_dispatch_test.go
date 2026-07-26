@@ -19,6 +19,8 @@ var lockMethods = []string{
 	api.MethodLockRemoveSigner,
 	api.MethodLockDisable,
 	api.MethodLockLocalDisable,
+	api.MethodLockPin,
+	api.MethodLockUnpin,
 }
 
 // TestRemoteDispatchRejectsLockMethods verifies that remoteDispatch returns

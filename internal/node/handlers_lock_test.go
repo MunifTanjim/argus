@@ -137,6 +137,35 @@ func TestLockInitRebootRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLockInitPinsTheNodeItRunsOn covers the trust anchor's own status: every other
+// device is told to compare its fingerprint against `lock status` here, so the pin
+// has to be reported by the same process that created it, not only after a restart.
+func TestLockInitPinsTheNodeItRunsOn(t *testing.T) {
+	d := newLockTestNode(t)
+	res, err := callLockInit(t, d, api.LockInitParams{})
+	if err != nil {
+		t.Fatalf("lock.init: %v", err)
+	}
+
+	raw, err := d.handleLockStatus(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("lock.status: %v", err)
+	}
+	st := raw.(api.LockStatusResult)
+	if !st.Pinned {
+		t.Fatal("the node that ran lock.init must report itself pinned")
+	}
+	if st.Quarantined {
+		t.Fatal("the node that ran lock.init must not be quarantined")
+	}
+	if !bytes.Equal(st.PinGenesis, res.Tip) {
+		t.Fatalf("PinGenesis = %x, want the new genesis %x", st.PinGenesis, res.Tip)
+	}
+	if st.PinSource != "file" {
+		t.Fatalf("PinSource = %q, want %q", st.PinSource, "file")
+	}
+}
+
 func mustSigner(t *testing.T) trustlog.SignerKey {
 	t.Helper()
 	sk, err := trustlog.GenerateSigner()

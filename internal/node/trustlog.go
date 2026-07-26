@@ -198,17 +198,30 @@ func (d *Node) writeGenesisHash(hash []byte) error {
 // Persisting before Store ensures the node is either fully persisted+enabled or
 // error+not-enabled; it is never enabled-but-unpersisted.
 func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chainPath string) error {
-	d.trustPath = chainPath
-	if err := os.MkdirAll(filepath.Dir(chainPath), 0o700); err != nil {
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		d.trustPath = chainPath
+		if err := os.MkdirAll(filepath.Dir(chainPath), 0o700); err != nil {
+			return err
+		}
+		if err := d.persistChain(store.Bytes()); err != nil {
+			return err
+		}
+		if err := d.writeGenesisHash(genesisHash); err != nil {
+			return err
+		}
+		d.trust.Store(store) // publish only after both persists succeed
+		// The node that runs lock.init is the network's first trust anchor: its own
+		// `lock status` is what every other device compares its fingerprint against,
+		// so the pin has to be visible immediately, not after a restart.
+		d.pinGenesis = append([]byte(nil), genesisHash...)
+		d.pinSource = trustpin.SourceFile.String()
+		d.trustGate.Clear()
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := d.persistChain(store.Bytes()); err != nil {
-		return err
-	}
-	if err := d.writeGenesisHash(genesisHash); err != nil {
-		return err
-	}
-	d.trust.Store(store) // publish only after both persists succeed
 	d.reevaluateTrustChannels()
 	d.emitBeacon() // announce the new chain tip to the gateway
 	return nil
@@ -291,24 +304,41 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	return nil
 }
 
-// DropPin clears the pin, the persisted chain, and the trust store. The node
-// returns to unpinned and re-quarantines on the next sync if the network still
-// has a trust log. It deliberately does not touch the local-disable marker.
+// DropPin clears the pin, the persisted chain, and the trust store. A node that
+// held a chain quarantines immediately — waiting for the next detection tick would
+// leave it open to any key the gateway introduces for up to one sync interval,
+// which is exactly the window the documented `unpin` + `pin` rotation walks
+// through. Live channels are dropped for the same reason. DropPin never releases a
+// quarantine and deliberately does not touch the local-disable marker.
 func (d *Node) DropPin() error {
-	d.pinMu.Lock()
-	defer d.pinMu.Unlock()
-	if d.trustPath == "" {
-		return errors.New("node: trust state path not configured")
-	}
-	if err := trustpin.New(genesisHashPath(d.trustPath)).Clear(); err != nil {
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		if d.trustPath == "" {
+			return errors.New("node: trust state path not configured")
+		}
+		if err := trustpin.New(genesisHashPath(d.trustPath)).Clear(); err != nil {
+			return err
+		}
+		if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		st := d.trust.Load()
+		sawChain := st != nil && st.Bytes() != nil
+		lastGenesis := d.pinGenesis
+		d.trust.Store(nil)
+		d.pinGenesis = nil
+		d.pinSource = ""
+		if sawChain {
+			// Only a chain we actually held proves this network is locked. Tripping
+			// without that proof would strand a node whose network has no trust log:
+			// `lock pin` would find nothing to pin and the gate would never clear.
+			d.trustGate.Trip(lastGenesis)
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	d.trust.Store(nil)
-	d.pinGenesis = nil
-	d.pinSource = ""
-	d.trustGate.Clear()
+	d.reevaluateTrustChannels()
 	return nil
 }

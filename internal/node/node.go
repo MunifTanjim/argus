@@ -122,8 +122,10 @@ type Node struct {
 	pinGenesis     []byte                             // copy of the resolved genesis hash
 	trustGate      trustpin.Gate                      // fail-closed state when unpinned on a locked network
 	// pinMu serializes the "is the node pinned?" decision across AdoptPin, DropPin,
-	// and the trip decision in detectUnpinnedChain so a concurrent adopt cannot race
-	// a detection's Trip call. Quarantined() and rejectsChannels() must stay lock-free.
+	// activateTrust, and the trip decision in detectUnpinnedChain so a concurrent
+	// adopt cannot race a detection's Trip call. It also guards every post-start read
+	// and write of pinGenesis/pinSource (a status RPC runs on its own goroutine).
+	// Quarantined() and rejectsChannels() must stay lock-free.
 	pinMu sync.Mutex
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)

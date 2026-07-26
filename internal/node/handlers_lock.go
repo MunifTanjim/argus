@@ -432,6 +432,30 @@ func (d *Node) handleLockLog(_ context.Context, _ json.RawMessage) (any, error) 
 	}, nil
 }
 
+// readPinState fills the pin/quarantine fields of a status result. It holds pinMu
+// for the whole read because AdoptPin/DropPin rewrite the pin slice header and the
+// gate together, and a status RPC runs on its own goroutine.
+//
+// Quarantine wins over the pin, matching the CLI printer. Both set at once is
+// unreachable — every writer sets the pin and clears the gate under this same lock
+// — so it is reported as the inconsistency it would be rather than papered over.
+func (d *Node) readPinState(res *api.LockStatusResult) {
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
+	res.Quarantined = d.trustGate.Tripped()
+	res.Pinned = len(d.pinGenesis) > 0
+	switch {
+	case res.Quarantined:
+		if res.Pinned {
+			d.log.Error("inconsistent lock state: pinned and quarantined at once; reporting quarantine")
+		}
+		res.PinGenesis = d.trustGate.Genesis()
+	case res.Pinned:
+		res.PinGenesis = append([]byte(nil), d.pinGenesis...)
+		res.PinSource = d.pinSource
+	}
+}
+
 // handleLockStatus returns the audit view of this node's locked state.
 func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, error) {
 	res := api.LockStatusResult{
@@ -439,15 +463,7 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 		IdentityPubKey: append([]byte(nil), d.identity.Public...),
 		LocalDisabled:  d.localDisabled(),
 	}
-	res.Quarantined = d.Quarantined()
-	res.Pinned = len(d.pinGenesis) > 0
-	switch {
-	case res.Pinned:
-		res.PinGenesis = append([]byte(nil), d.pinGenesis...)
-		res.PinSource = d.pinSource
-	case res.Quarantined:
-		res.PinGenesis = d.trustGate.Genesis()
-	}
+	d.readPinState(&res)
 	st := d.trust.Load()
 	if st == nil {
 		return res, nil
