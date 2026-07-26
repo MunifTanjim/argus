@@ -272,6 +272,21 @@ func guardExistingPin(pf *trustpin.File, genesis []byte) error {
 		base64.StdEncoding.EncodeToString(cur), fingerprintOf(cur))
 }
 
+// guardUnpin refuses to unpin a device whose effective pin comes from lock.genesis.
+// Clearing the file there would leave the device pinned and enforcing while the
+// command reported the opposite.
+func guardUnpin(cfg *config.Config) error {
+	cfgGenesis, err := configPin(cfg)
+	if err != nil {
+		return err
+	}
+	if cfgGenesis == nil {
+		return nil
+	}
+	return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  clearing the pin file would change nothing — the device stays pinned and enforcing;\n  remove lock.genesis from the config to unpin",
+		base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+}
+
 func newLockUnpinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "unpin",
@@ -287,13 +302,8 @@ func newLockUnpinCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			cfgGenesis, cerr := configPin(cfg)
-			if cerr != nil {
-				return fail(cmd, cerr)
-			}
-			if cfgGenesis != nil {
-				return fail(cmd, fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  clearing the pin file would change nothing — the device stays pinned and enforcing;\n  remove lock.genesis from the config to unpin",
-					base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis)))
+			if gerr := guardUnpin(cfg); gerr != nil {
+				return fail(cmd, gerr)
 			}
 
 			if cerr := clientPinFile().Clear(); cerr != nil {

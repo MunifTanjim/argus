@@ -276,3 +276,31 @@ func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
 		t.Fatalf("no chains → want (nil, nil), got (%x, %v)", got, err)
 	}
 }
+
+// TestGuardUnpinRefusesAConfigPinnedDevice covers the flatly-wrong message: clearing
+// the file on a config-pinned device leaves it pinned and enforcing.
+func TestGuardUnpinRefusesAConfigPinnedDevice(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{}
+	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x12))
+
+	err := guardUnpin(cfg)
+
+	if err == nil {
+		t.Fatal("unpin must refuse when the effective pin comes from the config")
+	}
+	if !strings.Contains(err.Error(), "lock.genesis") {
+		t.Fatalf("error must name the config key, got: %v", err)
+	}
+}
+
+func TestGuardUnpinAllowsAFilePinnedDevice(t *testing.T) {
+	tempStateDir(t)
+	if err := clientPinFile().Save(testGenesis(0x13)); err != nil {
+		t.Fatalf("seed client pin: %v", err)
+	}
+
+	if err := guardUnpin(&config.Config{}); err != nil {
+		t.Fatalf("a file-pinned device must be unpinnable: %v", err)
+	}
+}
