@@ -73,3 +73,40 @@ func TestGateConcurrentTrip(t *testing.T) {
 		t.Fatal("concurrent trips must settle on exactly one genesis")
 	}
 }
+
+func TestGateConcurrentTripAndClear(t *testing.T) {
+	for iter := 0; iter < 100; iter++ {
+		var g trustpin.Gate
+		var wg sync.WaitGroup
+
+		wg.Add(4)
+
+		go func() {
+			defer wg.Done()
+			g.Trip(genesis(0xAA))
+		}()
+
+		go func() {
+			defer wg.Done()
+			g.Clear()
+		}()
+
+		for r := 0; r < 2; r++ {
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 50; i++ {
+					_ = g.Tripped()
+					_ = g.Genesis()
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		tripped := g.Tripped()
+		gen := g.Genesis()
+		if (tripped && gen == nil) || (!tripped && gen != nil) {
+			t.Fatalf("iter %d: final state inconsistent: Tripped=%v, Genesis=%v", iter, tripped, gen != nil)
+		}
+	}
+}
