@@ -5,5 +5,5 @@ package node
 // the two escape hatches stay independent, so re-pinning never silently re-enables
 // enforcement an operator turned off, and local-disable never drops the pin.
 func (d *Node) rejectsChannels() bool {
-	return d.trustGate.Tripped() && !d.localDisabled()
+	return !d.localDisabled() && d.trustGate.Tripped()
 }

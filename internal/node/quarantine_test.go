@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
@@ -100,29 +101,62 @@ func TestGateTripsOnlyOncePerNode(t *testing.T) {
 	}
 }
 
+// TestQuarantineRejectsHandshake drives a real Noise handshake into a quarantined
+// responder and asserts no channel is established. Deleting the rejectsChannels()
+// guard in handshake() makes this test fail.
 func TestQuarantineRejectsHandshake(t *testing.T) {
+	clientKP, _ := e2e.GenerateKeyPair()
 	chain, _ := lockedChainForTest(t)
-	d := New()
+	d := newE2ETestNode(t)
 	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{chain}})
 	if !d.Quarantined() {
-		t.Fatal("precondition: node should be quarantined")
+		t.Fatal("precondition: gate must be tripped")
 	}
-
-	if !d.rejectsChannels() {
-		t.Fatal("a quarantined node must reject inbound channels")
+	r := d.newRelayResponder()
+	if runClientHandshake(t, r, clientKP) {
+		t.Fatal("quarantined node must reject inbound handshake; no channel must be established")
 	}
 }
 
+// TestReevaluateClosesChannelsWhenQuarantined establishes a live channel on an
+// open node, trips the gate, then calls reevaluate and asserts the channel is
+// closed. Deleting the rejectsChannels() guard in reevaluate() makes this test fail.
+func TestReevaluateClosesChannelsWhenQuarantined(t *testing.T) {
+	clientKP, _ := e2e.GenerateKeyPair()
+	_, genesis := lockedChainForTest(t)
+	d := newE2ETestNode(t)
+	r := d.newRelayResponder()
+
+	if !runClientHandshake(t, r, clientKP) {
+		t.Fatal("precondition: open node must establish channel")
+	}
+
+	d.trustGate.Trip(genesis)
+	r.reevaluate()
+
+	const chanID = "enforce-test-chan"
+	if r.lookup(chanID) != nil {
+		t.Fatal("reevaluate must close all channels when node is quarantined")
+	}
+}
+
+// TestLocalDisableOverridesQuarantine drives a real handshake through a node
+// whose gate is tripped and local-disable is set, and asserts the channel is
+// accepted. local-disable is the universal escape hatch.
 func TestLocalDisableOverridesQuarantine(t *testing.T) {
+	clientKP, _ := e2e.GenerateKeyPair()
 	chain, _ := lockedChainForTest(t)
-	d := New()
+	d := newE2ETestNode(t)
 	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
 	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{chain}})
+	if !d.Quarantined() {
+		t.Fatal("precondition: gate must be tripped")
+	}
 	if err := d.LocalDisable(); err != nil {
 		t.Fatalf("LocalDisable: %v", err)
 	}
-
-	if d.rejectsChannels() {
-		t.Fatal("local-disable is the universal escape hatch; it must override quarantine")
+	r := d.newRelayResponder()
+	if !runClientHandshake(t, r, clientKP) {
+		t.Fatal("local-disable must override quarantine; handshake must succeed")
 	}
 }
