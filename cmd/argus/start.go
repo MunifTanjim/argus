@@ -394,16 +394,12 @@ type gatewayServeOpts struct {
 	tunnelOrigin  string
 }
 
-// serveGateway starts the co-located gateway: aggregates the in-process node plus
-// dialed-in nodes, serves clients over o.listener, and (when enabled) wires
-// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
-// shut down.
+// serveGateway starts the co-located gateway: relays for dialed-in nodes (including
+// its own co-located node, which self-uplinks over loopback so clients reach it over
+// E2E like any other node), serves clients over o.listener, and (when enabled) wires
+// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
-	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
-	if d := o.node; d != nil {
-		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), "", d.SignerPubKey(), d.BeaconPub(), d.Capabilities()))
-	}
 
 	var store *clienttoken.Store
 	if o.enablePairing {
@@ -438,6 +434,14 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
+
+	// The co-located node joins its own gateway over a loopback uplink (rather than an
+	// in-process source) so it becomes an E2E relay peer with a published identity key,
+	// reachable by clients exactly like a remote node. ConnectGateway retries with
+	// backoff, so it needs no readiness signal against the listener above.
+	if d := o.node; d != nil {
+		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")

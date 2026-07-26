@@ -36,7 +36,7 @@ func TestConnectGatewayBranch(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", false, nil)
+	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock", nil)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock)
+	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock, nil)
 	if err != nil {
 		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
 	}
@@ -154,12 +154,12 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	defer cancel()
 
 	// Wrong token: the gateway rejects the upgrade, so the probe must fail.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t), nil); err == nil {
 		t.Fatal("expected an error for a rejected gateway token")
 	}
 
 	// Unreachable host: dial failure must also surface.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t), nil); err == nil {
 		t.Fatal("expected an error for an unreachable gateway")
 	}
 }

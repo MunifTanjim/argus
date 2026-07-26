@@ -27,10 +27,6 @@ type Config struct {
 type GatewayConfig struct {
 	URL        string
 	ListenAddr string
-	// E2E opts the client into end-to-end encrypted transport to a gateway: it
-	// talks to nodes over relayed Noise channels instead of the gateway's cleartext
-	// aggregated API. Client-side only; ignored for local (unix-socket) connections.
-	E2E bool
 }
 
 type NodeConfig struct {
@@ -107,7 +103,6 @@ var defaults = map[string]any{
 	"token":                         "",
 	"gateway.url":                   "",
 	"gateway.listen-addr":           ":8443",
-	"gateway.e2e":                   false,
 	"mode":                          "",
 	"node.id":                       "",
 	"node.label":                    "",
@@ -197,7 +192,6 @@ func FromViper(v *viper.Viper) Config {
 		Gateway: GatewayConfig{
 			URL:        v.GetString("gateway.url"),
 			ListenAddr: v.GetString("gateway.listen-addr"),
-			E2E:        v.GetBool("gateway.e2e"),
 		},
 		Node: NodeConfig{
 			ID:    v.GetString("node.id"),

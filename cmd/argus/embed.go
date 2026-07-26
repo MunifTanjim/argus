@@ -27,16 +27,18 @@ import (
 // compile-time assertion: ReconnectingE2EClient must satisfy tui.Client.
 var _ tui.Client = (*client.ReconnectingE2EClient)(nil)
 
-// connect returns a client that re-dials with backoff if the connection drops. With a
-// gateway URL it dials over WebSocket; otherwise the local node's unix socket (which
-// must already be running — use connectLocalSpawn to start one first).
-func connect(ctx context.Context, gatewayURL, token, socket string, e2eEnabled bool, genesisHash []byte) (tui.Client, error) {
+// connect returns a client that re-dials with backoff if the connection drops. The
+// transport is decided by destination: a gateway URL is always end-to-end encrypted
+// (the gateway is a blind relay that serves no node methods in cleartext), while the
+// local node's unix socket stays plaintext (same machine, same trust boundary). The
+// local node must already be running — use connectLocalSpawn to start one first.
+func connect(ctx context.Context, gatewayURL, token, socket string, genesisHash []byte) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, err
 	}
-	if e2eEnabled && gatewayURL != "" {
+	if gatewayURL != "" {
 		var c *client.ReconnectingE2EClient
 		if len(genesisHash) > 0 {
 			static, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
@@ -100,14 +102,14 @@ func localNodeRunning(socket string) (bool, error) {
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it to
 // accept, then connects. Returns the node's log buffer for the TUI's Logs tab.
 func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (tui.Client, *logbuf.Buffer, error) {
-	return connectLocalSpawnWithGateway(ctx, cfg, "", token, socket)
+	return connectLocalSpawnWithGateway(ctx, cfg, "", token, socket, nil)
 }
 
 // connectLocalSpawnWithGateway starts an ephemeral embedded node (tied to ctx). Empty
 // gatewayURL (isolated spawn): the TUI drives the local socket. Set gatewayURL
 // (connected spawn): the node uplinks to that gateway so this machine joins the fleet,
 // and the TUI drives the gateway so it sees the whole fleet, this machine included.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string) (tui.Client, *logbuf.Buffer, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, genesisHash []byte) (tui.Client, *logbuf.Buffer, error) {
 	var wsURL string
 	var gatewayClient *http.Client
 	if gatewayURL != "" {
@@ -147,8 +149,9 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		return nil, nil, err
 	}
 	conn.Close() // probe only; the client opens its own connection
-	// Isolated spawn drives the local node; connected spawn drives the gateway.
-	client, err := connect(ctx, gatewayURL, token, socket, false, nil)
+	// Isolated spawn (empty gatewayURL) drives the local node over the plaintext socket;
+	// connected spawn drives the gateway over E2E.
+	client, err := connect(ctx, gatewayURL, token, socket, genesisHash)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -167,9 +170,9 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	}
 
 	// Drive the in-process gateway over loopback using the actually-bound address
-	// (cfg.Gateway.ListenAddr may specify port 0 or an unspecified host). The TUI
-	// reaches the node through the gateway's in-process source, so the node socket is
-	// never dialed here.
+	// (cfg.Gateway.ListenAddr may specify port 0 or an unspecified host). The node
+	// self-uplinks to this same gateway (see serveGateway), so the TUI reaches it over
+	// E2E and the node socket is never dialed here.
 	gwURL := "ws://" + loopbackDialAddr(ln.Addr().(*net.TCPAddr))
 
 	// A gateway that dies after startup can't recover on a fixed loopback port, so tear
@@ -223,7 +226,14 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	}
 	probe.Close()
 
-	client, err := connect(ctx, gwURL, cfg.Token, socket, false, nil)
+	// startEmbeddedNode already validated the genesis; reuse it to open the loopback
+	// client in the same locked/open mode as the node.
+	head, herr := lockGenesisHead(cfg)
+	if herr != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("lock.genesis is set but unusable: %w", herr)
+	}
+	client, err := connect(ctx, gwURL, cfg.Token, socket, head)
 	if err != nil {
 		cancel()
 		return nil, nil, err

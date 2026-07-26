@@ -15,14 +15,6 @@ import (
 
 // newRootCmd builds the argus command tree. The root command with no subcommand
 // runs the TUI client; start/hooks/hook attach as subcommands.
-// warnE2ESpawnUnsupported notes, when e2e is requested on a path that spawns a local
-// node, that E2E is not yet supported there and the connection proceeds in plaintext.
-func warnE2ESpawnUnsupported(e2e bool) {
-	if e2e {
-		shell.StdErrF("argus: --e2e is not yet supported when spawning a local node; connecting in plaintext\n")
-	}
-}
-
 func newRootCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "argus",
@@ -68,13 +60,12 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, cfg.Gateway.E2E, head)
+					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
-					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				}
 			case running:
-				client, err = connect(ctx, "", cfg.Token, cfg.Socket, false, nil)
+				client, err = connect(ctx, "", cfg.Token, cfg.Socket, nil)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -88,10 +79,9 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnGateway:
 					client, logs, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
-					warnE2ESpawnUnsupported(cfg.Gateway.E2E)
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				case launchGateway:
-					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, cfg.Gateway.E2E, head)
+					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, head)
 				}
 			}
 			if err != nil {
