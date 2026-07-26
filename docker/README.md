@@ -107,6 +107,9 @@ docker compose -f docker/docker-compose.yml exec node-a \
 Save the printed **`lock.genesis: <B64>`** and the **disablement secret** (shown
 once — it's your break-glass recovery key).
 
+`lock init` pins both roles inside the node-a container (its node and its client).
+Every other device is unpinned and will quarantine.
+
 **Pin every other node to the genesis.** Each node that was not present at `lock init`
 must be pinned interactively. The command pulls the offered genesis, shows its word
 fingerprint, and asks for confirmation — compare those words against `argus lock status`
@@ -115,6 +118,15 @@ on node-a before typing `y`:
 ```sh
 docker compose -f docker/docker-compose.yml exec node-b argus lock pin
 docker compose -f docker/docker-compose.yml exec node-c argus lock pin
+```
+
+**Pin the TUI client too.** The `client` service is a separate device with its own
+pin; unpinned, it quarantines and shows an empty dashboard. Its home volume persists,
+so pin it once:
+
+```sh
+docker compose -f docker/docker-compose.yml run --rm client lock pin
+docker compose -f docker/docker-compose.yml run --rm client lock status  # client pin: <words>
 ```
 
 **Declarative alternative:** you can instead set `ARGUS_LOCK_GENESIS=<B64>` in
@@ -131,7 +143,7 @@ docker compose -f docker/docker-compose.yml up -d
 identities, so `lock init` did not authorize it. Get its pubkey and sign it:
 
 ```sh
-docker compose -f docker/docker-compose.yml run --rm client argus lock status
+docker compose -f docker/docker-compose.yml run --rm client lock status
 # prints this device's identity pubkey + the exact `argus lock sign <pubkey>` command
 docker compose -f docker/docker-compose.yml exec node-a argus lock sign <pubkey>
 ```
@@ -157,7 +169,7 @@ it get rejected and then accepted:
 
 ```sh
 # fresh, unauthorized client identity
-docker compose -f docker/docker-compose.yml run --rm client argus lock status
+docker compose -f docker/docker-compose.yml run --rm client lock status
 #   -> "locked mode enabled, this node authorized: false" + a sign hint
 docker compose -f docker/docker-compose.yml run --rm client
 #   -> roster is visible but NO node channels open (rejected)

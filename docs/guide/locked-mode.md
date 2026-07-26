@@ -34,13 +34,16 @@ trust log) to pass the locked-mode gate.
 
 **Disablement secret** — a random break-glass credential generated at `lock init`.
 Presenting the secret disables locked mode network-wide without requiring any signer
-key. Store it securely and offline.
+key. Store it securely and offline. It does **not** release a quarantined device: a
+device with no pin cannot tell whether the chain carrying the disable entry is the
+real one, so it keeps refusing channels. Recover a quarantined node with
+`argus lock pin` or `argus lock local-disable`, not with `lock disable`.
 
 ## Pinning the genesis
 
 The **genesis pin** is a 32-byte hash that tells a device which trust log it belongs to. Without it, a device on a locked network has no way to know which chain is authoritative and will refuse all E2E channels — a deliberate fail-closed posture.
 
-`lock init` self-pins the node it runs on automatically. Every other device — additional nodes and TUI clients — must be pinned separately.
+`lock init` pins both roles on the machine it runs on: the node (which created the genesis) and that machine's TUI client, which is a separate role with its own pin file. Every other device — additional nodes and TUI clients — must be pinned separately.
 
 ### Pinning a new device
 
@@ -55,13 +58,13 @@ The command connects to the gateway, reads the offered trust-log branches, and s
 ```
 genesis offered by this network:
   <base64>
-  ocean hammer lamp river ...
+  chisel cobra drumbeat eyeglass hamlet island keyboard mural
 
 Compare these words against `argus lock status` on a node you trust.
 Pin this device to it? [y/N]:
 ```
 
-Before typing `y`, compare those words against the fingerprint shown by `argus lock status` (the `pin:` line) on a node you already trust — over the phone, in a chat, or any out-of-band channel. Matching words confirm you are pinning to the same trust root that node is already enforcing.
+Before typing `y`, compare those words against the fingerprint shown by `argus lock status` (the `pin:` line) on a node you already trust — over the phone, in a chat, or any out-of-band channel. Matching words confirm you are pinning to the same trust root that node is already enforcing. Note that `pin:` and `trust fingerprint:` are different hashes: the genesis and the current signer set. Compare `pin:` against `pin:`.
 
 If you already know the genesis (for example, from `lock init` output), you can pin without a prompt:
 
@@ -69,7 +72,20 @@ If you already know the genesis (for example, from `lock init` output), you can 
 argus lock pin <genesis-b64>
 ```
 
-An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. `argus lock status` will show the quarantined state and the genesis that was seen. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
+An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
+
+`argus lock status` reports quarantine for both roles on the machine it runs on:
+
+- `pin: none — QUARANTINED (chain seen: …)` is the **node** on this machine.
+- `client pin: none — QUARANTINED (chain seen: …)` is this machine's **TUI client**.
+
+The two are pinned independently, so one can be quarantined while the other is not.
+
+Pinning recovers a quarantined node live over its local socket — no restart. A quarantined **client** is different: the running TUI process read its pin at startup, so after `argus lock pin` you must restart `argus` for the dashboard to come back. The client has no `local-disable` equivalent either; `lock pin` plus a restart is its only escape.
+
+### What quarantine does *not* prove
+
+Quarantine triggers when a device sees a chain it cannot verify. Detection therefore depends on the gateway actually relaying a chain to that device. A malicious gateway can simply serve no chain to an unpinned device, and that device stays open — it never learns the network is locked. **A device that is not quarantined is not evidence that the network is unlocked.** The only positive assurance is a pin you placed yourself after comparing the fingerprint out-of-band. Pin every device; do not treat "no quarantine warning" as an all-clear.
 
 ### Unpinning a device
 
@@ -77,7 +93,11 @@ An unpinned device on a locked network enters **quarantine**: it can see the ros
 argus lock unpin
 ```
 
-This clears the pin and removes the local chain file (a chain from the old genesis can never be used again). The device returns to the quarantine state on a locked network until re-pinned.
+This clears the pin and removes the local chain file (a chain from the old genesis can never be used again). A node that had actually synced the chain quarantines immediately — it does not stay open until the next sync tick — and its live channels are dropped, so the documented `unpin` + `pin` rotation never opens a window where any key the gateway introduces is accepted.
+
+`unpin` and `lock local-disable` are independent: neither reads or writes the other's state. Unpinning never lifts a local-disable, and a local-disable never drops the pin.
+
+On a device pinned by `lock.genesis` in its config, `lock pin` and `lock unpin` both refuse: the config outranks the pin file, so remove `lock.genesis` from the config first.
 
 ## Anti-equivocation: signed HEAD beacons
 
@@ -116,7 +136,7 @@ a gateway that is hiding branches.
 words derived from the current signer set:
 
 ```
-trust fingerprint: ocean hammer lamp river
+trust fingerprint: sawdust scenic seabird select shadow skydive solo sugar
 ```
 
 If you suspect equivocation, compare this fingerprint across all your nodes
