@@ -23,7 +23,6 @@ func fingerprintOf(genesis []byte) string {
 	return strings.Join(trustlog.HashFingerprint(genesis), " ")
 }
 
-// distinctGenesis returns the unique genesis hashes in first-seen order.
 func distinctGenesis(all [][]byte) [][]byte {
 	var out [][]byte
 	for _, g := range all {
@@ -59,10 +58,42 @@ func confirmGenesis(r io.Reader, w io.Writer, genesis []byte) (bool, error) {
 	}
 }
 
-// genesisFromNetwork pulls the gateway's retained branches and returns the single
-// genesis they agree on. More than one distinct genesis is refused: competing
-// roots mean either two networks share this gateway or someone is offering a fake
-// one, and picking by branch length would choose a trust root by popularity.
+// resolveGenesis extracts the single agreed-upon genesis from a set of offered
+// chains. Returns (nil, nil) only when no chains were offered. Returns an error
+// when chains were received but none decoded (possible format mismatch,
+// corruption, or gateway manipulation) or when more than one distinct genesis
+// is present — competing roots mean either two networks share this gateway or
+// someone is offering a fake one; picking by branch length would choose a trust
+// root by popularity.
+func resolveGenesis(chains [][]byte) ([]byte, error) {
+	if len(chains) == 0 {
+		return nil, nil
+	}
+	var seen [][]byte
+	for _, chain := range chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		seen = append(seen, trustlog.HashEntry(&entries[0]))
+	}
+	if len(seen) == 0 {
+		return nil, fmt.Errorf("gateway offered %d chain(s) but none could be decoded; possible format mismatch or corruption", len(chains))
+	}
+	switch all := distinctGenesis(seen); len(all) {
+	case 1:
+		return all[0], nil
+	default:
+		var b strings.Builder
+		for _, g := range all {
+			fmt.Fprintf(&b, "\n  %s  %s", base64.StdEncoding.EncodeToString(g), fingerprintOf(g))
+		}
+		return nil, fmt.Errorf("this gateway is offering %d different trust roots:%s\n\npin the right one explicitly: argus lock pin <genesis-b64>", len(all), b.String())
+	}
+}
+
+// genesisFromNetwork pulls the gateway's retained branches and delegates
+// resolution to resolveGenesis.
 func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error) {
 	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
 	if err != nil {
@@ -78,26 +109,7 @@ func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error)
 	if err := c.Call(api.MethodTrustLogPull, nil, &got); err != nil {
 		return nil, fmt.Errorf("trustlog.pull: %w", err)
 	}
-	var seen [][]byte
-	for _, chain := range got.Chains {
-		entries, err := trustlog.UnmarshalChain(chain)
-		if err != nil || len(entries) == 0 {
-			continue
-		}
-		seen = append(seen, trustlog.HashEntry(&entries[0]))
-	}
-	switch all := distinctGenesis(seen); len(all) {
-	case 0:
-		return nil, nil
-	case 1:
-		return all[0], nil
-	default:
-		var b strings.Builder
-		for _, g := range all {
-			fmt.Fprintf(&b, "\n  %s  %s", base64.StdEncoding.EncodeToString(g), fingerprintOf(g))
-		}
-		return nil, fmt.Errorf("this gateway is offering %d different trust roots:%s\n\npin the right one explicitly: argus lock pin <genesis-b64>", len(all), b.String())
-	}
+	return resolveGenesis(got.Chains)
 }
 
 // applyPin writes this device's client pin and, when a local node answers, pins
@@ -108,7 +120,7 @@ func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) error {
 	}
 	shell.StdOutF("pinned this device\n  genesis: %s\n  %s\n", base64.StdEncoding.EncodeToString(genesis), fingerprintOf(genesis))
 	if _, err := callLocal[struct{}](ctx, cfg, api.MethodLockPin, api.LockPinParams{Genesis: genesis}); err != nil {
-		shell.StdErrF("note: no local node pinned (%v)\n  if a node runs on this machine, pin it there too\n", err)
+		shell.StdErrF("note: client pin saved but the local node RPC failed (%v)\n  run `argus lock pin` again once the node is reachable to pin it there too\n", err)
 		return nil
 	}
 	shell.StdOutF("  local node pinned and enforcing\n")
@@ -135,7 +147,7 @@ func newLockPinCmd() *cobra.Command {
 				if derr != nil {
 					return fail(cmd, derr)
 				}
-				if perr := guardExistingPin(genesis); perr != nil {
+				if perr := guardExistingPin(clientPinFile(), genesis); perr != nil {
 					return fail(cmd, perr)
 				}
 				return applyPin(ctx, cfg, genesis)
@@ -149,7 +161,7 @@ func newLockPinCmd() *cobra.Command {
 				shell.StdOutF("no trust log on this network; nothing to pin\n")
 				return nil
 			}
-			if perr := guardExistingPin(genesis); perr != nil {
+			if perr := guardExistingPin(clientPinFile(), genesis); perr != nil {
 				return fail(cmd, perr)
 			}
 			ok, cerr := confirmGenesis(os.Stdin, os.Stdout, genesis)
@@ -167,9 +179,8 @@ func newLockPinCmd() *cobra.Command {
 	return cmd
 }
 
-// guardExistingPin refuses to overwrite a different pin already on this device.
-func guardExistingPin(genesis []byte) error {
-	cur, err := clientPinFile().Load()
+func guardExistingPin(pf *trustpin.File, genesis []byte) error {
+	cur, err := pf.Load()
 	if err != nil {
 		return err
 	}
@@ -205,7 +216,7 @@ func newLockUnpinCmd() *cobra.Command {
 			}
 			shell.StdOutF("unpinned this device\n")
 			if _, err := callLocal[struct{}](ctx, cfg, api.MethodLockUnpin, nil); err != nil {
-				shell.StdErrF("note: no local node unpinned (%v)\n", err)
+				shell.StdErrF("note: local node unpin failed (%v) — it still holds its pin and is still enforcing\n  run `argus lock unpin` again when the node is reachable\n", err)
 			} else {
 				shell.StdOutF("  local node unpinned\n")
 			}
