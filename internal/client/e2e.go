@@ -70,6 +70,7 @@ type beaconMissState struct {
 // gateway.
 type E2EClient struct {
 	peer   *api.Peer
+	ready  chan struct{} // closed at end of NewE2EClientWithGate; synchronises m.peer init
 	static e2e.KeyPair
 
 	mu       sync.Mutex
@@ -121,6 +122,7 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 	m := &E2EClient{
 		static:        static,
 		gate:          gate,
+		ready:         make(chan struct{}),
 		byNode:        map[string]*nodeChan{},
 		byChanID:      map[string]*nodeChan{},
 		pending:       map[uint64]chan pendingReply{},
@@ -151,21 +153,19 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 	// networks) never fires Done, so the supervisor never reconnects and every
 	// gateway-native Call blocks forever.
 	//
-	// api.NewPeer starts its read loop goroutine before returning, so any node.event
-	// arriving on the connection can call onPeerNotify → adoptNode → openChannel
-	// before the assignment below completes. m.mu serializes the store with the
-	// load in openChannel so the race detector does not fire.
-	peerVal := api.NewPeer(conn, api.PeerOptions{
+	// api.NewPeer starts its read loop before returning; a node.event arriving on
+	// the connection can call onPeerNotify → adoptNode → openChannel before the
+	// assignment below completes. close(m.ready) establishes the happens-before
+	// that openChannel waits on, so it always reads a fully-set m.peer.
+	m.peer = api.NewPeer(conn, api.PeerOptions{
 		OnRelayFrame:              m.onRelayFrame,
 		OnNotify:                  m.onPeerNotify,
 		KeepaliveInterval:         api.DefaultKeepaliveInterval,
 		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
 		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
 	})
-	m.mu.Lock()
-	m.peer = peerVal
-	m.mu.Unlock()
 	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
+	close(m.ready)
 	return m, nil
 }
 
@@ -244,26 +244,12 @@ func (m *E2EClient) Connect() error {
 	} else {
 		m.detectUnpinnedChain()
 	}
-	var firstOpenErr error
 	for _, nd := range roster.Nodes {
 		if err := m.openIfEligible(nd); err != nil {
 			// One unreachable node must not abort the whole session; skip it and keep
 			// aggregating the rest (a later reconnect/refresh retries it).
 			log.Printf("client: skipping node %s: open channel failed: %v", nd.ID, err)
-			if firstOpenErr == nil {
-				firstOpenErr = err
-			}
 		}
-	}
-	// If every channel-open attempt failed (i.e. nodes were tried but all rejected
-	// the handshake) and nothing was opened, surface the first error so callers know
-	// the session is unusable. Silent skips (offline/unauthorized by trust/gate
-	// tripped) leave firstOpenErr nil and are not treated as failures.
-	m.mu.Lock()
-	opened := len(m.byNode)
-	m.mu.Unlock()
-	if opened == 0 && firstOpenErr != nil {
-		return firstOpenErr
 	}
 	if m.trust != nil {
 		go m.trustSyncLoop()
@@ -323,17 +309,13 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 // openChannel runs relay.open + the Noise IK initiator handshake for one node.
 // pub is the decoded identity public key, already checked by Connect.
 func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
-	// Read m.peer under m.mu: a node.event arriving during NewE2EClientWithGate
-	// can spawn this goroutine before the m.peer assignment completes. If peer is
-	// nil, return early — Connect()'s nodes.list loop opens the channel instead.
-	m.mu.Lock()
-	peer := m.peer
-	m.mu.Unlock()
-	if peer == nil {
-		return nil
-	}
+	// Wait for NewE2EClientWithGate to finish: api.NewPeer starts its read loop
+	// before returning, so a node.event can spawn this goroutine via onPeerNotify
+	// → adoptNode before m.peer is assigned. The channel close is the
+	// happens-before guarantee.
+	<-m.ready
 	var res api.RelayOpenResult
-	if err := peer.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: nd.ID}, &res); err != nil {
+	if err := m.peer.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: nd.ID}, &res); err != nil {
 		return err
 	}
 	init, msg1, err := e2e.NewInitiator(m.static, pub, api.ChannelPrologue(nd.ID, res.ChanID))
@@ -349,7 +331,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := peer.SendRawFrame(frame); err != nil {
+	if err := m.peer.SendRawFrame(frame); err != nil {
 		return err
 	}
 	select {
@@ -369,7 +351,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 		m.everConnected[string(pub)] = true // record for checkBeaconConsistency skip guard
 		m.mu.Unlock()
 		return nil
-	case <-peer.Done():
+	case <-m.peer.Done():
 		return fmt.Errorf("connection closed during handshake")
 	case <-time.After(time.Duration(handshakeTimeoutNs.Load())):
 		return fmt.Errorf("handshake timeout")
