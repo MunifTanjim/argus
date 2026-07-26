@@ -107,15 +107,21 @@ docker compose -f docker/docker-compose.yml exec node-a \
 Save the printed **`lock.genesis: <B64>`** and the **disablement secret** (shown
 once — it's your break-glass recovery key).
 
-**Pin the genesis everywhere** so every device boots fail-closed. Put it in
-`docker/.env`:
+**Pin every other node to the genesis.** Each node that was not present at `lock init`
+must be pinned interactively. The command pulls the offered genesis, shows its word
+fingerprint, and asks for confirmation — compare those words against `argus lock status`
+on node-a before typing `y`:
 
 ```sh
-echo 'ARGUS_LOCK_GENESIS=<paste-the-B64>' >> docker/.env
+docker compose -f docker/docker-compose.yml exec node-b argus lock pin
+docker compose -f docker/docker-compose.yml exec node-c argus lock pin
 ```
 
-Uncomment the `ARGUS_LOCK_GENESIS` line in `docker/docker-compose.yml` (in both
-`x-node-base` and the `client` service), then restart:
+**Declarative alternative:** you can instead set `ARGUS_LOCK_GENESIS=<B64>` in
+`docker/.env` and uncomment the env var in `docker/docker-compose.yml` (both
+`x-node-base` and the `client` service). The env var takes precedence over the
+pinned file, which is useful for fleet-wide deployment where you want a single
+authoritative genesis wired into your compose config. After editing, restart:
 
 ```sh
 docker compose -f docker/docker-compose.yml up -d

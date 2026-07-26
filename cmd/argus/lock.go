@@ -20,7 +20,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockRevokeSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockRevokeSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd(), newLockPinCmd(), newLockUnpinCmd())
 	return cmd
 }
 
@@ -159,6 +159,11 @@ func newLockStatusCmd() *cobra.Command {
 				}
 				pub := base64.StdEncoding.EncodeToString(kp.Public)
 				shell.StdOutF("locked mode: (client — no local node)\n  this device identity: %s\n  to authorize, run on a signer node:\n    %s\n", pub, lockSignHint(kp.Public))
+				if pin, perr := clientPinFile().Load(); perr == nil && pin != nil {
+					shell.StdOutF("  pin: %s (source: file)\n", strings.Join(trustlog.HashFingerprint(pin), " "))
+				} else {
+					shell.StdOutF("  pin: none\n")
+				}
 				return nil
 			}
 			printLockStatus(st)
@@ -669,6 +674,16 @@ func printLockStatus(st api.LockStatusResult) {
 		shell.StdOutF("locked mode: disabled\n  this node signer: %s\n  this node identity: %s\n",
 			b64OrNone(st.SignerPubKey),
 			b64OrNone(st.IdentityPubKey))
+		switch {
+		case st.Quarantined:
+			shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
+				strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "))
+		case st.Pinned:
+			shell.StdOutF("  pin: %s (source: %s)\n",
+				strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
+		default:
+			shell.StdOutF("  pin: none\n")
+		}
 		if st.LocalDisabled {
 			shell.StdOutF("  local-disable: active\n")
 		}
@@ -676,6 +691,16 @@ func printLockStatus(st api.LockStatusResult) {
 	}
 	shell.StdOutF("locked mode: enabled\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
 		base64.StdEncoding.EncodeToString(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+	switch {
+	case st.Quarantined:
+		shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
+			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "))
+	case st.Pinned:
+		shell.StdOutF("  pin: %s (source: %s)\n",
+			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
+	default:
+		shell.StdOutF("  pin: none\n")
+	}
 	if len(st.Signers) > 0 {
 		shell.StdOutF("  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
 		for _, s := range st.Signers {

@@ -36,6 +36,49 @@ trust log) to pass the locked-mode gate.
 Presenting the secret disables locked mode network-wide without requiring any signer
 key. Store it securely and offline.
 
+## Pinning the genesis
+
+The **genesis pin** is a 32-byte hash that tells a device which trust log it belongs to. Without it, a device on a locked network has no way to know which chain is authoritative and will refuse all E2E channels — a deliberate fail-closed posture.
+
+`lock init` self-pins the node it runs on automatically. Every other device — additional nodes and TUI clients — must be pinned separately.
+
+### Pinning a new device
+
+Run on the device you want to pin:
+
+```sh
+argus lock pin
+```
+
+The command connects to the gateway, reads the offered trust-log branches, and shows you the genesis **word fingerprint** — a short sequence of human-readable words derived from the genesis hash:
+
+```
+genesis offered by this network:
+  <base64>
+  ocean hammer lamp river ...
+
+Compare these words against `argus lock status` on a node you trust.
+Pin this device to it? [y/N]:
+```
+
+Before typing `y`, compare those words against the fingerprint shown by `argus lock status` (the `pin:` line) on a node you already trust — over the phone, in a chat, or any out-of-band channel. Matching words confirm you are pinning to the same trust root that node is already enforcing.
+
+If you already know the genesis (for example, from `lock init` output), you can pin without a prompt:
+
+```sh
+argus lock pin <genesis-b64>
+```
+
+An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. `argus lock status` will show the quarantined state and the genesis that was seen. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
+
+### Unpinning a device
+
+```sh
+argus lock unpin
+```
+
+This clears the pin and removes the local chain file (a chain from the old genesis can never be used again). The device returns to the quarantine state on a locked network until re-pinned.
+
 ## Anti-equivocation: signed HEAD beacons
 
 A malicious or compromised gateway could attempt to show different nodes or clients
