@@ -104,6 +104,12 @@ type fakeNode struct {
 	key    e2e.KeyPair
 	ch     *api.Channel // per-channel session, set at handshake (single read loop, no lock)
 	handle func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote)
+	// postHandshake, when set, is sealed right after msg2 — a real node pushes its
+	// registry snapshot the moment the channel exists.
+	postHandshake *fakeNote
+	// beforeMsg2, when set, runs while the client is still blocked waiting for the
+	// handshake reply — the window in which its channel is not yet registered.
+	beforeMsg2 func()
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -112,7 +118,9 @@ type fakeNode struct {
 // Set chain before Connect to serve a trust-log chain from trustlog.pull.
 type fakeMultiGateway struct {
 	peer   *api.Peer
+	mu     sync.Mutex           // guards nodes/order: addNode races the peer read loop
 	nodes  map[string]*fakeNode // node id -> node
+	order  []*fakeNode          // stable nodes.list order
 	byChan map[string]*fakeNode // chan_id -> node
 	nextCh int
 	chain  []byte // served by trustlog.pull; nil = method-not-found
@@ -127,23 +135,21 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 	}
 	for _, n := range nodes {
 		g.nodes[n.id] = n
+		g.order = append(g.order, n)
 	}
 	g.peer = api.NewPeer(gwConn, api.PeerOptions{
 		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
 			switch method {
 			case api.MethodNodesList:
 				var descs []api.NodeDescriptor
-				for _, n := range nodes { // stable order
-					descs = append(descs, api.NodeDescriptor{
-						ID: n.id, Label: n.id + "-box", Online: true,
-						IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
-					})
+				for _, n := range g.snapshotNodes() {
+					descs = append(descs, g.descriptor(n))
 				}
 				return api.NodesListResult{Nodes: descs}, nil
 			case api.MethodRelayOpen:
 				var p api.RelayOpenParams
 				_ = json.Unmarshal(params, &p)
-				n := g.nodes[p.NodeID]
+				n := g.node(p.NodeID)
 				if n == nil {
 					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node"}
 				}
@@ -164,6 +170,42 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 	return g, clientConn
 }
 
+func (g *fakeMultiGateway) snapshotNodes() []*fakeNode {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]*fakeNode(nil), g.order...)
+}
+
+func (g *fakeMultiGateway) node(id string) *fakeNode {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.nodes[id]
+}
+
+func (g *fakeMultiGateway) descriptor(n *fakeNode) api.NodeDescriptor {
+	return api.NodeDescriptor{
+		ID: n.id, Label: n.id + "-box", Online: true,
+		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
+	}
+}
+
+// addNode makes n visible to nodes.list and relay.open, as a node joining the
+// gateway mid-session does.
+func (g *fakeMultiGateway) addNode(n *fakeNode) {
+	g.mu.Lock()
+	g.nodes[n.id] = n
+	g.order = append(g.order, n)
+	g.mu.Unlock()
+}
+
+// emitNodeEvent pushes a roster notification, the gateway's only signal that a
+// node's reachability changed.
+func (g *fakeMultiGateway) emitNodeEvent(evType string, n *fakeNode) {
+	nd := g.descriptor(n)
+	nd.Online = evType != api.NodeEventOffline && evType != api.NodeEventRemoved
+	_ = g.peer.Notify(api.MethodNodeEvent, api.NodeEvent{Type: evType, Node: nd})
+}
+
 func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 	n := g.byChan[f.Route.ChanID]
 	if n == nil {
@@ -179,8 +221,15 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 			return
 		}
 		n.ch = api.NewChannel(f.Route.ChanID, sess)
+		if hook := n.beforeMsg2; hook != nil {
+			hook()
+		}
 		hf, _ := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
 		_ = g.peer.SendRawFrame(hf)
+		if note := n.postHandshake; note != nil {
+			nf, _ := n.ch.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
+			_ = g.peer.SendRawFrame(nf)
+		}
 		return
 	}
 	if n.ch == nil {

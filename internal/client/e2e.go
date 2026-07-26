@@ -22,12 +22,17 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Tunable timeouts.
 var callTimeout = 30 * time.Second
+
+// defaultOfflineGrace is how long a disconnected node's sessions stay visible
+// (marked Offline) before the client drops them.
+const defaultOfflineGrace = 30 * time.Second
 
 // handshakeTimeoutNs is how long an initiator waits for the responder's msg2.
 // Stored as nanoseconds in an atomic so SetHandshakeTimeoutForTest is race-free
@@ -74,6 +79,14 @@ type E2EClient struct {
 	subNode  map[string]string // sub_id  -> nodeID (transcript.subscribe)
 	termNode map[string]string // term_id -> nodeID (terminal.open)
 
+	// Per-node session mirror, kept so the client can synthesize the events a node
+	// that went away can no longer send. nodeSessions maps nodeID -> stamped session
+	// id -> the last session seen for it; offlineTimers holds the per-node grace timer.
+	nodeSessions  map[string]map[string]session.Session
+	offlineTimers map[string]*time.Timer
+	offlineGrace  time.Duration
+	opening       map[string]chan struct{} // node id -> closed when its in-flight open finishes
+
 	events chan api.Notification
 
 	trust     *trustlog.SyncStore // locked-mode trust-log store; nil when off
@@ -111,6 +124,10 @@ func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []b
 		pending:       map[uint64]chan pendingReply{},
 		subNode:       map[string]string{},
 		termNode:      map[string]string{},
+		nodeSessions:  map[string]map[string]session.Session{},
+		offlineTimers: map[string]*time.Timer{},
+		opening:       map[string]chan struct{}{},
+		offlineGrace:  defaultOfflineGrace,
 		events:        make(chan api.Notification, 256),
 		beacons:       map[string]api.Beacon{},
 		beaconCtr:     map[string]uint64{},
@@ -174,6 +191,12 @@ func (m *E2EClient) Close() error {
 	if m.trustStop != nil {
 		m.trustStop()
 	}
+	m.mu.Lock()
+	for id, t := range m.offlineTimers {
+		t.Stop()
+		delete(m.offlineTimers, id)
+	}
+	m.mu.Unlock()
 	return m.peer.Close()
 }
 
@@ -198,20 +221,7 @@ func (m *E2EClient) Connect() error {
 		m.syncTrustLog()
 	}
 	for _, nd := range roster.Nodes {
-		if !nd.Online {
-			continue // offline within-grace node: no live relay peer, relay.open would fail
-		}
-		if nd.IdentityPubKey == "" {
-			continue // no key: cannot open an E2E channel to this node
-		}
-		pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
-		if err != nil {
-			continue // bad key: skip (fail-closed; also can't open a channel anyway)
-		}
-		if m.trust != nil && !m.trust.Disabled() && !m.trust.DeviceAuthorized(pub) {
-			continue // unauthorized node: silent exclusion (fail-closed)
-		}
-		if err := m.openChannel(nd, pub); err != nil {
+		if err := m.openIfEligible(nd); err != nil {
 			// One unreachable node must not abort the whole session; skip it and keep
 			// aggregating the rest (a later reconnect/refresh retries it).
 			log.Printf("client: skipping node %s: open channel failed: %v", nd.ID, err)
@@ -222,6 +232,50 @@ func (m *E2EClient) Connect() error {
 		go m.trustSyncLoop()
 	}
 	return nil
+}
+
+// openIfEligible opens a channel to nd unless it is offline, keyless, or (in
+// locked mode) unauthorized — the silent-skip cases are not errors. Returns the
+// open error otherwise.
+func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
+	if !nd.Online {
+		return nil // offline within-grace node: no live relay peer, relay.open would fail
+	}
+	if nd.IdentityPubKey == "" {
+		return nil // no key: cannot open an E2E channel to this node
+	}
+	pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+	if err != nil {
+		return nil // bad key: skip (fail-closed; also can't open a channel anyway)
+	}
+	if m.trust != nil && !m.trust.Disabled() && !m.trust.DeviceAuthorized(pub) {
+		return nil // unauthorized node: silent exclusion (fail-closed)
+	}
+	// A node is registered in byNode only once its handshake finishes, so the
+	// in-flight map is what keeps a roster event landing mid-handshake from opening
+	// a second channel — which would replay the node's whole snapshot. A second
+	// caller waits for the winner instead of skipping, so Connect never returns
+	// before the channel an adopting goroutine is already opening exists.
+	m.mu.Lock()
+	if _, open := m.byNode[nd.ID]; open {
+		m.mu.Unlock()
+		return nil
+	}
+	if inflight, ok := m.opening[nd.ID]; ok {
+		m.mu.Unlock()
+		<-inflight
+		return nil
+	}
+	done := make(chan struct{})
+	m.opening[nd.ID] = done
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.opening, nd.ID)
+		m.mu.Unlock()
+		close(done)
+	}()
+	return m.openChannel(nd, pub)
 }
 
 // openChannel runs relay.open + the Noise IK initiator handshake for one node.
@@ -328,6 +382,7 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 		}
 		if f.Method == api.MethodSessionEvent {
 			params = stampEvent(params, nc.nodeID, nc.label)
+			m.trackSessionEvent(nc.nodeID, params)
 		} else if f.Method == api.MethodTasksChanged {
 			params = stampTasksChanged(params, nc.nodeID)
 		}
@@ -820,10 +875,10 @@ func (m *E2EClient) TrustTip() []byte {
 	return m.trust.Tip()
 }
 
-// onPeerNotify handles gateway-level notifications. It processes node.event
-// beacon updates (ingest the new beacon) and offline/removed events (prune the
-// node's beacon state so stale tips cannot accumulate misses after the node
-// leaves the roster or goes offline).
+// onPeerNotify handles gateway-level notifications. node.event is the only signal
+// a blind gateway can give about node reachability, so it drives channel lifecycle
+// (open on join/return, drop on loss), the synthesized session events a departed
+// node can no longer send, and beacon state hygiene.
 func (m *E2EClient) onPeerNotify(n api.Notification) {
 	if n.Method != api.MethodNodeEvent {
 		return
@@ -835,8 +890,125 @@ func (m *E2EClient) onPeerNotify(n api.Notification) {
 	switch ev.Type {
 	case api.NodeEventBeacon:
 		m.ingestBeaconFromDescriptor(ev.Node)
-	case api.NodeEventOffline, api.NodeEventRemoved:
+	case api.NodeEventAdded, api.NodeEventOnline:
+		// Off the read loop: openChannel calls the gateway and waits for msg2, both
+		// of which are answered on this very loop.
+		go m.adoptNode(ev.Node)
+	case api.NodeEventOffline:
 		m.pruneBeaconForDescriptor(ev.Node)
+		m.loseNode(ev.Node.ID, false)
+	case api.NodeEventRemoved:
+		m.pruneBeaconForDescriptor(ev.Node)
+		m.loseNode(ev.Node.ID, true)
+	}
+}
+
+// adoptNode opens a channel to a node that joined (or came back) after Connect.
+// Its sessions arrive on their own: the node streams its registry snapshot as
+// soon as the channel is up.
+func (m *E2EClient) adoptNode(nd api.NodeDescriptor) {
+	if err := m.openIfEligible(nd); err != nil {
+		log.Printf("client: node %s came online but the channel failed: %v", nd.ID, err)
+	}
+}
+
+// loseNode drops the channel to a node that is no longer reachable and accounts
+// for its sessions: gone for good (removed from the roster) means remove them now,
+// otherwise grey them and sweep once the grace window passes. Nothing else can
+// report those sessions — the node that owned them is exactly what went away.
+func (m *E2EClient) loseNode(nodeID string, gone bool) {
+	m.mu.Lock()
+	if nc := m.byNode[nodeID]; nc != nil {
+		delete(m.byNode, nodeID)
+		if ch := nc.ch.Load(); ch != nil {
+			delete(m.byChanID, ch.ID())
+		}
+	}
+	if t := m.offlineTimers[nodeID]; t != nil {
+		t.Stop()
+		delete(m.offlineTimers, nodeID)
+	}
+	var events []registry.Event
+	sessions := m.nodeSessions[nodeID]
+	if gone {
+		delete(m.nodeSessions, nodeID)
+		for _, s := range sessions {
+			events = append(events, registry.Event{Type: registry.EventRemoved, Session: s})
+		}
+	} else {
+		for id, s := range sessions {
+			s.Offline = true
+			sessions[id] = s
+			events = append(events, registry.Event{Type: registry.EventUpdated, Session: s})
+		}
+		if len(sessions) > 0 {
+			m.offlineTimers[nodeID] = time.AfterFunc(m.offlineGrace, func() { m.sweepOfflineNode(nodeID) })
+		}
+	}
+	m.mu.Unlock()
+	m.emitSessionEvents(events)
+}
+
+// sweepOfflineNode drops the sessions still marked offline when the grace window
+// expires. A session the node re-reported after coming back is no longer marked,
+// so it survives — no timer cancellation needed.
+func (m *E2EClient) sweepOfflineNode(nodeID string) {
+	m.mu.Lock()
+	delete(m.offlineTimers, nodeID)
+	sessions := m.nodeSessions[nodeID]
+	var events []registry.Event
+	for id, s := range sessions {
+		if !s.Offline {
+			continue
+		}
+		delete(sessions, id)
+		events = append(events, registry.Event{Type: registry.EventRemoved, Session: s})
+	}
+	if len(sessions) == 0 {
+		delete(m.nodeSessions, nodeID)
+	}
+	m.mu.Unlock()
+	m.emitSessionEvents(events)
+}
+
+// trackSessionEvent mirrors an already-stamped session.event so the client can
+// synthesize the offline/removal events for these sessions later.
+func (m *E2EClient) trackSessionEvent(nodeID string, stamped json.RawMessage) {
+	var ev registry.Event
+	if json.Unmarshal(stamped, &ev) != nil || ev.Session.ID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ev.Type == registry.EventRemoved {
+		if sessions := m.nodeSessions[nodeID]; sessions != nil {
+			delete(sessions, ev.Session.ID)
+			if len(sessions) == 0 {
+				delete(m.nodeSessions, nodeID)
+			}
+		}
+		return
+	}
+	sessions := m.nodeSessions[nodeID]
+	if sessions == nil {
+		sessions = map[string]session.Session{}
+		m.nodeSessions[nodeID] = sessions
+	}
+	sessions[ev.Session.ID] = ev.Session
+}
+
+// emitSessionEvents pushes synthesized session.events onto the event stream, with
+// the same drop-on-stalled-consumer policy as relayed ones.
+func (m *E2EClient) emitSessionEvents(events []registry.Event) {
+	for _, ev := range events {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		select {
+		case m.events <- api.Notification{Method: api.MethodSessionEvent, Params: b}:
+		default:
+		}
 	}
 }
 
