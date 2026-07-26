@@ -570,10 +570,32 @@ func (c *Client) SetPaneZoom(ctx context.Context, target, paneID string, zoom bo
 	return err
 }
 
+// fallbackTerm is the TERM given to an attach that inherits none.
+const fallbackTerm = "xterm-256color"
+
 // AttachCommand builds the `tmux attach-session` command (with this client's -L
 // socket) for running under a PTY.
 func (c *Client) AttachCommand(ctx context.Context, session string) *exec.Cmd {
-	return exec.CommandContext(ctx, c.bin, c.args("attach-session", "-t", session)...)
+	cmd := exec.CommandContext(ctx, c.bin, c.args("attach-session", "-t", session)...)
+	cmd.Env = attachEnv(os.Environ())
+	return cmd
+}
+
+// attachEnv guarantees a usable TERM: a node started as a daemon (systemd,
+// container) inherits none, and tmux then refuses to attach at all ("terminal
+// does not support clear"), killing the PTY the instant it opens.
+func attachEnv(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if name, val, _ := strings.Cut(kv, "="); name == "TERM" {
+			if val != "" {
+				return env
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "TERM="+fallbackTerm)
 }
 
 // ListSessions returns every session name on the server, or nil and no error
