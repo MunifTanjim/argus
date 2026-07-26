@@ -64,12 +64,13 @@ func TestPeerNonRelayStillDispatches(t *testing.T) {
 	defer a.Close()
 	defer b.Close()
 
+	// Not "ping": that is answered by the Peer itself and never reaches Dispatch.
 	var out string
-	if err := a.Call("ping", nil, &out); err != nil {
+	if err := a.Call("echo", nil, &out); err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if out != "pong-ping" {
-		t.Errorf("dispatch result = %q, want pong-ping", out)
+	if out != "pong-echo" {
+		t.Errorf("dispatch result = %q, want pong-echo", out)
 	}
 	if atomic.LoadInt32(&relayHits) != 0 {
 		t.Error("a non-relay request must not reach OnRelayFrame")

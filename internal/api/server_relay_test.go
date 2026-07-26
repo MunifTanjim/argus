@@ -10,7 +10,8 @@ import (
 
 func TestServerRoutesRelayFramesToHandler(t *testing.T) {
 	srv := NewServer()
-	srv.Handle("ping", func(context.Context, json.RawMessage) (any, error) { return "pong", nil })
+	// Not "ping": that is answered by the Peer itself and never reaches a handler.
+	srv.Handle("echo", func(context.Context, json.RawMessage) (any, error) { return "pong", nil })
 	got := make(chan RelayFrame, 1)
 	gotPeer := make(chan *Peer, 1)
 	srv.SetRelayFrameHandler(func(p *Peer, f RelayFrame) { gotPeer <- p; got <- f })
@@ -22,8 +23,8 @@ func TestServerRoutesRelayFramesToHandler(t *testing.T) {
 
 	// A normal request still dispatches.
 	var out string
-	if err := client.Call("ping", nil, &out); err != nil || out != "pong" {
-		t.Fatalf("ping = %q err=%v", out, err)
+	if err := client.Call("echo", nil, &out); err != nil || out != "pong" {
+		t.Fatalf("echo = %q err=%v", out, err)
 	}
 
 	// A relay frame reaches the handler.
