@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -120,6 +121,62 @@ func TestApplyPinPinsTheClientWhenNoNodeIsRunning(t *testing.T) {
 
 	if err := applyPin(context.Background(), cfg, genesis); err != nil {
 		t.Fatalf("a client-only machine must still be pinnable: %v", err)
+	}
+
+	pin, err := clientPinFile().Load()
+	if err != nil || !bytes.Equal(pin, genesis) {
+		t.Fatalf("client pin = %x (%v), want %x", pin, err, genesis)
+	}
+}
+
+// networkGenesisNode serves one decodable chain plus an accepting lock.pin, i.e. the
+// happy path the bare `argus lock pin` walks.
+func networkGenesisNode(t *testing.T) (*config.Config, []byte) {
+	t.Helper()
+	chain := makeTestChainBytes(t)
+	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogPullResult{Chains: [][]byte{chain}}, nil
+	}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{
+		api.MethodTrustLogPull: pull,
+		api.MethodLockPin:      acceptPin,
+	})}
+	entries, err := trustlog.UnmarshalChain(chain)
+	if err != nil {
+		t.Fatalf("UnmarshalChain: %v", err)
+	}
+	return cfg, trustlog.HashEntry(&entries[0])
+}
+
+// TestPinFromNetworkRefusesAGenesisThatContradictsTheConfig covers the bare form the
+// guide documents as primary: writing the network's genesis over a config pin bricks
+// the next `argus` run with a genesis pin conflict.
+func TestPinFromNetworkRefusesAGenesisThatContradictsTheConfig(t *testing.T) {
+	tempStateDir(t)
+	cfg, _ := networkGenesisNode(t)
+	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x77))
+
+	err := pinFromNetwork(context.Background(), cfg, strings.NewReader("y\n"), io.Discard)
+
+	if err == nil {
+		t.Fatal("the bare `lock pin` must refuse a genesis that contradicts lock.genesis")
+	}
+	if !strings.Contains(err.Error(), "lock.genesis") {
+		t.Fatalf("error must name the config key, got: %v", err)
+	}
+	pin, perr := clientPinFile().Load()
+	if perr != nil || pin != nil {
+		t.Fatalf("no client pin must be written: got %x, %v", pin, perr)
+	}
+}
+
+func TestPinFromNetworkPinsWhenTheConfigAgrees(t *testing.T) {
+	tempStateDir(t)
+	cfg, genesis := networkGenesisNode(t)
+	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(genesis)
+
+	if err := pinFromNetwork(context.Background(), cfg, strings.NewReader("y\n"), io.Discard); err != nil {
+		t.Fatalf("pinning the genesis the config already names must be allowed: %v", err)
 	}
 
 	pin, err := clientPinFile().Load()

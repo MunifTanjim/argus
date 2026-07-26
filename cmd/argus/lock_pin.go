@@ -208,6 +208,32 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 	return guardExistingPin(clientPinFile(), genesis)
 }
 
+// pinFromNetwork is the bare `argus lock pin`: pull the genesis this network offers,
+// guard it against every pin this device already has — lock.genesis included, or the
+// command writes a pin file the next `argus` run dies on — then confirm before writing.
+func pinFromNetwork(ctx context.Context, cfg *config.Config, in io.Reader, out io.Writer) error {
+	genesis, err := genesisFromNetwork(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if genesis == nil {
+		shell.StdOutF("no trust log on this network; nothing to pin\n")
+		return nil
+	}
+	if err := guardPin(cfg, genesis); err != nil {
+		return err
+	}
+	ok, err := confirmGenesis(in, out, genesis)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		shell.StdOutF("not pinned\n")
+		return nil
+	}
+	return applyPin(ctx, cfg, genesis)
+}
+
 func newLockPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "pin [genesis-b64]",
@@ -234,26 +260,10 @@ func newLockPinCmd() *cobra.Command {
 				return applyPin(ctx, cfg, genesis)
 			}
 
-			genesis, gerr := genesisFromNetwork(ctx, cfg)
-			if gerr != nil {
-				return fail(cmd, gerr)
-			}
-			if genesis == nil {
-				shell.StdOutF("no trust log on this network; nothing to pin\n")
-				return nil
-			}
-			if perr := guardExistingPin(clientPinFile(), genesis); perr != nil {
+			if perr := pinFromNetwork(ctx, cfg, os.Stdin, os.Stdout); perr != nil {
 				return fail(cmd, perr)
 			}
-			ok, cerr := confirmGenesis(os.Stdin, os.Stdout, genesis)
-			if cerr != nil {
-				return fail(cmd, cerr)
-			}
-			if !ok {
-				shell.StdOutF("not pinned\n")
-				return nil
-			}
-			return applyPin(ctx, cfg, genesis)
+			return nil
 		},
 	}
 	addClientFlags(cmd.Flags())
