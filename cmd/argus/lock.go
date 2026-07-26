@@ -13,6 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 func newLockCmd() *cobra.Command {
@@ -177,14 +178,11 @@ func newLockStatusCmd() *cobra.Command {
 				}
 				pub := base64.StdEncoding.EncodeToString(kp.Public)
 				shell.StdOutF("locked mode: (client — no local node)\n  this device identity: %s\n  to authorize, run on a signer node:\n    %s\n", pub, lockSignHint(kp.Public))
-				if pin, perr := clientPinFile().Load(); perr == nil && pin != nil {
-					shell.StdOutF("  pin: %s (source: file)\n", strings.Join(trustlog.HashFingerprint(pin), " "))
-				} else {
-					shell.StdOutF("  pin: none\n")
-				}
+				printClientPinStatus(ctx, cfg)
 				return nil
 			}
 			printLockStatus(st)
+			printClientPinStatus(ctx, cfg)
 			// Enrollment hint: when this node isn't authorized yet, show the exact sign command.
 			if st.Enabled && !st.Authorized && len(st.IdentityPubKey) > 0 {
 				shell.StdOutF("\n  to authorize this node, run on a signer node:\n    %s\n", lockSignHint(st.IdentityPubKey))
@@ -194,6 +192,39 @@ func newLockStatusCmd() *cobra.Command {
 	}
 	addClientFlags(cmd.Flags())
 	return cmd
+}
+
+// printClientPinStatus reports the client (TUI) role's pin state on this machine.
+// The client has no RPC surface and the node's status says nothing about it, so this
+// is the only place an operator can see that the dashboard on this box is
+// quarantined. With no pin of its own it asks the gateway whether the network has a
+// trust log at all — that is precisely the condition that quarantines the client.
+func printClientPinStatus(ctx context.Context, cfg *config.Config) {
+	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	var netGenesis []byte
+	var neterr error
+	if perr == nil && pin.Genesis == nil && cfg.Gateway.URL != "" {
+		netGenesis, neterr = genesisFromNetwork(ctx, cfg)
+	}
+	shell.StdOutF("%s", clientPinStatus(pin, perr, netGenesis, neterr))
+}
+
+// clientPinStatus renders the client pin line. netGenesis is the genesis this
+// network is offering (nil when there is none or it was not checked), neterr why the
+// check failed.
+func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr error) string {
+	switch {
+	case perr != nil:
+		return fmt.Sprintf("  client pin: UNUSABLE — %v\n       argus refuses to start until this is resolved\n", perr)
+	case pin.Genesis != nil:
+		return fmt.Sprintf("  client pin: %s (source: %s)\n", fingerprintOf(pin.Genesis), pin.Source)
+	case netGenesis != nil:
+		return fmt.Sprintf("  client pin: none — QUARANTINED (chain seen: %s)\n       the dashboard on this machine opens no channels; run: argus lock pin\n", fingerprintOf(netGenesis))
+	case neterr != nil:
+		return fmt.Sprintf("  client pin: none (could not check this network for a trust log: %v)\n", neterr)
+	default:
+		return "  client pin: none\n"
+	}
 }
 
 // lockSignHint returns the "argus lock sign <pubkey>" instruction string for

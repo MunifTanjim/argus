@@ -13,6 +13,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // tempStateDir points config.GetStatePath (and therefore both pin files) at a
@@ -176,5 +177,62 @@ func TestPinClientRoleLeavesAConflictingPinAlone(t *testing.T) {
 	pin, err := clientPinFile().Load()
 	if err != nil || !bytes.Equal(pin, existing) {
 		t.Fatalf("client pin = %x (%v), want the untouched %x", pin, err, existing)
+	}
+}
+
+// TestClientPinStatusNamesQuarantine backs the doc promise that `argus lock status`
+// shows a quarantined device and the genesis it saw — the client-side quarantine has
+// no other surface.
+func TestClientPinStatusNamesQuarantine(t *testing.T) {
+	seen := testGenesis(0x11)
+
+	line := clientPinStatus(trustpin.Pin{}, nil, seen, nil)
+
+	if !strings.Contains(line, "QUARANTINED") {
+		t.Fatalf("line must name the quarantine, got: %q", line)
+	}
+	if !strings.Contains(line, fingerprintOf(seen)) {
+		t.Fatalf("line must show the genesis that was seen, got: %q", line)
+	}
+	if !strings.Contains(line, "argus lock pin") {
+		t.Fatalf("line must name the fix, got: %q", line)
+	}
+}
+
+// TestClientPinStatusNamesACorruptPin covers the pin file that exists but is the
+// wrong length: the same file makes `argus` refuse to start, so reporting "none" is
+// actively misleading.
+func TestClientPinStatusNamesACorruptPin(t *testing.T) {
+	dir := tempStateDir(t)
+	if err := os.WriteFile(filepath.Join(dir, "client-trustlog-genesis"), []byte("short"), 0o600); err != nil {
+		t.Fatalf("write corrupt pin: %v", err)
+	}
+
+	pin, perr := trustpin.Resolve("", clientPinFile())
+	line := clientPinStatus(pin, perr, nil, nil)
+
+	if strings.Contains(line, "none") {
+		t.Fatalf("a corrupt pin must not be reported as no pin, got: %q", line)
+	}
+	if !strings.Contains(line, "corrupt") {
+		t.Fatalf("line must name the corruption, got: %q", line)
+	}
+}
+
+func TestClientPinStatusReportsAPinnedClient(t *testing.T) {
+	genesis := testGenesis(0x21)
+
+	line := clientPinStatus(trustpin.Pin{Genesis: genesis, Source: trustpin.SourceConfig}, nil, nil, nil)
+
+	if !strings.Contains(line, fingerprintOf(genesis)) || !strings.Contains(line, "config") {
+		t.Fatalf("line must show the fingerprint and its source, got: %q", line)
+	}
+}
+
+func TestClientPinStatusUnpinnedOnAnUnlockedNetwork(t *testing.T) {
+	line := clientPinStatus(trustpin.Pin{}, nil, nil, nil)
+
+	if strings.Contains(line, "QUARANTINED") {
+		t.Fatalf("no trust log on the network must not claim quarantine, got: %q", line)
 	}
 }
