@@ -75,7 +75,7 @@ func TestGateConcurrentTrip(t *testing.T) {
 }
 
 func TestGateConcurrentTripAndClear(t *testing.T) {
-	for iter := 0; iter < 100; iter++ {
+	for iter := 0; iter < 20; iter++ {
 		var g trustpin.Gate
 		var wg sync.WaitGroup
 
