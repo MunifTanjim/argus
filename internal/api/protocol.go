@@ -115,6 +115,8 @@ const (
 	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
 	MethodLockLog                = "lock.log"                // request: no params; result: LockLogResult
+	MethodLockPin                = "lock.pin"                // request: LockPinParams; result: nil
+	MethodLockUnpin              = "lock.unpin"              // request: no params; result: nil
 	MethodSessionTasks           = "sessions.tasks"          // request: SessionRef; result: TasksResult
 	MethodTasksChanged           = "tasks.changed"           // notification: TasksChanged (server→client)
 )
@@ -698,6 +700,11 @@ type LockSignerParams struct {
 	Signer []byte `json:"signer"`
 }
 
+// LockPinParams pins a node to a trust-log genesis hash.
+type LockPinParams struct {
+	Genesis []byte `json:"genesis"`
+}
+
 // LockInitParams enables locked mode. Signers are ADDITIONAL Ed25519 signer pubkeys
 // (the local node auto-includes its own); Devices are Curve25519 identity pubkeys to
 // authorize in the genesis (the current nodes).
@@ -791,4 +798,8 @@ type LockStatusResult struct {
 	Disabled       bool     `json:"disabled,omitempty"`
 	LocalDisabled  bool     `json:"local_disabled,omitempty"`
 	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
+	Pinned      bool   `json:"pinned,omitempty"`
+	PinGenesis  []byte `json:"pin_genesis,omitempty"` // resolved pin, or the observed genesis when quarantined
+	PinSource   string `json:"pin_source,omitempty"`  // "config" or "file"
+	Quarantined bool   `json:"quarantined,omitempty"`
 }

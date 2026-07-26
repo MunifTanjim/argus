@@ -236,6 +236,26 @@ func (d *Node) handleLockLocalDisable(_ context.Context, _ json.RawMessage) (any
 	return nil, nil
 }
 
+func (d *Node) handleLockPin(_ context.Context, raw json.RawMessage) (any, error) {
+	var p api.LockPinParams
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+	}
+	if err := d.AdoptPin(p.Genesis); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+	}
+	return struct{}{}, nil
+}
+
+func (d *Node) handleLockUnpin(_ context.Context, _ json.RawMessage) (any, error) {
+	if err := d.DropPin(); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return struct{}{}, nil
+}
+
 // handleLockRevokeSignerStart begins a revoke-signer co-signing ceremony
 // (lock.revokeSignerStart). Requires this node to be a trusted signer. Selects a
 // fork point, builds a partial KindRevokeSigner entry, adds this node's co-sign,
@@ -418,6 +438,15 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 		SignerPubKey:   append([]byte(nil), d.signer.Public...),
 		IdentityPubKey: append([]byte(nil), d.identity.Public...),
 		LocalDisabled:  d.localDisabled(),
+	}
+	res.Quarantined = d.Quarantined()
+	res.Pinned = len(d.pinGenesis) > 0
+	switch {
+	case res.Pinned:
+		res.PinGenesis = append([]byte(nil), d.pinGenesis...)
+		res.PinSource = d.pinSource
+	case res.Quarantined:
+		res.PinGenesis = d.trustGate.Genesis()
 	}
 	st := d.trust.Load()
 	if st == nil {

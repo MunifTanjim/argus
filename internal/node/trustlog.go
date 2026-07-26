@@ -1,8 +1,11 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -239,4 +242,54 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 		d.reevaluateTrustChannels()
 		return
 	}
+}
+
+// AdoptPin pins this node to genesis at runtime: persist the pin, enable the
+// trust store, and release the quarantine gate. The next sync tick ingests the
+// chain, so an operator recovers a quarantined node without a restart.
+// Re-pinning the same genesis is a no-op; a different one is refused, because
+// silently switching trust roots is exactly what the pin exists to prevent.
+func (d *Node) AdoptPin(genesis []byte) error {
+	if len(genesis) != trustpin.GenesisLen {
+		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
+	}
+	if len(d.pinGenesis) > 0 {
+		if bytes.Equal(d.pinGenesis, genesis) {
+			return nil
+		}
+		return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
+	}
+	if d.trustPath == "" {
+		return errors.New("node: trust state path not configured")
+	}
+	if err := trustpin.New(genesisHashPath(d.trustPath)).Save(genesis); err != nil {
+		return err
+	}
+	if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
+		return err
+	}
+	d.pinSource = trustpin.SourceFile.String()
+	d.trustGate.Clear()
+	d.reevaluateTrustChannels()
+	return nil
+}
+
+// DropPin clears the pin, the persisted chain, and the trust store. The node
+// returns to unpinned and re-quarantines on the next sync if the network still
+// has a trust log. It deliberately does not touch the local-disable marker.
+func (d *Node) DropPin() error {
+	if d.trustPath == "" {
+		return errors.New("node: trust state path not configured")
+	}
+	if err := trustpin.New(genesisHashPath(d.trustPath)).Clear(); err != nil {
+		return err
+	}
+	if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	d.trust.Store(nil)
+	d.pinGenesis = nil
+	d.pinSource = ""
+	d.trustGate.Clear()
+	return nil
 }
