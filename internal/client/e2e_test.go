@@ -443,6 +443,75 @@ func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	}
 }
 
+// A rostered node that is offline (within grace, no live relay peer) or otherwise
+// unreachable (relay.open → unknown node) must not abort the whole session: Connect
+// skips it and keeps the reachable nodes.
+func TestClientConnectSkipsOfflineAndUnreachableNodes(t *testing.T) {
+	good := &fakeNode{id: "good", key: mustKP(t)}
+	good.handle = func(_ string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return params, nil, nil // echo
+	}
+	offlineKey := mustKP(t)
+	phantomKey := mustKP(t)
+
+	gwConn, clientConn := net.Pipe()
+	g := &fakeMultiGateway{nodes: map[string]*fakeNode{"good": good}, byChan: map[string]*fakeNode{}}
+	g.peer = api.NewPeer(gwConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			switch method {
+			case api.MethodNodesList:
+				return api.NodesListResult{Nodes: []api.NodeDescriptor{
+					{ID: "good", Label: "good", Online: true, IdentityPubKey: base64.StdEncoding.EncodeToString(good.key.Public)},
+					{ID: "offline", Label: "offline", Online: false, IdentityPubKey: base64.StdEncoding.EncodeToString(offlineKey.Public)},
+					{ID: "phantom", Label: "phantom", Online: true, IdentityPubKey: base64.StdEncoding.EncodeToString(phantomKey.Public)},
+				}}, nil
+			case api.MethodRelayOpen:
+				var p api.RelayOpenParams
+				_ = json.Unmarshal(params, &p)
+				if p.NodeID != "good" { // offline must never reach here; phantom has no peer
+					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + p.NodeID}
+				}
+				g.nextCh++
+				chID := "c" + strconv.Itoa(g.nextCh)
+				g.byChan[chID] = good
+				return api.RelayOpenResult{ChanID: chID}, nil
+			}
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
+		},
+		OnRelayFrame: g.onFrame,
+	})
+	defer g.peer.Close()
+
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Connect(); err != nil {
+		t.Fatalf("connect must not fail on one offline/unreachable node: %v", err)
+	}
+
+	snap := c.byNodeSnapshot()
+	if _, ok := snap["good"]; !ok {
+		t.Fatal("reachable node should have a channel")
+	}
+	if _, ok := snap["offline"]; ok {
+		t.Fatal("offline node must be skipped (no relay.open, no channel)")
+	}
+	if _, ok := snap["phantom"]; ok {
+		t.Fatal("unreachable node must be skipped fail-soft (no channel)")
+	}
+
+	var out map[string]any
+	if err := c.callNode("good", "sessions.input", map[string]any{"text": "hi"}, &out); err != nil {
+		t.Fatalf("callNode good: %v", err)
+	}
+	if out["text"] != "hi" {
+		t.Errorf("echo = %v, want text=hi", out)
+	}
+}
+
 func TestClientDisabledStoreConnectsAll(t *testing.T) {
 	// Build a trust chain with a disablement commitment, authorizing only nodeAuth.
 	signer, _ := trustlog.GenerateSigner()

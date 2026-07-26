@@ -197,6 +197,9 @@ func (m *E2EClient) Connect() error {
 		m.syncTrustLog()
 	}
 	for _, nd := range roster.Nodes {
+		if !nd.Online {
+			continue // offline within-grace node: no live relay peer, relay.open would fail
+		}
 		if nd.IdentityPubKey == "" {
 			continue // no key: cannot open an E2E channel to this node
 		}
@@ -208,7 +211,10 @@ func (m *E2EClient) Connect() error {
 			continue // unauthorized node: silent exclusion (fail-closed)
 		}
 		if err := m.openChannel(nd, pub); err != nil {
-			return fmt.Errorf("client: open channel to %s: %w", nd.ID, err)
+			// One unreachable node must not abort the whole session; skip it and keep
+			// aggregating the rest (a later reconnect/refresh retries it).
+			log.Printf("client: skipping node %s: open channel failed: %v", nd.ID, err)
+			continue
 		}
 	}
 	if m.trust != nil {
