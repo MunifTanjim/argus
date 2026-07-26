@@ -204,7 +204,7 @@ func printClientPinStatus(ctx context.Context, cfg *config.Config) {
 	var netGenesis []byte
 	var neterr error
 	if perr == nil && pin.Genesis == nil && cfg.Gateway.URL != "" {
-		netGenesis, neterr = genesisFromNetwork(ctx, cfg)
+		netGenesis, neterr = quarantiningGenesis(ctx, cfg)
 	}
 	shell.StdOutF("%s", clientPinStatus(pin, perr, netGenesis, neterr))
 }

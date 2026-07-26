@@ -13,6 +13,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
@@ -27,9 +28,9 @@ func tempStateDir(t *testing.T) string {
 	return dir
 }
 
-// serveFakeNode starts a local node socket serving lock.pin with the given handler.
-// The socket lives in a short temp dir: macOS caps unix socket paths at ~104 bytes.
-func serveFakeNode(t *testing.T, lockPin api.HandlerFunc) string {
+// serveFakeNode starts a local socket serving the given handlers. The socket lives in
+// a short temp dir: macOS caps unix socket paths at ~104 bytes.
+func serveFakeNode(t *testing.T, handlers map[string]api.HandlerFunc) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "ap")
 	if err != nil {
@@ -41,7 +42,9 @@ func serveFakeNode(t *testing.T, lockPin api.HandlerFunc) string {
 		t.Fatalf("listen: %v", err)
 	}
 	srv := api.NewServer()
-	srv.Handle(api.MethodLockPin, lockPin)
+	for method, h := range handlers {
+		srv.Handle(method, h)
+	}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() {
 		l.Close()
@@ -61,7 +64,7 @@ func refusePin(_ context.Context, _ json.RawMessage) (any, error) {
 // error and no quarantine to explain it.
 func TestApplyPinLeavesTheClientUnpinnedWhenTheNodeRefuses(t *testing.T) {
 	tempStateDir(t)
-	cfg := &config.Config{Socket: serveFakeNode(t, refusePin)}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: refusePin})}
 
 	err := applyPin(context.Background(), cfg, testGenesis(0x22))
 
@@ -79,7 +82,7 @@ func TestApplyPinLeavesTheClientUnpinnedWhenTheNodeRefuses(t *testing.T) {
 
 func TestApplyPinWritesTheClientPinWhenTheNodeAccepts(t *testing.T) {
 	tempStateDir(t)
-	cfg := &config.Config{Socket: serveFakeNode(t, acceptPin)}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: acceptPin})}
 	genesis := testGenesis(0x33)
 
 	if err := applyPin(context.Background(), cfg, genesis); err != nil {
@@ -234,5 +237,42 @@ func TestClientPinStatusUnpinnedOnAnUnlockedNetwork(t *testing.T) {
 
 	if strings.Contains(line, "QUARANTINED") {
 		t.Fatalf("no trust log on the network must not claim quarantine, got: %q", line)
+	}
+}
+
+// TestQuarantiningGenesisReportsCompetingRoots pins the difference between choosing a
+// pin and reporting one: two roots is a hard error when picking, but the device is
+// quarantined all the same, so status must still name a genesis.
+func TestQuarantiningGenesisReportsCompetingRoots(t *testing.T) {
+	chains := [][]byte{makeTestChainBytes(t), makeTestChainBytes(t)}
+	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogPullResult{Chains: chains}, nil
+	}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogPull: pull})}
+
+	got, err := quarantiningGenesis(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("quarantiningGenesis: %v", err)
+	}
+	entries, _ := trustlog.UnmarshalChain(chains[0])
+	if want := trustlog.HashEntry(&entries[0]); !bytes.Equal(got, want) {
+		t.Fatalf("genesis = %x, want the first decodable chain's %x", got, want)
+	}
+	if _, rerr := resolveGenesis(chains); rerr == nil {
+		t.Fatal("precondition: resolveGenesis must reject competing roots")
+	}
+}
+
+func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
+	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogPullResult{}, nil
+	}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogPull: pull})}
+
+	got, err := quarantiningGenesis(context.Background(), cfg)
+
+	if err != nil || got != nil {
+		t.Fatalf("no chains → want (nil, nil), got (%x, %v)", got, err)
 	}
 }

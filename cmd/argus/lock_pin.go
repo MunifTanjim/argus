@@ -93,9 +93,8 @@ func resolveGenesis(chains [][]byte) ([]byte, error) {
 	}
 }
 
-// genesisFromNetwork pulls the gateway's retained branches and delegates
-// resolution to resolveGenesis.
-func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error) {
+// pullChains fetches the gateway's retained trust-log branches.
+func pullChains(ctx context.Context, cfg *config.Config) ([][]byte, error) {
 	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
 	if err != nil {
 		return nil, err
@@ -110,7 +109,36 @@ func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error)
 	if err := c.Call(api.MethodTrustLogPull, nil, &got); err != nil {
 		return nil, fmt.Errorf("trustlog.pull: %w", err)
 	}
-	return resolveGenesis(got.Chains)
+	return got.Chains, nil
+}
+
+// genesisFromNetwork pulls the gateway's retained branches and delegates
+// resolution to resolveGenesis.
+func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return resolveGenesis(chains)
+}
+
+// quarantiningGenesis returns the genesis that would quarantine an unpinned device
+// here, or nil. It mirrors the detector rather than resolveGenesis: detection trips
+// on the FIRST chain that decodes, so competing roots — an error when choosing a pin
+// — are still a quarantine when reporting one.
+func quarantiningGenesis(ctx context.Context, cfg *config.Config) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	for _, chain := range chains {
+		entries, uerr := trustlog.UnmarshalChain(chain)
+		if uerr != nil || len(entries) == 0 {
+			continue
+		}
+		return trustlog.HashEntry(&entries[0]), nil
+	}
+	return nil, nil
 }
 
 // applyPin pins the node role first and writes the client pin only once the node has
