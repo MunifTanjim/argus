@@ -1,18 +1,22 @@
-# docker compose test harness for the feat/e2e-encryption-blind-gateway branch.dockerfi
+# docker compose test harness for the feat/e2e-encryption-blind-gateway branch.
 #
 #   cp docker/.env.example docker/.env
 #   docker compose -f docker/docker-compose.yml up -d --build
 #   docker compose -f docker/docker-compose.yml run --rm client
 #
+# Every service runs the same image; only the command differs.
 # See docker/README.md for the full walkthrough (open mode + locked mode).
 
 name: argus-e2e
 
+# Only `gateway` carries the build stanza: two services exporting the same tag in
+# one (parallel) build is an error. So the first run must be `up --build`, which
+# builds the image before anything starts.
+x-argus: &argus
+  image: argus-e2e:dev
+
 x-node-base: &node-base
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-    target: node
+  <<: *argus
   depends_on: [gateway]
   environment:
     ARGUS_GATEWAY_URL: ws://gateway:8443
@@ -26,10 +30,10 @@ x-node-base: &node-base
 
 services:
   gateway:
+    <<: *argus
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: gateway
     command:
       - start
       - --mode=gateway
@@ -55,7 +59,7 @@ services:
         "--label=node-a",
       ]
     volumes:
-      - node-a-home:/home/agent
+      - node-a-home:/home/argus
 
   node-b:
     <<: *node-base
@@ -68,7 +72,7 @@ services:
         "--label=node-b",
       ]
     volumes:
-      - node-b-home:/home/agent
+      - node-b-home:/home/argus
 
   node-c:
     <<: *node-base
@@ -81,15 +85,12 @@ services:
         "--label=node-c",
       ]
     volumes:
-      - node-c-home:/home/agent
+      - node-c-home:/home/argus
 
   # The interactive TUI client. Not started by `up`; run on demand so it gets a
   # TTY:  docker compose run --rm client
   client:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: node
+    <<: *argus
     profiles: [client]
     depends_on: [gateway]
     stdin_open: true
@@ -99,11 +100,10 @@ services:
       ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
       # Pin the same genesis here for locked mode (see README step 2).
       # ARGUS_LOCK_GENESIS: ${ARGUS_LOCK_GENESIS:-}
-    # entrypoint: "sh"
     command: ["--gateway=ws://gateway:8443", "--token=${ARGUS_TOKEN:-devtoken}"]
     # Stable client identity across runs — required for locked-mode authorization.
     volumes:
-      - client-home:/home/agent
+      - client-home:/home/argus
 
 volumes:
   gw-home:

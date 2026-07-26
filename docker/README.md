@@ -11,6 +11,9 @@ you can exercise it yourself:
 - **client** — the interactive TUI. It reads the roster, opens one sealed channel
   per node *through* the gateway, and aggregates sessions client-side.
 
+All four run the **same image** (`docker/Dockerfile`) — the role is decided
+entirely by the command in `docker-compose.yml`.
+
 Every client↔gateway connection is end-to-end encrypted **by construction**: the
 gateway is a blind relay that serves no session data in cleartext, so a client always
 opens sealed Noise channels to the nodes through it. There is no `--e2e` flag — the
@@ -58,7 +61,7 @@ Discovery scans tmux, so start `claude` inside a tmux pane (detached):
 ```sh
 for n in node-a node-b node-c; do
   docker compose -f docker/docker-compose.yml exec $n \
-    tmux new -d -s work -c /home/agent claude
+    tmux new -d -s work -c /home/argus claude
 done
 ```
 
@@ -175,17 +178,20 @@ docker compose -f docker/docker-compose.yml exec node-a argus lock disable <secr
 ## Teardown
 
 ```sh
-docker compose -f docker/docker-compose.yml down          # keep volumes (identities persist)
-docker compose -f docker/docker-compose.yml down -v       # wipe everything
+docker compose -f docker/docker-compose.yml down                            # keep volumes (identities persist)
+docker compose -f docker/docker-compose.yml --profile client down -v        # wipe everything
 ```
+
+`--profile client` matters on the wipe: `client` is a profile service, and a
+plain `down -v` leaves `client-home` behind.
 
 ## Notes & troubleshooting
 
 - **Claude Code on Alpine (musl):** the image installs `libc6-compat` as a shim.
-  If `claude` still fails to launch, switch the `node` stage base in
-  `docker/Dockerfile` from `alpine`-based to Debian by changing the final stages
-  to `node:22-slim` (and swap `apk add ...` for `apt-get install -y tmux procps
-  git`). The argus binary is static and runs on either.
+  If `claude` still fails to launch, switch the runtime stage in
+  `docker/Dockerfile` from `alpine:3` to `node:22-slim` (and swap `apk add ...`
+  for `apt-get install -y ca-certificates tini tmux procps git`). The argus
+  binary is static and runs on either.
 - **Port 8443 already in use?** (e.g. you already run argus on the host) — set
   `ARGUS_GATEWAY_PORT` to a free host port in `docker/.env`; the container side
   stays 8443, so the internal `ws://gateway:8443` used by nodes/clients is
@@ -197,3 +203,7 @@ docker compose -f docker/docker-compose.yml down -v       # wipe everything
 - **Sessions empty?** Make sure `claude` is actually running in a tmux pane on the
   node (`docker compose exec node-a tmux ls`) and reopen the client to trigger a
   rescan.
+- **`permission denied` reading state** (e.g. `persisted genesis unusable`) — a
+  volume left over from an image whose container user had a different uid. The
+  home volumes hold uid-owned `0600` state, so they are not portable across a
+  user change. Wipe them: `--profile client down -v`.
