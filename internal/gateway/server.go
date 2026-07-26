@@ -42,6 +42,20 @@ type Server struct {
 	nextChan  atomic.Uint64            // chan_id allocator
 
 	trust *trustStore // opaque hold of the network's trust-log chain (blind)
+
+	log *slog.Logger // connection/relay lifecycle logging; nil disables it
+}
+
+// discardLog absorbs lifecycle logging when no logger is configured.
+var discardLog = slog.New(slog.DiscardHandler)
+
+// logger returns the configured logger, or a discarding one so call sites can log
+// unconditionally.
+func (s *Server) logger() *slog.Logger {
+	if s.log != nil {
+		return s.log
+	}
+	return discardLog
 }
 
 // NewServer builds a gateway Server over agg.
@@ -124,11 +138,14 @@ func (s *Server) addChannel(chanID string, client, node *api.Peer) {
 	s.relayMu.Unlock()
 	go s.relayPump(ch, ch.toNode, node)
 	go s.relayPump(ch, ch.toClient, client)
+	s.logger().Info("relay channel opened", "chan", chanID)
 }
 
 // dropChannel removes a channel and stops its pumps. It does not close the peers
-// (they may host other channels). Idempotent.
-func (s *Server) dropChannel(chanID string) {
+// (they may host other channels). Idempotent. reason is logged: a torn-down channel
+// is invisible to the client, which only sees its calls stall to their timeout, so
+// the gateway's record of why is the only way to diagnose it.
+func (s *Server) dropChannel(chanID, reason string) {
 	s.relayMu.Lock()
 	ch, ok := s.channels[chanID]
 	if ok {
@@ -137,13 +154,14 @@ func (s *Server) dropChannel(chanID string) {
 	s.relayMu.Unlock()
 	if ok {
 		ch.stopOnce.Do(func() { close(ch.stop) })
+		s.logger().Info("relay channel dropped", "chan", chanID, "reason", reason)
 	}
 }
 
 // dropChannelsWhere tears down every channel whose relayChannel matches pred. It
 // collects matches under relayMu, then drops them after unlocking (dropChannel
 // re-acquires the lock).
-func (s *Server) dropChannelsWhere(pred func(*relayChannel) bool) {
+func (s *Server) dropChannelsWhere(reason string, pred func(*relayChannel) bool) {
 	s.relayMu.Lock()
 	var toDrop []string
 	for cid, ch := range s.channels {
@@ -153,7 +171,7 @@ func (s *Server) dropChannelsWhere(pred func(*relayChannel) bool) {
 	}
 	s.relayMu.Unlock()
 	for _, cid := range toDrop {
-		s.dropChannel(cid)
+		s.dropChannel(cid, reason)
 	}
 }
 
@@ -166,7 +184,7 @@ func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
 			return
 		case raw := <-q:
 			if err := dst.SendRawFrame(raw); err != nil {
-				s.dropChannel(ch.chanID)
+				s.dropChannel(ch.chanID, "frame write to peer failed: "+err.Error())
 				return
 			}
 		}
@@ -180,7 +198,7 @@ func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
 	case <-ch.stop:
 	case q <- raw:
 	default:
-		s.dropChannel(ch.chanID)
+		s.dropChannel(ch.chanID, "relay queue overflow: peer is not draining")
 	}
 }
 
@@ -222,11 +240,15 @@ func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 		delete(s.nodePeers, id)
 	}
 	s.relayMu.Unlock()
-	s.dropChannelsWhere(func(ch *relayChannel) bool { return ch.node == peer })
+	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
 }
 
-// SetLogger enables per-request logging (nil disables).
-func (s *Server) SetLogger(l *slog.Logger) { s.clientSrv.SetLogger(l) }
+// SetLogger enables per-request logging on the client surface plus node-uplink and
+// relay-channel lifecycle logging (nil disables).
+func (s *Server) SetLogger(l *slog.Logger) {
+	s.log = l
+	s.clientSrv.SetLogger(l)
+}
 
 // Handler returns the gateway's HTTP handler with the /node and /client routes.
 func (s *Server) Handler() http.Handler {
@@ -327,7 +349,7 @@ func (s *Server) buildClientServer() *api.Server {
 		ch := s.channels[p.ChanID]
 		s.relayMu.Unlock()
 		if ch != nil && ch.client == clientPeer {
-			s.dropChannel(p.ChanID)
+			s.dropChannel(p.ChanID, "closed by client")
 		}
 		return nil, nil
 	})
@@ -358,7 +380,7 @@ func (s *Server) buildClientServer() *api.Server {
 			close(done)
 			rosterCancel()
 			if clientPeer, ok := n.(*api.Peer); ok {
-				s.dropChannelsWhere(func(ch *relayChannel) bool { return ch.client == clientPeer })
+				s.dropChannelsWhere("client disconnected", func(ch *relayChannel) bool { return ch.client == clientPeer })
 			}
 		}
 	})
@@ -486,11 +508,27 @@ func (s *Server) nodeHandler() http.Handler {
 // TCP FIN) promptly. Closing after nodeKeepaliveFailures unanswered pings fires
 // Done into the aggregator's offline → grace → removal path; two failures ride out
 // a transient blip so a briefly busy node isn't dropped.
-const (
-	nodeKeepaliveInterval = 15 * time.Second
-	nodeKeepaliveTimeout  = 5 * time.Second
-	nodeKeepaliveFailures = 2
+var (
+	nodeKeepaliveInterval = api.DefaultKeepaliveInterval
+	nodeKeepaliveTimeout  = api.DefaultKeepaliveTimeout
+	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
 )
+
+// nodeIdentifyTimeout bounds the post-auth identify handshake on a node uplink.
+const nodeIdentifyTimeout = 30 * time.Second
+
+// SetNodeKeepaliveForTest shortens the node-uplink heartbeat so a test can cover
+// several keepalive cycles in milliseconds. Test-only.
+func SetNodeKeepaliveForTest(interval, timeout time.Duration, failures int) {
+	nodeKeepaliveInterval, nodeKeepaliveTimeout, nodeKeepaliveFailures = interval, timeout, failures
+}
+
+// ResetNodeKeepaliveForTest restores the production heartbeat settings. Test-only.
+func ResetNodeKeepaliveForTest() {
+	nodeKeepaliveInterval = api.DefaultKeepaliveInterval
+	nodeKeepaliveTimeout = api.DefaultKeepaliveTimeout
+	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
+}
 
 // nodeDispatch serves the requests a node issues down its uplink. Today that is
 // only trust-log distribution (offer + pull); everything else is method-not-found.
@@ -559,17 +597,37 @@ func (s *Server) serveNode(conn net.Conn) {
 		return s.nodeDispatch(ctx, method, params)
 	}
 
+	// The node uplink bypasses api.Server, so log its requests here to match the
+	// per-request logging the client surface gets.
+	loggedDispatch := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		start := time.Now()
+		res, err := nodeDispatch(ctx, method, params)
+		args := []any{"method", method, "dur", time.Since(start), "src", "node"}
+		if err != nil {
+			args = append(args, "err", err)
+		}
+		s.logger().Info("rpc", args...)
+		return res, err
+	}
+
 	peer := api.NewPeer(conn, api.PeerOptions{
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
-		Dispatch:                  nodeDispatch,
+		Dispatch:                  loggedDispatch,
 		OnRelayFrame:              s.forwardFromNode,
+		Logger:                    s.log,
 	})
 	defer peer.Close()
 
+	// Bound the identify handshake: an authenticated peer that never answers would
+	// otherwise hold this goroutine and its connection open indefinitely, since
+	// keepalive alone keeps a silent-but-responsive peer alive.
+	idCtx, idCancel := context.WithTimeout(context.Background(), nodeIdentifyTimeout)
+	defer idCancel()
 	var id api.IdentifyResult
-	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
+	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
+		s.logger().Warn("node uplink rejected: identify failed", "err", err)
 		return
 	}
 	mu.Lock()
@@ -579,5 +637,7 @@ func (s *Server) serveNode(conn net.Conn) {
 	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.BeaconPubKey, id.Capabilities, peer, id.Beacon))
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
+	s.logger().Info("node uplink adopted", "node", id.ID, "label", id.Label, "version", id.Version)
 	<-peer.Done()
+	s.logger().Info("node uplink closed", "node", id.ID)
 }

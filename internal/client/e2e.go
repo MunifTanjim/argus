@@ -127,7 +127,16 @@ func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []b
 			}
 		}
 	}
-	m.peer = api.NewPeer(conn, api.PeerOptions{OnRelayFrame: m.onRelayFrame, OnNotify: m.onPeerNotify})
+	// Keepalive: without it a half-open gateway link (NAT timeout, a phone changing
+	// networks) never fires Done, so the supervisor never reconnects and every
+	// gateway-native Call blocks forever.
+	m.peer = api.NewPeer(conn, api.PeerOptions{
+		OnRelayFrame:              m.onRelayFrame,
+		OnNotify:                  m.onPeerNotify,
+		KeepaliveInterval:         api.DefaultKeepaliveInterval,
+		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
+		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
+	})
 	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
 	return m, nil
 }
@@ -410,7 +419,11 @@ func (m *E2EClient) fanoutSessions(method string, raw json.RawMessage, out any) 
 			defer wg.Done()
 			var ss []session.Session
 			if err := m.callNode(nc.nodeID, method, raw, &ss); err != nil {
-				return // one bad node doesn't fail the whole list
+				// One bad node doesn't fail the whole list, but it must not vanish
+				// silently either: an all-nodes failure is otherwise indistinguishable
+				// from an empty fleet.
+				log.Printf("client: warn: %s on node %s failed: %v", method, nc.nodeID, err)
+				return
 			}
 			results[i] = res{sessions: ss, nodeID: nc.nodeID, label: nc.label}
 		}()
@@ -438,6 +451,7 @@ func (m *E2EClient) fanoutHistoryProjects(raw json.RawMessage, out any) error {
 			defer wg.Done()
 			var projects []session.HistoryProject
 			if err := m.callNode(nc.nodeID, api.MethodSessionsHistoryProjects, raw, &projects); err != nil {
+				log.Printf("client: warn: sessions.historyProjects on node %s failed: %v", nc.nodeID, err)
 				return
 			}
 			for i := range projects {

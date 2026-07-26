@@ -71,6 +71,13 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		Dispatch: d.uplinkDispatch(),
 		// Relayed E2E frames from clients are terminated by the responder.
 		OnRelayFrame: resp.onFrame,
+		// The gateway heartbeats this link from its side, but that only lets the
+		// gateway notice a half-open uplink. Ping from here too so the node also
+		// detects one and re-dials instead of sitting on a dead connection.
+		KeepaliveInterval:         api.DefaultKeepaliveInterval,
+		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
+		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
+		Logger:                    d.log,
 	})
 	if err != nil {
 		if ctx.Err() == nil {
