@@ -125,9 +125,18 @@ pin; unpinned, it quarantines and shows an empty dashboard. Its home volume pers
 so pin it once:
 
 ```sh
-docker compose -f docker/docker-compose.yml run --rm client lock pin
-docker compose -f docker/docker-compose.yml run --rm client lock status  # client pin: <words>
+docker compose -f docker/docker-compose.yml run --rm client \
+  lock pin --gateway ws://gateway:8443 --token "${ARGUS_TOKEN:-devtoken}"
+docker compose -f docker/docker-compose.yml run --rm client \
+  lock status --gateway ws://gateway:8443 --token "${ARGUS_TOKEN:-devtoken}"  # client pin: <words>
 ```
+
+`docker compose run` replaces the service's `command:`, which is where the client's
+`--gateway`/`--token` normally live — hence the explicit flags. The `client` service
+also sets `ARGUS_GATEWAY_URL`/`ARGUS_TOKEN`, so they can be omitted on this harness;
+they are spelled out here because that is what the commands actually need. The client
+container runs no node, so `lock pin` also notes that the local node is unreachable and
+pins the client role only — expected here.
 
 **Declarative alternative:** you can instead set `ARGUS_LOCK_GENESIS=<B64>` in
 `docker/.env` and uncomment the env var in `docker/docker-compose.yml` (both

@@ -96,6 +96,11 @@ services:
     stdin_open: true
     tty: true
     environment:
+      # `docker compose run` replaces the command below, so the gateway and token
+      # must also be in the environment: without them `run --rm client lock pin`
+      # falls back to a unix socket that has no node behind it.
+      ARGUS_GATEWAY_URL: ws://gateway:8443
+      ARGUS_TOKEN: ${ARGUS_TOKEN:-devtoken}
       ARGUS_LOG_LEVEL: ${ARGUS_LOG_LEVEL:-info}
       ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
       # Pin the same genesis here for locked mode (see README step 2).
