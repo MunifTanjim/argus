@@ -74,39 +74,63 @@ func TestGateConcurrentTrip(t *testing.T) {
 	}
 }
 
-func TestGateConcurrentTripAndClear(t *testing.T) {
+// TestGateTripWithoutAGenesisStillFailsClosed pins the gate's invariant: a trip is
+// a trip even when the caller had no genesis to record, and a tripped gate never
+// reports a nil genesis (which a caller could read as "open").
+func TestGateTripWithoutAGenesisStillFailsClosed(t *testing.T) {
+	var g trustpin.Gate
+	g.Trip(nil)
+	if !g.Tripped() {
+		t.Fatal("Trip(nil) must still fail the device closed")
+	}
+	if g.Genesis() == nil {
+		t.Fatal("a tripped gate must never report a nil genesis")
+	}
+	if len(g.Genesis()) != 0 {
+		t.Fatalf("Genesis = %x, want empty", g.Genesis())
+	}
+}
+
+// TestGateClearThenTripAdoptsTheNewGenesis exercises re-pinning: the genesis
+// recorded before a Clear must not survive it. Concurrent readers run throughout so
+// -race covers the reader path, but the assertion is on the writer sequence, not on
+// a self-consistency property the type derives for free.
+func TestGateClearThenTripAdoptsTheNewGenesis(t *testing.T) {
 	for iter := 0; iter < 20; iter++ {
 		var g trustpin.Gate
-		var wg sync.WaitGroup
+		old, fresh := genesis(0xAA), genesis(0xBB)
+		g.Trip(old)
 
-		wg.Add(4)
-
-		go func() {
-			defer wg.Done()
-			g.Trip(genesis(0xAA))
-		}()
-
-		go func() {
-			defer wg.Done()
-			g.Clear()
-		}()
-
+		stop := make(chan struct{})
+		var readers sync.WaitGroup
 		for r := 0; r < 2; r++ {
+			readers.Add(1)
 			go func() {
-				defer wg.Done()
-				for i := 0; i < 50; i++ {
-					_ = g.Tripped()
-					_ = g.Genesis()
+				defer readers.Done()
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					if gen := g.Genesis(); gen != nil && !bytes.Equal(gen, old) && !bytes.Equal(gen, fresh) {
+						t.Errorf("iter %d: reader saw a genesis that was never tripped: %x", iter, gen)
+						return
+					}
 				}
 			}()
 		}
 
-		wg.Wait()
+		g.Clear()
+		g.Trip(fresh)
+		close(stop)
+		readers.Wait()
 
-		tripped := g.Tripped()
-		gen := g.Genesis()
-		if (tripped && gen == nil) || (!tripped && gen != nil) {
-			t.Fatalf("iter %d: final state inconsistent: Tripped=%v, Genesis=%v", iter, tripped, gen != nil)
+		if !g.Tripped() {
+			t.Fatalf("iter %d: gate must be tripped after Clear+Trip", iter)
+		}
+		if !bytes.Equal(g.Genesis(), fresh) {
+			t.Fatalf("iter %d: Genesis = %x, want the post-Clear genesis %x", iter, g.Genesis(), fresh)
 		}
 	}
 }

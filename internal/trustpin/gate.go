@@ -14,19 +14,24 @@ type Gate struct {
 // Trip fails the device closed and records the observed genesis. Idempotent: the
 // first observed genesis is kept so status output stays stable across ticks.
 func (g *Gate) Trip(genesis []byte) {
-	cp := append([]byte(nil), genesis...)
+	cp := make([]byte, len(genesis))
+	copy(cp, genesis)
 	g.genesis.CompareAndSwap(nil, &cp)
 }
 
 func (g *Gate) Tripped() bool { return g.genesis.Load() != nil }
 
 // Genesis returns a copy of the first observed genesis, or nil if never tripped.
+// A tripped gate always reports non-nil (empty when Trip was handed no genesis),
+// so callers can never infer "open" from a nil read.
 func (g *Gate) Genesis() []byte {
 	p := g.genesis.Load()
 	if p == nil {
 		return nil
 	}
-	return append([]byte(nil), *p...)
+	out := make([]byte, len(*p))
+	copy(out, *p)
+	return out
 }
 
 // Clear releases the gate once a pin has been adopted.
