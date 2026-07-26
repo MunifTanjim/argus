@@ -8,6 +8,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 const (
@@ -20,9 +21,10 @@ const (
 // tui.Client with a stable Events()/States() stream across reconnects.
 type ReconnectingE2EClient struct {
 	dial        api.Dialer
-	genesisHash []byte      // pinned trust-log genesis hash; nil = trust-log sync off
-	static      e2e.KeyPair // stable client identity; threaded into every E2EClient
-	chainPath   string      // locked-mode chain persist path; "" = no persistence
+	genesisHash []byte         // pinned trust-log genesis hash; nil = trust-log sync off
+	static      e2e.KeyPair    // stable client identity; threaded into every E2EClient
+	chainPath   string         // locked-mode chain persist path; "" = no persistence
+	gate        *trustpin.Gate // shared across reconnects; a dropped connection must not clear quarantine
 	ctx         context.Context
 	cancel      context.CancelFunc
 
@@ -60,6 +62,7 @@ func newReconnecting(ctx context.Context, dial api.Dialer, genesisHash []byte, s
 		genesisHash: genesisHash,
 		static:      static,
 		chainPath:   chainPath,
+		gate:        &trustpin.Gate{},
 		ctx:         cctx,
 		cancel:      cancel,
 		events:      make(chan api.Notification, 256),
@@ -85,7 +88,7 @@ func (c *ReconnectingE2EClient) connectOnce() (*E2EClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	cur, err := NewE2EClientWithIdentity(conn, c.static, c.genesisHash, c.chainPath)
+	cur, err := NewE2EClientWithGate(conn, c.static, c.genesisHash, c.chainPath, c.gate)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -191,6 +194,10 @@ func (c *ReconnectingE2EClient) TrustTip() []byte {
 	}
 	return nil
 }
+
+// Quarantined reports whether this device is unpinned on a network that has a
+// trust log. Sticky across reconnects.
+func (c *ReconnectingE2EClient) Quarantined() bool { return c.gate.Tripped() }
 
 // Call routes to the live E2E client, erroring promptly when disconnected.
 func (c *ReconnectingE2EClient) Call(method string, params, out any) error {

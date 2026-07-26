@@ -25,6 +25,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // Tunable timeouts.
@@ -89,6 +90,7 @@ type E2EClient struct {
 
 	events chan api.Notification
 
+	gate      *trustpin.Gate      // fail-closed state when unpinned on a locked network
 	trust     *trustlog.SyncStore // locked-mode trust-log store; nil when off
 	trustPath string              // locked-mode chain persist path; "" = no persistence
 	trustCtx  context.Context     // cancelled on Close, stops the sync ticker
@@ -112,13 +114,13 @@ type E2EClient struct {
 	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
 }
 
-// NewE2EClientWithIdentity wraps a gateway connection with a caller-provided static
-// identity (persisted, for locked mode) and optional pinned genesis. chainPath, if
-// non-empty, seeds the trust store from disk on construction and persists it on each
-// advance (genesis-pinned Ingest rejects a rolled-back or tampered file).
-func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []byte, chainPath string) (*E2EClient, error) {
+// NewE2EClientWithGate is NewE2EClientWithIdentity plus a caller-owned quarantine
+// gate. The reconnecting client shares one gate across reconnects so an unpinned
+// client cannot be un-quarantined by a dropped connection.
+func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte, chainPath string, gate *trustpin.Gate) (*E2EClient, error) {
 	m := &E2EClient{
 		static:        static,
+		gate:          gate,
 		byNode:        map[string]*nodeChan{},
 		byChanID:      map[string]*nodeChan{},
 		pending:       map[uint64]chan pendingReply{},
@@ -158,6 +160,18 @@ func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []b
 	m.trustCtx, m.trustStop = context.WithCancel(context.Background())
 	return m, nil
 }
+
+// NewE2EClientWithIdentity wraps a gateway connection with a caller-provided static
+// identity (persisted, for locked mode) and optional pinned genesis. chainPath, if
+// non-empty, seeds the trust store from disk on construction and persists it on each
+// advance (genesis-pinned Ingest rejects a rolled-back or tampered file).
+func NewE2EClientWithIdentity(conn net.Conn, static e2e.KeyPair, genesisHash []byte, chainPath string) (*E2EClient, error) {
+	return NewE2EClientWithGate(conn, static, genesisHash, chainPath, &trustpin.Gate{})
+}
+
+// Quarantined reports whether this client saw a trust log it has no pin to
+// verify, in which case it opens no node channels until `argus lock pin` runs.
+func (m *E2EClient) Quarantined() bool { return m.gate.Tripped() }
 
 // NewE2EClient wraps a gateway connection, wiring the relay-frame demux. Generates
 // an ephemeral client Noise static key.
@@ -219,6 +233,8 @@ func (m *E2EClient) Connect() error {
 	// this pull fails.
 	if m.trust != nil {
 		m.syncTrustLog()
+	} else {
+		m.detectUnpinnedChain()
 	}
 	for _, nd := range roster.Nodes {
 		if err := m.openIfEligible(nd); err != nil {
@@ -230,6 +246,8 @@ func (m *E2EClient) Connect() error {
 	}
 	if m.trust != nil {
 		go m.trustSyncLoop()
+	} else {
+		go m.unpinnedWatchLoop()
 	}
 	return nil
 }
@@ -238,6 +256,9 @@ func (m *E2EClient) Connect() error {
 // locked mode) unauthorized — the silent-skip cases are not errors. Returns the
 // open error otherwise.
 func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
+	if m.gate.Tripped() {
+		return nil
+	}
 	if !nd.Online {
 		return nil // offline within-grace node: no live relay peer, relay.open would fail
 	}
@@ -456,6 +477,25 @@ func (m *E2EClient) channelsSnapshot() []*nodeChan {
 // Also prunes beacon state for each dropped node so stale cached beacons cannot
 // accumulate misses and false-positive the equivocation flag.
 func (m *E2EClient) reevaluateChannels() {
+	if m.gate.Tripped() {
+		m.mu.Lock()
+		var drop []*nodeChan
+		for _, nc := range m.byNode {
+			drop = append(drop, nc)
+		}
+		for _, nc := range drop {
+			delete(m.byNode, nc.nodeID)
+			if ch := nc.ch.Load(); ch != nil {
+				delete(m.byChanID, ch.ID())
+			}
+			key := string(nc.identityPub)
+			delete(m.beacons, key)
+			delete(m.beaconCtr, key)
+			delete(m.beaconMiss, key)
+		}
+		m.mu.Unlock()
+		return
+	}
 	if m.trust == nil || m.trust.Disabled() {
 		return
 	}
@@ -857,6 +897,47 @@ func (m *E2EClient) trustSyncLoop() {
 			return
 		case <-t.C:
 			m.syncTrustLog()
+		}
+	}
+}
+
+// detectUnpinnedChain quarantines this client when the network has a trust log
+// and the client holds no pin. Decode only — a self-consistent chain proves
+// nothing about its author, so verification would add no safety here.
+func (m *E2EClient) detectUnpinnedChain() {
+	if m.gate.Tripped() {
+		return
+	}
+	var got api.TrustLogPullResult
+	if err := m.peer.Call(api.MethodTrustLogPull, nil, &got); err != nil {
+		return
+	}
+	for _, chain := range got.Chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		m.gate.Trip(trustlog.HashEntry(&entries[0]))
+		log.Printf("client: network has a trust log but this device is unpinned; refusing all node channels (run: argus lock pin)")
+		m.reevaluateChannels()
+		return
+	}
+}
+
+// unpinnedWatchLoop keeps checking for a trust log so a client that was running
+// when the network got locked converges to quarantine within a tick.
+func (m *E2EClient) unpinnedWatchLoop() {
+	t := time.NewTicker(time.Duration(clientTrustSyncInterval.Load()))
+	defer t.Stop()
+	for {
+		select {
+		case <-m.trustCtx.Done():
+			return
+		case <-t.C:
+			if m.gate.Tripped() {
+				return
+			}
+			m.detectUnpinnedChain()
 		}
 	}
 }
