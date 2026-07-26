@@ -106,7 +106,7 @@ func pullChains(ctx context.Context, cfg *config.Config) ([][]byte, error) {
 	c := api.NewClient(conn)
 	defer c.Close()
 	var got api.TrustLogPullResult
-	if err := c.Call(api.MethodTrustLogPull, nil, &got); err != nil {
+	if err := c.CallContext(ctx, api.MethodTrustLogPull, nil, &got); err != nil {
 		return nil, fmt.Errorf("trustlog.pull: %w", err)
 	}
 	return got.Chains, nil

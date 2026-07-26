@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
@@ -182,6 +185,45 @@ func TestPinFromNetworkPinsWhenTheConfigAgrees(t *testing.T) {
 	pin, err := clientPinFile().Load()
 	if err != nil || !bytes.Equal(pin, genesis) {
 		t.Fatalf("client pin = %x (%v), want %x", pin, err, genesis)
+	}
+}
+
+// TestClientPinLineReturnsWhenTheGatewayNeverAnswers pins the diagnostic's contract: a
+// gateway that completes the upgrade and answers nothing is exactly the degraded state
+// `lock status` is run in, so the probe must be bounded and reported, not hang.
+func TestClientPinLineReturnsWhenTheGatewayNeverAnswers(t *testing.T) {
+	tempStateDir(t)
+	blackhole := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := api.AcceptWS(w, r)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		<-blackhole
+	}))
+	t.Cleanup(func() {
+		close(blackhole)
+		ts.Close()
+	})
+
+	restore := gatewayProbeTimeout
+	gatewayProbeTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { gatewayProbeTimeout = restore })
+
+	cfg := &config.Config{}
+	cfg.Gateway.URL = "ws://" + strings.TrimPrefix(ts.URL, "http://")
+
+	lines := make(chan string, 1)
+	go func() { lines <- clientPinLine(context.Background(), cfg) }()
+
+	select {
+	case line := <-lines:
+		if !strings.Contains(line, "did not answer") {
+			t.Fatalf("line must report the unanswered probe, got: %q", line)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("lock status hung on a gateway that never answers")
 	}
 }
 

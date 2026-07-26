@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -194,19 +196,34 @@ func newLockStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// printClientPinStatus reports the client (TUI) role's pin state on this machine.
-// The client has no RPC surface and the node's status says nothing about it, so this
-// is the only place an operator can see that the dashboard on this box is
-// quarantined. With no pin of its own it asks the gateway whether the network has a
-// trust log at all — that is precisely the condition that quarantines the client.
+// gatewayProbeTimeout bounds the trust-log probe `lock status` makes. A gateway that
+// completes the WebSocket upgrade and then answers nothing would otherwise hang the
+// one command an operator runs when the gateway is the broken thing.
+var gatewayProbeTimeout = 5 * time.Second
+
 func printClientPinStatus(ctx context.Context, cfg *config.Config) {
+	shell.StdOutF("%s", clientPinLine(ctx, cfg))
+}
+
+// clientPinLine reports the client (TUI) role's pin state on this machine. The client
+// has no RPC surface and the node's status says nothing about it, so this is the only
+// place an operator can see that the dashboard on this box is quarantined. With no pin
+// of its own it asks the gateway whether the network has a trust log at all — that is
+// precisely the condition that quarantines the client. A probe that times out is
+// reported in the line, never returned: the node half of `lock status` must still print.
+func clientPinLine(ctx context.Context, cfg *config.Config) string {
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
 	var netGenesis []byte
 	var neterr error
 	if perr == nil && pin.Genesis == nil && cfg.Gateway.URL != "" {
-		netGenesis, neterr = quarantiningGenesis(ctx, cfg)
+		pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
+		defer cancel()
+		netGenesis, neterr = quarantiningGenesis(pctx, cfg)
+		if errors.Is(neterr, context.DeadlineExceeded) {
+			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
+		}
 	}
-	shell.StdOutF("%s", clientPinStatus(pin, perr, netGenesis, neterr))
+	return clientPinStatus(pin, perr, netGenesis, neterr)
 }
 
 // clientPinStatus renders the client pin line. netGenesis is the genesis this
