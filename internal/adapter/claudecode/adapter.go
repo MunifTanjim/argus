@@ -46,9 +46,12 @@ func (ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (sess
 
 func (ccAdapter) EventName(ev adapter.HookEvent) string { return EventName(ev) }
 
+// RescanOnHook triggers a discovery rescan only for a session's start: SessionEnd
+// has already removed the session via ProcessHook, and the agent is still alive
+// while its own exit hook runs — a scan there would rediscover the pane and
+// re-create what the hook just ended.
 func (ccAdapter) RescanOnHook(ev adapter.HookEvent) bool {
-	e := EventName(ev)
-	return e == "SessionStart" || e == "SessionEnd"
+	return EventName(ev) == "SessionStart"
 }
 
 func (ccAdapter) ShouldBlock(ev adapter.HookEvent) bool { return ShouldBlock(ev) }
