@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -112,19 +113,71 @@ func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error)
 	return resolveGenesis(got.Chains)
 }
 
-// applyPin writes this device's client pin and, when a local node answers, pins
-// it live over RPC so a quarantined node recovers without a restart.
+// applyPin pins the node role first and writes the client pin only once the node has
+// accepted the genesis. The other order leaves node=X, client=Y on a rejected pin:
+// the client then resolves Y, never quarantines, and silently opens zero channels —
+// an empty dashboard with no error anywhere.
 func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) error {
+	nodePinned, err := pinLocalNode(ctx, cfg, genesis)
+	if err != nil {
+		return err
+	}
 	if err := clientPinFile().Save(genesis); err != nil {
 		return err
 	}
 	shell.StdOutF("pinned this device\n  genesis: %s\n  %s\n", base64.StdEncoding.EncodeToString(genesis), fingerprintOf(genesis))
-	if _, err := callLocal[struct{}](ctx, cfg, api.MethodLockPin, api.LockPinParams{Genesis: genesis}); err != nil {
-		shell.StdErrF("note: client pin saved but the local node RPC failed (%v)\n  run `argus lock pin` again once the node is reachable to pin it there too\n", err)
-		return nil
+	if nodePinned {
+		shell.StdOutF("  local node pinned and enforcing\n")
 	}
-	shell.StdOutF("  local node pinned and enforcing\n")
 	return nil
+}
+
+// pinLocalNode pins the node role over RPC, reporting whether it took. A node that
+// REFUSES the genesis aborts the whole command — the two roles on one machine must
+// never end up on different trust roots. A node that is merely not running does not:
+// its persisted pin is checked instead, and the operator is told to re-run.
+func pinLocalNode(ctx context.Context, cfg *config.Config, genesis []byte) (bool, error) {
+	_, err := callLocal[struct{}](ctx, cfg, api.MethodLockPin, api.LockPinParams{Genesis: genesis})
+	if err == nil {
+		return true, nil
+	}
+	var rpcErr *api.RPCError
+	if errors.As(err, &rpcErr) {
+		return false, fmt.Errorf("the local node refused this genesis: %s\n  nothing was written; this device is unchanged", rpcErr.Message)
+	}
+	if perr := guardExistingPin(nodePinFile(), genesis); perr != nil {
+		return false, fmt.Errorf("the local node is unreachable (%v) and its saved pin disagrees:\n  %w", err, perr)
+	}
+	shell.StdErrF("note: the local node is unreachable (%v)\n  pinning the client role only; run `argus lock pin` again once the node is up\n", err)
+	return false, nil
+}
+
+// configPin returns the genesis declared by lock.genesis, or nil. Both pin and unpin
+// must consult it: it outranks the pin file, and trustpin.Resolve turns a file that
+// disagrees with it into a hard startup failure.
+func configPin(cfg *config.Config) ([]byte, error) {
+	if cfg.Lock.Genesis == "" {
+		return nil, nil
+	}
+	g, err := trustpin.Decode(cfg.Lock.Genesis)
+	if err != nil {
+		return nil, fmt.Errorf("lock.genesis in this device's config is unusable: %w", err)
+	}
+	return g, nil
+}
+
+// guardPin refuses a pin that contradicts a trust root this device already has,
+// whether it comes from the config or from the client pin file.
+func guardPin(cfg *config.Config, genesis []byte) error {
+	cfgGenesis, err := configPin(cfg)
+	if err != nil {
+		return err
+	}
+	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
+		return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  writing a different pin would make the next `argus` run fail with a genesis pin conflict;\n  remove lock.genesis from the config first",
+			base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+	}
+	return guardExistingPin(clientPinFile(), genesis)
 }
 
 func newLockPinCmd() *cobra.Command {
@@ -147,7 +200,7 @@ func newLockPinCmd() *cobra.Command {
 				if derr != nil {
 					return fail(cmd, derr)
 				}
-				if perr := guardExistingPin(clientPinFile(), genesis); perr != nil {
+				if perr := guardPin(cfg, genesis); perr != nil {
 					return fail(cmd, perr)
 				}
 				return applyPin(ctx, cfg, genesis)
@@ -205,6 +258,15 @@ func newLockUnpinCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+
+			cfgGenesis, cerr := configPin(cfg)
+			if cerr != nil {
+				return fail(cmd, cerr)
+			}
+			if cfgGenesis != nil {
+				return fail(cmd, fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  clearing the pin file would change nothing — the device stays pinned and enforcing;\n  remove lock.genesis from the config to unpin",
+					base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis)))
+			}
 
 			if cerr := clientPinFile().Clear(); cerr != nil {
 				return fail(cmd, cerr)

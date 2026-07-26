@@ -126,7 +126,8 @@ func newLockInitCmd() *cobra.Command {
 			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
 				shell.StdErrF("%s", w)
 			}
-			shell.StdOutF("\nTo pin your other nodes and clients, set in their config:\n  lock.genesis: %s\n", tip)
+			pinClientRole(cfg, res.Tip)
+			shell.StdOutF("\nTo pin your other devices, run on each of them:\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", tip)
 			return nil
 		},
 	}
@@ -134,6 +135,23 @@ func newLockInitCmd() *cobra.Command {
 	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
 	addClientFlags(cmd.Flags())
 	return cmd
+}
+
+// pinClientRole pins this machine's client (TUI) role to the genesis lock.init just
+// created. The client is a separate role reading a separate file, so without this the
+// dashboard on the very machine that locked the network quarantines itself on the next
+// tick. It is never a hard failure: the node is locked either way, and the operator
+// gets the exact command to finish the job.
+func pinClientRole(cfg *config.Config, genesis []byte) {
+	if err := guardPin(cfg, genesis); err != nil {
+		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n", err)
+		return
+	}
+	if err := clientPinFile().Save(genesis); err != nil {
+		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n  run here: argus lock pin %s\n", err, base64.StdEncoding.EncodeToString(genesis))
+		return
+	}
+	shell.StdOutF("  this machine's client (TUI) role pinned to the same genesis\n")
 }
 
 func newLockStatusCmd() *cobra.Command {
