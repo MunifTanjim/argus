@@ -328,6 +328,13 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 			return err
 		}
 		m.mu.Lock()
+		if m.gate.Tripped() {
+			// Gate tripped during the open window: evict the in-flight channel so no
+			// ungated entry survives into byNode.
+			delete(m.byChanID, res.ChanID)
+			m.mu.Unlock()
+			return nil
+		}
 		m.byNode[nd.ID] = nc
 		m.everConnected[string(pub)] = true // record for checkBeaconConsistency skip guard
 		m.mu.Unlock()

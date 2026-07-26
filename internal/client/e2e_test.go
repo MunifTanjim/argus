@@ -158,10 +158,13 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				g.byChan[chID] = n
 				return api.RelayOpenResult{ChanID: chID}, nil
 			case api.MethodTrustLogPull:
-				if g.chain == nil {
+				g.mu.Lock()
+				ch := g.chain
+				g.mu.Unlock()
+				if ch == nil {
 					return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 				}
-				return api.TrustLogPullResult{Chains: [][]byte{g.chain}}, nil
+				return api.TrustLogPullResult{Chains: [][]byte{ch}}, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},
@@ -195,6 +198,14 @@ func (g *fakeMultiGateway) addNode(n *fakeNode) {
 	g.mu.Lock()
 	g.nodes[n.id] = n
 	g.order = append(g.order, n)
+	g.mu.Unlock()
+}
+
+// setChain updates the chain served by trustlog.pull. Safe to call from test
+// goroutines while the gateway peer loop is running.
+func (g *fakeMultiGateway) setChain(chain []byte) {
+	g.mu.Lock()
+	g.chain = chain
 	g.mu.Unlock()
 }
 
