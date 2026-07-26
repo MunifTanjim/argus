@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,7 +33,11 @@ func TestLockSignRevoke(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	sockA := filepath.Join(dir, "a.sock")
 	chainPathA := filepath.Join(dir, "chainA")
 	chainPathB := filepath.Join(dir, "chainB")
@@ -118,7 +123,11 @@ func TestLockSignerAddRemove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	sockA := filepath.Join(dir, "a.sock")
 	sockB := filepath.Join(dir, "b.sock")
 	chainPathA := filepath.Join(dir, "chainA")

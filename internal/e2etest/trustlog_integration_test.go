@@ -59,7 +59,11 @@ func TestTrustLogDistributionThroughRealGateway(t *testing.T) {
 	defer cancel()
 
 	// Real node with the seeded chain persisted, uplinked to the gateway.
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	chainPath := filepath.Join(dir, "trustlog-chain")
 	// Write after all AuthorizeDevice calls so the persisted chain is complete.
 	if err := os.WriteFile(chainPath, trustlog.MarshalChain(log.Entries()), 0o600); err != nil {

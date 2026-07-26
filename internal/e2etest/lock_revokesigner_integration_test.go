@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -38,7 +39,11 @@ func TestLockRevokeSignerCeremony(t *testing.T) {
 	defer ts.Close()
 
 	ctx := t.Context()
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	sockA := filepath.Join(dir, "a.sock")
 	sockB := filepath.Join(dir, "b.sock")

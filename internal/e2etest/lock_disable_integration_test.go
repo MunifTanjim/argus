@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,9 +38,13 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir := t.TempDir()
-	sockA := filepath.Join(dir, "a.sock")
-	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(dir, "a-chain"))
+	tmpDir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	sockA := filepath.Join(tmpDir, "a.sock")
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, filepath.Join(tmpDir, "a-chain"))
 
 	// Wait until node A appears on the roster with its identity key populated.
 	waitFor(t, "node rostered with identity key", func() bool {

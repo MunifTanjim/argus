@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -98,12 +99,16 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir := t.TempDir()
-	sockA := filepath.Join(dir, "a.sock")
-	chainPathA := filepath.Join(dir, "chainA")
-	chainPathB := filepath.Join(dir, "chainB")
+	tmpDir, err := os.MkdirTemp("", "tq")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	sockA := filepath.Join(tmpDir, "a.sock")
+	chainPathA := filepath.Join(tmpDir, "chainA")
+	chainPathB := filepath.Join(tmpDir, "chainB")
 	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, chainPathA)
-	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(dir, "b.sock"), chainPathB)
+	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(tmpDir, "b.sock"), chainPathB)
 
 	// Wait until both nodes are on the roster with signer and identity keys.
 	pollConn, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
