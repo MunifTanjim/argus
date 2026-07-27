@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,101 @@ func (failingTunnel) Command(string) (tunnel.CommandSpec, error) {
 	return tunnel.CommandSpec{}, errors.New("boom")
 }
 func (failingTunnel) ExtractURL(string) (string, bool) { return "", false }
+
+// silentTunnel's child never prints a URL — a remotely-managed tunnel whose ingress
+// argus can't parse. reportURL makes it print one line ExtractURL accepts, for the
+// suppression case.
+type silentTunnel struct{ reportURL string }
+
+func (silentTunnel) Name() string { return "silent" }
+func (p silentTunnel) Command(string) (tunnel.CommandSpec, error) {
+	script := "sleep 30"
+	if p.reportURL != "" {
+		script = "echo " + p.reportURL + "; sleep 30"
+	}
+	return tunnel.CommandSpec{Path: "/bin/sh", Args: []string{"-c", script}}, nil
+}
+
+func (p silentTunnel) ExtractURL(line string) (string, bool) {
+	if p.reportURL != "" && strings.Contains(line, p.reportURL) {
+		return p.reportURL, true
+	}
+	return "", false
+}
+
+// A tunnel that comes up but never reports a public URL must be fatal: pairing would
+// otherwise hand out the LAN URL and encode an unreachable address in the QR.
+func TestServeGatewayOnFatalWhenTunnelReportsNoURL(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	orig := tunnelURLTimeout
+	tunnelURLTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { tunnelURLTimeout = orig })
+
+	fatal := make(chan struct{}, 1)
+	httpSrv := serveGateway(ctx, gatewayServeOpts{
+		node:         node.New(),
+		listener:     ln,
+		log:          logger.NewBufferLogger(logbuf.New(50)),
+		onFatal:      func() { fatal <- struct{}{} },
+		version:      "test",
+		tunnel:       silentTunnel{},
+		tunnelOrigin: "http://127.0.0.1:0",
+	})
+	t.Cleanup(func() {
+		sctx, c := context.WithTimeout(context.Background(), time.Second)
+		defer c()
+		_ = httpSrv.Shutdown(sctx)
+	})
+
+	select {
+	case <-fatal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onFatal not called after the tunnel reported no public URL")
+	}
+}
+
+// The converse: a tunnel that does report a URL must never trip the timeout, or every
+// healthy tunnel dies a minute after start.
+func TestServeGatewayReportedURLSuppressesTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	orig := tunnelURLTimeout
+	tunnelURLTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { tunnelURLTimeout = orig })
+
+	fatal := make(chan struct{}, 1)
+	httpSrv := serveGateway(ctx, gatewayServeOpts{
+		node:         node.New(),
+		listener:     ln,
+		log:          logger.NewBufferLogger(logbuf.New(50)),
+		onFatal:      func() { fatal <- struct{}{} },
+		version:      "test",
+		tunnel:       silentTunnel{reportURL: "https://argus.example.com"},
+		tunnelOrigin: "http://127.0.0.1:0",
+	})
+	t.Cleanup(func() {
+		sctx, c := context.WithTimeout(context.Background(), time.Second)
+		defer c()
+		_ = httpSrv.Shutdown(sctx)
+	})
+
+	select {
+	case <-fatal:
+		t.Fatal("onFatal called despite the tunnel reporting a public URL")
+	case <-time.After(500 * time.Millisecond): // 10x the timeout
+	}
+}
 
 // A listener that dies after startup must invoke onFatal so `argus start` can exit
 // non-zero (and the embedded gateway can tear its stack down).

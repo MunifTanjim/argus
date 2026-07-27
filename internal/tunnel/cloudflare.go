@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -18,12 +19,23 @@ import (
 // quickURLRe matches the public URL cloudflared prints for a quick tunnel.
 var quickURLRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 
+// remoteConfigRe captures the Go-quoted config blob a remotely-managed cloudflared
+// logs on connect and on every config change:
+//
+//	<ts> INF Updated to new configuration config="{\"ingress\":[…]}" version=10
+//
+// The body pattern skips escaped characters, so the match ends at the first
+// *unescaped* quote — correct whether or not another quoted field follows, and for
+// a hostname or path that itself contains a quote.
+var remoteConfigRe = regexp.MustCompile(`config="((?:[^"\\]|\\.)*)"`)
+
 // Cloudflare runs cloudflared in one of three modes by which fields are set:
 //
 //   - quick: neither Token nor Tunnel set. Ephemeral unauthenticated tunnel with a
 //     printed *.trycloudflare.com URL.
 //   - remotely-managed: Token set. Hostname/ingress configured on Cloudflare's side;
-//     run with --token.
+//     run with --token. cloudflared logs the ingress it pulled, so the public
+//     hostname is scraped from its output (see remoteIngressHostname).
 //   - locally-managed: Tunnel set. argus creates the tunnel (if absent), routes a DNS
 //     record for Hostname to it, then runs it (credentials in ~/.cloudflared/<UUID>.json).
 type Cloudflare struct {
@@ -42,8 +54,8 @@ func (c Cloudflare) Name() string { return "cloudflare" }
 func (c Cloudflare) Command(origin string) (CommandSpec, error) {
 	// Global flags (incl. --loglevel) go after "tunnel" and before the subcommand.
 	base := []string{"tunnel", "--no-autoupdate"}
-	if c.LogLevel != "" {
-		base = append(base, "--loglevel", c.LogLevel)
+	if lvl := c.effectiveLogLevel(); lvl != "" {
+		base = append(base, "--loglevel", lvl)
 	}
 	switch {
 	case c.Tunnel != "":
@@ -57,10 +69,22 @@ func (c Cloudflare) Command(origin string) (CommandSpec, error) {
 	}
 }
 
+// effectiveLogLevel floors quick and remotely-managed modes at info: they scrape their
+// public URL from cloudflared output (see ExtractURL), which is emitted only at info or
+// below, so a caller asking for warn/error would never get a URL. ClassifyLine keeps the
+// resulting INF noise below argus's threshold. Locally-managed mode learns its hostname
+// from Prepare, so it keeps whatever level was asked for.
+func (c Cloudflare) effectiveLogLevel() string {
+	if c.Tunnel == "" && c.LogLevel != "" && c.LogLevel != "debug" {
+		return "info"
+	}
+	return c.LogLevel
+}
+
 // cfLevelByToken maps cloudflared's log-level tokens to slog levels. INF → Debug:
-// cloudflared's INFO is chatty noise, but quick mode must run at --loglevel info to
-// emit its URL banner (extracted separately via ExtractURL), so demote it below
-// argus's info threshold. FTL → Error, never fatal: classification only sets a level.
+// cloudflared's INFO is chatty noise, and the scrape modes must run at --loglevel info
+// (see effectiveLogLevel), so demote it below argus's info threshold. FTL → Error, never
+// fatal: classification only sets a level.
 var cfLevelByToken = map[string]slog.Level{
 	"DBG": slog.LevelDebug,
 	"INF": slog.LevelDebug,
@@ -85,11 +109,48 @@ func (c Cloudflare) ClassifyLine(line string) slog.Level {
 }
 
 func (c Cloudflare) ExtractURL(line string) (string, bool) {
-	if c.Token != "" || c.Tunnel != "" {
-		return "", false // configured hostname is not printed by cloudflared
+	switch {
+	case c.Tunnel != "":
+		return "", false // locally-managed: Hostname is known ahead of time, reported by Prepare
+	case c.Token != "":
+		return remoteIngressHostname(line)
+	default:
+		m := quickURLRe.FindString(line)
+		return m, m != ""
 	}
-	if m := quickURLRe.FindString(line); m != "" {
-		return m, true
+}
+
+// remoteIngressHostname pulls the public URL from the ingress a remotely-managed
+// cloudflared logs at INF ("Updated to new configuration"). Returns the first rule with
+// a usable hostname; the trailing catch-all (http_status:404) has none, and a tunnel
+// routing several hostnames yields the first — argus can't pick between them.
+func remoteIngressHostname(line string) (string, bool) {
+	m := remoteConfigRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	// cloudflared escapes the blob Go-style, so unquote before parsing it as JSON.
+	raw, err := strconv.Unquote(`"` + m[1] + `"`)
+	if err != nil {
+		return "", false
+	}
+	var cfg struct {
+		Ingress []struct {
+			Hostname string `json:"hostname"`
+			Path     string `json:"path"`
+		} `json:"ingress"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return "", false
+	}
+	for _, in := range cfg.Ingress {
+		// A wildcard hostname doesn't resolve, and a path-scoped rule doesn't route the
+		// bare hostname. Either would publish a URL that pairing can't reach — and unlike
+		// every other failure here it would report success, so nothing downstream notices.
+		if in.Hostname == "" || strings.Contains(in.Hostname, "*") || in.Path != "" {
+			continue
+		}
+		return "https://" + in.Hostname, true
 	}
 	return "", false
 }

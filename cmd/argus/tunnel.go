@@ -96,13 +96,9 @@ func resolveTunnel(o tunnelOptions) (tunnel.Provider, string, error) {
 		if cfMode == "local" && name == "" {
 			name = "argus" // default name for the tunnel argus creates and owns
 		}
+		// Cloudflare.Command floors the level for the modes that scrape their URL from
+		// output; which those are is the provider's business, not the CLI's.
 		cfLog := cloudflaredLogLevel(o.logLevel)
-		// A quick tunnel's public URL is only emitted by cloudflared at info or
-		// below, but argus's default (info -> warn) would suppress it — so floor
-		// quick mode at info. The INFO noise stays below the fold via ClassifyLine.
-		if cfMode == "quick" && cfLog != "debug" {
-			cfLog = "info"
-		}
 		// <UUID>.json creds live in the same dir as the origin cert.
 		var credsDir string
 		if cfMode == "local" {

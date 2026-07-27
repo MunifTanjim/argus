@@ -13,6 +13,10 @@ with `--tunnel`; plain `--tunnel cloudflare` infers it from the `--cloudflare-*`
 flags. The tunnel edge terminates TLS; if it dies, Argus retries with backoff and
 keeps serving on your LAN.
 
+Whichever provider you pick, a tunnel that comes up but reports no public URL within
+a minute is fatal: Argus exits instead of handing out pairing QRs that encode the LAN
+address.
+
 ### Quick
 
 An ephemeral URL that changes on each run — fine for a quick pairing test.
@@ -29,6 +33,16 @@ its token:
 ```sh
 argus start --tunnel cloudflare:remote --cloudflare-token <CLOUDFLARE_TOKEN> --token <TOKEN>
 ```
+
+- Argus reads the public hostname from the tunnel's **remotely-managed ingress**, which
+  `cloudflared` reports once it connects — nothing to pass on the command line. If the
+  tunnel routes several public hostnames, the first one wins; wildcard (`*.example.com`)
+  and path-scoped rules are skipped, since neither yields a URL pairing can reach.
+- Configure the tunnel's public hostname to point at the gateway's listen address
+  (`http://localhost:8443` by default) in the Cloudflare dashboard.
+- Reading that ingress requires `cloudflared --loglevel info`, so this mode runs it one
+  level chattier than the others. The extra lines are classified as debug and stay below
+  the fold unless you pass `--log-level debug`.
 
 ### Local
 
