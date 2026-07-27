@@ -49,11 +49,71 @@ func TestCloudflareExtractURLQuick(t *testing.T) {
 	}
 }
 
-func TestCloudflareExtractURLNamedNeverMatches(t *testing.T) {
+func TestCloudflareExtractURLRemote(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "single hostname",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"argus.example.com\",\"originRequest\":{},\"service\":\"http://localhost:8443\"},{\"service\":\"http_status:404\"}],\"warp-routing\":{\"enabled\":false}}" version=10`,
+			want: "https://argus.example.com",
+		},
+		{
+			name: "several hostnames yields the first",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"one.example.com\",\"service\":\"http://localhost:8443\"},{\"hostname\":\"two.example.com\",\"service\":\"http://localhost:9000\"},{\"service\":\"http_status:404\"}]}" version=3`,
+			want: "https://one.example.com",
+		},
+		{
+			name: "catch-all only",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"service\":\"http_status:404\"}]}" version=1`,
+		},
+		{
+			name: "unrelated line",
+			line: "2026-07-31T11:52:12Z INF Registered tunnel connection connIndex=0",
+		},
+		{
+			name: "quick-tunnel URL is not honoured in remote mode",
+			line: "2026-07-31T11:52:12Z INF |  https://fluffy-cat-123.trycloudflare.com  |",
+		},
+		{
+			name: "unterminated quote",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"argus.example.com\"}]}`,
+		},
+		{
+			name: "malformed json",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[" version=1`,
+		},
+		{
+			name: "wildcard hostname is skipped for the next usable rule",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"*.example.com\",\"service\":\"http://localhost:9000\"},{\"hostname\":\"argus.example.com\",\"service\":\"http://localhost:8443\"},{\"service\":\"http_status:404\"}]}" version=4`,
+			want: "https://argus.example.com",
+		},
+		{
+			name: "wildcard only yields nothing",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"*.example.com\",\"service\":\"http://localhost:8443\"},{\"service\":\"http_status:404\"}]}" version=5`,
+		},
+		{
+			name: "path-scoped rule is skipped",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"shared.example.com\",\"path\":\"/argus\",\"service\":\"http://localhost:8443\"},{\"service\":\"http_status:404\"}]}" version=6`,
+		},
+		{
+			// zerolog sorts fields, so anything quoted after config= must not extend the
+			// match past config's own closing quote.
+			name: "quoted field after config",
+			line: `2026-07-31T11:52:12Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"argus.example.com\",\"service\":\"http://localhost:8443\"}]}" event="reload" version=7`,
+			want: "https://argus.example.com",
+		},
+	}
 	c := Cloudflare{Bin: "cloudflared", Token: "tok"}
-	// Named mode's hostname is configured on Cloudflare's side, not printed.
-	if _, ok := c.ExtractURL("https://gateway.example.com is up"); ok {
-		t.Error("named tunnel must not report a URL")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := c.ExtractURL(tc.line)
+			if ok != (tc.want != "") || got != tc.want {
+				t.Errorf("ExtractURL = %q, %v; want %q, %v", got, ok, tc.want, tc.want != "")
+			}
+		})
 	}
 }
 
@@ -84,20 +144,40 @@ func TestCloudflareCommandLogLevel(t *testing.T) {
 		c    Cloudflare
 		want []string
 	}{
+		// Quick and remote scrape their URL from output, so anything above info is
+		// floored — at warn or error cloudflared never prints the line they need.
 		{
-			name: "quick",
+			name: "quick floors warn to info",
 			c:    Cloudflare{Bin: "cloudflared", LogLevel: "warn"},
-			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "warn", "--url", "http://127.0.0.1:8443"},
+			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "info", "--url", "http://127.0.0.1:8443"},
 		},
 		{
-			name: "remote",
+			name: "remote floors error to info",
 			c:    Cloudflare{Bin: "cloudflared", Token: "tok", LogLevel: "error"},
-			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "error", "run", "--token", "tok"},
+			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "info", "run", "--token", "tok"},
 		},
 		{
-			name: "local",
+			name: "quick keeps debug",
+			c:    Cloudflare{Bin: "cloudflared", LogLevel: "debug"},
+			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "debug", "--url", "http://127.0.0.1:8443"},
+		},
+		{
+			// Empty omits the flag; cloudflared's own default is already info.
+			name: "quick unset omits the flag",
+			c:    Cloudflare{Bin: "cloudflared"},
+			want: []string{"tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8443"},
+		},
+		// Local knows its hostname up front (Prepare reports it), so it scrapes nothing
+		// and keeps whatever level was asked for.
+		{
+			name: "local keeps debug",
 			c:    Cloudflare{Bin: "cloudflared", Tunnel: "argus", LogLevel: "debug"},
 			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "debug", "run", "--url", "http://127.0.0.1:8443", "argus"},
+		},
+		{
+			name: "local keeps error",
+			c:    Cloudflare{Bin: "cloudflared", Tunnel: "argus", LogLevel: "error"},
+			want: []string{"tunnel", "--no-autoupdate", "--loglevel", "error", "run", "--url", "http://127.0.0.1:8443", "argus"},
 		},
 	}
 	for _, tc := range cases {

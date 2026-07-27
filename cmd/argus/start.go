@@ -334,6 +334,11 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	return nil
 }
 
+// tunnelURLTimeout: a tunnel running this long without reporting a public URL is
+// treated as fatal. Long enough for a slow first connect, short enough to beat a
+// pairing attempt. A var so tests can shrink it.
+var tunnelURLTimeout = 60 * time.Second
+
 // gatewayServeOpts configures serveGateway. Each capability is guarded by its own
 // flag so `argus start` (all on) and the embedded TUI gateway (tunnel off) share
 // one code path. The listener is pre-bound by the caller so bind errors surface
@@ -404,8 +409,27 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 		tunLog := o.log.With("scope", "tunnel")
 		sup := tunnel.Supervisor{Logger: tunLog}
 		tunLog.Info("opening tunnel", "provider", o.tunnel.Name(), "origin", o.tunnelOrigin)
+		// If no URL arrives, pairing would silently hand out the LAN URL from
+		// gatewayBaseURL — fail instead of serving a wrong QR. Also catches a child the
+		// supervisor crash-restarts forever.
+		var gotURL atomic.Bool
+		urlTimer := time.AfterFunc(tunnelURLTimeout, func() {
+			// CAS, not Load: Stop() loses to a timer already firing, so a URL landing at
+			// exactly t=timeout would otherwise be both published and declared missing.
+			if !gotURL.CompareAndSwap(false, true) || ctx.Err() != nil {
+				return
+			}
+			tunLog.Error("tunnel opened but reported no public URL; pairing would use the local URL",
+				"provider", o.tunnel.Name(), "timeout", tunnelURLTimeout)
+			if o.onFatal != nil {
+				o.onFatal()
+			}
+		})
 		go func() {
+			defer urlTimer.Stop()
 			rerr := sup.Run(ctx, o.tunnel, o.tunnelOrigin, func(u string) {
+				gotURL.Store(true)
+				urlTimer.Stop()
 				hsrv.SetPublicURL(u)
 				tunLog.Info("tunnel public URL; run `argus pair` to add a device", "url", u)
 			})

@@ -578,44 +578,61 @@ func TestCloudflaredLogLevel(t *testing.T) {
 	}
 }
 
-func TestResolveTunnelSetsCloudflaredLogLevel(t *testing.T) {
-	o := baseOpts()
-	o.provider = "cloudflare:remote" // remote keeps the plain info->warn offset
-	o.cfToken = "tok"
-	o.logLevel = slog.LevelInfo
-	p, _, err := resolveTunnel(o)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	cf, ok := p.(tunnel.Cloudflare)
-	if !ok {
-		t.Fatalf("provider type = %T", p)
-	}
-	if cf.LogLevel != "warn" {
-		t.Errorf("cf.LogLevel = %q, want warn (offset from info)", cf.LogLevel)
-	}
-}
-
-// A quick tunnel must run cloudflared at info (or below) or its public-URL banner
-// is never printed; the info->warn offset that suits other modes would hide it.
-func TestResolveTunnelQuickFloorsLogLevel(t *testing.T) {
-	cases := map[slog.Level]string{
+// The level cloudflared runs at is the argus level (via cloudflaredLogLevel) floored by
+// Cloudflare.Command for the scrape modes. Assert on the argv, since that is what
+// reaches the child.
+func TestResolveTunnelCloudflaredLogLevel(t *testing.T) {
+	scraped := map[slog.Level]string{
 		slog.Level(-8):  "debug", // trace: stays at debug (URL still emitted)
 		slog.LevelDebug: "debug",
 		slog.LevelInfo:  "info", // would be warn without the floor
 		slog.LevelWarn:  "info",
 		slog.LevelError: "info",
 	}
-	for in, want := range cases {
-		o := baseOpts() // no --cloudflare-* flags => quick mode
-		o.logLevel = in
-		p, _, err := resolveTunnel(o)
-		if err != nil {
-			t.Fatalf("resolve(%v): %v", in, err)
-		}
-		cf := p.(tunnel.Cloudflare)
-		if cf.LogLevel != want {
-			t.Errorf("quick LogLevel at argus %v = %q, want %q", in, cf.LogLevel, want)
+	local := map[slog.Level]string{
+		slog.Level(-8):  "debug",
+		slog.LevelDebug: "debug",
+		slog.LevelInfo:  "warn", // no floor: Prepare reports local's hostname
+		slog.LevelWarn:  "warn",
+		slog.LevelError: "error",
+	}
+	modes := []struct {
+		name  string
+		setup func(*tunnelOptions)
+		want  map[slog.Level]string
+	}{
+		{"quick", func(*tunnelOptions) {}, scraped}, // no --cloudflare-* flags => quick
+		{"remote", func(o *tunnelOptions) { o.provider = "cloudflare:remote"; o.cfToken = "tok" }, scraped},
+		{"local", func(o *tunnelOptions) { o.provider = "cloudflare:local"; o.cfHostname = "argus.example.com" }, local},
+	}
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			for in, want := range m.want {
+				o := baseOpts()
+				m.setup(&o)
+				o.logLevel = in
+				p, origin, err := resolveTunnel(o)
+				if err != nil {
+					t.Fatalf("resolve(%v): %v", in, err)
+				}
+				spec, err := p.Command(origin)
+				if err != nil {
+					t.Fatalf("Command(%v): %v", in, err)
+				}
+				if got := argValue(spec.Args, "--loglevel"); got != want {
+					t.Errorf("%s --loglevel at argus %v = %q, want %q", m.name, in, got, want)
+				}
+			}
+		})
+	}
+}
+
+// argValue returns the argument following flag, or "" if flag is absent or last.
+func argValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
 		}
 	}
+	return ""
 }
