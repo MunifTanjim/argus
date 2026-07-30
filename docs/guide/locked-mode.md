@@ -9,8 +9,10 @@ clients can read and verify them.
 ## Quickstart
 
 ```sh
-# on the node that will hold the first signer key (list every signer, this one included):
+# on the node that will hold the first signer key (list every signer, this one included).
+# without --confirm this only prints what it would create:
 argus lock init sigpub:<this-node> [sigpub:<other-node>...]
+argus lock init --confirm sigpub:<this-node> [sigpub:<other-node>...]
 
 # check the state of this node:
 argus lock status
@@ -54,8 +56,13 @@ on the node itself never passes through the gateway.
 `lock init` takes the signer keys as positional arguments, and they are the
 **complete** set the new log will trust — including the key of the node you run it
 on, which must be listed like any other. Nothing is added implicitly, so the command
-you ran is a full record of who can sign in the network it created. Omit your own key
-and the command refuses, printing it for you to paste back:
+you ran is a full record of who can sign in the network it created. `lock init` also does nothing until you pass `--confirm`. On its own it prints the
+signer set, the number of disablement secrets, and the devices it would authorize
+from the gateway's roster — then exits having created nothing. Read that list before
+confirming: those identity keys come from the gateway, and at this point nothing has
+verified them.
+
+Omit your own key and the command refuses, printing it for you to paste back:
 
 ```
 $ argus lock init sigpub:8b2d7e05...

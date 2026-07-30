@@ -27,8 +27,8 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"agent":            true, // `hook` only: selects the adapter, not a config key
 		"argus-managed":    true, // `hook` only: install marker, parsed and ignored
 		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
-		"signer":           true, // `lock init` only: one-shot signer list, not a persistent config key
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
+		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
 		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a persistent config key
 		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a persistent config key
 		"replacement":      true, // `lock revoke-signer` only: one-shot replacement signer list

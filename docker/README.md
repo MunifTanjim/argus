@@ -113,11 +113,20 @@ you pass are the complete signer set:
 docker compose -f docker/docker-compose.yml exec node-a argus lock status   # this node signer: sigpub:<hex>
 ```
 
-Then init on node-a with all three keys, so any two can recover from the loss of the third:
+Then init on node-a with all three keys, so any two can recover from the loss of the
+third. Run it once without `--confirm` to see the signer set and the devices it would
+authorize from the roster; nothing is created until you re-run it with the flag:
 
 ```sh
 docker compose -f docker/docker-compose.yml exec node-a \
   argus lock init \
+    sigpub:<node-a-hex> \
+    sigpub:<node-b-hex> \
+    sigpub:<node-c-hex> \
+    --gen-disablements 1
+
+docker compose -f docker/docker-compose.yml exec node-a \
+  argus lock init --confirm \
     sigpub:<node-a-hex> \
     sigpub:<node-b-hex> \
     sigpub:<node-c-hex> \

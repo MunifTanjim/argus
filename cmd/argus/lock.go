@@ -59,31 +59,42 @@ func parseSignerKeys(args []string) ([][]byte, error) {
 	return out, nil
 }
 
+// ownSignerKey reads this node's signer public half over the local socket.
+func ownSignerKey(ctx context.Context, cfg *config.Config) ([]byte, error) {
+	st, err := lockStatusOnNode(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("reading this node's signer key: %w", err)
+	}
+	if len(st.SignerPubKey) == 0 {
+		return nil, fmt.Errorf("this node has no signer key")
+	}
+	return st.SignerPubKey, nil
+}
+
 // requireOwnSignerKey refuses an init whose signer list omits the local node's own
 // key. The node enforces this too; doing it here as well means the operator is told
 // which key is missing, and the exact command to run, before anything is created.
-func requireOwnSignerKey(ctx context.Context, cfg *config.Config, sigPubs [][]byte, args []string) error {
-	st, err := lockStatusOnNode(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("reading this node's signer key: %w", err)
-	}
-	if len(st.SignerPubKey) == 0 {
-		return fmt.Errorf("this node has no signer key")
-	}
-	own := keyfmt.SignerKey.Encode(st.SignerPubKey)
+func requireOwnSignerKey(own []byte, sigPubs [][]byte, args []string) error {
 	for _, p := range sigPubs {
-		if bytes.Equal(p, st.SignerPubKey) {
+		if bytes.Equal(p, own) {
 			return nil
 		}
 	}
 	return fmt.Errorf("this node's own signer key must be listed explicitly:\n  argus lock init %s\n\nthe signer keys you pass are the complete set the new trust log will trust",
-		strings.Join(append([]string{own}, args...), " "))
+		strings.Join(append([]string{keyfmt.SignerKey.Encode(own)}, args...), " "))
 }
 
-// gatherDevices returns every rostered node's identity pubkey (the devices to
-// authorize at init). Nodes without a key (pre-E2E/co-located) are skipped.
-func gatherDevices(roster []api.NodeDescriptor) [][]byte {
-	out := make([][]byte, 0, len(roster))
+// rosterDevice is one identity key `lock init` would authorize, with the roster
+// label it came from.
+type rosterDevice struct {
+	pub   []byte
+	label string
+}
+
+// gatherRosterDevices returns every rostered node's identity pubkey paired with the
+// name it is listed under, so the preview can show what is about to be trusted.
+func gatherRosterDevices(roster []api.NodeDescriptor) []rosterDevice {
+	out := make([]rosterDevice, 0, len(roster))
 	for _, nd := range roster {
 		if nd.IdentityPubKey == "" {
 			continue
@@ -93,19 +104,53 @@ func gatherDevices(roster []api.NodeDescriptor) [][]byte {
 			shell.StdErrF("WARN: node %q has an unparseable identity key; not authorizing it\n", nd.ID)
 			continue
 		}
-		out = append(out, pub)
+		label := nd.Label
+		if label == "" {
+			label = nd.ID
+		}
+		out = append(out, rosterDevice{pub: pub, label: label})
 	}
 	return out
 }
 
+// initPreview renders what `lock init` would create. Printing this and exiting is
+// the default: the signer set becomes permanent and the disablement secrets are
+// shown exactly once, so the operator gets to read it before any of that is true.
+// It also surfaces the device list, which is otherwise invisible — those identity
+// keys come from the gateway's roster, and nothing has verified them.
+func initPreview(own []byte, sigPubs [][]byte, devices []rosterDevice, genDisablements int, args []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "would create a trust log with:\n  signers (%d):\n", len(sigPubs))
+	for _, p := range sigPubs {
+		self := ""
+		if bytes.Equal(p, own) {
+			self = "  (this node)"
+		}
+		fmt.Fprintf(&b, "    %s%s\n", keyfmt.SignerKey.Encode(p), self)
+	}
+	fmt.Fprintf(&b, "  signer-set fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(sigPubs), " "))
+	fmt.Fprintf(&b, "  disablement secrets: %d (shown once, at creation)\n", genDisablements)
+	fmt.Fprintf(&b, "  devices authorized from the gateway roster (%d):\n", len(devices))
+	for _, d := range devices {
+		fmt.Fprintf(&b, "    %s  %s\n", keyfmt.DeviceKey.Encode(d.pub), d.label)
+	}
+	if len(devices) > 0 {
+		b.WriteString("  these identity keys come from the gateway, which nothing has verified yet\n")
+	}
+	fmt.Fprintf(&b, "\nnothing has been created. re-run with --confirm:\n  argus lock init --confirm %s\n", strings.Join(args, " "))
+	return b.String()
+}
+
 func newLockInitCmd() *cobra.Command {
 	var genDisablements int
+	var confirm bool
 	cmd := &cobra.Command{
 		Use:   "init sigpub:<hex> [sigpub:<hex>...]",
 		Short: "Enable locked mode: create the trust log with exactly these signer keys",
 		Long: "Enable locked mode. The keys given are the complete set of signers the new\n" +
 			"trust log will trust — including this node's own key, which must be listed.\n" +
-			"Read each key with `argus lock status` on the node that holds it.",
+			"Read each key with `argus lock status` on the node that holds it.\n\n" +
+			"Without --confirm this prints what would be created and exits, changing nothing.",
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -124,7 +169,11 @@ func newLockInitCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			if err := requireOwnSignerKey(ctx, cfg, sigPubs, args); err != nil {
+			own, err := ownSignerKey(ctx, cfg)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if err := requireOwnSignerKey(own, sigPubs, args); err != nil {
 				return fail(cmd, err)
 			}
 
@@ -133,7 +182,15 @@ func newLockInitCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			devices := gatherDevices(roster)
+			rosterDevices := gatherRosterDevices(roster)
+			if !confirm {
+				shell.StdOutF("%s", initPreview(own, sigPubs, rosterDevices, genDisablements, args))
+				return nil
+			}
+			devices := make([][]byte, 0, len(rosterDevices))
+			for _, d := range rosterDevices {
+				devices = append(devices, d.pub)
+			}
 
 			// 2. lock.init on the local node.
 			res, err := lockInitOnNode(ctx, cfg, api.LockInitParams{Signers: sigPubs, Devices: devices, GenDisablements: genDisablements})
@@ -164,6 +221,7 @@ func newLockInitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
+	cmd.Flags().BoolVar(&confirm, "confirm", false, "actually create the trust log; without it, print what would be created and exit")
 	addClientFlags(cmd.Flags())
 	return cmd
 }

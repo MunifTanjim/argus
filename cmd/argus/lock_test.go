@@ -203,14 +203,63 @@ func TestLockSignHint(t *testing.T) {
 	}
 }
 
-func TestGatherDevices(t *testing.T) {
+func TestGatherRosterDevices(t *testing.T) {
 	idA := base64.StdEncoding.EncodeToString([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	roster := []api.NodeDescriptor{
-		{ID: "a", IdentityPubKey: idA},
+		{ID: "a", Label: "alpha", IdentityPubKey: idA},
 		{ID: "b"}, // no identity pubkey: skipped
 	}
-	devs := gatherDevices(roster)
-	if len(devs) != 1 || base64.StdEncoding.EncodeToString(devs[0]) != idA {
-		t.Fatalf("gatherDevices = %v", devs)
+	devs := gatherRosterDevices(roster)
+	if len(devs) != 1 || base64.StdEncoding.EncodeToString(devs[0].pub) != idA {
+		t.Fatalf("gatherRosterDevices = %v", devs)
+	}
+	if devs[0].label != "alpha" {
+		t.Fatalf("label = %q, want alpha", devs[0].label)
+	}
+}
+
+func TestRequireOwnSignerKey(t *testing.T) {
+	own := bytes.Repeat([]byte{0x01}, 32)
+	other := bytes.Repeat([]byte{0x02}, 32)
+
+	if err := requireOwnSignerKey(own, [][]byte{other, own}, nil); err != nil {
+		t.Fatalf("own key listed: %v", err)
+	}
+	err := requireOwnSignerKey(own, [][]byte{other}, []string{keyfmt.SignerKey.Encode(other)})
+	if err == nil {
+		t.Fatal("omitting this node's own key must be refused")
+	}
+	// The error has to be copy-pasteable: the full corrected command, own key first.
+	want := "argus lock init " + keyfmt.SignerKey.Encode(own) + " " + keyfmt.SignerKey.Encode(other)
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error must contain the corrected command %q, got: %v", want, err)
+	}
+}
+
+// The preview is what stands between an operator and a permanent, once-only
+// disclosure of disablement secrets, so it has to show every part of what would be
+// created — including the roster-supplied device list nothing has verified.
+func TestInitPreviewShowsWhatWouldBeCreated(t *testing.T) {
+	own := bytes.Repeat([]byte{0x01}, 32)
+	other := bytes.Repeat([]byte{0x02}, 32)
+	dev := bytes.Repeat([]byte{0x03}, 32)
+	args := []string{keyfmt.SignerKey.Encode(own), keyfmt.SignerKey.Encode(other)}
+
+	got := initPreview(own, [][]byte{own, other}, []rosterDevice{{pub: dev, label: "node-b"}}, 2, args)
+
+	for _, want := range []string{
+		keyfmt.SignerKey.Encode(own),
+		keyfmt.SignerKey.Encode(other),
+		"(this node)",
+		"disablement secrets: 2",
+		keyfmt.DeviceKey.Encode(dev),
+		"node-b",
+		"come from the gateway",
+		"nothing has been created",
+		"argus lock init --confirm " + strings.Join(args, " "),
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview must contain %q, got:\n%s", want, got)
+		}
 	}
 }
