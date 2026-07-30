@@ -38,35 +38,20 @@ func findNode(roster []api.NodeDescriptor, name string) *api.NodeDescriptor {
 	return nil
 }
 
-// resolveSigners maps each --signer argument to an Ed25519 signer pubkey. A
-// sigpub: key is used as given; anything else is looked up in the roster by node
-// label or id.
+// parseSignerKeys parses each --signer argument as a sigpub: key.
 //
-// The distinction matters at init: the roster comes from the gateway, which is
-// untrusted and which no trust log yet constrains, so a name resolves through a
-// party that could substitute its own key into the genesis. A key collected
-// out-of-band from `argus lock status` on the node itself does not.
-func resolveSigners(roster []api.NodeDescriptor, names []string) ([][]byte, error) {
-	out := make([][]byte, 0, len(names))
-	for _, name := range names {
-		if keyfmt.Tagged(name) {
-			pub, err := keyfmt.SignerKey.Decode(name)
-			if err != nil {
-				return nil, fmt.Errorf("signer %q: %w", name, err)
-			}
-			out = append(out, pub)
-			continue
-		}
-		nd := findNode(roster, name)
-		if nd == nil {
-			return nil, fmt.Errorf("unknown node %q (not in roster)", name)
-		}
-		if nd.SignerPubKey == "" {
-			return nil, fmt.Errorf("node %q advertises no signer key", name)
-		}
-		pub, err := base64.StdEncoding.DecodeString(nd.SignerPubKey)
+// Node names are deliberately not accepted here. A name can only become a key by
+// way of the roster, which the gateway serves and which no trust log constrains at
+// init time — so naming a co-signer would let the gateway substitute its own key
+// into the genesis and hold a signing seat forever. A key read off
+// `argus lock status` on the node itself reaches this command without passing
+// through the gateway at all.
+func parseSignerKeys(args []string) ([][]byte, error) {
+	out := make([][]byte, 0, len(args))
+	for _, arg := range args {
+		pub, err := keyfmt.SignerKey.Decode(arg)
 		if err != nil {
-			return nil, fmt.Errorf("node %q signer pubkey: %w", name, err)
+			return nil, fmt.Errorf("--signer %q: %w\n  read it with `argus lock status` on that node", arg, err)
 		}
 		out = append(out, pub)
 	}
@@ -115,7 +100,7 @@ func newLockInitCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			sigPubs, err := resolveSigners(roster, signers)
+			sigPubs, err := parseSignerKeys(signers)
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -137,9 +122,9 @@ func newLockInitCmd() *cobra.Command {
 				shell.StdErrF("\nSAVE the disablement secret(s) above NOW — shown only once. Each one disables\nlocked mode network-wide (break-glass recovery if signer keys are lost).\n")
 			}
 			if res.SignerCount < 2 && len(res.DisablementSecrets) == 0 {
-				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer (--signer <node>) or\ngenerate a disablement secret (--gen-disablements).\n")
+				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer (--signer sigpub:<hex>)\nor generate a disablement secret (--gen-disablements).\n")
 			} else if res.SignerCount < 2 {
-				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer <node>.\n")
+				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer sigpub:<hex>.\n")
 			}
 			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
 				shell.StdErrF("%s", w)
@@ -149,7 +134,7 @@ func newLockInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer: node label/id, or a sigpub: key read from 'argus lock status' on that node; repeatable")
+	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer key (sigpub:<hex>), read with 'argus lock status' on that node; repeatable")
 	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
 	addClientFlags(cmd.Flags())
 	return cmd
@@ -529,25 +514,36 @@ func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, de
 	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockDeviceParams{Device: device})
 }
 
-// resolveSignerArgs resolves a list of signer arguments to 32-byte Ed25519 pubkeys.
-// Each arg is first tried against the roster (by node label or id); if that fails,
-// it is parsed as a sigpub: key.
+// resolveSignerArgs resolves signer arguments for the post-init signer commands to
+// 32-byte Ed25519 pubkeys: a sigpub: key is used as given, a node label or id is
+// looked up in the gateway's roster.
+//
+// Unlike `lock init --signer`, a name is still accepted here. The roster mapping is
+// gateway-supplied either way, so naming a signer to add carries the same
+// substitution risk as it did at init — pass a sigpub: key when that matters.
 func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, error) {
 	out := make([][]byte, 0, len(args))
 	for _, arg := range args {
-		pubs, rerr := resolveSigners(roster, []string{arg})
-		if rerr == nil && len(pubs) == 1 {
-			out = append(out, pubs[0])
+		if keyfmt.Tagged(arg) {
+			pub, err := keyfmt.SignerKey.Decode(arg)
+			if err != nil {
+				return nil, fmt.Errorf("resolve signer %q: %w", arg, err)
+			}
+			out = append(out, pub)
 			continue
 		}
-		raw, berr := keyfmt.SignerKey.Decode(arg)
-		if berr != nil {
-			if rerr != nil && !keyfmt.Tagged(arg) {
-				return nil, fmt.Errorf("resolve signer %q: %w", arg, rerr)
-			}
-			return nil, fmt.Errorf("resolve signer %q: %w", arg, berr)
+		nd := findNode(roster, arg)
+		if nd == nil {
+			return nil, fmt.Errorf("resolve signer %q: not a known node and not a %s key", arg, keyfmt.SignerKey.Prefix())
 		}
-		out = append(out, raw)
+		if nd.SignerPubKey == "" {
+			return nil, fmt.Errorf("resolve signer %q: node advertises no signer key", arg)
+		}
+		pub, err := base64.StdEncoding.DecodeString(nd.SignerPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve signer %q: %w", arg, err)
+		}
+		out = append(out, pub)
 	}
 	return out, nil
 }

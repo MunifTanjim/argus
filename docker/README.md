@@ -96,24 +96,25 @@ docker compose -f docker/docker-compose.yml exec node-a \
 Locked mode makes device authorization unforgeable even against an actively
 malicious gateway, via a signer-signed, hash-chained trust log.
 
-**Init on a signer node** (node-a reads the roster via `ARGUS_GATEWAY_URL`; add
-node-b and node-c as co-signers so recovery is possible). The `--signer` names here
-are the compose service names, which the harness passes through as each node's
-`--id`/`--label`:
-
-```sh
-docker compose -f docker/docker-compose.yml exec node-a \
-  argus lock init --signer node-b --signer node-c --gen-disablements 1
-```
-
-A name is resolved to a signer key through the roster the **gateway** serves, and at
-init time there is no trust log yet to constrain that mapping. To take the gateway out
-of it, read each co-signer's key off the node itself and pass the key instead:
+**Init on a signer node.** `--signer` takes signer *keys*, not node names: a name
+could only be turned into a key via the roster the gateway serves, and at init time
+no trust log exists yet to constrain that mapping — so a hostile gateway could seat
+its own key in your genesis. Read each co-signer's key off the node itself first:
 
 ```sh
 docker compose -f docker/docker-compose.yml exec node-b argus lock status   # this node signer: sigpub:<hex>
+docker compose -f docker/docker-compose.yml exec node-c argus lock status   # this node signer: sigpub:<hex>
+```
+
+Then init on node-a, naming node-b and node-c as co-signers so recovery is possible.
+node-a's own key is added automatically — it is read locally, not from the gateway:
+
+```sh
 docker compose -f docker/docker-compose.yml exec node-a \
-  argus lock init --signer sigpub:<node-b-hex> --signer sigpub:<node-c-hex> --gen-disablements 1
+  argus lock init \
+    --signer sigpub:<node-b-hex> \
+    --signer sigpub:<node-c-hex> \
+    --gen-disablements 1
 ```
 
 Save the printed **`genesis: gen:<hex>`** and the **disablement secret** (`dis:<hex>`,

@@ -78,77 +78,64 @@ func TestLockLogCmdWiredInLockCmd(t *testing.T) {
 	}
 }
 
-func TestResolveSigners(t *testing.T) {
-	sigB := base64.StdEncoding.EncodeToString([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
-	roster := []api.NodeDescriptor{
-		{ID: "node-a", Label: "alpha", SignerPubKey: base64.StdEncoding.EncodeToString([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))},
-		{ID: "node-b", Label: "beta", SignerPubKey: sigB},
-	}
-	// Resolve by label.
-	got, err := resolveSigners(roster, []string{"beta"})
-	if err != nil {
-		t.Fatalf("resolveSigners: %v", err)
-	}
-	if len(got) != 1 || base64.StdEncoding.EncodeToString(got[0]) != sigB {
-		t.Fatalf("resolved = %v", got)
-	}
-	// Resolve by id.
-	if _, err := resolveSigners(roster, []string{"node-a"}); err != nil {
-		t.Fatalf("by id: %v", err)
-	}
-	// Unknown name errors.
-	if _, err := resolveSigners(roster, []string{"nope"}); err == nil {
-		t.Fatal("unknown signer name should error")
-	}
-	// A node without a signer pubkey errors.
-	noSigner := []api.NodeDescriptor{{ID: "n", Label: "n"}}
-	if _, err := resolveSigners(noSigner, []string{"n"}); err == nil {
-		t.Fatal("node without signer pubkey should error")
-	}
-}
-
-// A sigpub: key must be trusted as given, without consulting the roster at all.
-// At lock init the roster comes from the untrusted gateway and no trust log yet
-// constrains it, so a key collected out-of-band is the only gateway-independent
-// way to name a co-signer.
-func TestResolveSignersAcceptsAKeyWithoutTheRoster(t *testing.T) {
+func TestParseSignerKeysAcceptsOnlyKeys(t *testing.T) {
 	want := bytes.Repeat([]byte{0xD4}, 32)
 
-	got, err := resolveSigners(nil, []string{keyfmt.SignerKey.Encode(want)})
+	got, err := parseSignerKeys([]string{keyfmt.SignerKey.Encode(want)})
 	if err != nil {
-		t.Fatalf("resolveSigners: %v", err)
+		t.Fatalf("parseSignerKeys: %v", err)
 	}
 	if len(got) != 1 || !bytes.Equal(got[0], want) {
-		t.Fatalf("resolved = %x, want %x", got, want)
+		t.Fatalf("parsed = %x, want %x", got, want)
 	}
 }
 
-// A roster that claims a different key for a named node cannot override an
-// explicitly supplied one — the key path must not consult the roster.
-func TestResolveSignersPrefersTheGivenKeyOverTheRoster(t *testing.T) {
-	want := bytes.Repeat([]byte{0xD4}, 32)
-	roster := []api.NodeDescriptor{{
-		ID:           keyfmt.SignerKey.Encode(want),
-		Label:        keyfmt.SignerKey.Encode(want),
-		SignerPubKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xEE}, 32)),
-	}}
-
-	got, err := resolveSigners(roster, []string{keyfmt.SignerKey.Encode(want)})
-	if err != nil {
-		t.Fatalf("resolveSigners: %v", err)
+// A node name must be refused outright. Resolving one would go through the roster
+// the gateway serves, which nothing constrains at init time — the whole reason this
+// input is keys-only.
+func TestParseSignerKeysRejectsANodeName(t *testing.T) {
+	err := func() error { _, e := parseSignerKeys([]string{"node-b"}); return e }()
+	if err == nil {
+		t.Fatal("a node name must not be accepted as a signer")
 	}
-	if !bytes.Equal(got[0], want) {
-		t.Fatalf("resolved = %x, want the supplied key %x", got[0], want)
+	if !strings.Contains(err.Error(), keyfmt.SignerKey.Prefix()) {
+		t.Fatalf("error must show the expected form, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "argus lock status") {
+		t.Fatalf("error must say where to read the key, got: %v", err)
 	}
 }
 
-func TestResolveSignersRejectsAWrongKindOfKey(t *testing.T) {
-	_, err := resolveSigners(nil, []string{keyfmt.DeviceKey.Encode(bytes.Repeat([]byte{0x01}, 32))})
+func TestParseSignerKeysRejectsAWrongKindOfKey(t *testing.T) {
+	_, err := parseSignerKeys([]string{keyfmt.DeviceKey.Encode(bytes.Repeat([]byte{0x01}, 32))})
 	if err == nil {
 		t.Fatal("a device key must not be accepted as a signer")
 	}
 	if !strings.Contains(err.Error(), "signer key") || !strings.Contains(err.Error(), "device key") {
 		t.Fatalf("error must name both kinds, got: %v", err)
+	}
+}
+
+// The post-init signer commands still accept a name; keys must win there too.
+func TestResolveSignerArgsAcceptsBothFormsAndPrefersTheKey(t *testing.T) {
+	want := bytes.Repeat([]byte{0xD4}, 32)
+	rosterKey := bytes.Repeat([]byte{0xEE}, 32)
+	roster := []api.NodeDescriptor{{
+		ID:           "node-b",
+		Label:        "beta",
+		SignerPubKey: base64.StdEncoding.EncodeToString(rosterKey),
+	}}
+
+	byName, err := resolveSignerArgs(roster, []string{"beta"})
+	if err != nil || !bytes.Equal(byName[0], rosterKey) {
+		t.Fatalf("by name: got %x err %v", byName, err)
+	}
+	byKey, err := resolveSignerArgs(roster, []string{keyfmt.SignerKey.Encode(want)})
+	if err != nil || !bytes.Equal(byKey[0], want) {
+		t.Fatalf("by key: got %x err %v", byKey, err)
+	}
+	if _, err := resolveSignerArgs(roster, []string{"nope"}); err == nil {
+		t.Fatal("unknown name should error")
 	}
 }
 

@@ -44,11 +44,15 @@ $ argus lock sign gen:4f3a9c1e...
 error: device "gen:4f3a9c1e..." : expected a device key (devpub:), got a genesis hash (gen:)
 ```
 
-Anywhere a command takes a node label or id, it also takes the corresponding key.
-That matters most at `lock init`: a label is resolved to a key through the roster
-the **gateway** serves, and at init time no trust log exists yet to constrain it.
-A key you read off `argus lock status` on the node itself does not go through the
-gateway at all.
+Most commands take either a node label/id or the corresponding key. `lock init
+--signer` is the exception: it takes **only** a `sigpub:` key. A label can only
+become a key by way of the roster the **gateway** serves, and at init time no trust
+log exists yet to constrain that mapping — a hostile gateway could seat its own key
+in the genesis and hold a signing seat forever. A key read off `argus lock status`
+on the node itself never passes through the gateway.
+
+The node running `lock init` adds its own signer key automatically; that key is read
+from local disk, not from the roster, so it carries no such risk.
 
 ## Key concepts
 
