@@ -107,7 +107,7 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	// the client-side enforcement (Slice 5b) will attempt a channel to node A,
 	// letting node A's enforcement (Slice 5a) reject the unauthorized client.
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Devices: [][]byte{idA}}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}, Devices: [][]byte{idA}}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 

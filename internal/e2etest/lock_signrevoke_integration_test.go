@@ -38,7 +38,7 @@ func TestLockSignRevoke(t *testing.T) {
 	chainPathA := filepath.Join(dir, "chainA")
 	chainPathB := filepath.Join(dir, "chainB")
 
-	startLockNode(t, ctx, "node-a", ts.URL, sockA, chainPathA)
+	nodeA := startLockNode(t, ctx, "node-a", ts.URL, sockA, chainPathA)
 	nodeB := startLockNode(t, ctx, "node-b", ts.URL, filepath.Join(sd, "b.sock"), chainPathB)
 
 	// Wait until both nodes are rostered.
@@ -68,7 +68,7 @@ func TestLockSignRevoke(t *testing.T) {
 
 	// lock.init on A — A is the sole signer, no additional devices initially.
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestLockSignerAddRemove(t *testing.T) {
 
 	// lock.init on A — A is the sole signer initially.
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 

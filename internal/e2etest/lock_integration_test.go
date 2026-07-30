@@ -192,7 +192,7 @@ func TestLockInitPropagatesThroughGateway(t *testing.T) {
 	})
 	ac := api.NewClient(aConn)
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: sigPubs, Devices: devices}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: append([][]byte{nodeA.SignerPublic()}, sigPubs...), Devices: devices}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 	ac.Close()

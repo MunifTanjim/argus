@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -38,7 +39,7 @@ func findNode(roster []api.NodeDescriptor, name string) *api.NodeDescriptor {
 	return nil
 }
 
-// parseSignerKeys parses each --signer argument as a sigpub: key.
+// parseSignerKeys parses each `lock init` argument as a sigpub: key.
 //
 // Node names are deliberately not accepted here. A name can only become a key by
 // way of the roster, which the gateway serves and which no trust log constrains at
@@ -51,11 +52,32 @@ func parseSignerKeys(args []string) ([][]byte, error) {
 	for _, arg := range args {
 		pub, err := keyfmt.SignerKey.Decode(arg)
 		if err != nil {
-			return nil, fmt.Errorf("--signer %q: %w\n  read it with `argus lock status` on that node", arg, err)
+			return nil, fmt.Errorf("signer %q: %w\n  read it with `argus lock status` on that node", arg, err)
 		}
 		out = append(out, pub)
 	}
 	return out, nil
+}
+
+// requireOwnSignerKey refuses an init whose signer list omits the local node's own
+// key. The node enforces this too; doing it here as well means the operator is told
+// which key is missing, and the exact command to run, before anything is created.
+func requireOwnSignerKey(ctx context.Context, cfg *config.Config, sigPubs [][]byte, args []string) error {
+	st, err := lockStatusOnNode(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("reading this node's signer key: %w", err)
+	}
+	if len(st.SignerPubKey) == 0 {
+		return fmt.Errorf("this node has no signer key")
+	}
+	own := keyfmt.SignerKey.Encode(st.SignerPubKey)
+	for _, p := range sigPubs {
+		if bytes.Equal(p, st.SignerPubKey) {
+			return nil
+		}
+	}
+	return fmt.Errorf("this node's own signer key must be listed explicitly:\n  argus lock init %s\n\nthe signer keys you pass are the complete set the new trust log will trust",
+		strings.Join(append([]string{own}, args...), " "))
 }
 
 // gatherDevices returns every rostered node's identity pubkey (the devices to
@@ -77,14 +99,17 @@ func gatherDevices(roster []api.NodeDescriptor) [][]byte {
 }
 
 func newLockInitCmd() *cobra.Command {
-	var signers []string
 	var genDisablements int
 	cmd := &cobra.Command{
-		Use:           "init",
-		Short:         "Enable locked mode: create the trust log and authorize current nodes",
+		Use:   "init sigpub:<hex> [sigpub:<hex>...]",
+		Short: "Enable locked mode: create the trust log with exactly these signer keys",
+		Long: "Enable locked mode. The keys given are the complete set of signers the new\n" +
+			"trust log will trust — including this node's own key, which must be listed.\n" +
+			"Read each key with `argus lock status` on the node that holds it.",
+		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := resolveConfig(cmd)
 			if err != nil {
 				return fail(cmd, err)
@@ -95,12 +120,16 @@ func newLockInitCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// 1. Roster from the gateway.
-			roster, err := fetchRoster(ctx, cfg)
+			sigPubs, err := parseSignerKeys(args)
 			if err != nil {
 				return fail(cmd, err)
 			}
-			sigPubs, err := parseSignerKeys(signers)
+			if err := requireOwnSignerKey(ctx, cfg, sigPubs, args); err != nil {
+				return fail(cmd, err)
+			}
+
+			// Roster from the gateway (devices to authorize).
+			roster, err := fetchRoster(ctx, cfg)
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -122,9 +151,9 @@ func newLockInitCmd() *cobra.Command {
 				shell.StdErrF("\nSAVE the disablement secret(s) above NOW — shown only once. Each one disables\nlocked mode network-wide (break-glass recovery if signer keys are lost).\n")
 			}
 			if res.SignerCount < 2 && len(res.DisablementSecrets) == 0 {
-				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer (--signer sigpub:<hex>)\nor generate a disablement secret (--gen-disablements).\n")
+				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer key\nto the init command, or generate a disablement secret (--gen-disablements).\n")
 			} else if res.SignerCount < 2 {
-				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider adding a second signer: argus lock init --signer sigpub:<hex>.\n")
+				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider re-initialising with a second signer key listed.\n")
 			}
 			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
 				shell.StdErrF("%s", w)
@@ -134,7 +163,6 @@ func newLockInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer key (sigpub:<hex>), read with 'argus lock status' on that node; repeatable")
 	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
 	addClientFlags(cmd.Flags())
 	return cmd

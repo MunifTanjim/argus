@@ -9,8 +9,8 @@ clients can read and verify them.
 ## Quickstart
 
 ```sh
-# on the node that will hold the first signer key:
-argus lock init
+# on the node that will hold the first signer key (list every signer, this one included):
+argus lock init sigpub:<this-node> [sigpub:<other-node>...]
 
 # check the state of this node:
 argus lock status
@@ -44,15 +44,24 @@ $ argus lock sign gen:4f3a9c1e...
 error: device "gen:4f3a9c1e..." : expected a device key (devpub:), got a genesis hash (gen:)
 ```
 
-Most commands take either a node label/id or the corresponding key. `lock init
---signer` is the exception: it takes **only** a `sigpub:` key. A label can only
+Most commands take either a node label/id or the corresponding key. `lock init` is
+the exception: it takes **only** `sigpub:` keys. A label can only
 become a key by way of the roster the **gateway** serves, and at init time no trust
 log exists yet to constrain that mapping — a hostile gateway could seat its own key
 in the genesis and hold a signing seat forever. A key read off `argus lock status`
 on the node itself never passes through the gateway.
 
-The node running `lock init` adds its own signer key automatically; that key is read
-from local disk, not from the roster, so it carries no such risk.
+`lock init` takes the signer keys as positional arguments, and they are the
+**complete** set the new log will trust — including the key of the node you run it
+on, which must be listed like any other. Nothing is added implicitly, so the command
+you ran is a full record of who can sign in the network it created. Omit your own key
+and the command refuses, printing it for you to paste back:
+
+```
+$ argus lock init sigpub:8b2d7e05...
+error: this node's own signer key must be listed explicitly:
+  argus lock init sigpub:4f3a9c1e... sigpub:8b2d7e05...
+```
 
 ## Key concepts
 

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
@@ -24,14 +26,59 @@ func newLockTestNode(t *testing.T) *Node {
 	return d
 }
 
+// callLockInit issues lock.init, adding the node's own signer key when the caller
+// did not list it. lock.init requires it explicitly; tests that are not about that
+// rule should not have to restate it. TestLockInitRequiresOwnSignerKey covers the
+// rule itself by calling handleLockInit directly.
 func callLockInit(t *testing.T, d *Node, p api.LockInitParams) (api.LockInitResult, error) {
 	t.Helper()
+	own := d.SignerPublic()
+	has := false
+	for _, s := range p.Signers {
+		if bytes.Equal(s, own) {
+			has = true
+			break
+		}
+	}
+	if !has {
+		p.Signers = append([][]byte{own}, p.Signers...)
+	}
 	raw, _ := json.Marshal(p)
 	res, err := d.handleLockInit(context.Background(), raw)
 	if err != nil {
 		return api.LockInitResult{}, err
 	}
 	return res.(api.LockInitResult), nil
+}
+
+// The signer set must be exactly what the caller listed: a node that omits its own
+// key is refused rather than silently added, so the init command is a complete
+// record of who can sign in the network it creates.
+func TestLockInitRequiresOwnSignerKey(t *testing.T) {
+	d := newLockTestNode(t)
+	other, _ := trustlog.GenerateSigner()
+
+	raw, _ := json.Marshal(api.LockInitParams{Signers: [][]byte{other.Public}})
+	_, err := d.handleLockInit(context.Background(), raw)
+	if err == nil {
+		t.Fatal("lock.init must refuse a signer set that omits this node's own key")
+	}
+	if !strings.Contains(err.Error(), keyfmt.SignerKey.Encode(d.SignerPublic())) {
+		t.Fatalf("error must name the missing key, got: %v", err)
+	}
+	if d.trust.Load() != nil {
+		t.Fatal("a refused init must not enable locked mode")
+	}
+
+	// Listing it explicitly succeeds, and the set is exactly the two keys.
+	raw, _ = json.Marshal(api.LockInitParams{Signers: [][]byte{d.SignerPublic(), other.Public}})
+	res, err := d.handleLockInit(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("explicit self: %v", err)
+	}
+	if got := res.(api.LockInitResult).SignerCount; got != 2 {
+		t.Fatalf("SignerCount = %d, want 2", got)
+	}
 }
 
 func TestLockInitBuildsGenesisAndAuthorizes(t *testing.T) {

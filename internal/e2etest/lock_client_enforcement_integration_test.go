@@ -119,7 +119,7 @@ func TestClientExcludesUnauthorizedNode(t *testing.T) {
 	// A's identity key is in Devices — node B is NOT an authorized device.
 	var initRes api.LockInitResult
 	if err := ac.Call(api.MethodLockInit, api.LockInitParams{
-		Signers: [][]byte{sigB},
+		Signers: [][]byte{nodeA.SignerPublic(), sigB},
 		Devices: [][]byte{idA},
 	}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)

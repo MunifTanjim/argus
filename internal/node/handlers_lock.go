@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
@@ -50,9 +51,12 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "gen_disablements must be non-negative"}
 	}
 
-	// Signer set = self + additional (deduped). Validate lengths.
-	signerSet := [][]byte{append([]byte(nil), d.signer.Public...)}
-	seen := map[string]bool{string(d.signer.Public): true}
+	// The signer set is exactly what the caller listed, deduped — including this
+	// node's own key, which must be named explicitly. Adding it implicitly would
+	// mean the genesis trusts a key the operator never wrote down, so the command
+	// that created a network would not be a complete record of who can sign in it.
+	signerSet := make([][]byte, 0, len(p.Signers))
+	seen := map[string]bool{}
 	for _, s := range p.Signers {
 		if len(s) != ed25519.PublicKeySize {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "bad signer pubkey length"}
@@ -60,6 +64,13 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 		if !seen[string(s)] {
 			seen[string(s)] = true
 			signerSet = append(signerSet, append([]byte(nil), s...))
+		}
+	}
+	if !seen[string(d.signer.Public)] {
+		return nil, &api.RPCError{
+			Code: api.CodeInvalidRequest,
+			Message: "this node's own signer key must be listed explicitly: " +
+				keyfmt.SignerKey.Encode(d.signer.Public),
 		}
 	}
 	for _, dev := range p.Devices {

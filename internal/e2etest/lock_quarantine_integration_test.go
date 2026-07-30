@@ -55,7 +55,7 @@ func TestUnpinnedNodeQuarantinesThenRecoversOnPin(t *testing.T) {
 	})
 	ac := api.NewClient(aConn)
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 	ac.Close()

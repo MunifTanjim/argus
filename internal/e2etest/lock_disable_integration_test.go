@@ -101,6 +101,7 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	// GenDisablements:1 causes the node to generate one disablement secret.
 	var initRes api.LockInitResult
 	if err := ac.Call(api.MethodLockInit, api.LockInitParams{
+		Signers:         [][]byte{nodeA.SignerPublic()},
 		GenDisablements: 1,
 		Devices:         [][]byte{idA},
 	}, &initRes); err != nil {

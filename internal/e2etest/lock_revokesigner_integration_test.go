@@ -99,7 +99,7 @@ func TestLockRevokeSignerCeremony(t *testing.T) {
 	defer ac.Close()
 
 	var initRes api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{signerBPub, signerCPub}}, &initRes); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic(), signerBPub, signerCPub}}, &initRes); err != nil {
 		t.Fatalf("lock.init: %v", err)
 	}
 	if initRes.SignerCount != 3 {

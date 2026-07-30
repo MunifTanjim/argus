@@ -210,6 +210,9 @@ func (d *Node) SetSignerKey(kp trustlog.SignerKey) {
 // SignerPubKey returns the base64 Ed25519 signer public half, or "" if unset.
 func (d *Node) SignerPubKey() string { return d.signerPubB64 }
 
+// SignerPublic returns a copy of the raw Ed25519 signer public half, or nil if unset.
+func (d *Node) SignerPublic() []byte { return append([]byte(nil), d.signer.Public...) }
+
 // SetBeaconKey sets the node's Ed25519 beacon keypair, whose public half is
 // announced to the gateway roster (beacon_pubkey) for anti-equivocation. Call
 // before Run. The private half stays local.
