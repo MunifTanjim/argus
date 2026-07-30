@@ -517,8 +517,8 @@ func newLockRemoveSignerCmd() *cobra.Command {
 
 func newLockSignerCmd(use, short, method string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           use + " <signer>",
-		Short:         short + " (node label/id or sigpub: key)",
+		Use:           use + " sigpub:<hex>",
+		Short:         short + " (signer key; read it with `argus lock status` on that node)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -529,9 +529,7 @@ func newLockSignerCmd(use, short, method string) *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			// Resolve the signer pubkey: node label/id via roster, or raw base64.
-			roster, _ := fetchRoster(ctx, cfg) // best-effort
-			pubs, err := resolveSignerArgs(roster, []string{args[0]})
+			pubs, err := parseSignerKeys([]string{args[0]})
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -600,41 +598,6 @@ func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, de
 	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockDeviceParams{Device: device})
 }
 
-// resolveSignerArgs resolves signer arguments for the post-init signer commands to
-// 32-byte Ed25519 pubkeys: a sigpub: key is used as given, a node label or id is
-// looked up in the gateway's roster.
-//
-// Unlike `lock init --signer`, a name is still accepted here. The roster mapping is
-// gateway-supplied either way, so naming a signer to add carries the same
-// substitution risk as it did at init — pass a sigpub: key when that matters.
-func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, error) {
-	out := make([][]byte, 0, len(args))
-	for _, arg := range args {
-		if keyfmt.Tagged(arg) {
-			pub, err := keyfmt.SignerKey.Decode(arg)
-			if err != nil {
-				return nil, fmt.Errorf("resolve signer %q: %w", arg, err)
-			}
-			out = append(out, pub)
-			continue
-		}
-		nd := findNode(roster, arg)
-		if nd == nil {
-			return nil, fmt.Errorf("resolve signer %q: not a known node and not a %s key", arg, keyfmt.SignerKey.Prefix())
-		}
-		if nd.SignerPubKey == "" {
-			return nil, fmt.Errorf("resolve signer %q: node advertises no signer key", arg)
-		}
-		pub, err := base64.StdEncoding.DecodeString(nd.SignerPubKey)
-		if err != nil {
-			return nil, fmt.Errorf("resolve signer %q: %w", arg, err)
-		}
-		out = append(out, pub)
-	}
-	return out, nil
-}
-
-// revokeSignerStartOnNode dials the LOCAL socket and calls lock.revokeSignerStart.
 func revokeSignerStartOnNode(ctx context.Context, cfg *config.Config, p api.LockRevokeSignerStartParams) (api.LockRevokeSignerBlobResult, error) {
 	return callLocal[api.LockRevokeSignerBlobResult](ctx, cfg, api.MethodLockRevokeSignerStart, p)
 }
@@ -718,8 +681,7 @@ func newLockRevokeSignerCmd() *cobra.Command {
 			if len(args) == 0 {
 				return fail(cmd, fmt.Errorf("revoke-signer: specify signer(s) to revoke, or use --cosign / --finish"))
 			}
-			roster, _ := fetchRoster(ctx, cfg) // best-effort; nil roster → raw-base64 fallback
-			revoked, err := resolveSignerArgs(roster, args)
+			revoked, err := parseSignerKeys(args)
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -731,14 +693,14 @@ func newLockRevokeSignerCmd() *cobra.Command {
 					if signerCountAfterRevoke(st.Signers, revoked) < 1 {
 						return fail(cmd, fmt.Errorf(
 							"revocation would remove all signers and leave the log unrecoverable\n"+
-								"  use --replacement <node> to atomically add a successor signer, or\n"+
+								"  use --replacement sigpub:<hex> to atomically add a successor signer, or\n"+
 								"  'argus lock disable <secret>' + reinit to abandon locked mode"))
 					}
 				}
 			}
 			var replaces [][]byte
 			if len(replacements) > 0 {
-				replaces, err = resolveSignerArgs(roster, replacements)
+				replaces, err = parseSignerKeys(replacements)
 				if err != nil {
 					return fail(cmd, fmt.Errorf("--replacement: %w", err))
 				}
@@ -768,7 +730,7 @@ func newLockRevokeSignerCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cosignBlob, "cosign", "", "add this node's co-sign to a ceremony blob (from start or a prior --cosign)")
 	cmd.Flags().StringVar(&finishBlob, "finish", "", "finalize a completed ceremony blob and apply the revocation")
-	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer node (label/id or sigpub: key); repeatable")
+	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer key (sigpub:<hex>); repeatable")
 	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "override the fork point (tip: or gen:); default: parent of revoked signer's earliest entry")
 	addClientFlags(cmd.Flags())
 	return cmd

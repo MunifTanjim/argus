@@ -116,26 +116,18 @@ func TestParseSignerKeysRejectsAWrongKindOfKey(t *testing.T) {
 	}
 }
 
-// The post-init signer commands still accept a name; keys must win there too.
-func TestResolveSignerArgsAcceptsBothFormsAndPrefersTheKey(t *testing.T) {
+// Every signer input is keys-only, post-init included: a name could only be turned
+// into a key through the gateway's roster, so revoking or adding a signer by name
+// would let the gateway decide which key you actually acted on.
+func TestSignerCommandsTakeOnlyKeys(t *testing.T) {
 	want := bytes.Repeat([]byte{0xD4}, 32)
-	rosterKey := bytes.Repeat([]byte{0xEE}, 32)
-	roster := []api.NodeDescriptor{{
-		ID:           "node-b",
-		Label:        "beta",
-		SignerPubKey: base64.StdEncoding.EncodeToString(rosterKey),
-	}}
 
-	byName, err := resolveSignerArgs(roster, []string{"beta"})
-	if err != nil || !bytes.Equal(byName[0], rosterKey) {
-		t.Fatalf("by name: got %x err %v", byName, err)
+	got, err := parseSignerKeys([]string{keyfmt.SignerKey.Encode(want)})
+	if err != nil || !bytes.Equal(got[0], want) {
+		t.Fatalf("key form: got %x err %v", got, err)
 	}
-	byKey, err := resolveSignerArgs(roster, []string{keyfmt.SignerKey.Encode(want)})
-	if err != nil || !bytes.Equal(byKey[0], want) {
-		t.Fatalf("by key: got %x err %v", byKey, err)
-	}
-	if _, err := resolveSignerArgs(roster, []string{"nope"}); err == nil {
-		t.Fatal("unknown name should error")
+	if _, err := parseSignerKeys([]string{"beta"}); err == nil {
+		t.Fatal("a node label must not resolve to a signer")
 	}
 }
 

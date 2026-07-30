@@ -46,12 +46,14 @@ $ argus lock sign gen:4f3a9c1e...
 error: device "gen:4f3a9c1e..." : expected a device key (devpub:), got a genesis hash (gen:)
 ```
 
-Most commands take either a node label/id or the corresponding key. `lock init` is
-the exception: it takes **only** `sigpub:` keys. A label can only
-become a key by way of the roster the **gateway** serves, and at init time no trust
-log exists yet to constrain that mapping — a hostile gateway could seat its own key
-in the genesis and hold a signing seat forever. A key read off `argus lock status`
-on the node itself never passes through the gateway.
+Device commands (`lock sign`, `lock revoke-device`) take either a node label/id or a
+`devpub:` key. Every **signer** input — `lock init`, `lock add-signer`,
+`lock remove-signer`, `lock revoke-signer` and its `--replacement` — takes **only** a
+`sigpub:` key. A label can only become a key by way of the roster the **gateway** serves. At init
+that lets a hostile gateway seat its own key in the genesis; afterwards it lets one
+decide which key you actually added, removed or revoked — revoking "node-b" by name
+could leave the compromised key in place and remove an honest one instead. A key read
+off `argus lock status` on the node itself never passes through the gateway.
 
 `lock init` takes the signer keys as positional arguments, and they are the
 **complete** set the new log will trust — including the key of the node you run it
@@ -218,7 +220,7 @@ requires the remaining trusted signers to out-vote the compromised one:
 
 ```sh
 # start (on the initiating signer node):
-argus lock revoke-signer <compromised-signer> --replacement <new-node>
+argus lock revoke-signer sigpub:<compromised> --replacement sigpub:<successor>
 
 # co-sign (on another signer node):
 argus lock revoke-signer --cosign <blob>
