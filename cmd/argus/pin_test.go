@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,7 +20,7 @@ func TestResolvePinPrefersConfig(t *testing.T) {
 	f := trustpin.New(filepath.Join(t.TempDir(), "trustlog-genesis"))
 	cfgG := testGenesis(0x77)
 
-	p, err := trustpin.Resolve(base64.StdEncoding.EncodeToString(cfgG), f)
+	p, err := trustpin.Resolve(trustpin.Encode(cfgG), f)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -32,7 +31,7 @@ func TestResolvePinPrefersConfig(t *testing.T) {
 
 func TestResolvePinRejectsShortConfigGenesis(t *testing.T) {
 	f := trustpin.New(filepath.Join(t.TempDir(), "trustlog-genesis"))
-	short := base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})
+	short := "gen:01020304"
 
 	_, err := trustpin.Resolve(short, f)
 	if err == nil {

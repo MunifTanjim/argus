@@ -15,12 +15,40 @@ argus lock init
 # check the state of this node:
 argus lock status
 
-# authorize another device (node label, or raw base64 identity pubkey):
+# authorize another device (node label, or a devpub: key):
 argus lock sign <device>
 
 # view the full trust-log history:
 argus lock log
 ```
+
+## Key formats
+
+Everything locked mode asks you to copy between machines is 32 bytes, so each kind
+carries a prefix that says what it is:
+
+| Prefix | What it is | Where it comes from |
+| --- | --- | --- |
+| `sigpub:` | signer key | `argus lock status` on the signing node |
+| `devpub:` | device (identity) key | `argus lock status` on that device |
+| `gen:` | genesis hash — the trust root | `argus lock init`, or `argus lock pin` |
+| `dis:` | disablement secret | `argus lock init`, shown once |
+| `tip:` | current chain tip, for audit | `argus lock status` / `argus lock log` |
+
+Commands reject a value of the wrong kind by name rather than accepting it because
+the length matches, so pasting a genesis hash where a device key belongs fails
+instead of silently authorizing something that does not exist:
+
+```
+$ argus lock sign gen:4f3a9c1e...
+error: device "gen:4f3a9c1e..." : expected a device key (devpub:), got a genesis hash (gen:)
+```
+
+Anywhere a command takes a node label or id, it also takes the corresponding key.
+That matters most at `lock init`: a label is resolved to a key through the roster
+the **gateway** serves, and at init time no trust log exists yet to constrain it.
+A key you read off `argus lock status` on the node itself does not go through the
+gateway at all.
 
 ## Key concepts
 
@@ -57,7 +85,7 @@ The command connects to the gateway, reads the offered trust-log branches, and s
 
 ```
 genesis offered by this network:
-  <base64>
+  gen:4f3a9c1e2d7b06a5f81c3e94d2b0a7c6e5194f8d3a2c7b60e91d48a2e5c3b7d1
   chisel cobra drumbeat eyeglass hamlet island keyboard mural
 
 Compare these words against `argus lock status` on a node you trust.
@@ -69,7 +97,7 @@ Before typing `y`, compare those words against the fingerprint shown by `argus l
 If you already know the genesis (for example, from `lock init` output), you can pin without a prompt:
 
 ```sh
-argus lock pin <genesis-b64>
+argus lock pin gen:<hex>
 ```
 
 An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
@@ -106,7 +134,7 @@ On a device pinned by `lock.genesis` in its config, `lock pin` refuses to write 
 If `lock.genesis` in the config and the persisted pin file name **different** genesis hashes, `argus` refuses to start:
 
 ```
-genesis pin conflict: lock.genesis is <X> but <path> holds <Y>; run `argus lock unpin` to drop the persisted pin
+genesis pin conflict: lock.genesis is gen:<X> but <path> holds gen:<Y>; run `argus lock unpin` to drop the persisted pin
 ```
 
 Run that command on the affected device:

@@ -9,11 +9,11 @@ package trustpin
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"os"
 
 	"github.com/MunifTanjim/argus/internal/atomicfile"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 )
 
 // GenesisLen is the byte length of a trust-log genesis hash (BLAKE2s-256).
@@ -86,17 +86,11 @@ func (f *File) Clear() error {
 	return nil
 }
 
-// Decode parses a base64 genesis hash as printed by `argus lock init`.
-func Decode(s string) ([]byte, error) {
-	b, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		return nil, fmt.Errorf("genesis is not valid base64: %w", err)
-	}
-	if len(b) != GenesisLen {
-		return nil, fmt.Errorf("genesis decoded to %d bytes, want %d", len(b), GenesisLen)
-	}
-	return b, nil
-}
+// Decode parses a genesis hash in the gen:<hex> form printed by `argus lock init`.
+func Decode(s string) ([]byte, error) { return keyfmt.Genesis.Decode(s) }
+
+// Encode renders a genesis hash for display.
+func Encode(genesis []byte) string { return keyfmt.Genesis.Encode(genesis) }
 
 // Resolve applies pin precedence: config wins, then the persisted file, then
 // unresolved. Config wins because it is the declarative source an operator
@@ -121,7 +115,7 @@ func Resolve(cfgGenesis string, f *File) (Pin, error) {
 	case fromCfg != nil && fromFile != nil && !bytes.Equal(fromCfg, fromFile):
 		return Pin{}, fmt.Errorf(
 			"genesis pin conflict: lock.genesis is %s but %s holds %s; run `argus lock unpin` to drop the persisted pin",
-			base64.StdEncoding.EncodeToString(fromCfg), f.path, base64.StdEncoding.EncodeToString(fromFile))
+			Encode(fromCfg), f.path, Encode(fromFile))
 	case fromCfg != nil:
 		return Pin{Genesis: fromCfg, Source: SourceConfig}, nil
 	case fromFile != nil:

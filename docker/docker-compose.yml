@@ -23,7 +23,7 @@ x-node-base: &node-base
     ARGUS_TOKEN: ${ARGUS_TOKEN:-devtoken}
     ARGUS_LOG_LEVEL: ${ARGUS_LOG_LEVEL:-info}
     ARGUS_LOG_FORMAT: ${ARGUS_LOG_FORMAT:-json}
-    # Locked mode: uncomment and set to the `lock.genesis` printed by
+    # Locked mode: uncomment and set to the gen:<hex> genesis printed by
     # `argus lock init`, then `docker compose up -d` to pin it (fail-closed).
     # ARGUS_LOCK_GENESIS: ${ARGUS_LOCK_GENESIS:-}
   restart: unless-stopped

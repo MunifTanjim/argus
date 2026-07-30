@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 )
 
 func TestLockInitFewSignersWarning(t *testing.T) {
@@ -106,6 +107,51 @@ func TestResolveSigners(t *testing.T) {
 	}
 }
 
+// A sigpub: key must be trusted as given, without consulting the roster at all.
+// At lock init the roster comes from the untrusted gateway and no trust log yet
+// constrains it, so a key collected out-of-band is the only gateway-independent
+// way to name a co-signer.
+func TestResolveSignersAcceptsAKeyWithoutTheRoster(t *testing.T) {
+	want := bytes.Repeat([]byte{0xD4}, 32)
+
+	got, err := resolveSigners(nil, []string{keyfmt.SignerKey.Encode(want)})
+	if err != nil {
+		t.Fatalf("resolveSigners: %v", err)
+	}
+	if len(got) != 1 || !bytes.Equal(got[0], want) {
+		t.Fatalf("resolved = %x, want %x", got, want)
+	}
+}
+
+// A roster that claims a different key for a named node cannot override an
+// explicitly supplied one — the key path must not consult the roster.
+func TestResolveSignersPrefersTheGivenKeyOverTheRoster(t *testing.T) {
+	want := bytes.Repeat([]byte{0xD4}, 32)
+	roster := []api.NodeDescriptor{{
+		ID:           keyfmt.SignerKey.Encode(want),
+		Label:        keyfmt.SignerKey.Encode(want),
+		SignerPubKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xEE}, 32)),
+	}}
+
+	got, err := resolveSigners(roster, []string{keyfmt.SignerKey.Encode(want)})
+	if err != nil {
+		t.Fatalf("resolveSigners: %v", err)
+	}
+	if !bytes.Equal(got[0], want) {
+		t.Fatalf("resolved = %x, want the supplied key %x", got[0], want)
+	}
+}
+
+func TestResolveSignersRejectsAWrongKindOfKey(t *testing.T) {
+	_, err := resolveSigners(nil, []string{keyfmt.DeviceKey.Encode(bytes.Repeat([]byte{0x01}, 32))})
+	if err == nil {
+		t.Fatal("a device key must not be accepted as a signer")
+	}
+	if !strings.Contains(err.Error(), "signer key") || !strings.Contains(err.Error(), "device key") {
+		t.Fatalf("error must name both kinds, got: %v", err)
+	}
+}
+
 func TestResolveDevice(t *testing.T) {
 	idA := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xA1}, 32))
 	roster := []api.NodeDescriptor{{ID: "node-a", Label: "alpha", IdentityPubKey: idA}}
@@ -118,19 +164,30 @@ func TestResolveDevice(t *testing.T) {
 	if base64.StdEncoding.EncodeToString(got) != idA {
 		t.Fatalf("resolved = %x", got)
 	}
-	// Raw base64 pubkey (32 bytes) passes through.
-	rawPub := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xB2}, 32))
+	// A devpub: key passes through.
+	rawPub := keyfmt.DeviceKey.Encode(bytes.Repeat([]byte{0xB2}, 32))
 	got, err = resolveDevice(roster, rawPub)
-	if err != nil || base64.StdEncoding.EncodeToString(got) != rawPub {
-		t.Fatalf("raw pubkey: got %x err %v", got, err)
+	if err != nil || keyfmt.DeviceKey.Encode(got) != rawPub {
+		t.Fatalf("device key: got %x err %v", got, err)
 	}
-	// Non-32-byte base64 → error.
-	if _, err := resolveDevice(roster, base64.StdEncoding.EncodeToString([]byte{1, 2, 3})); err == nil {
+	// Short devpub: body → error.
+	if _, err := resolveDevice(roster, "devpub:010203"); err == nil {
 		t.Fatal("short pubkey should error")
 	}
-	// Unknown non-base64 string → error.
+	// Unknown untagged string → error.
 	if _, err := resolveDevice(roster, "not-a-node-or-key!!"); err == nil {
 		t.Fatal("unresolvable device should error")
+	}
+	// A genesis hash is also 32 bytes: it must be refused by kind, not accepted.
+	err = func() error {
+		_, e := resolveDevice(roster, keyfmt.Genesis.Encode(bytes.Repeat([]byte{0xC3}, 32)))
+		return e
+	}()
+	if err == nil {
+		t.Fatal("a genesis hash must not resolve as a device")
+	}
+	if !strings.Contains(err.Error(), "genesis hash") || !strings.Contains(err.Error(), "device key") {
+		t.Fatalf("error must name both kinds, got: %v", err)
 	}
 	// Resolve by node ID → identity pubkey.
 	got, err = resolveDevice(roster, "node-a")
@@ -153,7 +210,7 @@ func TestLockSignHint(t *testing.T) {
 	if !strings.HasPrefix(hint, "argus lock sign ") {
 		t.Fatalf("hint %q does not start with 'argus lock sign '", hint)
 	}
-	encoded := base64.StdEncoding.EncodeToString(pub)
+	encoded := keyfmt.DeviceKey.Encode(pub)
 	if !strings.HasSuffix(hint, encoded) {
 		t.Fatalf("hint %q does not end with pubkey %s", hint, encoded)
 	}

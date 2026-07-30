@@ -2,7 +2,6 @@ package trustpin_test
 
 import (
 	"bytes"
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +68,7 @@ func TestLoadCorruptFileIsError(t *testing.T) {
 
 func TestDecode(t *testing.T) {
 	want := genesis(0x5C)
-	got, err := trustpin.Decode(base64.StdEncoding.EncodeToString(want))
+	got, err := trustpin.Decode(trustpin.Encode(want))
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
@@ -79,14 +78,14 @@ func TestDecode(t *testing.T) {
 	if _, err := trustpin.Decode("not!base64!"); err == nil {
 		t.Fatal("malformed base64 should error")
 	}
-	if _, err := trustpin.Decode(base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})); err == nil {
+	if _, err := trustpin.Decode("gen:01020304"); err == nil {
 		t.Fatal("a 4-byte genesis should error")
 	}
 }
 
 func TestResolvePrecedence(t *testing.T) {
 	cfgG, fileG := genesis(0x11), genesis(0x22)
-	cfgB64 := base64.StdEncoding.EncodeToString(cfgG)
+	cfgB64 := trustpin.Encode(cfgG)
 
 	t.Run("neither", func(t *testing.T) {
 		p, err := trustpin.Resolve("", trustpin.New(filepath.Join(t.TempDir(), "pin")))

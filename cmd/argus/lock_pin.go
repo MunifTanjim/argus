@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -45,7 +44,7 @@ func distinctGenesis(all [][]byte) [][]byte {
 // Anything other than y/yes declines, so a stray newline never pins a device.
 func confirmGenesis(r io.Reader, w io.Writer, genesis []byte) (bool, error) {
 	fmt.Fprintf(w, "genesis offered by this network:\n  %s\n  %s\n\n",
-		base64.StdEncoding.EncodeToString(genesis), fingerprintOf(genesis))
+		trustpin.Encode(genesis), fingerprintOf(genesis))
 	fmt.Fprintf(w, "Compare these words against `argus lock status` on a node you trust.\nPin this device to it? [y/N]: ")
 	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil && err != io.EOF {
@@ -87,9 +86,9 @@ func resolveGenesis(chains [][]byte) ([]byte, error) {
 	default:
 		var b strings.Builder
 		for _, g := range all {
-			fmt.Fprintf(&b, "\n  %s  %s", base64.StdEncoding.EncodeToString(g), fingerprintOf(g))
+			fmt.Fprintf(&b, "\n  %s  %s", trustpin.Encode(g), fingerprintOf(g))
 		}
-		return nil, fmt.Errorf("this gateway is offering %d different trust roots:%s\n\npin the right one explicitly: argus lock pin <genesis-b64>", len(all), b.String())
+		return nil, fmt.Errorf("this gateway is offering %d different trust roots:%s\n\npin the right one explicitly: argus lock pin gen:<hex>", len(all), b.String())
 	}
 }
 
@@ -153,7 +152,7 @@ func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) error {
 	if err := clientPinFile().Save(genesis); err != nil {
 		return err
 	}
-	shell.StdOutF("pinned this device\n  genesis: %s\n  %s\n", base64.StdEncoding.EncodeToString(genesis), fingerprintOf(genesis))
+	shell.StdOutF("pinned this device\n  genesis: %s\n  %s\n", trustpin.Encode(genesis), fingerprintOf(genesis))
 	if nodePinned {
 		shell.StdOutF("  local node pinned and enforcing\n")
 	}
@@ -203,7 +202,7 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 	}
 	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
 		return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  writing a different pin would make the next `argus` run fail with a genesis pin conflict;\n  remove lock.genesis from the config first",
-			base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+			trustpin.Encode(cfgGenesis), fingerprintOf(cfgGenesis))
 	}
 	return guardExistingPin(clientPinFile(), genesis)
 }
@@ -236,7 +235,7 @@ func pinFromNetwork(ctx context.Context, cfg *config.Config, in io.Reader, out i
 
 func newLockPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "pin [genesis-b64]",
+		Use:           "pin [gen:<hex>]",
 		Short:         "Pin this device to the network's trust-log genesis",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -279,7 +278,7 @@ func guardExistingPin(pf *trustpin.File, genesis []byte) error {
 		return nil
 	}
 	return fmt.Errorf("this device is already pinned to %s (%s); run `argus lock unpin` first",
-		base64.StdEncoding.EncodeToString(cur), fingerprintOf(cur))
+		trustpin.Encode(cur), fingerprintOf(cur))
 }
 
 // unpinSummary states what the device is actually left with. lock.genesis outranks
@@ -290,7 +289,7 @@ func unpinSummary(cfgGenesis []byte) string {
 		return "\nThis device now has no trust root. It will refuse all channels while the\nnetwork has a trust log, until you run `argus lock pin`.\n"
 	}
 	return fmt.Sprintf("\nlock.genesis in this device's config still pins it to\n  %s (%s)\nso it stays pinned and enforcing. Remove lock.genesis from the config to unpin\nthis device completely.\n",
-		base64.StdEncoding.EncodeToString(cfgGenesis), fingerprintOf(cfgGenesis))
+		trustpin.Encode(cfgGenesis), fingerprintOf(cfgGenesis))
 }
 
 // unpinLocalNode drops the node role's pin. A running node does it itself over the

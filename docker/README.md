@@ -97,15 +97,27 @@ Locked mode makes device authorization unforgeable even against an actively
 malicious gateway, via a signer-signed, hash-chained trust log.
 
 **Init on a signer node** (node-a reads the roster via `ARGUS_GATEWAY_URL`; add
-node-b and node-c as co-signers so recovery is possible):
+node-b and node-c as co-signers so recovery is possible). The `--signer` names here
+are the compose service names, which the harness passes through as each node's
+`--id`/`--label`:
 
 ```sh
 docker compose -f docker/docker-compose.yml exec node-a \
   argus lock init --signer node-b --signer node-c --gen-disablements 1
 ```
 
-Save the printed **`lock.genesis: <B64>`** and the **disablement secret** (shown
-once — it's your break-glass recovery key).
+A name is resolved to a signer key through the roster the **gateway** serves, and at
+init time there is no trust log yet to constrain that mapping. To take the gateway out
+of it, read each co-signer's key off the node itself and pass the key instead:
+
+```sh
+docker compose -f docker/docker-compose.yml exec node-b argus lock status   # this node signer: sigpub:<hex>
+docker compose -f docker/docker-compose.yml exec node-a \
+  argus lock init --signer sigpub:<node-b-hex> --signer sigpub:<node-c-hex> --gen-disablements 1
+```
+
+Save the printed **`genesis: gen:<hex>`** and the **disablement secret** (`dis:<hex>`,
+shown once — it's your break-glass recovery key).
 
 `lock init` pins both roles inside the node-a container (its node and its client).
 Every other device is unpinned and will quarantine.
@@ -138,7 +150,7 @@ they are spelled out here because that is what the commands actually need. The c
 container runs no node, so `lock pin` also notes that the local node is unreachable and
 pins the client role only — expected here.
 
-**Declarative alternative:** you can instead set `ARGUS_LOCK_GENESIS=<B64>` in
+**Declarative alternative:** you can instead set `ARGUS_LOCK_GENESIS=gen:<hex>` in
 `docker/.env` and uncomment the env var in `docker/docker-compose.yml` (both
 `x-node-base` and the `client` service). The env var takes precedence over the
 pinned file, which is useful for fleet-wide deployment where you want a single
@@ -153,8 +165,8 @@ identities, so `lock init` did not authorize it. Get its pubkey and sign it:
 
 ```sh
 docker compose -f docker/docker-compose.yml run --rm client lock status
-# prints this device's identity pubkey + the exact `argus lock sign <pubkey>` command
-docker compose -f docker/docker-compose.yml exec node-a argus lock sign <pubkey>
+# prints this device's devpub: key + the exact `argus lock sign <devpub:...>` command
+docker compose -f docker/docker-compose.yml exec node-a argus lock sign devpub:<hex>
 ```
 
 **Verify:**
@@ -184,7 +196,7 @@ docker compose -f docker/docker-compose.yml run --rm client
 #   -> roster is visible but NO node channels open (rejected)
 
 # authorize it, wait ~30s for the chain to sync, then it works
-docker compose -f docker/docker-compose.yml exec node-a argus lock sign <pubkey>
+docker compose -f docker/docker-compose.yml exec node-a argus lock sign devpub:<hex>
 docker compose -f docker/docker-compose.yml run --rm client
 #   -> now connects and lists sessions
 ```
@@ -192,7 +204,7 @@ docker compose -f docker/docker-compose.yml run --rm client
 Show **live revocation** kicking an authorized device off:
 
 ```sh
-docker compose -f docker/docker-compose.yml exec node-a argus lock revoke-device <pubkey>
+docker compose -f docker/docker-compose.yml exec node-a argus lock revoke-device devpub:<hex>
 # the client's open channels are torn down within a sync tick
 ```
 

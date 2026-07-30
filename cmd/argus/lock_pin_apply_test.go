@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -157,7 +156,7 @@ func networkGenesisNode(t *testing.T) (*config.Config, []byte) {
 func TestPinFromNetworkRefusesAGenesisThatContradictsTheConfig(t *testing.T) {
 	tempStateDir(t)
 	cfg, _ := networkGenesisNode(t)
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x77))
+	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x77))
 
 	err := pinFromNetwork(context.Background(), cfg, strings.NewReader("y\n"), io.Discard)
 
@@ -176,7 +175,7 @@ func TestPinFromNetworkRefusesAGenesisThatContradictsTheConfig(t *testing.T) {
 func TestPinFromNetworkPinsWhenTheConfigAgrees(t *testing.T) {
 	tempStateDir(t)
 	cfg, genesis := networkGenesisNode(t)
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(genesis)
+	cfg.Lock.Genesis = trustpin.Encode(genesis)
 
 	if err := pinFromNetwork(context.Background(), cfg, strings.NewReader("y\n"), io.Discard); err != nil {
 		t.Fatalf("pinning the genesis the config already names must be allowed: %v", err)
@@ -230,7 +229,7 @@ func TestClientPinLineReturnsWhenTheGatewayNeverAnswers(t *testing.T) {
 func TestGuardPinRefusesADifferentConfigGenesis(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{}
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x77))
+	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x77))
 
 	err := guardPin(cfg, testGenesis(0x88))
 
@@ -246,7 +245,7 @@ func TestGuardPinAllowsTheConfigGenesis(t *testing.T) {
 	tempStateDir(t)
 	genesis := testGenesis(0x99)
 	cfg := &config.Config{}
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(genesis)
+	cfg.Lock.Genesis = trustpin.Encode(genesis)
 
 	if err := guardPin(cfg, genesis); err != nil {
 		t.Fatalf("pinning the genesis the config already names must be allowed: %v", err)
@@ -382,7 +381,7 @@ func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
 func TestUnpinResolvesAConfigFileConflict(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x12))
+	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x12))
 	if err := clientPinFile().Save(testGenesis(0x13)); err != nil {
 		t.Fatalf("seed client pin: %v", err)
 	}
@@ -426,7 +425,7 @@ func TestUnpinClearsAFilePin(t *testing.T) {
 func TestUnpinClearsAStoppedNodesPinWhenTheConfigStillPinsIt(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
-	cfg.Lock.Genesis = base64.StdEncoding.EncodeToString(testGenesis(0x14))
+	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x14))
 	if err := nodePinFile().Save(testGenesis(0x15)); err != nil {
 		t.Fatalf("seed node pin: %v", err)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -136,15 +135,15 @@ func TestResolveGenesisMultipleRoots(t *testing.T) {
 	if !strings.Contains(msg, "2 different trust roots") {
 		t.Fatalf("error must say 2 different trust roots, got: %v", msg)
 	}
-	// Both genesis hashes — base64 and word fingerprint — must appear so the
+	// Both genesis hashes — encoded form and word fingerprint — must appear so the
 	// operator can identify which root is theirs and pass it explicitly.
 	for _, chain := range [][]byte{chain1, chain2} {
 		entries, _ := trustlog.UnmarshalChain(chain)
 		genesis := trustlog.HashEntry(&entries[0])
-		b64 := base64.StdEncoding.EncodeToString(genesis)
+		enc := trustpin.Encode(genesis)
 		fp := fingerprintOf(genesis)
-		if !strings.Contains(msg, b64) {
-			t.Errorf("error must contain base64 %s, got: %v", b64, msg)
+		if !strings.Contains(msg, enc) {
+			t.Errorf("error must contain %s, got: %v", enc, msg)
 		}
 		if !strings.Contains(msg, fp) {
 			t.Errorf("error must contain fingerprint %q, got: %v", fp, msg)

@@ -13,6 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
@@ -37,11 +38,25 @@ func findNode(roster []api.NodeDescriptor, name string) *api.NodeDescriptor {
 	return nil
 }
 
-// resolveSigners maps --signer names (node label or id) to their Ed25519 signer
-// pubkeys from the roster. Errors on an unknown name or a node with no signer key.
+// resolveSigners maps each --signer argument to an Ed25519 signer pubkey. A
+// sigpub: key is used as given; anything else is looked up in the roster by node
+// label or id.
+//
+// The distinction matters at init: the roster comes from the gateway, which is
+// untrusted and which no trust log yet constrains, so a name resolves through a
+// party that could substitute its own key into the genesis. A key collected
+// out-of-band from `argus lock status` on the node itself does not.
 func resolveSigners(roster []api.NodeDescriptor, names []string) ([][]byte, error) {
 	out := make([][]byte, 0, len(names))
 	for _, name := range names {
+		if keyfmt.Tagged(name) {
+			pub, err := keyfmt.SignerKey.Decode(name)
+			if err != nil {
+				return nil, fmt.Errorf("signer %q: %w", name, err)
+			}
+			out = append(out, pub)
+			continue
+		}
 		nd := findNode(roster, name)
 		if nd == nil {
 			return nil, fmt.Errorf("unknown node %q (not in roster)", name)
@@ -113,10 +128,10 @@ func newLockInitCmd() *cobra.Command {
 			}
 
 			// 3. Report.
-			tip := base64.StdEncoding.EncodeToString(res.Tip)
-			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", tip, res.SignerCount)
+			genesis := keyfmt.Genesis.Encode(res.Tip)
+			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", genesis, res.SignerCount)
 			for _, s := range res.DisablementSecrets {
-				shell.StdOutF("  disablement secret: %s\n", base64.StdEncoding.EncodeToString(s))
+				shell.StdOutF("  disablement secret: %s\n", keyfmt.Disablement.Encode(s))
 			}
 			if len(res.DisablementSecrets) > 0 {
 				shell.StdErrF("\nSAVE the disablement secret(s) above NOW — shown only once. Each one disables\nlocked mode network-wide (break-glass recovery if signer keys are lost).\n")
@@ -130,11 +145,11 @@ func newLockInitCmd() *cobra.Command {
 				shell.StdErrF("%s", w)
 			}
 			pinClientRole(cfg, res.Tip)
-			shell.StdOutF("\nTo pin your other devices, run on each of them:\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", tip)
+			shell.StdOutF("\nTo pin your other devices, run on each of them:\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", genesis)
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer node (label or id); repeatable")
+	cmd.Flags().StringArrayVar(&signers, "signer", nil, "additional signer: node label/id, or a sigpub: key read from 'argus lock status' on that node; repeatable")
 	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
 	addClientFlags(cmd.Flags())
 	return cmd
@@ -151,7 +166,7 @@ func pinClientRole(cfg *config.Config, genesis []byte) {
 		return
 	}
 	if err := clientPinFile().Save(genesis); err != nil {
-		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n  run here: argus lock pin %s\n", err, base64.StdEncoding.EncodeToString(genesis))
+		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n  run here: argus lock pin %s\n", err, keyfmt.Genesis.Encode(genesis))
 		return
 	}
 	shell.StdOutF("  this machine's client (TUI) role pinned to the same genesis\n")
@@ -178,7 +193,7 @@ func newLockStatusCmd() *cobra.Command {
 				if ierr != nil {
 					return fail(cmd, err) // surface the original node-dial error
 				}
-				pub := base64.StdEncoding.EncodeToString(kp.Public)
+				pub := keyfmt.DeviceKey.Encode(kp.Public)
 				shell.StdOutF("locked mode: (client — no local node)\n  this device identity: %s\n  to authorize, run on a signer node:\n    %s\n", pub, lockSignHint(kp.Public))
 				printClientPinStatus(ctx, cfg)
 				return nil
@@ -247,7 +262,7 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 // lockSignHint returns the "argus lock sign <pubkey>" instruction string for
 // the given raw Ed25519 public key. Used in enrollment / authorization hints.
 func lockSignHint(pub []byte) string {
-	return "argus lock sign " + base64.StdEncoding.EncodeToString(pub)
+	return "argus lock sign " + keyfmt.DeviceKey.Encode(pub)
 }
 
 // fetchRoster dials the gateway and returns nodes.list.
@@ -335,23 +350,23 @@ func printLockLogEntry(e api.LockLogEntry) {
 	case "genesis":
 		shell.StdOutF("[%d] genesis: %d signer(s)\n", e.Index, len(e.Signers))
 		for _, s := range e.Signers {
-			shell.StdOutF("  signer: %s\n", base64.StdEncoding.EncodeToString(s))
+			shell.StdOutF("  signer: %s\n", keyfmt.SignerKey.Encode(s))
 		}
 	case "add-signer":
-		shell.StdOutF("[%d] add-signer: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+		shell.StdOutF("[%d] add-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
 	case "remove-signer":
-		shell.StdOutF("[%d] remove-signer: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+		shell.StdOutF("[%d] remove-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
 	case "authorize-device":
-		shell.StdOutF("[%d] authorize-device: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+		shell.StdOutF("[%d] authorize-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
 	case "revoke-device":
-		shell.StdOutF("[%d] revoke-device: %s\n", e.Index, base64.StdEncoding.EncodeToString(e.Target))
+		shell.StdOutF("[%d] revoke-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
 	case "revoke-signer":
 		shell.StdOutF("[%d] revoke-signer: %d revoked, %d co-sign(s)\n", e.Index, len(e.Revoked), e.CoSignCount)
 		for _, r := range e.Revoked {
-			shell.StdOutF("  revoked: %s\n", base64.StdEncoding.EncodeToString(r))
+			shell.StdOutF("  revoked: %s\n", keyfmt.SignerKey.Encode(r))
 		}
 		for _, r := range e.Replaces {
-			shell.StdOutF("  replaces: %s\n", base64.StdEncoding.EncodeToString(r))
+			shell.StdOutF("  replaces: %s\n", keyfmt.SignerKey.Encode(r))
 		}
 	case "disable":
 		shell.StdOutF("[%d] disable\n", e.Index)
@@ -392,8 +407,8 @@ func newLockLogCmd() *cobra.Command {
 }
 
 // resolveDevice maps a device argument to a 32-byte identity pubkey: a roster node's
-// label or id resolves to its IdentityPubKey; otherwise the arg is parsed as a raw
-// base64 pubkey (which must be 32 bytes).
+// label or id resolves to its IdentityPubKey; otherwise the arg is parsed as a
+// devpub: key.
 func resolveDevice(roster []api.NodeDescriptor, arg string) ([]byte, error) {
 	if nd := findNode(roster, arg); nd != nil {
 		if nd.IdentityPubKey == "" {
@@ -405,9 +420,12 @@ func resolveDevice(roster []api.NodeDescriptor, arg string) ([]byte, error) {
 		}
 		return pub, nil
 	}
-	pub, err := base64.StdEncoding.DecodeString(arg)
-	if err != nil || len(pub) != 32 {
-		return nil, fmt.Errorf("device %q is neither a known node (label/id) nor a 32-byte base64 pubkey", arg)
+	if !keyfmt.Tagged(arg) {
+		return nil, fmt.Errorf("device %q is neither a known node (label/id) nor a %s key", arg, keyfmt.DeviceKey.Prefix())
+	}
+	pub, err := keyfmt.DeviceKey.Decode(arg)
+	if err != nil {
+		return nil, fmt.Errorf("device %q: %w", arg, err)
 	}
 	return pub, nil
 }
@@ -429,7 +447,7 @@ func newLockRemoveSignerCmd() *cobra.Command {
 func newLockSignerCmd(use, short, method string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           use + " <signer>",
-		Short:         short + " (node label/id or base64 signer pubkey)",
+		Short:         short + " (node label/id or sigpub: key)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -451,7 +469,7 @@ func newLockSignerCmd(use, short, method string) *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, base64.StdEncoding.EncodeToString(res.Tip))
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
 			return nil
 		},
 	}
@@ -466,7 +484,7 @@ func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, si
 func newLockDeviceCmd(use, short, method string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           use + " <device>",
-		Short:         short + " (node label/id or base64 identity pubkey)",
+		Short:         short + " (node label/id or devpub: key)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -498,7 +516,7 @@ func newLockDeviceCmd(use, short, method string) *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, base64.StdEncoding.EncodeToString(res.Tip))
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
 			return nil
 		},
 	}
@@ -513,7 +531,7 @@ func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, de
 
 // resolveSignerArgs resolves a list of signer arguments to 32-byte Ed25519 pubkeys.
 // Each arg is first tried against the roster (by node label or id); if that fails,
-// it is parsed as a raw base64 32-byte pubkey (mirroring the Phase-2 pattern).
+// it is parsed as a sigpub: key.
 func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, error) {
 	out := make([][]byte, 0, len(args))
 	for _, arg := range args {
@@ -522,12 +540,12 @@ func resolveSignerArgs(roster []api.NodeDescriptor, args []string) ([][]byte, er
 			out = append(out, pubs[0])
 			continue
 		}
-		raw, berr := base64.StdEncoding.DecodeString(arg)
-		if berr != nil || len(raw) != 32 {
-			if rerr != nil {
+		raw, berr := keyfmt.SignerKey.Decode(arg)
+		if berr != nil {
+			if rerr != nil && !keyfmt.Tagged(arg) {
 				return nil, fmt.Errorf("resolve signer %q: %w", arg, rerr)
 			}
-			return nil, fmt.Errorf("resolve signer %q: not a known node and not a valid 32-byte base64 pubkey", arg)
+			return nil, fmt.Errorf("resolve signer %q: %w", arg, berr)
 		}
 		out = append(out, raw)
 	}
@@ -589,7 +607,7 @@ func newLockRevokeSignerCmd() *cobra.Command {
 				if ferr != nil {
 					return fail(cmd, ferr)
 				}
-				shell.StdOutF("revocation applied\n  new tip (audit): %s\n", base64.StdEncoding.EncodeToString(res.Tip))
+				shell.StdOutF("revocation applied\n  new tip (audit): %s\n", keyfmt.Tip.Encode(res.Tip))
 				shell.StdErrF("\nRevocation propagates to the network within ~30s.\n")
 				return nil
 			}
@@ -645,9 +663,9 @@ func newLockRevokeSignerCmd() *cobra.Command {
 			}
 			var forkFromBytes []byte
 			if forkFrom != "" {
-				forkFromBytes, err = base64.StdEncoding.DecodeString(forkFrom)
+				forkFromBytes, err = keyfmt.DecodeAny(forkFrom, keyfmt.Tip, keyfmt.Genesis)
 				if err != nil {
-					return fail(cmd, fmt.Errorf("--fork-from: invalid base64: %w", err))
+					return fail(cmd, fmt.Errorf("--fork-from: %w", err))
 				}
 			}
 			res, serr := revokeSignerStartOnNode(ctx, cfg, api.LockRevokeSignerStartParams{
@@ -668,8 +686,8 @@ func newLockRevokeSignerCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cosignBlob, "cosign", "", "add this node's co-sign to a ceremony blob (from start or a prior --cosign)")
 	cmd.Flags().StringVar(&finishBlob, "finish", "", "finalize a completed ceremony blob and apply the revocation")
-	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer node (label/id or base64 pubkey); repeatable")
-	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "override the fork-point hash (base64); default: parent of revoked signer's earliest entry")
+	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer node (label/id or sigpub: key); repeatable")
+	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "override the fork point (tip: or gen:); default: parent of revoked signer's earliest entry")
 	addClientFlags(cmd.Flags())
 	return cmd
 }
@@ -686,9 +704,9 @@ func newLockDisableCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			secret, err := base64.StdEncoding.DecodeString(args[0])
+			secret, err := keyfmt.Disablement.Decode(args[0])
 			if err != nil {
-				return fail(cmd, fmt.Errorf("secret must be base64: %w", err))
+				return fail(cmd, err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -696,7 +714,7 @@ func newLockDisableCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			shell.StdOutF("locked mode disabled network-wide\n  current tip (audit): %s\n", base64.StdEncoding.EncodeToString(res.Tip))
+			shell.StdOutF("locked mode disabled network-wide\n  current tip (audit): %s\n", keyfmt.Tip.Encode(res.Tip))
 			return nil
 		},
 	}
@@ -728,18 +746,18 @@ func newLockLocalDisableCmd() *cobra.Command {
 	return cmd
 }
 
-func b64OrNone(b []byte) string {
+func keyOrNone(k keyfmt.Kind, b []byte) string {
 	if len(b) == 0 {
 		return "(none)"
 	}
-	return base64.StdEncoding.EncodeToString(b)
+	return k.Encode(b)
 }
 
 func printLockStatus(st api.LockStatusResult) {
 	if !st.Enabled {
 		shell.StdOutF("locked mode: disabled\n  this node signer: %s\n  this node identity: %s\n",
-			b64OrNone(st.SignerPubKey),
-			b64OrNone(st.IdentityPubKey))
+			keyOrNone(keyfmt.SignerKey, st.SignerPubKey),
+			keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
 		switch {
 		case st.Quarantined:
 			shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
@@ -756,7 +774,7 @@ func printLockStatus(st api.LockStatusResult) {
 		return
 	}
 	shell.StdOutF("locked mode: enabled\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
-		base64.StdEncoding.EncodeToString(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+		keyfmt.Tip.Encode(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
 	switch {
 	case st.Quarantined:
 		shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
@@ -770,7 +788,7 @@ func printLockStatus(st api.LockStatusResult) {
 	if len(st.Signers) > 0 {
 		shell.StdOutF("  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
 		for _, s := range st.Signers {
-			shell.StdOutF("    signer: %s\n", base64.StdEncoding.EncodeToString(s))
+			shell.StdOutF("    signer: %s\n", keyfmt.SignerKey.Encode(s))
 		}
 	}
 	if st.Disabled {
