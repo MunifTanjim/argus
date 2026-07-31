@@ -43,6 +43,10 @@ type Server struct {
 
 	trust *trustStore // opaque hold of the network's trust-log chain (blind)
 
+	// chatterRPCs counts trustlog.*, beacon.*, and nodes.list dispatches — the
+	// methods the chatter-reduction effort targets. Read via ChatterRPCCountForTest.
+	chatterRPCs atomic.Uint64
+
 	log *slog.Logger // connection/relay lifecycle logging; nil disables it
 }
 
@@ -258,6 +262,10 @@ func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
 }
 
+// ChatterRPCCountForTest returns the cumulative count of trustlog.*, beacon.*, and
+// nodes.list RPCs dispatched since the server started. Test-only.
+func (s *Server) ChatterRPCCountForTest() uint64 { return s.chatterRPCs.Load() }
+
 // SetLogger enables per-request logging on the client surface plus node-uplink and
 // relay-channel lifecycle logging (nil disables).
 func (s *Server) SetLogger(l *slog.Logger) {
@@ -311,6 +319,7 @@ func (s *Server) buildClientServer() *api.Server {
 	// nodes.list is the E2E discovery view: each node's id/label/caps + Noise pubkey
 	// + online flag. Additive alongside server.info.
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
+		s.chatterRPCs.Add(1)
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	})
 
@@ -318,6 +327,7 @@ func (s *Server) buildClientServer() *api.Server {
 	// The client ingests each branch and its genesis-pinned fork-choice picks the
 	// winner; the gateway never verifies or interprets the chain internals.
 	srv.Handle(api.MethodTrustLogPull, func(_ context.Context, params json.RawMessage) (any, error) {
+		s.chatterRPCs.Add(1)
 		chains, fps := s.trust.diff(pullKnown(params))
 		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	})
@@ -639,6 +649,10 @@ func (s *Server) serveNode(conn net.Conn) {
 			args = append(args, "err", err)
 		}
 		s.logger().Info("rpc", args...)
+		switch method {
+		case api.MethodTrustLogPull, api.MethodTrustLogOffer, api.MethodBeaconOffer:
+			s.chatterRPCs.Add(1)
+		}
 		return res, err
 	}
 
