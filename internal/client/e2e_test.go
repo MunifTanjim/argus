@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"net"
@@ -110,6 +111,10 @@ type fakeNode struct {
 	// beforeMsg2, when set, runs while the client is still blocked waiting for the
 	// handshake reply — the window in which its channel is not yet registered.
 	beforeMsg2 func()
+	// beacon state for courier-dedupe tests; zero-value means no beacon configured.
+	beaconPub  []byte
+	beaconPriv ed25519.PrivateKey
+	beaconCtr  uint64
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -118,12 +123,13 @@ type fakeNode struct {
 // Set chain before Connect to serve a trust-log chain from trustlog.pull.
 type fakeMultiGateway struct {
 	peer   *api.Peer
-	mu     sync.Mutex           // guards nodes/order: addNode races the peer read loop
+	mu     sync.Mutex           // guards nodes/order/deliveries: addNode races the peer read loop
 	nodes  map[string]*fakeNode // node id -> node
 	order  []*fakeNode          // stable nodes.list order
 	byChan map[string]*fakeNode // chan_id -> node
 	nextCh int
-	chain  []byte // served by trustlog.pull; nil = method-not-found
+	chain      []byte // served by trustlog.pull; nil = method-not-found
+	deliveries int    // total beacon.deliver calls received across all nodes
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -143,7 +149,7 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 			case api.MethodNodesList:
 				var descs []api.NodeDescriptor
 				for _, n := range g.snapshotNodes() {
-					descs = append(descs, g.descriptor(n))
+					descs = append(descs, g.nodeDescriptor(n))
 				}
 				return api.NodesListResult{Nodes: descs}, nil
 			case api.MethodRelayOpen:
@@ -185,10 +191,52 @@ func (g *fakeMultiGateway) node(id string) *fakeNode {
 	return g.nodes[id]
 }
 
-func (g *fakeMultiGateway) descriptor(n *fakeNode) api.NodeDescriptor {
+func (g *fakeMultiGateway) nodeDescriptor(n *fakeNode) api.NodeDescriptor {
 	return api.NodeDescriptor{
 		ID: n.id, Label: n.id + "-box", Online: true,
 		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
+	}
+}
+
+// beaconDeliveries returns the total number of beacon.deliver calls received
+// by all nodes managed by this gateway. Guarded by mu.
+func (g *fakeMultiGateway) beaconDeliveries() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.deliveries
+}
+
+// bumpBeaconCounter increments the beacon counter for the first node in order.
+// Call ingestBeaconFromDescriptor(gw.descriptor(0)) afterward to update the
+// client's stored beacon before the next deliverBeacons call.
+func (g *fakeMultiGateway) bumpBeaconCounter(t *testing.T) {
+	t.Helper()
+	g.mu.Lock()
+	if len(g.order) > 0 {
+		g.order[0].beaconCtr++
+	}
+	g.mu.Unlock()
+}
+
+// courierTestTip is the fixed tip used by descriptor when constructing beacons
+// for courier-dedupe tests.
+var courierTestTip = bytes.Repeat([]byte{0xab}, 32)
+
+// descriptor returns a NodeDescriptor for g.order[i] with a signed beacon
+// built from the node's beacon key and current counter. Used by courier tests.
+func (g *fakeMultiGateway) descriptor(i int) api.NodeDescriptor {
+	g.mu.Lock()
+	n := g.order[i]
+	pub := n.beaconPub
+	priv := n.beaconPriv
+	ctr := n.beaconCtr
+	g.mu.Unlock()
+	b := api.SignBeacon(priv, pub, courierTestTip, 1, ctr)
+	return api.NodeDescriptor{
+		ID:             n.id,
+		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
+		BeaconPubKey:   base64.StdEncoding.EncodeToString(pub),
+		Beacon:         &b,
 	}
 }
 
@@ -212,7 +260,7 @@ func (g *fakeMultiGateway) setChain(chain []byte) {
 // emitNodeEvent pushes a roster notification, the gateway's only signal that a
 // node's reachability changed.
 func (g *fakeMultiGateway) emitNodeEvent(evType string, n *fakeNode) {
-	nd := g.descriptor(n)
+	nd := g.nodeDescriptor(n)
 	nd.Online = evType != api.NodeEventOffline && evType != api.NodeEventRemoved
 	_ = g.peer.Notify(api.MethodNodeEvent, api.NodeEvent{Type: evType, Node: nd})
 }

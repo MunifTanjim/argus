@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -651,4 +652,82 @@ func TestEquivocationRequiresPersistence(t *testing.T) {
 			t.Fatal("two consecutive misses for the same foreign tip must set the equivocation flag")
 		}
 	})
+}
+
+// newCourierTestClient builds a connected E2EClient with n nodes and pre-ingested
+// beacons. Each node handler counts beacon.deliver calls via g.deliveries. Uses
+// the shared fakeMultiGateway from e2e_test.go so the counting helpers (beaconDeliveries,
+// bumpBeaconCounter, descriptor) are available on the returned gateway.
+func newCourierTestClient(t *testing.T, n int) (*E2EClient, *fakeMultiGateway) {
+	t.Helper()
+	var g *fakeMultiGateway
+	nodes := make([]*fakeNode, n)
+	for i := 0; i < n; i++ {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("ed25519.GenerateKey: %v", err)
+		}
+		nodes[i] = &fakeNode{
+			id:         fmt.Sprintf("n%d", i+1),
+			key:        mustKP(t),
+			beaconPub:  pub,
+			beaconPriv: priv,
+			beaconCtr:  1,
+			handle: func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+				if method == api.MethodBeaconDeliver {
+					g.mu.Lock()
+					g.deliveries++
+					g.mu.Unlock()
+				}
+				return nil, nil, nil
+			},
+		}
+	}
+	g, clientConn := newFakeMultiGateway(t, nodes...)
+	t.Cleanup(func() { g.peer.Close() })
+	m, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("NewE2EClient: %v", err)
+	}
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		m.ingestBeaconFromDescriptor(g.descriptor(i))
+	}
+	return m, g
+}
+
+// TestCourierSkipsUnchangedBeacons verifies that a second deliverBeacons call
+// with the same beacon counters sends nothing — each (source, target) pair is
+// skipped once the counter has been recorded.
+func TestCourierSkipsUnchangedBeacons(t *testing.T) {
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+
+	m.deliverBeacons()
+	first := gw.beaconDeliveries()
+	m.deliverBeacons()
+
+	if gw.beaconDeliveries() != first {
+		t.Fatalf("deliveries went %d -> %d; an unchanged beacon must not be re-sent", first, gw.beaconDeliveries())
+	}
+}
+
+// TestCourierDeliversAHigherCounter verifies that a beacon whose counter advanced
+// IS re-delivered even though a previous delivery for the same (source, target)
+// pair is already recorded.
+func TestCourierDeliversAHigherCounter(t *testing.T) {
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+	m.deliverBeacons()
+	before := gw.beaconDeliveries()
+
+	gw.bumpBeaconCounter(t) // same source, newer counter
+	m.ingestBeaconFromDescriptor(gw.descriptor(0))
+	m.deliverBeacons()
+
+	if gw.beaconDeliveries() <= before {
+		t.Fatal("a beacon with a higher counter must be delivered")
+	}
 }

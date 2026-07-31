@@ -114,6 +114,11 @@ type E2EClient struct {
 	everConnected map[string]bool // string(identityPub) → true, never deleted
 	equivocation  bool            // set permanently once divergence is detected
 
+	// delivered[sourceNodeID][targetNodeID] = counter of the last beacon successfully
+	// couriered from source to target. Guards against re-delivering the same beacon
+	// on every tick; a higher counter resets the skip. Guarded by mu.
+	delivered map[string]map[string]uint64
+
 	beaconKnownTip []byte          // caches known-set key; guarded by mu
 	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
 
@@ -147,6 +152,7 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		beaconMiss:    map[string]*beaconMissState{},
 		everConnected: map[string]bool{},
 		seenBranches:  map[[32]byte]bool{},
+		delivered:     map[string]map[string]uint64{},
 	}
 	if genesisHash != nil {
 		m.trust = trustlog.NewSyncStore(genesisHash)
@@ -521,6 +527,10 @@ func (m *E2EClient) reevaluateChannels() {
 			delete(m.beacons, key)
 			delete(m.beaconCtr, key)
 			delete(m.beaconMiss, key)
+			delete(m.delivered, nc.nodeID)
+			for srcID := range m.delivered {
+				delete(m.delivered[srcID], nc.nodeID)
+			}
 		}
 		m.mu.Unlock()
 		return
@@ -545,6 +555,10 @@ func (m *E2EClient) reevaluateChannels() {
 		delete(m.beacons, key)
 		delete(m.beaconCtr, key)
 		delete(m.beaconMiss, key)
+		delete(m.delivered, nc.nodeID)
+		for srcID := range m.delivered {
+			delete(m.delivered[srcID], nc.nodeID)
+		}
 	}
 	m.mu.Unlock()
 }
@@ -1103,6 +1117,10 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 		t.Stop()
 		delete(m.offlineTimers, nodeID)
 	}
+	delete(m.delivered, nodeID)
+	for srcID := range m.delivered {
+		delete(m.delivered[srcID], nodeID)
+	}
 	var events []registry.Event
 	sessions := m.nodeSessions[nodeID]
 	if gone {
@@ -1450,7 +1468,20 @@ func (m *E2EClient) deliverBeacons() {
 			if targetID == e.sourceID {
 				continue // don't deliver a node's own beacon back to itself
 			}
-			_ = m.callNode(targetID, api.MethodBeaconDeliver, b, nil)
+			m.mu.Lock()
+			skip := m.delivered[e.sourceID][targetID] >= b.Counter
+			m.mu.Unlock()
+			if skip {
+				continue
+			}
+			if m.callNode(targetID, api.MethodBeaconDeliver, b, nil) == nil {
+				m.mu.Lock()
+				if m.delivered[e.sourceID] == nil {
+					m.delivered[e.sourceID] = make(map[string]uint64)
+				}
+				m.delivered[e.sourceID][targetID] = b.Counter
+				m.mu.Unlock()
+			}
 		}
 	}
 }
