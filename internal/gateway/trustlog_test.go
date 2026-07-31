@@ -331,3 +331,84 @@ func TestTrustLogOfferPullCompetingForksThroughGateway(t *testing.T) {
 		t.Fatal("chain B missing from pull result")
 	}
 }
+
+// marshalChainForTest builds a marshalled chain of n entries.
+func marshalChainForTest(t *testing.T, n int) []byte {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	for i := 1; i < n; i++ {
+		dev := bytes.Repeat([]byte{byte(i)}, 32)
+		if err := log.AuthorizeDevice(dev, signer); err != nil {
+			t.Fatalf("AuthorizeDevice: %v", err)
+		}
+	}
+	return trustlog.MarshalChain(log.Entries())
+}
+
+func TestDiffWithholdsKnownBranches(t *testing.T) {
+	var ts trustStore
+	a := marshalChainForTest(t, 3)
+	b := marshalChainForTest(t, 5)
+	ts.offer(a)
+	ts.offer(b)
+
+	keyA := chainKey(a)
+	chains, fps := ts.diff([][]byte{keyA[:]})
+
+	if len(chains) != 1 || !bytes.Equal(chains[0], b) {
+		t.Fatalf("diff returned %d chains, want only the unknown one", len(chains))
+	}
+	if len(fps) != 2 {
+		t.Fatalf("fingerprints = %d, want all 2 branches regardless of Known", len(fps))
+	}
+}
+
+func TestDiffWithNoKnownReturnsEverything(t *testing.T) {
+	var ts trustStore
+	a := marshalChainForTest(t, 3)
+	ts.offer(a)
+
+	chains, fps := ts.diff(nil)
+
+	if len(chains) != 1 || len(fps) != 1 {
+		t.Fatalf("chains=%d fps=%d, want 1 and 1", len(chains), len(fps))
+	}
+}
+
+func TestDiffOrdersByDescendingEntryCount(t *testing.T) {
+	var ts trustStore
+	short := marshalChainForTest(t, 2)
+	long := marshalChainForTest(t, 6)
+	ts.offer(short)
+	ts.offer(long)
+
+	chains, _ := ts.diff(nil)
+
+	if len(chains) != 2 || !bytes.Equal(chains[0], long) {
+		t.Fatal("diff must return the longest branch first, like all()")
+	}
+}
+
+func TestFingerprintsIsStableAndComplete(t *testing.T) {
+	var ts trustStore
+	a := marshalChainForTest(t, 3)
+	ts.offer(a)
+	ts.offer(a) // re-offer of a known branch
+
+	fps := ts.fingerprints()
+
+	if len(fps) != 1 {
+		t.Fatalf("fingerprints = %d, want 1 (a re-offer is not a new branch)", len(fps))
+	}
+	want := chainKey(a)
+	if !bytes.Equal(fps[0], want[:]) {
+		t.Fatalf("fingerprint = %x, want %x", fps[0], want)
+	}
+}

@@ -104,3 +104,51 @@ func (t *trustStore) all() [][]byte {
 	}
 	return out
 }
+
+// diff returns the retained branches whose fingerprint is absent from known,
+// longest first, together with the fingerprints of every branch held. Callers use
+// the fingerprint list to notice a branch the gateway lost (restart, cap eviction)
+// and re-offer it.
+//
+// The comparison is over opaque content hashes: the gateway learns nothing about a
+// chain by performing it.
+func (t *trustStore) diff(known [][]byte) (chains [][]byte, fingerprints [][]byte) {
+	skip := make(map[[32]byte]bool, len(known))
+	for _, k := range known {
+		if len(k) != 32 {
+			continue
+		}
+		var key [32]byte
+		copy(key[:], k)
+		skip[key] = true
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	type keyed struct {
+		key   [32]byte
+		entry branchEntry
+	}
+	es := make([]keyed, 0, len(t.branches))
+	for k, v := range t.branches {
+		es = append(es, keyed{key: k, entry: v})
+	}
+	sort.Slice(es, func(i, j int) bool { return es[i].entry.count > es[j].entry.count })
+
+	fingerprints = make([][]byte, 0, len(es))
+	for _, e := range es {
+		fp := e.key
+		fingerprints = append(fingerprints, append([]byte(nil), fp[:]...))
+		if skip[e.key] {
+			continue
+		}
+		chains = append(chains, append([]byte(nil), e.entry.bytes...))
+	}
+	return chains, fingerprints
+}
+
+// fingerprints returns the content hash of every retained branch.
+func (t *trustStore) fingerprints() [][]byte {
+	_, fps := t.diff(nil)
+	return fps
+}
