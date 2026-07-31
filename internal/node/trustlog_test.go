@@ -237,3 +237,98 @@ func TestEnableTrustLogIgnoresCorruptDisk(t *testing.T) {
 		t.Fatal("DeviceAuthorized should be false when no chain was loaded")
 	}
 }
+
+// The second sync must not re-download a branch, and must not re-offer a chain the
+// gateway confirms it holds.
+func TestSyncIsQuietWhenNothingChanged(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	fp := branchFingerprint(chain)
+
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+
+	d.syncTrustOnce(peer)
+	firstOffers := peer.offers
+	d.syncTrustOnce(peer)
+
+	if peer.offers != firstOffers {
+		t.Fatalf("offers went %d -> %d; a chain the gateway already holds must not be re-offered", firstOffers, peer.offers)
+	}
+	if len(peer.lastKnown) == 0 {
+		t.Fatal("the second pull must send the fingerprints already seen")
+	}
+}
+
+// If the gateway loses the branch, the node must notice and re-offer.
+func TestNodeReoffersWhenGatewayForgets(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.syncTrustOnce(peer)
+	before := peer.offers
+
+	peer.fingerprints = nil // gateway restarted: it holds nothing
+	peer.chains = nil
+	d.syncTrustOnce(peer)
+
+	if peer.offers <= before {
+		t.Fatal("a gateway that no longer lists our fingerprint must trigger a re-offer")
+	}
+}
+
+// An old gateway returns no Fingerprints at all. That is not "holds nothing".
+func TestOldGatewayStillGetsOffers(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, legacy: true}
+
+	d.syncTrustOnce(peer)
+	d.syncTrustOnce(peer)
+
+	if peer.offers < 2 {
+		t.Fatalf("offers = %d; against a gateway with no Fingerprints the node must offer unconditionally", peer.offers)
+	}
+}
+
+type recordingTrustPeer struct {
+	chains       [][]byte
+	fingerprints [][]byte
+	legacy       bool // omit Fingerprints entirely, like a gateway that predates them
+	offers       int
+	pulls        int
+	lastKnown    [][]byte
+}
+
+func (p *recordingTrustPeer) Call(method string, params, out any) error {
+	switch method {
+	case api.MethodTrustLogOffer:
+		p.offers++
+	case api.MethodTrustLogPull:
+		p.pulls++
+		if pp, ok := params.(api.TrustLogPullParams); ok {
+			p.lastKnown = pp.Known
+		}
+		res, ok := out.(*api.TrustLogPullResult)
+		if !ok {
+			return nil
+		}
+		res.Chains = p.chains
+		if !p.legacy {
+			res.Fingerprints = p.fingerprints
+		}
+	}
+	return nil
+}

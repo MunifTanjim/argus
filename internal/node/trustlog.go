@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/blake2s"
+
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -64,6 +66,45 @@ func (d *Node) TrustStore() *trustlog.SyncStore { return d.trust.Load() }
 // enabling locked mode. Call at boot so a later live lock.init has a target path.
 func (d *Node) SetTrustChainPath(path string) { d.trustPath = path }
 
+// branchFingerprint is the content hash the gateway keys branches by. It must match
+// gateway.chainKey exactly or every pull re-downloads.
+func branchFingerprint(chain []byte) [32]byte { return blake2s.Sum256(chain) }
+
+// knownFingerprints returns the fingerprints of branches already received, for the
+// pull request. Guarded by pinMu alongside the rest of the trust decision state.
+func (d *Node) knownFingerprints() [][]byte {
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
+	out := make([][]byte, 0, len(d.seenBranches))
+	for k := range d.seenBranches {
+		fp := k
+		out = append(out, append([]byte(nil), fp[:]...))
+	}
+	return out
+}
+
+// rememberBranch records a fingerprint as received. Branches that fail to verify are
+// recorded too: fingerprints are content-addressed, so identical bytes can never
+// become valid later, and re-fetching them forever is the waste this removes.
+func (d *Node) rememberBranch(chain []byte) {
+	fp := branchFingerprint(chain)
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
+	if d.seenBranches == nil {
+		d.seenBranches = map[[32]byte]bool{}
+	}
+	d.seenBranches[fp] = true
+}
+
+func containsFingerprint(list [][]byte, want [32]byte) bool {
+	for _, f := range list {
+		if len(f) == 32 && bytes.Equal(f, want[:]) {
+			return true
+		}
+	}
+	return false
+}
+
 // syncTrustOnce runs one offer/pull cycle over peer: publish our current chain
 // (if any), then pull all retained gateway branches and ingest each in order.
 // The genesis-pinned store's fork-choice accepts the best valid branch; invalid
@@ -74,21 +115,47 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 		d.detectUnpinnedChain(peer)
 		return
 	}
-	if mine := st.Bytes(); mine != nil {
-		_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
-	}
 	var got api.TrustLogPullResult
-	if err := peer.Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
+	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
 		return
+	}
+	// Offer only when the gateway does not list our chain. A nil Fingerprints means
+	// the gateway predates the field, so fall back to offering unconditionally.
+	// Write this as an explicit switch, NOT as a single boolean: the natural
+	// spelling (`held := got.Fingerprints == nil`) inverts the legacy case and
+	// silently stops offering to an old gateway forever.
+	preMine := st.Bytes()
+	if preMine != nil {
+		switch {
+		case got.Fingerprints == nil:
+			_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: preMine}, nil)
+		case !containsFingerprint(got.Fingerprints, branchFingerprint(preMine)):
+			_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: preMine}, nil)
+		}
 	}
 	anyChanged := false
 	for _, chain := range got.Chains {
+		d.rememberBranch(chain)
 		changed, err := st.Ingest(chain)
 		if err != nil {
 			continue // rollback/fork/tamper/wrong-genesis: skip this branch
 		}
 		if changed {
 			anyChanged = true
+		}
+	}
+	// When the store was empty before this pull and we just ingested our first
+	// chain, offer it now so the gateway sees our state on the same tick.
+	// Without this, a node that adopts a pin on a live network stays silent for
+	// an entire sync interval before it can offer.
+	if anyChanged && preMine == nil {
+		if mine := st.Bytes(); mine != nil {
+			switch {
+			case got.Fingerprints == nil:
+				_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
+			case !containsFingerprint(got.Fingerprints, branchFingerprint(mine)):
+				_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
+			}
 		}
 	}
 	if anyChanged {
@@ -239,10 +306,11 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 		return
 	}
 	var got api.TrustLogPullResult
-	if err := peer.Call(api.MethodTrustLogPull, nil, &got); err != nil {
+	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
 		return
 	}
 	for _, chain := range got.Chains {
+		d.rememberBranch(chain)
 		entries, err := trustlog.UnmarshalChain(chain)
 		if err != nil || len(entries) == 0 {
 			continue
