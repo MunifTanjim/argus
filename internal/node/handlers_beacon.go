@@ -60,7 +60,10 @@ func (d *Node) handleBeaconDeliver(_ context.Context, params json.RawMessage) (a
 	d.peerBeaconMu.Lock()
 	defer d.peerBeaconMu.Unlock()
 	if !d.peerBeaconPubs[key] {
-		return nil, nil // unknown beacon pub: drop
+		// Signal non-acceptance so the client courier retries on the next tick
+		// instead of recording this as delivered. The gap is transient: syncRoster
+		// runs at connect and every rosterSyncEvery trust ticks.
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown beacon pub: roster sync pending"}
 	}
 	if b.Counter <= d.peerBeaconCtr[key] {
 		return nil, nil // stale or replayed: ignore

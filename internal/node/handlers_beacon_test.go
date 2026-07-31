@@ -142,7 +142,8 @@ func TestHandleBeaconDeliverDropsBadSig(t *testing.T) {
 }
 
 // TestHandleBeaconDeliverDropsUnknownPub verifies that a beacon whose
-// BeaconPub is not in the roster-known set is silently dropped.
+// BeaconPub is not in the roster-known set is dropped and a non-nil error is
+// returned so the client courier does not record the delivery and retries next tick.
 func TestHandleBeaconDeliverDropsUnknownPub(t *testing.T) {
 	d, _, _ := setupNodeWithTrust(t)
 	pub, priv := genBeaconKeyPair(t)
@@ -152,8 +153,8 @@ func TestHandleBeaconDeliverDropsUnknownPub(t *testing.T) {
 	b := api.SignBeacon(priv, pub, tip, 1, 1)
 
 	_, err := d.handleBeaconDeliver(context.Background(), marshalBeacon(t, b))
-	if err != nil {
-		t.Fatalf("handleBeaconDeliver must not error for unknown pub: %v", err)
+	if err == nil {
+		t.Fatal("handleBeaconDeliver must return an error for unknown pub so the client retries")
 	}
 	d.peerBeaconMu.Lock()
 	_, stored := d.peerBeacons[string(pub)]
@@ -300,7 +301,8 @@ func TestHandleBeaconDeliverBenignLagClears(t *testing.T) {
 
 // TestBeaconDeliverRemoteDispatchAllowed verifies that beacon.deliver passes
 // through remoteDispatch (the E2E responder path) and is not blocked like
-// lock.* methods.
+// lock.* methods. The beacon's pub is not registered so an unknown-pub error
+// is expected; only CodeMethodNotFound indicates the method is blocked.
 func TestBeaconDeliverRemoteDispatchAllowed(t *testing.T) {
 	d := newNode(nil)
 	remote := d.remoteDispatch()
@@ -314,7 +316,7 @@ func TestBeaconDeliverRemoteDispatchAllowed(t *testing.T) {
 		if ok && rpcErr.Code == api.CodeMethodNotFound {
 			t.Fatal("beacon.deliver must not be blocked by remoteDispatch (must be reachable over E2E)")
 		}
-		t.Fatalf("unexpected error from remoteDispatch(beacon.deliver): %v", err)
+		// CodeInvalidRequest (unknown pub) is expected — the method reached the handler.
 	}
 }
 

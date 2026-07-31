@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -729,5 +730,155 @@ func TestCourierDeliversAHigherCounter(t *testing.T) {
 
 	if gw.beaconDeliveries() <= before {
 		t.Fatal("a beacon with a higher counter must be delivered")
+	}
+}
+
+// TestCourierDoesNotRecordRejectedDelivery verifies that a rejected delivery
+// (non-nil error from callNode) does not advance m.delivered, so the next tick
+// retries. This guards against the silent-drop window where a node's roster is
+// not yet synced and it returns an error for an unknown beacon pub.
+func TestCourierDoesNotRecordRejectedDelivery(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		n1calls int
+	)
+	// n1 rejects the first beacon.deliver with an RPCError (simulating unknown-pub),
+	// then accepts on the second call.
+	n1 := &fakeNode{
+		id:  "n1",
+		key: mustKP(t),
+		handle: func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+			if method != api.MethodBeaconDeliver {
+				return nil, nil, nil
+			}
+			mu.Lock()
+			n1calls++
+			first := n1calls == 1
+			mu.Unlock()
+			if first {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "not ready"}, nil
+			}
+			return nil, nil, nil
+		},
+	}
+	n2pub, n2priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	n2 := &fakeNode{
+		id:         "n2",
+		key:        mustKP(t),
+		beaconPub:  n2pub,
+		beaconPriv: n2priv,
+		beaconCtr:  1,
+		handle: func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+			return nil, nil, nil
+		},
+	}
+
+	gw, clientConn := newFakeMultiGateway(t, n1, n2)
+	defer gw.peer.Close()
+
+	m, merr := NewE2EClient(clientConn)
+	if merr != nil {
+		t.Fatalf("NewE2EClient: %v", merr)
+	}
+	defer m.Close()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	m.ingestBeaconFromDescriptor(gw.descriptor(1)) // n2's beacon, to be delivered to n1
+
+	// First delivery: n1 rejects. Counter must NOT be recorded.
+	m.deliverBeacons()
+	m.mu.Lock()
+	afterReject := m.delivered["n2"]["n1"]
+	m.mu.Unlock()
+	if afterReject != 0 {
+		t.Fatalf("rejected delivery must not record counter: delivered[n2][n1]=%d", afterReject)
+	}
+
+	// Second delivery: n1 accepts. Counter must now be recorded (retry confirmed).
+	m.deliverBeacons()
+	m.mu.Lock()
+	afterAccept := m.delivered["n2"]["n1"]
+	m.mu.Unlock()
+	if afterAccept == 0 {
+		t.Fatal("accepted delivery must record the counter")
+	}
+
+	mu.Lock()
+	calls := n1calls
+	mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("n1 must be called twice (reject + retry); got %d", calls)
+	}
+}
+
+// TestCourierDeliveredPrunedOnNodeLoss verifies that loseNode clears the
+// departing node from m.delivered — both as a source row and as a target
+// column — so a node that leaves and rejoins receives a fresh delivery rather
+// than being permanently skipped by a stale dedupe entry.
+func TestCourierDeliveredPrunedOnNodeLoss(t *testing.T) {
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+
+	// Deliver once so m.delivered is populated.
+	m.deliverBeacons()
+
+	gw.mu.Lock()
+	n1ID := gw.order[0].id
+	n2ID := gw.order[1].id
+	gw.mu.Unlock()
+
+	m.mu.Lock()
+	ctrN2toN1 := m.delivered[n2ID][n1ID]
+	m.mu.Unlock()
+	if ctrN2toN1 == 0 {
+		t.Skip("no delivery was recorded; cannot test prune")
+	}
+
+	// Save n1's channel handle before losing it, so we can restore byNode/byChanID
+	// and confirm a fresh delivery reaches the now-rejoined n1.
+	m.mu.Lock()
+	n1nc := m.byNode[n1ID]
+	var n1chanID string
+	if n1nc != nil {
+		if ch := n1nc.ch.Load(); ch != nil {
+			n1chanID = ch.ID()
+		}
+	}
+	m.mu.Unlock()
+
+	m.loseNode(n1ID, false) // prunes n1 from delivered
+
+	m.mu.Lock()
+	_, sourceRow := m.delivered[n1ID]
+	targetEntry := m.delivered[n2ID][n1ID]
+	m.mu.Unlock()
+
+	if sourceRow {
+		t.Error("loseNode must delete the departing node's source row from m.delivered")
+	}
+	if targetEntry != 0 {
+		t.Error("loseNode must clear the departing node from every source's target map")
+	}
+
+	// Restore n1 to byNode/byChanID (simulating a reconnect) and verify that
+	// the next deliverBeacons re-delivers — the pruned state means no skip.
+	m.mu.Lock()
+	if n1nc != nil {
+		m.byNode[n1ID] = n1nc
+		if n1chanID != "" {
+			m.byChanID[n1chanID] = n1nc
+		}
+	}
+	m.mu.Unlock()
+
+	beforeRejoin := gw.beaconDeliveries()
+	m.deliverBeacons()
+	if gw.beaconDeliveries() <= beforeRejoin {
+		t.Fatal("rejoining node must receive a fresh beacon delivery after the prune")
 	}
 }

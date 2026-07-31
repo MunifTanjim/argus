@@ -62,6 +62,11 @@ type pendingReply struct {
 // same tip required before the equivocation flag is set.
 const beaconMissThreshold = 2
 
+// beaconDeliverForceEvery mirrors node.rosterSyncEvery: a full re-courier is
+// forced every this many deliverBeacons calls so transient acceptance failures
+// (e.g. the target's roster not yet synced) resolve within ~N×30s at worst.
+const beaconDeliverForceEvery = 10
+
 // beaconMissState tracks consecutive unreconciled ticks for a single node's beacon tip.
 type beaconMissState struct {
 	tip    []byte
@@ -116,8 +121,10 @@ type E2EClient struct {
 
 	// delivered[sourceNodeID][targetNodeID] = counter of the last beacon successfully
 	// couriered from source to target. Guards against re-delivering the same beacon
-	// on every tick; a higher counter resets the skip. Guarded by mu.
-	delivered map[string]map[string]uint64
+	// on every tick; a higher counter resets the skip. A full re-courier is forced
+	// every beaconDeliverForceEvery calls (deliverTick tracks that count). Guarded by mu.
+	delivered   map[string]map[string]uint64
+	deliverTick uint64
 
 	beaconKnownTip []byte          // caches known-set key; guarded by mu
 	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
@@ -1435,10 +1442,17 @@ func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes, tip []byte) {
 
 // deliverBeacons couriers each collected node beacon to every OTHER connected
 // node via the beacon.deliver E2E method. A node's own beacon is never delivered
-// back to that same node. Delivery is best-effort (errors silently ignored) and
-// sequential — the use case is N=2–5 nodes and a 30-second interval.
+// back to that same node. Each (source, target) pair is deduped by the counter
+// last successfully delivered: a beacon is only sent when its counter advances or
+// the target rejected a prior attempt. Every beaconDeliverForceEvery calls a full
+// re-courier is forced regardless, bounding the window in which a transient
+// node-side rejection (e.g. roster not yet synced) leaves a target without a
+// beacon. Delivery is sequential — the use case is N=2–5 nodes and a 30-second
+// interval.
 func (m *E2EClient) deliverBeacons() {
 	m.mu.Lock()
+	m.deliverTick++
+	forceAll := m.deliverTick%beaconDeliverForceEvery == 0
 	// Build identity pub → nodeID index from current channels.
 	identToNode := make(map[string]string, len(m.byNode))
 	for nodeID, nc := range m.byNode {
@@ -1468,11 +1482,13 @@ func (m *E2EClient) deliverBeacons() {
 			if targetID == e.sourceID {
 				continue // don't deliver a node's own beacon back to itself
 			}
-			m.mu.Lock()
-			skip := m.delivered[e.sourceID][targetID] >= b.Counter
-			m.mu.Unlock()
-			if skip {
-				continue
+			if !forceAll {
+				m.mu.Lock()
+				skip := m.delivered[e.sourceID][targetID] >= b.Counter
+				m.mu.Unlock()
+				if skip {
+					continue
+				}
 			}
 			if m.callNode(targetID, api.MethodBeaconDeliver, b, nil) == nil {
 				m.mu.Lock()
