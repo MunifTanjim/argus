@@ -258,7 +258,7 @@ func TestPinClientRolePinsTheMachineThatRanLockInit(t *testing.T) {
 	tempStateDir(t)
 	genesis := testGenesis(0xAB)
 
-	pinClientRole(&config.Config{}, genesis)
+	pinClientRole(&config.Config{}, genesis, false)
 
 	pin, err := clientPinFile().Load()
 	if err != nil || !bytes.Equal(pin, genesis) {
@@ -273,11 +273,44 @@ func TestPinClientRoleLeavesAConflictingPinAlone(t *testing.T) {
 		t.Fatalf("seed client pin: %v", err)
 	}
 
-	pinClientRole(&config.Config{}, testGenesis(0xEF))
+	pinClientRole(&config.Config{}, testGenesis(0xEF), false)
 
 	pin, err := clientPinFile().Load()
 	if err != nil || !bytes.Equal(pin, existing) {
 		t.Fatalf("client pin = %x (%v), want the untouched %x", pin, err, existing)
+	}
+}
+
+// Re-initing over a disabled log leaves the client pinned to a dead genesis, which
+// would dark-dashboard the very machine that just relocked the network.
+func TestPinClientRoleReplacesTheStalePinOnReinit(t *testing.T) {
+	tempStateDir(t)
+	if err := clientPinFile().Save(testGenesis(0xCD)); err != nil {
+		t.Fatalf("seed client pin: %v", err)
+	}
+	fresh := testGenesis(0xEF)
+
+	pinClientRole(&config.Config{}, fresh, true)
+
+	pin, err := clientPinFile().Load()
+	if err != nil || !bytes.Equal(pin, fresh) {
+		t.Fatalf("client pin = %x (%v), want %x", pin, err, fresh)
+	}
+}
+
+// A config pin is the operator's own declaration, so re-init must not overwrite it
+// behind their back — the next `argus` run would die on the conflict.
+func TestPinClientRoleKeepsTheConfigPinOnReinit(t *testing.T) {
+	tempStateDir(t)
+	declared := testGenesis(0xCD)
+	cfg := &config.Config{}
+	cfg.Lock.Genesis = trustpin.Encode(declared)
+
+	pinClientRole(cfg, testGenesis(0xEF), true)
+
+	pin, err := clientPinFile().Load()
+	if err != nil || pin != nil {
+		t.Fatalf("client pin = %x (%v), want no pin file written", pin, err)
 	}
 }
 

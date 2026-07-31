@@ -201,10 +201,19 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 		return err
 	}
 	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
-		return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  writing a different pin would make the next `argus` run fail with a genesis pin conflict;\n  remove lock.genesis from the config first",
-			trustpin.Encode(cfgGenesis), fingerprintOf(cfgGenesis))
+		return configPinConflict(cfgGenesis)
 	}
 	return guardExistingPin(clientPinFile(), genesis)
+}
+
+func configPinConflict(cfgGenesis []byte) error {
+	return fmt.Errorf("this device is pinned by config: lock.genesis is %s (%s)\n  writing a different pin would make the next `argus` run fail with a genesis pin conflict;\n  remove lock.genesis from the config first",
+		trustpin.Encode(cfgGenesis), fingerprintOf(cfgGenesis))
+}
+
+func existingPinConflict(cur []byte) error {
+	return fmt.Errorf("this device is already pinned to %s (%s); run `argus lock unpin` first",
+		trustpin.Encode(cur), fingerprintOf(cur))
 }
 
 // pinFromNetwork is the bare `argus lock pin`: pull the genesis this network offers,
@@ -277,8 +286,7 @@ func guardExistingPin(pf *trustpin.File, genesis []byte) error {
 	if cur == nil || bytes.Equal(cur, genesis) {
 		return nil
 	}
-	return fmt.Errorf("this device is already pinned to %s (%s); run `argus lock unpin` first",
-		trustpin.Encode(cur), fingerprintOf(cur))
+	return existingPinConflict(cur)
 }
 
 // unpinSummary states what the device is actually left with. lock.genesis outranks

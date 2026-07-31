@@ -192,6 +192,11 @@ func newLockInitCmd() *cobra.Command {
 				devices = append(devices, d.pub)
 			}
 
+			// A disabled log is a dead network that lock.init replaces with a new
+			// genesis, so the pins pointing at it are stale rather than conflicting.
+			prior, _ := lockStatusOnNode(ctx, cfg)
+			reinit := prior.Enabled && prior.Disabled
+
 			// 2. lock.init on the local node.
 			res, err := lockInitOnNode(ctx, cfg, api.LockInitParams{Signers: sigPubs, Devices: devices, GenDisablements: genDisablements})
 			if err != nil {
@@ -215,7 +220,11 @@ func newLockInitCmd() *cobra.Command {
 			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
 				shell.StdErrF("%s", w)
 			}
-			pinClientRole(cfg, res.Tip)
+			pinClientRole(cfg, res.Tip, reinit)
+			if reinit {
+				shell.StdOutF("\nThis replaced a disabled trust log, so every device still pinned to the old\ngenesis must be repinned, run on each of them:\n  argus lock unpin\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", genesis)
+				return nil
+			}
 			shell.StdOutF("\nTo pin your other devices, run on each of them:\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", genesis)
 			return nil
 		},
@@ -231,13 +240,40 @@ func newLockInitCmd() *cobra.Command {
 // dashboard on the very machine that locked the network quarantines itself on the next
 // tick. It is never a hard failure: the node is locked either way, and the operator
 // gets the exact command to finish the job.
-func pinClientRole(cfg *config.Config, genesis []byte) {
-	if err := guardPin(cfg, genesis); err != nil {
+//
+// replaceStale overwrites a pin left over from a disabled log, matching what the node
+// does to its own pin: the genesis came from this machine's node over its local socket
+// and the operator asked for it, so the file pin has no more standing than the node's.
+// A config pin (lock.genesis) is still refused — that one is the operator's to edit.
+func pinClientRole(cfg *config.Config, genesis []byte, replaceStale bool) {
+	note := func(err error) {
 		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n", err)
+	}
+	cfgGenesis, err := configPin(cfg)
+	if err != nil {
+		note(err)
+		return
+	}
+	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
+		note(configPinConflict(cfgGenesis))
+		return
+	}
+	prior, err := clientPinFile().Load()
+	if err != nil {
+		note(err)
+		return
+	}
+	stale := prior != nil && !bytes.Equal(prior, genesis)
+	if stale && !replaceStale {
+		note(existingPinConflict(prior))
 		return
 	}
 	if err := clientPinFile().Save(genesis); err != nil {
 		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n  run here: argus lock pin %s\n", err, keyfmt.Genesis.Encode(genesis))
+		return
+	}
+	if stale {
+		shell.StdOutF("  this machine's client (TUI) role repinned from the disabled genesis %s\n", keyfmt.Genesis.Encode(prior))
 		return
 	}
 	shell.StdOutF("  this machine's client (TUI) role pinned to the same genesis\n")

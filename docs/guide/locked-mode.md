@@ -89,6 +89,14 @@ device with no pin cannot tell whether the chain carrying the disable entry is t
 real one, so it keeps refusing channels. Recover a quarantined node with
 `argus lock pin` or `argus lock local-disable`, not with `lock disable`.
 
+A disabled log is terminal — it can never be re-enabled. To lock the network again,
+run `argus lock init` once more: it creates a **new** genesis over the disabled one.
+That is a new trust root. The machine you run it on repins both of its roles (node
+and TUI client) to the new genesis automatically; every **other** device pinned to
+the old one must run `argus lock unpin` and then `argus lock pin` before it will
+connect again. A device pinned by `lock.genesis` in its config is never repinned for
+you — edit the config there.
+
 ## Pinning the genesis
 
 The **genesis pin** is a 32-byte hash that tells a device which trust log it belongs to. Without it, a device on a locked network has no way to know which chain is authoritative and will refuse all E2E channels — a deliberate fail-closed posture.
