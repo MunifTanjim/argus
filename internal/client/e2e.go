@@ -116,6 +116,12 @@ type E2EClient struct {
 
 	beaconKnownTip []byte          // caches known-set key; guarded by mu
 	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
+
+	// triggerMu guards the rate-limiter state for beacon-triggered pulls. Kept
+	// separate from mu so notification handling never contends with the main lock.
+	triggerMu             sync.Mutex
+	lastTriggeredPull     time.Time
+	triggeredPullInFlight bool
 }
 
 // NewE2EClientWithGate is NewE2EClientWithIdentity plus a caller-owned quarantine
@@ -854,6 +860,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	}
 }
 
+// minClientTriggeredPullInterval bounds how often a beacon can cause a pull.
+const minClientTriggeredPullInterval = 5 * time.Second
+
 // clientTrustSyncInterval is how often the client re-pulls the trust-log chain.
 // Stored as nanoseconds in an atomic so SetTrustSyncIntervalForTest is race-free
 // when background goroutines read it concurrently.
@@ -1197,13 +1206,40 @@ func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) {
 	}
 	key := string(identityPub)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if b.Counter <= m.beaconCtr[key] {
+		m.mu.Unlock()
 		return // stale or replayed: ignore
 	}
 	m.beacons[key] = b
 	m.beaconCtr[key] = b.Counter
 	delete(m.beaconMiss, key) // counter advanced: new beacon supersedes any miss streak
+	beaconTip := b.Tip
+	m.mu.Unlock()
+
+	if m.trust == nil || len(beaconTip) == 0 {
+		return
+	}
+	if bytes.Equal(beaconTip, m.trust.Tip()) {
+		return
+	}
+
+	m.triggerMu.Lock()
+	if time.Since(m.lastTriggeredPull) < minClientTriggeredPullInterval || m.triggeredPullInFlight {
+		m.triggerMu.Unlock()
+		return
+	}
+	m.lastTriggeredPull = time.Now()
+	m.triggeredPullInFlight = true
+	m.triggerMu.Unlock()
+
+	go func() {
+		defer func() {
+			m.triggerMu.Lock()
+			m.triggeredPullInFlight = false
+			m.triggerMu.Unlock()
+		}()
+		m.syncTrustLog()
+	}()
 }
 
 // buildChainHashSet parses chainBytes and returns the set of all entry hashes

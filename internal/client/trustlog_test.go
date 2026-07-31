@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"sync"
@@ -20,6 +21,7 @@ type gatewayStats struct {
 	mu              sync.Mutex
 	lastKnownLen    int
 	chainsServedCnt int
+	pullsCnt        int
 }
 
 func (s *gatewayStats) lastKnownCount() int {
@@ -32,6 +34,12 @@ func (s *gatewayStats) chainsServed() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.chainsServedCnt
+}
+
+func (s *gatewayStats) pulls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pullsCnt
 }
 
 // trustGatewayConn is one end of a net.Pipe running a minimal gateway that answers
@@ -63,6 +71,7 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 
 					stats.mu.Lock()
 					stats.lastKnownLen = len(params.Known)
+					stats.pullsCnt++
 					stats.mu.Unlock()
 
 					mu.Lock()
@@ -185,4 +194,47 @@ func TestClientDoesNotRefetchAKnownBranch(t *testing.T) {
 	if got := stats.chainsServed(); got > 1 {
 		t.Fatalf("chains served = %d, want the branch sent at most once", got)
 	}
+}
+
+// descriptorWithBeaconForTest builds an api.NodeDescriptor with a validly-signed
+// beacon carrying the given tip, using fresh throwaway keys.
+func descriptorWithBeaconForTest(t *testing.T, tip []byte) api.NodeDescriptor {
+	t.Helper()
+	nodeKey := mustKP(t)
+	bPub, bPriv := genBeaconKey(t)
+	b := api.SignBeacon(bPriv, bPub, tip, 1, 1)
+	return api.NodeDescriptor{
+		IdentityPubKey: base64.StdEncoding.EncodeToString(nodeKey.Public),
+		BeaconPubKey:   base64.StdEncoding.EncodeToString(bPub),
+		Beacon:         &b,
+	}
+}
+
+func TestBeaconWithUnknownTipTriggersAPull(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(10 * time.Minute)) // prove the timer is not what pulled
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+
+	signer, _ := trustlog.GenerateSigner()
+	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	chain := trustlog.MarshalChain(log.Entries())
+
+	ch := make(chan []byte, 1)
+	ch <- chain
+	conn, stats := trustGatewayConnWithStats(t, ch)
+	m, err := NewE2EClientWithIdentity(conn, mustKP(t), log.Tip(), "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	before := stats.pulls()
+
+	// A beacon announcing a tip this client has never ingested.
+	m.ingestBeaconFromDescriptor(descriptorWithBeaconForTest(t, bytes.Repeat([]byte{0xAB}, 32)))
+
+	waitClient(t, "triggered pull issued", func() bool {
+		return stats.pulls() > before
+	})
 }

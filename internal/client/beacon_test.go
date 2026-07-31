@@ -345,7 +345,12 @@ func TestClientBeaconCrossCheck(t *testing.T) {
 			return ok && b.Counter == 2
 		})
 
-		c.syncTrustLog() // tick 1: miss=1, not yet flagged (could still be propagation lag)
+		// The unknown tip triggers an immediate pull (tick 1: miss=1, not yet flagged).
+		waitClient(t, "triggered pull settled", func() bool {
+			c.triggerMu.Lock()
+			defer c.triggerMu.Unlock()
+			return !c.triggeredPullInFlight
+		})
 		if c.Equivocation() {
 			t.Fatal("first miss must not set equivocation flag (requires 2 consecutive)")
 		}
@@ -613,7 +618,12 @@ func TestEquivocationRequiresPersistence(t *testing.T) {
 			return ok && b.Counter == 1
 		})
 
-		c.syncTrustLog() // tick 1: client has genesis only → tip absent → miss=1
+		// The unknown tip triggers an immediate pull (tick 1: miss=1, not yet flagged).
+		waitClient(t, "triggered pull settled", func() bool {
+			c.triggerMu.Lock()
+			defer c.triggerMu.Unlock()
+			return !c.triggeredPullInFlight
+		})
 		if c.Equivocation() {
 			t.Fatal("single miss must not set equivocation flag (could be propagation lag)")
 		}
