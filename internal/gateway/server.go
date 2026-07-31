@@ -215,6 +215,9 @@ func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
 	if ch != nil && ch.client == src {
+		if f.Method == api.MethodBeaconDeliver {
+			s.chatterRPCs.Add(1)
+		}
 		s.enqueue(ch, ch.toNode, f.Raw)
 	}
 }
@@ -575,6 +578,8 @@ func pullKnown(params json.RawMessage) [][]byte {
 // clients are supplicants and must not publish trust state.
 func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
+	case api.MethodNodesList:
+		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	case api.MethodTrustLogOffer:
 		p, err := api.Decode[api.TrustLogChain](params)
 		if err != nil {
@@ -650,7 +655,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		}
 		s.logger().Info("rpc", args...)
 		switch method {
-		case api.MethodTrustLogPull, api.MethodTrustLogOffer, api.MethodBeaconOffer:
+		case api.MethodNodesList, api.MethodTrustLogPull, api.MethodTrustLogOffer, api.MethodBeaconOffer:
 			s.chatterRPCs.Add(1)
 		}
 		return res, err
