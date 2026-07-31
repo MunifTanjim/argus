@@ -695,7 +695,7 @@ type TrustLogPullResult struct {
 	//
 	// Absent (nil) means the gateway predates this field — not "no branches". A
 	// caller must not treat the two the same: doing so re-offers on every tick.
-	Fingerprints [][]byte `json:"fingerprints,omitempty"`
+	Fingerprints [][]byte `json:"fingerprints"`
 }
 
 // LockDeviceParams identifies a device to authorize/revoke by its Curve25519
