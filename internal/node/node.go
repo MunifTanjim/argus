@@ -134,13 +134,13 @@ type Node struct {
 	activeResponder   atomic.Pointer[relayResponder] // the current uplink responder, if any
 	keepaliveInterval time.Duration                  // node↔gateway keepalive interval; 0 → api.DefaultKeepaliveInterval
 
-	// triggerMu guards the rate-limiter state for gateway-triggered pulls. Kept
-	// separate from pinMu so notification handling never contends with the pin
-	// decision or file I/O.
-	triggerMu             sync.Mutex
-	lastTriggeredPull     time.Time
-	triggeredPullInFlight bool        // true while a notified pull goroutine is running
-	testTriggerPeer       trustCaller // test-only override for triggerPeer; nil = use activeUplink
+	// Rate limiters for work an untrusted party can ask for: a gateway
+	// trustlog.changed hint, and a courier delivering a beacon this node cannot yet
+	// attribute. Each has its own lock so neither contends with the pin decision.
+	trustPullTrigger triggerLimiter
+	rosterTrigger    triggerLimiter
+
+	testTriggerPeer atomic.Pointer[trustCaller] // test override for triggerPeer
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node

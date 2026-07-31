@@ -29,7 +29,11 @@ import (
 // when background goroutines read it concurrently.
 var trustSyncInterval atomic.Int64
 
-func init() { trustSyncInterval.Store(int64(5 * time.Minute)) }
+func init() {
+	trustSyncInterval.Store(int64(5 * time.Minute))
+	rosterSyncIntervalNs.Store(int64(5 * time.Minute))
+	triggeredPullIntervalNs.Store(int64(5 * time.Second))
+}
 
 // SetTrustSyncIntervalForTest overrides the node's trust-log sync cadence. Test-only.
 func SetTrustSyncIntervalForTest(d time.Duration) { trustSyncInterval.Store(int64(d)) }
@@ -110,19 +114,34 @@ func containsFingerprint(list [][]byte, want [32]byte) bool {
 	return false
 }
 
-// syncTrustOnce runs one offer/pull cycle over peer: publish our current chain
+// syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
+// the node's own timer may call it: the N=2 equivocation guard counts consecutive
+// ticks, so anything an untrusted party can provoke must use pullTrustOnce instead.
+func (d *Node) syncTrustOnce(peer trustCaller) {
+	if !d.pullTrustOnce(peer) {
+		return
+	}
+	// Cross-check stored peer beacons against the resolved chain on every tick
+	// (regardless of whether the chain advanced) so the N=2 persistence guard
+	// accumulates correctly.
+	d.checkPeerBeaconConsistency()
+}
+
+// pullTrustOnce runs one offer/pull cycle over peer: publish our current chain
 // (if any), then pull all retained gateway branches and ingest each in order.
 // The genesis-pinned store's fork-choice accepts the best valid branch; invalid
 // or rolled-back branches are silently skipped. A single advance triggers persist.
-func (d *Node) syncTrustOnce(peer trustCaller) {
+// Returns false when there was nothing to reconcile against — no store (the
+// unpinned detection path ran instead) or a failed pull.
+func (d *Node) pullTrustOnce(peer trustCaller) bool {
 	st := d.trust.Load()
 	if st == nil {
 		d.detectUnpinnedChain(peer)
-		return
+		return false
 	}
 	var got api.TrustLogPullResult
 	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
-		return
+		return false
 	}
 	anyChanged := false
 	for _, chain := range got.Chains {
@@ -157,10 +176,7 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 			}
 		}
 	}
-	// Cross-check stored peer beacons against the resolved chain on every tick
-	// (regardless of whether the chain advanced) so the N=2 persistence guard
-	// accumulates correctly.
-	d.checkPeerBeaconConsistency()
+	return true
 }
 
 // persistChain writes chain bytes to trustPath atomically via atomicfile.Write.
@@ -202,9 +218,10 @@ func (d *Node) runTrustSync(ctx context.Context, peer *api.Peer) {
 // enabled live via lock.init begins syncing without a reconnect. syncTrustOnce is a
 // no-op while the store is unset.
 //
-// Roster sync (for peer beacon attribution) runs once at startup and every
-// rosterSyncEvery trust ticks, so peerBeaconPubs stays current without adding
-// an extra RPC to every tight-interval test tick.
+// Roster sync (for peer beacon attribution) runs on its own rosterSyncInterval
+// clock, not as a multiple of the trust tick: an unattributed peer's beacons are
+// rejected outright, so that latency must not follow whatever the trust backstop
+// is tuned to, and it must not scale down with a tight-interval test tick either.
 func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
 	// Populate roster-known beacon pubs before the first trust sync so that
 	// any beacon.deliver calls arriving immediately after connect are attributed.
@@ -212,25 +229,32 @@ func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
 	d.syncTrustOnce(peer)
 	t := time.NewTicker(time.Duration(trustSyncInterval.Load()))
 	defer t.Stop()
-	ticks := 0
+	rt := time.NewTicker(rosterSyncInterval())
+	defer rt.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			ticks++
 			d.syncTrustOnce(peer)
-			if ticks%rosterSyncEvery == 0 {
-				d.syncRoster(peer)
-			}
+		case <-rt.C:
+			d.syncRoster(peer)
 		}
 	}
 }
 
-// rosterSyncEvery controls how often the roster is re-fetched relative to the
-// trust-sync tick. 10 means one nodes.list per 10 trust ticks (e.g. once per
-// 50 minutes at the default 5 m interval). A reconnect always refreshes.
-const rosterSyncEvery = 10
+// rosterSyncIntervalNs is how often peer beacon attribution is refreshed. A node
+// that joined after the last sync has every beacon rejected as "unknown beacon
+// pub" until the next one, so this bounds how long a new node stays outside the
+// anti-equivocation cross-check. A reconnect always refreshes.
+// Stored as nanoseconds in an atomic so setRosterSyncIntervalForTest is race-free
+// when the sync loop reads it concurrently.
+var rosterSyncIntervalNs atomic.Int64
+
+func rosterSyncInterval() time.Duration { return time.Duration(rosterSyncIntervalNs.Load()) }
+
+// setRosterSyncIntervalForTest overrides the roster refresh cadence. Test-only.
+func setRosterSyncIntervalForTest(d time.Duration) { rosterSyncIntervalNs.Store(int64(d)) }
 
 // genesisHashPath is the state file holding the pinned genesis hash, kept beside
 // the chain so a node's locked state is self-contained in its state dir.
@@ -362,55 +386,72 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	return nil
 }
 
-// minTriggeredPullInterval bounds how often a gateway notification can cause a pull.
+// triggeredPullIntervalNs bounds how often a gateway notification can cause a pull.
 // Without it, a hostile gateway turns one notification into unbounded work — the
-// notification is untrusted, so it must not be able to amplify.
-const minTriggeredPullInterval = 5 * time.Second
+// notification is untrusted, so it must not be able to amplify. Suppressed
+// notifications are coalesced into one deferred pull, never queued, so the bound
+// holds under a flood.
+// Stored as nanoseconds in an atomic so setTriggeredPullIntervalForTest is race-free
+// when background goroutines read it concurrently.
+var triggeredPullIntervalNs atomic.Int64
+
+func minTriggeredPullInterval() time.Duration {
+	return time.Duration(triggeredPullIntervalNs.Load())
+}
+
+// setTriggeredPullIntervalForTest overrides the notification rate-limit window so a
+// test can observe deferral without waiting out the production window. Test-only.
+func setTriggeredPullIntervalForTest(d time.Duration) { triggeredPullIntervalNs.Store(int64(d)) }
 
 // onGatewayNotify handles gateway→node notifications. The only one is a hint that
 // the trust log moved; everything else is ignored.
 //
-// The pull runs off the read loop (go syncTrustOnce) because notifications are
-// dispatched synchronously — calling peer.Call on the same peer inline would
-// deadlock waiting for a response only the read loop can deliver.
+// The notification only schedules work — it never advances the equivocation state
+// machine, so a forged one changes when the node pulls, not what it concludes.
 func (d *Node) onGatewayNotify(n api.Notification) {
 	if n.Method != api.MethodTrustLogChanged {
 		return
 	}
-	// Resolve the peer before acquiring triggerMu: no stamp when there is nothing
-	// to pull against (e.g. during a reconnect gap).
-	peer := d.triggerPeer()
-	if peer == nil {
+	// Resolve the peer first: nothing to schedule when there is nothing to pull
+	// against (e.g. during a reconnect gap).
+	if d.triggerPeer() == nil {
 		return
 	}
-	d.triggerMu.Lock()
-	if time.Since(d.lastTriggeredPull) < minTriggeredPullInterval || d.triggeredPullInFlight {
-		d.triggerMu.Unlock()
-		return
-	}
-	d.lastTriggeredPull = time.Now()
-	d.triggeredPullInFlight = true
-	d.triggerMu.Unlock()
-
-	go func() {
-		defer func() {
-			d.triggerMu.Lock()
-			d.triggeredPullInFlight = false
-			d.triggerMu.Unlock()
-		}()
-		d.syncTrustOnce(peer)
-	}()
+	d.trustPullTrigger.request(minTriggeredPullInterval(), func() {
+		// The peer is resolved at run time, not at notification time: a deferred pull
+		// must use whichever uplink is live when it fires.
+		peer := d.triggerPeer()
+		if peer == nil {
+			return
+		}
+		// pullTrustOnce, not syncTrustOnce: a gateway-driven pull must not clock the
+		// consistency check, or the gateway could drive peerBeaconMiss to its
+		// threshold at whatever rate it chooses to notify.
+		d.pullTrustOnce(peer)
+	})
 }
 
-// triggerPeer returns the peer the notification-triggered pull should use: the
-// test override when set, otherwise the live gateway uplink. Returns nil (not a
-// typed nil) when no peer is available, so callers can guard with peer != nil.
+// requestRosterSync refreshes peer beacon attribution out of band, for when a
+// courier delivers a beacon signed by a key this node cannot place — normally a
+// peer that joined since the last roster tick. Rate-limited because the trigger
+// comes from an untrusted client.
+func (d *Node) requestRosterSync() {
+	if d.triggerPeer() == nil {
+		return
+	}
+	d.rosterTrigger.request(minTriggeredPullInterval(), func() {
+		if peer := d.triggerPeer(); peer != nil {
+			d.syncRoster(peer)
+		}
+	})
+}
+
+// triggerPeer returns the peer an event-triggered RPC should use: the test
+// override when set, otherwise the live gateway uplink. Returns nil (not a typed
+// nil) when no peer is available, so callers can guard with peer != nil.
 func (d *Node) triggerPeer() trustCaller {
-	d.triggerMu.Lock()
-	tp := d.testTriggerPeer
-	d.triggerMu.Unlock()
-	if tp != nil {
-		return tp
+	if tp := d.testTriggerPeer.Load(); tp != nil {
+		return *tp
 	}
 	if p := d.activeUplink.Load(); p != nil {
 		return p
@@ -418,13 +459,9 @@ func (d *Node) triggerPeer() trustCaller {
 	return nil
 }
 
-// setTriggerPeerForTest installs a trustCaller used by onGatewayNotify in place
-// of the live uplink. Test-only.
-func (d *Node) setTriggerPeerForTest(p trustCaller) {
-	d.triggerMu.Lock()
-	d.testTriggerPeer = p
-	d.triggerMu.Unlock()
-}
+// setTriggerPeerForTest installs a trustCaller used by the event-driven pull and
+// roster refresh in place of the live uplink. Test-only.
+func (d *Node) setTriggerPeerForTest(p trustCaller) { d.testTriggerPeer.Store(&p) }
 
 // DropPin clears the pin, the persisted chain, and the trust store. A node that
 // held a chain quarantines immediately — waiting for the next detection tick would

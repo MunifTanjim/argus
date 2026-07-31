@@ -93,9 +93,11 @@ const (
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
 	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
 	// did not previously hold has been offered. It is a hint with no authority: the
-	// node's response is to pull and verify against its pinned genesis, exactly as a
-	// timer tick would. A forged or withheld notification changes only when that
-	// happens, never what the node accepts.
+	// node's response is to pull and verify against its pinned genesis. It buys the
+	// gateway strictly less than a timer tick does — the pull is rate-limited and it
+	// deliberately omits the peer-beacon consistency check, which only the node's own
+	// clock may advance. A forged or withheld notification changes only when the pull
+	// happens, never what the node accepts or concludes.
 	MethodTrustLogChanged = "trustlog.changed" // gateway->node notification: TrustLogChangedParams
 	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
 	// for blind relay on the roster/node.event stream. The gateway never verifies it.

@@ -206,8 +206,14 @@ func TestRunTrustSyncPollsLiveEnable(t *testing.T) {
 	fp := &fakePeer{pullChain: chain}
 	// runTrustSync must NOT early-return when trust is nil; start it, then enable.
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go d.runTrustSyncLoop(ctx, fp) // test-only loop over trustCaller (see note)
+	// Wait the loop out before TempDir cleanup: a persist still in flight when the
+	// context ends would otherwise recreate the chain file under RemoveAll.
+	loopDone := make(chan struct{})
+	t.Cleanup(func() { cancel(); <-loopDone })
+	go func() {
+		defer close(loopDone)
+		d.runTrustSyncLoop(ctx, fp) // test-only loop over trustCaller (see note)
+	}()
 
 	// Enable after the loop is already running.
 	ss := trustlog.NewSyncStore(head)
@@ -312,15 +318,28 @@ type recordingTrustPeer struct {
 	chains       [][]byte
 	fingerprints [][]byte
 	legacy       bool // omit Fingerprints entirely, like a gateway that predates them
+	roster       []api.NodeDescriptor // served by nodes.list
 	offers       int
 	pulls        int
+	rosters      int
 	lastKnown    [][]byte
+}
+
+func (p *recordingTrustPeer) rosterCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rosters
 }
 
 func (p *recordingTrustPeer) Call(method string, params, out any) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch method {
+	case api.MethodNodesList:
+		p.rosters++
+		if res, ok := out.(*api.NodesListResult); ok {
+			res.Nodes = p.roster
+		}
 	case api.MethodTrustLogOffer:
 		p.offers++
 	case api.MethodTrustLogPull:
@@ -354,12 +373,13 @@ func TestTriggeredPullIsRateLimited(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
 	}
-	// Wait for any in-flight pull goroutine to complete before asserting.
-	waitFor(t, "no pull in flight", func() bool {
-		d.triggerMu.Lock()
-		defer d.triggerMu.Unlock()
-		return !d.triggeredPullInFlight
+	t.Cleanup(d.trustPullTrigger.stop) // the single deferred pull outlives this test
+	waitFor(t, "the immediate pull happens", func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return peer.pulls >= 1
 	})
+	time.Sleep(200 * time.Millisecond) // still well inside the window
 
 	peer.mu.Lock()
 	pulls := peer.pulls
@@ -411,9 +431,7 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 	// First notification: should trigger a pull.
 	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
 	waitFor(t, "first pull completes", func() bool {
-		d.triggerMu.Lock()
-		defer d.triggerMu.Unlock()
-		return !d.triggeredPullInFlight
+		return d.trustPullTrigger.idle()
 	})
 	peer.mu.Lock()
 	after1 := peer.pulls
@@ -422,24 +440,8 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 		t.Fatalf("after first notify: pulls = %d, want 1", after1)
 	}
 
-	// Second notification within the window: must be suppressed.
-	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
-	waitFor(t, "no second pull in flight", func() bool {
-		d.triggerMu.Lock()
-		defer d.triggerMu.Unlock()
-		return !d.triggeredPullInFlight
-	})
-	peer.mu.Lock()
-	after2 := peer.pulls
-	peer.mu.Unlock()
-	if after2 > 1 {
-		t.Fatalf("second notify (within window) triggered a pull: pulls = %d", after2)
-	}
-
-	// Backdate the timestamp past the window; the next notification must pull.
-	d.triggerMu.Lock()
-	d.lastTriggeredPull = time.Now().Add(-(minTriggeredPullInterval + time.Second))
-	d.triggerMu.Unlock()
+	// Backdate past the window, then notify: must pull straight away.
+	d.trustPullTrigger.backdate(minTriggeredPullInterval() + time.Second)
 
 	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
 	waitFor(t, "pull after window expiry", func() bool {
@@ -447,6 +449,126 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 		defer peer.mu.Unlock()
 		return peer.pulls >= 2
 	})
+}
+
+// TestSuppressedNotificationIsDeferredNotDropped is the regression guard for the
+// operator sequence `lock sign d1` then `lock revoke d2` seconds later: the second
+// notification lands inside the rate-limit window and must still be acted on when
+// the window closes. Dropping it costs the whole 5-minute backstop.
+func TestSuppressedNotificationIsDeferredNotDropped(t *testing.T) {
+	setTriggeredPullIntervalForTest(200 * time.Millisecond)
+	t.Cleanup(func() { setTriggeredPullIntervalForTest(5 * time.Second) })
+
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	waitFor(t, "first pull completes", func() bool {
+		return d.trustPullTrigger.idle()
+	})
+
+	// Second change, inside the window: suppressed now, owed later.
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	peer.mu.Lock()
+	immediate := peer.pulls
+	peer.mu.Unlock()
+	if immediate != 1 {
+		t.Fatalf("pulls = %d immediately after the second notify; the window must still hold", immediate)
+	}
+
+	// No further notification arrives: the deferred pull has to fire by itself.
+	waitFor(t, "deferred pull fires without another notification", func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return peer.pulls >= 2
+	})
+}
+
+// TestNotificationFloodCoalescesToOneDeferredPull holds the rate limit in place
+// now that suppression defers instead of drops: a flood must collapse into a
+// single owed pull, not a queue of them.
+func TestNotificationFloodCoalescesToOneDeferredPull(t *testing.T) {
+	setTriggeredPullIntervalForTest(100 * time.Millisecond)
+	t.Cleanup(func() { setTriggeredPullIntervalForTest(5 * time.Second) })
+
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+
+	for i := 0; i < 50; i++ {
+		d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	}
+	waitFor(t, "deferred pull fires", func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return peer.pulls >= 2
+	})
+	time.Sleep(300 * time.Millisecond) // three more windows: a queue would drain here
+
+	peer.mu.Lock()
+	pulls := peer.pulls
+	peer.mu.Unlock()
+	if pulls > 2 {
+		t.Fatalf("pulls = %d; 50 notifications must coalesce into one deferred pull, not a queue", pulls)
+	}
+}
+
+// TestNotificationPullSkipsTheConsistencyTick pins the protocol promise that a
+// forged trustlog.changed cannot clock the node's N=2 equivocation guard: the
+// notification path pulls and ingests, but only the node's own timer advances
+// peerBeaconMiss.
+func TestNotificationPullSkipsTheConsistencyTick(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+	// Converge first so the node holds a chain to cross-check against.
+	d.syncTrustOnce(peer)
+
+	// A peer beacon whose tip is nowhere in the node's chain: one consistency tick
+	// records a miss, two set the flag.
+	bPub, bPriv := genBeaconKeyPair(t)
+	divergent := api.SignBeacon(bPriv, bPub, bytes.Repeat([]byte{0xde}, 32), 1, 1)
+	d.peerBeaconMu.Lock()
+	d.peerBeaconPubs = map[string]bool{string(bPub): true}
+	d.peerBeacons = map[string]api.Beacon{string(bPub): divergent}
+	d.peerBeaconMu.Unlock()
+
+	for i := 0; i < 5; i++ {
+		d.trustPullTrigger.backdate(minTriggeredPullInterval() + time.Second)
+		d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+		waitFor(t, "triggered pull completes", func() bool {
+			return d.trustPullTrigger.idle()
+		})
+	}
+
+	d.peerBeaconMu.Lock()
+	miss := d.peerBeaconMiss[string(bPub)]
+	d.peerBeaconMu.Unlock()
+	if miss != nil {
+		t.Fatalf("gateway notifications advanced peerBeaconMiss to %d; only the node's own tick may", miss.misses)
+	}
+	if d.equivocation.Load() {
+		t.Fatal("a gateway that forges trustlog.changed must not be able to drive the equivocation flag")
+	}
 }
 
 // TestNotificationConvergesChainAndKeepsUplinkAlive is an integration test: a
@@ -508,4 +630,27 @@ func TestNotificationConvergesChainAndKeepsUplinkAlive(t *testing.T) {
 	if d.activeUplink.Load() == nil {
 		t.Fatal("uplink died after receiving trustlog.changed notification (read-loop deadlock?)")
 	}
+}
+
+// TestRosterSyncRunsOnItsOwnClock pins peer-beacon attribution to a clock of its
+// own. Tied to the trust tick it inherited the 5-minute backstop times ten, and a
+// newly joined node had every beacon rejected as "unknown beacon pub" for the
+// better part of an hour.
+func TestRosterSyncRunsOnItsOwnClock(t *testing.T) {
+	SetTrustSyncIntervalForTest(10 * time.Minute) // no trust tick fires in this test
+	setRosterSyncIntervalForTest(20 * time.Millisecond)
+	t.Cleanup(func() {
+		SetTrustSyncIntervalForTest(5 * time.Minute)
+		setRosterSyncIntervalForTest(5 * time.Minute)
+	})
+
+	peer := &recordingTrustPeer{}
+	d := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.runTrustSyncLoop(ctx, peer)
+
+	waitFor(t, "roster refreshes without a trust tick", func() bool {
+		return peer.rosterCount() >= 3 // one at startup plus two from its own ticker
+	})
 }
