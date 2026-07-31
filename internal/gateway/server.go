@@ -226,6 +226,21 @@ func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
 	}
 }
 
+// notifyNodePeers sends a notification to every connected node uplink. Node peers
+// only — clients learn trust-log changes from NodeEventBeacon, so sending both
+// would double-trigger pulls.
+func (s *Server) notifyNodePeers(method string, params any) {
+	s.relayMu.Lock()
+	peers := make([]*api.Peer, 0, len(s.nodePeers))
+	for _, p := range s.nodePeers {
+		peers = append(peers, p)
+	}
+	s.relayMu.Unlock()
+	for _, p := range peers {
+		_ = p.Notify(method, params)
+	}
+}
+
 // addNodePeer records a live node uplink as a relay.open target.
 func (s *Server) addNodePeer(id string, peer *api.Peer) {
 	s.relayMu.Lock()
@@ -555,7 +570,9 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		s.trust.offer(p.Chain)
+		if s.trust.offer(p.Chain) {
+			s.notifyNodePeers(api.MethodTrustLogChanged, api.TrustLogChangedParams{})
+		}
 		return nil, nil
 	case api.MethodTrustLogPull:
 		chains, fps := s.trust.diff(pullKnown(params))

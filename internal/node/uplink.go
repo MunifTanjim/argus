@@ -14,11 +14,9 @@ const (
 	uplinkMaxBackoff  = 15 * time.Second
 )
 
-// uplinkDispatch is the cleartext gateway→node control surface over the uplink.
-// After the blind-gateway cutover the gateway issues no session control here —
-// clients reach node handlers only through the E2E responder — so this answers
-// just node.identify and refuses everything else, keeping the node from serving
-// cleartext session data up the uplink.
+// uplinkDispatch is the cleartext gateway→node request surface over the uplink.
+// It answers only node.identify; all other requests are refused. Gateway→node
+// notifications (not requests) are handled via OnNotify, not here.
 func (d *Node) uplinkDispatch() api.DispatchFunc {
 	full := d.remoteDispatch()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -33,8 +31,8 @@ func (d *Node) uplinkDispatch() api.DispatchFunc {
 // cancelled, reconnecting with capped exponential backoff. nil httpClient uses
 // the default.
 //
-// The node is a symmetric peer: it serves only node.identify over the cleartext
-// uplink; client control flows exclusively through the E2E responder.
+// The node answers no gateway→node commands over the cleartext uplink; it
+// accepts one notification (trustlog.changed) as an untrusted pull hint.
 func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient *http.Client) {
 	d.log.Info("connecting to gateway", "url", url)
 	backoff := uplinkBaseBackoff
@@ -66,9 +64,13 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
 	resp := d.newRelayResponder()
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
-		// Only node.identify is answered over the cleartext uplink; all other
-		// gateway→node control is refused (clients go through the E2E responder).
+		// No gateway→node commands are answered over the cleartext uplink; clients
+		// reach node handlers only through the E2E responder. One hint is accepted:
+		// trustlog.changed triggers a pull the node already does on a timer, so a
+		// forged or withheld notification changes only when the pull happens, not what
+		// the node accepts (verified against pinned genesis either way).
 		Dispatch: d.uplinkDispatch(),
+		OnNotify: d.onGatewayNotify,
 		// Relayed E2E frames from clients are terminated by the responder.
 		OnRelayFrame: resp.onFrame,
 		// The gateway heartbeats this link from its side, but that only lets the

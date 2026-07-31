@@ -358,6 +358,50 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	return nil
 }
 
+// minTriggeredPullInterval bounds how often a gateway notification can cause a pull.
+// Without it, a hostile gateway turns one notification into unbounded work — the
+// notification is untrusted, so it must not be able to amplify.
+const minTriggeredPullInterval = 5 * time.Second
+
+// onGatewayNotify handles gateway→node notifications. The only one is a hint that
+// the trust log moved; everything else is ignored.
+func (d *Node) onGatewayNotify(n api.Notification) {
+	if n.Method != api.MethodTrustLogChanged {
+		return
+	}
+	d.triggerMu.Lock()
+	if time.Since(d.lastTriggeredPull) < minTriggeredPullInterval {
+		d.triggerMu.Unlock()
+		return
+	}
+	d.lastTriggeredPull = time.Now()
+	d.triggerMu.Unlock()
+
+	if peer := d.triggerPeer(); peer != nil {
+		d.syncTrustOnce(peer)
+	}
+}
+
+// triggerPeer returns the peer the notification-triggered pull should use: the
+// test override when set, otherwise the live gateway uplink.
+func (d *Node) triggerPeer() trustCaller {
+	d.triggerMu.Lock()
+	tp := d.testTriggerPeer
+	d.triggerMu.Unlock()
+	if tp != nil {
+		return tp
+	}
+	return d.activeUplink.Load()
+}
+
+// setTriggerPeerForTest installs a trustCaller used by onGatewayNotify in place
+// of the live uplink. Test-only.
+func (d *Node) setTriggerPeerForTest(p trustCaller) {
+	d.triggerMu.Lock()
+	d.testTriggerPeer = p
+	d.triggerMu.Unlock()
+}
+
 // DropPin clears the pin, the persisted chain, and the trust store. A node that
 // held a chain quarantines immediately — waiting for the next detection tick would
 // leave it open to any key the gateway introduces for up to one sync interval,

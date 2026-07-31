@@ -332,3 +332,41 @@ func (p *recordingTrustPeer) Call(method string, params, out any) error {
 	}
 	return nil
 }
+
+func TestTriggeredPullIsRateLimited(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+
+	for i := 0; i < 20; i++ {
+		d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	}
+
+	if peer.pulls > 1 {
+		t.Fatalf("pulls = %d; a notification flood must not amplify into pulls", peer.pulls)
+	}
+}
+
+func TestNotificationTriggersAPull(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+
+	if peer.pulls != 1 {
+		t.Fatalf("pulls = %d, want exactly 1", peer.pulls)
+	}
+}

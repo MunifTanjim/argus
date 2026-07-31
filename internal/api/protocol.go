@@ -91,6 +91,12 @@ const (
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogPull  = "trustlog.pull"  // request: TrustLogPullParams (optional); result: TrustLogPullResult (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
+	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
+	// did not previously hold has been offered. It is a hint with no authority: the
+	// node's response is to pull and verify against its pinned genesis, exactly as a
+	// timer tick would. A forged or withheld notification changes only when that
+	// happens, never what the node accepts.
+	MethodTrustLogChanged = "trustlog.changed" // gateway->node notification: TrustLogChangedParams
 	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
 	// for blind relay on the roster/node.event stream. The gateway never verifies it.
 	MethodBeaconOffer = "beacon.offer" // node->gateway request: Beacon; result: nil
@@ -696,6 +702,13 @@ type TrustLogPullResult struct {
 	// Absent (nil) means the gateway predates this field — not "no branches". A
 	// caller must not treat the two the same: doing so re-offers on every tick.
 	Fingerprints [][]byte `json:"fingerprints"`
+}
+
+// TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
+// Fingerprint is the content hash of the newly inserted branch; receivers use it
+// only as a hint — they verify whatever the pull returns against their pinned genesis.
+type TrustLogChangedParams struct {
+	Fingerprint []byte `json:"fingerprint,omitempty"`
 }
 
 // LockDeviceParams identifies a device to authorize/revoke by its Curve25519
