@@ -427,6 +427,62 @@ func TestLockDisableRequiresLocked(t *testing.T) {
 	}
 }
 
+// Until the chain reaches the gateway no other device can even see that the network
+// is locked, so a local change must publish it now rather than at the next sync tick
+// (trustSyncInterval — five minutes in production).
+func TestLockChangesOfferTheChainImmediately(t *testing.T) {
+	d := newLockTestNode(t)
+	peer := &fakePeer{}
+	d.setTriggerPeerForTest(peer)
+
+	res, err := callLockInit(t, d, api.LockInitParams{})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if len(peer.offered) != 1 {
+		t.Fatalf("lock.init offered %d chains, want 1", len(peer.offered))
+	}
+	if !bytes.Equal(peer.offered[0], d.TrustStore().Bytes()) {
+		t.Fatal("lock.init must offer the chain it just created")
+	}
+	if !bytes.Equal(d.TrustStore().Tip(), res.Tip) {
+		t.Fatal("offered chain must be the live one")
+	}
+
+	// Every later advance publishes too, or an authorization sits invisible for a
+	// full tick while the device it names keeps being refused.
+	if _, err := callLockDevice(t, d, api.MethodLockSign, bytes.Repeat([]byte{0xC3}, 32)); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if len(peer.offered) != 2 {
+		t.Fatalf("lock.sign offered %d chains total, want 2", len(peer.offered))
+	}
+	if !bytes.Equal(peer.offered[1], d.TrustStore().Bytes()) {
+		t.Fatal("lock.sign must offer the advanced chain")
+	}
+}
+
+// A no-op change must stay silent: re-signing an authorized device leaves the chain
+// byte-identical, and offering it again is chatter the gateway just dedupes.
+func TestNoOpLockChangeOffersNothing(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	dev := bytes.Repeat([]byte{0xC3}, 32)
+	if _, err := callLockDevice(t, d, api.MethodLockSign, dev); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	peer := &fakePeer{}
+	d.setTriggerPeerForTest(peer)
+	if _, err := callLockDevice(t, d, api.MethodLockSign, dev); err != nil {
+		t.Fatalf("re-sign: %v", err)
+	}
+	if len(peer.offered) != 0 {
+		t.Fatalf("re-signing an authorized device offered %d chains, want 0", len(peer.offered))
+	}
+}
+
 // A disabled log is a dead network: lock.init must be able to start a fresh one,
 // since disable + reinit is the documented recovery path when signer keys are lost.
 func TestLockInitAfterDisable(t *testing.T) {

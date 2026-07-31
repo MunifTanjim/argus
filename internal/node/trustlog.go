@@ -216,6 +216,35 @@ func (d *Node) persistTrust() error {
 	return d.persistChain(st.Bytes())
 }
 
+// announceTrustChange publishes a chain this node just advanced locally (lock.init,
+// sign, revoke, disable): the chain first, then the beacon, so a device reacting to
+// the beacon's new tip finds the chain that explains it already retained by the
+// gateway. Without the offer, nothing leaves this node until the next sync tick —
+// trustSyncInterval away — and the rest of the network cannot even see that the
+// network is locked, let alone pin to it.
+func (d *Node) announceTrustChange() {
+	d.offerTrustNow()
+	d.emitBeacon()
+}
+
+// offerTrustNow pushes the current chain to the gateway out of band. Best effort:
+// the sync loop's offer remains the backstop when there is no uplink.
+func (d *Node) offerTrustNow() {
+	st := d.trust.Load()
+	if st == nil {
+		return
+	}
+	chain := st.Bytes()
+	peer := d.triggerPeer()
+	if chain == nil || peer == nil {
+		return
+	}
+	if err := peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
+		return
+	}
+	d.rememberBranch(chain) // the gateway holds it now; the next pull must not re-fetch it
+}
+
 // runTrustSync drives the offer/pull loop for the uplink's lifetime. It
 // cancels the loop when the peer drops or ctx ends.
 func (d *Node) runTrustSync(ctx context.Context, peer *api.Peer) {
@@ -319,7 +348,7 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 		return err
 	}
 	d.reevaluateTrustChannels()
-	d.emitBeacon() // announce the new chain tip to the gateway
+	d.announceTrustChange()
 	return nil
 }
 
@@ -379,8 +408,10 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 }
 
 // AdoptPin pins this node to genesis at runtime: persist the pin, enable the
-// trust store, and release the quarantine gate. The next sync tick ingests the
-// chain, so an operator recovers a quarantined node without a restart.
+// trust store, release the quarantine gate, and pull the chain, so an operator
+// recovers a quarantined node without a restart. The pull is not deferred to the
+// next tick: until the chain lands the store is empty, which authorizes nobody, so
+// a deferred pull would trade the quarantine for a blackout of the same length.
 // Re-pinning the same genesis is a no-op; a different one is refused, because
 // silently switching trust roots is exactly what the pin exists to prevent.
 func (d *Node) AdoptPin(genesis []byte) error {
@@ -412,6 +443,9 @@ func (d *Node) AdoptPin(genesis []byte) error {
 		return err
 	}
 	d.reevaluateTrustChannels()
+	if peer := d.triggerPeer(); peer != nil {
+		d.pullTrustOnce(peer)
+	}
 	return nil
 }
 
