@@ -273,6 +273,7 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
 	f.String("zrok-name", "", "[zrok] reserved name for a stable URL: 'namespace:name' or 'name' (default: argus) [$ARGUS_ZROK_NAME]")
 	f.String("ngrok-domain", "", "[ngrok] reserved/custom domain (default: the account's static dev domain) [$ARGUS_NGROK_DOMAIN]")
+	f.Duration("keepalive-interval", 0, "node↔gateway keepalive ping interval (default: 15s) [$ARGUS_GATEWAY_KEEPALIVE_INTERVAL]")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
@@ -362,6 +363,7 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	if err != nil {
 		return err
 	}
+	d.SetKeepaliveInterval(cfg.Gateway.KeepaliveInterval)
 	go d.ConnectGateway(ctx, wsURL, cfg.Token, gatewayClient)
 	return nil
 }

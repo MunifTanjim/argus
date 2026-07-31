@@ -270,7 +270,7 @@ func TestClientBeaconCrossCheck(t *testing.T) {
 	// Use a very long sync interval so the background trustSyncLoop does not fire
 	// between our explicit syncTrustLog() calls (which would add spurious miss ticks).
 	SetTrustSyncIntervalForTest(time.Hour)
-	t.Cleanup(func() { SetTrustSyncIntervalForTest(30 * time.Second) })
+	t.Cleanup(func() { SetTrustSyncIntervalForTest(5 * time.Minute) })
 
 	// Build a 2-entry chain (genesis + authorize-device).
 	signer, _ := trustlog.GenerateSigner()
@@ -494,7 +494,7 @@ func TestClientPrunesBeaconOnOfflineRemovedEvent(t *testing.T) {
 // but were NEVER connected are still checked (not skipped).
 func TestClientCheckBeaconConsistencySkipsNonConnected(t *testing.T) {
 	SetTrustSyncIntervalForTest(time.Hour)
-	t.Cleanup(func() { SetTrustSyncIntervalForTest(30 * time.Second) })
+	t.Cleanup(func() { SetTrustSyncIntervalForTest(5 * time.Minute) })
 
 	signer, _ := trustlog.GenerateSigner()
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
@@ -559,7 +559,7 @@ func TestEquivocationRequiresPersistence(t *testing.T) {
 	// Use a very long sync interval so the background trustSyncLoop does not fire
 	// between our explicit syncTrustLog() calls (which would add spurious miss ticks).
 	SetTrustSyncIntervalForTest(time.Hour)
-	t.Cleanup(func() { SetTrustSyncIntervalForTest(30 * time.Second) })
+	t.Cleanup(func() { SetTrustSyncIntervalForTest(5 * time.Minute) })
 
 	// Two-entry chain: genesis + authorize-device.
 	signer, _ := trustlog.GenerateSigner()

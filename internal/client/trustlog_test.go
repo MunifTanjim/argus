@@ -120,7 +120,7 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 
 func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
-	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	// Genesis-only chain first; an authorize appended later.
 	signer, _ := trustlog.GenerateSigner()
@@ -167,7 +167,7 @@ func waitClient(t *testing.T, what string, cond func() bool) {
 
 func TestClientDoesNotRefetchAKnownBranch(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
-	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	signer, _ := trustlog.GenerateSigner()
 	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
@@ -212,7 +212,7 @@ func descriptorWithBeaconForTest(t *testing.T, tip []byte) api.NodeDescriptor {
 
 func TestBeaconWithUnknownTipTriggersAPull(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(10 * time.Minute)) // prove the timer is not what pulled
-	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	signer, _ := trustlog.GenerateSigner()
 	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -76,7 +77,7 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		// The gateway heartbeats this link from its side, but that only lets the
 		// gateway notice a half-open uplink. Ping from here too so the node also
 		// detects one and re-dials instead of sitting on a dead connection.
-		KeepaliveInterval:         api.DefaultKeepaliveInterval,
+		KeepaliveInterval:         cmp.Or(d.keepaliveInterval, api.DefaultKeepaliveInterval),
 		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
 		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
 		Logger:                    d.log,

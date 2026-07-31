@@ -64,7 +64,7 @@ const beaconMissThreshold = 2
 
 // beaconDeliverForceEvery mirrors node.rosterSyncEvery: a full re-courier is
 // forced every this many deliverBeacons calls so transient acceptance failures
-// (e.g. the target's roster not yet synced) resolve within ~N×30s at worst.
+// (e.g. the target's roster not yet synced) resolve within ~N×5m at worst.
 const beaconDeliverForceEvery = 10
 
 // beaconMissState tracks consecutive unreconciled ticks for a single node's beacon tip.
@@ -884,13 +884,18 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 // minClientTriggeredPullInterval bounds how often a beacon can cause a pull.
 const minClientTriggeredPullInterval = 5 * time.Second
 
-// clientTrustSyncInterval is how often the client re-pulls the trust-log chain.
+// clientTrustSyncInterval is the BACKSTOP for trust-log convergence, not the primary
+// path: a change normally arrives via trustlog.changed (node) or NodeEventBeacon
+// (client) within milliseconds. It also bounds how long an UNPINNED device stays
+// open on a locked network before quarantining, so shortening it is safe and
+// lengthening it widens that window. Do not tune this without reading
+// detectUnpinnedChain.
 // Stored as nanoseconds in an atomic so SetTrustSyncIntervalForTest is race-free
 // when background goroutines read it concurrently.
 var clientTrustSyncInterval atomic.Int64
 
 func init() {
-	clientTrustSyncInterval.Store(int64(30 * time.Second))
+	clientTrustSyncInterval.Store(int64(5 * time.Minute))
 	handshakeTimeoutNs.Store(int64(10 * time.Second))
 }
 

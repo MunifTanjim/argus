@@ -66,7 +66,7 @@ func TestUnpinnedClientStaysOpenWithNoTrustLog(t *testing.T) {
 
 func TestUnpinnedClientQuarantinesMidSession(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
-	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	chain, _ := genesisChainForTest(t)
 	ch := make(chan []byte, 1)
@@ -99,7 +99,7 @@ func TestUnpinnedClientQuarantinesMidSession(t *testing.T) {
 // gains a trust log under a running client.
 func TestUnpinnedClientDropsChannelOnQuarantine(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
-	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	chain, _ := genesisChainForTest(t)
 

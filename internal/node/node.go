@@ -131,7 +131,8 @@ type Node struct {
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 
-	activeResponder atomic.Pointer[relayResponder] // the current uplink responder, if any
+	activeResponder   atomic.Pointer[relayResponder] // the current uplink responder, if any
+	keepaliveInterval time.Duration                  // node↔gateway keepalive interval; 0 → api.DefaultKeepaliveInterval
 
 	// triggerMu guards the rate-limiter state for gateway-triggered pulls. Kept
 	// separate from pinMu so notification handling never contends with the pin
@@ -200,6 +201,10 @@ func (d *Node) SetIdentity(id, label string) {
 // SetVersion records the node's binary version, reported to clients via
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
+
+// SetKeepaliveInterval overrides the node↔gateway keepalive ping interval.
+// Zero (the default) falls back to api.DefaultKeepaliveInterval. Call before ConnectGateway.
+func (d *Node) SetKeepaliveInterval(interval time.Duration) { d.keepaliveInterval = interval }
 
 // SetIdentityKey sets the node's Noise static keypair, whose public half is
 // announced to the gateway (identity_pubkey) for E2E channel setup. Call before Run.

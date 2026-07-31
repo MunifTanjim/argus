@@ -25,8 +25,9 @@ type Config struct {
 }
 
 type GatewayConfig struct {
-	URL        string
-	ListenAddr string
+	URL               string
+	ListenAddr        string
+	KeepaliveInterval time.Duration
 }
 
 type NodeConfig struct {
@@ -103,6 +104,7 @@ var defaults = map[string]any{
 	"token":                         "",
 	"gateway.url":                   "",
 	"gateway.listen-addr":           ":8443",
+	"gateway.keepalive-interval":    "15s",
 	"mode":                          "",
 	"node.id":                       "",
 	"node.label":                    "",
@@ -190,8 +192,9 @@ func FromViper(v *viper.Viper) Config {
 		Token:  v.GetString("token"),
 		Mode:   v.GetString("mode"),
 		Gateway: GatewayConfig{
-			URL:        v.GetString("gateway.url"),
-			ListenAddr: v.GetString("gateway.listen-addr"),
+			URL:               v.GetString("gateway.url"),
+			ListenAddr:        v.GetString("gateway.listen-addr"),
+			KeepaliveInterval: v.GetDuration("gateway.keepalive-interval"),
 		},
 		Node: NodeConfig{
 			ID:    v.GetString("node.id"),

@@ -33,8 +33,8 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 	client.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	client.SetHandshakeTimeoutForTest(300 * time.Millisecond)
 	t.Cleanup(func() {
-		node.SetTrustSyncIntervalForTest(30 * time.Second)
-		client.SetTrustSyncIntervalForTest(30 * time.Second)
+		node.SetTrustSyncIntervalForTest(5 * time.Minute)
+		client.SetTrustSyncIntervalForTest(5 * time.Minute)
 		client.SetHandshakeTimeoutForTest(10 * time.Second)
 	})
 

@@ -20,8 +20,8 @@ func TestLockSignRevoke(t *testing.T) {
 	node.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	client.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	t.Cleanup(func() {
-		node.SetTrustSyncIntervalForTest(30 * time.Second)
-		client.SetTrustSyncIntervalForTest(30 * time.Second)
+		node.SetTrustSyncIntervalForTest(5 * time.Minute)
+		client.SetTrustSyncIntervalForTest(5 * time.Minute)
 	})
 
 	agg := gateway.New(time.Second)
@@ -107,8 +107,8 @@ func TestLockSignerAddRemove(t *testing.T) {
 	node.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	client.SetTrustSyncIntervalForTest(50 * time.Millisecond)
 	t.Cleanup(func() {
-		node.SetTrustSyncIntervalForTest(30 * time.Second)
-		client.SetTrustSyncIntervalForTest(30 * time.Second)
+		node.SetTrustSyncIntervalForTest(5 * time.Minute)
+		client.SetTrustSyncIntervalForTest(5 * time.Minute)
 	})
 
 	agg := gateway.New(time.Second)

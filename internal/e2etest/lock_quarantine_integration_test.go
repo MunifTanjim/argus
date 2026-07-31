@@ -18,7 +18,7 @@ import (
 // pin, and starts enforcing normally once pinned to the same genesis.
 func TestUnpinnedNodeQuarantinesThenRecoversOnPin(t *testing.T) {
 	node.SetTrustSyncIntervalForTest(50 * time.Millisecond)
-	t.Cleanup(func() { node.SetTrustSyncIntervalForTest(30 * time.Second) })
+	t.Cleanup(func() { node.SetTrustSyncIntervalForTest(5 * time.Minute) })
 
 	agg := gateway.New(time.Second)
 	srv := gateway.NewServer(agg, nil, nil)

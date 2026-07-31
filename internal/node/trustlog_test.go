@@ -195,7 +195,7 @@ func TestWriteGenesisHashRoundTrip(t *testing.T) {
 
 func TestRunTrustSyncPollsLiveEnable(t *testing.T) {
 	trustSyncInterval.Store(int64(10 * time.Millisecond))
-	t.Cleanup(func() { trustSyncInterval.Store(int64(30 * time.Second)) })
+	t.Cleanup(func() { trustSyncInterval.Store(int64(5 * time.Minute)) })
 
 	// Build a chain + a fake peer serving it.
 	chain, head, device, _ := seedChain(t, true) // genesis+authorize (existing helper)
@@ -457,7 +457,7 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 func TestNotificationConvergesChainAndKeepsUplinkAlive(t *testing.T) {
 	// Long sync interval: convergence must come from the notification, not the timer.
 	SetTrustSyncIntervalForTest(10 * time.Minute)
-	t.Cleanup(func() { SetTrustSyncIntervalForTest(30 * time.Second) })
+	t.Cleanup(func() { SetTrustSyncIntervalForTest(5 * time.Minute) })
 
 	chain, genesis := lockedChainForTest(t)
 

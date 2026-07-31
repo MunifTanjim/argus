@@ -19,13 +19,17 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
-// trustSyncInterval is how often a connected node re-runs the offer/pull cycle.
-// Chain updates are rare, so this is a lazy convergence tick, not a hot loop.
+// trustSyncInterval is the BACKSTOP for trust-log convergence, not the primary
+// path: a change normally arrives via trustlog.changed (node) or NodeEventBeacon
+// (client) within milliseconds. It also bounds how long an UNPINNED device stays
+// open on a locked network before quarantining, so shortening it is safe and
+// lengthening it widens that window. Do not tune this without reading
+// detectUnpinnedChain.
 // Stored as nanoseconds in an atomic so SetTrustSyncIntervalForTest is race-free
 // when background goroutines read it concurrently.
 var trustSyncInterval atomic.Int64
 
-func init() { trustSyncInterval.Store(int64(30 * time.Second)) }
+func init() { trustSyncInterval.Store(int64(5 * time.Minute)) }
 
 // SetTrustSyncIntervalForTest overrides the node's trust-log sync cadence. Test-only.
 func SetTrustSyncIntervalForTest(d time.Duration) { trustSyncInterval.Store(int64(d)) }
@@ -225,7 +229,7 @@ func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
 
 // rosterSyncEvery controls how often the roster is re-fetched relative to the
 // trust-sync tick. 10 means one nodes.list per 10 trust ticks (e.g. once per
-// 5 minutes at the default 30 s interval). A reconnect always refreshes.
+// 50 minutes at the default 5 m interval). A reconnect always refreshes.
 const rosterSyncEvery = 10
 
 // genesisHashPath is the state file holding the pinned genesis hash, kept beside
