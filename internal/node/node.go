@@ -133,12 +133,13 @@ type Node struct {
 
 	activeResponder atomic.Pointer[relayResponder] // the current uplink responder, if any
 
-	// triggerMu guards lastTriggeredPull and testTriggerPeer (rate-limiter state
-	// for gateway-triggered pulls; separate from pinMu so notification handling
-	// never contends with the pin decision or file I/O).
-	triggerMu         sync.Mutex
-	lastTriggeredPull time.Time
-	testTriggerPeer   trustCaller // test-only override for triggerPeer; nil = use activeUplink
+	// triggerMu guards the rate-limiter state for gateway-triggered pulls. Kept
+	// separate from pinMu so notification handling never contends with the pin
+	// decision or file I/O.
+	triggerMu             sync.Mutex
+	lastTriggeredPull     time.Time
+	triggeredPullInFlight bool        // true while a notified pull goroutine is running
+	testTriggerPeer       trustCaller // test-only override for triggerPeer; nil = use activeUplink
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node

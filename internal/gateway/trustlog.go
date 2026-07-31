@@ -45,11 +45,12 @@ func chainKey(chain []byte) [32]byte {
 // signature check), fingerprint by blake2s, and update or insert the branch.
 // When inserting a new branch would exceed trustStoreCap the branch with the
 // fewest entries is evicted. Unparseable chains are silently dropped.
-// inserted is true only when a fingerprint not previously held was stored.
-func (t *trustStore) offer(chain []byte) (inserted bool) {
+// inserted is true and fp holds the branch fingerprint only when a key not
+// previously held was stored.
+func (t *trustStore) offer(chain []byte) (inserted bool, fp [32]byte) {
 	entries, err := trustlog.UnmarshalChain(chain)
 	if err != nil {
-		return false
+		return false, fp
 	}
 	count := len(entries)
 	key := chainKey(chain)
@@ -68,7 +69,7 @@ func (t *trustStore) offer(chain []byte) (inserted bool) {
 		if count > existing.count {
 			t.branches[key] = branchEntry{bytes: append([]byte(nil), chain...), count: count}
 		}
-		return false
+		return false, fp
 	}
 
 	// New branch: insert, then evict the smallest-count branch if over cap.
@@ -84,7 +85,7 @@ func (t *trustStore) offer(chain []byte) (inserted bool) {
 		}
 		delete(t.branches, minKey)
 	}
-	return true
+	return true, key
 }
 
 // diff returns the retained branches whose fingerprint is absent from known,

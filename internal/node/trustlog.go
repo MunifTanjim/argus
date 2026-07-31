@@ -365,25 +365,42 @@ const minTriggeredPullInterval = 5 * time.Second
 
 // onGatewayNotify handles gateway→node notifications. The only one is a hint that
 // the trust log moved; everything else is ignored.
+//
+// The pull runs off the read loop (go syncTrustOnce) because notifications are
+// dispatched synchronously — calling peer.Call on the same peer inline would
+// deadlock waiting for a response only the read loop can deliver.
 func (d *Node) onGatewayNotify(n api.Notification) {
 	if n.Method != api.MethodTrustLogChanged {
 		return
 	}
+	// Resolve the peer before acquiring triggerMu: no stamp when there is nothing
+	// to pull against (e.g. during a reconnect gap).
+	peer := d.triggerPeer()
+	if peer == nil {
+		return
+	}
 	d.triggerMu.Lock()
-	if time.Since(d.lastTriggeredPull) < minTriggeredPullInterval {
+	if time.Since(d.lastTriggeredPull) < minTriggeredPullInterval || d.triggeredPullInFlight {
 		d.triggerMu.Unlock()
 		return
 	}
 	d.lastTriggeredPull = time.Now()
+	d.triggeredPullInFlight = true
 	d.triggerMu.Unlock()
 
-	if peer := d.triggerPeer(); peer != nil {
+	go func() {
+		defer func() {
+			d.triggerMu.Lock()
+			d.triggeredPullInFlight = false
+			d.triggerMu.Unlock()
+		}()
 		d.syncTrustOnce(peer)
-	}
+	}()
 }
 
 // triggerPeer returns the peer the notification-triggered pull should use: the
-// test override when set, otherwise the live gateway uplink.
+// test override when set, otherwise the live gateway uplink. Returns nil (not a
+// typed nil) when no peer is available, so callers can guard with peer != nil.
 func (d *Node) triggerPeer() trustCaller {
 	d.triggerMu.Lock()
 	tp := d.testTriggerPeer
@@ -391,7 +408,10 @@ func (d *Node) triggerPeer() trustCaller {
 	if tp != nil {
 		return tp
 	}
-	return d.activeUplink.Load()
+	if p := d.activeUplink.Load(); p != nil {
+		return p
+	}
+	return nil
 }
 
 // setTriggerPeerForTest installs a trustCaller used by onGatewayNotify in place

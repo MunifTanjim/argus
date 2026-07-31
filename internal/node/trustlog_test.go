@@ -3,12 +3,16 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
@@ -304,6 +308,7 @@ func TestOldGatewayStillGetsOffers(t *testing.T) {
 }
 
 type recordingTrustPeer struct {
+	mu           sync.Mutex
 	chains       [][]byte
 	fingerprints [][]byte
 	legacy       bool // omit Fingerprints entirely, like a gateway that predates them
@@ -313,6 +318,8 @@ type recordingTrustPeer struct {
 }
 
 func (p *recordingTrustPeer) Call(method string, params, out any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	switch method {
 	case api.MethodTrustLogOffer:
 		p.offers++
@@ -347,9 +354,18 @@ func TestTriggeredPullIsRateLimited(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
 	}
+	// Wait for any in-flight pull goroutine to complete before asserting.
+	waitFor(t, "no pull in flight", func() bool {
+		d.triggerMu.Lock()
+		defer d.triggerMu.Unlock()
+		return !d.triggeredPullInFlight
+	})
 
-	if peer.pulls > 1 {
-		t.Fatalf("pulls = %d; a notification flood must not amplify into pulls", peer.pulls)
+	peer.mu.Lock()
+	pulls := peer.pulls
+	peer.mu.Unlock()
+	if pulls > 1 {
+		t.Fatalf("pulls = %d; a notification flood must not amplify into pulls", pulls)
 	}
 }
 
@@ -365,8 +381,131 @@ func TestNotificationTriggersAPull(t *testing.T) {
 	d.setTriggerPeerForTest(peer)
 
 	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	waitFor(t, "one pull from notification", func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return peer.pulls >= 1
+	})
 
-	if peer.pulls != 1 {
-		t.Fatalf("pulls = %d, want exactly 1", peer.pulls)
+	peer.mu.Lock()
+	pulls := peer.pulls
+	peer.mu.Unlock()
+	if pulls != 1 {
+		t.Fatalf("pulls = %d, want exactly 1", pulls)
+	}
+}
+
+// TestTriggeredPullResumesAfterWindow proves the rate limiter is not a one-shot
+// block: once the window expires a fresh notification triggers another pull.
+func TestTriggeredPullResumesAfterWindow(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	fp := branchFingerprint(chain)
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	d.setTriggerPeerForTest(peer)
+
+	// First notification: should trigger a pull.
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	waitFor(t, "first pull completes", func() bool {
+		d.triggerMu.Lock()
+		defer d.triggerMu.Unlock()
+		return !d.triggeredPullInFlight
+	})
+	peer.mu.Lock()
+	after1 := peer.pulls
+	peer.mu.Unlock()
+	if after1 != 1 {
+		t.Fatalf("after first notify: pulls = %d, want 1", after1)
+	}
+
+	// Second notification within the window: must be suppressed.
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	waitFor(t, "no second pull in flight", func() bool {
+		d.triggerMu.Lock()
+		defer d.triggerMu.Unlock()
+		return !d.triggeredPullInFlight
+	})
+	peer.mu.Lock()
+	after2 := peer.pulls
+	peer.mu.Unlock()
+	if after2 > 1 {
+		t.Fatalf("second notify (within window) triggered a pull: pulls = %d", after2)
+	}
+
+	// Backdate the timestamp past the window; the next notification must pull.
+	d.triggerMu.Lock()
+	d.lastTriggeredPull = time.Now().Add(-(minTriggeredPullInterval + time.Second))
+	d.triggerMu.Unlock()
+
+	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
+	waitFor(t, "pull after window expiry", func() bool {
+		peer.mu.Lock()
+		defer peer.mu.Unlock()
+		return peer.pulls >= 2
+	})
+}
+
+// TestNotificationConvergesChainAndKeepsUplinkAlive is an integration test: a
+// real node dials a real gateway, a second peer offers a branch, the resulting
+// trustlog.changed notification triggers a pull off the read loop, and the chain
+// converges. The uplink must remain alive throughout — this is the test that
+// catches the read-loop deadlock (Critical 1).
+func TestNotificationConvergesChainAndKeepsUplinkAlive(t *testing.T) {
+	// Long sync interval: convergence must come from the notification, not the timer.
+	SetTrustSyncIntervalForTest(10 * time.Minute)
+	t.Cleanup(func() { SetTrustSyncIntervalForTest(30 * time.Second) })
+
+	chain, genesis := lockedChainForTest(t)
+
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
+	hs := httptest.NewServer(srv.Handler())
+	defer hs.Close()
+
+	d := New()
+	d.SetIdentity("live-node", "live-box")
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.ConnectGateway(ctx, wsURL(hs.URL)+"/node", "", nil)
+
+	waitFor(t, "uplink established", func() bool { return d.activeUplink.Load() != nil })
+
+	// A second node peer offers the chain; the gateway inserts it and notifies all
+	// node peers including the live node.
+	offerer, err := api.DialWSPeer(context.Background(), wsURL(hs.URL)+"/node", "", nil, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return api.IdentifyResult{ID: "offerer-node"}, nil
+			}
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "not found"}
+		},
+	})
+	if err != nil {
+		t.Fatalf("dial offerer: %v", err)
+	}
+	defer offerer.Close()
+
+	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
+		t.Fatalf("offer: %v", err)
+	}
+
+	// The notification-driven pull must converge the chain.
+	waitFor(t, "trust store converged", func() bool {
+		ts := d.TrustStore()
+		return ts != nil && ts.Tip() != nil
+	})
+
+	// The uplink must still be alive — a read-loop deadlock would have killed it.
+	if d.activeUplink.Load() == nil {
+		t.Fatal("uplink died after receiving trustlog.changed notification (read-loop deadlock?)")
 	}
 }

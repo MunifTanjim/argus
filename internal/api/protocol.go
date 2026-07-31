@@ -705,8 +705,9 @@ type TrustLogPullResult struct {
 }
 
 // TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
-// Fingerprint is the content hash of the newly inserted branch; receivers use it
-// only as a hint — they verify whatever the pull returns against their pinned genesis.
+// Fingerprint is the blake2s-256 content hash of the newly inserted branch (the
+// same key the gateway indexes by). Receivers treat it as an opaque hint only —
+// they pull and verify whatever the gateway returns against their pinned genesis.
 type TrustLogChangedParams struct {
 	Fingerprint []byte `json:"fingerprint,omitempty"`
 }

@@ -171,8 +171,8 @@ func TestPullFingerprintsEmptyNotNullForEmptyStore(t *testing.T) {
 }
 
 // TestTrustLogChangedNotifiesPeers checks that offering a new branch sends a
-// trustlog.changed notification to connected node peers, and that re-offering the
-// same branch (no new insertion) sends nothing.
+// trustlog.changed notification to connected node peers (not clients), and that
+// re-offering the same branch (no new insertion) sends nothing.
 func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	agg := New(time.Second)
 	srv := NewServer(agg, nil, nil)
@@ -180,7 +180,7 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	defer hs.Close()
 	ctx := context.Background()
 
-	got := make(chan api.Notification, 4)
+	nodeGot := make(chan api.Notification, 4)
 	nodeDispatch := func(_ context.Context, method string, _ json.RawMessage) (any, error) {
 		if method == api.MethodNodeIdentify {
 			return api.IdentifyResult{ID: "test-node"}, nil
@@ -189,26 +189,46 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	}
 	nodePeer, err := api.DialWSPeer(ctx, gwWSURL(hs.URL, "/node"), "", nil, api.PeerOptions{
 		Dispatch: nodeDispatch,
-		OnNotify: func(n api.Notification) { got <- n },
+		OnNotify: func(n api.Notification) { nodeGot <- n },
 	})
 	if err != nil {
 		t.Fatalf("dial node: %v", err)
 	}
 	defer nodePeer.Close()
 
+	// A client peer must NOT receive trustlog.changed; clients learn from NodeEventBeacon.
+	clientGot := make(chan api.Notification, 4)
+	clientPeer, err := api.DialWSPeer(ctx, gwWSURL(hs.URL, "/client"), "", nil, api.PeerOptions{
+		OnNotify: func(n api.Notification) {
+			if n.Method == api.MethodTrustLogChanged {
+				clientGot <- n
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientPeer.Close()
+
 	chain := marshalChainForTest(t, 2)
 
-	// First offer: new branch → notification expected.
+	// First offer: new branch → node gets trustlog.changed, client gets nothing.
 	if err := nodePeer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
 		t.Fatalf("offer: %v", err)
 	}
 	select {
-	case n := <-got:
+	case n := <-nodeGot:
 		if n.Method != api.MethodTrustLogChanged {
-			t.Fatalf("got notification method %q, want %q", n.Method, api.MethodTrustLogChanged)
+			t.Fatalf("node got notification method %q, want %q", n.Method, api.MethodTrustLogChanged)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("node did not receive trustlog.changed after a new branch was offered")
+	}
+	select {
+	case n := <-clientGot:
+		t.Fatalf("client must not receive %q; clients learn from NodeEventBeacon", n.Method)
+	case <-time.After(200 * time.Millisecond):
+		// correct: client is not in nodePeers
 	}
 
 	// Second offer of the same chain: no new insertion → no notification.
@@ -216,7 +236,7 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 		t.Fatalf("re-offer: %v", err)
 	}
 	select {
-	case n := <-got:
+	case n := <-nodeGot:
 		t.Fatalf("unexpected notification %q for a re-offer of a known branch", n.Method)
 	case <-time.After(200 * time.Millisecond):
 		// correct: no notification for a known branch

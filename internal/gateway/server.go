@@ -570,8 +570,8 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		if s.trust.offer(p.Chain) {
-			s.notifyNodePeers(api.MethodTrustLogChanged, api.TrustLogChangedParams{})
+		if inserted, fp := s.trust.offer(p.Chain); inserted {
+			s.notifyNodePeers(api.MethodTrustLogChanged, api.TrustLogChangedParams{Fingerprint: fp[:]})
 		}
 		return nil, nil
 	case api.MethodTrustLogPull:
