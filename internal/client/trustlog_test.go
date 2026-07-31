@@ -6,27 +6,65 @@ import (
 	"encoding/json"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/blake2s"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
+type gatewayStats struct {
+	mu              sync.Mutex
+	lastKnownLen    int
+	chainsServedCnt int
+}
+
+func (s *gatewayStats) lastKnownCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastKnownLen
+}
+
+func (s *gatewayStats) chainsServed() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.chainsServedCnt
+}
+
 // trustGatewayConn is one end of a net.Pipe running a minimal gateway that answers
 // nodes.list (empty) and trustlog.pull with the latest chain sent on chain.
 func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
+	conn, _ := trustGatewayConnWithStats(t, chain)
+	return conn
+}
+
+// trustGatewayConnWithStats is trustGatewayConn extended to record pull statistics
+// and honour the Known fingerprints: branches already known to the caller are
+// withheld, matching the real gateway's conditional-diff behaviour.
+func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *gatewayStats) {
 	t.Helper()
 	srvConn, cliConn := net.Pipe()
 	var mu sync.Mutex
 	var current []byte
+	var seenFPs atomic.Value // holds map[[32]byte]bool
+	stats := &gatewayStats{}
 	go func() {
 		peer := api.NewPeer(srvConn, api.PeerOptions{
-			Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			Dispatch: func(_ context.Context, method string, raw json.RawMessage) (any, error) {
 				switch method {
 				case api.MethodNodesList:
 					return api.NodesListResult{Nodes: []api.NodeDescriptor{}}, nil
 				case api.MethodTrustLogPull:
+					var params api.TrustLogPullParams
+					_ = json.Unmarshal(raw, &params)
+
+					stats.mu.Lock()
+					stats.lastKnownLen = len(params.Known)
+					stats.mu.Unlock()
+
 					mu.Lock()
 					select {
 					case c := <-chain:
@@ -35,18 +73,40 @@ func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
 					}
 					cur := current
 					mu.Unlock()
-					var chains [][]byte
-					if cur != nil {
-						chains = [][]byte{cur}
+
+					if cur == nil {
+						return api.TrustLogPullResult{}, nil
 					}
-					return api.TrustLogPullResult{Chains: chains}, nil
+					fp := blake2s.Sum256(cur)
+					var known map[[32]byte]bool
+					if v := seenFPs.Load(); v != nil {
+						known = v.(map[[32]byte]bool)
+					}
+					for _, k := range params.Known {
+						if len(k) == 32 {
+							var kfp [32]byte
+							copy(kfp[:], k)
+							if known == nil {
+								known = map[[32]byte]bool{}
+							}
+							known[kfp] = true
+						}
+					}
+					seenFPs.Store(known)
+					if known[fp] {
+						return api.TrustLogPullResult{}, nil
+					}
+					stats.mu.Lock()
+					stats.chainsServedCnt++
+					stats.mu.Unlock()
+					return api.TrustLogPullResult{Chains: [][]byte{cur}}, nil
 				}
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 			},
 		})
 		<-peer.Done()
 	}()
-	return cliConn
+	return cliConn, stats
 }
 
 func TestClientPullsAndReSyncsTrustLog(t *testing.T) {
@@ -94,4 +154,35 @@ func waitClient(t *testing.T, what string, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestClientDoesNotRefetchAKnownBranch(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(20 * time.Millisecond))
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(30 * time.Second)) })
+
+	signer, _ := trustlog.GenerateSigner()
+	log, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	chain := trustlog.MarshalChain(log.Entries())
+
+	ch := make(chan []byte, 1)
+	ch <- chain
+	conn, stats := trustGatewayConnWithStats(t, ch)
+
+	m, err := NewE2EClientWithIdentity(conn, mustKP(t), log.Tip(), "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	m.syncTrustLog() // a second, explicit sync
+
+	if got := stats.lastKnownCount(); got == 0 {
+		t.Fatal("the client must send the fingerprints it already holds")
+	}
+	if got := stats.chainsServed(); got > 1 {
+		t.Fatalf("chains served = %d, want the branch sent at most once", got)
+	}
 }
