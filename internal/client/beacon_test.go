@@ -619,7 +619,7 @@ func TestEquivocationRequiresPersistence(t *testing.T) {
 		}
 
 		// Advance gateway to serve the full chain (node was legitimately ahead).
-		gw.chain = fullChain
+		gw.setChain(fullChain)
 		c.syncTrustLog() // tick 2: client pulls full chain → tip reconciles → miss reset
 		if c.Equivocation() {
 			t.Fatal("benign propagation lag must never set the equivocation flag after reconciliation")
