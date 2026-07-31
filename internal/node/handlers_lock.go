@@ -34,7 +34,9 @@ func loadCurrentLog(st *trustlog.SyncStore) ([]trustlog.Entry, *trustlog.Log, er
 // set is this node plus the requested additional signers, authorizes the requested
 // devices, persists + activates it live, and returns the new genesis hash. Once-only.
 func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, error) {
-	if d.trust.Load() != nil {
+	// A disabled log is a dead network, and disable + reinit is the recovery path
+	// when the signer keys are gone, so re-initing over one starts a fresh genesis.
+	if st := d.trust.Load(); st != nil && !st.Disabled() {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode already enabled"}
 	}
 	if len(d.signer.Public) != ed25519.PublicKeySize {

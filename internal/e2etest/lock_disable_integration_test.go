@@ -1,6 +1,7 @@
 package e2etest
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"net"
@@ -206,5 +207,66 @@ func TestLockDisablePropagatesAndStopsEnforcement(t *testing.T) {
 	waitFor(t, "post-disable agents.list succeeds", func() bool {
 		var agents api.AgentsListResult
 		return cPost.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agents) == nil
+	})
+
+	// RE-INIT: disable + reinit is the documented recovery path, so a disabled log
+	// must not block lock.init. The new genesis is a new network — enforcement is
+	// back on and the still-unsigned clientKP is refused again.
+	var reinitRes api.LockInitResult
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{
+		Signers:         [][]byte{nodeA.SignerPublic()},
+		GenDisablements: 1,
+		Devices:         [][]byte{idA},
+	}, &reinitRes); err != nil {
+		t.Fatalf("lock.init after disable: %v", err)
+	}
+	if bytes.Equal(reinitRes.Tip, initRes.Tip) {
+		t.Fatal("re-init must create a new genesis")
+	}
+	if st := nodeA.TrustStore(); st == nil || st.Disabled() {
+		t.Fatal("node A must be enabled again after re-init")
+	}
+	waitFor(t, "re-init genesis propagated to gateway", func() bool {
+		pc, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
+		if err != nil {
+			return false
+		}
+		defer pc.Close()
+		var got api.TrustLogPullResult
+		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil {
+			return false
+		}
+		st := trustlog.NewSyncStore(reinitRes.Tip)
+		for _, chain := range got.Chains {
+			st.Ingest(chain) //nolint:errcheck
+		}
+		return st.DeviceAuthorized(idA) && !st.Disabled()
+	})
+
+	cReinit, err := client.NewReconnectingE2EClientLocked(ctx, dial, reinitRes.Tip, clientKP, "")
+	if err != nil {
+		t.Fatalf("Connect should succeed even for unauthorized client: %v", err)
+	}
+	defer cReinit.Close()
+	waitFor(t, "re-init client refused again", func() bool {
+		var agents api.AgentsListResult
+		err := cReinit.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agents)
+		return err != nil && strings.Contains(err.Error(), "no channel to node")
+	})
+
+	// Signing the same key into the NEW chain serves it: the refusal above is the
+	// new genesis enforcing, not a client that never synced a chain.
+	var signRes api.LockDeviceResult
+	if err := ac.Call(api.MethodLockSign, api.LockDeviceParams{Device: clientKP.Public}, &signRes); err != nil {
+		t.Fatalf("lock.sign after re-init: %v", err)
+	}
+	cSigned, err := client.NewReconnectingE2EClientLocked(ctx, dial, reinitRes.Tip, clientKP, "")
+	if err != nil {
+		t.Fatalf("signed client connect: %v", err)
+	}
+	defer cSigned.Close()
+	waitFor(t, "signed client served on the new chain", func() bool {
+		var agents api.AgentsListResult
+		return cSigned.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agents) == nil
 	})
 }

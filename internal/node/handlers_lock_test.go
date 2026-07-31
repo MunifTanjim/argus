@@ -12,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 func newLockTestNode(t *testing.T) *Node {
@@ -423,6 +424,42 @@ func TestLockDisableRequiresLocked(t *testing.T) {
 	raw, _ := json.Marshal(api.LockDisableParams{Secret: []byte("x")})
 	if _, err := d.handleLockDisable(context.Background(), raw); err == nil {
 		t.Fatal("disable on an unlocked node must error")
+	}
+}
+
+// A disabled log is a dead network: lock.init must be able to start a fresh one,
+// since disable + reinit is the documented recovery path when signer keys are lost.
+func TestLockInitAfterDisable(t *testing.T) {
+	d := newLockTestNode(t)
+	first, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: first.DisablementSecrets[0]})
+	if _, err := d.handleLockDisable(context.Background(), raw); err != nil {
+		t.Fatalf("lock.disable: %v", err)
+	}
+
+	second, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
+		t.Fatalf("re-init after disable: %v", err)
+	}
+	if bytes.Equal(second.Tip, first.Tip) {
+		t.Fatal("re-init must create a new genesis")
+	}
+	st := d.TrustStore()
+	if st == nil || st.Disabled() {
+		t.Fatal("re-init must publish a fresh, enabled store")
+	}
+	if !bytes.Equal(st.Tip(), second.Tip) {
+		t.Fatal("live store tip must be the new genesis")
+	}
+	pin, err := trustpin.New(genesisHashPath(d.trustPath)).Load()
+	if err != nil {
+		t.Fatalf("load pin: %v", err)
+	}
+	if !bytes.Equal(pin, second.Tip) {
+		t.Fatal("persisted pin must follow the new genesis")
 	}
 }
 

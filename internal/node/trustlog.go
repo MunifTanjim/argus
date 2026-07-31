@@ -300,6 +300,7 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 		if err := d.writeGenesisHash(genesisHash); err != nil {
 			return err
 		}
+		d.seenBranches = nil // new store, new genesis — stale fingerprints are invalid
 		d.trust.Store(store) // publish only after both persists succeed
 		// The node that runs lock.init is the network's first trust anchor: its own
 		// `lock status` is what every other device compares its fingerprint against,
