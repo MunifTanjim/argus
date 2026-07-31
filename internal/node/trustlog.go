@@ -46,10 +46,22 @@ type trustCaller interface {
 
 // EnableTrustLog turns on locked-mode trust-log participation: it pins genesisHash
 // and loads any chain already persisted at path (rollback resistance across
-// reboots — a restarted node resumes from its last verified tip). Call before
-// ConnectGateway. A malformed/rolled-back on-disk chain is ignored (the store
-// stays empty rather than adopting it); genuine corruption surfaces on next sync.
+// reboots — a restarted node resumes from its last verified tip). A
+// malformed/rolled-back on-disk chain is ignored (the store stays empty rather than
+// adopting it); genuine corruption surfaces on next sync.
+//
+// Safe on a live, gateway-connected node: pinMu serializes the pin state it writes
+// against the sync loop, which reads seenBranches on every pull.
 func (d *Node) EnableTrustLog(genesisHash []byte, path string) error {
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
+	return d.enableTrustLogLocked(genesisHash, path)
+}
+
+// enableTrustLogLocked is EnableTrustLog for a caller that already holds pinMu,
+// because enabling the store is one step of a larger pin decision that must not be
+// interleaved (AdoptPin). Precondition: pinMu is held.
+func (d *Node) enableTrustLogLocked(genesisHash []byte, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -373,7 +385,7 @@ func (d *Node) AdoptPin(genesis []byte) error {
 		if err := trustpin.New(genesisHashPath(d.trustPath)).Save(genesis); err != nil {
 			return err
 		}
-		if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
+		if err := d.enableTrustLogLocked(genesis, d.trustPath); err != nil {
 			return err
 		}
 		d.pinSource = trustpin.SourceFile.String()
