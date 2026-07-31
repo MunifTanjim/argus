@@ -288,7 +288,7 @@ func TestClientBeaconCrossCheck(t *testing.T) {
 	n1 := &fakeNode{id: "n1", key: mustKP(t), handle: noop}
 	n2 := &fakeNode{id: "n2", key: mustKP(t), handle: noop}
 	gw, clientConn := newFakeMultiGateway(t, n1, n2)
-	gw.chain = chain
+	gw.setChain(chain)
 	defer gw.peer.Close()
 
 	c, err := NewE2EClientWithGenesis(clientConn, head)
@@ -394,7 +394,7 @@ func TestClientPrunesBeaconStateOnChannelDrop(t *testing.T) {
 	nodeA.handle = noop
 	nodeB.handle = noop
 	gw, clientConn := newFakeMultiGateway(t, nodeA, nodeB)
-	gw.chain = chain
+	gw.setChain(chain)
 	defer gw.peer.Close()
 
 	c, err := NewE2EClientWithGenesis(clientConn, head)
@@ -506,7 +506,7 @@ func TestClientCheckBeaconConsistencySkipsNonConnected(t *testing.T) {
 	genesisHash := trustlog.HashEntry(&entries[0])
 
 	gw, clientConn := newFakeMultiGateway(t, n1)
-	gw.chain = chain
+	gw.setChain(chain)
 	defer gw.peer.Close()
 
 	c, err := NewE2EClientWithGenesis(clientConn, genesisHash)
@@ -577,7 +577,7 @@ func TestEquivocationRequiresPersistence(t *testing.T) {
 	}
 	n1 := &fakeNode{id: "n1", key: mustKP(t), handle: noop}
 	gw, clientConn := newFakeMultiGateway(t, n1)
-	gw.chain = genesisOnlyChain
+	gw.setChain(genesisOnlyChain)
 	defer gw.peer.Close()
 
 	c, err := NewE2EClientWithGenesis(clientConn, genesisHash)
