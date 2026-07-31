@@ -100,11 +100,12 @@ func containsChain(chains [][]byte, want []byte) bool {
 	return false
 }
 
-// TestTrustStoreEmpty checks that a freshly constructed store returns nil from all.
+// TestTrustStoreEmpty checks that a freshly constructed store returns no chains.
 func TestTrustStoreEmpty(t *testing.T) {
 	ts := &trustStore{}
-	if ts.all() != nil {
-		t.Fatal("empty store should return nil from all()")
+	chains, _ := ts.diff(nil)
+	if chains != nil {
+		t.Fatal("empty store should return nil chains from diff(nil)")
 	}
 }
 
@@ -115,7 +116,7 @@ func TestTrustStoreGarbageIgnored(t *testing.T) {
 	ts := &trustStore{}
 	ts.offer(long)
 	ts.offer([]byte("not a valid chain"))
-	chains := ts.all()
+	chains, _ := ts.diff(nil)
 	if len(chains) != 1 {
 		t.Fatalf("garbage offer must not affect stored branches; got %d chains", len(chains))
 	}
@@ -132,7 +133,7 @@ func TestTrustStoreRetainsDistinctBranches(t *testing.T) {
 	ts := &trustStore{}
 	ts.offer(chainA)
 	ts.offer(chainB)
-	chains := ts.all()
+	chains, _ := ts.diff(nil)
 	if len(chains) < 2 {
 		t.Fatalf("both competing branches must be retained; got %d chains", len(chains))
 	}
@@ -152,7 +153,7 @@ func TestTrustStoreBounded(t *testing.T) {
 	for i := 0; i <= trustStoreCap; i++ {
 		ts.offer(oneEntryChain(t))
 	}
-	chains := ts.all()
+	chains, _ := ts.diff(nil)
 	if len(chains) > trustStoreCap {
 		t.Fatalf("store must not exceed cap %d; got %d branches", trustStoreCap, len(chains))
 	}
@@ -173,7 +174,7 @@ func TestTrustStoreEvictsSmallestOnOverflow(t *testing.T) {
 	short := oneEntryChain(t)
 	ts.offer(short)
 
-	chains := ts.all()
+	chains, _ := ts.diff(nil)
 	if len(chains) > trustStoreCap {
 		t.Fatalf("store exceeded cap after overflow: %d branches", len(chains))
 	}
@@ -212,7 +213,7 @@ func TestTrustStoreBlind(t *testing.T) {
 	// Either way the gateway does not call any verify function.
 }
 
-// TestTrustStoreOrderedByDescCount checks that all() returns branches with the
+// TestTrustStoreOrderedByDescCount checks that diff(nil) returns branches with the
 // highest entry count first.
 func TestTrustStoreOrderedByDescCount(t *testing.T) {
 	short, long := twoEntryChain(t)
@@ -220,13 +221,13 @@ func TestTrustStoreOrderedByDescCount(t *testing.T) {
 	// Offer short first, then long.
 	ts.offer(short)
 	ts.offer(long)
-	chains := ts.all()
+	chains, _ := ts.diff(nil)
 	if len(chains) < 2 {
 		t.Fatalf("expected 2 chains, got %d", len(chains))
 	}
 	// long (2 entries) must come before short (1 entry).
 	if !bytes.Equal(chains[0], long) {
-		t.Fatal("longest chain should be first in all()")
+		t.Fatal("longest chain should be first in diff(nil)")
 	}
 }
 

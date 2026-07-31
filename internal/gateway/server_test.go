@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -47,6 +48,63 @@ type delivererFunc func(context.Context, string, []byte, string, string) error
 
 func (f delivererFunc) Deliver(ctx context.Context, ep string, b []byte, ttl, u string) error {
 	return f(ctx, ep, b, ttl, u)
+}
+
+func newTestGatewayAndClient(t *testing.T) (*Server, *api.Peer) {
+	t.Helper()
+	srv := NewServer(New(time.Second), nil, nil)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	cli, err := api.DialWSPeer(context.Background(), gwWSURL(hs.URL, "/client"), "", nil, api.PeerOptions{})
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	t.Cleanup(func() { cli.Close() })
+	return srv, cli
+}
+
+func offerChain(t *testing.T, srv *Server, chain []byte) {
+	t.Helper()
+	srv.trust.offer(chain)
+}
+
+func TestPullWithheldWhenFingerprintKnown(t *testing.T) {
+	srv, cli := newTestGatewayAndClient(t)
+	chain := marshalChainForTest(t, 3)
+	offerChain(t, srv, chain)
+
+	var first api.TrustLogPullResult
+	if err := cli.Call(api.MethodTrustLogPull, nil, &first); err != nil {
+		t.Fatalf("first pull: %v", err)
+	}
+	if len(first.Chains) != 1 || len(first.Fingerprints) != 1 {
+		t.Fatalf("first pull: chains=%d fps=%d, want 1 and 1", len(first.Chains), len(first.Fingerprints))
+	}
+
+	var second api.TrustLogPullResult
+	if err := cli.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: first.Fingerprints}, &second); err != nil {
+		t.Fatalf("second pull: %v", err)
+	}
+	if len(second.Chains) != 0 {
+		t.Fatalf("a known branch must not be re-sent, got %d chains", len(second.Chains))
+	}
+	if len(second.Fingerprints) != 1 {
+		t.Fatal("fingerprints must always be complete, even when no chain is sent")
+	}
+}
+
+// An old client sends no params at all; it must keep getting everything.
+func TestPullWithoutParamsIsUnchanged(t *testing.T) {
+	srv, cli := newTestGatewayAndClient(t)
+	offerChain(t, srv, marshalChainForTest(t, 3))
+
+	var res api.TrustLogPullResult
+	if err := cli.Call(api.MethodTrustLogPull, nil, &res); err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if len(res.Chains) != 1 {
+		t.Fatal("omitted Known must mean send everything")
+	}
 }
 
 func TestNodeDispatchPushDeliverReportsGone(t *testing.T) {

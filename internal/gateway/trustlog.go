@@ -85,26 +85,6 @@ func (t *trustStore) offer(chain []byte) {
 	}
 }
 
-// all returns copies of all retained branch bytes, ordered by descending entry
-// count (longest branch first). Returns nil when no chains have been offered yet.
-func (t *trustStore) all() [][]byte {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.branches) == 0 {
-		return nil
-	}
-	es := make([]branchEntry, 0, len(t.branches))
-	for _, v := range t.branches {
-		es = append(es, v)
-	}
-	sort.Slice(es, func(i, j int) bool { return es[i].count > es[j].count })
-	out := make([][]byte, len(es))
-	for i, e := range es {
-		out[i] = append([]byte(nil), e.bytes...)
-	}
-	return out
-}
-
 // diff returns the retained branches whose fingerprint is absent from known,
 // longest first, together with the fingerprints of every branch held. Callers use
 // the fingerprint list to notice a branch the gateway lost (restart, cap eviction)

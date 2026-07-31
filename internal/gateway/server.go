@@ -299,11 +299,12 @@ func (s *Server) buildClientServer() *api.Server {
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	})
 
-	// trustlog.pull serves all retained competing trust-log branches to a client.
+	// trustlog.pull serves retained competing trust-log branches to a client.
 	// The client ingests each branch and its genesis-pinned fork-choice picks the
 	// winner; the gateway never verifies or interprets the chain internals.
-	srv.Handle(api.MethodTrustLogPull, func(context.Context, json.RawMessage) (any, error) {
-		return api.TrustLogPullResult{Chains: s.trust.all()}, nil
+	srv.Handle(api.MethodTrustLogPull, func(_ context.Context, params json.RawMessage) (any, error) {
+		chains, fps := s.trust.diff(pullKnown(params))
+		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	})
 
 	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
@@ -530,6 +531,19 @@ func ResetNodeKeepaliveForTest() {
 	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
 }
 
+// pullKnown extracts the caller's known fingerprints. Absent or malformed params
+// mean "send everything", which is how a caller that predates the field behaves.
+func pullKnown(params json.RawMessage) [][]byte {
+	if len(params) == 0 {
+		return nil
+	}
+	p, err := api.Decode[api.TrustLogPullParams](params)
+	if err != nil {
+		return nil
+	}
+	return p.Known
+}
+
 // nodeDispatch serves the requests a node issues down its uplink. Today that is
 // only trust-log distribution (offer + pull); everything else is method-not-found.
 // Kept separate from the client server so trustlog.offer is reachable ONLY here —
@@ -544,7 +558,8 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 		s.trust.offer(p.Chain)
 		return nil, nil
 	case api.MethodTrustLogPull:
-		return api.TrustLogPullResult{Chains: s.trust.all()}, nil
+		chains, fps := s.trust.diff(pullKnown(params))
+		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	case api.MethodPushDeliver:
 		if s.pushDeliverer == nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push delivery not enabled on this gateway"}

@@ -89,7 +89,7 @@ const (
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
-	MethodTrustLogPull  = "trustlog.pull"  // request: no params; result: TrustLogPullResult (node/client fetch)
+	MethodTrustLogPull  = "trustlog.pull"  // request: TrustLogPullParams (optional); result: TrustLogPullResult (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
 	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
 	// for blind relay on the roster/node.event stream. The gateway never verifies it.
@@ -667,6 +667,13 @@ type TrustLogChain struct {
 	Chain []byte `json:"chain,omitempty"`
 }
 
+// TrustLogPullParams optionally narrows a trustlog.pull. Known carries the
+// fingerprints of branches the caller has already received, so the gateway can
+// withhold them. An empty or omitted Known requests every branch.
+type TrustLogPullParams struct {
+	Known [][]byte `json:"known,omitempty"`
+}
+
 // TrustLogPullResult is the response to a trustlog.pull request. Chains holds all
 // competing trust-log branches the blind gateway currently holds, each as opaque
 // marshalled bytes (trustlog.MarshalChain output). Ordered by descending entry
@@ -682,6 +689,13 @@ type TrustLogChain struct {
 // their genesis-pinned SyncStore/fork-choice picks the winning branch.
 type TrustLogPullResult struct {
 	Chains [][]byte `json:"chains"`
+	// Fingerprints is the content hash of EVERY branch the gateway holds, including
+	// ones withheld from Chains. A caller whose own chain is missing from this list
+	// knows the gateway lost it (restart, cap eviction) and re-offers.
+	//
+	// Absent (nil) means the gateway predates this field — not "no branches". A
+	// caller must not treat the two the same: doing so re-offers on every tick.
+	Fingerprints [][]byte `json:"fingerprints,omitempty"`
 }
 
 // LockDeviceParams identifies a device to authorize/revoke by its Curve25519
