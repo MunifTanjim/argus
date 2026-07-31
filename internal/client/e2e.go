@@ -62,10 +62,15 @@ type pendingReply struct {
 // same tip required before the equivocation flag is set.
 const beaconMissThreshold = 2
 
-// beaconDeliverForceEvery mirrors node.rosterSyncEvery: a full re-courier is
-// forced every this many deliverBeacons calls so transient acceptance failures
-// (e.g. the target's roster not yet synced) resolve within ~N×5m at worst.
-const beaconDeliverForceEvery = 10
+// beaconDeliverForceInterval bounds how stale the courier's per-pair dedupe state
+// may get: at most this often, a delivery is re-attempted even for a pair already
+// recorded as delivered. It is wall-clock rather than a call count because delivery
+// is arrival-driven — a call count would fire every few seconds on a busy fleet and
+// almost never on an idle one, which is backwards. The window can be long: a target
+// that rejects is never recorded as delivered, so genuine failures already retry on
+// the next beacon or tick; this only covers a target that accepted and then lost the
+// beacon without dropping its channel.
+const beaconDeliverForceInterval = 30 * time.Minute
 
 // beaconMissState tracks consecutive unreconciled ticks for a single node's beacon tip.
 type beaconMissState struct {
@@ -122,18 +127,23 @@ type E2EClient struct {
 	// delivered[sourceNodeID][targetNodeID] = counter of the last beacon successfully
 	// couriered from source to target. Guards against re-delivering the same beacon
 	// on every tick; a higher counter resets the skip. A full re-courier is forced
-	// every beaconDeliverForceEvery calls (deliverTick tracks that count). Guarded by mu.
-	delivered   map[string]map[string]uint64
-	deliverTick uint64
+	// once per beaconDeliverForceInterval (lastForcedDeliver stamps it). Guarded by mu.
+	delivered         map[string]map[string]uint64
+	lastForcedDeliver time.Time
 
 	beaconKnownTip []byte          // caches known-set key; guarded by mu
 	beaconKnown    map[string]bool // resolved chain entry-hash set for beacon checks
 
-	// triggerMu guards the rate-limiter state for beacon-triggered pulls. Kept
+	// triggerMu guards the rate-limiter state for beacon-triggered work. Kept
 	// separate from mu so notification handling never contends with the main lock.
+	// triggerWantPull accumulates across coalesced requests: a courier-only trigger
+	// must not cancel a pull a suppressed one already asked for.
 	triggerMu             sync.Mutex
 	lastTriggeredPull     time.Time
 	triggeredPullInFlight bool
+	triggerPending        bool
+	triggerWantPull       bool
+	triggerTimer          *time.Timer
 }
 
 // NewE2EClientWithGate is NewE2EClientWithIdentity plus a caller-owned quarantine
@@ -242,6 +252,12 @@ func (m *E2EClient) Close() error {
 		delete(m.offlineTimers, id)
 	}
 	m.mu.Unlock()
+	m.triggerMu.Lock()
+	m.triggerPending = false
+	if m.triggerTimer != nil {
+		m.triggerTimer.Stop()
+	}
+	m.triggerMu.Unlock()
 	return m.peer.Close()
 }
 
@@ -257,7 +273,7 @@ func (m *E2EClient) Connect() error {
 	// so that the first syncTrustLog cross-check already has whatever beacons the
 	// gateway advertises on the roster).
 	for _, nd := range roster.Nodes {
-		m.ingestBeaconFromDescriptor(nd)
+		m.ingestBeaconFromDescriptor(nd) // the sync below covers the pull and the courier
 	}
 	// Locked mode: pull the trust log before deciding which nodes to open. The store
 	// is already disk-seeded (last verified HEAD), so enforcement is correct even if
@@ -881,8 +897,20 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	}
 }
 
-// minClientTriggeredPullInterval bounds how often a beacon can cause a pull.
-const minClientTriggeredPullInterval = 5 * time.Second
+// clientTriggerIntervalNs bounds how often an arriving beacon can cause a trust-log
+// pull and a courier run. Beacons are relayed by an untrusted gateway, so they must
+// not be able to amplify into unbounded work: suppressed arrivals are coalesced into
+// one deferred run, never queued.
+// Stored as nanoseconds in an atomic so setTriggerIntervalForTest is race-free when
+// background goroutines read it concurrently.
+var clientTriggerIntervalNs atomic.Int64
+
+func minClientTriggeredPullInterval() time.Duration {
+	return time.Duration(clientTriggerIntervalNs.Load())
+}
+
+// setTriggerIntervalForTest overrides the beacon-trigger rate-limit window. Test-only.
+func setTriggerIntervalForTest(d time.Duration) { clientTriggerIntervalNs.Store(int64(d)) }
 
 // clientTrustSyncInterval is the BACKSTOP for trust-log convergence, not the primary
 // path: a change normally arrives via trustlog.changed (node) or NodeEventBeacon
@@ -897,6 +925,7 @@ var clientTrustSyncInterval atomic.Int64
 func init() {
 	clientTrustSyncInterval.Store(int64(5 * time.Minute))
 	handshakeTimeoutNs.Store(int64(10 * time.Second))
+	clientTriggerIntervalNs.Store(int64(5 * time.Second))
 }
 
 // SetHandshakeTimeoutForTest overrides the Noise handshake timeout. Test-only.
@@ -1090,7 +1119,12 @@ func (m *E2EClient) onPeerNotify(n api.Notification) {
 	}
 	switch ev.Type {
 	case api.NodeEventBeacon:
-		m.ingestBeaconFromDescriptor(ev.Node)
+		// Every accepted beacon owes a courier run: node↔node beacon delivery has no
+		// other path, so leaving it to the tick puts each node's equivocation
+		// cross-check a whole backstop behind the client's.
+		if accepted, wantPull := m.ingestBeaconFromDescriptor(ev.Node); accepted {
+			m.requestBeaconTrigger(wantPull)
+		}
 	case api.NodeEventAdded, api.NodeEventOnline:
 		// Off the read loop: openChannel calls the gateway and waits for msg2, both
 		// of which are answered on this very loop.
@@ -1244,65 +1278,121 @@ func (m *E2EClient) pruneBeaconForDescriptor(nd api.NodeDescriptor) {
 //  4. b.Counter must be strictly greater than the last accepted counter for this node.
 //
 // A beacon that fails any guard is silently dropped (not flagged as equivocation).
-func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) {
+//
+// accepted reports that a new beacon was stored, which is what the courier owes a
+// run for; wantPull additionally reports that the beacon's tip is one this client
+// cannot yet place, which is what a trust-log pull (or, unpinned, a quarantine
+// check) owes a run for. Acting on them is the caller's job: on the Connect path
+// an explicit sync follows immediately, so only the event path triggers.
+func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) (accepted, wantPull bool) {
 	if nd.Beacon == nil || nd.IdentityPubKey == "" || nd.BeaconPubKey == "" {
-		return
+		return false, false
 	}
 	identityPub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
 	if err != nil {
-		return
+		return false, false
 	}
 	expectedBeaconPub, err := base64.StdEncoding.DecodeString(nd.BeaconPubKey)
 	if err != nil {
-		return
+		return false, false
 	}
 	b := *nd.Beacon
 	if !api.VerifyBeacon(b) {
-		return // signature invalid: silently drop
+		return false, false // signature invalid: silently drop
 	}
 	if !bytes.Equal(b.BeaconPub, expectedBeaconPub) {
-		return // beacon's key doesn't match roster-announced key: drop
+		return false, false // beacon's key doesn't match roster-announced key: drop
 	}
 	key := string(identityPub)
-	shouldTrigger := false
-	func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		if b.Counter <= m.beaconCtr[key] {
-			return // stale or replayed: ignore
-		}
-		m.beacons[key] = b
-		m.beaconCtr[key] = b.Counter
-		delete(m.beaconMiss, key)
-		if m.trust == nil || len(b.Tip) == 0 {
-			return
-		}
-		// Trigger only when the tip is absent from our known chain history.
-		// beaconKnown is nil before the first consistency check; trigger conservatively.
-		shouldTrigger = m.beaconKnown == nil || !m.beaconKnown[string(b.Tip)]
-	}()
-
-	if !shouldTrigger {
-		return
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if b.Counter <= m.beaconCtr[key] {
+		return false, false // stale or replayed: ignore
 	}
+	m.beacons[key] = b
+	m.beaconCtr[key] = b.Counter
+	delete(m.beaconMiss, key)
+	if len(b.Tip) == 0 {
+		return true, false
+	}
+	if m.trust == nil {
+		// Unpinned: any tip at all is evidence the network has a trust log, which is
+		// what detectUnpinnedChain quarantines on. Without this the unpinned client
+		// has no event path at all and waits out the whole backstop.
+		return true, !m.gate.Tripped()
+	}
+	// Pull only when the tip is absent from our known chain history.
+	// beaconKnown is nil before the first consistency check; pull conservatively.
+	return true, m.beaconKnown == nil || !m.beaconKnown[string(b.Tip)]
+}
 
+// requestBeaconTrigger runs the arrival-driven beacon work now when the rate-limit
+// window is clear, otherwise defers a single run to the end of the window. Deferring
+// rather than dropping keeps a second change landing seconds after the first from
+// waiting for the backstop; coalescing into one pending run keeps the bound that a
+// beacon flood costs at most one run per minClientTriggeredPullInterval window.
+func (m *E2EClient) requestBeaconTrigger(wantPull bool) {
 	m.triggerMu.Lock()
-	if time.Since(m.lastTriggeredPull) < minClientTriggeredPullInterval || m.triggeredPullInFlight {
-		m.triggerMu.Unlock()
+	defer m.triggerMu.Unlock()
+	m.triggerWantPull = m.triggerWantPull || wantPull
+	if m.triggerPending {
 		return
 	}
+	if m.triggeredPullInFlight {
+		m.triggerPending = true // re-armed by the running trigger's completion
+		return
+	}
+	if wait := minClientTriggeredPullInterval() - time.Since(m.lastTriggeredPull); wait > 0 {
+		m.triggerPending = true
+		if m.triggerTimer != nil {
+			m.triggerTimer.Stop()
+		}
+		m.triggerTimer = time.AfterFunc(wait, m.firePendingBeaconTrigger)
+		return
+	}
+	m.startBeaconTriggerLocked()
+}
+
+func (m *E2EClient) firePendingBeaconTrigger() {
+	m.triggerMu.Lock()
+	defer m.triggerMu.Unlock()
+	if !m.triggerPending || m.triggeredPullInFlight {
+		return
+	}
+	m.triggerPending = false
+	m.startBeaconTriggerLocked()
+}
+
+// startBeaconTriggerLocked launches the trigger off the read loop: beacons arrive as
+// notifications dispatched on it, and every RPC below needs that loop to answer.
+// Caller holds triggerMu.
+func (m *E2EClient) startBeaconTriggerLocked() {
 	m.lastTriggeredPull = time.Now()
 	m.triggeredPullInFlight = true
-	m.triggerMu.Unlock()
-
+	pull := m.triggerWantPull
+	m.triggerWantPull = false
 	go func() {
-		defer func() {
-			m.triggerMu.Lock()
-			m.triggeredPullInFlight = false
-			m.triggerMu.Unlock()
-		}()
-		m.pullTrustChain()
+		defer m.finishBeaconTrigger()
+		if pull {
+			if m.trust == nil {
+				m.detectUnpinnedChain()
+			} else {
+				m.pullTrustChain()
+			}
+		}
+		m.deliverBeacons()
 	}()
+}
+
+func (m *E2EClient) finishBeaconTrigger() {
+	m.triggerMu.Lock()
+	m.triggeredPullInFlight = false
+	pending := m.triggerPending
+	m.triggerPending = false
+	m.triggerMu.Unlock()
+	if pending {
+		m.requestBeaconTrigger(false)
+	}
 }
 
 // buildChainHashSet parses chainBytes and returns the set of all entry hashes
@@ -1449,15 +1539,16 @@ func (m *E2EClient) checkBeaconConsistencyWithChain(chainBytes, tip []byte) {
 // node via the beacon.deliver E2E method. A node's own beacon is never delivered
 // back to that same node. Each (source, target) pair is deduped by the counter
 // last successfully delivered: a beacon is only sent when its counter advances or
-// the target rejected a prior attempt. Every beaconDeliverForceEvery calls a full
-// re-courier is forced regardless, bounding the window in which a transient
-// node-side rejection (e.g. roster not yet synced) leaves a target without a
-// beacon. Delivery is sequential — the use case is N=2–5 nodes and a 30-second
-// interval.
+// the target rejected a prior attempt. Once per beaconDeliverForceInterval a full
+// re-courier is forced regardless, bounding the window in which a target that
+// accepted and then lost a beacon stays without it. Delivery is sequential — the
+// use case is N=2–5 nodes, and the driver is beacon arrival, not the trust tick.
 func (m *E2EClient) deliverBeacons() {
 	m.mu.Lock()
-	m.deliverTick++
-	forceAll := m.deliverTick%beaconDeliverForceEvery == 0
+	forceAll := time.Since(m.lastForcedDeliver) >= beaconDeliverForceInterval
+	if forceAll {
+		m.lastForcedDeliver = time.Now()
+	}
 	// Build identity pub → nodeID index from current channels.
 	identToNode := make(map[string]string, len(m.byNode))
 	for nodeID, nc := range m.byNode {

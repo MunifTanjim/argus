@@ -257,6 +257,12 @@ func (g *fakeMultiGateway) setChain(chain []byte) {
 	g.mu.Unlock()
 }
 
+// emitBeaconEvent pushes g.order[i]'s current signed beacon as a NodeEventBeacon,
+// the only way a beacon reaches a running client.
+func (g *fakeMultiGateway) emitBeaconEvent(i int) {
+	_ = g.peer.Notify(api.MethodNodeEvent, api.NodeEvent{Type: api.NodeEventBeacon, Node: g.descriptor(i)})
+}
+
 // emitNodeEvent pushes a roster notification, the gateway's only signal that a
 // node's reachability changed.
 func (g *fakeMultiGateway) emitNodeEvent(evType string, n *fakeNode) {

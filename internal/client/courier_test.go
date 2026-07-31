@@ -200,3 +200,85 @@ func TestClientBeaconCourierDoesNotDeliverSelfBeacon(t *testing.T) {
 		t.Fatalf("single-node setup must not call beacon.deliver (no other nodes); got %d calls", got)
 	}
 }
+
+// TestBeaconArrivalCouriersWithoutWaitingForTheTick guards the one node↔node
+// beacon path there is: the courier must run when a beacon arrives. Left to the
+// trust tick, a peer's tip reaches the other nodes a whole 5-minute backstop late
+// and their equivocation cross-check stalls behind it.
+func TestBeaconArrivalCouriersWithoutWaitingForTheTick(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(10 * time.Minute)) // prove the tick is not what couriered
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
+
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+	before := gw.beaconDeliveries()
+
+	gw.bumpBeaconCounter(t)
+	gw.emitBeaconEvent(0)
+
+	waitClient(t, "beacon couriered on arrival", func() bool {
+		return gw.beaconDeliveries() > before
+	})
+}
+
+// TestSuppressedBeaconArrivalIsDeferredNotDropped is the client half of the
+// coalescing fix: a second beacon landing inside the rate-limit window must still
+// be couriered when the window closes, not discarded until the backstop.
+func TestSuppressedBeaconArrivalIsDeferredNotDropped(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(10 * time.Minute))
+	setTriggerIntervalForTest(200 * time.Millisecond)
+	t.Cleanup(func() {
+		clientTrustSyncInterval.Store(int64(5 * time.Minute))
+		setTriggerIntervalForTest(5 * time.Second)
+	})
+
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+
+	gw.bumpBeaconCounter(t)
+	gw.emitBeaconEvent(0)
+	waitClient(t, "first arrival couriered", func() bool { return gw.beaconDeliveries() > 0 })
+	first := gw.beaconDeliveries()
+
+	// Second change, inside the window. No further event follows it.
+	gw.bumpBeaconCounter(t)
+	gw.emitBeaconEvent(0)
+
+	waitClient(t, "deferred courier run fires on its own", func() bool {
+		return gw.beaconDeliveries() > first
+	})
+}
+
+// TestBeaconFloodCoalescesToOneDeferredRun keeps the rate limit meaningful now
+// that suppression defers: a flood of arrivals must collapse into a single owed
+// run rather than queue one per beacon.
+func TestBeaconFloodCoalescesToOneDeferredRun(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(10 * time.Minute))
+	setTriggerIntervalForTest(100 * time.Millisecond)
+	t.Cleanup(func() {
+		clientTrustSyncInterval.Store(int64(5 * time.Minute))
+		setTriggerIntervalForTest(5 * time.Second)
+	})
+
+	m, gw := newCourierTestClient(t, 2)
+	defer m.Close()
+
+	m.deliverBeacons() // steady state, so every delivery below belongs to the flood
+	before := gw.beaconDeliveries()
+
+	// Requested synchronously so the whole flood lands inside one window; each
+	// counter bump makes the run that follows it observable as a delivery.
+	for i := 0; i < 30; i++ {
+		gw.bumpBeaconCounter(t)
+		m.ingestBeaconFromDescriptor(gw.descriptor(0))
+		m.requestBeaconTrigger(false)
+	}
+	waitClient(t, "at least one courier run", func() bool { return gw.beaconDeliveries() > before })
+	time.Sleep(400 * time.Millisecond) // four more windows: a queue would drain here
+
+	// One node pair, so each run delivers at most one beacon: an immediate run plus
+	// the single coalesced deferred one.
+	if got := gw.beaconDeliveries() - before; got > 2 {
+		t.Fatalf("deliveries = %d; 30 arrivals must coalesce into one deferred run", got)
+	}
+}

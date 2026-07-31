@@ -22,6 +22,13 @@ type gatewayStats struct {
 	lastKnownLen    int
 	chainsServedCnt int
 	pullsCnt        int
+	peer            *api.Peer // the stub gateway's peer, for pushing node.event
+}
+
+// emitBeacon pushes a NodeEventBeacon carrying nd, the only way a beacon reaches a
+// running client.
+func (s *gatewayStats) emitBeacon(nd api.NodeDescriptor) {
+	_ = s.peer.Notify(api.MethodNodeEvent, api.NodeEvent{Type: api.NodeEventBeacon, Node: nd})
 }
 
 func (s *gatewayStats) lastKnownCount() int {
@@ -59,7 +66,7 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 	var current []byte
 	var seenFPs atomic.Value // holds map[[32]byte]bool
 	stats := &gatewayStats{}
-	go func() {
+	{
 		peer := api.NewPeer(srvConn, api.PeerOptions{
 			Dispatch: func(_ context.Context, method string, raw json.RawMessage) (any, error) {
 				switch method {
@@ -113,8 +120,9 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 			},
 		})
-		<-peer.Done()
-	}()
+		stats.peer = peer
+		t.Cleanup(func() { peer.Close() })
+	}
 	return cliConn, stats
 }
 
@@ -232,9 +240,39 @@ func TestBeaconWithUnknownTipTriggersAPull(t *testing.T) {
 	before := stats.pulls()
 
 	// A beacon announcing a tip this client has never ingested.
-	m.ingestBeaconFromDescriptor(descriptorWithBeaconForTest(t, bytes.Repeat([]byte{0xAB}, 32)))
+	stats.emitBeacon(descriptorWithBeaconForTest(t, bytes.Repeat([]byte{0xAB}, 32)))
 
 	waitClient(t, "triggered pull issued", func() bool {
 		return stats.pulls() > before
 	})
+}
+
+// TestUnpinnedClientQuarantinesOnBeaconArrival is the client half of the event
+// path the 5-minute backstop was justified by. An unpinned client holds no trust
+// store, which is exactly the case the pull trigger used to bail on, so a locked
+// network left it talking to unverified nodes for a whole backstop.
+func TestUnpinnedClientQuarantinesOnBeaconArrival(t *testing.T) {
+	clientTrustSyncInterval.Store(int64(10 * time.Minute)) // prove the backstop is not what tripped it
+	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
+
+	chain, _ := genesisChainForTest(t)
+	ch := make(chan []byte, 1)
+	conn, stats := trustGatewayConnWithStats(t, ch)
+
+	m, err := NewE2EClientWithIdentity(conn, mustKP(t), nil, "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if m.Quarantined() {
+		t.Fatal("precondition: no chain yet, so no quarantine")
+	}
+
+	ch <- chain // the network gets locked under a running unpinned client
+	stats.emitBeacon(descriptorWithBeaconForTest(t, bytes.Repeat([]byte{0xCD}, 32)))
+
+	waitClient(t, "unpinned client quarantines from the beacon event", m.Quarantined)
 }

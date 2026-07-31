@@ -13,6 +13,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // genBeaconKey returns a fresh Ed25519 beacon keypair for test use.
@@ -173,7 +174,7 @@ func TestBeaconCounterGuard(t *testing.T) {
 		}
 	}
 
-	m := &E2EClient{beacons: map[string]api.Beacon{}, beaconCtr: map[string]uint64{}}
+	m := &E2EClient{beacons: map[string]api.Beacon{}, beaconCtr: map[string]uint64{}, gate: &trustpin.Gate{}}
 	key := string(nodeKey.Public)
 
 	m.ingestBeaconFromDescriptor(makeND(5))
@@ -212,7 +213,7 @@ func TestBeaconVerifyGuard(t *testing.T) {
 	bPubB64 := base64.StdEncoding.EncodeToString(bPub)
 	otherPubB64 := base64.StdEncoding.EncodeToString(otherPub)
 
-	m := &E2EClient{beacons: map[string]api.Beacon{}, beaconCtr: map[string]uint64{}}
+	m := &E2EClient{beacons: map[string]api.Beacon{}, beaconCtr: map[string]uint64{}, gate: &trustpin.Gate{}}
 
 	// Nil Beacon → no-op.
 	m.ingestBeaconFromDescriptor(api.NodeDescriptor{
