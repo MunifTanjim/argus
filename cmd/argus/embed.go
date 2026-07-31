@@ -200,6 +200,8 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 		enablePairing: true,
 		enablePush:    true,
 		pushDelay:     cfg.Push.Mobile.Delay,
+
+		keepaliveInterval: cfg.Gateway.KeepaliveInterval,
 	})
 	go func() {
 		<-ctx.Done()

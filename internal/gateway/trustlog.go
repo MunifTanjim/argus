@@ -46,7 +46,10 @@ func chainKey(chain []byte) [32]byte {
 // When inserting a new branch would exceed trustStoreCap the branch with the
 // fewest entries is evicted. Unparseable chains are silently dropped.
 // inserted is true and fp holds the branch fingerprint only when a key not
-// previously held was stored.
+// previously held was stored AND survived the eviction pass. A branch that is
+// immediately evicted again reports inserted=false: announcing it would tell peers
+// to pull something the gateway no longer holds, and with more competing branches
+// than the cap that turns into a re-offer/notify loop across the whole fleet.
 func (t *trustStore) offer(chain []byte) (inserted bool, fp [32]byte) {
 	entries, err := trustlog.UnmarshalChain(chain)
 	if err != nil {
@@ -84,6 +87,9 @@ func (t *trustStore) offer(chain []byte) (inserted bool, fp [32]byte) {
 			}
 		}
 		delete(t.branches, minKey)
+		if minKey == key {
+			return false, fp
+		}
 	}
 	return true, key
 }

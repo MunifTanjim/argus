@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -42,6 +43,11 @@ type Server struct {
 	nextChan  atomic.Uint64            // chan_id allocator
 
 	trust *trustStore // opaque hold of the network's trust-log chain (blind)
+
+	// nodeKeepalive is the gateway→node ping interval; 0 uses nodeKeepaliveInterval.
+	// Operator-configurable so gateway.keepalive-interval governs both directions of
+	// the node↔gateway link rather than only the node's own pings.
+	nodeKeepalive time.Duration
 
 	// chatterRPCs counts trustlog.*, beacon.*, and nodes.list dispatches — the
 	// methods the chatter-reduction effort targets. Read via ChatterRPCCountForTest.
@@ -89,6 +95,10 @@ func (s *Server) SetVAPIDPublicKey(key string) { s.vapidPubKey = key }
 // SetPushDeliverer wires the gateway's blind-relay egress for the push.deliver RPC.
 // Call before serving.
 func (s *Server) SetPushDeliverer(d push.Deliverer) { s.pushDeliverer = d }
+
+// SetNodeKeepaliveInterval sets how often the gateway pings each node uplink.
+// Zero keeps the built-in default. Call before serving.
+func (s *Server) SetNodeKeepaliveInterval(d time.Duration) { s.nodeKeepalive = d }
 
 // SetVersion records the server binary's version, served via server.info. Call before serving.
 func (s *Server) SetVersion(v string) { s.version = v }
@@ -233,14 +243,19 @@ func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
 	}
 }
 
-// notifyNodePeers sends a notification to every connected node uplink. Node peers
-// only — clients learn trust-log changes from NodeEventBeacon, so sending both
-// would double-trigger pulls.
-func (s *Server) notifyNodePeers(method string, params any) {
+// notifyNodePeers sends a notification to every connected node uplink except
+// except (nil sends to all). Node peers only — clients learn trust-log changes
+// from NodeEventBeacon, so sending both would double-trigger pulls. The originator
+// is excluded because it already holds what it just offered: notifying it would
+// spend its rate-limit budget on its own change, delaying the pull a genuine peer
+// change needs moments later.
+func (s *Server) notifyNodePeers(except *api.Peer, method string, params any) {
 	s.relayMu.Lock()
 	peers := make([]*api.Peer, 0, len(s.nodePeers))
 	for _, p := range s.nodePeers {
-		peers = append(peers, p)
+		if p != except {
+			peers = append(peers, p)
+		}
 	}
 	s.relayMu.Unlock()
 	for _, p := range peers {
@@ -575,8 +590,9 @@ func pullKnown(params json.RawMessage) [][]byte {
 // nodeDispatch serves the requests a node issues down its uplink: roster lookup
 // (nodes.list), trust-log distribution (offer + pull), and push delivery. Kept
 // separate from the client server so trustlog.offer is reachable only here —
-// clients are supplicants and must not publish trust state.
-func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawMessage) (any, error) {
+// clients are supplicants and must not publish trust state. src is the offering
+// uplink, excluded from the trustlog.changed fan-out.
+func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case api.MethodNodesList:
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
@@ -586,7 +602,7 @@ func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawM
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
 		if inserted, fp := s.trust.offer(p.Chain); inserted {
-			s.notifyNodePeers(api.MethodTrustLogChanged, api.TrustLogChangedParams{Fingerprint: fp[:]})
+			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Fingerprint: fp[:]})
 		}
 		return nil, nil
 	case api.MethodTrustLogPull:
@@ -625,6 +641,9 @@ func (s *Server) serveNode(conn net.Conn) {
 	// nodeID is set (under mu) once identify succeeds; beacon.offer handling reads it.
 	var mu sync.Mutex
 	var nodeID string
+	// self is this uplink, published once api.NewPeer returns so trustlog.offer can
+	// exclude the offering node from the change fan-out.
+	var self atomic.Pointer[api.Peer]
 
 	nodeDispatch := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		if method == api.MethodBeaconOffer {
@@ -641,7 +660,7 @@ func (s *Server) serveNode(conn net.Conn) {
 			s.agg.UpdateBeacon(id, &b)
 			return nil, nil
 		}
-		return s.nodeDispatch(ctx, method, params)
+		return s.nodeDispatch(ctx, self.Load(), method, params)
 	}
 
 	// The node uplink bypasses api.Server, so log its requests here to match the
@@ -662,13 +681,14 @@ func (s *Server) serveNode(conn net.Conn) {
 	}
 
 	peer := api.NewPeer(conn, api.PeerOptions{
-		KeepaliveInterval:         nodeKeepaliveInterval,
+		KeepaliveInterval:         cmp.Or(s.nodeKeepalive, nodeKeepaliveInterval),
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
 		Dispatch:                  loggedDispatch,
 		OnRelayFrame:              s.forwardFromNode,
 		Logger:                    s.log,
 	})
+	self.Store(peer)
 	defer peer.Close()
 
 	// Bound the identify handshake: an authenticated peer that never answers would

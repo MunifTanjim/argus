@@ -190,6 +190,29 @@ func TestTrustStoreEvictsSmallestOnOverflow(t *testing.T) {
 	}
 }
 
+// TestSelfEvictedOfferIsNotAnnounced covers the fork-thrash loop: past the cap, an
+// offer that is immediately evicted again must report inserted=false. Announcing it
+// tells every node to pull a branch the gateway no longer holds, whose owner then
+// re-offers it, which evicts another — chatter worse than the polling this replaced.
+func TestSelfEvictedOfferIsNotAnnounced(t *testing.T) {
+	ts := &trustStore{}
+	for i := 0; i < trustStoreCap; i++ {
+		_, long := twoEntryChain(t)
+		ts.offer(long)
+	}
+	short := oneEntryChain(t)
+
+	inserted, _ := ts.offer(short)
+
+	if inserted {
+		t.Fatal("an offer evicted by its own insertion must not report inserted")
+	}
+	chains, _ := ts.diff(nil)
+	if containsChain(chains, short) {
+		t.Fatal("precondition: the short chain is the one evicted")
+	}
+}
+
 // TestTrustStoreBlind verifies that the store never inspects entry internals beyond
 // the DoS-capped count: it accepts any structurally valid chain regardless of
 // whether signatures would pass verification (the gateway is blind).

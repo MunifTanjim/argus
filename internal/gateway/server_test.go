@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -170,9 +172,20 @@ func TestPullFingerprintsEmptyNotNullForEmptyStore(t *testing.T) {
 	}
 }
 
+// waitForNodePeers blocks until n node uplinks are registered as relay targets.
+func waitForNodePeers(t *testing.T, srv *Server, n int) {
+	t.Helper()
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		return len(srv.nodePeers) >= n
+	})
+}
+
 // TestTrustLogChangedNotifiesPeers checks that offering a new branch sends a
-// trustlog.changed notification to connected node peers (not clients), and that
-// re-offering the same branch (no new insertion) sends nothing.
+// trustlog.changed notification to the OTHER connected node peers (not clients,
+// and not the offering node itself), and that re-offering the same branch (no new
+// insertion) sends nothing.
 func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	agg := New(time.Second)
 	srv := NewServer(agg, nil, nil)
@@ -180,21 +193,32 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	defer hs.Close()
 	ctx := context.Background()
 
-	nodeGot := make(chan api.Notification, 4)
-	nodeDispatch := func(_ context.Context, method string, _ json.RawMessage) (any, error) {
-		if method == api.MethodNodeIdentify {
-			return api.IdentifyResult{ID: "test-node"}, nil
+	dialNode := func(id string, got chan api.Notification) *api.Peer {
+		t.Helper()
+		p, err := api.DialWSPeer(ctx, gwWSURL(hs.URL, "/node"), "", nil, api.PeerOptions{
+			Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+				if method == api.MethodNodeIdentify {
+					return api.IdentifyResult{ID: id}, nil
+				}
+				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+			},
+			OnNotify: func(n api.Notification) { got <- n },
+		})
+		if err != nil {
+			t.Fatalf("dial node %s: %v", id, err)
 		}
-		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		return p
 	}
-	nodePeer, err := api.DialWSPeer(ctx, gwWSURL(hs.URL, "/node"), "", nil, api.PeerOptions{
-		Dispatch: nodeDispatch,
-		OnNotify: func(n api.Notification) { nodeGot <- n },
-	})
-	if err != nil {
-		t.Fatalf("dial node: %v", err)
-	}
+
+	// offerer publishes; nodeGot belongs to the peer that must be told about it.
+	nodeGot := make(chan api.Notification, 4)
+	nodePeer := dialNode("test-node", nodeGot)
 	defer nodePeer.Close()
+
+	offererGot := make(chan api.Notification, 4)
+	offerer := dialNode("offering-node", offererGot)
+	defer offerer.Close()
+	waitForNodePeers(t, srv, 2)
 
 	// A client peer must NOT receive trustlog.changed; clients learn from NodeEventBeacon.
 	clientGot := make(chan api.Notification, 4)
@@ -212,8 +236,9 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 
 	chain := marshalChainForTest(t, 2)
 
-	// First offer: new branch → node gets trustlog.changed, client gets nothing.
-	if err := nodePeer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
+	// First offer: new branch → the other node gets trustlog.changed, client gets
+	// nothing, and the offering node is not told about its own change.
+	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
 		t.Fatalf("offer: %v", err)
 	}
 	select {
@@ -225,6 +250,12 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 		t.Fatal("node did not receive trustlog.changed after a new branch was offered")
 	}
 	select {
+	case n := <-offererGot:
+		t.Fatalf("the offering node must not be notified of its own offer, got %q", n.Method)
+	case <-time.After(200 * time.Millisecond):
+		// correct: self-notification would burn the offerer's own pull budget
+	}
+	select {
 	case n := <-clientGot:
 		t.Fatalf("client must not receive %q; clients learn from NodeEventBeacon", n.Method)
 	case <-time.After(200 * time.Millisecond):
@@ -232,7 +263,7 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	}
 
 	// Second offer of the same chain: no new insertion → no notification.
-	if err := nodePeer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
+	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
 		t.Fatalf("re-offer: %v", err)
 	}
 	select {
@@ -251,7 +282,7 @@ func TestNodeDispatchPushDeliverReportsGone(t *testing.T) {
 		return push.ErrGone
 	}))
 	params := mustMarshal(api.PushDeliverParams{Endpoint: "https://p/ep", Ciphertext: base64.StdEncoding.EncodeToString([]byte("opaque"))})
-	res, err := s.nodeDispatch(context.Background(), api.MethodPushDeliver, params)
+	res, err := s.nodeDispatch(context.Background(), nil, api.MethodPushDeliver, params)
 	if err != nil {
 		t.Fatalf("nodeDispatch: %v", err)
 	}
@@ -288,5 +319,52 @@ func TestNodeUplinkServesNodesList(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("nodes.list result %+v missing alpha with expected beacon pub key", result.Nodes)
+	}
+}
+
+// TestGatewayPingsNodesAtTheConfiguredInterval covers the half of
+// gateway.keepalive-interval that used to be hardcoded: the gateway's own pings to
+// each node uplink. Without it an operator raising the interval fleet-wide gets
+// only the node-side half of the reduction.
+func TestGatewayPingsNodesAtTheConfiguredInterval(t *testing.T) {
+	srv := NewServer(New(0), nil, nil)
+	srv.SetNodeKeepaliveInterval(30 * time.Millisecond)
+
+	gwConn, nodeConn := net.Pipe()
+	go srv.serveNode(gwConn)
+	defer nodeConn.Close()
+
+	pings := make(chan struct{}, 16)
+	go func() {
+		sc := bufio.NewScanner(nodeConn)
+		enc := json.NewEncoder(nodeConn)
+		for sc.Scan() {
+			var m struct {
+				ID     *json.RawMessage `json:"id"`
+				Method string           `json:"method"`
+			}
+			if json.Unmarshal(sc.Bytes(), &m) != nil || m.ID == nil {
+				continue
+			}
+			switch m.Method {
+			case api.MethodNodeIdentify:
+				_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": api.IdentifyResult{ID: "keepalive-node"}})
+			case api.MethodPing:
+				select {
+				case pings <- struct{}{}:
+				default:
+				}
+				_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": nil})
+			}
+		}
+	}()
+
+	// Three pings well inside the window the 15s default could ever produce one in.
+	for i := 0; i < 3; i++ {
+		select {
+		case <-pings:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("gateway sent %d pings; gateway.keepalive-interval must drive the gateway's own pings too", i)
+		}
 	}
 }

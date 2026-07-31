@@ -193,8 +193,10 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			enablePairing: true,
 			enablePush:    true,
 			pushDelay:     cfg.Push.Mobile.Delay,
-			tunnel:        tun,
-			tunnelOrigin:  tunOrigin,
+
+			keepaliveInterval: cfg.Gateway.KeepaliveInterval,
+			tunnel:            tun,
+			tunnelOrigin:      tunOrigin,
 		})
 	}
 
@@ -273,7 +275,7 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
 	f.String("zrok-name", "", "[zrok] reserved name for a stable URL: 'namespace:name' or 'name' (default: argus) [$ARGUS_ZROK_NAME]")
 	f.String("ngrok-domain", "", "[ngrok] reserved/custom domain (default: the account's static dev domain) [$ARGUS_NGROK_DOMAIN]")
-	f.Duration("keepalive-interval", 0, "node↔gateway keepalive ping interval (default: 15s) [$ARGUS_GATEWAY_KEEPALIVE_INTERVAL]")
+	f.Duration("keepalive-interval", 0, "node↔gateway keepalive ping interval, both directions (default: 15s) [$ARGUS_GATEWAY_KEEPALIVE_INTERVAL]")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
@@ -375,18 +377,19 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 // the gateway/tunnel/push scopes from it — injected so the embedded caller can
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
-	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
-	token         string
-	listener      net.Listener
-	log           *slog.Logger
-	onFatal       func() // listener/tunnel death handler; may be nil
-	version       string
-	publicURL     string
-	enablePairing bool
-	enablePush    bool
-	pushDelay     time.Duration
-	tunnel        tunnel.Provider
-	tunnelOrigin  string
+	node              *node.Node // in-process source; nil for a standalone gateway (relay only)
+	token             string
+	listener          net.Listener
+	log               *slog.Logger
+	onFatal           func() // listener/tunnel death handler; may be nil
+	version           string
+	publicURL         string
+	enablePairing     bool
+	enablePush        bool
+	pushDelay         time.Duration
+	keepaliveInterval time.Duration // gateway→node heartbeat; 0 uses the built-in default
+	tunnel            tunnel.Provider
+	tunnelOrigin      string
 }
 
 // serveGateway starts the co-located gateway: relays for dialed-in nodes (including
@@ -414,6 +417,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	}
 	hsrv.SetVersion(o.version)
 	hsrv.SetPublicURL(o.publicURL)
+	hsrv.SetNodeKeepaliveInterval(o.keepaliveInterval)
 	hsrv.SetLogger(gwLog)
 	if o.enablePush {
 		setupPush(ctx, o.node, hsrv, o.pushDelay, o.log.With("scope", "push"))
