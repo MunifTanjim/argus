@@ -262,3 +262,31 @@ func TestNodeDispatchPushDeliverReportsGone(t *testing.T) {
 		t.Fatalf("deliverer got %q, want decoded ciphertext", gotBody)
 	}
 }
+
+// TestNodeUplinkServesNodesList verifies that nodes.list is reachable over the
+// node-uplink route so a node's syncRoster call populates peer beacon attribution
+// rather than receiving method-not-found.
+func TestNodeUplinkServesNodesList(t *testing.T) {
+	srv := NewServer(New(time.Second), nil, nil)
+	alpha := newFakeSource("alpha", "alpha-box")
+	alpha.beaconPubKey = "dGVzdC1iZWFjb24tdGVzdA==" // non-empty sentinel value
+	srv.agg.AddSource(alpha)
+	defer alpha.close()
+
+	nodePeer, _ := adoptFakeNode(t, srv, "beta", "PUBKEY-BETA")
+	defer nodePeer.Close()
+
+	var result api.NodesListResult
+	if err := nodePeer.Call(api.MethodNodesList, nil, &result); err != nil {
+		t.Fatalf("nodes.list over node uplink: %v", err)
+	}
+	var found bool
+	for _, nd := range result.Nodes {
+		if nd.ID == "alpha" && nd.BeaconPubKey == "dGVzdC1iZWFjb24tdGVzdA==" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("nodes.list result %+v missing alpha with expected beacon pub key", result.Nodes)
+	}
+}

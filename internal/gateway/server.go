@@ -572,9 +572,9 @@ func pullKnown(params json.RawMessage) [][]byte {
 	return p.Known
 }
 
-// nodeDispatch serves the requests a node issues down its uplink. Today that is
-// only trust-log distribution (offer + pull); everything else is method-not-found.
-// Kept separate from the client server so trustlog.offer is reachable ONLY here —
+// nodeDispatch serves the requests a node issues down its uplink: roster lookup
+// (nodes.list), trust-log distribution (offer + pull), and push delivery. Kept
+// separate from the client server so trustlog.offer is reachable only here —
 // clients are supplicants and must not publish trust state.
 func (s *Server) nodeDispatch(_ context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
