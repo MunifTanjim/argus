@@ -108,13 +108,19 @@ func (d *Node) knownFingerprints() [][]byte {
 // recorded too: for the current pin, identical bytes can never become valid later,
 // and re-fetching them forever is the waste this removes.
 func (d *Node) rememberBranch(chain []byte) {
-	fp := branchFingerprint(chain)
 	d.pinMu.Lock()
 	defer d.pinMu.Unlock()
+	d.rememberBranchLocked(chain)
+}
+
+// rememberBranchLocked is rememberBranch for a caller already holding pinMu, because
+// recording a fingerprint is only correct together with the store state it was read
+// against. Precondition: pinMu is held.
+func (d *Node) rememberBranchLocked(chain []byte) {
 	if d.seenBranches == nil {
 		d.seenBranches = map[[32]byte]bool{}
 	}
-	d.seenBranches[fp] = true
+	d.seenBranches[branchFingerprint(chain)] = true
 }
 
 func containsFingerprint(list [][]byte, want [32]byte) bool {
@@ -334,9 +340,19 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 	}
 	// Record all fingerprints first: the detection loop returns after the first
 	// decodable chain, so branches after that one would otherwise be missed.
-	for _, chain := range got.Chains {
-		d.rememberBranch(chain)
+	// Under pinMu, and only while the store is still unset: a pin that landed during
+	// the pull just cleared seenBranches for its new store, and marking these chains
+	// seen would tell the gateway to withhold the very branches that store still
+	// needs — stranding it empty until some other branch appears.
+	d.pinMu.Lock()
+	if d.trust.Load() != nil {
+		d.pinMu.Unlock()
+		return
 	}
+	for _, chain := range got.Chains {
+		d.rememberBranchLocked(chain)
+	}
+	d.pinMu.Unlock()
 	for _, chain := range got.Chains {
 		entries, err := trustlog.UnmarshalChain(chain)
 		if err != nil || len(entries) == 0 {

@@ -339,6 +339,41 @@ func TestAdoptPinAndDetectRaceInvariant(t *testing.T) {
 	}
 }
 
+// A pin adopted during the pull clears seenBranches for its new, empty store. If
+// detect then marks the chains it pulled as seen, the gateway withholds them from
+// every later pull and the store stays empty — the node reports itself pinned while
+// authorizing nobody, until some unrelated branch appears.
+func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+
+	for i := range 50 {
+		d := New()
+		d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+
+		gate := make(chan struct{})
+		peer := &gatedTrustPeer{chains: [][]byte{chain}, gate: gate}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.syncTrustOnce(peer)
+		}()
+
+		_ = d.AdoptPin(genesis)
+		close(gate)
+		wg.Wait()
+
+		st := d.TrustStore()
+		if st == nil || st.Length() > 0 {
+			continue // the store ingested the chain itself; nothing to strand
+		}
+		if fp := branchFingerprint(chain); containsFingerprint(d.knownFingerprints(), fp) {
+			t.Fatalf("iter %d: chain marked seen but never ingested; the gateway will withhold it", i)
+		}
+	}
+}
+
 func trustpinFileForTest(d *Node) *trustpin.File {
 	return trustpin.New(genesisHashPath(d.trustPath))
 }
