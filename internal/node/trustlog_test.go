@@ -95,10 +95,10 @@ func TestSyncOnceOffersAndIngests(t *testing.T) {
 	}
 
 	fp := &fakePeer{pullChain: longChain}
-	d.syncTrustOnce(fp) // offer our short chain, pull+ingest the long one
+	d.syncTrustOnce(fp) // pull+ingest the long one, then offer it
 
-	if len(fp.offered) != 1 || !bytes.Equal(fp.offered[0], shortChain) {
-		t.Fatalf("expected our short chain offered, got %d offers", len(fp.offered))
+	if len(fp.offered) != 1 || !bytes.Equal(fp.offered[0], longChain) {
+		t.Fatalf("expected our chain offered after ingest, got %d offers", len(fp.offered))
 	}
 	if !d.TrustStore().DeviceAuthorized(device) {
 		t.Fatal("device from pulled chain should be authorized")

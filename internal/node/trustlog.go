@@ -55,6 +55,7 @@ func (d *Node) EnableTrustLog(genesisHash []byte, path string) error {
 	}
 	d.trustPath = path
 	d.pinGenesis = append([]byte(nil), genesisHash...)
+	d.seenBranches = nil // new store, new genesis — stale fingerprints are invalid
 	d.trust.Store(sync)
 	return nil
 }
@@ -84,8 +85,8 @@ func (d *Node) knownFingerprints() [][]byte {
 }
 
 // rememberBranch records a fingerprint as received. Branches that fail to verify are
-// recorded too: fingerprints are content-addressed, so identical bytes can never
-// become valid later, and re-fetching them forever is the waste this removes.
+// recorded too: for the current pin, identical bytes can never become valid later,
+// and re-fetching them forever is the waste this removes.
 func (d *Node) rememberBranch(chain []byte) {
 	fp := branchFingerprint(chain)
 	d.pinMu.Lock()
@@ -119,20 +120,6 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
 		return
 	}
-	// Offer only when the gateway does not list our chain. A nil Fingerprints means
-	// the gateway predates the field, so fall back to offering unconditionally.
-	// Write this as an explicit switch, NOT as a single boolean: the natural
-	// spelling (`held := got.Fingerprints == nil`) inverts the legacy case and
-	// silently stops offering to an old gateway forever.
-	preMine := st.Bytes()
-	if preMine != nil {
-		switch {
-		case got.Fingerprints == nil:
-			_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: preMine}, nil)
-		case !containsFingerprint(got.Fingerprints, branchFingerprint(preMine)):
-			_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: preMine}, nil)
-		}
-	}
 	anyChanged := false
 	for _, chain := range got.Chains {
 		d.rememberBranch(chain)
@@ -144,19 +131,14 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 			anyChanged = true
 		}
 	}
-	// When the store was empty before this pull and we just ingested our first
-	// chain, offer it now so the gateway sees our state on the same tick.
-	// Without this, a node that adopts a pin on a live network stays silent for
-	// an entire sync interval before it can offer.
-	if anyChanged && preMine == nil {
-		if mine := st.Bytes(); mine != nil {
-			switch {
-			case got.Fingerprints == nil:
-				_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
-			case !containsFingerprint(got.Fingerprints, branchFingerprint(mine)):
-				_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
-			}
-		}
+	// Offer only when the gateway does not list our chain's fingerprint.
+	// containsFingerprint returns false for a nil slice, so a legacy gateway
+	// (Fingerprints == nil) is treated as "does not hold our branch" and receives
+	// an unconditional offer. Record our own fingerprint after offering so the
+	// gateway cannot echo it back on the next pull.
+	if mine := st.Bytes(); mine != nil && !containsFingerprint(got.Fingerprints, branchFingerprint(mine)) {
+		_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
+		d.rememberBranch(mine)
 	}
 	if anyChanged {
 		if werr := d.persistTrust(); werr != nil {
@@ -309,8 +291,12 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
 		return
 	}
+	// Record all fingerprints first: the detection loop returns after the first
+	// decodable chain, so branches after that one would otherwise be missed.
 	for _, chain := range got.Chains {
 		d.rememberBranch(chain)
+	}
+	for _, chain := range got.Chains {
 		entries, err := trustlog.UnmarshalChain(chain)
 		if err != nil || len(entries) == 0 {
 			continue
@@ -397,6 +383,7 @@ func (d *Node) DropPin() error {
 		d.trust.Store(nil)
 		d.pinGenesis = nil
 		d.pinSource = ""
+		d.seenBranches = nil // stale fingerprints must not suppress the re-fill after re-pin
 		if sawChain {
 			// Only a chain we actually held proves this network is locked. Tripping
 			// without that proof would strand a node whose network has no trust log:
