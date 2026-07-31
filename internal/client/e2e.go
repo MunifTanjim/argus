@@ -906,6 +906,35 @@ func (m *E2EClient) rememberBranch(chain []byte) {
 	m.mu.Unlock()
 }
 
+// pullTrustChain fetches and ingests trust-log branches from the gateway without
+// running the beacon consistency check or delivering beacons. Beacon-triggered
+// calls use this path so they do not count as equivocation miss ticks: the branch
+// a beacon announces may not yet have propagated to the gateway, and miss
+// accumulation is the responsibility of the periodic timer only.
+func (m *E2EClient) pullTrustChain() {
+	var got api.TrustLogPullResult
+	if err := m.peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: m.knownFingerprints()}, &got); err != nil {
+		return
+	}
+	anyChanged := false
+	for _, chain := range got.Chains {
+		m.rememberBranch(chain)
+		changed, err := m.trust.Ingest(chain)
+		if err != nil {
+			continue
+		}
+		if changed {
+			anyChanged = true
+		}
+	}
+	if anyChanged {
+		if m.trustPath != "" {
+			_ = m.persistTrustChain()
+		}
+		m.reevaluateChannels()
+	}
+}
+
 // syncTrustLog pulls all competing trust-log branches from the gateway and ingests
 // each in order (genesis-pinned; the fork-choice in the store picks the winner;
 // rolled-back or tampered branches are silently skipped). After a successful pull it
@@ -1205,21 +1234,25 @@ func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) {
 		return // beacon's key doesn't match roster-announced key: drop
 	}
 	key := string(identityPub)
-	m.mu.Lock()
-	if b.Counter <= m.beaconCtr[key] {
-		m.mu.Unlock()
-		return // stale or replayed: ignore
-	}
-	m.beacons[key] = b
-	m.beaconCtr[key] = b.Counter
-	delete(m.beaconMiss, key) // counter advanced: new beacon supersedes any miss streak
-	beaconTip := b.Tip
-	m.mu.Unlock()
+	shouldTrigger := false
+	func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if b.Counter <= m.beaconCtr[key] {
+			return // stale or replayed: ignore
+		}
+		m.beacons[key] = b
+		m.beaconCtr[key] = b.Counter
+		delete(m.beaconMiss, key)
+		if m.trust == nil || len(b.Tip) == 0 {
+			return
+		}
+		// Trigger only when the tip is absent from our known chain history.
+		// beaconKnown is nil before the first consistency check; trigger conservatively.
+		shouldTrigger = m.beaconKnown == nil || !m.beaconKnown[string(b.Tip)]
+	}()
 
-	if m.trust == nil || len(beaconTip) == 0 {
-		return
-	}
-	if bytes.Equal(beaconTip, m.trust.Tip()) {
+	if !shouldTrigger {
 		return
 	}
 
@@ -1238,7 +1271,7 @@ func (m *E2EClient) ingestBeaconFromDescriptor(nd api.NodeDescriptor) {
 			m.triggeredPullInFlight = false
 			m.triggerMu.Unlock()
 		}()
-		m.syncTrustLog()
+		m.pullTrustChain()
 	}()
 }
 
