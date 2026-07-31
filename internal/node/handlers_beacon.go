@@ -28,7 +28,9 @@ type beaconMissState struct {
 //
 //  1. api.VerifyBeacon — Ed25519 sig must verify against b.BeaconPub.
 //  2. Attribution — b.BeaconPub must match a roster-known peer's beacon_pubkey
-//     (populated by syncRoster); silently drops beacons from unknown keys.
+//     (populated by syncRoster); an unknown key is answered with an RPC error, which
+//     is what stops the client courier from recording the beacon as delivered, and
+//     schedules a rate-limited roster refresh so the gap closes in seconds.
 //  3. Counter guard — b.Counter must be strictly greater than the last accepted
 //     counter for this key; ignores stale and replayed beacons.
 //  4. Stores the accepted beacon; deletes any prior miss streak (new beacon
@@ -57,22 +59,31 @@ func (d *Node) handleBeaconDeliver(_ context.Context, params json.RawMessage) (a
 	// whose tip revealed equivocation). VerifyBeacon (crypto) already ran above,
 	// outside the lock.
 	key := string(b.BeaconPub)
+	unknown, err := d.acceptPeerBeacon(key, b)
+	if unknown {
+		// An unplaceable key is the symptom of a peer that joined since the last
+		// roster tick, so refresh out of band rather than leaving it unattributable
+		// for a whole roster interval. Signal non-acceptance too, so the client
+		// courier retries instead of recording this as delivered.
+		d.requestRosterSync()
+	}
+	return nil, err
+}
+
+// acceptPeerBeacon stores b under key, reporting whether the key is unattributable.
+func (d *Node) acceptPeerBeacon(key string, b api.Beacon) (unknown bool, err error) {
 	d.peerBeaconMu.Lock()
 	defer d.peerBeaconMu.Unlock()
 	if !d.peerBeaconPubs[key] {
-		// Signal non-acceptance so the client courier retries on the next tick
-		// instead of recording this as delivered. The gap is transient: syncRoster
-		// runs at connect and every rosterSyncEvery trust ticks.
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown beacon pub: roster sync pending"}
+		return true, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown beacon pub: roster sync pending"}
 	}
 	if b.Counter <= d.peerBeaconCtr[key] {
-		return nil, nil // stale or replayed: ignore
+		return false, nil // stale or replayed: ignore
 	}
 	d.peerBeaconCtr[key] = b.Counter
 	d.peerBeacons[key] = b
 	delete(d.peerBeaconMiss, key) // new beacon supersedes any miss streak
-
-	return nil, nil
+	return false, nil
 }
 
 // checkPeerBeaconConsistency cross-checks all stored peer beacons against this
@@ -115,8 +126,8 @@ func (d *Node) checkPeerBeaconConsistency() {
 	var toFlag []string
 	for key, b := range d.peerBeacons {
 		// Belt-and-suspenders: skip peers no longer in the current roster attribution
-		// set. syncRoster prunes beacon state every 10 ticks; this guard closes the
-		// window between those calls so a de-rostered peer never accumulates misses.
+		// set. syncRoster prunes beacon state on its own interval; this guard closes
+		// the window between those calls so a de-rostered peer never accumulates misses.
 		if !d.peerBeaconPubs[key] {
 			continue
 		}

@@ -494,3 +494,31 @@ type fakeTrustCaller struct {
 func (f *fakeTrustCaller) Call(method string, params, out any) error {
 	return f.fn(method, params, out)
 }
+
+// TestUnknownBeaconPubRefreshesTheRoster covers the other half of the roster
+// decoupling: a peer that joined since the last roster tick is unattributable, so
+// its beacons are rejected. Waiting a whole roster interval to notice keeps the new
+// node outside the anti-equivocation cross-check and makes the courier retry into
+// a wall; the rejection itself has to schedule the refresh.
+func TestUnknownBeaconPubRefreshesTheRoster(t *testing.T) {
+	d, _, _ := setupNodeWithTrust(t)
+	joiner, joinerPriv := genBeaconKeyPair(t)
+
+	peer := &recordingTrustPeer{roster: []api.NodeDescriptor{{
+		ID:           "joiner",
+		BeaconPubKey: base64.StdEncoding.EncodeToString(joiner),
+	}}}
+	d.setTriggerPeerForTest(peer)
+
+	b := api.SignBeacon(joinerPriv, joiner, bytes.Repeat([]byte{0x42}, 32), 1, 1)
+	if _, err := d.handleBeaconDeliver(context.Background(), marshalBeacon(t, b)); err == nil {
+		t.Fatal("a beacon from an unattributable key must be rejected so the courier retries")
+	}
+
+	waitFor(t, "the rejection refreshes the roster", func() bool { return peer.rosterCount() >= 1 })
+	waitFor(t, "the joiner becomes attributable", func() bool {
+		d.peerBeaconMu.Lock()
+		defer d.peerBeaconMu.Unlock()
+		return d.peerBeaconPubs[string(joiner)]
+	})
+}
