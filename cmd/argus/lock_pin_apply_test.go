@@ -635,3 +635,37 @@ func TestAuthorizeHintSuppressedWhenThereIsNoLiveRoot(t *testing.T) {
 		t.Fatalf("an authorized node needs no hint; got %q", h)
 	}
 }
+
+// On a node-only machine the client role may never have run, so the only proof this
+// device's root is dead is the NODE's persisted chain. Reading just the client's left
+// `lock pin` refusing on the very device the parity work exists to unstick.
+func TestGuardPinAllowsReplacementProvenByTheNodeChain(t *testing.T) {
+	tempStateDir(t)
+	chain, genesis := disabledChainForTest(t)
+	if err := clientPinFile().Save(genesis); err != nil {
+		t.Fatalf("seed pin: %v", err)
+	}
+	if err := os.WriteFile(config.GetStatePath("trustlog-chain"), chain, 0o600); err != nil {
+		t.Fatalf("seed node chain: %v", err)
+	}
+
+	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err != nil {
+		t.Fatalf("a pin the node's own chain proves dead must not block: %v", err)
+	}
+}
+
+// A live node chain still guards the pin: only a disabled one makes it stale.
+func TestGuardPinRefusesWhenTheNodeChainIsLive(t *testing.T) {
+	tempStateDir(t)
+	chain, genesis := liveChainForTest(t)
+	if err := clientPinFile().Save(genesis); err != nil {
+		t.Fatalf("seed pin: %v", err)
+	}
+	if err := os.WriteFile(config.GetStatePath("trustlog-chain"), chain, 0o600); err != nil {
+		t.Fatalf("seed node chain: %v", err)
+	}
+
+	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err == nil {
+		t.Fatal("a live node chain must still require unpin")
+	}
+}

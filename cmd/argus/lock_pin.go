@@ -235,15 +235,25 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 // re-enabled, so the pin is stale rather than conflicting and `lock pin` may replace
 // it without an unpin. An absent or unreadable chain is no proof, so it is a no.
 func clientPinSuperseded(cur []byte) bool {
-	b, err := os.ReadFile(config.GetStatePath("client-trustlog-chain"))
-	if err != nil || len(b) == 0 {
-		return false
+	// Either role's chain is proof: on a node-only machine the client has never run
+	// and has no chain of its own, and on a client-only machine there is no node —
+	// so requiring one particular file would refuse on exactly the devices that need
+	// unsticking. Both are ingested under cur, so a chain from some other root can
+	// never stand in as evidence.
+	for _, name := range []string{"client-trustlog-chain", "trustlog-chain"} {
+		b, err := os.ReadFile(config.GetStatePath(name))
+		if err != nil || len(b) == 0 {
+			continue
+		}
+		st := trustlog.NewSyncStore(cur)
+		if _, ierr := st.Ingest(b); ierr != nil {
+			continue
+		}
+		if st.Disabled() {
+			return true
+		}
 	}
-	st := trustlog.NewSyncStore(cur)
-	if _, ierr := st.Ingest(b); ierr != nil {
-		return false
-	}
-	return st.Disabled()
+	return false
 }
 
 func configPinConflict(cfgGenesis []byte) error {
