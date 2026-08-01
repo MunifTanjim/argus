@@ -377,21 +377,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	}
 	select {
 	case err := <-nc.hs:
-		if err != nil {
-			return err
-		}
-		m.mu.Lock()
-		if m.gate.Tripped() {
-			// Gate tripped during the open window: evict the in-flight channel so no
-			// ungated entry survives into byNode.
-			delete(m.byChanID, res.ChanID)
-			m.mu.Unlock()
-			return nil
-		}
-		m.byNode[nd.ID] = nc
-		m.everConnected[string(pub)] = true // record for checkBeaconConsistency skip guard
-		m.mu.Unlock()
-		return nil
+		return err
 	case <-m.peer.Done():
 		return fmt.Errorf("connection closed during handshake")
 	case <-time.After(time.Duration(handshakeTimeoutNs.Load())):
@@ -429,6 +415,20 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 		// arriving before ch is stored would be dropped — losing that state and
 		// desyncing the shared dec-nonce for everything after it.
 		err := m.finishHandshake(nc, f)
+		if err == nil {
+			// Register in byNode here, before signalling nc.hs. The read loop is
+			// single-threaded, so byNode is written before the next frame (the node's
+			// session snapshot) can be processed — ensuring any consumer that reacts
+			// to the resulting session.event already sees this node in byNode.
+			m.mu.Lock()
+			if m.gate.Tripped() {
+				delete(m.byChanID, f.Route.ChanID)
+			} else {
+				m.byNode[nc.nodeID] = nc
+				m.everConnected[string(nc.identityPub)] = true
+			}
+			m.mu.Unlock()
+		}
 		select {
 		case nc.hs <- err:
 		default:

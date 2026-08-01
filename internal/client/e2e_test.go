@@ -892,3 +892,50 @@ func TestPushTestReturnsGoneOnlyIfAllNodesGone(t *testing.T) {
 		}
 	})
 }
+
+// TestByNodeWrittenBeforeSessionEventDelivered pins the happens-before guarantee:
+// byNode must be written before the node's first session.event reaches the consumer.
+// A consumer that calls sessions.list or callNode in response to that event must find
+// the node. The test is deterministic because the read loop is single-threaded —
+// byNode is written before the postHandshake frame is even dispatched, so by the
+// time the event exits c.Events() the registration is visible.
+func TestByNodeWrittenBeforeSessionEventDelivered(t *testing.T) {
+	n := &fakeNode{
+		id:  "snap-node",
+		key: mustKP(t),
+		postHandshake: &fakeNote{
+			method: api.MethodSessionEvent,
+			params: json.RawMessage(`{"type":"added","session":{"id":"s1"}}`),
+		},
+		handle: func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+			return nil, nil, nil
+		},
+	}
+	gw, clientConn := newFakeMultiGateway(t, n)
+	defer gw.peer.Close()
+
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("NewE2EClient: %v", err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-c.Events():
+			if ev.Method != api.MethodSessionEvent {
+				continue
+			}
+			if _, ok := c.byNodeSnapshot()[n.id]; !ok {
+				t.Fatalf("session.event for %q reached consumer but node not in byNode", n.id)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no session.event received within deadline")
+		}
+	}
+}
