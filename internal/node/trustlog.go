@@ -348,6 +348,7 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 	}(); err != nil {
 		return err
 	}
+	d.resetPeerBeaconState()
 	d.reevaluateTrustChannels()
 	d.announceTrustChange()
 	return nil
@@ -455,6 +456,7 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	if len(genesis) != trustpin.GenesisLen {
 		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
 	}
+	adopted := false
 	if err := func() error {
 		d.pinMu.Lock()
 		defer d.pinMu.Unlock()
@@ -485,9 +487,13 @@ func (d *Node) AdoptPin(genesis []byte) error {
 		}
 		d.pinSource = trustpin.SourceFile.String()
 		d.trustGate.Clear()
+		adopted = true
 		return nil
 	}(); err != nil {
 		return err
+	}
+	if adopted {
+		d.resetPeerBeaconState()
 	}
 	d.reevaluateTrustChannels()
 	if peer := d.triggerPeer(); peer != nil {

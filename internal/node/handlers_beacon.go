@@ -158,6 +158,20 @@ func (d *Node) checkPeerBeaconConsistency() {
 	}
 }
 
+// resetPeerBeaconState drops everything collected under a previous trust root.
+// Beacons carry a tip, not a genesis, so a tip from the old chain is
+// indistinguishable from an equivocating one and would latch d.equivocation for
+// good after a legitimate relock. Must not be called while holding pinMu.
+func (d *Node) resetPeerBeaconState() {
+	d.peerBeaconMu.Lock()
+	clear(d.peerBeacons)
+	clear(d.peerBeaconMiss)
+	d.beaconKnown = nil
+	d.beaconKnownTip = nil
+	d.peerBeaconMu.Unlock()
+	d.equivocation.Store(false)
+}
+
 // syncRoster fetches the gateway roster and updates peerBeaconPubs with the
 // beacon_pubkey values of all OTHER roster nodes. Called on each sync tick so
 // newly joining nodes are recognized for beacon attribution.

@@ -522,3 +522,56 @@ func TestUnknownBeaconPubRefreshesTheRoster(t *testing.T) {
 		return d.peerBeaconPubs[string(joiner)]
 	})
 }
+
+// Adopting a new trust root invalidates every beacon gathered under the old one:
+// those tips can never resolve against the new chain, so keeping them latches
+// equivocation permanently after a legitimate relock.
+func TestNewTrustRootClearsPeerBeaconState(t *testing.T) {
+	d := disabledChainNode(t)
+	d.peerBeaconMu.Lock()
+	d.peerBeacons["stale"] = api.Beacon{Tip: bytes.Repeat([]byte{0x9A}, 32)}
+	d.peerBeaconMiss["stale"] = &beaconMissState{tip: bytes.Repeat([]byte{0x9A}, 32), misses: 2}
+	d.peerBeaconMu.Unlock()
+	d.equivocation.Store(true)
+
+	_, foreignGenesis := lockedChainForTest(t)
+	if err := d.AdoptPin(foreignGenesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+
+	if d.Equivocation() {
+		t.Fatal("a new trust root must clear the equivocation latch")
+	}
+	d.peerBeaconMu.Lock()
+	defer d.peerBeaconMu.Unlock()
+	if len(d.peerBeacons) != 0 || len(d.peerBeaconMiss) != 0 {
+		t.Fatal("beacons gathered under the old root must be dropped")
+	}
+}
+
+// Re-pinning the same genesis changes no root, so it must not become a way to clear
+// the equivocation latch — that flag is evidence about the chain we still follow.
+func TestRepinningTheSameGenesisKeepsBeaconState(t *testing.T) {
+	d := newLockTestNode(t)
+	res, err := callLockInit(t, d, api.LockInitParams{})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	d.peerBeaconMu.Lock()
+	d.peerBeacons["peer"] = api.Beacon{Tip: bytes.Repeat([]byte{0x9A}, 32)}
+	d.peerBeaconMu.Unlock()
+	d.equivocation.Store(true)
+
+	if err := d.AdoptPin(res.Tip); err != nil {
+		t.Fatalf("re-pinning the same genesis: %v", err)
+	}
+
+	if !d.Equivocation() {
+		t.Fatal("a no-op re-pin must not clear the equivocation latch")
+	}
+	d.peerBeaconMu.Lock()
+	defer d.peerBeaconMu.Unlock()
+	if len(d.peerBeacons) != 1 {
+		t.Fatal("a no-op re-pin must not drop collected beacons")
+	}
+}
