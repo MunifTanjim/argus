@@ -1,6 +1,9 @@
 package node
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -158,5 +161,86 @@ func TestLocalDisableOverridesQuarantine(t *testing.T) {
 	r := d.newRelayResponder()
 	if !runClientHandshake(t, r, clientKP) {
 		t.Fatal("local-disable must override quarantine; handshake must succeed")
+	}
+}
+
+// disabledChainNode returns a node pinned to its own genesis whose chain has been
+// disabled by a break-glass secret — the state every device is left in after
+// `argus lock disable`.
+func disabledChainNode(t *testing.T) *Node {
+	t.Helper()
+	d := newLockTestNode(t)
+	res, err := callLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: res.DisablementSecrets[0]})
+	if _, err := d.handleLockDisable(context.Background(), raw); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if !d.TrustStore().Disabled() {
+		t.Fatal("precondition: store must be disabled")
+	}
+	return d
+}
+
+// A disabled chain enforces nothing and can never be re-enabled, so once the network
+// serves a different root the stale pin has all the costs of a pin and none of the
+// protection. The node must fail closed exactly like an unpinned one.
+func TestDisabledChainNodeQuarantinesOnForeignGenesis(t *testing.T) {
+	d := disabledChainNode(t)
+	foreign, foreignGenesis := lockedChainForTest(t)
+
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{foreign}})
+
+	if !d.Quarantined() {
+		t.Fatal("a superseded node must quarantine")
+	}
+	if !d.rejectsChannels() {
+		t.Fatal("a superseded node must reject channels")
+	}
+	if got := d.trustGate.Genesis(); !bytes.Equal(got, foreignGenesis) {
+		t.Fatalf("gate genesis = %x, want the foreign root %x", got, foreignGenesis)
+	}
+}
+
+// Branches of our own root are not a supersession, however many arrive.
+func TestDisabledChainNodeIgnoresItsOwnGenesis(t *testing.T) {
+	d := disabledChainNode(t)
+	own := d.TrustStore().Bytes()
+
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{own}})
+
+	if d.Quarantined() {
+		t.Fatal("our own chain must never quarantine us")
+	}
+}
+
+// A live pin is exactly what should refuse a foreign root without going dark.
+func TestEnforcingNodeIgnoresForeignGenesis(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	foreign, _ := lockedChainForTest(t)
+
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{foreign}})
+
+	if d.Quarantined() {
+		t.Fatal("an enforcing node must reject a foreign chain without quarantining")
+	}
+}
+
+// The offer must survive: a disabled node is how the disable entry reaches nodes
+// that were offline when it happened, and the gateway's copy is not guaranteed.
+func TestSupersededNodeStillOffersItsChain(t *testing.T) {
+	d := disabledChainNode(t)
+	foreign, _ := lockedChainForTest(t)
+	peer := &fakeTrustPeer{chains: [][]byte{foreign}}
+
+	d.syncTrustOnce(peer)
+
+	if peer.offers == 0 {
+		t.Fatal("a superseded node must keep offering its disabled chain")
 	}
 }

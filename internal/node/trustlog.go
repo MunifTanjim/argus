@@ -172,6 +172,7 @@ func (d *Node) pullTrustOnce(peer trustCaller) bool {
 			anyChanged = true
 		}
 	}
+	d.detectSupersedingChain(got.Chains)
 	// Offer only when the gateway does not list our chain's fingerprint.
 	// containsFingerprint returns false for a nil slice, so a legacy gateway
 	// (Fingerprints == nil) is treated as "does not hold our branch" and receives
@@ -403,6 +404,40 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 		} else {
 			d.pinMu.Unlock()
 		}
+		return
+	}
+}
+
+// detectSupersedingChain quarantines a node whose own chain is disabled once the
+// network serves a different trust root. A disabled log authorizes nobody and can
+// never be re-enabled, so the pin holding it protects nothing while still refusing
+// the live root — the same rootless state detectUnpinnedChain exists for, reached
+// from the other direction. Decode only, for the reason given there.
+func (d *Node) detectSupersedingChain(chains [][]byte) {
+	if d.trustGate.Tripped() {
+		return
+	}
+	if st := d.trust.Load(); st == nil || !st.Disabled() {
+		return
+	}
+	for _, chain := range chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		genesis := trustlog.HashEntry(&entries[0])
+		d.pinMu.Lock()
+		st := d.trust.Load()
+		if st == nil || !st.Disabled() || bytes.Equal(genesis, d.pinGenesis) {
+			d.pinMu.Unlock()
+			continue
+		}
+		d.trustGate.Trip(genesis)
+		d.pinMu.Unlock()
+		d.log.Warn("this device's trust log is disabled and the network moved to a different root; refusing all channels until pinned",
+			"genesis", base64.StdEncoding.EncodeToString(genesis),
+			"fix", "argus lock pin")
+		d.reevaluateTrustChannels()
 		return
 	}
 }
