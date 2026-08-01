@@ -268,6 +268,32 @@ func TestSupersededNodeStillOffersItsChain(t *testing.T) {
 	}
 }
 
+// TestEnableTrustLogClearsGateWhenGenesisMatches checks that a node whose gate
+// was tripped for genesis G is unquarantined by EnableTrustLog(G, path) without
+// going through AdoptPin. AdoptPin already cleared the gate unconditionally;
+// EnableTrustLog must do the same when it receives the matching genesis.
+func TestEnableTrustLogClearsGateWhenGenesisMatches(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	path := filepath.Join(t.TempDir(), "chain")
+
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{chain}})
+	if !d.Quarantined() {
+		t.Fatal("precondition: gate must be tripped before calling EnableTrustLog")
+	}
+
+	if err := d.EnableTrustLog(genesis, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+
+	if d.Quarantined() {
+		t.Fatal("gate must be cleared after EnableTrustLog with the matching genesis")
+	}
+	if d.rejectsChannels() {
+		t.Fatal("node must accept channels after the gate is cleared")
+	}
+}
+
 // The network can be relocked more than once. A first-sighting-wins gate keeps
 // naming the earlier successor, so the operator compares a fingerprint that matches
 // no node and pins a root that no longer exists.

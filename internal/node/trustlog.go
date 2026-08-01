@@ -75,6 +75,9 @@ func (d *Node) enableTrustLogLocked(genesisHash []byte, path string) error {
 	d.pinGenesis = append([]byte(nil), genesisHash...)
 	d.seenBranches = nil // new store, new genesis — stale fingerprints are invalid
 	d.trust.Store(sync)
+	if bytes.Equal(d.trustGate.Genesis(), genesisHash) {
+		d.trustGate.Clear()
+	}
 	return nil
 }
 
