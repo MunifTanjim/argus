@@ -149,6 +149,11 @@ func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) error {
 	if err != nil {
 		return err
 	}
+	// A chain from a superseded root can never ingest again; leaving it behind only
+	// produces a confusing error on the next sync (the cleanup unpinDevice does too).
+	if rerr := os.Remove(config.GetStatePath("client-trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
+		return rerr
+	}
 	if err := clientPinFile().Save(genesis); err != nil {
 		return err
 	}
@@ -203,7 +208,30 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
 		return configPinConflict(cfgGenesis)
 	}
-	return guardExistingPin(clientPinFile(), genesis)
+	cur, err := clientPinFile().Load()
+	if err != nil {
+		return err
+	}
+	if cur == nil || bytes.Equal(cur, genesis) || clientPinSuperseded(cur) {
+		return nil
+	}
+	return existingPinConflict(cur)
+}
+
+// clientPinSuperseded reports whether this device's client pin names a chain that has
+// been disabled network-wide. Such a chain enforces nothing and can never be
+// re-enabled, so the pin is stale rather than conflicting and `lock pin` may replace
+// it without an unpin. An absent or unreadable chain is no proof, so it is a no.
+func clientPinSuperseded(cur []byte) bool {
+	b, err := os.ReadFile(config.GetStatePath("client-trustlog-chain"))
+	if err != nil || len(b) == 0 {
+		return false
+	}
+	st := trustlog.NewSyncStore(cur)
+	if _, ierr := st.Ingest(b); ierr != nil {
+		return false
+	}
+	return st.Disabled()
 }
 
 func configPinConflict(cfgGenesis []byte) error {

@@ -513,3 +513,85 @@ func TestUnpinSummarySaysNoTrustRootWithoutAConfigPin(t *testing.T) {
 		t.Fatalf("a fully unpinned device has no trust root, got: %q", msg)
 	}
 }
+
+// liveChainForTest returns a genesis-only chain and its genesis hash.
+func liveChainForTest(t *testing.T) (chain []byte, genesis []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("genesis: %v", err)
+	}
+	return trustlog.MarshalChain(log.Entries()), log.Tip()
+}
+
+// disabledChainForTest returns the chain a device holds after `argus lock disable`:
+// a genesis carrying one disablement commitment, plus the entry that consumed it.
+func disabledChainForTest(t *testing.T) (chain []byte, genesis []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	secret, err := trustlog.GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("secret: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{trustlog.DisablementCommitment(secret)})
+	if err != nil {
+		t.Fatalf("genesis: %v", err)
+	}
+	tip := log.Tip()
+	if err := log.Disable(secret, signer); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	return trustlog.MarshalChain(log.Entries()), tip
+}
+
+// A client pin to a disabled chain is stale: `lock pin` adopts the live root in one
+// command, exactly as it does on a device that never had a pin.
+func TestGuardPinAllowsReplacingASupersededClientPin(t *testing.T) {
+	tempStateDir(t)
+	chain, genesis := disabledChainForTest(t)
+	if err := clientPinFile().Save(genesis); err != nil {
+		t.Fatalf("seed pin: %v", err)
+	}
+	if err := os.WriteFile(config.GetStatePath("client-trustlog-chain"), chain, 0o600); err != nil {
+		t.Fatalf("seed chain: %v", err)
+	}
+
+	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err != nil {
+		t.Fatalf("a superseded pin must not block a new one: %v", err)
+	}
+}
+
+// A live pin still requires an explicit unpin.
+func TestGuardPinStillRefusesALiveClientPin(t *testing.T) {
+	tempStateDir(t)
+	chain, genesis := liveChainForTest(t)
+	if err := clientPinFile().Save(genesis); err != nil {
+		t.Fatalf("seed pin: %v", err)
+	}
+	if err := os.WriteFile(config.GetStatePath("client-trustlog-chain"), chain, 0o600); err != nil {
+		t.Fatalf("seed chain: %v", err)
+	}
+
+	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err == nil {
+		t.Fatal("a live pin must still require unpin")
+	}
+}
+
+// Without the old chain there is no evidence the pin is stale; stay conservative.
+func TestGuardPinRefusesWhenStalenessCannotBeProven(t *testing.T) {
+	tempStateDir(t)
+	if err := clientPinFile().Save(testGenesis(0xCD)); err != nil {
+		t.Fatalf("seed pin: %v", err)
+	}
+
+	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err == nil {
+		t.Fatal("no chain on disk means no proof of staleness")
+	}
+}
