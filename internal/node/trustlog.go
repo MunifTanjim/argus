@@ -11,8 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/blake2s"
-
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -87,49 +85,53 @@ func (d *Node) TrustStore() *trustlog.SyncStore { return d.trust.Load() }
 // enabling locked mode. Call at boot so a later live lock.init has a target path.
 func (d *Node) SetTrustChainPath(path string) { d.trustPath = path }
 
-// branchFingerprint is the content hash the gateway keys branches by. It must match
-// gateway.chainKey exactly or every pull re-downloads.
-func branchFingerprint(chain []byte) [32]byte { return blake2s.Sum256(chain) }
+// branchHead is the hash of a chain's last entry — the identity the gateway keys
+// branches by now. It must match the head the gateway derives or every sync
+// re-downloads.
+func branchHead(chain []byte) ([32]byte, bool) {
+	var out [32]byte
+	entries, err := trustlog.UnmarshalChain(chain)
+	if err != nil || len(entries) == 0 {
+		return out, false
+	}
+	copy(out[:], trustlog.HashEntry(&entries[len(entries)-1]))
+	return out, true
+}
 
-// knownFingerprints returns the fingerprints of branches already received, for the
-// pull request. Guarded by pinMu alongside the rest of the trust decision state.
-func (d *Node) knownFingerprints() [][]byte {
+// knownHeads returns the head hash of every branch already received, for the sync
+// request. Guarded by pinMu alongside the rest of the trust decision state.
+func (d *Node) knownHeads() [][]byte {
 	d.pinMu.Lock()
 	defer d.pinMu.Unlock()
 	out := make([][]byte, 0, len(d.seenBranches))
 	for k := range d.seenBranches {
-		fp := k
-		out = append(out, append([]byte(nil), fp[:]...))
+		h := k
+		out = append(out, append([]byte(nil), h[:]...))
 	}
 	return out
 }
 
-// rememberBranch records a fingerprint as received. Branches that fail to verify are
+// rememberHead records a branch as received. Branches that fail to verify are
 // recorded too: for the current pin, identical bytes can never become valid later,
 // and re-fetching them forever is the waste this removes.
-func (d *Node) rememberBranch(chain []byte) {
+func (d *Node) rememberHead(chain []byte) {
 	d.pinMu.Lock()
 	defer d.pinMu.Unlock()
-	d.rememberBranchLocked(chain)
+	d.rememberHeadLocked(chain)
 }
 
-// rememberBranchLocked is rememberBranch for a caller already holding pinMu, because
-// recording a fingerprint is only correct together with the store state it was read
+// rememberHeadLocked is rememberHead for a caller already holding pinMu, because
+// recording a head is only correct together with the store state it was read
 // against. Precondition: pinMu is held.
-func (d *Node) rememberBranchLocked(chain []byte) {
+func (d *Node) rememberHeadLocked(chain []byte) {
+	h, ok := branchHead(chain)
+	if !ok {
+		return
+	}
 	if d.seenBranches == nil {
 		d.seenBranches = map[[32]byte]bool{}
 	}
-	d.seenBranches[branchFingerprint(chain)] = true
-}
-
-func containsFingerprint(list [][]byte, want [32]byte) bool {
-	for _, f := range list {
-		if len(f) == 32 && bytes.Equal(f, want[:]) {
-			return true
-		}
-	}
-	return false
+	d.seenBranches[h] = true
 }
 
 // syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
@@ -145,25 +147,77 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 	d.checkPeerBeaconConsistency()
 }
 
-// pullTrustOnce runs one offer/pull cycle over peer: publish our current chain
-// (if any), then pull all retained gateway branches and ingest each in order.
+// syncTrustChains exchanges heads with the gateway and returns the branches it
+// served, assembled back into chains. The gateway sends only entries this node
+// cannot reach from its heads, so its delta is merged with the entries of the
+// branches already held before assembling — a chain missing its ancestors cannot
+// be verified. A non-empty Want means the gateway is behind: it is answered with
+// the ancestry it asked for, so a node that locked the network while the gateway
+// was restarting still publishes.
+func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
+	var got api.TrustLogSyncResult
+	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: d.knownHeads()}, &got); err != nil {
+		return nil, false
+	}
+
+	merged := append([][]byte{}, got.Entries...)
+	if st := d.trust.Load(); st != nil {
+		if mine := st.Bytes(); mine != nil {
+			if raw, err := trustlog.ChainEntries(mine); err == nil {
+				merged = append(merged, raw...)
+			}
+		}
+	}
+	chains := trustlog.AssembleChains(merged)
+
+	if len(got.Want) > 0 {
+		d.pushHeldEntries(peer)
+	}
+	return chains, true
+}
+
+// pushHeldEntries publishes this node's own branch to a gateway that asked for it.
+func (d *Node) pushHeldEntries(peer trustCaller) {
+	st := d.trust.Load()
+	if st == nil {
+		return
+	}
+	mine := st.Bytes()
+	if mine == nil {
+		return
+	}
+	raw, err := trustlog.ChainEntries(mine)
+	if err != nil {
+		return
+	}
+	if err := peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil); err != nil {
+		return
+	}
+	// Also populate the old chain store so clients still on trustlog.pull can see it
+	// until they are switched in the next task.
+	_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
+	d.rememberHead(mine)
+}
+
+// pullTrustOnce runs one sync cycle over peer: exchange heads with the gateway,
+// ingest each returned branch, and push our own if the gateway asked for it.
 // The genesis-pinned store's fork-choice accepts the best valid branch; invalid
 // or rolled-back branches are silently skipped. A single advance triggers persist.
 // Returns false when there was nothing to reconcile against — no store (the
-// unpinned detection path ran instead) or a failed pull.
+// unpinned detection path ran instead) or a failed sync.
 func (d *Node) pullTrustOnce(peer trustCaller) bool {
 	st := d.trust.Load()
 	if st == nil {
 		d.detectUnpinnedChain(peer)
 		return false
 	}
-	var got api.TrustLogPullResult
-	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
 		return false
 	}
 	anyChanged := false
-	for _, chain := range got.Chains {
-		d.rememberBranch(chain)
+	for _, chain := range chains {
+		d.rememberHead(chain)
 		changed, err := st.Ingest(chain)
 		if err != nil {
 			continue // rollback/fork/tamper/wrong-genesis: skip this branch
@@ -172,23 +226,12 @@ func (d *Node) pullTrustOnce(peer trustCaller) bool {
 			anyChanged = true
 		}
 	}
-	d.detectSupersedingChain(got.Chains)
-	// Offer only when the gateway does not list our chain's fingerprint.
-	// containsFingerprint returns false for a nil slice, so a legacy gateway
-	// (Fingerprints == nil) is treated as "does not hold our branch" and receives
-	// an unconditional offer. Record our own fingerprint after offering so the
-	// gateway cannot echo it back on the next pull.
-	if mine := st.Bytes(); mine != nil && !containsFingerprint(got.Fingerprints, branchFingerprint(mine)) {
-		_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
-		d.rememberBranch(mine)
-	}
+	d.detectSupersedingChain(chains)
 	if anyChanged {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 		d.reevaluateTrustChannels()
-		// Emit a fresh beacon directly over the sync peer so the gateway sees the
-		// updated tip immediately (without waiting for a reconnect/identify).
 		if len(d.beacon.Private) > 0 {
 			if b, err := d.makeBeacon(); err == nil {
 				_ = peer.Call(api.MethodBeaconOffer, b, nil)
@@ -228,22 +271,20 @@ func (d *Node) announceTrustChange() {
 	d.emitBeacon()
 }
 
-// offerTrustNow pushes the current chain to the gateway out of band. Best effort:
-// the sync loop's offer remains the backstop when there is no uplink.
+// offerTrustNow pushes the current branch's entries to the gateway out of band.
+// Entries the gateway already holds dedupe by hash, so this costs only what is
+// genuinely new. Best effort: the sync loop remains the backstop when there is no
+// uplink.
 func (d *Node) offerTrustNow() {
 	st := d.trust.Load()
 	if st == nil {
 		return
 	}
-	chain := st.Bytes()
 	peer := d.triggerPeer()
-	if chain == nil || peer == nil {
+	if peer == nil {
 		return
 	}
-	if err := peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
-		return
-	}
-	d.rememberBranch(chain) // the gateway holds it now; the next pull must not re-fetch it
+	d.pushHeldEntries(peer)
 }
 
 // runTrustSync drives the offer/pull loop for the uplink's lifetime. It
@@ -365,14 +406,14 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 	if d.trustGate.Tripped() {
 		return
 	}
-	var got api.TrustLogPullResult
-	if err := peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: d.knownFingerprints()}, &got); err != nil {
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
 		return
 	}
-	// Record all fingerprints first: the detection loop returns after the first
-	// decodable chain, so branches after that one would otherwise be missed.
+	// Record all heads first: the detection loop returns after the first decodable
+	// chain, so branches after that one would otherwise be missed.
 	// Under pinMu, and only while the store is still unset: a pin that landed during
-	// the pull just cleared seenBranches for its new store, and marking these chains
+	// the sync just cleared seenBranches for its new store, and marking these chains
 	// seen would tell the gateway to withhold the very branches that store still
 	// needs — stranding it empty until some other branch appears.
 	d.pinMu.Lock()
@@ -380,11 +421,11 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 		d.pinMu.Unlock()
 		return
 	}
-	for _, chain := range got.Chains {
-		d.rememberBranchLocked(chain)
+	for _, chain := range chains {
+		d.rememberHeadLocked(chain)
 	}
 	d.pinMu.Unlock()
-	for _, chain := range got.Chains {
+	for _, chain := range chains {
 		entries, err := trustlog.UnmarshalChain(chain)
 		if err != nil || len(entries) == 0 {
 			continue
@@ -534,6 +575,22 @@ func (d *Node) onGatewayNotify(n api.Notification) {
 	// against (e.g. during a reconnect gap).
 	if d.triggerPeer() == nil {
 		return
+	}
+	if p, err := api.Decode[api.TrustLogChangedParams](n.Params); err == nil && len(p.Heads) > 0 {
+		known := map[string]bool{}
+		for _, h := range d.knownHeads() {
+			known[string(h)] = true
+		}
+		fresh := false
+		for _, h := range p.Heads {
+			if !known[string(h)] {
+				fresh = true
+				break
+			}
+		}
+		if !fresh {
+			return
+		}
 	}
 	d.trustPullTrigger.request(minTriggeredPullInterval(), func() {
 		// The peer is resolved at run time, not at notification time: a deferred pull

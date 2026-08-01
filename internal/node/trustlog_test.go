@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -55,23 +56,28 @@ func TestEnableTrustLogLoadsFromDisk(t *testing.T) {
 	}
 }
 
-// A fakePeer records offered chains and serves a canned pull, standing in for the
-// gateway uplink so runTrustSync can be exercised without a network.
+// A fakePeer serves a canned chain as entries on trustlog.sync and records pushed
+// entries (reassembled into chains) for assertions, standing in for the gateway
+// uplink so runTrustSync can be exercised without a network.
 type fakePeer struct {
 	pullChain []byte
-	offered   [][]byte
+	offered   [][]byte // chains reconstructed from MethodTrustLogPush calls
 }
 
 func (f *fakePeer) Call(method string, params, out any) error {
 	switch method {
-	case api.MethodTrustLogOffer:
-		f.offered = append(f.offered, params.(api.TrustLogChain).Chain)
-	case api.MethodTrustLogPull:
-		var chains [][]byte
+	case api.MethodTrustLogSync:
+		res := out.(*api.TrustLogSyncResult)
 		if f.pullChain != nil {
-			chains = [][]byte{f.pullChain}
+			if raw, err := trustlog.ChainEntries(f.pullChain); err == nil {
+				res.Entries = raw
+			}
 		}
-		*(out.(*api.TrustLogPullResult)) = api.TrustLogPullResult{Chains: chains}
+	case api.MethodTrustLogPush:
+		entries := params.(api.TrustLogPushParams).Entries
+		for _, chain := range trustlog.AssembleChains(entries) {
+			f.offered = append(f.offered, chain)
+		}
 	}
 	return nil
 }
@@ -99,11 +105,8 @@ func TestSyncOnceOffersAndIngests(t *testing.T) {
 	}
 
 	fp := &fakePeer{pullChain: longChain}
-	d.syncTrustOnce(fp) // pull+ingest the long one, then offer it
+	d.syncTrustOnce(fp) // pull+ingest the long one
 
-	if len(fp.offered) != 1 || !bytes.Equal(fp.offered[0], longChain) {
-		t.Fatalf("expected our chain offered after ingest, got %d offers", len(fp.offered))
-	}
 	if !d.TrustStore().DeviceAuthorized(device) {
 		t.Fatal("device from pulled chain should be authorized")
 	}
@@ -248,32 +251,31 @@ func TestEnableTrustLogIgnoresCorruptDisk(t *testing.T) {
 	}
 }
 
-// The second sync must not re-download a branch, and must not re-offer a chain the
-// gateway confirms it holds.
+// The second sync must not push a chain the gateway already holds (Want is empty),
+// and must send the known heads so the gateway can compute its delta.
 func TestSyncIsQuietWhenNothingChanged(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
-	fp := branchFingerprint(chain)
 
 	d := New()
 	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}} // Want is nil → no push
 
 	d.syncTrustOnce(peer)
 	firstOffers := peer.offers
 	d.syncTrustOnce(peer)
 
 	if peer.offers != firstOffers {
-		t.Fatalf("offers went %d -> %d; a chain the gateway already holds must not be re-offered", firstOffers, peer.offers)
+		t.Fatalf("offers went %d -> %d; gateway returned no Want so node must not push", firstOffers, peer.offers)
 	}
 	if len(peer.lastKnown) == 0 {
-		t.Fatal("the second pull must send the fingerprints already seen")
+		t.Fatal("the second sync must send the known heads")
 	}
 }
 
-// If the gateway loses the branch, the node must notice and re-offer.
+// If the gateway loses the branch and sets Want, the node must push again.
 func TestNodeReoffersWhenGatewayForgets(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
 	d := New()
@@ -281,48 +283,51 @@ func TestNodeReoffersWhenGatewayForgets(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}} // Want is nil → no push
 	d.syncTrustOnce(peer)
 	before := peer.offers
 
-	peer.fingerprints = nil // gateway restarted: it holds nothing
+	// Gateway restarted and signals it wants our branch back.
 	peer.chains = nil
+	peer.want = [][]byte{bytes.Repeat([]byte{0x01}, 32)}
 	d.syncTrustOnce(peer)
 
 	if peer.offers <= before {
-		t.Fatal("a gateway that no longer lists our fingerprint must trigger a re-offer")
+		t.Fatal("a gateway that sets Want must trigger a push from the node")
 	}
 }
 
-// An old gateway returns no Fingerprints at all. That is not "holds nothing".
-func TestOldGatewayStillGetsOffers(t *testing.T) {
+// The node pushes whenever Want is set, and only then — no unconditional offers.
+func TestNodePushesWhenGatewayWants(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
 	d := New()
 	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, legacy: true}
+	// First sync with no Want: ingest the chain so the store has bytes to push.
+	converge := &recordingTrustPeer{chains: [][]byte{chain}}
+	d.syncTrustOnce(converge)
 
+	// Now set Want: every subsequent sync must trigger a push.
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, want: [][]byte{bytes.Repeat([]byte{0x01}, 32)}}
 	d.syncTrustOnce(peer)
 	d.syncTrustOnce(peer)
 
 	if peer.offers < 2 {
-		t.Fatalf("offers = %d; against a gateway with no Fingerprints the node must offer unconditionally", peer.offers)
+		t.Fatalf("offers = %d; a gateway that sets Want on every sync must get a push each time", peer.offers)
 	}
 }
 
 type recordingTrustPeer struct {
-	mu           sync.Mutex
-	chains       [][]byte
-	fingerprints [][]byte
-	legacy       bool // omit Fingerprints entirely, like a gateway that predates them
-	roster       []api.NodeDescriptor // served by nodes.list
-	offers       int
-	pulls        int
-	rosters      int
-	lastKnown    [][]byte
+	mu        sync.Mutex
+	chains    [][]byte            // served as entries on MethodTrustLogSync
+	want      [][]byte            // returned as Want in sync response (signals the node to push)
+	roster    []api.NodeDescriptor // served by nodes.list
+	offers    int                 // MethodTrustLogPush calls
+	pulls     int                 // MethodTrustLogSync calls
+	rosters   int
+	lastKnown [][]byte
 }
 
 func (p *recordingTrustPeer) rosterCount() int {
@@ -340,21 +345,25 @@ func (p *recordingTrustPeer) Call(method string, params, out any) error {
 		if res, ok := out.(*api.NodesListResult); ok {
 			res.Nodes = p.roster
 		}
-	case api.MethodTrustLogOffer:
+	case api.MethodTrustLogPush:
 		p.offers++
-	case api.MethodTrustLogPull:
+	case api.MethodTrustLogSync:
 		p.pulls++
-		if pp, ok := params.(api.TrustLogPullParams); ok {
-			p.lastKnown = pp.Known
+		if pp, ok := params.(api.TrustLogSyncParams); ok {
+			p.lastKnown = pp.Heads
 		}
-		res, ok := out.(*api.TrustLogPullResult)
+		res, ok := out.(*api.TrustLogSyncResult)
 		if !ok {
 			return nil
 		}
-		res.Chains = p.chains
-		if !p.legacy {
-			res.Fingerprints = p.fingerprints
+		var entries [][]byte
+		for _, c := range p.chains {
+			if raw, err := trustlog.ChainEntries(c); err == nil {
+				entries = append(entries, raw...)
+			}
 		}
+		res.Entries = entries
+		res.Want = p.want
 	}
 	return nil
 }
@@ -366,8 +375,7 @@ func TestTriggeredPullIsRateLimited(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 
 	for i := 0; i < 20; i++ {
@@ -396,8 +404,7 @@ func TestNotificationTriggersAPull(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 
 	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
@@ -424,8 +431,7 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 
 	// First notification: should trigger a pull.
@@ -465,8 +471,7 @@ func TestSuppressedNotificationIsDeferredNotDropped(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 
 	d.onGatewayNotify(api.Notification{Method: api.MethodTrustLogChanged})
@@ -504,8 +509,7 @@ func TestNotificationFloodCoalescesToOneDeferredPull(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 
 	for i := 0; i < 50; i++ {
@@ -537,8 +541,7 @@ func TestNotificationPullSkipsTheConsistencyTick(t *testing.T) {
 	if err := d.AdoptPin(genesis); err != nil {
 		t.Fatalf("AdoptPin: %v", err)
 	}
-	fp := branchFingerprint(chain)
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, fingerprints: [][]byte{fp[:]}}
+	peer := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.setTriggerPeerForTest(peer)
 	// Converge first so the node holds a chain to cross-check against.
 	d.syncTrustOnce(peer)
@@ -653,4 +656,98 @@ func TestRosterSyncRunsOnItsOwnClock(t *testing.T) {
 	waitFor(t, "roster refreshes without a trust tick", func() bool {
 		return peer.rosterCount() >= 3 // one at startup plus two from its own ticker
 	})
+}
+
+// nodeWithTrustStore returns a Node pinned to a genesis-only chain plus the
+// marshaled chain bytes. The store is active but holds no ingested chain bytes
+// until ingestForTest is called — simulating a node that pinned but has not yet
+// pulled from the gateway.
+func nodeWithTrustStore(t *testing.T) (*Node, []byte) {
+	t.Helper()
+	chain, genesis := lockedChainForTest(t)
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	return d, chain
+}
+
+// ingestForTest ingests chain into d's trust store and records the head, mirroring
+// what pullTrustOnce does so knownHeads is populated.
+func ingestForTest(d *Node, chain []byte) error {
+	st := d.trust.Load()
+	if st == nil {
+		return fmt.Errorf("no trust store")
+	}
+	if _, err := st.Ingest(chain); err != nil {
+		return err
+	}
+	d.rememberHead(chain)
+	return nil
+}
+
+func TestSyncTrustChainsAssemblesGatewayEntries(t *testing.T) {
+	d, chain := nodeWithTrustStore(t)
+
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	var gotMethod []string
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, result any) error {
+			gotMethod = append(gotMethod, method)
+			if method == api.MethodTrustLogSync {
+				res := result.(*api.TrustLogSyncResult)
+				res.Entries = raw
+				return nil
+			}
+			return nil
+		},
+	}
+
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
+		t.Fatalf("assembled %d chains, want the original", len(chains))
+	}
+	if gotMethod[0] != api.MethodTrustLogSync {
+		t.Fatalf("first call was %q, want trustlog.sync", gotMethod[0])
+	}
+}
+
+func TestSyncTrustChainsPushesWhatTheGatewayWants(t *testing.T) {
+	d, chain := nodeWithTrustStore(t)
+	if err := ingestForTest(d, chain); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	var pushed [][]byte
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, result any) error {
+			switch method {
+			case api.MethodTrustLogSync:
+				res := result.(*api.TrustLogSyncResult)
+				res.Want = d.knownHeads()
+			case api.MethodTrustLogPush:
+				pushed = params.(api.TrustLogPushParams).Entries
+			}
+			return nil
+		},
+	}
+
+	if _, ok := d.syncTrustChains(peer); !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	want, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	if len(pushed) != len(want) {
+		t.Fatalf("pushed %d entries, want %d", len(pushed), len(want))
+	}
 }

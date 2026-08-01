@@ -287,7 +287,7 @@ func TestDropPinLeavesLocalDisableAlone(t *testing.T) {
 }
 
 // gatedTrustPeer is a fake trust peer that blocks at the end of a
-// MethodTrustLogPull response until gate is closed. It forces detectUnpinnedChain's
+// MethodTrustLogSync response until gate is closed. It forces detectUnpinnedChain's
 // trip decision to happen after whatever the caller does before closing gate —
 // reliably placing the test at the exact race window without depending on scheduler
 // timing.
@@ -297,9 +297,15 @@ type gatedTrustPeer struct {
 }
 
 func (p *gatedTrustPeer) Call(method string, params, out any) error {
-	if method == api.MethodTrustLogPull {
-		if res, ok := out.(*api.TrustLogPullResult); ok {
-			res.Chains = p.chains
+	if method == api.MethodTrustLogSync {
+		if res, ok := out.(*api.TrustLogSyncResult); ok {
+			var entries [][]byte
+			for _, c := range p.chains {
+				if raw, err := trustlog.ChainEntries(c); err == nil {
+					entries = append(entries, raw...)
+				}
+			}
+			res.Entries = entries
 		}
 		<-p.gate
 	}
@@ -368,8 +374,11 @@ func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 		if st == nil || st.Length() > 0 {
 			continue // the store ingested the chain itself; nothing to strand
 		}
-		if fp := branchFingerprint(chain); containsFingerprint(d.knownFingerprints(), fp) {
-			t.Fatalf("iter %d: chain marked seen but never ingested; the gateway will withhold it", i)
+		head, _ := branchHead(chain)
+		for _, h := range d.knownHeads() {
+			if len(h) == 32 && string(h) == string(head[:]) {
+				t.Fatalf("iter %d: chain marked seen but never ingested; the gateway will withhold it", i)
+			}
 		}
 	}
 }

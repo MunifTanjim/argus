@@ -12,7 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
-// fakeTrustPeer serves a fixed set of chains to trustlog.pull and records calls.
+// fakeTrustPeer serves a fixed set of chains to trustlog.sync and records calls.
 type fakeTrustPeer struct {
 	chains  [][]byte
 	pulls   int
@@ -25,12 +25,18 @@ func (f *fakeTrustPeer) Call(method string, params, out any) error {
 		return f.callErr
 	}
 	switch method {
-	case api.MethodTrustLogPull:
+	case api.MethodTrustLogSync:
 		f.pulls++
-		if res, ok := out.(*api.TrustLogPullResult); ok {
-			res.Chains = f.chains
+		if res, ok := out.(*api.TrustLogSyncResult); ok {
+			var entries [][]byte
+			for _, c := range f.chains {
+				if raw, err := trustlog.ChainEntries(c); err == nil {
+					entries = append(entries, raw...)
+				}
+			}
+			res.Entries = entries
 		}
-	case api.MethodTrustLogOffer:
+	case api.MethodTrustLogPush:
 		f.offers++
 	}
 	return nil
@@ -233,15 +239,32 @@ func TestEnforcingNodeIgnoresForeignGenesis(t *testing.T) {
 
 // The offer must survive: a disabled node is how the disable entry reaches nodes
 // that were offline when it happened, and the gateway's copy is not guaranteed.
+// The gateway signals via Want that it needs our chain; the node must push.
 func TestSupersededNodeStillOffersItsChain(t *testing.T) {
 	d := disabledChainNode(t)
 	foreign, _ := lockedChainForTest(t)
-	peer := &fakeTrustPeer{chains: [][]byte{foreign}}
+	// fakeTrustPeer doesn't support Want — use a fakeTrustCaller to simulate the
+	// gateway requesting our disabled chain.
+	var offers int
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			switch method {
+			case api.MethodTrustLogSync:
+				res := out.(*api.TrustLogSyncResult)
+				raw, _ := trustlog.ChainEntries(foreign)
+				res.Entries = raw
+				res.Want = [][]byte{bytes.Repeat([]byte{0x01}, 32)}
+			case api.MethodTrustLogPush:
+				offers++
+			}
+			return nil
+		},
+	}
 
 	d.syncTrustOnce(peer)
 
-	if peer.offers == 0 {
-		t.Fatal("a superseded node must keep offering its disabled chain")
+	if offers == 0 {
+		t.Fatal("a superseded node must push its disabled chain when the gateway asks")
 	}
 }
 
