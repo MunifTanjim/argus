@@ -17,6 +17,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
@@ -42,7 +43,8 @@ type Server struct {
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
 	nextChan  atomic.Uint64            // chan_id allocator
 
-	trust *trustStore // opaque hold of the network's trust-log chain (blind)
+	trust   *trustStore   // opaque hold of the network's trust-log chain (blind)
+	entries *entryStore   // entry-keyed trust-log DAG (blind)
 
 	// nodeKeepalive is the gateway→node ping interval; 0 uses nodeKeepaliveInterval.
 	// Operator-configurable so gateway.keepalive-interval governs both directions of
@@ -77,6 +79,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 	s.channels = map[string]*relayChannel{}
 	s.nodePeers = map[string]*api.Peer{}
 	s.trust = &trustStore{}
+	s.entries = &entryStore{}
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
 	return s
@@ -350,6 +353,19 @@ func (s *Server) buildClientServer() *api.Server {
 		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	})
 
+	// trustlog.sync serves the entries a caller cannot reach from its own heads.
+	// The caller assembles them into chains and its genesis-pinned fork-choice
+	// picks the winner; the gateway never verifies or interprets entry internals.
+	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, params json.RawMessage) (any, error) {
+		s.chatterRPCs.Add(1)
+		p, err := api.Decode[api.TrustLogSyncParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		entries, want := s.entries.delta(p.Heads)
+		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
+	})
+
 	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
 	srv.Handle(api.MethodRelayOpen, func(ctx context.Context, params json.RawMessage) (any, error) {
 		n, ok := api.NotifierFrom(ctx)
@@ -604,10 +620,29 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if inserted, fp := s.trust.offer(p.Chain); inserted {
 			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Fingerprint: fp[:]})
 		}
+		if raw, cerr := trustlog.ChainEntries(p.Chain); cerr == nil {
+			s.entries.putAll(raw)
+		}
 		return nil, nil
 	case api.MethodTrustLogPull:
 		chains, fps := s.trust.diff(pullKnown(params))
 		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
+	case api.MethodTrustLogSync:
+		p, err := api.Decode[api.TrustLogSyncParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		entries, want := s.entries.delta(p.Heads)
+		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
+	case api.MethodTrustLogPush:
+		p, err := api.Decode[api.TrustLogPushParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		if n := s.entries.putAll(p.Entries); n > 0 {
+			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.heads()})
+		}
+		return nil, nil
 	case api.MethodPushDeliver:
 		if s.pushDeliverer == nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push delivery not enabled on this gateway"}
