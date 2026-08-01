@@ -1,0 +1,5 @@
+$ argus lock pin gen:garbage --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock pin: genesis hash is not valid hex: encoding/hex: invalid byte: U+0067 'g'

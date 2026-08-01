@@ -1,0 +1,6 @@
+$ argus lock init sigpub:zzzz --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock init: signer "sigpub:zzzz": signer key is not valid hex: encoding/hex: invalid byte: U+007A 'z'
+  read it with `argus lock status` on that node

@@ -1,0 +1,5 @@
+$ argus lock revoke-signer --finish <BLOB-START> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock revoke-signer: co-sign quorum not yet reached; collect more co-signs

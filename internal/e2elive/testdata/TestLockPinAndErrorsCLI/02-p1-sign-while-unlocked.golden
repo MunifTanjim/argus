@@ -1,0 +1,5 @@
+$ argus lock sign node-b --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock sign: locked mode not enabled

@@ -1,0 +1,9 @@
+$ argus lock status --gateway=ws://<UNREACHABLE-GW-ADDR> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: not enabled
+  this node signer: <NODE-A-SIGPUB>
+  this node identity: <NODE-A-DEVPUB>
+  pin: none
+  client pin: none
+--- stderr ---

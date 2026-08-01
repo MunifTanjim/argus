@@ -1,0 +1,5 @@
+$ argus lock sign nosuchdevice --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock sign: device "nosuchdevice" is neither a known node (label/id) nor a devpub: key

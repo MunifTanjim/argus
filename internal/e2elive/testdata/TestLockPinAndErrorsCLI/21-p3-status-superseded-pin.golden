@@ -1,0 +1,13 @@
+$ argus lock status --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: disabled network-wide — break-glass used, nothing is enforced
+  this is permanent: the log can never be re-enabled
+  to lock again: argus lock init (new genesis; every device repins)
+  current tip (audit): <TIP-2>
+  pin: <FP> (source: file)
+  client pin: <FP> — SUPERSEDED: the network now uses <FP>
+       the dashboard on this machine opens no channels; run:
+         argus lock pin <GENESIS-2>
+       then restart argus
+--- stderr ---

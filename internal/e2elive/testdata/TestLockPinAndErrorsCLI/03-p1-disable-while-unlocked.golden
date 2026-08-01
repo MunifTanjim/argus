@@ -1,0 +1,5 @@
+$ argus lock disable somesecret --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock disable: expected a disablement secret of the form dis:<64 hex chars>, got "somesecret"
