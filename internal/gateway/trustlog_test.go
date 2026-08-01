@@ -436,3 +436,75 @@ func TestFingerprintsIsStableAndComplete(t *testing.T) {
 		t.Fatalf("fingerprint = %x, want %x", fps[0], want)
 	}
 }
+
+// deadChainForTest returns a chain of `devices`+2 entries whose last entry disables
+// it — what every relock leaves behind on the gateway.
+func deadChainForTest(t *testing.T, devices int) []byte {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	secret, err := trustlog.GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("GenerateDisablementSecret: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{trustlog.DisablementCommitment(secret)})
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	for i := 0; i < devices; i++ {
+		dev := bytes.Repeat([]byte{byte(0xA0 + i)}, 32)
+		if err := log.AuthorizeDevice(dev, signer); err != nil {
+			t.Fatalf("AuthorizeDevice: %v", err)
+		}
+	}
+	if err := log.Disable(secret, signer); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	return trustlog.MarshalChain(log.Entries())
+}
+
+// A freshly minted genesis is the shortest branch there is, so evicting purely by
+// entry count drops the very root a relocked network needs to publish — and
+// inserted=false means no peer is even notified. Dead branches go first instead.
+func TestOfferKeepsALiveRootOverDeadOnesAtCap(t *testing.T) {
+	var s trustStore
+	for i := 0; i < trustStoreCap; i++ {
+		if ok, _ := s.offer(deadChainForTest(t, i+1)); !ok {
+			t.Fatalf("seeding dead branch %d must be retained", i)
+		}
+	}
+	fresh, _ := twoEntryChain(t) // one entry: a brand-new genesis
+
+	inserted, _ := s.offer(fresh)
+
+	if !inserted {
+		t.Fatal("a new live root must be retained (and announced) even when the cap is full of dead branches")
+	}
+	found := false
+	served, _ := s.diff(nil)
+	for _, chain := range served {
+		if bytes.Equal(chain, fresh) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the live root must still be served after the eviction pass")
+	}
+}
+
+// Among live branches the old rule stands: the shortest is the least valuable.
+func TestOfferStillEvictsTheShortestLiveBranch(t *testing.T) {
+	var s trustStore
+	short, long := twoEntryChain(t)
+	s.offer(long) //nolint:errcheck
+	for i := 0; i < trustStoreCap-1; i++ {
+		_, l := twoEntryChain(t)
+		s.offer(l) //nolint:errcheck
+	}
+
+	if inserted, _ := s.offer(short); inserted {
+		t.Fatal("the shortest live branch must lose when every branch is live")
+	}
+}

@@ -95,18 +95,38 @@ func TestReinitOverDisabledLogMatchesFirstLock(t *testing.T) {
 
 	// 3. Relock. node-b must behave exactly as it did in step 1.
 	var g2 api.LockInitResult
-	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}}, &g2); err != nil {
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{
+		Signers:         [][]byte{nodeA.SignerPublic()},
+		GenDisablements: 1,
+	}, &g2); err != nil {
 		t.Fatalf("lock.init over the disabled log: %v", err)
 	}
 	waitFor(t, "node-b quarantines on the relock", func() bool { return nodeB.Quarantined() })
+	waitFor(t, "node-b names the new root", func() bool {
+		return bytes.Equal(nodeB.QuarantineGenesis(), g2.Tip)
+	})
 
-	// 4. One command, no unpin.
-	if err := nodeB.AdoptPin(g2.Tip); err != nil {
-		t.Fatalf("AdoptPin G2 must not require an unpin: %v", err)
+	// 3b. Relock a second time, without repinning node-b in between. The gateway now
+	// retains three roots — two dead, one live — and node-b must name the live one:
+	// that fingerprint is what the operator compares against node-a and then pins.
+	if err := ac.Call(api.MethodLockDisable, api.LockDisableParams{Secret: g2.DisablementSecrets[0]}, &disableRes); err != nil {
+		t.Fatalf("second lock.disable: %v", err)
 	}
-	waitFor(t, "node-b enforces G2", func() bool {
+	var g3 api.LockInitResult
+	if err := ac.Call(api.MethodLockInit, api.LockInitParams{Signers: [][]byte{nodeA.SignerPublic()}}, &g3); err != nil {
+		t.Fatalf("second lock.init: %v", err)
+	}
+	waitFor(t, "node-b follows the second relock", func() bool {
+		return bytes.Equal(nodeB.QuarantineGenesis(), g3.Tip)
+	})
+
+	// 4. One command, no unpin — against the root node-b was told to adopt.
+	if err := nodeB.AdoptPin(nodeB.QuarantineGenesis()); err != nil {
+		t.Fatalf("AdoptPin must not require an unpin: %v", err)
+	}
+	waitFor(t, "node-b enforces the live root", func() bool {
 		st := nodeB.TrustStore()
-		return !nodeB.Quarantined() && st != nil && !st.Disabled() && bytes.Equal(st.Tip(), g2.Tip)
+		return !nodeB.Quarantined() && st != nil && !st.Disabled() && bytes.Equal(st.Tip(), g3.Tip)
 	})
 	if nodeA.Equivocation() || nodeB.Equivocation() {
 		t.Fatal("a legitimate relock must not latch equivocation")

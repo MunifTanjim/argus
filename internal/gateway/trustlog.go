@@ -17,7 +17,8 @@ const trustStoreCap = 4
 // branchEntry is one retained branch inside trustStore.
 type branchEntry struct {
 	bytes []byte
-	count int // number of decoded entries (used for eviction and ordering)
+	count int  // number of decoded entries (used for eviction and ordering)
+	dead  bool // carries a disable entry: terminal, so it can never grow or matter more
 }
 
 // trustStore is the gateway's opaque hold of the network's trust-log chain. The
@@ -56,6 +57,7 @@ func (t *trustStore) offer(chain []byte) (inserted bool, fp [32]byte) {
 		return false, fp
 	}
 	count := len(entries)
+	dead := trustlog.ContainsDisable(entries)
 	key := chainKey(chain)
 
 	t.mu.Lock()
@@ -70,28 +72,38 @@ func (t *trustStore) offer(chain []byte) (inserted bool, fp [32]byte) {
 		// entries (same bytes ⇒ same count, so this is effectively a no-op for
 		// identical re-offers; guards against the degenerate case).
 		if count > existing.count {
-			t.branches[key] = branchEntry{bytes: append([]byte(nil), chain...), count: count}
+			t.branches[key] = branchEntry{bytes: append([]byte(nil), chain...), count: count, dead: dead}
 		}
 		return false, fp
 	}
 
-	// New branch: insert, then evict the smallest-count branch if over cap.
-	t.branches[key] = branchEntry{bytes: append([]byte(nil), chain...), count: count}
+	// New branch: insert, then evict the least valuable branch if over cap.
+	t.branches[key] = branchEntry{bytes: append([]byte(nil), chain...), count: count, dead: dead}
 	if len(t.branches) > trustStoreCap {
-		var minKey [32]byte
-		minCount := -1
+		var victim [32]byte
+		first := true
 		for k, v := range t.branches {
-			if minCount < 0 || v.count < minCount {
-				minKey = k
-				minCount = v.count
+			if first || evictBefore(v, t.branches[victim]) {
+				victim, first = k, false
 			}
 		}
-		delete(t.branches, minKey)
-		if minKey == key {
+		delete(t.branches, victim)
+		if victim == key {
 			return false, fp
 		}
 	}
 	return true, key
+}
+
+// evictBefore ranks a for eviction against b: disabled branches go first, then the
+// shortest. Count alone would evict a freshly minted genesis every time — it is the
+// shortest branch there is — so a network relocking after break-glass could not get
+// its new root past a cap full of long dead ones, and no peer would ever be notified.
+func evictBefore(a, b branchEntry) bool {
+	if a.dead != b.dead {
+		return a.dead
+	}
+	return a.count < b.count
 }
 
 // diff returns the retained branches whose fingerprint is absent from known,

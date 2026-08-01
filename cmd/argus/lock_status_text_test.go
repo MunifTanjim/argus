@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 )
 
 func TestLockStatusLinesNamesTheThreeStates(t *testing.T) {
@@ -60,6 +61,42 @@ func TestLockStatusLinesKeepsUnpinnedQuarantineWording(t *testing.T) {
 	out, _ := lockStatusLines(api.LockStatusResult{Quarantined: true, SeenGenesis: testGenesis(0xC2)})
 	for _, want := range []string{"QUARANTINED", "argus lock pin"} {
 		if !strings.Contains(out, want) {
+			t.Fatalf("output %q must contain %q", out, want)
+		}
+	}
+}
+
+// A superseded device's own log being disabled is background: what matters is that
+// THIS device is refusing everything. Leading with "nothing is enforced" reads as a
+// contradiction two lines above "this device refuses all channels".
+func TestLockStatusLinesLeadsWithQuarantineWhenSuperseded(t *testing.T) {
+	out, _ := lockStatusLines(api.LockStatusResult{
+		Enabled:     true,
+		Disabled:    true,
+		Pinned:      true,
+		Quarantined: true,
+		PinGenesis:  testGenesis(0xC1),
+		SeenGenesis: testGenesis(0xC2),
+	})
+	head := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(head, "QUARANTINED") {
+		t.Fatalf("headline %q must lead with the device's own state", head)
+	}
+	if strings.Contains(head, "nothing is enforced") {
+		t.Fatalf("headline %q contradicts the refusal notice below it", head)
+	}
+}
+
+// After two relocks the gateway offers several roots, and bare `lock pin` refuses to
+// choose between them — so the instruction has to carry the genesis.
+func TestLockStatusLinesGivesAnExplicitPinCommand(t *testing.T) {
+	seen := testGenesis(0xC2)
+	for _, st := range []api.LockStatusResult{
+		{Enabled: true, Disabled: true, Pinned: true, Quarantined: true, PinGenesis: testGenesis(0xC1), SeenGenesis: seen},
+		{Quarantined: true, SeenGenesis: seen},
+	} {
+		out, _ := lockStatusLines(st)
+		if want := "argus lock pin " + keyfmt.Genesis.Encode(seen); !strings.Contains(out, want) {
 			t.Fatalf("output %q must contain %q", out, want)
 		}
 	}

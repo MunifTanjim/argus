@@ -19,6 +19,17 @@ func (g *Gate) Trip(genesis []byte) {
 	g.genesis.CompareAndSwap(nil, &cp)
 }
 
+// Observe records genesis as the chain quarantining this device, replacing any
+// earlier sighting. Trip keeps the FIRST one so an unpinned device's status stays
+// stable across ticks; a device whose own root was disabled needs the opposite,
+// because the network can relock again and the fingerprint it prints is the one the
+// operator compares out-of-band and then pins.
+func (g *Gate) Observe(genesis []byte) {
+	cp := make([]byte, len(genesis))
+	copy(cp, genesis)
+	g.genesis.Store(&cp)
+}
+
 func (g *Gate) Tripped() bool { return g.genesis.Load() != nil }
 
 // Genesis returns a copy of the first observed genesis, or nil if never tripped.

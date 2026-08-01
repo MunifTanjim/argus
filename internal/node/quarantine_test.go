@@ -244,3 +244,36 @@ func TestSupersededNodeStillOffersItsChain(t *testing.T) {
 		t.Fatal("a superseded node must keep offering its disabled chain")
 	}
 }
+
+// The network can be relocked more than once. A first-sighting-wins gate keeps
+// naming the earlier successor, so the operator compares a fingerprint that matches
+// no node and pins a root that no longer exists.
+func TestSupersededNodeFollowsTheLatestRoot(t *testing.T) {
+	d := disabledChainNode(t)
+	first, firstGenesis := lockedChainForTest(t)
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{first}})
+	if got := d.trustGate.Genesis(); !bytes.Equal(got, firstGenesis) {
+		t.Fatalf("gate genesis = %x, want %x", got, firstGenesis)
+	}
+
+	second, secondGenesis := lockedChainForTest(t)
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{second}})
+
+	if got := d.trustGate.Genesis(); !bytes.Equal(got, secondGenesis) {
+		t.Fatalf("gate genesis = %x, want the newer root %x", got, secondGenesis)
+	}
+}
+
+// A dead root the gateway still retains must never outrank the live one: that
+// fingerprint is what the operator compares against a working node.
+func TestSupersededNodeNamesTheLiveRootNotTheDeadOne(t *testing.T) {
+	d := disabledChainNode(t)
+	own := d.TrustStore().Bytes()
+	live, liveGenesis := lockedChainForTest(t)
+
+	d.syncTrustOnce(&fakeTrustPeer{chains: [][]byte{own, live}})
+
+	if got := d.trustGate.Genesis(); !bytes.Equal(got, liveGenesis) {
+		t.Fatalf("gate genesis = %x, want the live root %x", got, liveGenesis)
+	}
+}

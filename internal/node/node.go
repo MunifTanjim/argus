@@ -263,6 +263,11 @@ func (d *Node) Equivocation() bool { return d.equivocation.Load() }
 // in which case it refuses all E2E channels until `argus lock pin` runs.
 func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 
+// QuarantineGenesis is the trust root this node saw and cannot verify, or nil when
+// it is not quarantined. For a superseded node it tracks the network's current root,
+// so it is what `argus lock status` tells the operator to compare and pin.
+func (d *Node) QuarantineGenesis() []byte { return d.trustGate.Genesis() }
+
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.
 func (d *Node) SetMirrorAffixes(prefix, suffix string) {

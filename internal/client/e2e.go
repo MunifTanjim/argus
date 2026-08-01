@@ -998,23 +998,18 @@ func (m *E2EClient) pullTrustChain() {
 // enforces nothing and can never be re-enabled, so the pin holding it is not
 // protection, only a refusal to see the live network.
 func (m *E2EClient) detectSupersedingChain(chains [][]byte) {
-	if m.gate.Tripped() || m.trust == nil || !m.trust.Disabled() {
+	if m.trust == nil || !m.trust.Disabled() {
 		return
 	}
-	for _, chain := range chains {
-		entries, err := trustlog.UnmarshalChain(chain)
-		if err != nil || len(entries) == 0 {
-			continue
-		}
-		genesis := trustlog.HashEntry(&entries[0])
-		if bytes.Equal(genesis, m.genesis) {
-			continue
-		}
-		m.gate.Trip(genesis)
-		log.Printf("client: this device's trust log is disabled and the network moved to a different root; refusing all node channels (run: argus lock pin, then restart argus)")
-		m.reevaluateChannels()
+	genesis := trustlog.SupersedingGenesis(chains, m.genesis)
+	if genesis == nil || bytes.Equal(genesis, m.gate.Genesis()) {
 		return
 	}
+	// Observe, not Trip: a second relock moves the root again, and the fingerprint
+	// this device reports is the one the operator pins.
+	m.gate.Observe(genesis)
+	log.Printf("client: this device's trust log is disabled and the network moved to a different root; refusing all node channels (run: argus lock pin, then restart argus)")
+	m.reevaluateChannels()
 }
 
 // syncTrustLog pulls all competing trust-log branches from the gateway and ingests

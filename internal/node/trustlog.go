@@ -415,32 +415,29 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 // the live root — the same rootless state detectUnpinnedChain exists for, reached
 // from the other direction. Decode only, for the reason given there.
 func (d *Node) detectSupersedingChain(chains [][]byte) {
-	if d.trustGate.Tripped() {
-		return
-	}
 	if st := d.trust.Load(); st == nil || !st.Disabled() {
 		return
 	}
-	for _, chain := range chains {
-		entries, err := trustlog.UnmarshalChain(chain)
-		if err != nil || len(entries) == 0 {
-			continue
-		}
-		genesis := trustlog.HashEntry(&entries[0])
-		d.pinMu.Lock()
-		st := d.trust.Load()
-		if st == nil || !st.Disabled() || bytes.Equal(genesis, d.pinGenesis) {
-			d.pinMu.Unlock()
-			continue
-		}
-		d.trustGate.Trip(genesis)
+	d.pinMu.Lock()
+	st := d.trust.Load()
+	if st == nil || !st.Disabled() {
 		d.pinMu.Unlock()
-		d.log.Warn("this device's trust log is disabled and the network moved to a different root; refusing all channels until pinned",
-			"genesis", base64.StdEncoding.EncodeToString(genesis),
-			"fix", "argus lock pin")
-		d.reevaluateTrustChannels()
 		return
 	}
+	genesis := trustlog.SupersedingGenesis(chains, d.pinGenesis)
+	if genesis == nil || bytes.Equal(genesis, d.trustGate.Genesis()) {
+		d.pinMu.Unlock()
+		return
+	}
+	// Observe, not Trip: the network can relock more than once, and each time the
+	// root this device must be told to adopt changes. A first-sighting-wins gate
+	// would keep naming a root that no longer exists.
+	d.trustGate.Observe(genesis)
+	d.pinMu.Unlock()
+	d.log.Warn("this device's trust log is disabled and the network moved to a different root; refusing all channels until pinned",
+		"genesis", base64.StdEncoding.EncodeToString(genesis),
+		"fix", "argus lock pin")
+	d.reevaluateTrustChannels()
 }
 
 // AdoptPin pins this node to genesis at runtime: persist the pin, enable the

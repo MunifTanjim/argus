@@ -140,6 +140,18 @@ func quarantiningGenesis(ctx context.Context, cfg *config.Config) ([]byte, error
 	return nil, nil
 }
 
+// supersedingGenesisFromNetwork returns the root this network has moved to, for a
+// device still pinned to own. Unlike quarantiningGenesis it does not take the first
+// chain that decodes: after a relock the gateway still holds the dead root, and
+// naming that one sends the operator to pin a genesis nobody is on.
+func supersedingGenesisFromNetwork(ctx context.Context, cfg *config.Config, own []byte) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return trustlog.SupersedingGenesis(chains, own), nil
+}
+
 // applyPin pins the node role first and writes the client pin only once the node has
 // accepted the genesis. The other order leaves node=X, client=Y on a rejected pin:
 // the client then resolves Y, never quarantines, and silently opens zero channels —

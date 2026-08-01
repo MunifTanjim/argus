@@ -343,7 +343,11 @@ func clientPinLine(ctx context.Context, cfg *config.Config) string {
 	if perr == nil && (pin.Genesis == nil || superseded) && cfg.Gateway.URL != "" {
 		pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
 		defer cancel()
-		netGenesis, neterr = quarantiningGenesis(pctx, cfg)
+		if superseded {
+			netGenesis, neterr = supersedingGenesisFromNetwork(pctx, cfg, pin.Genesis)
+		} else {
+			netGenesis, neterr = quarantiningGenesis(pctx, cfg)
+		}
 		if errors.Is(neterr, context.DeadlineExceeded) {
 			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
 		}
@@ -360,12 +364,13 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 	case perr != nil:
 		return fmt.Sprintf("  client pin: UNUSABLE — %v\n       argus refuses to start until this is resolved\n", perr)
 	case pin.Genesis != nil && superseded:
-		moved := "the network moved to a new trust root"
+		moved, fix := "the network moved to a new trust root", "argus lock pin"
 		if netGenesis != nil {
 			moved = "the network now uses " + fingerprintOf(netGenesis)
+			fix = "argus lock pin " + trustpin.Encode(netGenesis)
 		}
-		return fmt.Sprintf("  client pin: %s — SUPERSEDED: %s\n       the dashboard on this machine opens no channels;\n       run: argus lock pin, then restart argus\n",
-			fingerprintOf(pin.Genesis), moved)
+		return fmt.Sprintf("  client pin: %s — SUPERSEDED: %s\n       the dashboard on this machine opens no channels; run:\n         %s\n       then restart argus\n",
+			fingerprintOf(pin.Genesis), moved, fix)
 	case pin.Genesis != nil:
 		return fmt.Sprintf("  client pin: %s (source: %s)\n", fingerprintOf(pin.Genesis), pin.Source)
 	case netGenesis != nil:
@@ -870,6 +875,12 @@ func printLockStatus(st api.LockStatusResult) {
 func lockStatusLines(st api.LockStatusResult) (string, string) {
 	var b strings.Builder
 	switch {
+	// Supersession outranks every other headline: what the operator needs first is
+	// that THIS device is serving nobody, not the history of the root it still holds.
+	case st.Quarantined && st.Pinned:
+		fmt.Fprintf(&b, "locked mode: QUARANTINED — this device follows a trust root the network has left\n"+
+			"  its own log was disabled by break-glass, so it enforces nothing and can never be re-enabled\n"+
+			"  current tip (audit): %s\n", keyfmt.Tip.Encode(st.Tip))
 	case !st.Enabled:
 		fmt.Fprintf(&b, "locked mode: not enabled\n  this node signer: %s\n  this node identity: %s\n",
 			keyOrNone(keyfmt.SignerKey, st.SignerPubKey), keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
@@ -903,12 +914,15 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 // superseded: its root was disabled and the network moved on, so it names both.
 func lockPinLines(st api.LockStatusResult) string {
 	seen := strings.Join(trustlog.HashFingerprint(st.SeenGenesis), " ")
+	// Name the genesis explicitly: a gateway that has seen a relock retains several
+	// competing roots, and bare `lock pin` refuses to pick between them.
+	fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 	switch {
 	case st.Quarantined && st.Pinned:
-		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       this device refuses all channels; run: argus lock pin\n",
-			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), seen)
+		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       this device refuses all channels; run:\n         %s\n",
+			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), seen, fix)
 	case st.Quarantined:
-		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n", seen)
+		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run:\n         %s\n", seen, fix)
 	case st.Pinned:
 		return fmt.Sprintf("  pin: %s (source: %s)\n",
 			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
