@@ -519,6 +519,11 @@ func minTriggeredPullInterval() time.Duration {
 // test can observe deferral without waiting out the production window. Test-only.
 func setTriggeredPullIntervalForTest(d time.Duration) { triggeredPullIntervalNs.Store(int64(d)) }
 
+// SetTriggeredPullIntervalForTest is setTriggeredPullIntervalForTest for integration
+// tests in other packages, which drive several notification-triggered pulls in a row
+// and would otherwise spend the production window between each. Test-only.
+func SetTriggeredPullIntervalForTest(d time.Duration) { setTriggeredPullIntervalForTest(d) }
+
 // onGatewayNotify handles gateway→node notifications. The only one is a hint that
 // the trust log moved; everything else is ignored.
 //
