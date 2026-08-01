@@ -105,6 +105,7 @@ type E2EClient struct {
 
 	gate         *trustpin.Gate      // fail-closed state when unpinned on a locked network
 	trust        *trustlog.SyncStore // locked-mode trust-log store; nil when off
+	genesis      []byte              // this device's pinned trust root; nil when unpinned
 	trustPath    string              // locked-mode chain persist path; "" = no persistence
 	trustCtx     context.Context     // cancelled on Close, stops the sync ticker
 	trustStop    context.CancelFunc
@@ -173,6 +174,7 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 	}
 	if genesisHash != nil {
 		m.trust = trustlog.NewSyncStore(genesisHash)
+		m.genesis = append([]byte(nil), genesisHash...)
 		m.trustPath = chainPath
 		// Seed from a persisted chain so a reconnect resumes from the last verified
 		// tip (genesis-pinned Ingest rejects a rolled-back/tampered file).
@@ -982,11 +984,36 @@ func (m *E2EClient) pullTrustChain() {
 			anyChanged = true
 		}
 	}
+	m.detectSupersedingChain(got.Chains)
 	if anyChanged {
 		if m.trustPath != "" {
 			_ = m.persistTrustChain()
 		}
 		m.reevaluateChannels()
+	}
+}
+
+// detectSupersedingChain quarantines this client when its own chain is disabled and
+// the network serves a different trust root. Same rule as the node's: a disabled log
+// enforces nothing and can never be re-enabled, so the pin holding it is not
+// protection, only a refusal to see the live network.
+func (m *E2EClient) detectSupersedingChain(chains [][]byte) {
+	if m.gate.Tripped() || m.trust == nil || !m.trust.Disabled() {
+		return
+	}
+	for _, chain := range chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		genesis := trustlog.HashEntry(&entries[0])
+		if bytes.Equal(genesis, m.genesis) {
+			continue
+		}
+		m.gate.Trip(genesis)
+		log.Printf("client: this device's trust log is disabled and the network moved to a different root; refusing all node channels (run: argus lock pin, then restart argus)")
+		m.reevaluateChannels()
+		return
 	}
 }
 
@@ -1010,6 +1037,7 @@ func (m *E2EClient) syncTrustLog() {
 			anyChanged = true
 		}
 	}
+	m.detectSupersedingChain(got.Chains)
 	if anyChanged {
 		if m.trustPath != "" {
 			// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.

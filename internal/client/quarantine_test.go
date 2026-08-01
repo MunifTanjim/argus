@@ -237,3 +237,83 @@ func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 		t.Fatalf("channel survived into byNode after quarantine + adopt race: got %v", snap)
 	}
 }
+
+// disabledChainForTest builds a genesis carrying one disablement commitment and then
+// consumes it, producing the chain every device holds after `argus lock disable`.
+func disabledChainForTest(t *testing.T) (chain []byte, genesis []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	secret, err := trustlog.GenerateDisablementSecret()
+	if err != nil {
+		t.Fatalf("secret: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, [][]byte{trustlog.DisablementCommitment(secret)})
+	if err != nil {
+		t.Fatalf("genesis: %v", err)
+	}
+	tip := log.Tip()
+	if err := log.Disable(secret, signer); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	return trustlog.MarshalChain(log.Entries()), tip
+}
+
+// The client mirrors the node: a pin to a disabled chain protects nothing, so once
+// the network serves a different root the dashboard must go dark and say why.
+func TestClientQuarantinesWhenItsDisabledChainIsSuperseded(t *testing.T) {
+	disabled, ownGenesis := disabledChainForTest(t)
+	foreign, foreignGenesis := genesisChainForTest(t)
+	ch := make(chan []byte, 1)
+	ch <- foreign
+
+	m, err := NewE2EClientWithIdentity(trustGatewayConn(t, ch), mustKP(t), ownGenesis, "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if _, err := m.trust.Ingest(disabled); err != nil {
+		t.Fatalf("seed disabled chain: %v", err)
+	}
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	m.syncTrustLog()
+
+	if !m.Quarantined() {
+		t.Fatal("a superseded client must quarantine")
+	}
+	if got := m.gate.Genesis(); !bytes.Equal(got, foreignGenesis) {
+		t.Fatalf("gate genesis = %x, want %x", got, foreignGenesis)
+	}
+}
+
+// A client whose own root is still live refuses the foreign chain without going dark
+// — that is what its pin is for.
+func TestEnforcingClientIgnoresForeignGenesis(t *testing.T) {
+	own, ownGenesis := genesisChainForTest(t)
+	foreign, _ := genesisChainForTest(t)
+	ch := make(chan []byte, 1)
+	ch <- foreign
+
+	m, err := NewE2EClientWithIdentity(trustGatewayConn(t, ch), mustKP(t), ownGenesis, "")
+	if err != nil {
+		t.Fatalf("NewE2EClientWithIdentity: %v", err)
+	}
+	defer m.Close()
+	if _, err := m.trust.Ingest(own); err != nil {
+		t.Fatalf("seed own chain: %v", err)
+	}
+	if err := m.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	m.syncTrustLog()
+
+	if m.Quarantined() {
+		t.Fatal("an enforcing client must not quarantine on a foreign chain")
+	}
+}
