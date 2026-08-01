@@ -94,14 +94,53 @@ func TestNormalizeRejectsSpaceSeparatedTimestamp(t *testing.T) {
 	}
 }
 
-func TestNormalizeDurationRegexDoesNotMatchNodeLabels(t *testing.T) {
+func TestNormalizeDurationRegex(t *testing.T) {
 	c := newNormCluster()
-	in := "node: node-3m\nstatus: online\n"
-	got, err := c.normalize(in)
-	if err != nil {
-		t.Fatalf("normalize: %v", err)
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "node-3m does not match (hyphen before duration)",
+			in:   "node: node-3m\nstatus: online\n",
+			want: "node: node-3m\nstatus: online\n",
+		},
+		{
+			name: "elapsed=1.25s matches (equals before duration)",
+			in:   "elapsed=1.25s\n",
+			want: "elapsed=<DUR>\n",
+		},
+		{
+			name: "timeout:30s matches (colon before duration)",
+			in:   "timeout:30s\n",
+			want: "timeout:<DUR>\n",
+		},
+		{
+			name: "took 1.25s matches (space before duration)",
+			in:   "took 1.25s\n",
+			want: "took <DUR>\n",
+		},
+		{
+			name: "multiple durations on one line both match",
+			in:   "1s 2s\n",
+			want: "<DUR> <DUR>\n",
+		},
+		{
+			name: "duration at start of line (^ anchor)",
+			in:   "500ms elapsed\n",
+			want: "<DUR> elapsed\n",
+		},
 	}
-	if got != in {
-		t.Fatalf("node label was incorrectly modified: got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := c.normalize(tc.in)
+			if err != nil {
+				t.Fatalf("normalize: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
