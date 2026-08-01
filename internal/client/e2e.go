@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/blake2s"
-
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/e2e"
@@ -936,31 +934,58 @@ func SetHandshakeTimeoutForTest(d time.Duration) { handshakeTimeoutNs.Store(int6
 // SetTrustSyncIntervalForTest overrides the client's trust-log sync cadence. Test-only.
 func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval.Store(int64(d)) }
 
-// clientBranchFingerprint is the content hash the gateway keys branches by. It must
-// match gateway.chainKey exactly or every pull re-downloads everything.
-func clientBranchFingerprint(chain []byte) [32]byte { return blake2s.Sum256(chain) }
+func clientBranchHead(chain []byte) ([32]byte, bool) {
+	var out [32]byte
+	entries, err := trustlog.UnmarshalChain(chain)
+	if err != nil || len(entries) == 0 {
+		return out, false
+	}
+	copy(out[:], trustlog.HashEntry(&entries[len(entries)-1]))
+	return out, true
+}
 
-// knownFingerprints returns the fingerprints of branches already received, for use
-// as the Known field in a pull request. Guarded by mu.
-func (m *E2EClient) knownFingerprints() [][]byte {
+func (m *E2EClient) knownHeads() [][]byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([][]byte, 0, len(m.seenBranches))
 	for k := range m.seenBranches {
-		fp := k
-		out = append(out, append([]byte(nil), fp[:]...))
+		h := k
+		out = append(out, append([]byte(nil), h[:]...))
 	}
 	return out
 }
 
-// rememberBranch records a branch fingerprint as received. Branches that fail to
-// ingest are recorded too: for the current pin, identical bytes can never become
-// valid later.
-func (m *E2EClient) rememberBranch(chain []byte) {
-	fp := clientBranchFingerprint(chain)
+// rememberHead records a branch head as received. Branches that fail to ingest are
+// recorded too: for the current pin, identical bytes can never become valid later.
+func (m *E2EClient) rememberHead(chain []byte) {
+	h, ok := clientBranchHead(chain)
+	if !ok {
+		return
+	}
 	m.mu.Lock()
-	m.seenBranches[fp] = true
+	m.seenBranches[h] = true
 	m.mu.Unlock()
+}
+
+// syncTrustChains exchanges heads with the gateway and returns the branches it
+// served, assembled into chains. The gateway's delta is merged with the entries of
+// the chain already held, since it sends only what this client cannot reach. Want
+// is ignored: the client is a supplicant and must not publish trust state — a head
+// only it holds reaches the gateway from a node.
+func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
+	var got api.TrustLogSyncResult
+	if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: m.knownHeads()}, &got); err != nil {
+		return nil, false
+	}
+	merged := append([][]byte{}, got.Entries...)
+	if m.trust != nil {
+		if mine := m.trust.Bytes(); mine != nil {
+			if raw, err := trustlog.ChainEntries(mine); err == nil {
+				merged = append(merged, raw...)
+			}
+		}
+	}
+	return trustlog.AssembleChains(merged), true
 }
 
 // pullTrustChain fetches and ingests trust-log branches from the gateway without
@@ -969,13 +994,13 @@ func (m *E2EClient) rememberBranch(chain []byte) {
 // a beacon announces may not yet have propagated to the gateway, and miss
 // accumulation is the responsibility of the periodic timer only.
 func (m *E2EClient) pullTrustChain() {
-	var got api.TrustLogPullResult
-	if err := m.peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: m.knownFingerprints()}, &got); err != nil {
+	chains, ok := m.syncTrustChains()
+	if !ok {
 		return
 	}
 	anyChanged := false
-	for _, chain := range got.Chains {
-		m.rememberBranch(chain)
+	for _, chain := range chains {
+		m.rememberHead(chain)
 		changed, err := m.trust.Ingest(chain)
 		if err != nil {
 			continue
@@ -984,7 +1009,7 @@ func (m *E2EClient) pullTrustChain() {
 			anyChanged = true
 		}
 	}
-	m.detectSupersedingChain(got.Chains)
+	m.detectSupersedingChain(chains)
 	if anyChanged {
 		if m.trustPath != "" {
 			_ = m.persistTrustChain()
@@ -1017,13 +1042,13 @@ func (m *E2EClient) detectSupersedingChain(chains [][]byte) {
 // rolled-back or tampered branches are silently skipped). After a successful pull it
 // cross-checks all collected node beacons against the resolved chain.
 func (m *E2EClient) syncTrustLog() {
-	var got api.TrustLogPullResult
-	if err := m.peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: m.knownFingerprints()}, &got); err != nil {
+	chains, ok := m.syncTrustChains()
+	if !ok {
 		return
 	}
 	anyChanged := false
-	for _, chain := range got.Chains {
-		m.rememberBranch(chain)
+	for _, chain := range chains {
+		m.rememberHead(chain)
 		changed, err := m.trust.Ingest(chain)
 		if err != nil {
 			continue // rollback/fork/tamper/wrong-genesis: skip this branch
@@ -1032,19 +1057,14 @@ func (m *E2EClient) syncTrustLog() {
 			anyChanged = true
 		}
 	}
-	m.detectSupersedingChain(got.Chains)
+	m.detectSupersedingChain(chains)
 	if anyChanged {
 		if m.trustPath != "" {
-			// best-effort: a failed persist just means the next reconnect re-pulls + re-persists.
 			_ = m.persistTrustChain()
 		}
 		m.reevaluateChannels()
 	}
-	// Cross-check all collected node beacons against the resolved chain on every
-	// successful pull — regardless of whether the chain advanced this tick.
 	m.checkBeaconConsistency()
-	// Courier each node's signed beacon to the other connected nodes so nodes can
-	// cross-check each other's tips without relying solely on the client's view.
 	m.deliverBeacons()
 }
 
@@ -1075,16 +1095,14 @@ func (m *E2EClient) detectUnpinnedChain() {
 	if m.gate.Tripped() {
 		return
 	}
-	var got api.TrustLogPullResult
-	if err := m.peer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: m.knownFingerprints()}, &got); err != nil {
+	chains, ok := m.syncTrustChains()
+	if !ok {
 		return
 	}
-	// Record all fingerprints first: the detection loop returns after the first
-	// decodable chain, so branches after that one would otherwise be missed.
-	for _, chain := range got.Chains {
-		m.rememberBranch(chain)
+	for _, chain := range chains {
+		m.rememberHead(chain)
 	}
-	for _, chain := range got.Chains {
+	for _, chain := range chains {
 		entries, err := trustlog.UnmarshalChain(chain)
 		if err != nil || len(entries) == 0 {
 			continue

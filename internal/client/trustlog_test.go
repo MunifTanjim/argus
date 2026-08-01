@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/blake2s"
-
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
@@ -56,15 +54,15 @@ func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
 	return conn
 }
 
-// trustGatewayConnWithStats is trustGatewayConn extended to record pull statistics
-// and honour the Known fingerprints: branches already known to the caller are
-// withheld, matching the real gateway's conditional-diff behaviour.
+// trustGatewayConnWithStats is trustGatewayConn extended to record sync statistics
+// and honour the Heads set: branches whose head the caller already holds are withheld,
+// matching the real gateway's conditional-diff behaviour.
 func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *gatewayStats) {
 	t.Helper()
 	srvConn, cliConn := net.Pipe()
 	var mu sync.Mutex
 	var current []byte
-	var seenFPs atomic.Value // holds map[[32]byte]bool
+	var seenHeads atomic.Value // holds map[[32]byte]bool
 	stats := &gatewayStats{}
 	{
 		peer := api.NewPeer(srvConn, api.PeerOptions{
@@ -72,12 +70,12 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 				switch method {
 				case api.MethodNodesList:
 					return api.NodesListResult{Nodes: []api.NodeDescriptor{}}, nil
-				case api.MethodTrustLogPull:
-					var params api.TrustLogPullParams
+				case api.MethodTrustLogSync:
+					var params api.TrustLogSyncParams
 					_ = json.Unmarshal(raw, &params)
 
 					stats.mu.Lock()
-					stats.lastKnownLen = len(params.Known)
+					stats.lastKnownLen = len(params.Heads)
 					stats.pullsCnt++
 					stats.mu.Unlock()
 
@@ -91,31 +89,41 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 					mu.Unlock()
 
 					if cur == nil {
-						return api.TrustLogPullResult{}, nil
+						return api.TrustLogSyncResult{}, nil
 					}
-					fp := blake2s.Sum256(cur)
+					entries, err := trustlog.UnmarshalChain(cur)
+					if err != nil || len(entries) == 0 {
+						return api.TrustLogSyncResult{}, nil
+					}
+					var head [32]byte
+					copy(head[:], trustlog.HashEntry(&entries[len(entries)-1]))
+
 					var known map[[32]byte]bool
-					if v := seenFPs.Load(); v != nil {
+					if v := seenHeads.Load(); v != nil {
 						known = v.(map[[32]byte]bool)
 					}
-					for _, k := range params.Known {
+					for _, k := range params.Heads {
 						if len(k) == 32 {
-							var kfp [32]byte
-							copy(kfp[:], k)
+							var kh [32]byte
+							copy(kh[:], k)
 							if known == nil {
 								known = map[[32]byte]bool{}
 							}
-							known[kfp] = true
+							known[kh] = true
 						}
 					}
-					seenFPs.Store(known)
-					if known[fp] {
-						return api.TrustLogPullResult{}, nil
+					seenHeads.Store(known)
+					if known[head] {
+						return api.TrustLogSyncResult{}, nil
+					}
+					raw, err := trustlog.ChainEntries(cur)
+					if err != nil {
+						return api.TrustLogSyncResult{}, nil
 					}
 					stats.mu.Lock()
 					stats.chainsServedCnt++
 					stats.mu.Unlock()
-					return api.TrustLogPullResult{Chains: [][]byte{cur}}, nil
+					return api.TrustLogSyncResult{Entries: raw}, nil
 				}
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 			},
@@ -245,6 +253,81 @@ func TestBeaconWithUnknownTipTriggersAPull(t *testing.T) {
 	waitClient(t, "triggered pull issued", func() bool {
 		return stats.pulls() > before
 	})
+}
+
+func clientWithTrustStore(t *testing.T) (*E2EClient, []byte) {
+	t.Helper()
+	chain, genesis := genesisChainForTest(t)
+	srvConn, cliConn := net.Pipe()
+	m, err := NewE2EClientWithGenesis(cliConn, genesis)
+	if err != nil {
+		srvConn.Close()
+		cliConn.Close()
+		t.Fatalf("NewE2EClientWithGenesis: %v", err)
+	}
+	origPeer := m.peer
+	t.Cleanup(func() {
+		m.Close()
+		origPeer.Close()
+		srvConn.Close()
+	})
+	if _, err := m.trust.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	return m, chain
+}
+
+func fakePeerFunc(fn func(method string, params, result any) error) *api.Peer {
+	srvConn, cliConn := net.Pipe()
+	api.NewPeer(srvConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, raw json.RawMessage) (any, error) {
+			var result any
+			switch method {
+			case api.MethodTrustLogSync:
+				result = &api.TrustLogSyncResult{}
+			default:
+				result = &struct{}{}
+			}
+			if err := fn(method, raw, result); err != nil {
+				return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+			}
+			return result, nil
+		},
+	})
+	return api.NewPeer(cliConn, api.PeerOptions{})
+}
+
+func TestClientSyncTrustChainsAssemblesEntries(t *testing.T) {
+	m, chain := clientWithTrustStore(t)
+
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	pushed := false
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		switch method {
+		case api.MethodTrustLogSync:
+			res := result.(*api.TrustLogSyncResult)
+			res.Entries = raw
+			res.Want = [][]byte{{1, 2, 3}} // the client must ignore this
+		case api.MethodTrustLogPush:
+			pushed = true
+		}
+		return nil
+	})
+
+	chains, ok := m.syncTrustChains()
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
+		t.Fatalf("assembled %d chains, want the original", len(chains))
+	}
+	if pushed {
+		t.Fatalf("the client must never push trust state")
+	}
 }
 
 // TestUnpinnedClientQuarantinesOnBeaconArrival is the client half of the event

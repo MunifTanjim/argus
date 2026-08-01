@@ -163,8 +163,8 @@ func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 				close(relayOpened) // signal: adoptNode passed the gate check
 				<-relayRelease     // block: hold until the test has tripped the gate
 				return api.RelayOpenResult{ChanID: "c1"}, nil
-			case api.MethodTrustLogPull:
-				return api.TrustLogPullResult{Chains: [][]byte{}}, nil
+			case api.MethodTrustLogSync:
+				return api.TrustLogSyncResult{}, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},

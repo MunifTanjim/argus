@@ -120,7 +120,7 @@ type fakeNode struct {
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
 // advertises all of them, relay.open{node_id} allocates a chan_id bound to that
 // node, and OnRelayFrame routes handshake/sealed frames to the right node by chan_id.
-// Set chain before Connect to serve a trust-log chain from trustlog.pull.
+// Set chain before Connect to serve a trust-log chain from trustlog.sync.
 type fakeMultiGateway struct {
 	peer   *api.Peer
 	mu     sync.Mutex           // guards nodes/order/deliveries: addNode races the peer read loop
@@ -128,7 +128,7 @@ type fakeMultiGateway struct {
 	order  []*fakeNode          // stable nodes.list order
 	byChan map[string]*fakeNode // chan_id -> node
 	nextCh int
-	chain      []byte // served by trustlog.pull; nil = method-not-found
+	chain      []byte // served by trustlog.sync; nil = empty result
 	deliveries int    // total beacon.deliver calls received across all nodes
 }
 
@@ -163,14 +163,18 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				chID := "c" + strconv.Itoa(g.nextCh)
 				g.byChan[chID] = n
 				return api.RelayOpenResult{ChanID: chID}, nil
-			case api.MethodTrustLogPull:
+			case api.MethodTrustLogSync:
 				g.mu.Lock()
 				ch := g.chain
 				g.mu.Unlock()
 				if ch == nil {
-					return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
+					return api.TrustLogSyncResult{}, nil
 				}
-				return api.TrustLogPullResult{Chains: [][]byte{ch}}, nil
+				entries, err := trustlog.ChainEntries(ch)
+				if err != nil {
+					return api.TrustLogSyncResult{}, nil
+				}
+				return api.TrustLogSyncResult{Entries: entries}, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},
