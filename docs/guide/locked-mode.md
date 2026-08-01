@@ -91,11 +91,20 @@ real one, so it keeps refusing channels. Recover a quarantined node with
 
 A disabled log is terminal — it can never be re-enabled. To lock the network again,
 run `argus lock init` once more: it creates a **new** genesis over the disabled one.
-That is a new trust root. The machine you run it on repins both of its roles (node
-and TUI client) to the new genesis automatically; every **other** device pinned to
-the old one must run `argus lock unpin` and then `argus lock pin` before it will
-connect again. A device pinned by `lock.genesis` in its config is never repinned for
-you — edit the config there.
+That is a new trust root, so every device pinned to the old one quarantines as soon
+as it sees the new root — the same fail-closed behaviour as a device that has never
+been pinned — and recovers with a single `argus lock pin`. A pin to a disabled chain
+is stale rather than conflicting: it protects nothing, because the chain it names
+authorizes nobody and can never be re-enabled, so `lock pin` replaces it without an
+`unpin`. The machine you run `lock init` on repins both of its roles automatically.
+A device pinned by `lock.genesis` in its config is never repinned for you — edit the
+config there.
+
+Client (TUI) identities are **not** carried into the new genesis: `lock init` only
+authorizes the node identities on the gateway roster. Re-authorize each client with
+`argus lock sign devkey:<identity>` on a signer node, exactly as you did the first
+time. Carrying them forward would re-authorize anything a compromised signer had
+authorized in the old chain.
 
 ## Pinning the genesis
 
@@ -132,10 +141,21 @@ argus lock pin gen:<hex>
 
 An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
 
-`argus lock status` reports quarantine for both roles on the machine it runs on:
+`argus lock status` opens with one of three states:
+
+| Headline | Meaning |
+|---|---|
+| `locked mode: not enabled` | this device has no trust log |
+| `locked mode: enforcing` | normal locked operation |
+| `locked mode: disabled network-wide` | break-glass was used; nothing is enforced, permanently |
+
+It reports quarantine for both roles on the machine it runs on:
 
 - `pin: none — QUARANTINED (chain seen: …)` is the **node** on this machine.
 - `client pin: none — QUARANTINED (chain seen: …)` is this machine's **TUI client**.
+- `pin: … — SUPERSEDED: the network now uses …` is a device whose own root was
+  disabled while the network moved to a new one. It refuses all channels until
+  `argus lock pin`.
 
 The two are pinned independently, so one can be quarantined while the other is not.
 
