@@ -2,6 +2,7 @@ package e2elive
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 )
 
 var argusBin string
@@ -173,4 +175,17 @@ func (c *Cluster) WaitOnline(ids ...string) {
 		}
 		return true
 	})
+}
+
+func (c *Cluster) NewClient() *client.ReconnectingE2EClient {
+	c.t.Helper()
+	dial := func(ctx context.Context) (net.Conn, error) {
+		return api.DialWSConn(ctx, c.GWURL+"/client", c.Token, nil)
+	}
+	cl, err := client.NewReconnectingE2EClient(c.ctx, dial)
+	if err != nil {
+		c.t.Fatalf("NewClient: %v", err)
+	}
+	c.t.Cleanup(func() { cl.Close() })
+	return cl
 }
