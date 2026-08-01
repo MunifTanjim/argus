@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// sortSignerBlocks sorts consecutive "    signer: " lines within the string so
+// that their order is stable after redaction regardless of key-generation order.
+func sortSignerBlocks(s string) string {
+	lines := strings.Split(s, "\n")
+	i := 0
+	for i < len(lines) {
+		if !strings.HasPrefix(lines[i], "    signer: ") {
+			i++
+			continue
+		}
+		j := i
+		for j < len(lines) && strings.HasPrefix(lines[j], "    signer: ") {
+			j++
+		}
+		sort.Strings(lines[i:j])
+		i = j
+	}
+	return strings.Join(lines, "\n")
+}
+
 type redaction struct {
 	from string
 	to   string
@@ -64,6 +84,7 @@ func (c *Cluster) normalize(s string) (string, error) {
 	s = reTime.ReplaceAllString(s, "<TIME>")
 	s = reDur.ReplaceAllString(s, "${1}<DUR>")
 	s = reFP.ReplaceAllString(s, "<FP>")
+	s = sortSignerBlocks(s)
 
 	for _, re := range volatile {
 		if m := re.FindString(s); m != "" {

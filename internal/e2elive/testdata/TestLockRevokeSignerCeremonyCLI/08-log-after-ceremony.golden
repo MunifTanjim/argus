@@ -1,0 +1,15 @@
+$ argus lock log --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+[0] genesis: 2 signer(s)
+  signer: <NODE-A-SIGPUB>
+  signer: <NODE-B-SIGPUB>
+[1] authorize-device: <NODE-A-DEVPUB>
+[2] authorize-device: <NODE-B-DEVPUB>
+[3] authorize-device: <NODE-C-DEVPUB>
+[4] revoke-signer: 1 revoked, 2 co-sign(s)
+  revoked: <NODE-B-SIGPUB>
+  replaces: <NODE-C-SIGPUB>
+
+tip fingerprint: <FP>
+--- stderr ---
