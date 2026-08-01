@@ -377,3 +377,49 @@ func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 func trustpinFileForTest(d *Node) *trustpin.File {
 	return trustpin.New(genesisHashPath(d.trustPath))
 }
+
+// A pin to a disabled chain is stale, not conflicting: `lock pin` must adopt the
+// live root in one command, matching what a fresh node does.
+func TestAdoptPinReplacesAStaleDisabledPin(t *testing.T) {
+	d := disabledChainNode(t)
+	old := append([]byte(nil), d.pinGenesis...)
+	_, foreignGenesis := lockedChainForTest(t)
+
+	if err := d.AdoptPin(foreignGenesis); err != nil {
+		t.Fatalf("AdoptPin over a disabled chain: %v", err)
+	}
+
+	if !bytes.Equal(d.pinGenesis, foreignGenesis) {
+		t.Fatalf("pinGenesis = %x, want %x", d.pinGenesis, foreignGenesis)
+	}
+	if bytes.Equal(d.pinGenesis, old) {
+		t.Fatal("the stale pin must be replaced")
+	}
+	persisted, err := trustpinFileForTest(d).Load()
+	if err != nil || !bytes.Equal(persisted, foreignGenesis) {
+		t.Fatalf("persisted pin = %x (%v), want %x", persisted, err, foreignGenesis)
+	}
+	if st := d.TrustStore(); st == nil || st.Disabled() {
+		t.Fatal("the new store must not inherit the disabled chain")
+	}
+	if d.Quarantined() {
+		t.Fatal("adopting the live root must release the quarantine")
+	}
+}
+
+// An enforcing pin is the thing the pin exists to protect; only unpin may move it.
+func TestAdoptPinStillRefusesADifferentLiveGenesis(t *testing.T) {
+	d := newLockTestNode(t)
+	if _, err := callLockInit(t, d, api.LockInitParams{}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	_, foreignGenesis := lockedChainForTest(t)
+
+	err := d.AdoptPin(foreignGenesis)
+	if err == nil {
+		t.Fatal("a live pin must not be replaced")
+	}
+	if !strings.Contains(err.Error(), "unpin") {
+		t.Fatalf("error must name the recovery command, got: %v", err)
+	}
+}

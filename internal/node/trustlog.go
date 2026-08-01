@@ -448,7 +448,9 @@ func (d *Node) detectSupersedingChain(chains [][]byte) {
 // next tick: until the chain lands the store is empty, which authorizes nobody, so
 // a deferred pull would trade the quarantine for a blackout of the same length.
 // Re-pinning the same genesis is a no-op; a different one is refused, because
-// silently switching trust roots is exactly what the pin exists to prevent.
+// silently switching trust roots is exactly what the pin exists to prevent — unless
+// the chain we hold is disabled, which makes the pin stale rather than a trust root
+// worth defending.
 func (d *Node) AdoptPin(genesis []byte) error {
 	if len(genesis) != trustpin.GenesisLen {
 		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
@@ -460,7 +462,17 @@ func (d *Node) AdoptPin(genesis []byte) error {
 			if bytes.Equal(d.pinGenesis, genesis) {
 				return nil
 			}
-			return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
+			// A disabled chain enforces nothing and can never be re-enabled, so the pin
+			// holding it is stale rather than conflicting — replacing it is the same
+			// decision `lock pin` makes on a device that never had one. The dead chain
+			// goes with it: it can never ingest under the new root.
+			if st := d.trust.Load(); st == nil || !st.Disabled() {
+				return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
+			}
+			if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			d.pinGenesis = nil
 		}
 		if d.trustPath == "" {
 			return errors.New("node: trust state path not configured")
