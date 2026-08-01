@@ -457,15 +457,14 @@ func (d *Node) readPinState(res *api.LockStatusResult) {
 	defer d.pinMu.Unlock()
 	res.Quarantined = d.trustGate.Tripped()
 	res.Pinned = len(d.pinGenesis) > 0
-	switch {
-	case res.Quarantined:
-		if res.Pinned {
-			d.log.Error("inconsistent lock state: pinned and quarantined at once; reporting quarantine")
-		}
-		res.PinGenesis = d.trustGate.Genesis()
-	case res.Pinned:
+	if res.Pinned {
 		res.PinGenesis = append([]byte(nil), d.pinGenesis...)
 		res.PinSource = d.pinSource
+	}
+	// Pinned and quarantined at once is the superseded state: the pinned root was
+	// disabled and the network moved on. Both roots are reported so status can say so.
+	if res.Quarantined {
+		res.SeenGenesis = d.trustGate.Genesis()
 	}
 }
 

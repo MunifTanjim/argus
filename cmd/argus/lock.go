@@ -834,50 +834,63 @@ func keyOrNone(k keyfmt.Kind, b []byte) string {
 }
 
 func printLockStatus(st api.LockStatusResult) {
-	if !st.Enabled {
-		shell.StdOutF("locked mode: disabled\n  this node signer: %s\n  this node identity: %s\n",
-			keyOrNone(keyfmt.SignerKey, st.SignerPubKey),
-			keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
-		switch {
-		case st.Quarantined:
-			shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
-				strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "))
-		case st.Pinned:
-			shell.StdOutF("  pin: %s (source: %s)\n",
-				strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
-		default:
-			shell.StdOutF("  pin: none\n")
-		}
-		if st.LocalDisabled {
-			shell.StdOutF("  local-disable: active\n")
-		}
-		return
+	out, warn := lockStatusLines(st)
+	shell.StdOutF("%s", out)
+	if warn != "" {
+		shell.StdErrF("%s", warn)
 	}
-	shell.StdOutF("locked mode: enabled\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
-		keyfmt.Tip.Encode(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+}
+
+// lockStatusLines renders `lock status` as (stdout, stderr). Pure, so the wording is
+// testable — the same split clientPinStatus uses. The headline states enforcement:
+// "disabled" is reserved for a network whose break-glass secret was spent, never for
+// one that was simply never locked.
+func lockStatusLines(st api.LockStatusResult) (string, string) {
+	var b strings.Builder
 	switch {
-	case st.Quarantined:
-		shell.StdOutF("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n",
-			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "))
-	case st.Pinned:
-		shell.StdOutF("  pin: %s (source: %s)\n",
-			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
+	case !st.Enabled:
+		fmt.Fprintf(&b, "locked mode: not enabled\n  this node signer: %s\n  this node identity: %s\n",
+			keyOrNone(keyfmt.SignerKey, st.SignerPubKey), keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
+	case st.Disabled:
+		fmt.Fprintf(&b, "locked mode: disabled network-wide — break-glass used, nothing is enforced\n"+
+			"  this is permanent: the log can never be re-enabled\n"+
+			"  to lock again: argus lock init (new genesis; every device repins)\n"+
+			"  current tip (audit): %s\n", keyfmt.Tip.Encode(st.Tip))
 	default:
-		shell.StdOutF("  pin: none\n")
+		fmt.Fprintf(&b, "locked mode: enforcing\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
+			keyfmt.Tip.Encode(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
 	}
-	if len(st.Signers) > 0 {
-		shell.StdOutF("  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
+	b.WriteString(lockPinLines(st))
+	if st.Enabled && !st.Disabled && len(st.Signers) > 0 {
+		fmt.Fprintf(&b, "  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
 		for _, s := range st.Signers {
-			shell.StdOutF("    signer: %s\n", keyfmt.SignerKey.Encode(s))
+			fmt.Fprintf(&b, "    signer: %s\n", keyfmt.SignerKey.Encode(s))
 		}
-	}
-	if st.Disabled {
-		shell.StdOutF("  network-wide disabled: true\n")
 	}
 	if st.LocalDisabled {
-		shell.StdOutF("  local-disable: active\n")
+		b.WriteString("  local-disable: active\n")
 	}
+	var warn string
 	if st.Equivocation {
-		shell.StdErrF("\n⚠ equivocation detected: node beacons diverge — the gateway may be showing inconsistent trust-log views. Compare the tip fingerprint above across your nodes out-of-band (phone/chat) to confirm they match.\n")
+		warn = "\n⚠ equivocation detected: node beacons diverge — the gateway may be showing inconsistent trust-log views. Compare the tip fingerprint above across your nodes out-of-band (phone/chat) to confirm they match.\n"
+	}
+	return b.String(), warn
+}
+
+// lockPinLines renders the pin block. A quarantined device that still holds a pin is
+// superseded: its root was disabled and the network moved on, so it names both.
+func lockPinLines(st api.LockStatusResult) string {
+	seen := strings.Join(trustlog.HashFingerprint(st.SeenGenesis), " ")
+	switch {
+	case st.Quarantined && st.Pinned:
+		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       this device refuses all channels; run: argus lock pin\n",
+			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), seen)
+	case st.Quarantined:
+		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run: argus lock pin\n", seen)
+	case st.Pinned:
+		return fmt.Sprintf("  pin: %s (source: %s)\n",
+			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
+	default:
+		return "  pin: none\n"
 	}
 }

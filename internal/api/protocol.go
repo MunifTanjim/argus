@@ -829,7 +829,8 @@ type LockStatusResult struct {
 	LocalDisabled  bool     `json:"local_disabled,omitempty"`
 	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
 	Pinned      bool   `json:"pinned,omitempty"`
-	PinGenesis  []byte `json:"pin_genesis,omitempty"` // resolved pin, or the observed genesis when quarantined
-	PinSource   string `json:"pin_source,omitempty"`  // "config" or "file"
+	PinGenesis  []byte `json:"pin_genesis,omitempty"`  // this device's own pin
+	SeenGenesis []byte `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
+	PinSource   string `json:"pin_source,omitempty"`   // "config" or "file"
 	Quarantined bool   `json:"quarantined,omitempty"`
 }
