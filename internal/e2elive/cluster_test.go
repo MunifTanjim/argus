@@ -71,12 +71,24 @@ func TestNodeJoinsAndLockStatus(t *testing.T) {
 	c.WaitOnline("node-a")
 
 	a := c.nodes["node-a"]
-	out, err := a.Lock("status")
-	if err != nil {
-		t.Fatalf("lock status: %v\n%s", err, out)
+
+	ok := a.LockRun("status")
+	if ok.ExitCode != 0 {
+		t.Fatalf("lock status exit = %d, stderr:\n%s", ok.ExitCode, ok.Stderr)
 	}
-	if len(out) == 0 {
-		t.Fatalf("lock status produced no output")
+	if !strings.Contains(ok.Stdout, "locked mode:") {
+		t.Fatalf("lock status stdout missing headline:\n%s", ok.Stdout)
+	}
+	if !strings.Contains(strings.Join(ok.Args, " "), "lock status") {
+		t.Fatalf("Args not recorded: %v", ok.Args)
+	}
+
+	bad := a.LockRun("init", "sigpub:zzzz")
+	if bad.ExitCode == 0 {
+		t.Fatalf("malformed key should fail, got exit 0:\n%s", bad.Stdout)
+	}
+	if bad.Stderr == "" {
+		t.Fatalf("malformed key produced no stderr")
 	}
 
 	sc, err := a.DialSocket()
