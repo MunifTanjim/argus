@@ -669,7 +669,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		}
 		s.logger().Info("rpc", args...)
 		switch method {
-		case api.MethodNodesList, api.MethodBeaconOffer:
+		case api.MethodNodesList, api.MethodTrustLogSync, api.MethodTrustLogPush, api.MethodBeaconOffer:
 			s.chatterRPCs.Add(1)
 		}
 		return res, err
