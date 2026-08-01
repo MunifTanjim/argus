@@ -60,3 +60,42 @@ func TestPushDeliverParamsRoundTrip(t *testing.T) {
 		t.Fatalf("method = %q", MethodPushDeliver)
 	}
 }
+
+func TestTrustLogSyncWireShape(t *testing.T) {
+	b, err := json.Marshal(TrustLogSyncParams{Heads: [][]byte{{1, 2, 3}}})
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	if got, want := string(b), `{"heads":["AQID"]}`; got != want {
+		t.Fatalf("params wire shape = %s, want %s", got, want)
+	}
+
+	var res TrustLogSyncResult
+	if err := json.Unmarshal([]byte(`{"entries":["AQ=="],"want":["Ag=="]}`), &res); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0][0] != 1 {
+		t.Fatalf("entries decoded wrong: %v", res.Entries)
+	}
+	if len(res.Want) != 1 || res.Want[0][0] != 2 {
+		t.Fatalf("want decoded wrong: %v", res.Want)
+	}
+}
+
+func TestTrustLogPushAndChangedWireShape(t *testing.T) {
+	b, err := json.Marshal(TrustLogPushParams{Entries: [][]byte{{9}}})
+	if err != nil {
+		t.Fatalf("marshal push: %v", err)
+	}
+	if got, want := string(b), `{"entries":["CQ=="]}`; got != want {
+		t.Fatalf("push wire shape = %s, want %s", got, want)
+	}
+
+	var ch TrustLogChangedParams
+	if err := json.Unmarshal([]byte(`{"heads":["AQ=="]}`), &ch); err != nil {
+		t.Fatalf("unmarshal changed: %v", err)
+	}
+	if len(ch.Heads) != 1 || ch.Heads[0][0] != 1 {
+		t.Fatalf("heads decoded wrong: %v", ch.Heads)
+	}
+}

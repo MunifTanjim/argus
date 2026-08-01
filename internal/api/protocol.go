@@ -91,6 +91,8 @@ const (
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogPull  = "trustlog.pull"  // request: TrustLogPullParams (optional); result: TrustLogPullResult (node/client fetch)
 	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
+	MethodTrustLogSync  = "trustlog.sync"  // request: TrustLogSyncParams; result: TrustLogSyncResult (node/client head-based sync)
+	MethodTrustLogPush  = "trustlog.push"  // node->gateway request: TrustLogPushParams; result: nil (publish entries)
 	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
 	// did not previously hold has been offered. It is a hint with no authority: the
 	// node's response is to pull and verify against its pinned genesis. It buys the
@@ -706,12 +708,39 @@ type TrustLogPullResult struct {
 	Fingerprints [][]byte `json:"fingerprints"`
 }
 
+// TrustLogSyncParams carries the caller's head hashes — the hash of the last
+// entry of every branch it holds, including branches it rejected. Holding a head
+// implies holding its ancestry, so the gateway needs nothing else to compute the
+// delta. An empty Heads requests everything.
+type TrustLogSyncParams struct {
+	Heads [][]byte `json:"heads,omitempty"`
+}
+
+// TrustLogSyncResult answers a trustlog.sync. Entries holds every retained entry
+// the caller cannot reach from its heads, as individually marshalled
+// trustlog.MarshalEntry bytes, ordered parents before children. Want names the
+// caller's heads the gateway does not hold; a node answers it with trustlog.push,
+// a client ignores it — clients are supplicants and must not publish trust state.
+type TrustLogSyncResult struct {
+	Entries [][]byte `json:"entries,omitempty"`
+	Want    [][]byte `json:"want,omitempty"`
+}
+
+// TrustLogPushParams carries individually marshalled entries a node is publishing
+// to the gateway, ordered parents before children.
+type TrustLogPushParams struct {
+	Entries [][]byte `json:"entries,omitempty"`
+}
+
 // TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
 // Fingerprint is the blake2s-256 content hash of the newly inserted branch (the
 // same key the gateway indexes by). Receivers treat it as an opaque hint only —
 // they pull and verify whatever the gateway returns against their pinned genesis.
 type TrustLogChangedParams struct {
-	Fingerprint []byte `json:"fingerprint,omitempty"`
+	Fingerprint []byte   `json:"fingerprint,omitempty"`
+	// Heads are the gateway's head hashes after the change. A receiver that already
+	// holds every one of them has nothing to fetch and can skip the sync entirely.
+	Heads [][]byte `json:"heads,omitempty"`
 }
 
 // LockDeviceParams identifies a device to authorize/revoke by its Curve25519
