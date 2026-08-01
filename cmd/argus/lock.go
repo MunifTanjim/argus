@@ -16,7 +16,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/shell"
-	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
@@ -128,7 +127,7 @@ func initPreview(own []byte, sigPubs [][]byte, devices []rosterDevice, genDisabl
 		}
 		fmt.Fprintf(&b, "    %s%s\n", keyfmt.SignerKey.Encode(p), self)
 	}
-	fmt.Fprintf(&b, "  signer-set fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(sigPubs), " "))
+	fmt.Fprintf(&b, "  signer-set fingerprint: %s\n", signerSetFingerprintOf(sigPubs))
 	fmt.Fprintf(&b, "  disablement secrets: %d (shown once, at creation)\n", genDisablements)
 	fmt.Fprintf(&b, "  devices authorized from the gateway roster (%d):\n", len(devices))
 	for _, d := range devices {
@@ -530,7 +529,7 @@ func newLockLogCmd() *cobra.Command {
 				printLockLogEntry(e)
 			}
 			if len(res.Signers) > 0 {
-				fp := strings.Join(trustlog.SignerSetFingerprint(res.Signers), " ")
+				fp := signerSetFingerprintOf(res.Signers)
 				shell.StdOutF("\ntip fingerprint: %s\n", fp)
 			}
 			return nil
@@ -896,7 +895,7 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 	}
 	b.WriteString(lockPinLines(st))
 	if st.Enabled && !st.Disabled && len(st.Signers) > 0 {
-		fmt.Fprintf(&b, "  trust fingerprint: %s\n", strings.Join(trustlog.SignerSetFingerprint(st.Signers), " "))
+		fmt.Fprintf(&b, "  trust fingerprint: %s\n", signerSetFingerprintOf(st.Signers))
 		for _, s := range st.Signers {
 			fmt.Fprintf(&b, "    signer: %s\n", keyfmt.SignerKey.Encode(s))
 		}
@@ -914,19 +913,19 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 // lockPinLines renders the pin block. A quarantined device that still holds a pin is
 // superseded: its root was disabled and the network moved on, so it names both.
 func lockPinLines(st api.LockStatusResult) string {
-	seen := strings.Join(trustlog.HashFingerprint(st.SeenGenesis), " ")
+	seen := fingerprintOf(st.SeenGenesis)
 	// Name the genesis explicitly: a gateway that has seen a relock retains several
 	// competing roots, and bare `lock pin` refuses to pick between them.
 	fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 	switch {
 	case st.Quarantined && st.Pinned:
 		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       run:\n         %s\n",
-			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), seen, fix)
+			fingerprintOf(st.PinGenesis), seen, fix)
 	case st.Quarantined:
 		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run:\n         %s\n", seen, fix)
 	case st.Pinned:
 		return fmt.Sprintf("  pin: %s (source: %s)\n",
-			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), st.PinSource)
+			fingerprintOf(st.PinGenesis), st.PinSource)
 	default:
 		return "  pin: none\n"
 	}

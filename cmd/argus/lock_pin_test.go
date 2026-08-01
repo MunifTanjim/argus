@@ -161,3 +161,20 @@ func TestResolveGenesisSingleRoot(t *testing.T) {
 		t.Fatalf("genesis len = %d, want %d", len(g), trustpin.GenesisLen)
 	}
 }
+
+func TestFingerprintsAreBracketed(t *testing.T) {
+	genesis := bytes.Repeat([]byte{0x01}, 32)
+	got := fingerprintOf(genesis)
+	if !strings.HasPrefix(got, "[") || !strings.HasSuffix(got, "]") {
+		t.Fatalf("fingerprintOf must bracket its words, got %q", got)
+	}
+	if strings.Contains(strings.Trim(got, "[]"), "[") {
+		t.Fatalf("nested brackets in %q", got)
+	}
+
+	signers := [][]byte{bytes.Repeat([]byte{0x02}, 32)}
+	gotSet := signerSetFingerprintOf(signers)
+	if !strings.HasPrefix(gotSet, "[") || !strings.HasSuffix(gotSet, "]") {
+		t.Fatalf("signerSetFingerprintOf must bracket its words, got %q", gotSet)
+	}
+}

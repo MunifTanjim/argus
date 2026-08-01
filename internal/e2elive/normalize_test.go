@@ -42,7 +42,7 @@ func TestNormalizePrefersLongestMatch(t *testing.T) {
 
 func TestNormalizeFallbacksTimeDurationFingerprint(t *testing.T) {
 	c := newNormCluster()
-	in := "at 2026-08-01T12:34:56Z took 1.25s\n  trust fingerprint: amber koala rivet dune\n"
+	in := "at 2026-08-01T12:34:56Z took 1.25s\n  trust fingerprint: [amber koala rivet dune]\n"
 	got, err := c.normalize(in)
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
@@ -91,6 +91,31 @@ func TestNormalizeRejectsSpaceSeparatedTimestamp(t *testing.T) {
 		t.Fatalf("expected leftover-volatility failure for space-separated timestamp")
 	} else if !strings.Contains(err.Error(), "unregistered volatile value") {
 		t.Fatalf("wrong error: %v", err)
+	}
+}
+
+func TestNormalizeReplacesBracketedFingerprintsAnywhereInALine(t *testing.T) {
+	c := newNormCluster()
+	in := "  pin: [amber koala rivet dune] — SUPERSEDED: the network now uses [opal finch mesa gull]\n"
+	got, err := c.normalize(in)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	want := "  pin: <FP> — SUPERSEDED: the network now uses <FP>\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestNormalizeLeavesSingleBracketedWordsAlone(t *testing.T) {
+	c := newNormCluster()
+	in := "Usage:\n  argus lock init sigpub:<hex> [sigpub:<hex>...] [flags]\n"
+	got, err := c.normalize(in)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if got != in {
+		t.Fatalf("usage text was rewritten:\n%s", got)
 	}
 }
 

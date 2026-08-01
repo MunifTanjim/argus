@@ -19,8 +19,18 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
+// fingerprintWordsOf brackets fingerprint words so tooling can find them with
+// one pattern and operators can see where they stop when they appear mid-sentence.
+func fingerprintWordsOf(words []string) string {
+	return "[" + strings.Join(words, " ") + "]"
+}
+
 func fingerprintOf(genesis []byte) string {
-	return strings.Join(trustlog.HashFingerprint(genesis), " ")
+	return fingerprintWordsOf(trustlog.HashFingerprint(genesis))
+}
+
+func signerSetFingerprintOf(signers [][]byte) string {
+	return fingerprintWordsOf(trustlog.SignerSetFingerprint(signers))
 }
 
 func distinctGenesis(all [][]byte) [][]byte {

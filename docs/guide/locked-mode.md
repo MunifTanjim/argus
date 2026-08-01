@@ -125,7 +125,7 @@ The command connects to the gateway, reads the offered trust-log branches, and s
 ```
 genesis offered by this network:
   gen:4f3a9c1e2d7b06a5f81c3e94d2b0a7c6e5194f8d3a2c7b60e91d48a2e5c3b7d1
-  chisel cobra drumbeat eyeglass hamlet island keyboard mural
+  [chisel cobra drumbeat eyeglass hamlet island keyboard mural]
 
 Compare these words against `argus lock status` on a node you trust.
 Pin this device to it? [y/N]:
@@ -232,7 +232,7 @@ a gateway that is hiding branches.
 words derived from the current signer set:
 
 ```
-trust fingerprint: sawdust scenic seabird select shadow skydive solo sugar
+trust fingerprint: [sawdust scenic seabird select shadow skydive solo sugar]
 ```
 
 If you suspect equivocation, compare this fingerprint across all your nodes
