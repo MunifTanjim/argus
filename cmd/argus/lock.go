@@ -878,8 +878,9 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 	// Supersession outranks every other headline: what the operator needs first is
 	// that THIS device is serving nobody, not the history of the root it still holds.
 	case st.Quarantined && st.Pinned:
-		fmt.Fprintf(&b, "locked mode: QUARANTINED — this device follows a trust root the network has left\n"+
-			"  its own log was disabled by break-glass, so it enforces nothing and can never be re-enabled\n"+
+		fmt.Fprintf(&b, "locked mode: QUARANTINED — this device refuses all channels\n"+
+			"  it follows a trust root the network has left: its own log was disabled by\n"+
+			"  break-glass (permanently), and the network has since locked again under a new one\n"+
 			"  current tip (audit): %s\n", keyfmt.Tip.Encode(st.Tip))
 	case !st.Enabled:
 		fmt.Fprintf(&b, "locked mode: not enabled\n  this node signer: %s\n  this node identity: %s\n",
@@ -919,7 +920,7 @@ func lockPinLines(st api.LockStatusResult) string {
 	fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 	switch {
 	case st.Quarantined && st.Pinned:
-		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       this device refuses all channels; run:\n         %s\n",
+		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       run:\n         %s\n",
 			strings.Join(trustlog.HashFingerprint(st.PinGenesis), " "), seen, fix)
 	case st.Quarantined:
 		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run:\n         %s\n", seen, fix)

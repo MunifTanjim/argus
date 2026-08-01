@@ -82,8 +82,17 @@ func TestLockStatusLinesLeadsWithQuarantineWhenSuperseded(t *testing.T) {
 	if !strings.Contains(head, "QUARANTINED") {
 		t.Fatalf("headline %q must lead with the device's own state", head)
 	}
-	if strings.Contains(head, "nothing is enforced") {
-		t.Fatalf("headline %q contradicts the refusal notice below it", head)
+	// One statement about what this device does, made once. "enforces nothing"
+	// describes the dead chain, but reads as the opposite of "refuses all channels"
+	// — and a quarantined device is the most restrictive state there is, not the
+	// least.
+	for _, banned := range []string{"nothing is enforced", "enforces nothing"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("output %q must not claim it enforces nothing while refusing every channel", out)
+		}
+	}
+	if n := strings.Count(out, "refuses all channels"); n != 1 {
+		t.Fatalf("output %q states the refusal %d times, want exactly 1", out, n)
 	}
 }
 
