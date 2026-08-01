@@ -33,6 +33,7 @@ type Cluster struct {
 
 	redactions []redaction
 	steps      int
+	goldenDir  string // test override; empty means testdata/<TestName>
 }
 
 func New(t *testing.T) *Cluster {
