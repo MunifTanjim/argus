@@ -1,9 +1,9 @@
-$ argus lock status --socket=<ROOT>/nope.sock --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock status --socket=<ROOT>/nope.sock --gateway=ws://<GW-ADDR> --token=<TOKEN>
 exit 0
 --- stdout ---
-locked mode: not enabled
-  this node signer: <NODE-A-SIGPUB>
-  this node identity: <NODE-A-DEVPUB>
-  pin: none
+locked mode: (client — no local node)
+  this device identity: <CLI-CLIENT-DEVPUB>
+  to authorize, run on a signer node:
+    argus lock sign <CLI-CLIENT-DEVPUB>
   client pin: none
 --- stderr ---

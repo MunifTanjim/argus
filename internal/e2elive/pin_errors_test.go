@@ -52,7 +52,15 @@ func TestLockPinAndErrorsCLI(t *testing.T) {
 	c.Step(t, "p1-disable-while-unlocked", a.LockRun("disable", "somesecret"))
 	c.Step(t, "p1-bad-token", a.LockRun("status", "--token=wrong-token"))
 	c.Step(t, "p1-unreachable-gateway", a.LockRun("status", "--gateway=ws://127.0.0.1:1"))
-	c.Step(t, "p1-unreachable-socket", a.LockRun("status", "--socket="+c.Root+"/nope.sock"))
+
+	// When the socket is unreachable the CLI falls back to client mode via the
+	// gateway, which generates an ephemeral per-run device key that must be
+	// redacted before the golden comparison.
+	unreachableSocket := a.LockRun("status", "--socket="+c.Root+"/nope.sock")
+	for _, m := range regexp.MustCompile(PatClientDeviceKey).FindAllStringSubmatch(unreachableSocket.Stdout+unreachableSocket.Stderr, -1) {
+		c.Redact(m[1], "<CLI-CLIENT-DEVPUB>")
+	}
+	c.Step(t, "p1-unreachable-socket", unreachableSocket)
 
 	// Phase 2 — argument validation; no state change, so order is free.
 	c.Step(t, "p2-init-no-args", a.LockRun("init"))

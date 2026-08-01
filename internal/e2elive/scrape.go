@@ -8,11 +8,15 @@ import (
 
 // Patterns for reading values back out of real CLI output. Group 1 is the value.
 const (
-	PatSignerKey   = `this node signer: (sigpub:[0-9a-f]+)`
-	PatDeviceKey   = `this node identity: (devpub:[0-9a-f]+)`
-	PatGenesis     = `genesis: (gen:[0-9a-f]+)`
-	PatTip         = `tip \(audit\): (tip:[0-9a-f]+)`
-	PatDisablement = `disablement secret: (dis:[0-9a-f]+)`
+	PatSignerKey = `this node signer: (sigpub:[0-9a-f]+)`
+	PatDeviceKey = `this node identity: (devpub:[0-9a-f]+)`
+	// PatClientDeviceKey matches the ephemeral device identity printed in client
+	// mode (no local node socket), distinct from PatDeviceKey which matches the
+	// node-process identity.
+	PatClientDeviceKey = `this device identity: (devpub:[0-9a-f]+)`
+	PatGenesis         = `genesis: (gen:[0-9a-f]+)`
+	PatTip             = `tip \(audit\): (tip:[0-9a-f]+)`
+	PatDisablement     = `disablement secret: (dis:[0-9a-f]+)`
 	// Both the `blob: <b64>` stdout line and the `--cosign <b64>` stderr hint.
 	PatBlob = `(?:blob: |--cosign )([A-Za-z0-9+/=]+)`
 )
