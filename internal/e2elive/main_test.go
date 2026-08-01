@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-var argusBin string
-
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if testing.Short() {

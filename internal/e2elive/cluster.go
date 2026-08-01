@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var argusBin string
+
 type Node struct {
 }
 
@@ -22,9 +24,10 @@ type Cluster struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	procs []*exec.Cmd
-	logs  []string
-	nodes map[string]*Node
+	procs    []*exec.Cmd
+	logs     []string
+	logFiles []*os.File
+	nodes    map[string]*Node
 }
 
 func New(t *testing.T) *Cluster {
@@ -60,6 +63,9 @@ func New(t *testing.T) *Cluster {
 				}
 			}
 		}
+		for _, f := range c.logFiles {
+			f.Close()
+		}
 		_ = os.RemoveAll(root)
 	})
 	return c
@@ -82,5 +88,6 @@ func (c *Cluster) spawn(name, logPath string, env, args []string) *exec.Cmd {
 	}
 	c.procs = append(c.procs, cmd)
 	c.logs = append(c.logs, logPath)
+	c.logFiles = append(c.logFiles, logf)
 	return cmd
 }
