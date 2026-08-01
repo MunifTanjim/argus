@@ -121,12 +121,12 @@ func TestLockedNodeEnforcesAuthorizedClient(t *testing.T) {
 			return false
 		}
 		defer pc.Close()
-		var got api.TrustLogPullResult
-		if err := api.NewClient(pc).Call(api.MethodTrustLogPull, nil, &got); err != nil || len(got.Chains) == 0 {
+		var got api.TrustLogSyncResult
+		if err := api.NewClient(pc).Call(api.MethodTrustLogSync, api.TrustLogSyncParams{}, &got); err != nil || len(got.Entries) == 0 {
 			return false
 		}
 		st := trustlog.NewSyncStore(initRes.Tip)
-		for _, chain := range got.Chains {
+		for _, chain := range trustlog.AssembleChains(got.Entries) {
 			st.Ingest(chain) //nolint:errcheck
 		}
 		return st.DeviceAuthorized(idA)

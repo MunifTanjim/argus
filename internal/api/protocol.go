@@ -89,10 +89,8 @@ const (
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
-	MethodTrustLogPull  = "trustlog.pull"  // request: TrustLogPullParams (optional); result: TrustLogPullResult (node/client fetch)
-	MethodTrustLogOffer = "trustlog.offer" // node->gateway request: TrustLogChain; result: nil (publish)
-	MethodTrustLogSync  = "trustlog.sync"  // request: TrustLogSyncParams; result: TrustLogSyncResult (node/client head-based sync)
-	MethodTrustLogPush  = "trustlog.push"  // node->gateway request: TrustLogPushParams; result: nil (publish entries)
+	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (node/client head-based sync)
+	MethodTrustLogPush = "trustlog.push" // node->gateway request: TrustLogPushParams; result: nil (publish entries)
 	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
 	// did not previously hold has been offered. It is a hint with no authority: the
 	// node's response is to pull and verify against its pinned genesis. It buys the
@@ -670,44 +668,6 @@ type RelayCloseParams struct {
 	ChanID string `json:"chan_id"`
 }
 
-// TrustLogChain carries a marshaled trust-log chain (trustlog.MarshalChain output)
-// as opaque, self-authenticating bytes. Empty Chain means "no chain yet". Chain
-// marshals to base64 (Go encodes []byte as base64 in JSON).
-type TrustLogChain struct {
-	Chain []byte `json:"chain,omitempty"`
-}
-
-// TrustLogPullParams optionally narrows a trustlog.pull. Known carries the
-// fingerprints of branches the caller has already received, so the gateway can
-// withhold them. An empty or omitted Known requests every branch.
-type TrustLogPullParams struct {
-	Known [][]byte `json:"known,omitempty"`
-}
-
-// TrustLogPullResult is the response to a trustlog.pull request. Chains holds all
-// competing trust-log branches the blind gateway currently holds, each as opaque
-// marshalled bytes (trustlog.MarshalChain output). Ordered by descending entry
-// count (longest branch first). Empty when nothing has been offered yet; a
-// single-branch network returns a one-element list.
-//
-// Wire shape (for Task 6 / Dart mirror):
-//
-//	{"chains": ["<base64>", ...]}   // array of base64-encoded branch bytes
-//
-// Each element decodes to the raw binary produced by trustlog.MarshalChain (the
-// same format as TrustLogChain.Chain). Clients ingest every element in order;
-// their genesis-pinned SyncStore/fork-choice picks the winning branch.
-type TrustLogPullResult struct {
-	Chains [][]byte `json:"chains"`
-	// Fingerprints is the content hash of EVERY branch the gateway holds, including
-	// ones withheld from Chains. A caller whose own chain is missing from this list
-	// knows the gateway lost it (restart, cap eviction) and re-offers.
-	//
-	// Absent (nil) means the gateway predates this field — not "no branches". A
-	// caller must not treat the two the same: doing so re-offers on every tick.
-	Fingerprints [][]byte `json:"fingerprints"`
-}
-
 // TrustLogSyncParams carries the caller's head hashes — the hash of the last
 // entry of every branch it holds, including branches it rejected. Holding a head
 // implies holding its ancestry, so the gateway needs nothing else to compute the
@@ -733,13 +693,9 @@ type TrustLogPushParams struct {
 }
 
 // TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
-// Fingerprint is the blake2s-256 content hash of the newly inserted branch (the
-// same key the gateway indexes by). Receivers treat it as an opaque hint only —
-// they pull and verify whatever the gateway returns against their pinned genesis.
+// Heads are the gateway's head hashes after the change. A receiver that already
+// holds every one of them has nothing to fetch and can skip the sync entirely.
 type TrustLogChangedParams struct {
-	Fingerprint []byte   `json:"fingerprint,omitempty"`
-	// Heads are the gateway's head hashes after the change. A receiver that already
-	// holds every one of them has nothing to fetch and can skip the sync entirely.
 	Heads [][]byte `json:"heads,omitempty"`
 }
 

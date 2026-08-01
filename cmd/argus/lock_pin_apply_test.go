@@ -136,11 +136,15 @@ func TestApplyPinPinsTheClientWhenNoNodeIsRunning(t *testing.T) {
 func networkGenesisNode(t *testing.T) (*config.Config, []byte) {
 	t.Helper()
 	chain := makeTestChainBytes(t)
-	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
-		return api.TrustLogPullResult{Chains: [][]byte{chain}}, nil
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	sync := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogSyncResult{Entries: raw}, nil
 	}
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{
-		api.MethodTrustLogPull: pull,
+		api.MethodTrustLogSync: sync,
 		api.MethodLockPin:      acceptPin,
 	})}
 	entries, err := trustlog.UnmarshalChain(chain)
@@ -376,10 +380,18 @@ func TestClientPinStatusUnpinnedOnAnUnlockedNetwork(t *testing.T) {
 // quarantined all the same, so status must still name a genesis.
 func TestQuarantiningGenesisReportsCompetingRoots(t *testing.T) {
 	chains := [][]byte{makeTestChainBytes(t), makeTestChainBytes(t)}
-	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
-		return api.TrustLogPullResult{Chains: chains}, nil
+	var allEntries [][]byte
+	for _, c := range chains {
+		raw, err := trustlog.ChainEntries(c)
+		if err != nil {
+			t.Fatalf("ChainEntries: %v", err)
+		}
+		allEntries = append(allEntries, raw...)
 	}
-	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogPull: pull})}
+	sync := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogSyncResult{Entries: allEntries}, nil
+	}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
 	got, err := quarantiningGenesis(context.Background(), cfg)
 
@@ -396,10 +408,10 @@ func TestQuarantiningGenesisReportsCompetingRoots(t *testing.T) {
 }
 
 func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
-	pull := func(_ context.Context, _ json.RawMessage) (any, error) {
-		return api.TrustLogPullResult{}, nil
+	sync := func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogSyncResult{}, nil
 	}
-	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogPull: pull})}
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
 	got, err := quarantiningGenesis(context.Background(), cfg)
 

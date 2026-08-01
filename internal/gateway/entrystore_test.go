@@ -7,6 +7,64 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
+// twoEntryChain returns a genesis+authorize chain (2 entries) and a genesis-only
+// chain (1 entry) sharing the same signer.
+func twoEntryChain(t *testing.T) (short, long []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	short = trustlog.MarshalChain(log.Entries())
+	dev := make([]byte, 32)
+	if err := log.AuthorizeDevice(dev, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	long = trustlog.MarshalChain(log.Entries())
+	return short, long
+}
+
+// divergentForks returns two chains that share the same genesis but have different
+// second entries (each authorizes a distinct device). They are true competing forks.
+func divergentForks(t *testing.T) (chainA, chainB []byte, devA, devB []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	genLog, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisEntries := genLog.Entries()
+
+	devA = bytes.Repeat([]byte{0xAA}, 32)
+	logA, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load fork A: %v", err)
+	}
+	if err := logA.AuthorizeDevice(devA, signer); err != nil {
+		t.Fatalf("AuthorizeDevice A: %v", err)
+	}
+	chainA = trustlog.MarshalChain(logA.Entries())
+
+	devB = bytes.Repeat([]byte{0xBB}, 32)
+	logB, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load fork B: %v", err)
+	}
+	if err := logB.AuthorizeDevice(devB, signer); err != nil {
+		t.Fatalf("AuthorizeDevice B: %v", err)
+	}
+	chainB = trustlog.MarshalChain(logB.Entries())
+
+	return chainA, chainB, devA, devB
+}
+
 // testChainPair builds a short (genesis-only) chain and an extended chain (same
 // genesis plus one more entry). The extended chain is a strict append of the short
 // one — they share the same head lineage.

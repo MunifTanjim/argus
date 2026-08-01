@@ -114,11 +114,11 @@ func pullChains(ctx context.Context, cfg *config.Config) ([][]byte, error) {
 	}
 	c := api.NewClient(conn)
 	defer c.Close()
-	var got api.TrustLogPullResult
-	if err := c.CallContext(ctx, api.MethodTrustLogPull, nil, &got); err != nil {
-		return nil, fmt.Errorf("trustlog.pull: %w", err)
+	var got api.TrustLogSyncResult
+	if err := c.CallContext(ctx, api.MethodTrustLogSync, api.TrustLogSyncParams{}, &got); err != nil {
+		return nil, fmt.Errorf("trustlog.sync: %w", err)
 	}
-	return got.Chains, nil
+	return trustlog.AssembleChains(got.Entries), nil
 }
 
 // genesisFromNetwork pulls the gateway's retained branches and delegates

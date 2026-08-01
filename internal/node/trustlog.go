@@ -196,9 +196,6 @@ func (d *Node) pushHeldEntries(peer trustCaller) {
 	if err := peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil); err != nil {
 		return
 	}
-	// Also populate the old chain store so clients still on trustlog.pull can see it
-	// until they are switched in the next task.
-	_ = peer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: mine}, nil)
 	d.rememberHead(mine)
 }
 

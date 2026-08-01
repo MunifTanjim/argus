@@ -2,17 +2,44 @@ package gateway
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
+
+func gwWSURL(httpURL, route string) string {
+	return "ws://" + strings.TrimPrefix(httpURL, "http://") + route
+}
+
+// marshalChainForTest builds a marshalled chain of n entries.
+func marshalChainForTest(t *testing.T, n int) []byte {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	for i := 1; i < n; i++ {
+		dev := bytes.Repeat([]byte{byte(i)}, 32)
+		if err := log.AuthorizeDevice(dev, signer); err != nil {
+			t.Fatalf("AuthorizeDevice: %v", err)
+		}
+	}
+	return trustlog.MarshalChain(log.Entries())
+}
 
 // server.info reports the version set via SetVersion plus every connected node,
 // so a client can both show the version and pick a spawn target.
@@ -50,126 +77,6 @@ type delivererFunc func(context.Context, string, []byte, string, string) error
 
 func (f delivererFunc) Deliver(ctx context.Context, ep string, b []byte, ttl, u string) error {
 	return f(ctx, ep, b, ttl, u)
-}
-
-func newTestGatewayAndClient(t *testing.T) (*Server, *api.Peer) {
-	t.Helper()
-	srv := NewServer(New(time.Second), nil, nil)
-	hs := httptest.NewServer(srv.Handler())
-	t.Cleanup(hs.Close)
-	cli, err := api.DialWSPeer(context.Background(), gwWSURL(hs.URL, "/client"), "", nil, api.PeerOptions{})
-	if err != nil {
-		t.Fatalf("dial client: %v", err)
-	}
-	t.Cleanup(func() { cli.Close() })
-	return srv, cli
-}
-
-func offerChain(t *testing.T, srv *Server, chain []byte) {
-	t.Helper()
-	srv.trust.offer(chain)
-}
-
-func TestPullWithheldWhenFingerprintKnown(t *testing.T) {
-	srv, cli := newTestGatewayAndClient(t)
-	chain := marshalChainForTest(t, 3)
-	offerChain(t, srv, chain)
-
-	var first api.TrustLogPullResult
-	if err := cli.Call(api.MethodTrustLogPull, nil, &first); err != nil {
-		t.Fatalf("first pull: %v", err)
-	}
-	if len(first.Chains) != 1 || len(first.Fingerprints) != 1 {
-		t.Fatalf("first pull: chains=%d fps=%d, want 1 and 1", len(first.Chains), len(first.Fingerprints))
-	}
-
-	var second api.TrustLogPullResult
-	if err := cli.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: first.Fingerprints}, &second); err != nil {
-		t.Fatalf("second pull: %v", err)
-	}
-	if len(second.Chains) != 0 {
-		t.Fatalf("a known branch must not be re-sent, got %d chains", len(second.Chains))
-	}
-	if len(second.Fingerprints) != 1 {
-		t.Fatal("fingerprints must always be complete, even when no chain is sent")
-	}
-}
-
-// An old client sends no params at all; it must keep getting everything.
-func TestPullWithoutParamsIsUnchanged(t *testing.T) {
-	srv, cli := newTestGatewayAndClient(t)
-	offerChain(t, srv, marshalChainForTest(t, 3))
-
-	var res api.TrustLogPullResult
-	if err := cli.Call(api.MethodTrustLogPull, nil, &res); err != nil {
-		t.Fatalf("pull: %v", err)
-	}
-	if len(res.Chains) != 1 {
-		t.Fatal("omitted Known must mean send everything")
-	}
-}
-
-// TestNodeRoutePullWithheldWhenFingerprintKnown exercises the node-uplink dispatch
-// path with a Known fingerprint list. If the node route were still calling the old
-// code path, this would fail even while the client-route tests pass.
-func TestNodeRoutePullWithheldWhenFingerprintKnown(t *testing.T) {
-	agg := New(time.Second)
-	srv := NewServer(agg, nil, nil)
-	hs := httptest.NewServer(srv.Handler())
-	defer hs.Close()
-	ctx := context.Background()
-
-	chain := marshalChainForTest(t, 3)
-	srv.trust.offer(chain)
-
-	nodeDispatch := func(_ context.Context, method string, _ json.RawMessage) (any, error) {
-		if method == api.MethodNodeIdentify {
-			return api.IdentifyResult{ID: "test-node"}, nil
-		}
-		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
-	}
-	nodePeer, err := api.DialWSPeer(ctx, gwWSURL(hs.URL, "/node"), "", nil, api.PeerOptions{Dispatch: nodeDispatch})
-	if err != nil {
-		t.Fatalf("dial node: %v", err)
-	}
-	defer nodePeer.Close()
-
-	var first api.TrustLogPullResult
-	if err := nodePeer.Call(api.MethodTrustLogPull, nil, &first); err != nil {
-		t.Fatalf("first pull: %v", err)
-	}
-	if len(first.Chains) != 1 || len(first.Fingerprints) != 1 {
-		t.Fatalf("first pull: chains=%d fps=%d, want 1 and 1", len(first.Chains), len(first.Fingerprints))
-	}
-
-	var second api.TrustLogPullResult
-	if err := nodePeer.Call(api.MethodTrustLogPull, api.TrustLogPullParams{Known: first.Fingerprints}, &second); err != nil {
-		t.Fatalf("second pull: %v", err)
-	}
-	if len(second.Chains) != 0 {
-		t.Fatalf("a known branch must not be re-sent over node route, got %d chains", len(second.Chains))
-	}
-	if len(second.Fingerprints) != 1 {
-		t.Fatal("fingerprints must always be complete over node route, even when no chain is sent")
-	}
-}
-
-// TestPullFingerprintsEmptyNotNullForEmptyStore checks that an empty store emits
-// "fingerprints":[] not null. Absent Fingerprints signals an old gateway; present
-// but empty signals a gateway that holds nothing. The two must not be conflated.
-func TestPullFingerprintsEmptyNotNullForEmptyStore(t *testing.T) {
-	_, cli := newTestGatewayAndClient(t)
-
-	var res api.TrustLogPullResult
-	if err := cli.Call(api.MethodTrustLogPull, nil, &res); err != nil {
-		t.Fatalf("pull: %v", err)
-	}
-	if res.Fingerprints == nil {
-		t.Fatal("empty store must emit Fingerprints:[] not null; nil would be indistinguishable from an old gateway")
-	}
-	if len(res.Fingerprints) != 0 {
-		t.Fatalf("empty store must have 0 fingerprints, got %d", len(res.Fingerprints))
-	}
 }
 
 // waitForNodePeers blocks until n node uplinks are registered as relay targets.
@@ -235,11 +142,15 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 	defer clientPeer.Close()
 
 	chain := marshalChainForTest(t, 2)
+	entries, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
 
-	// First offer: new branch → the other node gets trustlog.changed, client gets
-	// nothing, and the offering node is not told about its own change.
-	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
-		t.Fatalf("offer: %v", err)
+	// First push: new entries → the other node gets trustlog.changed, client gets
+	// nothing, and the pushing node is not told about its own change.
+	if err := offerer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: entries}, nil); err != nil {
+		t.Fatalf("push: %v", err)
 	}
 	select {
 	case n := <-nodeGot:
@@ -247,13 +158,13 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 			t.Fatalf("node got notification method %q, want %q", n.Method, api.MethodTrustLogChanged)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("node did not receive trustlog.changed after a new branch was offered")
+		t.Fatal("node did not receive trustlog.changed after new entries were pushed")
 	}
 	select {
 	case n := <-offererGot:
-		t.Fatalf("the offering node must not be notified of its own offer, got %q", n.Method)
+		t.Fatalf("the pushing node must not be notified of its own push, got %q", n.Method)
 	case <-time.After(200 * time.Millisecond):
-		// correct: self-notification would burn the offerer's own pull budget
+		// correct: self-notification would burn the pusher's own pull budget
 	}
 	select {
 	case n := <-clientGot:
@@ -262,15 +173,15 @@ func TestTrustLogChangedNotifiesPeers(t *testing.T) {
 		// correct: client is not in nodePeers
 	}
 
-	// Second offer of the same chain: no new insertion → no notification.
-	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
-		t.Fatalf("re-offer: %v", err)
+	// Re-push of the same entries: no new insertion → no notification.
+	if err := offerer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: entries}, nil); err != nil {
+		t.Fatalf("re-push: %v", err)
 	}
 	select {
 	case n := <-nodeGot:
-		t.Fatalf("unexpected notification %q for a re-offer of a known branch", n.Method)
+		t.Fatalf("unexpected notification %q for a re-push of known entries", n.Method)
 	case <-time.After(200 * time.Millisecond):
-		// correct: no notification for a known branch
+		// correct: no notification for known entries
 	}
 }
 

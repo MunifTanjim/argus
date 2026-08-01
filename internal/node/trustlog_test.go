@@ -619,8 +619,12 @@ func TestNotificationConvergesChainAndKeepsUplinkAlive(t *testing.T) {
 	}
 	defer offerer.Close()
 
-	if err := offerer.Call(api.MethodTrustLogOffer, api.TrustLogChain{Chain: chain}, nil); err != nil {
-		t.Fatalf("offer: %v", err)
+	entries, cerr := trustlog.ChainEntries(chain)
+	if cerr != nil {
+		t.Fatalf("ChainEntries: %v", cerr)
+	}
+	if err := offerer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: entries}, nil); err != nil {
+		t.Fatalf("push: %v", err)
 	}
 
 	// The notification-driven pull must converge the chain.

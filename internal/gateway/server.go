@@ -17,7 +17,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/push"
-	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
@@ -43,8 +42,7 @@ type Server struct {
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
 	nextChan  atomic.Uint64            // chan_id allocator
 
-	trust   *trustStore   // opaque hold of the network's trust-log chain (blind)
-	entries *entryStore   // entry-keyed trust-log DAG (blind)
+	entries *entryStore // entry-keyed trust-log DAG (blind)
 
 	// nodeKeepalive is the gateway→node ping interval; 0 uses nodeKeepaliveInterval.
 	// Operator-configurable so gateway.keepalive-interval governs both directions of
@@ -78,7 +76,6 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 	}
 	s.channels = map[string]*relayChannel{}
 	s.nodePeers = map[string]*api.Peer{}
-	s.trust = &trustStore{}
 	s.entries = &entryStore{}
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
@@ -324,7 +321,7 @@ func (s *Server) clientHandler() http.Handler {
 }
 
 // buildClientServer wires the client-facing JSON-RPC: blind methods (ping, server.info,
-// nodes.list, trustlog.pull, relay.open/close, clients.*, push.vapidKey) and the
+// nodes.list, trustlog.sync, relay.open/close, clients.*, push.vapidKey) and the
 // blind roster (node.event) stream.
 func (s *Server) buildClientServer() *api.Server {
 	srv := api.NewServer()
@@ -342,15 +339,6 @@ func (s *Server) buildClientServer() *api.Server {
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
 		s.chatterRPCs.Add(1)
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
-	})
-
-	// trustlog.pull serves retained competing trust-log branches to a client.
-	// The client ingests each branch and its genesis-pinned fork-choice picks the
-	// winner; the gateway never verifies or interprets the chain internals.
-	srv.Handle(api.MethodTrustLogPull, func(_ context.Context, params json.RawMessage) (any, error) {
-		s.chatterRPCs.Add(1)
-		chains, fps := s.trust.diff(pullKnown(params))
-		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	})
 
 	// trustlog.sync serves the entries a caller cannot reach from its own heads.
@@ -590,43 +578,15 @@ func ResetNodeKeepaliveForTest() {
 	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
 }
 
-// pullKnown extracts the caller's known fingerprints. Absent or malformed params
-// mean "send everything", which is how a caller that predates the field behaves.
-func pullKnown(params json.RawMessage) [][]byte {
-	if len(params) == 0 {
-		return nil
-	}
-	p, err := api.Decode[api.TrustLogPullParams](params)
-	if err != nil {
-		return nil
-	}
-	return p.Known
-}
-
 // nodeDispatch serves the requests a node issues down its uplink: roster lookup
-// (nodes.list), trust-log distribution (offer + pull), and push delivery. Kept
-// separate from the client server so trustlog.offer is reachable only here —
+// (nodes.list), trust-log distribution (push + sync), and push delivery. Kept
+// separate from the client server so trustlog.push is reachable only here —
 // clients are supplicants and must not publish trust state. src is the offering
 // uplink, excluded from the trustlog.changed fan-out.
 func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case api.MethodNodesList:
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
-	case api.MethodTrustLogOffer:
-		p, err := api.Decode[api.TrustLogChain](params)
-		if err != nil {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
-		}
-		if inserted, fp := s.trust.offer(p.Chain); inserted {
-			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Fingerprint: fp[:]})
-		}
-		if raw, cerr := trustlog.ChainEntries(p.Chain); cerr == nil {
-			s.entries.putAll(raw)
-		}
-		return nil, nil
-	case api.MethodTrustLogPull:
-		chains, fps := s.trust.diff(pullKnown(params))
-		return api.TrustLogPullResult{Chains: chains, Fingerprints: fps}, nil
 	case api.MethodTrustLogSync:
 		p, err := api.Decode[api.TrustLogSyncParams](params)
 		if err != nil {
@@ -676,7 +636,7 @@ func (s *Server) serveNode(conn net.Conn) {
 	// nodeID is set (under mu) once identify succeeds; beacon.offer handling reads it.
 	var mu sync.Mutex
 	var nodeID string
-	// self is this uplink, published once api.NewPeer returns so trustlog.offer can
+	// self is this uplink, published once api.NewPeer returns so trustlog.push can
 	// exclude the offering node from the change fan-out.
 	var self atomic.Pointer[api.Peer]
 
@@ -709,7 +669,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		}
 		s.logger().Info("rpc", args...)
 		switch method {
-		case api.MethodNodesList, api.MethodTrustLogPull, api.MethodTrustLogOffer, api.MethodBeaconOffer:
+		case api.MethodNodesList, api.MethodBeaconOffer:
 			s.chatterRPCs.Add(1)
 		}
 		return res, err
