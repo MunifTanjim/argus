@@ -1,0 +1,16 @@
+$ argus lock init <NODE-A-SIGPUB> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+would create a trust log with:
+  signers (1):
+    <NODE-A-SIGPUB>  (this node)
+  signer-set fingerprint: <FP>
+  disablement secrets: 1 (shown once, at creation)
+  devices authorized from the gateway roster (2):
+    <NODE-A-DEVPUB>  node-a
+    <NODE-B-DEVPUB>  node-b
+  these identity keys come from the gateway, which nothing has verified yet
+
+nothing has been created. re-run with --confirm:
+  argus lock init --confirm <NODE-A-SIGPUB>
+--- stderr ---

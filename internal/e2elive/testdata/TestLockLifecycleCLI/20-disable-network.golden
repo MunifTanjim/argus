@@ -1,0 +1,6 @@
+$ argus lock disable <SECRET-1> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode disabled network-wide
+  current tip (audit): <TIP-5>
+--- stderr ---

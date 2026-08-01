@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -181,6 +182,32 @@ func (c *Cluster) WaitOnline(ids ...string) {
 			}
 		}
 		return true
+	})
+}
+
+// WaitLockEnforcing blocks until the named node's `lock status` reports that it is
+// enforcing, so a golden taken on a second node cannot race trust-log propagation.
+func (c *Cluster) WaitLockEnforcing(id string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("WaitLockEnforcing: unknown node %q", id)
+	}
+	waitFor(c.t, "lock enforcing on "+id, func() bool {
+		r := n.LockRun("status")
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "locked mode: enforcing")
+	})
+}
+
+func (c *Cluster) WaitLockDisabled(id string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("WaitLockDisabled: unknown node %q", id)
+	}
+	waitFor(c.t, "lock disabled on "+id, func() bool {
+		r := n.LockRun("status")
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "disabled network-wide")
 	})
 }
 

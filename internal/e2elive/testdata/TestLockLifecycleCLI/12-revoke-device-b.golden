@@ -1,0 +1,6 @@
+$ argus lock revoke-device node-b --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+revoke-device ok
+  current tip (audit): <TIP-3>
+--- stderr ---
