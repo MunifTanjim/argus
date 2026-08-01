@@ -37,6 +37,8 @@ func TestSmokeUnlockedRoundTrip(t *testing.T) {
 	// Node-addressed call over the sealed E2E channel: sealed by the client,
 	// relayed opaquely by the gateway, decrypted+handled by the real node,
 	// and the sealed reply opened by the client. Empty result is fine.
+	// NodeID must be explicit here: with more than one node online the gateway
+	// cannot fall back to the sole-node route, so an unaddressed call would fail.
 	var agents api.AgentsListResult
 	if err := cl.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "node-a"}, &agents); err != nil {
 		t.Fatalf("agents.list over e2e: %v", err)

@@ -130,6 +130,9 @@ func (c *Cluster) StartGateway() {
 
 func (c *Cluster) AddNode(id string) *Node {
 	c.t.Helper()
+	if _, exists := c.nodes[id]; exists {
+		c.t.Fatalf("AddNode: node %q already exists", id)
+	}
 	dir := filepath.Join(c.Root, id)
 	env, err := isolatedEnv(dir)
 	if err != nil {
