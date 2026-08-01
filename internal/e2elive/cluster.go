@@ -30,6 +30,9 @@ type Cluster struct {
 	logs     []string
 	logFiles []*os.File
 	nodes    map[string]*Node
+
+	redactions []redaction
+	steps      int
 }
 
 func New(t *testing.T) *Cluster {
