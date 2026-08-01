@@ -52,8 +52,8 @@ func TestLockStatusLinesReportsSupersession(t *testing.T) {
 			t.Fatalf("output %q must contain %q", out, want)
 		}
 	}
-	if strings.Contains(out, "network-wide disabled: true") {
-		t.Fatal("the standalone disabled line is subsumed by the headline")
+	if strings.Contains(out, "locked mode: disabled network-wide") {
+		t.Fatal("the break-glass headline is subsumed by the supersession one")
 	}
 }
 
@@ -82,14 +82,11 @@ func TestLockStatusLinesLeadsWithQuarantineWhenSuperseded(t *testing.T) {
 	if !strings.Contains(head, "QUARANTINED") {
 		t.Fatalf("headline %q must lead with the device's own state", head)
 	}
-	// One statement about what this device does, made once. "enforces nothing"
-	// describes the dead chain, but reads as the opposite of "refuses all channels"
-	// — and a quarantined device is the most restrictive state there is, not the
-	// least.
-	for _, banned := range []string{"nothing is enforced", "enforces nothing"} {
-		if strings.Contains(out, banned) {
-			t.Fatalf("output %q must not claim it enforces nothing while refusing every channel", out)
-		}
+	// The break-glass headline (lockStatusLines' st.Disabled branch) says "nothing is
+	// enforced", which reads as the opposite of refusing every channel. A superseded
+	// device must not fall through to it: it is the most restrictive state there is.
+	if strings.Contains(out, "nothing is enforced") {
+		t.Fatalf("output %q must not claim it enforces nothing while refusing every channel", out)
 	}
 	if n := strings.Count(out, "refuses all channels"); n != 1 {
 		t.Fatalf("output %q states the refusal %d times, want exactly 1", out, n)
