@@ -62,6 +62,10 @@ func TestPushDeliverParamsRoundTrip(t *testing.T) {
 }
 
 func TestTrustLogSyncWireShape(t *testing.T) {
+	if MethodTrustLogSync != "trustlog.sync" {
+		t.Fatalf("method = %q", MethodTrustLogSync)
+	}
+
 	b, err := json.Marshal(TrustLogSyncParams{Heads: [][]byte{{1, 2, 3}}})
 	if err != nil {
 		t.Fatalf("marshal params: %v", err)
@@ -83,6 +87,10 @@ func TestTrustLogSyncWireShape(t *testing.T) {
 }
 
 func TestTrustLogPushAndChangedWireShape(t *testing.T) {
+	if MethodTrustLogPush != "trustlog.push" {
+		t.Fatalf("method = %q", MethodTrustLogPush)
+	}
+
 	b, err := json.Marshal(TrustLogPushParams{Entries: [][]byte{{9}}})
 	if err != nil {
 		t.Fatalf("marshal push: %v", err)
