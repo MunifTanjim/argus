@@ -14,9 +14,6 @@ import (
 
 var argusBin string
 
-type Node struct {
-}
-
 type Cluster struct {
 	t      *testing.T
 	Root   string
@@ -126,5 +123,54 @@ func (c *Cluster) StartGateway() {
 		defer cl.Close()
 		var r api.NodesListResult
 		return cl.Call(api.MethodNodesList, nil, &r) == nil
+	})
+}
+
+func (c *Cluster) AddNode(id string) *Node {
+	c.t.Helper()
+	dir := filepath.Join(c.Root, id)
+	env, err := isolatedEnv(dir)
+	if err != nil {
+		c.t.Fatalf("node %s env: %v", id, err)
+	}
+	sock := filepath.Join(dir, "s")
+	args := []string{
+		"start",
+		"--gateway=" + c.GWURL,
+		"--token=" + c.Token,
+		"--id=" + id,
+		"--label=" + id,
+		"--socket=" + sock,
+	}
+	cmd := c.spawn(id, filepath.Join(dir, "argus.log"), env, args)
+	n := &Node{ID: id, Dir: dir, Socket: sock, cluster: c, env: env, cmd: cmd}
+	c.nodes[id] = n
+	return n
+}
+
+func (c *Cluster) WaitOnline(ids ...string) {
+	c.t.Helper()
+	waitFor(c.t, "nodes online", func() bool {
+		cl, err := c.dialClient()
+		if err != nil {
+			return false
+		}
+		defer cl.Close()
+		var r api.NodesListResult
+		if cl.Call(api.MethodNodesList, nil, &r) != nil {
+			return false
+		}
+		online := map[string]bool{}
+		for _, nd := range r.Nodes {
+			if nd.Online && nd.IdentityPubKey != "" {
+				online[nd.ID] = true
+			}
+		}
+		for _, id := range ids {
+			if !online[id] {
+				return false
+			}
+		}
+		return true
 	})
 }

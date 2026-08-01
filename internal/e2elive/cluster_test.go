@@ -60,3 +60,28 @@ func TestGatewayServesClient(t *testing.T) {
 		t.Fatalf("expected empty roster, got %d nodes", len(r.Nodes))
 	}
 }
+
+func TestNodeJoinsAndLockStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real-process e2e; skipped under -short")
+	}
+	c := New(t)
+	c.StartGateway()
+	c.AddNode("node-a")
+	c.WaitOnline("node-a")
+
+	a := c.nodes["node-a"]
+	out, err := a.Lock("status")
+	if err != nil {
+		t.Fatalf("lock status: %v\n%s", err, out)
+	}
+	if len(out) == 0 {
+		t.Fatalf("lock status produced no output")
+	}
+
+	sc, err := a.DialSocket()
+	if err != nil {
+		t.Fatalf("DialSocket: %v", err)
+	}
+	sc.Close()
+}
