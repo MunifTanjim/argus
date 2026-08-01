@@ -307,9 +307,8 @@ func newLockStatusCmd() *cobra.Command {
 			}
 			printLockStatus(st)
 			printClientPinStatus(ctx, cfg)
-			// Enrollment hint: when this node isn't authorized yet, show the exact sign command.
-			if st.Enabled && !st.Authorized && len(st.IdentityPubKey) > 0 {
-				shell.StdOutF("\n  to authorize this node, run on a signer node:\n    %s\n", lockSignHint(st.IdentityPubKey))
+			if hint := authorizeHint(st); hint != "" {
+				shell.StdOutF("%s", hint)
 			}
 			return nil
 		},
@@ -335,9 +334,13 @@ func printClientPinStatus(ctx context.Context, cfg *config.Config) {
 // reported in the line, never returned: the node half of `lock status` must still print.
 func clientPinLine(ctx context.Context, cfg *config.Config) string {
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	// A pinned client is checked too, not just an unpinned one: when the chain it
+	// names has been disabled the pin is dead, and the network genesis is what the
+	// operator needs to see to understand why the dashboard went dark.
+	superseded := perr == nil && pin.Genesis != nil && clientPinSuperseded(pin.Genesis)
 	var netGenesis []byte
 	var neterr error
-	if perr == nil && pin.Genesis == nil && cfg.Gateway.URL != "" {
+	if perr == nil && (pin.Genesis == nil || superseded) && cfg.Gateway.URL != "" {
 		pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
 		defer cancel()
 		netGenesis, neterr = quarantiningGenesis(pctx, cfg)
@@ -345,16 +348,24 @@ func clientPinLine(ctx context.Context, cfg *config.Config) string {
 			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
 		}
 	}
-	return clientPinStatus(pin, perr, netGenesis, neterr)
+	return clientPinStatus(pin, perr, netGenesis, neterr, superseded)
 }
 
 // clientPinStatus renders the client pin line. netGenesis is the genesis this
 // network is offering (nil when there is none or it was not checked), neterr why the
-// check failed.
-func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr error) string {
+// check failed. superseded reports that the chain this pin names was disabled
+// network-wide, which makes the pin dead rather than protective.
+func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr error, superseded bool) string {
 	switch {
 	case perr != nil:
 		return fmt.Sprintf("  client pin: UNUSABLE — %v\n       argus refuses to start until this is resolved\n", perr)
+	case pin.Genesis != nil && superseded:
+		moved := "the network moved to a new trust root"
+		if netGenesis != nil {
+			moved = "the network now uses " + fingerprintOf(netGenesis)
+		}
+		return fmt.Sprintf("  client pin: %s — SUPERSEDED: %s\n       the dashboard on this machine opens no channels;\n       run: argus lock pin, then restart argus\n",
+			fingerprintOf(pin.Genesis), moved)
 	case pin.Genesis != nil:
 		return fmt.Sprintf("  client pin: %s (source: %s)\n", fingerprintOf(pin.Genesis), pin.Source)
 	case netGenesis != nil:
@@ -364,6 +375,17 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 	default:
 		return "  client pin: none\n"
 	}
+}
+
+// authorizeHint is the enrollment instruction for a node the chain does not yet
+// authorize. Silent when there is no live root to be authorized into: a disabled
+// chain authorizes nobody, and a quarantined device follows a root the network has
+// left — in both cases the next step is `argus lock pin`, which the pin line says.
+func authorizeHint(st api.LockStatusResult) string {
+	if !st.Enabled || st.Authorized || st.Disabled || st.Quarantined || len(st.IdentityPubKey) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n  to authorize this node, run on a signer node:\n    %s\n", lockSignHint(st.IdentityPubKey))
 }
 
 // lockSignHint returns the "argus lock sign <pubkey>" instruction string for

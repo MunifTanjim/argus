@@ -320,7 +320,7 @@ func TestPinClientRoleKeepsTheConfigPinOnReinit(t *testing.T) {
 func TestClientPinStatusNamesQuarantine(t *testing.T) {
 	seen := testGenesis(0x11)
 
-	line := clientPinStatus(trustpin.Pin{}, nil, seen, nil)
+	line := clientPinStatus(trustpin.Pin{}, nil, seen, nil, false)
 
 	if !strings.Contains(line, "QUARANTINED") {
 		t.Fatalf("line must name the quarantine, got: %q", line)
@@ -343,7 +343,7 @@ func TestClientPinStatusNamesACorruptPin(t *testing.T) {
 	}
 
 	pin, perr := trustpin.Resolve("", clientPinFile())
-	line := clientPinStatus(pin, perr, nil, nil)
+	line := clientPinStatus(pin, perr, nil, nil, false)
 
 	if strings.Contains(line, "none") {
 		t.Fatalf("a corrupt pin must not be reported as no pin, got: %q", line)
@@ -356,7 +356,7 @@ func TestClientPinStatusNamesACorruptPin(t *testing.T) {
 func TestClientPinStatusReportsAPinnedClient(t *testing.T) {
 	genesis := testGenesis(0x21)
 
-	line := clientPinStatus(trustpin.Pin{Genesis: genesis, Source: trustpin.SourceConfig}, nil, nil, nil)
+	line := clientPinStatus(trustpin.Pin{Genesis: genesis, Source: trustpin.SourceConfig}, nil, nil, nil, false)
 
 	if !strings.Contains(line, fingerprintOf(genesis)) || !strings.Contains(line, "config") {
 		t.Fatalf("line must show the fingerprint and its source, got: %q", line)
@@ -364,7 +364,7 @@ func TestClientPinStatusReportsAPinnedClient(t *testing.T) {
 }
 
 func TestClientPinStatusUnpinnedOnAnUnlockedNetwork(t *testing.T) {
-	line := clientPinStatus(trustpin.Pin{}, nil, nil, nil)
+	line := clientPinStatus(trustpin.Pin{}, nil, nil, nil, false)
 
 	if strings.Contains(line, "QUARANTINED") {
 		t.Fatalf("no trust log on the network must not claim quarantine, got: %q", line)
@@ -593,5 +593,45 @@ func TestGuardPinRefusesWhenStalenessCannotBeProven(t *testing.T) {
 
 	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err == nil {
 		t.Fatal("no chain on disk means no proof of staleness")
+	}
+}
+
+// The client role is pinned separately, so after a relock it must say so on its own
+// line — otherwise the only signal is the node's, and a dark dashboard looks fine.
+func TestClientPinStatusNamesSupersession(t *testing.T) {
+	line := clientPinStatus(trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, nil, testGenesis(0xC2), nil, true)
+
+	for _, want := range []string{"SUPERSEDED", "argus lock pin", "restart"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("line %q must contain %q", line, want)
+		}
+	}
+}
+
+// Supersession is proven by the disabled chain, not by the network probe; report it
+// even when the gateway could not be reached for the new fingerprint.
+func TestClientPinStatusNamesSupersessionWithoutTheNetwork(t *testing.T) {
+	line := clientPinStatus(trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, nil, nil, nil, true)
+
+	if !strings.Contains(line, "SUPERSEDED") {
+		t.Fatalf("line %q must still report supersession", line)
+	}
+}
+
+// A superseded node cannot be authorized into a chain it does not follow; the only
+// useful instruction is to pin.
+func TestAuthorizeHintSuppressedWhenThereIsNoLiveRoot(t *testing.T) {
+	id := testGenesis(0x44)
+	if h := authorizeHint(api.LockStatusResult{Enabled: true, IdentityPubKey: id}); h == "" {
+		t.Fatal("an enforcing chain that lacks this node must still hint how to authorize it")
+	}
+	if h := authorizeHint(api.LockStatusResult{Enabled: true, Disabled: true, IdentityPubKey: id}); h != "" {
+		t.Fatalf("a disabled chain authorizes nobody; got %q", h)
+	}
+	if h := authorizeHint(api.LockStatusResult{Enabled: true, Quarantined: true, IdentityPubKey: id}); h != "" {
+		t.Fatalf("a quarantined device must be told to pin, not to sign; got %q", h)
+	}
+	if h := authorizeHint(api.LockStatusResult{Enabled: true, Authorized: true, IdentityPubKey: id}); h != "" {
+		t.Fatalf("an authorized node needs no hint; got %q", h)
 	}
 }

@@ -102,7 +102,7 @@ config there.
 
 Client (TUI) identities are **not** carried into the new genesis: `lock init` only
 authorizes the node identities on the gateway roster. Re-authorize each client with
-`argus lock sign devkey:<identity>` on a signer node, exactly as you did the first
+`argus lock sign devpub:<identity>` on a signer node, exactly as you did the first
 time. Carrying them forward would re-authorize anything a compromised signer had
 authorized in the old chain.
 
