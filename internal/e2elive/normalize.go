@@ -14,7 +14,7 @@ type redaction struct {
 
 var (
 	reTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})`)
-	reDur  = regexp.MustCompile(`\b\d+(?:\.\d+)?(?:ns|µs|us|ms|s|m|h)\b`)
+	reDur  = regexp.MustCompile(`(^|[\s/,\(\)\[\]{}])\d+(?:\.\d+)?(?:ns|µs|us|ms|s|m|h)\b`)
 	reFP   = regexp.MustCompile(`(?m)(fingerprint: ).*$`)
 
 	// A step fails if any of these survive normalization: they are per-run values
@@ -24,6 +24,7 @@ var (
 		regexp.MustCompile(`127\.0\.0\.1:\d+`),
 		regexp.MustCompile(`(?:/private)?/(?:var/folders|tmp)/\S+`),
 		regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`),
+		regexp.MustCompile(`\d{2}:\d{2}:\d{2}`),
 	}
 )
 
@@ -61,7 +62,7 @@ func (c *Cluster) normalize(s string) (string, error) {
 	}
 
 	s = reTime.ReplaceAllString(s, "<TIME>")
-	s = reDur.ReplaceAllString(s, "<DUR>")
+	s = reDur.ReplaceAllString(s, "$1<DUR>")
 	s = reFP.ReplaceAllString(s, "${1}<FP>")
 
 	for _, re := range volatile {

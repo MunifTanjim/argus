@@ -83,3 +83,25 @@ func TestNormalizeAcceptsPlaceholdersAndPlainText(t *testing.T) {
 		t.Fatalf("plain text changed:\n%s", got)
 	}
 }
+
+func TestNormalizeRejectsSpaceSeparatedTimestamp(t *testing.T) {
+	c := newNormCluster()
+	in := "event occurred at 2026-08-01 12:34:56 +0000\n"
+	if _, err := c.normalize(in); err == nil {
+		t.Fatalf("expected leftover-volatility failure for space-separated timestamp")
+	} else if !strings.Contains(err.Error(), "unregistered volatile value") {
+		t.Fatalf("wrong error: %v", err)
+	}
+}
+
+func TestNormalizeDurationRegexDoesNotMatchNodeLabels(t *testing.T) {
+	c := newNormCluster()
+	in := "node: node-3m\nstatus: online\n"
+	got, err := c.normalize(in)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if got != in {
+		t.Fatalf("node label was incorrectly modified: got %q", got)
+	}
+}
