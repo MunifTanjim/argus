@@ -4,9 +4,12 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 var argusBin string
@@ -90,4 +93,38 @@ func (c *Cluster) spawn(name, logPath string, env, args []string) *exec.Cmd {
 	c.logs = append(c.logs, logPath)
 	c.logFiles = append(c.logFiles, logf)
 	return cmd
+}
+
+func (c *Cluster) dialClient() (*api.Client, error) {
+	conn, err := api.DialWSConn(c.ctx, c.GWURL+"/client", c.Token, nil)
+	if err != nil {
+		return nil, err
+	}
+	return api.NewClient(conn), nil
+}
+
+func (c *Cluster) StartGateway() {
+	c.t.Helper()
+	dir := filepath.Join(c.Root, "gw")
+	env, err := isolatedEnv(dir)
+	if err != nil {
+		c.t.Fatalf("gateway env: %v", err)
+	}
+	args := []string{
+		"start",
+		"--mode=gateway",
+		"--token=" + c.Token,
+		"--listen-addr=" + c.GWAddr,
+	}
+	c.spawn("gw", filepath.Join(dir, "argus.log"), env, args)
+
+	waitFor(c.t, "gateway /client ready", func() bool {
+		cl, derr := c.dialClient()
+		if derr != nil {
+			return false
+		}
+		defer cl.Close()
+		var r api.NodesListResult
+		return cl.Call(api.MethodNodesList, nil, &r) == nil
+	})
 }

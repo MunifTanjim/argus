@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 func TestNewIsolatesBinary(t *testing.T) {
@@ -34,5 +36,27 @@ func TestNewIsolatesBinary(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Usage") {
 		t.Fatalf("help output missing Usage:\n%s", out)
+	}
+}
+
+func TestGatewayServesClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real-process e2e; skipped under -short")
+	}
+	c := New(t)
+	c.StartGateway()
+
+	cl, err := c.dialClient()
+	if err != nil {
+		t.Fatalf("dialClient: %v", err)
+	}
+	defer cl.Close()
+
+	var r api.NodesListResult
+	if err := cl.Call(api.MethodNodesList, nil, &r); err != nil {
+		t.Fatalf("nodes.list: %v", err)
+	}
+	if len(r.Nodes) != 0 {
+		t.Fatalf("expected empty roster, got %d nodes", len(r.Nodes))
 	}
 }
