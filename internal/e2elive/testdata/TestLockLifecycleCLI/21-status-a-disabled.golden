@@ -6,8 +6,10 @@ locked mode: disabled network-wide — break-glass used, nothing is enforced
   to lock again: argus lock init (new genesis; every device repins)
   current tip (audit): <TIP-5>
   pin: <FP> (source: file)
-  client pin: <FP> — SUPERSEDED: the network moved to a new trust root
-       the dashboard on this machine opens no channels; run:
+  client pin: <FP> — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet
+       the dashboard on this machine opens no channels
+       a signer must run:
+         argus lock init
+       then on each device:
          argus lock pin
-       then restart argus
 --- stderr ---

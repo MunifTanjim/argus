@@ -369,13 +369,15 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 	case perr != nil:
 		return fmt.Sprintf("  client pin: UNUSABLE — %v\n       argus refuses to start until this is resolved\n", perr)
 	case pin.Genesis != nil && superseded:
-		moved, fix := "the network moved to a new trust root", "argus lock pin"
 		if netGenesis != nil {
-			moved = "the network now uses " + fingerprintOf(netGenesis)
-			fix = "argus lock pin " + trustpin.Encode(netGenesis)
+			return fmt.Sprintf("  client pin: %s — SUPERSEDED: the network now uses %s\n       the dashboard on this machine opens no channels; run:\n         %s\n       then restart argus\n",
+				fingerprintOf(pin.Genesis), fingerprintOf(netGenesis), "argus lock pin "+trustpin.Encode(netGenesis))
 		}
-		return fmt.Sprintf("  client pin: %s — SUPERSEDED: %s\n       the dashboard on this machine opens no channels; run:\n         %s\n       then restart argus\n",
-			fingerprintOf(pin.Genesis), moved, fix)
+		// The pinned chain was disabled but no replacement root is available yet.
+		// Saying "moved to a new root" would be false; advising "argus lock pin" would
+		// send the operator chasing a genesis that does not exist.
+		return fmt.Sprintf("  client pin: %s — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet\n       the dashboard on this machine opens no channels\n       a signer must run:\n         argus lock init\n       then on each device:\n         argus lock pin\n",
+			fingerprintOf(pin.Genesis))
 	case pin.Genesis != nil:
 		return fmt.Sprintf("  client pin: %s (source: %s)\n", fingerprintOf(pin.Genesis), pin.Source)
 	case netGenesis != nil:
@@ -924,15 +926,23 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 // lockPinLines renders the pin block. A quarantined device that still holds a pin is
 // superseded: its root was disabled and the network moved on, so it names both.
 func lockPinLines(st api.LockStatusResult) string {
-	seen := fingerprintOf(st.SeenGenesis)
-	// Name the genesis explicitly: a gateway that has seen a relock retains several
-	// competing roots, and bare `lock pin` refuses to pick between them.
-	fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 	switch {
 	case st.Quarantined && st.Pinned:
+		if len(st.SeenGenesis) == 0 {
+			// Gate tripped but no replacement root observed yet. Saying "now uses []"
+			// would mislead; advise the operator to wait for a signer to reinit.
+			return fmt.Sprintf("  pin: %s — SUPERSEDED: the pinned chain was disabled; no replacement root yet\n       when a signer runs argus lock init, then run here:\n         argus lock pin\n",
+				fingerprintOf(st.PinGenesis))
+		}
+		// Name the genesis explicitly: a gateway that has seen a relock retains several
+		// competing roots, and bare `lock pin` refuses to pick between them.
+		seen := fingerprintOf(st.SeenGenesis)
+		fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 		return fmt.Sprintf("  pin: %s — SUPERSEDED: the network now uses %s\n       run:\n         %s\n",
 			fingerprintOf(st.PinGenesis), seen, fix)
 	case st.Quarantined:
+		seen := fingerprintOf(st.SeenGenesis)
+		fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
 		return fmt.Sprintf("  pin: none — QUARANTINED (chain seen: %s)\n       run:\n         %s\n", seen, fix)
 	case st.Pinned:
 		return fmt.Sprintf("  pin: %s (source: %s)\n",
