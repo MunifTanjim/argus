@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -293,8 +294,6 @@ func newLockStatusCmd() *cobra.Command {
 			defer cancel()
 			st, err := lockStatusOnNode(ctx, cfg)
 			if err != nil {
-				// Node socket is unreachable: print the client view, but exit non-zero
-				// because the node half of the status could not be established.
 				kp, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 				if ierr != nil {
 					return fail(cmd, err) // surface the original node-dial error
@@ -302,6 +301,13 @@ func newLockStatusCmd() *cobra.Command {
 				pub := keyfmt.DeviceKey.Encode(kp.Public)
 				shell.StdOutF("locked mode: (client — no local node)\n  this device identity: %s\n  to authorize, run on a signer node:\n    %s\n", pub, lockSignHint(kp.Public))
 				printClientPinStatus(ctx, cfg)
+				// Exit 0 only when the socket was not explicitly requested and simply
+				// does not exist: that is a machine with no local node (client-only).
+				// An explicit --socket flag, or any error other than ENOENT (ECONNREFUSED,
+				// timeout, etc.), means the socket is broken or misconfigured.
+				if !cmd.Flags().Changed("socket") && errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
 				return fail(cmd, fmt.Errorf("node socket: %v", err))
 			}
 			printLockStatus(st)
