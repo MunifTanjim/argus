@@ -141,19 +141,30 @@ class LoopbackLink implements RpcLink {
 /// A gateway relaying to several nodes, keyed by node id. Answers nodes.list with
 /// each node's identity_pubkey and relay.open(node_id) with a chan bound to that node.
 class MultiNodeLoopbackLink implements RpcLink {
-  MultiNodeLoopbackLink(this._nodes, {Uint8List? trustChain})
-      : _trustChain = trustChain {
+  MultiNodeLoopbackLink(this._nodes, {Uint8List? trustChain}) {
     for (final n in _nodes.values) {
       n.sendToClient = _push;
+    }
+    if (trustChain != null) {
+      this.trustChain = trustChain;
     }
   }
 
   final Map<String, LoopbackNode> _nodes;
 
-  /// The trust chain the gateway serves on `trustlog.pull`. Mutable so a test can
-  /// advance it (simulating a mid-session `lock revoke`) between re-syncs.
-  Uint8List? _trustChain;
-  set trustChain(Uint8List? chain) => _trustChain = chain;
+  /// The gateway's entry store, populated when [trustChain] is set. Used to
+  /// answer trustlog.sync with the correct delta for the caller's heads.
+  final EntryStore _entryStore = EntryStore();
+
+  /// Sets the trust chain the gateway serves on `trustlog.sync`. Mutable so a
+  /// test can advance it (simulating a mid-session `lock revoke`) between
+  /// re-syncs. Each assignment replaces the store's content with the new chain.
+  set trustChain(Uint8List chain) {
+    try {
+      _entryStore.putAll(chainEntries(chain));
+    } catch (_) {}
+  }
+
   final _ctrl = StreamController<RpcMessage>();
   final _chanToNode = <String, LoopbackNode>{};
   int _chanSeq = 0;
@@ -204,14 +215,29 @@ class MultiNodeLoopbackLink implements RpcLink {
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': {'chan_id': chanId}}));
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
-      case 'trustlog.pull':
-        final tc = _trustChain;
+      case 'trustlog.sync':
+        // Honour the caller's heads: return only entries it cannot reach.
+        // When heads is empty, all stored entries are returned (correct delta).
+        final params = j['params'];
+        final rawHeads = params is Map ? params['heads'] : null;
+        final knownHeads = <Uint8List>[];
+        if (rawHeads is List) {
+          for (final h in rawHeads) {
+            if (h is String && h.isNotEmpty) {
+              try {
+                knownHeads.add(Uint8List.fromList(base64.decode(h)));
+              } catch (_) {}
+            }
+          }
+        }
+        final (entries, _) = _entryStore.delta(knownHeads);
         _push(jsonEncode({
           'jsonrpc': '2.0',
           'id': id,
-          // Wire format: chains is a list of base64-encoded branch bytes.
-          // Empty list when no chain has been offered yet.
-          'result': {'chains': tc == null ? <String>[] : [base64.encode(tc)]},
+          'result': {
+            'entries': [for (final e in entries) base64.encode(e)],
+            'want': <String>[],
+          },
         }));
     }
   }

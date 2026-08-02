@@ -14,8 +14,10 @@ import 'bytes.dart' show bytesEqual, hexEncode;
 import 'channel.dart';
 import 'handshake.dart';
 import 'keypair.dart';
+import 'trustlog/assemble.dart' show assembleChains, chainEntries;
 import 'trustlog/codec.dart' show hashEntry, unmarshalChain;
 import 'trustlog/entry.dart' show Entry;
+import 'trustlog/entry_store.dart' show EntryStore;
 import 'trustlog/trust_store.dart';
 
 /// A node reachable through the blind gateway. [identityPubKey] is the node's
@@ -89,6 +91,7 @@ class E2EClient implements GatewayClient {
   final Duration callTimeout;
   final TrustStore? _trust;
   final Uint8List? _initialTrustChain;
+  final _entryStore = EntryStore();
 
   /// When set (with a trust store), the client periodically re-pulls the trust
   /// log so mid-session revocations take effect; null disables background re-sync.
@@ -226,26 +229,19 @@ class E2EClient implements GatewayClient {
       final seed = _initialTrustChain;
       if (seed != null) {
         try {
+          // Pre-flight decode before storing: only put seed entries in the store
+          // if all entries decode correctly. Advertising a head whose ancestry
+          // is absent from the store violates the sync invariant — the gateway
+          // would withhold that ancestry on the assumption the client holds it.
+          try {
+            unmarshalChain(seed); // throws if any entry is malformed
+            _entryStore.putAll(chainEntries(seed));
+          } catch (_) {}
           await _trust.ingest(seed);
         } catch (_) {/* corrupt/rolled-back seed: ignore, fail-closed */}
       }
       try {
-        final pull = await _gateway.call('trustlog.pull');
-        if (pull is Map) {
-          // The pull result carries a list of competing branches (chains).
-          // Each element is a base64-encoded chain; ingest all in order so the
-          // genesis-pinned fork-choice resolves the winner.
-          final chains = pull['chains'];
-          if (chains is List) {
-            for (final c in chains) {
-              if (c is String && c.isNotEmpty) {
-                try {
-                  await _trust.ingest(Uint8List.fromList(base64.decode(c)));
-                } catch (_) {/* bad branch: skip, keep best state so far */}
-              }
-            }
-          }
-        }
+        await _syncTrustLog(_trust);
       } catch (_) {/* keep prior/seeded state (fail-closed) */}
     }
     final toOpen = <NodeDescriptor>[];
@@ -284,19 +280,7 @@ class E2EClient implements GatewayClient {
     if (trust == null || _closed) return;
     final before = trust.chainBytes;
     try {
-      final pull = await _gateway.call('trustlog.pull');
-      if (pull is Map) {
-        final chains = pull['chains'];
-        if (chains is List) {
-          for (final c in chains) {
-            if (c is String && c.isNotEmpty) {
-              try {
-                await trust.ingest(Uint8List.fromList(base64.decode(c)));
-              } catch (_) {/* bad branch: skip */}
-            }
-          }
-        }
-      }
+      await _syncTrustLog(trust);
     } catch (_) {
       return; // keep the current verified view (fail-closed)
     }
@@ -311,6 +295,35 @@ class E2EClient implements GatewayClient {
     // syncTrustLog which always calls checkBeaconConsistency + deliverBeacons.
     _checkBeaconConsistency();
     await _deliverBeacons();
+  }
+
+  /// Calls trustlog.sync, stores returned raw entries, assembles complete
+  /// genesis-rooted chains from all retained entries, and ingests each into
+  /// [trust]. Throws on RPC error (caller decides whether to swallow).
+  Future<void> _syncTrustLog(TrustStore trust) async {
+    final heads = _entryStore.heads();
+    final result = await _gateway.call('trustlog.sync', {
+      'heads': [for (final h in heads) base64.encode(h)],
+    });
+    if (result is Map) {
+      final rawList = result['entries'];
+      if (rawList is List) {
+        final entries = <Uint8List>[
+          for (final e in rawList)
+            if (e is String && e.isNotEmpty) Uint8List.fromList(base64.decode(e)),
+        ];
+        _entryStore.putAll(entries);
+      }
+    }
+    // Merge all retained raw entries (including current chain) with any new ones,
+    // assemble complete chains, and ingest each.
+    final (allEntries, _) = _entryStore.delta([]);
+    final chains = assembleChains(allEntries);
+    for (final chain in chains) {
+      try {
+        await trust.ingest(chain);
+      } catch (_) {/* bad branch: skip, keep best state so far */}
+    }
   }
 
   /// Closes channels to nodes no longer authorized by the current trust log.
