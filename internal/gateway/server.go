@@ -17,6 +17,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
@@ -42,7 +43,7 @@ type Server struct {
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
 	nextChan  atomic.Uint64            // chan_id allocator
 
-	entries *entryStore // entry-keyed trust-log DAG (blind)
+	entries *trustlog.EntryStore // entry-keyed trust-log DAG (blind)
 
 	// nodeKeepalive is the gateway→node ping interval; 0 uses nodeKeepaliveInterval.
 	// Operator-configurable so gateway.keepalive-interval governs both directions of
@@ -76,7 +77,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 	}
 	s.channels = map[string]*relayChannel{}
 	s.nodePeers = map[string]*api.Peer{}
-	s.entries = &entryStore{}
+	s.entries = trustlog.NewEntryStore()
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
 	return s
@@ -350,7 +351,7 @@ func (s *Server) buildClientServer() *api.Server {
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want := s.entries.delta(p.Heads)
+		entries, want := s.entries.Delta(p.Heads)
 		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
 	})
 
@@ -592,15 +593,15 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want := s.entries.delta(p.Heads)
+		entries, want := s.entries.Delta(p.Heads)
 		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
 	case api.MethodTrustLogPush:
 		p, err := api.Decode[api.TrustLogPushParams](params)
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		if n := s.entries.putAll(p.Entries); n > 0 {
-			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.heads()})
+		if n := s.entries.PutAll(p.Entries); n > 0 {
+			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.Heads()})
 		}
 		return nil, nil
 	case api.MethodPushDeliver:
