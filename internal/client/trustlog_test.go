@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,7 +51,7 @@ func (s *gatewayStats) pulls() int {
 }
 
 // trustGatewayConn is one end of a net.Pipe running a minimal gateway that answers
-// nodes.list (empty) and trustlog.pull with the latest chain sent on chain.
+// nodes.list (empty) and trustlog.sync with the latest chain sent on chain.
 func trustGatewayConn(t *testing.T, chain <-chan []byte) net.Conn {
 	conn, _ := trustGatewayConnWithStats(t, chain)
 	return conn
@@ -561,5 +564,72 @@ func TestClientSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 	}
 	if len(chains) != 1 || !bytes.Equal(chains[0], fullChain) {
 		t.Fatalf("assembled chain does not match original")
+	}
+}
+
+// orphanGateway serves a fixed list of raw entries (orphans) on trustlog.sync,
+// simulating a gateway that holds entries whose ancestors were pruned.
+func orphanGateway(t *testing.T, entries [][]byte) *api.Peer {
+	t.Helper()
+	return fakePeerFunc(func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			result.(*api.TrustLogSyncResult).Entries = entries
+		}
+		return nil
+	})
+}
+
+func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {
+	// Orphan entries: a chain with genesis stripped.
+	signer, _ := trustlog.GenerateSigner()
+	tl, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	dev := bytes.Repeat([]byte{0xCC}, 32)
+	_ = tl.AuthorizeDevice(dev, signer)
+	full := trustlog.MarshalChain(tl.Entries())
+	all, _ := trustlog.UnmarshalChain(full)
+	orphans, _ := trustlog.ChainEntries(trustlog.MarshalChain(all[1:])) // 1 orphan (no genesis)
+
+	_, genesis := genesisChainForTest(t)
+	srvConn, cliConn := net.Pipe()
+	m, err := NewE2EClientWithGenesis(cliConn, genesis)
+	if err != nil {
+		srvConn.Close()
+		cliConn.Close()
+		t.Fatalf("NewE2EClientWithGenesis: %v", err)
+	}
+	defer m.Close()
+	defer srvConn.Close()
+
+	captureLog := func(fn func()) string {
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		defer log.SetOutput(os.Stderr)
+		fn()
+		return buf.String()
+	}
+
+	// First call: unplaced count changes 0→1; warning must appear.
+	m.peer = orphanGateway(t, orphans)
+	out := captureLog(func() { m.syncTrustChains() })
+	if !strings.Contains(out, "unplaced") {
+		t.Fatal("first call should log the unplaced warning")
+	}
+
+	// Second call: same count; warning must NOT repeat.
+	m.peer = orphanGateway(t, orphans)
+	out = captureLog(func() { m.syncTrustChains() })
+	if strings.Contains(out, "unplaced") {
+		t.Fatal("second call with identical unplaced count must not log")
+	}
+
+	// Sync with no orphans: count returns to 0, memory resets.
+	m.peer = orphanGateway(t, nil)
+	captureLog(func() { m.syncTrustChains() })
+
+	// Recurrence: same orphan count as the first wave; must warn again.
+	m.peer = orphanGateway(t, orphans)
+	out = captureLog(func() { m.syncTrustChains() })
+	if !strings.Contains(out, "unplaced") {
+		t.Fatal("recurrence after zero must log again")
 	}
 }

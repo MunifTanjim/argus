@@ -111,7 +111,8 @@ type E2EClient struct {
 	// retainedEntries holds raw entries of every received branch, including those
 	// that lost fork-choice. Its lifetime matches seenBranches: both reset together
 	// so advertised heads always have their entries present.
-	retainedEntries *trustlog.EntryStore // guarded by mu
+	retainedEntries    *trustlog.EntryStore // guarded by mu
+	lastUnplacedLogged int                  // last unplaced count that triggered a warning; 0 means no active warning; guarded by mu
 
 	// Beacon cross-check state (guarded by mu).
 	// beacons maps string(identityPub) to the latest verified beacon for each node.
@@ -1012,7 +1013,11 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 		}
 	}
 	chains, unplaced := trustlog.AssembleChainsReport(merged)
-	if unplaced > 0 {
+	m.mu.Lock()
+	prevUnplaced := m.lastUnplacedLogged
+	m.lastUnplacedLogged = unplaced
+	m.mu.Unlock()
+	if unplaced > 0 && unplaced != prevUnplaced {
 		log.Printf("client: warn: trust-log sync has %d unplaced entries; gateway may hold an incomplete branch", unplaced)
 	}
 

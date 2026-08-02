@@ -200,7 +200,11 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 		}
 	}
 	chains, unplaced := trustlog.AssembleChainsReport(merged)
-	if unplaced > 0 {
+	d.pinMu.Lock()
+	prevUnplaced := d.lastUnplacedLogged
+	d.lastUnplacedLogged = unplaced
+	d.pinMu.Unlock()
+	if unplaced > 0 && unplaced != prevUnplaced {
 		d.log.Warn("trust-log sync has unplaced entries; gateway may hold an incomplete branch", "unplaced", unplaced)
 	}
 

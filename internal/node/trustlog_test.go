@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -321,11 +322,11 @@ func TestNodePushesWhenGatewayWants(t *testing.T) {
 
 type recordingTrustPeer struct {
 	mu        sync.Mutex
-	chains    [][]byte            // served as entries on MethodTrustLogSync
-	want      [][]byte            // returned as Want in sync response (signals the node to push)
+	chains    [][]byte             // served as entries on MethodTrustLogSync
+	want      [][]byte             // returned as Want in sync response (signals the node to push)
 	roster    []api.NodeDescriptor // served by nodes.list
-	offers    int                 // MethodTrustLogPush calls
-	pulls     int                 // MethodTrustLogSync calls
+	offers    int                  // MethodTrustLogPush calls
+	pulls     int                  // MethodTrustLogSync calls
 	rosters   int
 	lastKnown [][]byte
 }
@@ -986,5 +987,62 @@ func TestRememberHeadAtCeilingDoesNotRecordHead(t *testing.T) {
 	if len(headsAfter) != len(headsBefore) {
 		t.Fatalf("at ceiling: rememberHead must not record the head; knownHeads grew from %d to %d",
 			len(headsBefore), len(headsAfter))
+	}
+}
+
+func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {
+	// Build a chain the node knows (chain1) and pin to it.
+	chain1, head1, _, _ := seedChain(t, false)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chain")
+	if err := os.WriteFile(path, chain1, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	d := New()
+	if err := d.EnableTrustLog(head1, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+
+	// Build an orphan chain (separate signer, drop genesis → all entries unplaced).
+	signer2, _ := trustlog.GenerateSigner()
+	log2, _ := trustlog.NewGenesis([][]byte{signer2.Public}, signer2, nil)
+	dev := bytes.Repeat([]byte{0xBB}, 32)
+	_ = log2.AuthorizeDevice(dev, signer2)
+	full2 := trustlog.MarshalChain(log2.Entries())
+	allEntries, _ := trustlog.UnmarshalChain(full2)
+	orphanChain1 := trustlog.MarshalChain(allEntries[1:]) // 1 orphan entry (drop genesis)
+
+	var logs syncBuffer
+	d.SetLogger(debugLogger(&logs))
+
+	fp := &fakePeer{pullChain: orphanChain1}
+
+	// First sync: unplaced count changed from 0 → 1; warning must appear.
+	d.syncTrustChains(fp)
+	if !strings.Contains(logs.String(), "unplaced") {
+		t.Fatal("first call should log the unplaced warning")
+	}
+
+	// Second sync: same unplaced count (1); warning must NOT repeat.
+	logs = syncBuffer{}
+	d.SetLogger(debugLogger(&logs))
+	d.syncTrustChains(fp)
+	if strings.Contains(logs.String(), "unplaced") {
+		t.Fatal("second call with identical unplaced count must not log")
+	}
+
+	// Sync with no orphans (count returns to 0): no log, but memory resets.
+	fp.pullChain = nil
+	logs = syncBuffer{}
+	d.SetLogger(debugLogger(&logs))
+	d.syncTrustChains(fp)
+
+	// Recurrence: same orphan count as the first wave (1); must warn again.
+	fp.pullChain = orphanChain1
+	logs = syncBuffer{}
+	d.SetLogger(debugLogger(&logs))
+	d.syncTrustChains(fp)
+	if !strings.Contains(logs.String(), "unplaced") {
+		t.Fatal("recurrence after zero must log again")
 	}
 }

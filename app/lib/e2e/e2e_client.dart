@@ -97,6 +97,9 @@ class E2EClient implements GatewayClient {
   // advertised; advertising a raw store tip can violate the sync invariant if
   // any ancestor is missing (the gateway withholds it thinking the client holds it).
   final _seenBranches = <String>{};
+  // Last unplaced count that triggered a warning. 0 means no active warning;
+  // reset to 0 when the count returns to 0 so a later recurrence is reported again.
+  int _lastUnplacedLogged = 0;
 
   /// When set (with a trust store), the client periodically re-pulls the trust
   /// log so mid-session revocations take effect; null disables background re-sync.
@@ -130,6 +133,8 @@ class E2EClient implements GatewayClient {
   void debugCheckBeaconConsistency() => _checkBeaconConsistency();
   @visibleForTesting
   Set<String>? get debugBeaconKnown => _beaconKnown;
+  @visibleForTesting
+  int get debugLastUnplacedLogged => _lastUnplacedLogged;
 
   late final StreamSubscription<RpcMessage> _sub;
   final _gatewayCtrl = StreamController<RpcMessage>();
@@ -334,7 +339,9 @@ class E2EClient implements GatewayClient {
     merged.addAll(retained);
 
     final (chains, unplaced) = assembleChainsReport(merged);
-    if (unplaced > 0) {
+    final prevUnplaced = _lastUnplacedLogged;
+    _lastUnplacedLogged = unplaced;
+    if (unplaced > 0 && unplaced != prevUnplaced) {
       developer.log(
         'trust-log sync has $unplaced unplaced entries; gateway may hold an incomplete branch',
         name: 'e2e',
