@@ -215,22 +215,17 @@ class MultiNodeLoopbackLink implements RpcLink {
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':
-        // Read 'known' (new offer protocol) and fall back to 'heads' while both
-        // coexist. 'known' lists every entry hash the caller holds; the gateway
-        // computes the delta by set subtraction (mirrors Go gateway.Delta).
-        // 'heads' uses the older ancestry-inference path for backward compat.
-        final params = j['params'];
-        final rawKnown = params is Map ? params['known'] : null;
-        final rawHeads = params is Map ? params['heads'] : null;
+        // 'known' lists every entry hash the caller holds; the gateway computes
+        // the delta by set subtraction (mirrors Go gateway.Delta).
         // A truncated offer under-reports by construction and can look disjoint
         // when it is not — suppress disjoint for truncated offers, matching the
         // real gateway.
+        final params = j['params'];
+        final rawKnown = params is Map ? params['known'] : null;
         final offerTruncated = params is Map ? params['truncated'] == true : false;
-        List<Uint8List> entries;
-        bool disjoint = false;
+        // Decode the caller's offered hashes (base64 binary → hex for comparison).
+        final knownHex = <String>{};
         if (rawKnown is List) {
-          // Decode the caller's offered hashes (base64 binary → hex for comparison).
-          final knownHex = <String>{};
           for (final h in rawKnown) {
             if (h is String && h.isNotEmpty) {
               try {
@@ -238,34 +233,21 @@ class MultiNodeLoopbackLink implements RpcLink {
               } catch (_) {}
             }
           }
-          // Set subtraction: return every entry whose hash is not in knownHex.
-          final all = _entryStore.all();
-          entries = [
-            for (final raw in all)
-              if (!knownHex.contains(hexEncode(hashEntry(unmarshalEntry(raw)))))
-                raw,
-          ];
-          // disjoint: non-empty, non-truncated known shares no entry with this store.
-          if (knownHex.isNotEmpty && !offerTruncated) {
-            final storeHex = {
-              for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw)))
-            };
-            disjoint = knownHex.every((h) => !storeHex.contains(h));
-          }
-        } else {
-          final knownHeads = <Uint8List>[
-            for (final h in rawHeads is List ? rawHeads : <dynamic>[])
-              if (h is String && h.isNotEmpty)
-                ...() {
-                  try {
-                    return [Uint8List.fromList(base64.decode(h))];
-                  } catch (_) {
-                    return <Uint8List>[];
-                  }
-                }(),
-          ];
-          final (delta, _) = _entryStore.delta(knownHeads);
-          entries = delta;
+        }
+        // Set subtraction: return every entry whose hash is not in knownHex.
+        final all = _entryStore.all();
+        final List<Uint8List> entries = [
+          for (final raw in all)
+            if (!knownHex.contains(hexEncode(hashEntry(unmarshalEntry(raw)))))
+              raw,
+        ];
+        // disjoint: non-empty, non-truncated known shares no entry with this store.
+        bool disjoint = false;
+        if (knownHex.isNotEmpty && !offerTruncated) {
+          final storeHex = {
+            for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw)))
+          };
+          disjoint = knownHex.every((h) => !storeHex.contains(h));
         }
         _push(jsonEncode({
           'jsonrpc': '2.0',

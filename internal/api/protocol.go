@@ -674,18 +674,16 @@ type RelayCloseParams struct {
 // Truncated reports that Known was capped and is partial: the caller will receive
 // entries it already holds, which dedupe, and the gateway must not treat a
 // truncated offer as disjoint.
-//
-// Heads is the superseded head-only form, removed once every caller sends Known.
 type TrustLogSyncParams struct {
-	Heads     [][]byte `json:"heads,omitempty"`
 	Known     [][]byte `json:"known,omitempty"`
 	Truncated bool     `json:"truncated,omitempty"`
 }
 
 // TrustLogSyncResult answers a trustlog.sync. Entries holds every retained entry
-// the caller cannot reach from its heads, as individually marshalled
-// trustlog.MarshalEntry bytes, ordered parents before children. Want names the
-// caller's heads the gateway does not hold; a node answers it with trustlog.push,
+// the caller does not hold, as individually marshalled trustlog.MarshalEntry
+// bytes, ordered parents before children; the gateway computes this by set
+// subtraction over the caller's Known offer. Want names hashes in the caller's
+// Known that the gateway does not hold; a node answers it with trustlog.push,
 // a client ignores it — clients are supplicants and must not publish trust state.
 // Disjoint reports that a non-empty, untruncated Known shared no entry with
 // the gateway's store — the caller is almost certainly following a different

@@ -342,20 +342,16 @@ func (s *Server) buildClientServer() *api.Server {
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	})
 
-	// trustlog.sync serves the entries a caller cannot reach from its own heads.
-	// The caller assembles them into chains and its genesis-pinned fork-choice
-	// picks the winner; the gateway never verifies or interprets entry internals.
+	// trustlog.sync answers with every retained entry the caller does not hold,
+	// computed by set subtraction over the caller's Known offer. The caller
+	// assembles them into chains; the gateway never verifies or interprets internals.
 	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, params json.RawMessage) (any, error) {
 		s.chatterRPCs.Add(1)
 		p, err := api.Decode[api.TrustLogSyncParams](params)
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		known := p.Known
-		if known == nil {
-			known = p.Heads
-		}
-		entries, want, disjoint := s.entries.Delta(known)
+		entries, want, disjoint := s.entries.Delta(p.Known)
 		return api.TrustLogSyncResult{
 			Entries:  entries,
 			Want:     want,
@@ -601,11 +597,7 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		known := p.Known
-		if known == nil {
-			known = p.Heads
-		}
-		entries, want, disjoint := s.entries.Delta(known)
+		entries, want, disjoint := s.entries.Delta(p.Known)
 		return api.TrustLogSyncResult{
 			Entries:  entries,
 			Want:     want,

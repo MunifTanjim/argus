@@ -66,14 +66,6 @@ func TestTrustLogSyncWireShape(t *testing.T) {
 		t.Fatalf("method = %q", MethodTrustLogSync)
 	}
 
-	b, err := json.Marshal(TrustLogSyncParams{Heads: [][]byte{{1, 2, 3}}})
-	if err != nil {
-		t.Fatalf("marshal params: %v", err)
-	}
-	if got, want := string(b), `{"heads":["AQID"]}`; got != want {
-		t.Fatalf("params wire shape = %s, want %s", got, want)
-	}
-
 	var res TrustLogSyncResult
 	if err := json.Unmarshal([]byte(`{"entries":["AQ=="],"want":["Ag=="]}`), &res); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
