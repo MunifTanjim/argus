@@ -101,17 +101,16 @@ type E2EClient struct {
 
 	events chan api.Notification
 
-	gate         *trustpin.Gate      // fail-closed state when unpinned on a locked network
-	trust        *trustlog.SyncStore // locked-mode trust-log store; nil when off
-	genesis      []byte              // this device's pinned trust root; nil when unpinned
-	trustPath    string              // locked-mode chain persist path; "" = no persistence
-	trustCtx     context.Context     // cancelled on Close, stops the sync ticker
-	trustStop    context.CancelFunc
-	seenBranches map[[32]byte]bool // fingerprints of branches received; guarded by mu
+	gate      *trustpin.Gate      // fail-closed state when unpinned on a locked network
+	trust     *trustlog.SyncStore // locked-mode trust-log store; nil when off
+	genesis   []byte              // this device's pinned trust root; nil when unpinned
+	trustPath string              // locked-mode chain persist path; "" = no persistence
+	trustCtx  context.Context     // cancelled on Close, stops the sync ticker
+	trustStop context.CancelFunc
 	// retainedEntries holds raw entries of every received branch, including those
-	// that lost fork-choice. Its lifetime matches seenBranches: both reset together
-	// so advertised heads always have their entries present.
+	// that lost fork-choice. Its hashes form the Known offer on every sync.
 	retainedEntries    *trustlog.EntryStore // guarded by mu
+	lastDisjointLogged bool                 // guarded by mu
 	lastUnplacedLogged int                  // last unplaced count that triggered a warning; 0 means no active warning; guarded by mu
 
 	// Beacon cross-check state (guarded by mu).
@@ -172,7 +171,6 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		beaconCtr:     map[string]uint64{},
 		beaconMiss:    map[string]*beaconMissState{},
 		everConnected: map[string]bool{},
-		seenBranches:  map[[32]byte]bool{},
 		delivered:     map[string]map[string]uint64{},
 	}
 	if genesisHash != nil {
@@ -939,63 +937,54 @@ func SetHandshakeTimeoutForTest(d time.Duration) { handshakeTimeoutNs.Store(int6
 // SetTrustSyncIntervalForTest overrides the client's trust-log sync cadence. Test-only.
 func SetTrustSyncIntervalForTest(d time.Duration) { clientTrustSyncInterval.Store(int64(d)) }
 
-func clientBranchHead(chain []byte) ([32]byte, bool) {
-	var out [32]byte
-	entries, err := trustlog.UnmarshalChain(chain)
-	if err != nil || len(entries) == 0 {
-		return out, false
-	}
-	copy(out[:], trustlog.HashEntry(&entries[len(entries)-1]))
-	return out, true
-}
-
-func (m *E2EClient) knownHeads() [][]byte {
+// knownHashes lists every entry hash this client retains, for a sync offer. The
+// entry store is the only source, so the offer can never claim more than is held.
+func (m *E2EClient) knownHashes() (hashes [][]byte, truncated bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([][]byte, 0, len(m.seenBranches))
-	for k := range m.seenBranches {
-		h := k
-		out = append(out, append([]byte(nil), h[:]...))
+	re := m.retainedEntries
+	m.mu.Unlock()
+	if re == nil {
+		return nil, false
 	}
-	return out
+	return re.Hashes()
 }
 
-// rememberHead records a branch head as received. The head is only recorded when
-// every entry is retained — a full store must not produce a head with missing ancestry.
-func (m *E2EClient) rememberHead(chain []byte) {
-	h, ok := clientBranchHead(chain)
-	if !ok {
-		return
-	}
-	raw, err := trustlog.ChainEntries(chain)
-	if err != nil {
-		return
-	}
+// syncTrustChains exchanges known entry hashes with the gateway and returns the
+// assembled chains it served. The gateway computes the delta by set subtraction,
+// so the client never needs to infer ancestry. Want is ignored — the client is a
+// supplicant and must not publish trust state.
+func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
+	// Initialize retainedEntries and seed it from the trust chain so the offer
+	// always reflects what is locally held, including on the first call.
+	// PutAll is idempotent for already-present entries.
 	m.mu.Lock()
 	if m.retainedEntries == nil {
 		m.retainedEntries = trustlog.NewEntryStore()
 	}
-	_, refused := m.retainedEntries.PutAll(raw)
-	if refused > 0 {
-		log.Printf("client: warn: trust-log entry store at ceiling; entries refused: %d, head not recorded", refused)
-		m.mu.Unlock()
-		return
-	}
-	m.seenBranches[h] = true
+	re := m.retainedEntries
 	m.mu.Unlock()
-}
+	if m.trust != nil {
+		if mine := m.trust.Bytes(); mine != nil {
+			if raw, err := trustlog.ChainEntries(mine); err == nil {
+				re.PutAll(raw)
+			}
+		}
+	}
 
-// syncTrustChains exchanges heads with the gateway and returns the branches it
-// served, assembled into chains. The gateway's delta is merged with the entries of
-// the chain already held, since it sends only what this client cannot reach. Want
-// is ignored: the client is a supplicant and must not publish trust state — a head
-// only it holds reaches the gateway from a node.
-func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
-	heads := m.knownHeads()
+	known, truncated := m.knownHashes()
 	var got api.TrustLogSyncResult
-	if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: heads}, &got); err != nil {
+	if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Known: known, Truncated: truncated}, &got); err != nil {
 		return nil, false
 	}
+
+	m.mu.Lock()
+	prevDisjoint := m.lastDisjointLogged
+	m.lastDisjointLogged = got.Disjoint
+	m.mu.Unlock()
+	if got.Disjoint && !prevDisjoint {
+		log.Printf("client: trust log: this device shares no history with the network's; it is likely pinned to a different trust root")
+	}
+
 	merged := append([][]byte{}, got.Entries...)
 	if m.trust != nil {
 		if mine := m.trust.Bytes(); mine != nil {
@@ -1004,21 +993,30 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 			}
 		}
 	}
-	m.mu.Lock()
-	re := m.retainedEntries
-	m.mu.Unlock()
-	if re != nil {
-		if retained := re.All(); len(retained) > 0 {
-			merged = append(merged, retained...)
-		}
+	if retained := re.All(); len(retained) > 0 {
+		merged = append(merged, retained...)
 	}
 	chains, unplaced := trustlog.AssembleChainsReport(merged)
+
 	m.mu.Lock()
 	prevUnplaced := m.lastUnplacedLogged
 	m.lastUnplacedLogged = unplaced
 	m.mu.Unlock()
 	if unplaced > 0 && unplaced != prevUnplaced {
 		log.Printf("client: warn: trust-log sync has %d unplaced entries; gateway may hold an incomplete branch", unplaced)
+	}
+
+	refused := 0
+	for _, chain := range chains {
+		raw, err := trustlog.ChainEntries(chain)
+		if err != nil {
+			continue
+		}
+		_, r := re.PutAll(raw)
+		refused += r
+	}
+	if refused > 0 {
+		log.Printf("client: warn: trust-log entry store at ceiling; entries refused: %d", refused)
 	}
 
 	return chains, true
@@ -1036,7 +1034,6 @@ func (m *E2EClient) pullTrustChain() {
 	}
 	anyChanged := false
 	for _, chain := range chains {
-		m.rememberHead(chain)
 		changed, err := m.trust.Ingest(chain)
 		if err != nil {
 			continue
@@ -1084,7 +1081,6 @@ func (m *E2EClient) syncTrustLog() {
 	}
 	anyChanged := false
 	for _, chain := range chains {
-		m.rememberHead(chain)
 		changed, err := m.trust.Ingest(chain)
 		if err != nil {
 			continue // rollback/fork/tamper/wrong-genesis: skip this branch
@@ -1134,9 +1130,6 @@ func (m *E2EClient) detectUnpinnedChain() {
 	chains, ok := m.syncTrustChains()
 	if !ok {
 		return
-	}
-	for _, chain := range chains {
-		m.rememberHead(chain)
 	}
 	for _, chain := range chains {
 		entries, err := trustlog.UnmarshalChain(chain)

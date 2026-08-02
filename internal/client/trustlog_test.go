@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,7 +64,6 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 	srvConn, cliConn := net.Pipe()
 	var mu sync.Mutex
 	var current []byte
-	var seenHeads atomic.Value // holds map[[32]byte]bool
 	stats := &gatewayStats{}
 	{
 		peer := api.NewPeer(srvConn, api.PeerOptions{
@@ -78,7 +76,7 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 					_ = json.Unmarshal(raw, &params)
 
 					stats.mu.Lock()
-					stats.lastKnownLen = len(params.Heads)
+					stats.lastKnownLen = len(params.Known)
 					stats.pullsCnt++
 					stats.mu.Unlock()
 
@@ -98,35 +96,23 @@ func trustGatewayConnWithStats(t *testing.T, chain <-chan []byte) (net.Conn, *ga
 					if err != nil || len(entries) == 0 {
 						return api.TrustLogSyncResult{}, nil
 					}
-					var head [32]byte
-					copy(head[:], trustlog.HashEntry(&entries[len(entries)-1]))
+					head := trustlog.HashEntry(&entries[len(entries)-1])
 
-					var known map[[32]byte]bool
-					if v := seenHeads.Load(); v != nil {
-						known = v.(map[[32]byte]bool)
+					known := make(map[string]bool, len(params.Known))
+					for _, k := range params.Known {
+						known[string(k)] = true
 					}
-					for _, k := range params.Heads {
-						if len(k) == 32 {
-							var kh [32]byte
-							copy(kh[:], k)
-							if known == nil {
-								known = map[[32]byte]bool{}
-							}
-							known[kh] = true
-						}
-					}
-					seenHeads.Store(known)
-					if known[head] {
+					if known[string(head)] {
 						return api.TrustLogSyncResult{}, nil
 					}
-					raw, err := trustlog.ChainEntries(cur)
+					chainEntries, err := trustlog.ChainEntries(cur)
 					if err != nil {
 						return api.TrustLogSyncResult{}, nil
 					}
 					stats.mu.Lock()
 					stats.chainsServedCnt++
 					stats.mu.Unlock()
-					return api.TrustLogSyncResult{Entries: raw}, nil
+					return api.TrustLogSyncResult{Entries: chainEntries}, nil
 				}
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 			},
@@ -284,14 +270,21 @@ func fakePeerFunc(fn func(method string, params, result any) error) *api.Peer {
 	srvConn, cliConn := net.Pipe()
 	api.NewPeer(srvConn, api.PeerOptions{
 		Dispatch: func(_ context.Context, method string, raw json.RawMessage) (any, error) {
-			var result any
+			var (
+				params any
+				result any
+			)
 			switch method {
 			case api.MethodTrustLogSync:
+				var p api.TrustLogSyncParams
+				_ = json.Unmarshal(raw, &p)
+				params = p
 				result = &api.TrustLogSyncResult{}
 			default:
+				params = raw
 				result = &struct{}{}
 			}
-			if err := fn(method, raw, result); err != nil {
+			if err := fn(method, params, result); err != nil {
 				return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
 			}
 			return result, nil
@@ -415,11 +408,6 @@ func TestClientSyncTrustChainsOrphanNoRetry(t *testing.T) {
 		return nil
 	})
 
-	// Plant a fake head so knownHeads() is non-empty.
-	m.mu.Lock()
-	m.seenBranches[[32]byte{0: 1}] = true
-	m.mu.Unlock()
-
 	_, ok := m.syncTrustChains()
 	if !ok {
 		t.Fatalf("syncTrustChains reported failure")
@@ -468,9 +456,21 @@ func TestClientSyncTrustChainsRetainsRejectedBranch(t *testing.T) {
 	if _, err := m.trust.Ingest(chainX); err != nil {
 		t.Fatalf("Ingest X: %v", err)
 	}
-	// Simulate receiving-and-rejecting Y: rememberHead records the head and (after
-	// the fix) retains its raw entries without ingesting them into the store.
-	m.rememberHead(chainY)
+	// Simulate receiving-and-rejecting Y: retain its raw entries directly without
+	// ingesting them into the trust store (fork-choice loser).
+	rawY, err := trustlog.ChainEntries(chainY)
+	if err != nil {
+		t.Fatalf("ChainEntries Y: %v", err)
+	}
+	m.mu.Lock()
+	if m.retainedEntries == nil {
+		m.retainedEntries = trustlog.NewEntryStore()
+	}
+	reY := m.retainedEntries
+	m.mu.Unlock()
+	if _, refused := reY.PutAll(rawY); refused > 0 {
+		t.Fatalf("PutAll Y refused %d entries", refused)
+	}
 
 	m.peer = fakePeerFunc(func(method string, params, result any) error {
 		if method == api.MethodTrustLogSync {
@@ -491,6 +491,88 @@ func TestClientSyncTrustChainsRetainsRejectedBranch(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("extension of rejected branch Y was lost: no assembled chain of length ≥3")
+	}
+}
+
+func clientForkChainForTest(t *testing.T) []byte {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	tl, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	if err := tl.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	return trustlog.MarshalChain(tl.Entries())
+}
+
+func TestClientOffersEveryRetainedHash(t *testing.T) {
+	m, chain := clientWithTrustStore(t)
+
+	var got api.TrustLogSyncParams
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			got = params.(api.TrustLogSyncParams)
+		}
+		return nil
+	})
+	m.syncTrustChains()
+
+	want, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	if len(got.Known) != len(want) {
+		t.Fatalf("offered %d hashes, want %d", len(got.Known), len(want))
+	}
+}
+
+func TestClientDoesNotRefetchARejectedBranch(t *testing.T) {
+	m, _ := clientWithTrustStore(t)
+	rejected := clientForkChainForTest(t)
+
+	calls := 0
+	var second api.TrustLogSyncParams
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method != api.MethodTrustLogSync {
+			return nil
+		}
+		calls++
+		if calls == 1 {
+			raw, err := trustlog.ChainEntries(rejected)
+			if err != nil {
+				t.Fatalf("ChainEntries: %v", err)
+			}
+			result.(*api.TrustLogSyncResult).Entries = raw
+			return nil
+		}
+		second = params.(api.TrustLogSyncParams)
+		return nil
+	})
+
+	m.syncTrustChains()
+	m.syncTrustChains()
+
+	raw, err := trustlog.ChainEntries(rejected)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	offered := map[string]bool{}
+	for _, h := range second.Known {
+		offered[string(h)] = true
+	}
+	for _, r := range raw {
+		e, uerr := trustlog.UnmarshalEntry(r)
+		if uerr != nil {
+			t.Fatalf("UnmarshalEntry: %v", uerr)
+		}
+		if !offered[string(trustlog.HashEntry(&e))] {
+			t.Fatalf("second offer omitted a rejected-branch entry")
+		}
 	}
 }
 
@@ -549,11 +631,6 @@ func TestClientSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 		res.Entries = fullRaw
 		return nil
 	})
-
-	// Plant a fake head so knownHeads() is non-empty.
-	m.mu.Lock()
-	m.seenBranches[[32]byte{0: 1}] = true
-	m.mu.Unlock()
 
 	chains, ok := m.syncTrustChains()
 	if !ok {
