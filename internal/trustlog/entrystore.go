@@ -175,17 +175,19 @@ func (s *EntryStore) Delta(known [][]byte) (entries [][]byte, want [][]byte, dis
 	emitted := map[string]bool{}
 	var emit func(h string)
 	emit = func(h string) {
-		if h == "" || emitted[h] || held[h] {
+		if h == "" || emitted[h] {
 			return
 		}
 		if _, ok := s.byHash[h]; !ok {
 			return
 		}
-		// Recurse through prev only to order output parents-first; this is not
-		// the reachability inference that was removed.
+		// Always recurse into prev so ancestors of a held hash are not withheld;
+		// skip only the append when held, not the descent.
 		emit(s.prev[h])
 		emitted[h] = true
-		entries = append(entries, append([]byte(nil), s.byHash[h]...))
+		if !held[h] {
+			entries = append(entries, append([]byte(nil), s.byHash[h]...))
+		}
 	}
 	for _, h := range s.headsLocked() {
 		emit(string(h))

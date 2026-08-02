@@ -217,14 +217,15 @@ func TestEntryStoreGarbageDoesNotSetRefused(t *testing.T) {
 	}
 }
 
-func TestEntryStoreDeltaWithholdsWhatTheCallerCanReach(t *testing.T) {
+func TestEntryStoreDeltaCallerHoldingAllHashesReceivesNothing(t *testing.T) {
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
 	s.PutAll(raw)
 
-	entries, want, _ := s.Delta(s.Heads())
+	allHashes, _ := s.Hashes()
+	entries, want, _ := s.Delta(allHashes)
 	if len(entries) != 0 {
-		t.Fatalf("a caller holding the head must receive nothing, got %d entries", len(entries))
+		t.Fatalf("a caller listing all entry hashes must receive nothing, got %d entries", len(entries))
 	}
 	if len(want) != 0 {
 		t.Fatalf("want should be empty, got %d", len(want))
@@ -232,10 +233,31 @@ func TestEntryStoreDeltaWithholdsWhatTheCallerCanReach(t *testing.T) {
 
 	entries, want, _ = s.Delta(nil)
 	if len(entries) != len(raw) {
-		t.Fatalf("a caller with no heads must receive everything: got %d, want %d", len(entries), len(raw))
+		t.Fatalf("a caller with nothing must receive everything: got %d, want %d", len(entries), len(raw))
 	}
 	if len(want) != 0 {
 		t.Fatalf("want should be empty, got %d", len(want))
+	}
+}
+
+// TestEntryStoreDeltaSendsAncestorsOfKnownEntry covers the structural guarantee
+// that a non-prefix-closed offer does not let the gateway withhold ancestors.
+// A caller listing only a child (without its parent) must still receive the parent.
+func TestEntryStoreDeltaSendsAncestorsOfKnownEntry(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOfES(t, testChainES(t))
+	if len(raw) < 2 {
+		t.Skip("need a multi-entry chain")
+	}
+	s.PutAll(raw)
+
+	child, err := UnmarshalEntry(raw[len(raw)-1])
+	if err != nil {
+		t.Fatalf("UnmarshalEntry: %v", err)
+	}
+	entries, _, _ := s.Delta([][]byte{HashEntry(&child)})
+	if len(entries) != len(raw)-1 {
+		t.Fatalf("ancestor of a known entry must be sent: got %d entries, want %d", len(entries), len(raw)-1)
 	}
 }
 
