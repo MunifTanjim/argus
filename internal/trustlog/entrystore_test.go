@@ -149,10 +149,18 @@ func TestEntryStoreTwoBranchesShareGenesis(t *testing.T) {
 }
 
 func TestEntryStoreCeilingStopsRunawayGrowth(t *testing.T) {
+	SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { SetMaxRetainedEntriesForTest(1 << 16) })
+
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
-	s.count = maxRetainedEntries
+	// Fill to the ceiling with one real entry.
 	stored, refused := s.Put(raw[0])
+	if !stored || refused {
+		t.Fatalf("first Put must succeed: stored=%v refused=%v", stored, refused)
+	}
+	// Next Put must be refused against real state.
+	stored, refused = s.Put(raw[len(raw)-1])
 	if stored {
 		t.Fatalf("insert past the ceiling must not be stored")
 	}
@@ -162,15 +170,25 @@ func TestEntryStoreCeilingStopsRunawayGrowth(t *testing.T) {
 }
 
 func TestEntryStoreCeilingRefusedCountIsNonZero(t *testing.T) {
+	SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { SetMaxRetainedEntriesForTest(1 << 16) })
+
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
-	s.count = maxRetainedEntries
-	added, refused := s.PutAll(raw)
+	if len(raw) < 2 {
+		t.Skip("need at least 2 entries")
+	}
+	// Fill to ceiling with the first entry.
+	if stored, _ := s.Put(raw[0]); !stored {
+		t.Fatalf("first Put must succeed")
+	}
+	// Remaining entries must all be refused.
+	added, refused := s.PutAll(raw[1:])
 	if added != 0 {
 		t.Fatalf("at ceiling: added must be 0, got %d", added)
 	}
-	if refused != len(raw) {
-		t.Fatalf("at ceiling: refused must be %d, got %d", len(raw), refused)
+	if refused != len(raw)-1 {
+		t.Fatalf("at ceiling: refused must be %d, got %d", len(raw)-1, refused)
 	}
 }
 

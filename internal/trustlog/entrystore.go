@@ -6,7 +6,7 @@ import "sync"
 // performs a handful of trust-log writes a year, so reaching this ceiling means a
 // peer is misbehaving. Nothing is ever evicted — inserts past the ceiling are
 // refused; callers log when the refused count is non-zero.
-const maxRetainedEntries = 1 << 16
+var maxRetainedEntries = 1 << 16
 
 // EntryStore holds the network's trust-log entries keyed by entry hash. It is
 // intentionally blind: it parses only each entry's own hash and its Prev pointer,
@@ -22,20 +22,14 @@ type EntryStore struct {
 	count  int
 }
 
-// MaxRetainedEntries is the EntryStore ceiling; exposed for tests in other packages.
-const MaxRetainedEntries = maxRetainedEntries
-
 // NewEntryStore returns an empty EntryStore.
 func NewEntryStore() *EntryStore {
 	return &EntryStore{}
 }
 
-// SetCountForTest directly sets the entry count. For tests that need a full store.
-func (s *EntryStore) SetCountForTest(n int) {
-	s.mu.Lock()
-	s.count = n
-	s.mu.Unlock()
-}
+// SetMaxRetainedEntriesForTest overrides the entry store ceiling. Test-only; restore
+// with t.Cleanup so a lowered ceiling cannot leak into sibling tests.
+func SetMaxRetainedEntriesForTest(n int) { maxRetainedEntries = n }
 
 // Put stores a single raw entry. stored is true when the entry was newly added.
 // refused is true specifically when the store is at maxRetainedEntries; callers

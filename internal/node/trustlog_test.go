@@ -961,19 +961,26 @@ func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 // whose entries cannot all be retained must not have its head recorded. A full
 // store must never cause the node to advertise a head it cannot back with entries.
 func TestRememberHeadAtCeilingDoesNotRecordHead(t *testing.T) {
-	chain, _, _, _ := seedChain(t, true) // genesis + authorize
+	// Lower ceiling to 1 so one real entry fills the store.
+	trustlog.SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { trustlog.SetMaxRetainedEntriesForTest(1 << 16) })
+
+	// genesisChain (1 entry) fills the store; twoEntryChain (2 entries) cannot fit.
+	genesisChain, _, _, _ := seedChain(t, false) // genesis only
+	twoEntryChain, _, _, _ := seedChain(t, true) // genesis + authorize
 
 	d := New()
 	d.SetTrustChainPath(t.TempDir() + "/chain")
 
-	// Pre-fill the retained entry store to the ceiling.
-	d.pinMu.Lock()
-	d.retainedEntries = trustlog.NewEntryStore()
-	d.retainedEntries.SetCountForTest(trustlog.MaxRetainedEntries)
-	d.pinMu.Unlock()
-
+	// Fill the store with the genesis chain (1 entry = ceiling).
+	d.rememberHead(genesisChain)
 	headsBefore := d.knownHeads()
-	d.rememberHead(chain)
+	if len(headsBefore) != 1 {
+		t.Fatalf("setup: expected 1 head after filling, got %d", len(headsBefore))
+	}
+
+	// Offer a two-entry chain — the second entry must be refused and the head not recorded.
+	d.rememberHead(twoEntryChain)
 	headsAfter := d.knownHeads()
 
 	if len(headsAfter) != len(headsBefore) {
