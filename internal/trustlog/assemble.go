@@ -14,12 +14,19 @@ func ChainEntries(chain []byte) ([][]byte, error) {
 	return out, nil
 }
 
-// AssembleChains groups individually marshalled entries into complete
-// genesis-rooted chains, each encoded with MarshalChain. Entries that do not
-// decode are ignored, and a branch whose head cannot walk Prev back to a
-// nil-Prev genesis is skipped: a chain with a hole cannot be verified, so
-// returning it half-built would only push the failure downstream.
-func AssembleChains(entries [][]byte) [][]byte {
+// AssembleChainsReport is AssembleChains plus the number of input entries that
+// could not be placed in any complete genesis-rooted chain.
+//
+// unplaced counts distinct, decodable input entries whose hash does not appear
+// in any returned chain. Entries that fail to decode are not counted — they are
+// garbage, not evidence of a missing ancestor. Duplicates count once.
+//
+// A non-zero unplaced count with a non-empty heads set sent to the gateway is a
+// signal that the gateway withheld ancestors it believed the caller already held
+// (because the caller advertised those heads). The caller should clear its
+// branch cache and retry once with nil heads so the gateway sends the full
+// ancestry.
+func AssembleChainsReport(entries [][]byte) (chains [][]byte, unplaced int) {
 	byHash := map[string]Entry{}
 	var order []string
 	for _, raw := range entries {
@@ -42,7 +49,7 @@ func AssembleChains(entries [][]byte) [][]byte {
 		}
 	}
 
-	var chains [][]byte
+	placed := map[string]bool{}
 	for _, h := range order {
 		if referenced[h] {
 			continue
@@ -51,8 +58,26 @@ func AssembleChains(entries [][]byte) [][]byte {
 		if !ok {
 			continue
 		}
+		for i := range chain {
+			placed[string(HashEntry(&chain[i]))] = true
+		}
 		chains = append(chains, MarshalChain(chain))
 	}
+	for h := range byHash {
+		if !placed[h] {
+			unplaced++
+		}
+	}
+	return chains, unplaced
+}
+
+// AssembleChains groups individually marshalled entries into complete
+// genesis-rooted chains, each encoded with MarshalChain. Entries that do not
+// decode are ignored, and a branch whose head cannot walk Prev back to a
+// nil-Prev genesis is skipped: a chain with a hole cannot be verified, so
+// returning it half-built would only push the failure downstream.
+func AssembleChains(entries [][]byte) [][]byte {
+	chains, _ := AssembleChainsReport(entries)
 	return chains
 }
 

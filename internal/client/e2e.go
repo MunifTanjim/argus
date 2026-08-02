@@ -973,8 +973,9 @@ func (m *E2EClient) rememberHead(chain []byte) {
 // is ignored: the client is a supplicant and must not publish trust state — a head
 // only it holds reaches the gateway from a node.
 func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
+	heads := m.knownHeads()
 	var got api.TrustLogSyncResult
-	if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: m.knownHeads()}, &got); err != nil {
+	if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: heads}, &got); err != nil {
 		return nil, false
 	}
 	merged := append([][]byte{}, got.Entries...)
@@ -985,7 +986,32 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 			}
 		}
 	}
-	return trustlog.AssembleChains(merged), true
+	chains, unplaced := trustlog.AssembleChainsReport(merged)
+
+	// Same recovery as the node: the gateway withheld ancestors for branches we
+	// advertised but no longer hold entries for. One unconditional retry with empty
+	// heads forces a full resend; retry at most once to avoid per-tick doubling if
+	// the gateway permanently holds an orphan branch.
+	if unplaced > 0 && len(heads) > 0 {
+		log.Printf("client: warn: trust-log delta has %d unplaced entries; clearing branch cache and re-syncing", unplaced)
+		m.mu.Lock()
+		m.seenBranches = map[[32]byte]bool{}
+		m.mu.Unlock()
+		var got2 api.TrustLogSyncResult
+		if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: nil}, &got2); err == nil {
+			merged2 := append([][]byte{}, got2.Entries...)
+			if m.trust != nil {
+				if mine := m.trust.Bytes(); mine != nil {
+					if raw, err := trustlog.ChainEntries(mine); err == nil {
+						merged2 = append(merged2, raw...)
+					}
+				}
+			}
+			chains, _ = trustlog.AssembleChainsReport(merged2)
+		}
+	}
+
+	return chains, true
 }
 
 // pullTrustChain fetches and ingests trust-log branches from the gateway without

@@ -95,3 +95,75 @@ func TestAssembleChainsIgnoresUndecodableEntries(t *testing.T) {
 		t.Fatalf("garbage changed the chain bytes")
 	}
 }
+
+func TestAssembleChainsReportCompletChainIsFullyPlaced(t *testing.T) {
+	chain, _ := chainOf(t, 2)
+	raw, err := ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	chains, unplaced := AssembleChainsReport(raw)
+	if unplaced != 0 {
+		t.Fatalf("unplaced = %d, want 0 for a complete chain", unplaced)
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
+		t.Fatalf("AssembleChainsReport returned wrong chain")
+	}
+}
+
+func TestAssembleChainsReportCountsOrphanedEntries(t *testing.T) {
+	chain, _ := chainOf(t, 2)
+	raw, err := ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	if len(raw) < 2 {
+		t.Fatalf("need at least 2 entries, got %d", len(raw))
+	}
+
+	// Drop the genesis: all remaining entries are orphaned (cannot walk to nil-Prev).
+	orphaned := raw[1:]
+	chains, unplaced := AssembleChainsReport(orphaned)
+	if len(chains) != 0 {
+		t.Fatalf("incomplete branch must yield no chains, got %d", len(chains))
+	}
+	if unplaced != len(orphaned) {
+		t.Fatalf("unplaced = %d, want %d (one per orphaned entry)", unplaced, len(orphaned))
+	}
+}
+
+func TestAssembleChainsReportIgnoresGarbageInUnplacedCount(t *testing.T) {
+	chain, _ := chainOf(t, 2)
+	raw, err := ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	// Garbage entry must not increment unplaced — it is not a decodable entry.
+	chains, unplaced := AssembleChainsReport(append(append([][]byte{}, raw...), []byte("garbage")))
+	if unplaced != 0 {
+		t.Fatalf("unplaced = %d, want 0; garbage must not count as unplaced", unplaced)
+	}
+	if len(chains) != 1 {
+		t.Fatalf("got %d chains, want 1", len(chains))
+	}
+}
+
+func TestAssembleChainsReportDuplicateOrphanCountsOnce(t *testing.T) {
+	chain, _ := chainOf(t, 2)
+	raw, err := ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	if len(raw) < 2 {
+		t.Fatalf("need at least 2 entries, got %d", len(raw))
+	}
+
+	// Drop genesis → orphan; supply it twice.
+	orphan := raw[1]
+	_, unplaced := AssembleChainsReport([][]byte{orphan, orphan})
+	if unplaced != 1 {
+		t.Fatalf("unplaced = %d, want 1; duplicated orphan must count once", unplaced)
+	}
+}

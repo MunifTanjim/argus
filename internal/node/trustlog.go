@@ -158,8 +158,9 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 // the ancestry it asked for, so a node that locked the network while the gateway
 // was restarting still publishes.
 func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
+	heads := d.knownHeads()
 	var got api.TrustLogSyncResult
-	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: d.knownHeads()}, &got); err != nil {
+	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: heads}, &got); err != nil {
 		return nil, false
 	}
 
@@ -171,7 +172,31 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 			}
 		}
 	}
-	chains := trustlog.AssembleChains(merged)
+	chains, unplaced := trustlog.AssembleChainsReport(merged)
+
+	// The gateway withholds entries whose ancestors it believes the caller holds,
+	// keyed by the heads the caller advertised. seenBranches records heads of
+	// rejected branches too, so a node that discarded a losing branch can still
+	// advertise its head — causing the gateway to send only the orphaned tip. Clear
+	// the cache and retry once with no heads so the gateway sends the full ancestry.
+	if unplaced > 0 && len(heads) > 0 {
+		d.log.Warn("trust-log delta has unplaced entries; clearing branch cache and re-syncing", "unplaced", unplaced)
+		d.pinMu.Lock()
+		d.seenBranches = nil
+		d.pinMu.Unlock()
+		var got2 api.TrustLogSyncResult
+		if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: nil}, &got2); err == nil {
+			merged2 := append([][]byte{}, got2.Entries...)
+			if st := d.trust.Load(); st != nil {
+				if mine := st.Bytes(); mine != nil {
+					if raw, err := trustlog.ChainEntries(mine); err == nil {
+						merged2 = append(merged2, raw...)
+					}
+				}
+			}
+			chains, _ = trustlog.AssembleChainsReport(merged2)
+		}
+	}
 
 	if len(got.Want) > 0 {
 		d.pushHeldEntries(peer)

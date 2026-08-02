@@ -359,3 +359,127 @@ func TestUnpinnedClientQuarantinesOnBeaconArrival(t *testing.T) {
 
 	waitClient(t, "unpinned client quarantines from the beacon event", m.Quarantined)
 }
+
+// clientWithChain builds a client pinned to the given genesis chain and returns
+// it alongside the full raw entries. The original peer is replaced on return so
+// callers can substitute a fake; the teardown closes both connections.
+func clientWithChain(t *testing.T, fullChain []byte, genesis []byte) (*E2EClient, [][]byte) {
+	t.Helper()
+	fullRaw, err := trustlog.ChainEntries(fullChain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	srvConn, cliConn := net.Pipe()
+	m, err := NewE2EClientWithGenesis(cliConn, genesis)
+	if err != nil {
+		srvConn.Close()
+		cliConn.Close()
+		t.Fatalf("NewE2EClientWithGenesis: %v", err)
+	}
+	origPeer := m.peer
+	t.Cleanup(func() {
+		m.Close()
+		origPeer.Close()
+		srvConn.Close()
+	})
+	return m, fullRaw
+}
+
+// TestClientSyncTrustChainsRetiesOnUnplacedEntries covers the case where the
+// gateway withholds ancestors because the client advertised heads for branches
+// whose entries it already discarded. On the first sync the gateway returns only
+// an orphaned tip; the client must clear its branch cache and retry once with nil
+// heads so the gateway sends the full ancestry.
+func TestClientSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
+	// Build a two-entry chain: genesis + authorize.
+	signer, _ := trustlog.GenerateSigner()
+	tlog, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	genesis := tlog.Tip()
+	_ = tlog.AuthorizeDevice(bytes.Repeat([]byte{0x33}, 32), signer)
+	fullChain := trustlog.MarshalChain(tlog.Entries())
+
+	m, fullRaw := clientWithChain(t, fullChain, genesis)
+	if len(fullRaw) < 2 {
+		t.Fatalf("need ≥2 entries")
+	}
+	orphan := fullRaw[1] // has Prev pointing to genesis, but genesis missing
+
+	calls := 0
+	var lastHeads [][]byte
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method != api.MethodTrustLogSync {
+			return nil
+		}
+		calls++
+		var p api.TrustLogSyncParams
+		if raw, ok := params.(json.RawMessage); ok {
+			_ = json.Unmarshal(raw, &p)
+		}
+		lastHeads = p.Heads
+		res := result.(*api.TrustLogSyncResult)
+		if calls == 1 {
+			res.Entries = [][]byte{orphan}
+		} else {
+			res.Entries = fullRaw
+		}
+		return nil
+	})
+
+	// Plant a fake head so knownHeads() is non-empty.
+	m.mu.Lock()
+	m.seenBranches[[32]byte{0: 1}] = true
+	m.mu.Unlock()
+
+	chains, ok := m.syncTrustChains()
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 syncs (initial + retry), got %d", calls)
+	}
+	if len(lastHeads) != 0 {
+		t.Fatalf("retry must carry empty Heads, got %d heads", len(lastHeads))
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], fullChain) {
+		t.Fatalf("assembled chain does not match original after retry")
+	}
+}
+
+// TestClientSyncTrustChainsNoRetryOnHappyPath asserts that when all returned
+// entries assemble cleanly, exactly one sync is issued — the retry must not fire.
+func TestClientSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
+	signer, _ := trustlog.GenerateSigner()
+	tlog, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	genesis := tlog.Tip()
+	_ = tlog.AuthorizeDevice(bytes.Repeat([]byte{0x44}, 32), signer)
+	fullChain := trustlog.MarshalChain(tlog.Entries())
+
+	m, fullRaw := clientWithChain(t, fullChain, genesis)
+
+	calls := 0
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method != api.MethodTrustLogSync {
+			return nil
+		}
+		calls++
+		res := result.(*api.TrustLogSyncResult)
+		res.Entries = fullRaw
+		return nil
+	})
+
+	// Plant a fake head so knownHeads() is non-empty.
+	m.mu.Lock()
+	m.seenBranches[[32]byte{0: 1}] = true
+	m.mu.Unlock()
+
+	chains, ok := m.syncTrustChains()
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("happy path must issue exactly 1 sync, got %d", calls)
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], fullChain) {
+		t.Fatalf("assembled chain does not match original")
+	}
+}

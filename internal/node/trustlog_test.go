@@ -755,3 +755,99 @@ func TestSyncTrustChainsPushesWhatTheGatewayWants(t *testing.T) {
 		t.Fatalf("pushed %d entries, want %d", len(pushed), len(want))
 	}
 }
+
+// TestSyncTrustChainsRetiesOnUnplacedEntries covers the case where the gateway
+// withholds ancestors because the node advertised heads for branches whose entries
+// it already discarded. On the first sync the gateway returns only the orphaned
+// tip; the node must clear its branch cache and retry once with nil heads so the
+// gateway sends the full ancestry.
+func TestSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
+	chain, _, _, _ := seedChain(t, true) // genesis + authorize → 2 entries
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil || len(raw) < 2 {
+		t.Fatalf("need ≥2 entries: %v", err)
+	}
+	// Serve only the non-genesis entry first; the genesis is missing so it cannot be placed.
+	orphan := raw[1]
+
+	calls := 0
+	var lastHeads [][]byte
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method != api.MethodTrustLogSync {
+				return nil
+			}
+			calls++
+			pp := params.(api.TrustLogSyncParams)
+			lastHeads = pp.Heads
+			res := out.(*api.TrustLogSyncResult)
+			if calls == 1 {
+				res.Entries = [][]byte{orphan}
+			} else {
+				res.Entries = raw
+			}
+			return nil
+		},
+	}
+
+	d := New()
+	// Plant a fake head so knownHeads() returns non-empty, which is the precondition
+	// for the retry (empty heads means the gateway cannot be withholding anything).
+	d.pinMu.Lock()
+	d.seenBranches = map[[32]byte]bool{{0: 1}: true}
+	d.pinMu.Unlock()
+
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 syncs (initial + retry), got %d", calls)
+	}
+	if len(lastHeads) != 0 {
+		t.Fatalf("retry must carry empty Heads, got %d heads", len(lastHeads))
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
+		t.Fatalf("assembled chain does not match original after retry")
+	}
+}
+
+// TestSyncTrustChainsNoRetryOnHappyPath asserts that when all returned entries
+// assemble cleanly into complete chains, exactly one sync is issued — the retry
+// must not fire on the happy path.
+func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
+	chain, _, _, _ := seedChain(t, true)
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	calls := 0
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method != api.MethodTrustLogSync {
+				return nil
+			}
+			calls++
+			res := out.(*api.TrustLogSyncResult)
+			res.Entries = raw
+			return nil
+		},
+	}
+
+	d := New()
+	d.pinMu.Lock()
+	d.seenBranches = map[[32]byte]bool{{0: 1}: true}
+	d.pinMu.Unlock()
+
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("happy path must issue exactly 1 sync, got %d", calls)
+	}
+	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
+		t.Fatalf("assembled chain does not match original")
+	}
+}
