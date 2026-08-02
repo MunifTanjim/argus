@@ -806,10 +806,10 @@ func TestSyncTrustChainsUnplacedEntriesAreWarned(t *testing.T) {
 }
 
 // TestSyncTrustChainsRetainsRejectedBranchEntries covers the loss scenario: the
-// node received branch Y (a fork that lost fork-choice to X), recorded its head
-// in seenBranches, then discarded its entries. The gateway later serves only an
-// extension entry D whose Prev points to the tip of Y. Without retention, D cannot
-// be placed. After the fix the node retains Y's entries so assembly succeeds.
+// node received branch Y (a fork that lost fork-choice to X) and retained its
+// raw entries without ingesting them. The gateway later serves only an extension
+// entry D whose Prev points to the tip of Y. Without retention D cannot be
+// placed. After the fix the node retains Y's entries so assembly succeeds.
 func TestSyncTrustChainsRetainsRejectedBranchEntries(t *testing.T) {
 	signer, err := trustlog.GenerateSigner()
 	if err != nil {

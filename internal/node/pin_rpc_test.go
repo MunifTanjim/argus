@@ -346,10 +346,9 @@ func TestAdoptPinAndDetectRaceInvariant(t *testing.T) {
 }
 
 // A pin adopted concurrently with a detect pull must not leave the node unable to
-// fill its store. In the old design seenBranches could record a branch the store
-// never ingested, causing the gateway to withhold it forever. Known is derived from
-// retainedEntries, so: if retained entries exist for a chain, assembly succeeds
-// from those entries alone on the next pull — no gateway re-download needed.
+// fill its store. Known is derived from retainedEntries, so if retained entries
+// exist for a chain, assembly succeeds from those entries alone on the next pull —
+// no gateway re-download needed.
 func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
 

@@ -418,11 +418,11 @@ func TestClientSyncTrustChainsOrphanNoRetry(t *testing.T) {
 }
 
 // TestClientSyncTrustChainsRetainsRejectedBranch covers the loss scenario: the
-// client received branch Y (a fork that lost fork-choice to X), recorded its
-// head via rememberHead, then did not ingest it. The gateway later serves only
-// an extension entry D whose Prev points to the tip of Y. Without retention D
-// cannot be placed. After the fix, rememberHead retains Y's raw entries so
-// assembly of [genesis, devY, D] succeeds.
+// client received branch Y (a fork that lost fork-choice to X) and retained its
+// raw entries without ingesting them. The gateway later serves only an extension
+// entry D whose Prev points to the tip of Y. Without retention D cannot be
+// placed. After the fix the entry store holds Y's entries so assembly of
+// [genesis, devY, D] succeeds.
 func TestClientSyncTrustChainsRetainsRejectedBranch(t *testing.T) {
 	signer, err := trustlog.GenerateSigner()
 	if err != nil {

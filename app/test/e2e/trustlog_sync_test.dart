@@ -51,12 +51,12 @@ void main() {
       // Client starts with fork_chain=[genesis,authB] as its trust anchor.
       // Phase 1 (connect): gateway sends chain=[genesis,authA]; client assembles
       //   both chain and fork_chain (fork_chain wins, trust.chainBytes=fork_chain),
-      //   retains authA in _seenBranches.
+      //   retains authA in the entry store.
       // Phase 2 (resyncNow): gateway sends ONLY the disable entry (prev=authA).
       //   Client must reconstruct disabled_chain=[genesis,authA,disable] from the
       //   retained authA — which is absent from trust.chainBytes (=fork_chain).
       //
-      // Without retention authA is missing from the merge; disable has no reachable
+      // Without retention authA is missing from the merge; disable has no placed
       // ancestor and disabled_chain cannot be assembled.
       final v = _tl();
       final chainXRaw = _b(v, 'chain');            // [genesis, authA]
