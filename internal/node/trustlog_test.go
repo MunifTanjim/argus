@@ -1217,3 +1217,86 @@ func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {
 		t.Fatal("recurrence after zero must log again")
 	}
 }
+
+// TestFirstSyncOfferIncludesOwnChain is the reboot scenario: the node holds a
+// verified chain (loaded from disk by EnableTrustLog) but its entry store is
+// fresh. Without the seed step the first offer is empty, and the gateway
+// responds with Want=[], so the chain is republished only on the NEXT tick —
+// up to trustSyncInterval away. With the fix the chain is seeded into the
+// entry store before the offer is built, so the hashes appear on tick 1.
+func TestFirstSyncOfferIncludesOwnChain(t *testing.T) {
+	chain, genesis := lockedChainForTest(t)
+
+	dir := t.TempDir()
+	chainPath := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(chainPath, chain, 0o600); err != nil {
+		t.Fatalf("write chain: %v", err)
+	}
+
+	d := New()
+	if err := d.EnableTrustLog(genesis, chainPath); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+	// After EnableTrustLog, trust store has the chain but retainedEntries is empty.
+
+	var firstKnown [][]byte
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method == api.MethodTrustLogSync {
+				if pp, ok := params.(api.TrustLogSyncParams); ok && firstKnown == nil {
+					firstKnown = pp.Known
+				}
+			}
+			return nil
+		},
+	}
+
+	d.syncTrustChains(peer)
+
+	wantRaw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	known := make(map[string]bool, len(firstKnown))
+	for _, h := range firstKnown {
+		known[string(h)] = true
+	}
+	for _, raw := range wantRaw {
+		e, err := trustlog.UnmarshalEntry(raw)
+		if err != nil {
+			t.Fatalf("UnmarshalEntry: %v", err)
+		}
+		if !known[string(trustlog.HashEntry(&e))] {
+			t.Fatalf("first offer missing chain entry hash; known has %d entries", len(firstKnown))
+		}
+	}
+}
+
+// TestSyncTrustChainsDisjointLatch verifies that the disjoint warning fires on
+// the first disjoint sync and is suppressed on subsequent ones. Checked via
+// lastDisjointLogged state transitions.
+func TestSyncTrustChainsDisjointLatch(t *testing.T) {
+	d := New()
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method == api.MethodTrustLogSync {
+				out.(*api.TrustLogSyncResult).Disjoint = true
+			}
+			return nil
+		},
+	}
+	d.syncTrustChains(peer)
+	d.pinMu.Lock()
+	latched := d.lastDisjointLogged
+	d.pinMu.Unlock()
+	if !latched {
+		t.Fatal("lastDisjointLogged must be true after first disjoint sync")
+	}
+	d.syncTrustChains(peer)
+	d.pinMu.Lock()
+	latched = d.lastDisjointLogged
+	d.pinMu.Unlock()
+	if !latched {
+		t.Fatal("lastDisjointLogged must remain true after repeated disjoint sync")
+	}
+}

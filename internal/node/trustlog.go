@@ -121,6 +121,22 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 // with only the specific entries named, so a node that locked the network while
 // the gateway was restarting still publishes.
 func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
+	// Seed from the verified trust chain first so the offer always reflects
+	// what is locally held, including on the first call after a restart.
+	// PutAll is idempotent for already-present entries.
+	d.pinMu.Lock()
+	if d.retainedEntries == nil {
+		d.retainedEntries = trustlog.NewEntryStore()
+	}
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if st := d.trust.Load(); st != nil {
+		if mine := st.Bytes(); mine != nil {
+			if raw, err := trustlog.ChainEntries(mine); err == nil {
+				re.PutAll(raw)
+			}
+		}
+	}
 	known, truncated := d.knownHashes()
 	var got api.TrustLogSyncResult
 	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Known: known, Truncated: truncated}, &got); err != nil {
@@ -129,10 +145,6 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	d.pinMu.Lock()
 	prevDisjoint := d.lastDisjointLogged
 	d.lastDisjointLogged = got.Disjoint
-	if d.retainedEntries == nil {
-		d.retainedEntries = trustlog.NewEntryStore()
-	}
-	re := d.retainedEntries
 	d.pinMu.Unlock()
 	if got.Disjoint && !prevDisjoint {
 		d.log.Warn("trust log: this device shares no history with the network's; it is likely pinned to a different trust root")
