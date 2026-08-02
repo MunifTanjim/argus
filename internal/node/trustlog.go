@@ -138,9 +138,7 @@ func (d *Node) rememberHeadLocked(chain []byte) {
 	d.seenBranches[h] = true
 	if d.retainedEntries != nil {
 		if raw, err := trustlog.ChainEntries(chain); err == nil {
-			if inserted := d.retainedEntries.PutAll(raw); inserted < len(raw) && inserted == 0 && len(raw) > 0 {
-				d.log.Warn("trust-log retained entry store may be at ceiling; entries not stored", "count", len(raw))
-			}
+			d.retainedEntries.PutAll(raw)
 		}
 	}
 }
@@ -183,7 +181,10 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	// Merge retained entries from non-winning branches so we can assemble
 	// chains whose ancestors the gateway withheld (it assumes we hold them
 	// because we advertised the head).
-	if re := d.retainedEntries; re != nil {
+	d.pinMu.Lock()
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if re != nil {
 		if retained, _ := re.Delta(nil); len(retained) > 0 {
 			merged = append(merged, retained...)
 		}
