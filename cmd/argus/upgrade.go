@@ -25,15 +25,8 @@ func upgradeAssetName(tag, goos, goarch string) string {
 	return fmt.Sprintf("%s-%s-%s-%s", config.BinaryName, tag, goos, goarch)
 }
 
-func downloadLatestBinary(ctx context.Context, dst string) error {
-	useGH := util.HasTool("gh")
-
-	tag, err := latestTag(ctx, useGH)
-	if err != nil {
-		return fmt.Errorf("failed to resolve latest release: %w", err)
-	}
-	shell.StdErrF("Latest version: %s\n", tag)
-
+// downloadBinary writes the release binary for tag to dst.
+func downloadBinary(ctx context.Context, tag, dst string, useGH bool) error {
 	assetName := upgradeAssetName(tag, runtime.GOOS, runtime.GOARCH)
 	shell.StdErrF("Downloading %s...\n", assetName)
 
@@ -152,11 +145,26 @@ func newUpgradeCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 			defer cancel()
 
+			useGH := util.HasTool("gh")
+			tag, err := latestTag(ctx, useGH)
+			if err != nil {
+				return fail(cmd, fmt.Errorf("failed to resolve latest release: %w", err))
+			}
+			currVersion := cmd.Root().Version
+
+			shell.StdErrF("Current version: %s\n", currVersion)
+			shell.StdErrF("Latest version: %s\n", tag)
+
+			if tag == currVersion {
+				shell.StdErrLn("Already on the latest version!")
+				return nil
+			}
+
 			// Keep the temp file beside the target so the final rename stays on the
 			// same filesystem (atomic, and safe to swap a running binary on Unix).
 			tempPath := execPath + ".tmp"
 
-			if err := downloadLatestBinary(ctx, tempPath); err != nil {
+			if err := downloadBinary(ctx, tag, tempPath, useGH); err != nil {
 				os.Remove(tempPath)
 				return fail(cmd, fmt.Errorf("failed to download: %w", err))
 			}
@@ -174,7 +182,7 @@ func newUpgradeCmd() *cobra.Command {
 
 			// Report success before refreshing completion: a completion problem must
 			// not mask that the upgrade itself already succeeded.
-			shell.StdErrLn("Upgraded to the latest version!")
+			shell.StdErrF("Upgraded to %s!\n", tag)
 
 			switch err := completion.Install(cmd); {
 			case err == nil:
