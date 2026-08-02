@@ -1008,7 +1008,7 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 	re := m.retainedEntries
 	m.mu.Unlock()
 	if re != nil {
-		if retained, _ := re.Delta(nil); len(retained) > 0 {
+		if retained := re.All(); len(retained) > 0 {
 			merged = append(merged, retained...)
 		}
 	}

@@ -351,7 +351,7 @@ func (s *Server) buildClientServer() *api.Server {
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want := s.entries.Delta(p.Heads)
+		entries, want, _ := s.entries.Delta(p.Heads)
 		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
 	})
 
@@ -593,7 +593,7 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want := s.entries.Delta(p.Heads)
+		entries, want, _ := s.entries.Delta(p.Heads)
 		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
 	case api.MethodTrustLogPush:
 		p, err := api.Decode[api.TrustLogPushParams](params)

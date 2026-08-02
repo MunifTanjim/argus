@@ -189,13 +189,12 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 		}
 	}
 	// Merge retained entries from non-winning branches so we can assemble
-	// chains whose ancestors the gateway withheld (it assumes we hold them
-	// because we advertised the head).
+	// chains whose ancestors the gateway withheld.
 	d.pinMu.Lock()
 	re := d.retainedEntries
 	d.pinMu.Unlock()
 	if re != nil {
-		if retained, _ := re.Delta(nil); len(retained) > 0 {
+		if retained := re.All(); len(retained) > 0 {
 			merged = append(merged, retained...)
 		}
 	}

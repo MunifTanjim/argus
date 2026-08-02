@@ -138,7 +138,7 @@ func TestEntryStoreTwoBranchesShareGenesis(t *testing.T) {
 		t.Fatalf("two competing forks must produce exactly 2 heads, got %d", len(heads))
 	}
 
-	entries, want := s.Delta(nil)
+	entries, want, _ := s.Delta(nil)
 	if len(want) != 0 {
 		t.Fatalf("want should be empty, got %d", len(want))
 	}
@@ -149,8 +149,8 @@ func TestEntryStoreTwoBranchesShareGenesis(t *testing.T) {
 }
 
 func TestEntryStoreCeilingStopsRunawayGrowth(t *testing.T) {
-	SetMaxRetainedEntriesForTest(1)
-	t.Cleanup(func() { SetMaxRetainedEntriesForTest(1 << 16) })
+	prev := SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { SetMaxRetainedEntriesForTest(prev) })
 
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
@@ -170,8 +170,8 @@ func TestEntryStoreCeilingStopsRunawayGrowth(t *testing.T) {
 }
 
 func TestEntryStoreCeilingRefusedCountIsNonZero(t *testing.T) {
-	SetMaxRetainedEntriesForTest(1)
-	t.Cleanup(func() { SetMaxRetainedEntriesForTest(1 << 16) })
+	prev := SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { SetMaxRetainedEntriesForTest(prev) })
 
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
@@ -222,7 +222,7 @@ func TestEntryStoreDeltaWithholdsWhatTheCallerCanReach(t *testing.T) {
 	raw := entriesOfES(t, testChainES(t))
 	s.PutAll(raw)
 
-	entries, want := s.Delta(s.Heads())
+	entries, want, _ := s.Delta(s.Heads())
 	if len(entries) != 0 {
 		t.Fatalf("a caller holding the head must receive nothing, got %d entries", len(entries))
 	}
@@ -230,7 +230,7 @@ func TestEntryStoreDeltaWithholdsWhatTheCallerCanReach(t *testing.T) {
 		t.Fatalf("want should be empty, got %d", len(want))
 	}
 
-	entries, want = s.Delta(nil)
+	entries, want, _ = s.Delta(nil)
 	if len(entries) != len(raw) {
 		t.Fatalf("a caller with no heads must receive everything: got %d, want %d", len(entries), len(raw))
 	}
@@ -244,18 +244,149 @@ func TestEntryStoreDeltaReportsHeadsItDoesNotHold(t *testing.T) {
 	s.PutAll(entriesOfES(t, testChainES(t)))
 
 	unknown := []byte("0123456789abcdef0123456789abcdef")
-	_, want := s.Delta([][]byte{unknown})
+	_, want, _ := s.Delta([][]byte{unknown})
 	if len(want) != 1 || !bytes.Equal(want[0], unknown) {
 		t.Fatalf("unknown head must come back in want, got %v", want)
 	}
 }
 
-func TestEntryStoreDeltaOrdersParentsBeforeChildren(t *testing.T) {
+func TestEntryStoreRetainsAnOrphan(t *testing.T) {
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
+	if len(raw) < 2 {
+		t.Skip("need a multi-entry chain")
+	}
+
+	s.PutAll(raw[1:]) // no genesis
+	entries, _, _ := s.Delta(nil)
+	if len(entries) != len(raw)-1 {
+		t.Fatalf("orphans must be retained and served: got %d, want %d", len(entries), len(raw)-1)
+	}
+}
+
+func TestEntryStoreRejectsUndecodableEntries(t *testing.T) {
+	s := NewEntryStore()
+	stored, _ := s.Put([]byte("garbage"))
+	if stored {
+		t.Fatalf("undecodable entry must not be stored")
+	}
+}
+
+// twoEntryChain returns a chain of two entries (genesis + one child) as a
+// single marshalled chain blob. Matches twoEntryChainES but returns only the
+// extended (two-entry) form for use in set-subtraction tests.
+func twoEntryChain(t *testing.T) []byte {
+	t.Helper()
+	_, long := twoEntryChainES(t)
+	return long
+}
+
+// entriesOf splits a marshalled chain into its individual raw entry blobs.
+func entriesOf(t *testing.T, chain []byte) [][]byte {
+	t.Helper()
+	return entriesOfES(t, chain)
+}
+
+func TestEntryStoreHashesListsEverythingHeld(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOf(t, twoEntryChain(t))
 	s.PutAll(raw)
 
-	entries, _ := s.Delta(nil)
+	hashes, truncated := s.Hashes()
+	if truncated {
+		t.Fatalf("small store must not truncate")
+	}
+	if len(hashes) != len(raw) {
+		t.Fatalf("got %d hashes, want %d", len(hashes), len(raw))
+	}
+	held := map[string]bool{}
+	for _, h := range hashes {
+		held[string(h)] = true
+	}
+	for _, r := range raw {
+		e, err := UnmarshalEntry(r)
+		if err != nil {
+			t.Fatalf("UnmarshalEntry: %v", err)
+		}
+		if !held[string(HashEntry(&e))] {
+			t.Fatalf("Hashes omitted a retained entry")
+		}
+	}
+}
+
+func TestEntryStoreHashesTruncatesAtCap(t *testing.T) {
+	prev := SetMaxOfferedHashesForTest(1)
+	t.Cleanup(func() { SetMaxOfferedHashesForTest(prev) })
+
+	s := NewEntryStore()
+	s.PutAll(entriesOf(t, twoEntryChain(t)))
+
+	hashes, truncated := s.Hashes()
+	if !truncated {
+		t.Fatalf("expected truncation at cap 1")
+	}
+	if len(hashes) != 1 {
+		t.Fatalf("got %d hashes, want 1", len(hashes))
+	}
+}
+
+func TestEntryStoreDeltaIsSetSubtraction(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOf(t, twoEntryChain(t))
+	s.PutAll(raw)
+	all, _ := s.Hashes()
+
+	entries, want, disjoint := s.Delta(all)
+	if len(entries) != 0 || len(want) != 0 || disjoint {
+		t.Fatalf("caller holding everything: got %d entries, %d want, disjoint=%v", len(entries), len(want), disjoint)
+	}
+
+	entries, want, disjoint = s.Delta(nil)
+	if len(entries) != len(raw) {
+		t.Fatalf("empty known: got %d entries, want %d", len(entries), len(raw))
+	}
+	if len(want) != 0 || disjoint {
+		t.Fatalf("empty known must not be disjoint and must want nothing")
+	}
+}
+
+// A caller holding only the genesis must receive the child — under the old
+// reachability walk it would have received nothing, because the child was
+// reachable from a head the caller never claimed.
+func TestEntryStoreDeltaSendsUnlistedDescendants(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOf(t, twoEntryChain(t))
+	s.PutAll(raw)
+
+	genesis, err := UnmarshalEntry(raw[0])
+	if err != nil {
+		t.Fatalf("UnmarshalEntry: %v", err)
+	}
+	entries, _, _ := s.Delta([][]byte{HashEntry(&genesis)})
+	if len(entries) != len(raw)-1 {
+		t.Fatalf("got %d entries, want %d", len(entries), len(raw)-1)
+	}
+}
+
+func TestEntryStoreDeltaWantsUnheldHashes(t *testing.T) {
+	s := NewEntryStore()
+	s.PutAll(entriesOf(t, twoEntryChain(t)))
+
+	unknown := []byte("0123456789abcdef0123456789abcdef")
+	_, want, disjoint := s.Delta([][]byte{unknown})
+	if len(want) != 1 || string(want[0]) != string(unknown) {
+		t.Fatalf("unknown hash must come back in want, got %v", want)
+	}
+	if !disjoint {
+		t.Fatalf("a non-empty known sharing nothing must report disjoint")
+	}
+}
+
+func TestEntryStoreDeltaOrdersParentsBeforeChildren(t *testing.T) {
+	s := NewEntryStore()
+	s.PutAll(entriesOf(t, twoEntryChain(t)))
+
+	entries, _, _ := s.Delta(nil)
 	seen := map[string]bool{}
 	for _, r := range entries {
 		e, err := UnmarshalEntry(r)
@@ -269,24 +400,11 @@ func TestEntryStoreDeltaOrdersParentsBeforeChildren(t *testing.T) {
 	}
 }
 
-func TestEntryStoreRetainsAnOrphan(t *testing.T) {
+func TestEntryStoreAllReturnsEveryEntry(t *testing.T) {
 	s := NewEntryStore()
-	raw := entriesOfES(t, testChainES(t))
-	if len(raw) < 2 {
-		t.Skip("need a multi-entry chain")
-	}
-
-	s.PutAll(raw[1:]) // no genesis
-	entries, _ := s.Delta(nil)
-	if len(entries) != len(raw)-1 {
-		t.Fatalf("orphans must be retained and served: got %d, want %d", len(entries), len(raw)-1)
-	}
-}
-
-func TestEntryStoreRejectsUndecodableEntries(t *testing.T) {
-	s := NewEntryStore()
-	stored, _ := s.Put([]byte("garbage"))
-	if stored {
-		t.Fatalf("undecodable entry must not be stored")
+	raw := entriesOf(t, twoEntryChain(t))
+	s.PutAll(raw)
+	if got := len(s.All()); got != len(raw) {
+		t.Fatalf("All returned %d, want %d", got, len(raw))
 	}
 }

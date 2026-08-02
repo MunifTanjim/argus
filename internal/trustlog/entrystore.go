@@ -27,9 +27,29 @@ func NewEntryStore() *EntryStore {
 	return &EntryStore{}
 }
 
-// SetMaxRetainedEntriesForTest overrides the entry store ceiling. Test-only; restore
-// with t.Cleanup so a lowered ceiling cannot leak into sibling tests.
-func SetMaxRetainedEntriesForTest(n int) { maxRetainedEntries = n }
+// SetMaxRetainedEntriesForTest overrides the entry store ceiling and returns the
+// previous value. Test-only; restore with t.Cleanup so a lowered ceiling cannot
+// leak into sibling tests.
+func SetMaxRetainedEntriesForTest(n int) int {
+	prev := maxRetainedEntries
+	maxRetainedEntries = n
+	return prev
+}
+
+// maxOfferedHashes caps how many hashes a sync offer lists. Two orders of
+// magnitude above any realistic log, and well below maxRetainedEntries, so
+// truncation is unreachable without an attack. Truncating is safe: the protocol
+// is set subtraction, so an under-reporting caller receives entries it already
+// holds and they dedupe by hash on arrival.
+var maxOfferedHashes = 4096
+
+// SetMaxOfferedHashesForTest overrides the offer cap and returns the previous
+// value. Test-only; restore it when the test ends.
+func SetMaxOfferedHashesForTest(n int) int {
+	prev := maxOfferedHashes
+	maxOfferedHashes = n
+	return prev
+}
 
 // Put stores a single raw entry. stored is true when the entry was newly added.
 // refused is true specifically when the store is at maxRetainedEntries; callers
@@ -84,6 +104,26 @@ func (s *EntryStore) putLocked(raw []byte) (stored, refused bool) {
 	return true, false
 }
 
+// Hashes lists the hash of every retained entry, for a sync offer. truncated is
+// true when the store holds more than maxOfferedHashes and the list is partial.
+func (s *EntryStore) Hashes() (hashes [][]byte, truncated bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for h := range s.byHash {
+		if len(hashes) >= maxOfferedHashes {
+			return hashes, true
+		}
+		hashes = append(hashes, []byte(h))
+	}
+	return hashes, false
+}
+
+// All returns every retained entry, parents before children.
+func (s *EntryStore) All() [][]byte {
+	entries, _, _ := s.Delta(nil)
+	return entries
+}
+
 // Heads returns the hash of every retained entry that no other retained entry
 // names as its Prev.
 func (s *EntryStore) Heads() [][]byte {
@@ -108,39 +148,41 @@ func (s *EntryStore) headsLocked() [][]byte {
 	return out
 }
 
-// Delta returns every retained entry the caller cannot reach by walking Prev from
-// its known heads, parents before children, plus any caller heads this store does
-// not hold. Holding a head implies holding its ancestry, so the head list alone is
-// enough to compute what the caller is missing.
-func (s *EntryStore) Delta(knownHeads [][]byte) (entries [][]byte, want [][]byte) {
+// Delta returns every retained entry whose hash the caller did not list, parents
+// before children, plus the listed hashes this store does not hold. disjoint
+// reports that a non-empty known shares no entry with this store — the caller is
+// almost certainly following a different trust root.
+//
+// This is set subtraction, not inference: the gateway does not assume the caller
+// holds a listed entry's ancestry. A caller that under-reports simply receives
+// entries it already has, which dedupe on arrival.
+func (s *EntryStore) Delta(known [][]byte) (entries [][]byte, want [][]byte, disjoint bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	reachable := map[string]bool{}
-	for _, h := range knownHeads {
+	held := make(map[string]bool, len(known))
+	shared := 0
+	for _, h := range known {
 		key := string(h)
-		if _, ok := s.byHash[key]; !ok {
-			want = append(want, append([]byte(nil), h...))
+		if _, ok := s.byHash[key]; ok {
+			held[key] = true
+			shared++
 			continue
 		}
-		for cur := key; cur != ""; {
-			if reachable[cur] {
-				break
-			}
-			reachable[cur] = true
-			cur = s.prev[cur]
-		}
+		want = append(want, append([]byte(nil), h...))
 	}
 
 	emitted := map[string]bool{}
 	var emit func(h string)
 	emit = func(h string) {
-		if h == "" || emitted[h] || reachable[h] {
+		if h == "" || emitted[h] || held[h] {
 			return
 		}
 		if _, ok := s.byHash[h]; !ok {
 			return
 		}
+		// Recurse through prev only to order output parents-first; this is not
+		// the reachability inference that was removed.
 		emit(s.prev[h])
 		emitted[h] = true
 		entries = append(entries, append([]byte(nil), s.byHash[h]...))
@@ -148,5 +190,5 @@ func (s *EntryStore) Delta(knownHeads [][]byte) (entries [][]byte, want [][]byte
 	for _, h := range s.headsLocked() {
 		emit(string(h))
 	}
-	return entries, want
+	return entries, want, len(known) > 0 && shared == 0
 }
