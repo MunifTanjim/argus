@@ -122,12 +122,12 @@ type fakeNode struct {
 // node, and OnRelayFrame routes handshake/sealed frames to the right node by chan_id.
 // Set chain before Connect to serve a trust-log chain from trustlog.sync.
 type fakeMultiGateway struct {
-	peer   *api.Peer
-	mu     sync.Mutex           // guards nodes/order/deliveries: addNode races the peer read loop
-	nodes  map[string]*fakeNode // node id -> node
-	order  []*fakeNode          // stable nodes.list order
-	byChan map[string]*fakeNode // chan_id -> node
-	nextCh int
+	peer       *api.Peer
+	mu         sync.Mutex           // guards nodes/order/deliveries: addNode races the peer read loop
+	nodes      map[string]*fakeNode // node id -> node
+	order      []*fakeNode          // stable nodes.list order
+	byChan     map[string]*fakeNode // chan_id -> node
+	nextCh     int
 	chain      []byte // served by trustlog.sync; nil = empty result
 	deliveries int    // total beacon.deliver calls received across all nodes
 }
@@ -253,7 +253,7 @@ func (g *fakeMultiGateway) addNode(n *fakeNode) {
 	g.mu.Unlock()
 }
 
-// setChain updates the chain served by trustlog.pull. Safe to call from test
+// setChain updates the chain served by trustlog.sync. Safe to call from test
 // goroutines while the gateway peer loop is running.
 func (g *fakeMultiGateway) setChain(chain []byte) {
 	g.mu.Lock()

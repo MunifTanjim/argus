@@ -74,8 +74,8 @@ func startBeaconLockNode(t *testing.T, ctx context.Context, id, gwURL, socketPat
 // almost nothing while idle. It fails loudly if a future change reintroduces a
 // per-tick full-chain transfer or an unconditional broadcast.
 //
-// What is counted: trustlog.pull, trustlog.offer, beacon.offer, nodes.list
-// (node→gateway); trustlog.pull, nodes.list (client→gateway); and beacon.deliver
+// What is counted: trustlog.sync, trustlog.push, beacon.offer, nodes.list
+// (node→gateway); trustlog.sync, nodes.list (client→gateway); and beacon.deliver
 // relay frames (client→node, counted in forwardFromClient where Method is cleartext).
 // Keepalive is excluded — it is time-based and machine-speed-sensitive; the counted
 // methods are tick-proportional, making the budget independent of wall-clock jitter.

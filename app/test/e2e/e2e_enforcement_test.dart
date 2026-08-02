@@ -111,7 +111,7 @@ void main() {
     await client.close();
   });
 
-  test('pinned client swallows trustlog.pull errors and stays fail-closed', () async {
+  test('pinned client swallows trustlog.sync errors and stays fail-closed', () async {
     final v = _tl();
     final enfGenesis = Uint8List.fromList(base64.decode(v['enforcement_genesis_head'] as String));
 
