@@ -22,9 +22,19 @@ type EntryStore struct {
 	count  int
 }
 
+// MaxRetainedEntries is the EntryStore ceiling; exposed for tests in other packages.
+const MaxRetainedEntries = maxRetainedEntries
+
 // NewEntryStore returns an empty EntryStore.
 func NewEntryStore() *EntryStore {
 	return &EntryStore{}
+}
+
+// SetCountForTest directly sets the entry count. For tests that need a full store.
+func (s *EntryStore) SetCountForTest(n int) {
+	s.mu.Lock()
+	s.count = n
+	s.mu.Unlock()
 }
 
 // Put stores a single raw entry. stored is true when the entry was newly added.

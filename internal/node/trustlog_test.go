@@ -956,3 +956,28 @@ func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 		t.Fatalf("assembled chain does not match original")
 	}
 }
+
+// TestRememberHeadAtCeilingDoesNotRecordHead pins the invariant that a branch
+// whose entries cannot all be retained must not have its head recorded. A full
+// store must never cause the node to advertise a head it cannot back with entries.
+func TestRememberHeadAtCeilingDoesNotRecordHead(t *testing.T) {
+	chain, _, _, _ := seedChain(t, true) // genesis + authorize
+
+	d := New()
+	d.SetTrustChainPath(t.TempDir() + "/chain")
+
+	// Pre-fill the retained entry store to the ceiling.
+	d.pinMu.Lock()
+	d.retainedEntries = trustlog.NewEntryStore()
+	d.retainedEntries.SetCountForTest(trustlog.MaxRetainedEntries)
+	d.pinMu.Unlock()
+
+	headsBefore := d.knownHeads()
+	d.rememberHead(chain)
+	headsAfter := d.knownHeads()
+
+	if len(headsAfter) != len(headsBefore) {
+		t.Fatalf("at ceiling: rememberHead must not record the head; knownHeads grew from %d to %d",
+			len(headsBefore), len(headsAfter))
+	}
+}

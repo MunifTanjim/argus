@@ -21,11 +21,10 @@ func ChainEntries(chain []byte) ([][]byte, error) {
 // in any returned chain. Entries that fail to decode are not counted — they are
 // garbage, not evidence of a missing ancestor. Duplicates count once.
 //
-// A non-zero unplaced count with a non-empty heads set sent to the gateway is a
-// signal that the gateway withheld ancestors it believed the caller already held
-// (because the caller advertised those heads). The caller should clear its
-// branch cache and retry once with nil heads so the gateway sends the full
-// ancestry.
+// A non-zero unplaced count is a signal that the gateway may hold an incomplete
+// branch — an entry whose ancestor chain is not yet fully propagated. The caller
+// should log it; retrying with different heads is not the remedy and risks masking
+// the underlying propagation gap.
 func AssembleChainsReport(entries [][]byte) (chains [][]byte, unplaced int) {
 	byHash := map[string]Entry{}
 	var order []string

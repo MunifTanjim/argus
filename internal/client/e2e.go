@@ -171,9 +171,8 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		beaconCtr:     map[string]uint64{},
 		beaconMiss:    map[string]*beaconMissState{},
 		everConnected: map[string]bool{},
-		seenBranches:    map[[32]byte]bool{},
-		retainedEntries: trustlog.NewEntryStore(),
-		delivered:       map[string]map[string]uint64{},
+		seenBranches:  map[[32]byte]bool{},
+		delivered:     map[string]map[string]uint64{},
 	}
 	if genesisHash != nil {
 		m.trust = trustlog.NewSyncStore(genesisHash)
@@ -960,22 +959,28 @@ func (m *E2EClient) knownHeads() [][]byte {
 	return out
 }
 
-// rememberHead records a branch head as received. Branches that fail to ingest are
-// recorded too: for the current pin, identical bytes can never become valid later.
+// rememberHead records a branch head as received. The head is only recorded when
+// every entry is retained — a full store must not produce a head with missing ancestry.
 func (m *E2EClient) rememberHead(chain []byte) {
 	h, ok := clientBranchHead(chain)
 	if !ok {
 		return
 	}
-	m.mu.Lock()
-	m.seenBranches[h] = true
-	if m.retainedEntries != nil {
-		if raw, err := trustlog.ChainEntries(chain); err == nil {
-			if _, refused := m.retainedEntries.PutAll(raw); refused > 0 {
-				log.Printf("client: warn: trust-log entry store at ceiling; entries refused: %d", refused)
-			}
-		}
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		return
 	}
+	m.mu.Lock()
+	if m.retainedEntries == nil {
+		m.retainedEntries = trustlog.NewEntryStore()
+	}
+	_, refused := m.retainedEntries.PutAll(raw)
+	if refused > 0 {
+		log.Printf("client: warn: trust-log entry store at ceiling; entries refused: %d, head not recorded", refused)
+		m.mu.Unlock()
+		return
+	}
+	m.seenBranches[h] = true
 	m.mu.Unlock()
 }
 
@@ -999,12 +1004,13 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 		}
 	}
 	m.mu.Lock()
-	if re := m.retainedEntries; re != nil {
+	re := m.retainedEntries
+	m.mu.Unlock()
+	if re != nil {
 		if retained, _ := re.Delta(nil); len(retained) > 0 {
 			merged = append(merged, retained...)
 		}
 	}
-	m.mu.Unlock()
 	chains, unplaced := trustlog.AssembleChainsReport(merged)
 	if unplaced > 0 {
 		log.Printf("client: warn: trust-log sync has %d unplaced entries; gateway may hold an incomplete branch", unplaced)

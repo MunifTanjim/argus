@@ -73,8 +73,8 @@ func (d *Node) enableTrustLogLocked(genesisHash []byte, path string) error {
 	}
 	d.trustPath = path
 	d.pinGenesis = append([]byte(nil), genesisHash...)
-	d.seenBranches = nil      // new store, new genesis — stale fingerprints are invalid
-	d.retainedEntries = trustlog.NewEntryStore() // same lifetime as seenBranches
+	d.seenBranches = nil    // new store, new genesis — stale fingerprints are invalid
+	d.retainedEntries = nil // same lifetime as seenBranches; lazily allocated in rememberHeadLocked
 	d.trust.Store(sync)
 	if bytes.Equal(d.trustGate.Genesis(), genesisHash) {
 		d.trustGate.Clear()
@@ -132,17 +132,25 @@ func (d *Node) rememberHeadLocked(chain []byte) {
 	if !ok {
 		return
 	}
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		return
+	}
+	// Retain entries first: only record the head if every entry was admitted.
+	// If the store is full, a refused entry means we cannot guarantee ancestry,
+	// which is the same broken invariant this work exists to remove.
+	if d.retainedEntries == nil {
+		d.retainedEntries = trustlog.NewEntryStore()
+	}
+	_, refused := d.retainedEntries.PutAll(raw)
+	if refused > 0 {
+		d.log.Warn("trust-log entry store at ceiling; entries refused, head not recorded", "refused", refused)
+		return
+	}
 	if d.seenBranches == nil {
 		d.seenBranches = map[[32]byte]bool{}
 	}
 	d.seenBranches[h] = true
-	if d.retainedEntries != nil {
-		if raw, err := trustlog.ChainEntries(chain); err == nil {
-			if _, refused := d.retainedEntries.PutAll(raw); refused > 0 {
-				d.log.Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
-			}
-		}
-	}
 }
 
 // syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
@@ -400,9 +408,9 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 		if err := d.writeGenesisHash(genesisHash); err != nil {
 			return err
 		}
-		d.seenBranches = nil      // new store, new genesis — stale fingerprints are invalid
-		d.retainedEntries = trustlog.NewEntryStore() // same lifetime as seenBranches
-		d.trust.Store(store) // publish only after both persists succeed
+		d.seenBranches = nil    // new store, new genesis — stale fingerprints are invalid
+		d.retainedEntries = nil // same lifetime as seenBranches; lazily allocated in rememberHeadLocked
+		d.trust.Store(store)    // publish only after both persists succeed
 		// The node that runs lock.init is the network's first trust anchor: its own
 		// `lock status` is what every other device compares its fingerprint against,
 		// so the pin has to be visible immediately, not after a restart.

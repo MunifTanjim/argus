@@ -95,6 +95,24 @@ func TestEntryStoreDedupesByHash(t *testing.T) {
 	}
 }
 
+func TestEntryStoreHeadIsTheLastEntry(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOfES(t, testChainES(t))
+	s.PutAll(raw)
+
+	heads := s.Heads()
+	if len(heads) != 1 {
+		t.Fatalf("got %d heads, want 1", len(heads))
+	}
+	last, err := UnmarshalEntry(raw[len(raw)-1])
+	if err != nil {
+		t.Fatalf("UnmarshalEntry: %v", err)
+	}
+	if string(heads[0]) != string(HashEntry(&last)) {
+		t.Fatalf("head is not the identity of the last entry")
+	}
+}
+
 func TestEntryStoreAppendDoesNotCreateASecondHead(t *testing.T) {
 	s := NewEntryStore()
 	short, extended := testChainPairES(t)
