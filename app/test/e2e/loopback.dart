@@ -156,13 +156,11 @@ class MultiNodeLoopbackLink implements RpcLink {
   /// answer trustlog.sync with the correct delta for the caller's heads.
   final EntryStore _entryStore = EntryStore();
 
-  /// Sets the trust chain the gateway serves on `trustlog.sync`. Mutable so a
-  /// test can advance it (simulating a mid-session `lock revoke`) between
-  /// re-syncs. Each assignment replaces the store's content with the new chain.
+  /// Accumulates entries from [chain] into the gateway's entry store, serving
+  /// the differential delta on `trustlog.sync`. Mutable so a test can advance
+  /// the chain (simulating a mid-session `lock revoke`) between re-syncs.
   set trustChain(Uint8List chain) {
-    try {
-      _entryStore.putAll(chainEntries(chain));
-    } catch (_) {}
+    _entryStore.putAll(chainEntries(chain));
   }
 
   final _ctrl = StreamController<RpcMessage>();

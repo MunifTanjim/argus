@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
+import 'package:argus/transport/connection.dart' show RpcLink;
+import 'package:argus/transport/jsonrpc.dart';
 
 import 'loopback.dart';
 
@@ -14,68 +17,98 @@ Map<String, dynamic> _tl() =>
 Uint8List _b(Map<String, dynamic> v, String k) =>
     Uint8List.fromList(base64.decode(v[k] as String));
 
+// Minimal RpcLink whose gateway responses are driven by [onSend].
+class _CallbackLink implements RpcLink {
+  _CallbackLink(this._onSend) : _ctrl = StreamController<RpcMessage>();
+
+  final void Function(Map<String, dynamic> j, _CallbackLink self) _onSend;
+  final StreamController<RpcMessage> _ctrl;
+
+  void push(Object response) =>
+      _ctrl.add(RpcMessage.fromJson(jsonDecode(jsonEncode(response)) as Map<String, dynamic>));
+
+  @override
+  Stream<RpcMessage> get incoming => _ctrl.stream;
+
+  @override
+  void send(String frame) {
+    for (final part in frame.split('\n')) {
+      if (part.trim().isEmpty) continue;
+      _onSend(jsonDecode(part) as Map<String, dynamic>, this);
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    if (!_ctrl.isClosed) await _ctrl.close();
+  }
+}
+
 void main() {
   group('trustlog.sync invariant', () {
-    test('store at ceiling must not record the head of an unretained branch', () {
-      // Structural: EntryStore only records a head if the entry was stored.
-      // If put refuses (ceiling), the head must not appear in heads().
-      // We cannot drive the 1<<16 ceiling in a unit test, but we can verify
-      // the contract that a refused entry is not in the head set.
+    test('loss scenario: retained entries enable assembly of a partial delta', () async {
+      // Client starts with fork_chain=[genesis,authB] as its trust anchor.
+      // Phase 1 (connect): gateway sends chain=[genesis,authA]; client assembles
+      //   both chain and fork_chain (fork_chain wins, trust.chainBytes=fork_chain),
+      //   retains authA in _seenBranches.
+      // Phase 2 (resyncNow): gateway sends ONLY the disable entry (prev=authA).
+      //   Client must reconstruct disabled_chain=[genesis,authA,disable] from the
+      //   retained authA — which is absent from trust.chainBytes (=fork_chain).
       //
-      // Since the real ceiling cannot be hit without generating 65536 valid
-      // signed entries, we verify the invariant property: the head set is a
-      // strict subset of what was actually stored (refused entries are absent).
+      // Without retention authA is missing from the merge; disable has no reachable
+      // ancestor and disabled_chain cannot be assembled.
       final v = _tl();
-      final entries = chainEntries(_b(v, 'chain'));
-      final store = EntryStore();
-      store.putAll(entries);
-      final headsBefore = store.heads();
-      // Garbage is not stored (decode failure) and must not appear as a head.
-      store.put(Uint8List.fromList(utf8.encode('garbage')));
-      expect(store.heads().length, headsBefore.length,
-          reason: 'a refused/failed entry must not create a new head');
-    });
+      final chainXRaw = _b(v, 'chain');            // [genesis, authA]
+      final chainYRaw = _b(v, 'fork_chain');        // [genesis, authB]
+      final disabledRaw = _b(v, 'disabled_chain'); // [genesis, authA, disable]
+      final genesisHash = _b(v, 'genesis_head');
 
-    test('loss scenario: retained entries from a rejected branch can be assembled', () async {
-      // The client wins branch X (chain) over fork Y (fork_chain). Both share
-      // the same genesis. If the client retains Y's entries in its store, it
-      // can assemble Y into a complete chain and ingest it if fork-choice later
-      // swings (e.g., a disable entry arrives on Y). This mirrors the Go test
-      // TestClientSyncTrustChainsRetainsRejectedBranch.
-      final v = _tl();
-      final chainX = _b(v, 'chain');
-      final chainY = _b(v, 'fork_chain');
-      final genesis = _b(v, 'genesis_head');
+      final chainXEntries = chainEntries(chainXRaw);
+      final disableEntryB64 = base64.encode(chainEntries(disabledRaw)[2]); // just disable
 
-      final store = EntryStore();
-      // Client holds X.
-      store.putAll(chainEntries(chainX));
-      // Client received-and-rejected Y (stored raw entries despite fork-choice rejection).
-      store.putAll(chainEntries(chainY));
+      int syncPhase = 0;
+      final link = _CallbackLink((j, self) {
+        final id = j['id'];
+        switch (j['method'] as String?) {
+          case 'nodes.list':
+            self.push({'jsonrpc': '2.0', 'id': id, 'result': {'nodes': []}});
+          case 'trustlog.sync':
+            // Phase 0 (connect's sync): send chain=[genesis,authA] so client
+            // retains authA. Phase 1+ (resyncNow): send ONLY the disable entry.
+            final entries = syncPhase == 0
+                ? [for (final e in chainXEntries) base64.encode(e)]
+                : [disableEntryB64];
+            syncPhase++;
+            self.push({
+              'jsonrpc': '2.0',
+              'id': id,
+              'result': {'entries': entries, 'want': []},
+            });
+        }
+      });
 
-      // Both X's head and Y's head are in the entry store.
-      expect(store.heads().length, 2,
-          reason: 'both branch heads must be retained');
+      // Seed with fork_chain so trust.chainBytes=fork_chain after ingest.
+      // authA is therefore NOT in trust.chainBytes — only in the entry store.
+      final client = E2EClient(
+        link.incoming,
+        link.send,
+        await generateKeyPair(),
+        genesisHash: genesisHash,
+        initialTrustChain: chainYRaw,
+      );
 
-      // Assembling from all stored entries yields both chains.
-      final (allEntries, _) = store.delta([]);
-      final chains = assembleChains(allEntries);
-      expect(chains.length, 2,
-          reason: 'retained Y enables assembly of both chains');
+      // Phase 1: connect seeds fork_chain, then syncs and gets chain=[genesis,authA].
+      await client.connect();
+      // Phase 2: resyncNow sends only the disable entry.
+      // The client rebuilds disabled_chain using retained authA.
+      await client.resyncNow();
 
-      // Y's chain must be valid — TrustStore can ingest it.
-      var yIngested = false;
-      for (final c in chains) {
-        if (bytesEqual(c, chainX)) continue;
-        final ts = TrustStore(genesis);
-        try {
-          await ts.ingest(c);
-          yIngested = true;
-        } catch (_) {}
-      }
-      expect(yIngested, isTrue,
-          reason: 'assembled fork Y must be ingestible — extension entries built '
-              'on Y\'s head can be attached and verified');
+      expect(client.isDisabled, isTrue,
+          reason: 'disabled_chain must be assembled and ingested '
+              'using authA retained from phase 1; '
+              'without retention authA is absent and assembly fails');
+
+      await client.close();
     });
 
     test('existing-behaviour: a revoked device stops being authorized after a sync', () async {

@@ -34,7 +34,9 @@ List<Uint8List> chainEntries(Uint8List chain) {
 ///
 /// The raw entry bytes are used as-is (never re-encoded through marshalEntry),
 /// so the chain bytes are byte-identical to what the gateway would have sent.
-List<Uint8List> assembleChains(List<Uint8List> rawEntries) {
+/// Also reports how many input entries could not be placed into any complete
+/// chain — non-zero means at least one entry has a Prev absent from the input.
+(List<Uint8List> chains, int unplaced) assembleChainsReport(List<Uint8List> rawEntries) {
   final byHash = <String, (Entry, Uint8List)>{};
   for (final raw in rawEntries) {
     Entry e;
@@ -56,6 +58,7 @@ List<Uint8List> assembleChains(List<Uint8List> rawEntries) {
   }
 
   final chains = <Uint8List>[];
+  var placed = 0;
 
   for (final head in byHash.keys) {
     if (referenced.contains(head)) continue;
@@ -78,6 +81,7 @@ List<Uint8List> assembleChains(List<Uint8List> rawEntries) {
     }
     if (!ok) continue;
 
+    placed += reversed.length;
     final buf = BytesBuilder();
     putUint32(buf, reversed.length);
     for (final h in reversed.reversed) {
@@ -87,5 +91,9 @@ List<Uint8List> assembleChains(List<Uint8List> rawEntries) {
     }
     chains.add(buf.toBytes());
   }
-  return chains;
+  return (chains, byHash.length - placed);
 }
+
+/// Convenience wrapper around [assembleChainsReport] that discards the unplaced count.
+List<Uint8List> assembleChains(List<Uint8List> rawEntries) =>
+    assembleChainsReport(rawEntries).$1;

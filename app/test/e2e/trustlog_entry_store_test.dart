@@ -120,8 +120,8 @@ void main() {
         final v = _tl();
         final entries = _rawEntries(_b(v, 'chain'));
         expect(entries.length, greaterThanOrEqualTo(2));
-        setMaxRetainedEntriesForTest(1);
-        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+        final prevCeiling = setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(prevCeiling));
 
         final store = EntryStore();
         final (stored, refused) = store.put(entries[0]);
@@ -137,8 +137,8 @@ void main() {
         final v = _tl();
         final entries = _rawEntries(_b(v, 'chain'));
         expect(entries.length, greaterThanOrEqualTo(2));
-        setMaxRetainedEntriesForTest(1);
-        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+        final prevCeiling = setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(prevCeiling));
 
         final store = EntryStore();
         store.put(entries[0]); // fills to ceiling
@@ -157,8 +157,8 @@ void main() {
         final v = _tl();
         final entries = _rawEntries(_b(v, 'chain'));
         expect(entries.length, greaterThanOrEqualTo(2));
-        setMaxRetainedEntriesForTest(1);
-        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+        final prevCeiling = setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(prevCeiling));
 
         final store = EntryStore();
         store.put(entries[0]); // fills ceiling with genesis

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../bytes.dart' show hexEncode;
 import 'codec.dart' show hashEntry, unmarshalEntry;
 import 'entry.dart' show Entry;
@@ -9,10 +11,15 @@ import 'entry.dart' show Entry;
 // inserts past the ceiling are refused.
 int _maxRetainedEntries = 1 << 16;
 
-/// Overrides the entry store ceiling for the duration of a test. Restore the
-/// previous value in [addTearDown] so a lowered ceiling cannot leak into
-/// sibling tests. Test-only — matches Go's [SetMaxRetainedEntriesForTest].
-void setMaxRetainedEntriesForTest(int n) => _maxRetainedEntries = n;
+/// Overrides the entry store ceiling and returns the previous value. Pass the
+/// returned value to [addTearDown] to restore it after the test. Test-only —
+/// matches Go's [SetMaxRetainedEntriesForTest].
+@visibleForTesting
+int setMaxRetainedEntriesForTest(int n) {
+  final prev = _maxRetainedEntries;
+  _maxRetainedEntries = n;
+  return prev;
+}
 
 /// Holds raw trust-log entries keyed by entry hash. Intentionally blind: parses
 /// only each entry's own hash and its Prev pointer — never a signature, a kind,
