@@ -97,7 +97,7 @@ class EntryStore {
 
   /// Returns every retained entry, parents before children.
   List<Uint8List> all() {
-    final (entries, _) = delta([]);
+    final (entries, _, _) = delta([]);
     return entries;
   }
 
@@ -114,24 +114,24 @@ class EntryStore {
     ];
   }
 
-  /// Returns every retained entry the caller cannot reach by walking Prev from
-  /// [knownHeads], ordered parents-before-children. Also returns caller heads
-  /// this store does not hold as the second element.
-  (List<Uint8List> entries, List<Uint8List> want) delta(List<Uint8List> knownHeads) {
-    final reachable = <String>{};
+  /// Returns every retained entry the caller did not list in [known], ordered
+  /// parents-before-children. Also returns in [want] the listed hashes this
+  /// store does not hold. [disjoint] is true when [known] is non-empty and
+  /// shares no entry with this store. This is set subtraction: the gateway
+  /// does not assume the caller holds a listed entry's ancestry.
+  (List<Uint8List> entries, List<Uint8List> want, bool disjoint) delta(
+      List<Uint8List> known) {
+    final held = <String, bool>{};
     final want = <Uint8List>[];
+    var shared = 0;
 
-    for (final h in knownHeads) {
+    for (final h in known) {
       final key = hexEncode(h);
-      if (!_byHash.containsKey(key)) {
+      if (_byHash.containsKey(key)) {
+        held[key] = true;
+        shared++;
+      } else {
         want.add(Uint8List.fromList(h));
-        continue;
-      }
-      var cur = key;
-      while (cur.isNotEmpty) {
-        if (reachable.contains(cur)) break;
-        reachable.add(cur);
-        cur = _prev[cur] ?? '';
       }
     }
 
@@ -139,17 +139,21 @@ class EntryStore {
     final result = <Uint8List>[];
 
     void emit(String h) {
-      if (h.isEmpty || emitted.contains(h) || reachable.contains(h)) return;
+      if (h.isEmpty || emitted.contains(h)) return;
       if (!_byHash.containsKey(h)) return;
+      // Always recurse into prev so ancestors of a held hash are not withheld;
+      // skip only the append when held, not the descent.
       emit(_prev[h] ?? '');
       emitted.add(h);
-      result.add(Uint8List.fromList(_byHash[h]!));
+      if (!held.containsKey(h)) {
+        result.add(Uint8List.fromList(_byHash[h]!));
+      }
     }
 
     for (final h in heads()) {
       emit(hexEncode(h));
     }
-    return (result, want);
+    return (result, want, known.isNotEmpty && shared == 0);
   }
 
   Uint8List _hexToBytes(String h) {

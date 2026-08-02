@@ -68,42 +68,57 @@ void main() {
       expect(refused, isFalse);
     });
 
-    test('delta with empty known-heads returns all retained entries', () {
+    test('delta with empty known returns all retained entries', () {
       final v = _tl();
       final entries = _rawEntries(_b(v, 'chain'));
       final store = EntryStore();
       store.putAll(entries);
-      final (all, want) = store.delta([]);
+      final (all, want, _) = store.delta([]);
       expect(all.length, entries.length,
-          reason: 'no known heads: receive everything');
+          reason: 'empty known: receive everything');
       expect(want, isEmpty);
     });
 
-    test('delta withholds what the caller can reach from its known heads', () {
+    test('delta with every hash known returns nothing', () {
       final v = _tl();
       final store = EntryStore();
       store.putAll(_rawEntries(_b(v, 'chain')));
-      final (diff, want) = store.delta(store.heads());
+      final (hashes, _) = store.hashes();
+      final (diff, want, _) = store.delta(hashes);
       expect(diff, isEmpty,
-          reason: 'caller holds the head: nothing to receive');
+          reason: 'caller listing all entry hashes must receive nothing');
       expect(want, isEmpty);
     });
 
-    test('delta reports unknown caller heads in want', () {
+    test('delta sends ancestors of a known entry that are not themselves known',
+        () {
+      final v = _tl();
+      final entries = _rawEntries(_b(v, 'chain'));
+      expect(entries.length, greaterThanOrEqualTo(2));
+      final store = EntryStore();
+      store.putAll(entries);
+      // List only the last entry (child) — its ancestors must still be sent.
+      final childHash = hashEntry(unmarshalEntry(entries.last));
+      final (diff, _, _) = store.delta([childHash]);
+      expect(diff.length, entries.length - 1,
+          reason: 'ancestors of a listed entry must be served if not listed');
+    });
+
+    test('delta reports unknown hashes in want', () {
       final v = _tl();
       final store = EntryStore();
       store.putAll(_rawEntries(_b(v, 'chain')));
-      final unknownHead = Uint8List(32)..fillRange(0, 32, 0xAB);
-      final (_, want) = store.delta([unknownHead]);
-      expect(want.length, 1, reason: 'unknown head must appear in want');
-      expect(want[0], equals(unknownHead));
+      final unknownHash = Uint8List(32)..fillRange(0, 32, 0xAB);
+      final (_, want, _) = store.delta([unknownHash]);
+      expect(want.length, 1, reason: 'unknown hash must appear in want');
+      expect(want[0], equals(unknownHash));
     });
 
     test('delta orders parents before children', () {
       final v = _tl();
       final store = EntryStore();
       store.putAll(_rawEntries(_b(v, 'chain')));
-      final (all, _) = store.delta([]);
+      final (all, _, _) = store.delta([]);
       final seenHashes = <String>{};
       for (final raw in all) {
         final e = unmarshalEntry(raw);
@@ -184,7 +199,7 @@ void main() {
       expect(entries.length, greaterThanOrEqualTo(2));
       final store = EntryStore();
       store.put(entries[1]); // non-genesis without its parent
-      final (all, _) = store.delta([]);
+      final (all, _, _) = store.delta([]);
       expect(all.length, 1, reason: 'orphan must be retained and served');
     });
 
