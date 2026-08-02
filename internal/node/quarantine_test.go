@@ -242,29 +242,52 @@ func TestEnforcingNodeIgnoresForeignGenesis(t *testing.T) {
 // The gateway signals via Want that it needs our chain; the node must push.
 func TestSupersededNodeStillOffersItsChain(t *testing.T) {
 	d := disabledChainNode(t)
-	foreign, _ := lockedChainForTest(t)
-	// fakeTrustPeer doesn't support Want — use a fakeTrustCaller to simulate the
-	// gateway requesting our disabled chain.
-	var offers int
+	// Seed retainedEntries: one sync with an empty result makes the node retain
+	// its own disabled chain so the hashes appear in Known on the next call.
+	d.syncTrustChains(&fakeTrustCaller{fn: func(string, any, any) error { return nil }})
+
+	// A real gateway derives Want from the Known list it received, so it can only
+	// request hashes the node actually offered. Echo Known back as Want.
+	var pushedEntries [][]byte
 	peer := &fakeTrustCaller{
 		fn: func(method string, params, out any) error {
 			switch method {
 			case api.MethodTrustLogSync:
-				res := out.(*api.TrustLogSyncResult)
-				raw, _ := trustlog.ChainEntries(foreign)
-				res.Entries = raw
-				res.Want = [][]byte{bytes.Repeat([]byte{0x01}, 32)}
+				p := params.(api.TrustLogSyncParams)
+				out.(*api.TrustLogSyncResult).Want = p.Known
 			case api.MethodTrustLogPush:
-				offers++
+				pp := params.(api.TrustLogPushParams)
+				pushedEntries = append(pushedEntries, pp.Entries...)
 			}
 			return nil
 		},
 	}
+	d.syncTrustChains(peer)
 
-	d.syncTrustOnce(peer)
-
-	if offers == 0 {
+	if len(pushedEntries) == 0 {
 		t.Fatal("a superseded node must push its disabled chain when the gateway asks")
+	}
+	// Verify the push contains the disabled chain's entries, not just any entries.
+	pushedHashes := map[string]bool{}
+	for _, raw := range pushedEntries {
+		e, err := trustlog.UnmarshalEntry(raw)
+		if err != nil {
+			continue
+		}
+		pushedHashes[string(trustlog.HashEntry(&e))] = true
+	}
+	disabledRaw, err := trustlog.ChainEntries(d.TrustStore().Bytes())
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	for _, raw := range disabledRaw {
+		e, uerr := trustlog.UnmarshalEntry(raw)
+		if uerr != nil {
+			continue
+		}
+		if !pushedHashes[string(trustlog.HashEntry(&e))] {
+			t.Fatal("pushed entries do not include the disabled chain's entries")
+		}
 	}
 }
 
