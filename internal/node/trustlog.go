@@ -130,13 +130,18 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	}
 	re := d.retainedEntries
 	d.pinMu.Unlock()
+	// Compute own entries once: seed the store before knownHashes so the offer
+	// always reflects locally-held entries (including after a restart), then
+	// reuse for the merge. PutAll is idempotent for already-present entries.
+	var ownEntries [][]byte
 	if st := d.trust.Load(); st != nil {
 		if mine := st.Bytes(); mine != nil {
 			if raw, err := trustlog.ChainEntries(mine); err == nil {
-				re.PutAll(raw)
+				ownEntries = raw
 			}
 		}
 	}
+	re.PutAll(ownEntries)
 	known, truncated := d.knownHashes()
 	var got api.TrustLogSyncResult
 	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Known: known, Truncated: truncated}, &got); err != nil {
@@ -151,13 +156,7 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	}
 
 	merged := append([][]byte{}, got.Entries...)
-	if st := d.trust.Load(); st != nil {
-		if mine := st.Bytes(); mine != nil {
-			if raw, err := trustlog.ChainEntries(mine); err == nil {
-				merged = append(merged, raw...)
-			}
-		}
-	}
+	merged = append(merged, ownEntries...)
 	if retained := re.All(); len(retained) > 0 {
 		merged = append(merged, retained...)
 	}
