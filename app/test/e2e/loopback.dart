@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:argus/e2e/e2e.dart';
+import 'package:argus/e2e/trustlog/codec.dart' show hashEntry, unmarshalEntry;
 import 'package:argus/transport/connection.dart' show RpcLink;
 import 'package:argus/transport/jsonrpc.dart';
 
@@ -214,27 +215,61 @@ class MultiNodeLoopbackLink implements RpcLink {
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':
-        // Honour the caller's heads: return only entries it cannot reach.
-        // When heads is empty, all stored entries are returned (correct delta).
+        // Read 'known' (new offer protocol) and fall back to 'heads' while both
+        // coexist. 'known' lists every entry hash the caller holds; the gateway
+        // computes the delta by set subtraction (mirrors Go gateway.Delta).
+        // 'heads' uses the older ancestry-inference path for backward compat.
         final params = j['params'];
+        final rawKnown = params is Map ? params['known'] : null;
         final rawHeads = params is Map ? params['heads'] : null;
-        final knownHeads = <Uint8List>[];
-        if (rawHeads is List) {
-          for (final h in rawHeads) {
+        List<Uint8List> entries;
+        bool disjoint = false;
+        if (rawKnown is List) {
+          // Decode the caller's offered hashes (base64 binary → hex for comparison).
+          final knownHex = <String>{};
+          for (final h in rawKnown) {
             if (h is String && h.isNotEmpty) {
               try {
-                knownHeads.add(Uint8List.fromList(base64.decode(h)));
+                knownHex.add(hexEncode(Uint8List.fromList(base64.decode(h))));
               } catch (_) {}
             }
           }
+          // Set subtraction: return every entry whose hash is not in knownHex.
+          final all = _entryStore.all();
+          entries = [
+            for (final raw in all)
+              if (!knownHex.contains(hexEncode(hashEntry(unmarshalEntry(raw)))))
+                raw,
+          ];
+          // disjoint: non-empty known shares no entry with this store.
+          if (knownHex.isNotEmpty) {
+            final storeHex = {
+              for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw)))
+            };
+            disjoint = knownHex.every((h) => !storeHex.contains(h));
+          }
+        } else {
+          final knownHeads = <Uint8List>[
+            for (final h in rawHeads is List ? rawHeads : <dynamic>[])
+              if (h is String && h.isNotEmpty)
+                ...() {
+                  try {
+                    return [Uint8List.fromList(base64.decode(h))];
+                  } catch (_) {
+                    return <Uint8List>[];
+                  }
+                }(),
+          ];
+          final (delta, _) = _entryStore.delta(knownHeads);
+          entries = delta;
         }
-        final (entries, _) = _entryStore.delta(knownHeads);
         _push(jsonEncode({
           'jsonrpc': '2.0',
           'id': id,
           'result': {
             'entries': [for (final e in entries) base64.encode(e)],
             'want': <String>[],
+            if (disjoint) 'disjoint': true,
           },
         }));
     }

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
+import 'package:argus/e2e/trustlog/entry_store.dart' show setMaxOfferedHashesForTest;
 
 Map<String, dynamic> _tl() =>
     (jsonDecode(File('test/e2e/testdata/vectors.json').readAsStringSync())
@@ -185,6 +186,48 @@ void main() {
       store.put(entries[1]); // non-genesis without its parent
       final (all, _) = store.delta([]);
       expect(all.length, 1, reason: 'orphan must be retained and served');
+    });
+
+    group('hashes', () {
+      test('hashes lists every retained entry', () {
+        final v = _tl();
+        final raw = _rawEntries(_b(v, 'chain'));
+        final store = EntryStore();
+        store.putAll(raw);
+        final (hashes, truncated) = store.hashes();
+        expect(truncated, isFalse);
+        expect(hashes.length, raw.length);
+      });
+
+      test('hashes truncates at the cap', () {
+        final prev = setMaxOfferedHashesForTest(1);
+        addTearDown(() => setMaxOfferedHashesForTest(prev));
+        final v = _tl();
+        final store = EntryStore();
+        store.putAll(_rawEntries(_b(v, 'chain')));
+        final (hashes, truncated) = store.hashes();
+        expect(truncated, isTrue);
+        expect(hashes.length, 1);
+      });
+    });
+
+    test('all returns every retained entry parents-first', () {
+      final v = _tl();
+      final store = EntryStore();
+      store.putAll(_rawEntries(_b(v, 'chain')));
+      store.putAll(_rawEntries(_b(v, 'fork_chain')));
+      final all = store.all();
+      expect(all.length, greaterThan(0));
+      final seenHashes = <String>{};
+      for (final raw in all) {
+        final e = unmarshalEntry(raw);
+        final prev = e.prev;
+        if (prev != null && prev.isNotEmpty) {
+          expect(seenHashes, contains(hexEncode(prev)),
+              reason: 'child emitted before its parent');
+        }
+        seenHashes.add(hexEncode(hashEntry(e)));
+      }
     });
   });
 }

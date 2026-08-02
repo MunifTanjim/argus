@@ -10,7 +10,7 @@ import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
 import '../transport/rpc_client.dart';
 import 'aggregate.dart';
 import 'beacon.dart';
-import 'bytes.dart' show bytesEqual, hexDecode, hexEncode;
+import 'bytes.dart' show bytesEqual, hexEncode;
 import 'channel.dart';
 import 'handshake.dart';
 import 'keypair.dart';
@@ -92,14 +92,12 @@ class E2EClient implements GatewayClient {
   final TrustStore? _trust;
   final Uint8List? _initialTrustChain;
   final _entryStore = EntryStore();
-  // Hashes (hex) of chain tips that have been fully retained — mirrors Go's
-  // seenBranches. Only heads of chains whose entries are all stored are
-  // advertised; advertising a raw store tip can violate the sync invariant if
-  // any ancestor is missing (the gateway withholds it thinking the client holds it).
-  final _seenBranches = <String>{};
   // Last unplaced count that triggered a warning. 0 means no active warning;
   // reset to 0 when the count returns to 0 so a later recurrence is reported again.
   int _lastUnplacedLogged = 0;
+  // Latch for the disjoint warning: log on false→true, stay quiet while true,
+  // reset to false when the flag clears so a later recurrence is reported again.
+  bool _lastDisjointLogged = false;
 
   /// When set (with a trust store), the client periodically re-pulls the trust
   /// log so mid-session revocations take effect; null disables background re-sync.
@@ -300,16 +298,37 @@ class E2EClient implements GatewayClient {
   }
 
   /// Calls trustlog.sync, stores returned raw entries, assembles complete
-  /// genesis-rooted chains, and ingests each into [trust]. Advertises only heads
-  /// of chains that were fully retained ([_seenBranches]) — never raw store tips,
-  /// which can include orphans whose ancestry the gateway would then withhold.
-  /// Throws on RPC error (caller decides whether to swallow).
+  /// genesis-rooted chains, and ingests each into [trust]. Derives the offer
+  /// from the entry store at call time — every retained entry hash is advertised,
+  /// so the gateway computes the delta by set subtraction. Throws on RPC error
+  /// (caller decides whether to swallow).
   Future<void> _syncTrustLog(TrustStore trust) async {
-    final knownHeads = [for (final h in _seenBranches) hexDecode(h)];
+    // Seed from the verified trust chain first so the offer always reflects
+    // what is locally held, including on the first call after a restart.
+    final cb = trust.chainBytes;
+    if (cb != null) {
+      try {
+        _entryStore.putAll(chainEntries(cb));
+      } catch (_) {}
+    }
+
+    final (known, truncated) = _entryStore.hashes();
     final result = await _gateway.call('trustlog.sync', {
-      'heads': [for (final h in knownHeads) base64.encode(h)],
+      'known': [for (final h in known) base64.encode(h)],
+      if (truncated) 'truncated': true,
     });
     if (result is Map) {
+      final disjoint = result['disjoint'] == true;
+      if (disjoint && !_lastDisjointLogged) {
+        developer.log(
+          'trust log: this device shares no history with the network\'s; '
+          'it is likely pinned to a different trust root',
+          name: 'e2e',
+          level: 900,
+        );
+      }
+      _lastDisjointLogged = disjoint;
+
       final rawList = result['entries'];
       if (rawList is List) {
         final entries = <Uint8List>[
@@ -326,17 +345,17 @@ class E2EClient implements GatewayClient {
         }
       }
     }
-    // Merge trust.chainBytes (verified current chain, not in store) with all
-    // retained entries. Mirrors Go: trust.Bytes() + retainedEntries.Delta(nil).
+
+    // Merge trust.chainBytes with all retained entries (all branches, including
+    // those that lost fork-choice). Mirrors Go: trust.Bytes() + re.All().
     final merged = <Uint8List>[];
-    final cb = trust.chainBytes;
-    if (cb != null) {
+    final cb2 = trust.chainBytes;
+    if (cb2 != null) {
       try {
-        merged.addAll(chainEntries(cb));
+        merged.addAll(chainEntries(cb2));
       } catch (_) {}
     }
-    final (retained, _) = _entryStore.delta([]);
-    merged.addAll(retained);
+    merged.addAll(_entryStore.all());
 
     final (chains, unplaced) = assembleChainsReport(merged);
     final prevUnplaced = _lastUnplacedLogged;
@@ -348,34 +367,28 @@ class E2EClient implements GatewayClient {
         level: 900,
       );
     }
+
+    var refused = 0;
     for (final chain in chains) {
-      _rememberHead(chain);
+      List<Uint8List> raw;
+      try {
+        raw = chainEntries(chain);
+      } catch (_) {
+        continue;
+      }
+      final (_, r) = _entryStore.putAll(raw);
+      refused += r;
       try {
         await trust.ingest(chain);
       } catch (_) {/* bad branch: skip, keep best state so far */}
     }
-  }
-
-  /// Records chain's tip in [_seenBranches] if every entry was retained. Mirrors
-  /// Go's rememberHead: a head is only advertised when no ancestry is missing,
-  /// so the gateway never withholds ancestors it assumes the client already holds.
-  void _rememberHead(Uint8List chain) {
-    List<Uint8List> raw;
-    try {
-      raw = chainEntries(chain);
-    } catch (_) {
-      return;
+    if (refused > 0) {
+      developer.log(
+        'trust-log entry store at ceiling; entries refused after assembly: $refused',
+        name: 'e2e',
+        level: 900,
+      );
     }
-    final (_, refused) = _entryStore.putAll(raw);
-    if (refused > 0) return;
-    List<Entry> entries;
-    try {
-      entries = unmarshalChain(chain);
-    } catch (_) {
-      return;
-    }
-    if (entries.isEmpty) return;
-    _seenBranches.add(hexEncode(hashEntry(entries.last)));
   }
 
   /// Closes channels to nodes no longer authorized by the current trust log.

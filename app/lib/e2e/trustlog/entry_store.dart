@@ -21,12 +21,28 @@ int setMaxRetainedEntriesForTest(int n) {
   return prev;
 }
 
+// Two orders of magnitude above any realistic log and well below
+// _maxRetainedEntries. Truncating is safe: the protocol is set subtraction,
+// so an under-reporting caller receives entries it already holds, which dedupe
+// by hash on arrival.
+int _maxOfferedHashes = 4096;
+
+/// Overrides the offer cap and returns the previous value. Pass the returned
+/// value to [addTearDown] to restore it after the test. Test-only — matches
+/// Go's [SetMaxOfferedHashesForTest].
+@visibleForTesting
+int setMaxOfferedHashesForTest(int n) {
+  final prev = _maxOfferedHashes;
+  _maxOfferedHashes = n;
+  return prev;
+}
+
 /// Holds raw trust-log entries keyed by entry hash. Intentionally blind: parses
 /// only each entry's own hash and its Prev pointer — never a signature, a kind,
 /// or any payload.
 ///
-/// Lifetime coupling: the retained entry set and the advertised head set share
-/// the same in-memory lifetime. After a restart both are empty, so the client
+/// Lifetime coupling: the retained entry set and the advertised offer share the
+/// same in-memory lifetime. After a restart both are empty, so the client
 /// advertises nothing and receives everything from the gateway — no
 /// partial-sync gap can arise.
 class EntryStore {
@@ -64,6 +80,25 @@ class EntryStore {
       if (r) refused++;
     }
     return (added, refused);
+  }
+
+  /// Lists the hash of every retained entry, for a sync offer. [truncated] is
+  /// true when the store holds more than [_maxOfferedHashes] entries and the
+  /// list is partial. Truncating is safe: the protocol is set subtraction, so
+  /// an under-reporting caller receives entries it already holds.
+  (List<Uint8List> hashes, bool truncated) hashes() {
+    final result = <Uint8List>[];
+    for (final h in _byHash.keys) {
+      if (result.length >= _maxOfferedHashes) return (result, true);
+      result.add(_hexToBytes(h));
+    }
+    return (result, false);
+  }
+
+  /// Returns every retained entry, parents before children.
+  List<Uint8List> all() {
+    final (entries, _) = delta([]);
+    return entries;
   }
 
   /// Returns the hash of every retained entry that no other retained entry

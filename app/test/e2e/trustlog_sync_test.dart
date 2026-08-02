@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
+import 'package:argus/e2e/trustlog/codec.dart' show hashEntry, unmarshalEntry;
 import 'package:argus/transport/connection.dart' show RpcLink;
 import 'package:argus/transport/jsonrpc.dart';
 
@@ -107,6 +108,70 @@ void main() {
           reason: 'disabled_chain must be assembled and ingested '
               'using authA retained from phase 1; '
               'without retention authA is absent and assembly fails');
+
+      await client.close();
+    });
+
+    test('rejected same-genesis branch is not re-downloaded on the next sync', () async {
+      // Client starts seeded with chain=[genesis,authA] as its trust anchor.
+      // First sync: gateway returns fork_chain=[genesis,authB] (same genesis, loses fork-choice).
+      // Second sync: the offer's known must include authB's hash so the gateway
+      // does not re-send it, proving retention works.
+      final v = _tl();
+      final chainRaw = _b(v, 'chain');           // [genesis, authA] — winner
+      final forkChainRaw = _b(v, 'fork_chain'); // [genesis, authB] — same genesis
+      final genesisHash = _b(v, 'genesis_head');
+
+      final forkEntries = chainEntries(forkChainRaw);
+
+      int syncPhase = 0;
+      Map<String, dynamic>? capturedSecondOffer;
+
+      final link = _CallbackLink((j, self) {
+        final id = j['id'];
+        switch (j['method'] as String?) {
+          case 'nodes.list':
+            self.push({'jsonrpc': '2.0', 'id': id, 'result': {'nodes': []}});
+          case 'trustlog.sync':
+            final params = j['params'];
+            if (syncPhase == 0) {
+              // First sync: return fork_chain entries so client retains authB.
+              self.push({
+                'jsonrpc': '2.0',
+                'id': id,
+                'result': {'entries': [for (final e in forkEntries) base64.encode(e)], 'want': []},
+              });
+            } else {
+              capturedSecondOffer = params is Map<String, dynamic> ? params : null;
+              self.push({'jsonrpc': '2.0', 'id': id, 'result': {'entries': [], 'want': []}});
+            }
+            syncPhase++;
+        }
+      });
+
+      // Seed with chain so trust.chainBytes=chain after ingest. authB is therefore
+      // NOT in trust.chainBytes — only in the entry store after first sync.
+      final client = E2EClient(
+        link.incoming,
+        link.send,
+        await generateKeyPair(),
+        genesisHash: genesisHash,
+        initialTrustChain: chainRaw,
+      );
+
+      await client.connect();   // first sync: gets fork_chain, retains authB
+      await client.resyncNow(); // second sync: offer must include authB's hash
+
+      expect(capturedSecondOffer, isNotNull);
+      final knownB64 = (capturedSecondOffer!['known'] as List?)?.cast<String>() ?? <String>[];
+      final knownSet = <String>{...knownB64};
+
+      for (final entry in forkEntries) {
+        final e = unmarshalEntry(entry);
+        final hashB64 = base64.encode(hashEntry(e));
+        expect(knownSet, contains(hashB64),
+            reason: 'second offer must include rejected-fork entry hash to avoid re-download');
+      }
 
       await client.close();
     });
