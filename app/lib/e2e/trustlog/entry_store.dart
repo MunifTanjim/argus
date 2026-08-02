@@ -141,10 +141,13 @@ class EntryStore {
     void emit(String h) {
       if (h.isEmpty || emitted.contains(h)) return;
       if (!_byHash.containsKey(h)) return;
+      // Mark visited before recursing so a prev cycle terminates here rather
+      // than overflowing the stack. Parents-before-children still holds: the
+      // append is after emit(prev) returns, so ancestors are always emitted first.
+      emitted.add(h);
       // Always recurse into prev so ancestors of a held hash are not withheld;
       // skip only the append when held, not the descent.
       emit(_prev[h] ?? '');
-      emitted.add(h);
       if (!held.containsKey(h)) {
         result.add(Uint8List.fromList(_byHash[h]!));
       }
@@ -154,6 +157,16 @@ class EntryStore {
       emit(hexEncode(h));
     }
     return (result, want, known.isNotEmpty && shared == 0);
+  }
+
+  /// Bypasses [put] to inject a raw (hash, bytes, prevHash) triple directly
+  /// into the internal maps. Test-only — used to construct prev cycles that a
+  /// well-formed hash-linked log cannot produce. Never call in production code.
+  @visibleForTesting
+  void injectRawForTest(String hash, Uint8List raw, String prevHash) {
+    _byHash[hash] = raw;
+    _prev[hash] = prevHash;
+    _count++;
   }
 
   Uint8List _hexToBytes(String h) {

@@ -226,6 +226,25 @@ void main() {
       });
     });
 
+    // Guards against unbounded recursion when the blind gateway has been fed a
+    // prev cycle (A.prev=B, B.prev=A). A well-formed hash-linked log cannot
+    // produce a cycle, but the gateway never verifies entries. With the visited
+    // mark set before recursing, delta terminates instead of overflowing.
+    test('delta terminates when prev pointers form a cycle', () {
+      // Keys must be 64-char hex strings (as put() produces via hexEncode).
+      const hashA = '0000000000000000000000000000000000000000000000000000000000000001';
+      const hashB = '0000000000000000000000000000000000000000000000000000000000000002';
+      const hashC = '0000000000000000000000000000000000000000000000000000000000000003';
+      final store = EntryStore()
+        ..injectRawForTest(hashA, Uint8List.fromList([1]), hashB)
+        ..injectRawForTest(hashB, Uint8List.fromList([2]), hashA)
+        ..injectRawForTest(hashC, Uint8List.fromList([3]), hashA);
+      // C is the only head; traversal: emit(C)→emit(A)→emit(B)→emit(A) stops
+      // because A is already marked visited.
+      final (entries, _, _) = store.delta([]);
+      expect(entries.length, 3);
+    });
+
     test('all returns every retained entry parents-first', () {
       final v = _tl();
       final store = EntryStore();

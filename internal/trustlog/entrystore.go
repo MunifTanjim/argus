@@ -181,10 +181,13 @@ func (s *EntryStore) Delta(known [][]byte) (entries [][]byte, want [][]byte, dis
 		if _, ok := s.byHash[h]; !ok {
 			return
 		}
+		// Mark visited before recursing so a prev cycle terminates here rather
+		// than overflowing the stack. Parents-before-children still holds: the
+		// append is after emit(prev) returns, so ancestors are always emitted first.
+		emitted[h] = true
 		// Always recurse into prev so ancestors of a held hash are not withheld;
 		// skip only the append when held, not the descent.
 		emit(s.prev[h])
-		emitted[h] = true
 		if !held[h] {
 			entries = append(entries, append([]byte(nil), s.byHash[h]...))
 		}

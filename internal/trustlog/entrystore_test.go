@@ -422,6 +422,25 @@ func TestEntryStoreDeltaOrdersParentsBeforeChildren(t *testing.T) {
 	}
 }
 
+// TestEntryStoreDeltaCycleTerminates guards against unbounded recursion when the
+// blind gateway has been fed a prev cycle (A.prev=B, B.prev=A). A well-formed
+// hash-linked log cannot produce a cycle, but the gateway never verifies entries.
+// With the visited mark set before recursing, Delta terminates instead of
+// overflowing the stack.
+func TestEntryStoreDeltaCycleTerminates(t *testing.T) {
+	// C is the only head (neither A nor B is unreferenced). Traversal: emit(C)
+	// → emit(A) → emit(B) → emit(A) terminates because A is already marked.
+	s := &EntryStore{
+		byHash: map[string][]byte{"A": {1}, "B": {2}, "C": {3}},
+		prev:   map[string]string{"A": "B", "B": "A", "C": "A"},
+		count:  3,
+	}
+	entries, _, _ := s.Delta(nil)
+	if len(entries) != 3 {
+		t.Fatalf("expected all 3 entries, got %d", len(entries))
+	}
+}
+
 func TestEntryStoreAllReturnsEveryEntry(t *testing.T) {
 	s := NewEntryStore()
 	raw := entriesOf(t, twoEntryChain(t))
