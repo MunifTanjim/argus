@@ -756,59 +756,164 @@ func TestSyncTrustChainsPushesWhatTheGatewayWants(t *testing.T) {
 	}
 }
 
-// TestSyncTrustChainsRetiesOnUnplacedEntries covers the case where the gateway
-// withholds ancestors because the node advertised heads for branches whose entries
-// it already discarded. On the first sync the gateway returns only the orphaned
-// tip; the node must clear its branch cache and retry once with nil heads so the
-// gateway sends the full ancestry.
-func TestSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
+// TestSyncTrustChainsUnplacedEntriesAreWarned covers the case where the gateway
+// returns an orphaned entry whose ancestors are not held by the node. After
+// removing the re-sync recovery, the node issues exactly one sync and logs a
+// warning rather than retrying.
+func TestSyncTrustChainsUnplacedEntriesAreWarned(t *testing.T) {
 	chain, _, _, _ := seedChain(t, true) // genesis + authorize → 2 entries
 	raw, err := trustlog.ChainEntries(chain)
 	if err != nil || len(raw) < 2 {
 		t.Fatalf("need ≥2 entries: %v", err)
 	}
-	// Serve only the non-genesis entry first; the genesis is missing so it cannot be placed.
+	// Serve only the non-genesis entry; without the genesis it cannot be placed.
 	orphan := raw[1]
 
 	calls := 0
-	var lastHeads [][]byte
 	peer := &fakeTrustCaller{
 		fn: func(method string, params, out any) error {
 			if method != api.MethodTrustLogSync {
 				return nil
 			}
 			calls++
-			pp := params.(api.TrustLogSyncParams)
-			lastHeads = pp.Heads
-			res := out.(*api.TrustLogSyncResult)
-			if calls == 1 {
-				res.Entries = [][]byte{orphan}
-			} else {
-				res.Entries = raw
-			}
+			out.(*api.TrustLogSyncResult).Entries = [][]byte{orphan}
 			return nil
 		},
 	}
 
 	d := New()
-	// Plant a fake head so knownHeads() returns non-empty, which is the precondition
-	// for the retry (empty heads means the gateway cannot be withholding anything).
 	d.pinMu.Lock()
 	d.seenBranches = map[[32]byte]bool{{0: 1}: true}
 	d.pinMu.Unlock()
+
+	_, ok := d.syncTrustChains(peer)
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 sync (no retry after removal), got %d", calls)
+	}
+}
+
+// TestSyncTrustChainsRetainsRejectedBranchEntries covers the loss scenario: the
+// node received branch Y (a fork that lost fork-choice to X), recorded its head
+// in seenBranches, then discarded its entries. The gateway later serves only an
+// extension entry D whose Prev points to the tip of Y. Without retention, D cannot
+// be placed. After the fix the node retains Y's entries so assembly succeeds.
+func TestSyncTrustChainsRetainsRejectedBranchEntries(t *testing.T) {
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+
+	genLog, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisEntries := genLog.Entries()
+
+	logX, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load X: %v", err)
+	}
+	if err := logX.AuthorizeDevice(bytes.Repeat([]byte{0xAA}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice X: %v", err)
+	}
+	chainX := trustlog.MarshalChain(logX.Entries())
+
+	logY, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load Y: %v", err)
+	}
+	if err := logY.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice Y: %v", err)
+	}
+	chainY := trustlog.MarshalChain(logY.Entries())
+
+	// D extends Y with a third device — the gateway serves only this entry.
+	logD, err := trustlog.Load(logY.Entries())
+	if err != nil {
+		t.Fatalf("Load D: %v", err)
+	}
+	if err := logD.AuthorizeDevice(bytes.Repeat([]byte{0xCC}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice D: %v", err)
+	}
+	rawD, err := trustlog.ChainEntries(trustlog.MarshalChain(logD.Entries()))
+	if err != nil {
+		t.Fatalf("ChainEntries D: %v", err)
+	}
+	dEntry := rawD[len(rawD)-1]
+
+	// Build a node pinned to this test's own genesis.
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+	genesis := genLog.Tip()
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	if err := ingestForTest(d, chainX); err != nil {
+		t.Fatalf("ingest X: %v", err)
+	}
+	// Simulate receiving-and-rejecting Y: record its head (entries NOT ingested).
+	d.rememberHead(chainY)
+
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method == api.MethodTrustLogSync {
+				out.(*api.TrustLogSyncResult).Entries = [][]byte{dEntry}
+			}
+			return nil
+		},
+	}
 
 	chains, ok := d.syncTrustChains(peer)
 	if !ok {
 		t.Fatalf("syncTrustChains reported failure")
 	}
-	if calls != 2 {
-		t.Fatalf("expected 2 syncs (initial + retry), got %d", calls)
+
+	// After the fix, node retains Y's entries so [genesis, devY, dEntry] assembles.
+	found := false
+	for _, c := range chains {
+		if entries, err := trustlog.ChainEntries(c); err == nil && len(entries) >= 3 {
+			found = true
+		}
 	}
-	if len(lastHeads) != 0 {
-		t.Fatalf("retry must carry empty Heads, got %d heads", len(lastHeads))
+	if !found {
+		t.Fatal("extension of rejected branch Y was lost: no assembled chain of length ≥3")
+	}
+}
+
+// TestSyncTrustChainsIssuesExactlyOneSync is a regression guard: a complete,
+// fully-connected chain must resolve in one sync with no recovery re-sync.
+func TestSyncTrustChainsIssuesExactlyOneSync(t *testing.T) {
+	chain, _, _, _ := seedChain(t, true)
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+
+	calls := 0
+	peer := &fakeTrustCaller{
+		fn: func(method string, params, out any) error {
+			if method != api.MethodTrustLogSync {
+				return nil
+			}
+			calls++
+			out.(*api.TrustLogSyncResult).Entries = raw
+			return nil
+		},
+	}
+
+	d := New()
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 sync, got %d", calls)
 	}
 	if len(chains) != 1 || !bytes.Equal(chains[0], chain) {
-		t.Fatalf("assembled chain does not match original after retry")
+		t.Fatalf("assembled chain does not match original")
 	}
 }
 

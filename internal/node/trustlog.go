@@ -73,7 +73,8 @@ func (d *Node) enableTrustLogLocked(genesisHash []byte, path string) error {
 	}
 	d.trustPath = path
 	d.pinGenesis = append([]byte(nil), genesisHash...)
-	d.seenBranches = nil // new store, new genesis — stale fingerprints are invalid
+	d.seenBranches = nil      // new store, new genesis — stale fingerprints are invalid
+	d.retainedEntries = trustlog.NewEntryStore() // same lifetime as seenBranches
 	d.trust.Store(sync)
 	if bytes.Equal(d.trustGate.Genesis(), genesisHash) {
 		d.trustGate.Clear()
@@ -135,6 +136,13 @@ func (d *Node) rememberHeadLocked(chain []byte) {
 		d.seenBranches = map[[32]byte]bool{}
 	}
 	d.seenBranches[h] = true
+	if d.retainedEntries != nil {
+		if raw, err := trustlog.ChainEntries(chain); err == nil {
+			if inserted := d.retainedEntries.PutAll(raw); inserted < len(raw) && inserted == 0 && len(raw) > 0 {
+				d.log.Warn("trust-log retained entry store may be at ceiling; entries not stored", "count", len(raw))
+			}
+		}
+	}
 }
 
 // syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
@@ -172,30 +180,17 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 			}
 		}
 	}
-	chains, unplaced := trustlog.AssembleChainsReport(merged)
-
-	// The gateway withholds entries whose ancestors it believes the caller holds,
-	// keyed by the heads the caller advertised. seenBranches records heads of
-	// rejected branches too, so a node that discarded a losing branch can still
-	// advertise its head — causing the gateway to send only the orphaned tip. Clear
-	// the cache and retry once with no heads so the gateway sends the full ancestry.
-	if unplaced > 0 && len(heads) > 0 {
-		d.log.Warn("trust-log delta has unplaced entries; clearing branch cache and re-syncing", "unplaced", unplaced)
-		d.pinMu.Lock()
-		d.seenBranches = nil
-		d.pinMu.Unlock()
-		var got2 api.TrustLogSyncResult
-		if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: nil}, &got2); err == nil {
-			merged2 := append([][]byte{}, got2.Entries...)
-			if st := d.trust.Load(); st != nil {
-				if mine := st.Bytes(); mine != nil {
-					if raw, err := trustlog.ChainEntries(mine); err == nil {
-						merged2 = append(merged2, raw...)
-					}
-				}
-			}
-			chains, _ = trustlog.AssembleChainsReport(merged2)
+	// Merge retained entries from non-winning branches so we can assemble
+	// chains whose ancestors the gateway withheld (it assumes we hold them
+	// because we advertised the head).
+	if re := d.retainedEntries; re != nil {
+		if retained, _ := re.Delta(nil); len(retained) > 0 {
+			merged = append(merged, retained...)
 		}
+	}
+	chains, unplaced := trustlog.AssembleChainsReport(merged)
+	if unplaced > 0 {
+		d.log.Warn("trust-log sync has unplaced entries; gateway may hold an incomplete branch", "unplaced", unplaced)
 	}
 
 	if len(got.Want) > 0 {
@@ -402,7 +397,8 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 		if err := d.writeGenesisHash(genesisHash); err != nil {
 			return err
 		}
-		d.seenBranches = nil // new store, new genesis — stale fingerprints are invalid
+		d.seenBranches = nil      // new store, new genesis — stale fingerprints are invalid
+		d.retainedEntries = trustlog.NewEntryStore() // same lifetime as seenBranches
 		d.trust.Store(store) // publish only after both persists succeed
 		// The node that runs lock.init is the network's first trust anchor: its own
 		// `lock status` is what every other device compares its fingerprint against,
@@ -688,7 +684,8 @@ func (d *Node) DropPin() error {
 		d.trust.Store(nil)
 		d.pinGenesis = nil
 		d.pinSource = ""
-		d.seenBranches = nil // stale fingerprints must not suppress the re-fill after re-pin
+		d.seenBranches = nil    // stale fingerprints must not suppress the re-fill after re-pin
+		d.retainedEntries = nil // same lifetime as seenBranches
 		if sawChain {
 			// Only a chain we actually held proves this network is locked. Tripping
 			// without that proof would strand a node whose network has no trust log:

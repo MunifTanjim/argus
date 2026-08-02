@@ -127,7 +127,8 @@ type Node struct {
 	// and write of pinGenesis/pinSource (a status RPC runs on its own goroutine).
 	// Quarantined() and rejectsChannels() must stay lock-free.
 	pinMu        sync.Mutex
-	seenBranches map[[32]byte]bool // fingerprints of branches received from the gateway; guarded by pinMu
+	seenBranches    map[[32]byte]bool  // fingerprints of branches received from the gateway; guarded by pinMu
+	retainedEntries *trustlog.EntryStore // raw entries of every branch received, including losers; guarded by pinMu; same lifetime as seenBranches
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 
