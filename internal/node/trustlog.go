@@ -49,7 +49,7 @@ type trustCaller interface {
 // adopting it); genuine corruption surfaces on next sync.
 //
 // Safe on a live, gateway-connected node: pinMu serializes the pin state it writes
-// against the sync loop, which reads seenBranches on every pull.
+// against the sync loop.
 func (d *Node) EnableTrustLog(genesisHash []byte, path string) error {
 	d.pinMu.Lock()
 	defer d.pinMu.Unlock()
@@ -73,8 +73,7 @@ func (d *Node) enableTrustLogLocked(genesisHash []byte, path string) error {
 	}
 	d.trustPath = path
 	d.pinGenesis = append([]byte(nil), genesisHash...)
-	d.seenBranches = nil    // new store, new genesis — stale fingerprints are invalid
-	d.retainedEntries = nil // same lifetime as seenBranches; lazily allocated in rememberHeadLocked
+	d.retainedEntries = trustlog.NewEntryStore() // fresh store for the new genesis
 	d.trust.Store(sync)
 	if bytes.Equal(d.trustGate.Genesis(), genesisHash) {
 		d.trustGate.Clear()
@@ -89,68 +88,17 @@ func (d *Node) TrustStore() *trustlog.SyncStore { return d.trust.Load() }
 // enabling locked mode. Call at boot so a later live lock.init has a target path.
 func (d *Node) SetTrustChainPath(path string) { d.trustPath = path }
 
-// branchHead is the hash of a chain's last entry — the identity the gateway keys
-// branches by now. It must match the head the gateway derives or every sync
-// re-downloads.
-func branchHead(chain []byte) ([32]byte, bool) {
-	var out [32]byte
-	entries, err := trustlog.UnmarshalChain(chain)
-	if err != nil || len(entries) == 0 {
-		return out, false
-	}
-	copy(out[:], trustlog.HashEntry(&entries[len(entries)-1]))
-	return out, true
-}
-
-// knownHeads returns the head hash of every branch already received, for the sync
-// request. Guarded by pinMu alongside the rest of the trust decision state.
-func (d *Node) knownHeads() [][]byte {
+// knownHashes lists every entry hash this node retains, for a sync offer. The
+// entry store is the only source: an entry that was not retained is absent from
+// the offer automatically, so the offer can never claim more than is held.
+func (d *Node) knownHashes() (hashes [][]byte, truncated bool) {
 	d.pinMu.Lock()
-	defer d.pinMu.Unlock()
-	out := make([][]byte, 0, len(d.seenBranches))
-	for k := range d.seenBranches {
-		h := k
-		out = append(out, append([]byte(nil), h[:]...))
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if re == nil {
+		return nil, false
 	}
-	return out
-}
-
-// rememberHead records a branch as received. Branches that fail to verify are
-// recorded too: for the current pin, identical bytes can never become valid later,
-// and re-fetching them forever is the waste this removes.
-func (d *Node) rememberHead(chain []byte) {
-	d.pinMu.Lock()
-	defer d.pinMu.Unlock()
-	d.rememberHeadLocked(chain)
-}
-
-// rememberHeadLocked is rememberHead for a caller already holding pinMu, because
-// recording a head is only correct together with the store state it was read
-// against. Precondition: pinMu is held.
-func (d *Node) rememberHeadLocked(chain []byte) {
-	h, ok := branchHead(chain)
-	if !ok {
-		return
-	}
-	raw, err := trustlog.ChainEntries(chain)
-	if err != nil {
-		return
-	}
-	// Retain entries first: only record the head if every entry was admitted.
-	// If the store is full, a refused entry means we cannot guarantee ancestry,
-	// which is the same broken invariant this work exists to remove.
-	if d.retainedEntries == nil {
-		d.retainedEntries = trustlog.NewEntryStore()
-	}
-	_, refused := d.retainedEntries.PutAll(raw)
-	if refused > 0 {
-		d.log.Warn("trust-log entry store at ceiling; entries refused, head not recorded", "refused", refused)
-		return
-	}
-	if d.seenBranches == nil {
-		d.seenBranches = map[[32]byte]bool{}
-	}
-	d.seenBranches[h] = true
+	return re.Hashes()
 }
 
 // syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
@@ -166,18 +114,20 @@ func (d *Node) syncTrustOnce(peer trustCaller) {
 	d.checkPeerBeaconConsistency()
 }
 
-// syncTrustChains exchanges heads with the gateway and returns the branches it
-// served, assembled back into chains. The gateway sends only entries this node
-// cannot reach from its heads, so its delta is merged with the entries of the
-// branches already held before assembling — a chain missing its ancestors cannot
-// be verified. A non-empty Want means the gateway is behind: it is answered with
-// the ancestry it asked for, so a node that locked the network while the gateway
-// was restarting still publishes.
+// syncTrustChains exchanges known entry hashes with the gateway and returns the
+// assembled chains it served. The gateway computes a set-subtraction delta from
+// Known, so the node never needs to infer ancestry: every entry the node holds is
+// listed explicitly. A non-empty Want means the gateway is behind; it is answered
+// with only the specific entries named, so a node that locked the network while
+// the gateway was restarting still publishes.
 func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
-	heads := d.knownHeads()
+	known, truncated := d.knownHashes()
 	var got api.TrustLogSyncResult
-	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: heads}, &got); err != nil {
+	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Known: known, Truncated: truncated}, &got); err != nil {
 		return nil, false
+	}
+	if got.Disjoint {
+		d.log.Warn("trust log: this device shares no history with the network's; it is likely pinned to a different trust root")
 	}
 
 	merged := append([][]byte{}, got.Entries...)
@@ -188,8 +138,6 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 			}
 		}
 	}
-	// Merge retained entries from non-winning branches so we can assemble
-	// chains whose ancestors the gateway withheld.
 	d.pinMu.Lock()
 	re := d.retainedEntries
 	d.pinMu.Unlock()
@@ -207,30 +155,54 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 		d.log.Warn("trust-log sync has unplaced entries; gateway may hold an incomplete branch", "unplaced", unplaced)
 	}
 
+	// Retain assembled chains' entries so the next offer reflects what is held.
+	if re != nil {
+		refused := 0
+		for _, chain := range chains {
+			raw, err := trustlog.ChainEntries(chain)
+			if err != nil {
+				continue
+			}
+			_, r := re.PutAll(raw)
+			refused += r
+		}
+		if refused > 0 {
+			d.log.Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
+		}
+	}
+
 	if len(got.Want) > 0 {
-		d.pushHeldEntries(peer)
+		d.pushWanted(peer, got.Want)
 	}
 	return chains, true
 }
 
-// pushHeldEntries publishes this node's own branch to a gateway that asked for it.
-func (d *Node) pushHeldEntries(peer trustCaller) {
-	st := d.trust.Load()
-	if st == nil {
+// pushWanted publishes the specific entries the gateway asked for.
+func (d *Node) pushWanted(peer trustCaller, want [][]byte) {
+	d.pinMu.Lock()
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if re == nil {
 		return
 	}
-	mine := st.Bytes()
-	if mine == nil {
+	held := map[string][]byte{}
+	for _, raw := range re.All() {
+		e, err := trustlog.UnmarshalEntry(raw)
+		if err != nil {
+			continue
+		}
+		held[string(trustlog.HashEntry(&e))] = raw
+	}
+	var out [][]byte
+	for _, h := range want {
+		if raw, ok := held[string(h)]; ok {
+			out = append(out, raw)
+		}
+	}
+	if len(out) == 0 {
 		return
 	}
-	raw, err := trustlog.ChainEntries(mine)
-	if err != nil {
-		return
-	}
-	if err := peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil); err != nil {
-		return
-	}
-	d.rememberHead(mine)
+	_ = peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: out}, nil)
 }
 
 // pullTrustOnce runs one sync cycle over peer: exchange heads with the gateway,
@@ -251,7 +223,6 @@ func (d *Node) pullTrustOnce(peer trustCaller) bool {
 	}
 	anyChanged := false
 	for _, chain := range chains {
-		d.rememberHead(chain)
 		changed, err := st.Ingest(chain)
 		if err != nil {
 			continue // rollback/fork/tamper/wrong-genesis: skip this branch
@@ -305,10 +276,9 @@ func (d *Node) announceTrustChange() {
 	d.emitBeacon()
 }
 
-// offerTrustNow pushes the current branch's entries to the gateway out of band.
-// Entries the gateway already holds dedupe by hash, so this costs only what is
-// genuinely new. Best effort: the sync loop remains the backstop when there is no
-// uplink.
+// offerTrustNow pushes the current branch's entries to the gateway out of band and
+// retains them so the next sync offer reflects the local write. Best effort: the
+// sync loop is the backstop when there is no uplink.
 func (d *Node) offerTrustNow() {
 	st := d.trust.Load()
 	if st == nil {
@@ -318,7 +288,21 @@ func (d *Node) offerTrustNow() {
 	if peer == nil {
 		return
 	}
-	d.pushHeldEntries(peer)
+	mine := st.Bytes()
+	if mine == nil {
+		return
+	}
+	raw, err := trustlog.ChainEntries(mine)
+	if err != nil {
+		return
+	}
+	d.pinMu.Lock()
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if re != nil {
+		re.PutAll(raw)
+	}
+	_ = peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil)
 }
 
 // runTrustSync drives the offer/pull loop for the uplink's lifetime. It
@@ -411,9 +395,8 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 		if err := d.writeGenesisHash(genesisHash); err != nil {
 			return err
 		}
-		d.seenBranches = nil    // new store, new genesis — stale fingerprints are invalid
-		d.retainedEntries = nil // same lifetime as seenBranches; lazily allocated in rememberHeadLocked
-		d.trust.Store(store)    // publish only after both persists succeed
+		d.retainedEntries = trustlog.NewEntryStore() // fresh store for the new genesis
+		d.trust.Store(store)                         // publish only after both persists succeed
 		// The node that runs lock.init is the network's first trust anchor: its own
 		// `lock status` is what every other device compares its fingerprint against,
 		// so the pin has to be visible immediately, not after a restart.
@@ -445,19 +428,13 @@ func (d *Node) detectUnpinnedChain(peer trustCaller) {
 	if !ok {
 		return
 	}
-	// Record all heads first: the detection loop returns after the first decodable
-	// chain, so branches after that one would otherwise be missed.
-	// Under pinMu, and only while the store is still unset: a pin that landed during
-	// the sync just cleared seenBranches for its new store, and marking these chains
-	// seen would tell the gateway to withhold the very branches that store still
-	// needs — stranding it empty until some other branch appears.
+	// Guard under pinMu: a concurrent AdoptPin that set the store between the sync
+	// and this point means the detection loop should not trip the gate for the old
+	// genesis.
 	d.pinMu.Lock()
 	if d.trust.Load() != nil {
 		d.pinMu.Unlock()
 		return
-	}
-	for _, chain := range chains {
-		d.rememberHeadLocked(chain)
 	}
 	d.pinMu.Unlock()
 	for _, chain := range chains {
@@ -612,8 +589,9 @@ func (d *Node) onGatewayNotify(n api.Notification) {
 		return
 	}
 	if p, err := api.Decode[api.TrustLogChangedParams](n.Params); err == nil && len(p.Heads) > 0 {
-		known := map[string]bool{}
-		for _, h := range d.knownHeads() {
+		hashes, _ := d.knownHashes()
+		known := make(map[string]bool, len(hashes))
+		for _, h := range hashes {
 			known[string(h)] = true
 		}
 		fresh := false
@@ -698,8 +676,7 @@ func (d *Node) DropPin() error {
 		d.trust.Store(nil)
 		d.pinGenesis = nil
 		d.pinSource = ""
-		d.seenBranches = nil    // stale fingerprints must not suppress the re-fill after re-pin
-		d.retainedEntries = nil // same lifetime as seenBranches
+		d.retainedEntries = nil // entries under the dropped root no longer matter
 		if sawChain {
 			// Only a chain we actually held proves this network is locked. Tripping
 			// without that proof would strand a node whose network has no trust log:

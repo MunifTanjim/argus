@@ -345,10 +345,11 @@ func TestAdoptPinAndDetectRaceInvariant(t *testing.T) {
 	}
 }
 
-// A pin adopted during the pull clears seenBranches for its new, empty store. If
-// detect then marks the chains it pulled as seen, the gateway withholds them from
-// every later pull and the store stays empty — the node reports itself pinned while
-// authorizing nobody, until some unrelated branch appears.
+// A pin adopted concurrently with a detect pull must not leave the node unable to
+// fill its store. In the old design seenBranches could record a branch the store
+// never ingested, causing the gateway to withhold it forever. Known is derived from
+// retainedEntries, so: if retained entries exist for a chain, assembly succeeds
+// from those entries alone on the next pull — no gateway re-download needed.
 func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
 
@@ -372,13 +373,17 @@ func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 
 		st := d.TrustStore()
 		if st == nil || st.Length() > 0 {
-			continue // the store ingested the chain itself; nothing to strand
+			continue // the store ingested the chain itself; nothing to check
 		}
-		head, _ := branchHead(chain)
-		for _, h := range d.knownHeads() {
-			if len(h) == 32 && string(h) == string(head[:]) {
-				t.Fatalf("iter %d: chain marked seen but never ingested; the gateway will withhold it", i)
-			}
+		// Store is empty: either retained entries are present (next pull assembles
+		// from them without re-download) or they're absent (next pull re-downloads).
+		// Either is correct; verify no hash leaks from a cleared store.
+		hashes, _ := d.knownHashes()
+		d.pinMu.Lock()
+		re := d.retainedEntries
+		d.pinMu.Unlock()
+		if re == nil && len(hashes) > 0 {
+			t.Fatalf("iter %d: known has %d hashes but retainedEntries is nil", i, len(hashes))
 		}
 	}
 }

@@ -253,7 +253,7 @@ func TestEnableTrustLogIgnoresCorruptDisk(t *testing.T) {
 }
 
 // The second sync must not push a chain the gateway already holds (Want is empty),
-// and must send the known heads so the gateway can compute its delta.
+// and must send the known entry hashes so the gateway can compute its delta.
 func TestSyncIsQuietWhenNothingChanged(t *testing.T) {
 	chain, genesis := lockedChainForTest(t)
 
@@ -272,7 +272,7 @@ func TestSyncIsQuietWhenNothingChanged(t *testing.T) {
 		t.Fatalf("offers went %d -> %d; gateway returned no Want so node must not push", firstOffers, peer.offers)
 	}
 	if len(peer.lastKnown) == 0 {
-		t.Fatal("the second sync must send the known heads")
+		t.Fatal("the second sync must send the known entry hashes")
 	}
 }
 
@@ -288,9 +288,10 @@ func TestNodeReoffersWhenGatewayForgets(t *testing.T) {
 	d.syncTrustOnce(peer)
 	before := peer.offers
 
-	// Gateway restarted and signals it wants our branch back.
+	// Gateway restarted and signals it wants our branch back (real entry hashes).
+	hashes, _ := d.knownHashes()
 	peer.chains = nil
-	peer.want = [][]byte{bytes.Repeat([]byte{0x01}, 32)}
+	peer.want = hashes
 	d.syncTrustOnce(peer)
 
 	if peer.offers <= before {
@@ -310,8 +311,9 @@ func TestNodePushesWhenGatewayWants(t *testing.T) {
 	converge := &recordingTrustPeer{chains: [][]byte{chain}}
 	d.syncTrustOnce(converge)
 
-	// Now set Want: every subsequent sync must trigger a push.
-	peer := &recordingTrustPeer{chains: [][]byte{chain}, want: [][]byte{bytes.Repeat([]byte{0x01}, 32)}}
+	// Now set Want to actual entry hashes the node holds: every subsequent sync must trigger a push.
+	hashes, _ := d.knownHashes()
+	peer := &recordingTrustPeer{chains: [][]byte{chain}, want: hashes}
 	d.syncTrustOnce(peer)
 	d.syncTrustOnce(peer)
 
@@ -351,7 +353,7 @@ func (p *recordingTrustPeer) Call(method string, params, out any) error {
 	case api.MethodTrustLogSync:
 		p.pulls++
 		if pp, ok := params.(api.TrustLogSyncParams); ok {
-			p.lastKnown = pp.Heads
+			p.lastKnown = pp.Known
 		}
 		res, ok := out.(*api.TrustLogSyncResult)
 		if !ok {
@@ -678,8 +680,8 @@ func nodeWithTrustStore(t *testing.T) (*Node, []byte) {
 	return d, chain
 }
 
-// ingestForTest ingests chain into d's trust store and records the head, mirroring
-// what pullTrustOnce does so knownHeads is populated.
+// ingestForTest ingests chain into d's trust store and retains the entries,
+// mirroring what pullTrustOnce + syncTrustChains do so knownHashes is populated.
 func ingestForTest(d *Node, chain []byte) error {
 	st := d.trust.Load()
 	if st == nil {
@@ -688,7 +690,16 @@ func ingestForTest(d *Node, chain []byte) error {
 	if _, err := st.Ingest(chain); err != nil {
 		return err
 	}
-	d.rememberHead(chain)
+	raw, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		return err
+	}
+	d.pinMu.Lock()
+	if d.retainedEntries == nil {
+		d.retainedEntries = trustlog.NewEntryStore()
+	}
+	d.retainedEntries.PutAll(raw)
+	d.pinMu.Unlock()
 	return nil
 }
 
@@ -737,7 +748,8 @@ func TestSyncTrustChainsPushesWhatTheGatewayWants(t *testing.T) {
 			switch method {
 			case api.MethodTrustLogSync:
 				res := result.(*api.TrustLogSyncResult)
-				res.Want = d.knownHeads()
+				hashes, _ := d.knownHashes()
+				res.Want = hashes
 			case api.MethodTrustLogPush:
 				pushed = params.(api.TrustLogPushParams).Entries
 			}
@@ -783,9 +795,6 @@ func TestSyncTrustChainsUnplacedEntriesAreWarned(t *testing.T) {
 	}
 
 	d := New()
-	d.pinMu.Lock()
-	d.seenBranches = map[[32]byte]bool{{0: 1}: true}
-	d.pinMu.Unlock()
 
 	_, ok := d.syncTrustChains(peer)
 	if !ok {
@@ -855,8 +864,17 @@ func TestSyncTrustChainsRetainsRejectedBranchEntries(t *testing.T) {
 	if err := ingestForTest(d, chainX); err != nil {
 		t.Fatalf("ingest X: %v", err)
 	}
-	// Simulate receiving-and-rejecting Y: record its head (entries NOT ingested).
-	d.rememberHead(chainY)
+	// Simulate receiving-and-rejecting Y: retain its entries without ingesting.
+	rawY, err := trustlog.ChainEntries(chainY)
+	if err != nil {
+		t.Fatalf("ChainEntries Y: %v", err)
+	}
+	d.pinMu.Lock()
+	if d.retainedEntries == nil {
+		d.retainedEntries = trustlog.NewEntryStore()
+	}
+	d.retainedEntries.PutAll(rawY)
+	d.pinMu.Unlock()
 
 	peer := &fakeTrustCaller{
 		fn: func(method string, params, out any) error {
@@ -942,9 +960,6 @@ func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 	}
 
 	d := New()
-	d.pinMu.Lock()
-	d.seenBranches = map[[32]byte]bool{{0: 1}: true}
-	d.pinMu.Unlock()
 
 	chains, ok := d.syncTrustChains(peer)
 	if !ok {
@@ -958,36 +973,131 @@ func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 	}
 }
 
-// TestRememberHeadAtCeilingDoesNotRecordHead pins the invariant that a branch
-// whose entries cannot all be retained must not have its head recorded. A full
-// store must never cause the node to advertise a head it cannot back with entries.
-func TestRememberHeadAtCeilingDoesNotRecordHead(t *testing.T) {
-	// Lower ceiling to 1 so one real entry fills the store.
-	trustlog.SetMaxRetainedEntriesForTest(1)
-	t.Cleanup(func() { trustlog.SetMaxRetainedEntriesForTest(1 << 16) })
+// TestKnownHashesReflectsCeiling pins the invariant that refused entries never
+// appear in the sync offer: knownHashes is derived from retainedEntries, so an
+// entry the store rejected is absent from known automatically.
+func TestKnownHashesReflectsCeiling(t *testing.T) {
+	prev := trustlog.SetMaxRetainedEntriesForTest(1)
+	t.Cleanup(func() { trustlog.SetMaxRetainedEntriesForTest(prev) })
 
-	// genesisChain (1 entry) fills the store; twoEntryChain (2 entries) cannot fit.
-	genesisChain, _, _, _ := seedChain(t, false) // genesis only
-	twoEntryChain, _, _, _ := seedChain(t, true) // genesis + authorize
+	genesisChain, _, _, _ := seedChain(t, false) // 1 entry — fills the store
+	otherChain, _, _, _ := seedChain(t, false)   // 1 entry — refused at ceiling
 
 	d := New()
 	d.SetTrustChainPath(t.TempDir() + "/chain")
+	d.pinMu.Lock()
+	d.retainedEntries = trustlog.NewEntryStore()
+	d.pinMu.Unlock()
 
-	// Fill the store with the genesis chain (1 entry = ceiling).
-	d.rememberHead(genesisChain)
-	headsBefore := d.knownHeads()
-	if len(headsBefore) != 1 {
-		t.Fatalf("setup: expected 1 head after filling, got %d", len(headsBefore))
+	raw, _ := trustlog.ChainEntries(genesisChain)
+	d.pinMu.Lock()
+	d.retainedEntries.PutAll(raw) // fills to ceiling
+	d.pinMu.Unlock()
+
+	hashesBefore, _ := d.knownHashes()
+	if len(hashesBefore) != 1 {
+		t.Fatalf("setup: expected 1 hash after filling, got %d", len(hashesBefore))
 	}
 
-	// Offer a two-entry chain — the second entry must be refused and the head not recorded.
-	d.rememberHead(twoEntryChain)
-	headsAfter := d.knownHeads()
-
-	if len(headsAfter) != len(headsBefore) {
-		t.Fatalf("at ceiling: rememberHead must not record the head; knownHeads grew from %d to %d",
-			len(headsBefore), len(headsAfter))
+	other, _ := trustlog.ChainEntries(otherChain)
+	d.pinMu.Lock()
+	_, refused := d.retainedEntries.PutAll(other)
+	d.pinMu.Unlock()
+	if refused == 0 {
+		t.Fatal("setup: expected refusal at ceiling")
 	}
+
+	hashesAfter, _ := d.knownHashes()
+	if len(hashesAfter) != len(hashesBefore) {
+		t.Fatalf("at ceiling: refused entry must not appear in known; got %d, want %d",
+			len(hashesAfter), len(hashesBefore))
+	}
+}
+
+// forkChainForTest returns a well-formed chain that the node's Ingest will reject
+// (different genesis) so it exercises the "received but rejected" retention path.
+func forkChainForTest(t *testing.T) []byte {
+	t.Helper()
+	chain, _ := lockedChainForTest(t)
+	return chain
+}
+
+// TestSyncTrustChainsOffersEveryRetainedHash checks that syncTrustChains sends
+// every retained entry hash in Known, not just branch tips.
+func TestSyncTrustChainsOffersEveryRetainedHash(t *testing.T) {
+	d, chain := nodeWithTrustStore(t)
+	if err := ingestForTest(d, chain); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	var got api.TrustLogSyncParams
+	peer := &fakeTrustCaller{fn: func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			got = params.(api.TrustLogSyncParams)
+		}
+		return nil
+	}}
+	d.syncTrustChains(peer)
+
+	want, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	if len(got.Known) != len(want) {
+		t.Fatalf("offered %d hashes, want %d", len(got.Known), len(want))
+	}
+	if got.Truncated {
+		t.Fatalf("small store must not truncate")
+	}
+}
+
+// TestRejectedBranchIsNotRefetched checks that entries received in one sync are
+// present in Known on the next, so a rejected branch is not re-downloaded forever.
+func TestRejectedBranchIsNotRefetched(t *testing.T) {
+	d, chain := nodeWithTrustStore(t)
+	rejected := forkChainForTest(t)
+
+	calls := 0
+	var second api.TrustLogSyncParams
+	peer := &fakeTrustCaller{fn: func(method string, params, result any) error {
+		if method != api.MethodTrustLogSync {
+			return nil
+		}
+		calls++
+		p := params.(api.TrustLogSyncParams)
+		if calls == 1 {
+			raw, err := trustlog.ChainEntries(rejected)
+			if err != nil {
+				t.Fatalf("ChainEntries: %v", err)
+			}
+			result.(*api.TrustLogSyncResult).Entries = raw
+			return nil
+		}
+		second = p
+		return nil
+	}}
+
+	d.syncTrustChains(peer)
+	d.syncTrustChains(peer)
+
+	rejectedRaw, err := trustlog.ChainEntries(rejected)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	offered := map[string]bool{}
+	for _, h := range second.Known {
+		offered[string(h)] = true
+	}
+	for _, r := range rejectedRaw {
+		e, uerr := trustlog.UnmarshalEntry(r)
+		if uerr != nil {
+			t.Fatalf("UnmarshalEntry: %v", uerr)
+		}
+		if !offered[string(trustlog.HashEntry(&e))] {
+			t.Fatalf("second offer omitted a rejected-branch entry; it would be re-downloaded forever")
+		}
+	}
+	_ = chain
 }
 
 func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {
