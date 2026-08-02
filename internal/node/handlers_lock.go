@@ -212,7 +212,7 @@ func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 		d.reevaluateTrustChannels()
 		d.announceTrustChange()
 	}
-	return api.LockDeviceResult{Tip: st.Tip()}, nil
+	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
 }
 
 // handleLockDisable consumes a disablement secret (lock.disable): if its commitment is

@@ -584,10 +584,10 @@ func resolveDevice(roster []api.NodeDescriptor, arg string) ([]byte, error) {
 }
 
 func newLockSignCmd() *cobra.Command {
-	return newLockDeviceCmd("sign", "Authorize a device", api.MethodLockSign)
+	return newLockDeviceCmd("sign", "Authorize a device", api.MethodLockSign, "device already authorized; nothing changed")
 }
 func newLockRevokeCmd() *cobra.Command {
-	return newLockDeviceCmd("revoke-device", "Revoke a device", api.MethodLockRevoke)
+	return newLockDeviceCmd("revoke-device", "Revoke a device", api.MethodLockRevoke, "device not currently authorized; nothing changed")
 }
 
 func newLockAddSignerCmd() *cobra.Command {
@@ -632,7 +632,7 @@ func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, si
 	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockSignerParams{Signer: signer})
 }
 
-func newLockDeviceCmd(use, short, method string) *cobra.Command {
+func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           use + " <device>",
 		Short:         short + " (node label/id or devpub: key)",
@@ -668,8 +668,7 @@ func newLockDeviceCmd(use, short, method string) *cobra.Command {
 				return fail(cmd, err)
 			}
 			if !res.Changed {
-				alreadyState := map[string]string{"sign": "authorized", "revoke-device": "revoked"}[use]
-				shell.StdOutF("%s: device already %s; nothing changed\n  current tip (audit): %s\n", use, alreadyState, keyfmt.Tip.Encode(res.Tip))
+				shell.StdOutF("%s: %s\n  current tip (audit): %s\n", use, noopMsg, keyfmt.Tip.Encode(res.Tip))
 				return nil
 			}
 			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
