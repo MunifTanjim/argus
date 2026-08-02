@@ -494,22 +494,6 @@ func TestClientSyncTrustChainsRetainsRejectedBranch(t *testing.T) {
 	}
 }
 
-func clientForkChainForTest(t *testing.T) []byte {
-	t.Helper()
-	signer, err := trustlog.GenerateSigner()
-	if err != nil {
-		t.Fatalf("GenerateSigner: %v", err)
-	}
-	tl, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
-	if err != nil {
-		t.Fatalf("NewGenesis: %v", err)
-	}
-	if err := tl.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer); err != nil {
-		t.Fatalf("AuthorizeDevice: %v", err)
-	}
-	return trustlog.MarshalChain(tl.Entries())
-}
-
 func TestClientOffersEveryRetainedHash(t *testing.T) {
 	m, chain := clientWithTrustStore(t)
 
@@ -531,9 +515,58 @@ func TestClientOffersEveryRetainedHash(t *testing.T) {
 	}
 }
 
+// TestClientDoesNotRefetchARejectedBranch checks that a same-genesis fork that
+// loses fork-choice is not re-downloaded on every tick. The fork's entries must
+// appear in Known after the first sync so the gateway sees the client already
+// holds them.
 func TestClientDoesNotRefetchARejectedBranch(t *testing.T) {
-	m, _ := clientWithTrustStore(t)
-	rejected := clientForkChainForTest(t)
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	genLog, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisEntries := genLog.Entries()
+	genesis := genLog.Tip()
+
+	// winner: the fork this client ingests and adopts.
+	logA, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load A: %v", err)
+	}
+	if err := logA.AuthorizeDevice(bytes.Repeat([]byte{0xAA}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice A: %v", err)
+	}
+	winner := trustlog.MarshalChain(logA.Entries())
+
+	// rejected: a same-genesis fork that Ingest rejects on fork-choice.
+	logB, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load B: %v", err)
+	}
+	if err := logB.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice B: %v", err)
+	}
+	rejected := trustlog.MarshalChain(logB.Entries())
+
+	srvConn, cliConn := net.Pipe()
+	m, merr := NewE2EClientWithGenesis(cliConn, genesis)
+	if merr != nil {
+		srvConn.Close()
+		cliConn.Close()
+		t.Fatalf("NewE2EClientWithGenesis: %v", merr)
+	}
+	origPeer := m.peer
+	t.Cleanup(func() {
+		m.Close()
+		origPeer.Close()
+		srvConn.Close()
+	})
+	if _, err := m.trust.Ingest(winner); err != nil {
+		t.Fatalf("Ingest winner: %v", err)
+	}
 
 	calls := 0
 	var second api.TrustLogSyncParams
