@@ -385,13 +385,11 @@ func clientWithChain(t *testing.T, fullChain []byte, genesis []byte) (*E2EClient
 	return m, fullRaw
 }
 
-// TestClientSyncTrustChainsRetiesOnUnplacedEntries covers the case where the
-// gateway withholds ancestors because the client advertised heads for branches
-// whose entries it already discarded. On the first sync the gateway returns only
-// an orphaned tip; the client must clear its branch cache and retry once with nil
-// heads so the gateway sends the full ancestry.
-func TestClientSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
-	// Build a two-entry chain: genesis + authorize.
+// TestClientSyncTrustChainsOrphanNoRetry covers the case where the gateway
+// serves an entry whose ancestor is absent. After the retention fix the client
+// no longer retries with nil heads; it issues exactly one sync and returns
+// whatever assembles (nothing, if the ancestor was never retained).
+func TestClientSyncTrustChainsOrphanNoRetry(t *testing.T) {
 	signer, _ := trustlog.GenerateSigner()
 	tlog, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	genesis := tlog.Tip()
@@ -402,26 +400,15 @@ func TestClientSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
 	if len(fullRaw) < 2 {
 		t.Fatalf("need ≥2 entries")
 	}
-	orphan := fullRaw[1] // has Prev pointing to genesis, but genesis missing
+	orphan := fullRaw[1] // has Prev pointing to genesis, but genesis not in merged
 
 	calls := 0
-	var lastHeads [][]byte
 	m.peer = fakePeerFunc(func(method string, params, result any) error {
 		if method != api.MethodTrustLogSync {
 			return nil
 		}
 		calls++
-		var p api.TrustLogSyncParams
-		if raw, ok := params.(json.RawMessage); ok {
-			_ = json.Unmarshal(raw, &p)
-		}
-		lastHeads = p.Heads
-		res := result.(*api.TrustLogSyncResult)
-		if calls == 1 {
-			res.Entries = [][]byte{orphan}
-		} else {
-			res.Entries = fullRaw
-		}
+		result.(*api.TrustLogSyncResult).Entries = [][]byte{orphan}
 		return nil
 	})
 
@@ -430,18 +417,111 @@ func TestClientSyncTrustChainsRetiesOnUnplacedEntries(t *testing.T) {
 	m.seenBranches[[32]byte{0: 1}] = true
 	m.mu.Unlock()
 
+	_, ok := m.syncTrustChains()
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("orphan entry must not trigger a retry: expected 1 sync, got %d", calls)
+	}
+}
+
+// TestClientSyncTrustChainsRetainsRejectedBranch covers the loss scenario: the
+// client received branch Y (a fork that lost fork-choice to X), recorded its
+// head via rememberHead, then did not ingest it. The gateway later serves only
+// an extension entry D whose Prev points to the tip of Y. Without retention D
+// cannot be placed. After the fix, rememberHead retains Y's raw entries so
+// assembly of [genesis, devY, D] succeeds.
+func TestClientSyncTrustChainsRetainsRejectedBranch(t *testing.T) {
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	genLog, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesis := genLog.Tip()
+	genesisEntries := genLog.Entries()
+
+	logX, _ := trustlog.Load(genesisEntries)
+	_ = logX.AuthorizeDevice(bytes.Repeat([]byte{0xAA}, 32), signer)
+	chainX := trustlog.MarshalChain(logX.Entries())
+
+	logY, _ := trustlog.Load(genesisEntries)
+	_ = logY.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer)
+	chainY := trustlog.MarshalChain(logY.Entries())
+
+	// D extends Y — the gateway serves only this entry.
+	logD, _ := trustlog.Load(logY.Entries())
+	_ = logD.AuthorizeDevice(bytes.Repeat([]byte{0xCC}, 32), signer)
+	rawD, err := trustlog.ChainEntries(trustlog.MarshalChain(logD.Entries()))
+	if err != nil {
+		t.Fatalf("ChainEntries D: %v", err)
+	}
+	dEntry := rawD[len(rawD)-1]
+
+	m, _ := clientWithChain(t, chainX, genesis)
+	if _, err := m.trust.Ingest(chainX); err != nil {
+		t.Fatalf("Ingest X: %v", err)
+	}
+	// Simulate receiving-and-rejecting Y: rememberHead records the head and (after
+	// the fix) retains its raw entries without ingesting them into the store.
+	m.rememberHead(chainY)
+
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			result.(*api.TrustLogSyncResult).Entries = [][]byte{dEntry}
+		}
+		return nil
+	})
+
 	chains, ok := m.syncTrustChains()
 	if !ok {
 		t.Fatalf("syncTrustChains reported failure")
 	}
-	if calls != 2 {
-		t.Fatalf("expected 2 syncs (initial + retry), got %d", calls)
+	found := false
+	for _, c := range chains {
+		if entries, err := trustlog.ChainEntries(c); err == nil && len(entries) >= 3 {
+			found = true
+		}
 	}
-	if len(lastHeads) != 0 {
-		t.Fatalf("retry must carry empty Heads, got %d heads", len(lastHeads))
+	if !found {
+		t.Fatal("extension of rejected branch Y was lost: no assembled chain of length ≥3")
+	}
+}
+
+// TestClientSyncTrustChainsIssuesExactlyOneSync is a regression guard: a
+// complete, fully-connected chain must resolve in exactly one sync with no
+// recovery re-sync.
+func TestClientSyncTrustChainsIssuesExactlyOneSync(t *testing.T) {
+	signer, _ := trustlog.GenerateSigner()
+	tlog, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	genesis := tlog.Tip()
+	_ = tlog.AuthorizeDevice(bytes.Repeat([]byte{0x55}, 32), signer)
+	fullChain := trustlog.MarshalChain(tlog.Entries())
+
+	m, fullRaw := clientWithChain(t, fullChain, genesis)
+
+	calls := 0
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method != api.MethodTrustLogSync {
+			return nil
+		}
+		calls++
+		result.(*api.TrustLogSyncResult).Entries = fullRaw
+		return nil
+	})
+
+	chains, ok := m.syncTrustChains()
+	if !ok {
+		t.Fatalf("syncTrustChains reported failure")
+	}
+	if calls != 1 {
+		t.Fatalf("complete chain must issue exactly 1 sync, got %d", calls)
 	}
 	if len(chains) != 1 || !bytes.Equal(chains[0], fullChain) {
-		t.Fatalf("assembled chain does not match original after retry")
+		t.Fatalf("assembled chain does not match original")
 	}
 }
 

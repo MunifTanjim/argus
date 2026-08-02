@@ -108,6 +108,10 @@ type E2EClient struct {
 	trustCtx     context.Context     // cancelled on Close, stops the sync ticker
 	trustStop    context.CancelFunc
 	seenBranches map[[32]byte]bool // fingerprints of branches received; guarded by mu
+	// retainedEntries holds raw entries of every received branch, including those
+	// that lost fork-choice. Its lifetime matches seenBranches: both reset together
+	// so advertised heads always have their entries present.
+	retainedEntries *trustlog.EntryStore // guarded by mu
 
 	// Beacon cross-check state (guarded by mu).
 	// beacons maps string(identityPub) to the latest verified beacon for each node.
@@ -167,8 +171,9 @@ func NewE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		beaconCtr:     map[string]uint64{},
 		beaconMiss:    map[string]*beaconMissState{},
 		everConnected: map[string]bool{},
-		seenBranches:  map[[32]byte]bool{},
-		delivered:     map[string]map[string]uint64{},
+		seenBranches:    map[[32]byte]bool{},
+		retainedEntries: trustlog.NewEntryStore(),
+		delivered:       map[string]map[string]uint64{},
 	}
 	if genesisHash != nil {
 		m.trust = trustlog.NewSyncStore(genesisHash)
@@ -964,6 +969,11 @@ func (m *E2EClient) rememberHead(chain []byte) {
 	}
 	m.mu.Lock()
 	m.seenBranches[h] = true
+	if m.retainedEntries != nil {
+		if raw, err := trustlog.ChainEntries(chain); err == nil {
+			m.retainedEntries.PutAll(raw)
+		}
+	}
 	m.mu.Unlock()
 }
 
@@ -986,29 +996,16 @@ func (m *E2EClient) syncTrustChains() ([][]byte, bool) {
 			}
 		}
 	}
-	chains, unplaced := trustlog.AssembleChainsReport(merged)
-
-	// Same recovery as the node: the gateway withheld ancestors for branches we
-	// advertised but no longer hold entries for. One unconditional retry with empty
-	// heads forces a full resend; retry at most once to avoid per-tick doubling if
-	// the gateway permanently holds an orphan branch.
-	if unplaced > 0 && len(heads) > 0 {
-		log.Printf("client: warn: trust-log delta has %d unplaced entries; clearing branch cache and re-syncing", unplaced)
-		m.mu.Lock()
-		m.seenBranches = map[[32]byte]bool{}
-		m.mu.Unlock()
-		var got2 api.TrustLogSyncResult
-		if err := m.peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Heads: nil}, &got2); err == nil {
-			merged2 := append([][]byte{}, got2.Entries...)
-			if m.trust != nil {
-				if mine := m.trust.Bytes(); mine != nil {
-					if raw, err := trustlog.ChainEntries(mine); err == nil {
-						merged2 = append(merged2, raw...)
-					}
-				}
-			}
-			chains, _ = trustlog.AssembleChainsReport(merged2)
+	m.mu.Lock()
+	if re := m.retainedEntries; re != nil {
+		if retained, _ := re.Delta(nil); len(retained) > 0 {
+			merged = append(merged, retained...)
 		}
+	}
+	m.mu.Unlock()
+	chains, unplaced := trustlog.AssembleChainsReport(merged)
+	if unplaced > 0 {
+		log.Printf("client: warn: trust-log sync has %d unplaced entries; gateway may hold an incomplete branch", unplaced)
 	}
 
 	return chains, true
