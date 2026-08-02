@@ -176,6 +176,40 @@ void main() {
       await client.close();
     });
 
+    test('disjoint response does not crash on repeat — latch holds', () async {
+      // Verifies the structural invariant of lastDisjointLogged: a gateway that
+      // returns disjoint=true on every sync must not cause an error on the
+      // second call (the latch prevents double-logging the warning).
+      final v = _tl();
+      final genesisHash = _b(v, 'genesis_head');
+
+      final link = _CallbackLink((j, self) {
+        final id = j['id'];
+        switch (j['method'] as String?) {
+          case 'nodes.list':
+            self.push({'jsonrpc': '2.0', 'id': id, 'result': {'nodes': []}});
+          case 'trustlog.sync':
+            self.push({
+              'jsonrpc': '2.0',
+              'id': id,
+              'result': {'entries': [], 'want': [], 'disjoint': true},
+            });
+        }
+      });
+
+      final client = E2EClient(
+        link.incoming,
+        link.send,
+        await generateKeyPair(),
+        genesisHash: genesisHash,
+      );
+
+      await client.connect();   // first disjoint sync — latch set
+      await client.resyncNow(); // second disjoint sync — latch suppresses re-log
+
+      await client.close();
+    });
+
     test('existing-behaviour: a revoked device stops being authorized after a sync', () async {
       // Uses the reeval vectors: initial chain authorizes both A and B;
       // revoke_b chain revokes B. After resync the client must no longer authorize B.

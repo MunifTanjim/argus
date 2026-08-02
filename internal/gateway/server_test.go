@@ -279,3 +279,49 @@ func TestGatewayPingsNodesAtTheConfiguredInterval(t *testing.T) {
 		}
 	}
 }
+
+// TestGatewayDisjointSuppressedWhenTruncated asserts both call sites in
+// server.go: when Truncated is set the gateway must suppress the Disjoint flag
+// so that a caller who under-reported due to the cap is not falsely quarantined.
+func TestGatewayDisjointSuppressedWhenTruncated(t *testing.T) {
+	s := NewServer(New(0), nil, nil)
+
+	chain := marshalChainForTest(t, 2)
+	entries, err := trustlog.ChainEntries(chain)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	s.entries.PutAll(entries)
+
+	// A hash the gateway does not hold — makes the offer disjoint.
+	unknownHash := bytes.Repeat([]byte{0xAB}, 32)
+
+	// Node uplink path.
+	for _, truncated := range []bool{true, false} {
+		params := mustMarshal(api.TrustLogSyncParams{Known: [][]byte{unknownHash}, Truncated: truncated})
+		res, err := s.nodeDispatch(context.Background(), nil, api.MethodTrustLogSync, params)
+		if err != nil {
+			t.Fatalf("nodeDispatch truncated=%v: %v", truncated, err)
+		}
+		got := res.(api.TrustLogSyncResult).Disjoint
+		want := !truncated
+		if got != want {
+			t.Fatalf("node path truncated=%v: Disjoint=%v, want %v", truncated, got, want)
+		}
+	}
+
+	// Client server path.
+	dispatch := s.clientSrv.DispatchFunc()
+	for _, truncated := range []bool{true, false} {
+		params := mustMarshal(api.TrustLogSyncParams{Known: [][]byte{unknownHash}, Truncated: truncated})
+		res, err := dispatch(context.Background(), api.MethodTrustLogSync, params)
+		if err != nil {
+			t.Fatalf("client dispatch truncated=%v: %v", truncated, err)
+		}
+		got := res.(api.TrustLogSyncResult).Disjoint
+		want := !truncated
+		if got != want {
+			t.Fatalf("client path truncated=%v: Disjoint=%v, want %v", truncated, got, want)
+		}
+	}
+}

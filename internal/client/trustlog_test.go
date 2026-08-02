@@ -743,3 +743,40 @@ func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {
 		t.Fatal("recurrence after zero must log again")
 	}
 }
+
+// TestClientSyncTrustChainsDisjointLatch verifies that the disjoint state is
+// latched on the first disjoint sync and does not flip back on a repeat.
+func TestClientSyncTrustChainsDisjointLatch(t *testing.T) {
+	_, genesis := genesisChainForTest(t)
+	srvConn, cliConn := net.Pipe()
+	m, err := NewE2EClientWithGenesis(cliConn, genesis)
+	if err != nil {
+		srvConn.Close()
+		cliConn.Close()
+		t.Fatalf("NewE2EClientWithGenesis: %v", err)
+	}
+	t.Cleanup(func() { m.Close(); srvConn.Close() })
+
+	m.peer = fakePeerFunc(func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			result.(*api.TrustLogSyncResult).Disjoint = true
+		}
+		return nil
+	})
+
+	m.syncTrustChains()
+	m.mu.Lock()
+	latched := m.lastDisjointLogged
+	m.mu.Unlock()
+	if !latched {
+		t.Fatal("lastDisjointLogged must be true after first disjoint sync")
+	}
+
+	m.syncTrustChains()
+	m.mu.Lock()
+	latched = m.lastDisjointLogged
+	m.mu.Unlock()
+	if !latched {
+		t.Fatal("lastDisjointLogged must remain true after repeated disjoint sync")
+	}
+}
