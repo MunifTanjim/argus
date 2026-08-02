@@ -183,12 +183,14 @@ func TestIdleFleetStaysUnderChatterBudget(t *testing.T) {
 
 	t.Logf("idle fleet chatter RPCs in 20-tick window: %d", got)
 
-	// Measured baseline: 60 RPCs on 2026-07-31. Budget adds ~25% headroom.
+	// Measured baseline: 60 RPCs on 2026-08-02 (re-confirmed after trustlog.sync offer change). Budget adds ~25% headroom.
 	// At 50 ms/tick: 2 nodes × 20 ticks × 1 trustlog.sync = 40; 1 client × 20 ticks
 	// × 1 trustlog.sync = 20; nodes.list = 0 (roster runs on its own clock, so only
 	// at connect plus a refresh when a beacon arrives from an unknown peer);
 	// trustlog.push = 0 (conditional on new entries); beacon.deliver = 0 while idle
 	// (couriered on arrival, deduped by counter, forced only every 30 minutes).
+	// Note: this counts RPC calls, not bytes; the offer now lists every retained entry hash,
+	// growing payload per call without changing call count.
 	const budget = 75
 	if got > budget {
 		t.Fatalf("idle fleet issued %d RPCs in the window, budget %d — something is polling or broadcasting unconditionally", got, budget)
