@@ -293,8 +293,8 @@ func newLockStatusCmd() *cobra.Command {
 			defer cancel()
 			st, err := lockStatusOnNode(ctx, cfg)
 			if err != nil {
-				// No local node (client-only machine): print this device's client identity
-				// pubkey + how to get it authorized, offline.
+				// Node socket is unreachable: print the client view, but exit non-zero
+				// because the node half of the status could not be established.
 				kp, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 				if ierr != nil {
 					return fail(cmd, err) // surface the original node-dial error
@@ -302,12 +302,15 @@ func newLockStatusCmd() *cobra.Command {
 				pub := keyfmt.DeviceKey.Encode(kp.Public)
 				shell.StdOutF("locked mode: (client — no local node)\n  this device identity: %s\n  to authorize, run on a signer node:\n    %s\n", pub, lockSignHint(kp.Public))
 				printClientPinStatus(ctx, cfg)
-				return nil
+				return fail(cmd, fmt.Errorf("node socket: %v", err))
 			}
 			printLockStatus(st)
-			printClientPinStatus(ctx, cfg)
+			pinErr := printClientPinStatus(ctx, cfg)
 			if hint := authorizeHint(st); hint != "" {
 				shell.StdOutF("%s", hint)
+			}
+			if pinErr != nil {
+				return fail(cmd, pinErr)
 			}
 			return nil
 		},
@@ -321,17 +324,20 @@ func newLockStatusCmd() *cobra.Command {
 // one command an operator runs when the gateway is the broken thing.
 var gatewayProbeTimeout = 5 * time.Second
 
-func printClientPinStatus(ctx context.Context, cfg *config.Config) {
-	shell.StdOutF("%s", clientPinLine(ctx, cfg))
+func printClientPinStatus(ctx context.Context, cfg *config.Config) error {
+	line, err := clientPinLine(ctx, cfg)
+	shell.StdOutF("%s", line)
+	return err
 }
 
 // clientPinLine reports the client (TUI) role's pin state on this machine. The client
 // has no RPC surface and the node's status says nothing about it, so this is the only
 // place an operator can see that the dashboard on this box is quarantined. With no pin
 // of its own it asks the gateway whether the network has a trust log at all — that is
-// precisely the condition that quarantines the client. A probe that times out is
-// reported in the line, never returned: the node half of `lock status` must still print.
-func clientPinLine(ctx context.Context, cfg *config.Config) string {
+// precisely the condition that quarantines the client. The error return is non-nil when
+// any part of the probe could not be completed (gateway unreachable, auth rejected,
+// timeout); the caller should still print the line and then exit non-zero.
+func clientPinLine(ctx context.Context, cfg *config.Config) (string, error) {
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
 	// A pinned client is checked too, not just an unpinned one: when the chain it
 	// names has been disabled the pin is dead, and the network genesis is what the
@@ -351,7 +357,7 @@ func clientPinLine(ctx context.Context, cfg *config.Config) string {
 			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
 		}
 	}
-	return clientPinStatus(pin, perr, netGenesis, neterr, superseded)
+	return clientPinStatus(pin, perr, netGenesis, neterr, superseded), neterr
 }
 
 // clientPinStatus renders the client pin line. netGenesis is the genesis this

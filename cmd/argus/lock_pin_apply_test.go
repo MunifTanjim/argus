@@ -218,7 +218,7 @@ func TestClientPinLineReturnsWhenTheGatewayNeverAnswers(t *testing.T) {
 	cfg.Gateway.URL = "ws://" + strings.TrimPrefix(ts.URL, "http://")
 
 	lines := make(chan string, 1)
-	go func() { lines <- clientPinLine(context.Background(), cfg) }()
+	go func() { line, _ := clientPinLine(context.Background(), cfg); lines <- line }()
 
 	select {
 	case line := <-lines:

@@ -1,5 +1,5 @@
 $ argus lock status --token=wrong-token --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR>
-exit 0
+exit 1
 --- stdout ---
 locked mode: not enabled
   this node signer: <NODE-A-SIGPUB>
@@ -7,3 +7,4 @@ locked mode: not enabled
   pin: none
   client pin: none (could not check this network for a trust log: failed to WebSocket dial: expected handshake response status code 101 but got 401)
 --- stderr ---
+argus lock status: failed to WebSocket dial: expected handshake response status code 101 but got 401

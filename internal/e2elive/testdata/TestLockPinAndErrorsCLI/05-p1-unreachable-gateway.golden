@@ -1,5 +1,5 @@
 $ argus lock status --gateway=ws://<UNREACHABLE-GW-ADDR> --socket=<node-a-SOCKET> --token=<TOKEN>
-exit 0
+exit 1
 --- stdout ---
 locked mode: not enabled
   this node signer: <NODE-A-SIGPUB>
@@ -7,3 +7,4 @@ locked mode: not enabled
   pin: none
   client pin: none (could not check this network for a trust log: failed to WebSocket dial: failed to send handshake request: Get "http://<UNREACHABLE-GW-ADDR>/client": dial tcp <UNREACHABLE-GW-ADDR>: connect: connection refused)
 --- stderr ---
+argus lock status: failed to WebSocket dial: failed to send handshake request: Get "http://<UNREACHABLE-GW-ADDR>/client": dial tcp <UNREACHABLE-GW-ADDR>: connect: connection refused

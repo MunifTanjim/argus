@@ -1,5 +1,5 @@
 $ argus lock status --socket=<ROOT>/nope.sock --gateway=ws://<GW-ADDR> --token=<TOKEN>
-exit 0
+exit 1
 --- stdout ---
 locked mode: (client — no local node)
   this device identity: <CLI-CLIENT-DEVPUB>
@@ -7,3 +7,4 @@ locked mode: (client — no local node)
     argus lock sign <CLI-CLIENT-DEVPUB>
   client pin: none
 --- stderr ---
+argus lock status: node socket: dial unix <ROOT>/nope.sock: connect: no such file or directory
