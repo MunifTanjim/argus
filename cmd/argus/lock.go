@@ -653,6 +653,11 @@ func newLockDeviceCmd(use, short, method string) *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
+			if !res.Changed {
+				alreadyState := map[string]string{"sign": "authorized", "revoke-device": "revoked"}[use]
+				shell.StdOutF("%s: device already %s; nothing changed\n  current tip (audit): %s\n", use, alreadyState, keyfmt.Tip.Encode(res.Tip))
+				return nil
+			}
 			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
 			return nil
 		},

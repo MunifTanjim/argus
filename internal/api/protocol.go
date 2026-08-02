@@ -715,9 +715,11 @@ type LockDeviceParams struct {
 	Device []byte `json:"device"`
 }
 
-// LockDeviceResult reports the trust-log tip after the sign/revoke.
+// LockDeviceResult reports the trust-log tip after the sign/revoke. Changed is
+// false when the device was already in the target state (idempotent no-op).
 type LockDeviceResult struct {
-	Tip []byte `json:"tip"`
+	Tip     []byte `json:"tip"`
+	Changed bool   `json:"changed"`
 }
 
 // LockSignerParams identifies a signer to add/remove by its Ed25519 signer pubkey.

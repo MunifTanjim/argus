@@ -166,7 +166,7 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 		d.reevaluateTrustChannels()
 		d.announceTrustChange()
 	}
-	return api.LockDeviceResult{Tip: st.Tip()}, nil
+	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
 }
 
 // handleLockAddSigner adds a trusted signer (lock.addSigner). Requires this node to be
