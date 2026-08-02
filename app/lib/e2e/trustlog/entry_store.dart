@@ -7,7 +7,12 @@ import 'entry.dart' show Entry;
 // DoS backstop: a locked network performs a handful of trust-log writes a year,
 // so reaching this ceiling means a peer is misbehaving. Nothing is evicted —
 // inserts past the ceiling are refused.
-const int _maxRetainedEntries = 1 << 16;
+int _maxRetainedEntries = 1 << 16;
+
+/// Overrides the entry store ceiling for the duration of a test. Restore the
+/// previous value in [addTearDown] so a lowered ceiling cannot leak into
+/// sibling tests. Test-only — matches Go's [SetMaxRetainedEntriesForTest].
+void setMaxRetainedEntriesForTest(int n) => _maxRetainedEntries = n;
 
 /// Holds raw trust-log entries keyed by entry hash. Intentionally blind: parses
 /// only each entry's own hash and its Prev pointer — never a signature, a kind,

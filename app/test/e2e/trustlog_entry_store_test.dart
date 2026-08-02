@@ -115,6 +115,68 @@ void main() {
       }
     });
 
+    group('ceiling', () {
+      test('refuses past the ceiling rather than evicting', () {
+        final v = _tl();
+        final entries = _rawEntries(_b(v, 'chain'));
+        expect(entries.length, greaterThanOrEqualTo(2));
+        setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+
+        final store = EntryStore();
+        final (stored, refused) = store.put(entries[0]);
+        expect(stored, isTrue, reason: 'first insert must succeed');
+        expect(refused, isFalse);
+
+        final (stored2, refused2) = store.put(entries[1]);
+        expect(stored2, isFalse, reason: 'insert past ceiling must not be stored');
+        expect(refused2, isTrue, reason: 'insert past ceiling must set refused');
+      });
+
+      test('putAll refused count is non-zero at ceiling', () {
+        final v = _tl();
+        final entries = _rawEntries(_b(v, 'chain'));
+        expect(entries.length, greaterThanOrEqualTo(2));
+        setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+
+        final store = EntryStore();
+        store.put(entries[0]); // fills to ceiling
+        final (added, refused) = store.putAll(entries.sublist(1));
+        expect(added, 0, reason: 'at ceiling: nothing new added');
+        expect(refused, entries.length - 1,
+            reason: 'at ceiling: every remaining entry must be refused');
+      });
+
+      test('invariant: at ceiling a branch must NOT add its head to the head set', () {
+        // This is the core invariant the entry store guards:
+        // a head is recorded ONLY if its raw bytes were retained.
+        // If put refuses (ceiling), the entry is absent from byHash, so
+        // heads() cannot return it. The head set is derived strictly from
+        // what is stored — a refused entry is invisible to heads().
+        final v = _tl();
+        final entries = _rawEntries(_b(v, 'chain'));
+        expect(entries.length, greaterThanOrEqualTo(2));
+        setMaxRetainedEntriesForTest(1);
+        addTearDown(() => setMaxRetainedEntriesForTest(1 << 16));
+
+        final store = EntryStore();
+        store.put(entries[0]); // fills ceiling with genesis
+        final headsBefore = store.heads();
+        expect(headsBefore.length, 1);
+
+        // The auth entry (prev = genesis hash) is refused; its head must
+        // NOT appear in heads() even though it would be a tip.
+        final (stored, refused) = store.put(entries[1]);
+        expect(stored, isFalse);
+        expect(refused, isTrue);
+
+        // Head set is unchanged — the refused entry is not recorded.
+        expect(store.heads().length, 1,
+            reason: 'refused entry must not appear as a new head');
+      });
+    });
+
     test('retains an orphan entry whose ancestor is absent', () {
       final v = _tl();
       final entries = _rawEntries(_b(v, 'chain'));
