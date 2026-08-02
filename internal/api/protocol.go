@@ -668,12 +668,18 @@ type RelayCloseParams struct {
 	ChanID string `json:"chan_id"`
 }
 
-// TrustLogSyncParams carries the caller's head hashes — the hash of the last
-// entry of every branch it holds, including branches it rejected. Holding a head
-// implies holding its ancestry, so the gateway needs nothing else to compute the
-// delta. An empty Heads requests everything.
+// TrustLogSyncParams states what the caller holds. Known lists the hash of every
+// entry it retains — adopted chain and rejected branches alike — so the gateway
+// computes the delta by set subtraction and never infers ancestry from a head.
+// Truncated reports that Known was capped and is partial: the caller will receive
+// entries it already holds, which dedupe, and the gateway must not treat a
+// truncated offer as disjoint.
+//
+// Heads is the superseded head-only form, removed once every caller sends Known.
 type TrustLogSyncParams struct {
-	Heads [][]byte `json:"heads,omitempty"`
+	Heads     [][]byte `json:"heads,omitempty"`
+	Known     [][]byte `json:"known,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
 }
 
 // TrustLogSyncResult answers a trustlog.sync. Entries holds every retained entry
@@ -681,9 +687,15 @@ type TrustLogSyncParams struct {
 // trustlog.MarshalEntry bytes, ordered parents before children. Want names the
 // caller's heads the gateway does not hold; a node answers it with trustlog.push,
 // a client ignores it — clients are supplicants and must not publish trust state.
+// Disjoint reports that a non-empty, untruncated Known shared no entry with
+// the gateway's store — the caller is almost certainly following a different
+// trust root. Advisory only: the entries are still returned, because a client
+// discovering the network's genesis and a device detecting supersession both
+// need them.
 type TrustLogSyncResult struct {
-	Entries [][]byte `json:"entries,omitempty"`
-	Want    [][]byte `json:"want,omitempty"`
+	Entries  [][]byte `json:"entries,omitempty"`
+	Want     [][]byte `json:"want,omitempty"`
+	Disjoint bool     `json:"disjoint,omitempty"`
 }
 
 // TrustLogPushParams carries individually marshalled entries a node is publishing

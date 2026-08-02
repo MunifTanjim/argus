@@ -351,8 +351,16 @@ func (s *Server) buildClientServer() *api.Server {
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want, _ := s.entries.Delta(p.Heads)
-		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
+		known := p.Known
+		if known == nil {
+			known = p.Heads
+		}
+		entries, want, disjoint := s.entries.Delta(known)
+		return api.TrustLogSyncResult{
+			Entries:  entries,
+			Want:     want,
+			Disjoint: disjoint && !p.Truncated,
+		}, nil
 	})
 
 	// relay.open pairs this client with a node into a chan_id channel for E2E frames.
@@ -593,8 +601,16 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		entries, want, _ := s.entries.Delta(p.Heads)
-		return api.TrustLogSyncResult{Entries: entries, Want: want}, nil
+		known := p.Known
+		if known == nil {
+			known = p.Heads
+		}
+		entries, want, disjoint := s.entries.Delta(known)
+		return api.TrustLogSyncResult{
+			Entries:  entries,
+			Want:     want,
+			Disjoint: disjoint && !p.Truncated,
+		}, nil
 	case api.MethodTrustLogPush:
 		p, err := api.Decode[api.TrustLogPushParams](params)
 		if err != nil {

@@ -86,6 +86,24 @@ func TestTrustLogSyncWireShape(t *testing.T) {
 	}
 }
 
+func TestTrustLogSyncOfferWireShape(t *testing.T) {
+	b, err := json.Marshal(TrustLogSyncParams{Known: [][]byte{{1, 2, 3}}, Truncated: true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got, want := string(b), `{"known":["AQID"],"truncated":true}`; got != want {
+		t.Fatalf("params wire shape = %s, want %s", got, want)
+	}
+
+	var res TrustLogSyncResult
+	if err := json.Unmarshal([]byte(`{"entries":["AQ=="],"disjoint":true}`), &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !res.Disjoint || len(res.Entries) != 1 {
+		t.Fatalf("decoded wrong: %+v", res)
+	}
+}
+
 func TestTrustLogPushAndChangedWireShape(t *testing.T) {
 	if MethodTrustLogPush != "trustlog.push" {
 		t.Fatalf("method = %q", MethodTrustLogPush)
