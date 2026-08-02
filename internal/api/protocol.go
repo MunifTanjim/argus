@@ -89,7 +89,7 @@ const (
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
-	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known entry hashes; gateway infers diff)
+	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
 	MethodTrustLogPush = "trustlog.push" // node->gateway request: TrustLogPushParams; result: nil (publish entries)
 	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
 	// did not previously hold has been offered. It is a hint with no authority: the
