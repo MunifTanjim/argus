@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
-import 'package:argus/e2e/trustlog/entry_store.dart' show setMaxOfferedHashesForTest;
+import 'package:argus/e2e/trustlog/entry_store.dart' show setMaxRetainedEntriesForTest, setMaxOfferedHashesForTest;
 
 Map<String, dynamic> _tl() =>
     (jsonDecode(File('test/e2e/testdata/vectors.json').readAsStringSync())

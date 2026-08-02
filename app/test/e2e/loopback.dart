@@ -222,6 +222,10 @@ class MultiNodeLoopbackLink implements RpcLink {
         final params = j['params'];
         final rawKnown = params is Map ? params['known'] : null;
         final rawHeads = params is Map ? params['heads'] : null;
+        // A truncated offer under-reports by construction and can look disjoint
+        // when it is not — suppress disjoint for truncated offers, matching the
+        // real gateway.
+        final offerTruncated = params is Map ? params['truncated'] == true : false;
         List<Uint8List> entries;
         bool disjoint = false;
         if (rawKnown is List) {
@@ -241,8 +245,8 @@ class MultiNodeLoopbackLink implements RpcLink {
               if (!knownHex.contains(hexEncode(hashEntry(unmarshalEntry(raw)))))
                 raw,
           ];
-          // disjoint: non-empty known shares no entry with this store.
-          if (knownHex.isNotEmpty) {
+          // disjoint: non-empty, non-truncated known shares no entry with this store.
+          if (knownHex.isNotEmpty && !offerTruncated) {
             final storeHex = {
               for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw)))
             };

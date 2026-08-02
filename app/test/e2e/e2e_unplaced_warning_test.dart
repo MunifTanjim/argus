@@ -90,15 +90,17 @@ void main() {
     expect(client.debugLastUnplacedLogged, 1,
         reason: 'first orphan: lastUnplacedLogged must advance to 1');
 
-    // Second resync: same orphan (already retained, deduped) → unplaced still 1,
-    // warning suppressed (count unchanged).
+    // Second resync: same orphan again → unplaced still 1, warning suppressed.
+    // Unplaced entries are not retained across syncs (only assembled chains are
+    // stored), so the gateway must re-serve them each tick for them to count.
     gw.nextEntries = [orphan1];
     await client.resyncNow();
     expect(client.debugLastUnplacedLogged, 1,
         reason: 'identical count: lastUnplacedLogged stays 1 (no repeated warning)');
 
-    // Third resync: a second orphan entry added → unplaced changes 1→2, warning fires.
-    gw.nextEntries = [orphan2];
+    // Third resync: serve both orphans so the merged input has two unplaced
+    // entries → count changes 1→2, warning fires.
+    gw.nextEntries = [orphan1, orphan2];
     await client.resyncNow();
     expect(client.debugLastUnplacedLogged, 2,
         reason: 'count changed 1→2: lastUnplacedLogged must advance to 2');

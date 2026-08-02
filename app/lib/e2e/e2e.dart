@@ -12,6 +12,6 @@ export 'trustlog/assemble.dart';
 export 'trustlog/entry.dart';
 export 'trustlog/codec.dart';
 export 'trustlog/disablement.dart';
-export 'trustlog/entry_store.dart';
+export 'trustlog/entry_store.dart' hide setMaxRetainedEntriesForTest, setMaxOfferedHashesForTest;
 export 'trustlog/trust_log.dart';
 export 'trustlog/trust_store.dart';

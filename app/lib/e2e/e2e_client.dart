@@ -317,6 +317,7 @@ class E2EClient implements GatewayClient {
       'known': [for (final h in known) base64.encode(h)],
       if (truncated) 'truncated': true,
     });
+    final gatewayEntries = <Uint8List>[];
     if (result is Map) {
       final disjoint = result['disjoint'] == true;
       if (disjoint && !_lastDisjointLogged) {
@@ -329,26 +330,25 @@ class E2EClient implements GatewayClient {
       }
       _lastDisjointLogged = disjoint;
 
+      // Decode gateway entries into the merge slice only — store write happens
+      // after assembly, so only entries belonging to a complete genesis-rooted
+      // chain are ever retained. Mirrors Go syncTrustChains exactly.
       final rawList = result['entries'];
       if (rawList is List) {
-        final entries = <Uint8List>[
-          for (final e in rawList)
-            if (e is String && e.isNotEmpty) Uint8List.fromList(base64.decode(e)),
-        ];
-        final (_, refused) = _entryStore.putAll(entries);
-        if (refused > 0) {
-          developer.log(
-            'trust-log entry store at ceiling; entries refused: $refused',
-            name: 'e2e',
-            level: 900,
-          );
+        for (final e in rawList) {
+          if (e is String && e.isNotEmpty) {
+            try {
+              gatewayEntries.add(Uint8List.fromList(base64.decode(e)));
+            } catch (_) {}
+          }
         }
       }
     }
 
-    // Merge trust.chainBytes with all retained entries (all branches, including
-    // those that lost fork-choice). Mirrors Go: trust.Bytes() + re.All().
+    // Merge: raw gateway entries + verified trust chain + all retained entries.
+    // Mirrors Go: got.Entries + trust.Bytes() + re.All().
     final merged = <Uint8List>[];
+    merged.addAll(gatewayEntries);
     final cb2 = trust.chainBytes;
     if (cb2 != null) {
       try {
