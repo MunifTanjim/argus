@@ -379,9 +379,15 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 			return fmt.Sprintf("  client pin: %s — SUPERSEDED: the network now uses %s\n       the dashboard on this machine opens no channels; run:\n         %s\n       then restart argus\n",
 				fingerprintOf(pin.Genesis), fingerprintOf(netGenesis), "argus lock pin "+trustpin.Encode(netGenesis))
 		}
-		// The pinned chain was disabled but no replacement root is available yet.
-		// Saying "moved to a new root" would be false; advising "argus lock pin" would
-		// send the operator chasing a genesis that does not exist.
+		if neterr != nil {
+			// Probe failed: a replacement root may exist but could not be checked.
+			// Advising lock init here could mint a competing genesis and fork the fleet.
+			return fmt.Sprintf("  client pin: %s — SUPERSEDED: could not reach the gateway to check for a replacement root: %v\n       the dashboard on this machine opens no channels; retry once the gateway is reachable\n",
+				fingerprintOf(pin.Genesis), neterr)
+		}
+		// The pinned chain was disabled and the gateway confirmed no replacement.
+		// Saying "moved to a new root" would be false; advising bare "argus lock pin"
+		// would send the operator chasing a genesis that does not exist.
 		return fmt.Sprintf("  client pin: %s — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet\n       the dashboard on this machine opens no channels\n       a signer must run:\n         argus lock init\n       then on each device:\n         argus lock pin\n",
 			fingerprintOf(pin.Genesis))
 	case pin.Genesis != nil:
