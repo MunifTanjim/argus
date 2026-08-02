@@ -5,7 +5,7 @@ import "sync"
 // maxRetainedEntries is a DoS backstop, not a retention policy: a locked network
 // performs a handful of trust-log writes a year, so reaching this ceiling means a
 // peer is misbehaving. Nothing is ever evicted — inserts past the ceiling are
-// refused and logged by the caller.
+// refused; callers log when the refused count is non-zero.
 const maxRetainedEntries = 1 << 16
 
 // EntryStore holds the network's trust-log entries keyed by entry hash. It is
@@ -27,31 +27,41 @@ func NewEntryStore() *EntryStore {
 	return &EntryStore{}
 }
 
-// Put stores a single raw entry. It returns false if the entry fails to decode,
-// is already held, or the store has reached maxRetainedEntries.
-func (s *EntryStore) Put(raw []byte) bool {
+// Put stores a single raw entry. stored is true when the entry was newly added.
+// refused is true specifically when the store is at maxRetainedEntries; callers
+// must log when refused is true. Duplicates and undecodable entries are silently
+// skipped (stored=false, refused=false).
+func (s *EntryStore) Put(raw []byte) (stored, refused bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.putLocked(raw)
 }
 
-// PutAll stores each raw entry in entries, returning the count of newly added entries.
-func (s *EntryStore) PutAll(entries [][]byte) int {
+// PutAll stores each raw entry, returning the count of newly added entries and the
+// count refused because the store is at maxRetainedEntries. Duplicates and
+// undecodable garbage contribute to neither count; callers must log when refused
+// is non-zero.
+func (s *EntryStore) PutAll(entries [][]byte) (added, refused int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := 0
 	for _, raw := range entries {
-		if s.putLocked(raw) {
-			n++
+		stored, ref := s.putLocked(raw)
+		if stored {
+			added++
+		}
+		if ref {
+			refused++
 		}
 	}
-	return n
+	return added, refused
 }
 
-func (s *EntryStore) putLocked(raw []byte) bool {
+// putLocked returns (stored, refused): stored when the entry was newly added,
+// refused when the ceiling was the reason it was not.
+func (s *EntryStore) putLocked(raw []byte) (stored, refused bool) {
 	e, err := UnmarshalEntry(raw)
 	if err != nil {
-		return false
+		return false, false
 	}
 	if s.byHash == nil {
 		s.byHash = map[string][]byte{}
@@ -59,15 +69,15 @@ func (s *EntryStore) putLocked(raw []byte) bool {
 	}
 	h := string(HashEntry(&e))
 	if _, exists := s.byHash[h]; exists {
-		return false
+		return false, false
 	}
 	if s.count >= maxRetainedEntries {
-		return false
+		return false, true
 	}
 	s.byHash[h] = append([]byte(nil), raw...)
 	s.prev[h] = string(e.Prev)
 	s.count++
-	return true
+	return true, false
 }
 
 // Heads returns the hash of every retained entry that no other retained entry

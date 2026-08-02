@@ -138,7 +138,9 @@ func (d *Node) rememberHeadLocked(chain []byte) {
 	d.seenBranches[h] = true
 	if d.retainedEntries != nil {
 		if raw, err := trustlog.ChainEntries(chain); err == nil {
-			d.retainedEntries.PutAll(raw)
+			if _, refused := d.retainedEntries.PutAll(raw); refused > 0 {
+				d.log.Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
+			}
 		}
 	}
 }

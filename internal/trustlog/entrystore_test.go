@@ -83,11 +83,15 @@ func TestEntryStoreDedupesByHash(t *testing.T) {
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
 
-	if got := s.PutAll(raw); got != len(raw) {
+	if got, _ := s.PutAll(raw); got != len(raw) {
 		t.Fatalf("first PutAll inserted %d, want %d", got, len(raw))
 	}
-	if got := s.PutAll(raw); got != 0 {
-		t.Fatalf("re-offering the same entries inserted %d, want 0", got)
+	added, refused := s.PutAll(raw)
+	if added != 0 {
+		t.Fatalf("re-offering the same entries inserted %d, want 0", added)
+	}
+	if refused != 0 {
+		t.Fatalf("dedup must not set refused: got %d", refused)
 	}
 }
 
@@ -130,8 +134,50 @@ func TestEntryStoreCeilingStopsRunawayGrowth(t *testing.T) {
 	s := NewEntryStore()
 	raw := entriesOfES(t, testChainES(t))
 	s.count = maxRetainedEntries
-	if s.Put(raw[0]) {
-		t.Fatalf("insert past the ceiling must be refused")
+	stored, refused := s.Put(raw[0])
+	if stored {
+		t.Fatalf("insert past the ceiling must not be stored")
+	}
+	if !refused {
+		t.Fatalf("insert past the ceiling must set refused=true")
+	}
+}
+
+func TestEntryStoreCeilingRefusedCountIsNonZero(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOfES(t, testChainES(t))
+	s.count = maxRetainedEntries
+	added, refused := s.PutAll(raw)
+	if added != 0 {
+		t.Fatalf("at ceiling: added must be 0, got %d", added)
+	}
+	if refused != len(raw) {
+		t.Fatalf("at ceiling: refused must be %d, got %d", len(raw), refused)
+	}
+}
+
+func TestEntryStoreDedupDoesNotSetRefused(t *testing.T) {
+	s := NewEntryStore()
+	raw := entriesOfES(t, testChainES(t))
+	s.PutAll(raw) // first insert — all added
+	_, refused := s.PutAll(raw)
+	if refused != 0 {
+		t.Fatalf("dedup must not set refused: got %d", refused)
+	}
+}
+
+func TestEntryStoreGarbageDoesNotSetRefused(t *testing.T) {
+	s := NewEntryStore()
+	stored, refused := s.Put([]byte("undecodable garbage"))
+	if stored {
+		t.Fatalf("garbage must not be stored")
+	}
+	if refused {
+		t.Fatalf("garbage decode failure must not set refused")
+	}
+	_, ref := s.PutAll([][]byte{[]byte("garbage1"), []byte("garbage2")})
+	if ref != 0 {
+		t.Fatalf("garbage must not set refused count: got %d", ref)
 	}
 }
 
@@ -203,7 +249,8 @@ func TestEntryStoreRetainsAnOrphan(t *testing.T) {
 
 func TestEntryStoreRejectsUndecodableEntries(t *testing.T) {
 	s := NewEntryStore()
-	if s.Put([]byte("garbage")) {
+	stored, _ := s.Put([]byte("garbage"))
+	if stored {
 		t.Fatalf("undecodable entry must not be stored")
 	}
 }

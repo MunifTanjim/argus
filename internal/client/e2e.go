@@ -971,7 +971,9 @@ func (m *E2EClient) rememberHead(chain []byte) {
 	m.seenBranches[h] = true
 	if m.retainedEntries != nil {
 		if raw, err := trustlog.ChainEntries(chain); err == nil {
-			m.retainedEntries.PutAll(raw)
+			if _, refused := m.retainedEntries.PutAll(raw); refused > 0 {
+				log.Printf("client: warn: trust-log entry store at ceiling; entries refused: %d", refused)
+			}
 		}
 	}
 	m.mu.Unlock()

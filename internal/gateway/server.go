@@ -600,7 +600,11 @@ func (s *Server) nodeDispatch(_ context.Context, src *api.Peer, method string, p
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
 		}
-		if n := s.entries.PutAll(p.Entries); n > 0 {
+		added, refused := s.entries.PutAll(p.Entries)
+		if refused > 0 {
+			s.logger().Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
+		}
+		if added > 0 {
 			s.notifyNodePeers(src, api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.Heads()})
 		}
 		return nil, nil
