@@ -126,7 +126,15 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	if err := peer.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{Known: known, Truncated: truncated}, &got); err != nil {
 		return nil, false
 	}
-	if got.Disjoint {
+	d.pinMu.Lock()
+	prevDisjoint := d.lastDisjointLogged
+	d.lastDisjointLogged = got.Disjoint
+	if d.retainedEntries == nil {
+		d.retainedEntries = trustlog.NewEntryStore()
+	}
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if got.Disjoint && !prevDisjoint {
 		d.log.Warn("trust log: this device shares no history with the network's; it is likely pinned to a different trust root")
 	}
 
@@ -138,13 +146,8 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 			}
 		}
 	}
-	d.pinMu.Lock()
-	re := d.retainedEntries
-	d.pinMu.Unlock()
-	if re != nil {
-		if retained := re.All(); len(retained) > 0 {
-			merged = append(merged, retained...)
-		}
+	if retained := re.All(); len(retained) > 0 {
+		merged = append(merged, retained...)
 	}
 	chains, unplaced := trustlog.AssembleChainsReport(merged)
 	d.pinMu.Lock()
@@ -156,19 +159,17 @@ func (d *Node) syncTrustChains(peer trustCaller) ([][]byte, bool) {
 	}
 
 	// Retain assembled chains' entries so the next offer reflects what is held.
-	if re != nil {
-		refused := 0
-		for _, chain := range chains {
-			raw, err := trustlog.ChainEntries(chain)
-			if err != nil {
-				continue
-			}
-			_, r := re.PutAll(raw)
-			refused += r
+	refused := 0
+	for _, chain := range chains {
+		raw, err := trustlog.ChainEntries(chain)
+		if err != nil {
+			continue
 		}
-		if refused > 0 {
-			d.log.Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
-		}
+		_, r := re.PutAll(raw)
+		refused += r
+	}
+	if refused > 0 {
+		d.log.Warn("trust-log entry store at ceiling; entries refused", "refused", refused)
 	}
 
 	if len(got.Want) > 0 {
@@ -276,16 +277,13 @@ func (d *Node) announceTrustChange() {
 	d.emitBeacon()
 }
 
-// offerTrustNow pushes the current branch's entries to the gateway out of band and
-// retains them so the next sync offer reflects the local write. Best effort: the
-// sync loop is the backstop when there is no uplink.
+// offerTrustNow retains locally-appended chain entries and pushes them to the
+// gateway out of band. Retention happens before the peer check so a local write
+// with no uplink is still reflected in the next sync offer. Best effort: the sync
+// loop is the backstop when there is no uplink.
 func (d *Node) offerTrustNow() {
 	st := d.trust.Load()
 	if st == nil {
-		return
-	}
-	peer := d.triggerPeer()
-	if peer == nil {
 		return
 	}
 	mine := st.Bytes()
@@ -301,6 +299,10 @@ func (d *Node) offerTrustNow() {
 	d.pinMu.Unlock()
 	if re != nil {
 		re.PutAll(raw)
+	}
+	peer := d.triggerPeer()
+	if peer == nil {
+		return
 	}
 	_ = peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil)
 }

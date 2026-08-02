@@ -129,6 +129,7 @@ type Node struct {
 	pinMu              sync.Mutex
 	retainedEntries    *trustlog.EntryStore // every retained entry, indexed by hash; the sole source of the sync offer; guarded by pinMu
 	lastUnplacedLogged int                  // last unplaced count that triggered a warning; 0 means no active warning; guarded by pinMu
+	lastDisjointLogged bool                 // true when the last sync returned disjoint; suppresses repeat warnings; guarded by pinMu
 
 	localDisabledFlag atomic.Bool // per-node locked-mode escape hatch (persisted marker)
 

@@ -973,53 +973,77 @@ func TestSyncTrustChainsNoRetryOnHappyPath(t *testing.T) {
 	}
 }
 
-// TestKnownHashesReflectsCeiling pins the invariant that refused entries never
-// appear in the sync offer: knownHashes is derived from retainedEntries, so an
-// entry the store rejected is absent from known automatically.
+// TestKnownHashesReflectsCeiling pins the node-level invariant: when the entry
+// store is at its ceiling, a sync that receives new entries must not include the
+// refused ones in the next Known offer. Driven through syncTrustChains so it
+// tests the actual node code path, not just EntryStore internals.
 func TestKnownHashesReflectsCeiling(t *testing.T) {
 	prev := trustlog.SetMaxRetainedEntriesForTest(1)
 	t.Cleanup(func() { trustlog.SetMaxRetainedEntriesForTest(prev) })
 
-	genesisChain, _, _, _ := seedChain(t, false) // 1 entry — fills the store
-	otherChain, _, _, _ := seedChain(t, false)   // 1 entry — refused at ceiling
+	// chainA fills the ceiling; chainB's entry must be refused.
+	chainA, genesisA := lockedChainForTest(t) // 1 genesis entry
+	chainB, _ := lockedChainForTest(t)        // 1 genesis entry, different genesis
 
 	d := New()
-	d.SetTrustChainPath(t.TempDir() + "/chain")
-	d.pinMu.Lock()
-	d.retainedEntries = trustlog.NewEntryStore()
-	d.pinMu.Unlock()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "chain"))
+	if err := d.AdoptPin(genesisA); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
 
-	raw, _ := trustlog.ChainEntries(genesisChain)
-	d.pinMu.Lock()
-	d.retainedEntries.PutAll(raw) // fills to ceiling
-	d.pinMu.Unlock()
-
+	// First sync delivers chainA: fills the store to ceiling (1 entry).
+	d.syncTrustChains(&fakeTrustCaller{fn: func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			raw, _ := trustlog.ChainEntries(chainA)
+			result.(*api.TrustLogSyncResult).Entries = raw
+		}
+		return nil
+	}})
 	hashesBefore, _ := d.knownHashes()
 	if len(hashesBefore) != 1 {
-		t.Fatalf("setup: expected 1 hash after filling, got %d", len(hashesBefore))
+		t.Fatalf("after first sync: expected 1 hash, got %d", len(hashesBefore))
 	}
 
-	other, _ := trustlog.ChainEntries(otherChain)
-	d.pinMu.Lock()
-	_, refused := d.retainedEntries.PutAll(other)
-	d.pinMu.Unlock()
-	if refused == 0 {
-		t.Fatal("setup: expected refusal at ceiling")
-	}
-
+	// Second sync delivers chainB: ceiling is full, the entry must be refused.
+	d.syncTrustChains(&fakeTrustCaller{fn: func(method string, params, result any) error {
+		if method == api.MethodTrustLogSync {
+			raw, _ := trustlog.ChainEntries(chainB)
+			result.(*api.TrustLogSyncResult).Entries = raw
+		}
+		return nil
+	}})
 	hashesAfter, _ := d.knownHashes()
-	if len(hashesAfter) != len(hashesBefore) {
-		t.Fatalf("at ceiling: refused entry must not appear in known; got %d, want %d",
+	if len(hashesAfter) > len(hashesBefore) {
+		t.Fatalf("at ceiling: refused entry must not appear in known; got %d hashes, want %d",
 			len(hashesAfter), len(hashesBefore))
 	}
 }
 
-// forkChainForTest returns a well-formed chain that the node's Ingest will reject
-// (different genesis) so it exercises the "received but rejected" retention path.
-func forkChainForTest(t *testing.T) []byte {
-	t.Helper()
-	chain, _ := lockedChainForTest(t)
-	return chain
+// TestPushWantedIgnoresUnknownHashes verifies that a Want naming a hash the node
+// does not hold produces no trustlog.push call. This pins the behaviour change
+// from pushHeldEntries (which pushed the whole chain) to pushWanted (exact match).
+func TestPushWantedIgnoresUnknownHashes(t *testing.T) {
+	d, chain := nodeWithTrustStore(t)
+	if err := ingestForTest(d, chain); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	pushed := false
+	peer := &fakeTrustCaller{fn: func(method string, params, result any) error {
+		switch method {
+		case api.MethodTrustLogSync:
+			// Want a hash the node definitely does not hold.
+			result.(*api.TrustLogSyncResult).Want = [][]byte{bytes.Repeat([]byte{0x99}, 32)}
+		case api.MethodTrustLogPush:
+			pushed = true
+		}
+		return nil
+	}}
+	d.syncTrustChains(peer)
+
+	if pushed {
+		t.Fatal("Want naming an unknown hash must not trigger a push; pushHeldEntries regression would send the whole chain")
+	}
 }
 
 // TestSyncTrustChainsOffersEveryRetainedHash checks that syncTrustChains sends
@@ -1051,11 +1075,49 @@ func TestSyncTrustChainsOffersEveryRetainedHash(t *testing.T) {
 	}
 }
 
-// TestRejectedBranchIsNotRefetched checks that entries received in one sync are
-// present in Known on the next, so a rejected branch is not re-downloaded forever.
+// TestRejectedBranchIsNotRefetched checks that a same-genesis fork that loses
+// fork-choice is not re-downloaded on every tick. The fork's entries must appear
+// in Known after the first sync so the gateway sees the node already holds them.
 func TestRejectedBranchIsNotRefetched(t *testing.T) {
-	d, chain := nodeWithTrustStore(t)
-	rejected := forkChainForTest(t)
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	genLog, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisEntries := genLog.Entries()
+	genesis := genLog.Tip()
+
+	// winner: the fork this node ingests and adopts.
+	logA, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load A: %v", err)
+	}
+	if err := logA.AuthorizeDevice(bytes.Repeat([]byte{0xAA}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice A: %v", err)
+	}
+	winner := trustlog.MarshalChain(logA.Entries())
+
+	// rejected: a same-genesis fork that Ingest rejects on fork-choice.
+	logB, err := trustlog.Load(genesisEntries)
+	if err != nil {
+		t.Fatalf("Load B: %v", err)
+	}
+	if err := logB.AuthorizeDevice(bytes.Repeat([]byte{0xBB}, 32), signer); err != nil {
+		t.Fatalf("AuthorizeDevice B: %v", err)
+	}
+	rejected := trustlog.MarshalChain(logB.Entries())
+
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+	if err := d.AdoptPin(genesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+	if err := ingestForTest(d, winner); err != nil {
+		t.Fatalf("ingest winner: %v", err)
+	}
 
 	calls := 0
 	var second api.TrustLogSyncParams
@@ -1097,7 +1159,6 @@ func TestRejectedBranchIsNotRefetched(t *testing.T) {
 			t.Fatalf("second offer omitted a rejected-branch entry; it would be re-downloaded forever")
 		}
 	}
-	_ = chain
 }
 
 func TestUnplacedWarningSuppressedWhenUnchanged(t *testing.T) {

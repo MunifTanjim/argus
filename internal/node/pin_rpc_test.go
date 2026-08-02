@@ -375,15 +375,12 @@ func TestDetectDoesNotStrandAStoreEnabledDuringThePull(t *testing.T) {
 		if st == nil || st.Length() > 0 {
 			continue // the store ingested the chain itself; nothing to check
 		}
-		// Store is empty: either retained entries are present (next pull assembles
-		// from them without re-download) or they're absent (next pull re-downloads).
-		// Either is correct; verify no hash leaks from a cleared store.
-		hashes, _ := d.knownHashes()
-		d.pinMu.Lock()
-		re := d.retainedEntries
-		d.pinMu.Unlock()
-		if re == nil && len(hashes) > 0 {
-			t.Fatalf("iter %d: known has %d hashes but retainedEntries is nil", i, len(hashes))
+		// The detect path ran and returned early; the store is empty.
+		// One more pull must converge it — either from gateway data or from
+		// retained entries assembled without a re-download.
+		d.pullTrustOnce(peer)
+		if d.TrustStore().Length() == 0 {
+			t.Fatalf("iter %d: store is empty after race + one pull; node is stranded", i)
 		}
 	}
 }
