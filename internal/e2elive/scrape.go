@@ -20,7 +20,7 @@ const (
 	PatTip = `tip(?:\s*\(audit\))?: +(tip:[0-9a-f]+)`
 	// PatEntryHash matches the per-entry hash line that lock log emits under each
 	// entry. Entry 0 uses the gen: prefix; all later entries use tip:.
-	PatEntryHash   = `    hash: ((?:gen|tip):[0-9a-f]+)`
+	PatEntryHash = `  hash: ((?:gen|tip):[0-9a-f]+)`
 	PatDisablement = `disablement secret: (dis:[0-9a-f]+)`
 	// Both the `blob: <b64>` stdout line and the `--cosign <b64>` stderr hint.
 	PatBlob = `(?:blob: |--cosign )([A-Za-z0-9+/=]+)`

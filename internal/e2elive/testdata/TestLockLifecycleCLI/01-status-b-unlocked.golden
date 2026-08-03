@@ -3,7 +3,7 @@ exit 0
 --- stdout ---
 locked mode: not enabled
 
-chain: none — never initialized
+chain: none — locked mode not enabled on this node
 
 this node
   identity: <NODE-B-DEVPUB>

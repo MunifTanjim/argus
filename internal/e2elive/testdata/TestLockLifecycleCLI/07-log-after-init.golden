@@ -3,11 +3,11 @@ exit 0
 --- stdout ---
 [0] genesis: 1 signer(s)
   signer: <NODE-A-SIGPUB>
-    hash: <GENESIS>
+  hash: <GENESIS>
 [1] authorize-device: <NODE-A-DEVPUB>
-    hash: <TIP-2>
+  hash: <TIP-2>
 [2] authorize-device: <NODE-B-DEVPUB>
-    hash: <TIP-1>
+  hash: <TIP-1>
 
 genesis: <GENESIS>
 tip:     <TIP-1>
