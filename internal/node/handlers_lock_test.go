@@ -944,3 +944,34 @@ func TestLockStatusReflectsState(t *testing.T) {
 		t.Fatalf("post-local-disable: LocalDisabled should be true, got %+v", st3)
 	}
 }
+
+func TestHandleLockLogIncludesEntryHashes(t *testing.T) {
+	skA := mustGenSigner(t)
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+	dev := bytes.Repeat([]byte{0xD2}, 32)
+	if err := tlog.AuthorizeDevice(dev, skA); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	d := newRevokeSignerNode(t, skA, genesisHash, trustlog.MarshalChain(tlog.Entries()))
+
+	res, err := callLockLog(t, d)
+	if err != nil {
+		t.Fatalf("lock.log: %v", err)
+	}
+	for i, e := range res.Entries {
+		if len(e.Hash) == 0 {
+			t.Fatalf("entry[%d] carries no hash", i)
+		}
+	}
+	if !bytes.Equal(res.Entries[0].Hash, genesisHash) {
+		t.Errorf("entry[0].Hash = %x, want genesis %x", res.Entries[0].Hash, genesisHash)
+	}
+	last := res.Entries[len(res.Entries)-1]
+	if !bytes.Equal(last.Hash, res.Tip) {
+		t.Errorf("last entry hash = %x, want tip %x", last.Hash, res.Tip)
+	}
+}

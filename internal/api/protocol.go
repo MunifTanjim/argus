@@ -798,6 +798,7 @@ type LockRevokeSignerFinishResult struct {
 type LockLogEntry struct {
 	Index       int      `json:"index"`
 	Kind        string   `json:"kind"`                   // genesis|add-signer|remove-signer|authorize-device|revoke-device|revoke-signer|disable
+	Hash        []byte   `json:"hash,omitempty"`         // this entry's chain hash; entry 0's is the genesis
 	Target      []byte   `json:"target,omitempty"`       // single-key entries: the target pubkey
 	Signers     [][]byte `json:"signers,omitempty"`      // genesis: initial signer set
 	Revoked     [][]byte `json:"revoked,omitempty"`      // revoke-signer: revoked signer pubkeys

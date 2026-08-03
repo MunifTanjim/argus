@@ -413,7 +413,7 @@ func (d *Node) handleLockLog(_ context.Context, _ json.RawMessage) (any, error) 
 	}
 	out := make([]api.LockLogEntry, len(entries))
 	for i, e := range entries {
-		le := api.LockLogEntry{Index: i, Kind: kindString(e.Kind)}
+		le := api.LockLogEntry{Index: i, Kind: kindString(e.Kind), Hash: trustlog.HashEntry(&entries[i])}
 		switch e.Kind {
 		case trustlog.KindGenesis:
 			le.Signers = make([][]byte, len(e.Signers))
