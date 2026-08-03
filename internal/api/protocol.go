@@ -818,6 +818,10 @@ type LockStatusResult struct {
 	Tip            []byte   `json:"tip,omitempty"`
 	Signers        [][]byte `json:"signers,omitempty"`
 	DeviceCount    int      `json:"device_count"`
+	// Devices is the authorized set. A non-zero DeviceCount with no Devices means the
+	// running daemon predates this field — upgraded binary, not yet restarted.
+	Devices        [][]byte `json:"devices,omitempty"`
+	Length         int      `json:"length,omitempty"`
 	SignerTrusted  bool     `json:"signer_trusted"`
 	Authorized     bool     `json:"authorized"`
 	SignerPubKey   []byte   `json:"signer_pubkey,omitempty"`

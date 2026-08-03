@@ -483,7 +483,10 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 	res.Enabled = true
 	res.Tip = st.Tip()
 	res.Signers = st.Signers()
-	res.DeviceCount = len(st.Devices())
+	devices := st.Devices()
+	res.DeviceCount = len(devices)
+	res.Devices = devices
+	res.Length = st.Length()
 	if len(d.signer.Public) > 0 {
 		res.SignerTrusted = st.SignerTrusted(d.signer.Public)
 	}

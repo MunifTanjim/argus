@@ -872,6 +872,35 @@ func TestLockStatusEquivocationField(t *testing.T) {
 	}
 }
 
+func TestLockStatusReportsDeviceSetAndLength(t *testing.T) {
+	skA := mustGenSigner(t)
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+	dev := bytes.Repeat([]byte{0xD1}, 32)
+	if err := tlog.AuthorizeDevice(dev, skA); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	d := newRevokeSignerNode(t, skA, genesisHash, trustlog.MarshalChain(tlog.Entries()))
+
+	raw, err := d.handleLockStatus(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("lock.status: %v", err)
+	}
+	st := raw.(api.LockStatusResult)
+	if st.DeviceCount != 1 {
+		t.Fatalf("DeviceCount = %d, want 1", st.DeviceCount)
+	}
+	if len(st.Devices) != 1 || !bytes.Equal(st.Devices[0], dev) {
+		t.Fatalf("Devices = %x, want [%x]", st.Devices, dev)
+	}
+	if st.Length != 2 {
+		t.Errorf("Length = %d, want 2", st.Length)
+	}
+}
+
 func TestLockStatusReflectsState(t *testing.T) {
 	d := newLockTestNode(t)
 	// Before init: not enabled, self keys reported, not locally disabled.
