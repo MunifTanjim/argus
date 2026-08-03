@@ -180,3 +180,76 @@ func TestLockStatusLinesOmitsAuthorizedWhenNotEnabled(t *testing.T) {
 		}
 	}
 }
+
+// The genesis must be printed in a form that can be copied, not only fingerprinted.
+func TestChainSectionPrintsGenesisTipAndLength(t *testing.T) {
+	st := api.LockStatusResult{
+		Enabled: true, Pinned: true,
+		PinGenesis: testGenesis(0xA1), Tip: testGenesis(0xB1), Length: 12,
+	}
+	out := chainSection(st)
+	for _, want := range []string{
+		keyfmt.Genesis.Encode(testGenesis(0xA1)),
+		fingerprintOf(testGenesis(0xA1)),
+		keyfmt.Tip.Encode(testGenesis(0xB1)),
+		fingerprintOf(testGenesis(0xB1)),
+		"length:  12 entries",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chain section must contain %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestChainSectionCollapsesWhenNotEnabled(t *testing.T) {
+	out := chainSection(api.LockStatusResult{})
+	if !strings.Contains(out, "chain: none") {
+		t.Errorf("chain section = %q, want a none line", out)
+	}
+}
+
+func TestDevicesSectionListsEachDeviceAndMarksThisNode(t *testing.T) {
+	self, other := testGenesis(0xD0), testGenesis(0xD1)
+	out := devicesSection(api.LockStatusResult{
+		Enabled: true, DeviceCount: 2,
+		Devices:        [][]byte{self, other},
+		IdentityPubKey: self,
+	})
+	if !strings.Contains(out, "devices (2)") {
+		t.Errorf("want a count header:\n%s", out)
+	}
+	for _, want := range []string{keyfmt.DeviceKey.Encode(self), keyfmt.DeviceKey.Encode(other)} {
+		if !strings.Contains(out, want) {
+			t.Errorf("must list %q:\n%s", want, out)
+		}
+	}
+	selfLine := keyfmt.DeviceKey.Encode(self) + "  ← this node"
+	if !strings.Contains(out, selfLine) {
+		t.Errorf("must mark this node:\n%s", out)
+	}
+	if strings.Contains(out, keyfmt.DeviceKey.Encode(other)+"  ← this node") {
+		t.Errorf("must not mark another device:\n%s", out)
+	}
+}
+
+// An upgraded binary talking to a daemon that has not restarted returns a count with
+// no list. Printing an empty roster for a populated chain would be a lie.
+func TestDevicesSectionReportsAStaleDaemon(t *testing.T) {
+	out := devicesSection(api.LockStatusResult{Enabled: true, DeviceCount: 7})
+	if !strings.Contains(out, "devices (7)") {
+		t.Errorf("must keep the count:\n%s", out)
+	}
+	if !strings.Contains(out, "restart it: argus start") {
+		t.Errorf("must advise a restart:\n%s", out)
+	}
+}
+
+func TestDevicesSectionCollapsesOnAnEmptyRoster(t *testing.T) {
+	out := devicesSection(api.LockStatusResult{Enabled: true})
+	if !strings.Contains(out, "devices: none") {
+		t.Errorf("devices section = %q, want a none line", out)
+	}
+	if strings.Contains(out, "restart") {
+		t.Errorf("an empty roster is not a stale daemon:\n%s", out)
+	}
+}

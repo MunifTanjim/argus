@@ -943,7 +943,20 @@ func chainSection(st api.LockStatusResult) string {
 	if !st.Enabled {
 		return "chain: none — never initialized\n"
 	}
-	return fmt.Sprintf("chain\n  tip:     %s\n", keyfmt.Tip.Encode(st.Tip))
+	var b strings.Builder
+	b.WriteString("chain\n")
+	// Enabled implies pinned — the store is genesis-pinned at construction — so an
+	// absent genesis here is a bug, not a state. Say so rather than print "gen:".
+	if len(st.PinGenesis) > 0 {
+		fmt.Fprintf(&b, "  genesis: %s\n           %s\n",
+			keyfmt.Genesis.Encode(st.PinGenesis), fingerprintOf(st.PinGenesis))
+	} else {
+		b.WriteString("  genesis: (not reported)\n")
+	}
+	fmt.Fprintf(&b, "  tip:     %s\n           %s\n",
+		keyfmt.Tip.Encode(st.Tip), fingerprintOf(st.Tip))
+	fmt.Fprintf(&b, "  length:  %d entries\n", st.Length)
+	return b.String()
 }
 
 func thisNodeSection(st api.LockStatusResult) string {
@@ -978,7 +991,20 @@ func devicesSection(st api.LockStatusResult) string {
 	if st.DeviceCount == 0 {
 		return "devices: none\n"
 	}
-	return fmt.Sprintf("devices (%d)\n", st.DeviceCount)
+	var b strings.Builder
+	fmt.Fprintf(&b, "devices (%d)\n", st.DeviceCount)
+	if len(st.Devices) == 0 {
+		b.WriteString("  list not reported by the running daemon — restart it: argus start\n")
+		return b.String()
+	}
+	for _, dev := range st.Devices {
+		fmt.Fprintf(&b, "  %s", keyfmt.DeviceKey.Encode(dev))
+		if bytes.Equal(dev, st.IdentityPubKey) {
+			b.WriteString("  ← this node")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func yesNo(b bool) string {
