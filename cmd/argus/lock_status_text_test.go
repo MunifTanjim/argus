@@ -253,3 +253,84 @@ func TestDevicesSectionCollapsesOnAnEmptyRoster(t *testing.T) {
 		t.Errorf("an empty roster is not a stale daemon:\n%s", out)
 	}
 }
+
+func TestSignersSectionListsSignersAndFingerprint(t *testing.T) {
+	sigA, sigB := testGenesis(0xA1), testGenesis(0xA2)
+	out := signersSection(api.LockStatusResult{
+		Enabled: true, Signers: [][]byte{sigA, sigB},
+	})
+	if !strings.Contains(out, "signers (2)") {
+		t.Errorf("want count header:\n%s", out)
+	}
+	for _, want := range []string{
+		keyfmt.SignerKey.Encode(sigA),
+		keyfmt.SignerKey.Encode(sigB),
+		"fingerprint:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("must contain %q:\n%s", want, out)
+		}
+	}
+}
+
+// Break-glass disables enforcement but the signer list records who held authority;
+// that list must still render so an operator can audit who had signing power.
+func TestSignersSectionRendersWhenLogDisabledByBreakGlass(t *testing.T) {
+	sigA := testGenesis(0xA1)
+	out := signersSection(api.LockStatusResult{
+		Enabled: true, Disabled: true,
+		Signers: [][]byte{sigA},
+	})
+	if !strings.Contains(out, "signers (1)") {
+		t.Errorf("want count header:\n%s", out)
+	}
+	if !strings.Contains(out, keyfmt.SignerKey.Encode(sigA)) {
+		t.Errorf("must list signer:\n%s", out)
+	}
+}
+
+func TestSignersSectionCollapsesWhenNoSigners(t *testing.T) {
+	out := signersSection(api.LockStatusResult{})
+	if !strings.Contains(out, "signers: none") {
+		t.Errorf("signers section = %q, want a none line", out)
+	}
+}
+
+func TestThisNodeSectionShowsKeysAndFlags(t *testing.T) {
+	st := api.LockStatusResult{
+		Enabled:        true,
+		IdentityPubKey: testGenesis(0xB0),
+		SignerPubKey:   testGenesis(0xB5),
+		Authorized:     true,
+		SignerTrusted:  true,
+	}
+	out := thisNodeSection(st)
+	for _, want := range []string{
+		"this node",
+		keyfmt.DeviceKey.Encode(testGenesis(0xB0)),
+		keyfmt.SignerKey.Encode(testGenesis(0xB5)),
+		"authorized: yes",
+		"trusted: yes",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("must contain %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestThisNodeSectionShowsNoneWhenKeysAbsent(t *testing.T) {
+	out := thisNodeSection(api.LockStatusResult{})
+	if !strings.Contains(out, "this node") {
+		t.Errorf("section header missing:\n%s", out)
+	}
+	// Keys absent: expect (none) placeholders, not empty fields.
+	if strings.Count(out, "(none)") < 2 {
+		t.Errorf("expect (none) for both absent keys:\n%s", out)
+	}
+	// No locked mode: authorized/trusted flags must not appear.
+	for _, unwanted := range []string{"authorized:", "trusted:"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("must not contain %q when not enabled:\n%s", unwanted, out)
+		}
+	}
+}
