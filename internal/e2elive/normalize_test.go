@@ -169,3 +169,52 @@ func TestNormalizeDurationRegex(t *testing.T) {
 		})
 	}
 }
+
+func TestSortSignerBlocks(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "signers run sorted",
+			in:   "signers (2)\n  fingerprint: <FP>\n  <NODE-B-SIGPUB>\n  <NODE-A-SIGPUB>\n",
+			want: "signers (2)\n  fingerprint: <FP>\n  <NODE-A-SIGPUB>\n  <NODE-B-SIGPUB>\n",
+		},
+		{
+			name: "devices run sorted independently of signers run",
+			in: "signers (2)\n  fingerprint: <FP>\n  <NODE-B-SIGPUB>\n  <NODE-A-SIGPUB>\n" +
+				"\ndevices (2)\n  <NODE-B-DEVPUB>\n  <NODE-A-DEVPUB>\n",
+			want: "signers (2)\n  fingerprint: <FP>\n  <NODE-A-SIGPUB>\n  <NODE-B-SIGPUB>\n" +
+				"\ndevices (2)\n  <NODE-A-DEVPUB>\n  <NODE-B-DEVPUB>\n",
+		},
+		{
+			name: "run terminated by a blank line",
+			in:   "  <NODE-B-SIGPUB>\n  <NODE-A-SIGPUB>\n\nsome other section\n",
+			want: "  <NODE-A-SIGPUB>\n  <NODE-B-SIGPUB>\n\nsome other section\n",
+		},
+		{
+			name: "run terminated by fingerprint line",
+			in:   "  <NODE-B-SIGPUB>\n  <NODE-A-SIGPUB>\n  fingerprint: <FP>\n",
+			want: "  <NODE-A-SIGPUB>\n  <NODE-B-SIGPUB>\n  fingerprint: <FP>\n",
+		},
+		{
+			name: "run terminated by identity line",
+			in:   "  <NODE-B-SIGPUB>\n  <NODE-A-SIGPUB>\n  identity: <NODE-A-DEVPUB>\n",
+			want: "  <NODE-A-SIGPUB>\n  <NODE-B-SIGPUB>\n  identity: <NODE-A-DEVPUB>\n",
+		},
+		{
+			name: "no roster lines left unchanged",
+			in:   "locked mode: enforcing\n  pin: <FP> (source: file)\n",
+			want: "locked mode: enforcing\n  pin: <FP> (source: file)\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sortSignerBlocks(tc.in)
+			if got != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
+}

@@ -7,10 +7,11 @@ import (
 	"strings"
 )
 
-// isRosterLine reports whether a post-redaction line is a sigpub or node-key
-// entry that belongs to a sortable roster block. It covers the old bare
-// "  sigpub:…" format and the new "  <NODE-…" placeholder format used for
-// both the signers and devices sections of lock status.
+// isRosterLine reports whether a post-redaction line belongs to a sortable
+// roster block. The "  <NODE-…" form is the expected post-redaction placeholder
+// for both signers and devices in lock status output. The "  sigpub:…" branch
+// is unreachable in practice: redaction runs before sorting, and any raw
+// sigpub:<hex> that survives trips the volatility check before we get here.
 func isRosterLine(line string) bool {
 	return strings.HasPrefix(line, "  sigpub:") || strings.HasPrefix(line, "  <NODE-")
 }
