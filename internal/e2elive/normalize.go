@@ -7,18 +7,18 @@ import (
 	"strings"
 )
 
-// sortSignerBlocks sorts consecutive "    signer: " lines within the string so
+// sortSignerBlocks sorts consecutive "  sigpub:" lines within the string so
 // that their order is stable after redaction regardless of key-generation order.
 func sortSignerBlocks(s string) string {
 	lines := strings.Split(s, "\n")
 	i := 0
 	for i < len(lines) {
-		if !strings.HasPrefix(lines[i], "    signer: ") {
+		if !strings.HasPrefix(lines[i], "  sigpub:") {
 			i++
 			continue
 		}
 		j := i
-		for j < len(lines) && strings.HasPrefix(lines[j], "    signer: ") {
+		for j < len(lines) && strings.HasPrefix(lines[j], "  sigpub:") {
 			j++
 		}
 		sort.Strings(lines[i:j])
