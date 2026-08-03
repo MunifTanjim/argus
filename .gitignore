@@ -3,6 +3,9 @@
 /bin/
 /dist/
 
+# scripts/demo.sh scratch: per-namespace homes and the shared demo binary
+/demo/test/
+
 # Go
 *.test
 *.out
