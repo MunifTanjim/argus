@@ -509,8 +509,12 @@ func entryHashString(e api.LockLogEntry) string {
 func lockLogTrailer(res api.LockLogResult) string {
 	var b strings.Builder
 	b.WriteString("\n")
-	if len(res.Entries) > 0 && len(res.Entries[0].Hash) > 0 {
-		fmt.Fprintf(&b, "genesis: %s\n", keyfmt.Genesis.Encode(res.Entries[0].Hash))
+	if len(res.Entries) > 0 {
+		if len(res.Entries[0].Hash) > 0 {
+			fmt.Fprintf(&b, "genesis: %s\n", keyfmt.Genesis.Encode(res.Entries[0].Hash))
+		} else {
+			b.WriteString("entry hashes not reported by the running daemon — restart it: argus start\n")
+		}
 	}
 	if len(res.Tip) > 0 {
 		fmt.Fprintf(&b, "tip:     %s\n", keyfmt.Tip.Encode(res.Tip))
@@ -552,7 +556,7 @@ func printLockLogEntry(e api.LockLogEntry) {
 		shell.StdOutF("[%d] %s\n", e.Index, e.Kind)
 	}
 	if len(e.Hash) > 0 {
-		shell.StdOutF("    hash: %s\n", entryHashString(e))
+		shell.StdOutF("  hash: %s\n", entryHashString(e))
 	}
 }
 
@@ -966,7 +970,7 @@ func lockHeadline(st api.LockStatusResult) string {
 
 func chainSection(st api.LockStatusResult) string {
 	if !st.Enabled {
-		return "chain: none — never initialized\n"
+		return "chain: none — locked mode not enabled on this node\n"
 	}
 	var b strings.Builder
 	b.WriteString("chain\n")
@@ -978,9 +982,17 @@ func chainSection(st api.LockStatusResult) string {
 	} else {
 		b.WriteString("  genesis: (not reported)\n")
 	}
-	fmt.Fprintf(&b, "  tip:     %s\n           %s\n",
-		keyfmt.Tip.Encode(st.Tip), fingerprintOf(st.Tip))
-	fmt.Fprintf(&b, "  length:  %d entries\n", st.Length)
+	if len(st.Tip) == 0 {
+		b.WriteString("  tip:     none — no chain synced yet\n")
+	} else {
+		fmt.Fprintf(&b, "  tip:     %s\n           %s\n",
+			keyfmt.Tip.Encode(st.Tip), fingerprintOf(st.Tip))
+	}
+	if st.Length == 0 && st.DeviceCount > 0 {
+		b.WriteString("  length:  not reported by the running daemon\n")
+	} else {
+		fmt.Fprintf(&b, "  length:  %d entries\n", st.Length)
+	}
 	return b.String()
 }
 
