@@ -3,6 +3,7 @@ package e2elive
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,7 @@ func TestLockLifecycleCLI(t *testing.T) {
 	// Tip values appear in status output and in every write-operation confirmation.
 	// Each unique tip is registered in encounter order so goldens are stable.
 	reTip := regexp.MustCompile(PatTip)
+	reEntryHash := regexp.MustCompile(PatEntryHash)
 	seenTips := map[string]bool{}
 	tipN := 0
 	redactTip := func(r Result) {
@@ -55,6 +57,13 @@ func TestLockLifecycleCLI(t *testing.T) {
 				seenTips[tip] = true
 				tipN++
 				c.Redact(tip, fmt.Sprintf("<TIP-%d>", tipN))
+			}
+		}
+		for _, m := range reEntryHash.FindAllStringSubmatch(r.Stdout+r.Stderr, -1) {
+			if hash := m[1]; strings.HasPrefix(hash, "tip:") && !seenTips[hash] {
+				seenTips[hash] = true
+				tipN++
+				c.Redact(hash, fmt.Sprintf("<TIP-%d>", tipN))
 			}
 		}
 	}
@@ -74,7 +83,9 @@ func TestLockLifecycleCLI(t *testing.T) {
 	redactTip(lockedB)
 	c.Step(t, "status-b-locked", lockedB)
 
-	c.Step(t, "log-after-init", a.LockRun("log"))
+	logAfterInit := a.LockRun("log")
+	redactTip(logAfterInit)
+	c.Step(t, "log-after-init", logAfterInit)
 
 	addSignerB := a.LockRun("add-signer", sigB)
 	redactTip(addSignerB)
@@ -114,7 +125,9 @@ func TestLockLifecycleCLI(t *testing.T) {
 	redactTip(oneSigner)
 	c.Step(t, "status-a-one-signer", oneSigner)
 
-	c.Step(t, "log-after-signer-churn", a.LockRun("log"))
+	logAfterChurn := a.LockRun("log")
+	redactTip(logAfterChurn)
+	c.Step(t, "log-after-signer-churn", logAfterChurn)
 
 	c.WaitTip("node-b", Scrape(t, removeSignerB, PatTip))
 

@@ -3,6 +3,7 @@ package e2elive
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,7 @@ func TestLockRevokeSignerCeremonyCLI(t *testing.T) {
 	}
 
 	reTip := regexp.MustCompile(PatTip)
+	reEntryHash := regexp.MustCompile(PatEntryHash)
 	seenTips := map[string]bool{}
 	tipN := 0
 	redactTip := func(r Result) {
@@ -51,6 +53,13 @@ func TestLockRevokeSignerCeremonyCLI(t *testing.T) {
 				seenTips[tip] = true
 				tipN++
 				c.Redact(tip, fmt.Sprintf("<TIP-%d>", tipN))
+			}
+		}
+		for _, m := range reEntryHash.FindAllStringSubmatch(r.Stdout+r.Stderr, -1) {
+			if hash := m[1]; strings.HasPrefix(hash, "tip:") && !seenTips[hash] {
+				seenTips[hash] = true
+				tipN++
+				c.Redact(hash, fmt.Sprintf("<TIP-%d>", tipN))
 			}
 		}
 	}
