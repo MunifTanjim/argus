@@ -497,6 +497,31 @@ func lockLogOnNode(ctx context.Context, cfg *config.Config) (api.LockLogResult, 
 	return callLocal[api.LockLogResult](ctx, cfg, api.MethodLockLog, nil)
 }
 
+// entryHashString spells an entry hash the way revoke-signer --fork-from parses it:
+// the genesis as gen:, every later entry as tip:.
+func entryHashString(e api.LockLogEntry) string {
+	if e.Index == 0 {
+		return keyfmt.Genesis.Encode(e.Hash)
+	}
+	return keyfmt.Tip.Encode(e.Hash)
+}
+
+func lockLogTrailer(res api.LockLogResult) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(res.Entries) > 0 && len(res.Entries[0].Hash) > 0 {
+		fmt.Fprintf(&b, "genesis: %s\n", keyfmt.Genesis.Encode(res.Entries[0].Hash))
+	}
+	if len(res.Tip) > 0 {
+		fmt.Fprintf(&b, "tip:     %s\n", keyfmt.Tip.Encode(res.Tip))
+	}
+	fmt.Fprintf(&b, "length:  %d entries\n", len(res.Entries))
+	if len(res.Signers) > 0 {
+		fmt.Fprintf(&b, "signers: %d  fingerprint: %s\n", len(res.Signers), signerSetFingerprintOf(res.Signers))
+	}
+	return b.String()
+}
+
 // printLockLogEntry prints one trust-log entry to stdout.
 func printLockLogEntry(e api.LockLogEntry) {
 	switch e.Kind {
@@ -526,6 +551,9 @@ func printLockLogEntry(e api.LockLogEntry) {
 	default:
 		shell.StdOutF("[%d] %s\n", e.Index, e.Kind)
 	}
+	if len(e.Hash) > 0 {
+		shell.StdOutF("    hash: %s\n", entryHashString(e))
+	}
 }
 
 func newLockLogCmd() *cobra.Command {
@@ -548,10 +576,7 @@ func newLockLogCmd() *cobra.Command {
 			for _, e := range res.Entries {
 				printLockLogEntry(e)
 			}
-			if len(res.Signers) > 0 {
-				fp := signerSetFingerprintOf(res.Signers)
-				shell.StdOutF("\ntip fingerprint: %s\n", fp)
-			}
+			shell.StdOutF("%s", lockLogTrailer(res))
 			return nil
 		},
 	}
