@@ -107,3 +107,76 @@ func TestLockStatusLinesGivesAnExplicitPinCommand(t *testing.T) {
 		}
 	}
 }
+
+// Every section renders in every state. Field presence must not depend on the
+// headline branch — that coupling is what hid the device set and the node's own
+// keys for as long as it did.
+func TestLockStatusLinesAlwaysRendersEverySection(t *testing.T) {
+	states := map[string]api.LockStatusResult{
+		"not enabled": {IdentityPubKey: testGenesis(0xB0)},
+		"enforcing": {
+			Enabled: true, Pinned: true,
+			PinGenesis: testGenesis(0xA1), Tip: testGenesis(0xB1),
+			IdentityPubKey: testGenesis(0xB0), DeviceCount: 1,
+		},
+		"disabled": {
+			Enabled: true, Disabled: true, Pinned: true,
+			PinGenesis: testGenesis(0xA2), Tip: testGenesis(0xB2),
+			IdentityPubKey: testGenesis(0xB0),
+		},
+		"quarantined": {
+			Enabled: true, Quarantined: true,
+			SeenGenesis: testGenesis(0xA3), Tip: testGenesis(0xB3),
+			IdentityPubKey: testGenesis(0xB0),
+		},
+		"superseded": {
+			Enabled: true, Disabled: true, Pinned: true, Quarantined: true,
+			PinGenesis: testGenesis(0xA4), SeenGenesis: testGenesis(0xA5),
+			Tip: testGenesis(0xB4), IdentityPubKey: testGenesis(0xB0),
+		},
+	}
+	// "  pin: " and not "pin": the disabled headline says "every device repins",
+	// which would satisfy a bare substring check with the pin section absent.
+	labels := []string{"chain", "this node", "signers", "devices", "  pin: "}
+	for name, st := range states {
+		out, _ := lockStatusLines(st)
+		for _, label := range labels {
+			if !strings.Contains(out, label) {
+				t.Errorf("%s: missing section %q in:\n%s", name, label, out)
+			}
+		}
+	}
+}
+
+// The node's own keys must be visible while locked mode is on, not only when it
+// is off.
+func TestLockStatusLinesNamesThisNodesKeysWhileEnforcing(t *testing.T) {
+	st := api.LockStatusResult{
+		Enabled: true, Pinned: true,
+		PinGenesis: testGenesis(0xA1), Tip: testGenesis(0xB1),
+		IdentityPubKey: testGenesis(0xB0), SignerPubKey: testGenesis(0xB5),
+		Authorized: true, SignerTrusted: true,
+	}
+	out, _ := lockStatusLines(st)
+	for _, want := range []string{
+		keyfmt.DeviceKey.Encode(testGenesis(0xB0)),
+		keyfmt.SignerKey.Encode(testGenesis(0xB5)),
+		"authorized: yes",
+		"trusted: yes",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output must contain %q:\n%s", want, out)
+		}
+	}
+}
+
+// Locked mode off means there is nothing to be authorized against; a bare "no"
+// would read as a denial.
+func TestLockStatusLinesOmitsAuthorizedWhenNotEnabled(t *testing.T) {
+	out, _ := lockStatusLines(api.LockStatusResult{IdentityPubKey: testGenesis(0xB0)})
+	for _, unwanted := range []string{"authorized:", "trusted:"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output must not contain %q when locked mode is off:\n%s", unwanted, out)
+		}
+	}
+}

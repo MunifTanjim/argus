@@ -892,38 +892,22 @@ func printLockStatus(st api.LockStatusResult) {
 }
 
 // lockStatusLines renders `lock status` as (stdout, stderr). Pure, so the wording is
-// testable — the same split clientPinStatus uses. The headline states enforcement:
-// "disabled" is reserved for a network whose break-glass secret was spent, never for
-// one that was simply never locked.
+// testable — the same split clientPinStatus uses. Sections are unconditional: a fact
+// that does not exist prints as none, so absence is never ambiguous.
 func lockStatusLines(st api.LockStatusResult) (string, string) {
 	var b strings.Builder
-	switch {
-	// Supersession outranks every other headline: what the operator needs first is
-	// that THIS device is serving nobody, not the history of the root it still holds.
-	case st.Quarantined && st.Pinned:
-		fmt.Fprintf(&b, "locked mode: QUARANTINED — this device refuses all channels\n"+
-			"  it follows a trust root the network has left: its own log was disabled by\n"+
-			"  break-glass (permanently), and the network has since locked again under a new one\n"+
-			"  current tip (audit): %s\n", keyfmt.Tip.Encode(st.Tip))
-	case !st.Enabled:
-		fmt.Fprintf(&b, "locked mode: not enabled\n  this node signer: %s\n  this node identity: %s\n",
-			keyOrNone(keyfmt.SignerKey, st.SignerPubKey), keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
-	case st.Disabled:
-		fmt.Fprintf(&b, "locked mode: disabled network-wide — break-glass used, nothing is enforced\n"+
-			"  this is permanent: the log can never be re-enabled\n"+
-			"  to lock again: argus lock init (new genesis; every device repins)\n"+
-			"  current tip (audit): %s\n", keyfmt.Tip.Encode(st.Tip))
-	default:
-		fmt.Fprintf(&b, "locked mode: enforcing\n  current tip (audit): %s\n  signers: %d\n  devices: %d\n  this node is signer: %v\n  this node authorized: %v\n",
-			keyfmt.Tip.Encode(st.Tip), len(st.Signers), st.DeviceCount, st.SignerTrusted, st.Authorized)
+	b.WriteString(lockHeadline(st))
+	for _, section := range []string{
+		chainSection(st),
+		thisNodeSection(st),
+		signersSection(st),
+		devicesSection(st),
+	} {
+		b.WriteString("\n")
+		b.WriteString(section)
 	}
+	b.WriteString("\n")
 	b.WriteString(lockPinLines(st))
-	if st.Enabled && !st.Disabled && len(st.Signers) > 0 {
-		fmt.Fprintf(&b, "  trust fingerprint: %s\n", signerSetFingerprintOf(st.Signers))
-		for _, s := range st.Signers {
-			fmt.Fprintf(&b, "    signer: %s\n", keyfmt.SignerKey.Encode(s))
-		}
-	}
 	if st.LocalDisabled {
 		b.WriteString("  local-disable: active\n")
 	}
@@ -932,6 +916,76 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 		warn = "\n⚠ equivocation detected: node beacons diverge — the gateway may be showing inconsistent trust-log views. Compare the tip fingerprint above across your nodes out-of-band (phone/chat) to confirm they match.\n"
 	}
 	return b.String(), warn
+}
+
+// lockHeadline states enforcement. "disabled" is reserved for a network whose
+// break-glass secret was spent, never for one that was simply never locked.
+// Supersession outranks every other headline: what the operator needs first is that
+// THIS device is serving nobody, not the history of the root it still holds.
+func lockHeadline(st api.LockStatusResult) string {
+	switch {
+	case st.Quarantined && st.Pinned:
+		return "locked mode: QUARANTINED — this device refuses all channels\n" +
+			"  it follows a trust root the network has left: its own log was disabled by\n" +
+			"  break-glass (permanently), and the network has since locked again under a new one\n"
+	case !st.Enabled:
+		return "locked mode: not enabled\n"
+	case st.Disabled:
+		return "locked mode: disabled network-wide — break-glass used, nothing is enforced\n" +
+			"  this is permanent: the log can never be re-enabled\n" +
+			"  to lock again: argus lock init (new genesis; every device repins)\n"
+	default:
+		return "locked mode: enforcing\n"
+	}
+}
+
+func chainSection(st api.LockStatusResult) string {
+	if !st.Enabled {
+		return "chain: none — never initialized\n"
+	}
+	return fmt.Sprintf("chain\n  tip:     %s\n", keyfmt.Tip.Encode(st.Tip))
+}
+
+func thisNodeSection(st api.LockStatusResult) string {
+	var b strings.Builder
+	b.WriteString("this node\n")
+	fmt.Fprintf(&b, "  identity: %s", keyOrNone(keyfmt.DeviceKey, st.IdentityPubKey))
+	if st.Enabled {
+		fmt.Fprintf(&b, "   authorized: %s", yesNo(st.Authorized))
+	}
+	fmt.Fprintf(&b, "\n  signer:   %s", keyOrNone(keyfmt.SignerKey, st.SignerPubKey))
+	if st.Enabled {
+		fmt.Fprintf(&b, "   trusted: %s", yesNo(st.SignerTrusted))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func signersSection(st api.LockStatusResult) string {
+	if len(st.Signers) == 0 {
+		return "signers: none\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "signers (%d)\n", len(st.Signers))
+	fmt.Fprintf(&b, "  fingerprint: %s\n", signerSetFingerprintOf(st.Signers))
+	for _, s := range st.Signers {
+		fmt.Fprintf(&b, "  %s\n", keyfmt.SignerKey.Encode(s))
+	}
+	return b.String()
+}
+
+func devicesSection(st api.LockStatusResult) string {
+	if st.DeviceCount == 0 {
+		return "devices: none\n"
+	}
+	return fmt.Sprintf("devices (%d)\n", st.DeviceCount)
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 // lockPinLines renders the pin block. A quarantined device that still holds a pin is
