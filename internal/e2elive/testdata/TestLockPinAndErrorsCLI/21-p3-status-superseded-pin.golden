@@ -4,7 +4,26 @@ exit 0
 locked mode: QUARANTINED — this device refuses all channels
   it follows a trust root the network has left: its own log was disabled by
   break-glass (permanently), and the network has since locked again under a new one
-  current tip (audit): <TIP-2>
+
+chain
+  genesis: <GENESIS-1>
+           <FP>
+  tip:     <TIP-2>
+           <FP>
+  length:  4 entries
+
+this node
+  identity: <NODE-B-DEVPUB>   authorized: yes
+  signer:   <NODE-B-SIGPUB>   trusted: no
+
+signers (1)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+
+devices (2)
+  <NODE-A-DEVPUB>
+  <NODE-B-DEVPUB>  ← this node
+
   pin: <FP> — SUPERSEDED: the network now uses <FP>
        run:
          argus lock pin <GENESIS-2>

@@ -4,7 +4,26 @@ exit 0
 locked mode: disabled network-wide — break-glass used, nothing is enforced
   this is permanent: the log can never be re-enabled
   to lock again: argus lock init (new genesis; every device repins)
-  current tip (audit): <TIP-6>
+
+chain
+  genesis: <GENESIS>
+           <FP>
+  tip:     <TIP-7>
+           <FP>
+  length:  8 entries
+
+this node
+  identity: <NODE-B-DEVPUB>   authorized: yes
+  signer:   <NODE-B-SIGPUB>   trusted: no
+
+signers (1)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+
+devices (2)
+  <NODE-A-DEVPUB>
+  <NODE-B-DEVPUB>  ← this node
+
   pin: <FP> (source: file)
   local-disable: active
   client pin: <FP> — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet

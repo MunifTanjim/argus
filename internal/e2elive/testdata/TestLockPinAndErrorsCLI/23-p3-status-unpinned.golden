@@ -2,8 +2,17 @@ $ argus lock status --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<T
 exit 0
 --- stdout ---
 locked mode: not enabled
-  this node signer: <NODE-B-SIGPUB>
-  this node identity: <NODE-B-DEVPUB>
+
+chain: none — never initialized
+
+this node
+  identity: <NODE-B-DEVPUB>
+  signer:   <NODE-B-SIGPUB>
+
+signers: none
+
+devices: none
+
   pin: none — QUARANTINED (chain seen: <FP>)
        run:
          argus lock pin <GENESIS-2>

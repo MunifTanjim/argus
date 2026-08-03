@@ -2,5 +2,5 @@ $ argus lock sign node-b --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --tok
 exit 0
 --- stdout ---
 sign ok
-  current tip (audit): <TIP-4>
+  current tip (audit): <TIP-5>
 --- stderr ---

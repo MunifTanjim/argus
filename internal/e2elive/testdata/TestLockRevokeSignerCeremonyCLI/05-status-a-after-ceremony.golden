@@ -2,14 +2,28 @@ $ argus lock status --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<T
 exit 0
 --- stdout ---
 locked mode: enforcing
-  current tip (audit): <TIP-1>
-  signers: 2
-  devices: 3
-  this node is signer: true
-  this node authorized: true
+
+chain
+  genesis: <GENESIS>
+           <FP>
+  tip:     <TIP-1>
+           <FP>
+  length:  5 entries
+
+this node
+  identity: <NODE-A-DEVPUB>   authorized: yes
+  signer:   <NODE-A-SIGPUB>   trusted: yes
+
+signers (2)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+  <NODE-C-SIGPUB>
+
+devices (3)
+  <NODE-A-DEVPUB>  ← this node
+  <NODE-B-DEVPUB>
+  <NODE-C-DEVPUB>
+
   pin: <FP> (source: file)
-  trust fingerprint: <FP>
-    signer: <NODE-A-SIGPUB>
-    signer: <NODE-C-SIGPUB>
   client pin: <FP> (source: file)
 --- stderr ---

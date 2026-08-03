@@ -2,5 +2,5 @@ $ argus lock add-signer <NODE-B-SIGPUB> --socket=<node-a-SOCKET> --gateway=ws://
 exit 0
 --- stdout ---
 add-signer ok
-  current tip (audit): <TIP-2>
+  current tip (audit): <TIP-3>
 --- stderr ---

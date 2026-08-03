@@ -7,18 +7,26 @@ import (
 	"strings"
 )
 
-// sortSignerBlocks sorts consecutive "  sigpub:" lines within the string so
-// that their order is stable after redaction regardless of key-generation order.
+// isRosterLine reports whether a post-redaction line is a sigpub or node-key
+// entry that belongs to a sortable roster block. It covers the old bare
+// "  sigpub:…" format and the new "  <NODE-…" placeholder format used for
+// both the signers and devices sections of lock status.
+func isRosterLine(line string) bool {
+	return strings.HasPrefix(line, "  sigpub:") || strings.HasPrefix(line, "  <NODE-")
+}
+
+// sortSignerBlocks sorts consecutive roster lines within the string so that
+// their order is stable after redaction regardless of key-generation order.
 func sortSignerBlocks(s string) string {
 	lines := strings.Split(s, "\n")
 	i := 0
 	for i < len(lines) {
-		if !strings.HasPrefix(lines[i], "  sigpub:") {
+		if !isRosterLine(lines[i]) {
 			i++
 			continue
 		}
 		j := i
-		for j < len(lines) && strings.HasPrefix(lines[j], "  sigpub:") {
+		for j < len(lines) && isRosterLine(lines[j]) {
 			j++
 		}
 		sort.Strings(lines[i:j])
