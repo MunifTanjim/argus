@@ -78,7 +78,7 @@ func (l *triggerLimiter) finish(interval time.Duration) {
 	}
 }
 
-// stop cancels a deferred run. Used on shutdown paths and by tests.
+// stop cancels a deferred run. Used by tests.
 func (l *triggerLimiter) stop() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
