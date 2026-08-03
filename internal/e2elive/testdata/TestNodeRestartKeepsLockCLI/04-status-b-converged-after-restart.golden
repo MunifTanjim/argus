@@ -1,0 +1,17 @@
+$ argus lock status --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: enforcing
+  current tip (audit): <TIP-2>
+  signers: 1
+  devices: 1
+  this node is signer: false
+  this node authorized: false
+  pin: <FP> (source: file)
+  trust fingerprint: <FP>
+    signer: <NODE-A-SIGPUB>
+  client pin: <FP> (source: file)
+
+  to authorize this node, run on a signer node:
+    argus lock sign <NODE-B-DEVPUB>
+--- stderr ---

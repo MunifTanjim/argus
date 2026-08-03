@@ -2,6 +2,7 @@ package e2elive
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -31,6 +32,11 @@ type Cluster struct {
 	logs     []string
 	logFiles []*os.File
 	nodes    map[string]*Node
+
+	gwCmd  *exec.Cmd
+	gwEnv  []string
+	gwArgs []string
+	gwGen  int
 
 	redactions []redaction
 	steps      int
@@ -110,17 +116,25 @@ func (c *Cluster) dialClient() (*api.Client, error) {
 func (c *Cluster) StartGateway() {
 	c.t.Helper()
 	dir := filepath.Join(c.Root, "gw")
-	env, err := isolatedEnv(dir)
-	if err != nil {
-		c.t.Fatalf("gateway env: %v", err)
+	if c.gwEnv == nil {
+		env, err := isolatedEnv(dir)
+		if err != nil {
+			c.t.Fatalf("gateway env: %v", err)
+		}
+		c.gwEnv = env
+		c.gwArgs = []string{
+			"start",
+			"--mode=gateway",
+			"--token=" + c.Token,
+			"--listen-addr=" + c.GWAddr,
+		}
 	}
-	args := []string{
-		"start",
-		"--mode=gateway",
-		"--token=" + c.Token,
-		"--listen-addr=" + c.GWAddr,
+	logPath := filepath.Join(dir, "argus.log")
+	if c.gwGen > 0 {
+		logPath = filepath.Join(dir, fmt.Sprintf("argus.%d.log", c.gwGen))
 	}
-	c.spawn("gw", filepath.Join(dir, "argus.log"), env, args)
+	c.gwGen++
+	c.gwCmd = c.spawn("gw", logPath, c.gwEnv, c.gwArgs)
 
 	waitFor(c.t, "gateway /client ready", func() bool {
 		cl, derr := c.dialClient()
@@ -131,6 +145,36 @@ func (c *Cluster) StartGateway() {
 		var r api.NodesListResult
 		return cl.Call(api.MethodNodesList, nil, &r) == nil
 	})
+}
+
+// StopGateway kills the gateway and waits until its port stops answering, so a
+// caller observing the fleet afterwards is genuinely seeing a gateway-less network.
+func (c *Cluster) StopGateway() {
+	c.t.Helper()
+	if c.gwCmd == nil {
+		c.t.Fatal("StopGateway: gateway was never started")
+	}
+	if c.gwCmd.Process != nil {
+		_ = c.gwCmd.Process.Signal(syscall.SIGTERM)
+	}
+	_ = c.gwCmd.Wait()
+	waitFor(c.t, "gateway stops answering", func() bool {
+		cl, err := c.dialClient()
+		if err != nil {
+			return true
+		}
+		cl.Close()
+		return false
+	})
+}
+
+// RestartGateway stands in for the gateway host rebooting. The replacement starts
+// with an empty entry store — it retains trust-log entries in memory only — so the
+// fleet has to refill it from the nodes.
+func (c *Cluster) RestartGateway() {
+	c.t.Helper()
+	c.StopGateway()
+	c.StartGateway()
 }
 
 func (c *Cluster) AddNode(id string) *Node {
@@ -152,10 +196,56 @@ func (c *Cluster) AddNode(id string) *Node {
 		"--label=" + id,
 		"--socket=" + sock,
 	}
-	cmd := c.spawn(id, filepath.Join(dir, "argus.log"), env, args)
-	n := &Node{ID: id, Dir: dir, Socket: sock, cluster: c, env: env, cmd: cmd}
+	logPath := filepath.Join(dir, "argus.log")
+	cmd := c.spawn(id, logPath, env, args)
+	n := &Node{ID: id, Dir: dir, Socket: sock, cluster: c, env: env, args: args, cmd: cmd, logPath: logPath}
 	c.nodes[id] = n
 	return n
+}
+
+// StopNode signals the node's process and waits for it to exit, leaving its
+// directory on disk for a later StartNode to reload.
+func (c *Cluster) StopNode(id string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("StopNode: unknown node %q", id)
+	}
+	if n.cmd.Process != nil {
+		_ = n.cmd.Process.Signal(syscall.SIGTERM)
+	}
+	_ = n.cmd.Wait()
+}
+
+// StartNode spawns a replacement process for a stopped node on the same directory
+// and socket, and blocks until it is serving. Waiting on the socket rather than the
+// gateway roster is deliberate: the roster still lists the previous process as
+// online until its offline grace expires, so it cannot distinguish the two.
+func (c *Cluster) StartNode(id string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("StartNode: unknown node %q", id)
+	}
+	n.gen++
+	n.logPath = filepath.Join(n.Dir, fmt.Sprintf("argus.%d.log", n.gen))
+	n.cmd = c.spawn(id, n.logPath, n.env, n.args)
+	waitFor(c.t, "node "+id+" serving its socket again", func() bool {
+		sc, err := n.DialSocket()
+		if err != nil {
+			return false
+		}
+		sc.Close()
+		return true
+	})
+}
+
+// RestartNode stands in for a machine reboot: the process goes away and a new one
+// comes up on the same directory, reloading whatever the old one persisted.
+func (c *Cluster) RestartNode(id string) {
+	c.t.Helper()
+	c.StopNode(id)
+	c.StartNode(id)
 }
 
 func (c *Cluster) WaitOnline(ids ...string) {
