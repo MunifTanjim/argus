@@ -301,7 +301,7 @@ func (c *Cluster) WaitTip(id, tip string) {
 	}
 	waitFor(c.t, "tip "+tip+" on "+id, func() bool {
 		r := n.LockRun("status")
-		return r.ExitCode == 0 && strings.Contains(r.Stdout, tip)
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "  tip:     "+tip)
 	})
 }
 
