@@ -466,7 +466,7 @@ func TestTriggeredPullResumesAfterWindow(t *testing.T) {
 // the window closes. Dropping it costs the whole 5-minute backstop.
 func TestSuppressedNotificationIsDeferredNotDropped(t *testing.T) {
 	setTriggeredPullIntervalForTest(200 * time.Millisecond)
-	t.Cleanup(func() { setTriggeredPullIntervalForTest(5 * time.Second) })
+	t.Cleanup(ResetTriggeredPullIntervalForTest)
 
 	chain, genesis := lockedChainForTest(t)
 	d := New()
@@ -504,7 +504,7 @@ func TestSuppressedNotificationIsDeferredNotDropped(t *testing.T) {
 // single owed pull, not a queue of them.
 func TestNotificationFloodCoalescesToOneDeferredPull(t *testing.T) {
 	setTriggeredPullIntervalForTest(100 * time.Millisecond)
-	t.Cleanup(func() { setTriggeredPullIntervalForTest(5 * time.Second) })
+	t.Cleanup(ResetTriggeredPullIntervalForTest)
 
 	chain, genesis := lockedChainForTest(t)
 	d := New()

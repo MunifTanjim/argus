@@ -25,7 +25,7 @@ func TestReinitOverDisabledLogMatchesFirstLock(t *testing.T) {
 	node.SetTriggeredPullIntervalForTest(50 * time.Millisecond)
 	t.Cleanup(func() {
 		node.SetTrustSyncIntervalForTest(5 * time.Minute)
-		node.SetTriggeredPullIntervalForTest(5 * time.Second)
+		node.ResetTriggeredPullIntervalForTest()
 	})
 
 	agg := gateway.New(time.Second)

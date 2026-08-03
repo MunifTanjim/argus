@@ -30,7 +30,7 @@ var trustSyncInterval atomic.Int64
 func init() {
 	trustSyncInterval.Store(int64(5 * time.Minute))
 	rosterSyncIntervalNs.Store(int64(5 * time.Minute))
-	triggeredPullIntervalNs.Store(int64(5 * time.Second))
+	triggeredPullIntervalNs.Store(int64(DefaultTriggeredPullInterval))
 }
 
 // SetTrustSyncIntervalForTest overrides the node's trust-log sync cadence. Test-only.
@@ -565,13 +565,20 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	return nil
 }
 
-// triggeredPullIntervalNs bounds how often a gateway notification can cause a pull.
-// Without it, a hostile gateway turns one notification into unbounded work — the
-// notification is untrusted, so it must not be able to amplify. Suppressed
-// notifications are coalesced into one deferred pull, never queued, so the bound
-// holds under a flood.
-// Stored as nanoseconds in an atomic so setTriggeredPullIntervalForTest is race-free
-// when background goroutines read it concurrently.
+// DefaultTriggeredPullInterval bounds how often a gateway notification can cause a
+// pull, and so bounds how far one untrusted notification can amplify. Tailnet lock
+// applies no bound at all here — control-supplied heads drive a TKA sync
+// unconditionally — because provoking one there costs a whole netmap push. A
+// trustlog.changed frame is far cheaper to emit, which is why argus keeps a bound;
+// it is deliberately small because the cost of being slow is an operator watching a
+// peer lag behind a lock ceremony. Suppressed notifications coalesce into one
+// deferred pull, so a peer reaches the current tip within this window regardless of
+// how many writes landed inside it.
+const DefaultTriggeredPullInterval = time.Second
+
+// triggeredPullIntervalNs holds DefaultTriggeredPullInterval as nanoseconds in an
+// atomic so setTriggeredPullIntervalForTest is race-free when background goroutines
+// read it concurrently.
 var triggeredPullIntervalNs atomic.Int64
 
 func minTriggeredPullInterval() time.Duration {
@@ -586,6 +593,12 @@ func setTriggeredPullIntervalForTest(d time.Duration) { triggeredPullIntervalNs.
 // tests in other packages, which drive several notification-triggered pulls in a row
 // and would otherwise spend the production window between each. Test-only.
 func SetTriggeredPullIntervalForTest(d time.Duration) { setTriggeredPullIntervalForTest(d) }
+
+// ResetTriggeredPullIntervalForTest restores the production window, so callers do
+// not each repeat the default. Test-only.
+func ResetTriggeredPullIntervalForTest() {
+	setTriggeredPullIntervalForTest(DefaultTriggeredPullInterval)
+}
 
 // onGatewayNotify handles gateway→node notifications. The only one is a hint that
 // the trust log moved; everything else is ignored.
