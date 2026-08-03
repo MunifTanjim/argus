@@ -131,7 +131,7 @@ Compare these words against `argus lock status` on a node you trust.
 Pin this device to it? [y/N]:
 ```
 
-Before typing `y`, compare those words against the fingerprint shown by `argus lock status` (the `pin:` line) on a node you already trust — over the phone, in a chat, or any out-of-band channel. Matching words confirm you are pinning to the same trust root that node is already enforcing. Note that `pin:` and `trust fingerprint:` are different hashes: the genesis and the current signer set. Compare `pin:` against `pin:`.
+Before typing `y`, compare those words against the fingerprint shown by `argus lock status` (the `pin:` line) on a node you already trust — over the phone, in a chat, or any out-of-band channel. Matching words confirm you are pinning to the same trust root that node is already enforcing. Note that `pin:` (the genesis fingerprint) and the `fingerprint:` line under `signers` (the signer-set fingerprint) are different hashes. Compare `pin:` against `pin:`.
 
 If you already know the genesis (for example, from `lock init` output), you can pin without a prompt:
 
@@ -228,18 +228,28 @@ a gateway that is hiding branches.
 
 ## The word-fingerprint backstop
 
-`argus lock status` prints a **trust fingerprint** — a short sequence of English
-words derived from the current signer set:
+`argus lock status` shows two fingerprints — short sequences of English words.
+Under the `chain` section, the second line of `tip:` is the **tip fingerprint**,
+derived from the chain head that node currently holds:
 
 ```
-trust fingerprint: [sawdust scenic seabird select shadow skydive solo sugar]
+chain
+  genesis: gen:<hex>
+           [words for genesis]
+  tip:     tip:<hex>
+           [sawdust scenic seabird select shadow skydive solo sugar]
+  length:  4 entries
 ```
 
-If you suspect equivocation, compare this fingerprint across all your nodes
-out-of-band (phone call, chat, or another trusted channel). Matching fingerprints on
-all nodes means they all see the same trust log. A mismatch, or an `⚠ equivocation
-detected` warning in the status output, means the gateway may be showing split views
-and the gateway operator should be investigated.
+Under `signers (N)`, `fingerprint:` gives the signer-set fingerprint, which changes
+only when signers are added or revoked.
+
+If you suspect equivocation, compare the **tip fingerprint** (the second line of
+`tip:` in the `chain` section) across all your nodes out-of-band (phone call, chat,
+or another trusted channel). Matching words on all nodes mean they all see the same
+chain state. A mismatch, or an `⚠ equivocation detected` warning in the status
+output, means the gateway may be showing split views and the gateway operator should
+be investigated.
 
 ## Signer revocation
 

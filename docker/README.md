@@ -102,15 +102,15 @@ no trust log exists yet to constrain that mapping — so a hostile gateway could
 its own key in your genesis. Read each co-signer's key off the node itself first:
 
 ```sh
-docker compose -f docker/docker-compose.yml exec node-b argus lock status   # this node signer: sigpub:<hex>
-docker compose -f docker/docker-compose.yml exec node-c argus lock status   # this node signer: sigpub:<hex>
+docker compose -f docker/docker-compose.yml exec node-b argus lock status   #   signer:   sigpub:<hex>
+docker compose -f docker/docker-compose.yml exec node-c argus lock status   #   signer:   sigpub:<hex>
 ```
 
 Read node-a's own key the same way — it must be listed explicitly, because the keys
 you pass are the complete signer set:
 
 ```sh
-docker compose -f docker/docker-compose.yml exec node-a argus lock status   # this node signer: sigpub:<hex>
+docker compose -f docker/docker-compose.yml exec node-a argus lock status   #   signer:   sigpub:<hex>
 ```
 
 Then init on node-a with all three keys, so any two can recover from the loss of the
