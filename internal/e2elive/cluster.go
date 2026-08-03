@@ -199,6 +199,37 @@ func (c *Cluster) WaitLockEnforcing(id string) {
 	})
 }
 
+// WaitTip blocks until the named node's `lock status` reports tip as its current
+// tip. Propagation to a peer is bounded by the triggered-pull window, so a golden
+// taken on a second node right after a write on the first would otherwise capture
+// the peer's pre-change state.
+func (c *Cluster) WaitTip(id, tip string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("WaitTip: unknown node %q", id)
+	}
+	waitFor(c.t, "tip "+tip+" on "+id, func() bool {
+		r := n.LockRun("status")
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "tip (audit): "+tip)
+	})
+}
+
+// WaitLockQuarantined blocks until the named node's `lock status` reports the
+// quarantine headline, which it can only reach after seeing a chain rooted at a
+// genesis it does not follow.
+func (c *Cluster) WaitLockQuarantined(id string) {
+	c.t.Helper()
+	n := c.nodes[id]
+	if n == nil {
+		c.t.Fatalf("WaitLockQuarantined: unknown node %q", id)
+	}
+	waitFor(c.t, "lock quarantined on "+id, func() bool {
+		r := n.LockRun("status")
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "locked mode: QUARANTINED")
+	})
+}
+
 func (c *Cluster) WaitLockDisabled(id string) {
 	c.t.Helper()
 	n := c.nodes[id]

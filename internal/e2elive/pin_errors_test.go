@@ -119,7 +119,10 @@ func TestLockPinAndErrorsCLI(t *testing.T) {
 	c.Step(t, "p3-reinit-new-genesis", second)
 
 	// Node-b is still pinned to gen1, which is now superseded by gen2. Its status
-	// must show the quarantine/supersession headline.
+	// must show the quarantine/supersession headline, and the pin it advises must
+	// name the live root — not the dead one it is still following.
+	c.WaitLockQuarantined("node-b")
+
 	statusSuperseded := b.LockRun("status")
 	redactTip(statusSuperseded)
 	c.Step(t, "p3-status-superseded-pin", statusSuperseded)

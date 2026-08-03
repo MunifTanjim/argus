@@ -1,11 +1,13 @@
 $ argus lock status --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
 exit 0
 --- stdout ---
-locked mode: disabled network-wide — break-glass used, nothing is enforced
-  this is permanent: the log can never be re-enabled
-  to lock again: argus lock init (new genesis; every device repins)
+locked mode: QUARANTINED — this device refuses all channels
+  it follows a trust root the network has left: its own log was disabled by
+  break-glass (permanently), and the network has since locked again under a new one
   current tip (audit): <TIP-2>
-  pin: <FP> (source: file)
+  pin: <FP> — SUPERSEDED: the network now uses <FP>
+       run:
+         argus lock pin <GENESIS-2>
   client pin: <FP> — SUPERSEDED: the network now uses <FP>
        the dashboard on this machine opens no channels; run:
          argus lock pin <GENESIS-2>

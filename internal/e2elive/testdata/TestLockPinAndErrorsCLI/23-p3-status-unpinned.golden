@@ -6,7 +6,7 @@ locked mode: not enabled
   this node identity: <NODE-B-DEVPUB>
   pin: none — QUARANTINED (chain seen: <FP>)
        run:
-         argus lock pin <GENESIS-1>
+         argus lock pin <GENESIS-2>
   client pin: none — QUARANTINED (chain seen: <FP>)
        the dashboard on this machine opens no channels; run: argus lock pin
 --- stderr ---

@@ -7,7 +7,8 @@ exit 0
 [2] authorize-device: <NODE-B-DEVPUB>
 [3] add-signer: <NODE-B-SIGPUB>
 [4] revoke-device: <NODE-B-DEVPUB>
-[5] remove-signer: <NODE-B-SIGPUB>
+[5] authorize-device: <NODE-B-DEVPUB>
+[6] remove-signer: <NODE-B-SIGPUB>
 
 tip fingerprint: <FP>
 --- stderr ---

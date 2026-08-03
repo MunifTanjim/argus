@@ -84,21 +84,27 @@ func TestLockLifecycleCLI(t *testing.T) {
 	redactTip(twoSigners)
 	c.Step(t, "status-a-two-signers", twoSigners)
 
-	signB := a.LockRun("sign", "node-b")
-	redactTip(signB)
-	c.Step(t, "sign-node-b", signB)
-
-	authorizedB := b.LockRun("status")
-	redactTip(authorizedB)
-	c.Step(t, "status-b-authorized", authorizedB)
-
+	// Revoke before sign: node-b's device is authorized by the genesis, so signing
+	// it first would be a no-op. Revoking first makes both steps a real transition.
 	revokeDevB := a.LockRun("revoke-device", "node-b")
 	redactTip(revokeDevB)
 	c.Step(t, "revoke-device-b", revokeDevB)
 
+	c.WaitTip("node-b", Scrape(t, revokeDevB, PatTip))
+
 	revokedB := b.LockRun("status")
 	redactTip(revokedB)
 	c.Step(t, "status-b-revoked", revokedB)
+
+	signB := a.LockRun("sign", "node-b")
+	redactTip(signB)
+	c.Step(t, "sign-node-b", signB)
+
+	c.WaitTip("node-b", Scrape(t, signB, PatTip))
+
+	authorizedB := b.LockRun("status")
+	redactTip(authorizedB)
+	c.Step(t, "status-b-authorized", authorizedB)
 
 	removeSignerB := a.LockRun("remove-signer", sigB)
 	redactTip(removeSignerB)
@@ -109,6 +115,8 @@ func TestLockLifecycleCLI(t *testing.T) {
 	c.Step(t, "status-a-one-signer", oneSigner)
 
 	c.Step(t, "log-after-signer-churn", a.LockRun("log"))
+
+	c.WaitTip("node-b", Scrape(t, removeSignerB, PatTip))
 
 	c.Step(t, "local-disable-b", b.LockRun("local-disable"))
 

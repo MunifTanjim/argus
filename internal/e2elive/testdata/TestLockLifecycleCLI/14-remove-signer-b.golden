@@ -2,5 +2,5 @@ $ argus lock remove-signer <NODE-B-SIGPUB> --socket=<node-a-SOCKET> --gateway=ws
 exit 0
 --- stdout ---
 remove-signer ok
-  current tip (audit): <TIP-4>
+  current tip (audit): <TIP-5>
 --- stderr ---
