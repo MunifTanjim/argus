@@ -244,10 +244,25 @@ plain `down -v` leaves `client-home` behind.
 ## Notes & troubleshooting
 
 - **Claude Code on Alpine (musl):** the image installs `libc6-compat` as a shim.
-  If `claude` still fails to launch, switch the `runtime-base` stage in
-  `docker/Dockerfile` from `alpine:3` to `node:22-slim` (and swap `apk add ...`
-  for `apt-get install -y ca-certificates tini tmux procps git`). The argus
-  binary is static and runs on either.
+  If `claude` still fails to launch, replace the `argus-demo` stage in
+  `docker/Dockerfile` with one that does not inherit from `runtime-base`:
+  ```dockerfile
+  FROM node:22-slim AS argus-demo
+  RUN apt-get update && apt-get install -y --no-install-recommends \
+          ca-certificates tini tmux procps git \
+      && adduser --disabled-password --gecos '' --home /home/argus argus \
+      && rm -rf /var/lib/apt/lists/*
+  COPY --from=builder /out/argus /usr/local/bin/argus
+  RUN npm install -g @anthropic-ai/claude-code
+  USER argus
+  WORKDIR /home/argus
+  ENV HOME=/home/argus
+  EXPOSE 8443
+  ENTRYPOINT ["/usr/bin/tini", "--", "argus"]
+  ```
+  `runtime-base` and `argus-test` are unchanged; `argus-demo` is the only stage
+  that carries the real Claude Code CLI. The argus binary is static and runs on
+  either Alpine or Debian.
 - **Port 8443 already in use?** (e.g. you already run argus on the host) — set
   `ARGUS_GATEWAY_PORT` to a free host port in `docker/.env`; the container side
   stays 8443, so the internal `ws://gateway:8443` used by nodes/clients is
