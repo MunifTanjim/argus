@@ -53,6 +53,14 @@ func dockerRun(args ...string) error {
 	return err
 }
 
+// dockerLogs returns a container's output as one text. `docker logs` keeps the
+// container's two streams apart, and argus writes its log lines to stderr, so
+// dockerOut alone would come back empty.
+func dockerLogs(container string) (string, error) {
+	out, err := exec.Command("docker", "logs", container).CombinedOutput()
+	return string(out), err
+}
+
 var (
 	buildOnce sync.Once
 	buildErr  error

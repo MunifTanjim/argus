@@ -5,38 +5,35 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/client"
 )
-
-var argusBin string
 
 type Cluster struct {
 	t      *testing.T
 	Root   string
 	Token  string
 	GWAddr string
-	GWURL  string
+	// GWURL is the gateway as the test process on the host reaches it.
+	GWURL string
+	// GWURLInternal is the gateway as a container reaches it. Every command that
+	// runs through docker exec must use this one.
+	GWURLInternal string
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	procs    []*exec.Cmd
-	logs     []string
-	logFiles []*os.File
-	nodes    map[string]*Node
+	runID      string
+	network    string
+	containers []string
+	nodes      map[string]*Node
 
-	gwCmd  *exec.Cmd
 	gwEnv  []string
 	gwArgs []string
-	gwGen  int
 
 	redactions []redaction
 	steps      int
@@ -45,65 +42,123 @@ type Cluster struct {
 
 func New(t *testing.T) *Cluster {
 	t.Helper()
-	if argusBin == "" {
-		t.Skip("argus binary not built (running under -short?)")
+	if testing.Short() {
+		t.Skip("container e2e; skipped under -short")
 	}
-	root, err := os.MkdirTemp("", "axe")
+	if err := buildTestImage(); err != nil {
+		t.Fatalf("build test image: %v", err)
+	}
+	base, err := scopedRootBase()
+	if err != nil {
+		t.Fatalf("scoped root base: %v", err)
+	}
+	root, err := os.MkdirTemp(base, "axe")
 	if err != nil {
 		t.Fatalf("scoped root: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	runID := filepath.Base(root)
 	c := &Cluster{
-		t:      t,
-		Root:   root,
-		Token:  "devtoken",
-		ctx:    ctx,
-		cancel: cancel,
-		nodes:  map[string]*Node{},
+		t:       t,
+		Root:    root,
+		Token:   "devtoken",
+		ctx:     ctx,
+		cancel:  cancel,
+		runID:   runID,
+		network: runID + "-net",
+		nodes:   map[string]*Node{},
 	}
 	c.GWAddr = freePort(t)
 	c.GWURL = "ws://" + c.GWAddr
+	c.GWURLInternal = "ws://" + runID + "-gw:8443"
+
+	if err := dockerRun("network", "create", "--label", runLabel+"=1", c.network); err != nil {
+		cancel()
+		t.Fatalf("create network: %v", err)
+	}
 
 	t.Cleanup(func() {
 		c.cancel()
-		for i := len(c.procs) - 1; i >= 0; i-- {
-			_ = c.procs[i].Wait()
-		}
 		if t.Failed() {
-			for _, lp := range c.logs {
-				if b, err := os.ReadFile(lp); err == nil {
-					t.Logf("---- %s ----\n%s", lp, b)
+			for _, name := range c.containers {
+				if out, err := dockerLogs(name); err == nil {
+					t.Logf("---- %s ----\n%s", name, out)
 				}
 			}
 		}
-		for _, f := range c.logFiles {
-			f.Close()
+		for i := len(c.containers) - 1; i >= 0; i-- {
+			_ = dockerRun("rm", "-f", c.containers[i])
 		}
+		_ = dockerRun("network", "rm", c.network)
 		_ = os.RemoveAll(root)
 	})
 	return c
 }
 
-func (c *Cluster) spawn(name, logPath string, env, args []string) *exec.Cmd {
-	c.t.Helper()
-	logf, err := os.Create(logPath)
+// scopedRootBase returns the parent directory a run's scoped root is created in.
+// It sits under the user's home because the VM-backed docker runtimes on macOS
+// (colima, Docker Desktop) share the home directory but not the private
+// directory TMPDIR names, and a bind mount they cannot resolve does not fail —
+// it silently becomes an empty directory inside the VM.
+func scopedRootBase() (string, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		c.t.Fatalf("%s log: %v", name, err)
+		return "", err
 	}
-	cmd := exec.CommandContext(c.ctx, argusBin, args...)
-	cmd.Env = env
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = 5 * time.Second
-	if err := cmd.Start(); err != nil {
-		c.t.Fatalf("start %s: %v", name, err)
+	base := filepath.Join(home, ".cache", "argus-e2elive")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", err
 	}
-	c.procs = append(c.procs, cmd)
-	c.logs = append(c.logs, logPath)
-	c.logFiles = append(c.logFiles, logf)
-	return cmd
+	return base, nil
 }
+
+// hostUser returns the --user value that makes bind-mounted files readable by
+// the test process. On Linux the container would otherwise write 0600 files
+// owned by the image's uid.
+func hostUser() string {
+	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+}
+
+// runContainer starts one detached argus container on the run network. hostDir
+// is bind-mounted at the container home, so Node.StatePath keeps working.
+func (c *Cluster) runContainer(name, hostDir string, env, argus []string, publish string) {
+	c.t.Helper()
+	args := []string{
+		"run", "-d",
+		"--name", name,
+		"--hostname", name,
+		"--network", c.network,
+		"--label", runLabel + "=1",
+		"--user", hostUser(),
+		"-v", hostDir + ":" + containerHome,
+	}
+	for _, e := range env {
+		args = append(args, "-e", e)
+	}
+	if publish != "" {
+		args = append(args, "-p", publish)
+	}
+	args = append(args, testImage)
+	args = append(args, argus...)
+
+	if err := dockerRun(args...); err != nil {
+		c.t.Fatalf("run %s: %v", name, err)
+	}
+	for _, existing := range c.containers {
+		if existing == name {
+			return
+		}
+	}
+	c.containers = append(c.containers, name)
+}
+
+func (c *Cluster) removeContainer(name string) {
+	c.t.Helper()
+	_ = dockerRun("stop", "-t", "5", name)
+	_ = dockerRun("rm", "-f", name)
+}
+
+func (c *Cluster) gatewayContainer() string { return c.runID + "-gw" }
 
 func (c *Cluster) dialClient() (*api.Client, error) {
 	conn, err := api.DialWSConn(c.ctx, c.GWURL+"/client", c.Token, nil)
@@ -117,7 +172,7 @@ func (c *Cluster) StartGateway() {
 	c.t.Helper()
 	dir := filepath.Join(c.Root, "gw")
 	if c.gwEnv == nil {
-		env, err := isolatedEnv(dir)
+		env, err := containerEnv(dir)
 		if err != nil {
 			c.t.Fatalf("gateway env: %v", err)
 		}
@@ -126,15 +181,14 @@ func (c *Cluster) StartGateway() {
 			"start",
 			"--mode=gateway",
 			"--token=" + c.Token,
-			"--listen-addr=" + c.GWAddr,
+			"--listen-addr=:8443",
 		}
 	}
-	logPath := filepath.Join(dir, "argus.log")
-	if c.gwGen > 0 {
-		logPath = filepath.Join(dir, fmt.Sprintf("argus.%d.log", c.gwGen))
+	_, port, err := net.SplitHostPort(c.GWAddr)
+	if err != nil {
+		c.t.Fatalf("split gateway addr %q: %v", c.GWAddr, err)
 	}
-	c.gwGen++
-	c.gwCmd = c.spawn("gw", logPath, c.gwEnv, c.gwArgs)
+	c.runContainer(c.gatewayContainer(), dir, c.gwEnv, c.gwArgs, "127.0.0.1:"+port+":8443")
 
 	waitFor(c.t, "gateway /client ready", func() bool {
 		cl, derr := c.dialClient()
@@ -147,17 +201,12 @@ func (c *Cluster) StartGateway() {
 	})
 }
 
-// StopGateway kills the gateway and waits until its port stops answering, so a
-// caller observing the fleet afterwards is genuinely seeing a gateway-less network.
+// StopGateway removes the gateway container and waits until its port stops
+// answering, so a caller observing the fleet afterwards is genuinely seeing a
+// gateway-less network.
 func (c *Cluster) StopGateway() {
 	c.t.Helper()
-	if c.gwCmd == nil {
-		c.t.Fatal("StopGateway: gateway was never started")
-	}
-	if c.gwCmd.Process != nil {
-		_ = c.gwCmd.Process.Signal(syscall.SIGTERM)
-	}
-	_ = c.gwCmd.Wait()
+	c.removeContainer(c.gatewayContainer())
 	waitFor(c.t, "gateway stops answering", func() bool {
 		cl, err := c.dialClient()
 		if err != nil {
@@ -183,65 +232,63 @@ func (c *Cluster) AddNode(id string) *Node {
 		c.t.Fatalf("AddNode: node %q already exists", id)
 	}
 	dir := filepath.Join(c.Root, id)
-	env, err := isolatedEnv(dir)
+	env, err := containerEnv(dir)
 	if err != nil {
 		c.t.Fatalf("node %s env: %v", id, err)
 	}
-	sock := filepath.Join(dir, "s")
+	sock := containerHome + "/s"
 	args := []string{
 		"start",
-		"--gateway=" + c.GWURL,
+		"--gateway=" + c.GWURLInternal,
 		"--token=" + c.Token,
 		"--id=" + id,
 		"--label=" + id,
 		"--socket=" + sock,
 	}
-	logPath := filepath.Join(dir, "argus.log")
-	cmd := c.spawn(id, logPath, env, args)
-	n := &Node{ID: id, Dir: dir, Socket: sock, cluster: c, env: env, args: args, cmd: cmd, logPath: logPath}
+	n := &Node{
+		ID:        id,
+		Dir:       dir,
+		Socket:    sock,
+		cluster:   c,
+		container: c.runID + "-" + id,
+		env:       env,
+		args:      args,
+	}
+	c.runContainer(n.container, dir, env, args, "")
 	c.nodes[id] = n
 	return n
 }
 
-// StopNode signals the node's process and waits for it to exit, leaving its
-// directory on disk for a later StartNode to reload.
+// StopNode removes the node's container, leaving its directory on disk for a
+// later StartNode to reload.
 func (c *Cluster) StopNode(id string) {
 	c.t.Helper()
 	n := c.nodes[id]
 	if n == nil {
 		c.t.Fatalf("StopNode: unknown node %q", id)
 	}
-	if n.cmd.Process != nil {
-		_ = n.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	_ = n.cmd.Wait()
+	c.removeContainer(n.container)
 }
 
-// StartNode spawns a replacement process for a stopped node on the same directory
-// and socket, and blocks until it is serving. Waiting on the socket rather than the
-// gateway roster is deliberate: the roster still lists the previous process as
-// online until its offline grace expires, so it cannot distinguish the two.
+// StartNode starts a replacement container for a stopped node on the same
+// directory and socket, and blocks until it is serving. Waiting on the node's
+// own socket rather than the gateway roster is deliberate: the roster still
+// lists the previous process as online until its offline grace expires, so it
+// cannot distinguish the two.
 func (c *Cluster) StartNode(id string) {
 	c.t.Helper()
 	n := c.nodes[id]
 	if n == nil {
 		c.t.Fatalf("StartNode: unknown node %q", id)
 	}
-	n.gen++
-	n.logPath = filepath.Join(n.Dir, fmt.Sprintf("argus.%d.log", n.gen))
-	n.cmd = c.spawn(id, n.logPath, n.env, n.args)
+	c.runContainer(n.container, n.Dir, n.env, n.args, "")
 	waitFor(c.t, "node "+id+" serving its socket again", func() bool {
-		sc, err := n.DialSocket()
-		if err != nil {
-			return false
-		}
-		sc.Close()
-		return true
+		return n.LockRun("status").ExitCode == 0
 	})
 }
 
-// RestartNode stands in for a machine reboot: the process goes away and a new one
-// comes up on the same directory, reloading whatever the old one persisted.
+// RestartNode stands in for a machine reboot: the container goes away and a new
+// one comes up on the same directory, reloading whatever the old one persisted.
 func (c *Cluster) RestartNode(id string) {
 	c.t.Helper()
 	c.StopNode(id)

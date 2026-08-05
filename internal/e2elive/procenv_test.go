@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func TestIsolatedEnvCreatesDirsAndVars(t *testing.T) {
+func TestContainerEnvCreatesHostDirsAndContainerVars(t *testing.T) {
 	dir := t.TempDir()
-	env, err := isolatedEnv(dir)
+	env, err := containerEnv(dir)
 	if err != nil {
-		t.Fatalf("isolatedEnv: %v", err)
+		t.Fatalf("containerEnv: %v", err)
 	}
 
 	for _, sub := range []string{"config", "state", "cache", "run"} {
@@ -24,11 +24,11 @@ func TestIsolatedEnvCreatesDirsAndVars(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"HOME":            dir,
-		"XDG_CONFIG_HOME": filepath.Join(dir, "config"),
-		"XDG_STATE_HOME":  filepath.Join(dir, "state"),
-		"XDG_CACHE_HOME":  filepath.Join(dir, "cache"),
-		"XDG_RUNTIME_DIR": filepath.Join(dir, "run"),
+		"HOME":            containerHome,
+		"XDG_CONFIG_HOME": containerHome + "/config",
+		"XDG_STATE_HOME":  containerHome + "/state",
+		"XDG_CACHE_HOME":  containerHome + "/cache",
+		"XDG_RUNTIME_DIR": containerHome + "/run",
 	}
 	got := map[string]string{}
 	var keys []string
@@ -42,12 +42,9 @@ func TestIsolatedEnvCreatesDirsAndVars(t *testing.T) {
 			t.Errorf("env %s = %q, want %q", k, got[k], v)
 		}
 	}
-	if got["PATH"] == "" {
-		t.Errorf("PATH not inherited")
-	}
 	sort.Strings(keys)
-	if len(keys) != 6 {
-		t.Errorf("env has %d vars (%v), want exactly 6", len(keys), keys)
+	if len(keys) != len(want) {
+		t.Errorf("env has %d vars (%v), want exactly %d", len(keys), keys, len(want))
 	}
 }
 

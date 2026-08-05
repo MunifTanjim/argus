@@ -3,34 +3,30 @@ package e2elive
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-func TestNewIsolatesBinary(t *testing.T) {
+func TestNewIsolatesRun(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
+		t.Skip("container e2e; skipped under -short")
 	}
 	c := New(t)
 
 	if !strings.HasPrefix(c.GWURL, "ws://127.0.0.1:") {
 		t.Fatalf("GWURL = %q", c.GWURL)
 	}
+	if want := "ws://" + c.runID + "-gw:8443"; c.GWURLInternal != want {
+		t.Fatalf("GWURLInternal = %q, want %q", c.GWURLInternal, want)
+	}
 	if _, err := os.Stat(c.Root); err != nil {
 		t.Fatalf("root missing: %v", err)
 	}
 
-	// The built binary runs under an isolated env and prints usage.
-	env, err := isolatedEnv(filepath.Join(c.Root, "probe"))
-	if err != nil {
-		t.Fatalf("isolatedEnv: %v", err)
-	}
-	cmd := exec.Command(argusBin, "--help")
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
+	// The image's argus is the entrypoint, so bare flags reach it.
+	out, err := exec.Command("docker", "run", "--rm", "--label", runLabel+"=1", testImage, "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("argus --help: %v\n%s", err, out)
 	}
@@ -91,9 +87,7 @@ func TestNodeJoinsAndLockStatus(t *testing.T) {
 		t.Fatalf("malformed key produced no stderr")
 	}
 
-	sc, err := a.DialSocket()
-	if err != nil {
-		t.Fatalf("DialSocket: %v", err)
+	if r := a.LockRun("status"); r.ExitCode != 0 {
+		t.Fatalf("lock status on node-a: exit %d\n%s%s", r.ExitCode, r.Stdout, r.Stderr)
 	}
-	sc.Close()
 }

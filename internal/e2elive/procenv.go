@@ -8,25 +8,20 @@ import (
 	"time"
 )
 
-func isolatedEnv(dir string) ([]string, error) {
-	subs := map[string]string{
-		"config": filepath.Join(dir, "config"),
-		"state":  filepath.Join(dir, "state"),
-		"cache":  filepath.Join(dir, "cache"),
-		"run":    filepath.Join(dir, "run"),
-	}
-	for _, p := range subs {
-		if err := os.MkdirAll(p, 0o700); err != nil {
+// containerEnv creates the per-process directories on the host side of the bind
+// mount and returns the environment naming them by their container paths.
+func containerEnv(hostDir string) ([]string, error) {
+	for _, sub := range []string{"config", "state", "cache", "run"} {
+		if err := os.MkdirAll(filepath.Join(hostDir, sub), 0o700); err != nil {
 			return nil, err
 		}
 	}
 	return []string{
-		"HOME=" + dir,
-		"XDG_CONFIG_HOME=" + subs["config"],
-		"XDG_STATE_HOME=" + subs["state"],
-		"XDG_CACHE_HOME=" + subs["cache"],
-		"XDG_RUNTIME_DIR=" + subs["run"],
-		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + containerHome,
+		"XDG_CONFIG_HOME=" + containerHome + "/config",
+		"XDG_STATE_HOME=" + containerHome + "/state",
+		"XDG_CACHE_HOME=" + containerHome + "/cache",
+		"XDG_RUNTIME_DIR=" + containerHome + "/run",
 	}, nil
 }
 
@@ -40,9 +35,11 @@ func freePort(t *testing.T) string {
 	return l.Addr().String()
 }
 
+// waitFor polls until cond holds. The deadline is generous because a container
+// start is far slower than a process start.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

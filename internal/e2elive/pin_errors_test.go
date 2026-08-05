@@ -56,7 +56,7 @@ func TestLockPinAndErrorsCLI(t *testing.T) {
 	// When the socket is unreachable the CLI falls back to client mode via the
 	// gateway, which generates an ephemeral per-run device key that must be
 	// redacted before the golden comparison.
-	unreachableSocket := a.LockRun("status", "--socket="+c.Root+"/nope.sock")
+	unreachableSocket := a.LockRun("status", "--socket="+containerHome+"/nope.sock")
 	for _, m := range regexp.MustCompile(PatClientDeviceKey).FindAllStringSubmatch(unreachableSocket.Stdout+unreachableSocket.Stderr, -1) {
 		c.Redact(m[1], "<CLI-CLIENT-DEVPUB>")
 	}
