@@ -30,6 +30,7 @@ type Cluster struct {
 	runID      string
 	network    string
 	containers []string
+	retired    []retiredLog
 	nodes      map[string]*Node
 
 	gwEnv  []string
@@ -80,9 +81,12 @@ func New(t *testing.T) *Cluster {
 	t.Cleanup(func() {
 		c.cancel()
 		if t.Failed() {
+			for i, r := range c.retired {
+				t.Logf("---- %s (retired generation %d) ----\n%s", r.container, i+1, r.body)
+			}
 			for _, name := range c.containers {
 				if out, err := dockerLogs(name); err == nil {
-					t.Logf("---- %s ----\n%s", name, out)
+					t.Logf("---- %s (live) ----\n%s", name, out)
 				}
 			}
 		}
@@ -95,6 +99,11 @@ func New(t *testing.T) *Cluster {
 	return c
 }
 
+// scopedRootDir names the cache directory every run's scoped root is created in.
+// normalize.go derives its volatile-path backstop from it, so the two cannot
+// drift apart.
+const scopedRootDir = "argus-e2elive"
+
 // scopedRootBase returns the parent directory a run's scoped root is created in.
 // It sits under the user's home because the VM-backed docker runtimes on macOS
 // (colima, Docker Desktop) share the home directory but not the private
@@ -105,7 +114,7 @@ func scopedRootBase() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base := filepath.Join(home, ".cache", "argus-e2elive")
+	base := filepath.Join(home, ".cache", scopedRootDir)
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return "", err
 	}
@@ -152,9 +161,20 @@ func (c *Cluster) runContainer(name, hostDir string, env, argus []string, publis
 	c.containers = append(c.containers, name)
 }
 
+// retiredLog is what one removed container generation wrote. Restarts replace the
+// container, and `docker rm` takes its log stream with it, so a failure dump would
+// otherwise only ever show the generation that happens to be alive at the end.
+type retiredLog struct {
+	container string
+	body      string
+}
+
 func (c *Cluster) removeContainer(name string) {
 	c.t.Helper()
 	_ = dockerRun("stop", "-t", "5", name)
+	if out, err := dockerLogs(name); err == nil && out != "" {
+		c.retired = append(c.retired, retiredLog{container: name, body: out})
+	}
 	_ = dockerRun("rm", "-f", name)
 }
 
@@ -274,7 +294,9 @@ func (c *Cluster) StopNode(id string) {
 // directory and socket, and blocks until it is serving. Waiting on the node's
 // own socket rather than the gateway roster is deliberate: the roster still
 // lists the previous process as online until its offline grace expires, so it
-// cannot distinguish the two.
+// cannot distinguish the two. The probe is `argus ping` with an empty --gateway,
+// which dials the unix socket and nothing else, so a node can be restarted while
+// the gateway is down.
 func (c *Cluster) StartNode(id string) {
 	c.t.Helper()
 	n := c.nodes[id]
@@ -282,8 +304,11 @@ func (c *Cluster) StartNode(id string) {
 		c.t.Fatalf("StartNode: unknown node %q", id)
 	}
 	c.runContainer(n.container, n.Dir, n.env, n.args, "")
-	waitFor(c.t, "node "+id+" serving its socket again", func() bool {
-		return n.LockRun("status").ExitCode == 0
+	waitFor(c.t, "node "+id+" answering on its own socket", func() bool {
+		r := dockerExec(c.ctx, n.container, n.env, []string{
+			"argus", "ping", "--count=1", "--socket=" + n.Socket, "--gateway=",
+		})
+		return r.ExitCode == 0
 	})
 }
 

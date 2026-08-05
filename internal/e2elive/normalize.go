@@ -52,6 +52,9 @@ var (
 		regexp.MustCompile(`[0-9a-fA-F]{32,}`),
 		regexp.MustCompile(`127\.0\.0\.1:\d+`),
 		regexp.MustCompile(`(?:/private)?/(?:var/folders|tmp)/\S+`),
+		// Scoped roots live under the user's home, so a host path that escapes the
+		// <ROOT> and <*-DIR> redactions would carry a username into a golden.
+		regexp.MustCompile(`\S*` + regexp.QuoteMeta(scopedRootDir) + `/\S+`),
 		regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`),
 		regexp.MustCompile(`\d{2}:\d{2}:\d{2}`),
 	}
