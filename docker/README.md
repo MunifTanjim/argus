@@ -244,7 +244,7 @@ plain `down -v` leaves `client-home` behind.
 ## Notes & troubleshooting
 
 - **Claude Code on Alpine (musl):** the image installs `libc6-compat` as a shim.
-  If `claude` still fails to launch, switch the runtime stage in
+  If `claude` still fails to launch, switch the `runtime-base` stage in
   `docker/Dockerfile` from `alpine:3` to `node:22-slim` (and swap `apk add ...`
   for `apt-get install -y ca-certificates tini tmux procps git`). The argus
   binary is static and runs on either.
