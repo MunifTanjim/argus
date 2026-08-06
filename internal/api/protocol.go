@@ -815,10 +815,10 @@ type LockLogResult struct {
 
 // LockStatusResult is the audit view of a node's locked state.
 type LockStatusResult struct {
-	Enabled        bool     `json:"enabled"`
-	Tip            []byte   `json:"tip,omitempty"`
-	Signers        [][]byte `json:"signers,omitempty"`
-	DeviceCount    int      `json:"device_count"`
+	Enabled     bool     `json:"enabled"`
+	Tip         []byte   `json:"tip,omitempty"`
+	Signers     [][]byte `json:"signers,omitempty"`
+	DeviceCount int      `json:"device_count"`
 	// Devices is the authorized set. A non-zero DeviceCount with no Devices means the
 	// running daemon predates this field — upgraded binary, not yet restarted.
 	Devices        [][]byte `json:"devices,omitempty"`
@@ -830,9 +830,9 @@ type LockStatusResult struct {
 	Disabled       bool     `json:"disabled,omitempty"`
 	LocalDisabled  bool     `json:"local_disabled,omitempty"`
 	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
-	Pinned      bool   `json:"pinned,omitempty"`
-	PinGenesis  []byte `json:"pin_genesis,omitempty"`  // this device's own pin
-	SeenGenesis []byte `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
-	PinSource   string `json:"pin_source,omitempty"`   // "config" or "file"
-	Quarantined bool   `json:"quarantined,omitempty"`
+	Pinned         bool     `json:"pinned,omitempty"`
+	PinGenesis     []byte   `json:"pin_genesis,omitempty"`  // this device's own pin
+	SeenGenesis    []byte   `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
+	PinSource      string   `json:"pin_source,omitempty"`   // "config" or "file"
+	Quarantined    bool     `json:"quarantined,omitempty"`
 }
