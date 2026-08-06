@@ -109,20 +109,25 @@ if [[ -n "${DEMO_PUBLISH:-}" ]]; then
   publish=(-p "${spec}:8443")
 fi
 
-# -it against a pipe is wrong twice over: docker refuses to attach a non-terminal
-# stdin to a TTY-enabled container, and -t puts a carriage return on every output
-# line. Both flags therefore need a real terminal at both ends, which is what
-# keeps `demo.sh a lock status | grep ...` working.
-tty_flags=()
+# -i and -t answer different questions, so they are decided separately.
+#
+# -i is unconditional: argus prompts on stdin (`lock pin` asks for confirmation),
+# and without -i docker attaches no stdin at all, so `echo y | demo.sh a lock pin`
+# would read EOF instead of the answer.
+#
+# -t needs a terminal at both ends. Docker refuses a non-terminal stdin on a
+# TTY-enabled container, and -t puts a carriage return on every output line, which
+# would break `demo.sh a lock status | grep ...`.
+attach_flags=(-i)
 if [[ -t 0 && -t 1 ]]; then
-  tty_flags=(-it)
+  attach_flags+=(-t)
 fi
 
 # --rm plus the container name means a namespace is one process at a time, and a
 # Ctrl-C leaves nothing behind. exec so signals and the exit code belong to
 # docker, which forwards them to argus.
 exec docker run --rm \
-  "${tty_flags[@]+"${tty_flags[@]}"}" \
+  "${attach_flags[@]+"${attach_flags[@]}"}" \
   --name "$CONTAINER" \
   --hostname "$CONTAINER" \
   --network "$NETWORK" \
