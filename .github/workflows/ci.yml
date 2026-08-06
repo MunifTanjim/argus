@@ -25,7 +25,7 @@ jobs:
       - name: Build
         run: make build
       - name: Test
-        run: make test
+        run: go test ./... -short
 
   convention:
     runs-on: ubuntu-latest

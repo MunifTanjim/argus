@@ -1,0 +1,29 @@
+name: e2elive
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2elive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test
+        run: go test ./internal/e2elive/ -count=1 -v
