@@ -25,6 +25,29 @@ func TestRepoRootFindsTheModuleRoot(t *testing.T) {
 	}
 }
 
+func TestRunRootOwner(t *testing.T) {
+	root, err := newRunRoot()
+	if err != nil {
+		t.Fatalf("newRunRoot: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	pid, ok := runRootOwner(filepath.Base(root))
+	if !ok || pid != os.Getpid() {
+		t.Fatalf("runRootOwner(%q) = %d, %v; want %d, true", filepath.Base(root), pid, ok, os.Getpid())
+	}
+	if !processAlive(pid) {
+		t.Fatalf("processAlive(%d) = false for this very process", pid)
+	}
+
+	// A name a sweep must treat as abandoned rather than skip.
+	for _, name := range []string{"axe", "axe-123", "axeXY-1", "other-1"} {
+		if _, ok := runRootOwner(name); ok {
+			t.Fatalf("runRootOwner(%q) claimed an owner", name)
+		}
+	}
+}
+
 func TestDockerExecReportsStdoutAndExitCode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("container test; skipped under -short")

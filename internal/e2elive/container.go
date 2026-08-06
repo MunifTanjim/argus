@@ -55,7 +55,8 @@ func dockerRun(args ...string) error {
 
 // dockerLogs returns a container's output as one text. `docker logs` keeps the
 // container's two streams apart, and argus writes its log lines to stderr, so
-// dockerOut alone would come back empty.
+// dockerOut alone would come back empty. Uncancellable on purpose: the failure
+// dump runs from t.Cleanup after c.cancel(), so a ctx-bound command would abort.
 func dockerLogs(container string) (string, error) {
 	out, err := exec.Command("docker", "logs", container).CombinedOutput()
 	return string(out), err
@@ -89,8 +90,8 @@ func buildTestImage() error {
 	return buildErr
 }
 
-// sweepStale removes containers and networks left behind by a run that was
-// killed before its cleanup could run.
+// sweepStale removes the containers, networks and run roots left behind by a run
+// that was killed before its cleanup could run.
 func sweepStale() {
 	if out, err := dockerOut("ps", "-aq", "--filter", "label="+runLabel); err == nil {
 		for _, id := range strings.Fields(out) {
@@ -102,6 +103,7 @@ func sweepStale() {
 			_ = dockerRun("network", "rm", id)
 		}
 	}
+	sweepStaleRoots()
 }
 
 type dockerResult struct {

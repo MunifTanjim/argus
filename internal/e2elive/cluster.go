@@ -2,11 +2,14 @@ package e2elive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -49,11 +52,7 @@ func New(t *testing.T) *Cluster {
 	if err := buildTestImage(); err != nil {
 		t.Fatalf("build test image: %v", err)
 	}
-	base, err := scopedRootBase()
-	if err != nil {
-		t.Fatalf("scoped root base: %v", err)
-	}
-	root, err := os.MkdirTemp(base, "axe")
+	root, err := newRunRoot()
 	if err != nil {
 		t.Fatalf("scoped root: %v", err)
 	}
@@ -73,11 +72,8 @@ func New(t *testing.T) *Cluster {
 	c.GWURL = "ws://" + c.GWAddr
 	c.GWURLInternal = "ws://" + runID + "-gw:8443"
 
-	if err := dockerRun("network", "create", "--label", runLabel+"=1", c.network); err != nil {
-		cancel()
-		t.Fatalf("create network: %v", err)
-	}
-
+	// Registered before the network exists so that a failure below still takes the
+	// run root with it.
 	t.Cleanup(func() {
 		c.cancel()
 		if t.Failed() {
@@ -96,6 +92,10 @@ func New(t *testing.T) *Cluster {
 		_ = dockerRun("network", "rm", c.network)
 		_ = os.RemoveAll(root)
 	})
+
+	if err := dockerRun("network", "create", "--label", runLabel+"=1", c.network); err != nil {
+		t.Fatalf("create network: %v", err)
+	}
 	return c
 }
 
@@ -121,9 +121,70 @@ func scopedRootBase() (string, error) {
 	return base, nil
 }
 
+// runRootPrefix begins every run root's name. The owning test process's pid
+// follows it, so that a sweep can tell an abandoned root from one another
+// process is still writing to.
+const runRootPrefix = "axe"
+
+func newRunRoot() (string, error) {
+	base, err := scopedRootBase()
+	if err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(base, fmt.Sprintf("%s%d-", runRootPrefix, os.Getpid()))
+}
+
+func runRootOwner(name string) (int, bool) {
+	rest, found := strings.CutPrefix(name, runRootPrefix)
+	if !found {
+		return 0, false
+	}
+	digits, _, found := strings.Cut(rest, "-")
+	if !found {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(digits)
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
+// sweepStaleRoots removes the run roots of processes that are gone. Ctrl-C skips
+// the t.Cleanup that would have removed them, and each one holds node identity
+// keys and the dev token, so leaving them to accumulate is not harmless.
+//
+// A root whose owning pid is still alive is never removed, which is what keeps a
+// concurrent run in another process safe. A name with no pid in it predates this
+// scheme and therefore cannot belong to a live run.
+func sweepStaleRoots() {
+	base, err := scopedRootBase()
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if pid, ok := runRootOwner(e.Name()); ok && processAlive(pid) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(base, e.Name()))
+	}
+}
+
+// processAlive reports whether the kernel still knows pid. Signal 0 performs the
+// permission checks without delivering anything, so EPERM means alive too.
+func processAlive(pid int) bool {
+	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+}
+
 // hostUser returns the --user value that makes bind-mounted files readable by
-// the test process. On Linux the container would otherwise write 0600 files
-// owned by the image's uid.
+// the test process. Without it the container writes 0600 files owned by the
+// image's uid. This is not a Linux-only concern: the VM-backed runtimes on macOS
+// carry the container uid onto the bind mount too, so dropping the flag on a Mac
+// breaks the state-file reads exactly as it does on Linux.
 func hostUser() string {
 	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 }
