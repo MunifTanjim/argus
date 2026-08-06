@@ -2,21 +2,52 @@ package e2elive
 
 import (
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// refreshSessions rescans on every node and returns what the client sees.
-// Discovery has no ticker, so a plain list can race a freshly started agent. A
-// call that errors returns nil, which lets the caller keep polling.
-func refreshSessions(cl *client.ReconnectingE2EClient) []session.Session {
-	var out []session.Session
-	if err := cl.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
-		return nil
+// waitChannels blocks until the client holds an established E2E channel to every
+// named node. NewClient returns before openChannel has completed its handshake,
+// and a sessions fan-out only reaches the channels that exist when it runs, so a
+// count taken too early can omit a node without saying so — which would let a
+// fleet that duplicates one node's agents still look correct.
+func waitChannels(t *testing.T, cl *client.ReconnectingE2EClient, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		waitFor(t, "e2e channel to "+id, func() bool {
+			var r api.AgentsListResult
+			return cl.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: id}, &r) == nil
+		})
 	}
-	return out
+}
+
+// waitSessions rescans every node until want accepts the result. Discovery has no
+// ticker, so a plain list can race a freshly started agent. A failing call is
+// retried rather than fatal, because one is normal while a node is still
+// settling, but the last failure is reported on timeout so that a broken
+// transport cannot present itself as a missing session.
+func waitSessions(t *testing.T, cl *client.ReconnectingE2EClient, what string, want func([]session.Session) bool) []session.Session {
+	t.Helper()
+	var last []session.Session
+	var lastErr error
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		var out []session.Session
+		if err := cl.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
+			lastErr = err
+		} else {
+			lastErr, last = nil, out
+			if want(out) {
+				return out
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s (last sessions.refresh error: %v; last result: %+v)", what, lastErr, last)
+	return nil
 }
 
 // TestAgentIsVisibleOnItsOwnNodeOnly is the container isolation regression test.
@@ -32,10 +63,10 @@ func TestAgentIsVisibleOnItsOwnNodeOnly(t *testing.T) {
 	a.StartAgent("work", "sid-node-a")
 
 	cl := c.NewClient()
-	var found []session.Session
-	waitFor(t, "node-a session to appear", func() bool {
-		found = refreshSessions(cl)
-		return len(found) > 0
+	waitChannels(t, cl, "node-a", "node-b")
+
+	found := waitSessions(t, cl, "node-a session to appear", func(ss []session.Session) bool {
+		return len(ss) > 0
 	})
 
 	if len(found) != 1 {
@@ -62,10 +93,10 @@ func TestEachNodeReportsItsOwnAgent(t *testing.T) {
 	b.StartAgent("beta", "sid-beta")
 
 	cl := c.NewClient()
-	var found []session.Session
-	waitFor(t, "both sessions to appear", func() bool {
-		found = refreshSessions(cl)
-		return len(found) == 2
+	waitChannels(t, cl, "node-a", "node-b")
+
+	found := waitSessions(t, cl, "both sessions to appear", func(ss []session.Session) bool {
+		return len(ss) == 2
 	})
 
 	byNode := map[string]string{}
