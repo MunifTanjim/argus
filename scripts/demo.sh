@@ -109,20 +109,20 @@ if [[ -n "${DEMO_PUBLISH:-}" ]]; then
   publish=(-p "${spec}:8443")
 fi
 
-# -t alone appends a carriage return to every output line, and -i without a TTY
-# on stdin makes `docker run -t` fail outright, so both flags are conditional on
-# a real terminal at both ends. That keeps `demo.sh a lock status | grep ...`
-# working.
-tty=()
+# -it against a pipe is wrong twice over: docker refuses to attach a non-terminal
+# stdin to a TTY-enabled container, and -t puts a carriage return on every output
+# line. Both flags therefore need a real terminal at both ends, which is what
+# keeps `demo.sh a lock status | grep ...` working.
+tty_flags=()
 if [[ -t 0 && -t 1 ]]; then
-  tty=(-it)
+  tty_flags=(-it)
 fi
 
 # --rm plus the container name means a namespace is one process at a time, and a
 # Ctrl-C leaves nothing behind. exec so signals and the exit code belong to
 # docker, which forwards them to argus.
 exec docker run --rm \
-  "${tty[@]+"${tty[@]}"}" \
+  "${tty_flags[@]+"${tty_flags[@]}"}" \
   --name "$CONTAINER" \
   --hostname "$CONTAINER" \
   --network "$NETWORK" \
