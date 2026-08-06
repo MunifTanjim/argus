@@ -78,7 +78,10 @@ CONTAINER="argus-demo-$NS"
 image_exists() { docker image inspect "$IMAGE" >/dev/null 2>&1; }
 
 if [[ -n "${DEMO_REBUILD:-}" ]] || ! image_exists; then
-  [[ -z "${DEMO_NO_BUILD:-}" ]] || die "image $IMAGE missing and DEMO_NO_BUILD is set"
+  if [[ -n "${DEMO_NO_BUILD:-}" ]]; then
+    [[ -z "${DEMO_REBUILD:-}" ]] || die "DEMO_REBUILD and DEMO_NO_BUILD are both set"
+    die "image $IMAGE missing and DEMO_NO_BUILD is set"
+  fi
   info "building $IMAGE"
   version="$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo demo)"
   docker build \
@@ -112,5 +115,5 @@ exec docker run --rm -it \
   -e "XDG_STATE_HOME=$CONTAINER_HOME/state" \
   -e "XDG_CACHE_HOME=$CONTAINER_HOME/cache" \
   -e "XDG_RUNTIME_DIR=$CONTAINER_HOME/run" \
-  "${publish[@]}" \
+  "${publish[@]+"${publish[@]}"}" \
   "$IMAGE" "$@"
