@@ -13,7 +13,7 @@ name: argus-e2e
 # one (parallel) build is an error. So the first run must be `up --build`, which
 # builds the image before anything starts.
 x-argus: &argus
-  image: argus-e2e:dev
+  image: argus-demo:dev
 
 x-node-base: &node-base
   <<: *argus
