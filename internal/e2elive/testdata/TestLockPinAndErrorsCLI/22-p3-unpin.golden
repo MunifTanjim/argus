@@ -1,4 +1,4 @@
-$ argus lock unpin --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock unpin --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 cleared this device's persisted pin

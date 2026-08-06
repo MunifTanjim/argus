@@ -1,4 +1,4 @@
-$ argus lock add-signer <NODE-B-SIGPUB> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock add-signer <NODE-B-SIGPUB> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 add-signer ok

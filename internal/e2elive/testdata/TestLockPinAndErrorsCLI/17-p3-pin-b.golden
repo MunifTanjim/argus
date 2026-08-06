@@ -1,4 +1,4 @@
-$ argus lock pin <GENESIS-1> --socket=<node-b-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock pin <GENESIS-1> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 pinned this device

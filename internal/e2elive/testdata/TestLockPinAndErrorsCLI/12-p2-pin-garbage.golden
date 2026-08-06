@@ -1,4 +1,4 @@
-$ argus lock pin gen:garbage --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock pin gen:garbage --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 1
 --- stdout ---
 --- stderr ---

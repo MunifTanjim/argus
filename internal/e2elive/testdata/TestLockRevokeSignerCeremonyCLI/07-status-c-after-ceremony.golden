@@ -1,4 +1,4 @@
-$ argus lock status --socket=<node-c-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 locked mode: enforcing

@@ -1,4 +1,4 @@
-$ argus lock disable <SECRET-1-1> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock disable <SECRET-1-1> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 locked mode disabled network-wide

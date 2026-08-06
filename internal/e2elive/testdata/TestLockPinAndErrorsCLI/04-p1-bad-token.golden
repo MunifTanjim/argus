@@ -1,4 +1,4 @@
-$ argus lock status --token=wrong-token --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR>
+$ argus lock status --token=wrong-token --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443
 exit 1
 --- stdout ---
 locked mode: not enabled

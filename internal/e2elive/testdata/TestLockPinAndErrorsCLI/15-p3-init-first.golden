@@ -1,4 +1,4 @@
-$ argus lock init <NODE-A-SIGPUB> --confirm --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock init <NODE-A-SIGPUB> --confirm --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 locked mode enabled

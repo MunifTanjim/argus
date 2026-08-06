@@ -1,4 +1,4 @@
-$ argus lock status --gateway=ws://<UNREACHABLE-GW-ADDR> --socket=<node-a-SOCKET> --token=<TOKEN>
+$ argus lock status --gateway=ws://<UNREACHABLE-GW-ADDR> --socket=/home/argus/s --token=<TOKEN>
 exit 1
 --- stdout ---
 locked mode: not enabled

@@ -1,4 +1,4 @@
-$ argus lock revoke-signer --finish <BLOB-COSIGNED> --socket=<node-a-SOCKET> --gateway=ws://<GW-ADDR> --token=<TOKEN>
+$ argus lock revoke-signer --finish <BLOB-COSIGNED> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
 revocation applied
