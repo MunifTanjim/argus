@@ -10,9 +10,6 @@ import (
 // TestLockPinAndErrorsCLI pins the failure surface of `argus lock` — exit codes and
 // error text — plus the client pin lifecycle, on one cluster in state order.
 func TestLockPinAndErrorsCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 	a := c.AddNode("node-a")

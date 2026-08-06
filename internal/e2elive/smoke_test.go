@@ -10,9 +10,6 @@ import (
 // composes: a client seals a request, the blind gateway relays it opaquely,
 // the real node process decrypts and answers, and the client opens the reply.
 func TestSmokeUnlockedRoundTrip(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 	c.AddNode("node-a")

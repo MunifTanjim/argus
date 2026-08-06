@@ -76,7 +76,6 @@ func (c *Cluster) Redact(actual, placeholder string) {
 
 func (c *Cluster) autoRedact() {
 	c.Redact(c.Root, "<ROOT>")
-	c.Redact(c.GWAddr, "<GW-ADDR>")
 	// The run id names the network and every container, so it reaches the goldens
 	// through the internal gateway URL on each command line.
 	c.Redact(c.runID, "<RUN-ID>")

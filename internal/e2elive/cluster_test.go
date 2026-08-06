@@ -2,7 +2,6 @@ package e2elive
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -10,9 +9,6 @@ import (
 )
 
 func TestNewIsolatesRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("container e2e; skipped under -short")
-	}
 	c := New(t)
 
 	if !strings.HasPrefix(c.GWURL, "ws://127.0.0.1:") {
@@ -26,19 +22,16 @@ func TestNewIsolatesRun(t *testing.T) {
 	}
 
 	// The image's argus is the entrypoint, so bare flags reach it.
-	out, err := exec.Command("docker", "run", "--rm", "--label", runLabel+"=1", testImage, "--help").CombinedOutput()
+	out, err := dockerOut("run", "--rm", "--label", runLabel+"=1", testImage, "--help")
 	if err != nil {
 		t.Fatalf("argus --help: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "Usage") {
+	if !strings.Contains(out, "Usage") {
 		t.Fatalf("help output missing Usage:\n%s", out)
 	}
 }
 
 func TestGatewayServesClient(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 
@@ -58,9 +51,6 @@ func TestGatewayServesClient(t *testing.T) {
 }
 
 func TestNodeJoinsAndLockStatus(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 	c.AddNode("node-a")

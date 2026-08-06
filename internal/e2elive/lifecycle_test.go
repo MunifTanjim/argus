@@ -10,9 +10,6 @@ import (
 // TestLockLifecycleCLI walks a locked network's whole life through the CLI on two
 // real node processes, pinning the exit code and output of every step.
 func TestLockLifecycleCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 	a := c.AddNode("node-a")

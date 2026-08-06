@@ -33,7 +33,7 @@ func waitSessions(t *testing.T, cl *client.ReconnectingE2EClient, what string, w
 	t.Helper()
 	var last []session.Session
 	var lastErr error
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(waitTimeout)
 	for time.Now().Before(deadline) {
 		var out []session.Session
 		if err := cl.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
@@ -44,7 +44,7 @@ func waitSessions(t *testing.T, cl *client.ReconnectingE2EClient, what string, w
 				return out
 			}
 		}
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(waitInterval)
 	}
 	t.Fatalf("timed out waiting for %s (last sessions.refresh error: %v; last result: %+v)", what, lastErr, last)
 	return nil

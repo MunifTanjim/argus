@@ -10,9 +10,6 @@ import (
 // TestLockRevokeSignerCeremonyCLI drives the three-phase co-signing ceremony across
 // three real processes, passing the ceremony blob between them through argv.
 func TestLockRevokeSignerCeremonyCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	c.StartGateway()
 	a := c.AddNode("node-a")

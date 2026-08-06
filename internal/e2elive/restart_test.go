@@ -60,9 +60,6 @@ func lockedPair(t *testing.T, c *Cluster) (a, b *Node, redactTip func(Result)) {
 // run in between — and it must still be a live participant afterwards, not just a
 // process holding stale state.
 func TestNodeRestartKeepsLockCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	a, b, redactTip := lockedPair(t, c)
 
@@ -101,9 +98,6 @@ func TestNodeRestartKeepsLockCLI(t *testing.T) {
 // enforces), and once it is back the fleet refills its empty entry store by itself,
 // so a write made after the restart still reaches a peer.
 func TestGatewayRestartKeepsFleetLockedCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	a, b, redactTip := lockedPair(t, c)
 
@@ -136,9 +130,6 @@ func TestGatewayRestartKeepsFleetLockedCLI(t *testing.T) {
 // separate file — so an unreadable chain must not come back as an open node. The
 // node is expected to start pinned with nothing loaded and refill from the gateway.
 func TestNodeRestartWithCorruptChainCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("real-process e2e; skipped under -short")
-	}
 	c := New(t)
 	_, b, redactTip := lockedPair(t, c)
 

@@ -35,16 +35,22 @@ func freePort(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// waitFor polls until cond holds. The deadline is generous because a container
-// start is far slower than a process start.
+// The budget every poll loop in this package spends. The deadline is generous
+// because a container start is far slower than a process start.
+const (
+	waitTimeout  = 60 * time.Second
+	waitInterval = 25 * time.Millisecond
+)
+
+// waitFor polls until cond holds.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(waitTimeout)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(waitInterval)
 	}
 	t.Fatalf("timed out waiting for %s", what)
 }
