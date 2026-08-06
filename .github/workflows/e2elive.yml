@@ -19,8 +19,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install Dependencies
-        run: go mod download
+      # No `go mod download` step: `go test` fetches what the test binary needs,
+      # and the image resolves its own modules inside BuildKit cache mounts that
+      # this runner never persists.
 
       # docker/setup-buildx-action is not used here: buildTestImage() calls
       # plain `docker build`, not `docker buildx build`. DOCKER_BUILDKIT=1 below
