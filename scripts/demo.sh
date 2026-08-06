@@ -42,7 +42,10 @@ ws://argus-demo-gw:8443.
 Environment:
   DEMO_REBUILD=1   rebuild the image even if it exists
   DEMO_NO_BUILD=1  never build; fail if the image is missing
-  DEMO_PUBLISH     host port to publish to the container's 8443 (gateway only)
+  DEMO_PUBLISH     host port to publish to the container's 8443 (gateway only).
+                   A bare port binds 127.0.0.1, because the demo token is
+                   trivial. Give a host to bind elsewhere on purpose, e.g.
+                   DEMO_PUBLISH=0.0.0.0:9999
 
 Examples:
   ${BASH_SOURCE[0]##*/} gw start --mode=gateway --token=t --listen-addr=:8443
@@ -98,12 +101,28 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 ||
 mkdir -p "$NS_DIR"/{config,state,cache,run}
 
 publish=()
-[[ -z "${DEMO_PUBLISH:-}" ]] || publish=(-p "${DEMO_PUBLISH}:8443")
+if [[ -n "${DEMO_PUBLISH:-}" ]]; then
+  # A bare port binds loopback. The demo gateway accepts a trivial token, so it
+  # must not reach the LAN unless the caller names a host deliberately.
+  spec="$DEMO_PUBLISH"
+  [[ "$spec" == *:* ]] || spec="127.0.0.1:$spec"
+  publish=(-p "${spec}:8443")
+fi
+
+# -t alone appends a carriage return to every output line, and -i without a TTY
+# on stdin makes `docker run -t` fail outright, so both flags are conditional on
+# a real terminal at both ends. That keeps `demo.sh a lock status | grep ...`
+# working.
+tty=()
+if [[ -t 0 && -t 1 ]]; then
+  tty=(-it)
+fi
 
 # --rm plus the container name means a namespace is one process at a time, and a
 # Ctrl-C leaves nothing behind. exec so signals and the exit code belong to
 # docker, which forwards them to argus.
-exec docker run --rm -it \
+exec docker run --rm \
+  "${tty[@]+"${tty[@]}"}" \
   --name "$CONTAINER" \
   --hostname "$CONTAINER" \
   --network "$NETWORK" \
