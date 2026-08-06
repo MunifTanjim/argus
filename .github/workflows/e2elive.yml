@@ -22,8 +22,12 @@ jobs:
       - name: Install Dependencies
         run: go mod download
 
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+      # docker/setup-buildx-action is not used here: buildTestImage() calls
+      # plain `docker build`, not `docker buildx build`. DOCKER_BUILDKIT=1 below
+      # is enough. Reintroduce setup-buildx-action if cache-from/cache-to: type=gha
+      # is ever added for image layer caching.
 
       - name: Test
+        env:
+          DOCKER_BUILDKIT: "1"
         run: go test ./internal/e2elive/ -count=1 -v
