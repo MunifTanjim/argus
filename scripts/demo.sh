@@ -47,10 +47,16 @@ Environment:
                    trivial. Give a host to bind elsewhere on purpose, e.g.
                    DEMO_PUBLISH=0.0.0.0:9999
 
+A \`start\` records its --gateway and --token in demo/test/<namespace>/config/argus/
+config.yaml, so later commands in that namespace reach the gateway without
+repeating them. A gateway namespace records only the token: see below.
+
 Examples:
   ${BASH_SOURCE[0]##*/} gw start --mode=gateway --token=t --listen-addr=:8443
   ${BASH_SOURCE[0]##*/} a start --gateway=ws://argus-demo-gw:8443 --token=t --id=node-a
   ${BASH_SOURCE[0]##*/} a lock status
+  ${BASH_SOURCE[0]##*/} a lock init sigpub:<hex>
+  ${BASH_SOURCE[0]##*/} gw lock init --gateway=ws://127.0.0.1:8443 sigpub:<hex>
 EOF
   exit 1
 }
@@ -99,6 +105,79 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 ||
   docker network create --label argus.demo=1 "$NETWORK" >/dev/null
 
 mkdir -p "$NS_DIR"/{config,state,cache,run}
+
+# The flags of a `start` describe the namespace's topology, so record the parts
+# every later command needs. Without this, `demo.sh a lock init` reaches the
+# gateway with no token and the handshake is refused with 401.
+start_gateway=""
+start_token=""
+start_mode=""
+start_listen=""
+parse_start_flags() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --gateway=*) start_gateway="${1#*=}" ;;
+    --token=*) start_token="${1#*=}" ;;
+    --mode=*) start_mode="${1#*=}" ;;
+    --listen-addr=*) start_listen="${1#*=}" ;;
+    --gateway)
+      start_gateway="${2:-}"
+      shift
+      ;;
+    --token)
+      start_token="${2:-}"
+      shift
+      ;;
+    --mode)
+      start_mode="${2:-}"
+      shift
+      ;;
+    --listen-addr)
+      start_listen="${2:-}"
+      shift
+      ;;
+    esac
+    shift
+  done
+}
+
+# YAML single-quoted scalar: the only escape inside one is a doubled quote.
+yaml_quote() { printf "'%s'" "${1//\'/\'\'}"; }
+
+if [[ "${1:-}" == "start" ]]; then
+  parse_start_flags "$@"
+
+  # Same inference argus itself makes: an explicit --mode wins, otherwise a token
+  # with no upstream means this namespace serves the gateway.
+  is_gateway=""
+  if [[ "$start_mode" == "gateway" ]] ||
+    [[ -z "$start_mode" && -z "$start_gateway" && -n "$start_token" ]]; then
+    is_gateway=1
+  fi
+
+  if [[ -n "$start_token" || -n "$start_gateway" ]]; then
+    conf_dir="$NS_DIR/config/argus"
+    mkdir -p "$conf_dir"
+    {
+      echo "# Written by scripts/demo.sh from the flags of the last \`start\` in this"
+      echo "# namespace. Delete it to go back to passing --gateway and --token by hand."
+      [[ -z "$start_token" ]] || echo "token: $(yaml_quote "$start_token")"
+      if [[ -n "$start_gateway" ]]; then
+        echo "gateway:"
+        echo "  url: $(yaml_quote "$start_gateway")"
+      fi
+    } >"$conf_dir/config.yaml"
+  fi
+
+  # gateway.url is left out of a gateway namespace's config on purpose: argus reads
+  # that key as "the upstream I connect to", so `argus start --mode=gateway` refuses
+  # a config that sets it. Client commands here need it passed by hand.
+  if [[ -n "$is_gateway" ]]; then
+    listen_port="${start_listen##*:}"
+    [[ -n "$listen_port" ]] || listen_port=8443
+    info "namespace '$NS' serves the gateway; its client commands need --gateway=ws://127.0.0.1:$listen_port"
+  fi
+fi
 
 publish=()
 if [[ -n "${DEMO_PUBLISH:-}" ]]; then
