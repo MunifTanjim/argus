@@ -110,7 +110,7 @@ func TestInProcessSourceRoutesThroughAggregator(t *testing.T) {
 		called <- method
 		return map[string]bool{"ok": true}, nil
 	}
-	a := New(0)
+	a := New(0, false)
 	a.AddSource(NewInProcessSource("home", "home-box", "", api.NodeCapabilities{SpawnSession: true}, registry.New(), dispatch))
 
 	if _, err := a.Route(context.Background(), "sessions.kill", json.RawMessage(`{"session_id":"home:default:%1"}`)); err != nil {

@@ -41,7 +41,7 @@ func debugLogger(w *syncBuffer) *slog.Logger {
 }
 
 func TestUplinkLogsEstablished(t *testing.T) {
-	agg := gateway.New(time.Second)
+	agg := gateway.New(time.Second, false)
 	hsrv := gateway.NewServer(agg,
 		func(tok string) bool { return tok == "dtok" },
 		func(tok string) bool { return tok == "ctok" },

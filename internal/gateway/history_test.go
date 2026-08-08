@@ -13,7 +13,7 @@ import (
 // Fanout calls every source and tags each reply with its origin node, the basis
 // for aggregating history projects across machines.
 func TestFanoutTagsResultsByNode(t *testing.T) {
-	a := New(0)
+	a := New(0, false)
 
 	srcA := newFakeSource("home", "home-box")
 	srcA.callResp, _ = json.Marshal([]session.HistoryProject{{ProjectDir: "/a", Label: "projA"}})
@@ -52,7 +52,7 @@ func TestFanoutTagsResultsByNode(t *testing.T) {
 // historySessions routes to one node; the gateway must stamp each returned session
 // with its owning node so a client can address its transcript by node_id.
 func TestHistorySessionsStampsNodeID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("default:%1"))
 	home.callResp, _ = json.Marshal(session.HistorySessionPage{
 		Items:   []session.HistorySession{{SessionID: "s1", TranscriptPath: "/t/s1.jsonl"}},

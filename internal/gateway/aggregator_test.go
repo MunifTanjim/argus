@@ -45,6 +45,10 @@ func (f *fakeSource) Capabilities() api.NodeCapabilities {
 func (f *fakeSource) Snapshot() []session.Session                { return f.snap }
 func (f *fakeSource) Subscribe() (<-chan registry.Event, func()) { return f.events, func() {} }
 func (f *fakeSource) Done() <-chan struct{}                      { return f.done }
+func (f *fakeSource) IdentityPubKey() string                    { return "" }
+func (f *fakeSource) SignerPubKey() string                      { return "" }
+func (f *fakeSource) BeaconPubKey() string                      { return "" }
+func (f *fakeSource) LatestBeacon() *api.Beacon                 { return nil }
 
 func (f *fakeSource) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()
@@ -90,7 +94,7 @@ func recvEvent(t *testing.T, ch <-chan registry.Event) registry.Event {
 }
 
 func TestAggregatorMergesWithCompositeIDsAndOrigin(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	a.AddSource(newFakeSource("home", "home-box", sess("default:%1")))
 	a.AddSource(newFakeSource("dev", "dev-box", sess("default:%2")))
 
@@ -113,7 +117,7 @@ func TestAggregatorMergesWithCompositeIDsAndOrigin(t *testing.T) {
 }
 
 func TestAggregatorStreamsEvents(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	events, cancel := a.Subscribe()
 	defer cancel()
 
@@ -131,7 +135,7 @@ func TestAggregatorStreamsEvents(t *testing.T) {
 }
 
 func TestAggregatorMarksSnapshotReplay(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	events, cancel := a.Subscribe()
 	defer cancel()
 
@@ -149,7 +153,7 @@ func TestAggregatorMarksSnapshotReplay(t *testing.T) {
 }
 
 func TestRouteForwardsToOwningSourceWithLocalID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("default:%1"))
 	dev := newFakeSource("dev", "dev-box", sess("default:%2"))
 	home.callResp = json.RawMessage(`{"screen":"home"}`)
@@ -181,7 +185,7 @@ func TestRouteForwardsToOwningSourceWithLocalID(t *testing.T) {
 }
 
 func TestRouteUnknownNode(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	_, err := a.Route(context.Background(), "sessions.capture", json.RawMessage(`{"session_id":"ghost:default:%1"}`))
 	if err == nil {
 		t.Fatal("want error routing to unknown node")
@@ -189,7 +193,7 @@ func TestRouteUnknownNode(t *testing.T) {
 }
 
 func TestSourceOfflineThenRemoved(t *testing.T) {
-	a := New(60 * time.Millisecond)
+	a := New(60 * time.Millisecond, false)
 	events, cancel := a.Subscribe()
 	defer cancel()
 
@@ -214,7 +218,7 @@ func TestSourceOfflineThenRemoved(t *testing.T) {
 }
 
 func TestReconnectBeforeGraceKeepsSessions(t *testing.T) {
-	a := New(400 * time.Millisecond)
+	a := New(400 * time.Millisecond, false)
 	src := newFakeSource("home", "home-box", sess("default:%1"))
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
@@ -245,7 +249,7 @@ func TestReconnectBeforeGraceKeepsSessions(t *testing.T) {
 }
 
 func TestRouteToNodeForwardsAndCompositesResult(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("default:%1"))
 	dev := newFakeSource("dev", "dev-box", sess("default:%2"))
 	home.callResp = json.RawMessage(`{"session_id":"default:%9","pane_id":"%9"}`)
@@ -271,7 +275,7 @@ func TestRouteToNodeForwardsAndCompositesResult(t *testing.T) {
 }
 
 func TestRouteToNodeUnknown(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	_, err := a.RouteToNode(context.Background(), "ghost", "sessions.spawn", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("want error routing to unknown node")
@@ -282,5 +286,44 @@ func TestNodeIDFromParams(t *testing.T) {
 	id, err := nodeIDFromParams(json.RawMessage(`{"node_id":"home","name":"x"}`))
 	if err != nil || id != "home" {
 		t.Fatalf("want home, got %q err %v", id, err)
+	}
+}
+
+func recvRosterEvent(t *testing.T, ch <-chan api.NodeEvent) api.NodeEvent {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		return ev
+	case <-time.After(2 * time.Second):
+		t.Fatal("no roster event received")
+		return api.NodeEvent{}
+	}
+}
+
+func TestBlindAggregatorRosterAndSubscribeRoster(t *testing.T) {
+	a := New(0, true)
+	events, cancel := a.SubscribeRoster()
+	defer cancel()
+
+	src := newFakeSource("home", "home-box")
+	a.AddSource(src)
+
+	ev := recvRosterEvent(t, events)
+	if ev.Type != api.NodeEventAdded {
+		t.Fatalf("want added event, got %q", ev.Type)
+	}
+	if ev.Node.ID != "home" || ev.Node.Label != "home-box" {
+		t.Fatalf("unexpected node in event: %+v", ev.Node)
+	}
+	if !ev.Node.Online {
+		t.Fatal("node should be online in added event")
+	}
+
+	roster := a.Roster()
+	if len(roster) != 1 || roster[0].ID != "home" {
+		t.Fatalf("want 1 roster entry for home, got %v", roster)
+	}
+	if !roster[0].Online {
+		t.Fatal("roster entry should be online")
 	}
 }

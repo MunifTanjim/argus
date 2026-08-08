@@ -29,6 +29,16 @@ type Source interface {
 	Subscribe() (<-chan registry.Event, func())
 	// Call invokes a control method with already node-local params, returning raw JSON.
 	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
+	// IdentityPubKey is the node's Noise static public key (base64), for E2E channel
+	// setup. Empty when the node has no key (pre-E2E / co-located).
+	IdentityPubKey() string
+	// SignerPubKey is the node's Ed25519 signer public key (base64). Empty when unset.
+	SignerPubKey() string
+	// BeaconPubKey is the node's Ed25519 beacon public key (base64). Empty when unset.
+	BeaconPubKey() string
+	// LatestBeacon is the initial signed HEAD beacon from the node's identify call
+	// (nil when the node has no beacon key or the beacon is unavailable).
+	LatestBeacon() *api.Beacon
 	// Done is closed when the source disconnects (never fires for the in-process source).
 	Done() <-chan struct{}
 }
@@ -55,6 +65,10 @@ func (s *InProcessSource) Capabilities() api.NodeCapabilities         { return s
 func (s *InProcessSource) Snapshot() []session.Session                { return s.reg.Snapshot() }
 func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }
 func (s *InProcessSource) Done() <-chan struct{}                      { return s.done }
+func (s *InProcessSource) IdentityPubKey() string                    { return "" }
+func (s *InProcessSource) SignerPubKey() string                       { return "" }
+func (s *InProcessSource) BeaconPubKey() string                      { return "" }
+func (s *InProcessSource) LatestBeacon() *api.Beacon                  { return nil }
 
 // Call dispatches to the local handlers and marshals the result. The ctx
 // notifier is wrapped so notifications the handler pushes back carry composite

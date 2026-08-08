@@ -161,6 +161,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		}
 		httpSrv = serveGateway(ctx, gatewayServeOpts{
 			node:          d,
+			blind:         cfg.E2EE.Enabled,
 			token:         cfg.Token,
 			listener:      ln,
 			log:           logger.New(context.Background()).L,
@@ -358,6 +359,7 @@ var tunnelURLTimeout = 60 * time.Second
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
 	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
+	blind         bool       // true = blind-roster (E2EE) path; false = plaintext session path
 	token         string
 	listener      net.Listener
 	log           *slog.Logger
@@ -376,7 +378,7 @@ type gatewayServeOpts struct {
 // client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
 // shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
-	agg := gateway.New(0)
+	agg := gateway.New(0, o.blind)
 	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
 	if d := o.node; d != nil {
 		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))

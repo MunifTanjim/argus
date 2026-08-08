@@ -905,6 +905,6 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.Capabilities, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, "", "", "", id.Capabilities, peer, nil).withEvents(events))
 	<-peer.Done()
 }

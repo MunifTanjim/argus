@@ -14,7 +14,7 @@ import (
 // TestPingRoundTripsOverGateway confirms the gateway's client server answers the ping RPC, so a
 // real latency probe completes end-to-end.
 func TestPingRoundTripsOverGateway(t *testing.T) {
-	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
+	hsrv := gateway.NewServer(gateway.New(0, false), nil, nil) // allow all
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
