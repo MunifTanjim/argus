@@ -13,6 +13,7 @@ require (
 	github.com/charmbracelet/x/vt v0.0.0-20260705004817-2cc9a8fe1146
 	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
+	github.com/flynn/noise v1.1.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -36,6 +37,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
