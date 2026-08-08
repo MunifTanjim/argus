@@ -4,6 +4,8 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,16 +14,20 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/trustlog"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 // Node holds the wired-up core.
@@ -37,6 +43,18 @@ type Node struct {
 	id      string // stable node id announced to the gateway (composite-id prefix)
 	label   string // human-friendly node name (e.g. hostname)
 	version string // binary version, reported to clients via identify/server.info
+
+	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
+	identityPubB64 string      // base64 public half, announced to the gateway
+	e2ee           bool        // true when E2E blind uplink is active
+
+	// compile-only trust fields: wired as nil/zero in TOFU mode; enforcement
+	// uses them only when a trust store is loaded via external lock machinery.
+	trust             atomic.Pointer[trustlog.SyncStore]
+	trustGate         trustpin.Gate
+	localDisabledFlag atomic.Bool
+
+	activeResponder atomic.Pointer[relayResponder]
 
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
@@ -126,6 +144,55 @@ func (d *Node) SetIdentity(id, label string) {
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
 
+// SetIdentityKey sets the node's Noise static keypair, whose public half is
+// announced to the gateway (identity_pubkey) for E2E channel setup. Call before Run.
+func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
+	d.identity = kp
+	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// SetE2EE enables or disables the blind-relay uplink path. When false (the
+// default) the node uses the plaintext uplink. Call before ConnectGateway.
+func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }
+
+// Quarantined reports whether this node is quarantined on a locked network it
+// cannot pin. In TOFU mode (nil trust store) this is always false.
+func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
+
+// rejectsChannels reports whether the node should refuse new E2E channels due
+// to being unpinned on a locked network. Always false in TOFU mode (nil trust).
+func (d *Node) rejectsChannels() bool {
+	return d.trustGate.Tripped() && d.trust.Load() == nil
+}
+
+// localDisabled reports whether this node's locked-mode enforcement is locally
+// disabled via the per-node escape hatch.
+func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
+
+// remoteDispatch returns the control surface exposed to remote callers. It
+// rejects lock.* methods (local-admin only) and dispatches the rest.
+func (d *Node) remoteDispatch() api.DispatchFunc {
+	full := d.server.DispatchFunc()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if strings.HasPrefix(method, "lock.") {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return full(ctx, method, params)
+	}
+}
+
+// uplinkDispatch is the gateway→node surface over the uplink. It answers only
+// node.identify; all other requests are refused.
+func (d *Node) uplinkDispatch() api.DispatchFunc {
+	full := d.remoteDispatch()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method == api.MethodNodeIdentify {
+			return full(ctx, method, params)
+		}
+		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+}
+
 // SetMirrorAffixes sets the prefix and suffix that bracket the argus-mirror-<termID>
 // marker in tmux mirror-session names. Call before Run.
 func (d *Node) SetMirrorAffixes(prefix, suffix string) {
@@ -168,9 +235,9 @@ func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 // aggregate it as an in-process source.
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
-// DispatchFunc exposes the node's control handlers so a co-located gateway can
-// route control calls into the local engine without a network hop.
-func (d *Node) DispatchFunc() api.DispatchFunc { return d.server.DispatchFunc() }
+// DispatchFunc exposes a restricted control surface for co-located gateways:
+// routes non-lock.* calls into the local engine without a network hop.
+func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
 
 // clientFor returns the tmux client for a session's server.
 func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
@@ -263,43 +330,48 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
-	// Stream registry changes to each connected client.
-	srv.OnConnect(func(n api.Notifier) func() {
-		d.registerConn(n)
-		events, cancel := reg.Subscribe()
-		// Send the current snapshot first so a fresh client is in sync. A client may
-		// hang up mid-stream (e.g. a liveness probe); stop on the first failed notify
-		// rather than spamming one per session against a dead connection.
-		for _, s := range reg.Snapshot() {
-			if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
-				break
-			}
-		}
-		done := make(chan struct{})
-		go func() {
-			for {
-				select {
-				case <-done:
-					return
-				case ev, ok := <-events:
-					if !ok {
-						return
-					}
-					if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
-						return
-					}
-				}
-			}
-		}()
-		return func() {
-			close(done)
-			cancel()
-			d.dropConn(n)
-		}
-	})
+	srv.OnConnect(d.streamRegistry)
 
 	d.server = srv
 	return d
+}
+
+// streamRegistry pushes the current session snapshot to n, then every subsequent
+// registry change, until the returned stop func runs. Both transports use it: a
+// direct socket connection (via OnConnect) and an E2E channel terminated from the
+// gateway uplink.
+func (d *Node) streamRegistry(n api.Notifier) func() {
+	d.registerConn(n)
+	events, cancel := d.reg.Subscribe()
+	// Send the current snapshot first so a fresh client is in sync. A client may
+	// hang up mid-stream (e.g. a liveness probe); stop on the first failed notify
+	// rather than spamming one per session against a dead connection.
+	for _, s := range d.reg.Snapshot() {
+		if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
+			break
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case ev, ok := <-events:
+				if !ok {
+					return
+				}
+				if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		cancel()
+		d.dropConn(n)
+	}
 }
 
 // Run scans once at startup and serves the API on the unix socket until ctx is

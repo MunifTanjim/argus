@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
@@ -129,6 +130,16 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	if n, ok := tun.(tunnel.Ngrok); ok {
 		if err := ensureNgrokAuth(ctx, n.Bin, onTTY); err != nil {
 			return fail(cmd, err)
+		}
+	}
+
+	if local && cfg.E2EE.Enabled {
+		kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json"))
+		if err != nil {
+			logger.Scoped("node").Warn("e2ee identity unavailable; running plaintext uplink", "err", err)
+		} else {
+			d.SetIdentityKey(kp)
+			d.SetE2EE(true)
 		}
 	}
 
