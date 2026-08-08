@@ -84,6 +84,27 @@ const (
 	// relay.open pairs a client with a node into a chan_id E2E channel.
 	MethodRelayOpen  = "relay.open"  // request: RelayOpenParams; result: RelayOpenResult
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
+	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
+	// bytes the blind gateway relays but cannot forge/roll back.
+	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
+	MethodTrustLogPush = "trustlog.push" // node->gateway request: TrustLogPushParams; result: nil (publish entries)
+	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
+	// did not previously hold has been offered. It is a hint with no authority: the
+	// node's response is to pull and verify against its pinned genesis. It buys the
+	// gateway strictly less than a timer tick does — the pull is rate-limited and it
+	// deliberately omits the peer-beacon consistency check, which only the node's own
+	// clock may advance. A forged or withheld notification changes only when the pull
+	// happens, never what the node accepts or concludes.
+	MethodTrustLogChanged = "trustlog.changed" // gateway->node notification: TrustLogChangedParams
+	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
+	// for blind relay on the roster/node.event stream. The gateway never verifies it.
+	MethodBeaconOffer = "beacon.offer" // node->gateway request: Beacon; result: nil
+	// MethodBeaconDeliver is a client→node request carrying a signed HEAD beacon
+	// from a peer node. The receiving node verifies the sig against the
+	// roster-announced beacon_pubkey, counter-guards against replay, and
+	// consistency-checks the peer's tip against its own chain. Allowed over the
+	// E2E (remote) path; never a lock.* local-only method.
+	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
 	MethodSessionTasks        = "sessions.tasks"        // request: SessionRef; result: TasksResult
 	MethodTasksChanged        = "tasks.changed"         // notification: TasksChanged (server→client)
 )
@@ -574,6 +595,34 @@ type RelayOpenResult struct {
 // RelayCloseParams tears down an E2E channel the client owns.
 type RelayCloseParams struct {
 	ChanID string `json:"chan_id"`
+}
+
+// TrustLogSyncParams states what the caller holds. Known lists the hash of every
+// entry it retains — adopted chain and rejected branches alike — so the gateway
+// computes the delta by set subtraction and never infers ancestry from a head.
+// Truncated reports that Known was capped and is partial: the caller will receive
+// entries it already holds, which dedupe, and the gateway must not treat a
+// truncated offer as disjoint.
+type TrustLogSyncParams struct {
+	Known     [][]byte `json:"known,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+// TrustLogSyncResult answers a trustlog.sync. Entries holds every retained entry
+// the caller does not hold, as individually marshalled trustlog.MarshalEntry
+// bytes, ordered parents before children; the gateway computes this by set
+// subtraction over the caller's Known offer. Want names hashes in the caller's
+// Known that the gateway does not hold; a node answers it with trustlog.push,
+// a client ignores it — clients are supplicants and must not publish trust state.
+// Disjoint reports that a non-empty, untruncated Known shared no entry with
+// the gateway's store — the caller is almost certainly following a different
+// trust root. Advisory only: the entries are still returned, because a client
+// discovering the network's genesis and a device detecting supersession both
+// need them.
+type TrustLogSyncResult struct {
+	Entries  [][]byte `json:"entries,omitempty"`
+	Want     [][]byte `json:"want,omitempty"`
+	Disjoint bool     `json:"disjoint,omitempty"`
 }
 
 // NodeDescriptor is one node in the gateway's roster (nodes.list / node.event). It

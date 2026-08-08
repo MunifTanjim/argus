@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
-	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tui"
@@ -47,7 +46,7 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			var client *api.ReconnectingClient
+			var client tui.Client
 			var logs *logbuf.Buffer
 			switch {
 			case cfg.Gateway.URL != "":
@@ -55,12 +54,12 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				} else {
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
 				}
 			case running:
-				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
+				client, err = connect(ctx, cfg, "", cfg.Token, cfg.Socket)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -76,7 +75,7 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnConnected:
 					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				case launchGateway:
-					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
+					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
 				}
 			}
 			if err != nil {

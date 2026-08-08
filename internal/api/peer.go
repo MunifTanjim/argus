@@ -46,6 +46,15 @@ type PeerOptions struct {
 	WriteTimeout time.Duration
 }
 
+// Link keepalive defaults, shared by every long-lived connection (node uplinks in
+// both directions, client<->gateway) so all sides agree on how fast a half-open
+// link is detected. Two failures ride out a transient blip.
+const (
+	DefaultKeepaliveInterval = 15 * time.Second
+	DefaultKeepaliveTimeout  = 5 * time.Second
+	DefaultKeepaliveFailures = 2
+)
+
 // defaultWriteTimeout bounds a blocked frame write when WriteTimeout is unset:
 // generous enough not to hit a slow-but-live consumer, short enough to drop a
 // truly stuck one before it starves the keepalive path.
