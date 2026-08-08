@@ -27,6 +27,15 @@ type Entry struct {
 		} `json:"usage"`
 	} `json:"message"`
 
+	// SessionID is the snake_case session_id, one candidate key for the on-disk
+	// tasks/ and teams/ dirs. It is usually the root session that owns those dirs,
+	// but it is not guaranteed: it can equal the transcript filename, differ from
+	// it (resume into a new file), or change mid-file across a resume or fork. So
+	// callers treat it as one candidate among several, not the sole key (see
+	// SessionDirKeys). Distinct from the camelCase sessionId, which equals the
+	// current transcript filename.
+	SessionID string `json:"session_id"`
+
 	// Session-level metadata. Present on most entry types.
 	Cwd            string `json:"cwd"`
 	GitBranch      string `json:"gitBranch"`

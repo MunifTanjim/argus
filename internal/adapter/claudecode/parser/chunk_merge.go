@@ -63,6 +63,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		toolCalls []ToolCall
 		model     string
 		stop      string
+		sessionID string
 	)
 
 	// Structured items built from ContentBlocks.
@@ -88,6 +89,9 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		}
 		if !m.IsMeta && m.StopReason != "" {
 			stop = m.StopReason
+		}
+		if !m.IsMeta && m.SessionID != "" {
+			sessionID = m.SessionID
 		}
 
 		// --- Structured item building ---
@@ -126,6 +130,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 							SubagentDesc:   info.Description,
 							TeamMemberName: info.MemberName,
 							TokenCount:     inputLen / 4,
+							SessionID:      m.SessionID,
 						})
 					} else {
 						items = append(items, DisplayItem{
@@ -136,6 +141,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 							ToolSummary:  ToolSummary(b.ToolName, b.ToolInput),
 							ToolCategory: CategorizeToolName(b.ToolName),
 							TokenCount:   inputLen / 4,
+							SessionID:    m.SessionID,
 						})
 					}
 					pending[b.ToolID] = pendingTool{
@@ -231,6 +237,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 	return Chunk{
 		Type:          AIChunk,
 		Timestamp:     ts,
+		SessionID:     sessionID,
 		Model:         model,
 		Text:          strings.Join(texts, "\n"),
 		ThinkingCount: thinking,

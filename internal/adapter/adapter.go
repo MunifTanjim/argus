@@ -87,7 +87,7 @@ type StreamingTranscript interface {
 type TaskSource interface {
 	// ReadTasks returns the session's current task list, ordered by id. A
 	// missing task store is empty, not an error.
-	ReadTasks(transcriptPath string) ([]api.Task, error)
+	ReadTasks(sessionIDs []string, transcriptPath string) ([]api.Task, error)
 	// TaskActivityCount counts signals in the folded chunks that the task list
 	// may have changed. The poller re-reads the transcript each tick anyway, so
 	// this adds no I/O; the count only grows, so a rise means new activity to

@@ -31,6 +31,10 @@ type DisplayItem struct {
 	DurationMs  int64 // tool_use -> tool_result timestamp delta
 	TokenCount  int   // estimated tokens: len(text)/4
 
+	// SessionID is the snake_case session_id of the line this item came from,
+	// used to key the on-disk tasks/ and teams/ dirs (see Entry.SessionID).
+	SessionID string
+
 	// Tool categorization
 	ToolCategory ToolCategory // broad functional group (Read, Edit, Bash, etc.)
 
@@ -75,6 +79,11 @@ type InferenceCycle struct {
 type Chunk struct {
 	Type      ChunkType
 	Timestamp time.Time
+
+	// SessionID is the snake_case session_id of the source line(s); for AI chunks
+	// it is the last non-meta message's. Backs the tasks/teams dir fallback so
+	// a user-only transcript (e.g. right after a resume) still yields the key.
+	SessionID string
 
 	// User chunk fields.
 	UserText       string
@@ -122,6 +131,7 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 			c := Chunk{
 				Type:      UserChunk,
 				Timestamp: m.Timestamp,
+				SessionID: m.SessionID,
 				UserText:  m.Text,
 			}
 			// Skill loads fold into the user chunk as a Skill item; other expanded prompts attach.

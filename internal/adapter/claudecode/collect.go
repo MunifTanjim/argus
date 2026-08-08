@@ -71,7 +71,11 @@ func collectSessionFiles(transcriptPath, home string) ([]adapter.BundledFile, er
 	base := strings.TrimSuffix(filepath.Base(abs), ".jsonl")
 	addTree(filepath.Join(filepath.Dir(abs), base, "subagents"))
 
-	// Team member sessions: sibling top-level .jsonl created by team Task calls.
+	// tasks/ and teams/ can be keyed by the filename base, the root session_id, or
+	// the writing line's session_id (Claude Code varies across versions). Bundle
+	// every candidate dir that exists. Team member sessions are sibling top-level
+	// .jsonl created by team Task calls.
+	var tasksKeys, teamsKeys []string
 	if chunks, err := parser.ReadSession(abs); err == nil {
 		if procs, err := parser.DiscoverTeamSessions(abs, chunks); err == nil {
 			for _, p := range procs {
@@ -80,12 +84,16 @@ func collectSessionFiles(transcriptPath, home string) ([]adapter.BundledFile, er
 				}
 			}
 		}
+		keys := parser.ResolveSessionDirKeys(chunks)
+		tasksKeys = keys.TasksCandidates()
+		teamsKeys = keys.TeamsCandidates()
 	}
 
-	// session-<short> dirs only exist under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS.
-	for _, key := range []string{base, "session-" + sessionShort(base)} {
-		addTree(filepath.Join(home, "tasks", key))
-		addTree(filepath.Join(home, "teams", key))
+	for _, dir := range candidateDirs(home, "tasks", tasksKeys, base) {
+		addTree(dir)
+	}
+	for _, dir := range candidateDirs(home, "teams", teamsKeys, base) {
+		addTree(dir)
 	}
 
 	return out, nil

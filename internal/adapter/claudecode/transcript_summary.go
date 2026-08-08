@@ -5,17 +5,27 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// summarize reads a transcript and distills the list-view summary, or nil when it
-// can't be read or yields nothing.
+// summarize reads a transcript and distills the list-view summary (plus the
+// tasks-dir session id), or nil when it can't be read or yields nothing. It
+// parses directly rather than via ReadTranscriptView so the per-line key walk
+// stays off the client transcript paths (subagent linking is irrelevant here).
 func summarize(path string) *session.Summary {
-	v, err := ReadTranscriptView(path)
-	if err != nil || len(v.Chunks) == 0 {
+	pchunks, err := parser.ReadSession(path)
+	if err != nil || len(pchunks) == 0 {
 		return nil
 	}
-	return summarizeChunks(v.Chunks)
+	s := summarizeChunks(foldChunks(pchunks, nil, nil))
+	if keys := strings.Join(parser.ResolveSessionDirKeys(pchunks).TasksCandidates(), " "); keys != "" {
+		if s == nil {
+			s = &session.Summary{}
+		}
+		s.TaskSessionKeys = keys
+	}
+	return s
 }
 
 // summarizeChunks distills the list-view summary from chronological chunks: the

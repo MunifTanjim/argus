@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -24,7 +25,11 @@ func (d *Node) handleTasks(ctx context.Context, params json.RawMessage) (any, er
 	if !ok || s.TranscriptPath == "" {
 		return api.TasksResult{Tasks: []api.Task{}}, nil
 	}
-	tasks, err := ts.ReadTasks(s.TranscriptPath)
+	var sessionIDs []string
+	if s.Summary != nil && s.Summary.TaskSessionKeys != "" {
+		sessionIDs = strings.Fields(s.Summary.TaskSessionKeys)
+	}
+	tasks, err := ts.ReadTasks(sessionIDs, s.TranscriptPath)
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}

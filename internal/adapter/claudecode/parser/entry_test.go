@@ -32,6 +32,17 @@ func TestParseEntry_ValidLine(t *testing.T) {
 	}
 }
 
+func TestParseEntry_SessionID(t *testing.T) {
+	line := []byte(`{"uuid":"abc-123","type":"assistant","sessionId":"file-uuid","session_id":"root-uuid","message":{"role":"assistant"}}`)
+	entry, ok := parser.ParseEntry(line)
+	if !ok {
+		t.Fatal("expected ParseEntry to succeed")
+	}
+	if entry.SessionID != "root-uuid" {
+		t.Errorf("SessionID = %q, want %q (the snake_case session_id, not sessionId)", entry.SessionID, "root-uuid")
+	}
+}
+
 func TestParseEntry_InvalidJSON(t *testing.T) {
 	line := []byte(`{not valid json`)
 	_, ok := parser.ParseEntry(line)

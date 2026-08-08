@@ -163,6 +163,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		if !excluded && hasUserContent(e.Message.Content, contentStr) {
 			return UserMsg{
 				Timestamp:      ts,
+				SessionID:      e.SessionID,
 				UUID:           e.UUID,
 				Text:           SanitizeContent(contentStr),
 				PermissionMode: e.PermissionMode,
@@ -179,6 +180,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 		return AIMsg{
 			Timestamp:     ts,
+			SessionID:     e.SessionID,
 			Model:         e.Message.Model,
 			Text:          SanitizeContent(ExtractText(e.Message.Content)),
 			ThinkingCount: thinking,
@@ -200,6 +202,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 	blocks := extractMetaBlocks(e.Message.Content, contentStr)
 	return AIMsg{
 		Timestamp: ts,
+		SessionID: e.SessionID,
 		Text:      contentStr,
 		IsMeta:    true,
 		Blocks:    blocks,

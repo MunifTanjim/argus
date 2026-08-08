@@ -150,6 +150,13 @@ type Summary struct {
 	Tokens       int     `json:"tokens,omitempty"`        // latest turn prompt-side token count
 	Task         string  `json:"task,omitempty"`          // latest user prompt, first line
 	LastActivity string  `json:"last_activity,omitempty"` // RFC3339 of the last chunk
+	// TaskSessionKeys holds the candidate session_id keys for the on-disk tasks
+	// dir, most likely first, space-separated. Captured from the transcript so task
+	// reads survive a resume or fork: Claude Code may key the dir by the root
+	// session_id, the writing line's id, or the transcript filename. Empty until
+	// the transcript is parsed. Space-joined (not a slice) to keep Summary
+	// comparable; safe to split on whitespace because keys are session_id UUIDs.
+	TaskSessionKeys string `json:"task_session_keys,omitempty"`
 }
 
 // Session is argus's record for a single AI coding tool session.

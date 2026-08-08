@@ -14,6 +14,7 @@ type ClassifiedMsg interface {
 // UserMsg represents genuine user input that starts a new request cycle.
 type UserMsg struct {
 	Timestamp      time.Time
+	SessionID      string // snake_case session_id of the source line (see Entry.SessionID)
 	UUID           string // raw entry uuid; stable id for a skill item
 	Text           string // sanitized display text
 	PermissionMode string // "default", "acceptEdits", "bypassPermissions", "plan"; empty if not present
@@ -39,6 +40,7 @@ type ContentBlock struct {
 // AIMsg represents assistant responses and internal flow messages (tool results).
 type AIMsg struct {
 	Timestamp     time.Time
+	SessionID     string // snake_case session_id of the source line (see Entry.SessionID)
 	Model         string
 	Text          string // sanitized text content
 	ThinkingCount int    // count of thinking blocks

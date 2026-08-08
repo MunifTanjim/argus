@@ -3,6 +3,7 @@ package claudecode
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -46,7 +47,7 @@ func TestReadTasks_SortedSkipsNonJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tasks, err := ReadTasks(tp)
+	tasks, err := ReadTasks(nil, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestReadTasks_FullUUIDFallback(t *testing.T) {
 	writeTask(t, dir, "1", "pending")
 	writeTask(t, dir, "2", "completed")
 
-	tasks, err := ReadTasks(tp)
+	tasks, err := ReadTasks(nil, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestReadTasks_FullUUIDWinsOverSessionShort(t *testing.T) {
 	writeTask(t, fullUUID, "9", "completed")
 	writeTask(t, sessionShort, "1", "in_progress")
 
-	tasks, err := ReadTasks(tp)
+	tasks, err := ReadTasks(nil, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +114,158 @@ func TestReadTasks_FullUUIDWinsOverSessionShort(t *testing.T) {
 	}
 }
 
+func TestReadTasks_UsesExplicitSessionID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := filepath.Join(home, ".claude")
+	// Filename is the current (resumed) id; the real dir is keyed by the root
+	// session_id, which differs after a resume.
+	tp := filepath.Join(claude, "projects", "-proj", "current1-1111-2222-3333-444455556666.jsonl")
+	rootID := "root2222-aaaa-bbbb-cccc-ddddeeeeffff"
+	dir := filepath.Join(claude, "tasks", rootID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTask(t, dir, "5", "in_progress")
+
+	tasks, err := ReadTasks([]string{rootID}, tp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "5" {
+		t.Fatalf("explicit session id should key the dir: got %+v", tasks)
+	}
+}
+
+// TestReadTasks_FilenameFallbackWhenSessionIDMisses covers the real corpus case
+// where the transcript's task lines carry a session_id with no dir, while the
+// board lives under the transcript filename. The read must fall back to the
+// filename even though a non-empty sessionID was supplied.
+func TestReadTasks_FilenameFallbackWhenSessionIDMisses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := filepath.Join(home, ".claude")
+	fname := "90ab9f31-ff3c-431a-a5d5-8d78b615d495"
+	tp := filepath.Join(claude, "projects", "-proj", fname+".jsonl")
+	dir := filepath.Join(claude, "tasks", fname)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTask(t, dir, "1", "in_progress")
+
+	// The task lines carried this id, but no such dir exists.
+	tasks, err := ReadTasks([]string{"9e19498a-7fd1-4d8a-a55e-cde668a0a3e1"}, tp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "1" {
+		t.Fatalf("should fall back to the filename dir: got %+v", tasks)
+	}
+}
+
+// TestReadTasks_EarlierCandidateWinsWhenBothPopulated locks the tie-break: when
+// two candidate dirs both hold tasks, the earlier candidate (the root session_id,
+// which TasksCandidates orders first) wins over a later one (the task-line id), so
+// a stale board cannot mask the live one.
+func TestReadTasks_EarlierCandidateWinsWhenBothPopulated(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := filepath.Join(home, ".claude")
+	tp := filepath.Join(claude, "projects", "-proj", "current1-1111-2222-3333-444455556666.jsonl")
+	rootID := "root2222-aaaa-bbbb-cccc-ddddeeeeffff"
+	taskLineID := "task3333-aaaa-bbbb-cccc-ddddeeeeffff"
+	rootDir := filepath.Join(claude, "tasks", rootID)
+	taskDir := filepath.Join(claude, "tasks", taskLineID)
+	for _, d := range []string{rootDir, taskDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTask(t, rootDir, "1", "in_progress")
+	writeTask(t, taskDir, "9", "completed")
+
+	tasks, err := ReadTasks([]string{rootID, taskLineID}, tp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "1" {
+		t.Fatalf("earlier candidate (root) should win: got %+v", tasks)
+	}
+}
+
+// TestReadTasks_SkipsEmptyEarlierDir locks the first-populated (not first-existing)
+// rule: an earlier candidate dir that exists but holds no tasks must not mask a
+// populated later one.
+func TestReadTasks_SkipsEmptyEarlierDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := filepath.Join(home, ".claude")
+	tp := filepath.Join(claude, "projects", "-proj", "current1-1111-2222-3333-444455556666.jsonl")
+	rootID := "root2222-aaaa-bbbb-cccc-ddddeeeeffff"
+	taskLineID := "task3333-aaaa-bbbb-cccc-ddddeeeeffff"
+	rootDir := filepath.Join(claude, "tasks", rootID)
+	taskDir := filepath.Join(claude, "tasks", taskLineID)
+	for _, d := range []string{rootDir, taskDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// rootDir exists but is empty; the live board sits under the later candidate.
+	writeTask(t, taskDir, "9", "completed")
+
+	tasks, err := ReadTasks([]string{rootID, taskLineID}, tp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "9" {
+		t.Fatalf("empty earlier dir must not mask a populated later one: got %+v", tasks)
+	}
+}
+
+func TestCandidateDirs(t *testing.T) {
+	root := "root2222-aaaa-bbbb-cccc-ddddeeeeffff"
+	base := "abcd1234-1111-2222-3333-444455556666"
+	tasksDir := func(key string) string { return filepath.Join("/home", "tasks", key) }
+
+	tests := []struct {
+		name string
+		keys []string
+		base string
+		want []string
+	}{
+		{
+			name: "root leads, base appended last, dupes dropped",
+			keys: []string{root, root},
+			base: base,
+			want: []string{tasksDir(root), tasksDir("session-root2222"), tasksDir(base), tasksDir("session-abcd1234")},
+		},
+		{
+			name: "key equal to base is deduped",
+			keys: []string{base},
+			base: base,
+			want: []string{tasksDir(base), tasksDir("session-abcd1234")},
+		},
+		{
+			name: "empty keys skipped",
+			keys: []string{"", root, ""},
+			base: "",
+			want: []string{tasksDir(root), tasksDir("session-root2222")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := candidateDirs("/home", "tasks", tt.keys, tt.base); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("candidateDirs = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReadTasks_MissingDirIsEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	tp := filepath.Join(home, ".claude", "projects", "-proj", "deadbeef-0000.jsonl")
-	tasks, err := ReadTasks(tp)
+	tasks, err := ReadTasks(nil, tp)
 	if err != nil {
 		t.Fatalf("missing dir should not error: %v", err)
 	}

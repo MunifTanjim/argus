@@ -67,8 +67,8 @@ func (ccAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFi
 	return collectSessionFiles(transcriptPath, claudeHome())
 }
 
-func (ccAdapter) ReadTasks(transcriptPath string) ([]api.Task, error) {
-	return ReadTasks(transcriptPath)
+func (ccAdapter) ReadTasks(sessionIDs []string, transcriptPath string) ([]api.Task, error) {
+	return ReadTasks(sessionIDs, transcriptPath)
 }
 
 func (ccAdapter) TaskActivityCount(chunks []transcript.Chunk) (int, bool) {

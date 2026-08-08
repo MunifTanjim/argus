@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -23,18 +24,37 @@ type diskTask struct {
 	BlockedBy   []string `json:"blockedBy"`
 }
 
-// taskDirs returns candidate task dirs, most-likely first. The session-<short>
-// dir only exists under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS.
-func taskDirs(transcriptPath string) []string {
-	home := claudeHome()
-	if home == "" {
-		return nil
-	}
-	base := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+// sessionDirs returns the candidate dirs for a session id under home/category
+// (category is "tasks" or "teams"), most-likely first: the id dir, then the
+// session-<short> dir (which only exists under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).
+func sessionDirs(home, category, sessionID string) []string {
 	return []string{
-		filepath.Join(home, "tasks", base),
-		filepath.Join(home, "tasks", "session-"+sessionShort(base)),
+		filepath.Join(home, category, sessionID),
+		filepath.Join(home, category, "session-"+sessionShort(sessionID)),
 	}
+}
+
+// candidateDirs expands the session id keys (plus base as the final filename
+// fallback) into the ordered, deduped dirs to probe under home/category.
+func candidateDirs(home, category string, keys []string, base string) []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(key string) {
+		if key == "" {
+			return
+		}
+		for _, dir := range sessionDirs(home, category, key) {
+			if !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	for _, key := range keys {
+		add(key)
+	}
+	add(base)
+	return dirs
 }
 
 func sessionShort(base string) string {
@@ -45,11 +65,20 @@ func sessionShort(base string) string {
 }
 
 // ReadTasks returns a session's task list ordered by numeric id, from the first
-// candidate dir that has tasks. Missing dirs are not errors; a read error
-// surfaces only when no candidate yielded tasks.
-func ReadTasks(transcriptPath string) ([]api.Task, error) {
+// candidate dir that holds tasks. sessionIDs are the snake_case session_id keys
+// captured from the transcript, most likely first; the transcript filename is
+// always tried as a final fallback. Claude Code has keyed the dir by the
+// filename, the root session_id, or the writing line's id across versions, so a
+// single key is not enough. Missing dirs are not errors; a read error surfaces
+// only when no candidate yielded tasks.
+func ReadTasks(sessionIDs []string, transcriptPath string) ([]api.Task, error) {
+	home := claudeHome()
+	if home == "" {
+		return nil, nil
+	}
+	base := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
 	var firstErr error
-	for _, dir := range taskDirs(transcriptPath) {
+	for _, dir := range candidateDirs(home, "tasks", sessionIDs, base) {
 		tasks, err := readTaskDir(dir)
 		if err != nil {
 			if firstErr == nil {
@@ -108,12 +137,6 @@ func taskIDLess(a, b string) bool {
 	return a < b
 }
 
-var taskMutatingTools = map[string]bool{
-	"TaskCreate": true,
-	"TaskUpdate": true,
-	"TaskStop":   true,
-}
-
 // TaskActivityCount counts signals in the main transcript that a session's task
 // list may have changed, so live updates key off the folded chunks (what the
 // user saw) rather than a disk poll. Two signals:
@@ -138,7 +161,7 @@ func TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool) 
 		for j := range chunks[i].Items {
 			it := chunks[i].Items[j]
 			switch {
-			case it.Kind == transcript.ItemTool && taskMutatingTools[it.ToolName] &&
+			case it.Kind == transcript.ItemTool && parser.IsTaskMutatingTool(it.ToolName) &&
 				(it.Result != "" || it.ResultIsError):
 				count++
 				hasTaskTool = true

@@ -18,29 +18,30 @@ const memberJSONL = `{"uuid":"m1","type":"user","teamName":"myteam","agentName":
 {"uuid":"m2","type":"assistant","timestamp":"2025-06-15T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn","usage":{"input_tokens":50,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 `
 
+func mkfile(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCollectSessionFiles(t *testing.T) {
 	home := t.TempDir()
 	projects := filepath.Join(home, "projects", "-proj")
 	uuid := "bd9d953d-3545-4c85-91c2-049ea8c71743"
 	short := "bd9d953d"
 
-	mkfile := func(p string) {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	main := filepath.Join(projects, uuid+".jsonl")
-	mkfile(main)
-	mkfile(filepath.Join(projects, uuid, "subagents", "agent-a.jsonl"))
-	mkfile(filepath.Join(projects, uuid, "subagents", "agent-a.meta.json"))
-	mkfile(filepath.Join(home, "tasks", uuid, "1.json"))
-	mkfile(filepath.Join(home, "teams", uuid, "config.json"))
-	mkfile(filepath.Join(home, "tasks", "session-"+short, "2.json"))
-	mkfile(filepath.Join(home, "teams", "session-"+short, "team.json"))
+	mkfile(t, main)
+	mkfile(t, filepath.Join(projects, uuid, "subagents", "agent-a.jsonl"))
+	mkfile(t, filepath.Join(projects, uuid, "subagents", "agent-a.meta.json"))
+	mkfile(t, filepath.Join(home, "tasks", uuid, "1.json"))
+	mkfile(t, filepath.Join(home, "teams", uuid, "config.json"))
+	mkfile(t, filepath.Join(home, "tasks", "session-"+short, "2.json"))
+	mkfile(t, filepath.Join(home, "teams", "session-"+short, "team.json"))
 
 	files, err := collectSessionFiles(main, home)
 	if err != nil {
@@ -69,6 +70,106 @@ func TestCollectSessionFiles(t *testing.T) {
 	entry := "root/projects/-proj/" + uuid + ".jsonl"
 	if !got[entry] {
 		t.Errorf("entry %s not collected", entry)
+	}
+}
+
+// TestCollectSessionFilesSplitKeys verifies the tasks/ dir is keyed by the
+// session_id of a task line and the teams/ dir by the session_id of a team line,
+// even when those differ from each other and from the filename.
+func TestCollectSessionFilesSplitKeys(t *testing.T) {
+	home := t.TempDir()
+	projects := filepath.Join(home, "projects", "-proj")
+	uuid := "ffffffff-0000-0000-0000-000000000000"
+
+	main := filepath.Join(projects, uuid+".jsonl")
+	lines := `{"uuid":"a1","type":"assistant","session_id":"taskid","message":{"role":"assistant","model":"m","content":[{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"x"}}]}}` + "\n" +
+		`{"uuid":"a2","type":"assistant","session_id":"teamid","message":{"role":"assistant","model":"m","content":[{"type":"tool_use","id":"t2","name":"TeamCreate","input":{"team_name":"docs"}}]}}` + "\n"
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(home, "tasks", "taskid", "1.json"))
+	mkfile(t, filepath.Join(home, "teams", "teamid", "config.json"))
+
+	files, err := collectSessionFiles(main, home)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[filepath.ToSlash(f.RelPath)] = true
+	}
+	for _, w := range []string{"root/tasks/taskid/1.json", "root/teams/teamid/config.json"} {
+		if !got[w] {
+			t.Errorf("missing %s (got %v)", w, got)
+		}
+	}
+}
+
+// TestCollectSessionFilesFallsBackToFilename verifies that a transcript without
+// session_id (older sessions) keeps the tasks/ and teams/ dirs keyed by the
+// filename base.
+func TestCollectSessionFilesFallsBackToFilename(t *testing.T) {
+	home := t.TempDir()
+	projects := filepath.Join(home, "projects", "-proj")
+	uuid := "aaaaaaaa-0000-0000-0000-000000000000"
+
+	main := filepath.Join(projects, uuid+".jsonl")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"uuid":"a1","type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"x"}}]}}` + "\n"
+	if err := os.WriteFile(main, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(home, "tasks", uuid, "1.json"))
+	mkfile(t, filepath.Join(home, "teams", uuid, "config.json"))
+
+	files, err := collectSessionFiles(main, home)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[filepath.ToSlash(f.RelPath)] = true
+	}
+	for _, w := range []string{"root/tasks/" + uuid + "/1.json", "root/teams/" + uuid + "/config.json"} {
+		if !got[w] {
+			t.Errorf("missing %s (got %v)", w, got)
+		}
+	}
+}
+
+// TestCollectSessionFilesKeysByRootSessionID covers resume-into-a-new-file: the
+// filename is a new uuid, but the board lives under the root session_id carried
+// on the lines. collect must bundle the root-keyed dir, not just the filename.
+func TestCollectSessionFilesKeysByRootSessionID(t *testing.T) {
+	home := t.TempDir()
+	projects := filepath.Join(home, "projects", "-proj")
+	fname := "11111111-0000-0000-0000-000000000000"
+	root := "22222222-0000-0000-0000-000000000000"
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(projects, fname+".jsonl")
+	line := `{"uuid":"a1","type":"assistant","session_id":"` + root + `","message":{"role":"assistant","model":"m","content":[{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"x"}}]}}` + "\n"
+	if err := os.WriteFile(main, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(home, "tasks", root, "1.json"))
+
+	files, err := collectSessionFiles(main, home)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[filepath.ToSlash(f.RelPath)] = true
+	}
+	if !got["root/tasks/"+root+"/1.json"] {
+		t.Errorf("missing root-keyed task file (got %v)", got)
 	}
 }
 
