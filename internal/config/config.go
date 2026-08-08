@@ -21,6 +21,7 @@ type Config struct {
 	Log     LogConfig
 	Tunnel  TunnelConfig
 	Tmux    TmuxConfig
+	E2EE    E2EEConfig
 }
 
 type GatewayConfig struct {
@@ -89,6 +90,11 @@ type TmuxConfig struct {
 	MirrorSessionSuffix string
 }
 
+// E2EE enables the blind-relay end-to-end-encrypted transport. Off by default; must be set on gateway, node, and client to opt the fleet in.
+type E2EEConfig struct {
+	Enabled bool
+}
+
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                        GetRuntimePath("argus.sock"),
@@ -111,6 +117,7 @@ var defaults = map[string]any{
 	"tunnel.ngrok.domain":           "",
 	"tmux.mirror-session-prefix":    "_",
 	"tmux.mirror-session-suffix":    "_",
+	"e2ee.enabled":                  false,
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -220,6 +227,9 @@ func FromViper(v *viper.Viper) Config {
 		Tmux: TmuxConfig{
 			MirrorSessionPrefix: v.GetString("tmux.mirror-session-prefix"),
 			MirrorSessionSuffix: v.GetString("tmux.mirror-session-suffix"),
+		},
+		E2EE: E2EEConfig{
+			Enabled: v.GetBool("e2ee.enabled"),
 		},
 	}
 }
