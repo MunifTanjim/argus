@@ -159,12 +159,6 @@ func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }
 // cannot pin. In TOFU mode (nil trust store) this is always false.
 func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 
-// rejectsChannels reports whether the node should refuse new E2E channels due
-// to being unpinned on a locked network. Always false in TOFU mode (nil trust).
-func (d *Node) rejectsChannels() bool {
-	return d.trustGate.Tripped() && d.trust.Load() == nil
-}
-
 // localDisabled reports whether this node's locked-mode enforcement is locally
 // disabled via the per-node escape hatch.
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
