@@ -23,6 +23,11 @@ type PeerOptions struct {
 	Dispatch DispatchFunc
 	// OnNotify receives notifications the remote end sends. Nil drops them.
 	OnNotify func(Notification)
+	// OnRelayFrame receives frames carrying a Route header (relayed E2E frames),
+	// along with the source Peer so the gateway can enforce channel ownership. Set
+	// on the gateway (to forward by chan_id) and on endpoints (to decrypt Body).
+	// Nil drops relay frames — they never reach Dispatch/OnNotify/the pending path.
+	OnRelayFrame func(*Peer, RelayFrame)
 	// BaseContext is the parent of each served request's context (so values like
 	// an auth Principal flow to handlers). Defaults to context.Background().
 	BaseContext context.Context
@@ -65,6 +70,7 @@ type Peer struct {
 
 	dispatch     DispatchFunc
 	onNotify     func(Notification)
+	onRelayFrame func(*Peer, RelayFrame)
 	writeTimeout time.Duration
 
 	ctx     context.Context
@@ -90,6 +96,7 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 		pending:      make(map[int]chan message),
 		dispatch:     opts.Dispatch,
 		onNotify:     opts.OnNotify,
+		onRelayFrame: opts.OnRelayFrame,
 		writeTimeout: writeTimeout,
 		ctx:          ctx,
 		cancel:       cancel,
@@ -234,6 +241,25 @@ func (p *Peer) send(m message) error {
 	return nil
 }
 
+// SendRawFrame writes a pre-marshaled frame verbatim, appending the newline
+// framing. A blind gateway uses it to forward a relayed frame's Raw bytes to the
+// paired peer without re-encoding — the sealed Body is never touched. Like send, a
+// failed/timed-out write drops the peer so the stream can't desync.
+func (p *Peer) SendRawFrame(raw []byte) error {
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
+	if p.writeTimeout > 0 {
+		if wd, ok := p.rwc.(writeDeadliner); ok {
+			_ = wd.SetWriteDeadline(time.Now().Add(p.writeTimeout))
+		}
+	}
+	if err := p.writeFrame(raw); err != nil {
+		_ = p.Close()
+		return err
+	}
+	return nil
+}
+
 func (p *Peer) writeFrame(b []byte) error {
 	if _, err := p.bw.Write(b); err != nil {
 		return err
@@ -257,6 +283,18 @@ func (p *Peer) readLoop() {
 		var m message
 		if err := json.Unmarshal(line, &m); err != nil {
 			_ = p.send(message{Error: &RPCError{Code: CodeParseError, Message: "parse error"}})
+			continue
+		}
+		if m.isRelay() {
+			if p.onRelayFrame != nil {
+				p.onRelayFrame(p, RelayFrame{
+					Method: m.Method,
+					ID:     m.ID,
+					Route:  *m.Route,
+					Body:   m.Body,
+					Raw:    append([]byte(nil), line...),
+				})
+			}
 			continue
 		}
 		switch {

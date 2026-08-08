@@ -43,6 +43,8 @@ const (
 	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
 	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
+	MethodNodesList                 = "nodes.list"                 // request: no params; result: NodesListResult
+	MethodNodeEvent                 = "node.event"                 // notification: NodeEvent
 	MethodTranscriptSubscribe       = "transcript.subscribe"       // request: TranscriptSubscribeParams; result: TranscriptDelta
 	MethodTranscriptUnsubscribe     = "transcript.unsubscribe"     // request: TranscriptUnsubscribeParams; result: nil
 	// Server→client push.
@@ -79,6 +81,9 @@ const (
 	MethodSessionFileDiff     = "sessions.fileDiff"     // request: FileDiffParams; result: FileDiffResult
 	MethodSessionCommits      = "sessions.commits"      // request: SessionRef; result: CommitsResult
 	MethodSessionCommitFiles  = "sessions.commitFiles"  // request: CommitFilesParams; result: ChangedFilesResult
+	// relay.open pairs a client with a node into a chan_id E2E channel.
+	MethodRelayOpen  = "relay.open"  // request: RelayOpenParams; result: RelayOpenResult
+	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
 	MethodSessionTasks        = "sessions.tasks"        // request: SessionRef; result: TasksResult
 	MethodTasksChanged        = "tasks.changed"         // notification: TasksChanged (server→client)
 )
@@ -244,10 +249,14 @@ type ServerInfo struct {
 // IdentifyResult announces a node's identity to the gateway. ID is the stable node
 // id (composite-id prefix and routing key).
 type IdentifyResult struct {
-	ID           string           `json:"id"`
-	Label        string           `json:"label"`
-	Version      string           `json:"version"` // node's binary version
-	Capabilities NodeCapabilities `json:"capabilities"`
+	ID             string           `json:"id"`
+	Label          string           `json:"label"`
+	Version        string           `json:"version"` // node's binary version
+	Capabilities   NodeCapabilities `json:"capabilities"`
+	IdentityPubKey string           `json:"identity_pubkey,omitempty"` // base64 Curve25519 static public (E2E)
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"`   // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`          // current signed HEAD beacon (nil if no beacon key)
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -412,12 +421,26 @@ type HookResult struct {
 	Output string `json:"output,omitempty"`
 }
 
+// RouteHeader is the cleartext routing metadata a blind gateway reads to relay a
+// frame between a client and a node. It appears only on relayed (gateway) links;
+// the local unix-socket path leaves it nil and uses Params/Result directly.
+type RouteHeader struct {
+	ChanID string `json:"chan_id"`           // client<->node E2E channel; the routing key
+	NodeID string `json:"node_id,omitempty"` // target node (set on the channel-open request)
+	SubID  string `json:"sub_id,omitempty"`  // streaming handle; the client demuxes on it
+	TermID string `json:"term_id,omitempty"` // terminal handle; the client demuxes on it
+}
+
 // message is the unified JSON-RPC envelope. A request has Method and ID; a
-// notification has Method and no ID; a response has ID and Result/Error.
+// notification has Method and no ID; a response has ID and Result/Error. On a
+// relayed (gateway) link, Route carries cleartext routing and Body carries the
+// sealed payload; Params/Result/Error are used only on the local unix-socket path.
 type message struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"`
 	Method  string           `json:"method,omitempty"`
+	Route   *RouteHeader     `json:"route,omitempty"`
+	Body    json.RawMessage  `json:"body,omitempty"`
 	Params  json.RawMessage  `json:"params,omitempty"`
 	Result  json.RawMessage  `json:"result,omitempty"`
 	Error   *RPCError        `json:"error,omitempty"`
@@ -425,6 +448,7 @@ type message struct {
 
 func (m *message) isRequest() bool      { return m.Method != "" && m.ID != nil }
 func (m *message) isNotification() bool { return m.Method != "" && m.ID == nil }
+func (m *message) isRelay() bool        { return m.Route != nil }
 
 // Decode unmarshals JSON-RPC params into T, centralizing the decode-and-check
 // boilerplate shared by node and gateway handlers. Empty params yield the zero value
@@ -535,4 +559,55 @@ type TerminalResizeParams struct {
 // TerminalCloseParams closes a terminal session.
 type TerminalCloseParams struct {
 	TermID string `json:"term_id"`
+}
+
+// RelayOpenParams requests a new E2E channel to the specified node.
+type RelayOpenParams struct {
+	NodeID string `json:"node_id"`
+}
+
+// RelayOpenResult carries the allocated chan_id for the new E2E channel.
+type RelayOpenResult struct {
+	ChanID string `json:"chan_id"`
+}
+
+// RelayCloseParams tears down an E2E channel the client owns.
+type RelayCloseParams struct {
+	ChanID string `json:"chan_id"`
+}
+
+// NodeDescriptor is one node in the gateway's roster (nodes.list / node.event). It
+// carries the node's Noise static public key so an E2E client can open a channel
+// (Noise IK precondition), and the online flag the gateway derives from socket +
+// grace state.
+type NodeDescriptor struct {
+	ID             string           `json:"id"`
+	Label          string           `json:"label"`
+	Version        string           `json:"version"`
+	Capabilities   NodeCapabilities `json:"capabilities"`
+	IdentityPubKey string           `json:"identity_pubkey,omitempty"`
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"` // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`        // latest signed HEAD beacon (gateway relays verbatim, never verifies)
+	Online         bool             `json:"online"`
+}
+
+// NodesListResult is the reply to nodes.list.
+type NodesListResult struct {
+	Nodes []NodeDescriptor `json:"nodes"`
+}
+
+// NodeEvent transitions on the roster stream (node.event).
+const (
+	NodeEventAdded   = "added"
+	NodeEventOnline  = "online"
+	NodeEventOffline = "offline"
+	NodeEventRemoved = "removed"
+	NodeEventBeacon  = "beacon" // node's HEAD beacon updated (gateway blind relay)
+)
+
+// NodeEvent is one roster change streamed to a client.
+type NodeEvent struct {
+	Type string         `json:"type"` // added | online | offline | removed
+	Node NodeDescriptor `json:"node"`
 }
