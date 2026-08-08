@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.12](https://github.com/MunifTanjim/argus/compare/0.0.11...0.0.12) (2026-08-08)
+
+
+### Features
+
+* **claude:** add claude 5 to 1M context models ([71658af](https://github.com/MunifTanjim/argus/commit/71658afe782539ebee2b8d2c1663dcc1dab9d99c))
+
+
+### Bug Fixes
+
+* **claude:** key tasks/teams dirs by session_id ([858b458](https://github.com/MunifTanjim/argus/commit/858b4581328b39be1101000ff7e69bd40169596d))
+* **claude:** resolve correct tasks and teams dir for a session ([5102e15](https://github.com/MunifTanjim/argus/commit/5102e15282207555edb29a853c3c503fa6b3c606))
+* compare current version before upgrade ([f56a384](https://github.com/MunifTanjim/argus/commit/f56a3843f3f5499ca9bb37ad7f1e538e99094d60))
+* report public url for cloudflare remote tunnel ([385a1ec](https://github.com/MunifTanjim/argus/commit/385a1ec8508e7cb5961bc5e5253e7006eb5eb18b))
+
 ## [0.0.11](https://github.com/MunifTanjim/argus/compare/0.0.10...0.0.11) (2026-07-21)
 
 
