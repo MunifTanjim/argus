@@ -379,8 +379,11 @@ type gatewayServeOpts struct {
 // shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0, o.blind)
-	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
-	if d := o.node; d != nil {
+	// Plaintext path: seed the in-process node source before serving so it is
+	// visible to the first client that connects. Blind path: the in-process node
+	// connects over loopback after the HTTP server starts (below), so its E2EE
+	// identity handshake goes through the real uplink path.
+	if d := o.node; d != nil && !o.blind {
 		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
 	}
 
@@ -396,7 +399,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	}
 
 	gwLog := o.log.With("scope", "gateway")
-	hsrv := gateway.NewServer(agg, tokenAuth(o.token), clientAuth)
+	hsrv := gateway.NewServer(agg, tokenAuth(o.token), clientAuth, o.blind)
 	if store != nil {
 		hsrv.SetClientTokens(store, o.token)
 	}
@@ -417,6 +420,12 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
+
+	// Blind path: connect the in-process node over loopback so its E2EE identity
+	// handshake goes through the real uplink path (must come after Serve goroutine).
+	if d := o.node; d != nil && o.blind {
+		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")

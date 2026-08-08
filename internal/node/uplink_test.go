@@ -37,6 +37,7 @@ func TestNodeUplinkEndToEnd(t *testing.T) {
 	hsrv := gateway.NewServer(agg,
 		func(tok string) bool { return tok == "dtok" },
 		func(tok string) bool { return tok == "ctok" },
+		false,
 	)
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()

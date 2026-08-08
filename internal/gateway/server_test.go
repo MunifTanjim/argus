@@ -20,7 +20,7 @@ func TestResumeRoutesByNodeID(t *testing.T) {
 	a.AddSource(home)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionResume,
 		json.RawMessage(`{"node_id":"home","agent":"claude","agent_session_id":"x","cwd":"/tmp"}`))
@@ -41,7 +41,7 @@ func TestClientServerSpawnRoutesByNodeID(t *testing.T) {
 	a.AddSource(home)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"node_id":"home","name":"x"}`))
@@ -66,7 +66,7 @@ func TestRefreshFansOutToNodes(t *testing.T) {
 	a.AddSource(dev)
 	eventually(t, func() bool { return len(a.Snapshot()) == 2 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	if _, err := dispatch(context.Background(), api.MethodSessionsRefresh, nil); err != nil {
 		t.Fatalf("refresh dispatch: %v", err)
@@ -86,7 +86,7 @@ func TestServerInfoReportsVersionAndNodes(t *testing.T) {
 	a := New(time.Second, false)
 	a.AddSource(newFakeSource("home", "home-box"))
 	a.AddSource(newFakeSource("dev", "dev-box"))
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	srv.SetVersion("1.2.3")
 	dispatch := srv.clientSrv.DispatchFunc()
 
@@ -119,7 +119,7 @@ func TestSpawnDefaultsToSoleNode(t *testing.T) {
 	home.callResp = json.RawMessage(`{"session_id":"default:%9","pane_id":"%9"}`)
 	a.AddSource(home)
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"name":"x"}`))
@@ -140,7 +140,7 @@ func TestSpawnWithoutNodeIDAmbiguousFails(t *testing.T) {
 	a.AddSource(newFakeSource("home", "home-box"))
 	a.AddSource(newFakeSource("dev", "dev-box"))
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	if _, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"name":"x"}`)); err == nil {
@@ -154,7 +154,7 @@ func TestAgentsListRouting(t *testing.T) {
 	home.callResp = json.RawMessage(`{"agents":[{"id":"claude","name":"Claude","color":"#fe8019","spawnable":true},{"id":"codex","name":"Codex","color":"#b8bb26","spawnable":false}]}`)
 	a.AddSource(home)
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 
 	// Omitted node_id with a single node → routed to it.
@@ -190,7 +190,7 @@ func (goneSender) Send(context.Context, push.Target, push.Notification) error {
 // fresh endpoint rather than re-register the dead one.
 func TestPushTestReturnsGoneCode(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	store := push.NewStore(t.TempDir())
 	srv.SetPush(store, push.NewDispatcher(store, goneSender{}, nil))
 
@@ -236,7 +236,7 @@ func (f *fakeClientNotifier) Notify(method string, params any) error {
 // TestSubTableHelpers verifies addSub/dropSub/clientForSub/subsForClient.
 func TestSubTableHelpers(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	c2 := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -279,7 +279,7 @@ func TestTranscriptSubscribeHandlerRecordsAndRoutes(t *testing.T) {
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	client := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	ctx := api.WithNotifier(context.Background(), client)
@@ -324,7 +324,7 @@ func TestTranscriptUnsubscribeHandlerRemovesAndRoutes(t *testing.T) {
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	client := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	srv.addSub("k", "d1", client)
@@ -355,7 +355,7 @@ func TestTranscriptUnsubscribeHandlerRemovesAndRoutes(t *testing.T) {
 // unsubscribe branch) is covered by TestServeNodeOnNotifyDeltaBranch.
 func TestGatewayForwardsTranscriptDeltaToSubscriber(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the subscribing client, c2 is a bystander.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -397,7 +397,7 @@ func TestGatewayForwardsTranscriptDeltaToSubscriber(t *testing.T) {
 // for transcript.delta using a net.Pipe-backed node uplink.
 func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the subscribing client.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -431,7 +431,7 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 	defer nodePeer.Close()
 
 	// serveNode runs in background; it will call node.identify and then block.
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 
 	// Wait for the identify call to be answered and source to be registered.
 	eventually(t, func() bool {
@@ -491,7 +491,7 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 // client (which only knows composite ids) can match it.
 func TestServeNodeCompositesTasksChanged(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
 	srv.addSub("sub1", "d1", c1)
@@ -512,7 +512,7 @@ func TestServeNodeCompositesTasksChanged(t *testing.T) {
 	})
 	defer nodePeer.Close()
 
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 	eventually(t, func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -548,7 +548,7 @@ func TestTerminalInputRejectsNonOwner(t *testing.T) {
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -585,7 +585,7 @@ func TestTerminalCloseRejectsNonOwner(t *testing.T) {
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -621,7 +621,7 @@ func TestTerminalOpenRejectsDuplicateTermID(t *testing.T) {
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -646,7 +646,7 @@ func TestTerminalOpenRejectsDuplicateTermID(t *testing.T) {
 // orphaned term only once, even under a burst of output frames for it.
 func TestOrphanTerminalOutputClosesOnce(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	gatewayConn, nodeConn := net.Pipe()
 	defer gatewayConn.Close()
@@ -667,7 +667,7 @@ func TestOrphanTerminalOutputClosesOnce(t *testing.T) {
 	})
 	defer nodePeer.Close()
 
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 	eventually(t, func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -720,7 +720,7 @@ func TestClientDisconnectClosesTerminals(t *testing.T) {
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	// Real client connection served by the gateway; the app drives the other end.
 	gwConn, appConn := net.Pipe()
@@ -756,7 +756,7 @@ func TestClientDisconnectClosesTerminals(t *testing.T) {
 // table hit forwards to the client, an unknown term_id calls terminal.close back.
 func TestTerminalOutputRoutedToClient(t *testing.T) {
 	a := New(time.Second, false)
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the client that opened terminal t1.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -785,7 +785,7 @@ func TestTerminalOutputRoutedToClient(t *testing.T) {
 	defer nodePeer.Close()
 
 	// serveNode runs in background; it calls node.identify then blocks.
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 
 	// Wait for the identify call to be answered and source to be registered.
 	eventually(t, func() bool {
@@ -834,4 +834,80 @@ func TestTerminalOutputRoutedToClient(t *testing.T) {
 			t.Fatal("gateway did not send terminal.close for orphaned term")
 		}
 	}
+}
+
+// TestBlindRelayOpenCloseAndNodesList exercises the blind server path: a node
+// connects via serveNodeBlind, a client opens a relay channel, confirms it gets a
+// chan_id, closes it, and verifies nodes.list returns the roster.
+func TestBlindRelayOpenCloseAndNodesList(t *testing.T) {
+	a := New(0, true)
+	srv := NewServer(a, nil, nil, true)
+
+	// Connect a fake node via serveNodeBlind.
+	gwNodeConn, nodeConn := net.Pipe()
+	defer gwNodeConn.Close()
+
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return api.IdentifyResult{ID: "n1", Label: "n1-box"}, nil
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+
+	go srv.serveNodeBlind(gwNodeConn)
+
+	// Wait for the node to be registered and available as a relay target.
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		return srv.nodePeers["n1"] != nil
+	})
+
+	// Connect a fake client via the client server.
+	gwClientConn, appConn := net.Pipe()
+	defer gwClientConn.Close()
+	go srv.clientSrv.ServeConnContext(context.Background(), gwClientConn)
+	app := api.NewPeer(appConn, api.PeerOptions{})
+	defer app.Close()
+
+	// nodes.list must include the connected node.
+	var listResult api.NodesListResult
+	if err := app.Call(api.MethodNodesList, nil, &listResult); err != nil {
+		t.Fatalf("nodes.list: %v", err)
+	}
+	if len(listResult.Nodes) != 1 || listResult.Nodes[0].ID != "n1" {
+		t.Fatalf("nodes.list: want [{ID:n1}], got %+v", listResult.Nodes)
+	}
+
+	// relay.open must return a chan_id.
+	var openResult api.RelayOpenResult
+	if err := app.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: "n1"}, &openResult); err != nil {
+		t.Fatalf("relay.open: %v", err)
+	}
+	chanID := openResult.ChanID
+	if chanID == "" {
+		t.Fatal("relay.open: expected non-empty chan_id")
+	}
+
+	// Channel must be recorded.
+	srv.relayMu.Lock()
+	_, recorded := srv.channels[chanID]
+	srv.relayMu.Unlock()
+	if !recorded {
+		t.Fatalf("channel %q not recorded after relay.open", chanID)
+	}
+
+	// relay.close must drop the channel.
+	if err := app.Call(api.MethodRelayClose, api.RelayCloseParams{ChanID: chanID}, nil); err != nil {
+		t.Fatalf("relay.close: %v", err)
+	}
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		_, stillThere := srv.channels[chanID]
+		return !stillThere
+	})
 }

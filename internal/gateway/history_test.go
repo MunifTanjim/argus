@@ -61,7 +61,7 @@ func TestHistorySessionsStampsNodeID(t *testing.T) {
 	a.AddSource(home)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionsHistorySessions,
 		json.RawMessage(`{"node_id":"home","project_dir":"/p","limit":10,"offset":0}`))
