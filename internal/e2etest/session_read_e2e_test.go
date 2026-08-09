@@ -2,6 +2,7 @@ package e2etest
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -18,25 +19,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
-
-// writeTempSessionTranscript writes a minimal valid JSONL transcript to a temp file and returns its path.
-func writeTempSessionTranscript(t *testing.T) string {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "transcript-*.jsonl")
-	if err != nil {
-		t.Fatalf("create temp transcript: %v", err)
-	}
-	content := `{"type":"user","uuid":"u1","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","model":"claude-opus-4-5","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10},"content":[{"type":"text","text":"hi there"}]}}
-`
-	if _, err := f.WriteString(content); err != nil {
-		t.Fatalf("write temp transcript: %v", err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("close temp transcript: %v", err)
-	}
-	return f.Name()
-}
 
 // writeTempProjectsTranscript creates a minimal JSONL transcript under the Claude
 // projects root (~/.claude/projects/), required by ReadHistoryTranscript's path
@@ -59,8 +41,13 @@ func writeTempProjectsTranscript(t *testing.T) string {
 	content := `{"type":"user","uuid":"u1","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","model":"claude-opus-4-5","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10},"content":[{"type":"text","text":"hi there"}]}}
 `
-	_, _ = f.WriteString(content)
-	f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		t.Skipf("skipping historyTranscript: cannot write transcript: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Skipf("skipping historyTranscript: cannot close transcript: %v", err)
+	}
 	path := f.Name()
 	t.Cleanup(func() {
 		os.Remove(path)
@@ -173,7 +160,7 @@ func TestSessionReadE2E(t *testing.T) {
 		}
 	})
 
-	compositeIDForNode := func(nodeID string) string {
+	compositeIDForNode := func(t *testing.T, nodeID string) string {
 		t.Helper()
 		for _, s := range allSessions {
 			if s.NodeID == nodeID {
@@ -185,7 +172,7 @@ func TestSessionReadE2E(t *testing.T) {
 	}
 
 	t.Run("sessions.transcriptView", func(t *testing.T) {
-		compositeID := compositeIDForNode("sr-node-a")
+		compositeID := compositeIDForNode(t, "sr-node-a")
 		var view transcript.TranscriptView
 		if err := c.Call(api.MethodSessionTranscriptView,
 			api.SessionRef{SessionID: compositeID}, &view); err != nil {
@@ -223,4 +210,77 @@ func TestSessionReadE2E(t *testing.T) {
 			t.Fatalf("sessions.historyTranscript: %v", err)
 		}
 	})
+}
+
+// TestSessionEventOverE2E proves that registry changes after a channel is open
+// produce a sealed session.event notification that the client receives on Events(),
+// carrying a node-stamped composite id. This exercises the SealNotificationFrame
+// path (node) → forwardFromNode relay → client onRelayFrame notification decode.
+func TestSessionEventOverE2E(t *testing.T) {
+	agg := gateway.New(time.Second, true)
+	srv := gateway.NewServer(agg, nil, nil, true)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	n := newE2ENode(t, "ev-node", "Event Node")
+	go n.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
+
+	pollConn, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
+	if err != nil {
+		t.Fatalf("poll dial: %v", err)
+	}
+	poll := api.NewClient(pollConn)
+	waitFor(t, "ev-node online", func() bool {
+		var r api.NodesListResult
+		if poll.Call(api.MethodNodesList, nil, &r) != nil {
+			return false
+		}
+		for _, nd := range r.Nodes {
+			if nd.ID == "ev-node" && nd.IdentityPubKey != "" && nd.Online {
+				return true
+			}
+		}
+		return false
+	})
+	poll.Close()
+
+	dial := func(ctx context.Context) (net.Conn, error) {
+		return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
+	}
+	c, err := client.NewReconnectingE2EClient(ctx, dial)
+	if err != nil {
+		t.Fatalf("NewReconnectingE2EClient: %v", err)
+	}
+	defer c.Close()
+
+	// NewReconnectingE2EClient completes Connect() before returning, so the E2E
+	// channel is already up and streamRegistry has sent its (empty) snapshot.
+	// Mutate the registry now to trigger a sealed session.event.
+	n.Registry().ApplyHook(registry.HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%99",
+		AgentSessionID: "ev-session-1", Status: session.StatusIdle,
+	})
+
+	select {
+	case ev := <-c.Events():
+		if ev.Method != api.MethodSessionEvent {
+			t.Fatalf("got event method %q, want %q", ev.Method, api.MethodSessionEvent)
+		}
+		var regEv registry.Event
+		if err := json.Unmarshal(ev.Params, &regEv); err != nil {
+			t.Fatalf("unmarshal session.event params: %v", err)
+		}
+		nodeID, _, ok := session.SplitCompositeID(regEv.Session.ID)
+		if !ok {
+			t.Fatalf("session id %q is not composite", regEv.Session.ID)
+		}
+		if nodeID != "ev-node" {
+			t.Fatalf("event session node prefix %q, want %q", nodeID, "ev-node")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for session.event on Events()")
+	}
 }
