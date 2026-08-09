@@ -209,6 +209,9 @@ func TestSessionReadE2E(t *testing.T) {
 			}, &view); err != nil {
 			t.Fatalf("sessions.historyTranscript: %v", err)
 		}
+		if len(view.Chunks) == 0 {
+			t.Fatal("historyTranscript over e2e: expected entries from the seeded transcript, got empty view")
+		}
 	})
 }
 
