@@ -27,8 +27,8 @@ func isTransportErr(err error) bool {
 // composite ids are caught by the "unknown session" error each node returns when the
 // session is absent from its own registry.
 func TestSessionControlE2E(t *testing.T) {
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -220,6 +220,42 @@ func TestSessionControlE2E(t *testing.T) {
 			api.KeyParams{SessionID: compA, Keys: []string{"Escape"}}, nil)
 		if err != nil && isTransportErr(err) {
 			t.Fatalf("sessions.key: transport failure: %v", err)
+		}
+	})
+
+	// compositeResult routing: spawn and resume route by node_id, not session_id.
+
+	// spawn/guard-path: nonexistent command guarantees exec.LookPath rejects it regardless
+	// of caps.SpawnSession, so no real agent is spawned on any host.
+	t.Run("spawn/guard-path", func(t *testing.T) {
+		var result api.SpawnResult
+		err := c.Call(api.MethodSessionSpawn, api.SpawnParams{NodeID: nodeA, Command: "argus-e2etest-no-such-command"}, &result)
+		if err == nil {
+			t.Fatal("sessions.spawn: unexpectedly succeeded — real agent was spawned; BLOCKED")
+		}
+		if isTransportErr(err) {
+			t.Fatalf("sessions.spawn: transport failure (sealed call did not reach handler): %v", err)
+		}
+		if !strings.Contains(err.Error(), "is not installed on node") &&
+			!strings.Contains(err.Error(), "spawn unavailable") {
+			t.Fatalf("sessions.spawn: expected LookPath/caps guard rejection, got: %v", err)
+		}
+	})
+
+	// resume/smoke: empty Cwd hits the "working directory is unknown" guard before any
+	// spawn attempt, so no real agent is ever launched.
+	t.Run("resume/smoke", func(t *testing.T) {
+		var result api.ResumeResult
+		err := c.Call(api.MethodSessionResume,
+			api.ResumeParams{NodeID: nodeA, Agent: "claude", AgentSessionID: "smoke"}, &result)
+		if err == nil {
+			t.Fatal("sessions.resume: unexpectedly succeeded — real agent was spawned; BLOCKED")
+		}
+		if isTransportErr(err) {
+			t.Fatalf("sessions.resume: transport failure (sealed call did not reach handler): %v", err)
+		}
+		if !strings.Contains(err.Error(), "working directory is unknown") {
+			t.Fatalf("sessions.resume: expected Cwd guard rejection, got: %v", err)
 		}
 	})
 }
