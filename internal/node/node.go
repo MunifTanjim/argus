@@ -229,9 +229,11 @@ func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 // aggregate it as an in-process source.
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
-// DispatchFunc exposes a restricted control surface for co-located gateways:
-// routes non-lock.* calls into the local engine without a network hop.
-func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
+// DispatchFunc exposes the local engine to a co-located gateway's in-process
+// source without a network hop. It stays the raw dispatch so the plaintext
+// (e2ee-off) path is byte-for-byte identical to before; lock.* filtering for
+// remote-reachable surfaces is added with the lock CLI (later slice).
+func (d *Node) DispatchFunc() api.DispatchFunc { return d.server.DispatchFunc() }
 
 // clientFor returns the tmux client for a session's server.
 func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
