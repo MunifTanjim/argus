@@ -76,8 +76,8 @@ func newE2ENode(t *testing.T, id, label string) *node.Node {
 // Two nodes are used so sessions.list merge + per-node composite stamping is also
 // covered.
 func TestSessionReadE2E(t *testing.T) {
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -209,6 +209,9 @@ func TestSessionReadE2E(t *testing.T) {
 			}, &view); err != nil {
 			t.Fatalf("sessions.historyTranscript: %v", err)
 		}
+		if len(view.Chunks) == 0 {
+			t.Fatal("historyTranscript over e2e: expected entries from the seeded transcript, got empty view")
+		}
 	})
 }
 
@@ -217,8 +220,8 @@ func TestSessionReadE2E(t *testing.T) {
 // carrying a node-stamped composite id. This exercises the SealNotificationFrame
 // path (node) → forwardFromNode relay → client onRelayFrame notification decode.
 func TestSessionEventOverE2E(t *testing.T) {
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
