@@ -249,14 +249,9 @@ func TestSessionControlE2E(t *testing.T) {
 		}
 	})
 
-	// compositeResult routing: spawn and resume route by node_id (not session_id) and
-	// stamp the session_id in the result. Both subtests assert the sealed round-trip
-	// reaches handleSessionSpawn/handleSessionResume and returns a node-level RPCError —
-	// no real agent is spawned (pty-cap safe).
+	// compositeResult routing: spawn and resume route by node_id, not session_id.
 
-	// spawn/guard-path proves the compositeResult spawn request was sealed → relayed →
-	// dispatched to handleSessionSpawn → sealed rejection returned, without a real spawn.
-	// A deliberately nonexistent command guarantees exec.LookPath rejects it regardless
+	// spawn/guard-path: nonexistent command guarantees exec.LookPath rejects it regardless
 	// of caps.SpawnSession, so no real agent is spawned on any host.
 	t.Run("spawn/guard-path", func(t *testing.T) {
 		var result api.SpawnResult
@@ -267,18 +262,26 @@ func TestSessionControlE2E(t *testing.T) {
 		if isTransportErr(err) {
 			t.Fatalf("sessions.spawn: transport failure (sealed call did not reach handler): %v", err)
 		}
+		if !strings.Contains(err.Error(), "is not installed on node") &&
+			!strings.Contains(err.Error(), "spawn unavailable") {
+			t.Fatalf("sessions.spawn: expected LookPath/caps guard rejection, got: %v", err)
+		}
 	})
 
-	// resume/smoke proves compositeResult routing for resume: sealed round-trip reaches
-	// handleSessionResume and returns a node-level RPCError (no real session to resume).
-	// Empty Cwd hits the "session working directory is unknown" guard deterministically
-	// before any spawn attempt, so no real agent is ever launched.
+	// resume/smoke: empty Cwd hits the "working directory is unknown" guard before any
+	// spawn attempt, so no real agent is ever launched.
 	t.Run("resume/smoke", func(t *testing.T) {
 		var result api.ResumeResult
 		err := c.Call(api.MethodSessionResume,
 			api.ResumeParams{NodeID: nodeA, Agent: "claude", AgentSessionID: "smoke"}, &result)
-		if err != nil && isTransportErr(err) {
+		if err == nil {
+			t.Fatal("sessions.resume: unexpectedly succeeded — real agent was spawned; BLOCKED")
+		}
+		if isTransportErr(err) {
 			t.Fatalf("sessions.resume: transport failure (sealed call did not reach handler): %v", err)
+		}
+		if !strings.Contains(err.Error(), "working directory is unknown") {
+			t.Fatalf("sessions.resume: expected Cwd guard rejection, got: %v", err)
 		}
 	})
 }
