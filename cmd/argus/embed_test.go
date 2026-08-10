@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/config"
 )
 
 func TestLocalNodeRunningAbsent(t *testing.T) {
@@ -14,5 +17,20 @@ func TestLocalNodeRunningAbsent(t *testing.T) {
 	}
 	if running {
 		t.Fatal("running = true, want false for a missing socket")
+	}
+}
+
+func TestStartEmbeddedNodeMalformedGenesis(t *testing.T) {
+	// A non-empty but malformed lock.genesis must not start an open node: the
+	// function must return an error immediately (fail-closed invariant).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := &config.Config{Lock: config.LockConfig{Genesis: "not!base64!!"}}
+	socket := filepath.Join(t.TempDir(), "node.sock")
+
+	_, _, err := startEmbeddedNode(ctx, cfg, socket)
+	if err == nil {
+		t.Fatal("startEmbeddedNode with malformed genesis should return an error")
 	}
 }

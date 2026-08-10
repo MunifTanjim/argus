@@ -1,0 +1,20 @@
+# Build context is the repo root (see docker/Dockerfile). Keep it lean, but do
+# NOT exclude app/ — assets.go //go:embed's a file under
+# app/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png.
+
+.git
+bin/
+/argus
+/argus.e2e
+web/node_modules
+
+# Flutter build artifacts (the embedded icon under app/.../res is still kept).
+app/build/
+app/.dart_tool/
+app/android/.gradle/
+app/android/app/build/
+app/ios/
+app/linux/
+app/macos/
+app/windows/
+app/web/

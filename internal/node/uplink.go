@@ -1,7 +1,9 @@
 package node
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -13,14 +15,25 @@ const (
 	uplinkMaxBackoff  = 15 * time.Second
 )
 
+// uplinkDispatch is the cleartext gateway→node request surface over the uplink.
+// It answers only node.identify; all other requests are refused. Gateway→node
+// notifications (not requests) are handled via OnNotify, not here.
+func (d *Node) uplinkDispatch() api.DispatchFunc {
+	full := d.remoteDispatch()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method == api.MethodNodeIdentify {
+			return full(ctx, method, params)
+		}
+		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+}
+
 // ConnectGateway maintains an outbound uplink to the gateway until ctx is
 // cancelled, reconnecting with capped exponential backoff. nil httpClient uses
 // the default.
 //
-// The node is a symmetric peer: it serves the gateway's control requests through
-// the same handlers as local clients and pushes registry changes up as
-// session.event. The gateway pulls the initial snapshot via sessions.list, so
-// only live events stream here.
+// The node answers no gateway→node commands over the cleartext uplink; it
+// accepts one notification (trustlog.changed) as an untrusted pull hint.
 func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient *http.Client) {
 	d.log.Info("connecting to gateway", "url", url)
 	backoff := uplinkBaseBackoff
@@ -47,13 +60,27 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 	}
 }
 
-// runUplink dials the gateway and pumps events until the connection or ctx ends. It
+// runUplink dials the gateway and waits until the connection or ctx ends. It
 // returns whether the dial succeeded (to drive backoff reset).
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
+	resp := d.newRelayResponder()
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
-		// The gateway issues control requests (capture/input/respond/...) down this
-		// link; serve them through the same handlers local clients use.
-		Dispatch: d.server.DispatchFunc(),
+		// No gateway→node commands are answered over the cleartext uplink; clients
+		// reach node handlers only through the E2E responder. One hint is accepted:
+		// trustlog.changed triggers a pull the node already does on a timer, so a
+		// forged or withheld notification changes only when the pull happens, not what
+		// the node accepts (verified against pinned genesis either way).
+		Dispatch: d.uplinkDispatch(),
+		OnNotify: d.onGatewayNotify,
+		// Relayed E2E frames from clients are terminated by the responder.
+		OnRelayFrame: resp.onFrame,
+		// The gateway heartbeats this link from its side, but that only lets the
+		// gateway notice a half-open uplink. Ping from here too so the node also
+		// detects one and re-dials instead of sitting on a dead connection.
+		KeepaliveInterval:         cmp.Or(d.keepaliveInterval, api.DefaultKeepaliveInterval),
+		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
+		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
+		Logger:                    d.log,
 	})
 	if err != nil {
 		if ctx.Err() == nil {
@@ -61,31 +88,32 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		}
 		return false
 	}
+	resp.peer.Store(peer)
+	d.activeResponder.Store(resp)
+	d.activeUplink.Store(peer)
 	defer peer.Close()
+	defer resp.closeAll()
+	defer d.activeResponder.CompareAndSwap(resp, nil)
+	defer d.activeUplink.CompareAndSwap(peer, nil)
 	d.log.Info("gateway uplink established", "url", url)
 
-	// Subscribe before the gateway pulls our snapshot so no live event is lost.
-	events, cancel := d.reg.Subscribe()
-	defer cancel()
+	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).
+	go d.runTrustSync(ctx, peer)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return true
-		case <-peer.Done():
-		case ev, ok := <-events:
-			if !ok {
-				return true
-			}
-			if err := peer.Notify(api.MethodSessionEvent, ev); err == nil {
-				continue
-			}
-		}
-		// peer.Done() fired, or a Notify failed: the uplink is gone. Log once,
-		// but not on clean shutdown (cancellation).
+	// Deliver encrypted mobile pushes over this uplink; desktop renders node-local.
+	if d.pushStore != nil {
+		d.SetPushDeliverer(uplinkDeliverer{peer: peer})
+	}
+
+	// Wait until the uplink or context ends; no session events are pushed here —
+	// clients are now blind-gateway E2E only.
+	select {
+	case <-ctx.Done():
+	case <-peer.Done():
+		// peer.Done() fired: the uplink is gone. Log once, but not on clean shutdown.
 		if ctx.Err() == nil {
 			d.log.Info("gateway uplink closed", "url", url)
 		}
-		return true
 	}
+	return true
 }

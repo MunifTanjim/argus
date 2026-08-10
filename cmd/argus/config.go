@@ -52,6 +52,7 @@ var flagKeys = map[string]string{
 	"external-url":           "tunnel.external.url",
 	"zrok-name":              "tunnel.zrok.name",
 	"ngrok-domain":           "tunnel.ngrok.domain",
+	"keepalive-interval":     "gateway.keepalive-interval",
 }
 
 // addClientFlags registers the node/gateway-reaching flags shared by the root TUI

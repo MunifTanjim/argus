@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/push"
@@ -33,85 +32,54 @@ func desktopNodeWithSession(t *testing.T, paneID string, focused bool, sink push
 	return d
 }
 
-func TestPushDesktopRendersWhenEnabled(t *testing.T) {
-	d := newNode(nil)
-	d.SetDesktopNotify(true, nil)
-	sink := &fakeSink{}
-	d.notifier = sink
-
-	params, _ := json.Marshal(push.Notification{Title: "repo", Body: "Permission: Bash"})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
-	if len(sink.got) != 1 || sink.got[0].Title != "repo" || sink.got[0].Body != "Permission: Bash" {
-		t.Fatalf("rendered = %+v, want one notification with title=repo and body=Permission: Bash", sink.got)
-	}
-}
-
-func TestPushDesktopNoopWhenDisabled(t *testing.T) {
-	d := newNode(nil)
-	sink := &fakeSink{}
-	d.notifier = sink
-	// SetDesktopNotify not called -> disabled by default.
-
-	params, _ := json.Marshal(push.Notification{Title: "t", Body: "b"})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
-	if len(sink.got) != 0 {
-		t.Fatalf("rendered %d notifications, want 0 (opt-in off)", len(sink.got))
-	}
-}
-
-func TestPushDesktopSuppressedWhenSessionFocused(t *testing.T) {
+// TestRenderDesktopSuppressedWhenSessionFocused verifies that renderDesktop (via
+// DesktopSink) suppresses a notification when the target session is already focused.
+func TestRenderDesktopSuppressedWhenSessionFocused(t *testing.T) {
 	paneID := "%7"
 	sessID := "default:" + paneID // registry key assigned by ReconcileSessions
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, paneID, true, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	n := push.Notification{
 		Title: "repo", Body: "Permission: Bash",
 		Data: map[string]string{"session_id": sessID},
-	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
 	}
+	d.DesktopSink().Notify(context.Background(), n)
 	if len(sink.got) != 0 {
 		t.Fatalf("rendered %d notifications, want 0 (session already focused)", len(sink.got))
 	}
 }
 
-func TestPushDesktopRendersWhenSessionNotFocused(t *testing.T) {
+// TestRenderDesktopRendersWhenSessionNotFocused verifies that renderDesktop renders
+// when the session exists locally but is not currently focused.
+func TestRenderDesktopRendersWhenSessionNotFocused(t *testing.T) {
 	paneID := "%7"
 	sessID := "default:" + paneID
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, paneID, false, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	n := push.Notification{
 		Title: "repo", Body: "Permission: Bash",
 		Data: map[string]string{"session_id": sessID},
-	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
 	}
+	d.DesktopSink().Notify(context.Background(), n)
 	if len(sink.got) != 1 {
 		t.Fatalf("rendered %d notifications, want 1 (session not focused)", len(sink.got))
 	}
 }
 
-// A broadcast for a session this node doesn't own can't be focused here, so it
-// renders even though focusedFn would say "focused" for a local pane.
-func TestPushDesktopRendersForeignSession(t *testing.T) {
+// TestRenderDesktopRendersForeignSession verifies that a notification for a session
+// on another node always renders: it cannot be focused on this machine, so focus
+// suppression must not apply.
+func TestRenderDesktopRendersForeignSession(t *testing.T) {
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, "%7", true, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	n := push.Notification{
 		Title: "repo", Body: "b",
 		Data: map[string]string{"session_id": session.CompositeID("nodeB", "xyz")},
-	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
 	}
+	d.DesktopSink().Notify(context.Background(), n)
 	if len(sink.got) != 1 {
 		t.Fatalf("rendered %d notifications, want 1 (foreign session never focused here)", len(sink.got))
 	}

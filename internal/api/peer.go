@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -23,6 +25,11 @@ type PeerOptions struct {
 	Dispatch DispatchFunc
 	// OnNotify receives notifications the remote end sends. Nil drops them.
 	OnNotify func(Notification)
+	// OnRelayFrame receives frames carrying a Route header (relayed E2E frames),
+	// along with the source Peer so the gateway can enforce channel ownership. Set
+	// on the gateway (to forward by chan_id) and on endpoints (to decrypt Body).
+	// Nil drops relay frames — they never reach Dispatch/OnNotify/the pending path.
+	OnRelayFrame func(*Peer, RelayFrame)
 	// BaseContext is the parent of each served request's context (so values like
 	// an auth Principal flow to handlers). Defaults to context.Background().
 	BaseContext context.Context
@@ -39,7 +46,20 @@ type PeerOptions struct {
 	// the node uplink). Exceeding it errors and closes the peer. Zero uses
 	// defaultWriteTimeout; a negative value disables the deadline.
 	WriteTimeout time.Duration
+	// Logger records why the peer dropped its connection (keepalive exhaustion, a
+	// failed frame write). A silent teardown is near-impossible to diagnose from
+	// the far end, which only ever sees calls time out. Nil disables it.
+	Logger *slog.Logger
 }
+
+// Link keepalive defaults, shared by every long-lived connection (node uplinks in
+// both directions, client<->gateway) so all sides agree on how fast a half-open
+// link is detected. Two failures ride out a transient blip.
+const (
+	DefaultKeepaliveInterval = 15 * time.Second
+	DefaultKeepaliveTimeout  = 5 * time.Second
+	DefaultKeepaliveFailures = 2
+)
 
 // defaultWriteTimeout bounds a blocked frame write when WriteTimeout is unset:
 // generous enough not to hit a slow-but-live consumer, short enough to drop a
@@ -65,7 +85,9 @@ type Peer struct {
 
 	dispatch     DispatchFunc
 	onNotify     func(Notification)
+	onRelayFrame func(*Peer, RelayFrame)
 	writeTimeout time.Duration
+	log          *slog.Logger
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -90,7 +112,9 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 		pending:      make(map[int]chan message),
 		dispatch:     opts.Dispatch,
 		onNotify:     opts.OnNotify,
+		onRelayFrame: opts.OnRelayFrame,
 		writeTimeout: writeTimeout,
+		log:          opts.Logger,
 		ctx:          ctx,
 		cancel:       cancel,
 		closed:       make(chan struct{}),
@@ -103,8 +127,8 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 }
 
 // keepalive pings the remote every interval and closes the peer after threshold
-// consecutive failed pings (an answered ping resets the streak). Catches a
-// half-open connection whose read side never errors. Stops when the peer closes.
+// consecutive unanswered pings (any reply resets the streak). Catches a half-open
+// connection whose read side never errors. Stops when the peer closes.
 func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 	if timeout <= 0 {
 		timeout = interval
@@ -123,16 +147,32 @@ func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 			ctx, cancel := context.WithTimeout(p.ctx, timeout)
 			err := p.CallContext(ctx, MethodPing, nil, nil)
 			cancel()
-			if err == nil {
+			if answered(err) {
 				fails = 0
 				continue
 			}
 			if fails++; fails >= threshold {
+				if p.log != nil {
+					p.log.Warn("peer closed: keepalive unanswered", "fails", fails, "interval", interval, "err", err)
+				}
 				_ = p.Close()
 				return
 			}
 		}
 	}
+}
+
+// answered reports whether a keepalive ping got a reply. A protocol-level error
+// reply still proves the remote is alive and processing frames — only a transport
+// failure (closed connection, no reply within the timeout) means the link is gone.
+// Treating an error reply as a miss would let a remote's dispatch policy tear down
+// its own healthy link.
+func answered(err error) bool {
+	if err == nil {
+		return true
+	}
+	var rpcErr *RPCError
+	return errors.As(err, &rpcErr)
 }
 
 // Done is closed when the peer's read loop ends (connection closed or errored).
@@ -228,6 +268,28 @@ func (p *Peer) send(m message) error {
 	if err := p.writeFrame(b); err != nil {
 		// A failed or timed-out write leaves the frame half-emitted, so the stream
 		// is unusable: drop the peer rather than desync every later frame.
+		if p.log != nil {
+			p.log.Warn("peer closed: frame write failed", "err", err)
+		}
+		_ = p.Close()
+		return err
+	}
+	return nil
+}
+
+// SendRawFrame writes a pre-marshaled frame verbatim, appending the newline
+// framing. A blind gateway uses it to forward a relayed frame's Raw bytes to the
+// paired peer without re-encoding — the sealed Body is never touched. Like send, a
+// failed/timed-out write drops the peer so the stream can't desync.
+func (p *Peer) SendRawFrame(raw []byte) error {
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
+	if p.writeTimeout > 0 {
+		if wd, ok := p.rwc.(writeDeadliner); ok {
+			_ = wd.SetWriteDeadline(time.Now().Add(p.writeTimeout))
+		}
+	}
+	if err := p.writeFrame(raw); err != nil {
 		_ = p.Close()
 		return err
 	}
@@ -259,6 +321,18 @@ func (p *Peer) readLoop() {
 			_ = p.send(message{Error: &RPCError{Code: CodeParseError, Message: "parse error"}})
 			continue
 		}
+		if m.isRelay() {
+			if p.onRelayFrame != nil {
+				p.onRelayFrame(p, RelayFrame{
+					Method: m.Method,
+					ID:     m.ID,
+					Route:  *m.Route,
+					Body:   m.Body,
+					Raw:    append([]byte(nil), line...),
+				})
+			}
+			continue
+		}
 		switch {
 		case m.isRequest():
 			go p.serveRequest(m)
@@ -284,6 +358,15 @@ func (p *Peer) readLoop() {
 
 func (p *Peer) serveRequest(m message) {
 	resp := message{ID: m.ID}
+	// ping is a transport-level liveness probe, answered by the Peer itself so no
+	// application dispatch policy can break its own link's keepalive. Handlers may
+	// still register ping for callers that reach dispatch without a Peer (e.g. a
+	// co-located gateway calling Node.DispatchFunc directly).
+	if m.Method == MethodPing {
+		resp.Result = json.RawMessage("null")
+		_ = p.send(resp)
+		return
+	}
 	if p.dispatch == nil {
 		resp.Error = &RPCError{Code: CodeMethodNotFound, Message: "method not found: " + m.Method}
 		_ = p.send(resp)

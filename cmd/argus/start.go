@@ -18,11 +18,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -102,11 +104,43 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		if kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
+			return fail(cmd, err)
+		} else {
+			d.SetIdentityKey(kp)
+		}
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		// Standalone node logs to the configured logger (the embedded node, sharing a
 		// TUI's terminal, stays at its discard default).
 		d.SetLogger(logger.Scoped("node").L)
-		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
+		if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+			logger.Scoped("node").Warn("signer key load failed; locked mode unavailable", "err", err)
+		} else {
+			d.SetSignerKey(kp)
+		}
+		if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+			logger.Scoped("node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+		} else {
+			d.SetBeaconKey(kp)
+			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+		}
+		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
+		if perr != nil {
+			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))
+		}
+		head := pin.Genesis
+		d.SetPinSource(pin.Source.String())
+		// Always set the chain path so lock.init has somewhere to persist.
+		chainPath := config.GetStatePath("trustlog-chain")
+		if head != nil {
+			if err := d.EnableTrustLog(head, chainPath); err != nil {
+				return fail(cmd, fmt.Errorf("locked mode configured but enabling trust log failed (refusing to start open): %w", err))
+			}
+		} else {
+			d.SetTrustChainPath(chainPath) // path only; not yet locked (lock.init will use it)
+		}
+		d.LoadLocalDisabled()
+		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and its local push Watch
 		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 	}
 
@@ -159,21 +193,21 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			enablePairing: true,
 			enablePush:    true,
 			pushDelay:     cfg.Push.Mobile.Delay,
-			tunnel:        tun,
-			tunnelOrigin:  tunOrigin,
+
+			keepaliveInterval: cfg.Gateway.KeepaliveInterval,
+			tunnel:            tun,
+			tunnelOrigin:      tunOrigin,
 		})
 	}
 
-	// Plain local node: nothing upstream drives desktop notifications, so run a
-	// local Watch over our own registry. (Gateway mode reaches the node via
-	// Fanout; uplink mode via the gateway's push.desktop RPC.)
-	if local && cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !serveGW {
-		events, cancel := d.Registry().Subscribe()
-		// Focus-aware sink: suppresses alerts for a session already on screen.
-		go func() {
-			defer cancel()
-			push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{d.DesktopSink()}}, logger.Scoped("push").L)
-		}()
+	// Every local node watches its own registry for desktop + mobile alerts. A
+	// co-located gateway (serveGW) already started its node's Watch in setupPush;
+	// an uplink node also needs a push store so mobile delivery has device targets.
+	if local && !serveGW {
+		if uplinkMode(cfg) {
+			d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+		}
+		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	}
 
 	if d != nil {
@@ -241,6 +275,7 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
 	f.String("zrok-name", "", "[zrok] reserved name for a stable URL: 'namespace:name' or 'name' (default: argus) [$ARGUS_ZROK_NAME]")
 	f.String("ngrok-domain", "", "[ngrok] reserved/custom domain (default: the account's static dev domain) [$ARGUS_NGROK_DOMAIN]")
+	f.Duration("keepalive-interval", 0, "node↔gateway keepalive ping interval, both directions (default: 15s) [$ARGUS_GATEWAY_KEEPALIVE_INTERVAL]")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
@@ -330,6 +365,7 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 	if err != nil {
 		return err
 	}
+	d.SetKeepaliveInterval(cfg.Gateway.KeepaliveInterval)
 	go d.ConnectGateway(ctx, wsURL, cfg.Token, gatewayClient)
 	return nil
 }
@@ -346,30 +382,27 @@ var tunnelURLTimeout = 60 * time.Second
 // the gateway/tunnel/push scopes from it — injected so the embedded caller can
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
-	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
-	token         string
-	listener      net.Listener
-	log           *slog.Logger
-	onFatal       func() // listener/tunnel death handler; may be nil
-	version       string
-	publicURL     string
-	enablePairing bool
-	enablePush    bool
-	pushDelay     time.Duration
-	tunnel        tunnel.Provider
-	tunnelOrigin  string
+	node              *node.Node // in-process source; nil for a standalone gateway (relay only)
+	token             string
+	listener          net.Listener
+	log               *slog.Logger
+	onFatal           func() // listener/tunnel death handler; may be nil
+	version           string
+	publicURL         string
+	enablePairing     bool
+	enablePush        bool
+	pushDelay         time.Duration
+	keepaliveInterval time.Duration // gateway→node heartbeat; 0 uses the built-in default
+	tunnel            tunnel.Provider
+	tunnelOrigin      string
 }
 
-// serveGateway starts the co-located gateway: aggregates the in-process node plus
-// dialed-in nodes, serves clients over o.listener, and (when enabled) wires
-// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
-// shut down.
+// serveGateway starts the co-located gateway: relays for dialed-in nodes (including
+// its own co-located node, which self-uplinks over loopback so clients reach it over
+// E2E like any other node), serves clients over o.listener, and (when enabled) wires
+// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
-	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
-	if d := o.node; d != nil {
-		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
-	}
 
 	var store *clienttoken.Store
 	if o.enablePairing {
@@ -389,9 +422,10 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	}
 	hsrv.SetVersion(o.version)
 	hsrv.SetPublicURL(o.publicURL)
+	hsrv.SetNodeKeepaliveInterval(o.keepaliveInterval)
 	hsrv.SetLogger(gwLog)
 	if o.enablePush {
-		setupPush(ctx, agg, hsrv, o.pushDelay, o.log.With("scope", "push"))
+		setupPush(ctx, o.node, hsrv, o.pushDelay, o.log.With("scope", "push"))
 	}
 
 	httpSrv := &http.Server{Handler: hsrv.Handler()}
@@ -404,6 +438,14 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
+
+	// The co-located node joins its own gateway over a loopback uplink (rather than an
+	// in-process source) so it becomes an E2E relay peer with a published identity key,
+	// reachable by clients exactly like a remote node. ConnectGateway retries with
+	// backoff, so it needs no readiness signal against the listener above.
+	if d := o.node; d != nil {
+		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")
@@ -444,28 +486,22 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	return httpSrv
 }
 
-// setupPush wires device push notifications (mobile dispatcher + desktop fanout).
-func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
-	store := push.NewStore(config.GetStatePath("push-tokens"))
-	// VAPID key (self-generated, persisted) signs Web Push requests; the public
-	// half is served to devices (push.vapidKey) to bind their subscription.
+// setupPush wires blind push: the gateway holds the VAPID key and relays opaque
+// bodies (push.deliver); the co-located node watches its own registry and encrypts.
+func setupPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
 	vapid, err := push.LoadOrCreateVAPID(config.GetStatePath("vapid_key.pem"))
 	if err != nil {
 		log.Warn("vapid disabled", "err", err)
-	} else {
-		hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+		return
 	}
-	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
-	hsrv.SetPush(store, dispatcher)
+	hsrv.SetVAPIDPublicKey(vapid.PublicKey())
+	hsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
 
-	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log}
-	go func() {
-		defer cancel()
-		push.Watch(ctx, events, push.Sinks{
-			Immediate: []push.Sink{broadcaster},
-			Delayed:   []push.Sink{dispatcher},
-			Delay:     delay,
-		}, log)
-	}()
+	// The co-located node (nil in a standalone gateway) stores its own device
+	// subscriptions and delivers in-process.
+	if d != nil {
+		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
+		d.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
+		go d.StartPush(ctx, delay)
+	}
 }

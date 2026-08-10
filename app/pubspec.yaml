@@ -51,6 +51,7 @@ dependencies:
   # Terminal emulator for the live tmux screen; fed capture-pane snapshots.
   xterm: ^4.0.0
   url_launcher: ^6.3.2
+  cryptography_plus: ^3.0.0
 
 dev_dependencies:
   flutter_test:

@@ -1,10 +1,11 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -175,17 +176,15 @@ func TestPeerWriteDeadlineDropsStuckPeer(t *testing.T) {
 
 // With keepalive on, a remote that stops answering pings (a half-open link that
 // never errors on read) is detected: the peer closes itself, firing Done.
+// The remote here is a bare conn that drains and never writes — a dispatch that
+// blocks would not do, since ping is answered above dispatch.
 func TestPeerKeepaliveClosesOnUnresponsiveRemote(t *testing.T) {
-	block := make(chan struct{})
-	pa, _, done := makePeers(
-		PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 40 * time.Millisecond},
-		PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) {
-			<-block // never answers the ping
-			return nil, nil
-		}},
-	)
-	defer done()
-	defer close(block)
+	local, remote := net.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, remote) }()
+	defer remote.Close()
+
+	pa := NewPeer(local, PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 40 * time.Millisecond})
+	defer pa.Close()
 
 	select {
 	case <-pa.Done():
@@ -195,21 +194,43 @@ func TestPeerKeepaliveClosesOnUnresponsiveRemote(t *testing.T) {
 	}
 }
 
+// replyToPings speaks the wire protocol directly, answering every inbound request
+// except the first skip of them. Ping is answered by the Peer above Dispatch, so a
+// blocking dispatch can no longer simulate a missed ping — the miss has to happen
+// at the transport level, as it would on a real flaky link.
+func replyToPings(t *testing.T, conn net.Conn, skip int) {
+	t.Helper()
+	go func() {
+		sc := bufio.NewScanner(conn)
+		seen := 0
+		for sc.Scan() {
+			var m message
+			if json.Unmarshal(sc.Bytes(), &m) != nil || m.ID == nil {
+				continue
+			}
+			if seen++; seen <= skip {
+				continue // swallow: the ping goes unanswered
+			}
+			b, _ := json.Marshal(message{JSONRPC: jsonrpcVersion, ID: m.ID, Result: json.RawMessage("null")})
+			if _, err := conn.Write(append(b, '\n')); err != nil {
+				return
+			}
+		}
+	}()
+}
+
 // A single missed ping is a transient blip, not a death: with a failure
 // threshold above one, the peer survives one timed-out ping as long as the next
 // one is answered.
 func TestPeerKeepaliveToleratesTransientBlip(t *testing.T) {
-	var pings atomic.Int32
-	pa, _, done := makePeers(
-		PeerOptions{KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 30 * time.Millisecond, KeepaliveFailureThreshold: 2},
-		PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) {
-			if pings.Add(1) == 1 {
-				time.Sleep(60 * time.Millisecond) // miss only the first ping
-			}
-			return nil, nil
-		}},
-	)
-	defer done()
+	local, remote := net.Pipe()
+	replyToPings(t, remote, 1) // drop only the first ping
+	defer remote.Close()
+
+	pa := NewPeer(local, PeerOptions{
+		KeepaliveInterval: 20 * time.Millisecond, KeepaliveTimeout: 30 * time.Millisecond, KeepaliveFailureThreshold: 2,
+	})
+	defer pa.Close()
 
 	select {
 	case <-pa.Done():

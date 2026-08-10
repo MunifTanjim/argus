@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -47,7 +49,13 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			var client *api.ReconnectingClient
+			pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+			if perr != nil {
+				return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
+			}
+			head := pin.Genesis
+
+			var client tui.Client
 			var logs *logbuf.Buffer
 			switch {
 			case cfg.Gateway.URL != "":
@@ -55,12 +63,12 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, err = connect(ctx, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				}
 			case running:
-				client, err = connect(ctx, "", cfg.Token, cfg.Socket)
+				client, err = connect(ctx, "", cfg.Token, cfg.Socket, nil)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -74,9 +82,9 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnGateway:
 					client, logs, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				case launchGateway:
-					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket)
+					client, err = connect(ctx, choice.gatewayURL, choice.token, cfg.Socket, head)
 				}
 			}
 			if err != nil {
@@ -103,7 +111,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	addClientFlags(cmd.Flags())
 
-	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd())
+	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd(), newLockCmd())
 
 	cmd.InitDefaultCompletionCmd()
 	if subcmd, _, _ := cmd.Find([]string{"completion"}); subcmd != nil && subcmd.Name() == "completion" {
@@ -122,5 +130,20 @@ var errSilent = errors.New("")
 // returns errSilent, so callers report once and exit non-zero without cobra re-printing.
 func fail(cmd *cobra.Command, err error) error {
 	shell.StdErrF("%s: %v\n", cmd.CommandPath(), err)
+	shell.StdErrF("%s", gatewayAuthHint(err))
 	return errSilent
+}
+
+// gatewayAuthHint names the three places a gateway token comes from, for the one
+// failure whose cause the transport error cannot state: the gateway answered, and
+// refused this caller. Returns "" for every other error.
+func gatewayAuthHint(err error) string {
+	var authErr *api.DialAuthError
+	if !errors.As(err, &authErr) {
+		return ""
+	}
+	if authErr.TokenSent {
+		return "  the gateway expects a different token: check --token, $ARGUS_TOKEN, or token: in the config file\n"
+	}
+	return "  no token was configured: pass --token, set $ARGUS_TOKEN, or set token: in the config file\n"
 }

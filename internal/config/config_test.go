@@ -240,3 +240,41 @@ func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 		}
 	}
 }
+
+func TestKeepaliveIntervalDefaultsAndOverrides(t *testing.T) {
+	v := viper.New()
+	if err := config.Load(v, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := config.FromViper(v)
+	if c.Gateway.KeepaliveInterval != 15*time.Second {
+		t.Fatalf("default = %v, want 15s", c.Gateway.KeepaliveInterval)
+	}
+
+	v.Set("gateway.keepalive-interval", "45s")
+	c = config.FromViper(v)
+	if c.Gateway.KeepaliveInterval != 45*time.Second {
+		t.Fatalf("override = %v, want 45s", c.Gateway.KeepaliveInterval)
+	}
+}
+
+func TestLockGenesisResolves(t *testing.T) {
+	// Default is empty.
+	v := viper.New()
+	if err := config.Load(v, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v).Lock.Genesis; got != "" {
+		t.Fatalf("default lock.genesis = %q, want empty", got)
+	}
+
+	// Env override binds.
+	t.Setenv("ARGUS_LOCK_GENESIS", "abc123==")
+	v2 := viper.New()
+	if err := config.Load(v2, "", true); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := config.FromViper(v2).Lock.Genesis; got != "abc123==" {
+		t.Fatalf("env lock.genesis = %q, want %q", got, "abc123==")
+	}
+}

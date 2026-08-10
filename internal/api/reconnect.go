@@ -57,6 +57,8 @@ func NewReconnectingClient(ctx context.Context, dial Dialer) (*ReconnectingClien
 
 // setPeer installs a new peer that relays notifications onto the stable events channel.
 func (c *ReconnectingClient) setPeer(conn net.Conn) {
+	// Keepalive so a half-open link fires Done and drives a reconnect, instead of
+	// leaving Call blocked forever on a connection that will never answer.
 	p := NewPeer(conn, PeerOptions{
 		OnNotify: func(n Notification) {
 			select {
@@ -64,6 +66,9 @@ func (c *ReconnectingClient) setPeer(conn net.Conn) {
 			default: // drop if the consumer is slow
 			}
 		},
+		KeepaliveInterval:         DefaultKeepaliveInterval,
+		KeepaliveTimeout:          DefaultKeepaliveTimeout,
+		KeepaliveFailureThreshold: DefaultKeepaliveFailures,
 	})
 	c.mu.Lock()
 	c.peer = p

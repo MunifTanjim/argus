@@ -43,8 +43,10 @@ const (
 	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
 	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
-	MethodTranscriptSubscribe       = "transcript.subscribe"       // request: TranscriptSubscribeParams; result: TranscriptDelta
-	MethodTranscriptUnsubscribe     = "transcript.unsubscribe"     // request: TranscriptUnsubscribeParams; result: nil
+	MethodNodesList                 = "nodes.list"
+	MethodNodeEvent                 = "node.event"
+	MethodTranscriptSubscribe       = "transcript.subscribe"   // request: TranscriptSubscribeParams; result: TranscriptDelta
+	MethodTranscriptUnsubscribe     = "transcript.unsubscribe" // request: TranscriptUnsubscribeParams; result: nil
 	// Server→client push.
 	MethodTranscriptDelta = "transcript.delta" // notification: TranscriptDelta
 	MethodTerminalOpen    = "terminal.open"    // request: TerminalOpenParams; result: nil
@@ -71,16 +73,60 @@ const (
 	MethodPushTest = "push.test" // request: PushDeviceRef; result: nil
 	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
 	// subscribe with. Empty Key means Web Push is unavailable.
-	MethodPushVAPIDKey  = "push.vapidKey"         // request: no params; result: PushVAPIDKey
-	MethodPushDesktop   = "push.desktop"          // request: push.Notification; result: nil (render on node if opted in)
+	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
+	// MethodPushDeliver is a node->gateway request carrying an opaque, pre-encrypted
+	// Web Push body for the gateway to VAPID-sign and POST. The gateway never sees
+	// cleartext notification content.
+	MethodPushDeliver   = "push.deliver"          // node->gateway request: PushDeliverParams; result: PushDeliverResult
 	MethodSessionExport = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
 	// Changed-files review for a live session's working directory (vs HEAD).
 	MethodSessionChangedFiles = "sessions.changedFiles" // request: SessionRef; result: ChangedFilesResult
 	MethodSessionFileDiff     = "sessions.fileDiff"     // request: FileDiffParams; result: FileDiffResult
 	MethodSessionCommits      = "sessions.commits"      // request: SessionRef; result: CommitsResult
 	MethodSessionCommitFiles  = "sessions.commitFiles"  // request: CommitFilesParams; result: ChangedFilesResult
-	MethodSessionTasks        = "sessions.tasks"        // request: SessionRef; result: TasksResult
-	MethodTasksChanged        = "tasks.changed"         // notification: TasksChanged (server→client)
+	// relay.open pairs a client with a node into a chan_id E2E channel.
+	MethodRelayOpen  = "relay.open"  // request: RelayOpenParams; result: RelayOpenResult
+	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
+	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
+	// bytes the blind gateway relays but cannot forge/roll back.
+	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
+	MethodTrustLogPush = "trustlog.push" // node->gateway request: TrustLogPushParams; result: nil (publish entries)
+	// MethodTrustLogChanged is a gateway→node notification that a branch the gateway
+	// did not previously hold has been offered. It is a hint with no authority: the
+	// node's response is to pull and verify against its pinned genesis. It buys the
+	// gateway strictly less than a timer tick does — the pull is rate-limited and it
+	// deliberately omits the peer-beacon consistency check, which only the node's own
+	// clock may advance. A forged or withheld notification changes only when the pull
+	// happens, never what the node accepts or concludes.
+	MethodTrustLogChanged = "trustlog.changed" // gateway->node notification: TrustLogChangedParams
+	// MethodBeaconOffer pushes a node's latest signed HEAD beacon to the gateway
+	// for blind relay on the roster/node.event stream. The gateway never verifies it.
+	MethodBeaconOffer = "beacon.offer" // node->gateway request: Beacon; result: nil
+	// MethodBeaconDeliver is a client→node request carrying a signed HEAD beacon
+	// from a peer node. The receiving node verifies the sig against the
+	// roster-announced beacon_pubkey, counter-guards against replay, and
+	// consistency-checks the peer's tip against its own chain. Allowed over the
+	// E2E (remote) path; never a lock.* local-only method.
+	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
+	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
+	// lock.* method for the gateway uplink, E2E responder, and co-located gateway,
+	// so only the CLI (which dials the unix socket) can invoke these.
+	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
+	MethodLockStatus             = "lock.status"             // request: no params; result: LockStatusResult
+	MethodLockSign               = "lock.sign"               // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke             = "lock.revoke"             // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockAddSigner          = "lock.addSigner"          // request: LockSignerParams; result: LockDeviceResult
+	MethodLockRemoveSigner       = "lock.removeSigner"       // request: LockSignerParams; result: LockDeviceResult
+	MethodLockDisable            = "lock.disable"            // request: LockDisableParams; result: LockDisableResult
+	MethodLockLocalDisable       = "lock.localDisable"       // request: no params; result: nil
+	MethodLockRevokeSignerStart  = "lock.revokeSignerStart"  // request: LockRevokeSignerStartParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
+	MethodLockLog                = "lock.log"                // request: no params; result: LockLogResult
+	MethodLockPin                = "lock.pin"                // request: LockPinParams; result: nil
+	MethodLockUnpin              = "lock.unpin"              // request: no params; result: nil
+	MethodSessionTasks           = "sessions.tasks"          // request: SessionRef; result: TasksResult
+	MethodTasksChanged           = "tasks.changed"           // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -198,6 +244,21 @@ type PushDeviceRef struct {
 	DeviceID string `json:"device_id"`
 }
 
+// PushDeliverParams carries an opaque, pre-encrypted (aes128gcm) Web Push body for
+// the gateway to deliver on a node's behalf. Ciphertext is base64 (std encoding).
+type PushDeliverParams struct {
+	Endpoint   string `json:"endpoint"`
+	Ciphertext string `json:"ciphertext"`
+	TTL        string `json:"ttl,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+}
+
+// PushDeliverResult reports delivery outcome. Gone means the subscription is dead
+// (404/410) and the node should prune its local record.
+type PushDeliverResult struct {
+	Gone bool `json:"gone,omitempty"`
+}
+
 // PairStartResult carries a freshly minted client token plus the gateway's public
 // base URL for the pairing QR.
 type PairStartResult struct {
@@ -244,10 +305,14 @@ type ServerInfo struct {
 // IdentifyResult announces a node's identity to the gateway. ID is the stable node
 // id (composite-id prefix and routing key).
 type IdentifyResult struct {
-	ID           string           `json:"id"`
-	Label        string           `json:"label"`
-	Version      string           `json:"version"` // node's binary version
-	Capabilities NodeCapabilities `json:"capabilities"`
+	ID             string           `json:"id"`
+	Label          string           `json:"label"`
+	Version        string           `json:"version"` // node's binary version
+	Capabilities   NodeCapabilities `json:"capabilities"`
+	IdentityPubKey string           `json:"identity_pubkey,omitempty"` // base64 Curve25519 static public (E2E)
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"`   // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`          // current signed HEAD beacon (nil if no beacon key)
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -257,6 +322,42 @@ type NodeInfo struct {
 	Label        string           `json:"label"`
 	Version      string           `json:"version"` // node's binary version
 	Capabilities NodeCapabilities `json:"capabilities"`
+}
+
+// NodeDescriptor is one node in the gateway's roster (nodes.list / node.event). It
+// carries the node's Noise static public key so an E2E client can open a channel
+// (Noise IK precondition), and the online flag the gateway derives from socket +
+// grace state.
+type NodeDescriptor struct {
+	ID             string           `json:"id"`
+	Label          string           `json:"label"`
+	Version        string           `json:"version"`
+	Capabilities   NodeCapabilities `json:"capabilities"`
+	IdentityPubKey string           `json:"identity_pubkey,omitempty"`
+	SignerPubKey   string           `json:"signer_pubkey,omitempty"`
+	BeaconPubKey   string           `json:"beacon_pubkey,omitempty"` // base64 Ed25519 beacon public (anti-equivocation)
+	Beacon         *Beacon          `json:"beacon,omitempty"`        // latest signed HEAD beacon (gateway relays verbatim, never verifies)
+	Online         bool             `json:"online"`
+}
+
+// NodesListResult is the reply to nodes.list.
+type NodesListResult struct {
+	Nodes []NodeDescriptor `json:"nodes"`
+}
+
+// NodeEvent transitions on the roster stream (node.event).
+const (
+	NodeEventAdded   = "added"
+	NodeEventOnline  = "online"
+	NodeEventOffline = "offline"
+	NodeEventRemoved = "removed"
+	NodeEventBeacon  = "beacon" // node's HEAD beacon updated (gateway blind relay)
+)
+
+// NodeEvent is one roster change streamed to a client.
+type NodeEvent struct {
+	Type string         `json:"type"` // added | online | offline | removed
+	Node NodeDescriptor `json:"node"`
 }
 
 type SpawnParams struct {
@@ -412,12 +513,26 @@ type HookResult struct {
 	Output string `json:"output,omitempty"`
 }
 
+// RouteHeader is the cleartext routing metadata a blind gateway reads to relay a
+// frame between a client and a node. It appears only on relayed (gateway) links;
+// the local unix-socket path leaves it nil and uses Params/Result directly.
+type RouteHeader struct {
+	ChanID string `json:"chan_id"`           // client<->node E2E channel; the routing key
+	NodeID string `json:"node_id,omitempty"` // target node (set on the channel-open request)
+	SubID  string `json:"sub_id,omitempty"`  // streaming handle; the client demuxes on it
+	TermID string `json:"term_id,omitempty"` // terminal handle; the client demuxes on it
+}
+
 // message is the unified JSON-RPC envelope. A request has Method and ID; a
-// notification has Method and no ID; a response has ID and Result/Error.
+// notification has Method and no ID; a response has ID and Result/Error. On a
+// relayed (gateway) link, Route carries cleartext routing and Body carries the
+// sealed payload; Params/Result/Error are used only on the local unix-socket path.
 type message struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"`
 	Method  string           `json:"method,omitempty"`
+	Route   *RouteHeader     `json:"route,omitempty"`
+	Body    json.RawMessage  `json:"body,omitempty"`
 	Params  json.RawMessage  `json:"params,omitempty"`
 	Result  json.RawMessage  `json:"result,omitempty"`
 	Error   *RPCError        `json:"error,omitempty"`
@@ -425,6 +540,7 @@ type message struct {
 
 func (m *message) isRequest() bool      { return m.Method != "" && m.ID != nil }
 func (m *message) isNotification() bool { return m.Method != "" && m.ID == nil }
+func (m *message) isRelay() bool        { return m.Route != nil }
 
 // Decode unmarshals JSON-RPC params into T, centralizing the decode-and-check
 // boilerplate shared by node and gateway handlers. Empty params yield the zero value
@@ -535,4 +651,188 @@ type TerminalResizeParams struct {
 // TerminalCloseParams closes a terminal session.
 type TerminalCloseParams struct {
 	TermID string `json:"term_id"`
+}
+
+// RelayOpenParams requests a new E2E channel to the specified node.
+type RelayOpenParams struct {
+	NodeID string `json:"node_id"`
+}
+
+// RelayOpenResult carries the allocated chan_id for the new E2E channel.
+type RelayOpenResult struct {
+	ChanID string `json:"chan_id"`
+}
+
+// RelayCloseParams tears down an E2E channel the client owns.
+type RelayCloseParams struct {
+	ChanID string `json:"chan_id"`
+}
+
+// TrustLogSyncParams states what the caller holds. Known lists the hash of every
+// entry it retains — adopted chain and rejected branches alike — so the gateway
+// computes the delta by set subtraction and never infers ancestry from a head.
+// Truncated reports that Known was capped and is partial: the caller will receive
+// entries it already holds, which dedupe, and the gateway must not treat a
+// truncated offer as disjoint.
+type TrustLogSyncParams struct {
+	Known     [][]byte `json:"known,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+// TrustLogSyncResult answers a trustlog.sync. Entries holds every retained entry
+// the caller does not hold, as individually marshalled trustlog.MarshalEntry
+// bytes, ordered parents before children; the gateway computes this by set
+// subtraction over the caller's Known offer. Want names hashes in the caller's
+// Known that the gateway does not hold; a node answers it with trustlog.push,
+// a client ignores it — clients are supplicants and must not publish trust state.
+// Disjoint reports that a non-empty, untruncated Known shared no entry with
+// the gateway's store — the caller is almost certainly following a different
+// trust root. Advisory only: the entries are still returned, because a client
+// discovering the network's genesis and a device detecting supersession both
+// need them.
+type TrustLogSyncResult struct {
+	Entries  [][]byte `json:"entries,omitempty"`
+	Want     [][]byte `json:"want,omitempty"`
+	Disjoint bool     `json:"disjoint,omitempty"`
+}
+
+// TrustLogPushParams carries individually marshalled entries a node is publishing
+// to the gateway, ordered parents before children.
+type TrustLogPushParams struct {
+	Entries [][]byte `json:"entries,omitempty"`
+}
+
+// TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
+// Heads are the gateway's head hashes after the change. A receiver that already
+// holds every one of them has nothing to fetch and can skip the sync entirely.
+type TrustLogChangedParams struct {
+	Heads [][]byte `json:"heads,omitempty"`
+}
+
+// LockDeviceParams identifies a device to authorize/revoke by its Curve25519
+// identity pubkey.
+type LockDeviceParams struct {
+	Device []byte `json:"device"`
+}
+
+// LockDeviceResult reports the trust-log tip after the sign/revoke. Changed is
+// false when the device was already in the target state (idempotent no-op).
+type LockDeviceResult struct {
+	Tip     []byte `json:"tip"`
+	Changed bool   `json:"changed"`
+}
+
+// LockSignerParams identifies a signer to add/remove by its Ed25519 signer pubkey.
+type LockSignerParams struct {
+	Signer []byte `json:"signer"`
+}
+
+// LockPinParams pins a node to a trust-log genesis hash.
+type LockPinParams struct {
+	Genesis []byte `json:"genesis"`
+}
+
+// LockInitParams enables locked mode. Signers are ADDITIONAL Ed25519 signer pubkeys
+// (the local node auto-includes its own); Devices are Curve25519 identity pubkeys to
+// authorize in the genesis (the current nodes).
+type LockInitParams struct {
+	Signers         [][]byte `json:"signers,omitempty"`
+	Devices         [][]byte `json:"devices,omitempty"`
+	GenDisablements int      `json:"gen_disablements,omitempty"` // number of disablement secrets to generate
+}
+
+// LockInitResult reports the new genesis tip (hash) and the final signer count (so the
+// CLI can warn on a single signer).
+type LockInitResult struct {
+	Tip                []byte   `json:"tip"`
+	SignerCount        int      `json:"signer_count"`
+	DisablementSecrets [][]byte `json:"disablement_secrets,omitempty"` // raw secrets, returned once for the operator to save
+}
+
+// LockDisableParams carries the raw disablement secret to consume.
+type LockDisableParams struct {
+	Secret []byte `json:"secret"`
+}
+
+// LockDisableResult reports the trust-log tip and disabled flag after lock.disable.
+type LockDisableResult struct {
+	Tip      []byte `json:"tip"`
+	Disabled bool   `json:"disabled"`
+}
+
+// LockRevokeSignerStartParams begins a revoke-signer co-signing ceremony.
+// Revoked is the list of signer pubkeys to revoke (required, non-empty).
+// Replaces is an optional list of replacement signer pubkeys added atomically.
+// ForkFrom overrides the fork-point hash; nil = auto-select (parent of the revoked
+// signer's earliest action, erasing it from the chain).
+type LockRevokeSignerStartParams struct {
+	Revoked  [][]byte `json:"revoked"`
+	Replaces [][]byte `json:"replaces,omitempty"`
+	ForkFrom []byte   `json:"fork_from,omitempty"`
+}
+
+// LockRevokeSignerBlobResult carries the serialized PendingRevoke blob produced
+// by lock.revokeSignerStart and lock.revokeSignerCosign.
+type LockRevokeSignerBlobResult struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerCosignParams carries the PendingRevoke blob to co-sign.
+type LockRevokeSignerCosignParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishParams carries the completed PendingRevoke blob to finalize
+// and ingest into the node's trust store.
+type LockRevokeSignerFinishParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishResult reports the new trust-log tip after the revocation
+// entry has been ingested and the chain has been persisted.
+type LockRevokeSignerFinishResult struct {
+	Tip []byte `json:"tip"`
+}
+
+// LockLogEntry summarises one entry in the trust-log chain, as returned by lock.log.
+type LockLogEntry struct {
+	Index       int      `json:"index"`
+	Kind        string   `json:"kind"`                   // genesis|add-signer|remove-signer|authorize-device|revoke-device|revoke-signer|disable
+	Hash        []byte   `json:"hash,omitempty"`         // this entry's chain hash; entry 0's is the genesis
+	Target      []byte   `json:"target,omitempty"`       // single-key entries: the target pubkey
+	Signers     [][]byte `json:"signers,omitempty"`      // genesis: initial signer set
+	Revoked     [][]byte `json:"revoked,omitempty"`      // revoke-signer: revoked signer pubkeys
+	Replaces    [][]byte `json:"replaces,omitempty"`     // revoke-signer: replacement signer pubkeys
+	CoSignCount int      `json:"cosign_count,omitempty"` // revoke-signer: number of co-signs
+}
+
+// LockLogResult is the reply to lock.log.
+type LockLogResult struct {
+	Entries []LockLogEntry `json:"entries"`
+	Tip     []byte         `json:"tip,omitempty"`
+	Signers [][]byte       `json:"signers,omitempty"` // current trusted signer set (for fingerprint computation)
+}
+
+// LockStatusResult is the audit view of a node's locked state.
+type LockStatusResult struct {
+	Enabled     bool     `json:"enabled"`
+	Tip         []byte   `json:"tip,omitempty"`
+	Signers     [][]byte `json:"signers,omitempty"`
+	DeviceCount int      `json:"device_count"`
+	// Devices is the authorized set. A non-zero DeviceCount with no Devices means the
+	// running daemon predates this field — upgraded binary, not yet restarted.
+	Devices        [][]byte `json:"devices,omitempty"`
+	Length         int      `json:"length,omitempty"`
+	SignerTrusted  bool     `json:"signer_trusted"`
+	Authorized     bool     `json:"authorized"`
+	SignerPubKey   []byte   `json:"signer_pubkey,omitempty"`
+	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+	LocalDisabled  bool     `json:"local_disabled,omitempty"`
+	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
+	Pinned         bool     `json:"pinned,omitempty"`
+	PinGenesis     []byte   `json:"pin_genesis,omitempty"`  // this device's own pin
+	SeenGenesis    []byte   `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
+	PinSource      string   `json:"pin_source,omitempty"`   // "config" or "file"
+	Quarantined    bool     `json:"quarantined,omitempty"`
 }

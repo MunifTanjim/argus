@@ -1,0 +1,28 @@
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: enforcing
+
+chain
+  genesis: <GENESIS>
+           <FP>
+  tip:     <TIP-5>
+           <FP>
+  length:  6 entries
+
+this node
+  identity: <NODE-B-DEVPUB>   authorized: yes
+  signer:   <NODE-B-SIGPUB>   trusted: yes
+
+signers (2)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+  <NODE-B-SIGPUB>
+
+devices (2)
+  <NODE-A-DEVPUB>
+  <NODE-B-DEVPUB>  ← this node
+
+  pin: <FP> (source: file)
+  client pin: <FP> (source: file)
+--- stderr ---
