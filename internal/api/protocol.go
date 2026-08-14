@@ -625,6 +625,19 @@ type TrustLogSyncResult struct {
 	Disjoint bool     `json:"disjoint,omitempty"`
 }
 
+// TrustLogPushParams carries individually marshalled entries a node is publishing
+// to the gateway, ordered parents before children.
+type TrustLogPushParams struct {
+	Entries [][]byte `json:"entries,omitempty"`
+}
+
+// TrustLogChangedParams is the payload of a MethodTrustLogChanged notification.
+// Heads are the gateway's head hashes after the change. A receiver that already
+// holds every one of them has nothing to fetch and can skip the sync entirely.
+type TrustLogChangedParams struct {
+	Heads [][]byte `json:"heads,omitempty"`
+}
+
 // NodeDescriptor is one node in the gateway's roster (nodes.list / node.event). It
 // carries the node's Noise static public key so an E2E client can open a channel
 // (Noise IK precondition), and the online flag the gateway derives from socket +
