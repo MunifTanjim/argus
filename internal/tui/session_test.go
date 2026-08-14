@@ -58,6 +58,7 @@ func (c *recordingClient) Events() <-chan api.Notification { return make(chan ap
 func (c *recordingClient) States() <-chan bool             { return make(chan bool) }
 func (c *recordingClient) Reconnect()                      {}
 func (c *recordingClient) Close() error                    { return nil }
+func (c *recordingClient) Quarantined() bool               { return false }
 
 func (c *recordingClient) calledMethods() []string {
 	c.mu.Lock()

@@ -19,6 +19,7 @@ func (logsStubClient) Events() <-chan api.Notification { return make(chan api.No
 func (logsStubClient) States() <-chan bool             { return make(chan bool) }
 func (logsStubClient) Reconnect()                      {}
 func (logsStubClient) Close() error                    { return nil }
+func (logsStubClient) Quarantined() bool               { return false }
 
 func fillLogs(b *logbuf.Buffer, n int) {
 	for i := 0; i < n; i++ {

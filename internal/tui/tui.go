@@ -27,6 +27,10 @@ type Client interface {
 	States() <-chan bool
 	Reconnect()
 	Close() error
+	// Quarantined reports whether this device is unpinned on a network that has a
+	// trust log and must run "argus lock pin" before it can reach any node.
+	// Always false for plaintext (non-E2E) clients.
+	Quarantined() bool
 }
 
 // Run connects the TUI and blocks until the user quits. Non-nil logs (embedded
