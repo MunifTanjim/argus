@@ -296,6 +296,7 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 		} else {
 			d.SetTrustChainPath(chainPath)
 		}
+		d.LoadLocalDisabled()
 	}
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))
 	go func() { _ = d.Run(ctx, socket) }()

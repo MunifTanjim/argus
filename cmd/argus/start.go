@@ -155,6 +155,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		} else {
 			d.SetTrustChainPath(chainPath)
 		}
+		d.LoadLocalDisabled()
 	}
 
 	if local {
