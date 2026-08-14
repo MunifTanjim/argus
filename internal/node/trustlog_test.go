@@ -240,3 +240,65 @@ func mustUnmarshalChain(t *testing.T, b []byte) []trustlog.Entry {
 	}
 	return e
 }
+
+// TestUnpinnedNodeQuarantinesOnServedChain verifies that a node with no pin
+// (SetTrustChainPath only, d.trust nil) trips Quarantined()+rejectsChannels()
+// when the gateway serves a non-empty trust chain.
+func TestUnpinnedNodeQuarantinesOnServedChain(t *testing.T) {
+	chain, _, _, _ := seedChain(t, true)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	d := New()
+	d.SetTrustChainPath(path)
+	// d.trust is nil — unpinned
+
+	d.pullTrustOnce(&fakePeer{pullChain: chain})
+
+	if !d.Quarantined() {
+		t.Fatal("unpinned node seeing a served chain must be quarantined")
+	}
+	if !d.rejectsChannels() {
+		t.Fatal("quarantined node must reject channels")
+	}
+}
+
+// TestPinnedAuthorizedNodeDoesNotQuarantine verifies that a pinned node that
+// successfully ingests its chain does not trip the quarantine gate.
+func TestPinnedAuthorizedNodeDoesNotQuarantine(t *testing.T) {
+	chain, head, _, _ := seedChain(t, true)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+
+	d.pullTrustOnce(&fakePeer{pullChain: chain})
+
+	if d.Quarantined() {
+		t.Fatal("pinned node that ingested its chain must not be quarantined")
+	}
+	if d.rejectsChannels() {
+		t.Fatal("authorized pinned node must not reject channels")
+	}
+}
+
+// TestUnpinnedNodeWithNoServedChainDoesNotQuarantine verifies that pure TOFU
+// (no chain served) never trips the gate.
+func TestUnpinnedNodeWithNoServedChainDoesNotQuarantine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	d := New()
+	d.SetTrustChainPath(path)
+
+	d.pullTrustOnce(&fakePeer{pullChain: nil}) // empty — no chain served
+
+	if d.Quarantined() {
+		t.Fatal("no served chain must never quarantine")
+	}
+	if d.rejectsChannels() {
+		t.Fatal("TOFU node must not reject channels")
+	}
+}

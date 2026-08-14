@@ -176,6 +176,14 @@ func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
 
+// reevaluateTrustChannels drops live client channels no longer authorized after a
+// trust-store advance. No-op when no uplink responder is active.
+func (d *Node) reevaluateTrustChannels() {
+	if r := d.activeResponder.Load(); r != nil {
+		r.reevaluate()
+	}
+}
+
 // remoteDispatch rejects lock.* methods (local-admin only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
