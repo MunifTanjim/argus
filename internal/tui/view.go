@@ -178,6 +178,12 @@ func (m model) homeTabs(active viewMode) string {
 	return out
 }
 
+// quarantined reports whether the client is in quarantine (unpinned device on a
+// locked network). Safe when client is nil (e.g. in tests).
+func (m model) quarantined() bool {
+	return m.client != nil && m.client.Quarantined()
+}
+
 func (m model) listView() string {
 	if m.spawn.active() {
 		return m.spawnView()
@@ -187,6 +193,13 @@ func (m model) listView() string {
 		title += dimStyle.Render("  (reconnecting…)")
 	}
 	title += "    " + m.homeTabs(modeList)
+
+	chrome := 4 // title + blank + (content) + footer
+	if m.quarantined() {
+		title += "\n" + StyleErrorBold.Render("⚠ QUARANTINED") +
+			dimStyle.Render("  pin this device: argus lock pin")
+		chrome++
+	}
 
 	// Empty state.
 	if len(m.order) == 0 {
@@ -226,9 +239,8 @@ func (m model) listView() string {
 		}
 	}
 
-	// Window to available height (chrome = 4: title + 2 blanks + footer), keeping
-	// the cursor card visible.
-	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-4))
+	// Window to available height, keeping the cursor card visible.
+	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-chrome))
 
 	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
 		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, listKeys.Quit)
