@@ -80,6 +80,66 @@ func TestEnableTrustLogGatesAuthorizedDevices(t *testing.T) {
 	}
 }
 
+func TestEnableTrustLogRejectsForeignGenesisChain(t *testing.T) {
+	// A valid chain authorizing a device, but built under its own genesis.
+	chain, chainGenesis, device, _ := seedChain(t, true)
+
+	// Pin a DIFFERENT genesis than the on-disk chain roots to.
+	pinnedGenesis := bytes.Repeat([]byte{0x33}, len(chainGenesis))
+	if bytes.Equal(pinnedGenesis, chainGenesis) {
+		t.Fatal("test setup: pinned genesis must differ from the chain's")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(path, chain, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	d := New()
+	// EnableTrustLog must not error: the foreign chain is logged and ignored, the
+	// node continues with an empty store rather than adopting untrusted data.
+	if err := d.EnableTrustLog(pinnedGenesis, path); err != nil {
+		t.Fatalf("EnableTrustLog should not error on a foreign-genesis chain: %v", err)
+	}
+	if d.TrustStore() == nil {
+		t.Fatal("TrustStore should be non-nil (store created) after EnableTrustLog")
+	}
+	if d.TrustStore().Tip() != nil {
+		t.Fatal("foreign chain must be rejected on ingest; store must start empty")
+	}
+	if d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("a device from a foreign-genesis chain must not be authorized")
+	}
+}
+
+func TestEnableTrustLogRejectsTamperedChain(t *testing.T) {
+	chain, head, device, _ := seedChain(t, true)
+	// Corrupt the persisted chain: bitflip a byte so genesis-pinned ingest rejects it.
+	tampered := append([]byte(nil), chain...)
+	tampered[len(tampered)/2] ^= 0xFF
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(path, tampered, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog should not error on a tampered chain: %v", err)
+	}
+	if d.TrustStore() == nil {
+		t.Fatal("TrustStore should be non-nil (store created) after EnableTrustLog")
+	}
+	if d.TrustStore().Tip() != nil {
+		t.Fatal("tampered chain must be rejected on ingest; store must start empty")
+	}
+	if d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("a device from a tampered chain must not be authorized")
+	}
+}
+
 func TestSyncTrustOnceIngestsAndPersists(t *testing.T) {
 	// Node starts with a genesis-only chain; gateway offers a longer one authorizing a device.
 	shortChain, head, device, signer := seedChain(t, false)
