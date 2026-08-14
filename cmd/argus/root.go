@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -47,6 +49,12 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
+			pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+			if perr != nil {
+				return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
+			}
+			head := pin.Genesis
+
 			var client tui.Client
 			var logs *logbuf.Buffer
 			switch {
@@ -55,12 +63,12 @@ func newRootCmd(version string) *cobra.Command {
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
 				if running {
-					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				}
 			case running:
-				client, err = connect(ctx, cfg, "", cfg.Token, cfg.Socket)
+				client, err = connect(ctx, cfg, "", cfg.Token, cfg.Socket, nil)
 			default:
 				choice, lerr := runLauncher(cfg.Token)
 				if lerr != nil {
@@ -74,9 +82,9 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnGateway:
 					client, logs, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
-					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
+					client, logs, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				case launchGateway:
-					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket)
+					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				}
 			}
 			if err != nil {
