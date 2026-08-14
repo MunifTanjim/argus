@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // TestClientServerServesVAPIDKey guards a regression where the unified client
@@ -96,4 +98,91 @@ func TestRelayOpenCloseAndNodesList(t *testing.T) {
 		_, stillThere := srv.channels[chanID]
 		return !stillThere
 	})
+}
+
+// makeBlindNodeEntries builds a small valid trust-log chain and returns its
+// entries as individually marshalled blobs, ready for TrustLogPushParams.
+func makeBlindNodeEntries(t *testing.T) [][]byte {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	raw := trustlog.MarshalChain(log.Entries())
+	entries, err := trustlog.ChainEntries(raw)
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	return entries
+}
+
+// TestBlindTrustLogPushSyncAndChanged exercises the blind trust-log path:
+// a node peer pushes entries, trustlog.sync returns them, and a second node
+// peer receives a trustlog.changed notification after the push.
+func TestBlindTrustLogPushSyncAndChanged(t *testing.T) {
+	a := New(0)
+	srv := NewServer(a, nil, nil)
+
+	connectNode := func(id string, got chan api.Notification) *api.Peer {
+		t.Helper()
+		gwConn, nodeConn := net.Pipe()
+		t.Cleanup(func() { gwConn.Close() })
+		p := api.NewPeer(nodeConn, api.PeerOptions{
+			Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+				if method == api.MethodNodeIdentify {
+					return api.IdentifyResult{ID: id, Label: id + "-box"}, nil
+				}
+				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+			},
+			OnNotify: func(n api.Notification) {
+				if got != nil {
+					got <- n
+				}
+			},
+		})
+		t.Cleanup(func() { p.Close() })
+		go srv.serveNode(gwConn)
+		return p
+	}
+
+	// node1 is the pusher; node2 must receive trustlog.changed.
+	node2Got := make(chan api.Notification, 4)
+	node1 := connectNode("node1", nil)
+	connectNode("node2", node2Got)
+
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		return len(srv.nodePeers) >= 2
+	})
+
+	entries := makeBlindNodeEntries(t)
+
+	// Push entries from node1 (call gateway's nodeDispatch from the node side).
+	if err := node1.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: entries}, nil); err != nil {
+		t.Fatalf("trustlog.push: %v", err)
+	}
+
+	// node2 must receive trustlog.changed.
+	select {
+	case n := <-node2Got:
+		if n.Method != api.MethodTrustLogChanged {
+			t.Fatalf("node2 got %q, want %q", n.Method, api.MethodTrustLogChanged)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("node2 did not receive trustlog.changed after push")
+	}
+
+	// trustlog.sync with empty Known must return the pushed entries.
+	var syncResult api.TrustLogSyncResult
+	if err := node1.Call(api.MethodTrustLogSync, api.TrustLogSyncParams{}, &syncResult); err != nil {
+		t.Fatalf("trustlog.sync: %v", err)
+	}
+	if len(syncResult.Entries) != len(entries) {
+		t.Fatalf("trustlog.sync: got %d entries, want %d", len(syncResult.Entries), len(entries))
+	}
 }
