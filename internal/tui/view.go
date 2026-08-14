@@ -178,6 +178,10 @@ func (m model) homeTabs(active viewMode) string {
 	return out
 }
 
+func (m model) quarantined() bool {
+	return m.client != nil && m.client.Quarantined()
+}
+
 func (m model) listView() string {
 	if m.spawn.active() {
 		return m.spawnView()
@@ -188,9 +192,18 @@ func (m model) listView() string {
 	}
 	title += "    " + m.homeTabs(modeList)
 
+	// chrome counts non-content rows: title + blank-after-title + footer + blank-before-footer.
+	// +1 when the quarantine banner is present (it adds a second title row).
+	chrome := 4
+	if m.quarantined() {
+		title += "\n" + StyleErrorBold.Render("⚠ QUARANTINED") +
+			dimStyle.Render("  pin this device: argus lock pin")
+		chrome++
+	}
+
 	// Empty state.
 	if len(m.order) == 0 {
-		return m.emptyListView(title)
+		return m.emptyListView(title, chrome)
 	}
 
 	// Populated.
@@ -226,9 +239,7 @@ func (m model) listView() string {
 		}
 	}
 
-	// Window to available height (chrome = 4: title + 2 blanks + footer), keeping
-	// the cursor card visible.
-	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-4))
+	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-chrome))
 
 	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
 		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, listKeys.Quit)
@@ -278,7 +289,7 @@ func argusLogo(width, height int) string {
 
 // emptyListView renders the welcome screen: the argus logo, wordmark, tagline, and a
 // spawn hint, centered in the space between the tab bar and the footer.
-func (m model) emptyListView(title string) string {
+func (m model) emptyListView(title string, chrome int) string {
 	textW := max(16, min(m.width-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
@@ -292,7 +303,7 @@ func (m model) emptyListView(title string) string {
 		center.Render(hint),
 	)
 
-	avail := max(1, m.height-4) // title + blank + welcome + footer
+	avail := max(1, m.height-chrome)
 	top := max(0, (avail-lipgloss.Height(welcome))/2)
 	block := strings.Repeat("\n", top) + centerBlock(welcome, lipgloss.Width(welcome), m.width)
 
