@@ -24,6 +24,7 @@ import (
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -140,6 +141,19 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		} else {
 			d.SetIdentityKey(kp)
 			d.SetE2EE(true)
+		}
+		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
+		if perr != nil {
+			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))
+		}
+		d.SetPinSource(pin.Source.String())
+		chainPath := config.GetStatePath("trustlog-chain")
+		if head := pin.Genesis; len(head) > 0 {
+			if err := d.EnableTrustLog(head, chainPath); err != nil {
+				return fail(cmd, fmt.Errorf("locked mode configured but enabling trust log failed (refusing to start open): %w", err))
+			}
+		} else {
+			d.SetTrustChainPath(chainPath)
 		}
 	}
 
