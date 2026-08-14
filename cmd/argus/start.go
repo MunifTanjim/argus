@@ -136,6 +136,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		if err := configureNodeLock(d, cfg, slog.Default().With("scope", "node")); err != nil {
 			return fail(cmd, err)
 		}
+		d.LoadLocalDisabled()
 	}
 
 	if local {
