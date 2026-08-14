@@ -1,0 +1,182 @@
+package node
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/trustlog"
+)
+
+// seedChain builds genesis[+authorize] and returns marshaled bytes + pieces.
+func seedChain(t *testing.T, withDevice bool) (chain, head, device []byte, signer trustlog.SignerKey) {
+	t.Helper()
+	var err error
+	signer, err = trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	head = log.Tip()
+	device = bytes.Repeat([]byte{0x11}, 32)
+	if withDevice {
+		if err := log.AuthorizeDevice(device, signer); err != nil {
+			t.Fatalf("AuthorizeDevice: %v", err)
+		}
+	}
+	return trustlog.MarshalChain(log.Entries()), head, device, signer
+}
+
+// fakePeer serves a canned chain as entries on trustlog.sync, standing in for the
+// gateway uplink so the sync path can be exercised without a network.
+type fakePeer struct {
+	pullChain []byte
+}
+
+func (f *fakePeer) Call(method string, params, out any) error {
+	switch method {
+	case api.MethodTrustLogSync:
+		res := out.(*api.TrustLogSyncResult)
+		if f.pullChain != nil {
+			if raw, err := trustlog.ChainEntries(f.pullChain); err == nil {
+				res.Entries = raw
+			}
+		}
+	}
+	return nil
+}
+
+// Compile-time checks: fakePeer satisfies trustCaller and runTrustSync takes *api.Peer.
+var _ trustCaller = (*fakePeer)(nil)
+var _ = (*Node).runTrustSync
+
+func TestEnableTrustLogGatesAuthorizedDevices(t *testing.T) {
+	chain, head, device, _ := seedChain(t, true)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(path, chain, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+	if d.TrustStore() == nil {
+		t.Fatal("TrustStore should be non-nil after EnableTrustLog")
+	}
+	if !d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("authorized device should be authorized")
+	}
+	unauthorized := bytes.Repeat([]byte{0x22}, 32)
+	if d.TrustStore().DeviceAuthorized(unauthorized) {
+		t.Fatal("unauthorized device must not be authorized")
+	}
+}
+
+func TestSyncTrustOnceIngestsAndPersists(t *testing.T) {
+	// Node starts with a genesis-only chain; gateway offers a longer one authorizing a device.
+	shortChain, head, device, signer := seedChain(t, false)
+	log, err := trustlog.Load(mustUnmarshalChain(t, shortChain))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := log.AuthorizeDevice(device, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	longChain := trustlog.MarshalChain(log.Entries())
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(path, shortChain, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+	if d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("device should not be authorized before sync")
+	}
+
+	d.syncTrustOnce(&fakePeer{pullChain: longChain})
+
+	if !d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("device from pulled chain should be authorized after sync")
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(onDisk, longChain) {
+		t.Fatal("advanced chain must be persisted to disk")
+	}
+}
+
+func TestSyncTrustRejectsRollback(t *testing.T) {
+	shortChain, head, device, signer := seedChain(t, false)
+	log, err := trustlog.Load(mustUnmarshalChain(t, shortChain))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := log.AuthorizeDevice(device, signer); err != nil {
+		t.Fatalf("AuthorizeDevice: %v", err)
+	}
+	longChain := trustlog.MarshalChain(log.Entries())
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	if err := os.WriteFile(path, longChain, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+
+	// Malicious gateway offers the short (stale) chain.
+	d.syncTrustOnce(&fakePeer{pullChain: shortChain})
+
+	if !d.TrustStore().DeviceAuthorized(device) {
+		t.Fatal("rollback must be rejected; device should stay authorized")
+	}
+}
+
+func TestRunTrustSyncLoopConverges(t *testing.T) {
+	trustSyncInterval.Store(int64(10 * time.Millisecond))
+	t.Cleanup(func() { trustSyncInterval.Store(int64(5 * time.Minute)) })
+
+	chain, head, device, _ := seedChain(t, true)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trustlog-chain")
+	d := New()
+	if err := d.EnableTrustLog(head, path); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	// Wait the loop out before TempDir cleanup: a persist still in flight when the
+	// context ends would otherwise recreate the chain file under RemoveAll.
+	t.Cleanup(func() { cancel(); <-loopDone })
+	go func() {
+		defer close(loopDone)
+		d.runTrustSyncLoop(ctx, &fakePeer{pullChain: chain})
+	}()
+
+	waitFor(t, func() bool {
+		return d.TrustStore() != nil && d.TrustStore().DeviceAuthorized(device)
+	})
+}
+
+func mustUnmarshalChain(t *testing.T, b []byte) []trustlog.Entry {
+	t.Helper()
+	e, err := trustlog.UnmarshalChain(b)
+	if err != nil {
+		t.Fatalf("UnmarshalChain: %v", err)
+	}
+	return e
+}
