@@ -230,6 +230,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
 	if perr != nil {
 		cancel()
+		shell.StdErrF("argus: %v\n", fmt.Errorf("refusing to connect open: %w", perr))
 		return nil, nil, fmt.Errorf("refusing to connect open: %w", perr)
 	}
 	c, err := connect(ctx, cfg, gwURL, cfg.Token, socket, pin.Genesis)

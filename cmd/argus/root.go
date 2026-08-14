@@ -49,11 +49,14 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
-			if perr != nil {
-				return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
+			var head []byte
+			if cfg.E2EE.Enabled {
+				pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+				if perr != nil {
+					return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
+				}
+				head = pin.Genesis
 			}
-			head := pin.Genesis
 
 			var client tui.Client
 			var logs *logbuf.Buffer
