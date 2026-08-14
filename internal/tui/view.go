@@ -194,7 +194,9 @@ func (m model) listView() string {
 	}
 	title += "    " + m.homeTabs(modeList)
 
-	chrome := 4 // title + blank + (content) + footer
+	// chrome counts non-content rows: title + blank-after-title + footer + blank-before-footer.
+	// +1 when the quarantine banner is present (it adds a second title row).
+	chrome := 4
 	if m.quarantined() {
 		title += "\n" + StyleErrorBold.Render("⚠ QUARANTINED") +
 			dimStyle.Render("  pin this device: argus lock pin")
@@ -203,7 +205,7 @@ func (m model) listView() string {
 
 	// Empty state.
 	if len(m.order) == 0 {
-		return m.emptyListView(title)
+		return m.emptyListView(title, chrome)
 	}
 
 	// Populated.
@@ -290,7 +292,8 @@ func argusLogo(width, height int) string {
 
 // emptyListView renders the welcome screen: the argus logo, wordmark, tagline, and a
 // spawn hint, centered in the space between the tab bar and the footer.
-func (m model) emptyListView(title string) string {
+// chrome is the number of non-content rows (matches the caller's chrome variable).
+func (m model) emptyListView(title string, chrome int) string {
 	textW := max(16, min(m.width-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
@@ -304,7 +307,7 @@ func (m model) emptyListView(title string) string {
 		center.Render(hint),
 	)
 
-	avail := max(1, m.height-4) // title + blank + welcome + footer
+	avail := max(1, m.height-chrome)
 	top := max(0, (avail-lipgloss.Height(welcome))/2)
 	block := strings.Repeat("\n", top) + centerBlock(welcome, lipgloss.Width(welcome), m.width)
 
