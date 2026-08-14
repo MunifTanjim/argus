@@ -262,3 +262,17 @@ func TestE2EEFromEnv(t *testing.T) {
 		t.Fatal("e2ee.enabled from env = false, want true")
 	}
 }
+
+func TestLockGenesisDefaultEmpty(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.Lock.Genesis != "" {
+		t.Fatalf("lock.genesis default = %q, want empty", c.Lock.Genesis)
+	}
+}
+
+func TestLockGenesisFromFile(t *testing.T) {
+	path := writeConfig(t, "lock:\n  genesis: abc123\n")
+	if c := load(t, path); c.Lock.Genesis != "abc123" {
+		t.Fatalf("lock.genesis from file = %q, want abc123", c.Lock.Genesis)
+	}
+}
