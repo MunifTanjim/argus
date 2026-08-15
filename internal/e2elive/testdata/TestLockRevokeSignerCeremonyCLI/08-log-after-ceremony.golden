@@ -1,0 +1,23 @@
+$ argus lock log --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+[0] genesis: 2 signer(s)
+  signer: <NODE-A-SIGPUB>
+  signer: <NODE-B-SIGPUB>
+  hash: <GENESIS>
+[1] authorize-device: <NODE-A-DEVPUB>
+  hash: <TIP-2>
+[2] authorize-device: <NODE-B-DEVPUB>
+  hash: <TIP-3>
+[3] authorize-device: <NODE-C-DEVPUB>
+  hash: <TIP-4>
+[4] revoke-signer: 1 revoked, 2 co-sign(s)
+  revoked: <NODE-B-SIGPUB>
+  replaces: <NODE-C-SIGPUB>
+  hash: <TIP-1>
+
+genesis: <GENESIS>
+tip:     <TIP-1>
+length:  5 entries
+signers: 2  fingerprint: <FP>
+--- stderr ---

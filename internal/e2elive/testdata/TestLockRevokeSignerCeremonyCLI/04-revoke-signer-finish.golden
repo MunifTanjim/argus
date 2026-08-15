@@ -1,0 +1,8 @@
+$ argus lock revoke-signer --finish <BLOB-COSIGNED> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+revocation applied
+  new tip (audit): <TIP-1>
+--- stderr ---
+
+Revocation propagates to the network within ~<DUR>.
