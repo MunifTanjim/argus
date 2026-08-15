@@ -790,11 +790,15 @@ func newLockRevokeSignerCmd() *cobra.Command {
 			}
 			if len(replacements) == 0 {
 				if st, serr := lockStatusOnNode(ctx, cfg); serr == nil && st.Enabled {
-					if signerCountAfterRevoke(st.Signers, revoked) < 1 {
+					remaining := signerCountAfterRevoke(st.Signers, revoked)
+					if remaining < 1 {
 						return fail(cmd, fmt.Errorf(
 							"revocation would remove all signers and leave the log unrecoverable\n"+
 								"  use --replacement sigpub:<hex> to atomically add a successor signer, or\n"+
 								"  'argus lock disable <secret>' + reinit to abandon locked mode"))
+					}
+					if w := lockInitFewSignersWarning(remaining); w != "" {
+						shell.StdErrF("%s", w)
 					}
 				}
 			}
