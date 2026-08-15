@@ -58,4 +58,5 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodLockRevokeSignerStart, d.handleLockRevokeSignerStart)
 	srv.Handle(api.MethodLockRevokeSignerCosign, d.handleLockRevokeSignerCosign)
 	srv.Handle(api.MethodLockRevokeSignerFinish, d.handleLockRevokeSignerFinish)
+	srv.Handle(api.MethodBeaconDeliver, d.handleBeaconDeliver)
 }
