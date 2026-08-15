@@ -19,6 +19,7 @@ class Profile {
     this.sshPort,
     this.gatewayPort,
     this.keyId,
+    this.e2eEnabled = false,
   });
 
   final String id;
@@ -31,6 +32,7 @@ class Profile {
   final int? sshPort; // ssh (null => default 22)
   final int? gatewayPort; // ssh (null => kDefaultGatewayPort)
   final String? keyId; // ssh
+  final bool e2eEnabled;
 
   Map<String, dynamic> toJson() => {
         'name': name,
@@ -42,6 +44,7 @@ class Profile {
         if (sshPort != null) 'sshPort': sshPort,
         if (gatewayPort != null) 'gatewayPort': gatewayPort,
         if (keyId != null) 'keyId': keyId,
+        if (e2eEnabled) 'e2eEnabled': true,
       };
 
   /// The gateway ws url an ssh profile dials, with the default gateway port
@@ -64,6 +67,7 @@ class Profile {
         sshPort: j['sshPort'] as int?,
         gatewayPort: j['gatewayPort'] as int?,
         keyId: j['keyId'] as String?,
+        e2eEnabled: j['e2eEnabled'] == true,
       );
 }
 
@@ -81,7 +85,8 @@ bool profileIsDangling(Profile p, List<LibraryKey> keys) =>
 Profile draftFromCredentials(String id, GatewayCredentials c) {
   if (!isSshGatewayUrl(c.url)) {
     return Profile(
-        id: id, name: '', mode: ProfileMode.direct, token: c.token, url: c.url);
+        id: id, name: '', mode: ProfileMode.direct, token: c.token, url: c.url,
+        e2eEnabled: c.e2eEnabled);
   }
   final cfg = parseSshGatewayUrl(c.url);
   return Profile(
@@ -93,5 +98,6 @@ Profile draftFromCredentials(String id, GatewayCredentials c) {
     user: cfg.user,
     sshPort: cfg.sshPort,
     gatewayPort: cfg.gatewayPort,
+    e2eEnabled: c.e2eEnabled,
   );
 }

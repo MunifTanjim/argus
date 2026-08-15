@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/transport/jsonrpc.dart';
+import 'package:argus/transport/rpc_client.dart';
 
 class FakeLink implements RpcLink {
   final _ctrl = StreamController<RpcMessage>.broadcast();
@@ -35,8 +36,9 @@ class PongLink implements RpcLink {
     final m = jsonDecode(frame) as Map<String, dynamic>;
     final id = m['id'];
     if (id != null && !_ctrl.isClosed) {
-      _ctrl.add(RpcMessage.fromJson(
-          {'jsonrpc': '2.0', 'id': id, 'result': null}));
+      _ctrl.add(
+        RpcMessage.fromJson({'jsonrpc': '2.0', 'id': id, 'result': null}),
+      );
     }
   }
 
@@ -54,31 +56,37 @@ class _Fatal implements FatalConnectError {
 }
 
 void main() {
-  test('a fatal connect error stops redialing and surfaces the message',
-      () async {
-    var attempts = 0;
-    final mgr = ConnectionManager(
-      connect: () async {
-        attempts++;
-        throw _Fatal('host key changed — possible MITM');
-      },
-      baseBackoff: const Duration(milliseconds: 5),
-      maxBackoff: const Duration(milliseconds: 20),
-    );
-    mgr.start();
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-    expect(mgr.state, ConnState.failed);
-    expect(mgr.failureMessage, contains('MITM'));
-    // Fatal ⇒ no backoff loop; a single dial, not repeated attempts.
-    expect(attempts, 1);
-    await mgr.stop();
-  });
+  test(
+    'a fatal connect error stops redialing and surfaces the message',
+    () async {
+      var attempts = 0;
+      final mgr = ConnectionManager(
+        connect: () async {
+          attempts++;
+          throw _Fatal('host key changed — possible MITM');
+        },
+        clientFactory: (incoming, send) =>
+            RpcClient(incoming: incoming, sendFrame: send),
+        baseBackoff: const Duration(milliseconds: 5),
+        maxBackoff: const Duration(milliseconds: 20),
+      );
+      mgr.start();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(mgr.state, ConnState.failed);
+      expect(mgr.failureMessage, contains('MITM'));
+      // Fatal ⇒ no backoff loop; a single dial, not repeated attempts.
+      expect(attempts, 1);
+      await mgr.stop();
+    },
+  );
 
   test('reaches connected and runs onConnected', () async {
     final link = FakeLink();
     var resynced = false;
     final mgr = ConnectionManager(
       connect: () async => link,
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       onConnected: (c) async => resynced = true,
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
@@ -103,6 +111,8 @@ void main() {
         links.add(l);
         return l;
       },
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
     );
@@ -119,6 +129,8 @@ void main() {
   test('stop prevents further reconnects', () async {
     final mgr = ConnectionManager(
       connect: () async => FakeLink(),
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
     );
@@ -138,6 +150,8 @@ void main() {
         }
         return FakeLink();
       },
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       dialTimeout: const Duration(milliseconds: 20),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
@@ -153,6 +167,8 @@ void main() {
     var attempt = 0;
     final mgr = ConnectionManager(
       connect: () async => FakeLink(),
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       onConnected: (c) async {
         attempt++;
         if (attempt == 1) await Completer<void>().future; // never completes
@@ -175,6 +191,8 @@ void main() {
         attempts++;
         return FakeLink(); // never answers ping
       },
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       keepaliveInterval: const Duration(milliseconds: 20),
       keepaliveTimeout: const Duration(milliseconds: 20),
       baseBackoff: const Duration(milliseconds: 5),
@@ -193,6 +211,8 @@ void main() {
         attempts++;
         return PongLink();
       },
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       keepaliveInterval: const Duration(milliseconds: 20),
       keepaliveTimeout: const Duration(milliseconds: 20),
       baseBackoff: const Duration(milliseconds: 5),
@@ -213,6 +233,8 @@ void main() {
         links.add(l);
         return l;
       },
+      clientFactory: (incoming, send) =>
+          RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
     );
