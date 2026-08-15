@@ -256,8 +256,8 @@ func TestGuardPinAllowsTheConfigGenesis(t *testing.T) {
 	}
 }
 
-// TestPinClientRolePinsTheMachineThatRanLockInit covers the dark-dashboard case: the
-// client is a separate role with its own file, so lock.init must pin it too.
+// TestClientPinStatusNamesQuarantine backs the doc promise that `argus lock status`
+// shows a quarantined device and the genesis it saw — the client-side quarantine has
 // no other surface.
 func TestClientPinStatusNamesQuarantine(t *testing.T) {
 	seen := testGenesis(0x11)
