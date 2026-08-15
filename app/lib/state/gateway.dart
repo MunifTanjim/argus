@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../data/client_identity_store.dart';
+import '../data/trust_chain_store.dart';
 import '../models/registry_event.dart';
 import '../pairing/gateway_store.dart';
 import '../pairing/pairing_uri.dart';
@@ -15,6 +17,11 @@ import '../transport/ws_link.dart';
 import 'profiles.dart';
 import 'push.dart';
 import 'sessions.dart';
+
+final clientIdentityStoreProvider =
+    Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
+final trustChainStoreProvider =
+    Provider<TrustChainStore>((ref) => TrustChainStore(const FlutterSecureKv()));
 
 final credentialsProvider = StateProvider<GatewayCredentials?>((ref) => null);
 
@@ -47,6 +54,10 @@ final connStateProvider =
 /// The user-facing message behind [ConnState.failed] (e.g. a changed host key /
 /// possible MITM), or null when not in a failed state.
 final connErrorProvider = StateProvider<String?>((ref) => null);
+
+/// Whether the active E2E client has detected a trust-log equivocation.
+/// Polled from the client on the trust-resync cadence; reset on disconnect.
+final equivocationProvider = StateProvider<bool>((ref) => false);
 
 Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.list');
