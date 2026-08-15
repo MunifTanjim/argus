@@ -1,0 +1,34 @@
+name: e2elive
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2elive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # No `go mod download` step: `go test` fetches what the test binary needs,
+      # and the image resolves its own modules inside BuildKit cache mounts that
+      # this runner never persists.
+
+      # docker/setup-buildx-action is not used here: buildTestImage() calls
+      # plain `docker build`, not `docker buildx build`. DOCKER_BUILDKIT=1 below
+      # is enough. Reintroduce setup-buildx-action if cache-from/cache-to: type=gha
+      # is ever added for image layer caching.
+
+      - name: Test
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: go test ./internal/e2elive/ -count=1 -v

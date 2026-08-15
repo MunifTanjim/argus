@@ -795,11 +795,24 @@ func (s *Server) nodeHandler() http.Handler {
 // TCP FIN) promptly. Closing after nodeKeepaliveFailures unanswered pings fires
 // Done into the aggregator's offline → grace → removal path; two failures ride out
 // a transient blip so a briefly busy node isn't dropped.
-const (
-	nodeKeepaliveInterval = 15 * time.Second
-	nodeKeepaliveTimeout  = 5 * time.Second
-	nodeKeepaliveFailures = 2
+var (
+	nodeKeepaliveInterval = api.DefaultKeepaliveInterval
+	nodeKeepaliveTimeout  = api.DefaultKeepaliveTimeout
+	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
 )
+
+// SetNodeKeepaliveForTest shortens the node-uplink heartbeat so a test can cover
+// several keepalive cycles in milliseconds. Test-only.
+func SetNodeKeepaliveForTest(interval, timeout time.Duration, failures int) {
+	nodeKeepaliveInterval, nodeKeepaliveTimeout, nodeKeepaliveFailures = interval, timeout, failures
+}
+
+// ResetNodeKeepaliveForTest restores the production heartbeat settings. Test-only.
+func ResetNodeKeepaliveForTest() {
+	nodeKeepaliveInterval = api.DefaultKeepaliveInterval
+	nodeKeepaliveTimeout = api.DefaultKeepaliveTimeout
+	nodeKeepaliveFailures = api.DefaultKeepaliveFailures
+}
 
 // nodeIdentifyTimeout bounds the post-auth identify handshake on a node uplink.
 const nodeIdentifyTimeout = 30 * time.Second
