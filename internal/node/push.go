@@ -94,13 +94,16 @@ func (c currentDeliverer) Deliver(ctx context.Context, endpoint string, cipherte
 }
 
 // StartPush runs push.Watch over this node's own registry: desktop alerts render
-// node-local, and (when a push store is set) mobile alerts are encrypted locally
-// and handed to the current deliverer (read per delivery) after `delay`. Blocks
-// until ctx is done; run it in a goroutine.
+// node-local when desktop notify is enabled, and (when a push store is set) mobile
+// alerts are encrypted locally and handed to the current deliverer (read per
+// delivery) after `delay`. Blocks until ctx is done; run it in a goroutine.
 func (d *Node) StartPush(ctx context.Context, delay time.Duration) {
 	events, cancel := d.reg.Subscribe()
 	defer cancel()
-	sinks := push.Sinks{Immediate: []push.Sink{d.DesktopSink()}, Delay: delay}
+	sinks := push.Sinks{Delay: delay}
+	if d.desktopNotify {
+		sinks.Immediate = []push.Sink{d.DesktopSink()}
+	}
 	if d.pushStore != nil {
 		disp := push.NewDispatcher(d.pushStore, push.NewRelaySender(currentDeliverer{d}), d.log)
 		sinks.Delayed = []push.Sink{disp}

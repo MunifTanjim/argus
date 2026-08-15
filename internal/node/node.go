@@ -83,7 +83,7 @@ type Node struct {
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
-	desktopNotify bool      // render incoming push.desktop notifications on this machine
+	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
 	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
@@ -141,9 +141,9 @@ func (d *Node) adapterFor(agent string) adapter.Adapter {
 	return d.adapterList[0]
 }
 
-// SetDesktopNotify toggles rendering of push.desktop notifications on this
-// machine; click wires a clicked notification to focus the session. Call before
-// Run — not safe once serving (mutates fields read by handler goroutines).
+// SetDesktopNotify toggles desktop notification rendering on this machine;
+// click wires a clicked notification to focus the session. Call before Run —
+// not safe once serving (mutates fields read by handler goroutines).
 func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 	d.desktopNotify = enabled
 	d.notifier = push.NewOSNotifier(d.log, click)

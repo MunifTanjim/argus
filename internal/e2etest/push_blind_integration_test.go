@@ -25,7 +25,7 @@ import (
 )
 
 // TestBlindPushNodeDeliversEncryptedPayload proves the e2ee push spec:
-// with blind=true, a node encrypts and delivers a push through the gateway
+// a node encrypts and delivers a push through the gateway (a pure router)
 // without the gateway ever seeing the notification cleartext.
 func TestBlindPushNodeDeliversEncryptedPayload(t *testing.T) {
 	var (
@@ -54,9 +54,9 @@ func TestBlindPushNodeDeliversEncryptedPayload(t *testing.T) {
 		t.Fatalf("vapid: %v", err)
 	}
 
-	// Blind gateway: holds VAPID key, relays opaque push.deliver bodies.
-	agg := gateway.New(time.Second, true)
-	gwsrv := gateway.NewServer(agg, nil, nil, true)
+	// Gateway: holds VAPID key, relays opaque push.deliver bodies.
+	agg := gateway.New(time.Second)
+	gwsrv := gateway.NewServer(agg, nil, nil)
 	gwsrv.SetVAPIDPublicKey(vapid.PublicKey())
 	gwsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
 	ts := httptest.NewServer(gwsrv.Handler())
@@ -115,7 +115,7 @@ func TestBlindPushNodeDeliversEncryptedPayload(t *testing.T) {
 	}
 	nc.Close()
 
-	// Connect the node to the blind gateway; runUplinkBlind sets the uplinkDeliverer
+	// Connect the node to the blind gateway; runUplink sets the uplinkDeliverer
 	// because d.pushStore != nil.
 	go d.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
 
@@ -165,33 +165,5 @@ func TestBlindPushNodeDeliversEncryptedPayload(t *testing.T) {
 	// The gateway never saw the cleartext; the body must be opaque.
 	if strings.Contains(string(body), "Needs your attention") || strings.Contains(string(body), "claude") {
 		t.Fatal("push body contains notification cleartext — gateway is not blind")
-	}
-}
-
-// TestBlindPushDefaultGatewayPathUnchanged confirms the e2ee-off (blind=false)
-// gateway push path is intact: push.register succeeds on the gateway's client
-// endpoint via the existing SetPush / registerPush code path.
-func TestBlindPushDefaultGatewayPathUnchanged(t *testing.T) {
-	store := push.NewStore(t.TempDir())
-	disp := push.NewDispatcher(store, push.NewUnifiedPushSender(nil), nil)
-
-	agg := gateway.New(time.Second, false)
-	srv := gateway.NewServer(agg, nil, nil, false)
-	srv.SetPush(store, disp)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	conn, err := api.DialWSConn(context.Background(), wsURL(ts.URL, "/client"), "", nil)
-	if err != nil {
-		t.Fatalf("dial gateway: %v", err)
-	}
-	c := api.NewClient(conn)
-	defer c.Close()
-
-	if err := c.Call(api.MethodPushRegister, api.PushRegisterParams{
-		DeviceID: "test-device",
-		Endpoint: "https://push.example.com/ep",
-	}, nil); err != nil {
-		t.Fatalf("push.register on non-blind gateway failed: %v", err)
 	}
 }

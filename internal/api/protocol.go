@@ -74,7 +74,6 @@ const (
 	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
 	// subscribe with. Empty Key means Web Push is unavailable.
 	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
-	MethodPushDesktop  = "push.desktop"  // request: push.Notification; result: nil (render on node if opted in)
 	// MethodPushDeliver is a node->gateway request carrying an opaque, pre-encrypted
 	// Web Push body for the gateway to VAPID-sign and POST. The gateway never sees
 	// cleartext notification content.

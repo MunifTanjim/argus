@@ -68,6 +68,53 @@ func TestNodeHandlePushRegisterAndTest(t *testing.T) {
 	}
 }
 
+// chanSink is a thread-safe push.Sink for asserting across the Watch goroutine.
+type chanSink struct{ ch chan push.Notification }
+
+func (c chanSink) Notify(_ context.Context, n push.Notification) { c.ch <- n }
+
+func TestNodeStartPushRendersDesktopWhenEnabled(t *testing.T) {
+	d := New()
+	d.SetDesktopNotify(true, nil)
+	sink := chanSink{ch: make(chan push.Notification, 1)}
+	d.notifier = sink
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.StartPush(ctx, 0)
+	time.Sleep(20 * time.Millisecond) // let Watch subscribe before publishing
+
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
+
+	select {
+	case <-sink.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no desktop notification rendered when enabled")
+	}
+}
+
+func TestNodeStartPushSkipsDesktopWhenDisabled(t *testing.T) {
+	d := New()
+	d.SetDesktopNotify(false, nil) // disabled: StartPush must not wire the desktop sink
+	sink := chanSink{ch: make(chan push.Notification, 1)}
+	d.notifier = sink
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.StartPush(ctx, 0)
+	time.Sleep(20 * time.Millisecond)
+
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
+
+	select {
+	case <-sink.ch:
+		t.Fatal("desktop notification rendered while disabled")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestNodeStartPushDeliversMobileOnAwaitingInput(t *testing.T) {
 	// Generate a real P256 UA keypair and auth secret for Web Push encryption.
 	curve := ecdh.P256()

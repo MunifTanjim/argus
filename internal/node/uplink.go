@@ -43,62 +43,10 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 }
 
 // runUplink dials the gateway and waits until the connection or ctx ends. It
-// returns whether the dial succeeded (to drive backoff reset).
+// returns whether the dial succeeded (to drive backoff reset). The node runs a
+// relay responder that terminates channels from clients; the gateway can only
+// issue node.identify, all client requests travel through relay frames.
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
-	if d.e2ee {
-		return d.runUplinkBlind(ctx, url, token, httpClient)
-	}
-	return d.runUplinkPlain(ctx, url, token, httpClient)
-}
-
-// runUplinkPlain is the original plaintext uplink: the gateway issues control
-// requests down this link and the node pushes registry changes up as session.event.
-func (d *Node) runUplinkPlain(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
-	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
-		// The gateway issues control requests (capture/input/respond/...) down this
-		// link. remoteDispatch filters lock.* so lock handlers are never reachable
-		// from the network — local unix socket only.
-		Dispatch: d.remoteDispatch(),
-	})
-	if err != nil {
-		if ctx.Err() == nil {
-			d.log.Warn("gateway uplink dial failed", "url", url, "err", err)
-		}
-		return false
-	}
-	defer peer.Close()
-	d.log.Info("gateway uplink established", "url", url)
-
-	// Subscribe before the gateway pulls our snapshot so no live event is lost.
-	events, cancel := d.reg.Subscribe()
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return true
-		case <-peer.Done():
-		case ev, ok := <-events:
-			if !ok {
-				return true
-			}
-			if err := peer.Notify(api.MethodSessionEvent, ev); err == nil {
-				continue
-			}
-		}
-		// peer.Done() fired, or a Notify failed: the uplink is gone. Log once,
-		// but not on clean shutdown (cancellation).
-		if ctx.Err() == nil {
-			d.log.Info("gateway uplink closed", "url", url)
-		}
-		return true
-	}
-}
-
-// runUplinkBlind is the E2E blind uplink: the node runs a relay responder that
-// terminates Noise IK channels from clients. The gateway can only issue
-// node.identify; all client requests travel sealed end-to-end.
-func (d *Node) runUplinkBlind(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
 	resp := d.newRelayResponder()
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		Dispatch:     d.uplinkDispatch(),

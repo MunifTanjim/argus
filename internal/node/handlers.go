@@ -27,7 +27,6 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodAgentsList, d.handleAgentsList)
 	srv.Handle(api.MethodSessionKill, d.handleSessionKill)
 	srv.Handle(api.MethodSessionFocus, d.handleSessionFocus)
-	srv.Handle(api.MethodPushDesktop, d.handlePushDesktop)
 	srv.Handle(api.MethodPushRegister, d.handlePushRegister)
 	srv.Handle(api.MethodPushUnregister, d.handlePushUnregister)
 	srv.Handle(api.MethodPushTest, d.handlePushTest)
