@@ -176,14 +176,17 @@ func (d *Node) remoteDispatch() api.DispatchFunc {
 }
 
 // uplinkDispatch is the gateway→node surface over the uplink. It answers only
-// node.identify; all other requests are refused.
+// node.identify and ping; all other requests are refused. Ping must pass so the
+// gateway's keepalive probe does not count as a failure and tear the uplink down.
 func (d *Node) uplinkDispatch() api.DispatchFunc {
 	full := d.remoteDispatch()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if method == api.MethodNodeIdentify {
+		switch method {
+		case api.MethodNodeIdentify, api.MethodPing:
 			return full(ctx, method, params)
+		default:
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
-		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 	}
 }
 
