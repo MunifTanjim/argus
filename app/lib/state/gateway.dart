@@ -6,7 +6,7 @@ import '../pairing/gateway_store.dart';
 import '../pairing/pairing_uri.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import '../transport/ssh_gateway.dart';
 import '../transport/ssh_hostkey_store.dart';
 import '../transport/ssh_key_store.dart';
@@ -48,12 +48,12 @@ final connStateProvider =
 /// possible MITM), or null when not in a failed state.
 final connErrorProvider = StateProvider<String?>((ref) => null);
 
-Future<void> loadSessions(RpcClient client, SessionsNotifier store) async {
+Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.list');
   store.replaceAll(parseSessions(result));
 }
 
-Future<void> refreshSessions(RpcClient client, SessionsNotifier store) async {
+Future<void> refreshSessions(GatewayClient client, SessionsNotifier store) async {
   final result = await client.call('sessions.refresh');
   store.replaceAll(parseSessions(result));
 }

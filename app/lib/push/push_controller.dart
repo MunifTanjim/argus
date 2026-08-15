@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import '../pairing/gateway_store.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import 'device_id.dart';
 import 'notifications.dart';
 import 'push_provider.dart';
@@ -48,7 +48,7 @@ class PushController {
 
   PushProvider? _active;
   PushTarget? _target;
-  RpcClient? _client;
+  GatewayClient? _client;
   String? _deviceId;
   String? _selectedDistributor;
   StreamSubscription<String>? _tapSub;
@@ -157,12 +157,12 @@ class PushController {
 
   /// Registers the current target once connected, and fetches the gateway's VAPID
   /// key (for the embedded FCM distributor).
-  void attach(RpcClient client) {
+  void attach(GatewayClient client) {
     _client = client;
     _onAttached(client);
   }
 
-  Future<void> _onAttached(RpcClient client) async {
+  Future<void> _onAttached(GatewayClient client) async {
     // New connection: register once (refreshing the gateway record), even if the
     // target is unchanged from the previous connection.
     _registeredTarget = null;
@@ -194,7 +194,7 @@ class PushController {
     await _registrations.close();
   }
 
-  Future<void> _fetchVapidKey(RpcClient client) async {
+  Future<void> _fetchVapidKey(GatewayClient client) async {
     String? key;
     try {
       final res = await client.call('push.vapidKey');
@@ -246,7 +246,7 @@ class PushController {
     return fut;
   }
 
-  Future<bool> _register(RpcClient client, String deviceId, PushTarget target) async {
+  Future<bool> _register(GatewayClient client, String deviceId, PushTarget target) async {
     final ok = await registerWithRetry(client, deviceId, target);
     if (!ok) _registeredTarget = null; // let a later attempt retry
     _lastRegistration = ok;
