@@ -119,6 +119,9 @@ func (d *Node) runUplinkBlind(ctx context.Context, url, token string, httpClient
 	defer d.activeResponder.CompareAndSwap(resp, nil)
 	defer d.activeUplink.CompareAndSwap(peer, nil)
 	d.log.Info("gateway uplink established", "url", url)
+	if d.pushStore != nil {
+		d.SetPushDeliverer(uplinkDeliverer{peer: peer})
+	}
 
 	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).
 	go d.runTrustSync(ctx, peer)
