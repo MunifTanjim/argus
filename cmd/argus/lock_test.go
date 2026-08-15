@@ -7,17 +7,39 @@ import (
 	"github.com/MunifTanjim/argus/internal/keyfmt"
 )
 
-func TestLockLogCmdWiredInLockCmd(t *testing.T) {
+func TestLockCmdRegistersOnly6aSubcommands(t *testing.T) {
 	cmd := newLockCmd()
-	found := false
-	for _, c := range cmd.Commands() {
-		if c.Name() == "log" {
-			found = true
-			break
+	subs := cmd.Commands()
+
+	if len(subs) != 5 {
+		names := make([]string, len(subs))
+		for i, c := range subs {
+			names[i] = c.Name()
+		}
+		t.Fatalf("newLockCmd must register exactly 5 subcommands, got %d: %v", len(subs), names)
+	}
+
+	want := []string{"local-disable", "log", "pin", "status", "unpin"}
+	for _, name := range want {
+		found := false
+		for _, c := range subs {
+			if c.Name() == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected subcommand %q not registered", name)
 		}
 	}
-	if !found {
-		t.Error("'argus lock log' subcommand not registered in newLockCmd")
+
+	forbidden := []string{"init", "sign", "revoke-device", "add-signer", "remove-signer", "disable", "revoke-signer"}
+	for _, name := range forbidden {
+		for _, c := range subs {
+			if c.Name() == name {
+				t.Errorf("signing/ceremony command %q must not be registered in 6a", name)
+			}
+		}
 	}
 }
 
