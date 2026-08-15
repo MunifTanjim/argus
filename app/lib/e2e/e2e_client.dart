@@ -75,9 +75,11 @@ class E2EClient implements GatewayClient {
     bool tofu = false,
     this.trustResyncInterval,
     this.onTrustChainAdvance,
-  })  : _trust = tofu
-            ? TrustStore.tofu()
-            : (genesisHash != null ? TrustStore(genesisHash) : null) {
+    bool plaintext = false,
+  }) : _trust = tofu
+           ? TrustStore.tofu()
+           : (genesisHash != null ? TrustStore(genesisHash) : null),
+       _plaintext = plaintext {
     _sub = _incoming.listen(_onMessage, onDone: _onDone, cancelOnError: false);
     _gateway = RpcClient(incoming: _gatewayCtrl.stream, sendFrame: _send);
     _gatewayNotifSub = _gateway.notifications.listen(_onGatewayNotification);
@@ -90,6 +92,7 @@ class E2EClient implements GatewayClient {
   final Duration callTimeout;
   final TrustStore? _trust;
   final Uint8List? _initialTrustChain;
+  final bool _plaintext;
   final _entryStore = EntryStore();
   // Last unplaced count that triggered a warning. 0 means no active warning;
   // reset to 0 when the count returns to 0 so a later recurrence is reported again.
@@ -190,29 +193,31 @@ class E2EClient implements GatewayClient {
   /// The per-node notification stream, decoded and (for session.event and
   /// tasks.changed) stamped with composite node origin — the aggregated view the
   /// app consumes.
-  Stream<({String method, Object? params})> get aggregatedEvents => events.map((e) {
-        Object? params;
-        try {
-          params = jsonDecode(utf8.decode(e.params));
-        } catch (_) {
-          return (method: e.method, params: null);
-        }
-        if (e.method == 'session.event' && params is Map<String, dynamic>) {
-          final sess = params['session'];
-          if (sess is Map<String, dynamic>) {
-            params = {
-              ...params,
-              'session': withOriginJson(sess, e.nodeId, _roster[e.nodeId]?.label),
-            };
-          }
-        } else if (e.method == 'tasks.changed' && params is Map<String, dynamic>) {
-          final sid = params['session_id'];
-          if (sid is String && sid.isNotEmpty) {
-            params = {...params, 'session_id': compositeId(e.nodeId, sid)};
-          }
-        }
-        return (method: e.method, params: params);
-      });
+  Stream<({String method, Object? params})> get aggregatedEvents => events.map((
+    e,
+  ) {
+    Object? params;
+    try {
+      params = jsonDecode(utf8.decode(e.params));
+    } catch (_) {
+      return (method: e.method, params: null);
+    }
+    if (e.method == 'session.event' && params is Map<String, dynamic>) {
+      final sess = params['session'];
+      if (sess is Map<String, dynamic>) {
+        params = {
+          ...params,
+          'session': withOriginJson(sess, e.nodeId, _roster[e.nodeId]?.label),
+        };
+      }
+    } else if (e.method == 'tasks.changed' && params is Map<String, dynamic>) {
+      final sid = params['session_id'];
+      if (sid is String && sid.isNotEmpty) {
+        params = {...params, 'session_id': compositeId(e.nodeId, sid)};
+      }
+    }
+    return (method: e.method, params: params);
+  });
 
   /// Discovers nodes (nodes.list) and opens an E2E channel to each node that
   /// advertises an identity key. When a genesis hash is configured, pulls and
@@ -237,33 +242,45 @@ class E2EClient implements GatewayClient {
       if (seed != null) {
         try {
           await _trust.ingest(seed);
-        } catch (_) {/* corrupt/rolled-back seed: ignore, fail-closed */}
+        } catch (_) {
+          /* corrupt/rolled-back seed: ignore, fail-closed */
+        }
       }
       try {
         await _syncTrustLog(_trust);
-      } catch (_) {/* keep prior/seeded state (fail-closed) */}
+      } catch (_) {
+        /* keep prior/seeded state (fail-closed) */
+      }
     }
     final toOpen = <NodeDescriptor>[];
     for (final n in nodes) {
       if (n is! Map) continue;
       final key = n['identity_pubkey'];
-      if (key is! String || key.isEmpty) continue;
-      final pub = base64.decode(key);
-      if (_trust != null && _trust.locked && !_trust.disabled && !_trust.deviceAuthorized(pub)) continue;
+      if (!_plaintext && (key is! String || key.isEmpty)) continue;
+      if (!_plaintext) {
+        final pub = base64.decode(key as String);
+        if (_trust != null &&
+            _trust.locked &&
+            !_trust.disabled &&
+            !_trust.deviceAuthorized(pub))
+          continue;
+      }
       toOpen.add(_parseNodeDescriptor(n as Map<String, dynamic>));
     }
-    await Future.wait(toOpen.map((desc) async {
-      final nc = await openChannel(desc);
-      _byNodeId[desc.id] = nc;
-      _roster[desc.id] = desc;
-      // Record identity pub hex so checkBeaconConsistency can distinguish
-      // "was connected, now offline" from "never connected".
-      if (desc.identityPubKey.isNotEmpty) {
-        try {
-          _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
-        } catch (_) {}
-      }
-    }));
+    await Future.wait(
+      toOpen.map((desc) async {
+        final nc = await openChannel(desc);
+        _byNodeId[desc.id] = nc;
+        _roster[desc.id] = desc;
+        // Record identity pub hex so checkBeaconConsistency can distinguish
+        // "was connected, now offline" from "never connected".
+        if (desc.identityPubKey.isNotEmpty) {
+          try {
+            _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
+          } catch (_) {}
+        }
+      }),
+    );
     final interval = trustResyncInterval;
     if (_trust != null && interval != null && !_closed) {
       _resyncTimer = Timer.periodic(interval, (_) => resyncNow());
@@ -284,7 +301,8 @@ class E2EClient implements GatewayClient {
       return; // keep the current verified view (fail-closed)
     }
     final after = trust.chainBytes;
-    final changed = after != null && (before == null || !bytesEqual(before, after));
+    final changed =
+        after != null && (before == null || !bytesEqual(before, after));
     if (changed) {
       await onTrustChainAdvance?.call(after);
       _reevaluateChannels();
@@ -379,7 +397,9 @@ class E2EClient implements GatewayClient {
       refused += r;
       try {
         await trust.ingest(chain);
-      } catch (_) {/* bad branch: skip, keep best state so far */}
+      } catch (_) {
+        /* bad branch: skip, keep best state so far */
+      }
     }
     if (refused > 0) {
       developer.log(
@@ -423,7 +443,6 @@ class E2EClient implements GatewayClient {
     }
   }
 
-
   /// Aggregating RPC: reproduces the gateway's cross-node aggregation. Mirrors
   /// RpcClient.call's signature so the app can swap transports.
   @override
@@ -435,18 +454,33 @@ class E2EClient implements GatewayClient {
       case 'sessions.historyProjects':
         return _fanoutHistoryProjects(params);
       case 'transcript.unsubscribe':
-        return _routeByHandle(_subNode, stringField(params, 'sub_id'), method, params);
+        return _routeByHandle(
+          _subNode,
+          stringField(params, 'sub_id'),
+          method,
+          params,
+        );
     }
-    if (sessionAddressed.contains(method)) return _routeBySession(method, params);
+    if (sessionAddressed.contains(method))
+      return _routeBySession(method, params);
     if (nodeAddressed.contains(method)) return _routeByNode(method, params);
     if (terminalHandleAddressed.contains(method)) {
-      return _routeByHandle(_termNode, stringField(params, 'term_id'), method, params);
+      return _routeByHandle(
+        _termNode,
+        stringField(params, 'term_id'),
+        method,
+        params,
+      );
     }
     if (pushFanoutMethods.contains(method)) return _fanoutPush(method, params);
     return _gateway.call(method, params); // gateway-native passthrough
   }
 
-  Future<Object?> _callNodeDecoded(String nodeId, String method, Object? params) async {
+  Future<Object?> _callNodeDecoded(
+    String nodeId,
+    String method,
+    Object? params,
+  ) async {
     final nc = _byNodeId[nodeId];
     if (nc == null) throw StateError('unknown node $nodeId');
     final result = await callNode(nc, method, utf8.encode(jsonEncode(params)));
@@ -456,19 +490,22 @@ class E2EClient implements GatewayClient {
 
   Future<List<dynamic>> _fanoutSessions(String method, Object? params) async {
     final entries = _byNodeId.keys.toList();
-    final results = await Future.wait(entries.map((nodeId) async {
-      try {
-        final r = await _callNodeDecoded(nodeId, method, params);
-        return (nodeId, r is List ? r : const []);
-      } catch (_) {
-        return (nodeId, const <dynamic>[]);
-      }
-    }));
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, method, params);
+          return (nodeId, r is List ? r : const []);
+        } catch (_) {
+          return (nodeId, const <dynamic>[]);
+        }
+      }),
+    );
     final merged = <dynamic>[];
     for (final (nodeId, list) in results) {
       final label = _roster[nodeId]?.label;
       for (final s in list) {
-        if (s is Map<String, dynamic>) merged.add(withOriginJson(s, nodeId, label));
+        if (s is Map<String, dynamic>)
+          merged.add(withOriginJson(s, nodeId, label));
       }
     }
     return merged;
@@ -476,23 +513,33 @@ class E2EClient implements GatewayClient {
 
   Future<List<dynamic>> _fanoutHistoryProjects(Object? params) async {
     final entries = _byNodeId.keys.toList();
-    final results = await Future.wait(entries.map((nodeId) async {
-      try {
-        final r = await _callNodeDecoded(nodeId, 'sessions.historyProjects', params);
-        return (nodeId, r is List ? r : const []);
-      } catch (_) {
-        return (nodeId, const <dynamic>[]);
-      }
-    }));
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(
+            nodeId,
+            'sessions.historyProjects',
+            params,
+          );
+          return (nodeId, r is List ? r : const []);
+        } catch (_) {
+          return (nodeId, const <dynamic>[]);
+        }
+      }),
+    );
     final all = <Map<String, dynamic>>[];
     for (final (nodeId, list) in results) {
       final label = _roster[nodeId]?.label;
       for (final p in list) {
-        if (p is Map<String, dynamic>) all.add({...p, 'node_id': nodeId, 'node_label': label});
+        if (p is Map<String, dynamic>)
+          all.add({...p, 'node_id': nodeId, 'node_label': label});
       }
     }
-    all.sort((a, b) =>
-        (b['last_activity'] as String? ?? '').compareTo(a['last_activity'] as String? ?? ''));
+    all.sort(
+      (a, b) => (b['last_activity'] as String? ?? '').compareTo(
+        a['last_activity'] as String? ?? '',
+      ),
+    );
     return all;
   }
 
@@ -503,13 +550,18 @@ class E2EClient implements GatewayClient {
   Future<Object?> _fanoutPush(String method, Object? params) async {
     final nodeIds = _byNodeId.keys.toList();
     if (nodeIds.isEmpty) return _gateway.call(method, params);
-    final results = await Future.wait(nodeIds.map((nodeId) async {
-      try {
-        return (null as Object?, await _callNodeDecoded(nodeId, method, params));
-      } on Object catch (e) {
-        return (e, null as Object?);
-      }
-    }));
+    final results = await Future.wait(
+      nodeIds.map((nodeId) async {
+        try {
+          return (
+            null as Object?,
+            await _callNodeDecoded(nodeId, method, params),
+          );
+        } on Object catch (e) {
+          return (e, null as Object?);
+        }
+      }),
+    );
     Object? lastResult;
     var successCount = 0;
     final errors = <Object>[];
@@ -541,7 +593,11 @@ class E2EClient implements GatewayClient {
     if (!ok) {
       throw RpcError(-32600, 'session id is not gateway-qualified: $composite');
     }
-    final result = await _callNodeDecoded(nodeId, method, rewriteSessionId(params, localId));
+    final result = await _callNodeDecoded(
+      nodeId,
+      method,
+      rewriteSessionId(params, localId),
+    );
     if (method == 'transcript.subscribe') {
       final sub = stringField(params, 'sub_id');
       if (sub != null && sub.isNotEmpty) _subNode[sub] = nodeId;
@@ -559,14 +615,16 @@ class E2EClient implements GatewayClient {
       if (nodeId.isEmpty) throw RpcError(-32600, '$method requires node_id');
     }
     final result = await _callNodeDecoded(nodeId, method, params);
-    if (compositeResultMethods.contains(method) && result is Map<String, dynamic>) {
+    if (compositeResultMethods.contains(method) &&
+        result is Map<String, dynamic>) {
       final local = result['session_id'];
       if (local is String && local.isNotEmpty) {
         return {...result, 'session_id': compositeId(nodeId, local)};
       }
       return result;
     }
-    if (method == 'sessions.historySessions' && result is Map<String, dynamic>) {
+    if (method == 'sessions.historySessions' &&
+        result is Map<String, dynamic>) {
       final items = result['items'];
       if (items is List) {
         final label = _roster[nodeId]?.label;
@@ -574,7 +632,10 @@ class E2EClient implements GatewayClient {
           ...result,
           'items': [
             for (final it in items)
-              if (it is Map<String, dynamic>) {...it, 'node_id': nodeId, 'node_label': label} else it
+              if (it is Map<String, dynamic>)
+                {...it, 'node_id': nodeId, 'node_label': label}
+              else
+                it,
           ],
         };
       }
@@ -583,7 +644,11 @@ class E2EClient implements GatewayClient {
   }
 
   Future<Object?> _routeByHandle(
-      Map<String, String> table, String? id, String method, Object? params) async {
+    Map<String, String> table,
+    String? id,
+    String method,
+    Object? params,
+  ) async {
     if (id == null || id.isEmpty) {
       throw RpcError(-32600, '$method requires a handle id');
     }
@@ -623,7 +688,10 @@ class E2EClient implements GatewayClient {
   Future<void> _ingestBeaconFromDescriptor(NodeDescriptor nd) async {
     final beacon = nd.beacon;
     final beaconPubKeyStr = nd.beaconPubKey;
-    if (beacon == null || nd.identityPubKey.isEmpty || beaconPubKeyStr == null || beaconPubKeyStr.isEmpty) {
+    if (beacon == null ||
+        nd.identityPubKey.isEmpty ||
+        beaconPubKeyStr == null ||
+        beaconPubKeyStr.isEmpty) {
       return;
     }
     final Uint8List identityPub;
@@ -635,13 +703,16 @@ class E2EClient implements GatewayClient {
       return;
     }
     if (!await verifyBeacon(beacon)) return; // signature invalid: drop
-    if (!bytesEqual(beacon.beaconPub, expectedBeaconPub)) return; // key mismatch: drop
+    if (!bytesEqual(beacon.beaconPub, expectedBeaconPub))
+      return; // key mismatch: drop
     final key = hexEncode(identityPub);
     final curCtr = _beaconCtr[key] ?? 0;
     if (beacon.counter <= curCtr) return; // stale or replayed: ignore
     _beacons[key] = beacon;
     _beaconCtr[key] = beacon.counter;
-    _beaconMiss.remove(key); // counter advanced: new beacon supersedes any miss streak
+    _beaconMiss.remove(
+      key,
+    ); // counter advanced: new beacon supersedes any miss streak
   }
 
   /// Removes beacon state for the node described by [nd]. Used when a node goes
@@ -670,8 +741,16 @@ class E2EClient implements GatewayClient {
     if (nodeJson is! Map<String, dynamic>) return;
     final evType = params['type'];
     if (evType == 'beacon') {
-      _ingestBeaconFromDescriptor(_parseNodeDescriptor(nodeJson)).catchError((Object e, StackTrace st) {
-        developer.log('e2e_client: beacon ingest error', name: 'e2e', error: e, stackTrace: st);
+      _ingestBeaconFromDescriptor(_parseNodeDescriptor(nodeJson)).catchError((
+        Object e,
+        StackTrace st,
+      ) {
+        developer.log(
+          'e2e_client: beacon ingest error',
+          name: 'e2e',
+          error: e,
+          stackTrace: st,
+        );
       });
     } else if (evType == 'offline' || evType == 'removed') {
       _pruneBeaconForDescriptor(_parseNodeDescriptor(nodeJson));
@@ -693,10 +772,13 @@ class E2EClient implements GatewayClient {
     if (trust == null) return;
     final chainBytes = trust.chainBytes;
     if (chainBytes == null || chainBytes.isEmpty) return;
-    if (_beacons.isEmpty) return; // no beacons yet: skip the chain parse/hash entirely
+    if (_beacons.isEmpty)
+      return; // no beacons yet: skip the chain parse/hash entirely
     final tip = trust.tip;
     var known = _beaconKnown;
-    if (known == null || tip == null || !bytesEqual(tip, _beaconKnownTip ?? const [])) {
+    if (known == null ||
+        tip == null ||
+        !bytesEqual(tip, _beaconKnownTip ?? const [])) {
       List<Entry> entries;
       try {
         entries = unmarshalChain(chainBytes);
@@ -784,18 +866,34 @@ class E2EClient implements GatewayClient {
       for (final targetId in targetIds) {
         if (targetId == item.sourceId) continue; // never deliver back to source
         try {
-          await _callNodeDecoded(targetId, 'beacon.deliver', item.beacon.toJson());
-        } catch (_) {/* best-effort */}
+          await _callNodeDecoded(
+            targetId,
+            'beacon.deliver',
+            item.beacon.toJson(),
+          );
+        } catch (_) {
+          /* best-effort */
+        }
       }
     }
   }
 
   Future<NodeChannel> openChannel(NodeDescriptor node) async {
-    final res = await _gateway.call('relay.open', {'node_id': node.id}).timeout(handshakeTimeout);
+    final res = await _gateway
+        .call('relay.open', {'node_id': node.id})
+        .timeout(handshakeTimeout);
     final chanId = (res as Map)['chan_id'] as String;
+    if (_plaintext) {
+      final nc = NodeChannel(node.id, chanId, Channel.plain(chanId));
+      _byChanId[chanId] = nc;
+      return nc;
+    }
     final pub = base64.decode(node.identityPubKey);
     final (hs, msg1) = await HandshakeState.initiate(
-        staticKey: _static, remoteStatic: pub, prologue: channelPrologue(node.id, chanId));
+      staticKey: _static,
+      remoteStatic: pub,
+      prologue: channelPrologue(node.id, chanId),
+    );
     final hc = Completer<Uint8List>();
     _handshakes[chanId] = hc;
     _writeFrame(marshalHandshakeFrame(chanId, msg1));
@@ -805,7 +903,11 @@ class E2EClient implements GatewayClient {
     } finally {
       _handshakes.remove(chanId);
     }
-    final nc = NodeChannel(node.id, chanId, Channel(chanId, hs.finish(msg2)));
+    final nc = NodeChannel(
+      node.id,
+      chanId,
+      Channel.noise(chanId, hs.finish(msg2)),
+    );
     _byChanId[chanId] = nc;
     return nc;
   }
@@ -817,10 +919,13 @@ class E2EClient implements GatewayClient {
     final c = Completer<Uint8List>();
     _pending[id] = c;
     _writeFrame(nc.channel.sealRequestFrame(idn, method, nc.nodeId, params));
-    return c.future.timeout(callTimeout, onTimeout: () {
-      _pending.remove(id);
-      throw TimeoutException('callNode $method timed out');
-    });
+    return c.future.timeout(
+      callTimeout,
+      onTimeout: () {
+        _pending.remove(id);
+        throw TimeoutException('callNode $method timed out');
+      },
+    );
   }
 
   void _onMessage(RpcMessage m) {
@@ -838,7 +943,9 @@ class E2EClient implements GatewayClient {
       if (c != null && !c.isCompleted) {
         try {
           c.complete(handshakeFromFrame(RelayFrame.fromMessage(m)));
-        } catch (_) {/* malformed handshake: leave pending -> openChannel times out */}
+        } catch (_) {
+          /* malformed handshake: leave pending -> openChannel times out */
+        }
       }
       return;
     }
@@ -866,11 +973,14 @@ class E2EClient implements GatewayClient {
         if (!_events.isClosed) {
           _events.add((method: m.method!, params: params, nodeId: nc.nodeId));
         }
-      } catch (_) {/* drop */}
+      } catch (_) {
+        /* drop */
+      }
     }
   }
 
-  void _writeFrame(Uint8List frameBytes) => _send('${utf8.decode(frameBytes)}\n');
+  void _writeFrame(Uint8List frameBytes) =>
+      _send('${utf8.decode(frameBytes)}\n');
 
   void _onDone() {
     if (_closed) return;

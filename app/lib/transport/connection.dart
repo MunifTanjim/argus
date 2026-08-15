@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'gateway_client.dart';
 import 'jsonrpc.dart';
-import 'rpc_client.dart';
 
 abstract class RpcLink {
   /// Must be a broadcast stream; ConnectionManager attaches two listeners
@@ -24,7 +23,7 @@ abstract class FatalConnectError implements Exception {
 class ConnectionManager {
   ConnectionManager({
     required this.connect,
-    this.clientFactory,
+    required this.clientFactory,
     this.onConnected,
     this.baseBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 30),
@@ -34,7 +33,11 @@ class ConnectionManager {
   });
 
   final Future<RpcLink> Function() connect;
-  final FutureOr<GatewayClient> Function(Stream<RpcMessage>, void Function(String))? clientFactory;
+  final FutureOr<GatewayClient> Function(
+    Stream<RpcMessage>,
+    void Function(String),
+  )
+  clientFactory;
   final Future<void> Function(GatewayClient)? onConnected;
   final Duration baseBackoff;
   final Duration maxBackoff;
@@ -138,10 +141,9 @@ class ConnectionManager {
           _onLinkLost();
         },
       );
-      final factory = clientFactory ??
-          (Stream<RpcMessage> incoming, void Function(String) send) =>
-              RpcClient(incoming: incoming, sendFrame: send);
-      final client = await Future.value(factory(bridge.stream, link.send));
+      final client = await Future.value(
+        clientFactory(bridge.stream, link.send),
+      );
       _client = client;
       if (onConnected != null) await onConnected!(client).timeout(dialTimeout);
       if (!_running || gen != _gen) return;
@@ -187,7 +189,11 @@ class ConnectionManager {
   Duration _backoff(int attempt) {
     final ms = baseBackoff.inMilliseconds * (1 << (attempt - 1).clamp(0, 16));
     return Duration(
-        milliseconds: ms.clamp(baseBackoff.inMilliseconds, maxBackoff.inMilliseconds));
+      milliseconds: ms.clamp(
+        baseBackoff.inMilliseconds,
+        maxBackoff.inMilliseconds,
+      ),
+    );
   }
 
   Future<void> _teardownLink() async {

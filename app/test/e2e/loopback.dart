@@ -18,6 +18,7 @@ class LoopbackNode {
   final String id;
   final KeyPair keyPair;
   final NodeHandler handler;
+
   /// When set, this base64 string is reported as [identity_pubkey] in nodes.list
   /// instead of the node's real Noise keypair public key. The Noise handshake
   /// still uses [keyPair]. Allows testing the trust gate in isolation.
@@ -36,7 +37,10 @@ class LoopbackNode {
     if (m.method == methodE2EHandshake) {
       final msg1 = handshakeFromFrame(RelayFrame.fromMessage(m));
       final (sess, _, msg2) = await HandshakeState.respond(
-          staticKey: keyPair, prologue: channelPrologue(id, chanId), msg1: msg1);
+        staticKey: keyPair,
+        prologue: channelPrologue(id, chanId),
+        msg1: msg1,
+      );
       _session = sess;
       _chanId = chanId;
       sendToClient('${utf8.decode(marshalHandshakeFrame(chanId, msg2))}\n');
@@ -46,7 +50,10 @@ class LoopbackNode {
     // A real node drops undecryptable frames rather than crashing; mirror that.
     final Uint8List params;
     try {
-      params = Channel(chanId, _session!).openParams(RelayFrame.fromMessage(m));
+      params = Channel.noise(
+        chanId,
+        _session!,
+      ).openParams(RelayFrame.fromMessage(m));
     } catch (_) {
       return; // decrypt failure: drop, no reply
     }
@@ -60,25 +67,30 @@ class LoopbackNode {
     }
     final inner = handlerResult.$2 != null
         ? utf8.encode(
-            '{"error":{"code":${handlerResult.$2!.code},"message":${jsonEncode(handlerResult.$2!.message)}}}')
+            '{"error":{"code":${handlerResult.$2!.code},"message":${jsonEncode(handlerResult.$2!.message)}}}',
+          )
         : utf8.encode('{"result":${utf8.decode(handlerResult.$1!)}}');
     final body = base64.encode(_session!.seal(inner));
-    sendToClient('${jsonEncode({
-          'jsonrpc': '2.0',
-          'id': m.id == null ? null : int.parse(m.id!),
-          'route': {'chan_id': chanId},
-          'body': body,
-        })}\n');
+    sendToClient(
+      '${jsonEncode({
+        'jsonrpc': '2.0',
+        'id': m.id == null ? null : int.parse(m.id!),
+        'route': {'chan_id': chanId},
+        'body': body,
+      })}\n',
+    );
   }
 
   void emitNotification(String method, List<int> params) {
     final body = base64.encode(_session!.seal(params));
-    sendToClient('${jsonEncode({
-          'jsonrpc': '2.0',
-          'method': method,
-          'route': {'chan_id': _chanId},
-          'body': body,
-        })}\n');
+    sendToClient(
+      '${jsonEncode({
+        'jsonrpc': '2.0',
+        'method': method,
+        'route': {'chan_id': _chanId},
+        'body': body,
+      })}\n',
+    );
   }
 }
 
@@ -126,7 +138,13 @@ class LoopbackLink implements RpcLink {
     if (!answerGatewayRpc) return;
     switch (m.method) {
       case 'relay.open':
-        _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': {'chan_id': 'chan-${_chanSeq++}'}}));
+        _push(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {'chan_id': 'chan-${_chanSeq++}'},
+          }),
+        );
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
     }
@@ -201,16 +219,30 @@ class MultiNodeLoopbackLink implements RpcLink {
             {
               'id': e.key,
               'label': '${e.key}-box',
-              'identity_pubkey': e.value.advertisedIdentity ?? base64.encode(e.value.keyPair.publicKey),
+              'identity_pubkey':
+                  e.value.advertisedIdentity ??
+                  base64.encode(e.value.keyPair.publicKey),
               'online': true,
-            }
+            },
         ];
-        _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': {'nodes': nodes}}));
+        _push(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {'nodes': nodes},
+          }),
+        );
       case 'relay.open':
         final nodeId = (j['params'] as Map)['node_id'] as String;
         final chanId = 'chan-${_chanSeq++}';
         _chanToNode[chanId] = _nodes[nodeId]!;
-        _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': {'chan_id': chanId}}));
+        _push(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {'chan_id': chanId},
+          }),
+        );
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':
@@ -221,7 +253,9 @@ class MultiNodeLoopbackLink implements RpcLink {
         // real gateway.
         final params = j['params'];
         final rawKnown = params is Map ? params['known'] : null;
-        final offerTruncated = params is Map ? params['truncated'] == true : false;
+        final offerTruncated = params is Map
+            ? params['truncated'] == true
+            : false;
         // Decode the caller's offered hashes (base64 binary → hex for comparison).
         final knownHex = <String>{};
         if (rawKnown is List) {
@@ -244,19 +278,21 @@ class MultiNodeLoopbackLink implements RpcLink {
         bool disjoint = false;
         if (knownHex.isNotEmpty && !offerTruncated) {
           final storeHex = {
-            for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw)))
+            for (final raw in all) hexEncode(hashEntry(unmarshalEntry(raw))),
           };
           disjoint = knownHex.every((h) => !storeHex.contains(h));
         }
-        _push(jsonEncode({
-          'jsonrpc': '2.0',
-          'id': id,
-          'result': {
-            'entries': [for (final e in entries) base64.encode(e)],
-            'want': <String>[],
-            if (disjoint) 'disjoint': true,
-          },
-        }));
+        _push(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {
+              'entries': [for (final e in entries) base64.encode(e)],
+              'want': <String>[],
+              if (disjoint) 'disjoint': true,
+            },
+          }),
+        );
     }
   }
 

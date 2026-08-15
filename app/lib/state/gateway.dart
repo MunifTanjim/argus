@@ -110,18 +110,22 @@ Timer startEquivPoll(
   return Timer.periodic(interval, (_) => poll());
 }
 
-final clientIdentityStoreProvider =
-    Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
-final trustChainStoreProvider =
-    Provider<TrustChainStore>((ref) => TrustChainStore(const FlutterSecureKv()));
+final clientIdentityStoreProvider = Provider<ClientIdentityStore>(
+  (ref) => ClientIdentityStore(const FlutterSecureKv()),
+);
+final trustChainStoreProvider = Provider<TrustChainStore>(
+  (ref) => TrustChainStore(const FlutterSecureKv()),
+);
 
 final credentialsProvider = StateProvider<GatewayCredentials?>((ref) => null);
 
-final sshKeyStoreProvider =
-    Provider<SshKeyStore>((ref) => SshKeyStore(const FlutterSecureKv()));
+final sshKeyStoreProvider = Provider<SshKeyStore>(
+  (ref) => SshKeyStore(const FlutterSecureKv()),
+);
 
-final hostKeyStoreProvider =
-    Provider<HostKeyStore>((ref) => HostKeyStore(const FlutterSecureKv()));
+final hostKeyStoreProvider = Provider<HostKeyStore>(
+  (ref) => HostKeyStore(const FlutterSecureKv()),
+);
 
 /// Build the right link for a credential set: SSH gateways tunnel first, plain
 /// ws/wss connect directly. Top-level so it is unit-testable without Riverpod.
@@ -140,8 +144,9 @@ Future<RpcLink> connectForCredentials(
   return WebSocketRpcLink.connect(creds);
 }
 
-final connStateProvider =
-    StateProvider<ConnState>((ref) => ConnState.disconnected);
+final connStateProvider = StateProvider<ConnState>(
+  (ref) => ConnState.disconnected,
+);
 
 /// The user-facing message behind [ConnState.failed] (e.g. a changed host key /
 /// possible MITM), or null when not in a failed state.
@@ -156,7 +161,10 @@ Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
   store.replaceAll(parseSessions(result));
 }
 
-Future<void> refreshSessions(GatewayClient client, SessionsNotifier store) async {
+Future<void> refreshSessions(
+  GatewayClient client,
+  SessionsNotifier store,
+) async {
   final result = await client.call('sessions.refresh');
   store.replaceAll(parseSessions(result));
 }
@@ -186,12 +194,18 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final chainStore = ref.read(trustChainStoreProvider);
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
-    // Plaintext (e2eEnabled = false): no clientFactory — ConnectionManager uses
-    // the default RpcClient path. No identity generated, no handshake, no equiv
-    // poll. Byte-for-byte identical to pre-PR-9 behavior.
-    clientFactory: creds.e2eEnabled
-        ? (incoming, send) => buildE2EClient(incoming, send, identityStore, chainStore)
-        : null,
+    clientFactory: (incoming, send) => creds.e2eEnabled
+        ? buildE2EClient(incoming, send, identityStore, chainStore)
+        : Future(() async {
+            final client = E2EClient(
+              incoming,
+              send,
+              KeyPair(Uint8List(32), Uint8List(32)),
+              plaintext: true,
+            );
+            await client.connect();
+            return client;
+          }),
     onConnected: (client) async {
       await loadSessions(client, store);
       client.notifications.listen((m) => dispatchEvent(m, store));
@@ -210,8 +224,9 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   });
   // Start the equivocation poll only for E2E connections. For plaintext,
   // equivocationOf always returns false anyway, but we skip the timer entirely.
-  final Timer? equivPoll =
-      creds.e2eEnabled ? startEquivPoll(manager, equivocation) : null;
+  final Timer? equivPoll = creds.e2eEnabled
+      ? startEquivPoll(manager, equivocation)
+      : null;
   ref.onDispose(() {
     equivPoll?.cancel();
     equivocation.state = false; // reset per-session flag on disconnect

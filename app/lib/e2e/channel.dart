@@ -15,7 +15,12 @@ Uint8List channelPrologue(String nodeId, String chanId) =>
 
 /// Cleartext routing metadata a blind gateway reads to relay a frame.
 class RouteHeader {
-  const RouteHeader({required this.chanId, this.nodeId, this.subId, this.termId});
+  const RouteHeader({
+    required this.chanId,
+    this.nodeId,
+    this.subId,
+    this.termId,
+  });
 
   final String chanId;
   final String? nodeId;
@@ -59,12 +64,12 @@ class RelayFrame {
   }
 
   static RelayFrame fromMessage(RpcMessage m) => RelayFrame(
-        method: m.method,
-        id: m.id,
-        route: RouteHeader.fromJson(m.route),
-        body: m.body,
-        raw: Uint8List(0),
-      );
+    method: m.method,
+    id: m.id,
+    route: RouteHeader.fromJson(m.route),
+    body: m.body,
+    raw: Uint8List(0),
+  );
 }
 
 /// Builds a relay frame carrying a raw (unsealed) Noise handshake message.
@@ -87,26 +92,54 @@ Uint8List handshakeFromFrame(RelayFrame f) {
   return Uint8List.fromList(base64.decode(b));
 }
 
+abstract class ChannelCipher {
+  Uint8List seal(List<int> plaintext);
+  Uint8List open(List<int> sealed);
+}
+
+class _NoiseCipher implements ChannelCipher {
+  _NoiseCipher(this._s);
+  final Session _s;
+  @override
+  Uint8List seal(List<int> p) => _s.seal(p);
+  @override
+  Uint8List open(List<int> b) => _s.open(b);
+}
+
+class _IdentityCipher implements ChannelCipher {
+  @override
+  Uint8List seal(List<int> p) => Uint8List.fromList(p);
+  @override
+  Uint8List open(List<int> b) => Uint8List.fromList(b);
+}
+
 /// Seals JSON-RPC payloads for one client<->node E2E channel. The routing header
 /// travels in cleartext so a blind gateway can relay by chan_id; the inner
 /// params/result/error travel sealed in the body.
 class Channel {
-  Channel(this.chanId, this._session);
+  Channel(this.chanId, this._cipher);
+  Channel.noise(String chanId, Session s) : this(chanId, _NoiseCipher(s));
+  Channel.plain(String chanId) : this(chanId, _IdentityCipher());
 
   final String chanId;
-  final Session _session;
+  final ChannelCipher _cipher;
 
-  String _sealBody(List<int> inner) => base64.encode(_session.seal(inner));
+  String _sealBody(List<int> inner) => base64.encode(_cipher.seal(inner));
 
   Uint8List _openBody(Object? body) {
     if (body is! String) {
       throw const FormatException('channel body is not a string');
     }
-    return _session.open(base64.decode(body));
+    return _cipher.open(base64.decode(body));
   }
 
   /// Seals a request into wire frame bytes. [params] is the raw params JSON.
-  Uint8List sealRequestFrame(int id, String method, String nodeId, List<int> params) {
+  Uint8List sealRequestFrame(
+    int id,
+    String method,
+    String nodeId,
+    List<int> params,
+  ) {
     final route = <String, Object?>{'chan_id': chanId};
     if (nodeId.isNotEmpty) route['node_id'] = nodeId;
     final frame = <String, Object?>{
@@ -127,11 +160,17 @@ class Channel {
     final inner = _openBody(f.body);
     if (_hasPrefix(inner, '{"error":')) {
       final m = jsonDecode(utf8.decode(inner)) as Map<String, dynamic>;
-      return (result: null, error: RpcError.fromJson(m['error'] as Map<String, dynamic>));
+      return (
+        result: null,
+        error: RpcError.fromJson(m['error'] as Map<String, dynamic>),
+      );
     }
     const p = '{"result":';
-    if (_hasPrefix(inner, p) && inner.last == 0x7d /* } */) {
-      return (result: Uint8List.sublistView(inner, p.length, inner.length - 1), error: null);
+    if (_hasPrefix(inner, p) && inner.last == 0x7d /* } */ ) {
+      return (
+        result: Uint8List.sublistView(inner, p.length, inner.length - 1),
+        error: null,
+      );
     }
     throw const FormatException('unexpected sealed response shape');
   }
