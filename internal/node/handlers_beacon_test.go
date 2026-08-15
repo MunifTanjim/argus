@@ -551,6 +551,64 @@ func TestUnknownBeaconPubRefreshesTheRoster(t *testing.T) {
 	})
 }
 
+// lockedChainForTest returns chain bytes and genesis hash for a freshly created trust log.
+func lockedChainForTest(t *testing.T) (chain []byte, genesis []byte) {
+	t.Helper()
+	signer, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("signer key: %v", err)
+	}
+	log, err := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
+	if err != nil {
+		t.Fatalf("new genesis: %v", err)
+	}
+	return trustlog.MarshalChain(log.Entries()), log.Tip()
+}
+
+// disabledChainNode returns a Node whose trust log has been initialized and then disabled.
+func disabledChainNode(t *testing.T) *Node {
+	t.Helper()
+	d := beaconNewLockTestNode(t)
+	res, err := beaconCallLockInit(t, d, api.LockInitParams{GenDisablements: 1})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: res.DisablementSecrets[0]})
+	if _, err := d.handleLockDisable(context.Background(), raw); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if !d.TrustStore().Disabled() {
+		t.Fatal("precondition: store must be disabled")
+	}
+	return d
+}
+
+// Adopting a new trust root replaces the old one, so stale beacons gathered under
+// the old root must be dropped to avoid false equivocation: a tip that belongs to
+// the old chain is indistinguishable from a divergent one under the new root.
+func TestNewTrustRootClearsPeerBeaconState(t *testing.T) {
+	d := disabledChainNode(t)
+	d.peerBeaconMu.Lock()
+	d.peerBeacons["stale"] = api.Beacon{Tip: bytes.Repeat([]byte{0x9A}, 32)}
+	d.peerBeaconMiss["stale"] = &beaconMissState{tip: bytes.Repeat([]byte{0x9A}, 32), misses: 2}
+	d.peerBeaconMu.Unlock()
+	d.equivocation.Store(true)
+
+	_, foreignGenesis := lockedChainForTest(t)
+	if err := d.AdoptPin(foreignGenesis); err != nil {
+		t.Fatalf("AdoptPin: %v", err)
+	}
+
+	if d.Equivocation() {
+		t.Fatal("a new trust root must clear the equivocation latch")
+	}
+	d.peerBeaconMu.Lock()
+	defer d.peerBeaconMu.Unlock()
+	if len(d.peerBeacons) != 0 || len(d.peerBeaconMiss) != 0 {
+		t.Fatal("beacons gathered under the old root must be dropped")
+	}
+}
+
 // Re-pinning the same genesis changes no root, so it must not become a way to clear
 // the equivocation latch — that flag is evidence about the chain we still follow.
 func TestRepinningTheSameGenesisKeepsBeaconState(t *testing.T) {

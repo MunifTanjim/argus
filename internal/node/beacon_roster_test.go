@@ -18,13 +18,12 @@ import (
 // gateway uplink calls nodes.list successfully and populates peerBeaconPubs, so
 // handleBeaconDeliver can accept couriered beacons from registered peers.
 // This test would fail if nodes.list were absent from the gateway's node-uplink dispatch.
-//
-// NOTE: skipped until Task 4 adds syncRoster to runTrustSyncLoop (scope-map F5).
 func TestSyncRosterPopulatesPeerBeaconPubs(t *testing.T) {
-	t.Skip("deferred: requires Task 4 to integrate syncRoster into runTrustSyncLoop")
-
-	agg := gateway.New(time.Second, false)
-	srv := gateway.NewServer(agg, nil, nil, false)
+	// syncRoster is called from runTrustSyncLoop, which only runs on the blind
+	// uplink path. Use blind=true for both the aggregator and the server, and
+	// SetE2EE(true) on the node so ConnectGateway routes through runUplinkBlind.
+	agg := gateway.New(time.Second, true)
+	srv := gateway.NewServer(agg, nil, nil, true)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -43,6 +42,7 @@ func TestSyncRosterPopulatesPeerBeaconPubs(t *testing.T) {
 
 	d := newNode(nil)
 	d.SetIdentity("beta", "beta-box")
+	d.SetE2EE(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go d.ConnectGateway(ctx, wsURL(ts.URL)+"/node", "", nil)
