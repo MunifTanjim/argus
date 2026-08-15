@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -595,4 +596,312 @@ func TestSetSignerKey(t *testing.T) {
 	}
 	// Cleanup: the node may have created a temp path; no file I/O needed here.
 	_ = os.RemoveAll(t.TempDir())
+}
+
+func mustGenSigner(t *testing.T) trustlog.SignerKey {
+	t.Helper()
+	sk, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	return sk
+}
+
+// newRevokeSignerNode creates a Node with sk loaded and its trust store pre-seeded
+// with the provided genesis-pinned chain. The trustPath is set so persist succeeds.
+func newRevokeSignerNode(t *testing.T, sk trustlog.SignerKey, genesisHash, chain []byte) *Node {
+	t.Helper()
+	d := New()
+	d.SetSignerKey(sk)
+	d.trustPath = filepath.Join(t.TempDir(), "trustlog-chain")
+	st := trustlog.NewSyncStore(genesisHash)
+	if _, err := st.Ingest(chain); err != nil {
+		t.Fatalf("newRevokeSignerNode Ingest: %v", err)
+	}
+	d.trust.Store(st)
+	return d
+}
+
+func callRevokeSignerStart(t *testing.T, d *Node, p api.LockRevokeSignerStartParams) (api.LockRevokeSignerBlobResult, error) {
+	t.Helper()
+	raw, _ := json.Marshal(p)
+	res, err := d.handleLockRevokeSignerStart(context.Background(), raw)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	return res.(api.LockRevokeSignerBlobResult), nil
+}
+
+func callRevokeSignerCosign(t *testing.T, d *Node, blob []byte) (api.LockRevokeSignerBlobResult, error) {
+	t.Helper()
+	raw, _ := json.Marshal(api.LockRevokeSignerCosignParams{Blob: blob})
+	res, err := d.handleLockRevokeSignerCosign(context.Background(), raw)
+	if err != nil {
+		return api.LockRevokeSignerBlobResult{}, err
+	}
+	return res.(api.LockRevokeSignerBlobResult), nil
+}
+
+func callRevokeSignerFinish(t *testing.T, d *Node, blob []byte) (api.LockRevokeSignerFinishResult, error) {
+	t.Helper()
+	raw, _ := json.Marshal(api.LockRevokeSignerFinishParams{Blob: blob})
+	res, err := d.handleLockRevokeSignerFinish(context.Background(), raw)
+	if err != nil {
+		return api.LockRevokeSignerFinishResult{}, err
+	}
+	return res.(api.LockRevokeSignerFinishResult), nil
+}
+
+// TestHandleRevokeSignerCeremony runs a full Start→Cosign→Finish ceremony on a
+// 3-signer trust log {A,B,C}. A starts (revoking C with replacement D), B cosigns,
+// A finishes. After finish: C is not trusted, D is trusted, A and B remain trusted.
+func TestHandleRevokeSignerCeremony(t *testing.T) {
+	skA, skB, skC, skD := mustGenSigner(t), mustGenSigner(t), mustGenSigner(t), mustGenSigner(t)
+
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public, skB.Public, skC.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+
+	// C authorizes a device; the fork will erase this action.
+	cDevice := bytes.Repeat([]byte{0xCC}, 32)
+	if err := tlog.AuthorizeDevice(cDevice, skC); err != nil {
+		t.Fatalf("AuthorizeDevice by C: %v", err)
+	}
+	chain := trustlog.MarshalChain(tlog.Entries())
+
+	dA := newRevokeSignerNode(t, skA, genesisHash, chain)
+	dB := newRevokeSignerNode(t, skB, genesisHash, chain)
+
+	if !dA.TrustStore().SignerTrusted(skC.Public) {
+		t.Fatal("setup: C must be initially trusted")
+	}
+	if !dA.TrustStore().DeviceAuthorized(cDevice) {
+		t.Fatal("setup: C's device must be initially authorized")
+	}
+
+	// Step 1: A starts the ceremony revoking C and adding D as replacement.
+	startRes, err := callRevokeSignerStart(t, dA, api.LockRevokeSignerStartParams{
+		Revoked:  [][]byte{skC.Public},
+		Replaces: [][]byte{skD.Public},
+	})
+	if err != nil {
+		t.Fatalf("revokeSignerStart: %v", err)
+	}
+	blob1 := startRes.Blob
+	if len(blob1) == 0 {
+		t.Fatal("start: blob must not be empty")
+	}
+
+	// 1 co-sign (A) for 1 revoked (C) is not yet complete.
+	pr, err := trustlog.UnmarshalPendingRevoke(blob1)
+	if err != nil {
+		t.Fatalf("blob1 is not a valid PendingRevoke: %v", err)
+	}
+	if trustlog.Complete(pr, tlog) {
+		t.Fatal("should not be complete after only 1 co-sign")
+	}
+
+	// Step 2: B cosigns.
+	cosignRes, err := callRevokeSignerCosign(t, dB, blob1)
+	if err != nil {
+		t.Fatalf("revokeSignerCosign: %v", err)
+	}
+	blob2 := cosignRes.Blob
+
+	pr2, err := trustlog.UnmarshalPendingRevoke(blob2)
+	if err != nil {
+		t.Fatalf("blob2 is not a valid PendingRevoke: %v", err)
+	}
+	if !trustlog.Complete(pr2, tlog) {
+		t.Fatal("should be complete with 2 co-signs for 1 revoked signer")
+	}
+
+	// Step 3: A finishes — ingest and persist.
+	finishRes, err := callRevokeSignerFinish(t, dA, blob2)
+	if err != nil {
+		t.Fatalf("revokeSignerFinish: %v", err)
+	}
+	if len(finishRes.Tip) == 0 {
+		t.Fatal("finish: tip must not be empty")
+	}
+
+	st := dA.TrustStore()
+	if st.SignerTrusted(skC.Public) {
+		t.Error("C must be revoked after ceremony")
+	}
+	if !st.SignerTrusted(skD.Public) {
+		t.Error("replacement D must be trusted after ceremony")
+	}
+	if !st.SignerTrusted(skA.Public) {
+		t.Error("A must remain trusted")
+	}
+	if !st.SignerTrusted(skB.Public) {
+		t.Error("B must remain trusted")
+	}
+	if st.DeviceAuthorized(cDevice) {
+		t.Error("C's device must be revoked after fork erased C's action")
+	}
+}
+
+// TestHandleRevokeSignerFinishRejectsIncomplete verifies that Finish fails when the
+// co-sign quorum has not been reached.
+func TestHandleRevokeSignerFinishRejectsIncomplete(t *testing.T) {
+	skA, skB, skC := mustGenSigner(t), mustGenSigner(t), mustGenSigner(t)
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public, skB.Public, skC.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+	chain := trustlog.MarshalChain(tlog.Entries())
+	dA := newRevokeSignerNode(t, skA, genesisHash, chain)
+
+	startRes, err := callRevokeSignerStart(t, dA, api.LockRevokeSignerStartParams{
+		Revoked: [][]byte{skC.Public},
+	})
+	if err != nil {
+		t.Fatalf("revokeSignerStart: %v", err)
+	}
+
+	// Only 1 co-sign for 1 revoked signer — quorum not reached.
+	if _, err := callRevokeSignerFinish(t, dA, startRes.Blob); err == nil {
+		t.Fatal("finish with incomplete blob must return an error")
+	}
+}
+
+// TestHandleRevokeSignerUntrustedSignerRefused confirms that a node whose signer key
+// is not in the trust log is rejected by all three ceremony handlers.
+func TestHandleRevokeSignerUntrustedSignerRefused(t *testing.T) {
+	skA := mustGenSigner(t)
+	skOther := mustGenSigner(t) // not in genesis
+
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+	chain := trustlog.MarshalChain(tlog.Entries())
+
+	// Need a third signer so a revoke ceremony is meaningful.
+	skExtra := mustGenSigner(t)
+
+	// Rebuild genesis with 3 signers so a revoke ceremony is possible for validation.
+	tlog2, err := trustlog.NewGenesis([][]byte{skA.Public, skOther.Public, skExtra.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis2: %v", err)
+	}
+	genesisHash2 := tlog2.Tip()
+	chain2 := trustlog.MarshalChain(tlog2.Entries())
+
+	// dOther has the untrusted key but is given this chain (other IS trusted here).
+	// We want a node that is NOT trusted: build dBad with skOther key against the
+	// original single-signer genesis where only skA is trusted.
+	dBad := newRevokeSignerNode(t, skOther, genesisHash, chain)
+
+	// Start must be refused for dBad (skOther not trusted in the original chain).
+	_, err = callRevokeSignerStart(t, dBad, api.LockRevokeSignerStartParams{
+		Revoked: [][]byte{skExtra.Public},
+	})
+	if err == nil {
+		t.Fatal("start by untrusted signer must be refused")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest for untrusted start, got %v", err)
+	}
+
+	// Get a valid blob via the trusted node dA (using chain2 where skExtra exists).
+	dA2 := newRevokeSignerNode(t, skA, genesisHash2, chain2)
+	startRes, err := callRevokeSignerStart(t, dA2, api.LockRevokeSignerStartParams{
+		Revoked: [][]byte{skExtra.Public},
+	})
+	if err != nil {
+		t.Fatalf("start by trusted node: %v", err)
+	}
+
+	// Cosign must be refused for dBad.
+	_, err = callRevokeSignerCosign(t, dBad, startRes.Blob)
+	if err == nil {
+		t.Fatal("cosign by untrusted signer must be refused")
+	}
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest for untrusted cosign, got %v", err)
+	}
+
+	// Finish must also be refused for dBad.
+	_, err = callRevokeSignerFinish(t, dBad, startRes.Blob)
+	if err == nil {
+		t.Fatal("finish by untrusted signer must be refused")
+	}
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest for untrusted finish, got %v", err)
+	}
+}
+
+// TestHandleRevokeSignerNoSignerKey confirms that a node with no private signer key
+// returns CodeInvalidRequest for all three ceremony handlers and does NOT panic.
+func TestHandleRevokeSignerNoSignerKey(t *testing.T) {
+	skA := mustGenSigner(t)
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public}, skA, nil)
+	if err != nil {
+		t.Fatalf("NewGenesis: %v", err)
+	}
+	genesisHash := tlog.Tip()
+	chain := trustlog.MarshalChain(tlog.Entries())
+
+	// d has no signer key set (signer stays zero-value).
+	d := New()
+	d.trustPath = filepath.Join(t.TempDir(), "trustlog-chain")
+	st := trustlog.NewSyncStore(genesisHash)
+	if _, err := st.Ingest(chain); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	d.trust.Store(st)
+
+	fakeBlob := bytes.Repeat([]byte{0x01}, 32) // not a valid blob, but guard fires first
+
+	checkNoSignerKey := func(name string, fn func() error) {
+		t.Helper()
+		err := fn()
+		if err == nil {
+			t.Fatalf("%s: expected error with no signer key", name)
+		}
+		var rpcErr *api.RPCError
+		if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+			t.Errorf("%s: want CodeInvalidRequest, got %v", name, err)
+		}
+	}
+
+	checkNoSignerKey("start", func() error {
+		raw, _ := json.Marshal(api.LockRevokeSignerStartParams{Revoked: [][]byte{skA.Public}})
+		_, err := d.handleLockRevokeSignerStart(context.Background(), raw)
+		return err
+	})
+	checkNoSignerKey("cosign", func() error {
+		raw, _ := json.Marshal(api.LockRevokeSignerCosignParams{Blob: fakeBlob})
+		_, err := d.handleLockRevokeSignerCosign(context.Background(), raw)
+		return err
+	})
+	checkNoSignerKey("finish", func() error {
+		raw, _ := json.Marshal(api.LockRevokeSignerFinishParams{Blob: fakeBlob})
+		_, err := d.handleLockRevokeSignerFinish(context.Background(), raw)
+		return err
+	})
+}
+
+// TestHandleRevokeSignerStartRequiresLocked verifies that the Start handler errors
+// when locked mode is not enabled.
+func TestHandleRevokeSignerStartRequiresLocked(t *testing.T) {
+	d, _ := newSignerLockNode(t)
+	_, err := callRevokeSignerStart(t, d, api.LockRevokeSignerStartParams{
+		Revoked: [][]byte{bytes.Repeat([]byte{0x01}, 32)},
+	})
+	if err == nil {
+		t.Fatal("revokeSignerStart on unlocked node must error")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest for unlocked start, got %v", err)
+	}
 }

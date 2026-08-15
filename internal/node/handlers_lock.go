@@ -292,6 +292,109 @@ func (d *Node) handleLockLocalDisable(_ context.Context, _ json.RawMessage) (any
 	return nil, nil
 }
 
+func (d *Node) handleLockRevokeSignerStart(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if len(d.signer.Private) != ed25519.PrivateKeySize {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerStartParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	if len(p.Revoked) == 0 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "revoked must be non-empty"}
+	}
+	_, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := trustlog.StartRevoke(log, p.Revoked, p.Replaces, p.ForkFrom, d.signer)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "start revoke: " + err.Error()}
+	}
+	return api.LockRevokeSignerBlobResult{Blob: pr.Marshal()}, nil
+}
+
+func (d *Node) handleLockRevokeSignerCosign(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if len(d.signer.Private) != ed25519.PrivateKeySize {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerCosignParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	pr, err := trustlog.UnmarshalPendingRevoke(p.Blob)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid blob: " + err.Error()}
+	}
+	_, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	pr, err = trustlog.AddCoSign(pr, log, d.signer)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cosign: " + err.Error()}
+	}
+	return api.LockRevokeSignerBlobResult{Blob: pr.Marshal()}, nil
+}
+
+func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMessage) (any, error) {
+	st := d.trust.Load()
+	if st == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+	}
+	if len(d.signer.Private) != ed25519.PrivateKeySize {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+	}
+	if !st.SignerTrusted(d.signer.Public) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+	}
+	p, err := api.Decode[api.LockRevokeSignerFinishParams](params)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	pr, err := trustlog.UnmarshalPendingRevoke(p.Blob)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid blob: " + err.Error()}
+	}
+	entries, log, err := loadCurrentLog(st)
+	if err != nil {
+		return nil, err
+	}
+	if !trustlog.Complete(pr, log) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "co-sign quorum not yet reached; collect more co-signs"}
+	}
+	newChain, err := trustlog.BuildRevokeChain(pr, entries)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "build revoke chain: " + err.Error()}
+	}
+	changed, err := st.Ingest(newChain)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "ingest: " + err.Error()}
+	}
+	if changed {
+		if werr := d.persistTrust(); werr != nil {
+			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+		}
+		d.reevaluateTrustChannels()
+		d.announceTrustChange()
+	}
+	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
+}
+
 func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, error) {
 	signerPub := d.SignerPublic()
 	res := api.LockStatusResult{
