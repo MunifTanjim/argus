@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -217,6 +218,60 @@ func TestPushTestReturnsGoneCode(t *testing.T) {
 	}
 	if recs, _ := store.List(); len(recs) != 0 {
 		t.Fatalf("want target pruned, got %d records", len(recs))
+	}
+}
+
+// delivererFunc adapts a func to push.Deliverer.
+type delivererFunc func(context.Context, string, []byte, string, string) error
+
+func (f delivererFunc) Deliver(ctx context.Context, ep string, b []byte, ttl, u string) error {
+	return f(ctx, ep, b, ttl, u)
+}
+
+// TestNodeDispatchPushDeliverReportsGone exercises the blind push.deliver path:
+// a fake node calls push.deliver with an ErrGone deliverer and expects Gone=true
+// in the result and the decoded ciphertext forwarded to the deliverer.
+func TestNodeDispatchPushDeliverReportsGone(t *testing.T) {
+	s := NewServer(New(0, true), nil, nil, true)
+	var gotBody []byte
+	s.SetPushDeliverer(delivererFunc(func(_ context.Context, _ string, body []byte, _, _ string) error {
+		gotBody = body
+		return push.ErrGone
+	}))
+
+	gwConn, nodeConn := net.Pipe()
+	defer gwConn.Close()
+
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return api.IdentifyResult{ID: "n1", Label: "n1"}, nil
+			}
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		},
+	})
+	defer nodePeer.Close()
+	go s.serveNodeBlind(gwConn)
+
+	eventually(t, func() bool {
+		s.relayMu.Lock()
+		defer s.relayMu.Unlock()
+		return s.nodePeers["n1"] != nil
+	})
+
+	var result api.PushDeliverResult
+	err := nodePeer.Call(api.MethodPushDeliver, api.PushDeliverParams{
+		Endpoint:   "https://p/ep",
+		Ciphertext: base64.StdEncoding.EncodeToString([]byte("opaque")),
+	}, &result)
+	if err != nil {
+		t.Fatalf("push.deliver: %v", err)
+	}
+	if !result.Gone {
+		t.Fatal("want Gone=true")
+	}
+	if string(gotBody) != "opaque" {
+		t.Fatalf("deliverer got %q, want decoded ciphertext", gotBody)
 	}
 }
 
