@@ -771,35 +771,25 @@ func TestHandleRevokeSignerFinishRejectsIncomplete(t *testing.T) {
 }
 
 // TestHandleRevokeSignerUntrustedSignerRefused confirms that a node whose signer key
-// is not in the trust log is rejected by all three ceremony handlers.
+// is not in the trust log is rejected by all three ceremony handlers. The finish
+// sub-case uses a QUORUM-COMPLETE blob to prove the SignerTrusted guard (not the
+// quorum guard) is what blocks an untrusted node from finalizing the ceremony.
 func TestHandleRevokeSignerUntrustedSignerRefused(t *testing.T) {
-	skA := mustGenSigner(t)
+	skA, skB, skExtra := mustGenSigner(t), mustGenSigner(t), mustGenSigner(t)
 	skOther := mustGenSigner(t) // not in genesis
 
-	tlog, err := trustlog.NewGenesis([][]byte{skA.Public}, skA, nil)
+	// Build 3-signer genesis {A, B, Extra}; skOther is not a member.
+	tlog, err := trustlog.NewGenesis([][]byte{skA.Public, skB.Public, skExtra.Public}, skA, nil)
 	if err != nil {
 		t.Fatalf("NewGenesis: %v", err)
 	}
 	genesisHash := tlog.Tip()
 	chain := trustlog.MarshalChain(tlog.Entries())
 
-	// Need a third signer so a revoke ceremony is meaningful.
-	skExtra := mustGenSigner(t)
-
-	// Rebuild genesis with 3 signers so a revoke ceremony is possible for validation.
-	tlog2, err := trustlog.NewGenesis([][]byte{skA.Public, skOther.Public, skExtra.Public}, skA, nil)
-	if err != nil {
-		t.Fatalf("NewGenesis2: %v", err)
-	}
-	genesisHash2 := tlog2.Tip()
-	chain2 := trustlog.MarshalChain(tlog2.Entries())
-
-	// dOther has the untrusted key but is given this chain (other IS trusted here).
-	// We want a node that is NOT trusted: build dBad with skOther key against the
-	// original single-signer genesis where only skA is trusted.
+	// dBad holds skOther — not trusted in this genesis.
 	dBad := newRevokeSignerNode(t, skOther, genesisHash, chain)
 
-	// Start must be refused for dBad (skOther not trusted in the original chain).
+	// Start must be refused for dBad.
 	_, err = callRevokeSignerStart(t, dBad, api.LockRevokeSignerStartParams{
 		Revoked: [][]byte{skExtra.Public},
 	})
@@ -811,16 +801,31 @@ func TestHandleRevokeSignerUntrustedSignerRefused(t *testing.T) {
 		t.Errorf("want CodeInvalidRequest for untrusted start, got %v", err)
 	}
 
-	// Get a valid blob via the trusted node dA (using chain2 where skExtra exists).
-	dA2 := newRevokeSignerNode(t, skA, genesisHash2, chain2)
-	startRes, err := callRevokeSignerStart(t, dA2, api.LockRevokeSignerStartParams{
+	// Build a quorum-complete blob: A starts, B cosigns (2 co-signs > 1 revoked).
+	dA := newRevokeSignerNode(t, skA, genesisHash, chain)
+	dB := newRevokeSignerNode(t, skB, genesisHash, chain)
+	startRes, err := callRevokeSignerStart(t, dA, api.LockRevokeSignerStartParams{
 		Revoked: [][]byte{skExtra.Public},
 	})
 	if err != nil {
-		t.Fatalf("start by trusted node: %v", err)
+		t.Fatalf("start by A: %v", err)
+	}
+	cosignRes, err := callRevokeSignerCosign(t, dB, startRes.Blob)
+	if err != nil {
+		t.Fatalf("cosign by B: %v", err)
+	}
+	completeBlob := cosignRes.Blob
+
+	// Sanity-check: the blob really is quorum-complete.
+	pr, err := trustlog.UnmarshalPendingRevoke(completeBlob)
+	if err != nil {
+		t.Fatalf("UnmarshalPendingRevoke: %v", err)
+	}
+	if !trustlog.Complete(pr, tlog) {
+		t.Fatal("blob must be quorum-complete before testing untrusted finish")
 	}
 
-	// Cosign must be refused for dBad.
+	// Cosign must be refused for dBad (SignerTrusted guard fires before cosign logic).
 	_, err = callRevokeSignerCosign(t, dBad, startRes.Blob)
 	if err == nil {
 		t.Fatal("cosign by untrusted signer must be refused")
@@ -829,10 +834,11 @@ func TestHandleRevokeSignerUntrustedSignerRefused(t *testing.T) {
 		t.Errorf("want CodeInvalidRequest for untrusted cosign, got %v", err)
 	}
 
-	// Finish must also be refused for dBad.
-	_, err = callRevokeSignerFinish(t, dBad, startRes.Blob)
+	// Finish must be refused for dBad even with a QUORUM-COMPLETE blob —
+	// SignerTrusted fires first, before the quorum check.
+	_, err = callRevokeSignerFinish(t, dBad, completeBlob)
 	if err == nil {
-		t.Fatal("finish by untrusted signer must be refused")
+		t.Fatal("finish by untrusted signer must be refused even with a quorum-complete blob")
 	}
 	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
 		t.Errorf("want CodeInvalidRequest for untrusted finish, got %v", err)
@@ -890,18 +896,40 @@ func TestHandleRevokeSignerNoSignerKey(t *testing.T) {
 	})
 }
 
-// TestHandleRevokeSignerStartRequiresLocked verifies that the Start handler errors
-// when locked mode is not enabled.
-func TestHandleRevokeSignerStartRequiresLocked(t *testing.T) {
-	d, _ := newSignerLockNode(t)
-	_, err := callRevokeSignerStart(t, d, api.LockRevokeSignerStartParams{
-		Revoked: [][]byte{bytes.Repeat([]byte{0x01}, 32)},
-	})
-	if err == nil {
-		t.Fatal("revokeSignerStart on unlocked node must error")
+// TestHandleRevokeSignerRequiresLocked verifies that all three ceremony handlers
+// return CodeInvalidRequest when locked mode is not enabled (st == nil).
+func TestHandleRevokeSignerRequiresLocked(t *testing.T) {
+	d, _ := newSignerLockNode(t) // signer set, no trust store
+	fakeBlob := bytes.Repeat([]byte{0x01}, 32)
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"start", func() error {
+			raw, _ := json.Marshal(api.LockRevokeSignerStartParams{Revoked: [][]byte{fakeBlob}})
+			_, err := d.handleLockRevokeSignerStart(context.Background(), raw)
+			return err
+		}},
+		{"cosign", func() error {
+			raw, _ := json.Marshal(api.LockRevokeSignerCosignParams{Blob: fakeBlob})
+			_, err := d.handleLockRevokeSignerCosign(context.Background(), raw)
+			return err
+		}},
+		{"finish", func() error {
+			raw, _ := json.Marshal(api.LockRevokeSignerFinishParams{Blob: fakeBlob})
+			_, err := d.handleLockRevokeSignerFinish(context.Background(), raw)
+			return err
+		}},
 	}
-	var rpcErr *api.RPCError
-	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
-		t.Errorf("want CodeInvalidRequest for unlocked start, got %v", err)
+	for _, c := range cases {
+		err := c.fn()
+		if err == nil {
+			t.Fatalf("%s: expected error when locked mode not enabled", c.name)
+		}
+		var rpcErr *api.RPCError
+		if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+			t.Errorf("%s: want CodeInvalidRequest, got %v", c.name, err)
+		}
 	}
 }
