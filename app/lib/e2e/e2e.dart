@@ -1,4 +1,8 @@
+export 'aggregate.dart';
+export 'beacon.dart';
 export 'bytes.dart';
+export 'channel.dart';
+export 'e2e_client.dart';
 export 'ed25519.dart';
 export 'keypair.dart';
 export 'handshake.dart';
