@@ -5,7 +5,7 @@ PREFIX  ?= $(HOME)/.local
 BINDIR  ?= $(PREFIX)/bin
 APP_DIR ?= app
 
-.PHONY: build argus test vet fmt fmt-check tidy check clean install uninstall help \
+.PHONY: build argus test test-all vet fmt fmt-check tidy check clean install uninstall help \
 	app-get app-analyze app-test app-fmt app-check app-run app-build app-clean
 
 build: argus ## Build the binary into bin/
@@ -13,7 +13,10 @@ build: argus ## Build the binary into bin/
 argus: ## Build the unified argus binary (TUI, serve, hooks)
 	go build $(LDFLAGS) -o $(BIN)/argus ./cmd/argus
 
-test: ## Run all tests
+test: ## Run the tests that need no Docker daemon
+	go test ./... -short
+
+test-all: ## Run every test, including the container suite (needs Docker)
 	go test ./...
 
 vet: ## Run go vet
