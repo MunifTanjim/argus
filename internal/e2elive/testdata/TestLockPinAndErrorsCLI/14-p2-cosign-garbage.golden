@@ -1,0 +1,5 @@
+$ argus lock revoke-signer --cosign !!!notbase64!!! --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock revoke-signer: --cosign: invalid base64 blob: illegal base64 data at input byte 0

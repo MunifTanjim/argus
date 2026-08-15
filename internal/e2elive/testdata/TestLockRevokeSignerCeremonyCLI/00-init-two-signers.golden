@@ -1,0 +1,19 @@
+$ argus lock init <NODE-A-SIGPUB> <NODE-B-SIGPUB> --confirm --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode enabled
+  genesis: <GENESIS>
+  signers: 2
+  disablement secret: <SECRET-1>
+  this machine's client (TUI) role pinned to the same genesis
+
+To pin your other devices, run on each of them:
+  argus lock pin
+(or set lock.genesis: <GENESIS> in their config)
+--- stderr ---
+
+SAVE the disablement secret(s) above NOW — shown only once. Each one disables
+locked mode network-wide (break-glass recovery if signer keys are lost).
+
+Note: fewer than 3 signers — 'lock revoke-signer' needs ≥3 signers to out-vote
+one compromised key; with fewer, recovery is 'lock disable' + reinit.

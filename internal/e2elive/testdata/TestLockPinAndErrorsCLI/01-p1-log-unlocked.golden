@@ -1,0 +1,5 @@
+$ argus lock log --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock log: locked mode not enabled

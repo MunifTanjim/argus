@@ -1,0 +1,6 @@
+$ argus lock sign node-b --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+sign ok
+  current tip (audit): <TIP-5>
+--- stderr ---
