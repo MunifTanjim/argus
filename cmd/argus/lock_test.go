@@ -16,7 +16,7 @@ func TestLockCmdRegistersExpectedSubcommands(t *testing.T) {
 
 	want := []string{
 		"local-disable", "log", "pin", "status", "unpin",
-		"init", "sign", "revoke-device", "add-signer", "remove-signer", "disable",
+		"init", "sign", "revoke-device", "add-signer", "remove-signer", "revoke-signer", "disable",
 	}
 	if len(subs) != len(want) {
 		names := make([]string, len(subs))
@@ -38,12 +38,27 @@ func TestLockCmdRegistersExpectedSubcommands(t *testing.T) {
 			t.Errorf("expected subcommand %q not registered", name)
 		}
 	}
+}
 
-	// revoke-signer (6c ceremony) must not be registered yet.
-	for _, c := range subs {
-		if c.Name() == "revoke-signer" {
-			t.Errorf("ceremony command %q must not be registered until 6c", c.Name())
-		}
+func TestSoleRootGuardDetectsZeroSigners(t *testing.T) {
+	s1 := bytes.Repeat([]byte{0x01}, 32)
+	s2 := bytes.Repeat([]byte{0x02}, 32)
+	s3 := bytes.Repeat([]byte{0x03}, 32)
+
+	if n := signerCountAfterRevoke([][]byte{s1}, [][]byte{s1}); n != 0 {
+		t.Fatalf("sole-root: got %d, want 0", n)
+	}
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s1}); n != 1 {
+		t.Fatalf("one-of-two: got %d, want 1", n)
+	}
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s1, s2}); n != 0 {
+		t.Fatalf("both-of-two: got %d, want 0", n)
+	}
+	if n := signerCountAfterRevoke([][]byte{s1, s2}, [][]byte{s3}); n != 2 {
+		t.Fatalf("non-member: got %d, want 2", n)
+	}
+	if n := signerCountAfterRevoke(nil, [][]byte{s1}); n != 0 {
+		t.Fatalf("nil current: got %d, want 0", n)
 	}
 }
 
