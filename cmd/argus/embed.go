@@ -136,6 +136,10 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 	}
 	if gatewayURL != "" {
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
+	} else if cfg.E2EE.Enabled {
+		// Isolated e2ee spawn: StartPush covers desktop via DesktopSink; the
+		// standalone desktop Watch below is skipped to prevent double delivery.
+		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	} else if cfg.Push.Desktop.Enabled {
 		// Isolated spawn has no gateway to drive alerts, so watch our own registry.
 		// (A connected spawn gets push.desktop RPCs from its gateway instead.)
