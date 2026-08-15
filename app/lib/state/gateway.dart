@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../data/client_identity_store.dart';
 import '../data/trust_chain_store.dart';
+import '../e2e/e2e.dart';
 import '../models/registry_event.dart';
 import '../pairing/gateway_store.dart';
 import '../pairing/pairing_uri.dart';
@@ -17,6 +22,93 @@ import '../transport/ws_link.dart';
 import 'profiles.dart';
 import 'push.dart';
 import 'sessions.dart';
+
+class TrustAnchorTampered implements FatalConnectError {
+  @override
+  String get message =>
+      'Stored trust anchor failed verification — refusing to connect (possible tampering). '
+      'Clear app data to re-establish trust.';
+}
+
+bool _bytesEq(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// Builds a connected E2E client over a bridged link, with identity + trust
+/// persistence. TOFU on first use; a stored anchor is re-verified (fail-closed on
+/// tampering — never silently re-TOFU) and re-anchors the pull; the verified chain
+/// is persisted on advance.
+Future<GatewayClient> buildE2EClient(
+  Stream<RpcMessage> incoming,
+  void Function(String) send,
+  ClientIdentityStore identityStore,
+  TrustChainStore chainStore,
+) async {
+  final identity = await identityStore.loadOrCreate();
+  final Uint8List? seed;
+  try {
+    seed = await chainStore.load();
+  } on TrustAnchorLost {
+    // Anchored before, but the stored anchor is now missing/corrupt — fail closed
+    // (do NOT re-TOFU onto whatever the gateway serves).
+    throw TrustAnchorTampered();
+  }
+  if (seed != null) {
+    final probe = TrustStore.tofu();
+    try {
+      await probe.ingest(seed);
+    } catch (_) {
+      throw TrustAnchorTampered(); // do NOT re-TOFU a rejected anchor
+    }
+  }
+  final client = E2EClient(
+    incoming,
+    send,
+    identity,
+    tofu: true,
+    initialTrustChain: seed,
+    // Re-sync the trust log periodically so mid-session revocations take effect
+    // (channels to now-unauthorized nodes are dropped), persisting each advance.
+    trustResyncInterval: const Duration(seconds: 30),
+    onTrustChainAdvance: chainStore.save,
+  );
+  await client.connect();
+  final head = client.trustChainBytes;
+  // If connect() throws after an in-progress trust advance, the save below is
+  // skipped; the next successful reconnect re-pulls, re-advances, and persists.
+  if (head != null && (seed == null || !_bytesEq(head, seed))) {
+    await chainStore.save(head);
+  }
+  return client;
+}
+
+/// Returns whether [client] is an [E2EClient] that has detected an equivocation.
+/// Extracted from the equivPoll callback in [gatewayProvider] for testability.
+@visibleForTesting
+bool equivocationOf(GatewayClient? client) =>
+    client is E2EClient && client.equivocation;
+
+/// Starts the equivocation poll and returns the [Timer] so the caller can cancel
+/// it on dispose. It polls once immediately — so an equivocation already present
+/// at connect surfaces without waiting a full [interval] — then on every tick.
+/// The poll writes [equivocationOf] unconditionally (no `!equivocation.state`
+/// guard) so a stale true left by a previous session is always cleared when the
+/// new [E2EClient] starts clean. [interval] defaults to 30 s (the trust-resync
+/// cadence); injectable for tests.
+@visibleForTesting
+Timer startEquivPoll(
+  ConnectionManager manager,
+  StateController<bool> equivocation, {
+  Duration interval = const Duration(seconds: 30),
+}) {
+  void poll() => equivocation.state = equivocationOf(manager.client);
+  poll(); // surface an existing equivocation immediately, not only after the first tick
+  return Timer.periodic(interval, (_) => poll());
+}
 
 final clientIdentityStoreProvider =
     Provider<ClientIdentityStore>((ref) => ClientIdentityStore(const FlutterSecureKv()));
@@ -87,10 +179,19 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final push = ref.read(pushControllerProvider);
   final connState = ref.read(connStateProvider.notifier);
   final connError = ref.read(connErrorProvider.notifier);
+  final equivocation = ref.read(equivocationProvider.notifier);
   final profileStore = ref.read(profileStoreProvider);
   final testResults = ref.read(connectionTestResultsProvider.notifier);
+  final identityStore = ref.read(clientIdentityStoreProvider);
+  final chainStore = ref.read(trustChainStoreProvider);
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
+    // Plaintext (e2eEnabled = false): no clientFactory — ConnectionManager uses
+    // the default RpcClient path. No identity generated, no handshake, no equiv
+    // poll. Byte-for-byte identical to pre-PR-9 behavior.
+    clientFactory: creds.e2eEnabled
+        ? (incoming, send) => buildE2EClient(incoming, send, identityStore, chainStore)
+        : null,
     onConnected: (client) async {
       await loadSessions(client, store);
       client.notifications.listen((m) => dispatchEvent(m, store));
@@ -107,7 +208,13 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     connState.state = s;
     connError.state = s == ConnState.failed ? manager.failureMessage : null;
   });
+  // Start the equivocation poll only for E2E connections. For plaintext,
+  // equivocationOf always returns false anyway, but we skip the timer entirely.
+  final Timer? equivPoll =
+      creds.e2eEnabled ? startEquivPoll(manager, equivocation) : null;
   ref.onDispose(() {
+    equivPoll?.cancel();
+    equivocation.state = false; // reset per-session flag on disconnect
     statesSub.cancel();
     // Tell the outgoing gateway to stop pushing before the link closes, so only
     // the active connection delivers notifications. Non-blocking, best-effort.
