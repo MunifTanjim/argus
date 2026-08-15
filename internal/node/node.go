@@ -48,6 +48,9 @@ type Node struct {
 	identityPubB64 string      // base64 public half, announced to the gateway
 	e2ee           bool        // true when E2E blind uplink is active
 
+	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log); zero when unset
+	signerPubB64 string            // base64 public half, announced to the gateway roster
+
 	// Locked-mode trust state: nil/zero in TOFU mode; enforcement engages only once
 	// a trust store is loaded via EnableTrustLog.
 	trust             atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
@@ -172,6 +175,23 @@ func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 // default) the node uses the plaintext uplink. Call before ConnectGateway.
 func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }
 
+// SetSignerKey sets the node's Ed25519 signer keypair. Call before Run.
+func (d *Node) SetSignerKey(kp trustlog.SignerKey) {
+	d.signer = kp
+	d.signerPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// SignerPubKey returns the base64 Ed25519 signer public half, or "" if unset.
+func (d *Node) SignerPubKey() string { return d.signerPubB64 }
+
+// SignerPublic returns a copy of the raw Ed25519 signer public half, or nil if unset.
+func (d *Node) SignerPublic() []byte {
+	if len(d.signer.Public) == 0 {
+		return nil
+	}
+	return append([]byte(nil), d.signer.Public...)
+}
+
 // Quarantined reports whether this node is quarantined on a locked network it
 // cannot pin. In TOFU mode (nil trust store) this is always false.
 func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
@@ -258,10 +278,10 @@ func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
 // DispatchFunc exposes the local engine to a co-located gateway's in-process
-// source without a network hop. It stays the raw dispatch so the plaintext
-// (e2ee-off) path is byte-for-byte identical to before; lock.* filtering for
-// remote-reachable surfaces is added with the lock CLI (later slice).
-func (d *Node) DispatchFunc() api.DispatchFunc { return d.server.DispatchFunc() }
+// source without a network hop. It returns remoteDispatch so that lock.* methods
+// registered on d.server are never reachable from a co-located gateway; only the
+// local unix socket (CLI) can invoke them.
+func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
 
 // clientFor returns the tmux client for a session's server.
 func (d *Node) clientFor(s session.Session) (*tmux.Client, error) {
