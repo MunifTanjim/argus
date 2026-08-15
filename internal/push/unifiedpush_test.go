@@ -5,6 +5,12 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,5 +91,50 @@ func TestMessageIDUnique(t *testing.T) {
 			t.Fatalf("duplicate message id: %q", id)
 		}
 		seen[id] = true
+	}
+}
+
+func TestPostEncryptedSetsHeadersAndPostsBody(t *testing.T) {
+	var gotBody []byte
+	var gotCE, gotTTL, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		gotCE = r.Header.Get("Content-Encoding")
+		gotTTL = r.Header.Get("TTL")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	v, err := LoadOrCreateVAPID(filepath.Join(t.TempDir(), "vapid.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("opaque-ciphertext")
+	if err := PostEncrypted(context.Background(), srv.Client(), v, srv.URL, body, "", ""); err != nil {
+		t.Fatalf("PostEncrypted: %v", err)
+	}
+	if string(gotBody) != "opaque-ciphertext" {
+		t.Errorf("body = %q, want opaque-ciphertext", gotBody)
+	}
+	if gotCE != "aes128gcm" {
+		t.Errorf("Content-Encoding = %q", gotCE)
+	}
+	if gotTTL != unifiedPushTTL {
+		t.Errorf("TTL = %q", gotTTL)
+	}
+	if !strings.HasPrefix(gotAuth, "vapid t=") {
+		t.Errorf("Authorization = %q, want vapid header", gotAuth)
+	}
+}
+
+func TestPostEncryptedGoneOn410(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+	}))
+	defer srv.Close()
+	err := PostEncrypted(context.Background(), srv.Client(), nil, srv.URL, []byte("x"), "", "")
+	if !errors.Is(err, ErrGone) {
+		t.Fatalf("err = %v, want ErrGone", err)
 	}
 }
