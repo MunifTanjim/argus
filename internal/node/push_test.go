@@ -66,6 +66,53 @@ func TestNodeHandlePushRegisterAndTest(t *testing.T) {
 	}
 }
 
+// chanSink is a thread-safe push.Sink for asserting across the Watch goroutine.
+type chanSink struct{ ch chan push.Notification }
+
+func (c chanSink) Notify(_ context.Context, n push.Notification) { c.ch <- n }
+
+func TestNodeStartPushRendersDesktopWhenEnabled(t *testing.T) {
+	d := New()
+	d.SetDesktopNotify(true, nil)
+	sink := chanSink{ch: make(chan push.Notification, 1)}
+	d.notifier = sink
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.StartPush(ctx, 0)
+	time.Sleep(20 * time.Millisecond) // let Watch subscribe before publishing
+
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
+
+	select {
+	case <-sink.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no desktop notification rendered when enabled")
+	}
+}
+
+func TestNodeStartPushSkipsDesktopWhenDisabled(t *testing.T) {
+	d := New()
+	d.SetDesktopNotify(false, nil) // disabled: StartPush must not wire the desktop sink
+	sink := chanSink{ch: make(chan push.Notification, 1)}
+	d.notifier = sink
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.StartPush(ctx, 0)
+	time.Sleep(20 * time.Millisecond)
+
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
+
+	select {
+	case <-sink.ch:
+		t.Fatal("desktop notification rendered while disabled")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestNodeStartPushDeliversMobileOnAwaitingInput(t *testing.T) {
 	curve := ecdh.P256()
 	uaPriv, err := curve.GenerateKey(rand.Reader)
@@ -111,6 +158,33 @@ func TestNodeStartPushDeliversMobileOnAwaitingInput(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no mobile push delivered")
+	}
+}
+
+type captureSink struct{ last push.Notification }
+
+func (c *captureSink) Notify(_ context.Context, n push.Notification) { c.last = n }
+
+func TestNodeIDStampSinkStampsNodeID(t *testing.T) {
+	var cap1 captureSink
+	orig := push.Notification{Data: map[string]string{"session_id": "s1"}}
+	nodeIDStampSink{nodeID: "n1", inner: &cap1}.Notify(context.Background(), orig)
+
+	if got := cap1.last.Data["node_id"]; got != "n1" {
+		t.Errorf("node_id = %q, want %q", got, "n1")
+	}
+	if got := cap1.last.Data["session_id"]; got != "s1" {
+		t.Errorf("session_id = %q, want %q", got, "s1")
+	}
+	if _, ok := orig.Data["node_id"]; ok {
+		t.Error("original Data was mutated: node_id present")
+	}
+
+	// nil Data case
+	var cap2 captureSink
+	nodeIDStampSink{nodeID: "n1", inner: &cap2}.Notify(context.Background(), push.Notification{})
+	if got := cap2.last.Data["node_id"]; got != "n1" {
+		t.Errorf("nil-Data case: node_id = %q, want %q", got, "n1")
 	}
 }
 

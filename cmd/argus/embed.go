@@ -26,17 +26,24 @@ import (
 )
 
 // connect returns a client that re-dials with backoff if the connection drops. With a
-// gateway URL and E2EE enabled it dials over E2E; otherwise the local node's unix socket
-// (which must already be running — use connectLocalSpawn to start one first) uses
-// plaintext. When head is non-nil the E2E client enforces the trust log (locked mode);
-// otherwise it uses TOFU.
+// gateway URL it always uses the channel client (Noise when E2EE is enabled, identity
+// cipher otherwise). The local unix socket uses api.NewReconnectingClient. When head is
+// non-nil the E2E client enforces the trust log (locked mode); otherwise it uses TOFU.
 func connect(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, err
 	}
-	if gatewayURL != "" && cfg.E2EE.Enabled {
+	if gatewayURL != "" {
+		if !cfg.E2EE.Enabled {
+			c, err := client.NewReconnectingPlainClient(ctx, dial)
+			if err != nil {
+				shell.StdErrF("argus: cannot connect to gateway at %s: %v\n", gatewayURL, err)
+				return nil, err
+			}
+			return c, nil
+		}
 		if len(head) > 0 {
 			static, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 			if ierr != nil {
@@ -57,13 +64,9 @@ func connect(ctx context.Context, cfg *config.Config, gatewayURL, token, socket 
 		}
 		return c, nil
 	}
-	c, err := api.NewReconnectingClient(ctx, dial)
+	c, err := api.NewReconnectingClient(ctx, dial) // local unix socket only
 	if err != nil {
-		if gatewayURL != "" {
-			shell.StdErrF("argus: cannot connect to gateway at %s: %v\n", gatewayURL, err)
-		} else {
-			shell.StdErrF("argus: cannot connect to argusd at %s: %v\n", socket, err)
-		}
+		shell.StdErrF("argus: cannot connect to argusd at %s: %v\n", socket, err)
 		return nil, err
 	}
 	return c, nil
@@ -135,10 +138,17 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		return nil, nil, serr
 	}
 	if gatewayURL != "" {
+		// The embedded node accepts mobile push registrations fanned over relay
+		// channels, so it needs a store (the daemon/co-located paths do the same).
+		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
+		// Gateway is a pure router; this node self-drives desktop alerts via DesktopSink.
+		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
+	} else if cfg.E2EE.Enabled {
+		// Isolated e2ee spawn: StartPush covers desktop via DesktopSink.
+		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	} else if cfg.Push.Desktop.Enabled {
-		// Isolated spawn has no gateway to drive alerts, so watch our own registry.
-		// (A connected spawn gets push.desktop RPCs from its gateway instead.)
+		// Isolated spawn has no gateway; watch our own registry for desktop alerts.
 		events, cancel := d.Registry().Subscribe()
 		go func() {
 			defer cancel()
