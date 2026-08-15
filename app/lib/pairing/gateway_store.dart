@@ -89,21 +89,29 @@ class GatewayStore {
 
   static const _urlKey = 'gateway_url';
   static const _tokenKey = 'gateway_token';
+  static const _e2eKey = 'gateway_e2e';
 
   Future<GatewayCredentials?> load() async {
     final url = await _kv.read(_urlKey);
     final token = await _kv.read(_tokenKey);
     if (url == null || token == null) return null;
-    return GatewayCredentials(url, token);
+    final e2eEnabled = await _kv.read(_e2eKey) == 'true';
+    return GatewayCredentials(url, token, e2eEnabled: e2eEnabled);
   }
 
   Future<void> save(GatewayCredentials c) async {
     await _kv.write(_urlKey, c.url);
     await _kv.write(_tokenKey, c.token);
+    if (c.e2eEnabled) {
+      await _kv.write(_e2eKey, 'true');
+    } else {
+      await _kv.delete(_e2eKey);
+    }
   }
 
   Future<void> clear() async {
     await _kv.delete(_urlKey);
     await _kv.delete(_tokenKey);
+    await _kv.delete(_e2eKey);
   }
 }
