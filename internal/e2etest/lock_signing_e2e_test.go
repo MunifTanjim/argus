@@ -21,8 +21,8 @@ import (
 // establishes a locked network; an authorized device connects through the gateway;
 // lock.sign admits a second device; lock.revoke-device deauthorizes it.
 func TestLockSigning(t *testing.T) {
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
