@@ -29,6 +29,10 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
 		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
+		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a config key
+		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a config key
+		"replacement":      true, // `lock revoke-signer` only: ceremony argument, not a config key
+		"fork-from":        true, // `lock revoke-signer` only: ceremony argument, not a config key
 	}
 
 	seen := map[string]bool{}
