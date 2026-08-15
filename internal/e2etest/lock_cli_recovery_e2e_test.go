@@ -29,8 +29,8 @@ func TestLockCLIRecovery(t *testing.T) {
 	node.SetTriggeredPullIntervalForTest(50 * time.Millisecond)
 	t.Cleanup(node.ResetTriggeredPullIntervalForTest)
 
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

@@ -49,7 +49,7 @@ type Node struct {
 	e2ee           bool        // true when E2E blind uplink is active
 
 	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log); zero when unset
-	signerPubB64 string            // base64 public half, announced to the gateway roster
+	signerPubB64 string             // base64 public half, announced to the gateway roster
 
 	// Locked-mode trust state: nil/zero in TOFU mode; enforcement engages only once
 	// a trust store is loaded via EnableTrustLog.
