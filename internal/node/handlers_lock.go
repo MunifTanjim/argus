@@ -240,6 +240,9 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 	if st == nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
 	}
+	if len(d.signer.Private) != ed25519.PrivateKeySize {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+	}
 	p, err := api.Decode[api.LockDisableParams](params)
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
