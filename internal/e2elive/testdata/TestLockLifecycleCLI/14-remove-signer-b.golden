@@ -1,0 +1,6 @@
+$ argus lock remove-signer <NODE-B-SIGPUB> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+remove-signer ok
+  current tip (audit): <TIP-6>
+--- stderr ---

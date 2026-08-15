@@ -1,0 +1,6 @@
+$ argus lock revoke-device node-b --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+revoke-device ok
+  current tip (audit): <TIP-2>
+--- stderr ---
