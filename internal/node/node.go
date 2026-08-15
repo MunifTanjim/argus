@@ -253,6 +253,10 @@ func (d *Node) Equivocation() bool { return d.equivocation.Load() }
 // cannot pin. In TOFU mode (nil trust store) this is always false.
 func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 
+// QuarantineGenesis is the trust root this node saw and cannot verify, or nil when
+// not quarantined.
+func (d *Node) QuarantineGenesis() []byte { return d.trustGate.Genesis() }
+
 // localDisabled reports whether this node's locked-mode enforcement is locally
 // disabled via the per-node escape hatch.
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }

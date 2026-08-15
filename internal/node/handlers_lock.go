@@ -416,6 +416,7 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 		res.Authorized = st.DeviceAuthorized(d.identity.Public)
 	}
 	res.Disabled = st.Disabled()
+	res.Equivocation = d.Equivocation()
 	return res, nil
 }
 

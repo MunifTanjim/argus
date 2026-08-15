@@ -929,7 +929,11 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 	if st.LocalDisabled {
 		b.WriteString("  local-disable: active\n")
 	}
-	return b.String(), ""
+	var warn string
+	if st.Equivocation {
+		warn = "\n⚠ equivocation detected: node beacons diverge — the gateway may be showing inconsistent trust-log views. Compare the tip fingerprint above across your nodes out-of-band (phone/chat) to confirm they match.\n"
+	}
+	return b.String(), warn
 }
 
 // lockHeadline states enforcement. "disabled" is reserved for a network whose

@@ -809,6 +809,7 @@ type LockStatusResult struct {
 	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
 	Disabled       bool     `json:"disabled,omitempty"`
 	LocalDisabled  bool     `json:"local_disabled,omitempty"`
+	Equivocation   bool     `json:"equivocation,omitempty"` // true if a peer beacon couldn't reconcile with this node's chain
 	Pinned         bool     `json:"pinned,omitempty"`
 	PinGenesis     []byte   `json:"pin_genesis,omitempty"`  // this device's own pin
 	SeenGenesis    []byte   `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
