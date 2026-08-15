@@ -107,22 +107,22 @@ const (
 	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
-	MethodLockInit         = "lock.init"         // request: LockInitParams; result: LockInitResult
-	MethodLockSign         = "lock.sign"         // request: LockDeviceParams; result: LockDeviceResult
-	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
-	MethodLockAddSigner    = "lock.addSigner"    // request: LockSignerParams; result: LockDeviceResult
-	MethodLockRemoveSigner = "lock.removeSigner" // request: LockSignerParams; result: LockDeviceResult
-	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
-	MethodLockPin          = "lock.pin"          // request: LockPinParams; result: nil
-	MethodLockUnpin        = "lock.unpin"        // request: no params; result: nil
-	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
-	MethodLockStatus            = "lock.status"            // request: no params; result: LockStatusResult
-	MethodLockLog               = "lock.log"               // request: no params; result: LockLogResult
+	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
+	MethodLockSign               = "lock.sign"               // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke             = "lock.revoke"             // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockAddSigner          = "lock.addSigner"          // request: LockSignerParams; result: LockDeviceResult
+	MethodLockRemoveSigner       = "lock.removeSigner"       // request: LockSignerParams; result: LockDeviceResult
+	MethodLockDisable            = "lock.disable"            // request: LockDisableParams; result: LockDisableResult
+	MethodLockPin                = "lock.pin"                // request: LockPinParams; result: nil
+	MethodLockUnpin              = "lock.unpin"              // request: no params; result: nil
+	MethodLockLocalDisable       = "lock.localDisable"       // request: no params; result: nil
+	MethodLockStatus             = "lock.status"             // request: no params; result: LockStatusResult
+	MethodLockLog                = "lock.log"                // request: no params; result: LockLogResult
 	MethodLockRevokeSignerStart  = "lock.revokeSignerStart"  // request: LockRevokeSignerStartParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
-	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
-	MethodTasksChanged     = "tasks.changed"     // notification: TasksChanged (server→client)
+	MethodSessionTasks           = "sessions.tasks"          // request: SessionRef; result: TasksResult
+	MethodTasksChanged           = "tasks.changed"           // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
