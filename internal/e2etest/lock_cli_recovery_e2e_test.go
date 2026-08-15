@@ -3,6 +3,7 @@ package e2etest
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/node"
@@ -55,8 +57,17 @@ func TestLockCLIRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pinnedKP: %v", err)
 	}
+	// disKP is the local-disable node's identity key. It is authorized here so a
+	// locked client can open a channel to it for the behavioral escape-hatch assertion.
+	disKP, err := e2e.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("disKP: %v", err)
+	}
 	if err := tlog.AuthorizeDevice(authKP.Public, signer); err != nil {
 		t.Fatalf("AuthorizeDevice(authKP): %v", err)
+	}
+	if err := tlog.AuthorizeDevice(disKP.Public, signer); err != nil {
+		t.Fatalf("AuthorizeDevice(disKP): %v", err)
 	}
 	chain := trustlog.MarshalChain(tlog.Entries())
 
@@ -64,6 +75,10 @@ func TestLockCLIRecovery(t *testing.T) {
 	pinnedChainPath := filepath.Join(dir, "pinned-chain")
 	if err := os.WriteFile(pinnedChainPath, chain, 0o600); err != nil {
 		t.Fatalf("write pinned chain: %v", err)
+	}
+	clientChainPath := filepath.Join(dir, "client-chain")
+	if err := os.WriteFile(clientChainPath, chain, 0o600); err != nil {
+		t.Fatalf("write client chain: %v", err)
 	}
 
 	pinnedNode := node.New()
@@ -187,9 +202,9 @@ func TestLockCLIRecovery(t *testing.T) {
 		if err := lc.Call(api.MethodLockPin, api.LockPinParams{Genesis: genesisHash}, nil); err != nil {
 			t.Fatalf("lock.pin: %v", err)
 		}
-		if unpinnedNode.Quarantined() {
-			t.Fatal("lock.pin must clear quarantine")
-		}
+		waitFor(t, "lock.pin clears quarantine", func() bool {
+			return !unpinnedNode.Quarantined()
+		})
 
 		var st api.LockStatusResult
 		if err := lc.Call(api.MethodLockStatus, nil, &st); err != nil {
@@ -210,11 +225,9 @@ func TestLockCLIRecovery(t *testing.T) {
 	})
 
 	t.Run("local-disable", func(t *testing.T) {
-		// Re-quarantine a fresh unpinned node on the same gateway.
-		disKP, err := e2e.GenerateKeyPair()
-		if err != nil {
-			t.Fatalf("disKP: %v", err)
-		}
+		// Re-quarantine a fresh unpinned node on the same gateway. disKP is authorized
+		// in the chain so a locked client can open a channel to it for the behavioral
+		// escape-hatch assertion after lock.local-disable.
 		// Chain state in t.TempDir(); socket in the outer dir to keep the path
 		// short enough for macOS's 104-byte sockaddr_un limit.
 		disChainDir := t.TempDir()
@@ -253,12 +266,6 @@ func TestLockCLIRecovery(t *testing.T) {
 		if err := lc.Call(api.MethodLockLocalDisable, nil, nil); err != nil {
 			t.Fatalf("lock.local-disable: %v", err)
 		}
-		// After local-disable the node must accept channels (escape hatch).
-		if disNode.Quarantined() {
-			// Quarantined() checks trustGate only; the escape hatch is in rejectsChannels.
-			// The gate may still be tripped; the important invariant is that channels
-			// are accepted (rejectsChannels() == false).
-		}
 
 		var st api.LockStatusResult
 		if err := lc.Call(api.MethodLockStatus, nil, &st); err != nil {
@@ -266,6 +273,26 @@ func TestLockCLIRecovery(t *testing.T) {
 		}
 		if !st.LocalDisabled {
 			t.Error("LocalDisabled must be true after lock.local-disable")
+		}
+
+		// Behavioral assertion: the escape hatch must allow real channels through the
+		// gateway even though the quarantine gate is still tripped. disNode has no
+		// trust store (unpinned/trust-nil), so after local-disable it accepts any
+		// channel. The client uses the pinned path (locked client) so it can see the
+		// network's trust log without quarantining and will open a channel to lcr-dis
+		// (disKP.Public is authorized in the chain). agents.list must succeed.
+		gwDial := func(ctx context.Context) (net.Conn, error) {
+			return api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
+		}
+		c, err := client.NewReconnectingE2EClientLocked(ctx, gwDial, genesisHash, authKP, clientChainPath)
+		if err != nil {
+			t.Fatalf("NewReconnectingE2EClientLocked: %v", err)
+		}
+		defer c.Close()
+
+		var agents api.AgentsListResult
+		if err := c.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "lcr-dis"}, &agents); err != nil {
+			t.Fatalf("local-disable escape hatch: agents.list to quarantine-gated node failed: %v", err)
 		}
 	})
 
