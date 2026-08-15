@@ -1,8 +1,9 @@
 import 'dart:async';
 
+import 'gateway_client.dart';
 import 'jsonrpc.dart';
 
-class RpcClient {
+class RpcClient implements GatewayClient {
   RpcClient({required Stream<RpcMessage> incoming, required this.sendFrame}) {
     _sub = incoming.listen(_onMessage);
   }
@@ -14,8 +15,10 @@ class RpcClient {
   int _nextId = 0;
   bool _closed = false;
 
+  @override
   Stream<RpcMessage> get notifications => _notifications.stream;
 
+  @override
   Future<Object?> call(String method, [Object? params]) {
     if (_closed) {
       return Future.error(StateError('client closed'));
@@ -43,6 +46,7 @@ class RpcClient {
     }
   }
 
+  @override
   void close([Object? error]) {
     if (_closed) return;
     _closed = true;
