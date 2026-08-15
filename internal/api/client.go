@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 )
@@ -67,4 +68,10 @@ func (c *Client) Close() error { return c.peer.Close() }
 // Call sends a request and unmarshals the result into out (which may be nil).
 func (c *Client) Call(method string, params, out any) error {
 	return c.peer.Call(method, params, out)
+}
+
+// CallContext is Call bounded by ctx: on cancel or deadline it abandons the request
+// and closes the connection so the peer does not serve a stale response.
+func (c *Client) CallContext(ctx context.Context, method string, params, out any) error {
+	return c.peer.CallContext(ctx, method, params, out)
 }
