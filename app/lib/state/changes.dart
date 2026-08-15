@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import 'gateway.dart';
 
 /// Wraps the changed-files RPCs. Resolves the client fresh on each call so
@@ -10,9 +10,9 @@ import 'gateway.dart';
 /// try/catch.
 class ChangesApi {
   ChangesApi(this._clientOf);
-  final RpcClient? Function() _clientOf;
+  final GatewayClient? Function() _clientOf;
 
-  RpcClient get _client => _clientOf() ?? (throw StateError('not connected'));
+  GatewayClient get _client => _clientOf() ?? (throw StateError('not connected'));
 
   static List<ChangedFile> _filesOf(Map<String, dynamic> res) =>
       (res['files'] as List? ?? const [])

@@ -4,7 +4,7 @@ import 'dart:developer' as developer;
 
 import '../models/enums.dart';
 import '../transport/jsonrpc.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import '../util/id.dart';
 
 /// An open terminal attach the UI drives and disposes.
@@ -35,7 +35,7 @@ class TerminalAttach implements TerminalSession {
     _rows = rows;
   }
 
-  final RpcClient client;
+  final GatewayClient client;
   final String sessionId;
 
   /// Raw output bytes from the PTY; the view writes them to the emulator.
