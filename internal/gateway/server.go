@@ -28,16 +28,20 @@ type Server struct {
 	clientSrv  *api.Server
 
 	clientTokens  *clienttoken.Store
-	pushStore     *push.Store            // nil = push disabled
-	pushSender    *push.Dispatcher       // for push.test
-	pushDeliverer push.Deliverer         // blind-path egress for push.deliver; nil disables
-	vapidPubKey   string                 // served via push.vapidKey
-	master        string                 // a /client conn presenting it is admin
-	version       string                 // served via server.info
-	publicURL     atomic.Pointer[string] // base URL for pairing QRs
+	pushStore     *push.Store
+	pushSender    *push.Dispatcher
+	pushDeliverer push.Deliverer
+	vapidPubKey   string
+	master        string
+	version       string
+	publicURL     atomic.Pointer[string]
+
+	nodeKeepaliveInterval time.Duration
+	nodeKeepaliveTimeout  time.Duration
+	nodeKeepaliveFailures int
 
 	pairMu      sync.Mutex
-	pairWaiters map[string]<-chan struct{} // minted token -> "device connected" signal
+	pairWaiters map[string]<-chan struct{}
 
 	relayMu   sync.Mutex
 	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
@@ -55,6 +59,10 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		channels:    map[string]*relayChannel{},
 		nodePeers:   map[string]*api.Peer{},
 		entries:     trustlog.NewEntryStore(),
+
+		nodeKeepaliveInterval: api.DefaultKeepaliveInterval,
+		nodeKeepaliveTimeout:  api.DefaultKeepaliveTimeout,
+		nodeKeepaliveFailures: api.DefaultKeepaliveFailures,
 	}
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
@@ -74,7 +82,7 @@ func (s *Server) SetPush(store *push.Store, dispatcher *push.Dispatcher) {
 	s.pushSender = dispatcher
 }
 
-// SetPushDeliverer wires the blind-path egress for the push.deliver node→gateway RPC.
+// SetPushDeliverer wires the egress for the push.deliver node→gateway RPC.
 func (s *Server) SetPushDeliverer(d push.Deliverer) { s.pushDeliverer = d }
 
 // SetVAPIDPublicKey publishes the VAPID public key devices fetch via push.vapidKey.
@@ -126,7 +134,7 @@ func (s *Server) clientHandler() http.Handler {
 		}
 		admin := s.master != "" && tok == s.master
 		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin})
-		s.clientSrv.ServeConnContext(ctx, conn) // blocks until the conn closes
+		s.clientSrv.ServeConnContext(ctx, conn)
 	})
 }
 
@@ -174,7 +182,6 @@ func (s *Server) registerPush(srv *api.Server) {
 		return nil, nil
 	})
 
-	// test sends a notification through the real backend to confirm end-to-end delivery.
 	srv.Handle(api.MethodPushTest, func(ctx context.Context, params json.RawMessage) (any, error) {
 		if s.pushStore == nil || s.pushSender == nil {
 			return nil, unavailable
@@ -196,7 +203,6 @@ func (s *Server) registerPush(srv *api.Server) {
 		if err := s.pushSender.SendTo(sctx, p.DeviceID, n); err != nil {
 			code := api.CodeInternalError
 			if errors.Is(err, push.ErrGone) {
-				// Target dead and already pruned; client should mint a fresh endpoint.
 				code = api.CodePushGone
 			}
 			return nil, &api.RPCError{Code: code, Message: err.Error()}
@@ -204,7 +210,6 @@ func (s *Server) registerPush(srv *api.Server) {
 		return nil, nil
 	})
 
-	// vapidKey serves the gateway's VAPID public key for Web Push subscription.
 	srv.Handle(api.MethodPushVAPIDKey, func(_ context.Context, _ json.RawMessage) (any, error) {
 		return api.PushVAPIDKey{Key: s.vapidPubKey}, nil
 	})
@@ -224,7 +229,6 @@ func requireAdmin(h api.HandlerFunc) api.HandlerFunc {
 func (s *Server) registerClientAdmin(srv *api.Server) {
 	unavailable := &api.RPCError{Code: api.CodeInvalidRequest, Message: "client token management not enabled on this gateway"}
 
-	// pairStart mints a pending token and returns it with the public URL for a QR.
 	srv.Handle(api.MethodClientsPairStart, requireAdmin(func(context.Context, json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -240,8 +244,6 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		return api.PairStartResult{Token: tok, URL: s.getPublicURL()}, nil
 	}))
 
-	// pairAwait blocks until the token's device connects (waiter closed on promotion)
-	// or the pairing window elapses.
 	srv.Handle(api.MethodClientsPairAwait, requireAdmin(func(ctx context.Context, params json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -269,7 +271,6 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		}
 	}))
 
-	// list returns the persisted client tokens.
 	srv.Handle(api.MethodClientsList, requireAdmin(func(context.Context, json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -285,7 +286,6 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		return out, nil
 	}))
 
-	// remove revokes a client token by deleting its record.
 	srv.Handle(api.MethodClientsRemove, requireAdmin(func(_ context.Context, params json.RawMessage) (any, error) {
 		if s.clientTokens == nil {
 			return nil, unavailable
@@ -315,27 +315,20 @@ func (s *Server) nodeHandler() http.Handler {
 	})
 }
 
-// Node uplink keepalive: pings detect a half-open link (host vanished without a
-// TCP FIN) promptly. Closing after nodeKeepaliveFailures unanswered pings fires
-// Done into the aggregator's offline → grace → removal path; two failures ride out
-// a transient blip so a briefly busy node isn't dropped.
-const (
-	nodeKeepaliveInterval = 15 * time.Second
-	nodeKeepaliveTimeout  = 5 * time.Second
-	nodeKeepaliveFailures = 2
-)
+// SetNodeKeepalive tunes this server's node-uplink heartbeat. Call before serving.
+// Pings detect a half-open link (host vanished without a TCP FIN) promptly; closing
+// after failures unanswered pings fires Done into the aggregator's offline → grace →
+// removal path. Defaults (api.DefaultKeepalive*) ride out a transient blip so a
+// briefly busy node is not dropped.
+func (s *Server) SetNodeKeepalive(interval, timeout time.Duration, failures int) {
+	s.nodeKeepaliveInterval, s.nodeKeepaliveTimeout, s.nodeKeepaliveFailures = interval, timeout, failures
+}
 
 // nodeIdentifyTimeout bounds the post-auth identify handshake on a node uplink.
 const nodeIdentifyTimeout = 30 * time.Second
 
-// maxClosedOrphans caps the per-uplink debounce set for orphaned terminal output
-// so a long-lived node connection with heavy attach churn can't grow it without
-// bound. Far above any plausible count of concurrently-dying orphans.
-const maxClosedOrphans = 4096
-
 var discardLog = slog.New(slog.DiscardHandler)
 
-// logger returns the configured logger, or a discarding one so call sites can log unconditionally.
 func (s *Server) logger() *slog.Logger {
 	if s.log != nil {
 		return s.log
@@ -354,8 +347,7 @@ const relayQueueDepth = 64
 const maxChannelsPerClient = 64
 
 // relayChannel is one client<->node E2E channel. The gateway forwards opaque
-// frames between the two peers by chan_id, never reading the sealed Body. Two pump
-// goroutines (one per direction) decouple the peers' read loops.
+// frames between the two peers by chan_id, never reading the sealed Body.
 type relayChannel struct {
 	chanID   string
 	client   *api.Peer
@@ -380,8 +372,7 @@ func (s *Server) addChannel(chanID string, client, node *api.Peer) {
 	s.logger().Info("relay channel opened", "chan", chanID)
 }
 
-// dropChannel removes a channel and stops its pumps. It does not close the peers
-// (they may host other channels). Idempotent.
+// dropChannel is idempotent.
 func (s *Server) dropChannel(chanID, reason string) {
 	s.relayMu.Lock()
 	ch, ok := s.channels[chanID]
@@ -409,8 +400,6 @@ func (s *Server) dropChannelsWhere(reason string, pred func(*relayChannel) bool)
 	}
 }
 
-// relayPump drains q and forwards each frame to dst verbatim. A write error tears
-// the channel down.
 func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
 	for {
 		select {
@@ -436,8 +425,6 @@ func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
 	}
 }
 
-// forwardFromClient relays a client's frame to the channel's node — but only if
-// src actually owns the channel.
 func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	s.relayMu.Lock()
 	ch := s.channels[f.Route.ChanID]
@@ -447,8 +434,6 @@ func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	}
 }
 
-// forwardFromNode relays a node's frame to the channel's client — but only if src
-// owns the channel.
 func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
 	s.relayMu.Lock()
 	ch := s.channels[f.Route.ChanID]
@@ -492,8 +477,8 @@ func (s *Server) notifyNodePeers(except *api.Peer, method string, params any) {
 	}
 }
 
-// buildClientServer wires the client-facing JSON-RPC: ping, server.info,
-// nodes.list, relay.open/close, node.event roster stream, and clients.*.
+// buildClientServer wires the client-facing JSON-RPC: ping, server.info, nodes.list,
+// trustlog.sync, relay.open/close, node.event roster stream, and clients.*.
 func (s *Server) buildClientServer() *api.Server {
 	srv := api.NewServer()
 
@@ -597,8 +582,8 @@ func (s *Server) buildClientServer() *api.Server {
 	return srv
 }
 
-// serveNode adopts an accepted node uplink: identify,
-// register as a source, record as a relay target, and block until it disconnects.
+// serveNode adopts an accepted node uplink: identify, register as a source, record
+// as a relay target, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
 	var self atomic.Pointer[api.Peer]
 
@@ -652,9 +637,9 @@ func (s *Server) serveNode(conn net.Conn) {
 	}
 
 	peer := api.NewPeer(conn, api.PeerOptions{
-		KeepaliveInterval:         nodeKeepaliveInterval,
-		KeepaliveTimeout:          nodeKeepaliveTimeout,
-		KeepaliveFailureThreshold: nodeKeepaliveFailures,
+		KeepaliveInterval:         s.nodeKeepaliveInterval,
+		KeepaliveTimeout:          s.nodeKeepaliveTimeout,
+		KeepaliveFailureThreshold: s.nodeKeepaliveFailures,
 		Dispatch:                  nodeDispatch,
 		OnRelayFrame:              s.forwardFromNode,
 	})
