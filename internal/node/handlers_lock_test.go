@@ -251,6 +251,37 @@ func TestHandleLockPinAndUnpin(t *testing.T) {
 	}
 }
 
+// TestRemoteDispatchFiltersLockMethods verifies that remoteDispatch — used by
+// both DispatchFunc (co-located gateway) and the plaintext uplink — rejects
+// lock.* while passing non-lock methods through.
+func TestRemoteDispatchFiltersLockMethods(t *testing.T) {
+	d, _ := newLockNode(t)
+	dispatch := d.remoteDispatch()
+	ctx := context.Background()
+
+	raw, _ := json.Marshal(api.LockPinParams{Genesis: make([]byte, 32)})
+	_, err := dispatch(ctx, api.MethodLockPin, raw)
+	if err == nil {
+		t.Fatal("remoteDispatch must reject lock.pin")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeMethodNotFound {
+		t.Errorf("want CodeMethodNotFound for lock.pin, got %v", err)
+	}
+
+	_, err = dispatch(ctx, api.MethodLockStatus, nil)
+	if err == nil {
+		t.Fatal("remoteDispatch must reject lock.status")
+	}
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeMethodNotFound {
+		t.Errorf("want CodeMethodNotFound for lock.status, got %v", err)
+	}
+
+	if _, err := dispatch(ctx, api.MethodPing, nil); err != nil {
+		t.Errorf("ping must pass through remoteDispatch, got %v", err)
+	}
+}
+
 // TestKindString covers all recognized kind codes.
 func TestKindString(t *testing.T) {
 	cases := []struct {
