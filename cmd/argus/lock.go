@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockStatusCmd(), newLockLogCmd(), newLockPinCmd(), newLockUnpinCmd(), newLockLocalDisableCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd(), newLockPinCmd(), newLockUnpinCmd())
 	return cmd
 }
 
@@ -283,6 +284,440 @@ func printLockLogEntry(e api.LockLogEntry) {
 	if len(e.Hash) > 0 {
 		shell.StdOutF("  hash: %s\n", entryHashString(e))
 	}
+}
+
+// findNode returns the roster entry whose id or label matches name, or nil.
+func findNode(roster []api.NodeDescriptor, name string) *api.NodeDescriptor {
+	for i := range roster {
+		if roster[i].ID == name || roster[i].Label == name {
+			return &roster[i]
+		}
+	}
+	return nil
+}
+
+// parseSignerKeys parses each `lock init` argument as a sigpub: key.
+//
+// Node names are deliberately not accepted here. A name can only become a key by
+// way of the roster, which the gateway serves and which no trust log constrains at
+// init time — so naming a co-signer would let the gateway substitute its own key
+// into the genesis and hold a signing seat forever. A key read off
+// `argus lock status` on the node itself reaches this command without passing
+// through the gateway at all.
+func parseSignerKeys(args []string) ([][]byte, error) {
+	out := make([][]byte, 0, len(args))
+	for _, arg := range args {
+		pub, err := keyfmt.SignerKey.Decode(arg)
+		if err != nil {
+			return nil, fmt.Errorf("signer %q: %w\n  read it with `argus lock status` on that node", arg, err)
+		}
+		out = append(out, pub)
+	}
+	return out, nil
+}
+
+// ownSignerKey reads this node's signer public half over the local socket.
+func ownSignerKey(ctx context.Context, cfg *config.Config) ([]byte, error) {
+	st, err := lockStatusOnNode(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("reading this node's signer key: %w", err)
+	}
+	if len(st.SignerPubKey) == 0 {
+		return nil, fmt.Errorf("this node has no signer key")
+	}
+	return st.SignerPubKey, nil
+}
+
+// requireOwnSignerKey refuses an init whose signer list omits the local node's own
+// key. The node enforces this too; doing it here as well means the operator is told
+// which key is missing, and the exact command to run, before anything is created.
+func requireOwnSignerKey(own []byte, sigPubs [][]byte, args []string) error {
+	for _, p := range sigPubs {
+		if bytes.Equal(p, own) {
+			return nil
+		}
+	}
+	return fmt.Errorf("this node's own signer key must be listed explicitly:\n  argus lock init %s\n\nthe signer keys you pass are the complete set the new trust log will trust",
+		strings.Join(append([]string{keyfmt.SignerKey.Encode(own)}, args...), " "))
+}
+
+// rosterDevice is one identity key `lock init` would authorize, with the roster
+// label it came from.
+type rosterDevice struct {
+	pub   []byte
+	label string
+}
+
+// gatherRosterDevices returns every rostered node's identity pubkey paired with the
+// name it is listed under, so the preview can show what is about to be trusted.
+func gatherRosterDevices(roster []api.NodeDescriptor) []rosterDevice {
+	out := make([]rosterDevice, 0, len(roster))
+	for _, nd := range roster {
+		if nd.IdentityPubKey == "" {
+			continue
+		}
+		pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+		if err != nil {
+			shell.StdErrF("WARN: node %q has an unparseable identity key; not authorizing it\n", nd.ID)
+			continue
+		}
+		label := nd.Label
+		if label == "" {
+			label = nd.ID
+		}
+		out = append(out, rosterDevice{pub: pub, label: label})
+	}
+	return out
+}
+
+// initPreview renders what `lock init` would create. Printing this and exiting is
+// the default: the signer set becomes permanent and the disablement secrets are
+// shown exactly once, so the operator gets to read it before any of that is true.
+// It also surfaces the device list, which is otherwise invisible — those identity
+// keys come from the gateway's roster, and nothing has verified them.
+func initPreview(own []byte, sigPubs [][]byte, devices []rosterDevice, genDisablements int, args []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "would create a trust log with:\n  signers (%d):\n", len(sigPubs))
+	for _, p := range sigPubs {
+		self := ""
+		if bytes.Equal(p, own) {
+			self = "  (this node)"
+		}
+		fmt.Fprintf(&b, "    %s%s\n", keyfmt.SignerKey.Encode(p), self)
+	}
+	fmt.Fprintf(&b, "  signer-set fingerprint: %s\n", signerSetFingerprintOf(sigPubs))
+	fmt.Fprintf(&b, "  disablement secrets: %d (shown once, at creation)\n", genDisablements)
+	fmt.Fprintf(&b, "  devices authorized from the gateway roster (%d):\n", len(devices))
+	for _, d := range devices {
+		fmt.Fprintf(&b, "    %s  %s\n", keyfmt.DeviceKey.Encode(d.pub), d.label)
+	}
+	if len(devices) > 0 {
+		b.WriteString("  these identity keys come from the gateway, which nothing has verified yet\n")
+	}
+	fmt.Fprintf(&b, "\nnothing has been created. re-run with --confirm:\n  argus lock init --confirm %s\n", strings.Join(args, " "))
+	return b.String()
+}
+
+// lockInitFewSignersWarning returns the warning text to print when the trust log has fewer
+// than 3 signers, because the revoke-signer co-signing ceremony requires ≥3 to out-vote
+// one compromised key. Returns "" for ≥3 signers.
+func lockInitFewSignersWarning(signerCount int) string {
+	if signerCount < 3 {
+		return "\nNote: fewer than 3 signers — 'lock revoke-signer' needs ≥3 signers to out-vote\none compromised key; with fewer, recovery is 'lock disable' + reinit.\n"
+	}
+	return ""
+}
+
+// fetchRoster dials the gateway and returns nodes.list.
+func fetchRoster(ctx context.Context, cfg *config.Config) ([]api.NodeDescriptor, error) {
+	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c := api.NewClient(conn)
+	defer c.Close()
+	var r api.NodesListResult
+	if err := c.Call(api.MethodNodesList, nil, &r); err != nil {
+		return nil, fmt.Errorf("nodes.list: %w", err)
+	}
+	return r.Nodes, nil
+}
+
+func lockInitOnNode(ctx context.Context, cfg *config.Config, p api.LockInitParams) (api.LockInitResult, error) {
+	return callLocal[api.LockInitResult](ctx, cfg, api.MethodLockInit, p)
+}
+
+// pinClientRole pins this machine's client (TUI) role to the genesis lock.init just
+// created. The client is a separate role reading a separate file, so without this the
+// dashboard on the very machine that locked the network quarantines itself on the next
+// tick. It is never a hard failure: the node is locked either way, and the operator
+// gets the exact command to finish the job.
+//
+// replaceStale overwrites a pin left over from a disabled log, matching what the node
+// does to its own pin: the genesis came from this machine's node over its local socket
+// and the operator asked for it, so the file pin has no more standing than the node's.
+// A config pin (lock.genesis) is still refused — that one is the operator's to edit.
+func pinClientRole(cfg *config.Config, genesis []byte, replaceStale bool) {
+	note := func(err error) {
+		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n", err)
+	}
+	cfgGenesis, err := configPin(cfg)
+	if err != nil {
+		note(err)
+		return
+	}
+	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
+		note(configPinConflict(cfgGenesis))
+		return
+	}
+	prior, err := clientPinFile().Load()
+	if err != nil {
+		note(err)
+		return
+	}
+	stale := prior != nil && !bytes.Equal(prior, genesis)
+	if stale && !replaceStale {
+		note(existingPinConflict(prior))
+		return
+	}
+	if err := clientPinFile().Save(genesis); err != nil {
+		shell.StdErrF("\nNOTE: this machine's client (TUI) role was NOT pinned: %v\n  run here: argus lock pin %s\n", err, keyfmt.Genesis.Encode(genesis))
+		return
+	}
+	if stale {
+		shell.StdOutF("  this machine's client (TUI) role repinned from the disabled genesis %s\n", keyfmt.Genesis.Encode(prior))
+		return
+	}
+	shell.StdOutF("  this machine's client (TUI) role pinned to the same genesis\n")
+}
+
+func newLockInitCmd() *cobra.Command {
+	var genDisablements int
+	var confirm bool
+	cmd := &cobra.Command{
+		Use:   "init sigpub:<hex> [sigpub:<hex>...]",
+		Short: "Enable locked mode: create the trust log with exactly these signer keys",
+		Long: "Enable locked mode. The keys given are the complete set of signers the new\n" +
+			"trust log will trust — including this node's own key, which must be listed.\n" +
+			"Read each key with `argus lock status` on the node that holds it.\n\n" +
+			"Without --confirm this prints what would be created and exits, changing nothing.",
+		Args:          cobra.ArbitraryArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if cfg.Gateway.URL == "" {
+				return fail(cmd, fmt.Errorf("lock init needs a gateway (set gateway.url) to read the node roster"))
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			sigPubs, err := parseSignerKeys(args)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			own, err := ownSignerKey(ctx, cfg)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if err := requireOwnSignerKey(own, sigPubs, args); err != nil {
+				return fail(cmd, err)
+			}
+
+			roster, err := fetchRoster(ctx, cfg)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			rosterDevices := gatherRosterDevices(roster)
+			if !confirm {
+				shell.StdOutF("%s", initPreview(own, sigPubs, rosterDevices, genDisablements, args))
+				return nil
+			}
+			devices := make([][]byte, 0, len(rosterDevices))
+			for _, d := range rosterDevices {
+				devices = append(devices, d.pub)
+			}
+
+			// A disabled log is a dead network that lock.init replaces with a new
+			// genesis, so the pins pointing at it are stale rather than conflicting.
+			prior, _ := lockStatusOnNode(ctx, cfg)
+			reinit := prior.Enabled && prior.Disabled
+
+			res, err := lockInitOnNode(ctx, cfg, api.LockInitParams{Signers: sigPubs, Devices: devices, GenDisablements: genDisablements})
+			if err != nil {
+				return fail(cmd, err)
+			}
+
+			genesis := keyfmt.Genesis.Encode(res.Tip)
+			shell.StdOutF("locked mode enabled\n  genesis: %s\n  signers: %d\n", genesis, res.SignerCount)
+			for _, s := range res.DisablementSecrets {
+				shell.StdOutF("  disablement secret: %s\n", keyfmt.Disablement.Encode(s))
+			}
+			if len(res.DisablementSecrets) > 0 {
+				shell.StdErrF("\nSAVE the disablement secret(s) above NOW — shown only once. Each one disables\nlocked mode network-wide (break-glass recovery if signer keys are lost).\n")
+			}
+			if res.SignerCount < 2 && len(res.DisablementSecrets) == 0 {
+				shell.StdErrF("\nWARNING: only one signer and no disablement secrets — if this node is lost\nor compromised there is NO recovery. Add a second signer key\nto the init command, or generate a disablement secret (--gen-disablements).\n")
+			} else if res.SignerCount < 2 {
+				shell.StdErrF("\nNote: only one signer. If it is lost, use a saved disablement secret to recover.\nConsider re-initialising with a second signer key listed.\n")
+			}
+			if w := lockInitFewSignersWarning(res.SignerCount); w != "" {
+				shell.StdErrF("%s", w)
+			}
+			pinClientRole(cfg, res.Tip, reinit)
+			if reinit {
+				shell.StdOutF("\nThis replaced a disabled trust log, so every device still pinned to the old\ngenesis must be repinned, run on each of them:\n  argus lock unpin\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", genesis)
+				return nil
+			}
+			shell.StdOutF("\nTo pin your other devices, run on each of them:\n  argus lock pin\n(or set lock.genesis: %s in their config)\n", genesis)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&genDisablements, "gen-disablements", 1, "number of disablement (recovery) secrets to generate")
+	cmd.Flags().BoolVar(&confirm, "confirm", false, "actually create the trust log; without it, print what would be created and exit")
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
+// resolveDevice maps a device argument to a 32-byte identity pubkey: a roster node's
+// label or id resolves to its IdentityPubKey; otherwise the arg is parsed as a
+// devpub: key.
+func resolveDevice(roster []api.NodeDescriptor, arg string) ([]byte, error) {
+	if nd := findNode(roster, arg); nd != nil {
+		if nd.IdentityPubKey == "" {
+			return nil, fmt.Errorf("node %q advertises no identity key", arg)
+		}
+		pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("node %q identity pubkey: %w", arg, err)
+		}
+		return pub, nil
+	}
+	if !keyfmt.Tagged(arg) {
+		return nil, fmt.Errorf("device %q is neither a known node (label/id) nor a %s key", arg, keyfmt.DeviceKey.Prefix())
+	}
+	pub, err := keyfmt.DeviceKey.Decode(arg)
+	if err != nil {
+		return nil, fmt.Errorf("device %q: %w", arg, err)
+	}
+	return pub, nil
+}
+
+func newLockSignCmd() *cobra.Command {
+	return newLockDeviceCmd("sign", "Authorize a device", api.MethodLockSign, "device already authorized; nothing changed")
+}
+func newLockRevokeCmd() *cobra.Command {
+	return newLockDeviceCmd("revoke-device", "Revoke a device", api.MethodLockRevoke, "device not currently authorized; nothing changed")
+}
+
+func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           use + " <device>",
+		Short:         short + " (node label/id or devpub: key)",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Resolve the device: try a raw pubkey first (no gateway needed); if that
+			// fails and a gateway is configured, resolve against the roster.
+			device, derr := resolveDevice(nil, args[0])
+			if derr != nil {
+				if cfg.Gateway.URL == "" {
+					return fail(cmd, fmt.Errorf("%v (no gateway configured to resolve a node name)", derr))
+				}
+				roster, rerr := fetchRoster(ctx, cfg)
+				if rerr != nil {
+					return fail(cmd, rerr)
+				}
+				if device, derr = resolveDevice(roster, args[0]); derr != nil {
+					return fail(cmd, derr)
+				}
+			}
+
+			res, err := lockDeviceOnNode(ctx, cfg, method, device)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if !res.Changed {
+				shell.StdOutF("%s: %s\n  current tip (audit): %s\n", use, noopMsg, keyfmt.Tip.Encode(res.Tip))
+				return nil
+			}
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
+func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, device []byte) (api.LockDeviceResult, error) {
+	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockDeviceParams{Device: device})
+}
+
+func newLockAddSignerCmd() *cobra.Command {
+	return newLockSignerCmd("add-signer", "Add a trusted signer", api.MethodLockAddSigner)
+}
+func newLockRemoveSignerCmd() *cobra.Command {
+	return newLockSignerCmd("remove-signer", "Remove a trusted signer", api.MethodLockRemoveSigner)
+}
+
+func newLockSignerCmd(use, short, method string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           use + " sigpub:<hex>",
+		Short:         short + " (signer key; read it with `argus lock status` on that node)",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pubs, err := parseSignerKeys([]string{args[0]})
+			if err != nil {
+				return fail(cmd, err)
+			}
+			pub := pubs[0]
+			res, err := lockSignerOnNode(ctx, cfg, method, pub)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
+}
+
+func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, signer []byte) (api.LockDeviceResult, error) {
+	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockSignerParams{Signer: signer})
+}
+
+func newLockDisableCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "disable <secret>",
+		Short:         "Disable locked mode network-wide using a disablement secret",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			secret, err := keyfmt.Disablement.Decode(args[0])
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			res, err := callLocal[api.LockDisableResult](ctx, cfg, api.MethodLockDisable, api.LockDisableParams{Secret: secret})
+			if err != nil {
+				return fail(cmd, err)
+			}
+			shell.StdOutF("locked mode disabled network-wide\n  current tip (audit): %s\n", keyfmt.Tip.Encode(res.Tip))
+			return nil
+		},
+	}
+	addClientFlags(cmd.Flags())
+	return cmd
 }
 
 func newLockLocalDisableCmd() *cobra.Command {
