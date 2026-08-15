@@ -86,6 +86,9 @@ type Node struct {
 	desktopNotify bool      // render incoming push.desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
+	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
+	pushDeliverer atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
+
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
@@ -147,6 +150,14 @@ func (d *Node) SetDesktopNotify(enabled bool, click func(string) []string) {
 }
 
 func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
+
+// SetPushStore enables node-side push registration (register/unregister/test).
+// Call before StartPush. nil disables push.
+func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
+
+// SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
+// Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).
+func (d *Node) SetPushDeliverer(dv push.Deliverer) { d.pushDeliverer.Store(&dv) }
 
 // SetIdentity overrides the node's id and label (default: hostname). The id is
 // the gateway's routing key, so it must be stable across reconnects and unique
