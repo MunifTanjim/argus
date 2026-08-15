@@ -45,10 +45,10 @@ func (f *fakeSource) Capabilities() api.NodeCapabilities {
 func (f *fakeSource) Snapshot() []session.Session                { return f.snap }
 func (f *fakeSource) Subscribe() (<-chan registry.Event, func()) { return f.events, func() {} }
 func (f *fakeSource) Done() <-chan struct{}                      { return f.done }
-func (f *fakeSource) IdentityPubKey() string                    { return "" }
-func (f *fakeSource) SignerPubKey() string                      { return "" }
-func (f *fakeSource) BeaconPubKey() string                      { return "" }
-func (f *fakeSource) LatestBeacon() *api.Beacon                 { return nil }
+func (f *fakeSource) IdentityPubKey() string                     { return "" }
+func (f *fakeSource) SignerPubKey() string                       { return "" }
+func (f *fakeSource) BeaconPubKey() string                       { return "" }
+func (f *fakeSource) LatestBeacon() *api.Beacon                  { return nil }
 
 func (f *fakeSource) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()
@@ -193,7 +193,7 @@ func TestRouteUnknownNode(t *testing.T) {
 }
 
 func TestSourceOfflineThenRemoved(t *testing.T) {
-	a := New(60 * time.Millisecond, false)
+	a := New(60*time.Millisecond, false)
 	events, cancel := a.Subscribe()
 	defer cancel()
 
@@ -218,7 +218,7 @@ func TestSourceOfflineThenRemoved(t *testing.T) {
 }
 
 func TestReconnectBeforeGraceKeepsSessions(t *testing.T) {
-	a := New(400 * time.Millisecond, false)
+	a := New(400*time.Millisecond, false)
 	src := newFakeSource("home", "home-box", sess("default:%1"))
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })

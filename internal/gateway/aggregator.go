@@ -30,8 +30,8 @@ type Aggregator struct {
 	blind bool
 
 	mu         sync.Mutex
-	sessions   map[string]session.Session // plaintext path: composite id -> session
-	sources    map[string]*srcState       // node id -> state
+	sessions   map[string]session.Session  // plaintext path: composite id -> session
+	sources    map[string]*srcState        // node id -> state
 	subs       map[int]chan registry.Event // plaintext path: session event subscribers
 	nextSub    int
 	rosterSubs map[int]chan api.NodeEvent // blind path: roster event subscribers

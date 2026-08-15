@@ -105,8 +105,8 @@ const (
 	// consistency-checks the peer's tip against its own chain. Allowed over the
 	// E2E (remote) path; never a lock.* local-only method.
 	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
-	MethodSessionTasks        = "sessions.tasks"        // request: SessionRef; result: TasksResult
-	MethodTasksChanged        = "tasks.changed"         // notification: TasksChanged (server→client)
+	MethodSessionTasks  = "sessions.tasks" // request: SessionRef; result: TasksResult
+	MethodTasksChanged  = "tasks.changed"  // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.

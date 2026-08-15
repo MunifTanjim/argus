@@ -65,9 +65,9 @@ func (s *InProcessSource) Capabilities() api.NodeCapabilities         { return s
 func (s *InProcessSource) Snapshot() []session.Session                { return s.reg.Snapshot() }
 func (s *InProcessSource) Subscribe() (<-chan registry.Event, func()) { return s.reg.Subscribe() }
 func (s *InProcessSource) Done() <-chan struct{}                      { return s.done }
-func (s *InProcessSource) IdentityPubKey() string                    { return "" }
+func (s *InProcessSource) IdentityPubKey() string                     { return "" }
 func (s *InProcessSource) SignerPubKey() string                       { return "" }
-func (s *InProcessSource) BeaconPubKey() string                      { return "" }
+func (s *InProcessSource) BeaconPubKey() string                       { return "" }
 func (s *InProcessSource) LatestBeacon() *api.Beacon                  { return nil }
 
 // Call dispatches to the local handlers and marshals the result. The ctx
