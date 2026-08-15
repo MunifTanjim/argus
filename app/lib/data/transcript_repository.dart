@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/gateway.dart';
 import '../state/transcript.dart';
 import '../state/transcript_controller.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 
 /// UI-facing entry point for live transcript subscriptions. Screens open a
 /// subscription through this abstraction instead of constructing a
@@ -24,7 +24,7 @@ abstract class TranscriptRepository {
 /// fresh on each open so reconnects use the new client.
 class TranscriptRepositoryRemote implements TranscriptRepository {
   TranscriptRepositoryRemote(this._clientOf);
-  final RpcClient? Function() _clientOf;
+  final GatewayClient? Function() _clientOf;
 
   @override
   TranscriptSubscription? open({

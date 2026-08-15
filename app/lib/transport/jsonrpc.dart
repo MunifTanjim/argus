@@ -18,8 +18,11 @@ class RpcMessage {
   final Object? params;
   final Object? result;
   final RpcError? error;
+  final Object? route; // raw relay routing header (a Map with chan_id) on relayed links
+  final Object? body;  // raw sealed body value (a base64 String) on relayed links
 
-  const RpcMessage({this.id, this.method, this.params, this.result, this.error});
+  const RpcMessage(
+      {this.id, this.method, this.params, this.result, this.error, this.route, this.body});
 
   factory RpcMessage.fromJson(Map<String, dynamic> j) {
     final rawId = j['id'];
@@ -31,6 +34,8 @@ class RpcMessage {
       error: j['error'] == null
           ? null
           : RpcError.fromJson(j['error'] as Map<String, dynamic>),
+      route: j['route'],
+      body: j['body'],
     );
   }
 

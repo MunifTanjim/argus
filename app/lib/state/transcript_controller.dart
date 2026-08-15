@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chunk.dart';
 import '../transport/jsonrpc.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import 'transcript.dart';
 
 // Keyed by session id. The arg isn't needed inside the notifier — the
@@ -18,7 +18,7 @@ final transcriptProvider =
 /// delta. Sends have_chunks = current cached length so the server can send a
 /// minimal catch-up after a reconnect.
 Future<void> subscribeTranscript(
-  RpcClient client,
+  GatewayClient client,
   TranscriptNotifier store, {
   required String sessionId,
   String? agentId,
@@ -61,7 +61,7 @@ class TranscriptController implements TranscriptSubscription {
     this.agentId,
   });
 
-  final RpcClient client;
+  final GatewayClient client;
   final TranscriptNotifier store;
   final String sessionId;
   final String? agentId;

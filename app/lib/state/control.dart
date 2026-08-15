@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import 'gateway.dart';
 import 'grouping.dart';
 
@@ -14,11 +14,11 @@ import 'grouping.dart';
 /// as [Error] instead of throwing or silently doing nothing.
 class SessionService {
   SessionService(this._clientOf);
-  final RpcClient? Function() _clientOf;
+  final GatewayClient? Function() _clientOf;
 
   /// Runs [body] against the current client, mapping a null client or any
   /// thrown error to [Error].
-  Future<Result<T>> _guard<T>(Future<T> Function(RpcClient c) body) async {
+  Future<Result<T>> _guard<T>(Future<T> Function(GatewayClient c) body) async {
     final c = _clientOf();
     if (c == null) return Result.error(StateError('not connected'));
     try {

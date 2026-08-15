@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
 import '../models/chunk.dart';
-import '../transport/rpc_client.dart';
+import '../transport/gateway_client.dart';
 import 'gateway.dart';
 
 /// ToolDetailRef addresses the transcript a tool item belongs to, so the detail
@@ -55,7 +55,7 @@ class ToolDetailRef {
 /// [Error] for the UI to render.
 class ToolDetailApi {
   ToolDetailApi(this._clientOf);
-  final RpcClient? Function() _clientOf;
+  final GatewayClient? Function() _clientOf;
 
   Future<Result<ToolDetail>> fetch(ToolDetailRef ref, String toolId) async {
     final c = _clientOf();
