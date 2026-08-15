@@ -535,6 +535,39 @@ func TestHandleLockDisable_WrongSecretFails(t *testing.T) {
 	}
 }
 
+// TestHandleLockDisable_NoSignerKeyReturnsError guards against the panic path
+// where st != nil but d.signer is zero (LoadOrCreateSigner failed at startup).
+// ed25519.Sign panics on an empty private key, so the missing-signer guard must
+// fire before st.Disable is ever called.
+func TestHandleLockDisable_NoSignerKeyReturnsError(t *testing.T) {
+	// Build a trust store with a different signer, leaving this node's signer empty.
+	other, _ := trustlog.GenerateSigner()
+	otherLog, _ := trustlog.NewGenesis([][]byte{other.Public}, other, nil)
+	genesis := otherLog.Tip()
+
+	d, _ := newLockNode(t)
+	// No SetSignerKey — signer stays zero.
+
+	if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+	d.syncTrustOnce(&fakePeer{pullChain: trustlog.MarshalChain(otherLog.Entries())})
+
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: make([]byte, 32)})
+	// Must NOT panic; must return CodeInvalidRequest.
+	res, err := d.handleLockDisable(context.Background(), raw)
+	if res != nil {
+		t.Error("expected nil result on error path")
+	}
+	if err == nil {
+		t.Fatal("expected RPCError when no signer key is set")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest, got %v", err)
+	}
+}
+
 // TestSignerPublicNilSafe confirms SignerPublic returns nil (not a panic) when no key is set.
 func TestSignerPublicNilSafe(t *testing.T) {
 	d := New()
