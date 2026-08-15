@@ -116,8 +116,11 @@ const (
 	MethodLockPin          = "lock.pin"          // request: LockPinParams; result: nil
 	MethodLockUnpin        = "lock.unpin"        // request: no params; result: nil
 	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
-	MethodLockStatus       = "lock.status"       // request: no params; result: LockStatusResult
-	MethodLockLog          = "lock.log"          // request: no params; result: LockLogResult
+	MethodLockStatus            = "lock.status"            // request: no params; result: LockStatusResult
+	MethodLockLog               = "lock.log"               // request: no params; result: LockLogResult
+	MethodLockRevokeSignerStart  = "lock.revokeSignerStart"  // request: LockRevokeSignerStartParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
+	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
 	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
 	MethodTasksChanged     = "tasks.changed"     // notification: TasksChanged (server→client)
 )
@@ -730,6 +733,40 @@ type LockDisableParams struct {
 type LockDisableResult struct {
 	Tip      []byte `json:"tip"`
 	Disabled bool   `json:"disabled"`
+}
+
+// LockRevokeSignerStartParams begins a revoke-signer co-signing ceremony.
+// Revoked is the list of signer pubkeys to revoke (required, non-empty).
+// Replaces is an optional list of replacement signer pubkeys added atomically.
+// ForkFrom overrides the fork-point hash; nil = auto-select (parent of the revoked
+// signer's earliest action, erasing it from the chain).
+type LockRevokeSignerStartParams struct {
+	Revoked  [][]byte `json:"revoked"`
+	Replaces [][]byte `json:"replaces,omitempty"`
+	ForkFrom []byte   `json:"fork_from,omitempty"`
+}
+
+// LockRevokeSignerBlobResult carries the serialized PendingRevoke blob produced
+// by lock.revokeSignerStart and lock.revokeSignerCosign.
+type LockRevokeSignerBlobResult struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerCosignParams carries the PendingRevoke blob to co-sign.
+type LockRevokeSignerCosignParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishParams carries the completed PendingRevoke blob to finalize
+// and ingest into the node's trust store.
+type LockRevokeSignerFinishParams struct {
+	Blob []byte `json:"blob"`
+}
+
+// LockRevokeSignerFinishResult reports the new trust-log tip after the revocation
+// entry has been ingested and the chain has been persisted.
+type LockRevokeSignerFinishResult struct {
+	Tip []byte `json:"tip"`
 }
 
 // LockPinParams pins a node to a trust-log genesis hash.
