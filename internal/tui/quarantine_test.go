@@ -12,7 +12,7 @@ import (
 
 type stubQuarantinedClient struct{ q bool }
 
-func (c *stubQuarantinedClient) Call(_ string, _, _ any) error  { return nil }
+func (c *stubQuarantinedClient) Call(_ string, _, _ any) error   { return nil }
 func (c *stubQuarantinedClient) Events() <-chan api.Notification { return nil }
 func (c *stubQuarantinedClient) States() <-chan bool             { return nil }
 func (c *stubQuarantinedClient) Reconnect()                      {}

@@ -26,8 +26,8 @@ func TestLockQuarantine(t *testing.T) {
 	node.SetTriggeredPullIntervalForTest(50 * time.Millisecond)
 	t.Cleanup(node.ResetTriggeredPullIntervalForTest)
 
-	agg := gateway.New(time.Second, true)
-	srv := gateway.NewServer(agg, nil, nil, true)
+	agg := gateway.New(time.Second)
+	srv := gateway.NewServer(agg, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -205,8 +205,8 @@ func TestLockQuarantine(t *testing.T) {
 
 	t.Run("tofu", func(t *testing.T) {
 		// A separate gateway serving NO chain. An unpinned node must NOT quarantine.
-		tofuAgg := gateway.New(time.Second, true)
-		tofuSrv := gateway.NewServer(tofuAgg, nil, nil, true)
+		tofuAgg := gateway.New(time.Second)
+		tofuSrv := gateway.NewServer(tofuAgg, nil, nil)
 		tofuTS := httptest.NewServer(tofuSrv.Handler())
 		defer tofuTS.Close()
 
