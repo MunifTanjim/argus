@@ -1,0 +1,18 @@
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: not enabled
+
+chain: none — locked mode not enabled on this node
+
+this node
+  identity: <NODE-A-DEVPUB>
+  signer:   <NODE-A-SIGPUB>
+
+signers: none
+
+devices: none
+
+  pin: none
+  client pin: none
+--- stderr ---

@@ -1,0 +1,34 @@
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: disabled network-wide — break-glass used, nothing is enforced
+  this is permanent: the log can never be re-enabled
+  to lock again: argus lock init (new genesis; every device repins)
+
+chain
+  genesis: <GENESIS>
+           <FP>
+  tip:     <TIP-7>
+           <FP>
+  length:  8 entries
+
+this node
+  identity: <NODE-A-DEVPUB>   authorized: yes
+  signer:   <NODE-A-SIGPUB>   trusted: yes
+
+signers (1)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+
+devices (2)
+  <NODE-A-DEVPUB>  ← this node
+  <NODE-B-DEVPUB>
+
+  pin: <FP> (source: file)
+  client pin: <FP> — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet
+       the dashboard on this machine opens no channels
+       a signer must run:
+         argus lock init
+       then on each device:
+         argus lock pin
+--- stderr ---

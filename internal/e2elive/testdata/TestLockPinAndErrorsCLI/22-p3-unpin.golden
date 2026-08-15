@@ -1,0 +1,9 @@
+$ argus lock unpin --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+cleared this device's persisted pin
+  local node unpinned
+--- stderr ---
+
+This device now has no trust root. It will refuse all channels while the
+network has a trust log, until you run `argus lock pin`.

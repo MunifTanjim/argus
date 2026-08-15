@@ -1,0 +1,34 @@
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: QUARANTINED — this device refuses all channels
+  it follows a trust root the network has left: its own log was disabled by
+  break-glass (permanently), and the network has since locked again under a new one
+
+chain
+  genesis: <GENESIS-1>
+           <FP>
+  tip:     <TIP-2>
+           <FP>
+  length:  4 entries
+
+this node
+  identity: <NODE-B-DEVPUB>   authorized: yes
+  signer:   <NODE-B-SIGPUB>   trusted: no
+
+signers (1)
+  fingerprint: <FP>
+  <NODE-A-SIGPUB>
+
+devices (2)
+  <NODE-A-DEVPUB>
+  <NODE-B-DEVPUB>  ← this node
+
+  pin: <FP> — SUPERSEDED: the network now uses <FP>
+       run:
+         argus lock pin <GENESIS-2>
+  client pin: <FP> — SUPERSEDED: the network now uses <FP>
+       the dashboard on this machine opens no channels; run:
+         argus lock pin <GENESIS-2>
+       then restart argus
+--- stderr ---

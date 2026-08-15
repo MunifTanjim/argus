@@ -1,0 +1,21 @@
+$ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+locked mode: not enabled
+
+chain: none — locked mode not enabled on this node
+
+this node
+  identity: <NODE-B-DEVPUB>
+  signer:   <NODE-B-SIGPUB>
+
+signers: none
+
+devices: none
+
+  pin: none — QUARANTINED (chain seen: <FP>)
+       run:
+         argus lock pin <GENESIS-2>
+  client pin: none — QUARANTINED (chain seen: <FP>)
+       the dashboard on this machine opens no channels; run: argus lock pin
+--- stderr ---

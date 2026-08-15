@@ -1,0 +1,8 @@
+$ argus lock pin <GENESIS> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+pinned this device
+  genesis: <GENESIS>
+  <FP>
+  local node pinned and enforcing
+--- stderr ---
