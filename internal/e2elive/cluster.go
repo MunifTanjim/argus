@@ -16,6 +16,14 @@ import (
 	"github.com/MunifTanjim/argus/internal/client"
 )
 
+// CipherMode selects whether the fleet uses Noise E2EE or a plaintext relay channel.
+type CipherMode int
+
+const (
+	CipherE2EE      CipherMode = iota // Noise end-to-end encryption (default)
+	CipherPlaintext                   // relay channel without Noise
+)
+
 type Cluster struct {
 	t      *testing.T
 	Root   string
@@ -36,8 +44,9 @@ type Cluster struct {
 	retired    []retiredLog
 	nodes      map[string]*Node
 
-	gwEnv  []string
-	gwArgs []string
+	cipherMode CipherMode
+	gwEnv      []string
+	gwArgs     []string
 
 	redactions []redaction
 	steps      int
@@ -96,6 +105,16 @@ func New(t *testing.T) *Cluster {
 	if err := dockerRun("network", "create", "--label", runLabel+"=1", c.network); err != nil {
 		t.Fatalf("create network: %v", err)
 	}
+	return c
+}
+
+// NewPlaintext is like New but configures the fleet to use the plaintext relay
+// channel (no Noise encryption). Use it for cipher-independent scenario variants
+// and parity tests.
+func NewPlaintext(t *testing.T) *Cluster {
+	t.Helper()
+	c := New(t)
+	c.cipherMode = CipherPlaintext
 	return c
 }
 
@@ -257,7 +276,10 @@ func (c *Cluster) StartGateway() {
 		if err != nil {
 			c.t.Fatalf("gateway env: %v", err)
 		}
-		c.gwEnv = append(env, "ARGUS_E2EE_ENABLED=true")
+		if c.cipherMode == CipherE2EE {
+			env = append(env, "ARGUS_E2EE_ENABLED=true")
+		}
+		c.gwEnv = env
 		c.gwArgs = []string{
 			"start",
 			"--mode=gateway",
@@ -317,7 +339,9 @@ func (c *Cluster) AddNode(id string) *Node {
 	if err != nil {
 		c.t.Fatalf("node %s env: %v", id, err)
 	}
-	env = append(env, "ARGUS_E2EE_ENABLED=true")
+	if c.cipherMode == CipherE2EE {
+		env = append(env, "ARGUS_E2EE_ENABLED=true")
+	}
 	sock := containerHome + "/s"
 	args := []string{
 		"start",
@@ -396,7 +420,11 @@ func (c *Cluster) WaitOnline(ids ...string) {
 		}
 		online := map[string]bool{}
 		for _, nd := range r.Nodes {
-			if nd.Online && nd.IdentityPubKey != "" {
+			// In E2EE mode, IdentityPubKey being non-empty signals the node has
+			// fully announced its Noise identity. In plaintext mode the field is
+			// always empty, so Online alone is the readiness signal.
+			ready := nd.Online && (c.cipherMode == CipherPlaintext || nd.IdentityPubKey != "")
+			if ready {
 				online[nd.ID] = true
 			}
 		}
@@ -471,7 +499,13 @@ func (c *Cluster) NewClient() *client.ReconnectingE2EClient {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return api.DialWSConn(ctx, c.GWURL+"/client", c.Token, nil)
 	}
-	cl, err := client.NewReconnectingE2EClient(c.ctx, dial)
+	var cl *client.ReconnectingE2EClient
+	var err error
+	if c.cipherMode == CipherPlaintext {
+		cl, err = client.NewReconnectingPlainClient(c.ctx, dial)
+	} else {
+		cl, err = client.NewReconnectingE2EClient(c.ctx, dial)
+	}
 	if err != nil {
 		c.t.Fatalf("NewClient: %v", err)
 	}
