@@ -10,12 +10,14 @@ import (
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
-// configureNodeLock loads the node's e2ee identity, then activates locked mode
-// from the resolved genesis pin. Call it only when cfg.E2EE.Enabled is true.
+// configureNodeLock loads the node's e2ee identity and (best-effort) signer key,
+// then activates locked mode from the resolved genesis pin. Call it only when
+// cfg.E2EE.Enabled is true.
 //
 // It fails CLOSED on the identity: when e2ee is enabled the identity must load,
 // because a node left with the trust log on but encryption off serves
-// unauthenticated plaintext channels — a locked-mode bypass.
+// unauthenticated plaintext channels — a locked-mode bypass. A signer failure
+// only degrades a feature (cannot author) and stays a warning.
 func configureNodeLock(d *node.Node, cfg *config.Config, log *slog.Logger) error {
 	kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json"))
 	if err != nil {
@@ -23,6 +25,12 @@ func configureNodeLock(d *node.Node, cfg *config.Config, log *slog.Logger) error
 	}
 	d.SetIdentityKey(kp)
 	d.SetE2EE(true)
+
+	if sk, serr := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); serr != nil {
+		log.Warn("signer key load failed; locked mode unavailable", "err", serr)
+	} else {
+		d.SetSignerKey(sk)
+	}
 
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
 	if perr != nil {

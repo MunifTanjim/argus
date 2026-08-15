@@ -99,6 +99,12 @@ const (
 	MethodTasksChanged    = "tasks.changed"    // notification: TasksChanged (server→client)
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
+	MethodLockInit         = "lock.init"         // request: LockInitParams; result: LockInitResult
+	MethodLockSign         = "lock.sign"         // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockRevoke       = "lock.revoke"       // request: LockDeviceParams; result: LockDeviceResult
+	MethodLockAddSigner    = "lock.addSigner"    // request: LockSignerParams; result: LockDeviceResult
+	MethodLockRemoveSigner = "lock.removeSigner" // request: LockSignerParams; result: LockDeviceResult
+	MethodLockDisable      = "lock.disable"      // request: LockDisableParams; result: LockDisableResult
 	MethodLockPin          = "lock.pin"          // request: LockPinParams; result: nil
 	MethodLockUnpin        = "lock.unpin"        // request: no params; result: nil
 	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
@@ -666,6 +672,51 @@ const (
 type NodeEvent struct {
 	Type string         `json:"type"` // added | online | offline | removed | trust-changed
 	Node NodeDescriptor `json:"node"`
+}
+
+// LockInitParams enables locked mode. Signers lists Ed25519 signer pubkeys (this
+// node's own key must be included explicitly). Devices lists Curve25519 identity
+// pubkeys to authorize in the genesis.
+type LockInitParams struct {
+	Signers         [][]byte `json:"signers,omitempty"`
+	Devices         [][]byte `json:"devices,omitempty"`
+	GenDisablements int      `json:"gen_disablements,omitempty"`
+}
+
+// LockInitResult reports the new genesis tip and the final signer count.
+type LockInitResult struct {
+	Tip                []byte   `json:"tip"`
+	SignerCount        int      `json:"signer_count"`
+	DisablementSecrets [][]byte `json:"disablement_secrets,omitempty"`
+}
+
+// LockDeviceParams identifies a device to authorize/revoke by its Curve25519
+// identity pubkey.
+type LockDeviceParams struct {
+	Device []byte `json:"device"`
+}
+
+// LockDeviceResult reports the trust-log tip after the sign/revoke. Changed is
+// false when the device was already in the target state (idempotent no-op).
+type LockDeviceResult struct {
+	Tip     []byte `json:"tip"`
+	Changed bool   `json:"changed"`
+}
+
+// LockSignerParams identifies a signer to add/remove by its Ed25519 pubkey.
+type LockSignerParams struct {
+	Signer []byte `json:"signer"`
+}
+
+// LockDisableParams carries the raw disablement secret to consume.
+type LockDisableParams struct {
+	Secret []byte `json:"secret"`
+}
+
+// LockDisableResult reports the trust-log tip and disabled flag after lock.disable.
+type LockDisableResult struct {
+	Tip      []byte `json:"tip"`
+	Disabled bool   `json:"disabled"`
 }
 
 // LockPinParams pins a node to a trust-log genesis hash.
