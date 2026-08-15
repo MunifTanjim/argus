@@ -105,8 +105,15 @@ const (
 	// consistency-checks the peer's tip against its own chain. Allowed over the
 	// E2E (remote) path; never a lock.* local-only method.
 	MethodBeaconDeliver = "beacon.deliver" // client->node request: Beacon (peer's); result: nil
-	MethodSessionTasks  = "sessions.tasks" // request: SessionRef; result: TasksResult
-	MethodTasksChanged  = "tasks.changed"  // notification: TasksChanged (server→client)
+	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
+	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
+	MethodLockPin          = "lock.pin"          // request: LockPinParams; result: nil
+	MethodLockUnpin        = "lock.unpin"        // request: no params; result: nil
+	MethodLockLocalDisable = "lock.localDisable" // request: no params; result: nil
+	MethodLockStatus       = "lock.status"       // request: no params; result: LockStatusResult
+	MethodLockLog          = "lock.log"          // request: no params; result: LockLogResult
+	MethodSessionTasks     = "sessions.tasks"    // request: SessionRef; result: TasksResult
+	MethodTasksChanged     = "tasks.changed"     // notification: TasksChanged (server→client)
 )
 
 // ChangedFile is one entry in a session working directory's git status.
@@ -672,4 +679,51 @@ const (
 type NodeEvent struct {
 	Type string         `json:"type"` // added | online | offline | removed
 	Node NodeDescriptor `json:"node"`
+}
+
+// LockPinParams pins a node to a trust-log genesis hash.
+type LockPinParams struct {
+	Genesis []byte `json:"genesis"`
+}
+
+// LockLogEntry summarises one entry in the trust-log chain, as returned by lock.log.
+type LockLogEntry struct {
+	Index       int      `json:"index"`
+	Kind        string   `json:"kind"`                   // genesis|add-signer|remove-signer|authorize-device|revoke-device|revoke-signer|disable
+	Hash        []byte   `json:"hash,omitempty"`         // this entry's chain hash; entry 0's is the genesis
+	Target      []byte   `json:"target,omitempty"`       // single-key entries: the target pubkey
+	Signers     [][]byte `json:"signers,omitempty"`      // genesis: initial signer set
+	Revoked     [][]byte `json:"revoked,omitempty"`      // revoke-signer: revoked signer pubkeys
+	Replaces    [][]byte `json:"replaces,omitempty"`     // revoke-signer: replacement signer pubkeys
+	CoSignCount int      `json:"cosign_count,omitempty"` // revoke-signer: number of co-signs
+}
+
+// LockLogResult is the reply to lock.log.
+type LockLogResult struct {
+	Entries []LockLogEntry `json:"entries"`
+	Tip     []byte         `json:"tip,omitempty"`
+	Signers [][]byte       `json:"signers,omitempty"` // current trusted signer set (for fingerprint computation)
+}
+
+// LockStatusResult is the audit view of a node's locked state.
+type LockStatusResult struct {
+	Enabled     bool     `json:"enabled"`
+	Tip         []byte   `json:"tip,omitempty"`
+	Signers     [][]byte `json:"signers,omitempty"`
+	DeviceCount int      `json:"device_count"`
+	// Devices is the authorized set. A non-zero DeviceCount with no Devices means the
+	// running daemon predates this field — upgraded binary, not yet restarted.
+	Devices        [][]byte `json:"devices,omitempty"`
+	Length         int      `json:"length,omitempty"`
+	SignerTrusted  bool     `json:"signer_trusted"`
+	Authorized     bool     `json:"authorized"`
+	SignerPubKey   []byte   `json:"signer_pubkey,omitempty"`
+	IdentityPubKey []byte   `json:"identity_pubkey,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+	LocalDisabled  bool     `json:"local_disabled,omitempty"`
+	Pinned         bool     `json:"pinned,omitempty"`
+	PinGenesis     []byte   `json:"pin_genesis,omitempty"`  // this device's own pin
+	SeenGenesis    []byte   `json:"seen_genesis,omitempty"` // genesis observed by a tripped quarantine gate
+	PinSource      string   `json:"pin_source,omitempty"`   // "config" or "file"
+	Quarantined    bool     `json:"quarantined,omitempty"`
 }
