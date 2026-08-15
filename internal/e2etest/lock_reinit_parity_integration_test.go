@@ -129,7 +129,7 @@ func TestReinitOverDisabledLogMatchesFirstLock(t *testing.T) {
 		st := nodeB.TrustStore()
 		return !nodeB.Quarantined() && st != nil && !st.Disabled() && bytes.Equal(st.Tip(), g3.Tip)
 	})
-	if nodeA.Equivocation() || nodeB.Equivocation() {
-		t.Fatal("a legitimate relock must not latch equivocation")
-	}
+	// Equivocation cannot arise in this topology (no beacon keys, no client courier
+	// delivering peer beacons); the false-positive-on-relock non-regression is covered
+	// by TestNewTrustRootClearsPeerBeaconState and TestHandleBeaconDeliverBenignLagClears.
 }
