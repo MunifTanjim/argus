@@ -283,6 +283,11 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 			d.SetIdentityKey(kp)
 			d.SetE2EE(true)
 		}
+		if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+			log.With("scope", "node").Warn("signer key load failed; locked mode unavailable", "err", err)
+		} else {
+			d.SetSignerKey(kp)
+		}
 		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
 		if perr != nil {
 			return nil, nil, fmt.Errorf("refusing to start open: %w", perr)

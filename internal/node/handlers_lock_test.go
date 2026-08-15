@@ -307,6 +307,234 @@ func TestKindString(t *testing.T) {
 	}
 }
 
+// newSignerLockNode builds a Node with a signer key and a temp trust-chain path.
+func newSignerLockNode(t *testing.T) (*Node, trustlog.SignerKey) {
+	t.Helper()
+	sk, err := trustlog.GenerateSigner()
+	if err != nil {
+		t.Fatalf("GenerateSigner: %v", err)
+	}
+	d, _ := newLockNode(t)
+	d.SetSignerKey(sk)
+	return d, sk
+}
+
+// initLockNode calls handleLockInit on d with sk as the sole signer and no
+// additional devices or disablements. Returns the LockInitResult.
+func initLockNode(t *testing.T, d *Node, sk trustlog.SignerKey) api.LockInitResult {
+	t.Helper()
+	raw, _ := json.Marshal(api.LockInitParams{Signers: [][]byte{sk.Public}})
+	res, err := d.handleLockInit(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("handleLockInit: %v", err)
+	}
+	return res.(api.LockInitResult)
+}
+
+func TestHandleLockInit_CreatesGenesis(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	ir := initLockNode(t, d, sk)
+	if len(ir.Tip) == 0 {
+		t.Fatal("expected non-empty genesis tip")
+	}
+	if ir.SignerCount != 1 {
+		t.Errorf("signer count = %d, want 1", ir.SignerCount)
+	}
+	st := d.trust.Load()
+	if st == nil {
+		t.Fatal("trust store must be set after init")
+	}
+	if !st.SignerTrusted(sk.Public) {
+		t.Error("this node's signer must be trusted after init")
+	}
+}
+
+func TestHandleLockInit_AlreadyEnabled(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+	raw, _ := json.Marshal(api.LockInitParams{Signers: [][]byte{sk.Public}})
+	_, err := d.handleLockInit(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error on double-init")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest, got %v", err)
+	}
+}
+
+func TestHandleLockInit_NoSignerKey(t *testing.T) {
+	d, _ := newLockNode(t)
+	sk, _ := trustlog.GenerateSigner()
+	raw, _ := json.Marshal(api.LockInitParams{Signers: [][]byte{sk.Public}})
+	_, err := d.handleLockInit(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error when no signer key set")
+	}
+}
+
+func TestHandleLockInit_OwnKeyMustBeExplicit(t *testing.T) {
+	d, _ := newSignerLockNode(t)
+	other, _ := trustlog.GenerateSigner()
+	raw, _ := json.Marshal(api.LockInitParams{Signers: [][]byte{other.Public}})
+	_, err := d.handleLockInit(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error when own key not in signer list")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest, got %v", err)
+	}
+}
+
+func TestHandleLockSign_AuthorizesDevice(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+
+	dev := make([]byte, 32)
+	dev[0] = 0xAB
+	raw, _ := json.Marshal(api.LockDeviceParams{Device: dev})
+	res, err := d.handleLockSign(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("handleLockSign: %v", err)
+	}
+	dr := res.(api.LockDeviceResult)
+	if !dr.Changed {
+		t.Error("Changed must be true for a new authorization")
+	}
+	if !d.trust.Load().DeviceAuthorized(dev) {
+		t.Error("device must be authorized after handleLockSign")
+	}
+}
+
+func TestHandleLockRevoke_RevokesDevice(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+
+	dev := make([]byte, 32)
+	dev[0] = 0xCD
+
+	// Authorize first.
+	raw, _ := json.Marshal(api.LockDeviceParams{Device: dev})
+	if _, err := d.handleLockSign(context.Background(), raw); err != nil {
+		t.Fatalf("handleLockSign: %v", err)
+	}
+
+	// Now revoke.
+	if _, err := d.handleLockRevoke(context.Background(), raw); err != nil {
+		t.Fatalf("handleLockRevoke: %v", err)
+	}
+	if d.trust.Load().DeviceAuthorized(dev) {
+		t.Error("device must not be authorized after handleLockRevoke")
+	}
+}
+
+func TestHandleLockSign_UntrustedSignerRefused(t *testing.T) {
+	// Init with a different signer; this node's key is not in the trust set.
+	other, _ := trustlog.GenerateSigner()
+	otherLog, _ := trustlog.NewGenesis([][]byte{other.Public}, other, nil)
+	genesis := otherLog.Tip()
+
+	d, _ := newLockNode(t)
+	myKey, _ := trustlog.GenerateSigner()
+	d.SetSignerKey(myKey)
+
+	if err := d.EnableTrustLog(genesis, d.trustPath); err != nil {
+		t.Fatalf("EnableTrustLog: %v", err)
+	}
+	d.syncTrustOnce(&fakePeer{pullChain: trustlog.MarshalChain(otherLog.Entries())})
+
+	dev := make([]byte, 32)
+	raw, _ := json.Marshal(api.LockDeviceParams{Device: dev})
+	_, err := d.handleLockSign(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error when signer not trusted")
+	}
+	var rpcErr *api.RPCError
+	if !asRPCError(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Errorf("want CodeInvalidRequest, got %v", err)
+	}
+}
+
+func TestHandleLockAddSigner_AddsToSet(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+
+	newSigner, _ := trustlog.GenerateSigner()
+	raw, _ := json.Marshal(api.LockSignerParams{Signer: newSigner.Public})
+	res, err := d.handleLockAddSigner(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("handleLockAddSigner: %v", err)
+	}
+	dr := res.(api.LockDeviceResult)
+	if !dr.Changed {
+		t.Error("Changed must be true when a new signer is added")
+	}
+	if !d.trust.Load().SignerTrusted(newSigner.Public) {
+		t.Error("new signer must be trusted after handleLockAddSigner")
+	}
+}
+
+func TestHandleLockRemoveSigner_RemovesFromSet(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+
+	extra, _ := trustlog.GenerateSigner()
+	addRaw, _ := json.Marshal(api.LockSignerParams{Signer: extra.Public})
+	if _, err := d.handleLockAddSigner(context.Background(), addRaw); err != nil {
+		t.Fatalf("handleLockAddSigner: %v", err)
+	}
+
+	rmRaw, _ := json.Marshal(api.LockSignerParams{Signer: extra.Public})
+	if _, err := d.handleLockRemoveSigner(context.Background(), rmRaw); err != nil {
+		t.Fatalf("handleLockRemoveSigner: %v", err)
+	}
+	if d.trust.Load().SignerTrusted(extra.Public) {
+		t.Error("signer must not be trusted after handleLockRemoveSigner")
+	}
+}
+
+func TestHandleLockDisable_WithCorrectSecret(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	raw, _ := json.Marshal(api.LockInitParams{
+		Signers:         [][]byte{sk.Public},
+		GenDisablements: 1,
+	})
+	res, err := d.handleLockInit(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("handleLockInit: %v", err)
+	}
+	ir := res.(api.LockInitResult)
+	if len(ir.DisablementSecrets) != 1 {
+		t.Fatalf("expected 1 disablement secret, got %d", len(ir.DisablementSecrets))
+	}
+
+	disableRaw, _ := json.Marshal(api.LockDisableParams{Secret: ir.DisablementSecrets[0]})
+	dres, err := d.handleLockDisable(context.Background(), disableRaw)
+	if err != nil {
+		t.Fatalf("handleLockDisable: %v", err)
+	}
+	dr := dres.(api.LockDisableResult)
+	if !dr.Disabled {
+		t.Error("log must be disabled after handleLockDisable with correct secret")
+	}
+	if !d.trust.Load().Disabled() {
+		t.Error("trust store must report Disabled after handleLockDisable")
+	}
+}
+
+func TestHandleLockDisable_WrongSecretFails(t *testing.T) {
+	d, sk := newSignerLockNode(t)
+	initLockNode(t, d, sk)
+
+	wrongSecret := make([]byte, 32)
+	raw, _ := json.Marshal(api.LockDisableParams{Secret: wrongSecret})
+	_, err := d.handleLockDisable(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected error with wrong disablement secret")
+	}
+}
+
 // TestSignerPublicNilSafe confirms SignerPublic returns nil (not a panic) when no key is set.
 func TestSignerPublicNilSafe(t *testing.T) {
 	d := New()
