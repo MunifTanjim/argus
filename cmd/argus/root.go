@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tui"
@@ -121,5 +122,20 @@ var errSilent = errors.New("")
 // returns errSilent, so callers report once and exit non-zero without cobra re-printing.
 func fail(cmd *cobra.Command, err error) error {
 	shell.StdErrF("%s: %v\n", cmd.CommandPath(), err)
+	shell.StdErrF("%s", gatewayAuthHint(err))
 	return errSilent
+}
+
+// gatewayAuthHint names the three places a gateway token comes from, for the one
+// failure whose cause the transport error cannot state: the gateway answered, and
+// refused this caller. Returns "" for every other error.
+func gatewayAuthHint(err error) string {
+	var authErr *api.DialAuthError
+	if !errors.As(err, &authErr) {
+		return ""
+	}
+	if authErr.TokenSent {
+		return "  the gateway expects a different token: check --token, $ARGUS_TOKEN, or token: in the config file\n"
+	}
+	return "  no token was configured: pass --token, set $ARGUS_TOKEN, or set token: in the config file\n"
 }
