@@ -341,6 +341,71 @@ func (d *Node) persistTrust() error {
 	return d.persistChain(st.Bytes())
 }
 
+// activateTrust persists the new store atomically, wires the pin, and triggers a
+// trust-change announcement. Called from lock.init after building the genesis chain.
+func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chainPath string) error {
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		d.trustPath = chainPath
+		if err := os.MkdirAll(filepath.Dir(chainPath), 0o700); err != nil {
+			return err
+		}
+		if err := d.persistChain(store.Bytes()); err != nil {
+			return err
+		}
+		if err := d.writeGenesisHash(genesisHash); err != nil {
+			return err
+		}
+		d.retainedEntries = trustlog.NewEntryStore()
+		d.trust.Store(store)
+		d.pinGenesis = append([]byte(nil), genesisHash...)
+		d.pinSource = trustpin.SourceFile.String()
+		d.trustGate.Clear()
+		return nil
+	}(); err != nil {
+		return err
+	}
+	d.reevaluateTrustChannels()
+	d.announceTrustChange()
+	return nil
+}
+
+// announceTrustChange pushes the current chain to the gateway after a local
+// write (lock.init/sign/revoke/add-signer/remove-signer/disable).
+func (d *Node) announceTrustChange() {
+	d.offerTrustNow()
+}
+
+// offerTrustNow retains locally-appended chain entries and pushes them to the
+// gateway out of band. Best effort: the sync loop is the backstop when there is
+// no uplink.
+func (d *Node) offerTrustNow() {
+	st := d.trust.Load()
+	if st == nil {
+		return
+	}
+	mine := st.Bytes()
+	if mine == nil {
+		return
+	}
+	raw, err := trustlog.ChainEntries(mine)
+	if err != nil {
+		return
+	}
+	d.pinMu.Lock()
+	re := d.retainedEntries
+	d.pinMu.Unlock()
+	if re != nil {
+		re.PutAll(raw)
+	}
+	peer := d.triggerPeer()
+	if peer == nil {
+		return
+	}
+	_ = peer.Call(api.MethodTrustLogPush, api.TrustLogPushParams{Entries: raw}, nil)
+}
+
 // runTrustSync drives the pull loop for the uplink's lifetime. It cancels the
 // loop when the peer drops or ctx ends.
 func (d *Node) runTrustSync(ctx context.Context, peer *api.Peer) {

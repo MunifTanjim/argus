@@ -142,6 +142,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			d.SetIdentityKey(kp)
 			d.SetE2EE(true)
 		}
+		if kp, err := node.LoadOrCreateSigner(config.GetStatePath("signer-key.json")); err != nil {
+			logger.Scoped("node").Warn("signer key load failed; locked mode unavailable", "err", err)
+		} else {
+			d.SetSignerKey(kp)
+		}
 		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
 		if perr != nil {
 			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))
