@@ -6,9 +6,15 @@ package registry
 
 import (
 	"sync"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
+
+// defaultEndedGrace is how long a scan is barred from re-creating a session an
+// exit hook just ended. The agent is still alive while its own exit hook runs, so
+// the rescan that hook triggers would otherwise rediscover the pane immediately.
+const defaultEndedGrace = 5 * time.Second
 
 // EventType describes a change to the registry.
 type EventType string
@@ -37,14 +43,22 @@ type Registry struct {
 	index    *sessionIndex               // pane/agent-session correlation
 	subs     map[int]chan Event
 	nextSub  int
+
+	// ended holds pane keys and agent session ids whose session an exit hook just
+	// ended, with the time it happened; discovery may not re-create them until
+	// endedGrace passes or a later hook proves the agent is live again.
+	ended      map[string]time.Time
+	endedGrace time.Duration
 }
 
 // New returns an empty Registry.
 func New() *Registry {
 	return &Registry{
-		sessions: make(map[string]*session.Session),
-		index:    newSessionIndex(),
-		subs:     make(map[int]chan Event),
+		sessions:   make(map[string]*session.Session),
+		index:      newSessionIndex(),
+		subs:       make(map[int]chan Event),
+		ended:      make(map[string]time.Time),
+		endedGrace: defaultEndedGrace,
 	}
 }
 
@@ -161,6 +175,9 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 
 		created := false
 		if s == nil {
+			if r.recentlyEnded(paneK) || r.recentlyEnded(f.AgentSessionID) {
+				continue // the agent is still exiting; this scan must not revive it
+			}
 			id := paneK
 			if id == "" {
 				id = agent + ":" + f.AgentSessionID
@@ -282,6 +299,34 @@ func applyStatusHint(s *session.Session, hint session.Status) {
 	if hint == session.StatusIdle && s.Interaction == nil {
 		s.Interaction = &session.Interaction{Kind: session.InteractionIdle}
 	}
+}
+
+// markEnded / clearEnded / recentlyEnded manage the post-exit guard. Caller holds r.mu.
+func (r *Registry) markEnded(key string) {
+	if key != "" {
+		r.ended[key] = time.Now()
+	}
+}
+
+func (r *Registry) clearEnded(key string) {
+	if key != "" {
+		delete(r.ended, key)
+	}
+}
+
+func (r *Registry) recentlyEnded(key string) bool {
+	if key == "" {
+		return false
+	}
+	at, ok := r.ended[key]
+	if !ok {
+		return false
+	}
+	if time.Since(at) > r.endedGrace {
+		delete(r.ended, key)
+		return false
+	}
+	return true
 }
 
 // remove deletes a session from all indices and publishes a removal event with the
@@ -417,11 +462,16 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 
 	if u.Status == session.StatusDead {
+		r.markEnded(pKey)
+		r.markEnded(s.AgentSessionID)
 		r.remove(s.ID, pKey, session.StatusDead)
 		dead := *s
 		dead.Status = session.StatusDead
 		return dead, false
 	}
+	// Any other hook proves an agent is live here, so discovery is free again.
+	r.clearEnded(pKey)
+	r.clearEnded(u.AgentSessionID)
 	if u.Status != "" {
 		s.Status = u.Status
 		// A status decision (re)sets the pending interaction, but a bare Notification

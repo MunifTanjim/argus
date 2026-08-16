@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -471,17 +472,38 @@ func TestNewSessionArgsOmitsArgsWhenEmpty(t *testing.T) {
 }
 
 func TestAttachArgs(t *testing.T) {
-	// Private socket: argv includes -L <socket> and the config-less -f /dev/null.
+	// Private socket: argv includes -u, -L <socket> and the config-less -f /dev/null.
 	priv := New("argus").attachArgs("/usr/bin/tmux", "work")
-	want := []string{"/usr/bin/tmux", "-L", "argus", "-f", "/dev/null", "attach-session", "-t", "work"}
+	want := []string{"/usr/bin/tmux", "-u", "-L", "argus", "-f", "/dev/null", "attach-session", "-t", "work"}
 	if strings.Join(priv, " ") != strings.Join(want, " ") {
 		t.Fatalf("attachArgs = %#v, want %#v", priv, want)
 	}
 	// Default server: never touched — no -L, and no -f (argus must not alter how
 	// the user's own tmux loads its config).
 	def := New("").attachArgs("/usr/bin/tmux", "work")
-	if strings.Join(def, " ") != "/usr/bin/tmux attach-session -t work" {
+	if strings.Join(def, " ") != "/usr/bin/tmux -u attach-session -t work" {
 		t.Fatalf("default attachArgs = %#v", def)
+	}
+}
+
+func TestAttachEnvGuaranteesTerm(t *testing.T) {
+	// A node started as a daemon inherits no TERM, and tmux then refuses to attach
+	// ("terminal does not support clear"), killing the PTY the moment it opens.
+	got := attachEnv([]string{"HOME=/home/argus"})
+	if !slices.Contains(got, "TERM="+fallbackTerm) {
+		t.Fatalf("attachEnv without TERM = %#v, want a %s entry", got, fallbackTerm)
+	}
+	got = attachEnv([]string{"HOME=/home/argus", "TERM="})
+	if slices.Contains(got, "TERM=") {
+		t.Fatalf("attachEnv kept the empty TERM: %#v", got)
+	}
+	if !slices.Contains(got, "TERM="+fallbackTerm) {
+		t.Fatalf("attachEnv with empty TERM = %#v, want a %s entry", got, fallbackTerm)
+	}
+	// A real TERM is the viewer's own; never override it.
+	got = attachEnv([]string{"TERM=screen-256color"})
+	if !slices.Equal(got, []string{"TERM=screen-256color"}) {
+		t.Fatalf("attachEnv overrode an inherited TERM: %#v", got)
 	}
 }
 
