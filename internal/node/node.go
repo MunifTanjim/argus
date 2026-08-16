@@ -51,6 +51,31 @@ type Node struct {
 	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log); zero when unset
 	signerPubB64 string             // base64 public half, announced to the gateway roster
 
+	beacon            trustlog.SignerKey // node's Ed25519 beacon keypair (anti-equivocation; every node)
+	beaconPubB64      string             // base64 public half, announced to the gateway roster
+	beaconCounter     atomic.Uint64      // monotonic emission counter; bumped by makeBeacon
+	beaconCounterPath string             // path for counter persistence; "" = disabled
+	beaconEmitMu      sync.Mutex         // serializes counter increment+persist so persists commit in counter order
+
+	// Peer beacon courier ingest state (guarded by peerBeaconMu).
+	// peerBeaconPubs is the set of roster-known peer beacon public keys
+	// (excludes self). Populated by syncRoster on each uplink tick.
+	// peerBeacons stores the latest counter-guarded accepted beacon per key.
+	// peerBeaconMiss tracks consecutive unreconciled ticks (N=2 guard).
+	// equivocation is set permanently once persistent peer beacon divergence is detected.
+	peerBeaconMu   sync.Mutex
+	peerBeaconPubs map[string]bool             // string(rawPub) → true
+	peerBeacons    map[string]api.Beacon       // string(rawPub) → latest accepted beacon
+	peerBeaconCtr  map[string]uint64           // string(rawPub) → last accepted counter
+	peerBeaconMiss map[string]*beaconMissState // string(rawPub) → miss streak
+	equivocation   atomic.Bool                 // set permanently on persistent peer beacon divergence
+
+	// beaconKnown caches the resolved chain's entry-hash set for the beacon
+	// consistency check, keyed on beaconKnownTip; rebuilt only when the tip
+	// advances. Guarded by peerBeaconMu.
+	beaconKnownTip []byte
+	beaconKnown    map[string]bool
+
 	// Locked-mode trust state: nil/zero in TOFU mode; enforcement engages only once
 	// a trust store is loaded via EnableTrustLog.
 	trust             atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
@@ -71,10 +96,13 @@ type Node struct {
 	activeResponder atomic.Pointer[relayResponder]
 	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
 
-	// trustPullTrigger rate-limits pulls a gateway trustlog.changed hint can
-	// provoke, so one untrusted notification amplifies into at most one pull/window.
+	// Rate limiters for work an untrusted party can ask for: a gateway
+	// trustlog.changed hint, and a courier delivering a beacon this node cannot yet
+	// attribute. Each has its own lock so neither contends with the pin decision.
 	trustPullTrigger triggerLimiter
-	testTriggerPeer  atomic.Pointer[trustCaller] // test override for triggerPeer
+	rosterTrigger    triggerLimiter
+
+	testTriggerPeer atomic.Pointer[trustCaller] // test override for triggerPeer
 
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string
@@ -192,9 +220,42 @@ func (d *Node) SignerPublic() []byte {
 	return append([]byte(nil), d.signer.Public...)
 }
 
+// SetBeaconKey sets the node's Ed25519 beacon keypair, whose public half is
+// announced to the gateway roster (beacon_pubkey) for anti-equivocation. Call
+// before Run. The private half stays local.
+func (d *Node) SetBeaconKey(kp trustlog.SignerKey) {
+	d.beacon = kp
+	d.beaconPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
+}
+
+// BeaconPub returns the base64 Ed25519 beacon public half, or "" if unset.
+func (d *Node) BeaconPub() string { return d.beaconPubB64 }
+
+// SetBeaconCounterPath enables beacon counter persistence. On call it reads the
+// counter from the sibling file (path + ".counter") and seeds beaconCounter so
+// the first emission after a restart is strictly greater than the last value
+// peers accepted before the restart. makeBeacon writes the updated counter back
+// on every emission. Call before Run, after SetBeaconKey.
+func (d *Node) SetBeaconCounterPath(path string) {
+	d.beaconCounterPath = path
+	if n := LoadBeaconCounter(path); n > 0 {
+		d.beaconCounter.Store(n)
+	}
+}
+
+// Equivocation reports whether this node has detected a trust-log equivocation
+// via the client courier: a peer's signed HEAD beacon whose tip could not be
+// reconciled with this node's own chain after the N=2 persistence guard. Once
+// set, this flag is never cleared for the lifetime of the node process.
+func (d *Node) Equivocation() bool { return d.equivocation.Load() }
+
 // Quarantined reports whether this node is quarantined on a locked network it
 // cannot pin. In TOFU mode (nil trust store) this is always false.
 func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
+
+// QuarantineGenesis is the trust root this node saw and cannot verify, or nil when
+// not quarantined.
+func (d *Node) QuarantineGenesis() []byte { return d.trustGate.Genesis() }
 
 // localDisabled reports whether this node's locked-mode enforcement is locally
 // disabled via the per-node escape hatch.
@@ -352,16 +413,20 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	d := &Node{
 		reg: reg, clients: clients, id: host, label: host,
-		adapterList:  adapterList,
-		adapters:     adapterByAgent,
-		discs:        discs,
-		caps:         caps,
-		log:          slog.New(slog.DiscardHandler),
-		pending:      map[string]*pendingDecision{},
-		conns:        map[api.Notifier]*connSubs{},
-		terms:        map[api.Notifier]*connTerms{},
-		sessionTerms: map[string]*term{},
-		resuming:     map[string]string{},
+		adapterList:    adapterList,
+		adapters:       adapterByAgent,
+		discs:          discs,
+		caps:           caps,
+		log:            slog.New(slog.DiscardHandler),
+		pending:        map[string]*pendingDecision{},
+		conns:          map[api.Notifier]*connSubs{},
+		terms:          map[api.Notifier]*connTerms{},
+		sessionTerms:   map[string]*term{},
+		resuming:       map[string]string{},
+		peerBeaconPubs: map[string]bool{},
+		peerBeacons:    map[string]api.Beacon{},
+		peerBeaconCtr:  map[string]uint64{},
+		peerBeaconMiss: map[string]*beaconMissState{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {

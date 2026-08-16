@@ -147,6 +147,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		} else {
 			d.SetSignerKey(kp)
 		}
+		if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+			logger.Scoped("node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+		} else {
+			d.SetBeaconKey(kp)
+			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+		}
 		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
 		if perr != nil {
 			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))

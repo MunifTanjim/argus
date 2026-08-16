@@ -120,13 +120,14 @@ type Server struct {
 	terms  map[string]termEntry // term_id -> open terminal
 
 	// blind path (only populated when blind=true)
-	blind     bool
-	relayMu   sync.Mutex
-	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
-	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
-	entries   *trustlog.EntryStore     // retained trust-log entries (blind)
-	nextChan  atomic.Uint64            // chan_id allocator
-	log       *slog.Logger             // relay lifecycle logging; nil disables
+	blind       bool
+	relayMu     sync.Mutex
+	channels    map[string]*relayChannel // chan_id -> paired client/node + pumps
+	nodePeers   map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
+	entries     *trustlog.EntryStore     // retained trust-log entries (blind)
+	nextChan    atomic.Uint64            // chan_id allocator
+	chatterRPCs atomic.Uint64            // trustlog.*, beacon.*, nodes.list dispatches; read via ChatterRPCCountForTest
+	log         *slog.Logger             // relay lifecycle logging; nil disables
 }
 
 // NewServer builds a gateway Server over agg. When blind is true the server uses
@@ -1054,6 +1055,9 @@ func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
 	if ch != nil && ch.client == src {
+		if f.Method == api.MethodBeaconDeliver {
+			s.chatterRPCs.Add(1)
+		}
 		s.enqueue(ch, ch.toNode, f.Raw)
 	}
 }
@@ -1086,6 +1090,10 @@ func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
 }
 
+// ChatterRPCCountForTest returns the cumulative count of trustlog.*, beacon.*, and
+// nodes.list RPCs dispatched since the server started. Test-only.
+func (s *Server) ChatterRPCCountForTest() uint64 { return s.chatterRPCs.Load() }
+
 // notifyNodePeers sends a notification to every connected node uplink except
 // except (nil sends to all). Node peers only — clients learn trust-log changes
 // via node events, so sending both would double-trigger pulls. The originator
@@ -1116,10 +1124,12 @@ func (s *Server) buildClientServerBlind() *api.Server {
 	})
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
+		s.chatterRPCs.Add(1)
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
 	})
 
 	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, params json.RawMessage) (any, error) {
+		s.chatterRPCs.Add(1)
 		p, err := api.Decode[api.TrustLogSyncParams](params)
 		if err != nil {
 			return nil, err
@@ -1211,9 +1221,26 @@ func (s *Server) buildClientServerBlind() *api.Server {
 // serveNodeBlind adopts an accepted node uplink on the blind relay path: identify,
 // register as a source, record as a relay target, and block until it disconnects.
 func (s *Server) serveNodeBlind(conn net.Conn) {
+	// nodeID is set (under mu) once identify succeeds; beacon.offer handling reads it.
+	var mu sync.Mutex
+	var nodeID string
 	var self atomic.Pointer[api.Peer]
 
 	nodeDispatch := func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		if method == api.MethodBeaconOffer {
+			mu.Lock()
+			id := nodeID
+			mu.Unlock()
+			if id == "" {
+				return nil, nil // not yet identified; drop
+			}
+			b, err := api.Decode[api.Beacon](params)
+			if err != nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid beacon: " + err.Error()}
+			}
+			s.agg.UpdateBeacon(id, &b)
+			return nil, nil
+		}
 		switch method {
 		case api.MethodNodesList:
 			return api.NodesListResult{Nodes: s.agg.Roster()}, nil
@@ -1239,11 +1266,26 @@ func (s *Server) serveNodeBlind(conn net.Conn) {
 		}
 	}
 
+	loggedDispatch := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		start := time.Now()
+		res, err := nodeDispatch(ctx, method, params)
+		args := []any{"method", method, "dur", time.Since(start), "src", "node"}
+		if err != nil {
+			args = append(args, "err", err)
+		}
+		s.logger().Info("rpc", args...)
+		switch method {
+		case api.MethodNodesList, api.MethodTrustLogSync, api.MethodTrustLogPush, api.MethodBeaconOffer:
+			s.chatterRPCs.Add(1)
+		}
+		return res, err
+	}
+
 	peer := api.NewPeer(conn, api.PeerOptions{
 		KeepaliveInterval:         nodeKeepaliveInterval,
 		KeepaliveTimeout:          nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: nodeKeepaliveFailures,
-		Dispatch:                  nodeDispatch,
+		Dispatch:                  loggedDispatch,
 		OnRelayFrame:              s.forwardFromNode,
 	})
 	self.Store(peer)
@@ -1255,6 +1297,9 @@ func (s *Server) serveNodeBlind(conn net.Conn) {
 	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
+	mu.Lock()
+	nodeID = id.ID
+	mu.Unlock()
 
 	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.BeaconPubKey, id.Capabilities, peer, id.Beacon))
 	s.addNodePeer(id.ID, peer)

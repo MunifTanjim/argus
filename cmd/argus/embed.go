@@ -288,6 +288,12 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 		} else {
 			d.SetSignerKey(kp)
 		}
+		if kp, err := node.LoadOrCreateBeaconKey(config.GetStatePath("beacon-key.json")); err != nil {
+			log.With("scope", "node").Warn("beacon key load failed; anti-equivocation unavailable", "err", err)
+		} else {
+			d.SetBeaconKey(kp)
+			d.SetBeaconCounterPath(config.GetStatePath("beacon-key.json"))
+		}
 		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
 		if perr != nil {
 			return nil, nil, fmt.Errorf("refusing to start open: %w", perr)

@@ -26,8 +26,11 @@ import (
 // when background goroutines read it concurrently.
 var trustSyncInterval atomic.Int64
 
+var rosterSyncIntervalNs atomic.Int64
+
 func init() {
 	trustSyncInterval.Store(int64(5 * time.Minute))
+	rosterSyncIntervalNs.Store(int64(5 * time.Minute))
 	triggeredPullIntervalNs.Store(int64(DefaultTriggeredPullInterval))
 }
 
@@ -101,10 +104,14 @@ func (d *Node) knownHashes() (hashes [][]byte, truncated bool) {
 	return re.Hashes()
 }
 
-// syncTrustOnce runs one full sync cycle against peer. It is the loop's per-tick
-// unit; it is a no-op while the store is unset.
+// syncTrustOnce is pullTrustOnce plus the periodic peer-beacon cross-check. Only
+// the node's own timer may call it: the N=2 equivocation guard counts consecutive
+// ticks, so anything an untrusted party can provoke must use pullTrustOnce instead.
 func (d *Node) syncTrustOnce(peer trustCaller) {
-	d.pullTrustOnce(peer)
+	if !d.pullTrustOnce(peer) {
+		return
+	}
+	d.checkPeerBeaconConsistency()
 }
 
 // syncTrustChains exchanges known entry hashes with the gateway and returns the
@@ -232,13 +239,18 @@ func (d *Node) pullTrustOnce(peer trustCaller) bool {
 			anyChanged = true
 		}
 	}
+	d.detectSupersedingChain(chains)
 	if anyChanged {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
+		d.reevaluateTrustChannels()
+		if len(d.beacon.Private) > 0 {
+			if b, err := d.makeBeacon(); err == nil {
+				_ = peer.Call(api.MethodBeaconOffer, b, nil)
+			}
+		}
 	}
-	d.detectSupersedingChain(chains)
-	d.reevaluateTrustChannels()
 	return true
 }
 
@@ -366,15 +378,21 @@ func (d *Node) activateTrust(store *trustlog.SyncStore, genesisHash []byte, chai
 	}(); err != nil {
 		return err
 	}
+	d.resetPeerBeaconState()
 	d.reevaluateTrustChannels()
 	d.announceTrustChange()
 	return nil
 }
 
-// announceTrustChange pushes the current chain to the gateway after a local
-// write (lock.init/sign/revoke/add-signer/remove-signer/disable).
+// announceTrustChange publishes a chain this node just advanced locally (lock.init,
+// sign, revoke, disable): the chain first, then the beacon, so a device reacting to
+// the beacon's new tip finds the chain that explains it already retained by the
+// gateway. Without the offer, nothing leaves this node until the next sync tick —
+// trustSyncInterval away — and the rest of the network cannot even see that the
+// network is locked, let alone pin to it.
 func (d *Node) announceTrustChange() {
 	d.offerTrustNow()
+	d.emitBeacon()
 }
 
 // offerTrustNow retains locally-appended chain entries and pushes them to the
@@ -421,23 +439,38 @@ func (d *Node) runTrustSync(ctx context.Context, peer *api.Peer) {
 	d.runTrustSyncLoop(ctx, peer)
 }
 
-// runTrustSyncLoop pulls on connect and every trustSyncInterval until ctx ends or
-// the uplink drops. It polls the (atomic) trust store each tick, so a node enabled
-// live via lock.init begins syncing without a reconnect. syncTrustOnce is a no-op
-// while the store is unset.
+// runTrustSyncLoop offers+pulls on connect and every trustSyncInterval until ctx
+// ends or the uplink drops. It polls the (atomic) trust store each tick, so a node
+// enabled live via lock.init begins syncing without a reconnect. syncTrustOnce is a
+// no-op while the store is unset.
+//
+// Roster sync (for peer beacon attribution) runs on its own rosterSyncInterval
+// clock, not as a multiple of the trust tick: an unattributed peer's beacons are
+// rejected outright, so that latency must not follow whatever the trust backstop
+// is tuned to, and it must not scale down with a tight-interval test tick either.
 func (d *Node) runTrustSyncLoop(ctx context.Context, peer trustCaller) {
+	d.syncRoster(peer)
 	d.syncTrustOnce(peer)
 	t := time.NewTicker(time.Duration(trustSyncInterval.Load()))
 	defer t.Stop()
+	rt := time.NewTicker(rosterSyncInterval())
+	defer rt.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			d.syncTrustOnce(peer)
+		case <-rt.C:
+			d.syncRoster(peer)
 		}
 	}
 }
+
+func rosterSyncInterval() time.Duration { return time.Duration(rosterSyncIntervalNs.Load()) }
+
+// setRosterSyncIntervalForTest overrides the roster refresh cadence. Test-only.
+func setRosterSyncIntervalForTest(d time.Duration) { rosterSyncIntervalNs.Store(int64(d)) }
 
 // genesisHashPath is the state file holding the pinned genesis hash, kept beside
 // the chain so a node's locked state is self-contained in its state dir.
@@ -487,8 +520,8 @@ func ResetTriggeredPullIntervalForTest() {
 // onGatewayNotify handles gateway→node notifications. The only one is a hint that
 // the trust log moved; everything else is ignored.
 //
-// The notification only schedules work — a forged one changes when the node pulls,
-// not what it accepts (every branch is verified against the pinned genesis).
+// The notification only schedules work — it never advances the equivocation state
+// machine, so a forged one changes when the node pulls, not what it concludes.
 func (d *Node) onGatewayNotify(n api.Notification) {
 	if n.Method != api.MethodTrustLogChanged {
 		return
@@ -522,6 +555,9 @@ func (d *Node) onGatewayNotify(n api.Notification) {
 		if peer == nil {
 			return
 		}
+		// pullTrustOnce, not syncTrustOnce: a gateway-driven pull must not clock the
+		// consistency check, or the gateway could drive peerBeaconMiss to its
+		// threshold at whatever rate it chooses to notify.
 		d.pullTrustOnce(peer)
 	})
 }
@@ -553,6 +589,7 @@ func (d *Node) AdoptPin(genesis []byte) error {
 	if len(genesis) != trustpin.GenesisLen {
 		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
 	}
+	adopted := false
 	if err := func() error {
 		d.pinMu.Lock()
 		defer d.pinMu.Unlock()
@@ -581,9 +618,13 @@ func (d *Node) AdoptPin(genesis []byte) error {
 		}
 		d.pinSource = trustpin.SourceFile.String()
 		d.trustGate.Clear()
+		adopted = true
 		return nil
 	}(); err != nil {
 		return err
+	}
+	if adopted {
+		d.resetPeerBeaconState()
 	}
 	d.reevaluateTrustChannels()
 	if peer := d.triggerPeer(); peer != nil {
