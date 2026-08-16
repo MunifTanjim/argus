@@ -1,0 +1,5 @@
+$ argus lock revoke-device devpub:<NULL-KEY> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock revoke-device: locked mode not enabled

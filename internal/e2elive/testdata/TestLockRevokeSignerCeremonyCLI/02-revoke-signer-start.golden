@@ -1,0 +1,13 @@
+$ argus lock revoke-signer <NODE-B-SIGPUB> --replacement <NODE-C-SIGPUB> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+revoke-signer started
+  blob: <BLOB-START>
+--- stderr ---
+
+Next: run on another signer node:
+  argus lock revoke-signer --cosign <BLOB-START>
+After collecting enough co-signs, run on any signer node:
+  argus lock revoke-signer --finish <blob>
+
+Note: entries appended after the fork point by revoked signers will be erased.
