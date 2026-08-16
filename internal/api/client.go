@@ -58,6 +58,9 @@ func (c *Client) States() <-chan bool { return nil }
 // Reconnect is a no-op: a plain Client does not reconnect.
 func (c *Client) Reconnect() {}
 
+// Quarantined is always false: the plaintext client never enforces trust-log locking.
+func (c *Client) Quarantined() bool { return false }
+
 // Close terminates the connection.
 func (c *Client) Close() error { return c.peer.Close() }
 

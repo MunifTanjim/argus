@@ -180,6 +180,14 @@ func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 // disabled via the per-node escape hatch.
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
 
+// reevaluateTrustChannels drops live client channels no longer authorized after a
+// trust-store advance. No-op when no uplink responder is active.
+func (d *Node) reevaluateTrustChannels() {
+	if r := d.activeResponder.Load(); r != nil {
+		r.reevaluate()
+	}
+}
+
 // remoteDispatch returns the control surface exposed to remote callers. It
 // rejects lock.* methods (local-admin only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {

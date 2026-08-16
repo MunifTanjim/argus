@@ -147,6 +147,10 @@ func (c *ReconnectingClient) Reconnect() {
 	}
 }
 
+// Quarantined is always false: the plaintext client never enforces trust-log
+// locking, so it is never quarantined.
+func (c *ReconnectingClient) Quarantined() bool { return false }
+
 // Call routes to the live peer, erroring promptly when disconnected rather than blocking.
 func (c *ReconnectingClient) Call(method string, params, out any) error {
 	p := c.currentPeer()
