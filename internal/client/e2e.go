@@ -1127,6 +1127,7 @@ func (m *E2EClient) detectUnpinnedChain() {
 	if m.gate.Tripped() {
 		return
 	}
+	// The gateway does not serve trustlog.sync until locked mode lands (later slice); in TOFU this returns method-not-found and syncTrustChains degrades to "no chains" — not a bug.
 	chains, ok := m.syncTrustChains()
 	if !ok {
 		return
