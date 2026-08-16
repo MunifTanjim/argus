@@ -32,6 +32,7 @@ class ProfileEditScreen extends ConsumerStatefulWidget {
 
 class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   late ProfileMode _mode;
+  late bool _e2eEnabled;
   bool _showToken = false;
   bool _testing = false;
   String? _keyId;
@@ -51,6 +52,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   void initState() {
     super.initState();
     _mode = widget.initial?.mode ?? ProfileMode.ssh;
+    _e2eEnabled = widget.initial?.e2eEnabled ?? false;
     _keyId = widget.initial?.keyId;
   }
 
@@ -79,7 +81,8 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         return null;
       }
       return Profile(
-          id: id, name: name, mode: ProfileMode.direct, token: token, url: url);
+          id: id, name: name, mode: ProfileMode.direct, token: token, url: url,
+          e2eEnabled: _e2eEnabled);
     }
 
     final host = _host.text.trim();
@@ -115,6 +118,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       sshPort: sshPort,
       gatewayPort: gatewayPort,
       keyId: _keyId,
+      e2eEnabled: _e2eEnabled,
     );
   }
 
@@ -262,6 +266,13 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                       onPressed: () => setState(() => _showToken = !_showToken),
                     ),
                   ),
+                ),
+                SwitchListTile(
+                  key: const Key('e2e-toggle'),
+                  value: _e2eEnabled,
+                  onChanged: (v) => setState(() => _e2eEnabled = v),
+                  title: const Text('End-to-end encryption'),
+                  contentPadding: EdgeInsets.zero,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
