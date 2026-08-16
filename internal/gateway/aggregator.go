@@ -23,33 +23,43 @@ const fanoutTimeout = 15 * time.Second
 // Aggregator maintains the merged session view across all sources and routes
 // control calls to the owning source. Its Snapshot/Subscribe mirrors the
 // registry's pub/sub, so a gateway client consumes it like a node's registry.
+// When blind=true it tracks only roster liveness (online/offline/removed) and
+// does not touch session state — E2E frames flow through the relay layer instead.
 type Aggregator struct {
 	grace time.Duration
+	blind bool
 
-	mu       sync.Mutex
-	sessions map[string]session.Session // composite id -> session
-	sources  map[string]*srcState       // node id -> state
-	subs     map[int]chan registry.Event
-	nextSub  int
+	mu         sync.Mutex
+	sessions   map[string]session.Session  // plaintext path: composite id -> session
+	sources    map[string]*srcState        // node id -> state
+	subs       map[int]chan registry.Event // plaintext path: session event subscribers
+	nextSub    int
+	rosterSubs map[int]chan api.NodeEvent // blind path: roster event subscribers
+	nextRoster int
 }
 
 type srcState struct {
 	src    Source
 	stop   chan struct{}
 	halted bool
+	online bool        // blind path: is the node currently connected
 	timer  *time.Timer // offline-removal timer; non-nil only while disconnected
+	beacon *api.Beacon // blind path: latest signed HEAD beacon
 }
 
 // New returns an empty Aggregator. grace <= 0 uses DefaultOfflineGrace.
-func New(grace time.Duration) *Aggregator {
+// blind=true enables the roster-only path; blind=false is the plaintext session path.
+func New(grace time.Duration, blind bool) *Aggregator {
 	if grace <= 0 {
 		grace = DefaultOfflineGrace
 	}
 	return &Aggregator{
-		grace:    grace,
-		sessions: make(map[string]session.Session),
-		sources:  make(map[string]*srcState),
-		subs:     make(map[int]chan registry.Event),
+		grace:      grace,
+		blind:      blind,
+		sessions:   make(map[string]session.Session),
+		sources:    make(map[string]*srcState),
+		subs:       make(map[int]chan registry.Event),
+		rosterSubs: make(map[int]chan api.NodeEvent),
 	}
 }
 
@@ -95,20 +105,37 @@ func (a *Aggregator) NodeLabel(nodeID string) string {
 	return ""
 }
 
-// AddSource registers a source and starts ingesting it. A reconnect under the same
+// AddSource registers a source and starts tracking it. A reconnect under the same
 // node id replaces the prior source (cancelling its pending removal), never duplicates.
+// When blind, it starts a liveness watcher and emits a roster event.
+// When not blind, it starts ingesting sessions.
 func (a *Aggregator) AddSource(src Source) {
-	a.mu.Lock()
-	if old, ok := a.sources[src.ID()]; ok {
-		old.halt()
+	if a.blind {
+		a.mu.Lock()
+		evType := api.NodeEventAdded
+		if old, ok := a.sources[src.ID()]; ok {
+			old.halt()
+			evType = api.NodeEventOnline
+		}
+		st := &srcState{src: src, stop: make(chan struct{}), online: true, beacon: src.LatestBeacon()}
+		a.sources[src.ID()] = st
+		ev := api.NodeEvent{Type: evType, Node: descriptor(src.ID(), st)}
+		a.mu.Unlock()
+		a.publishRoster(ev)
+		go a.watchLiveness(st)
+	} else {
+		a.mu.Lock()
+		if old, ok := a.sources[src.ID()]; ok {
+			old.halt()
+		}
+		st := &srcState{src: src, stop: make(chan struct{})}
+		a.sources[src.ID()] = st
+		a.mu.Unlock()
+		go a.ingest(st)
 	}
-	st := &srcState{src: src, stop: make(chan struct{})}
-	a.sources[src.ID()] = st
-	a.mu.Unlock()
-	go a.ingest(st)
 }
 
-// halt stops a source's ingest goroutine and pending removal timer. Caller holds a.mu.
+// halt stops a source's goroutine and pending removal timer. Caller holds a.mu.
 func (st *srcState) halt() {
 	if !st.halted {
 		st.halted = true
@@ -119,6 +146,8 @@ func (st *srcState) halt() {
 		st.timer = nil
 	}
 }
+
+// — Plaintext path —
 
 func (a *Aggregator) ingest(st *srcState) {
 	src := st.src
@@ -182,8 +211,8 @@ func (a *Aggregator) applyEvent(nodeID, label string, ev registry.Event) {
 	a.publish(registry.Event{Type: ev.Type, Session: s})
 }
 
-// handleGone marks a disconnected node's sessions offline and schedules their
-// removal after the grace period.
+// handleGone marks a disconnected node's sessions offline (plaintext) or marks the
+// node offline in the roster (blind), then schedules removal after the grace period.
 func (a *Aggregator) handleGone(st *srcState) {
 	nodeID := st.src.ID()
 	a.mu.Lock()
@@ -191,19 +220,26 @@ func (a *Aggregator) handleGone(st *srcState) {
 		a.mu.Unlock()
 		return
 	}
-	var updated []session.Session
-	for id, s := range a.sessions {
-		if s.NodeID == nodeID && !s.Offline {
-			s.Offline = true
-			a.sessions[id] = s
-			updated = append(updated, s)
+	if a.blind {
+		st.online = false
+		st.timer = time.AfterFunc(a.grace, func() { a.removeNode(nodeID, st) })
+		ev := api.NodeEvent{Type: api.NodeEventOffline, Node: descriptor(nodeID, st)}
+		a.mu.Unlock()
+		a.publishRoster(ev)
+	} else {
+		var updated []session.Session
+		for id, s := range a.sessions {
+			if s.NodeID == nodeID && !s.Offline {
+				s.Offline = true
+				a.sessions[id] = s
+				updated = append(updated, s)
+			}
 		}
-	}
-	st.timer = time.AfterFunc(a.grace, func() { a.removeNode(nodeID, st) })
-	a.mu.Unlock()
-
-	for _, s := range updated {
-		a.publish(registry.Event{Type: registry.EventUpdated, Session: s})
+		st.timer = time.AfterFunc(a.grace, func() { a.removeNode(nodeID, st) })
+		a.mu.Unlock()
+		for _, s := range updated {
+			a.publish(registry.Event{Type: registry.EventUpdated, Session: s})
+		}
 	}
 }
 
@@ -213,18 +249,24 @@ func (a *Aggregator) removeNode(nodeID string, st *srcState) {
 		a.mu.Unlock()
 		return
 	}
-	var removed []session.Session
-	for id, s := range a.sessions {
-		if s.NodeID == nodeID {
-			delete(a.sessions, id)
-			removed = append(removed, s)
+	if a.blind {
+		delete(a.sources, nodeID)
+		ev := api.NodeEvent{Type: api.NodeEventRemoved, Node: descriptor(nodeID, st)}
+		a.mu.Unlock()
+		a.publishRoster(ev)
+	} else {
+		var removed []session.Session
+		for id, s := range a.sessions {
+			if s.NodeID == nodeID {
+				delete(a.sessions, id)
+				removed = append(removed, s)
+			}
 		}
-	}
-	delete(a.sources, nodeID)
-	a.mu.Unlock()
-
-	for _, s := range removed {
-		a.publish(registry.Event{Type: registry.EventRemoved, Session: s})
+		delete(a.sources, nodeID)
+		a.mu.Unlock()
+		for _, s := range removed {
+			a.publish(registry.Event{Type: registry.EventRemoved, Session: s})
+		}
 	}
 }
 
@@ -341,19 +383,6 @@ func (a *Aggregator) Fanout(ctx context.Context, method string, params json.RawM
 	return out
 }
 
-// nodeIDFromParams extracts the "node_id" field from raw JSON params.
-func nodeIDFromParams(params json.RawMessage) (string, error) {
-	var m struct {
-		NodeID string `json:"node_id"`
-	}
-	if len(params) > 0 {
-		if err := json.Unmarshal(params, &m); err != nil {
-			return "", err
-		}
-	}
-	return m.NodeID, nil
-}
-
 func (a *Aggregator) publish(ev registry.Event) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -379,6 +408,106 @@ func withOrigin(s session.Session, nodeID, label string) session.Session {
 	s.NodeLabel = label
 	s.Offline = false
 	return s
+}
+
+// — Blind path —
+
+// watchLiveness tracks a source's connection: waits for disconnect, then hands off to
+// handleGone (roster Offline + grace → Removed). No session state is touched.
+func (a *Aggregator) watchLiveness(st *srcState) {
+	select {
+	case <-st.src.Done():
+		a.handleGone(st)
+	case <-st.stop:
+	}
+}
+
+// Roster lists all known nodes (online + within-grace offline) sorted by label,
+// each with its identity pubkey and online flag — the client's E2E discovery view.
+func (a *Aggregator) Roster() []api.NodeDescriptor {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]api.NodeDescriptor, 0, len(a.sources))
+	for id, st := range a.sources {
+		out = append(out, descriptor(id, st))
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+	return out
+}
+
+// SubscribeRoster returns the roster event stream and a cancel func, mirroring
+// Subscribe (buffered, drop-on-slow-consumer).
+func (a *Aggregator) SubscribeRoster() (<-chan api.NodeEvent, func()) {
+	ch := make(chan api.NodeEvent, 64)
+	a.mu.Lock()
+	id := a.nextRoster
+	a.nextRoster++
+	a.rosterSubs[id] = ch
+	a.mu.Unlock()
+	return ch, func() {
+		a.mu.Lock()
+		if _, ok := a.rosterSubs[id]; ok {
+			delete(a.rosterSubs, id)
+			close(ch)
+		}
+		a.mu.Unlock()
+	}
+}
+
+// UpdateBeacon records nodeID's latest signed HEAD beacon and broadcasts a roster
+// event so subscribed clients see the fresh beacon.
+func (a *Aggregator) UpdateBeacon(nodeID string, b *api.Beacon) {
+	a.mu.Lock()
+	st, ok := a.sources[nodeID]
+	if !ok {
+		a.mu.Unlock()
+		return
+	}
+	st.beacon = b
+	ev := api.NodeEvent{Type: api.NodeEventBeacon, Node: descriptor(nodeID, st)}
+	a.mu.Unlock()
+	a.publishRoster(ev)
+}
+
+func (a *Aggregator) publishRoster(ev api.NodeEvent) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, ch := range a.rosterSubs {
+		select {
+		case ch <- ev:
+		default: // drop for a slow subscriber
+		}
+	}
+}
+
+// descriptor builds the roster view of a source. Caller holds a.mu.
+func descriptor(id string, st *srcState) api.NodeDescriptor {
+	return api.NodeDescriptor{
+		ID:             id,
+		Label:          st.src.Label(),
+		Version:        st.src.Version(),
+		Capabilities:   st.src.Capabilities(),
+		IdentityPubKey: st.src.IdentityPubKey(),
+		SignerPubKey:   st.src.SignerPubKey(),
+		BeaconPubKey:   st.src.BeaconPubKey(),
+		Beacon:         st.beacon,
+		Online:         st.online,
+	}
+}
+
+// — Shared helpers —
+
+// nodeIDFromParams extracts the "node_id" field from raw JSON params.
+func nodeIDFromParams(params json.RawMessage) (string, error) {
+	var m struct {
+		NodeID string `json:"node_id"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &m); err != nil {
+			return "", err
+		}
+	}
+	return m.NodeID, nil
 }
 
 // sessionIDFromParams extracts the "session_id" field from raw JSON params.

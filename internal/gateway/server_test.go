@@ -14,13 +14,13 @@ import (
 )
 
 func TestResumeRoutesByNodeID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("default:%1"))
 	home.callResp = json.RawMessage(`{"session_id":"default:%9"}`)
 	a.AddSource(home)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionResume,
 		json.RawMessage(`{"node_id":"home","agent":"claude","agent_session_id":"x","cwd":"/tmp"}`))
@@ -35,13 +35,13 @@ func TestResumeRoutesByNodeID(t *testing.T) {
 }
 
 func TestClientServerSpawnRoutesByNodeID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("default:%1"))
 	home.callResp = json.RawMessage(`{"session_id":"default:%9","pane_id":"%9"}`)
 	a.AddSource(home)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"node_id":"home","name":"x"}`))
@@ -59,14 +59,14 @@ func TestClientServerSpawnRoutesByNodeID(t *testing.T) {
 // every connected node (triggering each node's on-demand rescan) rather than
 // only returning its own cached merged view.
 func TestRefreshFansOutToNodes(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box", sess("s1"))
 	dev := newFakeSource("dev", "dev-box", sess("s2"))
 	a.AddSource(home)
 	a.AddSource(dev)
 	eventually(t, func() bool { return len(a.Snapshot()) == 2 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	if _, err := dispatch(context.Background(), api.MethodSessionsRefresh, nil); err != nil {
 		t.Fatalf("refresh dispatch: %v", err)
@@ -83,10 +83,10 @@ func TestRefreshFansOutToNodes(t *testing.T) {
 // server.info reports the version set via SetVersion plus every connected node,
 // so a client can both show the version and pick a spawn target.
 func TestServerInfoReportsVersionAndNodes(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	a.AddSource(newFakeSource("home", "home-box"))
 	a.AddSource(newFakeSource("dev", "dev-box"))
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	srv.SetVersion("1.2.3")
 	dispatch := srv.clientSrv.DispatchFunc()
 
@@ -114,12 +114,12 @@ func TestServerInfoReportsVersionAndNodes(t *testing.T) {
 // With node_id omitted and exactly one node connected, spawn defaults to it so a
 // fresh single-node setup can create its first session.
 func TestSpawnDefaultsToSoleNode(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box")
 	home.callResp = json.RawMessage(`{"session_id":"default:%9","pane_id":"%9"}`)
 	a.AddSource(home)
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	res, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"name":"x"}`))
@@ -136,11 +136,11 @@ func TestSpawnDefaultsToSoleNode(t *testing.T) {
 // With node_id omitted and more than one node connected, spawn is ambiguous and
 // must be rejected rather than guessing.
 func TestSpawnWithoutNodeIDAmbiguousFails(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	a.AddSource(newFakeSource("home", "home-box"))
 	a.AddSource(newFakeSource("dev", "dev-box"))
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 	if _, err := dispatch(context.Background(), api.MethodSessionSpawn,
 		json.RawMessage(`{"name":"x"}`)); err == nil {
@@ -149,12 +149,12 @@ func TestSpawnWithoutNodeIDAmbiguousFails(t *testing.T) {
 }
 
 func TestAgentsListRouting(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	home := newFakeSource("home", "home-box")
 	home.callResp = json.RawMessage(`{"agents":[{"id":"claude","name":"Claude","color":"#fe8019","spawnable":true},{"id":"codex","name":"Codex","color":"#b8bb26","spawnable":false}]}`)
 	a.AddSource(home)
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 	dispatch := srv.clientSrv.DispatchFunc()
 
 	// Omitted node_id with a single node → routed to it.
@@ -189,8 +189,8 @@ func (goneSender) Send(context.Context, push.Target, push.Notification) error {
 // generic internal error) when the target is gone, so the client knows to mint a
 // fresh endpoint rather than re-register the dead one.
 func TestPushTestReturnsGoneCode(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 	store := push.NewStore(t.TempDir())
 	srv.SetPush(store, push.NewDispatcher(store, goneSender{}, nil))
 
@@ -235,8 +235,8 @@ func (f *fakeClientNotifier) Notify(method string, params any) error {
 
 // TestSubTableHelpers verifies addSub/dropSub/clientForSub/subsForClient.
 func TestSubTableHelpers(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	c2 := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -273,13 +273,13 @@ func TestSubTableHelpers(t *testing.T) {
 // TestTranscriptSubscribeHandlerRecordsAndRoutes verifies that the gateway's
 // transcript.subscribe handler records the sub in the table and routes via agg.Route.
 func TestTranscriptSubscribeHandlerRecordsAndRoutes(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("d1", "d1-box", sess("s1"))
 	src.callResp = json.RawMessage(`{"sub_id":"k","from_index":0,"chunks":[]}`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	client := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	ctx := api.WithNotifier(context.Background(), client)
@@ -318,13 +318,13 @@ func TestTranscriptSubscribeHandlerRecordsAndRoutes(t *testing.T) {
 // TestTranscriptUnsubscribeHandlerRemovesAndRoutes verifies that the gateway's
 // transcript.unsubscribe handler removes the sub from the table and routes to the node.
 func TestTranscriptUnsubscribeHandlerRemovesAndRoutes(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("d1", "d1-box", sess("s1"))
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
 
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	client := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	srv.addSub("k", "d1", client)
@@ -354,8 +354,8 @@ func TestTranscriptUnsubscribeHandlerRemovesAndRoutes(t *testing.T) {
 // The full end-to-end path through serveNode's OnNotify (including the orphaned
 // unsubscribe branch) is covered by TestServeNodeOnNotifyDeltaBranch.
 func TestGatewayForwardsTranscriptDeltaToSubscriber(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the subscribing client, c2 is a bystander.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -396,8 +396,8 @@ func TestGatewayForwardsTranscriptDeltaToSubscriber(t *testing.T) {
 // TestServeNodeOnNotifyDeltaBranch exercises the full serveNode OnNotify path
 // for transcript.delta using a net.Pipe-backed node uplink.
 func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the subscribing client.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -431,7 +431,7 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 	defer nodePeer.Close()
 
 	// serveNode runs in background; it will call node.identify and then block.
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 
 	// Wait for the identify call to be answered and source to be registered.
 	eventually(t, func() bool {
@@ -490,8 +490,8 @@ func TestServeNodeOnNotifyDeltaBranch(t *testing.T) {
 // node with a node-local session id reaches the client with a composite id, so the
 // client (which only knows composite ids) can match it.
 func TestServeNodeCompositesTasksChanged(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
 	srv.addSub("sub1", "d1", c1)
@@ -512,7 +512,7 @@ func TestServeNodeCompositesTasksChanged(t *testing.T) {
 	})
 	defer nodePeer.Close()
 
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 	eventually(t, func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -543,12 +543,12 @@ func TestServeNodeCompositesTasksChanged(t *testing.T) {
 // TestTerminalInputRejectsNonOwner verifies terminal.input is routed only for the
 // client that opened the term; a different client with the same term_id is rejected.
 func TestTerminalInputRejectsNonOwner(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("n1", "n1-box", sess("s1"))
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -580,12 +580,12 @@ func TestTerminalInputRejectsNonOwner(t *testing.T) {
 // TestTerminalCloseRejectsNonOwner verifies a non-owner cannot close another
 // client's term: the request errors and the term stays in the table.
 func TestTerminalCloseRejectsNonOwner(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("n1", "n1-box", sess("s1"))
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -616,12 +616,12 @@ func TestTerminalCloseRejectsNonOwner(t *testing.T) {
 // TestTerminalOpenRejectsDuplicateTermID verifies terminal.open refuses an already-
 // open term_id, leaving the incumbent intact and never calling the node.
 func TestTerminalOpenRejectsDuplicateTermID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("d1", "d1-box", sess("s1"))
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	owner := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
 	intruder := &fakeClientNotifier{ch: make(chan api.Notification, 4)}
@@ -645,8 +645,8 @@ func TestTerminalOpenRejectsDuplicateTermID(t *testing.T) {
 // TestOrphanTerminalOutputClosesOnce verifies the gateway asks the node to close an
 // orphaned term only once, even under a burst of output frames for it.
 func TestOrphanTerminalOutputClosesOnce(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	gatewayConn, nodeConn := net.Pipe()
 	defer gatewayConn.Close()
@@ -667,7 +667,7 @@ func TestOrphanTerminalOutputClosesOnce(t *testing.T) {
 	})
 	defer nodePeer.Close()
 
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 	eventually(t, func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -715,12 +715,12 @@ func nodeGotTermClose(src *fakeSource, termID string) bool {
 // TestClientDisconnectClosesTerminals verifies per-connection cleanup drops a
 // client's open terminals and routes terminal.close to the node on disconnect.
 func TestClientDisconnectClosesTerminals(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("n1", "n1-box", sess("s1"))
 	src.callResp = json.RawMessage(`null`)
 	a.AddSource(src)
 	eventually(t, func() bool { return len(a.Snapshot()) == 1 })
-	srv := NewServer(a, nil, nil)
+	srv := NewServer(a, nil, nil, false)
 
 	// Real client connection served by the gateway; the app drives the other end.
 	gwConn, appConn := net.Pipe()
@@ -755,8 +755,8 @@ func TestClientDisconnectClosesTerminals(t *testing.T) {
 // TestTerminalOutputRoutedToClient exercises serveNode's terminal.output path: a
 // table hit forwards to the client, an unknown term_id calls terminal.close back.
 func TestTerminalOutputRoutedToClient(t *testing.T) {
-	a := New(time.Second)
-	srv := NewServer(a, nil, nil)
+	a := New(time.Second, false)
+	srv := NewServer(a, nil, nil, false)
 
 	// c1 is the client that opened terminal t1.
 	c1 := &fakeClientNotifier{ch: make(chan api.Notification, 8)}
@@ -785,7 +785,7 @@ func TestTerminalOutputRoutedToClient(t *testing.T) {
 	defer nodePeer.Close()
 
 	// serveNode runs in background; it calls node.identify then blocks.
-	go srv.serveNode(gatewayConn)
+	go srv.serveNodePlain(gatewayConn)
 
 	// Wait for the identify call to be answered and source to be registered.
 	eventually(t, func() bool {
@@ -834,4 +834,80 @@ func TestTerminalOutputRoutedToClient(t *testing.T) {
 			t.Fatal("gateway did not send terminal.close for orphaned term")
 		}
 	}
+}
+
+// TestBlindRelayOpenCloseAndNodesList exercises the blind server path: a node
+// connects via serveNodeBlind, a client opens a relay channel, confirms it gets a
+// chan_id, closes it, and verifies nodes.list returns the roster.
+func TestBlindRelayOpenCloseAndNodesList(t *testing.T) {
+	a := New(0, true)
+	srv := NewServer(a, nil, nil, true)
+
+	// Connect a fake node via serveNodeBlind.
+	gwNodeConn, nodeConn := net.Pipe()
+	defer gwNodeConn.Close()
+
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return api.IdentifyResult{ID: "n1", Label: "n1-box"}, nil
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+
+	go srv.serveNodeBlind(gwNodeConn)
+
+	// Wait for the node to be registered and available as a relay target.
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		return srv.nodePeers["n1"] != nil
+	})
+
+	// Connect a fake client via the client server.
+	gwClientConn, appConn := net.Pipe()
+	defer gwClientConn.Close()
+	go srv.clientSrv.ServeConnContext(context.Background(), gwClientConn)
+	app := api.NewPeer(appConn, api.PeerOptions{})
+	defer app.Close()
+
+	// nodes.list must include the connected node.
+	var listResult api.NodesListResult
+	if err := app.Call(api.MethodNodesList, nil, &listResult); err != nil {
+		t.Fatalf("nodes.list: %v", err)
+	}
+	if len(listResult.Nodes) != 1 || listResult.Nodes[0].ID != "n1" {
+		t.Fatalf("nodes.list: want [{ID:n1}], got %+v", listResult.Nodes)
+	}
+
+	// relay.open must return a chan_id.
+	var openResult api.RelayOpenResult
+	if err := app.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: "n1"}, &openResult); err != nil {
+		t.Fatalf("relay.open: %v", err)
+	}
+	chanID := openResult.ChanID
+	if chanID == "" {
+		t.Fatal("relay.open: expected non-empty chan_id")
+	}
+
+	// Channel must be recorded.
+	srv.relayMu.Lock()
+	_, recorded := srv.channels[chanID]
+	srv.relayMu.Unlock()
+	if !recorded {
+		t.Fatalf("channel %q not recorded after relay.open", chanID)
+	}
+
+	// relay.close must drop the channel.
+	if err := app.Call(api.MethodRelayClose, api.RelayCloseParams{ChanID: chanID}, nil); err != nil {
+		t.Fatalf("relay.close: %v", err)
+	}
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		_, stillThere := srv.channels[chanID]
+		return !stillThere
+	})
 }

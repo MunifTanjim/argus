@@ -33,10 +33,11 @@ func waitFor(t *testing.T, cond func() bool) {
 // a client connected to the gateway sees the session and routes control calls back to
 // the originating node.
 func TestNodeUplinkEndToEnd(t *testing.T) {
-	agg := gateway.New(time.Second)
+	agg := gateway.New(time.Second, false)
 	hsrv := gateway.NewServer(agg,
 		func(tok string) bool { return tok == "dtok" },
 		func(tok string) bool { return tok == "ctok" },
+		false,
 	)
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()

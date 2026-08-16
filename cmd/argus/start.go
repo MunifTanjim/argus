@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
@@ -132,6 +133,16 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		}
 	}
 
+	if local && cfg.E2EE.Enabled {
+		kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json"))
+		if err != nil {
+			logger.Scoped("node").Warn("e2ee identity unavailable; running plaintext uplink", "err", err)
+		} else {
+			d.SetIdentityKey(kp)
+			d.SetE2EE(true)
+		}
+	}
+
 	if local {
 		reconcileInstalledHooks()
 		if err := connectGateway(ctx, cfg, d); err != nil {
@@ -150,6 +161,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		}
 		httpSrv = serveGateway(ctx, gatewayServeOpts{
 			node:          d,
+			blind:         cfg.E2EE.Enabled,
 			token:         cfg.Token,
 			listener:      ln,
 			log:           logger.New(context.Background()).L,
@@ -347,6 +359,7 @@ var tunnelURLTimeout = 60 * time.Second
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
 	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
+	blind         bool       // true = blind-roster (E2EE) path; false = plaintext session path
 	token         string
 	listener      net.Listener
 	log           *slog.Logger
@@ -365,9 +378,12 @@ type gatewayServeOpts struct {
 // client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
 // shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
-	agg := gateway.New(0)
-	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
-	if d := o.node; d != nil {
+	agg := gateway.New(0, o.blind)
+	// Plaintext path: seed the in-process node source before serving so it is
+	// visible to the first client that connects. Blind path: the in-process node
+	// connects over loopback after the HTTP server starts (below), so its E2EE
+	// identity handshake goes through the real uplink path.
+	if d := o.node; d != nil && !o.blind {
 		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
 	}
 
@@ -383,7 +399,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	}
 
 	gwLog := o.log.With("scope", "gateway")
-	hsrv := gateway.NewServer(agg, tokenAuth(o.token), clientAuth)
+	hsrv := gateway.NewServer(agg, tokenAuth(o.token), clientAuth, o.blind)
 	if store != nil {
 		hsrv.SetClientTokens(store, o.token)
 	}
@@ -404,6 +420,12 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
+
+	// Blind path: connect the in-process node over loopback so its E2EE identity
+	// handshake goes through the real uplink path (must come after Serve goroutine).
+	if d := o.node; d != nil && o.blind {
+		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")

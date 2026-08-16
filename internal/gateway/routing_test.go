@@ -13,7 +13,7 @@ import (
 // Route strips the node prefix from a composite session id and forwards the call
 // to the owning node with the node-local id, preserving other params.
 func TestRouteRewritesCompositeSessionID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("home", "home-box")
 	a.AddSource(src)
 
@@ -59,7 +59,7 @@ func TestToolDetailIsClientRouted(t *testing.T) {
 // A session-routed toolDetail call reaches the owning node with the node-local id
 // and its agent_id/tool_id preserved.
 func TestRouteToolDetailPreservesParams(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("home", "home-box")
 	a.AddSource(src)
 
@@ -84,7 +84,7 @@ func TestRouteToolDetailPreservesParams(t *testing.T) {
 // RouteToNode forwards by node id and re-composites the session id in the result
 // so the client can address the newly created session.
 func TestRouteToNodeRecomposesResultID(t *testing.T) {
-	a := New(time.Second)
+	a := New(time.Second, false)
 	src := newFakeSource("home", "home-box")
 	src.callResp, _ = json.Marshal(map[string]any{"session_id": "argus:%5", "pane_id": "%5"})
 	a.AddSource(src)

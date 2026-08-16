@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -116,17 +117,34 @@ type Server struct {
 
 	termMu sync.Mutex
 	terms  map[string]termEntry // term_id -> open terminal
+
+	// blind path (only populated when blind=true)
+	blind     bool
+	relayMu   sync.Mutex
+	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
+	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
+	nextChan  atomic.Uint64            // chan_id allocator
+	log       *slog.Logger             // relay lifecycle logging; nil disables
 }
 
-// NewServer builds a gateway Server over agg.
-func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *Server {
+// NewServer builds a gateway Server over agg. When blind is true the server uses
+// the blind relay path (E2EE); when false it uses the plaintext session path.
+func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool, blind bool) *Server {
 	s := &Server{
 		agg: agg, nodeAuth: nodeAuth, clientAuth: clientAuth,
+		blind:       blind,
 		pairWaiters: map[string]<-chan struct{}{},
 		subs:        map[string]subEntry{},
 		terms:       map[string]termEntry{},
 	}
-	s.clientSrv = s.buildClientServer()
+	if blind {
+		s.channels = map[string]*relayChannel{}
+		s.nodePeers = map[string]*api.Peer{}
+		s.clientSrv = s.buildClientServerBlind()
+		s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
+	} else {
+		s.clientSrv = s.buildClientServerPlain()
+	}
 	return s
 }
 
@@ -294,8 +312,12 @@ func (s *Server) routeByNodeIDOrSole(method string) func(context.Context, json.R
 	}
 }
 
-// SetLogger enables per-request logging (nil disables).
-func (s *Server) SetLogger(l *slog.Logger) { s.clientSrv.SetLogger(l) }
+// SetLogger enables per-request logging on the client surface and relay lifecycle
+// logging (nil disables).
+func (s *Server) SetLogger(l *slog.Logger) {
+	s.log = l
+	s.clientSrv.SetLogger(l)
+}
 
 // Handler returns the gateway's HTTP handler with the /node and /client routes.
 func (s *Server) Handler() http.Handler {
@@ -326,9 +348,9 @@ func (s *Server) clientHandler() http.Handler {
 	})
 }
 
-// buildClientServer wires the client-facing JSON-RPC: reads from the merged view,
+// buildClientServerPlain wires the client-facing JSON-RPC: reads from the merged view,
 // control calls routed to the owning node, and a per-connection merged event stream.
-func (s *Server) buildClientServer() *api.Server {
+func (s *Server) buildClientServerPlain() *api.Server {
 	srv := api.NewServer()
 
 	// ping is a no-op latency probe to the gateway itself (not routed to a node).
@@ -752,7 +774,11 @@ func (s *Server) nodeHandler() http.Handler {
 		if err != nil {
 			return
 		}
-		s.serveNode(conn)
+		if s.blind {
+			s.serveNodeBlind(conn)
+		} else {
+			s.serveNodePlain(conn)
+		}
 	})
 }
 
@@ -766,14 +792,17 @@ const (
 	nodeKeepaliveFailures = 2
 )
 
+// nodeIdentifyTimeout bounds the post-auth identify handshake on a node uplink.
+const nodeIdentifyTimeout = 30 * time.Second
+
 // maxClosedOrphans caps the per-uplink debounce set for orphaned terminal output
 // so a long-lived node connection with heavy attach churn can't grow it without
 // bound. Far above any plausible count of concurrently-dying orphans.
 const maxClosedOrphans = 4096
 
-// serveNode adopts an accepted node uplink: learn its identity, register it as a
-// source, and block until it disconnects.
-func (s *Server) serveNode(conn net.Conn) {
+// serveNodePlain adopts an accepted node uplink on the plaintext path: learn its
+// identity, register it as a source, and block until it disconnects.
+func (s *Server) serveNodePlain(conn net.Conn) {
 	events := make(chan registry.Event, 64)
 	// peerRef lets the OnNotify closure reference peer before NewPeer returns.
 	// Atomic to satisfy the race detector (OnNotify runs in a goroutine).
@@ -905,6 +934,280 @@ func (s *Server) serveNode(conn net.Conn) {
 	if err := peer.Call(api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
 		return
 	}
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.Capabilities, peer, events))
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, "", "", "", id.Capabilities, peer, nil).withEvents(events))
+	<-peer.Done()
+}
+
+// discardLog absorbs lifecycle logging when no logger is configured.
+var discardLog = slog.New(slog.DiscardHandler)
+
+// logger returns the configured logger, or a discarding one so call sites can log unconditionally.
+func (s *Server) logger() *slog.Logger {
+	if s.log != nil {
+		return s.log
+	}
+	return discardLog
+}
+
+// relayQueueDepth bounds a channel's per-direction pump queue. On overflow the
+// channel is torn down (a dropped Noise record would desync the AEAD counter),
+// isolated from other channels.
+const relayQueueDepth = 64
+
+// maxChannelsPerClient caps how many relay channels one client connection may hold
+// open at once. Each channel costs two goroutines plus two relayQueueDepth buffers,
+// so an uncapped client could exhaust node/gateway resources.
+const maxChannelsPerClient = 64
+
+// relayChannel is one client<->node E2E channel. The gateway forwards opaque
+// frames between the two peers by chan_id, never reading the sealed Body. Two pump
+// goroutines (one per direction) decouple the peers' read loops.
+type relayChannel struct {
+	chanID   string
+	client   *api.Peer
+	node     *api.Peer
+	toNode   chan []byte
+	toClient chan []byte
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+// addChannel records a channel and starts its two pump goroutines.
+func (s *Server) addChannel(chanID string, client, node *api.Peer) {
+	ch := &relayChannel{
+		chanID: chanID, client: client, node: node,
+		toNode: make(chan []byte, relayQueueDepth), toClient: make(chan []byte, relayQueueDepth),
+		stop: make(chan struct{}),
+	}
+	s.relayMu.Lock()
+	s.channels[chanID] = ch
+	s.relayMu.Unlock()
+	go s.relayPump(ch, ch.toNode, node)
+	go s.relayPump(ch, ch.toClient, client)
+	s.logger().Info("relay channel opened", "chan", chanID)
+}
+
+// dropChannel removes a channel and stops its pumps. It does not close the peers
+// (they may host other channels). Idempotent.
+func (s *Server) dropChannel(chanID, reason string) {
+	s.relayMu.Lock()
+	ch, ok := s.channels[chanID]
+	if ok {
+		delete(s.channels, chanID)
+	}
+	s.relayMu.Unlock()
+	if ok {
+		ch.stopOnce.Do(func() { close(ch.stop) })
+		s.logger().Info("relay channel dropped", "chan", chanID, "reason", reason)
+	}
+}
+
+// dropChannelsWhere tears down every channel whose relayChannel matches pred.
+func (s *Server) dropChannelsWhere(reason string, pred func(*relayChannel) bool) {
+	s.relayMu.Lock()
+	var toDrop []string
+	for cid, ch := range s.channels {
+		if pred(ch) {
+			toDrop = append(toDrop, cid)
+		}
+	}
+	s.relayMu.Unlock()
+	for _, cid := range toDrop {
+		s.dropChannel(cid, reason)
+	}
+}
+
+// relayPump drains q and forwards each frame to dst verbatim. A write error tears
+// the channel down.
+func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
+	for {
+		select {
+		case <-ch.stop:
+			return
+		case raw := <-q:
+			if err := dst.SendRawFrame(raw); err != nil {
+				s.dropChannel(ch.chanID, "frame write to peer failed: "+err.Error())
+				return
+			}
+		}
+	}
+}
+
+// enqueue hands a frame to a channel's pump. On a full queue it tears the channel
+// down (never drops a frame — that would desync the sealed stream).
+func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
+	select {
+	case <-ch.stop:
+	case q <- raw:
+	default:
+		s.dropChannel(ch.chanID, "relay queue overflow: peer is not draining")
+	}
+}
+
+// forwardFromClient relays a client's frame to the channel's node — but only if
+// src actually owns the channel.
+func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
+	s.relayMu.Lock()
+	ch := s.channels[f.Route.ChanID]
+	s.relayMu.Unlock()
+	if ch != nil && ch.client == src {
+		s.enqueue(ch, ch.toNode, f.Raw)
+	}
+}
+
+// forwardFromNode relays a node's frame to the channel's client — but only if src
+// owns the channel.
+func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
+	s.relayMu.Lock()
+	ch := s.channels[f.Route.ChanID]
+	s.relayMu.Unlock()
+	if ch != nil && ch.node == src {
+		s.enqueue(ch, ch.toClient, f.Raw)
+	}
+}
+
+// addNodePeer records a live node uplink as a relay.open target.
+func (s *Server) addNodePeer(id string, peer *api.Peer) {
+	s.relayMu.Lock()
+	s.nodePeers[id] = peer
+	s.relayMu.Unlock()
+}
+
+// removeNodePeer drops a node uplink and tears down every channel bound to it.
+func (s *Server) removeNodePeer(id string, peer *api.Peer) {
+	s.relayMu.Lock()
+	if s.nodePeers[id] == peer {
+		delete(s.nodePeers, id)
+	}
+	s.relayMu.Unlock()
+	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
+}
+
+// buildClientServerBlind wires the blind client-facing JSON-RPC: ping, server.info,
+// nodes.list, relay.open/close, node.event roster stream, and clients.*.
+func (s *Server) buildClientServerBlind() *api.Server {
+	srv := api.NewServer()
+
+	srv.Handle(api.MethodPing, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
+
+	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
+		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
+	})
+
+	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
+		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+	})
+
+	srv.Handle(api.MethodRelayOpen, func(ctx context.Context, params json.RawMessage) (any, error) {
+		n, ok := api.NotifierFrom(ctx)
+		clientPeer, isPeer := n.(*api.Peer)
+		if !ok || !isPeer {
+			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client peer"}
+		}
+		p, err := api.Decode[api.RelayOpenParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		s.relayMu.Lock()
+		nodePeer := s.nodePeers[p.NodeID]
+		open := 0
+		for _, ch := range s.channels {
+			if ch.client == clientPeer {
+				open++
+			}
+		}
+		s.relayMu.Unlock()
+		if nodePeer == nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + p.NodeID}
+		}
+		if open >= maxChannelsPerClient {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this client"}
+		}
+		chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
+		s.addChannel(chanID, clientPeer, nodePeer)
+		return api.RelayOpenResult{ChanID: chanID}, nil
+	})
+
+	srv.Handle(api.MethodRelayClose, func(ctx context.Context, params json.RawMessage) (any, error) {
+		n, _ := api.NotifierFrom(ctx)
+		clientPeer, _ := n.(*api.Peer)
+		p, err := api.Decode[api.RelayCloseParams](params)
+		if err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+		}
+		s.relayMu.Lock()
+		ch := s.channels[p.ChanID]
+		s.relayMu.Unlock()
+		if ch != nil && ch.client == clientPeer {
+			s.dropChannel(p.ChanID, "closed by client")
+		}
+		return nil, nil
+	})
+
+	srv.OnConnect(func(n api.Notifier) func() {
+		rosterEvents, rosterCancel := s.agg.SubscribeRoster()
+		for _, nd := range s.agg.Roster() {
+			_ = n.Notify(api.MethodNodeEvent, api.NodeEvent{Type: api.NodeEventAdded, Node: nd})
+		}
+		done := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				case ev, ok := <-rosterEvents:
+					if !ok {
+						return
+					}
+					if err := n.Notify(api.MethodNodeEvent, ev); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		return func() {
+			close(done)
+			rosterCancel()
+			if clientPeer, ok := n.(*api.Peer); ok {
+				s.dropChannelsWhere("client disconnected", func(ch *relayChannel) bool { return ch.client == clientPeer })
+			}
+		}
+	})
+
+	s.registerClientAdmin(srv)
+	return srv
+}
+
+// serveNodeBlind adopts an accepted node uplink on the blind relay path: identify,
+// register as a source, record as a relay target, and block until it disconnects.
+func (s *Server) serveNodeBlind(conn net.Conn) {
+	nodeDispatch := func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		switch method {
+		case api.MethodNodesList:
+			return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+		default:
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+	}
+
+	peer := api.NewPeer(conn, api.PeerOptions{
+		KeepaliveInterval:         nodeKeepaliveInterval,
+		KeepaliveTimeout:          nodeKeepaliveTimeout,
+		KeepaliveFailureThreshold: nodeKeepaliveFailures,
+		Dispatch:                  nodeDispatch,
+		OnRelayFrame:              s.forwardFromNode,
+	})
+	defer peer.Close()
+
+	idCtx, idCancel := context.WithTimeout(context.Background(), nodeIdentifyTimeout)
+	defer idCancel()
+	var id api.IdentifyResult
+	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
+		return
+	}
+
+	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.BeaconPubKey, id.Capabilities, peer, id.Beacon))
+	s.addNodePeer(id.ID, peer)
+	defer s.removeNodePeer(id.ID, peer)
 	<-peer.Done()
 }

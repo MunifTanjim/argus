@@ -32,11 +32,11 @@ func shortSocket(t *testing.T) string {
 
 // The gateway branch dials over WebSocket and never auto-starts a local node.
 func TestConnectGatewayBranch(t *testing.T) {
-	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
+	hsrv := gateway.NewServer(gateway.New(0, false), nil, nil, false) // allow all
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock")
+	c, err := connect(context.Background(), &config.Config{}, wsURL(ts.URL), "", "/should/not/be/touched.sock")
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 // included via the uplink), not just the local socket.
 func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	sandboxHookDirs(t)
-	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
+	hsrv := gateway.NewServer(gateway.New(0, false), nil, nil, false) // allow all
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
@@ -145,7 +145,7 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 // forever-retrying background uplink.
 func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	auth := func(tok string) bool { return tok == "right" }
-	hsrv := gateway.NewServer(gateway.New(0), auth, auth)
+	hsrv := gateway.NewServer(gateway.New(0, false), auth, auth, false)
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
