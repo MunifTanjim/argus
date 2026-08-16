@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -119,8 +120,8 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 }
 
 // keepalive pings the remote every interval and closes the peer after threshold
-// consecutive failed pings (an answered ping resets the streak). Catches a
-// half-open connection whose read side never errors. Stops when the peer closes.
+// consecutive unanswered pings (any reply resets the streak). Catches a half-open
+// connection whose read side never errors. Stops when the peer closes.
 func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 	if timeout <= 0 {
 		timeout = interval
@@ -139,7 +140,7 @@ func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 			ctx, cancel := context.WithTimeout(p.ctx, timeout)
 			err := p.CallContext(ctx, MethodPing, nil, nil)
 			cancel()
-			if err == nil {
+			if answered(err) {
 				fails = 0
 				continue
 			}
@@ -149,6 +150,19 @@ func (p *Peer) keepalive(interval, timeout time.Duration, threshold int) {
 			}
 		}
 	}
+}
+
+// answered reports whether a keepalive ping got a reply. A protocol-level error
+// reply still proves the remote is alive and processing frames — only a transport
+// failure (closed connection, no reply within the timeout) means the link is gone.
+// Treating an error reply as a miss would let a remote's dispatch policy tear down
+// its own healthy link.
+func answered(err error) bool {
+	if err == nil {
+		return true
+	}
+	var rpcErr *RPCError
+	return errors.As(err, &rpcErr)
 }
 
 // Done is closed when the peer's read loop ends (connection closed or errored).
@@ -331,6 +345,15 @@ func (p *Peer) readLoop() {
 
 func (p *Peer) serveRequest(m message) {
 	resp := message{ID: m.ID}
+	// ping is a transport-level liveness probe, answered by the Peer itself so no
+	// application dispatch policy can break its own link's keepalive. Handlers may
+	// still register ping for callers that reach dispatch without a Peer (e.g. a
+	// co-located gateway calling Node.DispatchFunc directly).
+	if m.Method == MethodPing {
+		resp.Result = json.RawMessage("null")
+		_ = p.send(resp)
+		return
+	}
 	if p.dispatch == nil {
 		resp.Error = &RPCError{Code: CodeMethodNotFound, Message: "method not found: " + m.Method}
 		_ = p.send(resp)
