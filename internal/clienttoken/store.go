@@ -9,6 +9,7 @@ package clienttoken
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -25,7 +26,9 @@ const tokenBytes = 32
 // PendTTL bounds how long a minted-but-unconnected token stays accepted.
 const PendTTL = 60 * time.Second
 
-// Record is one persisted client token.
+// Record is one persisted client token. Token is the on-disk id (the hashed
+// token), not the raw secret — the raw token is shown only once at pairing and
+// is never recoverable from the store.
 type Record struct {
 	Token     string `json:"token"`
 	CreatedAt string `json:"created_at"`
@@ -82,7 +85,18 @@ func validToken(tok string) bool {
 	return true
 }
 
-func (s *Store) path(tok string) string { return filepath.Join(s.dir, tok+".json") }
+// hashToken maps a raw token to its at-rest id. The token is a 256-bit random
+// secret, so a fast unsalted hash is sufficient (salting/KDFs defend low-entropy
+// passwords, not high-entropy secrets). Only this hash is written to disk, so a
+// read of the store dir or a backup never yields a usable token.
+func hashToken(tok string) string {
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+// path is the file for an on-disk id (a hashed token). Callers holding a raw
+// token must hash it first via hashToken; List/Remove already operate on ids.
+func (s *Store) path(id string) string { return filepath.Join(s.dir, id+".json") }
 
 // Pend registers a minted token as accepted for the pairing window and returns a
 // channel closed when a device first authenticates. Auto-dropped after PendTTL;
@@ -145,7 +159,7 @@ func (s *Store) Authorize(tok string) bool {
 	}
 	s.mu.Unlock()
 
-	_, err := os.Stat(s.path(tok))
+	_, err := os.Stat(s.path(hashToken(tok)))
 	return err == nil
 }
 
@@ -158,7 +172,7 @@ func (s *Store) persist(tok string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path(tok), b, 0o600)
+	return os.WriteFile(s.path(hashToken(tok)), b, 0o600)
 }
 
 // List returns the persisted tokens, newest first.
@@ -187,12 +201,13 @@ func (s *Store) List() ([]Record, error) {
 	return out, nil
 }
 
-// Remove deletes a client token's file, revoking it for future connections.
-func (s *Store) Remove(tok string) error {
-	if !validToken(tok) {
+// Remove deletes a client token's file, revoking it for future connections. id
+// is the on-disk id returned by List (a hashed token), not the raw secret.
+func (s *Store) Remove(id string) error {
+	if !validToken(id) {
 		return fmt.Errorf("clienttoken: invalid token")
 	}
-	if err := os.Remove(s.path(tok)); err != nil {
+	if err := os.Remove(s.path(id)); err != nil {
 		return err
 	}
 	return nil
