@@ -138,6 +138,9 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		return nil, nil, serr
 	}
 	if gatewayURL != "" {
+		// The embedded node accepts mobile push registrations fanned over relay
+		// channels, so it needs a store (the daemon/co-located paths do the same).
+		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		go d.ConnectGateway(ctx, wsURL, token, gatewayClient)
 		// Gateway is a pure router; this node self-drives desktop alerts via DesktopSink.
 		go d.StartPush(ctx, cfg.Push.Mobile.Delay)

@@ -171,10 +171,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	// Local nodes not hosting a gateway drive their own push loop when in uplink
-	// mode (any cipher) or when E2EE is on standalone. The deliverer is set per
-	// connect by runUplink when an uplink is present.
+	// mode (any cipher) or when E2EE is on standalone. An uplink node gets a push
+	// store in either cipher mode: push.register/test fan out to nodes over relay
+	// channels regardless of cipher, mirroring the co-located node's unconditional
+	// store. The deliverer is set per connect by runUplink when an uplink is present.
 	if local && !serveGW && (cfg.E2EE.Enabled || uplinkMode(cfg)) {
-		if cfg.E2EE.Enabled && uplinkMode(cfg) {
+		if uplinkMode(cfg) {
 			d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		}
 		go d.StartPush(ctx, cfg.Push.Mobile.Delay)

@@ -67,9 +67,11 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 	defer d.activeResponder.CompareAndSwap(resp, nil)
 	defer d.activeUplink.CompareAndSwap(peer, nil)
 	d.log.Info("gateway uplink established", "url", url)
-	if d.pushStore != nil {
-		d.SetPushDeliverer(uplinkDeliverer{peer: peer})
-	}
+	// Wire the push egress for this uplink unconditionally. The store gate is
+	// enforced at delivery time (handlePushTest / StartPush); the store may be set
+	// after this uplink connects, so guarding on it here would leave a stably
+	// connected node with a nil deliverer until an unrelated reconnect.
+	d.SetPushDeliverer(uplinkDeliverer{peer: peer})
 
 	// Sync the trust-log chain over this uplink (no-op unless locked mode is on).
 	go d.runTrustSync(ctx, peer)
