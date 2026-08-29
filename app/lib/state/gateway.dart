@@ -229,16 +229,18 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       : null;
   ref.onDispose(() {
     equivPoll?.cancel();
-    equivocation.state = false; // reset per-session flag on disconnect
     statesSub.cancel();
-    // Tell the outgoing gateway to stop pushing before the link closes, so only
-    // the active connection delivers notifications. Non-blocking, best-effort.
     push.unregisterFromCurrentGateway();
-    // Drop the previous gateway's sessions so a switch/disconnect doesn't show
-    // stale data until the next fetch. (Transient reconnects reuse the same
-    // manager, so this doesn't fire on network blips.)
-    store.clear();
     manager.stop();
+    // Riverpod forbids modifying other providers inside onDispose. Defer the
+    // resets to a microtask that runs after teardown; both providers are
+    // app-level (not autoDispose) so they persist to receive it. Resets the
+    // per-session equivocation flag and drops the previous gateway's sessions so
+    // a switch/disconnect does not show stale data until the next fetch.
+    Future.microtask(() {
+      equivocation.state = false;
+      store.clear();
+    });
   });
   manager.start();
   return manager;
