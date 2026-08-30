@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -80,6 +82,11 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
+		// A paste is its own message, not a keypress. Hand it to the focused
+		// field: textinput handles tea.PasteMsg and sanitizes the content.
+		if m.state == stateGateway {
+			return m.forwardToField(msg)
+		}
 		return m, nil
 	}
 	if m.state == stateMenu {
@@ -142,12 +149,16 @@ func (m launcherModel) updateGateway(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.submitGateway()
 	}
 
-	// Forward typing to the focused field.
+	return m.forwardToField(key) // typing
+}
+
+// forwardToField hands a message to the focused gateway input.
+func (m launcherModel) forwardToField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if m.field == 0 {
-		m.urlIn, cmd = m.urlIn.Update(key)
+		m.urlIn, cmd = m.urlIn.Update(msg)
 	} else {
-		m.tokenIn, cmd = m.tokenIn.Update(key)
+		m.tokenIn, cmd = m.tokenIn.Update(msg)
 	}
 	return m, cmd
 }
@@ -164,7 +175,9 @@ func (m launcherModel) toggleField() (tea.Model, tea.Cmd) {
 }
 
 func (m launcherModel) submitGateway() (tea.Model, tea.Cmd) {
-	url := m.urlIn.Value()
+	// Trim: a pasted value carries a trailing newline, which textinput turns
+	// into a space, and a space in a token fails auth with no visible cause.
+	url := strings.TrimSpace(m.urlIn.Value())
 	if _, _, err := resolveGatewayURL(url, routeClient, nil); err != nil {
 		m.errMsg = err.Error()
 		return m, nil
@@ -173,7 +186,7 @@ func (m launcherModel) submitGateway() (tea.Model, tea.Cmd) {
 	if m.spawnConnected {
 		kind = launchSpawnConnected
 	}
-	m.choice = launchChoice{kind: kind, gatewayURL: url, token: m.tokenIn.Value()}
+	m.choice = launchChoice{kind: kind, gatewayURL: url, token: strings.TrimSpace(m.tokenIn.Value())}
 	return m, tea.Quit
 }
 
