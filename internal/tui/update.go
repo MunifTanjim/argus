@@ -82,6 +82,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.mode == modeScreen:
 			m.sendTermKey(m.termID, []byte(msg.Content))
 			return m, nil
+		case m.spawn.active():
+			m.pasteSpawn(msg.Content)
+			return m, nil
 		case m.idleComposerActive():
 			// Idle reply composer: append the paste verbatim (newlines and all).
 			m.prompt.reasonText += msg.Content
