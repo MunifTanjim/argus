@@ -124,6 +124,26 @@ func TestRecentlyEndedExpiresAfterGrace(t *testing.T) {
 	}
 }
 
+// A reconcile sweeps expired ended entries even for keys it never re-discovers,
+// so the post-exit guard map cannot grow unbounded on a long-lived daemon.
+func TestReconcileSessionsSweepsExpiredEndedEntries(t *testing.T) {
+	r := New()
+	r.endedGrace = 1 * time.Millisecond
+
+	r.mu.Lock()
+	r.ended["ghost-pane"] = time.Now().Add(-time.Second) // expired, never rediscovered
+	r.mu.Unlock()
+
+	r.ReconcileSessions("claude", nil) // no discovered panes: ghost is not queried
+
+	r.mu.Lock()
+	_, present := r.ended["ghost-pane"]
+	r.mu.Unlock()
+	if present {
+		t.Error("reconcile should sweep an expired ended entry that is never rediscovered")
+	}
+}
+
 func TestSnapshotStampsStatusLabel(t *testing.T) {
 	r := New()
 	r.ApplyHook(HookUpdate{

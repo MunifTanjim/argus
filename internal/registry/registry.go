@@ -148,6 +148,8 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.sweepEnded()
+
 	seenPane := map[string]bool{}
 	seenAgentSession := map[string]bool{}
 
@@ -327,6 +329,17 @@ func (r *Registry) recentlyEnded(key string) bool {
 		return false
 	}
 	return true
+}
+
+// sweepEnded drops guard entries past the grace window. recentlyEnded only
+// expires keys it is asked about, so a pane that ends and never reappears would
+// leak; ReconcileSessions calls this to bound the map. Caller holds r.mu.
+func (r *Registry) sweepEnded() {
+	for key, at := range r.ended {
+		if time.Since(at) > r.endedGrace {
+			delete(r.ended, key)
+		}
+	}
 }
 
 // remove deletes a session from all indices and publishes a removal event with the
