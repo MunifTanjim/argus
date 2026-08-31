@@ -159,7 +159,13 @@ class LoopbackLink implements RpcLink {
 /// A gateway relaying to several nodes, keyed by node id. Answers nodes.list with
 /// each node's identity_pubkey and relay.open(node_id) with a chan bound to that node.
 class MultiNodeLoopbackLink implements RpcLink {
-  MultiNodeLoopbackLink(this._nodes, {Uint8List? trustChain}) {
+  MultiNodeLoopbackLink(
+    this._nodes, {
+    Uint8List? trustChain,
+    Set<String>? offline,
+    Set<String>? failRelayOpen,
+  }) : _offline = offline ?? const {},
+       _failRelayOpen = failRelayOpen ?? const {} {
     for (final n in _nodes.values) {
       n.sendToClient = _push;
     }
@@ -169,6 +175,18 @@ class MultiNodeLoopbackLink implements RpcLink {
   }
 
   final Map<String, LoopbackNode> _nodes;
+
+  /// Node ids reported `online: false` in nodes.list. A relay.open for one also
+  /// fails, mirroring a within-grace node with no live uplink.
+  final Set<String> _offline;
+
+  /// Node ids reported online but whose relay.open returns an error, mirroring a
+  /// node that dropped between the roster snapshot and the open.
+  final Set<String> _failRelayOpen;
+
+  /// Every node id passed to relay.open, in order. Lets a test assert that an
+  /// offline node is skipped before any open is attempted.
+  final relayOpenCalls = <String>[];
 
   /// The gateway's entry store, populated when [trustChain] is set. Used to
   /// answer trustlog.sync with the correct delta for the caller's heads.
@@ -222,7 +240,7 @@ class MultiNodeLoopbackLink implements RpcLink {
               'identity_pubkey':
                   e.value.advertisedIdentity ??
                   base64.encode(e.value.keyPair.publicKey),
-              'online': true,
+              'online': !_offline.contains(e.key),
             },
         ];
         _push(
@@ -234,6 +252,17 @@ class MultiNodeLoopbackLink implements RpcLink {
         );
       case 'relay.open':
         final nodeId = (j['params'] as Map)['node_id'] as String;
+        relayOpenCalls.add(nodeId);
+        if (_offline.contains(nodeId) || _failRelayOpen.contains(nodeId)) {
+          _push(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': id,
+              'error': {'code': -32004, 'message': 'unknown node: $nodeId'},
+            }),
+          );
+          return;
+        }
         final chanId = 'chan-${_chanSeq++}';
         _chanToNode[chanId] = _nodes[nodeId]!;
         _push(

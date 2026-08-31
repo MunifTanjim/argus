@@ -31,12 +31,14 @@ class NodeDescriptor {
     required this.identityPubKey,
     this.beaconPubKey,
     this.beacon,
+    this.online = true,
   });
   final String id;
   final String? label;
   final String identityPubKey;
   final String? beaconPubKey;
   final Beacon? beacon;
+  final bool online;
 }
 
 /// Tracks consecutive unreconciled ticks for a single node's beacon tip.
@@ -255,29 +257,43 @@ class E2EClient implements GatewayClient {
     final toOpen = <NodeDescriptor>[];
     for (final n in nodes) {
       if (n is! Map) continue;
-      final key = n['identity_pubkey'];
-      if (!_plaintext && (key is! String || key.isEmpty)) continue;
+      final desc = _parseNodeDescriptor(n as Map<String, dynamic>);
+      // An offline node (within grace, no live relay peer) has no channel to
+      // open: relay.open would fail. Skip it; it attaches on a later roster
+      // update once it reconnects.
+      if (!desc.online) continue;
       if (!_plaintext) {
-        final pub = base64.decode(key as String);
+        if (desc.identityPubKey.isEmpty) continue;
+        final pub = base64.decode(desc.identityPubKey);
         if (_trust != null &&
             _trust.locked &&
             !_trust.disabled &&
             !_trust.deviceAuthorized(pub))
           continue;
       }
-      toOpen.add(_parseNodeDescriptor(n as Map<String, dynamic>));
+      toOpen.add(desc);
     }
     await Future.wait(
       toOpen.map((desc) async {
-        final nc = await openChannel(desc);
-        _byNodeId[desc.id] = nc;
-        _roster[desc.id] = desc;
-        // Record identity pub hex so checkBeaconConsistency can distinguish
-        // "was connected, now offline" from "never connected".
-        if (desc.identityPubKey.isNotEmpty) {
-          try {
-            _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
-          } catch (_) {}
+        // One unreachable node must not abort the whole session: skip it and
+        // keep aggregating the rest (mirrors the Go client).
+        try {
+          final nc = await openChannel(desc);
+          _byNodeId[desc.id] = nc;
+          _roster[desc.id] = desc;
+          // Record identity pub hex so checkBeaconConsistency can distinguish
+          // "was connected, now offline" from "never connected".
+          if (desc.identityPubKey.isNotEmpty) {
+            try {
+              _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
+            } catch (_) {}
+          }
+        } catch (e) {
+          developer.log(
+            'skipping node ${desc.id}: open channel failed: $e',
+            name: 'e2e',
+            level: 900,
+          );
         }
       }),
     );
@@ -675,6 +691,7 @@ class E2EClient implements GatewayClient {
       identityPubKey: n['identity_pubkey'] as String? ?? '',
       beaconPubKey: n['beacon_pubkey'] as String?,
       beacon: beacon,
+      online: n['online'] as bool? ?? true,
     );
   }
 
