@@ -109,7 +109,10 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// clientHandler authenticates a /client connection and tags it with a Principal.
+// clientHandler authenticates a /client connection and tags it with a Principal
+// (admin when the master token is presented). Mirrors api.Server.WSHandler but
+// threads the Principal so clients.* can require admin and a minted token can be
+// promoted on its first connection.
 func (s *Server) clientHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := api.BearerToken(r)
@@ -127,7 +130,8 @@ func (s *Server) clientHandler() http.Handler {
 	})
 }
 
-// registerPush wires the device push methods.
+// registerPush wires the device push methods. Open to any authenticated /client
+// (not admin-only): a device registers its push target keyed by a stable device id.
 func (s *Server) registerPush(srv *api.Server) {
 	unavailable := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push notifications not enabled on this gateway"}
 	badDevice := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push: device_id required"}
@@ -303,7 +307,10 @@ func (s *Server) nodeHandler() http.Handler {
 	})
 }
 
-// Node uplink keepalive settings.
+// Node uplink keepalive: pings detect a half-open link (host vanished without a
+// TCP FIN) promptly. Closing after nodeKeepaliveFailures unanswered pings fires
+// Done into the aggregator's offline → grace → removal path; two failures ride out
+// a transient blip so a briefly busy node isn't dropped.
 var (
 	nodeKeepaliveInterval = api.DefaultKeepaliveInterval
 	nodeKeepaliveTimeout  = api.DefaultKeepaliveTimeout
@@ -335,10 +342,14 @@ func (s *Server) logger() *slog.Logger {
 	return discardLog
 }
 
-// relayQueueDepth bounds a channel's per-direction pump queue.
+// relayQueueDepth bounds a channel's per-direction pump queue. On overflow the
+// channel is torn down (a dropped Noise record would desync the AEAD counter),
+// isolated from other channels.
 const relayQueueDepth = 64
 
-// maxChannelsPerClient caps how many relay channels one client connection may hold open.
+// maxChannelsPerClient caps how many relay channels one client connection may hold
+// open at once. Each channel costs two goroutines plus two relayQueueDepth buffers,
+// so an uncapped client could exhaust node/gateway resources.
 const maxChannelsPerClient = 64
 
 // relayChannel is one client<->node E2E channel. The gateway forwards opaque
@@ -412,7 +423,8 @@ func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
 	}
 }
 
-// enqueue hands a frame to a channel's pump. On a full queue it tears the channel down.
+// enqueue hands a frame to a channel's pump. On a full queue it tears the channel
+// down (never drops a frame — that would desync the sealed stream).
 func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
 	select {
 	case <-ch.stop:
