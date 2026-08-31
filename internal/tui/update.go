@@ -77,7 +77,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.Content == "":
 		case m.redact.inputActive:
-			m.redact.input += msg.Content
+			m.redact.input, m.redact.inputPos = insertText(m.redact.input, m.redact.inputPos, msg.Content)
 			return m, nil
 		case m.mode == modeScreen:
 			m.sendTermKey(m.termID, []byte(msg.Content))
@@ -86,8 +86,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pasteSpawn(msg.Content)
 			return m, nil
 		case m.idleComposerActive():
-			// Idle reply composer: append the paste verbatim (newlines and all).
-			m.prompt.reasonText += msg.Content
+			// Idle reply composer: insert the paste verbatim (newlines and all).
+			m.prompt.reasonText, m.prompt.reasonPos = insertText(m.prompt.reasonText, m.prompt.reasonPos, msg.Content)
 		}
 	case notificationMsg:
 		return m, m.applyEvent(api.Notification(msg))

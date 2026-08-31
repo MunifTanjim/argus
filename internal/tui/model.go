@@ -216,6 +216,7 @@ type redactState struct {
 	literals    []string
 	inputActive bool
 	input       string
+	inputPos    int // cursor within input, in runes
 	listActive  bool
 	listCursor  int
 	listReturn  bool // input was opened from the list (D); reopen it when the input closes

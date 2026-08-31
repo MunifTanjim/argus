@@ -344,8 +344,11 @@ func (m model) spawnView() string {
 		footer = navFooter
 	case spawnStepDir:
 		if m.spawn.custom {
+			// Scroll the line rather than truncate it, so the cursor stays on
+			// screen in a path longer than the card.
+			vis, vpos := scrollWindow(m.spawn.cwd, m.spawn.pos, cardW-1)
 			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +
-				asstStyle.Render(truncate(m.spawn.cwd, cardW-1)+"▏")
+				asstStyle.Render(withCursor(vis, vpos, "▏"))
 			footer = dimStyle.Render("type a path · enter confirm · esc cancel")
 			break
 		}
@@ -359,14 +362,20 @@ func (m model) spawnView() string {
 		footer = navFooter
 	case spawnStepPrompt:
 		lines := strings.Split(m.spawn.prompt, "\n")
+		row, col := cursorRowCol(m.spawn.prompt, m.spawn.pos)
 		for i, ln := range lines {
+			if i == row { // the cursor's line scrolls so the cursor stays visible
+				vis, vcol := scrollWindow(ln, col, cardW-1)
+				lines[i] = withCursor(vis, vcol, "▏")
+				continue
+			}
 			lines[i] = truncateLine(ln, cardW)
 		}
-		lines[len(lines)-1] += "▏" // cursor at end; Split always yields ≥1 line
-		// Window to the height after label + blank, keeping the tail (where typing
-		// happens) visible.
+		// Window to the height after label + blank, keeping the cursor's line
+		// visible (typing is usually at the tail, but home/up can move off it).
 		if budget := max(1, avail-2); len(lines) > budget {
-			lines = lines[len(lines)-budget:]
+			start := min(max(0, row-budget+1), len(lines)-budget)
+			lines = lines[start : start+budget]
 		}
 		body = StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)") + "\n\n" +
 			asstStyle.Render(strings.Join(lines, "\n"))

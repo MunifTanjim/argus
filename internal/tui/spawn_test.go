@@ -431,9 +431,9 @@ func TestSpawnPromptRuneAwareBackspace(t *testing.T) {
 		{"four-byte rocket", "🚀", '🚀'},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := editText(tc.input, tea.KeyPressMsg{Code: tea.KeyBackspace})
-			if got != "" {
-				t.Fatalf("editText backspace on %q: got %q, want empty", tc.input, got)
+			got, pos, _ := editText(tc.input, endPos(tc.input), tea.KeyPressMsg{Code: tea.KeyBackspace})
+			if got != "" || pos != 0 {
+				t.Fatalf("editText backspace on %q: got %q pos %d, want empty at 0", tc.input, got, pos)
 			}
 		})
 	}

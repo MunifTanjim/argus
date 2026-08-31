@@ -31,9 +31,11 @@ type promptState struct {
 	chosen      []int          // committed single-select option per question (-1 = unanswered)
 	toggles     []map[int]bool // multi-select toggles per question
 	text        []string       // "type your own" draft per question
+	textPos     []int          // cursor within text[i], in runes
 	submitSel   int            // 0=Submit, 1=Cancel on the Submit tab
 	decisionSel int            // permission/plan option index (Allow/Deny)
 	reasonText  string         // permission/plan deny reason + idle reply buffer
+	reasonPos   int            // cursor within reasonText, in runes
 	scroll      int            // dock body scroll offset (lines above the pinned controls)
 	key         string         // identity of the interaction the draft belongs to
 }
@@ -103,9 +105,10 @@ func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
 
 func (m *model) resetPromptState() {
 	m.prompt.tab, m.prompt.submitSel, m.prompt.decisionSel = 0, 0, 0
-	m.prompt.reasonText = ""
+	m.prompt.reasonText, m.prompt.reasonPos = "", 0
 	m.prompt.scroll = 0
 	m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = nil, nil, nil, nil
+	m.prompt.textPos = nil
 }
 
 // ensurePromptState sizes the per-question slices to n (preserving entries) and
@@ -119,6 +122,7 @@ func (m *model) ensurePromptState(n int) {
 		chosen := make([]int, n)
 		tog := make([]map[int]bool, n)
 		txt := make([]string, n)
+		txtPos := make([]int, n)
 		for i := 0; i < n; i++ {
 			chosen[i] = -1
 			if i < len(m.prompt.sel) {
@@ -135,8 +139,12 @@ func (m *model) ensurePromptState(n int) {
 			if i < len(m.prompt.text) {
 				txt[i] = m.prompt.text[i]
 			}
+			if i < len(m.prompt.textPos) {
+				txtPos[i] = m.prompt.textPos[i]
+			}
 		}
 		m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = sel, chosen, tog, txt
+		m.prompt.textPos = txtPos
 	}
 	maxTab := n - 1
 	if n > 1 {
@@ -170,6 +178,13 @@ func (m model) qText(tab int) string {
 		return m.prompt.text[tab]
 	}
 	return ""
+}
+
+func (m model) qTextPos(tab int) int {
+	if tab >= 0 && tab < len(m.prompt.textPos) {
+		return m.prompt.textPos[tab]
+	}
+	return 0
 }
 
 // qChosen returns the committed single-select option index, or -1 (unanswered).
@@ -337,7 +352,7 @@ type optionMarks struct {
 // renderOptions renders a selectable option list, returning the block and the
 // highlighted row's line index within it. The highlight is navigation only; the
 // committed selection shows via checkbox/radio marks.
-func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx int, otherText string, otherActive bool, descs []string, width int) (string, int) {
+func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx int, otherText string, otherPos int, otherActive bool, descs []string, width int) (string, int) {
 	var b strings.Builder
 	anchor := 0
 	for i, opt := range opts {
@@ -366,7 +381,7 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 		if i == otherIdx && (otherActive || otherText != "") {
 			text := "✎ " + otherText
 			if otherActive {
-				text += "▏"
+				text = "✎ " + withCursor(otherText, otherPos, "▏")
 			}
 			if selected {
 				label = StylePrimaryBold.Render(text)
@@ -446,7 +461,7 @@ func (m model) questionLines(ix *session.Interaction, width int) ([]string, int,
 		radio: !q.MultiSelect, chosen: m.qChosen(tab)}
 	base := strings.Count(b.String(), "\n")
 	block, a := m.renderOptions(opts, m.qSel(tab), marks,
-		otherIndex(q), m.qText(tab), m.otherActive(q, tab), q.OptionDescriptions, width)
+		otherIndex(q), m.qText(tab), m.qTextPos(tab), m.otherActive(q, tab), q.OptionDescriptions, width)
 	b.WriteString(block)
 	b.WriteString("\n\n" + chatHint())
 	// Question text (and tab bar) above the options scroll; the option list pins.
@@ -462,7 +477,7 @@ func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int,
 	}
 	opts := decisionOptions(ix)
 	base := strings.Count(b.String(), "\n")
-	block, a := m.renderOptions(opts, m.prompt.decisionSel, optionMarks{chosen: -1}, -1, "", false, nil, width)
+	block, a := m.renderOptions(opts, m.prompt.decisionSel, optionMarks{chosen: -1}, -1, "", 0, false, nil, width)
 	b.WriteString(block)
 	anchor := base + a
 	// The reason field appears only on the reject choice.
@@ -485,7 +500,7 @@ func (m model) rejectInput(ix *session.Interaction) string {
 	if m.prompt.reasonText == "" {
 		return prefix + "▏" + dimStyle.Render(ph)
 	}
-	return prefix + m.prompt.reasonText + "▏"
+	return prefix + withCursor(m.prompt.reasonText, m.prompt.reasonPos, "▏")
 }
 
 // idleLines renders the free-text composer for an idle interaction.
@@ -496,7 +511,7 @@ func (m model) idleLines(ix *session.Interaction, width int) ([]string, int, int
 		b.WriteString(body + "\n\n")
 	}
 	anchor := strings.Count(b.String(), "\n")
-	b.WriteString(hardWrap(userStyle.Render("> ")+m.prompt.reasonText+"▏", width))
+	b.WriteString(hardWrap(userStyle.Render("> ")+withCursor(m.prompt.reasonText, m.prompt.reasonPos, "▏"), width))
 	// The message body above scrolls; the reply composer pins to the bottom.
 	return splitAnchorCtrl(&b, anchor, anchor)
 }
