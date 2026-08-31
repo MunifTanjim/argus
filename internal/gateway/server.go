@@ -28,8 +28,6 @@ type Server struct {
 	clientSrv  *api.Server
 
 	clientTokens  *clienttoken.Store
-	pushStore     *push.Store
-	pushSender    *push.Dispatcher
 	pushDeliverer push.Deliverer
 	vapidPubKey   string
 	master        string
@@ -66,12 +64,6 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 func (s *Server) SetClientTokens(store *clienttoken.Store, master string) {
 	s.clientTokens = store
 	s.master = master
-}
-
-// SetPush enables the push.register/unregister/test methods. Call before serving.
-func (s *Server) SetPush(store *push.Store, dispatcher *push.Dispatcher) {
-	s.pushStore = store
-	s.pushSender = dispatcher
 }
 
 // SetPushDeliverer wires the egress for the push.deliver node→gateway RPC.
@@ -130,78 +122,10 @@ func (s *Server) clientHandler() http.Handler {
 	})
 }
 
-// registerPush wires the device push methods. Open to any authenticated /client
-// (not admin-only): a device registers its push target keyed by a stable device id.
+// registerPush wires the gateway's push surface. Only push.vapidKey is served:
+// a device fetches the VAPID key here, then registers its push target on its
+// owning node (over relay channels), never on the blind gateway.
 func (s *Server) registerPush(srv *api.Server) {
-	unavailable := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push notifications not enabled on this gateway"}
-	badDevice := &api.RPCError{Code: api.CodeInvalidRequest, Message: "push: device_id required"}
-
-	srv.Handle(api.MethodPushRegister, func(_ context.Context, params json.RawMessage) (any, error) {
-		if s.pushStore == nil {
-			return nil, unavailable
-		}
-		p, err := api.Decode[api.PushRegisterParams](params)
-		if err != nil {
-			return nil, err
-		}
-		if p.DeviceID == "" {
-			return nil, badDevice
-		}
-		if p.Endpoint == "" {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push.register: endpoint required"}
-		}
-		t := push.Target{Endpoint: p.Endpoint, P256dh: p.P256dh, Auth: p.Auth}
-		if err := s.pushStore.Upsert(p.DeviceID, t); err != nil {
-			return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
-		}
-		return nil, nil
-	})
-
-	srv.Handle(api.MethodPushUnregister, func(_ context.Context, params json.RawMessage) (any, error) {
-		if s.pushStore == nil {
-			return nil, unavailable
-		}
-		p, err := api.Decode[api.PushDeviceRef](params)
-		if err != nil {
-			return nil, err
-		}
-		if p.DeviceID == "" {
-			return nil, badDevice
-		}
-		if err := s.pushStore.Remove(p.DeviceID); err != nil {
-			return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
-		}
-		return nil, nil
-	})
-
-	srv.Handle(api.MethodPushTest, func(ctx context.Context, params json.RawMessage) (any, error) {
-		if s.pushStore == nil || s.pushSender == nil {
-			return nil, unavailable
-		}
-		p, err := api.Decode[api.PushDeviceRef](params)
-		if err != nil {
-			return nil, err
-		}
-		if p.DeviceID == "" {
-			return nil, badDevice
-		}
-		n := push.Notification{
-			Title: "argus",
-			Body:  "Test notification — push is working.",
-			Data:  map[string]string{"test": "1"},
-		}
-		sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		if err := s.pushSender.SendTo(sctx, p.DeviceID, n); err != nil {
-			code := api.CodeInternalError
-			if errors.Is(err, push.ErrGone) {
-				code = api.CodePushGone
-			}
-			return nil, &api.RPCError{Code: code, Message: err.Error()}
-		}
-		return nil, nil
-	})
-
 	srv.Handle(api.MethodPushVAPIDKey, func(_ context.Context, _ json.RawMessage) (any, error) {
 		return api.PushVAPIDKey{Key: s.vapidPubKey}, nil
 	})
