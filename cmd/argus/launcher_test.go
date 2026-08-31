@@ -174,3 +174,31 @@ func TestLauncherMenuLabelReflectsToken(t *testing.T) {
 		t.Fatalf("no token should offer an isolated spawn, got:\n%s", noToken)
 	}
 }
+
+// A pasted URL and token must reach the focused field, newline and all.
+func TestGatewayPasteReachesFocusedField(t *testing.T) {
+	m := enterGateway(newLauncherModel(""))
+	m = drive(m, tea.PasteMsg{Content: "ws://gw.example.com:8443"})
+	if got := m.urlIn.Value(); got != "ws://gw.example.com:8443" {
+		t.Fatalf("url after paste = %q", got)
+	}
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // url -> token
+	m = drive(m, tea.PasteMsg{Content: "secret\n"})
+	// textinput turns the pasted newline into a space; submit must trim it, or
+	// the gateway rejects the token for no visible reason.
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit
+	if m.choice.token != "secret" {
+		t.Fatalf("submitted token = %q, want %q", m.choice.token, "secret")
+	}
+	if m.choice.gatewayURL != "ws://gw.example.com:8443" {
+		t.Fatalf("submitted url = %q", m.choice.gatewayURL)
+	}
+}
+
+// A paste on the menu must not leak into the hidden gateway fields.
+func TestMenuPasteIgnored(t *testing.T) {
+	m := drive(newLauncherModel(""), tea.PasteMsg{Content: "junk"})
+	if m.urlIn.Value() != "" || m.tokenIn.Value() != "" {
+		t.Fatalf("paste leaked: url=%q token=%q", m.urlIn.Value(), m.tokenIn.Value())
+	}
+}

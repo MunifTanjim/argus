@@ -431,9 +431,9 @@ func TestSpawnPromptRuneAwareBackspace(t *testing.T) {
 		{"four-byte rocket", "🚀", '🚀'},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := editText(tc.input, tea.KeyPressMsg{Code: tea.KeyBackspace})
-			if got != "" {
-				t.Fatalf("editText backspace on %q: got %q, want empty", tc.input, got)
+			got, pos, _ := editText(tc.input, endPos(tc.input), tea.KeyPressMsg{Code: tea.KeyBackspace})
+			if got != "" || pos != 0 {
+				t.Fatalf("editText backspace on %q: got %q pos %d, want empty at 0", tc.input, got, pos)
 			}
 		})
 	}
@@ -486,5 +486,29 @@ func TestProjectsForNodeDedupesCwd(t *testing.T) {
 	}
 	if len(projectsForNode(all, "home")) != 2 {
 		t.Fatalf("dedupe within node = %+v", projectsForNode(all, "home"))
+	}
+}
+
+// A pasted PR link must land in the prompt buffer; the custom path drops newlines.
+func TestSpawnPaste(t *testing.T) {
+	c := &spawnPickClient{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}}
+	m := openSpawn(t, c)
+
+	// Dir step, custom path row: paste is stripped of newlines.
+	m.spawn.custom, m.spawn.cwd = true, ""
+	mm, _ := m.Update(tea.PasteMsg{Content: "/tmp/x\n"})
+	m = mm.(model)
+	if m.spawn.cwd != "/tmp/x" {
+		t.Fatalf("custom path after paste = %q, want %q", m.spawn.cwd, "/tmp/x")
+	}
+
+	// Prompt step: paste lands verbatim.
+	m.spawn.custom = false
+	m.spawn.step = spawnStepPrompt
+	url := "review https://github.com/o/r/pull/1"
+	mm, _ = m.Update(tea.PasteMsg{Content: url})
+	m = mm.(model)
+	if m.spawn.prompt != url {
+		t.Fatalf("prompt after paste = %q, want %q", m.spawn.prompt, url)
 	}
 }
