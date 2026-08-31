@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -69,7 +70,11 @@ func (d *Node) handleLockPin(_ context.Context, raw json.RawMessage) (any, error
 		}
 	}
 	if err := d.AdoptPin(p.Genesis); err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+		code := api.CodeInternalError
+		if errors.Is(err, ErrPinGenesisLen) || errors.Is(err, ErrPinConflict) {
+			code = api.CodeInvalidRequest
+		}
+		return nil, &api.RPCError{Code: code, Message: err.Error()}
 	}
 	return nil, nil
 }

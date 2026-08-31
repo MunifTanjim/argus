@@ -484,9 +484,16 @@ func (d *Node) setTriggerPeerForTest(p trustCaller) { d.testTriggerPeer.Store(&p
 //
 // Re-pinning the same genesis is a no-op; a different one is refused unless the
 // current chain is disabled (stale pin that no longer guards anything).
+// AdoptPin validation errors, wrapped so a handler can map them to a
+// client-facing invalid-request code; every other AdoptPin failure is internal.
+var (
+	ErrPinGenesisLen = errors.New("node: genesis length invalid")
+	ErrPinConflict   = errors.New("node: already pinned to a different genesis")
+)
+
 func (d *Node) AdoptPin(genesis []byte) error {
 	if len(genesis) != trustpin.GenesisLen {
-		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
+		return fmt.Errorf("%w: got %d bytes, want %d", ErrPinGenesisLen, len(genesis), trustpin.GenesisLen)
 	}
 	if err := func() error {
 		d.pinMu.Lock()
@@ -498,7 +505,7 @@ func (d *Node) AdoptPin(genesis []byte) error {
 			// A disabled chain enforces nothing and can never be re-enabled, so the pin
 			// holding it is stale rather than conflicting — replacing it is safe.
 			if st := d.trust.Load(); st == nil || !st.Disabled() {
-				return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
+				return fmt.Errorf("%w; run `argus lock unpin` first", ErrPinConflict)
 			}
 			if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
 				return err
