@@ -16,11 +16,6 @@ const (
 // ConnectGateway maintains an outbound uplink to the gateway until ctx is
 // cancelled, reconnecting with capped exponential backoff. nil httpClient uses
 // the default.
-//
-// The node is a symmetric peer: it serves the gateway's control requests through
-// the same handlers as local clients and pushes registry changes up as
-// session.event. The gateway pulls the initial snapshot via sessions.list, so
-// only live events stream here.
 func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient *http.Client) {
 	d.log.Info("connecting to gateway", "url", url)
 	backoff := uplinkBaseBackoff
@@ -47,9 +42,18 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 	}
 }
 
-// runUplink dials the gateway and pumps events until the connection or ctx ends. It
+// runUplink dials the gateway and waits until the connection or ctx ends. It
 // returns whether the dial succeeded (to drive backoff reset).
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
+	if d.e2ee {
+		return d.runUplinkBlind(ctx, url, token, httpClient)
+	}
+	return d.runUplinkPlain(ctx, url, token, httpClient)
+}
+
+// runUplinkPlain is the original plaintext uplink: the gateway issues control
+// requests down this link and the node pushes registry changes up as session.event.
+func (d *Node) runUplinkPlain(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		// The gateway issues control requests (capture/input/respond/...) down this
 		// link; serve them through the same handlers local clients use.
@@ -88,4 +92,36 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		}
 		return true
 	}
+}
+
+// runUplinkBlind is the E2E blind uplink: the node runs a relay responder that
+// terminates Noise IK channels from clients. The gateway can only issue
+// node.identify; all client requests travel sealed end-to-end.
+func (d *Node) runUplinkBlind(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
+	resp := d.newRelayResponder()
+	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
+		Dispatch:     d.uplinkDispatch(),
+		OnRelayFrame: resp.onFrame,
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			d.log.Warn("gateway uplink dial failed", "url", url, "err", err)
+		}
+		return false
+	}
+	resp.peer.Store(peer)
+	d.activeResponder.Store(resp)
+	defer peer.Close()
+	defer resp.closeAll()
+	defer d.activeResponder.CompareAndSwap(resp, nil)
+	d.log.Info("gateway uplink established", "url", url)
+
+	select {
+	case <-ctx.Done():
+	case <-peer.Done():
+		if ctx.Err() == nil {
+			d.log.Info("gateway uplink closed", "url", url)
+		}
+	}
+	return true
 }

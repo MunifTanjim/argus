@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // fakeDiscoverer registers the target session on its Nth ScanOnce, modelling the
@@ -300,4 +302,50 @@ func TestHandleSessionResumeJumpsToLiveSession(t *testing.T) {
 	if r.SessionID != live {
 		t.Fatalf("got %#v, want SessionID=%q", r, live)
 	}
+}
+
+// TestHandleNodeIdentifyTip verifies that handleNodeIdentify populates Tip from
+// the active trust store, and leaves it empty when no store is loaded.
+func TestHandleNodeIdentifyTip(t *testing.T) {
+	t.Run("with trust store", func(t *testing.T) {
+		sk, err := trustlog.GenerateSigner()
+		if err != nil {
+			t.Fatal(err)
+		}
+		tlog, err := trustlog.NewGenesis([][]byte{sk.Public}, sk, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		genesisHash := tlog.Tip()
+		chain := trustlog.MarshalChain(tlog.Entries())
+
+		st := trustlog.NewSyncStore(genesisHash)
+		if _, err := st.Ingest(chain); err != nil {
+			t.Fatal(err)
+		}
+
+		d := New()
+		d.trust.Store(st)
+
+		res, err := d.handleNodeIdentify(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := res.(api.IdentifyResult)
+		if !bytes.Equal(got.Tip, st.Tip()) {
+			t.Errorf("Tip = %x, want %x", got.Tip, st.Tip())
+		}
+	})
+
+	t.Run("no trust store", func(t *testing.T) {
+		d := New()
+		res, err := d.handleNodeIdentify(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := res.(api.IdentifyResult)
+		if len(got.Tip) != 0 {
+			t.Errorf("Tip = %x, want empty", got.Tip)
+		}
+	})
 }
