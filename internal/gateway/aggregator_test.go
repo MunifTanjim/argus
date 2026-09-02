@@ -98,6 +98,36 @@ func TestNodeIDFromParams(t *testing.T) {
 	}
 }
 
+func TestPublishTrustChanged(t *testing.T) {
+	a := New(0)
+	events, cancel := a.SubscribeRoster()
+	defer cancel()
+
+	a.PublishTrustChanged()
+
+	ev := recvRosterEvent(t, events)
+	if ev.Type != api.NodeEventTrustChanged {
+		t.Fatalf("want %q event, got %q", api.NodeEventTrustChanged, ev.Type)
+	}
+	if ev.Node.ID != "" {
+		t.Fatalf("trust-changed event should have empty Node, got %+v", ev.Node)
+	}
+}
+
+func TestPublishTrustChangedNotMixedWithRosterEvent(t *testing.T) {
+	a := New(0)
+	events, cancel := a.SubscribeRoster()
+	defer cancel()
+
+	src := newFakeSource("home", "home-box")
+	a.AddSource(src)
+
+	ev := recvRosterEvent(t, events)
+	if ev.Type == api.NodeEventTrustChanged {
+		t.Fatal("AddSource should not emit a trust-changed event")
+	}
+}
+
 func TestRosterAndSubscribeRoster(t *testing.T) {
 	a := New(0)
 	events, cancel := a.SubscribeRoster()
