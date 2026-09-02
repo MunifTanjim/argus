@@ -9,7 +9,6 @@ import '../transport/gateway_client.dart';
 import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
 import '../transport/rpc_client.dart';
 import 'aggregate.dart';
-import 'beacon.dart';
 import 'bytes.dart' show bytesEqual, hexEncode;
 import 'channel.dart';
 import 'handshake.dart';
@@ -22,34 +21,28 @@ import 'trustlog/trust_store.dart';
 
 /// A node reachable through the blind gateway. [identityPubKey] is the node's
 /// base64 Curve25519 static key (its Noise responder identity).
-/// [beaconPubKey] is the node's base64 Ed25519 beacon public key (anti-
-/// equivocation); [beacon] is the node's latest signed HEAD beacon.
 class NodeDescriptor {
   const NodeDescriptor({
     required this.id,
     this.label,
     required this.identityPubKey,
-    this.beaconPubKey,
-    this.beacon,
     this.online = true,
   });
   final String id;
   final String? label;
   final String identityPubKey;
-  final String? beaconPubKey;
-  final Beacon? beacon;
   final bool online;
 }
 
-/// Tracks consecutive unreconciled ticks for a single node's beacon tip.
-class _BeaconMissState {
-  _BeaconMissState({required this.tip, this.misses = 0});
+/// Tracks consecutive unreconciled ticks for a single node's tip.
+class _TipMissState {
+  _TipMissState({required this.tip, this.misses = 0});
   final Uint8List tip;
   int misses;
 }
 
 /// Number of consecutive unreconciled ticks before the equivocation flag is set.
-const int _beaconMissThreshold = 2;
+const int _tipMissThreshold = 2;
 
 /// One established E2E channel to a node.
 class NodeChannel {
@@ -126,15 +119,16 @@ class E2EClient implements GatewayClient {
   bool get isDisabled => _trust?.disabled ?? false;
 
   /// Whether the client has detected a trust-log equivocation: one or more
-  /// nodes reported a HEAD beacon whose tip could not be reconciled with the
-  /// client's resolved chain after [_beaconMissThreshold] consecutive pulls.
-  /// Once set, this flag is never cleared for the lifetime of the session.
+  /// nodes reported a tip over its authenticated channel that could not be
+  /// reconciled with the client's resolved chain after [_tipMissThreshold]
+  /// consecutive pulls. Once set, this flag is never cleared for the lifetime
+  /// of the session.
   bool get equivocation => _equivocation;
 
   @visibleForTesting
-  void debugCheckBeaconConsistency() => _checkBeaconConsistency();
+  void debugCheckTipConsistency() => _checkTipConsistency();
   @visibleForTesting
-  Set<String>? get debugBeaconKnown => _beaconKnown;
+  Set<String>? get debugKnownSet => _knownSet;
   @visibleForTesting
   int get debugLastUnplacedLogged => _lastUnplacedLogged;
 
@@ -154,22 +148,20 @@ class E2EClient implements GatewayClient {
   final _subNode = <String, String>{};
   final _termNode = <String, String>{};
 
-  // Beacon cross-check state (mirrors Go E2EClient beacon fields).
-  // [_beacons] maps identity-pub hex to the latest verified beacon.
-  // [_beaconCtr] tracks the last accepted counter for replay/stale detection.
-  // [_beaconMiss] tracks consecutive unreconciled ticks per node; cleared on
-  // reconcile or when the node's counter advances.
+  // Tip cross-check state (mirrors Go E2EClient tip fields).
+  // [_authTip] maps identity-pub hex to the tip each node reported over its
+  // authenticated channel (node.identify), refreshed once per sync tick.
+  // [_tipMiss] tracks consecutive unreconciled ticks per node; cleared on reconcile.
   // [_everConnected] records identity-pub hex keys for which a channel was
-  // successfully opened at any point; used by [_checkBeaconConsistency] to
-  // distinguish "once connected, now offline" (skip stale beacon) from "never
+  // successfully opened at any point; used by [_checkTipConsistency] to
+  // distinguish "once connected, now offline" (skip stale tip) from "never
   // connected" (still check — legitimate equivocation signal).
-  final _beacons = <String, Beacon>{};
-  final _beaconCtr = <String, int>{};
-  final _beaconMiss = <String, _BeaconMissState>{};
+  final _authTip = <String, Uint8List>{};
+  final _tipMiss = <String, _TipMissState>{};
   final _everConnected = <String>{}; // identity-pub hex; never removed
   bool _equivocation = false;
-  Uint8List? _beaconKnownTip; // caches the known-set key
-  Set<String>? _beaconKnown; // resolved chain entry-hash set for beacon checks
+  Uint8List? _knownSetTip; // caches the known-set key
+  Set<String>? _knownSet; // resolved chain entry-hash set for tip checks
 
   Stream<NodeEvent> get events => _events.stream;
 
@@ -228,13 +220,6 @@ class E2EClient implements GatewayClient {
   Future<void> connect() async {
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
-    // Seed the initial beacon map from the roster snapshot before the trust-log
-    // pull, so the first cross-check already has whatever beacons the gateway
-    // advertises. Mirrors Go E2EClient.Connect beacon seeding order.
-    for (final n in nodes) {
-      if (n is! Map<String, dynamic>) continue;
-      await _ingestBeaconFromDescriptor(_parseNodeDescriptor(n));
-    }
     if (_trust != null) {
       // Rollback anchor: re-verify the last-known-good chain before pulling, so the
       // gateway's chain must be a monotonic extension (a stale/shorter chain is
@@ -281,12 +266,27 @@ class E2EClient implements GatewayClient {
           final nc = await openChannel(desc);
           _byNodeId[desc.id] = nc;
           _roster[desc.id] = desc;
-          // Record identity pub hex so checkBeaconConsistency can distinguish
-          // "was connected, now offline" from "never connected".
+          // Record identity pub hex so checkTipConsistency can distinguish
+          // "was connected, now offline" from "never connected", then read the
+          // node's tip over its authenticated channel (node.identify).
           if (desc.identityPubKey.isNotEmpty) {
             try {
-              _everConnected.add(hexEncode(base64.decode(desc.identityPubKey)));
-            } catch (_) {}
+              final key = hexEncode(base64.decode(desc.identityPubKey));
+              _everConnected.add(key);
+              final res = await _callNodeDecoded(
+                desc.id,
+                'node.identify',
+                null,
+              );
+              if (res is Map<String, dynamic>)
+                _authTip[key] = _decodeTip(res['tip']);
+            } catch (e) {
+              developer.log(
+                'node ${desc.id} identify failed: $e',
+                name: 'e2e',
+                level: 900,
+              );
+            }
           }
         } catch (e) {
           developer.log(
@@ -323,11 +323,12 @@ class E2EClient implements GatewayClient {
       await onTrustChainAdvance?.call(after);
       _reevaluateChannels();
     }
-    // Cross-check beacon tips against the resolved chain on every successful
-    // pull — regardless of whether the chain advanced this tick. Mirrors Go's
-    // syncTrustLog which always calls checkBeaconConsistency + deliverBeacons.
-    _checkBeaconConsistency();
-    await _deliverBeacons();
+    // Re-read each node's tip over its authenticated channel, then cross-check
+    // those tips against the resolved chain on every successful pull — regardless
+    // of whether the chain advanced this tick. Mirrors Go's syncTrustLog which
+    // always calls refreshAuthTips + checkTipConsistency.
+    await _refreshAuthTips();
+    _checkTipConsistency();
   }
 
   /// Calls trustlog.sync, stores returned raw entries, assembles complete
@@ -428,9 +429,9 @@ class E2EClient implements GatewayClient {
 
   /// Closes channels to nodes no longer authorized by the current trust log.
   /// A nil/disabled/unlocked store closes nothing (disabled intentionally opens
-  /// access). Only closes — never opens newly-authorized nodes. Also prunes
-  /// beacon state for each dropped node so its stale tip cannot accumulate
-  /// misses and false-positive the equivocation flag.
+  /// access). Only closes — never opens newly-authorized nodes. Also prunes tip
+  /// state for each dropped node so its stale tip cannot accumulate misses and
+  /// false-positive the equivocation flag.
   void _reevaluateChannels() {
     final trust = _trust;
     if (trust == null || !trust.locked || trust.disabled) return;
@@ -446,14 +447,13 @@ class E2EClient implements GatewayClient {
       final nc = _byNodeId.remove(id);
       _roster.remove(id);
       if (nc != null) _byChanId.remove(nc.chanId);
-      // Prune beacon state so the revoked node's stale tip cannot accumulate
-      // misses and false-positive the equivocation flag.
+      // Prune tip state so the revoked node's stale tip cannot accumulate misses
+      // and false-positive the equivocation flag.
       if (desc != null && desc.identityPubKey.isNotEmpty) {
         try {
           final key = hexEncode(base64.decode(desc.identityPubKey));
-          _beacons.remove(key);
-          _beaconCtr.remove(key);
-          _beaconMiss.remove(key);
+          _authTip.remove(key);
+          _tipMiss.remove(key);
         } catch (_) {}
       }
     }
@@ -675,127 +675,114 @@ class E2EClient implements GatewayClient {
     return _callNodeDecoded(nodeId, method, params);
   }
 
-  /// Parses a raw nodes.list/node.event JSON map into a [NodeDescriptor],
-  /// including beacon fields when present.
+  /// Parses a raw nodes.list/node.event JSON map into a [NodeDescriptor].
   NodeDescriptor _parseNodeDescriptor(Map<String, dynamic> n) {
-    final beaconJson = n['beacon'];
-    Beacon? beacon;
-    if (beaconJson is Map<String, dynamic>) {
-      try {
-        beacon = Beacon.fromJson(beaconJson);
-      } catch (_) {}
-    }
     return NodeDescriptor(
       id: n['id'] as String? ?? '',
       label: n['label'] as String?,
       identityPubKey: n['identity_pubkey'] as String? ?? '',
-      beaconPubKey: n['beacon_pubkey'] as String?,
-      beacon: beacon,
       online: n['online'] as bool? ?? true,
     );
   }
 
-  /// Validates and stores the beacon from a [NodeDescriptor]. Guards mirror Go
-  /// E2EClient.ingestBeaconFromDescriptor:
-  ///   1. beacon, identityPubKey, and beaconPubKey must all be present.
-  ///   2. [verifyBeacon] must pass (Ed25519 signature check).
-  ///   3. beacon.beaconPub must equal the roster-announced beaconPubKey.
-  ///   4. beacon.counter must be strictly greater than the last accepted counter.
-  /// A beacon failing any guard is silently dropped.
-  Future<void> _ingestBeaconFromDescriptor(NodeDescriptor nd) async {
-    final beacon = nd.beacon;
-    final beaconPubKeyStr = nd.beaconPubKey;
-    if (beacon == null ||
-        nd.identityPubKey.isEmpty ||
-        beaconPubKeyStr == null ||
-        beaconPubKeyStr.isEmpty) {
-      return;
+  /// Decodes a node.identify result's `tip` field (base64) into raw bytes.
+  /// Returns an empty list when the field is absent or malformed.
+  Uint8List _decodeTip(Object? raw) {
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        return Uint8List.fromList(base64.decode(raw));
+      } catch (_) {}
     }
-    final Uint8List identityPub;
-    final Uint8List expectedBeaconPub;
-    try {
-      identityPub = Uint8List.fromList(base64.decode(nd.identityPubKey));
-      expectedBeaconPub = Uint8List.fromList(base64.decode(beaconPubKeyStr));
-    } catch (_) {
-      return;
-    }
-    if (!await verifyBeacon(beacon)) return; // signature invalid: drop
-    if (!bytesEqual(beacon.beaconPub, expectedBeaconPub))
-      return; // key mismatch: drop
-    final key = hexEncode(identityPub);
-    final curCtr = _beaconCtr[key] ?? 0;
-    if (beacon.counter <= curCtr) return; // stale or replayed: ignore
-    _beacons[key] = beacon;
-    _beaconCtr[key] = beacon.counter;
-    _beaconMiss.remove(
-      key,
-    ); // counter advanced: new beacon supersedes any miss streak
+    return Uint8List(0);
   }
 
-  /// Removes beacon state for the node described by [nd]. Used when a node goes
-  /// offline or is removed from the roster so its stale cached beacon tip cannot
+  /// Removes tip state for the node described by [nd]. Used when a node goes
+  /// offline or is removed from the roster so its stale cached tip cannot
   /// accumulate misses and false-positive the equivocation flag.
-  void _pruneBeaconForDescriptor(NodeDescriptor nd) {
+  void _pruneTipForDescriptor(NodeDescriptor nd) {
     if (nd.identityPubKey.isEmpty) return;
     try {
       final key = hexEncode(base64.decode(nd.identityPubKey));
-      _beacons.remove(key);
-      _beaconCtr.remove(key);
-      _beaconMiss.remove(key);
+      _authTip.remove(key);
+      _tipMiss.remove(key);
     } catch (_) {}
   }
 
   /// Handles a gateway-level notification. Filters for [node.event]:
-  /// - type [beacon]: ingests the updated beacon.
-  /// - type [offline] or [removed]: prunes the node's beacon state so stale
-  ///   tips cannot accumulate misses after the node leaves the roster or goes
+  /// - type [trust-changed]: pulls the trust log promptly (mirrors Go's kick →
+  ///   syncTrustLog nudge).
+  /// - type [offline] or [removed]: prunes the node's tip state so stale tips
+  ///   cannot accumulate misses after the node leaves the roster or goes
   ///   offline. Mirrors Go E2EClient.onPeerNotify.
   void _onGatewayNotification(RpcMessage msg) {
     if (msg.method != 'node.event') return;
     final params = msg.params;
     if (params is! Map<String, dynamic>) return;
+    final evType = params['type'];
+    if (evType == 'trust-changed') {
+      unawaited(resyncNow());
+      return;
+    }
     final nodeJson = params['node'];
     if (nodeJson is! Map<String, dynamic>) return;
-    final evType = params['type'];
-    if (evType == 'beacon') {
-      _ingestBeaconFromDescriptor(_parseNodeDescriptor(nodeJson)).catchError((
-        Object e,
-        StackTrace st,
-      ) {
-        developer.log(
-          'e2e_client: beacon ingest error',
-          name: 'e2e',
-          error: e,
-          stackTrace: st,
-        );
-      });
-    } else if (evType == 'offline' || evType == 'removed') {
-      _pruneBeaconForDescriptor(_parseNodeDescriptor(nodeJson));
+    if (evType == 'offline' || evType == 'removed') {
+      _pruneTipForDescriptor(_parseNodeDescriptor(nodeJson));
     }
   }
 
-  /// Cross-checks all collected node beacons against the current resolved
-  /// trust-log chain. Mirrors Go E2EClient.checkBeaconConsistency:
-  /// a beacon whose Tip is not present in the client's linear chain history is
-  /// tracked per-node; if the same unreconciled tip persists for
-  /// [_beaconMissThreshold] consecutive ticks, [_equivocation] is set.
-  /// Beacons for nodes that WERE connected (in [_everConnected]) but are no
-  /// longer connected are skipped — a legitimate fork that orphans an offline
-  /// node's cached tip must not accumulate misses and false-positive the flag.
-  /// Nodes that report beacons but were NEVER connected are still checked.
-  /// No-op when the trust store is absent or the chain is empty.
-  void _checkBeaconConsistency() {
+  /// Re-reads each connected node's trust-log tip over its authenticated Noise
+  /// channel (node.identify) and records it in [_authTip]. The tip is bound to the
+  /// trust-log-authorized identity, unlike the forgeable gateway roster; it is the
+  /// only source the equivocation check trusts. A node that fails to answer is
+  /// logged and left on its previously-known tip. Mirrors Go E2EClient.refreshAuthTips.
+  Future<void> _refreshAuthTips() async {
+    final targets = <(String, String)>[]; // (nodeId, identity-pub hex)
+    for (final nodeId in _byNodeId.keys) {
+      final desc = _roster[nodeId];
+      if (desc == null || desc.identityPubKey.isEmpty) continue;
+      try {
+        targets.add((nodeId, hexEncode(base64.decode(desc.identityPubKey))));
+      } catch (_) {}
+    }
+    await Future.wait(
+      targets.map((tg) async {
+        try {
+          final res = await _callNodeDecoded(tg.$1, 'node.identify', null);
+          if (res is Map<String, dynamic>)
+            _authTip[tg.$2] = _decodeTip(res['tip']);
+        } catch (e) {
+          developer.log(
+            'node ${tg.$1} identify (tip refresh) failed: $e',
+            name: 'e2e',
+            level: 900,
+          );
+        }
+      }),
+    );
+  }
+
+  /// Cross-checks each connected node's authenticated tip against the current
+  /// resolved trust-log chain. Mirrors Go E2EClient.checkTipConsistency:
+  /// a tip not present in the client's linear chain history is tracked per-node;
+  /// if the same unreconciled tip persists for [_tipMissThreshold] consecutive
+  /// ticks, [_equivocation] is set. Tips for nodes that WERE connected (in
+  /// [_everConnected]) but are no longer connected are skipped — a legitimate
+  /// fork that orphans an offline node's cached tip must not accumulate misses
+  /// and false-positive the flag. Nodes that reported a tip but were NEVER
+  /// connected are still checked. No-op when the trust store is absent or the
+  /// chain is empty.
+  void _checkTipConsistency() {
     final trust = _trust;
     if (trust == null) return;
     final chainBytes = trust.chainBytes;
     if (chainBytes == null || chainBytes.isEmpty) return;
-    if (_beacons.isEmpty)
-      return; // no beacons yet: skip the chain parse/hash entirely
+    if (_authTip.isEmpty)
+      return; // no tips yet: skip the chain parse/hash entirely
     final tip = trust.tip;
-    var known = _beaconKnown;
+    var known = _knownSet;
     if (known == null ||
         tip == null ||
-        !bytesEqual(tip, _beaconKnownTip ?? const [])) {
+        !bytesEqual(tip, _knownSetTip ?? const [])) {
       List<Entry> entries;
       try {
         entries = unmarshalChain(chainBytes);
@@ -807,8 +794,8 @@ class E2EClient implements GatewayClient {
       for (final e in entries) {
         known.add(hexEncode(hashEntry(e)));
       }
-      _beaconKnown = known;
-      _beaconKnownTip = tip == null ? null : Uint8List.fromList(tip);
+      _knownSet = known;
+      _knownSetTip = tip == null ? null : Uint8List.fromList(tip);
     }
     // Build the set of currently-connected identity-pub hex keys.
     final connected = <String>{};
@@ -819,78 +806,37 @@ class E2EClient implements GatewayClient {
         connected.add(hexEncode(base64.decode(desc.identityPubKey)));
       } catch (_) {}
     }
-    for (final entry in _beacons.entries) {
+    for (final entry in _authTip.entries) {
       final key = entry.key;
-      final b = entry.value;
-      // Belt-and-suspenders: skip beacons for nodes that WERE connected but
-      // are no longer connected. A legitimate fork that orphans an offline
-      // node's stale cached tip must not accumulate misses and trigger the
-      // flag. Nodes that report beacons but were NEVER connected are not
-      // skipped — those beacons are still checked for equivocation.
+      final tipBytes = entry.value;
+      // Belt-and-suspenders: skip tips for nodes that WERE connected but are no
+      // longer connected. A legitimate fork that orphans an offline node's stale
+      // cached tip must not accumulate misses and trigger the flag. Nodes that
+      // reported a tip but were NEVER connected are still checked.
       if (_everConnected.contains(key) && !connected.contains(key)) continue;
-      if (b.tip.isEmpty) {
-        _beaconMiss.remove(key); // no tip yet: clear any prior miss
+      if (tipBytes.isEmpty) {
+        _tipMiss.remove(key); // no tip yet: clear any prior miss
         continue;
       }
-      if (known.contains(hexEncode(b.tip))) {
-        _beaconMiss.remove(key); // tip reconciled: reset miss streak
+      if (known.contains(hexEncode(tipBytes))) {
+        _tipMiss.remove(key); // tip reconciled: reset miss streak
         continue;
       }
       // Tip not in resolved chain: track consecutive unreconciled ticks.
-      var ms = _beaconMiss[key];
-      if (ms == null || !bytesEqual(ms.tip, b.tip)) {
-        ms = _BeaconMissState(tip: Uint8List.fromList(b.tip), misses: 1);
-        _beaconMiss[key] = ms;
+      var ms = _tipMiss[key];
+      if (ms == null || !bytesEqual(ms.tip, tipBytes)) {
+        ms = _TipMissState(tip: Uint8List.fromList(tipBytes), misses: 1);
+        _tipMiss[key] = ms;
       } else {
         ms.misses++;
       }
-      if (ms.misses >= _beaconMissThreshold && !_equivocation) {
+      if (ms.misses >= _tipMissThreshold && !_equivocation) {
         developer.log(
-          'equivocation detected — node beacons diverge from resolved chain: key=$key tip=${hexEncode(b.tip)}',
+          'equivocation detected — node tip diverges from resolved chain: key=$key tip=${hexEncode(tipBytes)}',
           name: 'e2e',
           level: 900, // WARNING
         );
         _equivocation = true;
-      }
-    }
-  }
-
-  /// Couriers each collected signed node beacon to every OTHER connected node
-  /// via the beacon.deliver E2E method. Mirrors Go E2EClient.deliverBeacons.
-  /// Delivery is best-effort (errors silently ignored). A node's own beacon is
-  /// never delivered back to that same node.
-  Future<void> _deliverBeacons() async {
-    if (_beacons.isEmpty || _byNodeId.isEmpty) return;
-    // Build identity-pub hex → nodeId mapping from current channels + roster.
-    final identHexToNode = <String, String>{};
-    for (final nodeId in _byNodeId.keys) {
-      final desc = _roster[nodeId];
-      if (desc == null || desc.identityPubKey.isEmpty) continue;
-      try {
-        final pub = base64.decode(desc.identityPubKey);
-        identHexToNode[hexEncode(pub)] = nodeId;
-      } catch (_) {}
-    }
-    // Collect beacons with their source node ID.
-    final todo = <({Beacon beacon, String sourceId})>[];
-    for (final entry in _beacons.entries) {
-      final srcId = identHexToNode[entry.key];
-      if (srcId == null) continue; // node disconnected since beacon collected
-      todo.add((beacon: entry.value, sourceId: srcId));
-    }
-    final targetIds = _byNodeId.keys.toList();
-    for (final item in todo) {
-      for (final targetId in targetIds) {
-        if (targetId == item.sourceId) continue; // never deliver back to source
-        try {
-          await _callNodeDecoded(
-            targetId,
-            'beacon.deliver',
-            item.beacon.toJson(),
-          );
-        } catch (_) {
-          /* best-effort */
-        }
       }
     }
   }

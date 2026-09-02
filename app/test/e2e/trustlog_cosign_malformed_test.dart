@@ -16,8 +16,16 @@ Future<(SimpleKeyPair, Uint8List)> _makeSK(Ed25519 ed) async {
   return (kp, pub);
 }
 
-Future<Entry> _signGenesis(Ed25519 ed, SimpleKeyPair kp, List<Uint8List> signers) async {
-  final template = Entry(kind: Kind.genesis, signers: signers, signer: signers[0]);
+Future<Entry> _signGenesis(
+  Ed25519 ed,
+  SimpleKeyPair kp,
+  List<Uint8List> signers,
+) async {
+  final template = Entry(
+    kind: Kind.genesis,
+    signers: signers,
+    signer: signers[0],
+  );
   final sig = await ed.sign(sigBytes(template), keyPair: kp);
   return Entry(
     kind: Kind.genesis,
@@ -72,23 +80,11 @@ void main() {
       expect(log.signerTrusted(pubA), isFalse, reason: 'A must be revoked');
       expect(log.signerTrusted(pubB), isTrue, reason: 'B must stay trusted');
       expect(log.signerTrusted(pubC), isTrue, reason: 'C must stay trusted');
-      expect(log.signerTrusted(pubD), isTrue, reason: 'D (replacement) must be trusted');
+      expect(
+        log.signerTrusted(pubD),
+        isTrue,
+        reason: 'D (replacement) must be trusted',
+      );
     },
   );
-
-  // verifyBeacon must return false (matching Go api.VerifyBeacon) — not throw —
-  // when the signature has a wrong length, so a malformed beacon from an
-  // untrusted gateway cannot crash connect().
-  test('verifyBeacon returns false on a wrong-length signature (does not throw)', () async {
-    final ed = Ed25519();
-    final (_, pub) = await _makeSK(ed);
-    final b = Beacon(
-      beaconPub: pub,
-      tip: Uint8List.fromList([1, 2, 3]),
-      length: 1,
-      counter: 1,
-      sig: Uint8List(10), // wrong length (not 64)
-    );
-    expect(await verifyBeacon(b), isFalse);
-  });
 }

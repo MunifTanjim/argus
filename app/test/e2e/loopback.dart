@@ -30,6 +30,11 @@ class LoopbackNode {
   /// reply) — used to exercise the client's call timeout. Handshakes still work.
   bool dropRequests = false;
 
+  /// The trust-log tip this node reports over its authenticated channel in
+  /// answer to node.identify. Settable so a test can make a node advertise an
+  /// off-chain tip to drive the client's tip-consistency check.
+  Uint8List? tip;
+
   late void Function(String line) sendToClient;
 
   Future<void> onClientFrame(RpcMessage m) async {
@@ -58,12 +63,24 @@ class LoopbackNode {
       return; // decrypt failure: drop, no reply
     }
     (List<int>? ok, ({int code, String message})? err) handlerResult;
-    try {
-      handlerResult = (handler(m.method!, params), null);
-    } catch (e) {
-      final code = e is RpcError ? e.code : -32000;
-      final msg = e is RpcError ? e.message : '$e';
-      handlerResult = (null, (code: code, message: msg));
+    if (m.method == 'node.identify') {
+      // Answer node.identify with this node's id and (optional) trust-log tip,
+      // over the authenticated channel — the source the client's tip check trusts.
+      final t = tip;
+      handlerResult = (
+        utf8.encode(
+          jsonEncode({'id': id, if (t != null) 'tip': base64.encode(t)}),
+        ),
+        null,
+      );
+    } else {
+      try {
+        handlerResult = (handler(m.method!, params), null);
+      } catch (e) {
+        final code = e is RpcError ? e.code : -32000;
+        final msg = e is RpcError ? e.message : '$e';
+        handlerResult = (null, (code: code, message: msg));
+      }
     }
     final inner = handlerResult.$2 != null
         ? utf8.encode(
@@ -203,6 +220,10 @@ class MultiNodeLoopbackLink implements RpcLink {
   final _chanToNode = <String, LoopbackNode>{};
   int _chanSeq = 0;
 
+  /// Number of trustlog.sync calls answered. Lets a test assert that a prompt
+  /// pull was triggered (e.g. by a trust-changed node.event nudge).
+  int trustSyncCount = 0;
+
   void _push(String line) {
     for (final part in line.split('\n')) {
       if (part.trim().isEmpty || _ctrl.isClosed) continue;
@@ -275,6 +296,7 @@ class MultiNodeLoopbackLink implements RpcLink {
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':
+        trustSyncCount++;
         // 'known' lists every entry hash the caller holds; the gateway computes
         // the delta by set subtraction (mirrors Go gateway.Delta).
         // A truncated offer under-reports by construction and can look disjoint
@@ -327,8 +349,8 @@ class MultiNodeLoopbackLink implements RpcLink {
 
   /// Pushes a gateway-level (non-routed) notification to the client, simulating
   /// a server-sent [node.event] or similar gateway notification. This is how
-  /// tests inject offline/removed/beacon events without going through a node
-  /// channel.
+  /// tests inject offline/removed/trust-changed events without going through a
+  /// node channel.
   void pushNotification(String method, Object? params) {
     _push(jsonEncode({'jsonrpc': '2.0', 'method': method, 'params': params}));
   }

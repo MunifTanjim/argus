@@ -16,13 +16,13 @@ class TrustSummary {
     this.equivocation = false,
   });
   const TrustSummary.disconnected()
-      : connected = false,
-        isLocked = null,
-        isAuthorized = false,
-        isDisabled = false,
-        tip = null,
-        signers = const [],
-        equivocation = false;
+    : connected = false,
+      isLocked = null,
+      isAuthorized = false,
+      isDisabled = false,
+      tip = null,
+      signers = const [],
+      equivocation = false;
 
   final bool connected;
   final bool? isLocked; // null = open network / unknown
@@ -31,15 +31,16 @@ class TrustSummary {
   final Uint8List? tip;
   final List<Uint8List> signers;
 
-  /// True when the E2E client has detected a trust-log equivocation: beacon
-  /// tips from one or more nodes could not be reconciled with the resolved
-  /// chain after the miss threshold. Warn-only; the session continues.
+  /// True when the E2E client has detected a trust-log equivocation: a tip read
+  /// over one or more nodes' authenticated channels could not be reconciled with
+  /// the resolved chain after the miss threshold. Warn-only; the session continues.
   final bool equivocation;
 }
 
 /// The persisted device identity (Curve25519). Works offline.
 final deviceIdentityProvider = FutureProvider<KeyPair>(
-    (ref) async => ref.read(clientIdentityStoreProvider).loadOrCreate());
+  (ref) async => ref.read(clientIdentityStoreProvider).loadOrCreate(),
+);
 
 /// The live trust status from the active E2E client (disconnected when none).
 final trustSummaryProvider = Provider<TrustSummary>((ref) {
