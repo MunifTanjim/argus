@@ -620,6 +620,7 @@ func (s *Server) serveNode(conn net.Conn) {
 			added, _ := s.entries.PutAll(p.Entries)
 			if added > 0 {
 				s.notifyNodePeers(self.Load(), api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.Heads()})
+				s.agg.PublishTrustChanged()
 			}
 			return nil, nil
 		default:
