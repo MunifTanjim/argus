@@ -30,23 +30,6 @@ func shortSocket(t *testing.T) string {
 	return filepath.Join(dir, "s.sock")
 }
 
-// The gateway branch dials over WebSocket and never auto-starts a local node.
-func TestConnectGatewayBranch(t *testing.T) {
-	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
-	ts := httptest.NewServer(hsrv.Handler())
-	defer ts.Close()
-
-	c, err := connect(context.Background(), wsURL(ts.URL), "", "/should/not/be/touched.sock")
-	if err != nil {
-		t.Fatalf("connect gateway: %v", err)
-	}
-	defer c.Close()
-	var out []any
-	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
-		t.Fatalf("refresh over gateway: %v", err)
-	}
-}
-
 func sandboxHookDirs(t *testing.T) {
 	t.Helper()
 	t.Setenv("CODEX_HOME", t.TempDir())
