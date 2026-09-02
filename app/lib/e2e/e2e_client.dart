@@ -104,6 +104,8 @@ class E2EClient implements GatewayClient {
   /// verified trust chain, so the caller can persist it. Storage-agnostic.
   final Future<void> Function(Uint8List chain)? onTrustChainAdvance;
   Timer? _resyncTimer;
+  bool _resyncInFlight = false;
+  bool _resyncPending = false;
   Uint8List? get trustChainBytes => _trust?.chainBytes;
   Uint8List? get trustTip => _trust?.tip;
   List<Uint8List>? get trustSigners => _trust?.signers;
@@ -299,7 +301,7 @@ class E2EClient implements GatewayClient {
     );
     final interval = trustResyncInterval;
     if (_trust != null && interval != null && !_closed) {
-      _resyncTimer = Timer.periodic(interval, (_) => resyncNow());
+      _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
     }
   }
 
@@ -329,6 +331,26 @@ class E2EClient implements GatewayClient {
     // always calls refreshAuthTips + checkTipConsistency.
     await _refreshAuthTips();
     _checkTipConsistency();
+  }
+
+  /// Coalesces resync requests: a burst of trust-changed nudges (or a nudge
+  /// overlapping the periodic tick) collapses to at most one in-flight run plus
+  /// one queued follow-up — mirrors Go's buffered(1) kick consumed by the single
+  /// trustSyncLoop, bounding gateway-driven work.
+  Future<void> _kickResync() async {
+    if (_resyncInFlight) {
+      _resyncPending = true;
+      return;
+    }
+    _resyncInFlight = true;
+    try {
+      do {
+        _resyncPending = false;
+        await resyncNow();
+      } while (_resyncPending && !_closed);
+    } finally {
+      _resyncInFlight = false;
+    }
   }
 
   /// Calls trustlog.sync, stores returned raw entries, assembles complete
@@ -720,7 +742,7 @@ class E2EClient implements GatewayClient {
     if (params is! Map<String, dynamic>) return;
     final evType = params['type'];
     if (evType == 'trust-changed') {
-      unawaited(resyncNow());
+      unawaited(_kickResync());
       return;
     }
     final nodeJson = params['node'];
