@@ -21,7 +21,7 @@ import (
 )
 
 // awaitClientSessionEvent reads the client's event stream until a session.event
-// arrives, skipping unrelated notifications (node.event, trust beacons, ...).
+// arrives, skipping unrelated notifications (node.event, ...).
 func awaitClientSessionEvent(t *testing.T, events <-chan api.Notification) registry.Event {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
