@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -45,13 +46,37 @@ func DialWSConn(ctx context.Context, url, token string, httpClient *http.Client)
 	return dialWS(ctx, url, token, httpClient)
 }
 
+// DialAuthError reports that the gateway answered the WebSocket handshake with an
+// auth status instead of upgrading. It is distinct from a transport failure: the
+// gateway was reached, and it refused this caller's token.
+type DialAuthError struct {
+	URL        string
+	StatusCode int
+	TokenSent  bool
+	Err        error
+}
+
+func (e *DialAuthError) Error() string {
+	cause := "no bearer token was sent"
+	if e.TokenSent {
+		cause = "the bearer token was rejected"
+	}
+	return fmt.Sprintf("%s refused the connection: HTTP %d %s (%s)",
+		e.URL, e.StatusCode, http.StatusText(e.StatusCode), cause)
+}
+
+func (e *DialAuthError) Unwrap() error { return e.Err }
+
 func dialWS(ctx context.Context, url, token string, httpClient *http.Client) (net.Conn, error) {
 	opts := &websocket.DialOptions{HTTPClient: httpClient}
 	if token != "" {
 		opts.HTTPHeader = http.Header{"Authorization": []string{"Bearer " + token}}
 	}
-	c, _, err := websocket.Dial(ctx, url, opts)
+	c, resp, err := websocket.Dial(ctx, url, opts)
 	if err != nil {
+		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return nil, &DialAuthError{URL: url, StatusCode: resp.StatusCode, TokenSent: token != "", Err: err}
+		}
 		return nil, err
 	}
 	c.SetReadLimit(wsReadLimit)

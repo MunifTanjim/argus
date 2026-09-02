@@ -240,3 +240,25 @@ func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 		}
 	}
 }
+
+func TestE2EEDefaultFalse(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.E2EE.Enabled {
+		t.Fatal("e2ee.enabled default = true, want false")
+	}
+}
+
+func TestE2EEFromFile(t *testing.T) {
+	path := writeConfig(t, "e2ee:\n  enabled: true\n")
+	if c := load(t, path); !c.E2EE.Enabled {
+		t.Fatal("e2ee.enabled from file = false, want true")
+	}
+}
+
+func TestE2EEFromEnv(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("ARGUS_E2EE_ENABLED", "true")
+	if c := load(t, ""); !c.E2EE.Enabled {
+		t.Fatal("e2ee.enabled from env = false, want true")
+	}
+}
