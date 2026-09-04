@@ -108,7 +108,7 @@ authorized in the old chain.
 
 ## Pinning the genesis
 
-The **genesis pin** is a 32-byte hash that tells a device which trust log it belongs to. Without it, a device on a locked network has no way to know which chain is authoritative and will refuse all E2E channels — a deliberate fail-closed posture.
+The **genesis pin** is a 32-byte hash that tells a device which trust log it belongs to. A device pinned by `lock.genesis` in its config loads that trust root at boot. It then refuses every unauthorized E2E channel, independent of the gateway — the reliable fail-closed posture. A device with no pin refuses channels only after it sees, through the gateway, that the network is locked (see quarantine below). A gateway that withholds the chain can keep an unpinned device from noticing, so pin every device you rely on.
 
 `lock init` pins both roles on the machine it runs on: the node (which created the genesis) and that machine's TUI client, which is a separate role with its own pin file. Every other device — additional nodes and TUI clients — must be pinned separately.
 
@@ -139,7 +139,7 @@ If you already know the genesis (for example, from `lock init` output), you can 
 argus lock pin gen:<hex>
 ```
 
-An unpinned device on a locked network enters **quarantine**: it can see the roster and the offered genesis, but refuses all E2E channels until pinned. A hostile gateway can put an unpinned device into this state by offering a fabricated genesis chain — which is precisely why comparing the fingerprint out-of-band before accepting is what makes the adoption trustworthy.
+An unpinned device on a locked network enters **quarantine** once it sees an offered genesis chain. It can read the roster and that chain, but refuses all E2E channels until pinned. Quarantine depends on the gateway offering the chain. A hostile gateway can force quarantine by offering a fabricated genesis — which is why you compare the fingerprint out-of-band before accepting. A hostile gateway can also withhold the chain: then the device never quarantines and stays open. Quarantine is therefore best-effort. The reliable, gateway-independent fail-closed boundary is a `lock.genesis` config pin.
 
 `argus lock status` opens with one of three states:
 
