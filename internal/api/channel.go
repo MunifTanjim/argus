@@ -9,8 +9,10 @@ import (
 )
 
 // RelayFrame is a JSON-RPC frame on a relayed (gateway) link. A blind gateway
-// reads the cleartext Method/ID/Route to route it and forwards Raw verbatim to the
-// paired peer, never touching the sealed Body. An endpoint (client or node) uses
+// routes it by Route.ChanID alone and forwards Raw verbatim to the paired peer,
+// never reading the cleartext Method/ID or touching the sealed Body. The receiving
+// endpoint (client or node) reads the cleartext Method and ID to classify the
+// frame (handshake, request, response, or notification) and dispatch it, then uses
 // Body with its Channel to decrypt the payload.
 type RelayFrame struct {
 	Method string
