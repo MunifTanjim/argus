@@ -18,6 +18,9 @@ type PendingRevoke struct {
 // ForkPoint returns the fork-point hash (the Prev that the finalized entry will carry).
 func (pr PendingRevoke) ForkPoint() []byte { return cloneBytes(pr.partial.Prev) }
 
+// Revoked returns the signer pubkeys this ceremony revokes.
+func (pr PendingRevoke) Revoked() [][]byte { return cloneSigners(pr.partial.Signers) }
+
 // Marshal encodes pr to a bounded wire blob using the existing entry codec. The blob
 // is bounded by the same DoS caps as the chain codec (maxCoSigns, maxReplaces, etc.).
 func (pr PendingRevoke) Marshal() []byte { return MarshalEntry(pr.partial) }

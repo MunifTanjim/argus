@@ -933,3 +933,20 @@ func TestHandleRevokeSignerRequiresLocked(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstStillTrusted(t *testing.T) {
+	a := []byte("signer-A")
+	b := []byte("signer-B")
+	onlyATrusted := func(pub []byte) bool { return bytes.Equal(pub, a) }
+
+	// A revoked key that is gone from the signer set means the revocation took
+	// effect: no key is still trusted.
+	if got := firstStillTrusted(onlyATrusted, [][]byte{b}); got != nil {
+		t.Errorf("revoked-and-gone key reported still trusted: %x", got)
+	}
+	// A revoked key still in the signer set means the finalized chain lost
+	// fork-choice: the handler must not report success.
+	if got := firstStillTrusted(onlyATrusted, [][]byte{b, a}); !bytes.Equal(got, a) {
+		t.Errorf("still-trusted revoked key = %x, want %x", got, a)
+	}
+}

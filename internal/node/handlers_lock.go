@@ -385,6 +385,13 @@ func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMe
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "ingest: " + err.Error()}
 	}
+	// Ingest adopts the chain only if it wins fork-choice. If a revoked signer is
+	// still trusted, the finalized revoke lost fork-choice (e.g. an overlapping
+	// ceremony) and the compromised key is NOT gone — fail rather than report a
+	// false success.
+	if firstStillTrusted(st.SignerTrusted, pr.Revoked()) != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "revocation did not take effect (finalized chain lost fork-choice); re-run --finish"}
+	}
 	if changed {
 		if werr := d.persistTrust(); werr != nil {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
@@ -393,6 +400,17 @@ func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMe
 		d.announceTrustChange()
 	}
 	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
+}
+
+// firstStillTrusted returns the first key in revoked that trusted still reports as
+// a signer, or nil if none remain.
+func firstStillTrusted(trusted func(pub []byte) bool, revoked [][]byte) []byte {
+	for _, k := range revoked {
+		if trusted(k) {
+			return k
+		}
+	}
+	return nil
 }
 
 func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, error) {
