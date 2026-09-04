@@ -165,6 +165,33 @@ func TestNodeStartPushDeliversMobileOnAwaitingInput(t *testing.T) {
 	}
 }
 
+type captureSink struct{ last push.Notification }
+
+func (c *captureSink) Notify(_ context.Context, n push.Notification) { c.last = n }
+
+func TestNodeIDStampSinkStampsNodeID(t *testing.T) {
+	var cap1 captureSink
+	orig := push.Notification{Data: map[string]string{"session_id": "s1"}}
+	nodeIDStampSink{nodeID: "n1", inner: &cap1}.Notify(context.Background(), orig)
+
+	if got := cap1.last.Data["node_id"]; got != "n1" {
+		t.Errorf("node_id = %q, want %q", got, "n1")
+	}
+	if got := cap1.last.Data["session_id"]; got != "s1" {
+		t.Errorf("session_id = %q, want %q", got, "s1")
+	}
+	if _, ok := orig.Data["node_id"]; ok {
+		t.Error("original Data was mutated: node_id present")
+	}
+
+	// nil Data case
+	var cap2 captureSink
+	nodeIDStampSink{nodeID: "n1", inner: &cap2}.Notify(context.Background(), push.Notification{})
+	if got := cap2.last.Data["node_id"]; got != "n1" {
+		t.Errorf("nil-Data case: node_id = %q, want %q", got, "n1")
+	}
+}
+
 func TestNodeStartPushDelivererRefreshedAfterStart(t *testing.T) {
 	// Prove that a deliverer set AFTER StartPush begins is still picked up:
 	// this is the reconnect scenario where runUplink refreshes the deliverer

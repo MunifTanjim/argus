@@ -80,6 +80,24 @@ func (d *Node) handlePushVAPIDKey(_ context.Context, _ json.RawMessage) (any, er
 	return api.PushVAPIDKey{}, nil // node holds no VAPID key; client fetches it from the gateway
 }
 
+// Data is cloned before writing because the same Notification fans out to multiple sinks.
+type nodeIDStampSink struct {
+	nodeID string
+	inner  push.Sink
+}
+
+func (s nodeIDStampSink) Notify(ctx context.Context, n push.Notification) {
+	if s.nodeID != "" {
+		nd := make(map[string]string, len(n.Data)+1)
+		for k, v := range n.Data {
+			nd[k] = v
+		}
+		nd["node_id"] = s.nodeID
+		n.Data = nd
+	}
+	s.inner.Notify(ctx, n)
+}
+
 // currentDeliverer loads the node's live push deliverer per call, so an uplink
 // reconnect (which swaps the deliverer via SetPushDeliverer) is picked up without
 // restarting Watch.
@@ -98,15 +116,16 @@ func (c currentDeliverer) Deliver(ctx context.Context, endpoint string, cipherte
 // alerts are encrypted locally and handed to the current deliverer (read per
 // delivery) after `delay`. Blocks until ctx is done; run it in a goroutine.
 func (d *Node) StartPush(ctx context.Context, delay time.Duration) {
+	nodeID := d.id
 	events, cancel := d.reg.Subscribe()
 	defer cancel()
 	sinks := push.Sinks{Delay: delay}
 	if d.desktopNotify {
-		sinks.Immediate = []push.Sink{d.DesktopSink()}
+		sinks.Immediate = []push.Sink{nodeIDStampSink{nodeID: nodeID, inner: d.DesktopSink()}}
 	}
 	if d.pushStore != nil {
 		disp := push.NewDispatcher(d.pushStore, push.NewRelaySender(currentDeliverer{d}), d.log)
-		sinks.Delayed = []push.Sink{disp}
+		sinks.Delayed = []push.Sink{nodeIDStampSink{nodeID: nodeID, inner: disp}}
 	}
 	push.Watch(ctx, events, sinks, d.log)
 }
