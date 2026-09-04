@@ -280,7 +280,6 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 		if err := configureNodeLock(d, cfg, log.With("scope", "node")); err != nil {
 			return nil, nil, err
 		}
-		d.LoadLocalDisabled()
 	}
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))
 	go func() { _ = d.Run(ctx, socket) }()
