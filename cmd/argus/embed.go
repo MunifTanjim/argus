@@ -277,24 +277,8 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	if cfg.E2EE.Enabled {
-		if kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json")); err != nil {
-			log.With("scope", "node").Warn("identity load failed; E2E unavailable", "err", err)
-		} else {
-			d.SetIdentityKey(kp)
-			d.SetE2EE(true)
-		}
-		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
-		if perr != nil {
-			return nil, nil, fmt.Errorf("refusing to start open: %w", perr)
-		}
-		d.SetPinSource(pin.Source.String())
-		chainPath := config.GetStatePath("trustlog-chain")
-		if head := pin.Genesis; len(head) > 0 {
-			if err := d.EnableTrustLog(head, chainPath); err != nil {
-				return nil, nil, fmt.Errorf("locked mode configured but enabling trust log failed: %w", err)
-			}
-		} else {
-			d.SetTrustChainPath(chainPath)
+		if err := configureNodeLock(d, cfg, log.With("scope", "node")); err != nil {
+			return nil, nil, err
 		}
 	}
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))

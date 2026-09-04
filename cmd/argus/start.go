@@ -18,13 +18,11 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
-	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
-	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -135,25 +133,8 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	if local && cfg.E2EE.Enabled {
-		kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json"))
-		if err != nil {
-			logger.Scoped("node").Warn("e2ee identity unavailable; running plaintext uplink", "err", err)
-		} else {
-			d.SetIdentityKey(kp)
-			d.SetE2EE(true)
-		}
-		pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())
-		if perr != nil {
-			return fail(cmd, fmt.Errorf("refusing to start open: %w", perr))
-		}
-		d.SetPinSource(pin.Source.String())
-		chainPath := config.GetStatePath("trustlog-chain")
-		if head := pin.Genesis; len(head) > 0 {
-			if err := d.EnableTrustLog(head, chainPath); err != nil {
-				return fail(cmd, fmt.Errorf("locked mode configured but enabling trust log failed (refusing to start open): %w", err))
-			}
-		} else {
-			d.SetTrustChainPath(chainPath)
+		if err := configureNodeLock(d, cfg, slog.Default().With("scope", "node")); err != nil {
+			return fail(cmd, err)
 		}
 	}
 
