@@ -490,3 +490,24 @@ func TestLogCloneIsDeepAndIndependent(t *testing.T) {
 		t.Fatal("clone shares the entries slice with the original")
 	}
 }
+
+// An add-signer, authorize-device, or revoke-device entry with an empty Key is
+// meaningless and must be rejected. The Dart mirror rejects it (a zero-length Key
+// decodes to null there); Go must reject it too, or the two forks the chain.
+func TestVerifyRejectsEmptyKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		add  func(l *Log, by SignerKey) error
+	}{
+		{"AuthorizeDevice", func(l *Log, by SignerKey) error { return l.AuthorizeDevice(nil, by) }},
+		{"RevokeDevice", func(l *Log, by SignerKey) error { return l.RevokeDevice(nil, by) }},
+		{"AddSigner", func(l *Log, by SignerKey) error { return l.AddSigner(nil, by) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, a, _ := newGenesisTwoSigners(t)
+			if err := tc.add(l, a); err == nil {
+				t.Errorf("%s with an empty key must be rejected, got nil", tc.name)
+			}
+		})
+	}
+}

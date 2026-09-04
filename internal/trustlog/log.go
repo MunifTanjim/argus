@@ -181,6 +181,9 @@ func (l *Log) verify(e *Entry) error {
 		if !l.signers[string(e.Signer)] {
 			return errors.New("trustlog: entry not signed by a trusted signer")
 		}
+		if len(e.Key) == 0 {
+			return errors.New("trustlog: add-signer requires a signer key")
+		}
 		return nil
 	case KindRemoveSigner:
 		if !l.signers[string(e.Signer)] {
@@ -197,6 +200,9 @@ func (l *Log) verify(e *Entry) error {
 		if !l.signers[string(e.Signer)] {
 			return errors.New("trustlog: entry not signed by a trusted signer")
 		}
+		if len(e.Key) == 0 {
+			return errors.New("trustlog: authorize-device requires a device key")
+		}
 		if l.devices[string(e.Key)] {
 			return errors.New("trustlog: device already authorized")
 		}
@@ -204,6 +210,9 @@ func (l *Log) verify(e *Entry) error {
 	case KindRevokeDevice:
 		if !l.signers[string(e.Signer)] {
 			return errors.New("trustlog: entry not signed by a trusted signer")
+		}
+		if len(e.Key) == 0 {
+			return errors.New("trustlog: revoke-device requires a device key")
 		}
 		return nil
 	default:
