@@ -288,48 +288,81 @@ class E2EClient implements GatewayClient {
       }
       toOpen.add(desc);
     }
-    await Future.wait(
-      toOpen.map((desc) async {
-        // One unreachable node must not abort the whole session: skip it and
-        // keep aggregating the rest (mirrors the Go client).
+    await Future.wait(toOpen.map(_openNode));
+    final interval = trustResyncInterval;
+    if (_trust != null && interval != null && !_closed) {
+      _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
+    }
+  }
+
+  /// Opens a channel to [desc], records it in the roster, and reads its
+  /// authenticated tip. A failed open is logged and swallowed so one unreachable
+  /// node does not abort the caller (mirrors the Go client). Shared by [connect]
+  /// and [_adoptNode].
+  Future<void> _openNode(NodeDescriptor desc) async {
+    try {
+      final nc = await openChannel(desc);
+      _byNodeId[desc.id] = nc;
+      _roster[desc.id] = desc;
+      // Record identity pub hex so checkTipConsistency can distinguish
+      // "was connected, now offline" from "never connected", then read the
+      // node's tip over its authenticated channel (node.identify).
+      if (desc.identityPubKey.isNotEmpty) {
         try {
-          final nc = await openChannel(desc);
-          _byNodeId[desc.id] = nc;
-          _roster[desc.id] = desc;
-          // Record identity pub hex so checkTipConsistency can distinguish
-          // "was connected, now offline" from "never connected", then read the
-          // node's tip over its authenticated channel (node.identify).
-          if (desc.identityPubKey.isNotEmpty) {
-            try {
-              final key = hexEncode(base64.decode(desc.identityPubKey));
-              _everConnected.add(key);
-              final res = await _callNodeDecoded(
-                desc.id,
-                'node.identify',
-                null,
-              );
-              if (res is Map<String, dynamic>)
-                _authTip[key] = _decodeTip(res['tip']);
-            } catch (e) {
-              developer.log(
-                'node ${desc.id} identify failed: $e',
-                name: 'e2e',
-                level: 900,
-              );
-            }
-          }
+          final key = hexEncode(base64.decode(desc.identityPubKey));
+          _everConnected.add(key);
+          final res = await _callNodeDecoded(desc.id, 'node.identify', null);
+          if (res is Map<String, dynamic>)
+            _authTip[key] = _decodeTip(res['tip']);
         } catch (e) {
           developer.log(
-            'skipping node ${desc.id}: open channel failed: $e',
+            'node ${desc.id} identify failed: $e',
             name: 'e2e',
             level: 900,
           );
         }
-      }),
-    );
-    final interval = trustResyncInterval;
-    if (_trust != null && interval != null && !_closed) {
-      _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
+      }
+    } catch (e) {
+      developer.log(
+        'skipping node ${desc.id}: open channel failed: $e',
+        name: 'e2e',
+        level: 900,
+      );
+    }
+  }
+
+  /// Adopts a node that joined the roster or came back online after [connect].
+  /// Applies the same eligibility gate as connect (online, then the trust gate in
+  /// e2e mode) and skips a node that is already connected. Mirrors Go
+  /// E2EClient.adoptNode.
+  Future<void> _adoptNode(NodeDescriptor desc) async {
+    if (_closed || _byNodeId.containsKey(desc.id) || !desc.online) return;
+    if (!_plaintext) {
+      if (desc.identityPubKey.isEmpty) return;
+      final pub = base64.decode(desc.identityPubKey);
+      final trust = _trust;
+      if (trust != null &&
+          trust.locked &&
+          !trust.disabled &&
+          !trust.deviceAuthorized(pub))
+        return;
+    }
+    await _openNode(desc);
+  }
+
+  /// Forgets a node that left the roster or went offline: drops its channel and
+  /// prunes its tip state, so its sessions stop appearing and its stale tip cannot
+  /// accumulate equivocation misses. Mirrors Go E2EClient.loseNode.
+  void _loseNode(String id) {
+    final desc = _roster.remove(id);
+    final nc = _byNodeId.remove(id);
+    if (nc != null) _byChanId.remove(nc.chanId);
+    if (desc != null && desc.identityPubKey.isNotEmpty) {
+      try {
+        final key = hexEncode(base64.decode(desc.identityPubKey));
+        _authTip.remove(key);
+        _tipMiss.remove(key);
+      } catch (_) {}
     }
   }
 
@@ -493,19 +526,7 @@ class E2EClient implements GatewayClient {
       if (!trust.deviceAuthorized(pub)) drop.add(id);
     }
     for (final id in drop) {
-      final desc = _roster[id];
-      final nc = _byNodeId.remove(id);
-      _roster.remove(id);
-      if (nc != null) _byChanId.remove(nc.chanId);
-      // Prune tip state so the revoked node's stale tip cannot accumulate misses
-      // and false-positive the equivocation flag.
-      if (desc != null && desc.identityPubKey.isNotEmpty) {
-        try {
-          final key = hexEncode(base64.decode(desc.identityPubKey));
-          _authTip.remove(key);
-          _tipMiss.remove(key);
-        } catch (_) {}
-      }
+      _loseNode(id);
     }
   }
 
@@ -746,24 +767,14 @@ class E2EClient implements GatewayClient {
     return Uint8List(0);
   }
 
-  /// Removes tip state for the node described by [nd]. Used when a node goes
-  /// offline or is removed from the roster so its stale cached tip cannot
-  /// accumulate misses and false-positive the equivocation flag.
-  void _pruneTipForDescriptor(NodeDescriptor nd) {
-    if (nd.identityPubKey.isEmpty) return;
-    try {
-      final key = hexEncode(base64.decode(nd.identityPubKey));
-      _authTip.remove(key);
-      _tipMiss.remove(key);
-    } catch (_) {}
-  }
-
   /// Handles a gateway-level notification. Filters for [node.event]:
   /// - type [trust-changed]: pulls the trust log promptly (mirrors Go's kick →
   ///   syncTrustLog nudge).
-  /// - type [offline] or [removed]: prunes the node's tip state so stale tips
-  ///   cannot accumulate misses after the node leaves the roster or goes
-  ///   offline. Mirrors Go E2EClient.onPeerNotify.
+  /// - type [online] or [added]: adopts the node so a node that was offline at
+  ///   connect, or that reconnected, gets a channel and its sessions appear.
+  /// - type [offline] or [removed]: drops the node's channel and tip state so its
+  ///   sessions stop appearing and its stale tip cannot accumulate misses.
+  /// Mirrors Go E2EClient.onPeerNotify.
   void _onGatewayNotification(RpcMessage msg) {
     if (msg.method != 'node.event') return;
     final params = msg.params;
@@ -775,8 +786,13 @@ class E2EClient implements GatewayClient {
     }
     final nodeJson = params['node'];
     if (nodeJson is! Map<String, dynamic>) return;
-    if (evType == 'offline' || evType == 'removed') {
-      _pruneTipForDescriptor(_parseNodeDescriptor(nodeJson));
+    final desc = _parseNodeDescriptor(nodeJson);
+    if (evType == 'online' || evType == 'added') {
+      // Off the read loop: adoptNode calls the gateway and awaits msg2, both of
+      // which are answered on this very stream.
+      unawaited(_adoptNode(desc));
+    } else if (evType == 'offline' || evType == 'removed') {
+      _loseNode(desc.id);
     }
   }
 
