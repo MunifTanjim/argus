@@ -138,3 +138,30 @@ func TestPostEncryptedGoneOn410(t *testing.T) {
 		t.Fatalf("err = %v, want ErrGone", err)
 	}
 }
+
+func TestPostEncryptedGoneOn403VAPIDMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions."))
+	}))
+	defer srv.Close()
+	err := PostEncrypted(context.Background(), srv.Client(), nil, srv.URL, []byte("x"), "", "")
+	if !errors.Is(err, ErrGone) {
+		t.Fatalf("err = %v, want ErrGone", err)
+	}
+}
+
+func TestPostEncrypted403TransientNotGone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("unauthorized WebPush registration: invalid JWT provided"))
+	}))
+	defer srv.Close()
+	err := PostEncrypted(context.Background(), srv.Client(), nil, srv.URL, []byte("x"), "", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if errors.Is(err, ErrGone) {
+		t.Fatalf("err = %v, want non-ErrGone error", err)
+	}
+}

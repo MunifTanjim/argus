@@ -34,8 +34,9 @@ type Notification struct {
 // Single source for the "session_id" key (set in trigger.go).
 func (n Notification) SessionID() string { return n.Data["session_id"] }
 
-// ErrGone marks a permanently dead target (HTTP 404/410); senders wrap it so the
-// dispatcher prunes the target.
+// ErrGone marks a permanently dead target (HTTP 404/410, or a 403 whose body
+// signals a VAPID-credential mismatch); senders wrap it so the dispatcher prunes
+// the target.
 var ErrGone = errors.New("push: target gone")
 
 // Sender delivers one notification to one target.
