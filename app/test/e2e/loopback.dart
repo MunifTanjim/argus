@@ -30,6 +30,10 @@ class LoopbackNode {
   /// reply) — used to exercise the client's call timeout. Handshakes still work.
   bool dropRequests = false;
 
+  /// When set, the node waits for this gate before invoking the user [handler].
+  /// Lets a test hold one node's response open while another answers.
+  Completer<void>? gate;
+
   /// The trust-log tip this node reports over its authenticated channel in
   /// answer to node.identify. Settable so a test can make a node advertise an
   /// off-chain tip to drive the client's tip-consistency check.
@@ -74,6 +78,7 @@ class LoopbackNode {
         null,
       );
     } else {
+      if (gate != null) await gate!.future;
       try {
         handlerResult = (handler(m.method!, params), null);
       } catch (e) {

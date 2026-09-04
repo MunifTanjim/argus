@@ -156,17 +156,28 @@ final connErrorProvider = StateProvider<String?>((ref) => null);
 /// Polled from the client on the trust-resync cadence; reset on disconnect.
 final equivocationProvider = StateProvider<bool>((ref) => false);
 
-Future<void> loadSessions(GatewayClient client, SessionsNotifier store) async {
-  final result = await client.call('sessions.list');
-  store.replaceAll(parseSessions(result));
-}
+Future<void> loadSessions(GatewayClient client, SessionsNotifier store) =>
+    _loadSessions(client, store, 'sessions.list');
 
-Future<void> refreshSessions(
+Future<void> refreshSessions(GatewayClient client, SessionsNotifier store) =>
+    _loadSessions(client, store, 'sessions.refresh');
+
+Future<void> _loadSessions(
   GatewayClient client,
   SessionsNotifier store,
+  String method,
 ) async {
-  final result = await client.call('sessions.refresh');
-  store.replaceAll(parseSessions(result));
+  if (client is E2EClient) {
+    // Progressive: render each node's sessions as it responds so one slow node
+    // does not block the list. Drop disconnected nodes' sessions first.
+    store.retainNodes(client.connectedNodeIds);
+    await client.forEachNodeSessions(
+      method,
+      (nodeId, sessions) => store.mergeNode(nodeId, parseSessions(sessions)),
+    );
+    return;
+  }
+  store.replaceAll(parseSessions(await client.call(method)));
 }
 
 void dispatchEvent(RpcMessage m, SessionsNotifier store) {

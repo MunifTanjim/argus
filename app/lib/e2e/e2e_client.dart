@@ -167,7 +167,35 @@ class E2EClient implements GatewayClient {
 
   Stream<NodeEvent> get events => _events.stream;
 
-  Iterable<String> get connectedNodeIds => _byNodeId.keys;
+  /// The ids of nodes with an open channel.
+  Set<String> get connectedNodeIds => _byNodeId.keys.toSet();
+
+  /// Fans out [method] (sessions.list / sessions.refresh) to every connected node,
+  /// invoking [onNode] with each node's composited sessions AS THAT NODE RESPONDS
+  /// — not gated on the slowest. A node that errors or times out is skipped (its
+  /// prior sessions stay in the store). Completes when all nodes have settled.
+  Future<void> forEachNodeSessions(
+    String method,
+    void Function(String nodeId, List<Map<String, dynamic>> sessions) onNode,
+  ) async {
+    final entries = _byNodeId.keys.toList();
+    await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, method, null);
+          final list = r is List ? r : const [];
+          final label = _roster[nodeId]?.label;
+          final out = <Map<String, dynamic>>[
+            for (final s in list)
+              if (s is Map<String, dynamic>) withOriginJson(s, nodeId, label),
+          ];
+          onNode(nodeId, out);
+        } catch (_) {
+          // skip: keep this node's prior sessions in the store
+        }
+      }),
+    );
+  }
 
   StreamController<RpcMessage>? _notificationsCtrl;
   StreamSubscription<({String method, Object? params})>? _notificationsSub;
