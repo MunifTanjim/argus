@@ -2,25 +2,9 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/MunifTanjim/argus/internal/push"
 )
-
-// handlePushDesktop renders a gateway-pushed desktop notification, but only when
-// the node opted in; a non-opted-in node (e.g. headless) silently ignores it.
-// Always returns nil so the gateway's Fanout sees a clean reply.
-func (d *Node) handlePushDesktop(ctx context.Context, params json.RawMessage) (any, error) {
-	if !d.desktopNotify {
-		return nil, nil
-	}
-	var n push.Notification
-	if err := json.Unmarshal(params, &n); err != nil {
-		return nil, err
-	}
-	d.renderDesktop(ctx, n)
-	return nil, nil
-}
 
 // desktopSink adapts a Node into a push.Sink so the standalone push.Watch loop
 // renders through the same focus-aware path as gateway pushes.
@@ -36,7 +20,7 @@ func (d *Node) DesktopSink() push.Sink { return desktopSink{d} }
 // an attached tmux client), where a banner would only be noise. A session that
 // doesn't resolve locally is never focused here, so it renders.
 func (d *Node) renderDesktop(ctx context.Context, n push.Notification) {
-	if d.notifier == nil {
+	if !d.desktopNotify || d.notifier == nil {
 		return
 	}
 	if id := n.SessionID(); id != "" {

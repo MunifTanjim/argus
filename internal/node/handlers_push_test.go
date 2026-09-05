@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/push"
@@ -39,10 +38,8 @@ func TestPushDesktopRendersWhenEnabled(t *testing.T) {
 	sink := &fakeSink{}
 	d.notifier = sink
 
-	params, _ := json.Marshal(push.Notification{Title: "repo", Body: "Permission: Bash"})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
+	n := push.Notification{Title: "repo", Body: "Permission: Bash"}
+	d.renderDesktop(context.Background(), n)
 	if len(sink.got) != 1 || sink.got[0].Title != "repo" || sink.got[0].Body != "Permission: Bash" {
 		t.Fatalf("rendered = %+v, want one notification with title=repo and body=Permission: Bash", sink.got)
 	}
@@ -50,17 +47,24 @@ func TestPushDesktopRendersWhenEnabled(t *testing.T) {
 
 func TestPushDesktopNoopWhenDisabled(t *testing.T) {
 	d := newNode(nil)
+	d.SetDesktopNotify(false, nil) // disabled, but SetDesktopNotify still builds a non-nil notifier
 	sink := &fakeSink{}
 	d.notifier = sink
-	// SetDesktopNotify not called -> disabled by default.
 
-	params, _ := json.Marshal(push.Notification{Title: "t", Body: "b"})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
+	n := push.Notification{Title: "repo", Body: "Permission: Bash"}
+	d.renderDesktop(context.Background(), n)
 	if len(sink.got) != 0 {
-		t.Fatalf("rendered %d notifications, want 0 (opt-in off)", len(sink.got))
+		t.Fatalf("rendered %d notifications, want 0 (desktop notify disabled)", len(sink.got))
 	}
+}
+
+func TestPushDesktopNoopWhenNotifierNil(t *testing.T) {
+	d := newNode(nil)
+	// notifier nil -> renderDesktop is a no-op.
+	d.notifier = nil
+
+	n := push.Notification{Title: "t", Body: "b"}
+	d.renderDesktop(context.Background(), n) // must not panic
 }
 
 func TestPushDesktopSuppressedWhenSessionFocused(t *testing.T) {
@@ -69,13 +73,10 @@ func TestPushDesktopSuppressedWhenSessionFocused(t *testing.T) {
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, paneID, true, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	d.renderDesktop(context.Background(), push.Notification{
 		Title: "repo", Body: "Permission: Bash",
 		Data: map[string]string{"session_id": sessID},
 	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
 	if len(sink.got) != 0 {
 		t.Fatalf("rendered %d notifications, want 0 (session already focused)", len(sink.got))
 	}
@@ -87,13 +88,10 @@ func TestPushDesktopRendersWhenSessionNotFocused(t *testing.T) {
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, paneID, false, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	d.renderDesktop(context.Background(), push.Notification{
 		Title: "repo", Body: "Permission: Bash",
 		Data: map[string]string{"session_id": sessID},
 	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
 	if len(sink.got) != 1 {
 		t.Fatalf("rendered %d notifications, want 1 (session not focused)", len(sink.got))
 	}
@@ -105,13 +103,10 @@ func TestPushDesktopRendersForeignSession(t *testing.T) {
 	sink := &fakeSink{}
 	d := desktopNodeWithSession(t, "%7", true, sink)
 
-	params, _ := json.Marshal(push.Notification{
+	d.renderDesktop(context.Background(), push.Notification{
 		Title: "repo", Body: "b",
 		Data: map[string]string{"session_id": session.CompositeID("nodeB", "xyz")},
 	})
-	if _, err := d.handlePushDesktop(context.Background(), params); err != nil {
-		t.Fatalf("handlePushDesktop: %v", err)
-	}
 	if len(sink.got) != 1 {
 		t.Fatalf("rendered %d notifications, want 1 (foreign session never focused here)", len(sink.got))
 	}

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -26,13 +27,14 @@ type Server struct {
 	clientAuth func(token string) bool
 	clientSrv  *api.Server
 
-	clientTokens *clienttoken.Store
-	pushStore    *push.Store            // nil = push disabled
-	pushSender   *push.Dispatcher       // for push.test
-	vapidPubKey  string                 // served via push.vapidKey
-	master       string                 // a /client conn presenting it is admin
-	version      string                 // served via server.info
-	publicURL    atomic.Pointer[string] // base URL for pairing QRs
+	clientTokens  *clienttoken.Store
+	pushStore     *push.Store            // nil = push disabled
+	pushSender    *push.Dispatcher       // for push.test
+	pushDeliverer push.Deliverer         // blind-path egress for push.deliver; nil disables
+	vapidPubKey   string                 // served via push.vapidKey
+	master        string                 // a /client conn presenting it is admin
+	version       string                 // served via server.info
+	publicURL     atomic.Pointer[string] // base URL for pairing QRs
 
 	pairMu      sync.Mutex
 	pairWaiters map[string]<-chan struct{} // minted token -> "device connected" signal
@@ -71,6 +73,9 @@ func (s *Server) SetPush(store *push.Store, dispatcher *push.Dispatcher) {
 	s.pushStore = store
 	s.pushSender = dispatcher
 }
+
+// SetPushDeliverer wires the blind-path egress for the push.deliver node→gateway RPC.
+func (s *Server) SetPushDeliverer(d push.Deliverer) { s.pushDeliverer = d }
 
 // SetVAPIDPublicKey publishes the VAPID public key devices fetch via push.vapidKey.
 func (s *Server) SetVAPIDPublicKey(key string) { s.vapidPubKey = key }
@@ -623,6 +628,28 @@ func (s *Server) serveNode(conn net.Conn) {
 				s.agg.PublishTrustChanged()
 			}
 			return nil, nil
+		case api.MethodPushDeliver:
+			if s.pushDeliverer == nil {
+				return nil, &api.RPCError{Code: api.CodeInternalError, Message: "push delivery not configured"}
+			}
+			p, err := api.Decode[api.PushDeliverParams](params)
+			if err != nil {
+				return nil, err
+			}
+			body, err := base64.StdEncoding.DecodeString(p.Ciphertext)
+			if err != nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push.deliver: bad ciphertext: " + err.Error()}
+			}
+			dctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			derr := s.pushDeliverer.Deliver(dctx, p.Endpoint, body, p.TTL, p.Urgency)
+			if errors.Is(derr, push.ErrGone) {
+				return api.PushDeliverResult{Gone: true}, nil
+			}
+			if derr != nil {
+				return nil, &api.RPCError{Code: api.CodeInternalError, Message: derr.Error()}
+			}
+			return api.PushDeliverResult{}, nil
 		default:
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}

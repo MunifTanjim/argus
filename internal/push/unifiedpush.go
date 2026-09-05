@@ -33,6 +33,18 @@ func messageID() string {
 	return hex.EncodeToString(b[:])
 }
 
+func readLimited(r io.Reader) []byte {
+	b, _ := io.ReadAll(io.LimitReader(r, 512))
+	return b
+}
+
+// vapidCredentialMismatch reports whether a 403 body signals that the subscription
+// was created with a different VAPID key than the one signing the current request —
+// permanently undeliverable by this gateway.
+func vapidCredentialMismatch(b []byte) bool {
+	return bytes.Contains(bytes.ToLower(b), []byte("do not correspond"))
+}
+
 // encodePayload marshals the device JSON body, stamping id for replay dedup (see messageID).
 func encodePayload(n Notification, id string) ([]byte, error) {
 	return json.Marshal(map[string]any{
@@ -41,6 +53,49 @@ func encodePayload(n Notification, id string) ([]byte, error) {
 		"body":  n.Body,
 		"data":  n.Data,
 	})
+}
+
+// PostEncrypted POSTs a pre-encrypted aes128gcm Web Push body to endpoint, adding
+// the VAPID Authorization header (nil vapid omits it). Returns ErrGone on 404/410
+// and on a 403 whose body signals a permanent VAPID-credential mismatch.
+// This is the blind-relay half: the caller supplies an opaque ciphertext it need
+// not have produced, so a gateway can deliver a body a node encrypted.
+func PostEncrypted(ctx context.Context, client *http.Client, vapid *VAPID, endpoint string, body []byte, ttl, urgency string) error {
+	if ttl == "" {
+		ttl = unifiedPushTTL
+	}
+	if urgency == "" {
+		urgency = unifiedPushUrgency
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Encoding", "aes128gcm")
+	req.Header.Set("TTL", ttl)
+	req.Header.Set("Urgency", urgency)
+	if vapid != nil {
+		if auth, verr := vapid.authHeader(endpoint, time.Now()); verr == nil {
+			req.Header.Set("Authorization", auth)
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+		return fmt.Errorf("%w: %s %s", ErrGone, resp.Status, endpoint)
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		msg := bytes.TrimSpace(readLimited(resp.Body))
+		if resp.StatusCode == http.StatusForbidden && vapidCredentialMismatch(msg) {
+			return fmt.Errorf("%w: %s %s: %s", ErrGone, resp.Status, endpoint, msg)
+		}
+		return fmt.Errorf("push: POST %s: %s: %s", endpoint, resp.Status, msg)
+	}
+	return nil
 }
 
 // UnifiedPushSender POSTs to a device-provided distributor endpoint. With
