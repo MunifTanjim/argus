@@ -183,6 +183,12 @@ func (a *Aggregator) SubscribeRoster() (<-chan api.NodeEvent, func()) {
 	}
 }
 
+// PublishTrustChanged broadcasts a trust-changed roster event to all subscribers,
+// signalling that clients should pull the trust log promptly.
+func (a *Aggregator) PublishTrustChanged() {
+	a.publishRoster(api.NodeEvent{Type: api.NodeEventTrustChanged})
+}
+
 func (a *Aggregator) publishRoster(ev api.NodeEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

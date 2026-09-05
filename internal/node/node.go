@@ -48,13 +48,30 @@ type Node struct {
 	identityPubB64 string      // base64 public half, announced to the gateway
 	e2ee           bool        // true when E2E blind uplink is active
 
-	// compile-only trust fields: wired as nil/zero in TOFU mode; enforcement
-	// uses them only when a trust store is loaded via external lock machinery.
-	trust             atomic.Pointer[trustlog.SyncStore]
-	trustGate         trustpin.Gate
-	localDisabledFlag atomic.Bool
+	// Locked-mode trust state: nil/zero in TOFU mode; enforcement engages only once
+	// a trust store is loaded via EnableTrustLog.
+	trust             atomic.Pointer[trustlog.SyncStore] // locked-mode trust store; nil when off
+	trustGate         trustpin.Gate                      // fail-closed state when unpinned on a locked network
+	localDisabledFlag atomic.Bool                        // per-node locked-mode escape hatch (persisted marker)
+	trustPath         string                             // on-disk chain path for persistence
+	trustPersistMu    sync.Mutex                         // serializes atomic temp-file+rename persist
+	pinSource         string                             // "config", "file", or "none"
+	pinGenesis        []byte                             // copy of the resolved genesis hash
+	// pinMu serializes the pin-state decision and guards every post-start read and
+	// write of pinGenesis/pinSource/retainedEntries. Quarantined() and
+	// rejectsChannels() must stay lock-free.
+	pinMu              sync.Mutex
+	retainedEntries    *trustlog.EntryStore // every retained entry, indexed by hash; the sole source of the sync offer; guarded by pinMu
+	lastUnplacedLogged int                  // last unplaced count that triggered a warning; 0 means none; guarded by pinMu
+	lastDisjointLogged bool                 // true when the last sync returned disjoint; suppresses repeat warnings; guarded by pinMu
 
 	activeResponder atomic.Pointer[relayResponder]
+	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
+
+	// trustPullTrigger rate-limits pulls a gateway trustlog.changed hint can
+	// provoke, so one untrusted notification amplifies into at most one pull/window.
+	trustPullTrigger triggerLimiter
+	testTriggerPeer  atomic.Pointer[trustCaller] // test override for triggerPeer
 
 	mirrorPrefix string // wraps the argus-mirror-<termID> marker for naming mirror sessions
 	mirrorSuffix string

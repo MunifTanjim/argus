@@ -15,6 +15,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 // Server exposes an Aggregator over /node (node uplinks) and /client (consumers).
@@ -39,6 +40,7 @@ type Server struct {
 	relayMu   sync.Mutex
 	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
+	entries   *trustlog.EntryStore     // retained trust-log entries (blind)
 	nextChan  atomic.Uint64            // chan_id allocator
 	log       *slog.Logger             // relay lifecycle logging; nil disables
 }
@@ -50,6 +52,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		pairWaiters: map[string]<-chan struct{}{},
 		channels:    map[string]*relayChannel{},
 		nodePeers:   map[string]*api.Peer{},
+		entries:     trustlog.NewEntryStore(),
 	}
 	s.clientSrv = s.buildClientServer()
 	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
@@ -470,6 +473,24 @@ func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
 }
 
+// notifyNodePeers sends a notification to every connected node uplink except
+// except (nil sends to all). Node peers only — clients learn trust-log changes
+// via node events, so sending both would double-trigger pulls. The originator
+// is excluded because it already holds what it just pushed.
+func (s *Server) notifyNodePeers(except *api.Peer, method string, params any) {
+	s.relayMu.Lock()
+	peers := make([]*api.Peer, 0, len(s.nodePeers))
+	for _, p := range s.nodePeers {
+		if p != except {
+			peers = append(peers, p)
+		}
+	}
+	s.relayMu.Unlock()
+	for _, p := range peers {
+		_ = p.Notify(method, params)
+	}
+}
+
 // buildClientServer wires the client-facing JSON-RPC: ping, server.info,
 // nodes.list, relay.open/close, node.event roster stream, and clients.*.
 func (s *Server) buildClientServer() *api.Server {
@@ -483,6 +504,15 @@ func (s *Server) buildClientServer() *api.Server {
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
 		return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+	})
+
+	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, params json.RawMessage) (any, error) {
+		p, err := api.Decode[api.TrustLogSyncParams](params)
+		if err != nil {
+			return nil, err
+		}
+		entries, want, disjoint := s.entries.Delta(p.Known)
+		return api.TrustLogSyncResult{Entries: entries, Want: want, Disjoint: disjoint && !p.Truncated}, nil
 	})
 
 	srv.Handle(api.MethodRelayOpen, func(ctx context.Context, params json.RawMessage) (any, error) {
@@ -569,10 +599,30 @@ func (s *Server) buildClientServer() *api.Server {
 // serveNode adopts an accepted node uplink: identify,
 // register as a source, record as a relay target, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
+	var self atomic.Pointer[api.Peer]
+
 	nodeDispatch := func(_ context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
 		case api.MethodNodesList:
 			return api.NodesListResult{Nodes: s.agg.Roster()}, nil
+		case api.MethodTrustLogSync:
+			p, err := api.Decode[api.TrustLogSyncParams](params)
+			if err != nil {
+				return nil, err
+			}
+			entries, want, disjoint := s.entries.Delta(p.Known)
+			return api.TrustLogSyncResult{Entries: entries, Want: want, Disjoint: disjoint && !p.Truncated}, nil
+		case api.MethodTrustLogPush:
+			p, err := api.Decode[api.TrustLogPushParams](params)
+			if err != nil {
+				return nil, err
+			}
+			added, _ := s.entries.PutAll(p.Entries)
+			if added > 0 {
+				s.notifyNodePeers(self.Load(), api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.Heads()})
+				s.agg.PublishTrustChanged()
+			}
+			return nil, nil
 		default:
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
@@ -585,6 +635,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		Dispatch:                  nodeDispatch,
 		OnRelayFrame:              s.forwardFromNode,
 	})
+	self.Store(peer)
 	defer peer.Close()
 
 	idCtx, idCancel := context.WithTimeout(context.Background(), nodeIdentifyTimeout)

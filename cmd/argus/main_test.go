@@ -72,9 +72,7 @@ func TestConnectLocalSpawn(t *testing.T) {
 	}
 }
 
-// An embedded node must opt into desktop notifications when config enables them;
-// otherwise it silently drops every alert (gateway push.desktop RPC and the local
-// Watch both gate on this flag).
+// An embedded node must opt into desktop notifications when config enables them.
 func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 	sandboxHookDirs(t)
 	sock := shortSocket(t)
@@ -83,7 +81,10 @@ func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Push.Desktop.Enabled = true
-	d, _ := startEmbeddedNode(ctx, cfg, sock)
+	d, _, err := startEmbeddedNode(ctx, cfg, sock)
+	if err != nil {
+		t.Fatalf("startEmbeddedNode: %v", err)
+	}
 	if !d.DesktopNotifyEnabled() {
 		t.Fatal("embedded node should render desktop notifications when config enables them")
 	}
@@ -102,7 +103,7 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock)
+	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock, nil)
 	if err != nil {
 		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
 	}
@@ -136,12 +137,12 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	defer cancel()
 
 	// Wrong token: the gateway rejects the upgrade, so the probe must fail.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t), nil); err == nil {
 		t.Fatal("expected an error for a rejected gateway token")
 	}
 
 	// Unreachable host: dial failure must also surface.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t)); err == nil {
+	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t), nil); err == nil {
 		t.Fatal("expected an error for an unreachable gateway")
 	}
 }
