@@ -19,6 +19,20 @@ type chanState struct {
 	cancel       context.CancelFunc
 	clientStatic []byte // Noise static public key of the authenticated client
 	stopStream   func() // ends the registry event stream; guarded by relayResponder.mu
+	decFails     int    // consecutive decrypt failures; read-loop only, reset on success
+}
+
+// decryptWedgeWarnAfter is the run of consecutive decrypt failures that signals a
+// likely wedged channel (dec-nonce desync). Injected garbage cannot reach it — a
+// failed decrypt is dropped without advancing the nonce — only a genuine mid-stream
+// frame loss sustains it.
+const decryptWedgeWarnAfter = 8
+
+// wedgeWarn increments the per-channel consecutive-failure counter and reports true
+// exactly when it first reaches the threshold, so a sustained wedge logs once.
+func wedgeWarn(n *int) bool {
+	*n++
+	return *n == decryptWedgeWarnAfter
 }
 
 // relayResponder terminates E2E channels arriving over the gateway uplink: it runs
@@ -70,8 +84,14 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 	if f.ID != nil && f.Method != "" { // a request
 		params, err := cs.ch.OpenParams(f)
 		if err != nil {
-			return // undecryptable (tamper/desync): drop
+			// undecryptable (tamper/desync): drop. A sustained run means the channel
+			// is likely wedged; the client re-handshakes a fresh channel.
+			if wedgeWarn(&cs.decFails) {
+				r.d.log.Warn("channel decrypt failures, likely wedged (nonce desync)", "chan", f.Route.ChanID, "count", cs.decFails)
+			}
+			return
 		}
+		cs.decFails = 0
 		go r.serve(cs, f.ID, f.Method, params)
 	}
 }
