@@ -47,6 +47,7 @@ type nodeChan struct {
 	ch          atomic.Pointer[api.Channel] // set after the handshake; read on the read loop
 	sendMu      sync.Mutex                  // serializes Seal+SendRawFrame (enc-nonce order)
 	hs          chan error                  // handshake outcome, sent once ch is established
+	decFails    int                         // consecutive decrypt failures; read-loop only, reset on success
 }
 
 type pendingReply struct {
@@ -404,6 +405,18 @@ func (m *E2EClient) finishHandshake(nc *nodeChan, f api.RelayFrame) error {
 	return nil
 }
 
+// decryptWedgeWarnAfter is the run of consecutive decrypt failures that signals a
+// likely wedged channel (dec-nonce desync). Injected garbage cannot reach it — a
+// failed decrypt is dropped without advancing the nonce, so real frames still
+// decrypt and reset the count; only a genuine mid-stream frame loss sustains it.
+const decryptWedgeWarnAfter = 8
+
+// wedgeWarn reports true only on the tick the counter first hits the threshold, so a sustained wedge logs once.
+func wedgeWarn(n *int) bool {
+	*n++
+	return *n == decryptWedgeWarnAfter
+}
+
 // onRelayFrame demuxes inbound relay frames on the Peer read loop. It Opens every
 // sealed frame inline in arrival order (shared dec-nonce) and never blocks.
 func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
@@ -447,8 +460,14 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 	case f.ID != nil && f.Method == "":
 		result, rpcErr, err := ch.OpenResponse(f)
 		if err != nil {
-			return // decrypt failure (tamper/desync): drop
+			// decrypt failure (tamper/desync): drop. A sustained run means the
+			// channel is likely wedged; it re-handshakes on the next reconnect.
+			if wedgeWarn(&nc.decFails) {
+				log.Printf("client: warn: node %s channel: %d consecutive decrypt failures, likely wedged (nonce desync)", nc.nodeID, nc.decFails)
+			}
+			return
 		}
+		nc.decFails = 0
 		var id uint64
 		if err := json.Unmarshal(*f.ID, &id); err != nil {
 			return
@@ -463,8 +482,12 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 	case f.Method != "" && f.ID == nil:
 		params, err := ch.OpenParams(f)
 		if err != nil {
+			if wedgeWarn(&nc.decFails) {
+				log.Printf("client: warn: node %s channel: %d consecutive decrypt failures, likely wedged (nonce desync)", nc.nodeID, nc.decFails)
+			}
 			return
 		}
+		nc.decFails = 0
 		if f.Method == api.MethodSessionEvent {
 			params = stampEvent(params, nc.nodeID, nc.label)
 			m.trackSessionEvent(nc.nodeID, params)
