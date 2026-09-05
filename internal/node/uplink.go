@@ -56,8 +56,9 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 func (d *Node) runUplinkPlain(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		// The gateway issues control requests (capture/input/respond/...) down this
-		// link; serve them through the same handlers local clients use.
-		Dispatch: d.server.DispatchFunc(),
+		// link. remoteDispatch filters lock.* so lock handlers are never reachable
+		// from the network — local unix socket only.
+		Dispatch: d.remoteDispatch(),
 	})
 	if err != nil {
 		if ctx.Err() == nil {
