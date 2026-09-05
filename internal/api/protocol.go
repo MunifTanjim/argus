@@ -653,8 +653,12 @@ type NodeDescriptor struct {
 	Version        string           `json:"version"`
 	Capabilities   NodeCapabilities `json:"capabilities"`
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"`
-	SignerPubKey   string           `json:"signer_pubkey,omitempty"`
-	Online         bool             `json:"online"`
+	// SignerPubKey is served by the untrusted gateway roster and is therefore
+	// gateway-forgeable. Use it for discovery only (e.g. picking a signer to add).
+	// Any trust or enforcement decision must read the signer key from the
+	// authenticated node.identify reply, never from this roster copy.
+	SignerPubKey string `json:"signer_pubkey,omitempty"`
+	Online       bool   `json:"online"`
 }
 
 // NodesListResult is the reply to nodes.list.
