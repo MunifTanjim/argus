@@ -3,6 +3,9 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -212,6 +215,7 @@ func (d *Node) pushWanted(peer trustCaller, want [][]byte) {
 func (d *Node) pullTrustOnce(peer trustCaller) bool {
 	st := d.trust.Load()
 	if st == nil {
+		d.detectUnpinnedChain(peer)
 		return false
 	}
 	chains, ok := d.syncTrustChains(peer)
@@ -233,7 +237,89 @@ func (d *Node) pullTrustOnce(peer trustCaller) bool {
 			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
 		}
 	}
+	d.detectSupersedingChain(chains)
+	d.reevaluateTrustChannels()
 	return true
+}
+
+// detectUnpinnedChain quarantines this node when the network has a trust log but
+// this node holds no pin to verify it against. The chain is only decoded, never
+// verified: anyone can mint a keypair and build a self-consistent chain, so
+// verification would prove nothing about who authored it.
+//
+// A hostile gateway can therefore quarantine unpinned nodes with a fabricated
+// chain. It can already refuse to relay at all, so this grants it no new power.
+func (d *Node) detectUnpinnedChain(peer trustCaller) {
+	if d.trustGate.Tripped() {
+		return
+	}
+	chains, ok := d.syncTrustChains(peer)
+	if !ok {
+		return
+	}
+	// Guard under pinMu: a concurrent AdoptPin that set the store between the sync
+	// and this point means the detection loop should not trip the gate for the old
+	// genesis.
+	d.pinMu.Lock()
+	if d.trust.Load() != nil {
+		d.pinMu.Unlock()
+		return
+	}
+	d.pinMu.Unlock()
+	for _, chain := range chains {
+		entries, err := trustlog.UnmarshalChain(chain)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		genesis := trustlog.HashEntry(&entries[0])
+		// pinMu serializes the "store is nil → trip" decision against AdoptPin's
+		// "EnableTrustLog → Clear" sequence, closing the window where a concurrent
+		// adopt could have set the store and cleared the gate between our store-read
+		// above and this Trip call.
+		d.pinMu.Lock()
+		if d.trust.Load() == nil {
+			d.trustGate.Trip(genesis)
+			d.pinMu.Unlock()
+			d.log.Warn("unpinned node saw a trust log; refusing all channels until pinned",
+				"genesis", base64.StdEncoding.EncodeToString(genesis),
+				"fix", "argus lock pin")
+			d.reevaluateTrustChannels()
+		} else {
+			d.pinMu.Unlock()
+		}
+		return
+	}
+}
+
+// detectSupersedingChain quarantines a node whose own chain is disabled once the
+// network serves a different trust root. A disabled log authorizes nobody and can
+// never be re-enabled, so the pin holding it protects nothing while still refusing
+// the live root — the same rootless state detectUnpinnedChain exists for, reached
+// from the other direction. Decode only, for the reason given there.
+func (d *Node) detectSupersedingChain(chains [][]byte) {
+	if st := d.trust.Load(); st == nil || !st.Disabled() {
+		return
+	}
+	d.pinMu.Lock()
+	st := d.trust.Load()
+	if st == nil || !st.Disabled() {
+		d.pinMu.Unlock()
+		return
+	}
+	genesis := trustlog.SupersedingGenesis(chains, d.pinGenesis)
+	if genesis == nil || bytes.Equal(genesis, d.trustGate.Genesis()) {
+		d.pinMu.Unlock()
+		return
+	}
+	// Observe, not Trip: the network can relock more than once, and each time the
+	// root this device must be told to adopt changes. A first-sighting-wins gate
+	// would keep naming a root that no longer exists.
+	d.trustGate.Observe(genesis)
+	d.pinMu.Unlock()
+	d.log.Warn("this device's trust log is disabled and the network moved to a different root; refusing all channels until pinned",
+		"genesis", base64.StdEncoding.EncodeToString(genesis),
+		"fix", "argus lock pin")
+	d.reevaluateTrustChannels()
 }
 
 // persistChain writes chain bytes to trustPath atomically via atomicfile.Write.
@@ -391,3 +477,88 @@ func (d *Node) triggerPeer() trustCaller {
 // setTriggerPeerForTest installs a trustCaller used by the event-driven pull in
 // place of the live uplink. Test-only.
 func (d *Node) setTriggerPeerForTest(p trustCaller) { d.testTriggerPeer.Store(&p) }
+
+// AdoptPin pins this node to genesis at runtime: persist the pin, enable the trust
+// store, release the quarantine gate, and pull the chain, so an operator recovers a
+// quarantined node without a restart.
+//
+// Re-pinning the same genesis is a no-op; a different one is refused unless the
+// current chain is disabled (stale pin that no longer guards anything).
+func (d *Node) AdoptPin(genesis []byte) error {
+	if len(genesis) != trustpin.GenesisLen {
+		return fmt.Errorf("node: genesis is %d bytes, want %d", len(genesis), trustpin.GenesisLen)
+	}
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		if len(d.pinGenesis) > 0 {
+			if bytes.Equal(d.pinGenesis, genesis) {
+				return nil
+			}
+			// A disabled chain enforces nothing and can never be re-enabled, so the pin
+			// holding it is stale rather than conflicting — replacing it is safe.
+			if st := d.trust.Load(); st == nil || !st.Disabled() {
+				return errors.New("node: already pinned to a different genesis; run `argus lock unpin` first")
+			}
+			if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			d.pinGenesis = nil
+		}
+		if d.trustPath == "" {
+			return errors.New("node: trust state path not configured")
+		}
+		if err := trustpin.New(genesisHashPath(d.trustPath)).Save(genesis); err != nil {
+			return err
+		}
+		if err := d.enableTrustLogLocked(genesis, d.trustPath); err != nil {
+			return err
+		}
+		d.pinSource = trustpin.SourceFile.String()
+		d.trustGate.Clear()
+		return nil
+	}(); err != nil {
+		return err
+	}
+	d.reevaluateTrustChannels()
+	if peer := d.triggerPeer(); peer != nil {
+		d.pullTrustOnce(peer)
+	}
+	return nil
+}
+
+// DropPin clears the pin, the persisted chain, and the trust store. A node that
+// held a chain quarantines immediately. DropPin never releases a quarantine and
+// deliberately does not touch the local-disable marker.
+func (d *Node) DropPin() error {
+	if err := func() error {
+		d.pinMu.Lock()
+		defer d.pinMu.Unlock()
+		if d.trustPath == "" {
+			return errors.New("node: trust state path not configured")
+		}
+		if err := trustpin.New(genesisHashPath(d.trustPath)).Clear(); err != nil {
+			return err
+		}
+		if err := os.Remove(d.trustPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		st := d.trust.Load()
+		sawChain := st != nil && st.Bytes() != nil
+		lastGenesis := d.pinGenesis
+		d.trust.Store(nil)
+		d.pinGenesis = nil
+		d.pinSource = ""
+		d.retainedEntries = nil
+		if sawChain {
+			// Only a chain we actually held proves this network is locked. Tripping
+			// without that proof would strand a node whose network has no trust log.
+			d.trustGate.Trip(lastGenesis)
+		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+	d.reevaluateTrustChannels()
+	return nil
+}

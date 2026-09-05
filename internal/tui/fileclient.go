@@ -121,6 +121,7 @@ func (c *fileClient) Call(method string, params, out any) error {
 func (c *fileClient) Events() <-chan api.Notification { return c.events }
 func (c *fileClient) States() <-chan bool             { return c.states }
 func (c *fileClient) Reconnect()                      {}
+func (c *fileClient) Quarantined() bool               { return false }
 
 // Close releases the client. The extracted destDir is left in place: it's a
 // deterministic per-bundle cache (see RunBundle) reused on the next open.

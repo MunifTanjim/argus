@@ -37,5 +37,6 @@ func configureNodeLock(d *node.Node, cfg *config.Config, log *slog.Logger) error
 	} else {
 		d.SetTrustChainPath(chainPath)
 	}
+	d.LoadLocalDisabled()
 	return nil
 }

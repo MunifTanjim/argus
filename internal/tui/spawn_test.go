@@ -54,6 +54,7 @@ func (c *spawnPickClient) Events() <-chan api.Notification { return make(chan ap
 func (c *spawnPickClient) States() <-chan bool             { return make(chan bool) }
 func (c *spawnPickClient) Reconnect()                      {}
 func (c *spawnPickClient) Close() error                    { return nil }
+func (c *spawnPickClient) Quarantined() bool               { return false }
 
 func pumpAgents(t *testing.T, m model, cmd tea.Cmd) model {
 	t.Helper()
