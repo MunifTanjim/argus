@@ -25,7 +25,7 @@ func newLockCmd() *cobra.Command {
 		Use:   "lock",
 		Short: "Manage locked mode (network trust log)",
 	}
-	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd(), newLockPinCmd(), newLockUnpinCmd())
+	cmd.AddCommand(newLockInitCmd(), newLockStatusCmd(), newLockLogCmd(), newLockSignCmd(), newLockRevokeCmd(), newLockAddSignerCmd(), newLockRemoveSignerCmd(), newLockRevokeSignerCmd(), newLockDisableCmd(), newLockLocalDisableCmd(), newLockPinCmd(), newLockUnpinCmd())
 	return cmd
 }
 
@@ -688,6 +688,156 @@ func newLockSignerCmd(use, short, method string) *cobra.Command {
 
 func lockSignerOnNode(ctx context.Context, cfg *config.Config, method string, signer []byte) (api.LockDeviceResult, error) {
 	return callLocal[api.LockDeviceResult](ctx, cfg, method, api.LockSignerParams{Signer: signer})
+}
+
+// signerCountAfterRevoke returns how many signers from current would remain after
+// removing the revoked set.
+func signerCountAfterRevoke(current, revoked [][]byte) int {
+	revokedSet := make(map[string]bool, len(revoked))
+	for _, r := range revoked {
+		revokedSet[string(r)] = true
+	}
+	remaining := 0
+	for _, c := range current {
+		if !revokedSet[string(c)] {
+			remaining++
+		}
+	}
+	return remaining
+}
+
+func revokeSignerStartOnNode(ctx context.Context, cfg *config.Config, p api.LockRevokeSignerStartParams) (api.LockRevokeSignerBlobResult, error) {
+	return callLocal[api.LockRevokeSignerBlobResult](ctx, cfg, api.MethodLockRevokeSignerStart, p)
+}
+
+func revokeSignerCosignOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerBlobResult, error) {
+	return callLocal[api.LockRevokeSignerBlobResult](ctx, cfg, api.MethodLockRevokeSignerCosign, api.LockRevokeSignerCosignParams{Blob: blob})
+}
+
+func revokeSignerFinishOnNode(ctx context.Context, cfg *config.Config, blob []byte) (api.LockRevokeSignerFinishResult, error) {
+	return callLocal[api.LockRevokeSignerFinishResult](ctx, cfg, api.MethodLockRevokeSignerFinish, api.LockRevokeSignerFinishParams{Blob: blob})
+}
+
+// newLockRevokeSignerCmd implements the three-phase revoke-signer co-signing ceremony:
+//
+//	Start:   argus lock revoke-signer <signer...> [--replacement <node>...] [--fork-from <hash>]
+//	Co-sign: argus lock revoke-signer --cosign <blob>
+//	Finish:  argus lock revoke-signer --finish <blob>
+func newLockRevokeSignerCmd() *cobra.Command {
+	var cosignBlob string
+	var finishBlob string
+	var replacements []string
+	var forkFrom string
+
+	cmd := &cobra.Command{
+		Use:           "revoke-signer",
+		Short:         "Revoke a signer via co-signing ceremony (start / --cosign / --finish)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cosignBlob != "" && finishBlob != "" {
+				return fail(cmd, fmt.Errorf("--cosign and --finish are mutually exclusive"))
+			}
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if finishBlob != "" {
+				if len(args) > 0 {
+					return fail(cmd, fmt.Errorf("--finish does not take positional arguments"))
+				}
+				blob, berr := base64.StdEncoding.DecodeString(finishBlob)
+				if berr != nil {
+					return fail(cmd, fmt.Errorf("--finish: invalid base64 blob: %w", berr))
+				}
+				res, ferr := revokeSignerFinishOnNode(ctx, cfg, blob)
+				if ferr != nil {
+					return fail(cmd, ferr)
+				}
+				shell.StdOutF("revocation applied\n  new tip (audit): %s\n", keyfmt.Tip.Encode(res.Tip))
+				shell.StdErrF("\nRevocation propagates to the network within ~30s.\n")
+				return nil
+			}
+
+			if cosignBlob != "" {
+				if len(args) > 0 {
+					return fail(cmd, fmt.Errorf("--cosign does not take positional arguments"))
+				}
+				blob, berr := base64.StdEncoding.DecodeString(cosignBlob)
+				if berr != nil {
+					return fail(cmd, fmt.Errorf("--cosign: invalid base64 blob: %w", berr))
+				}
+				res, cerr := revokeSignerCosignOnNode(ctx, cfg, blob)
+				if cerr != nil {
+					return fail(cmd, cerr)
+				}
+				blobStr := base64.StdEncoding.EncodeToString(res.Blob)
+				shell.StdOutF("co-signed\n  blob: %s\n", blobStr)
+				shell.StdErrF("\nIf more co-signs are needed, run on another signer node:\n  argus lock revoke-signer --cosign %s\n", blobStr)
+				shell.StdErrF("When you have enough co-signs, run on any signer node:\n  argus lock revoke-signer --finish %s\n", blobStr)
+				return nil
+			}
+
+			if len(args) == 0 {
+				return fail(cmd, fmt.Errorf("revoke-signer: specify signer(s) to revoke, or use --cosign / --finish"))
+			}
+			revoked, err := parseSignerKeys(args)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if len(replacements) == 0 {
+				if st, serr := lockStatusOnNode(ctx, cfg); serr == nil && st.Enabled {
+					remaining := signerCountAfterRevoke(st.Signers, revoked)
+					if remaining < 1 {
+						return fail(cmd, fmt.Errorf(
+							"revocation would remove all signers and leave the log unrecoverable\n"+
+								"  use --replacement sigpub:<hex> to atomically add a successor signer, or\n"+
+								"  'argus lock disable <secret>' + reinit to abandon locked mode"))
+					}
+					if w := lockInitFewSignersWarning(remaining); w != "" {
+						shell.StdErrF("%s", w)
+					}
+				}
+			}
+			var replaces [][]byte
+			if len(replacements) > 0 {
+				replaces, err = parseSignerKeys(replacements)
+				if err != nil {
+					return fail(cmd, fmt.Errorf("--replacement: %w", err))
+				}
+			}
+			var forkFromBytes []byte
+			if forkFrom != "" {
+				forkFromBytes, err = keyfmt.DecodeAny(forkFrom, keyfmt.Tip, keyfmt.Genesis)
+				if err != nil {
+					return fail(cmd, fmt.Errorf("--fork-from: %w", err))
+				}
+			}
+			res, serr := revokeSignerStartOnNode(ctx, cfg, api.LockRevokeSignerStartParams{
+				Revoked:  revoked,
+				Replaces: replaces,
+				ForkFrom: forkFromBytes,
+			})
+			if serr != nil {
+				return fail(cmd, serr)
+			}
+			blobStr := base64.StdEncoding.EncodeToString(res.Blob)
+			shell.StdOutF("revoke-signer started\n  blob: %s\n", blobStr)
+			shell.StdErrF("\nNext: run on another signer node:\n  argus lock revoke-signer --cosign %s\n", blobStr)
+			shell.StdErrF("After collecting enough co-signs, run on any signer node:\n  argus lock revoke-signer --finish <blob>\n")
+			shell.StdErrF("\nNote: entries appended after the fork point by revoked signers will be erased.\n")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cosignBlob, "cosign", "", "add this node's co-sign to a ceremony blob (from start or a prior --cosign)")
+	cmd.Flags().StringVar(&finishBlob, "finish", "", "finalize a completed ceremony blob and apply the revocation")
+	cmd.Flags().StringArrayVar(&replacements, "replacement", nil, "replacement signer key (sigpub:<hex>); repeatable")
+	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "override the fork point (tip: or gen:); default: parent of revoked signer's earliest entry")
+	addClientFlags(cmd.Flags())
+	return cmd
 }
 
 func newLockDisableCmd() *cobra.Command {
