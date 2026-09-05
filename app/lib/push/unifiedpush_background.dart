@@ -5,6 +5,7 @@ import 'dart:typed_data';
 // Hide UnifiedPush's PushMessage; this module uses argus's own PushMessage type.
 import 'package:unifiedpush/unifiedpush.dart' hide PushMessage;
 
+import '../e2e/aggregate.dart' show compositeId;
 import 'notifications.dart';
 import 'push_message.dart';
 import 'push_provider.dart';
@@ -59,6 +60,15 @@ PushMessage decodeUnifiedPush(Uint8List bytes) {
     final data = rawData is Map
         ? rawData.map((k, v) => MapEntry(k.toString(), v.toString()))
         : <String, String>{};
+    // Push bypasses the RPC aggregator, so composite session_id here.
+    final nodeId = data['node_id'];
+    final sessionId = data['session_id'];
+    if (nodeId != null &&
+        nodeId.isNotEmpty &&
+        sessionId != null &&
+        sessionId.isNotEmpty) {
+      data['session_id'] = compositeId(nodeId, sessionId);
+    }
     return PushMessage(
       id: obj['id'] as String?,
       title: obj['title'] as String?,

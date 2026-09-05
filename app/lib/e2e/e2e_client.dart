@@ -1,0 +1,1046 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:developer' as developer;
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
+import '../transport/gateway_client.dart';
+import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
+import '../transport/rpc_client.dart';
+import 'aggregate.dart';
+import 'bytes.dart' show bytesEqual, hexEncode;
+import 'channel.dart';
+import 'handshake.dart';
+import 'keypair.dart';
+import 'trustlog/assemble.dart' show assembleChainsReport, chainEntries;
+import 'trustlog/codec.dart' show hashEntry, unmarshalChain;
+import 'trustlog/entry.dart' show Entry;
+import 'trustlog/entry_store.dart' show EntryStore;
+import 'trustlog/trust_store.dart';
+
+/// A node reachable through the blind gateway. [identityPubKey] is the node's
+/// base64 Curve25519 static key (its Noise responder identity).
+class NodeDescriptor {
+  const NodeDescriptor({
+    required this.id,
+    this.label,
+    required this.identityPubKey,
+    this.online = true,
+  });
+  final String id;
+  final String? label;
+  final String identityPubKey;
+  final bool online;
+}
+
+/// Tracks consecutive unreconciled ticks for a single node's tip.
+class _TipMissState {
+  _TipMissState({required this.tip, this.misses = 0});
+  final Uint8List tip;
+  int misses;
+}
+
+/// Number of consecutive unreconciled ticks before the equivocation flag is set.
+const int _tipMissThreshold = 2;
+
+/// One established E2E channel to a node.
+class NodeChannel {
+  NodeChannel(this.nodeId, this.chanId, this.channel);
+  final String nodeId;
+  final String chanId;
+  final Channel channel;
+}
+
+/// A notification decrypted from a node, tagged with its origin.
+typedef NodeEvent = ({String method, Uint8List params, String nodeId});
+
+/// Talks to nodes over end-to-end encrypted channels relayed by a blind gateway.
+/// Gateway-level RPCs (relay.open/ping) go through a reused [RpcClient]; relay
+/// frames are demuxed to per-node channels. Single dial (no reconnection here).
+class E2EClient implements GatewayClient {
+  E2EClient(
+    this._incoming,
+    this._send,
+    this._static, {
+    this.handshakeTimeout = const Duration(seconds: 15),
+    this.callTimeout = const Duration(seconds: 30),
+    Uint8List? genesisHash,
+    this._initialTrustChain,
+    bool tofu = false,
+    this.trustResyncInterval,
+    this.onTrustChainAdvance,
+    bool plaintext = false,
+  }) : _trust = tofu
+           ? TrustStore.tofu()
+           : (genesisHash != null ? TrustStore(genesisHash) : null),
+       _plaintext = plaintext {
+    _sub = _incoming.listen(_onMessage, onDone: _onDone, cancelOnError: false);
+    _gateway = RpcClient(incoming: _gatewayCtrl.stream, sendFrame: _send);
+    _gatewayNotifSub = _gateway.notifications.listen(_onGatewayNotification);
+  }
+
+  final Stream<RpcMessage> _incoming;
+  final void Function(String) _send;
+  final KeyPair _static;
+  final Duration handshakeTimeout;
+  final Duration callTimeout;
+  final TrustStore? _trust;
+  final Uint8List? _initialTrustChain;
+  final bool _plaintext;
+  final _entryStore = EntryStore();
+  // Last unplaced count that triggered a warning. 0 means no active warning;
+  // reset to 0 when the count returns to 0 so a later recurrence is reported again.
+  int _lastUnplacedLogged = 0;
+  // Latch for the disjoint warning: log on false→true, stay quiet while true,
+  // reset to false when the flag clears so a later recurrence is reported again.
+  bool _lastDisjointLogged = false;
+
+  /// When set (with a trust store), the client periodically re-pulls the trust
+  /// log so mid-session revocations take effect; null disables background re-sync.
+  final Duration? trustResyncInterval;
+
+  /// Called with the new chain bytes whenever a background re-sync advances the
+  /// verified trust chain, so the caller can persist it. Storage-agnostic.
+  final Future<void> Function(Uint8List chain)? onTrustChainAdvance;
+  Timer? _resyncTimer;
+  bool _resyncInFlight = false;
+  bool _resyncPending = false;
+  Uint8List? get trustChainBytes => _trust?.chainBytes;
+  Uint8List? get trustTip => _trust?.tip;
+  List<Uint8List>? get trustSigners => _trust?.signers;
+
+  /// null when there is no trust store or the network is open (not locked);
+  /// true when locked-mode enforcement is active.
+  bool? get isLocked => (_trust == null || !_trust.locked) ? null : true;
+
+  /// Whether this device's static identity is authorized by the current trust log.
+  bool get isAuthorized => _trust?.deviceAuthorized(_static.publicKey) ?? false;
+
+  /// Whether the trust log has been disabled (break-glass).
+  bool get isDisabled => _trust?.disabled ?? false;
+
+  /// Whether the client has detected a trust-log equivocation: one or more
+  /// nodes reported a tip over its authenticated channel that could not be
+  /// reconciled with the client's resolved chain after [_tipMissThreshold]
+  /// consecutive pulls. Once set, this flag is never cleared for the lifetime
+  /// of the session.
+  bool get equivocation => _equivocation;
+
+  @visibleForTesting
+  void debugCheckTipConsistency() => _checkTipConsistency();
+  @visibleForTesting
+  Set<String>? get debugKnownSet => _knownSet;
+  @visibleForTesting
+  int get debugLastUnplacedLogged => _lastUnplacedLogged;
+
+  late final StreamSubscription<RpcMessage> _sub;
+  final _gatewayCtrl = StreamController<RpcMessage>();
+  late final RpcClient _gateway;
+
+  final _byChanId = <String, NodeChannel>{};
+  final _handshakes = <String, Completer<Uint8List>>{};
+  final _pending = <String, Completer<Uint8List>>{};
+  final _events = StreamController<NodeEvent>.broadcast();
+  int _nextId = 0;
+  bool _closed = false;
+
+  final _byNodeId = <String, NodeChannel>{};
+  final _roster = <String, NodeDescriptor>{};
+  final _subNode = <String, String>{};
+  final _termNode = <String, String>{};
+
+  // Tip cross-check state (mirrors Go E2EClient tip fields).
+  // [_authTip] maps identity-pub hex to the tip each node reported over its
+  // authenticated channel (node.identify), refreshed once per sync tick.
+  // [_tipMiss] tracks consecutive unreconciled ticks per node; cleared on reconcile.
+  // [_everConnected] records identity-pub hex keys for which a channel was
+  // successfully opened at any point; used by [_checkTipConsistency] to
+  // distinguish "once connected, now offline" (skip stale tip) from "never
+  // connected" (still check — legitimate equivocation signal).
+  final _authTip = <String, Uint8List>{};
+  final _tipMiss = <String, _TipMissState>{};
+  final _everConnected = <String>{}; // identity-pub hex; never removed
+  bool _equivocation = false;
+  Uint8List? _knownSetTip; // caches the known-set key
+  Set<String>? _knownSet; // resolved chain entry-hash set for tip checks
+
+  Stream<NodeEvent> get events => _events.stream;
+
+  /// The ids of nodes with an open channel.
+  Set<String> get connectedNodeIds => _byNodeId.keys.toSet();
+
+  /// Fans out [method] (sessions.list / sessions.refresh) to every connected node,
+  /// invoking [onNode] with each node's composited sessions AS THAT NODE RESPONDS
+  /// — not gated on the slowest. A node that errors or times out is skipped (its
+  /// prior sessions stay in the store). Completes when all nodes have settled.
+  Future<void> forEachNodeSessions(
+    String method,
+    void Function(String nodeId, List<Map<String, dynamic>> sessions) onNode,
+  ) async {
+    final entries = _byNodeId.keys.toList();
+    await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, method, null);
+          final list = r is List ? r : const [];
+          final label = _roster[nodeId]?.label;
+          final out = <Map<String, dynamic>>[
+            for (final s in list)
+              if (s is Map<String, dynamic>) withOriginJson(s, nodeId, label),
+          ];
+          onNode(nodeId, out);
+        } catch (_) {
+          // skip: keep this node's prior sessions in the store
+        }
+      }),
+    );
+  }
+
+  StreamController<RpcMessage>? _notificationsCtrl;
+  StreamSubscription<({String method, Object? params})>? _notificationsSub;
+  StreamSubscription<RpcMessage>? _gatewayNotifSub;
+
+  @override
+  Stream<RpcMessage> get notifications {
+    final existing = _notificationsCtrl;
+    if (existing != null) return existing.stream;
+    final ctrl = StreamController<RpcMessage>.broadcast();
+    _notificationsCtrl = ctrl;
+    _notificationsSub = aggregatedEvents.listen(
+      (e) => ctrl.add(RpcMessage(method: e.method, params: e.params)),
+      onError: ctrl.addError,
+    );
+    return ctrl.stream;
+  }
+
+  /// The per-node notification stream, decoded and (for session.event and
+  /// tasks.changed) stamped with composite node origin — the aggregated view the
+  /// app consumes.
+  Stream<({String method, Object? params})> get aggregatedEvents => events.map((
+    e,
+  ) {
+    Object? params;
+    try {
+      params = jsonDecode(utf8.decode(e.params));
+    } catch (_) {
+      return (method: e.method, params: null);
+    }
+    if (e.method == 'session.event' && params is Map<String, dynamic>) {
+      final sess = params['session'];
+      if (sess is Map<String, dynamic>) {
+        params = {
+          ...params,
+          'session': withOriginJson(sess, e.nodeId, _roster[e.nodeId]?.label),
+        };
+      }
+    } else if (e.method == 'tasks.changed' && params is Map<String, dynamic>) {
+      final sid = params['session_id'];
+      if (sid is String && sid.isNotEmpty) {
+        params = {...params, 'session_id': compositeId(e.nodeId, sid)};
+      }
+    }
+    return (method: e.method, params: params);
+  });
+
+  /// Discovers nodes (nodes.list) and opens an E2E channel to each node that
+  /// advertises an identity key. When a genesis hash is configured, pulls and
+  /// ingests the trust log first, then skips any node whose identity key is not
+  /// authorized (fail-closed: a failed pull leaves prior state in place).
+  Future<void> connect() async {
+    final res = await _gateway.call('nodes.list');
+    final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
+    if (_trust != null) {
+      // Rollback anchor: re-verify the last-known-good chain before pulling, so the
+      // gateway's chain must be a monotonic extension (a stale/shorter chain is
+      // rejected). A tampered/rolled-back stored chain fails verification and is
+      // dropped (fail-closed).
+      final seed = _initialTrustChain;
+      if (seed != null) {
+        try {
+          await _trust.ingest(seed);
+        } catch (_) {
+          /* corrupt/rolled-back seed: ignore, fail-closed */
+        }
+      }
+      try {
+        await _syncTrustLog(_trust);
+      } catch (_) {
+        /* keep prior/seeded state (fail-closed) */
+      }
+    }
+    final toOpen = <NodeDescriptor>[];
+    for (final n in nodes) {
+      if (n is! Map) continue;
+      final desc = _parseNodeDescriptor(n as Map<String, dynamic>);
+      // An offline node (within grace, no live relay peer) has no channel to
+      // open: relay.open would fail. Skip it; it attaches on a later roster
+      // update once it reconnects.
+      if (!desc.online) continue;
+      if (!_plaintext) {
+        if (desc.identityPubKey.isEmpty) continue;
+        final pub = base64.decode(desc.identityPubKey);
+        if (_trust != null &&
+            _trust.locked &&
+            !_trust.disabled &&
+            !_trust.deviceAuthorized(pub))
+          continue;
+      }
+      toOpen.add(desc);
+    }
+    await Future.wait(toOpen.map(_openNode));
+    final interval = trustResyncInterval;
+    if (_trust != null && interval != null && !_closed) {
+      _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
+    }
+  }
+
+  /// Opens a channel to [desc], records it in the roster, and reads its
+  /// authenticated tip. A failed open is logged and swallowed so one unreachable
+  /// node does not abort the caller (mirrors the Go client). Shared by [connect]
+  /// and [_adoptNode].
+  Future<void> _openNode(NodeDescriptor desc) async {
+    try {
+      final nc = await openChannel(desc);
+      _byNodeId[desc.id] = nc;
+      _roster[desc.id] = desc;
+      // Record identity pub hex so checkTipConsistency can distinguish
+      // "was connected, now offline" from "never connected", then read the
+      // node's tip over its authenticated channel (node.identify).
+      if (desc.identityPubKey.isNotEmpty) {
+        try {
+          final key = hexEncode(base64.decode(desc.identityPubKey));
+          _everConnected.add(key);
+          final res = await _callNodeDecoded(desc.id, 'node.identify', null);
+          if (res is Map<String, dynamic>)
+            _authTip[key] = _decodeTip(res['tip']);
+        } catch (e) {
+          developer.log(
+            'node ${desc.id} identify failed: $e',
+            name: 'e2e',
+            level: 900,
+          );
+        }
+      }
+    } catch (e) {
+      developer.log(
+        'skipping node ${desc.id}: open channel failed: $e',
+        name: 'e2e',
+        level: 900,
+      );
+    }
+  }
+
+  /// Adopts a node that joined the roster or came back online after [connect].
+  /// Applies the same eligibility gate as connect (online, then the trust gate in
+  /// e2e mode) and skips a node that is already connected. Mirrors Go
+  /// E2EClient.adoptNode.
+  Future<void> _adoptNode(NodeDescriptor desc) async {
+    if (_closed || _byNodeId.containsKey(desc.id) || !desc.online) return;
+    if (!_plaintext) {
+      if (desc.identityPubKey.isEmpty) return;
+      final pub = base64.decode(desc.identityPubKey);
+      final trust = _trust;
+      if (trust != null &&
+          trust.locked &&
+          !trust.disabled &&
+          !trust.deviceAuthorized(pub))
+        return;
+    }
+    await _openNode(desc);
+  }
+
+  /// Forgets a node that left the roster or went offline: drops its channel and
+  /// prunes its tip state, so its sessions stop appearing and its stale tip cannot
+  /// accumulate equivocation misses. Mirrors Go E2EClient.loseNode.
+  void _loseNode(String id) {
+    final desc = _roster.remove(id);
+    final nc = _byNodeId.remove(id);
+    if (nc != null) _byChanId.remove(nc.chanId);
+    if (desc != null && desc.identityPubKey.isNotEmpty) {
+      try {
+        final key = hexEncode(base64.decode(desc.identityPubKey));
+        _authTip.remove(key);
+        _tipMiss.remove(key);
+      } catch (_) {}
+    }
+  }
+
+  /// Re-pulls the trust log and, on a verified advance, persists it (via
+  /// [onTrustChainAdvance]) and drops channels to now-unauthorized nodes. Also
+  /// runs periodically when [trustResyncInterval] is set; exposed for a manual
+  /// refresh and for tests. Errors are swallowed (the current view is kept).
+  Future<void> resyncNow() async {
+    final trust = _trust;
+    if (trust == null || _closed) return;
+    final before = trust.chainBytes;
+    try {
+      await _syncTrustLog(trust);
+    } catch (_) {
+      return; // keep the current verified view (fail-closed)
+    }
+    final after = trust.chainBytes;
+    final changed =
+        after != null && (before == null || !bytesEqual(before, after));
+    if (changed) {
+      await onTrustChainAdvance?.call(after);
+      _reevaluateChannels();
+    }
+    // Re-read each node's tip over its authenticated channel, then cross-check
+    // those tips against the resolved chain on every successful pull — regardless
+    // of whether the chain advanced this tick. Mirrors Go's syncTrustLog which
+    // always calls refreshAuthTips + checkTipConsistency.
+    await _refreshAuthTips();
+    _checkTipConsistency();
+  }
+
+  /// Coalesces resync requests: a burst of trust-changed nudges (or a nudge
+  /// overlapping the periodic tick) collapses to at most one in-flight run plus
+  /// one queued follow-up — mirrors Go's buffered(1) kick consumed by the single
+  /// trustSyncLoop, bounding gateway-driven work.
+  Future<void> _kickResync() async {
+    if (_resyncInFlight) {
+      _resyncPending = true;
+      return;
+    }
+    _resyncInFlight = true;
+    try {
+      do {
+        _resyncPending = false;
+        await resyncNow();
+      } while (_resyncPending && !_closed);
+    } finally {
+      _resyncInFlight = false;
+    }
+  }
+
+  /// Calls trustlog.sync, stores returned raw entries, assembles complete
+  /// genesis-rooted chains, and ingests each into [trust]. Derives the offer
+  /// from the entry store at call time — every retained entry hash is advertised,
+  /// so the gateway computes the delta by set subtraction. Throws on RPC error
+  /// (caller decides whether to swallow).
+  Future<void> _syncTrustLog(TrustStore trust) async {
+    // Seed from the verified trust chain first so the offer always reflects
+    // what is locally held, including on the first call after a restart.
+    final cb = trust.chainBytes;
+    if (cb != null) {
+      try {
+        _entryStore.putAll(chainEntries(cb));
+      } catch (_) {}
+    }
+
+    final (known, truncated) = _entryStore.hashes();
+    final result = await _gateway.call('trustlog.sync', {
+      'known': [for (final h in known) base64.encode(h)],
+      if (truncated) 'truncated': true,
+    });
+    final gatewayEntries = <Uint8List>[];
+    if (result is Map) {
+      final disjoint = result['disjoint'] == true;
+      if (disjoint && !_lastDisjointLogged) {
+        developer.log(
+          'trust log: this device shares no history with the network\'s; '
+          'it is likely pinned to a different trust root',
+          name: 'e2e',
+          level: 900,
+        );
+      }
+      _lastDisjointLogged = disjoint;
+
+      // Decode gateway entries into the merge slice only — store write happens
+      // after assembly, so only entries belonging to a complete genesis-rooted
+      // chain are ever retained. Mirrors Go syncTrustChains exactly.
+      final rawList = result['entries'];
+      if (rawList is List) {
+        for (final e in rawList) {
+          if (e is String && e.isNotEmpty) {
+            try {
+              gatewayEntries.add(Uint8List.fromList(base64.decode(e)));
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    // Merge: raw gateway entries + verified trust chain + all retained entries.
+    // Mirrors Go: got.Entries + trust.Bytes() + re.All().
+    final merged = <Uint8List>[];
+    merged.addAll(gatewayEntries);
+    final cb2 = trust.chainBytes;
+    if (cb2 != null) {
+      try {
+        merged.addAll(chainEntries(cb2));
+      } catch (_) {}
+    }
+    merged.addAll(_entryStore.all());
+
+    final (chains, unplaced) = assembleChainsReport(merged);
+    final prevUnplaced = _lastUnplacedLogged;
+    _lastUnplacedLogged = unplaced;
+    if (unplaced > 0 && unplaced != prevUnplaced) {
+      developer.log(
+        'trust-log sync has $unplaced unplaced entries; gateway may hold an incomplete branch',
+        name: 'e2e',
+        level: 900,
+      );
+    }
+
+    var refused = 0;
+    for (final chain in chains) {
+      List<Uint8List> raw;
+      try {
+        raw = chainEntries(chain);
+      } catch (_) {
+        continue;
+      }
+      final (_, r) = _entryStore.putAll(raw);
+      refused += r;
+      try {
+        await trust.ingest(chain);
+      } catch (_) {
+        /* bad branch: skip, keep best state so far */
+      }
+    }
+    if (refused > 0) {
+      developer.log(
+        'trust-log entry store at ceiling; entries refused after assembly: $refused',
+        name: 'e2e',
+        level: 900,
+      );
+    }
+  }
+
+  /// Closes channels to nodes no longer authorized by the current trust log.
+  /// A nil/disabled/unlocked store closes nothing (disabled intentionally opens
+  /// access). Only closes — never opens newly-authorized nodes. Also prunes tip
+  /// state for each dropped node so its stale tip cannot accumulate misses and
+  /// false-positive the equivocation flag.
+  void _reevaluateChannels() {
+    final trust = _trust;
+    if (trust == null || !trust.locked || trust.disabled) return;
+    final drop = <String>[];
+    for (final id in _byNodeId.keys) {
+      final desc = _roster[id];
+      if (desc == null) continue;
+      final pub = base64.decode(desc.identityPubKey);
+      if (!trust.deviceAuthorized(pub)) drop.add(id);
+    }
+    for (final id in drop) {
+      _loseNode(id);
+    }
+  }
+
+  /// Aggregating RPC: reproduces the gateway's cross-node aggregation. Mirrors
+  /// RpcClient.call's signature so the app can swap transports.
+  @override
+  Future<Object?> call(String method, [Object? params]) async {
+    switch (method) {
+      case 'sessions.list':
+      case 'sessions.refresh':
+        return _fanoutSessions(method, params);
+      case 'sessions.historyProjects':
+        return _fanoutHistoryProjects(params);
+      case 'transcript.unsubscribe':
+        return _routeByHandle(
+          _subNode,
+          stringField(params, 'sub_id'),
+          method,
+          params,
+        );
+    }
+    if (sessionAddressed.contains(method))
+      return _routeBySession(method, params);
+    if (nodeAddressed.contains(method)) return _routeByNode(method, params);
+    if (terminalHandleAddressed.contains(method)) {
+      return _routeByHandle(
+        _termNode,
+        stringField(params, 'term_id'),
+        method,
+        params,
+      );
+    }
+    if (pushFanoutMethods.contains(method)) return _fanoutPush(method, params);
+    return _gateway.call(method, params); // gateway-native passthrough
+  }
+
+  Future<Object?> _callNodeDecoded(
+    String nodeId,
+    String method,
+    Object? params,
+  ) async {
+    final nc = _byNodeId[nodeId];
+    if (nc == null) throw StateError('unknown node $nodeId');
+    final result = await callNode(nc, method, utf8.encode(jsonEncode(params)));
+    if (result.isEmpty) return null;
+    return jsonDecode(utf8.decode(result));
+  }
+
+  Future<List<dynamic>> _fanoutSessions(String method, Object? params) async {
+    final entries = _byNodeId.keys.toList();
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, method, params);
+          return (nodeId, r is List ? r : const []);
+        } catch (_) {
+          return (nodeId, const <dynamic>[]);
+        }
+      }),
+    );
+    final merged = <dynamic>[];
+    for (final (nodeId, list) in results) {
+      final label = _roster[nodeId]?.label;
+      for (final s in list) {
+        if (s is Map<String, dynamic>)
+          merged.add(withOriginJson(s, nodeId, label));
+      }
+    }
+    return merged;
+  }
+
+  Future<List<dynamic>> _fanoutHistoryProjects(Object? params) async {
+    final entries = _byNodeId.keys.toList();
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(
+            nodeId,
+            'sessions.historyProjects',
+            params,
+          );
+          return (nodeId, r is List ? r : const []);
+        } catch (_) {
+          return (nodeId, const <dynamic>[]);
+        }
+      }),
+    );
+    final all = <Map<String, dynamic>>[];
+    for (final (nodeId, list) in results) {
+      final label = _roster[nodeId]?.label;
+      for (final p in list) {
+        if (p is Map<String, dynamic>)
+          all.add({...p, 'node_id': nodeId, 'node_label': label});
+      }
+    }
+    all.sort(
+      (a, b) => (b['last_activity'] as String? ?? '').compareTo(
+        a['last_activity'] as String? ?? '',
+      ),
+    );
+    return all;
+  }
+
+  /// Fans out a push.register/unregister/test call to every connected node channel.
+  /// Succeeds (at-least-one) if any node accepts. For push.test, returns
+  /// [pushGoneCode] only when every node reported gone. If no nodes are connected,
+  /// falls back to the gateway so a plain-RPC connection still works.
+  Future<Object?> _fanoutPush(String method, Object? params) async {
+    final nodeIds = _byNodeId.keys.toList();
+    if (nodeIds.isEmpty) return _gateway.call(method, params);
+    final results = await Future.wait(
+      nodeIds.map((nodeId) async {
+        try {
+          return (
+            null as Object?,
+            await _callNodeDecoded(nodeId, method, params),
+          );
+        } on Object catch (e) {
+          return (e, null as Object?);
+        }
+      }),
+    );
+    Object? lastResult;
+    var successCount = 0;
+    final errors = <Object>[];
+    var goneCount = 0;
+    for (final (err, res) in results) {
+      if (err == null) {
+        successCount++;
+        lastResult = res;
+      } else {
+        errors.add(err);
+        if (err is RpcError && err.code == pushGoneCode) goneCount++;
+      }
+    }
+    if (successCount > 0) return lastResult;
+    if (method == 'push.test' && goneCount == nodeIds.length) {
+      throw const RpcError(pushGoneCode, 'push target gone');
+    }
+    throw errors.first;
+  }
+
+  String? _soleNode() => _byNodeId.length == 1 ? _byNodeId.keys.first : null;
+
+  Future<Object?> _routeBySession(String method, Object? params) async {
+    final composite = stringField(params, 'session_id');
+    if (composite == null) {
+      throw RpcError(-32600, '$method requires session_id');
+    }
+    final (nodeId, localId, ok) = splitCompositeId(composite);
+    if (!ok) {
+      throw RpcError(-32600, 'session id is not gateway-qualified: $composite');
+    }
+    final result = await _callNodeDecoded(
+      nodeId,
+      method,
+      rewriteSessionId(params, localId),
+    );
+    if (method == 'transcript.subscribe') {
+      final sub = stringField(params, 'sub_id');
+      if (sub != null && sub.isNotEmpty) _subNode[sub] = nodeId;
+    } else if (method == 'terminal.open') {
+      final term = stringField(params, 'term_id');
+      if (term != null && term.isNotEmpty) _termNode[term] = nodeId;
+    }
+    return result;
+  }
+
+  Future<Object?> _routeByNode(String method, Object? params) async {
+    var nodeId = stringField(params, 'node_id') ?? '';
+    if (nodeId.isEmpty) {
+      nodeId = _soleNode() ?? '';
+      if (nodeId.isEmpty) throw RpcError(-32600, '$method requires node_id');
+    }
+    final result = await _callNodeDecoded(nodeId, method, params);
+    if (compositeResultMethods.contains(method) &&
+        result is Map<String, dynamic>) {
+      final local = result['session_id'];
+      if (local is String && local.isNotEmpty) {
+        return {...result, 'session_id': compositeId(nodeId, local)};
+      }
+      return result;
+    }
+    if (method == 'sessions.historySessions' &&
+        result is Map<String, dynamic>) {
+      final items = result['items'];
+      if (items is List) {
+        final label = _roster[nodeId]?.label;
+        return {
+          ...result,
+          'items': [
+            for (final it in items)
+              if (it is Map<String, dynamic>)
+                {...it, 'node_id': nodeId, 'node_label': label}
+              else
+                it,
+          ],
+        };
+      }
+    }
+    return result;
+  }
+
+  Future<Object?> _routeByHandle(
+    Map<String, String> table,
+    String? id,
+    String method,
+    Object? params,
+  ) async {
+    if (id == null || id.isEmpty) {
+      throw RpcError(-32600, '$method requires a handle id');
+    }
+    final nodeId = table[id];
+    if (nodeId == null) {
+      throw RpcError(-32600, '$method: unknown handle $id');
+    }
+    return _callNodeDecoded(nodeId, method, params);
+  }
+
+  /// Parses a raw nodes.list/node.event JSON map into a [NodeDescriptor].
+  NodeDescriptor _parseNodeDescriptor(Map<String, dynamic> n) {
+    return NodeDescriptor(
+      id: n['id'] as String? ?? '',
+      label: n['label'] as String?,
+      identityPubKey: n['identity_pubkey'] as String? ?? '',
+      online: n['online'] as bool? ?? true,
+    );
+  }
+
+  /// Decodes a node.identify result's `tip` field (base64) into raw bytes.
+  /// Returns an empty list when the field is absent or malformed.
+  Uint8List _decodeTip(Object? raw) {
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        return Uint8List.fromList(base64.decode(raw));
+      } catch (_) {}
+    }
+    return Uint8List(0);
+  }
+
+  /// Handles a gateway-level notification. Filters for [node.event]:
+  /// - type [trust-changed]: pulls the trust log promptly (mirrors Go's kick →
+  ///   syncTrustLog nudge).
+  /// - type [online] or [added]: adopts the node so a node that was offline at
+  ///   connect, or that reconnected, gets a channel and its sessions appear.
+  /// - type [offline] or [removed]: drops the node's channel and tip state so its
+  ///   sessions stop appearing and its stale tip cannot accumulate misses.
+  /// Mirrors Go E2EClient.onPeerNotify.
+  void _onGatewayNotification(RpcMessage msg) {
+    if (msg.method != 'node.event') return;
+    final params = msg.params;
+    if (params is! Map<String, dynamic>) return;
+    final evType = params['type'];
+    if (evType == 'trust-changed') {
+      unawaited(_kickResync());
+      return;
+    }
+    final nodeJson = params['node'];
+    if (nodeJson is! Map<String, dynamic>) return;
+    final desc = _parseNodeDescriptor(nodeJson);
+    if (evType == 'online' || evType == 'added') {
+      // Off the read loop: adoptNode calls the gateway and awaits msg2, both of
+      // which are answered on this very stream.
+      unawaited(_adoptNode(desc));
+    } else if (evType == 'offline' || evType == 'removed') {
+      _loseNode(desc.id);
+    }
+  }
+
+  /// Re-reads each connected node's trust-log tip over its authenticated Noise
+  /// channel (node.identify) and records it in [_authTip]. The tip is bound to the
+  /// trust-log-authorized identity, unlike the forgeable gateway roster; it is the
+  /// only source the equivocation check trusts. A node that fails to answer is
+  /// logged and left on its previously-known tip. Mirrors Go E2EClient.refreshAuthTips.
+  Future<void> _refreshAuthTips() async {
+    final targets = <(String, String)>[]; // (nodeId, identity-pub hex)
+    for (final nodeId in _byNodeId.keys) {
+      final desc = _roster[nodeId];
+      if (desc == null || desc.identityPubKey.isEmpty) continue;
+      try {
+        targets.add((nodeId, hexEncode(base64.decode(desc.identityPubKey))));
+      } catch (_) {}
+    }
+    await Future.wait(
+      targets.map((tg) async {
+        try {
+          final res = await _callNodeDecoded(tg.$1, 'node.identify', null);
+          if (res is Map<String, dynamic>)
+            _authTip[tg.$2] = _decodeTip(res['tip']);
+        } catch (e) {
+          developer.log(
+            'node ${tg.$1} identify (tip refresh) failed: $e',
+            name: 'e2e',
+            level: 900,
+          );
+        }
+      }),
+    );
+  }
+
+  /// Cross-checks each connected node's authenticated tip against the current
+  /// resolved trust-log chain. Mirrors Go E2EClient.checkTipConsistency:
+  /// a tip not present in the client's linear chain history is tracked per-node;
+  /// if the same unreconciled tip persists for [_tipMissThreshold] consecutive
+  /// ticks, [_equivocation] is set. Tips for nodes that WERE connected (in
+  /// [_everConnected]) but are no longer connected are skipped — a legitimate
+  /// fork that orphans an offline node's cached tip must not accumulate misses
+  /// and false-positive the flag. Nodes that reported a tip but were NEVER
+  /// connected are still checked. No-op when the trust store is absent or the
+  /// chain is empty.
+  void _checkTipConsistency() {
+    final trust = _trust;
+    if (trust == null) return;
+    final chainBytes = trust.chainBytes;
+    if (chainBytes == null || chainBytes.isEmpty) return;
+    if (_authTip.isEmpty)
+      return; // no tips yet: skip the chain parse/hash entirely
+    final tip = trust.tip;
+    var known = _knownSet;
+    if (known == null ||
+        tip == null ||
+        !bytesEqual(tip, _knownSetTip ?? const [])) {
+      List<Entry> entries;
+      try {
+        entries = unmarshalChain(chainBytes);
+      } catch (_) {
+        return; // parse failure: be lenient rather than false-positive
+      }
+      if (entries.isEmpty) return;
+      known = <String>{};
+      for (final e in entries) {
+        known.add(hexEncode(hashEntry(e)));
+      }
+      _knownSet = known;
+      _knownSetTip = tip == null ? null : Uint8List.fromList(tip);
+    }
+    // Build the set of currently-connected identity-pub hex keys.
+    final connected = <String>{};
+    for (final nodeId in _byNodeId.keys) {
+      final desc = _roster[nodeId];
+      if (desc == null || desc.identityPubKey.isEmpty) continue;
+      try {
+        connected.add(hexEncode(base64.decode(desc.identityPubKey)));
+      } catch (_) {}
+    }
+    for (final entry in _authTip.entries) {
+      final key = entry.key;
+      final tipBytes = entry.value;
+      // Belt-and-suspenders: skip tips for nodes that WERE connected but are no
+      // longer connected. A legitimate fork that orphans an offline node's stale
+      // cached tip must not accumulate misses and trigger the flag. Nodes that
+      // reported a tip but were NEVER connected are still checked.
+      if (_everConnected.contains(key) && !connected.contains(key)) continue;
+      if (tipBytes.isEmpty) {
+        _tipMiss.remove(key); // no tip yet: clear any prior miss
+        continue;
+      }
+      if (known.contains(hexEncode(tipBytes))) {
+        _tipMiss.remove(key); // tip reconciled: reset miss streak
+        continue;
+      }
+      // Tip not in resolved chain: track consecutive unreconciled ticks.
+      var ms = _tipMiss[key];
+      if (ms == null || !bytesEqual(ms.tip, tipBytes)) {
+        ms = _TipMissState(tip: Uint8List.fromList(tipBytes), misses: 1);
+        _tipMiss[key] = ms;
+      } else {
+        ms.misses++;
+      }
+      if (ms.misses >= _tipMissThreshold && !_equivocation) {
+        developer.log(
+          'equivocation detected — node tip diverges from resolved chain: key=$key tip=${hexEncode(tipBytes)}',
+          name: 'e2e',
+          level: 900, // WARNING
+        );
+        _equivocation = true;
+      }
+    }
+  }
+
+  Future<NodeChannel> openChannel(NodeDescriptor node) async {
+    final res = await _gateway
+        .call('relay.open', {'node_id': node.id})
+        .timeout(handshakeTimeout);
+    final chanId = (res as Map)['chan_id'] as String;
+    if (_plaintext) {
+      final nc = NodeChannel(node.id, chanId, Channel.plain(chanId));
+      _byChanId[chanId] = nc;
+      return nc;
+    }
+    final pub = base64.decode(node.identityPubKey);
+    final (hs, msg1) = await HandshakeState.initiate(
+      staticKey: _static,
+      remoteStatic: pub,
+      prologue: channelPrologue(node.id, chanId),
+    );
+    final hc = Completer<Uint8List>();
+    _handshakes[chanId] = hc;
+    _writeFrame(marshalHandshakeFrame(chanId, msg1));
+    final Uint8List msg2;
+    try {
+      msg2 = await hc.future.timeout(handshakeTimeout);
+    } finally {
+      _handshakes.remove(chanId);
+    }
+    final nc = NodeChannel(
+      node.id,
+      chanId,
+      Channel.noise(chanId, hs.finish(msg2)),
+    );
+    _byChanId[chanId] = nc;
+    return nc;
+  }
+
+  Future<Uint8List> callNode(NodeChannel nc, String method, List<int> params) {
+    if (_closed) return Future.error(StateError('client closed'));
+    final idn = ++_nextId;
+    final id = idn.toString();
+    final c = Completer<Uint8List>();
+    _pending[id] = c;
+    _writeFrame(nc.channel.sealRequestFrame(idn, method, nc.nodeId, params));
+    return c.future.timeout(
+      callTimeout,
+      onTimeout: () {
+        _pending.remove(id);
+        throw TimeoutException('callNode $method timed out');
+      },
+    );
+  }
+
+  void _onMessage(RpcMessage m) {
+    final route = m.route;
+    if (route is Map && route['chan_id'] is String) {
+      _onRelay(m, route['chan_id'] as String);
+    } else {
+      if (!_gatewayCtrl.isClosed) _gatewayCtrl.add(m);
+    }
+  }
+
+  void _onRelay(RpcMessage m, String chanId) {
+    if (m.method == methodE2EHandshake) {
+      final c = _handshakes[chanId];
+      if (c != null && !c.isCompleted) {
+        try {
+          c.complete(handshakeFromFrame(RelayFrame.fromMessage(m)));
+        } catch (_) {
+          /* malformed handshake: leave pending -> openChannel times out */
+        }
+      }
+      return;
+    }
+    final nc = _byChanId[chanId];
+    if (nc == null) return;
+    final f = RelayFrame.fromMessage(m);
+    if (m.id != null && m.method == null) {
+      final waiter = _pending[m.id];
+      if (waiter == null || waiter.isCompleted) return;
+      try {
+        final r = nc.channel.openResponse(f);
+        _pending.remove(m.id);
+        if (r.error != null) {
+          waiter.completeError(r.error!);
+        } else {
+          waiter.complete(r.result!); // non-null on the non-error path
+        }
+      } catch (_) {
+        // injected/garbage or desynced frame: drop it, keep the pending slot so
+        // the genuine reply (which decrypts at the still-unadvanced nonce) resolves.
+      }
+    } else if (m.method != null && m.id == null) {
+      try {
+        final params = nc.channel.openParams(f);
+        if (!_events.isClosed) {
+          _events.add((method: m.method!, params: params, nodeId: nc.nodeId));
+        }
+      } catch (_) {
+        /* drop */
+      }
+    }
+  }
+
+  void _writeFrame(Uint8List frameBytes) =>
+      _send('${utf8.decode(frameBytes)}\n');
+
+  void _onDone() {
+    if (_closed) return;
+    _closed = true;
+    _gateway.close();
+    if (!_gatewayCtrl.isClosed) _gatewayCtrl.close();
+    _failAll(StateError('gateway link closed'));
+    if (!_events.isClosed) _events.close();
+  }
+
+  void _failAll(Object e) {
+    for (final c in [..._handshakes.values, ..._pending.values]) {
+      if (!c.isCompleted) c.completeError(e);
+    }
+    _handshakes.clear();
+    _pending.clear();
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    _resyncTimer?.cancel();
+    await _sub.cancel();
+    await _gatewayNotifSub?.cancel();
+    _gateway.close();
+    if (!_gatewayCtrl.isClosed) await _gatewayCtrl.close();
+    _failAll(StateError('client closed'));
+    if (!_events.isClosed) await _events.close();
+    await _notificationsSub?.cancel();
+    final ctrl = _notificationsCtrl;
+    if (ctrl != null && !ctrl.isClosed) await ctrl.close();
+  }
+}

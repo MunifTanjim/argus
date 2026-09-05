@@ -27,6 +27,28 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
 
   void clear() => state = const {};
 
+  /// Replaces only [nodeId]'s slice: drops that node's current sessions, then
+  /// inserts [sessions]. Other nodes' sessions are untouched — enables progressive
+  /// per-node loading without blanking the list.
+  void mergeNode(String nodeId, Iterable<Session> sessions) {
+    final next = <String, Session>{
+      for (final e in state.entries)
+        if (e.value.nodeId != nodeId) e.key: e.value,
+    };
+    for (final s in sessions) next[s.id] = s;
+    state = next;
+  }
+
+  /// Drops sessions whose origin node is not in [nodeIds] — clears sessions from
+  /// nodes no longer connected, without touching the rest.
+  void retainNodes(Set<String> nodeIds) {
+    state = <String, Session>{
+      for (final e in state.entries)
+        if (e.value.nodeId != null && nodeIds.contains(e.value.nodeId))
+          e.key: e.value,
+    };
+  }
+
   void apply(RegistryEvent ev) {
     state = applyEvent(state, ev);
   }
@@ -34,4 +56,5 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
 
 final sessionsProvider =
     NotifierProvider<SessionsNotifier, Map<String, Session>>(
-        SessionsNotifier.new);
+      SessionsNotifier.new,
+    );

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../pairing/pairing_uri.dart';
 import 'connection.dart';
 import 'jsonrpc.dart';
@@ -20,14 +22,18 @@ String resolveClientUrl(String base) {
   }
   if (u.path.isNotEmpty && u.path != '/') {
     throw FormatException(
-        'gateway url takes no path (the /client route is implicit)', base);
+      'gateway url takes no path (the /client route is implicit)',
+      base,
+    );
   }
   return u.replace(path: '/client').toString();
 }
 
 class WebSocketRpcLink implements RpcLink {
-  WebSocketRpcLink._(this._socket) {
-    _socket.listen(
+  WebSocketRpcLink._(WebSocket socket)
+    : _closeSocket = (() => socket.close()),
+      _sendFrame = socket.add {
+    socket.listen(
       _onData,
       onError: _controller.addError,
       onDone: close,
@@ -35,7 +41,26 @@ class WebSocketRpcLink implements RpcLink {
     );
   }
 
-  final WebSocket _socket;
+  /// Testing seam: exercises [_onData] and [close] against an injected stream
+  /// without a real socket. [closeHook] is called by [close].
+  @visibleForTesting
+  WebSocketRpcLink.fromStream(
+    Stream<dynamic> frames, {
+    Future<void> Function()? closeHook,
+  }) : _closeSocket = closeHook ?? (() async {}),
+       _sendFrame = _noop {
+    frames.listen(
+      _onData,
+      onError: _controller.addError,
+      onDone: close,
+      cancelOnError: false,
+    );
+  }
+
+  static void _noop(dynamic _) {}
+
+  final Future<void> Function() _closeSocket;
+  final void Function(dynamic) _sendFrame;
   final _controller = StreamController<RpcMessage>.broadcast();
   final _buf = StringBuffer();
 
@@ -54,24 +79,29 @@ class WebSocketRpcLink implements RpcLink {
   }
 
   void _onData(dynamic data) {
+    // A frame buffered before close() can still be delivered after the controller
+    // is closed; dropping it here avoids "add after close" on teardown.
+    if (_controller.isClosed) return;
     _buf.write(data is List<int> ? utf8.decode(data) : data as String);
     final parts = _buf.toString().split('\n');
     _buf.clear();
     _buf.write(parts.removeLast()); // trailing partial (or '')
     for (final line in parts) {
       if (line.trim().isEmpty) continue;
-      _controller.add(RpcMessage.fromJson(
-          jsonDecode(line) as Map<String, dynamic>));
+      if (_controller.isClosed) return;
+      _controller.add(
+        RpcMessage.fromJson(jsonDecode(line) as Map<String, dynamic>),
+      );
     }
   }
 
   @override
   Stream<RpcMessage> get incoming => _controller.stream;
   @override
-  void send(String frame) => _socket.add(frame);
+  void send(String frame) => _sendFrame(frame);
   @override
   Future<void> close() async {
-    await _socket.close();
+    await _closeSocket();
     if (!_controller.isClosed) await _controller.close();
   }
 }
