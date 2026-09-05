@@ -1,0 +1,20 @@
+$ argus lock status --token=wrong-token --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443
+exit 1
+--- stdout ---
+locked mode: not enabled
+
+chain: none — locked mode not enabled on this node
+
+this node
+  identity: <NODE-A-DEVPUB>
+  signer:   <NODE-A-SIGPUB>
+
+signers: none
+
+devices: none
+
+  pin: none
+  client pin: none (could not check this network for a trust log: ws://<RUN-ID>-gw:8443/client refused the connection: HTTP 401 Unauthorized (the bearer token was rejected))
+--- stderr ---
+argus lock status: ws://<RUN-ID>-gw:8443/client refused the connection: HTTP 401 Unauthorized (the bearer token was rejected)
+  the gateway expects a different token: check --token, $ARGUS_TOKEN, or token: in the config file

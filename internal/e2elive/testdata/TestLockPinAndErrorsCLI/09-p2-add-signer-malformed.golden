@@ -1,0 +1,6 @@
+$ argus lock add-signer sigpub:nothex --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 1
+--- stdout ---
+--- stderr ---
+argus lock add-signer: signer "sigpub:nothex": signer key is not valid hex: encoding/hex: invalid byte: U+006E 'n'
+  read it with `argus lock status` on that node

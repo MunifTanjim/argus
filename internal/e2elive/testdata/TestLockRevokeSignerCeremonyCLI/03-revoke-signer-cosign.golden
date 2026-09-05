@@ -1,0 +1,11 @@
+$ argus lock revoke-signer --cosign <BLOB-START> --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 0
+--- stdout ---
+co-signed
+  blob: <BLOB-COSIGNED>
+--- stderr ---
+
+If more co-signs are needed, run on another signer node:
+  argus lock revoke-signer --cosign <BLOB-COSIGNED>
+When you have enough co-signs, run on any signer node:
+  argus lock revoke-signer --finish <BLOB-COSIGNED>

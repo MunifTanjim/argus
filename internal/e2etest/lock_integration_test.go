@@ -106,3 +106,10 @@ func gatherDevicesForTest(nodes []api.NodeDescriptor) [][]byte {
 	}
 	return out
 }
+
+// lockSign authorizes a device key on a signer node via the unix socket client.
+func lockSign(c *api.Client, dev []byte) (api.LockDeviceResult, error) {
+	var res api.LockDeviceResult
+	err := c.Call(api.MethodLockSign, api.LockDeviceParams{Device: dev}, &res)
+	return res, err
+}

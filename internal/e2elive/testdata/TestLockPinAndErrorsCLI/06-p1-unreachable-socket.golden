@@ -1,0 +1,10 @@
+$ argus lock status --socket=/home/argus/nope.sock --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
+exit 1
+--- stdout ---
+locked mode: (client — no local node)
+  this device identity: <CLI-CLIENT-DEVPUB>
+  to authorize, run on a signer node:
+    argus lock sign <CLI-CLIENT-DEVPUB>
+  client pin: none
+--- stderr ---
+argus lock status: node socket: dial unix /home/argus/nope.sock: connect: no such file or directory
