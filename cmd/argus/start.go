@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
@@ -129,6 +130,16 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	if n, ok := tun.(tunnel.Ngrok); ok {
 		if err := ensureNgrokAuth(ctx, n.Bin, onTTY); err != nil {
 			return fail(cmd, err)
+		}
+	}
+
+	if local && cfg.E2EE.Enabled {
+		kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("node-identity.json"))
+		if err != nil {
+			logger.Scoped("node").Warn("e2ee identity unavailable; running plaintext uplink", "err", err)
+		} else {
+			d.SetIdentityKey(kp)
+			d.SetE2EE(true)
 		}
 	}
 
@@ -366,10 +377,6 @@ type gatewayServeOpts struct {
 // shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
-	// A standalone gateway (nil node) seeds no in-process source: remote nodes only.
-	if d := o.node; d != nil {
-		agg.AddSource(gateway.NewInProcessSource(d.ID(), d.Label(), d.Version(), d.Capabilities(), d.Registry(), d.DispatchFunc()))
-	}
 
 	var store *clienttoken.Store
 	if o.enablePairing {
@@ -404,6 +411,12 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
+
+	// Connect the in-process node over loopback so its identity handshake goes
+	// through the real uplink path (must come after Serve goroutine).
+	if d := o.node; d != nil {
+		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")
@@ -457,15 +470,6 @@ func setupPush(ctx context.Context, agg *gateway.Aggregator, hsrv *gateway.Serve
 	}
 	dispatcher := push.NewDispatcher(store, push.NewUnifiedPushSender(vapid), log)
 	hsrv.SetPush(store, dispatcher)
-
-	events, cancel := agg.Subscribe()
-	broadcaster := fanoutNotifier{agg: agg, log: log}
-	go func() {
-		defer cancel()
-		push.Watch(ctx, events, push.Sinks{
-			Immediate: []push.Sink{broadcaster},
-			Delayed:   []push.Sink{dispatcher},
-			Delay:     delay,
-		}, log)
-	}()
+	_ = ctx
+	_ = delay
 }

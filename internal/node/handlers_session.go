@@ -29,7 +29,11 @@ func (d *Node) handleSessionsList(context.Context, json.RawMessage) (any, error)
 
 // handleNodeIdentify announces this node's identity over the gateway uplink.
 func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error) {
-	return api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps}, nil
+	res := api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps, IdentityPubKey: d.identityPubB64}
+	if st := d.trust.Load(); st != nil {
+		res.Tip = st.Tip()
+	}
+	return res, nil
 }
 
 // handleServerInfo lets a client talking directly to a plain node read the
