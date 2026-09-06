@@ -232,4 +232,121 @@ void main() {
       expect(find.textContaining('preview-bravo'), findsOneWidget);
     });
   });
+
+  // The sheet is a modal the user must dismiss to read the transcript behind
+  // it. These pump the real route inside one ProviderScope, so the draft
+  // container survives a dismissal the way it does on device.
+  group('draft persistence', () {
+    Future<void> pumpHost(WidgetTester tester, SessionRepository c,
+        Session Function() session) async {
+      await tester.pumpWidget(ProviderScope(
+        overrides: [sessionRepositoryProvider.overrideWithValue(c)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () => showRespondSheet(ctx, session()),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> open(WidgetTester tester) async {
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> dismiss(WidgetTester tester) async {
+      Navigator.of(tester.element(find.byType(RespondSheet))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(RespondSheet), findsNothing);
+    }
+
+    testWidgets('an unsent reply survives a dismissal', (tester) async {
+      final c = _RecordingControl();
+      final s = _session({'kind': 'idle'});
+      await pumpHost(tester, c, () => s);
+      await open(tester);
+      await tester.enterText(find.byType(TextField), 'half typed');
+      await tester.pump();
+      await dismiss(tester);
+      await open(tester);
+      expect(find.text('half typed'), findsOneWidget);
+    });
+
+    testWidgets('a sent reply does not come back on the next open',
+        (tester) async {
+      final c = _RecordingControl();
+      final s = _session({'kind': 'idle'});
+      await pumpHost(tester, c, () => s);
+      await open(tester);
+      await tester.enterText(find.byType(TextField), 'next task');
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      expect(c.inputCalls.single, ['mac:%1', 'next task']);
+      await open(tester);
+      expect(find.text('next task'), findsNothing);
+    });
+
+    testWidgets('question answers survive a dismissal', (tester) async {
+      final c = _RecordingControl();
+      final s = _session({
+        'kind': 'question',
+        'questions': [
+          {
+            'question': 'Pick one',
+            'options': ['A', 'B'],
+          }
+        ],
+      });
+      await pumpHost(tester, c, () => s);
+      await open(tester);
+      await tester.tap(find.text('B'));
+      await tester.pump();
+      await dismiss(tester);
+      await open(tester);
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single['answers'], {'Pick one': 'B'});
+    });
+
+    testWidgets('the same permission prompt keeps the deny reason',
+        (tester) async {
+      final c = _RecordingControl();
+      final s = _session({'kind': 'permission', 'tool_name': 'Bash'});
+      await pumpHost(tester, c, () => s);
+      await open(tester);
+      await tester.tap(find.text('Deny'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'too risky');
+      await tester.pump();
+      await dismiss(tester);
+      await open(tester);
+      // still in reject mode, with the reason intact
+      expect(find.text('too risky'), findsOneWidget);
+    });
+
+    testWidgets('a different permission prompt drops the deny reason',
+        (tester) async {
+      final c = _RecordingControl();
+      var s = _session({'kind': 'permission', 'tool_name': 'Bash'});
+      await pumpHost(tester, c, () => s);
+      await open(tester);
+      await tester.tap(find.text('Deny'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'too risky');
+      await tester.pump();
+      await dismiss(tester);
+      // same session id, but the agent now waits on a different tool call
+      s = _session({'kind': 'permission', 'tool_name': 'Edit'});
+      await open(tester);
+      expect(find.text('too risky'), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('Deny'), findsOneWidget);
+    });
+  });
 }
