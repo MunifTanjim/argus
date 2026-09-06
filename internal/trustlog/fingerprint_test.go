@@ -1,10 +1,25 @@
 package trustlog
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestFingerprintWordListLen(t *testing.T) {
-	if len(fingerprintWordList) != 256 {
-		t.Fatalf("word list length = %d, want 256", len(fingerprintWordList))
+// HashFingerprint encodes the full 32-byte hash as a standard BIP39 mnemonic (24
+// words). The all-zero 256-bit vector is the canonical BIP39 test vector.
+func TestHashFingerprintBIP39(t *testing.T) {
+	got := HashFingerprint(make([]byte, 32))
+	if len(got) != 24 {
+		t.Fatalf("want 24 BIP39 words, got %d: %v", len(got), got)
+	}
+	const want = "abandon abandon abandon abandon abandon abandon abandon abandon abandon " +
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon " +
+		"abandon abandon abandon abandon abandon art"
+	if got := strings.Join(got, " "); got != want {
+		t.Fatalf("all-zero fingerprint = %q\n want the standard BIP39 vector", got)
+	}
+	if HashFingerprint(nil) != nil {
+		t.Fatal("nil hash should produce no words")
 	}
 }
 
@@ -13,34 +28,10 @@ func TestSignerSetFingerprintDeterministicAndOrderIndependent(t *testing.T) {
 	b := []byte{4, 5, 6}
 	f1 := SignerSetFingerprint([][]byte{a, b})
 	f2 := SignerSetFingerprint([][]byte{b, a}) // reversed order → same (sorted internally)
-	if len(f1) != 8 {
-		t.Fatalf("want 8 words, got %d", len(f1))
+	if len(f1) != 24 {
+		t.Fatalf("want 24 words, got %d", len(f1))
 	}
-	for i := range f1 {
-		if f1[i] != f2[i] {
-			t.Fatalf("order-dependence: %v vs %v", f1, f2)
-		}
-	}
-	if SignerSetFingerprint([][]byte{a})[0] == SignerSetFingerprint([][]byte{b})[0] {
-		t.Skip("different sets may coincide on word[0]; not asserting inequality")
-	}
-}
-
-func TestHashFingerprint(t *testing.T) {
-	hash := make([]byte, 32)
-	for i := range hash {
-		hash[i] = byte(i)
-	}
-	got := HashFingerprint(hash)
-	if len(got) != 8 {
-		t.Fatalf("len = %d, want 8 words", len(got))
-	}
-	for i, w := range got {
-		if want := fingerprintWordList[i]; w != want {
-			t.Fatalf("word %d = %q, want %q", i, w, want)
-		}
-	}
-	if HashFingerprint(nil) != nil && len(HashFingerprint(nil)) != 0 {
-		t.Fatal("nil hash should produce no words")
+	if strings.Join(f1, " ") != strings.Join(f2, " ") {
+		t.Fatalf("order-dependence: %v vs %v", f1, f2)
 	}
 }
