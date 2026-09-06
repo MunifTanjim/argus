@@ -195,6 +195,34 @@ argus lock unpin
 
 It clears both roles' persisted pins — the client's directly, and the node's over its socket, or from disk when the node cannot start. The device is left pinned to `lock.genesis` alone, so it never comes back open. If it was `lock.genesis` that was wrong, remove it from the config instead and re-run `argus lock pin`.
 
+## Anti-equivocation: authenticated tip cross-check
+
+A malicious or compromised gateway can try to show different nodes or clients
+different branches of the trust log. This is a "split-view" or equivocation attack.
+The client detects it by reading each node's tip over a channel the gateway cannot
+forge.
+
+1. **Authenticated tip source.** Each node reports its current trust-log tip through
+   the `node.identify` RPC. The client reads this tip over the node's authenticated
+   Noise channel, bound to the handshake identity. The gateway roster also carries
+   node data, but the roster is forgeable, so the equivocation check never uses it.
+
+2. **Tip refresh.** On each trust-sync tick, `refreshAuthTips` re-reads every
+   connected node's tip over that authenticated channel. A node that does not answer
+   keeps its previously-known tip. The gateway can drop or delay these RPCs, which
+   delays detection, but it cannot forge a tip, because it cannot complete the Noise
+   handshake as that node.
+
+3. **Consistency check.** `checkTipConsistency` compares each authenticated tip
+   against the client's resolved linear chain. A tip that is absent from the chain
+   and persists for `tipMissThreshold` consecutive ticks is flagged as equivocation.
+   Propagation lag reconciles on the next pull and resets the miss streak, so a
+   single missed tick does not flag. Tips from offline nodes are skipped.
+
+4. **Detection response.** The equivocation flag surfaces in `lock status`.
+   Fork-choice already prevents a node from adopting a bad branch. This layer exposes
+   a gateway that is hiding branches.
+
 ## The word-fingerprint backstop
 
 `argus lock status` shows two fingerprints — short sequences of English words.
