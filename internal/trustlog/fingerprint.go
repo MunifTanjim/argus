@@ -3,97 +3,34 @@ package trustlog
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"sort"
+	"strings"
 
+	bip39 "github.com/tyler-smith/go-bip39"
 	"golang.org/x/crypto/blake2s"
 )
 
-// fingerprintWordList maps byte values 0x00–0xFF to words.
-// Copied verbatim from app/lib/e2e/trust_fingerprint.dart (_fingerprintWords).
-// PGP biometric word list (even-index, two-syllable words), lowercased.
-var fingerprintWordList = [256]string{
-	"aardvark", "absurd", "accrue", "acme",
-	"adrift", "adult", "afflict", "ahead",
-	"aimless", "algol", "allow", "alone",
-	"ammo", "ancient", "apple", "artist",
-	"assume", "athens", "atlas", "aztec",
-	"baboon", "backfield", "backward", "basalt",
-	"beaming", "bedlamp", "beehive", "beeswax",
-	"befriend", "belfast", "berserk", "billiard",
-	"bison", "blackjack", "blockade", "blowtorch",
-	"bluebird", "bombast", "bookshelf", "brackish",
-	"breadline", "breakup", "brickyard", "briefcase",
-	"burbank", "button", "buzzard", "cement",
-	"chairlift", "chatter", "checkup", "chisel",
-	"choking", "chopper", "christmas", "clamshell",
-	"classic", "classroom", "cleanup", "clockwork",
-	"cobra", "commence", "concert", "cowbell",
-	"crackdown", "cranky", "crowfoot", "crucial",
-	"crumpled", "crusade", "cubic", "deadbolt",
-	"deckhand", "dogsled", "dosage", "dragnet",
-	"drainage", "dreadful", "drifter", "dropper",
-	"drumbeat", "drunken", "dupont", "dwelling",
-	"eating", "edict", "egghead", "eightball",
-	"endorse", "endow", "enlist", "erase",
-	"escape", "exceed", "eyeglass", "eyetooth",
-	"facial", "fallout", "flagpole", "flatfoot",
-	"flytrap", "fracture", "fragile", "framework",
-	"freedom", "frighten", "gazelle", "geiger",
-	"glasgow", "glitter", "glucose", "goggles",
-	"goldfish", "gremlin", "guidance", "hamlet",
-	"highchair", "hockey", "hotdog", "indoors",
-	"indulge", "inverse", "involve", "island",
-	"janus", "jawbone", "keyboard", "kickoff",
-	"kiwi", "klaxon", "lockup", "merit",
-	"minnow", "miser", "mohawk", "mural",
-	"music", "neptune", "newborn", "nightbird",
-	"obtuse", "offload", "oilfield", "optic",
-	"orca", "payday", "peachy", "pheasant",
-	"physique", "playhouse", "pluto", "preclude",
-	"prefer", "preshrunk", "printer", "profile",
-	"prowler", "pupil", "puppy", "python",
-	"quadrant", "quiver", "quota", "ragtime",
-	"ratchet", "rebirth", "reform", "regain",
-	"reindeer", "rematch", "repay", "retouch",
-	"revenge", "reward", "rhythm", "ringbolt",
-	"robust", "rocker", "ruffled", "sawdust",
-	"scallion", "scenic", "scorecard", "scotland",
-	"seabird", "select", "sentence", "shadow",
-	"showgirl", "skullcap", "skydive", "slingshot",
-	"slothful", "slowdown", "snapline", "snapshot",
-	"snowcap", "snowslide", "solo", "spaniel",
-	"spearhead", "spellbind", "spheroid", "spigot",
-	"spindle", "spoilage", "spyglass", "stagehand",
-	"stagnate", "stairway", "standard", "stapler",
-	"steamship", "stepchild", "sterling", "stockman",
-	"stopwatch", "stormy", "sugar", "surmount",
-	"suspense", "swelter", "tactics", "talon",
-	"tapeworm", "tempest", "tiger", "tissue",
-	"tonic", "tracker", "transit", "trauma",
-	"treadmill", "trojan", "trouble", "tumor",
-	"tunnel", "tycoon", "umpire", "uncut",
-	"unearth", "unwind", "uproot", "upset",
-	"upshot", "vapor", "village", "virus",
-	"vulcan", "waffle", "wallet", "watchword",
-	"wayside", "willow", "woodlark", "zulu",
-}
-
-// fingerprintWords maps the first up-to-8 bytes of digest to words.
+// fingerprintWords encodes a 32-byte digest as a standard BIP39 mnemonic (24
+// words including the checksum), so the human comparison covers the full 256-bit
+// hash rather than a truncated prefix. The Flutter client uses the same BIP39
+// wordlist, so the words match across argus and the app.
 func fingerprintWords(digest []byte) []string {
-	n := len(digest)
-	if n > 8 {
-		n = 8
+	if len(digest) == 0 {
+		return nil
 	}
-	out := make([]string, n)
-	for i := 0; i < n; i++ {
-		out[i] = fingerprintWordList[digest[i]]
+	m, err := bip39.NewMnemonic(digest)
+	if err != nil {
+		// Non-standard entropy length (never happens for a 32-byte hash); fall back
+		// to hex so a caller still gets a stable, comparable string.
+		return []string{hex.EncodeToString(digest)}
 	}
-	return out
+	return strings.Split(m, " ")
 }
 
-// SignerSetFingerprint is the human-verifiable word fingerprint of the trusted
-// signer set: BLAKE2s over length-prefixed, byte-sorted signer pubkeys, first 8
-// bytes → words. Deterministic and identical to the Flutter client.
+// SignerSetFingerprint is the human-verifiable BIP39 fingerprint of the trusted
+// signer set: BLAKE2s-256 over length-prefixed, byte-sorted signer pubkeys, then
+// BIP39-encoded. Deterministic and identical to the Flutter client.
 func SignerSetFingerprint(signers [][]byte) []string {
 	sorted := make([][]byte, len(signers))
 	copy(sorted, signers)
@@ -109,7 +46,7 @@ func SignerSetFingerprint(signers [][]byte) []string {
 	return fingerprintWords(sum[:])
 }
 
-// HashFingerprint is the human-verifiable word fingerprint of a raw hash (a
-// genesis or a chain tip): first 8 bytes mapped through the same word list as
-// SignerSetFingerprint, so the words match across argus and the Flutter client.
+// HashFingerprint is the human-verifiable BIP39 fingerprint of a raw 32-byte hash
+// (a genesis or a chain tip), matching SignerSetFingerprint's encoding so the words
+// are consistent across argus and the Flutter client.
 func HashFingerprint(hash []byte) []string { return fingerprintWords(hash) }
