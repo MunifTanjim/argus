@@ -1,85 +1,38 @@
 import 'dart:typed_data';
 
+import 'package:pointycastle/digests/sha256.dart';
+
+import 'bip39_wordlist.dart';
 import 'bytes.dart' show compareBytes;
 import 'symmetric_state.dart' show blake2s;
 
-/// The PGP biometric word list (even-index, two-syllable words), lowercased.
-/// Source: PGP word list designed by Patrick Juola and Philip Zimmermann (1995),
-/// licensed under the GNU Free Documentation License.
-/// Index 0–255 map to byte values 0x00–0xFF respectively.
-/// MUST remain exactly 256 entries — the assert below enforces this at runtime.
-const List<String> _fingerprintWords = [
-  'aardvark', 'absurd',    'accrue',    'acme',
-  'adrift',   'adult',     'afflict',   'ahead',
-  'aimless',  'algol',     'allow',     'alone',
-  'ammo',     'ancient',   'apple',     'artist',
-  'assume',   'athens',    'atlas',     'aztec',
-  'baboon',   'backfield', 'backward',  'basalt',
-  'beaming',  'bedlamp',   'beehive',   'beeswax',
-  'befriend', 'belfast',   'berserk',   'billiard',
-  'bison',    'blackjack', 'blockade',  'blowtorch',
-  'bluebird', 'bombast',   'bookshelf', 'brackish',
-  'breadline','breakup',   'brickyard', 'briefcase',
-  'burbank',  'button',    'buzzard',   'cement',
-  'chairlift','chatter',   'checkup',   'chisel',
-  'choking',  'chopper',   'christmas', 'clamshell',
-  'classic',  'classroom', 'cleanup',   'clockwork',
-  'cobra',    'commence',  'concert',   'cowbell',
-  'crackdown','cranky',    'crowfoot',  'crucial',
-  'crumpled', 'crusade',   'cubic',     'deadbolt',
-  'deckhand', 'dogsled',   'dosage',    'dragnet',
-  'drainage', 'dreadful',  'drifter',   'dropper',
-  'drumbeat', 'drunken',   'dupont',    'dwelling',
-  'eating',   'edict',     'egghead',   'eightball',
-  'endorse',  'endow',     'enlist',    'erase',
-  'escape',   'exceed',    'eyeglass',  'eyetooth',
-  'facial',   'fallout',   'flagpole',  'flatfoot',
-  'flytrap',  'fracture',  'fragile',   'framework',
-  'freedom',  'frighten',  'gazelle',   'geiger',
-  'glasgow',  'glitter',   'glucose',   'goggles',
-  'goldfish', 'gremlin',   'guidance',  'hamlet',
-  'highchair','hockey',    'hotdog',    'indoors',
-  'indulge',  'inverse',   'involve',   'island',
-  'janus',    'jawbone',   'keyboard',  'kickoff',
-  'kiwi',     'klaxon',    'lockup',    'merit',
-  'minnow',   'miser',     'mohawk',    'mural',
-  'music',    'neptune',   'newborn',   'nightbird',
-  'obtuse',   'offload',   'oilfield',  'optic',
-  'orca',     'payday',    'peachy',    'pheasant',
-  'physique', 'playhouse', 'pluto',     'preclude',
-  'prefer',   'preshrunk', 'printer',   'profile',
-  'prowler',  'pupil',     'puppy',     'python',
-  'quadrant', 'quiver',    'quota',     'ragtime',
-  'ratchet',  'rebirth',   'reform',    'regain',
-  'reindeer', 'rematch',   'repay',     'retouch',
-  'revenge',  'reward',    'rhythm',    'ringbolt',
-  'robust',   'rocker',    'ruffled',   'sawdust',
-  'scallion', 'scenic',    'scorecard', 'scotland',
-  'seabird',  'select',    'sentence',  'shadow',
-  'showgirl', 'skullcap',  'skydive',   'slingshot',
-  'slothful', 'slowdown',  'snapline',  'snapshot',
-  'snowcap',  'snowslide', 'solo',      'spaniel',
-  'spearhead','spellbind', 'spheroid',  'spigot',
-  'spindle',  'spoilage',  'spyglass',  'stagehand',
-  'stagnate', 'stairway',  'standard',  'stapler',
-  'steamship','stepchild', 'sterling',  'stockman',
-  'stopwatch','stormy',    'sugar',     'surmount',
-  'suspense', 'swelter',   'tactics',   'talon',
-  'tapeworm', 'tempest',   'tiger',     'tissue',
-  'tonic',    'tracker',   'transit',   'trauma',
-  'treadmill','trojan',    'trouble',   'tumor',
-  'tunnel',   'tycoon',    'umpire',    'uncut',
-  'unearth',  'unwind',    'uproot',    'upset',
-  'upshot',   'vapor',     'village',   'virus',
-  'vulcan',   'waffle',    'wallet',    'watchword',
-  'wayside',  'willow',    'woodlark',  'zulu',
-];
+/// BIP39 mnemonic (checksum included) matching Go tyler-smith/go-bip39 word-for-word
+/// (same wordlist, same bit order). 32-byte digest → 24 words.
+List<String> _bip39Words(Uint8List entropy) {
+  final entBits = entropy.length * 8;
+  final csBits = entBits ~/ 32; // 8 for 256-bit entropy
+  final hash = SHA256Digest().process(entropy);
 
-/// Word fingerprint of the trusted signer set: BLAKE2s over length-prefixed,
-/// byte-sorted signer pubkeys, first 8 bytes → words. Identical to Go
-/// trustlog.SignerSetFingerprint.
+  bool bitAt(int i) {
+    final src = i < entBits ? entropy : hash;
+    final j = i < entBits ? i : i - entBits;
+    return (src[j >> 3] >> (7 - (j & 7))) & 1 == 1;
+  }
+
+  final total = entBits + csBits;
+  final words = <String>[];
+  for (var i = 0; i < total; i += 11) {
+    var idx = 0;
+    for (var b = 0; b < 11; b++) {
+      idx = (idx << 1) | (bitAt(i + b) ? 1 : 0);
+    }
+    words.add(bip39English[idx]);
+  }
+  return words;
+}
+
+/// BIP39 fingerprint of the signer set, identical to Go trustlog.SignerSetFingerprint.
 List<String> signerSetFingerprintWords(List<Uint8List> signers) {
-  assert(_fingerprintWords.length == 256);
   final sorted = [...signers]..sort(compareBytes);
   final buf = BytesBuilder();
   final len = Uint8List(4);
@@ -88,6 +41,5 @@ List<String> signerSetFingerprintWords(List<Uint8List> signers) {
     buf..add(len)..add(s);
   }
   final digest = blake2s(buf.toBytes());
-  final n = digest.length < 8 ? digest.length : 8;
-  return [for (var i = 0; i < n; i++) _fingerprintWords[digest[i]]];
+  return _bip39Words(Uint8List.fromList(digest));
 }
