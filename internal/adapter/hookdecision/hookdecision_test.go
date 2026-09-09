@@ -64,6 +64,13 @@ func TestFormatDecision(t *testing.T) {
 		t.Errorf("permission allow: %s", out)
 	}
 
+	// A plain tool with real tool_input must still not echo updatedInput: Claude
+	// Code discards such an allow and re-prompts (anthropics/claude-code#74256).
+	out = FormatDecision("Bash", json.RawMessage(`{"command":"ls -la"}`), api.RespondParams{OptionValue: "allow"})
+	if !strings.Contains(out, `"behavior":"allow"`) || strings.Contains(out, "updatedInput") {
+		t.Errorf("permission allow with tool_input: %s", out)
+	}
+
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
 	out = FormatDecision("AskUserQuestion", toolInput, api.RespondParams{
 		Behavior: "allow",
