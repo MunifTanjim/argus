@@ -23,6 +23,14 @@ type hookOut struct {
 	} `json:"hookSpecificOutput"`
 }
 
+// requiresUpdatedInput lists the tools whose `allow` Claude Code discards unless
+// the decision echoes tool_input as updatedInput. Other tools must NOT get it:
+// Claude then treats the input as modified and re-prompts (anthropics/claude-code#74256).
+var requiresUpdatedInput = map[string]bool{
+	"ExitPlanMode":    true,
+	"AskUserQuestion": true,
+}
+
 func formatAnswer(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -104,10 +112,7 @@ func FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondPar
 		}
 		out.HookSpecificOutput.Decision.UpdatedInput = ui
 	}
-	// Claude Code discards an `allow` for interaction-requiring tools (e.g.
-	// ExitPlanMode) unless updatedInput is echoed (anthropics/claude-code#74256).
-	// Echo the original tool_input so the approval and any setMode are honored.
-	if behavior == "allow" && out.HookSpecificOutput.Decision.UpdatedInput == nil {
+	if behavior == "allow" && requiresUpdatedInput[toolName] && out.HookSpecificOutput.Decision.UpdatedInput == nil {
 		var in map[string]any
 		if json.Unmarshal(toolInput, &in) == nil && len(in) > 0 {
 			out.HookSpecificOutput.Decision.UpdatedInput = in
