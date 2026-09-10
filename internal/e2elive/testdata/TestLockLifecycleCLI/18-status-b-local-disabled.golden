@@ -24,5 +24,10 @@ devices (2)
 
   pin: <FP> (source: file)
   local-disable: active
-  client pin: <FP> (source: file)
+
+this tui
+  identity: <NODE-B-CLIENT-DEVPUB>   authorized: no
+  pin: <FP> (source: file)
+  → to authorize this tui, run on a signer node:
+      argus lock sign <NODE-B-CLIENT-DEVPUB>
 --- stderr ---

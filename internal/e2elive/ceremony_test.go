@@ -32,6 +32,9 @@ func TestLockRevokeSignerCeremonyCLI(t *testing.T) {
 	c.Redact(devA, "<NODE-A-DEVPUB>")
 	c.Redact(devB, "<NODE-B-DEVPUB>")
 	c.Redact(devC, "<NODE-C-DEVPUB>")
+	c.Redact(Scrape(t, statusA0, PatClientDeviceKey), "<NODE-A-CLIENT-DEVPUB>")
+	c.Redact(Scrape(t, statusB0, PatClientDeviceKey), "<NODE-B-CLIENT-DEVPUB>")
+	c.Redact(Scrape(t, statusC0, PatClientDeviceKey), "<NODE-C-CLIENT-DEVPUB>")
 
 	initRes := a.LockRun("init", sigA, sigB, "--confirm")
 	genesis := Scrape(t, initRes, PatGenesis)

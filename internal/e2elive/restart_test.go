@@ -24,9 +24,11 @@ func lockedPair(t *testing.T, c *Cluster) (a, b *Node, redactTip func(Result)) {
 	sigA := Scrape(t, statusA, PatSignerKey)
 	c.Redact(sigA, "<NODE-A-SIGPUB>")
 	c.Redact(Scrape(t, statusA, PatDeviceKey), "<NODE-A-DEVPUB>")
+	c.Redact(Scrape(t, statusA, PatClientDeviceKey), "<NODE-A-CLIENT-DEVPUB>")
 	statusB := b.LockRun("status")
 	c.Redact(Scrape(t, statusB, PatSignerKey), "<NODE-B-SIGPUB>")
 	c.Redact(Scrape(t, statusB, PatDeviceKey), "<NODE-B-DEVPUB>")
+	c.Redact(Scrape(t, statusB, PatClientDeviceKey), "<NODE-B-CLIENT-DEVPUB>")
 
 	reTip := regexp.MustCompile(PatTip)
 	seen := map[string]bool{}

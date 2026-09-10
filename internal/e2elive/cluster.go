@@ -478,7 +478,7 @@ func (c *Cluster) WaitLockQuarantined(id string) {
 	}
 	waitFor(c.t, "lock quarantined on "+id, func() bool {
 		r := n.LockRun("status")
-		return r.ExitCode == 0 && strings.Contains(r.Stdout, "locked mode: QUARANTINED")
+		return r.ExitCode == 0 && strings.Contains(r.Stdout, "locked mode: locked out")
 	})
 }
 

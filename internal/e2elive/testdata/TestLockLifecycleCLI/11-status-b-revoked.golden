@@ -23,8 +23,13 @@ devices (1)
   <NODE-A-DEVPUB>
 
   pin: <FP> (source: file)
-  client pin: <FP> (source: file)
 
   to authorize this node, run on a signer node:
     argus lock sign <NODE-B-DEVPUB>
+
+this tui
+  identity: <NODE-B-CLIENT-DEVPUB>   authorized: no
+  pin: <FP> (source: file)
+  → to authorize this tui, run on a signer node:
+      argus lock sign <NODE-B-CLIENT-DEVPUB>
 --- stderr ---

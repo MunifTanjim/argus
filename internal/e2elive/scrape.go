@@ -10,10 +10,9 @@ import (
 const (
 	PatSignerKey = `  signer:   (sigpub:[0-9a-f]+)`
 	PatDeviceKey = `  identity: (devpub:[0-9a-f]+)`
-	// PatClientDeviceKey matches the ephemeral device identity printed in client
-	// mode (no local node socket), distinct from PatDeviceKey which matches the
-	// node-process identity.
-	PatClientDeviceKey = `this device identity: (devpub:[0-9a-f]+)`
+	// PatClientDeviceKey matches the tui (client) identity printed in the "this tui"
+	// block, distinct from PatDeviceKey which matches the "this node" identity.
+	PatClientDeviceKey = `this tui\n  identity: (devpub:[0-9a-f]+)`
 	PatGenesis         = `genesis: (gen:[0-9a-f]+)`
 	// PatTip matches both the operation-confirmation format ("current tip (audit):")
 	// and the lock-status section format ("  tip:").
