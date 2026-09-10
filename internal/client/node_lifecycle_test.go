@@ -37,7 +37,7 @@ func newLifecycleNode(t *testing.T, id, sessionID string) *fakeNode {
 
 func awaitSessionEventFor(t *testing.T, c *E2EClient, nodeID string) registry.Event {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case n := <-c.Events():

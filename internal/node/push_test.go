@@ -71,6 +71,17 @@ type chanSink struct{ ch chan push.Notification }
 
 func (c chanSink) Notify(_ context.Context, n push.Notification) { c.ch <- n }
 
+func waitSubscribed(t *testing.T, d *Node) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for d.reg.SubscriberCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("StartPush did not subscribe within 10s")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestNodeStartPushRendersDesktopWhenEnabled(t *testing.T) {
 	d := New()
 	d.SetDesktopNotify(true, nil)
@@ -80,7 +91,7 @@ func TestNodeStartPushRendersDesktopWhenEnabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go d.StartPush(ctx, 0)
-	time.Sleep(20 * time.Millisecond) // let Watch subscribe before publishing
+	waitSubscribed(t, d)
 
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
@@ -101,7 +112,7 @@ func TestNodeStartPushSkipsDesktopWhenDisabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go d.StartPush(ctx, 0)
-	time.Sleep(20 * time.Millisecond)
+	waitSubscribed(t, d)
 
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
@@ -145,8 +156,7 @@ func TestNodeStartPushDeliversMobileOnAwaitingInput(t *testing.T) {
 	defer cancel()
 	go d.StartPush(ctx, 0) // delay 0 => mobile fires immediately
 
-	// Allow the goroutine to subscribe to the registry before publishing events.
-	time.Sleep(20 * time.Millisecond)
+	waitSubscribed(t, d)
 
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusWorking})
 	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s1", Status: session.StatusAwaitingInput})
@@ -218,8 +228,7 @@ func TestNodeStartPushDelivererRefreshedAfterStart(t *testing.T) {
 	defer cancel()
 	go d.StartPush(ctx, 0)
 
-	// Allow Watch to subscribe before we set the deliverer and publish events.
-	time.Sleep(20 * time.Millisecond)
+	waitSubscribed(t, d)
 
 	got := make(chan []byte, 1)
 	d.SetPushDeliverer(delivererFunc(func(_ context.Context, _ string, body []byte, _, _ string) error {
