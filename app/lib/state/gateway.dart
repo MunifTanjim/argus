@@ -19,6 +19,7 @@ import '../transport/ssh_hostkey_store.dart';
 import '../transport/ssh_key_store.dart';
 import '../transport/ssh_ws_link.dart';
 import '../transport/ws_link.dart';
+import 'device_identity.dart';
 import 'profiles.dart';
 import 'push.dart';
 import 'sessions.dart';
@@ -92,21 +93,30 @@ Future<GatewayClient> buildE2EClient(
 bool equivocationOf(GatewayClient? client) =>
     client is E2EClient && client.equivocation;
 
-/// Starts the equivocation poll and returns the [Timer] so the caller can cancel
-/// it on dispose. It polls once immediately — so an equivocation already present
+/// Starts the trust poll on the resync cadence and returns the [Timer] so the
+/// caller can cancel it on dispose. It polls once immediately — so state present
 /// at connect surfaces without waiting a full [interval] — then on every tick.
-/// The poll writes [equivocationOf] unconditionally (no `!equivocation.state`
-/// guard) so a stale true left by a previous session is always cleared when the
-/// new [E2EClient] starts clean. [interval] defaults to 30 s (the trust-resync
-/// cadence); injectable for tests.
+/// It refreshes [equivocation] and [trustSignature]; the latter re-renders the
+/// trust page on a background trust change (disable, supersession, authorization)
+/// that would otherwise show only after a reconnect. Both are written
+/// unconditionally so a stale value from a previous session is cleared when the
+/// new [E2EClient] starts clean. [interval] defaults to 30 s; injectable for tests.
 @visibleForTesting
 Timer startEquivPoll(
   ConnectionManager manager,
-  StateController<bool> equivocation, {
+  StateController<bool> equivocation,
+  StateController<String> trustSignature, {
   Duration interval = const Duration(seconds: 30),
 }) {
-  void poll() => equivocation.state = equivocationOf(manager.client);
-  poll(); // surface an existing equivocation immediately, not only after the first tick
+  void poll() {
+    equivocation.state = equivocationOf(manager.client);
+    trustSignature.state = trustSignatureOf(trustSummaryOf(manager.client));
+  }
+
+  // Deferred: this runs during gatewayProvider's build, and a provider may not
+  // modify another during build. The microtask surfaces existing state right
+  // after build, before the first frame.
+  Future.microtask(poll);
   return Timer.periodic(interval, (_) => poll());
 }
 
@@ -199,6 +209,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final connState = ref.read(connStateProvider.notifier);
   final connError = ref.read(connErrorProvider.notifier);
   final equivocation = ref.read(equivocationProvider.notifier);
+  final trustSignature = ref.read(trustSignatureProvider.notifier);
   final profileStore = ref.read(profileStoreProvider);
   final testResults = ref.read(connectionTestResultsProvider.notifier);
   final identityStore = ref.read(clientIdentityStoreProvider);
@@ -236,7 +247,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   // Start the equivocation poll only for E2E connections. For plaintext,
   // equivocationOf always returns false anyway, but we skip the timer entirely.
   final Timer? equivPoll = creds.e2eEnabled
-      ? startEquivPoll(manager, equivocation)
+      ? startEquivPoll(manager, equivocation, trustSignature)
       : null;
   ref.onDispose(() {
     equivPoll?.cancel();
@@ -250,6 +261,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     // a switch/disconnect does not show stale data until the next fetch.
     Future.microtask(() {
       equivocation.state = false;
+      trustSignature.state = '';
       store.clear();
     });
   });
