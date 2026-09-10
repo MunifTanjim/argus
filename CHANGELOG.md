@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.0.13](https://github.com/MunifTanjim/argus/compare/0.0.12...0.0.13) (2026-09-10)
+
+
+### Features
+
+* **cli:** add lock init/sign/revoke-device/add-signer/remove-signer/disable commands ([ca251be](https://github.com/MunifTanjim/argus/commit/ca251be7f60494193997ffde68a99698865c15aa))
+* **cli:** add lock pin/unpin/local-disable/status/log commands ([8268838](https://github.com/MunifTanjim/argus/commit/82688380bcc9f209d7b11f86e738cc999bd5cea8))
+* **cli:** add the lock revoke-signer co-signing ceremony command ([7a7c8a0](https://github.com/MunifTanjim/argus/commit/7a7c8a0b5ff3aed134e559a59c6405564e8eca67))
+* **cli:** resolve trust-log pins at startup and use the locked client when pinned ([78b537a](https://github.com/MunifTanjim/argus/commit/78b537a30a9a3f57e3a1269683ded4eaa6acd0b7))
+* **cli:** select transport by e2ee flag and wire the e2e client ([3296355](https://github.com/MunifTanjim/argus/commit/329635575e9cee3c91ffbd8fb2df0f986e94dfe8))
+* **e2ee:** add atomicfile, keyfmt, and keyfile leaf packages ([bb7eae6](https://github.com/MunifTanjim/argus/commit/bb7eae6eb1b53b911f98606c6ef95405a12d49bd))
+* **e2ee:** add lock.genesis and trust-log push/changed api params ([68c8590](https://github.com/MunifTanjim/argus/commit/68c859011a153fcf41194c6968fd9991210ce463))
+* **e2ee:** add Noise session and identity package ([311872a](https://github.com/MunifTanjim/argus/commit/311872a01b53452ded6a55b7b81cea177d1deb43))
+* **e2ee:** add relay transport surface, e2ee flag, and node identify tip ([b2d4f3f](https://github.com/MunifTanjim/argus/commit/b2d4f3fce7c00244426dd6c988279bbf05071e7d))
+* **e2ee:** add the blind-relay encrypt/deliver primitives and push.deliver api ([239161c](https://github.com/MunifTanjim/argus/commit/239161c63d09cd2095718edc46544f2a3b65c92f))
+* **e2ee:** add the e2e client with authenticated tip cross-check ([5040433](https://github.com/MunifTanjim/argus/commit/504043389a0972aeb45e3e4d22a5757b20b3143b))
+* **e2ee:** add trustlog and trustpin packages ([b1ca529](https://github.com/MunifTanjim/argus/commit/b1ca52955e7644eeeb4dd911f702be8a19cfeb22))
+* **e2ee:** encode the trust fingerprint as a full-hash BIP39 mnemonic ([cc58c79](https://github.com/MunifTanjim/argus/commit/cc58c79d6113ae26f7ab0da8cad5f9dbbe00f3e8))
+* **e2ee:** warn on sustained channel decrypt failures (nonce-desync wedge tripwire) ([86e5b75](https://github.com/MunifTanjim/argus/commit/86e5b7514c22da4b37b0e7897be21064cf350e40))
+* **gateway:** add push.deliver handler on the blind path ([0972dfb](https://github.com/MunifTanjim/argus/commit/0972dfb8db6c27ead24db0f554a9515fb5e593e3))
+* **gateway:** nudge clients on a trust-log change ([0e11f78](https://github.com/MunifTanjim/argus/commit/0e11f78e3928fdba6a621af0dfe57788fa6eae76))
+* **gateway:** serve blind trust-log sync/push and changed fan-out ([cfceff1](https://github.com/MunifTanjim/argus/commit/cfceff1c7e8e107ac77128d456ea99ce01fa82ef))
+* **node:** add AdoptPin/DropPin recovery and the local-disable escape hatch ([ee153d9](https://github.com/MunifTanjim/argus/commit/ee153d9a342d3f60154ea65bd6bd632b3cc4f787))
+* **node:** add the push store, StartPush watch, and blind uplink deliverer ([625e079](https://github.com/MunifTanjim/argus/commit/625e0798ce3dddc5d31f1ea8bac44812fe29a7bd))
+* **node:** add the relay responder and expose the resolved tip on identify ([8b830e9](https://github.com/MunifTanjim/argus/commit/8b830e9942b41a4de8161a3dd7acc9b13b22cd38))
+* **node:** add the revoke-signer co-signing ceremony handlers ([2820a1b](https://github.com/MunifTanjim/argus/commit/2820a1b002b72e222e94ee17a07c6690d3bd69d7))
+* **node:** add the signer key and lock init/sign/revoke/add-signer/remove-signer/disable handlers ([a220361](https://github.com/MunifTanjim/argus/commit/a2203613b050b752debd9bc0fb953f95718e0490))
+* **node:** carry the signer public key on node identify ([0eafcaa](https://github.com/MunifTanjim/argus/commit/0eafcaa1f0cf11974199ce3ea99a01a2ebdbcaba))
+* **node:** quarantine on an unverifiable chain and close now-unauthorized channels ([8bb90ca](https://github.com/MunifTanjim/argus/commit/8bb90ca971ccd5b9b459f1f135bf5e93ef7f1822))
+* **node:** serve lock pin/unpin/local-disable/status/log and filter lock.* from co-located gateways ([76b65a3](https://github.com/MunifTanjim/argus/commit/76b65a3bc0cbe0b077104f1f31aba7bde1511fe0))
+* **node:** sync the trust log and enable authorized-device gating (no beacon/quarantine) ([6cfec25](https://github.com/MunifTanjim/argus/commit/6cfec25ca6d8ff87a8a2d60a75f05f726bf4cc82))
+* **tui:** surface locked-mode quarantine state ([36af60f](https://github.com/MunifTanjim/argus/commit/36af60f3a0db0ee2719337f2664bd93f2434a5f1))
+
+
+### Bug Fixes
+
+* **claude:** echo updatedInput only for interaction-requiring tool allows ([9d5a434](https://github.com/MunifTanjim/argus/commit/9d5a434f833169ffeb0344a277624b1dfebd34ca))
+* **gateway:** store hashed tokens at rest, never the raw secret ([93380ce](https://github.com/MunifTanjim/argus/commit/93380ce3cb2179ebcdb3b77c6607584d151f9cb8))
+* **node:** inject a fallback TERM for headless attach and force UTF-8 with -u ([a38884b](https://github.com/MunifTanjim/argus/commit/a38884b011efbe5f3bc34e2cc4699cb8552f644c))
+* **node:** suppress re-creating a session during its own exit hook ([1b47ab1](https://github.com/MunifTanjim/argus/commit/1b47ab1c81ac3afc586ece4f83bd82303ca867dc))
+
 ## [0.0.12](https://github.com/MunifTanjim/argus/compare/0.0.11...0.0.12) (2026-08-08)
 
 
