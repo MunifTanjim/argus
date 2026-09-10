@@ -401,7 +401,9 @@ func waitExited(n *recordingNotifier, termID string, d time.Duration) bool {
 			if json.Unmarshal(msg.Params, &ex) != nil {
 				continue
 			}
-			if ex.TermID == termID && ex.Reason == api.TermExitedProcess {
+			// Empty reason means process-exit too (see api.TerminalExited.Reason), and
+			// the pump-EOF path can win the race and report it that way.
+			if ex.TermID == termID && (ex.Reason == api.TermExitedProcess || ex.Reason == "") {
 				return true
 			}
 		case <-deadline:
