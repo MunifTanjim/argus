@@ -105,6 +105,7 @@ class TrustStore {
   Uint8List? _chainBytes;
 
   bool get disabled => _log?.disabled ?? false;
+  Uint8List? get genesisHash => _genesisHash;
   Uint8List? get tip => _log?.tip;
   List<Uint8List>? get signers => _log?.signers;
   List<Uint8List>? get devices => _log?.devices;
@@ -169,6 +170,22 @@ class TrustStore {
     }
     _log = cand;
     _entries = entries;
+    _chainBytes = Uint8List.fromList(chainBytes);
+    return true;
+  }
+
+  /// Re-anchors the store to a specific, caller-chosen chain, replacing any
+  /// pinned genesis — the equivalent of `argus lock pin GENESIS`. NOT a blind
+  /// re-TOFU: the caller passes the exact chain to adopt, not whatever the
+  /// gateway serves next. Verified before adoption; on failure the current anchor
+  /// is left untouched.
+  Future<bool> reanchor(Uint8List chainBytes) async {
+    final entries = unmarshalChain(chainBytes);
+    if (entries.isEmpty) throw const FormatException('trustlog: empty chain');
+    final cand = await TrustLog.load(entries);
+    _log = cand;
+    _entries = entries;
+    _genesisHash = Uint8List.fromList(hashEntry(entries.first));
     _chainBytes = Uint8List.fromList(chainBytes);
     return true;
   }

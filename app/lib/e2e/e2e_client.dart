@@ -17,6 +17,7 @@ import 'trustlog/assemble.dart' show assembleChainsReport, chainEntries;
 import 'trustlog/codec.dart' show hashEntry, unmarshalChain;
 import 'trustlog/entry.dart' show Entry;
 import 'trustlog/entry_store.dart' show EntryStore;
+import 'trustlog/superseding.dart' show detectSupersession;
 import 'trustlog/trust_store.dart';
 
 /// A node reachable through the blind gateway. [identityPubKey] is the node's
@@ -107,6 +108,17 @@ class E2EClient implements GatewayClient {
   Uint8List? get trustChainBytes => _trust?.chainBytes;
   Uint8List? get trustTip => _trust?.tip;
   List<Uint8List>? get trustSigners => _trust?.signers;
+
+  Uint8List? _supersededBy;
+  Uint8List? _supersedingChain;
+
+  /// The successor root, or null. Non-null only when this device's pinned root
+  /// was disabled and a different root is served.
+  Uint8List? get supersededByGenesis => _supersededBy;
+
+  /// True when a live successor is held. False when superseded but no live root
+  /// exists yet.
+  bool get canAdoptSupersedingRoot => _supersedingChain != null;
 
   /// null when there is no trust store or the network is open (not locked);
   /// true when locked-mode enforcement is active.
@@ -501,6 +513,39 @@ class E2EClient implements GatewayClient {
         level: 900,
       );
     }
+    _detectSupersession(chains);
+  }
+
+  /// Only a device whose own pinned root is disabled looks for a successor,
+  /// mirroring the node's detectSupersedingChain. Recomputed every sync
+  /// ("observe, not trip") so a second re-lock names the newest root, not a stale
+  /// one.
+  void _detectSupersession(List<Uint8List> chains) {
+    final trust = _trust;
+    final own = trust?.genesisHash;
+    if (trust == null || !trust.disabled || own == null) {
+      _supersededBy = null;
+      _supersedingChain = null;
+      return;
+    }
+    final s = detectSupersession(chains, own);
+    _supersededBy = s?.genesis;
+    _supersedingChain = s?.liveChain;
+  }
+
+  /// Adopts the live successor surfaced by [supersededByGenesis], re-pinning the
+  /// store to it. Returns false when no live successor is held. Persists the new
+  /// anchor and re-evaluates channels.
+  Future<bool> adoptSupersedingRoot() async {
+    final chain = _supersedingChain;
+    final trust = _trust;
+    if (chain == null || trust == null) return false;
+    await trust.reanchor(chain);
+    _supersededBy = null;
+    _supersedingChain = null;
+    await onTrustChainAdvance?.call(chain);
+    _reevaluateChannels();
+    return true;
   }
 
   /// Closes channels to nodes no longer authorized by the current trust log.

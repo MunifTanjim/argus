@@ -31,6 +31,12 @@ List<String> _bip39Words(Uint8List entropy) {
   return words;
 }
 
+/// BIP39 fingerprint of a 32-byte hash (a genesis or tip), identical to Go
+/// trustlog.HashFingerprint. This is the word list `argus lock status` prints
+/// under a genesis, so the two render the same fingerprint for out-of-band
+/// comparison.
+List<String> genesisFingerprintWords(Uint8List hash) => _bip39Words(hash);
+
 /// BIP39 fingerprint of the signer set, identical to Go trustlog.SignerSetFingerprint.
 List<String> signerSetFingerprintWords(List<Uint8List> signers) {
   final sorted = [...signers]..sort(compareBytes);

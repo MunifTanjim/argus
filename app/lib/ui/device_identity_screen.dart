@@ -30,19 +30,22 @@ class DeviceIdentityScreen extends ConsumerWidget {
     final summary = ref.watch(trustSummaryProvider);
     final identityAsync = ref.watch(deviceIdentityProvider);
 
-    final isAwaiting = summary.connected &&
-        summary.isLocked == true &&
-        !summary.isAuthorized &&
-        !summary.isDisabled;
+    final status = trustStatusOf(summary);
+    final isAwaiting = status == TrustStatus.awaitingAuthorization;
     final enrollExpanded = isAwaiting || !summary.connected;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Device identity')),
+      appBar: AppBar(title: const Text('Device trust')),
       body: CenteredBody(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             _StatusCard(summary: summary),
+            if (status == TrustStatus.supersededLiveRoot ||
+                status == TrustStatus.supersededNoRoot) ...[
+              const SizedBox(height: 8),
+              _SupersededCard(summary: summary, canAdopt: status == TrustStatus.supersededLiveRoot),
+            ],
             if (summary.equivocation) ...[
               const SizedBox(height: 8),
               const _EquivocationBanner(),
@@ -66,13 +69,11 @@ class DeviceIdentityScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            ExpansionTile(
-              enabled: summary.signers.isNotEmpty,
-              title: const Text('Verify trust'),
-              children: summary.signers.isNotEmpty
-                  ? [_VerifyBody(summary: summary)]
-                  : const [],
-            ),
+            if (summary.signers.isNotEmpty && trustSignersVerifiable(status))
+              ExpansionTile(
+                title: const Text('Verify trust'),
+                children: [_VerifyBody(summary: summary)],
+              ),
             const ExpansionTile(
               title: Text('Advanced'),
               children: [_AdvancedBody()],
@@ -110,27 +111,113 @@ class _StatusCard extends StatelessWidget {
   }
 
   static (String, IconData, Color) _statusDisplay(TrustSummary summary) {
-    if (!summary.connected) {
-      return ('Not connected', Icons.cloud_off_outlined, AppColors.dim);
+    const green = Color(0xFFb8bb26); // gruvbox green
+    const yellow = Color(0xFFfabd2f); // gruvbox yellow
+    switch (trustStatusOf(summary)) {
+      case TrustStatus.notConnected:
+        return ('Not connected', Icons.cloud_off_outlined, AppColors.dim);
+      case TrustStatus.openNetwork:
+        return ('Open network', Icons.lock_open_outlined, AppColors.secondary);
+      case TrustStatus.supersededLiveRoot:
+      case TrustStatus.supersededNoRoot:
+        return ('Trust root superseded', Icons.sync_problem_outlined, yellow);
+      case TrustStatus.disabled:
+        return ('Disabled', Icons.block_outlined, AppColors.dim);
+      case TrustStatus.authorized:
+        return ('Authorized', Icons.verified_outlined, green);
+      case TrustStatus.awaitingAuthorization:
+        return ('Awaiting authorization', Icons.pending_outlined, yellow);
     }
-    if (summary.isLocked == null) {
-      return ('Open network', Icons.lock_open_outlined, AppColors.secondary);
-    }
-    if (summary.isDisabled) {
-      return ('Disabled', Icons.block_outlined, AppColors.dim);
-    }
-    if (summary.isAuthorized) {
-      return (
-        'Authorized',
-        Icons.verified_outlined,
-        const Color(0xFFb8bb26), // gruvbox green
-      );
-    }
-    return (
-      'Awaiting authorization',
-      Icons.pending_outlined,
-      const Color(0xFFfabd2f), // gruvbox yellow
+  }
+}
+
+/// Mirrors the CLI: name the successor root, require an explicit re-pin, never
+/// adopt silently. [canAdopt] is false when no live successor exists yet.
+class _SupersededCard extends ConsumerWidget {
+  const _SupersededCard({required this.summary, required this.canAdopt});
+
+  final TrustSummary summary;
+  final bool canAdopt;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genesis = summary.supersededByGenesis;
+    final words = genesis == null ? '' : genesisFingerprintWords(genesis).join(' ');
+    return Card(
+      color: AppColors.card,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              canAdopt
+                  ? 'This device is pinned to a trust root that was disabled. The '
+                      'network re-locked under a new root. Compare the fingerprint '
+                      'below against a trusted device, then re-establish trust.'
+                  : 'This device is pinned to a trust root that was disabled. The '
+                      'network has not re-locked yet. Wait for a signer to re-lock, '
+                      'then re-establish trust.',
+              style: const TextStyle(color: AppColors.text),
+            ),
+            if (genesis != null) ...[
+              const SizedBox(height: 12),
+              const Text('New root fingerprint',
+                  style: TextStyle(color: AppColors.dim, fontSize: 12)),
+              const SizedBox(height: 4),
+              SelectableText(words,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+            ],
+            if (canAdopt) ...[
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => _confirmReestablish(context, ref, words),
+                child: const Text('Re-establish trust'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
+  }
+
+  Future<void> _confirmReestablish(BuildContext ctx, WidgetRef r, String words) async {
+    final ok = await showDialog<bool>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Re-establish trust?'),
+        content: Text(
+          'This device will adopt the new trust root:\n\n$words\n\n'
+          'Only continue if this fingerprint matches a device you trust.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('Re-establish'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !ctx.mounted) return;
+    final client = r.read(gatewayProvider)?.client;
+    final adopted = client is E2EClient && await client.adoptSupersedingRoot();
+    if (adopted) {
+      // Reconnect so the client rebuilds from the newly-pinned root and opens
+      // channels to the now-authorized nodes. adopt alone re-pins but never opens
+      // channels (_reevaluateChannels only closes), so sessions would stay empty.
+      // Mirrors the CLI: `argus lock pin` then restart.
+      r.read(gatewayProvider)?.reconnectNow();
+    }
+    if (!ctx.mounted) return;
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+      content: Text(adopted
+          ? 'Trust re-established; reconnecting.'
+          : 'Could not re-establish trust; try again after the next sync.'),
+    ));
   }
 }
 

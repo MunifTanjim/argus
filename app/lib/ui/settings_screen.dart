@@ -73,8 +73,8 @@ class SettingsScreen extends ConsumerWidget {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.key_outlined),
-                      title: const Text('Device identity'),
-                      subtitle: const Text('Enroll & verify this device'),
+                      title: const Text('Device trust'),
+                      subtitle: const Text('Status, enrollment & recovery'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
