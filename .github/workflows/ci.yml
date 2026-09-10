@@ -7,11 +7,37 @@ on:
     branches: [main, dev]
 
 jobs:
-  check:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      app: ${{ steps.filter.outputs.app }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            app:
+              - 'app/**'
+              - '.github/workflows/ci.yml'
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    name: check:go
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -27,11 +53,39 @@ jobs:
       - name: Test
         run: make test
 
-  convention:
+  app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    name: check:app
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+      - name: Cache pub deps
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: ${{ runner.os }}-pub-
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Dependencies
+        run: flutter pub get
+      - name: Test
+        run: flutter test
+
+  convention:
+    runs-on: ubuntu-latest
+    name: check:convention
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Setup pnpm
