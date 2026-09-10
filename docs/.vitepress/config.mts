@@ -1,6 +1,7 @@
 import { copyFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
 const hostname = "https://argus.muniftanjim.dev";
 
@@ -9,7 +10,8 @@ const installScriptPath = fileURLToPath(
   new URL("../../scripts/install.sh", import.meta.url),
 );
 
-export default defineConfig({
+export default withMermaid(
+  defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
@@ -39,6 +41,13 @@ export default defineConfig({
   },
 
   vite: {
+    // Pre-bundle mermaid's CJS deps so the dev server resolves their default exports.
+    optimizeDeps: {
+      include: ["mermaid", "dayjs"],
+    },
+    ssr: {
+      noExternal: ["mermaid"],
+    },
     plugins: [
       {
         name: "serve-install-script",
@@ -143,4 +152,5 @@ export default defineConfig({
       provider: "local",
     },
   },
-});
+  }),
+);
