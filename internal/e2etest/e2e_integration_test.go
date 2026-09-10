@@ -142,8 +142,10 @@ func TestNodeIdentifyOverSealedChannel(t *testing.T) {
 	}
 	defer c.Close()
 
-	_, known := c.AuthTipKnownForTest(kp.Public)
-	if !known {
-		t.Fatal("node.identify over the sealed channel did not populate authTip: responder may not route node.identify")
-	}
+	// node.identify runs over the sealed channel asynchronously (and survives a
+	// reconnect), so poll rather than reading authTip the instant the client returns.
+	waitFor(t, "authTip populated by node.identify over the sealed channel", func() bool {
+		_, known := c.AuthTipKnownForTest(kp.Public)
+		return known
+	})
 }
