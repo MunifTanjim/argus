@@ -77,6 +77,14 @@ func (r *Registry) Snapshot() []session.Session {
 	return out
 }
 
+// SubscriberCount reports active subscribers so a caller can wait for a watcher to
+// subscribe before publishing.
+func (r *Registry) SubscriberCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.subs)
+}
+
 // Subscribe returns an event channel plus a cancel func. The channel is buffered;
 // events are dropped for a slow subscriber rather than blocking the registry.
 func (r *Registry) Subscribe() (<-chan Event, func()) {

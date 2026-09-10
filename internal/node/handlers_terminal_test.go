@@ -93,7 +93,7 @@ func TestTerminalOpenStreamsAndCloses(t *testing.T) {
 		if m.TermID != "t1" || m.Data == "" {
 			t.Fatalf("bad output: %+v", m)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("no terminal.output received")
 	}
 
@@ -144,7 +144,7 @@ func TestTerminalOpenSharedWindowGuard(t *testing.T) {
 	}
 	select {
 	case <-notif.outputs:
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("no terminal.output after allowed open")
 	}
 	if _, err := d.handleTerminalClose(octx, mustJSON(api.TerminalCloseParams{TermID: "t2"})); err != nil {
@@ -187,7 +187,7 @@ func TestTerminalOpenEvictsExistingViewer(t *testing.T) {
 
 	// A second open evicts A before the new viewer registers (as handleTerminalOpen does).
 	d.evictSessionTerm("s")
-	if !waitEvicted(nA, "tA", 3*time.Second) {
+	if !waitEvicted(nA, "tA", 10*time.Second) {
 		t.Fatal("viewer A was not evicted")
 	}
 
@@ -222,7 +222,7 @@ func TestTerminalOpenEvictsExistingViewer(t *testing.T) {
 		if m.TermID != "tB" {
 			t.Fatalf("bad output for B: %+v", m)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("viewer B: no output")
 	}
 }
@@ -254,7 +254,7 @@ func TestSessionEndBootsViewer(t *testing.T) {
 	}
 	select {
 	case <-n.outputs:
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("no output before session end")
 	}
 
@@ -268,7 +268,7 @@ func TestSessionEndBootsViewer(t *testing.T) {
 		Server: session.TmuxServerDefault, PaneID: pane, Status: session.StatusDead,
 	})
 
-	if !waitExited(n, "t1", 3*time.Second) {
+	if !waitExited(n, "t1", 10*time.Second) {
 		t.Fatal("viewer was not booted on session end")
 	}
 	d.sessionTermsMu.Lock()

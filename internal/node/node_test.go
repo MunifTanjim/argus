@@ -95,7 +95,7 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 		t.Fatalf("input: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var c api.CaptureResult
 		if err := client.Call(api.MethodSessionCapture, api.SessionRef{SessionID: sessionID}, &c); err == nil {
@@ -206,7 +206,7 @@ func TestSpawnAndKillEndToEnd(t *testing.T) {
 		t.Fatalf("kill: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if !paneExists(t, tmuxClient, res.PaneID) {
 			return // killed

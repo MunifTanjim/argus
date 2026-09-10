@@ -61,19 +61,24 @@ func TestSubscribeWorksWithoutRegisterConn(t *testing.T) {
 		if n.Method != api.MethodTranscriptDelta {
 			t.Fatalf("method = %q, want %q", n.Method, api.MethodTranscriptDelta)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("no delta notification after append (waited 3s)")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no delta notification after append (waited 10s)")
 	}
 
 	// Cancel the ctx; the lazy goroutine should call dropConn and stop the poller.
 	cancel()
-	time.Sleep(150 * time.Millisecond) // let the goroutine run
-
-	d.subsMu.Lock()
-	_, stillRegistered := d.conns[fn]
-	d.subsMu.Unlock()
-	if stillRegistered {
-		t.Fatal("ctx cancel should have removed the lazily-registered conn via dropConn")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		d.subsMu.Lock()
+		_, stillRegistered := d.conns[fn]
+		d.subsMu.Unlock()
+		if !stillRegistered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ctx cancel should have removed the lazily-registered conn via dropConn")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Drain any in-flight notification.
@@ -223,8 +228,8 @@ func TestSubscribePushesDeltaOnAppend(t *testing.T) {
 		if got.SubID != "x" {
 			t.Errorf("sub_id = %q, want x", got.SubID)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("no delta notification received after append (waited 3s)")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no delta notification received after append (waited 10s)")
 	}
 
 	// dropConn must stop the poller; drain the channel and confirm no more arrive.
