@@ -3,7 +3,7 @@ exit 0
 --- stdout ---
 locked mode: not enabled
 
-chain: none — locked mode not enabled on this node
+chain: none — this node holds no trust log
 
 this node
   identity: <NODE-A-DEVPUB>
@@ -14,5 +14,8 @@ signers: none
 devices: none
 
   pin: none
-  client pin: none
+
+this tui
+  identity: <NODE-A-CLIENT-DEVPUB>
+  pin: none
 --- stderr ---

@@ -10,4 +10,4 @@ Next: run on another signer node:
 After collecting enough co-signs, run on any signer node:
   argus lock revoke-signer --finish <blob>
 
-Note: entries appended after the fork point by revoked signers will be erased.
+Note: all entries after the fork point are erased, not only the revoked signer's; honest entries after it must be re-created.

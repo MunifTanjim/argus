@@ -75,7 +75,7 @@ func newLockStatusCmd() *cobra.Command {
 				if ierr != nil {
 					return fail(cmd, err) // surface the original node-dial error
 				}
-				shell.StdOutF("locked mode: (no local node)\nthis tui\n  identity: %s\n  → to authorize this tui, run on a signer node:\n      %s\n",
+				shell.StdOutF("locked mode: (no local node)\n\nthis tui\n  identity: %s\n  → to authorize this tui, run on a signer node:\n      %s\n",
 					keyfmt.DeviceKey.Encode(kp.Public), lockSignHint(kp.Public))
 				printClientPinStatus(ctx, cfg)
 				// Exit 0 only when the socket was not explicitly requested and simply
@@ -120,7 +120,7 @@ func printTUIRole(ctx context.Context, cfg *config.Config, st api.LockStatusResu
 	if err != nil {
 		return printClientPinStatus(ctx, cfg) // identity unreadable: still show the pin line
 	}
-	shell.StdOutF("this tui\n  identity: %s", keyfmt.DeviceKey.Encode(kp.Public))
+	shell.StdOutF("\nthis tui\n  identity: %s", keyfmt.DeviceKey.Encode(kp.Public))
 	showAuthz := st.Enabled && devicesKnown(st)
 	authorized := showAuthz && keyAuthorized(kp.Public, st.Devices)
 	if showAuthz {

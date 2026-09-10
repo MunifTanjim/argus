@@ -25,10 +25,15 @@ devices (2)
   <NODE-B-DEVPUB>
 
   pin: <FP> (source: file)
-  client pin: <FP> — SUPERSEDED: the pinned chain was disabled network-wide; no replacement root is available yet
-       the dashboard on this machine opens no channels
+
+this tui
+  identity: <NODE-A-CLIENT-DEVPUB>   authorized: no
+  pin: <FP> — the pinned root was disabled network-wide; no new root yet
+       this tui opens no channels
        a signer must run:
          argus lock init
        then on each device:
          argus lock pin
+  → to authorize this tui, run on a signer node:
+      argus lock sign <NODE-A-CLIENT-DEVPUB>
 --- stderr ---
