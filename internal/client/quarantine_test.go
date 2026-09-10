@@ -133,8 +133,14 @@ func TestUnpinnedClientDropsChannelOnQuarantine(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if snap := m.byNodeSnapshot(); len(snap) != 0 {
-		t.Fatalf("expected empty byNode after quarantine, got %d channel(s)", len(snap))
+	// Tripping the gate and dropping the channels are separate steps, so poll for
+	// the drain rather than reading byNode the instant Quarantined() flips.
+	drainBy := time.Now().Add(2 * time.Second)
+	for len(m.byNodeSnapshot()) != 0 {
+		if time.Now().After(drainBy) {
+			t.Fatalf("expected empty byNode after quarantine, got %d channel(s)", len(m.byNodeSnapshot()))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
