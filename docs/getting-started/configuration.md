@@ -40,6 +40,12 @@ log:
   format: pretty        # pretty | json
 ```
 
+## End-to-End Encryption
+
+`e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport,
+and `lock.genesis` pins the install to a trust log for locked mode. See
+[End-to-End Encryption](/guide/e2ee) for setup and the two modes.
+
 ## Desktop notifications
 
 `push.desktop.enabled` (default `false`) opts this node into native **macOS**

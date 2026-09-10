@@ -103,6 +103,7 @@ export default defineConfig({
           { text: "Single Machine", link: "/guide/single-machine" },
           { text: "Multi Machine", link: "/guide/multi-machine" },
           { text: "Gateway Tunnel", link: "/guide/gateway-tunnel" },
+          { text: "End-to-End Encryption", link: "/guide/e2ee" },
           { text: "TUI", link: "/guide/tui" },
           { text: "Mobile App", link: "/guide/mobile-app" },
         ],
