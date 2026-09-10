@@ -21,12 +21,14 @@ func TestLockLifecycleCLI(t *testing.T) {
 	devA := Scrape(t, statusA, PatDeviceKey)
 	c.Redact(sigA, "<NODE-A-SIGPUB>")
 	c.Redact(devA, "<NODE-A-DEVPUB>")
+	c.Redact(Scrape(t, statusA, PatClientDeviceKey), "<NODE-A-CLIENT-DEVPUB>")
 
 	statusB := b.LockRun("status")
 	sigB := Scrape(t, statusB, PatSignerKey)
 	devB := Scrape(t, statusB, PatDeviceKey)
 	c.Redact(sigB, "<NODE-B-SIGPUB>")
 	c.Redact(devB, "<NODE-B-DEVPUB>")
+	c.Redact(Scrape(t, statusB, PatClientDeviceKey), "<NODE-B-CLIENT-DEVPUB>")
 
 	c.Step(t, "status-a-unlocked", statusA)
 	c.Step(t, "status-b-unlocked", statusB)

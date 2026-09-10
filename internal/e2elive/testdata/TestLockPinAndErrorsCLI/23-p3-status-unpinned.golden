@@ -1,9 +1,10 @@
 $ argus lock status --socket=/home/argus/s --gateway=ws://<RUN-ID>-gw:8443 --token=<TOKEN>
 exit 0
 --- stdout ---
-locked mode: not enabled
+locked mode: locked out — the network is locked, but this node is not pinned to it
+  this node opens no channels until you pin it (see pin: below)
 
-chain: none — locked mode not enabled on this node
+chain: none — this node holds no trust log
 
 this node
   identity: <NODE-B-DEVPUB>
@@ -13,9 +14,12 @@ signers: none
 
 devices: none
 
-  pin: none — QUARANTINED (chain seen: <FP>)
+  pin: none — not pinned to the network's root (<FP>)
        run:
          argus lock pin <GENESIS-2>
-  client pin: none — QUARANTINED (chain seen: <FP>)
-       the dashboard on this machine opens no channels; run: argus lock pin
+
+this tui
+  identity: <NODE-B-CLIENT-DEVPUB>
+  pin: none — locked out: not pinned to the network's root (<FP>)
+       this tui opens no channels; run: argus lock pin
 --- stderr ---

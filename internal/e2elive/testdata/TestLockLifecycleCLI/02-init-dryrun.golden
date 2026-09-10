@@ -12,5 +12,5 @@ would create a trust log with:
   these identity keys come from the gateway, which nothing has verified yet
 
 nothing has been created. re-run with --confirm:
-  argus lock init --confirm <NODE-A-SIGPUB>
+  argus lock init --confirm --gateway ws://<RUN-ID>-gw:8443 --socket /home/argus/s --token <TOKEN> <NODE-A-SIGPUB>
 --- stderr ---

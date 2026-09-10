@@ -20,10 +20,12 @@ func TestLockPinAndErrorsCLI(t *testing.T) {
 	sigA := Scrape(t, statusA, PatSignerKey)
 	c.Redact(sigA, "<NODE-A-SIGPUB>")
 	c.Redact(Scrape(t, statusA, PatDeviceKey), "<NODE-A-DEVPUB>")
+	c.Redact(Scrape(t, statusA, PatClientDeviceKey), "<NODE-A-CLIENT-DEVPUB>")
 	statusB := b.LockRun("status")
 	sigB := Scrape(t, statusB, PatSignerKey)
 	c.Redact(sigB, "<NODE-B-SIGPUB>")
 	c.Redact(Scrape(t, statusB, PatDeviceKey), "<NODE-B-DEVPUB>")
+	c.Redact(Scrape(t, statusB, PatClientDeviceKey), "<NODE-B-CLIENT-DEVPUB>")
 
 	reTip := regexp.MustCompile(PatTip)
 	seenTips := map[string]bool{}
