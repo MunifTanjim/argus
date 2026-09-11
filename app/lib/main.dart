@@ -1,3 +1,5 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pairing/gateway_store.dart';
 import 'pairing/legacy_migration.dart';
+import 'push/fcm_source.dart';
 import 'push/unifiedpush_background.dart';
 import 'state/gateway.dart';
 import 'state/profiles.dart';
@@ -17,6 +20,15 @@ import 'ui/theme.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Firebase.initializeApp needs google-services.json; a missing/invalid config
+  // is swallowed so FCM stays inactive while everything else works.
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    initFcmListeners();
+  } catch (e) {
+    debugPrint('Firebase init failed: $e');
+  }
   // Register UnifiedPush callbacks here so they also run in the headless
   // background isolate (started with --unifiedpush-bg) when the app is killed,
   // letting an incoming push raise a notification.

@@ -6,6 +6,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Optional FCM support: only applied when google-services.json is present.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Release signing config, read from android/key.properties (gitignored). Absent
 // on machines that only do debug builds, in which case the release build falls
 // back to debug keys below.

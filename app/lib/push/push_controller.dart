@@ -1,12 +1,17 @@
 import 'dart:async';
 
-import '../e2e/aggregate.dart' show pushGoneCode;
+import 'package:meta/meta.dart';
+
 import '../pairing/gateway_store.dart';
 import '../transport/gateway_client.dart';
 import 'device_id.dart';
+import 'fcm_source.dart';
 import 'notifications.dart';
 import 'push_provider.dart';
 import 'push_target_store.dart';
+import 'pushport_client.dart';
+import 'pushport_config.dart';
+import 'pushport_fcm_provider.dart';
 import 'register.dart';
 import 'unifiedpush_background.dart';
 import 'unifiedpush_provider.dart';
@@ -15,28 +20,39 @@ import 'unifiedpush_provider.dart';
 /// distributor, preferred by default when no distributor has been chosen.
 const appPackageName = 'dev.muniftanjim.argus';
 
-/// PushController coordinates push end to end over UnifiedPush / Web Push. It
-/// activates a distributor (the embedded FCM one by default, or an external/chosen
-/// one), shows incoming messages, tracks the device [target] and (re)registers it
-/// on each connect — keyed by a stable device id so re-registration replaces the
-/// prior endpoint — and surfaces tapped notifications as session ids.
+/// Coordinates push end to end across backends: UnifiedPush (always) and the
+/// PushPort/FCM provider (when [PushPortConfig.isConfigured]). Keeps [_active] as
+/// the single running provider, (re)registers the device [target] on each
+/// connect, and surfaces tapped notifications as session ids.
 class PushController {
   PushController({
     UnifiedPushProvider? unifiedPush,
+    @visibleForTesting
+    List<PushProvider>? extraProviders,
     DeviceIdStore? deviceIdStore,
     PushTargetStore? targetStore,
+    SecureKv? providerKv,
     void Function(String sessionId)? onSessionTap,
+    @visibleForTesting
+    String? testDeviceId,
   })  : _unifiedPush = unifiedPush ?? UnifiedPushProvider(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(const FlutterSecureKv()),
         _targetStore = targetStore ?? PushTargetStore(const FlutterSecureKv()),
+        _providerKv = providerKv ?? const FlutterSecureKv(),
         // ignore: prefer_initializing_formals — private field, public named param.
-        _onSessionTap = onSessionTap;
+        _onSessionTap = onSessionTap {
+    _deviceId = testDeviceId;
+    _buildProviders(extraProviders);
+  }
 
   final UnifiedPushProvider _unifiedPush;
   final DeviceIdStore _deviceIdStore;
   final PushTargetStore _targetStore;
+  final SecureKv _providerKv;
+  static const _kProviderKey = 'push_provider';
   final void Function(String sessionId)? _onSessionTap;
   final _registrations = StreamController<bool>.broadcast();
+  late final Map<String, PushProvider> _providers;
   bool? _lastRegistration;
   PushTarget? _registeredTarget; // target already registered on this connection
   Future<bool>? _registerInFlight; // the running registration for _registeredTarget
@@ -47,6 +63,26 @@ class PushController {
   String? _deviceId;
   String? _selectedDistributor;
   StreamSubscription<String>? _tapSub;
+  bool _pushPortAvailable = false;
+
+  void _buildProviders(List<PushProvider>? extra) {
+    final all = <PushProvider>[_unifiedPush];
+    if (extra != null) {
+      all.addAll(extra);
+    } else if (PushPortConfig.isConfigured) {
+      final ppClient = PushPortClient(
+        baseUrl: PushPortConfig.baseUrl,
+        appId: PushPortConfig.appId,
+      );
+      all.add(PushPortFcmProvider(
+        client: ppClient,
+        getFcmToken: fcmToken,
+        incomingEncrypted: fcmEncryptedMessages,
+        incomingEncryptedOpens: fcmEncryptedOpens,
+      ));
+    }
+    _providers = {for (final p in all) p.name: p};
+  }
 
   PushTarget? get target => _target;
 
@@ -57,21 +93,19 @@ class PushController {
   /// why no endpoint was produced.
   Stream<String> get pushFailures => unifiedPushFailures;
 
-  /// Whether each gateway (re)registration attempt succeeded. Lets the UI surface
-  /// a failed registration instead of silently leaving the device unreachable.
+  /// Whether each gateway (re)registration attempt succeeded.
   Stream<bool> get registrations => _registrations.stream;
 
   /// The most recent registration result, or null if none has been attempted yet.
-  /// The stream is broadcast (no replay), so a screen that opens after the attempt
-  /// reads this to seed its state instead of waiting for the next event.
   bool? get lastRegistration => _lastRegistration;
+
+  /// Whether the connected gateway has a PushPort token configured.
+  bool get pushPortAvailable => _pushPortAvailable;
 
   /// Sets up local notifications, permission, tap routing, and starts UnifiedPush
   /// (defaulting to the embedded distributor when present).
   Future<void> init() async {
-    _deviceId = await _deviceIdStore.getOrCreate();
-    // Restore the last known target so a relaunch can re-register it on connect
-    // without waiting for the distributor to re-emit an endpoint.
+    _deviceId ??= await _deviceIdStore.getOrCreate();
     _target = await _targetStore.load();
     _unifiedPush.preferredDistributor = appPackageName;
 
@@ -81,7 +115,20 @@ class PushController {
     final launchId = await PushNotifications.instance.launchSessionId();
     if (launchId != null) _emitTap(launchId);
 
-    if (await _unifiedPush.isAvailable()) await _activate(_unifiedPush);
+    await activateInitialProvider();
+  }
+
+  /// Activates the persisted provider choice, falling back to UnifiedPush.
+  /// Called from [init] on startup so a prior selection survives a restart.
+  @visibleForTesting
+  Future<void> activateInitialProvider() async {
+    final saved = await _providerKv.read(_kProviderKey);
+    final savedProvider = saved != null ? _providers[saved] : null;
+    if (savedProvider != null) {
+      await _activate(savedProvider);
+    } else if (await _unifiedPush.isAvailable()) {
+      await _activate(_unifiedPush);
+    }
   }
 
   /// Asks the gateway to send a test notification to this device's registered
@@ -95,31 +142,29 @@ class PushController {
     await client.call('push.test', {'device_id': _deviceId});
   }
 
-  /// Forces a fresh registration to recover from a stale/missing one (e.g. a
-  /// failed test, or the gateway pruned a gone target). Re-requests an endpoint
-  /// from the distributor and re-registers it with the gateway, bypassing the
-  /// per-connection dedupe. Returns true once the gateway acknowledges.
-  ///
-  /// With [force] (push.test returned [pushGoneCode]: the cached endpoint is
-  /// permanently dead), the dead target is dropped everywhere — persisted,
-  /// in-memory, and the distributor's last-emitted endpoint — and only a brand-new
-  /// endpoint is registered; the dead one is never resurrected. Returns false if no
-  /// fresh endpoint could be obtained (the push token is likely dead; the user must
-  /// clear app data / reinstall to mint a new one).
+  /// Forces a fresh registration to recover from a stale/missing one. Pass
+  /// [force] when the endpoint is permanently gone.
   Future<bool> reregister({bool force = false}) async {
-    _registeredTarget = null; // bypass dedupe so the register actually fires
+    _registeredTarget = null;
     _registerInFlight = null;
     if (force) {
       await _targetStore.clear();
       _target = null;
-      final fresh = await _unifiedPush.forceFreshTarget();
-      if (fresh == null) return false;
-      _target = fresh;
-      await _targetStore.save(fresh);
+      if (_active == _unifiedPush) {
+        // UP: force-unregister first so the dead endpoint can't be re-emitted.
+        final fresh = await _unifiedPush.forceFreshTarget();
+        if (fresh == null) return false;
+        _target = fresh;
+        await _targetStore.save(fresh);
+      } else {
+        // Non-UP providers (pushport/fcm): restart to mint a fresh subscription.
+        final provider = _active;
+        if (provider != null) {
+          await provider.stop();
+          await _activate(provider);
+        }
+      }
     } else {
-      // refresh() waits for the fresh endpoint, during which _setTarget may start
-      // its own registration; _registerIfPossible then awaits that same in-flight
-      // RPC rather than returning before it completes.
       await _active?.refresh();
     }
     return _registerIfPossible();
@@ -128,16 +173,13 @@ class PushController {
   /// Installed UnifiedPush distributor apps detected on the device.
   Future<List<String>> distributors() => _unifiedPush.availableDistributors();
 
-  /// The selected UnifiedPush distributor: the acknowledged one if known, else the
-  /// user's last choice (getDistributor only returns an acknowledged distributor,
-  /// which is async for the embedded FCM one).
+  /// The selected UnifiedPush distributor.
   Future<String?> currentDistributor() async =>
       (await _unifiedPush.savedDistributor()) ?? _selectedDistributor;
 
-  /// Selects a distributor and (re)registers it as the active backend.
+  /// Selects a UnifiedPush distributor and (re)registers it as the active backend.
   Future<void> useDistributor(String distributor) async {
     _selectedDistributor = distributor;
-    // The embedded FCM distributor needs the VAPID key at register() time.
     final client = _client;
     if (client != null && _unifiedPush.vapidPubKey == null) {
       await _fetchVapidKey(client);
@@ -145,9 +187,18 @@ class PushController {
     await _unifiedPush.chooseDistributor(distributor);
     if (_active != _unifiedPush) await _active?.stop();
     await _activate(_unifiedPush);
-    // start() auto-registers only a single/preferred distributor; for an explicit
-    // pick alongside others, register the chosen one directly.
     await _unifiedPush.register();
+  }
+
+  /// Switches to the named provider, stopping the current one. Throws if the
+  /// name is not among the available providers.
+  Future<void> useProvider(String name) async {
+    final provider = _providers[name];
+    if (provider == null) throw ArgumentError('Unknown provider: $name');
+    if (_active == provider) return;
+    await _active?.stop();
+    await _activate(provider);
+    await _providerKv.write(_kProviderKey, name);
   }
 
   /// Registers the current target once connected, and fetches the gateway's VAPID
@@ -158,22 +209,15 @@ class PushController {
   }
 
   Future<void> _onAttached(GatewayClient client) async {
-    // New connection: register once (refreshing the gateway record), even if the
-    // target is unchanged from the previous connection.
     _registeredTarget = null;
     _registerInFlight = null;
-    // Fetch the VAPID key first (the embedded distributor needs it before it can
-    // produce an endpoint), then register the known target. If we still have no
-    // target, ask the backend to re-emit one so registration can follow.
-    await _fetchVapidKey(client);
+    await Future.wait([_fetchVapidKey(client), refreshServerInfo()]);
     await _registerIfPossible();
     if (_target == null) await _active?.refresh();
   }
 
   /// Tell the currently-connected gateway to stop pushing to this device, then
-  /// detach. Called when the active connection is torn down (profile switch or
-  /// disconnect) so only the active gateway delivers notifications. Leaves the
-  /// push backend and stored endpoint intact so the next connect re-registers.
+  /// detach.
   Future<void> unregisterFromCurrentGateway() async {
     final client = _client;
     final deviceId = _deviceId;
@@ -187,6 +231,19 @@ class PushController {
   Future<void> dispose() async {
     await _tapSub?.cancel();
     await _registrations.close();
+  }
+
+  /// Fetches `server.info` to update [pushPortAvailable]. Fail-closed: if the
+  /// call throws, [pushPortAvailable] is set to false.
+  Future<void> refreshServerInfo() async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      final res = await client.call('server.info');
+      _pushPortAvailable = (res is Map) && res['pushPortConfigured'] == true;
+    } catch (_) {
+      _pushPortAvailable = false;
+    }
   }
 
   Future<void> _fetchVapidKey(GatewayClient client) async {
@@ -228,10 +285,6 @@ class PushController {
     final target = _target;
     final deviceId = _deviceId;
     if (client == null || target == null || deviceId == null) return false;
-    // Collapse the duplicate calls that fire on a single connect (the persisted
-    // target and the distributor's re-emitted endpoint are normally identical).
-    // Claim synchronously before awaiting so a concurrent call sees it and awaits
-    // the same in-flight RPC instead of starting a second one or returning early.
     if (target == _registeredTarget) {
       return _registerInFlight ?? Future.value(true);
     }
@@ -243,7 +296,7 @@ class PushController {
 
   Future<bool> _register(GatewayClient client, String deviceId, PushTarget target) async {
     final ok = await registerWithRetry(client, deviceId, target);
-    if (!ok) _registeredTarget = null; // let a later attempt retry
+    if (!ok) _registeredTarget = null;
     _lastRegistration = ok;
     _registrations.add(ok);
     return ok;

@@ -5,14 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../e2e/aggregate.dart' show pushGoneCode;
 import '../push/push_controller.dart';
+import '../push/pushport_config.dart';
 import '../state/push.dart';
 import '../transport/jsonrpc.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
-/// Push notifications settings: the active backend, a test button, and a
-/// UnifiedPush distributor picker (the embedded FCM distributor appears here as
-/// "argus" alongside any installed external distributors).
+/// Push notifications settings: the active backend, a test button, a provider
+/// picker, and (when UnifiedPush is active) a distributor picker.
 class PushSettingsScreen extends ConsumerStatefulWidget {
   const PushSettingsScreen({super.key});
 
@@ -23,6 +23,7 @@ class PushSettingsScreen extends ConsumerStatefulWidget {
 class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   List<String> _distributors = [];
   String? _currentDistributor;
+  String? _activeProvider;
   bool _loading = true;
   bool? _registered;
   StreamSubscription<String>? _failureSub;
@@ -30,12 +31,13 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
 
   PushController get _controller => ref.read(pushControllerProvider);
 
+  bool get _showDistributorPicker => _activeProvider == 'unifiedpush';
+
   @override
   void initState() {
     super.initState();
-    // Seed from the last known result: registration usually completes on connect,
-    // before this screen (and its broadcast subscription) exists.
     _registered = _controller.lastRegistration;
+    _activeProvider = _controller.activeBackend;
     _failureSub = _controller.pushFailures.listen((reason) {
       if (mounted) _toast('UnifiedPush registration failed: $reason');
     });
@@ -57,12 +59,12 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   Future<void> _load() async {
     final distributors = await _controller.distributors();
     final current = await _controller.currentDistributor();
+    await _controller.refreshServerInfo();
     if (!mounted) return;
     setState(() {
       _distributors = distributors;
-      // Keep the existing selection if the plugin hasn't acknowledged one yet
-      // (ack is async, especially for the embedded FCM distributor).
       _currentDistributor = current ?? _currentDistributor;
+      _activeProvider = _controller.activeBackend;
       _loading = false;
     });
   }
@@ -86,8 +88,13 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                     label: const Text('Send test notification'),
                   ),
                   const SizedBox(height: 16),
-                  _header('Distributor'),
-                  ..._distributorBody(),
+                  _header('Provider'),
+                  ..._providerBody(),
+                  if (_showDistributorPicker) ...[
+                    const SizedBox(height: 16),
+                    _header('Distributor'),
+                    ..._distributorBody(),
+                  ],
                 ],
               ),
             ),
@@ -95,9 +102,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   }
 
   Widget _registrationStatus() {
-    const red = Color(
-      0xFFfb4934,
-    ); // gruvbox red — matches status usage elsewhere
+    const red = Color(0xFFfb4934);
     final (icon, color, label) = switch (_registered) {
       true => (
         Icons.check_circle_outline,
@@ -128,6 +133,34 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       ),
     ),
   );
+
+  List<Widget> _providerBody() {
+    final options = [
+      ('unifiedpush', 'UnifiedPush', 'Default — uses distributor apps on the device'),
+      if (PushPortConfig.isConfigured && _controller.pushPortAvailable)
+        ('pushport/fcm', 'PushPort / FCM', 'Firebase Cloud Messaging with on-device decrypt'),
+    ];
+    return [
+      RadioGroup<String>(
+        groupValue: _activeProvider,
+        onChanged: _selectProvider,
+        child: Column(
+          children: [
+            for (final (value, label, subtitle) in options)
+              RadioListTile<String>(
+                contentPadding: EdgeInsets.zero,
+                value: value,
+                title: Text(label),
+                subtitle: Text(
+                  subtitle,
+                  style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ];
+  }
 
   List<Widget> _distributorBody() {
     if (_distributors.isEmpty) {
@@ -176,20 +209,14 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       if (mounted) _toast('Test notification sent — check your notifications');
       return;
     } on RpcError catch (e) {
-      // The gateway pruned a permanently dead target: re-registering the same
-      // endpoint would just fail again, so force a fresh one instead.
       if (e.code == pushGoneCode) {
         await _recoverGoneAndRetry();
         return;
       }
-      // Other RPC failure (e.g. no/stale registration): re-register and retry.
-    } catch (_) {
-      // Not connected yet / no target: re-register and retry.
-    }
+    } catch (_) {}
     await _reregisterAndRetry();
   }
 
-  /// The cached endpoint is gone: mint a fresh one, then retry the test.
   Future<void> _recoverGoneAndRetry() async {
     if (mounted) _toast('Push endpoint expired — refreshing…');
     final ok = await _controller.reregister(force: true);
@@ -208,7 +235,6 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     );
   }
 
-  /// Stale/missing registration: re-register the current endpoint, then retry.
   Future<void> _reregisterAndRetry() async {
     if (mounted) _toast('Re-registering with the gateway…');
     final ok = await _controller.reregister();
@@ -223,8 +249,6 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     );
   }
 
-  /// Sends a test notification and toasts the outcome; [onFailure] gets the error
-  /// appended.
   Future<void> _sendTestThenToast({
     required String onSuccess,
     required String onFailure,
@@ -237,9 +261,23 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     }
   }
 
+  Future<void> _selectProvider(String? name) async {
+    if (name == null) return;
+    final prev = _activeProvider;
+    setState(() => _activeProvider = name);
+    try {
+      await _controller.useProvider(name);
+      await _load();
+      if (mounted) _toast('Using $name for push');
+    } catch (e) {
+      if (mounted) setState(() => _activeProvider = prev);
+      if (mounted) _toast('Failed to switch to $name: $e');
+    }
+  }
+
   Future<void> _selectDistributor(String? d) async {
     if (d == null) return;
-    setState(() => _currentDistributor = d); // reflect the choice immediately
+    setState(() => _currentDistributor = d);
     await _controller.useDistributor(d);
     await _load();
     if (mounted) _toast('Using ${_distributorLabel(d)} for push');
