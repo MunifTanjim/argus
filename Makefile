@@ -1,5 +1,7 @@
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+VERSION           := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+PUSHPORT_APP_ID   ?=
+PUSHPORT_BASE_URL ?= https://pushport.muniftanjim.dev
+LDFLAGS           := -ldflags "-X main.version=$(VERSION) -X main.pushPortAppID=$(PUSHPORT_APP_ID) -X main.pushPortBaseURL=$(PUSHPORT_BASE_URL)"
 BIN     := bin
 PREFIX  ?= $(HOME)/.local
 BINDIR  ?= $(PREFIX)/bin
@@ -62,16 +64,19 @@ app-fmt: ## Format the Flutter app's Dart sources
 
 app-check: app-analyze app-test ## Run the app analyzer and tests
 
-app-run: ## Run the Flutter app; fzf-select the device when several are connected (ARGS=... forwarded)
+app-run: ## Run the Flutter app; loads app/.env if present; fzf-select the device when several are connected (ARGS=... forwarded)
 	@cd $(APP_DIR) && \
 	lines=$$(flutter devices 2>/dev/null | grep ' • '); \
 	line=$$(echo "$$lines" | fzf --prompt='device> ' --select-1 --reverse) || exit 1; \
 	device=$$(echo "$$line" | awk -F' • ' '{print $$2}' | xargs); \
 	echo "Running on $$device"; \
-	flutter run -d "$$device" $(ARGS); \
+	envflag=""; [ -f .env ] && envflag="--dart-define-from-file=.env"; \
+	flutter run -d "$$device" $$envflag $(ARGS); \
 
-app-build: ## Build the Flutter app release APK
-	cd $(APP_DIR) && flutter build apk
+app-build: ## Build the Flutter app release APK; loads app/.env if present (ARGS=... forwarded)
+	@cd $(APP_DIR) && \
+	envflag=""; [ -f .env ] && envflag="--dart-define-from-file=.env"; \
+	flutter build apk $$envflag $(ARGS)
 
 app-clean: ## Remove the Flutter app's build artifacts
 	cd $(APP_DIR) && flutter clean
