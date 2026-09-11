@@ -11,6 +11,12 @@ import (
 // version is overridden at build time via -ldflags.
 var version = "dev"
 
+// pushPortAppID is overridden at build time via -ldflags.
+var pushPortAppID = ""
+
+// pushPortBaseURL is overridden at build time via -ldflags.
+var pushPortBaseURL = "https://pushport.muniftanjim.dev"
+
 func main() {
 	cmd := newRootCmd(version)
 	err := cmd.Execute()

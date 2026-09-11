@@ -24,6 +24,138 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
+// TestPushPortBearerDelivery proves that when a device endpoint host matches the
+// configured PushPort host, delivery uses Bearer authorization rather than VAPID.
+func TestPushPortBearerDelivery(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		gotAuth     string
+		gotEncoding string
+		gotBody     []byte
+		gotDelivery = make(chan struct{}, 1)
+	)
+	fakePushPort := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		gotEncoding = r.Header.Get("Content-Encoding")
+		gotBody = body
+		mu.Unlock()
+		select {
+		case gotDelivery <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer fakePushPort.Close()
+
+	ppHost := fakePushPort.Listener.Addr().String()
+
+	vapid, err := push.LoadOrCreateVAPID(filepath.Join(t.TempDir(), "vapid_key.pem"))
+	if err != nil {
+		t.Fatalf("vapid: %v", err)
+	}
+
+	agg := gateway.New(time.Second)
+	gwsrv := gateway.NewServer(agg, nil, nil)
+	gwsrv.SetVAPIDPublicKey(vapid.PublicKey())
+	gwsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid, &push.PushPortAuth{Host: ppHost, Token: "pit_test"}))
+	ts := httptest.NewServer(gwsrv.Handler())
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := node.New()
+	d.SetIdentity("pp-itest", "pp-itest")
+	d.SetVersion("itest")
+	kp, err := e2e.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("identity keypair: %v", err)
+	}
+	d.SetIdentityKey(kp)
+	d.SetE2EE(true)
+	d.SetPushStore(push.NewStore(t.TempDir()))
+
+	go d.StartPush(ctx, 0)
+
+	sd := sockDir(t)
+	sockPath := filepath.Join(sd, "pp.sock")
+	go func() { _ = d.Run(ctx, sockPath) }()
+	waitFor(t, "node socket ready", func() bool {
+		_, err := os.Stat(sockPath)
+		return err == nil
+	})
+
+	uaPriv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ua keypair: %v", err)
+	}
+	authSecret := make([]byte, 16)
+	if _, err := rand.Read(authSecret); err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawURLEncoding
+
+	nc, err := api.Dial(sockPath)
+	if err != nil {
+		t.Fatalf("dial node socket: %v", err)
+	}
+	if err := nc.Call(api.MethodPushRegister, api.PushRegisterParams{
+		DeviceID: "pp-dev-1",
+		Endpoint: fakePushPort.URL,
+		P256dh:   enc.EncodeToString(uaPriv.PublicKey().Bytes()),
+		Auth:     enc.EncodeToString(authSecret),
+	}, nil); err != nil {
+		t.Fatalf("push.register: %v", err)
+	}
+	nc.Close()
+
+	go d.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
+
+	waitFor(t, "node rostered", func() bool {
+		pc, err := api.DialWSConn(ctx, wsURL(ts.URL, "/client"), "", nil)
+		if err != nil {
+			return false
+		}
+		poll := api.NewClient(pc)
+		defer poll.Close()
+		var r api.NodesListResult
+		if poll.Call(api.MethodNodesList, nil, &r) != nil {
+			return false
+		}
+		for _, n := range r.Nodes {
+			if n.ID == "pp-itest" && n.Online {
+				return true
+			}
+		}
+		return false
+	})
+
+	d.Registry().ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s2", Status: session.StatusWorking})
+	d.Registry().ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "s2", Status: session.StatusAwaitingInput})
+
+	select {
+	case <-gotDelivery:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no push delivered to fake PushPort within 5s")
+	}
+
+	mu.Lock()
+	auth, encoding, body := gotAuth, gotEncoding, gotBody
+	mu.Unlock()
+
+	if auth != "Bearer pit_test" {
+		t.Fatalf("expected Bearer authorization, got: %q", auth)
+	}
+	if encoding != "aes128gcm" {
+		t.Fatalf("expected Content-Encoding aes128gcm, got: %q", encoding)
+	}
+	if len(body) == 0 {
+		t.Fatal("push body is empty")
+	}
+}
+
 // TestBlindPushNodeDeliversEncryptedPayload proves the e2ee push spec:
 // a node encrypts and delivers a push through the gateway (a pure router)
 // without the gateway ever seeing the notification cleartext.
@@ -58,7 +190,7 @@ func TestBlindPushNodeDeliversEncryptedPayload(t *testing.T) {
 	agg := gateway.New(time.Second)
 	gwsrv := gateway.NewServer(agg, nil, nil)
 	gwsrv.SetVAPIDPublicKey(vapid.PublicKey())
-	gwsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
+	gwsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid, nil))
 	ts := httptest.NewServer(gwsrv.Handler())
 	defer ts.Close()
 

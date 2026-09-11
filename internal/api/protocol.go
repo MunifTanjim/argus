@@ -77,8 +77,11 @@ const (
 	// MethodPushDeliver is a node->gateway request carrying an opaque, pre-encrypted
 	// Web Push body for the gateway to VAPID-sign and POST. The gateway never sees
 	// cleartext notification content.
-	MethodPushDeliver   = "push.deliver"          // node->gateway request: PushDeliverParams; result: PushDeliverResult
-	MethodSessionExport = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
+	MethodPushDeliver = "push.deliver" // node->gateway request: PushDeliverParams; result: PushDeliverResult
+	// MethodPushPortSetToken stores the PushPort instance token on the gateway
+	// (admin only) and applies it live.
+	MethodPushPortSetToken = "pushport.setToken"     // admin request: PushPortSetTokenParams; result: nil
+	MethodSessionExport    = "sessions.exportBundle" // request: ExportBundleParams; result: ExportBundleResult
 	// Changed-files review for a live session's working directory (vs HEAD).
 	MethodSessionChangedFiles = "sessions.changedFiles" // request: SessionRef; result: ChangedFilesResult
 	MethodSessionFileDiff     = "sessions.fileDiff"     // request: FileDiffParams; result: FileDiffResult
@@ -248,6 +251,11 @@ type PushDeliverResult struct {
 	Gone bool `json:"gone,omitempty"`
 }
 
+// PushPortSetTokenParams is the request body for MethodPushPortSetToken.
+type PushPortSetTokenParams struct {
+	Token string `json:"token"`
+}
+
 // PairStartResult carries a freshly minted client token plus the gateway's public
 // base URL for the pairing QR.
 type PairStartResult struct {
@@ -287,8 +295,9 @@ type NodeCapabilities struct {
 // ServerInfo carries server-wide metadata for a connected client: server version
 // and connected nodes. Served by the gateway.
 type ServerInfo struct {
-	Version string     `json:"version"`
-	Nodes   []NodeInfo `json:"nodes"`
+	Version            string     `json:"version"`
+	Nodes              []NodeInfo `json:"nodes"`
+	PushPortConfigured bool       `json:"pushPortConfigured"`
 }
 
 // IdentifyResult announces a node's identity to the gateway. ID is the stable node

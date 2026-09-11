@@ -27,12 +27,14 @@ type Server struct {
 	clientAuth func(token string) bool
 	clientSrv  *api.Server
 
-	clientTokens  *clienttoken.Store
-	pushDeliverer push.Deliverer
-	vapidPubKey   string
-	master        string
-	version       string
-	publicURL     atomic.Pointer[string]
+	clientTokens        *clienttoken.Store
+	pushDeliverer       push.Deliverer
+	vapidPubKey         string
+	pushPortTokenSetter func(string) error
+	pushPortStatus      func() bool
+	master              string
+	version             string
+	publicURL           atomic.Pointer[string]
 
 	nodeKeepaliveInterval time.Duration
 	nodeKeepaliveTimeout  time.Duration
@@ -79,6 +81,14 @@ func (s *Server) SetPushDeliverer(d push.Deliverer) { s.pushDeliverer = d }
 
 // SetVAPIDPublicKey publishes the VAPID public key devices fetch via push.vapidKey.
 func (s *Server) SetVAPIDPublicKey(key string) { s.vapidPubKey = key }
+
+// SetPushPortTokenSetter injects a callback that persists and live-applies a new
+// PushPort instance token. When unset, pushport.setToken returns "not enabled".
+func (s *Server) SetPushPortTokenSetter(fn func(string) error) { s.pushPortTokenSetter = fn }
+
+// SetPushPortStatus injects a callback reporting whether the gateway holds a
+// PushPort token, surfaced on server.info.
+func (s *Server) SetPushPortStatus(fn func() bool) { s.pushPortStatus = fn }
 
 // SetVersion records the server binary's version, served via server.info. Call before serving.
 func (s *Server) SetVersion(v string) { s.version = v }
@@ -147,6 +157,25 @@ func requireAdmin(h api.HandlerFunc) api.HandlerFunc {
 		}
 		return h(ctx, params)
 	}
+}
+
+func (s *Server) registerPushPortAdmin(srv *api.Server) {
+	srv.Handle(api.MethodPushPortSetToken, requireAdmin(func(_ context.Context, params json.RawMessage) (any, error) {
+		var p api.PushPortSetTokenParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "pushport.setToken: bad params"}
+		}
+		if p.Token == "" {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "pushport.setToken: empty token"}
+		}
+		if s.pushPortTokenSetter == nil {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "pushport not enabled on this gateway"}
+		}
+		if err := s.pushPortTokenSetter(p.Token); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}))
 }
 
 // registerClientAdmin wires the client-token management methods (admin-only).
@@ -409,7 +438,8 @@ func (s *Server) buildClientServer() *api.Server {
 	srv.Handle(api.MethodPing, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
 
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
-		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes()}, nil
+		configured := s.pushPortStatus != nil && s.pushPortStatus()
+		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes(), PushPortConfigured: configured}, nil
 	})
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
@@ -502,6 +532,7 @@ func (s *Server) buildClientServer() *api.Server {
 	})
 
 	s.registerPush(srv)
+	s.registerPushPortAdmin(srv)
 	s.registerClientAdmin(srv)
 	return srv
 }

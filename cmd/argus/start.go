@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -472,7 +473,25 @@ func setupBlindPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, del
 		return
 	}
 	hsrv.SetVAPIDPublicKey(vapid.PublicKey())
-	hsrv.SetPushDeliverer(push.NewGatewayDeliverer(vapid))
+	tokenPath := config.GetStatePath("pushport-token")
+	ppHost := ""
+	if u, err := url.Parse(pushPortBaseURL); err == nil {
+		ppHost = u.Host
+	}
+	var pp *push.PushPortAuth
+	if tok, _ := push.ReadInstanceToken(tokenPath); tok != "" && ppHost != "" {
+		pp = &push.PushPortAuth{Host: ppHost, Token: tok}
+	}
+	dv := push.NewGatewayDeliverer(vapid, pp)
+	hsrv.SetPushDeliverer(dv)
+	hsrv.SetPushPortTokenSetter(func(tok string) error {
+		if err := push.WriteInstanceToken(tokenPath, tok); err != nil {
+			return err
+		}
+		dv.SetPushPort(ppHost, tok)
+		return nil
+	})
+	hsrv.SetPushPortStatus(func() bool { return dv.HasPushPort() })
 	if d != nil {
 		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		go d.StartPush(ctx, delay)

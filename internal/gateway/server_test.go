@@ -149,6 +149,76 @@ func TestRelayOpenCloseAndNodesList(t *testing.T) {
 	})
 }
 
+func TestPushPortSetTokenAdmin(t *testing.T) {
+	s := NewServer(New(0), nil, nil)
+	var got string
+	s.SetPushPortTokenSetter(func(tok string) error { got = tok; return nil })
+
+	dispatch := s.clientSrv.DispatchFunc()
+
+	params, _ := json.Marshal(api.PushPortSetTokenParams{Token: "pit_xyz"})
+	adminCtx := api.WithPrincipal(context.Background(), api.Principal{Admin: true})
+	if _, err := dispatch(adminCtx, api.MethodPushPortSetToken, params); err != nil {
+		t.Fatalf("admin dispatch: %v", err)
+	}
+	if got != "pit_xyz" {
+		t.Fatalf("setter got %q, want pit_xyz", got)
+	}
+
+	if _, err := dispatch(context.Background(), api.MethodPushPortSetToken, params); err == nil {
+		t.Fatal("non-admin: want error, got nil")
+	}
+
+	s2 := NewServer(New(0), nil, nil)
+	dispatch2 := s2.clientSrv.DispatchFunc()
+	_, err := dispatch2(adminCtx, api.MethodPushPortSetToken, params)
+	if err == nil {
+		t.Fatal("nil setter: want error, got nil")
+	}
+	if rpcErr, ok := err.(*api.RPCError); !ok || rpcErr.Message != "pushport not enabled on this gateway" {
+		t.Fatalf("nil setter: want 'pushport not enabled on this gateway', got %v", err)
+	}
+}
+
+func TestServerInfoPushPortConfigured(t *testing.T) {
+	dispatch := func(s *Server) func(context.Context, string, json.RawMessage) (any, error) {
+		return s.clientSrv.DispatchFunc()
+	}
+
+	call := func(t *testing.T, s *Server) api.ServerInfo {
+		t.Helper()
+		res, err := dispatch(s)(context.Background(), api.MethodServerInfo, nil)
+		if err != nil {
+			t.Fatalf("server.info: %v", err)
+		}
+		info, ok := res.(api.ServerInfo)
+		if !ok {
+			t.Fatalf("result type = %T, want api.ServerInfo", res)
+		}
+		return info
+	}
+
+	// no hook set: PushPortConfigured must be false
+	s := NewServer(New(0), nil, nil)
+	if info := call(t, s); info.PushPortConfigured {
+		t.Fatal("want PushPortConfigured=false when no hook is set")
+	}
+
+	// hook returns false
+	s2 := NewServer(New(0), nil, nil)
+	s2.SetPushPortStatus(func() bool { return false })
+	if info := call(t, s2); info.PushPortConfigured {
+		t.Fatal("want PushPortConfigured=false when hook returns false")
+	}
+
+	// hook returns true
+	s3 := NewServer(New(0), nil, nil)
+	s3.SetPushPortStatus(func() bool { return true })
+	if info := call(t, s3); !info.PushPortConfigured {
+		t.Fatal("want PushPortConfigured=true when hook returns true")
+	}
+}
+
 func makeBlindNodeEntries(t *testing.T) [][]byte {
 	t.Helper()
 	signer, err := trustlog.GenerateSigner()
