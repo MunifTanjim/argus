@@ -42,9 +42,10 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           TAG_NAME: ${{ inputs.tag }}
+          PUSHPORT_APP_ID: ${{ secrets.PUSHPORT_APP_ID }}
         run: |
           mkdir -p build
-          go build -trimpath -ldflags "-s -w -X main.version=${TAG_NAME}" -o build/argus-${TAG_NAME}-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/argus
+          go build -trimpath -ldflags "-s -w -X main.version=${TAG_NAME} -X main.pushPortAppID=${PUSHPORT_APP_ID}" -o build/argus-${TAG_NAME}-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/argus
       - name: Upload Release Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
