@@ -55,12 +55,7 @@ func encodePayload(n Notification, id string) ([]byte, error) {
 	})
 }
 
-// PostEncrypted POSTs a pre-encrypted aes128gcm Web Push body to endpoint, adding
-// the VAPID Authorization header (nil vapid omits it). Returns ErrGone on 404/410
-// and on a 403 whose body signals a permanent VAPID-credential mismatch.
-// This is the blind-relay half: the caller supplies an opaque ciphertext it need
-// not have produced, so a gateway can deliver a body a node encrypted.
-func PostEncrypted(ctx context.Context, client *http.Client, vapid *VAPID, endpoint string, body []byte, ttl, urgency string) error {
+func newPushRequest(ctx context.Context, endpoint string, body []byte, ttl, urgency string) (*http.Request, error) {
 	if ttl == "" {
 		ttl = unifiedPushTTL
 	}
@@ -69,12 +64,49 @@ func PostEncrypted(ctx context.Context, client *http.Client, vapid *VAPID, endpo
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Content-Encoding", "aes128gcm")
 	req.Header.Set("TTL", ttl)
 	req.Header.Set("Urgency", urgency)
+	return req, nil
+}
+
+// PostToPushPort delivers a pre-encrypted aes128gcm body to a sealed PushPort
+// endpoint, authenticating with the node's instance token. 410 marks a dead
+// subscription (prune); 401/403 signal a bad or wrong-app token — a config error
+// that must not prune the target.
+func PostToPushPort(ctx context.Context, client *http.Client, token, endpoint string, body []byte, ttl, urgency string) error {
+	req, err := newPushRequest(ctx, endpoint, body, ttl, urgency)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+		return fmt.Errorf("%w: %s %s", ErrGone, resp.Status, endpoint)
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return fmt.Errorf("push: POST %s: %s: %s", endpoint, resp.Status, bytes.TrimSpace(readLimited(resp.Body)))
+	}
+	return nil
+}
+
+// PostEncrypted POSTs a pre-encrypted aes128gcm Web Push body to endpoint, adding
+// the VAPID Authorization header (nil vapid omits it). Returns ErrGone on 404/410
+// and on a 403 whose body signals a permanent VAPID-credential mismatch.
+// This is the blind-relay half: the caller supplies an opaque ciphertext it need
+// not have produced, so a gateway can deliver a body a node encrypted.
+func PostEncrypted(ctx context.Context, client *http.Client, vapid *VAPID, endpoint string, body []byte, ttl, urgency string) error {
+	req, err := newPushRequest(ctx, endpoint, body, ttl, urgency)
+	if err != nil {
+		return err
+	}
 	if vapid != nil {
 		auth, verr := vapid.authHeader(endpoint, time.Now())
 		if verr != nil {
