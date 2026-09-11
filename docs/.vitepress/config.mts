@@ -106,6 +106,7 @@ export default defineConfig({
           { text: "End-to-End Encryption", link: "/guide/e2ee" },
           { text: "TUI", link: "/guide/tui" },
           { text: "Mobile App", link: "/guide/mobile-app" },
+          { text: "PushPort", link: "/guide/pushport" },
         ],
       },
     ],
