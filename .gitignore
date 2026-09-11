@@ -38,3 +38,6 @@ docs/superpowers
 
 # local files
 *.local.*
+
+# Firebase — real config is not committed; copy .example and fill in real values
+app/android/app/google-services.json

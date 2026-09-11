@@ -46,3 +46,6 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# PushPort build-time defines (--dart-define-from-file=.env); .env.example is committed
+/.env
