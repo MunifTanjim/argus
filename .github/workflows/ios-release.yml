@@ -1,0 +1,65 @@
+name: iOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and sign only, skip the TestFlight upload
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    name: release
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    env:
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      CERTIFICATE_PRIVATE_KEY: ${{ secrets.APPLE_DISTRIBUTION_CERT_KEY }}
+      BUNDLE_ID: dev.muniftanjim.argus
+      NSE_BUNDLE_ID: dev.muniftanjim.argus.NotificationService
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Install codemagic CLI tools
+        run: |
+          pipx install codemagic-cli-tools
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch signing files
+        run: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "$NSE_BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+
+      - name: Apply provisioning profiles
+        working-directory: app/ios
+        run: xcode-project use-profiles --export-options-plist "$HOME/export_options.plist"
+
+      - name: Build IPA
+        env:
+          PUSHPORT_APP_ID: ${{ secrets.PUSHPORT_APP_ID }}
+        run: |
+          flutter build ipa --release \
+            --export-options-plist "$HOME/export_options.plist" \
+            --dart-define=PUSHPORT_APP_ID="$PUSHPORT_APP_ID"
+
+      - name: Upload to TestFlight
+        if: ${{ !inputs.dry_run }}
+        run: app-store-connect publish --path "$(find build/ios/ipa -name '*.ipa' | head -1)"
