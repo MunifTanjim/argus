@@ -1,4 +1,7 @@
+import 'push_lease.dart';
 import 'push_message.dart';
+
+export 'push_lease.dart' show PushLease;
 
 /// A device's Web Push target: the distributor endpoint URL the gateway POSTs to,
 /// plus the subscription keys (present for Web Push distributors; null for plain
@@ -45,10 +48,12 @@ abstract class PushProvider {
     required void Function(PushMessage) onOpen,
   });
 
-  /// Re-request the current endpoint from the distributor so [onTarget] fires
-  /// again. Used when the controller has no target after a restart/connect and
-  /// needs the backend to surface one.
+  /// Ask the backend for a current endpoint so [onTarget] fires again. The
+  /// endpoint can come back changed: a distributor can hand over a new one, and
+  /// a relay backend mints one.
   Future<void> refresh();
+
+  PushLease get lease;
 
   /// Stop receiving and forget the target (called on unpair).
   Future<void> stop();

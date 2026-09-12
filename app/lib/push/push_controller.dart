@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, TargetPlatform;
 import 'package:meta/meta.dart';
 
 import '../pairing/gateway_store.dart';
 import '../transport/gateway_client.dart';
+import 'apns_provider.dart';
+import 'apns_source.dart';
 import 'device_id.dart';
 import 'fcm_source.dart';
 import 'notifications.dart';
@@ -63,6 +66,7 @@ class PushController {
   String? _deviceId;
   String? _selectedDistributor;
   StreamSubscription<String>? _tapSub;
+  StreamSubscription<String>? _apnsTapSub;
   bool _pushPortAvailable = false;
 
   void _buildProviders(List<PushProvider>? extra) {
@@ -74,15 +78,37 @@ class PushController {
         baseUrl: PushPortConfig.baseUrl,
         appId: PushPortConfig.appId,
       );
-      all.add(PushPortFcmProvider(
-        client: ppClient,
-        getFcmToken: fcmToken,
-        incomingEncrypted: fcmEncryptedMessages,
-        incomingEncryptedOpens: fcmEncryptedOpens,
-      ));
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        all.add(ApnsProvider(
+          client: ppClient,
+          getApnsToken: apnsToken,
+          writeKeys: writeWebPushKeysToKeychain,
+        ));
+      } else {
+        all.add(PushPortFcmProvider(
+          client: ppClient,
+          getFcmToken: fcmToken,
+          incomingEncrypted: fcmEncryptedMessages,
+          incomingEncryptedOpens: fcmEncryptedOpens,
+        ));
+      }
     }
     _providers = {for (final p in all) p.name: p};
   }
+
+  String? _defaultProviderName() {
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        _providers.containsKey('pushport/apns')) {
+      return 'pushport/apns';
+    }
+    return null;
+  }
+
+  @visibleForTesting
+  List<String> get providerNames => _providers.keys.toList();
+
+  @visibleForTesting
+  String? get defaultProviderNameForTest => _defaultProviderName();
 
   PushTarget? get target => _target;
 
@@ -106,7 +132,7 @@ class PushController {
   /// (defaulting to the embedded distributor when present).
   Future<void> init() async {
     _deviceId ??= await _deviceIdStore.getOrCreate();
-    _target = await _targetStore.load();
+    await loadStoredTarget();
     _unifiedPush.preferredDistributor = appPackageName;
 
     await PushNotifications.instance.init();
@@ -115,21 +141,50 @@ class PushController {
     final launchId = await PushNotifications.instance.launchSessionId();
     if (launchId != null) _emitTap(launchId);
 
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      _apnsTapSub = apnsSessionTaps.listen(_emitTap);
+      final apnsLaunch = await apnsLaunchSessionId();
+      if (apnsLaunch != null) _emitTap(apnsLaunch);
+    }
+
     await activateInitialProvider();
   }
 
   /// Activates the persisted provider choice, falling back to UnifiedPush.
   /// Called from [init] on startup so a prior selection survives a restart.
+  /// PushPort providers are deferred to [_onAttached], which activates them only
+  /// after the gateway confirms PushPort is configured.
   @visibleForTesting
   Future<void> activateInitialProvider() async {
     final saved = await _providerKv.read(_kProviderKey);
     final savedProvider = saved != null ? _providers[saved] : null;
     if (savedProvider != null) {
+      if (_isPushPortProvider(savedProvider)) return;
       await _activate(savedProvider);
-    } else if (await _unifiedPush.isAvailable()) {
+      return;
+    }
+    if (_defaultProviderName() != null) return;
+    if (await _unifiedPush.isAvailable()) {
       await _activate(_unifiedPush);
     }
   }
+
+  /// A target whose lease lapsed while the app was closed is dropped: it can
+  /// never deliver, and registering it would report success over a dead
+  /// endpoint.
+  @visibleForTesting
+  Future<void> loadStoredTarget() async {
+    final stored = await _targetStore.load();
+    if (stored == null) return;
+    if (stored.lease.hasExpired()) {
+      await _targetStore.clear();
+      return;
+    }
+    _target = stored.target;
+  }
+
+  bool _isPushPortProvider(PushProvider? p) =>
+      p != null && p.name.startsWith('pushport/');
 
   /// Asks the gateway to send a test notification to this device's registered
   /// target. Throws if not connected or no target is registered yet.
@@ -157,7 +212,8 @@ class PushController {
         _target = fresh;
         await _targetStore.save(fresh);
       } else {
-        // Non-UP providers (pushport/fcm): restart to mint a fresh subscription.
+        // Relay providers: a restart also rebuilds the message listeners, which
+        // a plain refresh leaves alone.
         final provider = _active;
         if (provider != null) {
           await provider.stop();
@@ -212,8 +268,70 @@ class PushController {
     _registeredTarget = null;
     _registerInFlight = null;
     await Future.wait([_fetchVapidKey(client), refreshServerInfo()]);
+    await _syncPushPortActivation();
+    await _renewIfExpiring();
     await _registerIfPossible();
-    if (_target == null) await _active?.refresh();
+    final provider = _active;
+    if (_target == null && provider != null) await _refreshQuietly(provider);
+  }
+
+  Future<void> _syncPushPortActivation() async {
+    if (_pushPortAvailable) {
+      final desired = await _desiredPushPortProvider();
+      if (desired == null || _active == desired) return;
+      try {
+        await _activate(desired);
+      } catch (e) {
+        debugPrint('PushPort activation failed for ${desired.name}: $e');
+        _active = null;
+      }
+      return;
+    }
+    if (!_isPushPortProvider(_active)) return;
+    await _active?.stop();
+    _active = null;
+    _target = null;
+    await _targetStore.clear();
+    final client = _client;
+    final deviceId = _deviceId;
+    if (client != null && deviceId != null) {
+      await unregisterFromGateway(client, deviceId);
+    }
+  }
+
+  /// Inside the renewal lead the old endpoint still delivers, so a failed
+  /// renewal keeps it. Past expiry it delivers nothing, so it is dropped rather
+  /// than registered.
+  ///
+  /// Renewal is connect-scoped: no timer watches the lease. A suspended app drops
+  /// its link and renews on the next attach.
+  Future<void> _renewIfExpiring() async {
+    final provider = _active;
+    if (provider == null || !provider.lease.needsRenewal()) return;
+    await _refreshQuietly(provider);
+    if (!provider.lease.hasExpired()) return;
+    _target = null;
+    await _targetStore.clear();
+  }
+
+  /// A backend that cannot produce an endpoint right now must not abort the
+  /// attach. The next connect tries again.
+  Future<void> _refreshQuietly(PushProvider provider) async {
+    try {
+      await provider.refresh();
+    } catch (e) {
+      debugPrint('push: refresh failed for ${provider.name}: $e');
+    }
+  }
+
+  Future<PushProvider?> _desiredPushPortProvider() async {
+    final saved = await _providerKv.read(_kProviderKey);
+    if (saved != null) {
+      final p = _providers[saved];
+      return _isPushPortProvider(p) ? p : null;
+    }
+    final defaultName = _defaultProviderName();
+    return defaultName != null ? _providers[defaultName] : null;
   }
 
   /// Tell the currently-connected gateway to stop pushing to this device, then
@@ -230,6 +348,7 @@ class PushController {
 
   Future<void> dispose() async {
     await _tapSub?.cancel();
+    await _apnsTapSub?.cancel();
     await _registrations.close();
   }
 
@@ -274,7 +393,7 @@ class PushController {
 
   void _setTarget(PushTarget t) {
     _target = t;
-    _targetStore.save(t);
+    _targetStore.save(t, lease: _active?.lease ?? PushLease.none);
     _registerIfPossible();
   }
 

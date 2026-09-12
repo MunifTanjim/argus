@@ -28,8 +28,8 @@ cp .env.example .env
 
 | Key | Purpose |
 |---|---|
-| `ARGUS_PUSHPORT_APP_ID` | Your registered PushPort app id. Empty by default; set it to enable PushPort. |
-| `ARGUS_PUSHPORT_BASE_URL` | Overrides the default `https://pushport.muniftanjim.dev`. |
+| `PUSHPORT_APP_ID` | Your registered PushPort app id. Empty by default; set it to enable PushPort. |
+| `PUSHPORT_BASE_URL` | Overrides the default `https://pushport.muniftanjim.dev`. |
 
 `.env` is gitignored; `.env.example` is committed.
 

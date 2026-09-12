@@ -8,6 +8,7 @@ import '../pairing/gateway_store.dart';
 import 'push_message.dart';
 import 'push_provider.dart';
 import 'pushport_client.dart';
+import 'pushport_renewal.dart';
 import 'unifiedpush_background.dart' show decodeUnifiedPush;
 import 'webpush_crypto.dart';
 
@@ -22,13 +23,23 @@ class SecureWebPushKeyStore implements WebPushKeyStore {
   SecureWebPushKeyStore([SecureKv? kv]) : _kv = kv ?? const FlutterSecureKv();
 
   final SecureKv _kv;
+  Future<WebPushKeys>? _loaded;
 
   static const _privKey = 'webpush_private_key';
   static const _authKey = 'webpush_auth';
   static const _pubKey = 'webpush_p256dh';
 
+  /// The keypair never changes within a process, so it is read once. Sharing the
+  /// future also keeps two concurrent first callers from generating two keypairs.
+  /// A failure is not kept: secure storage is unreadable before the first device
+  /// unlock, and the next mint must be able to try again.
   @override
-  Future<WebPushKeys> loadOrCreate() async {
+  Future<WebPushKeys> loadOrCreate() => _loaded ??= _read().onError<Object>((e, s) {
+        _loaded = null;
+        Error.throwWithStackTrace(e, s);
+      });
+
+  Future<WebPushKeys> _read() async {
     final priv = await _kv.read(_privKey);
     final auth = await _kv.read(_authKey);
     final pub = await _kv.read(_pubKey);
@@ -58,7 +69,7 @@ class FixedWebPushKeyStore implements WebPushKeyStore {
 /// Delivers pushes over PushPort's FCM transport. The app generates its own
 /// ECDH keypair and decrypts messages on-device — no Firebase types leak here;
 /// FCM is consumed through the injected [getFcmToken] and [incomingEncrypted].
-class PushPortFcmProvider implements PushProvider {
+class PushPortFcmProvider with PushPortRenewal implements PushProvider {
   PushPortFcmProvider({
     required this.client,
     required this.getFcmToken,
@@ -83,6 +94,19 @@ class PushPortFcmProvider implements PushProvider {
   @override
   Future<bool> isAvailable() async => true;
 
+  /// The FCM token rotates on restore, reinstall, and Instance ID reset, so
+  /// every mint re-reads it.
+  @override
+  Future<PushPortMint> mintSubscription() async {
+    final keys = await _keyStore.loadOrCreate();
+    final fcmToken = await getFcmToken();
+    final sub = await client.subscribe(transport: 'fcm', token: fcmToken);
+    return (
+      sub: sub,
+      target: PushTarget(sub.endpoint, p256dh: keys.p256dh, auth: keys.auth),
+    );
+  }
+
   @override
   Future<void> start({
     required void Function(PushTarget) onTarget,
@@ -90,9 +114,7 @@ class PushPortFcmProvider implements PushProvider {
     required void Function(PushMessage) onOpen,
   }) async {
     final keys = await _keyStore.loadOrCreate();
-    final fcmToken = await getFcmToken();
-    final sub = await client.subscribe(transport: 'fcm', token: fcmToken);
-    onTarget(PushTarget(sub.endpoint, p256dh: keys.p256dh, auth: keys.auth));
+    await subscribe(onTarget);
 
     await _sub?.cancel();
     _sub = incomingEncrypted.listen((body) async {
@@ -129,7 +151,7 @@ class PushPortFcmProvider implements PushProvider {
   }
 
   @override
-  Future<void> refresh() async {}
+  Future<void> refresh() => renew();
 
   @override
   Future<void> stop() async {
@@ -137,5 +159,6 @@ class PushPortFcmProvider implements PushProvider {
     _sub = null;
     await _openSub?.cancel();
     _openSub = null;
+    forgetLease();
   }
 }
