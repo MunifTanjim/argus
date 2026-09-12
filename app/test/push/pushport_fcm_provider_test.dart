@@ -5,11 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:argus/pairing/gateway_store.dart' show SecureKv;
 import 'package:argus/push/pushport_client.dart';
 import 'package:argus/push/pushport_fcm_provider.dart';
 import 'package:argus/push/push_provider.dart';
 import 'package:argus/push/push_message.dart';
 import 'package:argus/push/webpush_crypto.dart';
+
+import 'push_test_support.dart';
 
 List<int> _hex(String s) => [
       for (var i = 0; i < s.length; i += 2) int.parse(s.substring(i, i + 2), radix: 16)
@@ -148,4 +151,181 @@ void main() {
     expect(messages, hasLength(1));
     expect(messages.first.sessionId, 'n1:s1');
   });
+
+  test('refresh re-subscribes and reports the fresh target', () async {
+    final ctrl = StreamController<List<int>>();
+    var calls = 0;
+    final provider = _renewableProvider(ctrl, () async {
+      calls++;
+      return pushPortSubscribeBody('https://relay/$calls', const Duration(hours: 24));
+    });
+
+    final targets = <PushTarget>[];
+    await provider.start(
+      onTarget: targets.add,
+      onMessage: (_) {},
+      onOpen: (_) {},
+    );
+    await provider.refresh();
+
+    expect(calls, 2);
+    expect(targets.map((t) => t.endpoint),
+        ['https://relay/1', 'https://relay/2']);
+    await ctrl.close();
+  });
+
+  test('incoming messages still decrypt after a renewal', () async {
+    final ctrl = StreamController<List<int>>();
+    var calls = 0;
+    final provider = _renewableProvider(ctrl, () async {
+      calls++;
+      return pushPortSubscribeBody('https://relay/$calls', const Duration(hours: 24));
+    });
+
+    final messages = <PushMessage>[];
+    await provider.start(
+      onTarget: (_) {},
+      onMessage: messages.add,
+      onOpen: (_) {},
+    );
+    await provider.refresh();
+
+    ctrl.add(_encryptedBody);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(messages, hasLength(1));
+    expect(messages.first.title, 'hi');
+    await ctrl.close();
+  });
+
+  test('overlapping refreshes share one subscription', () async {
+    final ctrl = StreamController<List<int>>();
+    var calls = 0;
+    Completer<void>? gate;
+    final provider = _renewableProvider(ctrl, () async {
+      calls++;
+      await gate?.future;
+      return pushPortSubscribeBody('https://relay/$calls', const Duration(hours: 24));
+    });
+
+    final targets = <PushTarget>[];
+    await provider.start(
+      onTarget: targets.add,
+      onMessage: (_) {},
+      onOpen: (_) {},
+    );
+
+    gate = Completer<void>();
+    final first = provider.refresh();
+    final second = provider.refresh();
+    gate.complete();
+    await Future.wait([first, second]);
+
+    expect(calls, 2, reason: 'one mint on start, one shared by both refreshes');
+    expect(targets.map((t) => t.endpoint),
+        ['https://relay/1', 'https://relay/2']);
+    await ctrl.close();
+  });
+
+  test('a fresh long subscription is not due for renewal', () async {
+    final ctrl = StreamController<List<int>>();
+    final provider = _renewableProvider(ctrl,
+        () async => pushPortSubscribeBody('https://relay/x', const Duration(hours: 24)));
+    await provider.start(onTarget: (_) {}, onMessage: (_) {}, onOpen: (_) {});
+
+    expect(provider.lease.needsRenewal(), isFalse);
+    await ctrl.close();
+  });
+
+  test('a lapsed subscription is due for renewal', () async {
+    final ctrl = StreamController<List<int>>();
+    final provider = _renewableProvider(ctrl,
+        () async => pushPortSubscribeBody('https://relay/x', const Duration(hours: -1)));
+    await provider.start(onTarget: (_) {}, onMessage: (_) {}, onOpen: (_) {});
+
+    expect(provider.lease.needsRenewal(), isTrue);
+    await ctrl.close();
+  });
+
+  test('a failed keypair read is retried, not kept', () async {
+    final kv = _FlakyKv(failures: 1);
+    final store = SecureWebPushKeyStore(kv);
+
+    await expectLater(store.loadOrCreate(), throwsA(isA<Exception>()));
+    final keys = await store.loadOrCreate();
+
+    expect(keys.p256dh, isNotEmpty);
+  });
+
+  test('the keypair is read once and shared', () async {
+    final kv = _FlakyKv();
+    final store = SecureWebPushKeyStore(kv);
+
+    final first = await store.loadOrCreate();
+    final second = await store.loadOrCreate();
+
+    expect(second.p256dh, first.p256dh);
+    expect(kv.reads, 3, reason: 'three keys read once, then the future is shared');
+  });
+
+  test('stop drops the lease and silences later refreshes', () async {
+    final ctrl = StreamController<List<int>>();
+    var calls = 0;
+    final provider = _renewableProvider(ctrl, () async {
+      calls++;
+      return pushPortSubscribeBody('https://relay/x', const Duration(hours: 24));
+    });
+    await provider.start(onTarget: (_) {}, onMessage: (_) {}, onOpen: (_) {});
+    await provider.stop();
+    await provider.refresh();
+
+    expect(provider.lease, PushLease.none);
+    expect(calls, 1);
+    await ctrl.close();
+  });
 }
+
+/// Rejects its first [failures] reads, like a keychain read before the device is
+/// unlocked.
+class _FlakyKv implements SecureKv {
+  _FlakyKv({this.failures = 0});
+
+  int failures;
+  int reads = 0;
+  final Map<String, String> _values = {};
+
+  @override
+  Future<String?> read(String key) async {
+    reads++;
+    if (failures > 0) {
+      failures--;
+      throw Exception('secure storage is locked');
+    }
+    return _values[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
+
+PushPortFcmProvider _renewableProvider(
+  StreamController<List<int>> ctrl,
+  Future<String> Function() respond,
+) =>
+    PushPortFcmProvider(
+      client: PushPortClient(
+        baseUrl: 'https://push.pushport.dev',
+        appId: 'argus',
+        httpClient: MockClient((_) async => http.Response(await respond(), 200)),
+      ),
+      getFcmToken: () async => 'test-fcm-token',
+      incomingEncrypted: ctrl.stream,
+      keyStore: FixedWebPushKeyStore(_fixedKeys),
+    );

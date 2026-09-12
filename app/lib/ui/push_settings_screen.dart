@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -57,8 +58,12 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   }
 
   Future<void> _load() async {
-    final distributors = await _controller.distributors();
-    final current = await _controller.currentDistributor();
+    List<String> distributors = [];
+    String? current;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      distributors = await _controller.distributors();
+      current = await _controller.currentDistributor();
+    }
     await _controller.refreshServerInfo();
     if (!mounted) return;
     setState(() {
@@ -135,11 +140,16 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   );
 
   List<Widget> _providerBody() {
-    final options = [
-      ('unifiedpush', 'UnifiedPush', 'Default — uses distributor apps on the device'),
-      if (PushPortConfig.isConfigured && _controller.pushPortAvailable)
-        ('pushport/fcm', 'PushPort / FCM', 'Firebase Cloud Messaging with on-device decrypt'),
-    ];
+    final options = defaultTargetPlatform == TargetPlatform.iOS
+        ? [
+            if (PushPortConfig.isConfigured && _controller.pushPortAvailable)
+              ('pushport/apns', 'PushPort / APNs', 'Apple Push Notification service with on-device decrypt'),
+          ]
+        : [
+            ('unifiedpush', 'UnifiedPush', 'Default — uses distributor apps on the device'),
+            if (PushPortConfig.isConfigured && _controller.pushPortAvailable)
+              ('pushport/fcm', 'PushPort / FCM', 'Firebase Cloud Messaging with on-device decrypt'),
+          ];
     return [
       RadioGroup<String>(
         groupValue: _activeProvider,
