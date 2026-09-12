@@ -29,6 +29,9 @@ Flutter/flutter_export_environment.sh
 ServiceDefinitions.json
 Runner/GeneratedPluginRegistrant.*
 
+# App Store export options (account-specific provisioning profiles)
+export_options.plist
+
 # Exceptions to above rules.
 !default.mode1v3
 !default.mode2v3
