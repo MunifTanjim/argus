@@ -20,21 +20,24 @@ import 'ui/theme.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Firebase.initializeApp needs google-services.json; a missing/invalid config
-  // is swallowed so FCM stays inactive while everything else works.
-  try {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    initFcmListeners();
-  } catch (e) {
-    debugPrint('Firebase init failed: $e');
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    // Firebase.initializeApp needs google-services.json; a missing/invalid config
+    // is swallowed so FCM stays inactive while everything else works.
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      initFcmListeners();
+    } catch (e) {
+      debugPrint('Firebase init failed: $e');
+    }
   }
-  // Register UnifiedPush callbacks here so they also run in the headless
-  // background isolate (started with --unifiedpush-bg) when the app is killed,
-  // letting an incoming push raise a notification.
-  await initUnifiedPush();
-  // Headless background launch: handle the push, don't build the UI.
-  if (args.contains('--unifiedpush-bg')) return;
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    // Register UnifiedPush callbacks here so they also run in the headless
+    // background isolate (started with --unifiedpush-bg) when the app is killed,
+    // letting an incoming push raise a notification.
+    await initUnifiedPush();
+    if (args.contains('--unifiedpush-bg')) return;
+  }
   _registerAssetLicenses();
   runApp(const ProviderScope(child: ArgusApp()));
 }
