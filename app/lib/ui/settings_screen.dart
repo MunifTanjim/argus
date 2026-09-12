@@ -6,6 +6,7 @@ import '../state/gateway.dart';
 import '../state/profiles.dart';
 import '../state/grouping.dart';
 import '../transport/ssh_gateway.dart';
+import 'about_screen.dart';
 import 'appearance_screen.dart';
 import 'device_identity_screen.dart';
 import 'push_settings_screen.dart';
@@ -79,6 +80,17 @@ class SettingsScreen extends ConsumerWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const DeviceIdentityScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('About'),
+                      subtitle: const Text('Privacy policy & licenses'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const AboutScreen()),
                       ),
                     ),
                     const SizedBox(height: 24),
