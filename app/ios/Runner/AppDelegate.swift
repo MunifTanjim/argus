@@ -8,6 +8,9 @@ import UserNotifications
   private var pendingToken: String?
   private var tokenResult: FlutterResult?
   private var launchSessionId: String?
+  // The session whose detail view is on screen, if any. A foreground push for it is
+  // not presented (see willPresent), matching Android's suppressForActive.
+  private var activeSessionId: String?
 
   override func application(
     _ application: UIApplication,
@@ -55,6 +58,17 @@ import UserNotifications
     case "getLaunchSessionId":
       result(launchSessionId)
       launchSessionId = nil
+    case "setActiveSession":
+      activeSessionId = call.arguments as? String  // nil clears
+      result(nil)
+    case "dismissSession":
+      if let sessionId = call.arguments as? String {
+        removeDeliveredNotifications(matching: sessionId) {
+          DispatchQueue.main.async { result(nil) }
+        }
+      } else {
+        result(nil)
+      }
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -86,7 +100,8 @@ import UserNotifications
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler([.banner, .sound])
+    completionHandler(foregroundPresentationOptions(
+      activeSessionId, info: notification.request.content.userInfo))
   }
 
   override func userNotificationCenter(
@@ -103,13 +118,5 @@ import UserNotifications
       }
     }
     completionHandler()
-  }
-
-  private func compositeSessionId(from info: [AnyHashable: Any]) -> String? {
-    guard let session = info["session_id"] as? String, !session.isEmpty else { return nil }
-    if let node = info["node_id"] as? String, !node.isEmpty {
-      return "\(node):\(session)"
-    }
-    return session
   }
 }
