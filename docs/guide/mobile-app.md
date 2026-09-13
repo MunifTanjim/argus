@@ -1,6 +1,6 @@
 # Mobile App
 
-A companion **Android app** (in [`app/`](https://github.com/MunifTanjim/argus/tree/main/app))
+A companion **mobile app** for iOS and Android (in [`app/`](https://github.com/MunifTanjim/argus/tree/main/app))
 mirrors the TUI — sessions, status, transcripts, live screen, prompts,
 history — and adds **Push Notification**: it pings you the moment a session needs
 you (a prompt, a question, a finished turn) **even when backgrounded or killed**.
@@ -8,6 +8,8 @@ you (a prompt, a question, a finished turn) **even when backgrounded or killed**
 <DemoVideo src="/screenshots/demo-app.mp4" alt="Argus Android app — sessions, transcript, and history in your pocket" portrait />
 
 ## Install
+
+### Android
 
 The app is in **Closed Testing** on Google Play — anyone can join:
 
@@ -18,6 +20,15 @@ The app is in **Closed Testing** on Google Play — anyone can join:
 3. Follow the link to install **Argus** from the Play Store.
 
 Updates then arrive automatically through the Play Store like any other app.
+
+### iOS
+
+The iOS app is distributed through **TestFlight**. To get access, ask the owner
+to add you as a tester in App Store Connect. You will receive an email invitation.
+
+1. Install **TestFlight** from the App Store if you do not have it.
+2. Open the invitation email and tap **View in TestFlight**.
+3. Tap **Install** in TestFlight.
 
 ## Pairing
 
@@ -62,8 +73,12 @@ rejected.
 The app pings you the moment a session needs you — **even when backgrounded or
 killed**. Nothing to configure; push is always on.
 
-Push runs over **UnifiedPush**, so it works on any Android:
+**iOS** — push runs over APNs through [PushPort](/guide/pushport), on by default
+in the published app. Source builds must embed a PushPort app id.
+
+**Android** — push runs over **UnifiedPush**, so it works on any Android:
 
 - **Google Play devices** — works out of the box, no setup.
 - **De-Googled devices** — install any UnifiedPush distributor (e.g.
   [ntfy](https://ntfy.sh)), then select it in **Settings → Push notifications**.
+- **PushPort** — an alternative to UnifiedPush. See the [PushPort guide](/guide/pushport).
