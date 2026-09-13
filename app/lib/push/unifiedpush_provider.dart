@@ -98,6 +98,11 @@ class UnifiedPushProvider implements PushProvider {
   @override
   Future<void> refresh() => _freshEndpoint();
 
+  /// The distributor hands over a replacement through onNewEndpoint, so there is
+  /// no expiry to watch.
+  @override
+  PushLease get lease => PushLease.none;
+
   /// Drops the distributor's cached endpoint and forces a brand-new one, returning
   /// the fresh target — never a stale fallback. Used to recover from a gone
   /// endpoint: unlike [refresh] (which reuses the cached endpoint and so can't

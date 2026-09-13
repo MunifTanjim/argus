@@ -6,9 +6,11 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/all.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import 'external_url.dart';
 import 'theme.dart';
+
+export 'external_url.dart' show openExternalUrl;
 
 /// A backtick fence guaranteed longer than any backtick run inside [body], so an
 /// embedded ``` cannot terminate the fenced block early.
@@ -523,20 +525,6 @@ void showLinkActions(BuildContext context, String url) {
       );
     },
   );
-}
-
-/// Opens [url] in the external browser. Overridable in tests. Malformed or
-/// unlaunchable URLs are ignored so a bad link can never crash the render.
-Future<void> Function(String url) openExternalUrl = _openExternalUrl;
-
-Future<void> _openExternalUrl(String url) async {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return;
-  try {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } catch (_) {
-    // Unlaunchable URL (no handler, platform error): ignore.
-  }
 }
 
 /// Copies [text] to the clipboard and shows a brief confirmation snackbar when a
