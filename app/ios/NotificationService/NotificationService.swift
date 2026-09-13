@@ -20,7 +20,14 @@ class NotificationService: UNNotificationServiceExtension {
         privateKey: keys.priv, auth: keys.auth, body: body),
       let obj = try? JSONSerialization.jsonObject(with: plaintext) as? [String: Any]
     else {
-      contentHandler(content)  // fall back to the placeholder alert
+      // Decryption failed: show the placeholder. A UNNotificationServiceExtension
+      // cannot discard a notification that carries a visible alert, so this push is
+      // always displayed. The placeholder has no session_id/node_id, so
+      // compositeSessionId is nil and it is never collapsed and can stack across
+      // repeated failures. Dropping or collapsing failed pushes needs a gateway
+      // change (apns-collapse-id, or top-level unencrypted session_id/node_id so the
+      // placeholder can be collapsed by compositeSessionId).
+      contentHandler(content)
       return
     }
 
@@ -32,7 +39,14 @@ class NotificationService: UNNotificationServiceExtension {
       for (k, v) in data { info[k] = v }
       content.userInfo = info
     }
-    contentHandler(content)
+    // Replace the session's standing alert so a session shows one notification,
+    // not a stack. APNs assigns each identifier, so an older alert cannot be
+    // collapsed by id and must be removed before this one is delivered.
+    if let sessionId = compositeSessionId(from: content.userInfo) {
+      removeDeliveredNotifications(matching: sessionId) { contentHandler(content) }
+    } else {
+      contentHandler(content)
+    }
   }
 
   override func serviceExtensionTimeWillExpire() {
