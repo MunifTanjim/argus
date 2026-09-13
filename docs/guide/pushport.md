@@ -3,19 +3,13 @@
 [**PushPort**](https://pushport.muniftanjim.dev) is a hosted push relay and an
 alternative push provider for Argus.
 
-[UnifiedPush](/guide/mobile-app#push-notification) is the default. PushPort is an
-alternative — pick whichever you prefer. Your notifications stay private either
-way: the Argus node encrypts each notification end-to-end for your device, so
-neither the gateway nor the relay sees the content.
+On Android, [UnifiedPush](/guide/mobile-app#push-notification) is the default and
+PushPort is an alternative. You can use either one. On iOS, PushPort is the only
+push path. Your notifications stay private either way: the Argus node encrypts
+each notification end-to-end for your device, so neither the gateway nor the
+relay sees the content.
 
-Delivery runs over **Firebase Cloud Messaging** (Android).
-
-## Prerequisites
-
-- An Argus app build that embeds a PushPort app id. Build it with
-  `make build PUSHPORT_APP_ID=<your-app-id>`. Without an embedded app id, the
-  PushPort option does not appear in the app.
-- A reachable gateway and its master token.
+Delivery runs over **Firebase Cloud Messaging** on Android and **Apple Push Notification service** on iOS.
 
 ## Setup
 
@@ -30,8 +24,11 @@ Delivery runs over **Firebase Cloud Messaging** (Android).
    `pit_…` token, and paste it back when prompted. The gateway stores the token
    and applies it live. No restart is needed.
 
-2. Select the provider in the app. Open **Settings → Push → Provider** and
-   select **PushPort/FCM**. This option appears only when the gateway has an
-   instance token.
+2. **Android only** — select the provider in the app. Open
+   **Settings → Push → Provider** and select **PushPort / FCM**. The option
+   appears only after step 1.
+
+   On iOS the app selects **PushPort / APNs** by itself, on the next connection
+   to the gateway. No action is needed.
 
 The app then subscribes and registers its endpoint with your gateway.
