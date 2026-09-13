@@ -1,5 +1,8 @@
+import 'package:argus/push/apns_source.dart';
 import 'package:argus/push/notifications.dart';
 import 'package:argus/push/push_message.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -53,6 +56,79 @@ void main() {
         () async {
       TestWidgetsFlutterBinding.ensureInitialized();
       await PushNotifications.instance.cancelForSession('home:default:%3');
+    });
+  });
+
+  group('cancelForSession on iOS', () {
+    const channel = MethodChannel('dev.muniftanjim.argus/apns');
+
+    setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setApnsChannelForTest(channel);
+    });
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    test('routes to the native dismiss channel with the composite id',
+        () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+
+      await PushNotifications.instance.cancelForSession('node1:abc');
+
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'dismissSession');
+      expect(calls.single.arguments, 'node1:abc');
+    });
+  });
+
+  group('setActiveSession on iOS', () {
+    const channel = MethodChannel('dev.muniftanjim.argus/apns');
+
+    setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setApnsChannelForTest(channel);
+    });
+    tearDown(() {
+      PushNotifications.instance.setActiveSession(null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('forwards the composite id to the native channel', () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+
+      PushNotifications.instance.setActiveSession('node1:abc');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'setActiveSession');
+      expect(calls.single.arguments, 'node1:abc');
+    });
+
+    test('forwards null to clear the active session', () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+
+      PushNotifications.instance.setActiveSession(null);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'setActiveSession');
+      expect(calls.single.arguments, isNull);
     });
   });
 

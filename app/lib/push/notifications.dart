@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'apns_source.dart';
 import 'push_message.dart';
 import 'seen_messages.dart';
 
@@ -36,8 +38,14 @@ class PushNotifications {
   String? get activeSessionId => _activeSessionId;
 
   /// Marks [sessionId] as the actively viewed session (null when none). While
-  /// set, [show] suppresses notifications for that session.
-  void setActiveSession(String? sessionId) => _activeSessionId = sessionId;
+  /// set, [show] suppresses notifications for that session. On iOS the same value
+  /// is forwarded to the native side, which suppresses foreground pushes for it.
+  void setActiveSession(String? sessionId) {
+    _activeSessionId = sessionId;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      unawaited(setApnsActiveSession(sessionId));
+    }
+  }
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'argus_sessions',
@@ -119,6 +127,10 @@ class PushNotifications {
   /// Dismisses the standing notification for [sessionId], if any. Called when a
   /// session's view opens so its alert clears as you start reading.
   Future<void> cancelForSession(String sessionId) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await dismissApnsSession(sessionId);
+      return;
+    }
     await init();
     if (!_ready) return;
     await _plugin.cancel(sessionNotificationId(sessionId));

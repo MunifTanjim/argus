@@ -59,3 +59,14 @@ Future<bool> writeWebPushKeysToKeychain({
 /// The session id of a notification tap that cold-launched the app.
 Future<String?> apnsLaunchSessionId() =>
     _channel.invokeMethod<String?>('getLaunchSessionId');
+
+/// Dismisses the delivered notification for [sessionId] (a composite
+/// `node:session` id). APNs owns the delivered notification's identifier, so the
+/// native side finds the match by session id rather than by a known id.
+Future<void> dismissApnsSession(String sessionId) =>
+    _channel.invokeMethod<void>('dismissSession', sessionId);
+
+/// Tells the native side which session is on screen (a composite `node:session`
+/// id), so a foreground push for it is not presented. Null clears.
+Future<void> setApnsActiveSession(String? sessionId) =>
+    _channel.invokeMethod<void>('setActiveSession', sessionId);
