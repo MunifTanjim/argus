@@ -68,7 +68,8 @@ func (r *Registry) Seed(sessions []session.Session) {
 	defer r.mu.Unlock()
 	for i := range sessions {
 		cp := sessions[i]
-		r.sessions[cp.ID] = &cp
+		r.sessions[cp.ID] = &cp // &cp is a per-iteration copy: isolates stored sessions from later caller mutation of the slice.
+
 		if cp.Tmux.PaneID != "" {
 			r.index.setPane(PaneKey(cp.Tmux.Server, cp.Tmux.PaneID), cp.ID)
 		}
