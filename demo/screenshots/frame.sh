@@ -10,8 +10,10 @@ RAW="${1:?raw png path}"
 OUT="${2:?output png path}"
 CAPTION="${3:?caption text}"
 
-W=1320
-H=2868
+# Canvas size: App Store Connect accepts 6.9" (1320x2868, default) or, for the
+# 6.5" slot, 1284x2778. Override with TARGET_W/TARGET_H. Layout scales with width.
+W="${TARGET_W:-1320}"
+H="${TARGET_H:-2868}"
 BG_TOP="#25292b"
 BG_BOTTOM="#161819"
 FG="#ebdbb2"
@@ -19,13 +21,15 @@ BODY="#0a0a0a"
 BUTTON="#2b2b2b"
 FONT="${ARGUS_CAPTION_FONT:-/System/Library/Fonts/SFNS.ttf}"
 
-CAP_H=224        # caption text-box height (top band)
-CAP_Y=92         # caption top offset
-DEV_Y=336        # device top offset (below the caption band)
-DEV_W=1060       # on-canvas screen width (the raw is scaled to this)
-BEZEL=22         # uniform bezel around the screen
-SR=94            # screen corner radius
-NUB=9            # how far side buttons protrude past the body
+s() { echo $(( $1 * W / 1320 )); } # scale a 1320-referenced length to the target width
+CAP_H=$(s 224)   # caption text-box height (top band)
+CAP_Y=$(s 92)    # caption top offset
+DEV_Y=$(s 336)   # device top offset (below the caption band)
+DEV_W=$(s 1060)  # on-canvas screen width (the raw is scaled to this)
+BEZEL=$(s 22)    # uniform bezel around the screen
+SR=$(s 94)       # screen corner radius
+NUB=$(s 9)       # how far side buttons protrude past the body
+PT=$(s 80)       # caption font point size
 
 TMP=$(mktemp -d -t argus-frame.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
@@ -82,7 +86,7 @@ magick "$TMP/device.png" \
 magick -size "${W}x${H}" \
   -define gradient:direction=north "gradient:${BG_BOTTOM}-${BG_TOP}" \
   \( -background none -fill "$FG" -gravity center \
-     -font "$FONT" -pointsize 80 -size "$((W-180))x${CAP_H}" \
+     -font "$FONT" -pointsize "$PT" -size "$((W-180))x${CAP_H}" \
      "caption:${CAPTION}" \) \
   -gravity north -geometry "+0+${CAP_Y}" -compose over -composite \
   "$TMP/device_sh.png" -gravity north -geometry "+0+${DEV_Y}" \
