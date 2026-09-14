@@ -1,8 +1,11 @@
 package node
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func TestLoadDemoDataParsesNodesAndHistory(t *testing.T) {
@@ -104,5 +107,20 @@ func TestBuildDemoNodesSeedsRegistryAndIdentity(t *testing.T) {
 	}
 	if len(n.demoHistory) != 1 {
 		t.Fatalf("demoHistory = %d, want 1", len(n.demoHistory))
+	}
+}
+
+func TestHistoryHandlersServeDemoFixtures(t *testing.T) {
+	dd, _ := LoadDemoData("testdata/demo_min.yaml")
+	nodes, _ := BuildDemoNodes(dd, "test")
+	d := nodes[0]
+
+	res, err := d.handleHistoryProjects(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("handleHistoryProjects: %v", err)
+	}
+	projs, ok := res.([]session.HistoryProject)
+	if !ok || len(projs) != 1 {
+		t.Fatalf("projects = %#v", res)
 	}
 }
