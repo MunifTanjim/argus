@@ -1,0 +1,8 @@
+nodes:
+  - id: n1
+    label: N1
+    sessions:
+      - id: s1
+        agent: nope
+        status: working
+        source: hook
