@@ -1,8 +1,37 @@
-[1;32myou@home[0m:[1;34m~/dev/argus[0m[1;33m (feat/demo-data)[0m$ go test ./internal/node/ -run TestDemo -v
-[1m=== RUN   TestDemoTerminal[0m
-[32m--- PASS: TestDemoTerminal (0.02s)[0m
-[1m=== RUN   TestDemoRepo[0m
-[32m--- PASS: TestDemoRepo (0.11s)[0m
-[1mok  	github.com/MunifTanjim/argus/internal/node	0.14s[0m
+[32m⏺[0m Fix the token-expiry boundary in the
+  auth middleware.
 
-[1;32myou@home[0m:[1;34m~/dev/argus[0m[1;33m (feat/demo-data)[0m$ [0m
+[32m⏺[0m [1mRead[0m([36minternal/gateway/auth.go[0m)
+  [90m⎿ Read 84 lines[0m
+
+[32m⏺[0m [36m!now.Before(tok.ExpiresAt)[0m is strict —
+  it rejects the exact expiry second.
+
+[32m⏺[0m [1mUpdate[0m([36minternal/gateway/auth.go[0m)
+  [90m⎿ Updated: 1 addition, 1 removal[0m
+     [90m42[0m [31m- if !now.Before(tok.ExpiresAt) {[0m
+     [90m42[0m [32m+ if now.After(tok.ExpiresAt) {[0m
+
+[32m⏺[0m [1mBash[0m([36mgo test ./internal/gateway
+  -run TestAuth[0m)
+  [90m⎿ === RUN   TestAuthValidate[0m
+     [90m--- PASS: valid_at_exact_expiry[0m
+     [90m--- PASS: TestAuthValidate (0.00s)[0m
+     [32mok[0m  [90minternal/gateway  0.412s[0m
+
+[32m⏺[0m [1mGrep[0m([36m!\w+\.Before\([0m) [90min internal[0m
+  [90m⎿ 3 matches[0m
+
+[32m⏺[0m The other two are ordering checks, not
+  expiry gates:
+  [90m• registry/reconcile_sessions.go[0m
+  [90m• node/terminal_mirror.go[0m
+  Neither validates a credential.
+
+[32m⏺[0m Done. A token at the exact expiry
+  second now counts as valid; tests pass.
+
+[33m╭──────────────────────────────────────╮[0m
+[33m│[0m > [33m                                   │[0m
+[33m╰──────────────────────────────────────╯[0m
+  [90m⏵⏵ accept edits · esc to interrupt[0m
