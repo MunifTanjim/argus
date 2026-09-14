@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func gitRun(dir string, args ...string) error {
@@ -15,7 +16,7 @@ func gitRun(dir string, args ...string) error {
 		"GIT_COMMITTER_NAME=argus demo", "GIT_COMMITTER_EMAIL=demo@argus.local",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git %v: %w: %s", args, err, out)
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
 	}
 	return nil
 }

@@ -459,7 +459,6 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
 	}
 	for _, dn := range o.demoNodes {
-		dn := dn
 		go dn.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
 	}
 
@@ -502,7 +501,6 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	return httpSrv
 }
 
-// demoToken returns a random master token for demo mode when none is configured.
 func demoToken() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)

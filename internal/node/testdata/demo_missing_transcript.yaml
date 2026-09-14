@@ -5,5 +5,5 @@ nodes:
       - id: s1
         agent: claude
         status: working
-        source: hook
+        source: hooked
         transcript_path: nope.jsonl
