@@ -1,37 +1,37 @@
-[32m⏺[0m Fix the token-expiry boundary in the
+[92m⏺[0m Fix the token-expiry boundary in the
   auth middleware.
 
-[32m⏺[0m [1mRead[0m([36minternal/gateway/auth.go[0m)
-  [90m⎿ Read 84 lines[0m
+[92m⏺[0m [1mRead[0m([96minternal/gateway/auth.go[0m)
+  [37m⎿ Read 84 lines[0m
 
-[32m⏺[0m [36m!now.Before(tok.ExpiresAt)[0m is strict —
+[92m⏺[0m [96m!now.Before(tok.ExpiresAt)[0m is strict —
   it rejects the exact expiry second.
 
-[32m⏺[0m [1mUpdate[0m([36minternal/gateway/auth.go[0m)
-  [90m⎿ Updated: 1 addition, 1 removal[0m
-     [90m42[0m [31m- if !now.Before(tok.ExpiresAt) {[0m
-     [90m42[0m [32m+ if now.After(tok.ExpiresAt) {[0m
+[92m⏺[0m [1mUpdate[0m([96minternal/gateway/auth.go[0m)
+  [37m⎿ Updated: 1 addition, 1 removal[0m
+     [37m42[0m [91m- if !now.Before(tok.ExpiresAt) {[0m
+     [37m42[0m [92m+ if now.After(tok.ExpiresAt) {[0m
 
-[32m⏺[0m [1mBash[0m([36mgo test ./internal/gateway
+[92m⏺[0m [1mBash[0m([96mgo test ./internal/gateway
   -run TestAuth[0m)
-  [90m⎿ === RUN   TestAuthValidate[0m
-     [90m--- PASS: valid_at_exact_expiry[0m
-     [90m--- PASS: TestAuthValidate (0.00s)[0m
-     [32mok[0m  [90minternal/gateway  0.412s[0m
+  [37m⎿ === RUN   TestAuthValidate[0m
+     [37m--- PASS: valid_at_exact_expiry[0m
+     [37m--- PASS: TestAuthValidate (0.00s)[0m
+     [92mok[0m  [37minternal/gateway  0.412s[0m
 
-[32m⏺[0m [1mGrep[0m([36m!\w+\.Before\([0m) [90min internal[0m
-  [90m⎿ 3 matches[0m
+[92m⏺[0m [1mGrep[0m([96m!\w+\.Before\([0m) [37min internal[0m
+  [37m⎿ 3 matches[0m
 
-[32m⏺[0m The other two are ordering checks, not
+[92m⏺[0m The other two are ordering checks, not
   expiry gates:
-  [90m• registry/reconcile_sessions.go[0m
-  [90m• node/terminal_mirror.go[0m
+  [37m• registry/reconcile_sessions.go[0m
+  [37m• node/terminal_mirror.go[0m
   Neither validates a credential.
 
-[32m⏺[0m Done. A token at the exact expiry
+[92m⏺[0m Done. A token at the exact expiry
   second now counts as valid; tests pass.
 
-[33m╭──────────────────────────────────────╮[0m
-[33m│[0m > [33m                                   │[0m
-[33m╰──────────────────────────────────────╯[0m
-  [90m⏵⏵ accept edits · esc to interrupt[0m
+[93m╭──────────────────────────────────────╮[0m
+[93m│[0m > [93m                                   │[0m
+[93m╰──────────────────────────────────────╯[0m
+  [37m⏵⏵ accept edits · esc to interrupt[0m
