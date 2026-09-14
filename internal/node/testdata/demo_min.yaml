@@ -14,7 +14,7 @@ nodes:
       - id: s2
         agent: claude
         name: fix linting
-        status: stopped
+        status: idle
         source: hook
         terminal_path: t.jsonl
         repo_spec: .

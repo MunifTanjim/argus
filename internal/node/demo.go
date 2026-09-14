@@ -10,7 +10,9 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 
 	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
 // DemoHistoryProject is one past-sessions project for the History view.
@@ -162,6 +164,41 @@ func LoadDemoData(path string) (*DemoData, error) {
 			dn.History = append(dn.History, hp)
 		}
 		out.Nodes = append(out.Nodes, dn)
+	}
+	return out, nil
+}
+
+// BuildDemoNodes constructs one read-only demo node per fixture node: an empty
+// tmux map (no spawn, no tmux), an ephemeral Noise identity with the e2ee uplink
+// on (the app speaks only Noise), a seeded registry, and demo history and
+// terminal fixtures. The nodes are ready to ConnectGateway; they must not Run.
+func BuildDemoNodes(dd *DemoData, version string) ([]*Node, error) {
+	out := make([]*Node, 0, len(dd.Nodes))
+	for _, dn := range dd.Nodes {
+		d := newNode(map[session.TmuxServer]*tmux.Client{})
+		d.SetIdentity(dn.ID, dn.Label)
+		d.SetVersion(version)
+
+		kp, err := e2e.GenerateKeyPair()
+		if err != nil {
+			return nil, fmt.Errorf("demo node %s identity: %w", dn.ID, err)
+		}
+		d.SetIdentityKey(kp)
+		d.SetE2EE(true)
+
+		d.demo = true
+		d.demoHistory = dn.History
+		d.reg.Seed(dn.Sessions)
+
+		d.demoTerminals = map[string][]byte{}
+		for sid, path := range dn.Terminals {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("demo node %s terminal %s: %w", dn.ID, sid, err)
+			}
+			d.demoTerminals[sid] = b
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }
