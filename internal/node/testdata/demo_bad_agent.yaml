@@ -5,4 +5,4 @@ nodes:
       - id: s1
         agent: nope
         status: working
-        source: hook
+        source: hooked

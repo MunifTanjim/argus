@@ -5,8 +5,8 @@ nodes:
       - id: dup
         agent: claude
         status: working
-        source: hook
+        source: hooked
       - id: dup
         agent: claude
-        status: stopped
-        source: hook
+        status: idle
+        source: hooked
