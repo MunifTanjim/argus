@@ -12,6 +12,9 @@ import (
 // handleHook applies an agent hook event. Blocking hooks park until the user
 // answers; the agent's own prompt stays live in parallel (whoever answers first wins).
 func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, error) {
+	if d.demo {
+		return api.HookResult{}, nil
+	}
 	ev, err := api.Decode[adapter.HookEvent](params)
 	if err != nil {
 		return nil, err

@@ -13,6 +13,9 @@ import (
 // ignore any node_id (the gateway uses it to route here); each scans this machine.
 
 func (d *Node) handleHistoryProjects(context.Context, json.RawMessage) (any, error) {
+	if d.demo {
+		return demoHistoryProjects(d.demoHistory), nil
+	}
 	lists := make([][]session.HistoryProject, 0, len(d.adapterList))
 	for _, a := range d.adapterList {
 		ps, err := a.ListHistoryProjects()
@@ -29,6 +32,9 @@ func (d *Node) handleHistorySessions(_ context.Context, params json.RawMessage) 
 	p, err := api.Decode[api.HistorySessionsParams](params)
 	if err != nil {
 		return nil, err
+	}
+	if d.demo {
+		return demoHistorySessions(d.demoHistory, p.ProjectDir, p.Offset, p.Limit), nil
 	}
 	// An empty ProjectDir is the "(unknown)" bucket (workspace-less sessions),
 	// not a missing param.
