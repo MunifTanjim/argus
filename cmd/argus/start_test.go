@@ -9,6 +9,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/node"
 )
 
 func cfgWith(url, token string) *config.Config {
@@ -165,5 +166,12 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("runStart did not return after ctx cancel")
+	}
+}
+
+func TestDemoDataFlagRejectsMissingFile(t *testing.T) {
+	_, err := node.LoadDemoData("does-not-exist.yaml")
+	if err == nil {
+		t.Fatal("want error for missing fixture")
 	}
 }
