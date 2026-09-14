@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -71,6 +73,35 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 	local := runLocalNode(cfg)
 	serveGW := serveGatewayMode(cfg)
+
+	demoPath, _ := cmd.Flags().GetString("demo-data")
+	var demoNodes []*node.Node
+	var demoCleanup func()
+	if demoPath != "" {
+		dd, err := node.LoadDemoData(demoPath)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		demoCleanup, err = node.MaterializeDemoRepos(dd)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		defer demoCleanup()
+		demoNodes, err = node.BuildDemoNodes(dd, version)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		local = false
+		serveGW = true
+		if cfg.Gateway.ListenAddr == "" {
+			cfg.Gateway.ListenAddr = ":8443"
+		}
+		if cfg.Token == "" {
+			cfg.Token = demoToken()
+			logger.Scoped("gateway").Info("demo mode: generated pairing token", "token", cfg.Token)
+		}
+	}
+
 	onTTY := isatty.IsTerminal(os.Stdin.Fd())
 	if local {
 		logger.Scoped("node").Info("starting argus node", "version", version)
@@ -168,6 +199,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			pushDelay:     cfg.Push.Mobile.Delay,
 			tunnel:        tun,
 			tunnelOrigin:  tunOrigin,
+			demoNodes:     demoNodes,
 		})
 	}
 
@@ -240,6 +272,8 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("socket", "", "unix socket path for the local JSON-RPC API (default: XDG runtime path)")
 	f.String("id", "", "stable node id announced to a gateway (default: hostname)")
 	f.String("label", "", "human-friendly node name shown in clients (default: hostname)")
+	f.String("demo-data", "", "path to a YAML fixture of fake nodes/sessions for screenshots")
+	_ = f.MarkHidden("demo-data")
 
 	f.String("mode", "", "run mode: 'node' (local node) or 'gateway' (standalone gateway, no local node); default: inferred from --token/--gateway [$ARGUS_MODE]")
 
@@ -363,7 +397,8 @@ var tunnelURLTimeout = 60 * time.Second
 // the gateway/tunnel/push scopes from it — injected so the embedded caller can
 // route to the TUI's log buffer instead of stderr.
 type gatewayServeOpts struct {
-	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
+	node          *node.Node   // in-process source; nil for a standalone gateway (relay only)
+	demoNodes     []*node.Node // extra in-process nodes to connect over loopback (demo mode)
 	token         string
 	listener      net.Listener
 	log           *slog.Logger
@@ -423,6 +458,10 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	if d := o.node; d != nil {
 		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
 	}
+	for _, dn := range o.demoNodes {
+		dn := dn
+		go dn.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
+	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")
@@ -461,6 +500,13 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 		}()
 	}
 	return httpSrv
+}
+
+// demoToken returns a random master token for demo mode when none is configured.
+func demoToken() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // setupBlindPush wires the e2ee-on push path: the gateway holds the VAPID key and

@@ -33,6 +33,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a config key
 		"replacement":      true, // `lock revoke-signer` only: ceremony argument, not a config key
 		"fork-from":        true, // `lock revoke-signer` only: ceremony argument, not a config key
+		"demo-data":        true, // `start` only: fixture path read directly, not a persistent config key
 	}
 
 	seen := map[string]bool{}
