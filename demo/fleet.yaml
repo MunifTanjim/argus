@@ -1,0 +1,146 @@
+nodes:
+  - id: home
+    label: home-desktop
+    spawn: true
+    sessions:
+      - id: argus-main
+        agent: claude
+        name: argus
+        repo: argus
+        cwd: /home/you/dev/argus
+        status: working
+        source: hooked
+        frontend: tmux
+        transcript_path: transcripts/claude-argus.jsonl
+        terminal_path: terminals/claude-argus.txt
+        summary:
+          model_name: "Opus 4.8"
+          model_color: "#d3869b"
+          tokens: 28780
+          task: "Thanks. Can you double-check nothing else in the codebase does the same non-strict expiry comparison?"
+      - id: dotfiles
+        agent: claude
+        name: dotfiles
+        repo: dotfiles
+        cwd: /home/you/dotfiles
+        status: idle
+        source: hooked
+        frontend: tmux
+    history:
+      - repo: argus
+        cwd: /home/you/dev/argus
+        sessions:
+          - session_id: h-argus-1
+            agent: claude
+            first_message: "refactor the auth middleware"
+            model_name: "Opus 4.8"
+            model_color: "#d3869b"
+            last_activity: "2026-07-08T21:14:45Z"
+            tokens: 51000
+            turn_count: 2
+            duration_ms: 43000
+            transcript_path: transcripts/claude-argus.jsonl
+          - session_id: h-argus-2
+            agent: claude
+            title: "Gateway reconnect backoff"
+            first_message: "the gateway hammers reconnects when the tunnel drops"
+            model_name: "Opus 4.8"
+            model_color: "#d3869b"
+            last_activity: "2026-07-08T16:02:10Z"
+            tokens: 88000
+            turn_count: 9
+            duration_ms: 512000
+          - session_id: h-argus-3
+            agent: claude
+            first_message: "add a --demo-data flag for screenshots"
+            model_name: "Sonnet 5"
+            model_color: "#83a598"
+            last_activity: "2026-07-07T23:48:00Z"
+            tokens: 132000
+            turn_count: 14
+            duration_ms: 1240000
+      - repo: dotfiles
+        cwd: /home/you/dotfiles
+        sessions:
+          - session_id: h-dot-1
+            agent: claude
+            first_message: "migrate my tmux config to the new plugin manager"
+            model_name: "Sonnet 5"
+            model_color: "#83a598"
+            last_activity: "2026-07-06T10:20:00Z"
+            tokens: 24000
+            turn_count: 5
+            duration_ms: 180000
+  - id: laptop
+    label: macbook-pro
+    sessions:
+      - id: webapp
+        agent: codex
+        name: web-app
+        repo: web-app
+        cwd: /home/you/dev/web-app
+        status: awaiting_input
+        source: hooked
+        frontend: tmux
+        transcript_path: transcripts/codex-webapp.jsonl
+        repo_spec: repos/webapp
+        summary:
+          model_name: "GPT-5.5"
+          model_color: "#8ec07c"
+          tokens: 50040
+          task: "GET /api/products 500s when the category query param is present but empty (e.g. ?category=). Should just return all products in that case. Fix it and add a regression test."
+      - id: scratch
+        agent: claude
+        name: scratch
+        repo: scratch
+        status: dead
+        source: discovered
+        frontend: tmux
+    history:
+      - repo: web-app
+        cwd: /home/you/dev/web-app
+        sessions:
+          - session_id: h-web-1
+            agent: codex
+            first_message: "GET /api/products 500s on empty category"
+            model_name: "GPT-5.5"
+            model_color: "#8ec07c"
+            last_activity: "2026-07-08T21:19:12Z"
+            tokens: 50000
+            turn_count: 1
+            duration_ms: 32000
+            transcript_path: transcripts/codex-webapp.jsonl
+          - session_id: h-web-2
+            agent: codex
+            title: "Checkout total rounding"
+            first_message: "cart total is off by a cent on multi-item orders"
+            model_name: "GPT-5.5"
+            model_color: "#8ec07c"
+            last_activity: "2026-07-08T09:31:00Z"
+            tokens: 61000
+            turn_count: 7
+            duration_ms: 420000
+  - id: devbox
+    label: dev-server
+    sessions:
+      - id: api-triage
+        agent: claude
+        name: investigate OOM
+        repo: api
+        cwd: /srv/api
+        status: awaiting_input
+        source: hooked
+        frontend: external
+        transcript_path: transcripts/claude-argus.jsonl
+        summary:
+          model_name: "Sonnet 5"
+          model_color: "#83a598"
+          tokens: 18340
+          task: "The API process is OOMing under load — heap grows unbounded after ~200 req/s for 10 min. Instrument and find the leak."
+      - id: ci-runner
+        agent: antigravity
+        name: run ci checks
+        repo: api
+        cwd: /srv/api
+        status: working
+        source: spawned
