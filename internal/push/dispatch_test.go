@@ -39,6 +39,56 @@ func TestDispatcherSendAll(t *testing.T) {
 	}
 }
 
+func TestDispatcherSendSkipsPaused(t *testing.T) {
+	store := NewStore(t.TempDir())
+	mustUpsert(t, store, "live", Target{Endpoint: "https://live.example/1"})
+	mustUpsert(t, store, "paused", Target{Endpoint: "https://paused.example/2"})
+	if err := store.SetPause("paused", pauseIndefinite); err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &fakeSender{}
+	d := NewDispatcher(store, sender, nil)
+	d.Send(context.Background(), Notification{})
+
+	if len(sender.sent) != 1 || sender.sent[0].Endpoint != "https://live.example/1" {
+		t.Fatalf("sent = %v, want only the live device", sender.sent)
+	}
+}
+
+func TestDispatcherSendDeliversExpiredPause(t *testing.T) {
+	store := NewStore(t.TempDir())
+	mustUpsert(t, store, "dev-1", Target{Endpoint: "https://a.example/1"})
+	if err := store.SetPause("dev-1", "2000-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &fakeSender{}
+	d := NewDispatcher(store, sender, nil)
+	d.Send(context.Background(), Notification{})
+
+	if len(sender.sent) != 1 {
+		t.Fatalf("expired pause: sent %d, want 1 (delivered)", len(sender.sent))
+	}
+}
+
+func TestDispatcherSendToBypassesPause(t *testing.T) {
+	store := NewStore(t.TempDir())
+	mustUpsert(t, store, "paused", Target{Endpoint: "https://paused.example/2"})
+	if err := store.SetPause("paused", pauseIndefinite); err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &fakeSender{}
+	d := NewDispatcher(store, sender, nil)
+	if err := d.SendTo(context.Background(), "paused", Notification{}); err != nil {
+		t.Fatalf("SendTo: %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("test send to paused device: sent %d, want 1 (bypass)", len(sender.sent))
+	}
+}
+
 func TestDispatcherSendPrunesGone(t *testing.T) {
 	store := NewStore(t.TempDir())
 	mustUpsert(t, store, "live", Target{Endpoint: "https://live.example/1"})

@@ -66,6 +66,35 @@ func TestNodeHandlePushRegisterAndTest(t *testing.T) {
 	}
 }
 
+func TestNodeHandlePushSetPause(t *testing.T) {
+	d := New()
+	store := push.NewStore(t.TempDir())
+	d.SetPushStore(store)
+	dispatch := d.server.DispatchFunc()
+
+	reg := mustMarshal(api.PushRegisterParams{DeviceID: "dev1", Endpoint: "https://p/ep"})
+	if _, err := dispatch(context.Background(), api.MethodPushRegister, reg); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	pause := mustMarshal(api.PushSetPauseParams{DeviceID: "dev1", PausedUntil: "2999-01-01T00:00:00Z"})
+	if _, err := dispatch(context.Background(), api.MethodPushSetPause, pause); err != nil {
+		t.Fatalf("setPause: %v", err)
+	}
+	recs, _ := store.List()
+	if len(recs) != 1 || recs[0].PausedUntil != "2999-01-01T00:00:00Z" {
+		t.Fatalf("records = %+v, want dev1 paused", recs)
+	}
+
+	clear := mustMarshal(api.PushSetPauseParams{DeviceID: "dev1"})
+	if _, err := dispatch(context.Background(), api.MethodPushSetPause, clear); err != nil {
+		t.Fatalf("setPause clear: %v", err)
+	}
+	if recs, _ := store.List(); recs[0].PausedUntil != "" {
+		t.Fatalf("after clear, PausedUntil = %q, want empty", recs[0].PausedUntil)
+	}
+}
+
 // chanSink is a thread-safe push.Sink for asserting across the Watch goroutine.
 type chanSink struct{ ch chan push.Notification }
 

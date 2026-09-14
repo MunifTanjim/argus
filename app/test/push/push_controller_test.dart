@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/push/device_id.dart';
+import 'package:argus/push/pause_preference_store.dart';
 import 'package:argus/push/push_controller.dart';
 import 'package:argus/push/push_message.dart';
 import 'package:argus/push/push_provider.dart';
@@ -29,11 +30,14 @@ class _FakeGatewayClient implements GatewayClient {
   final params = <Map<String, dynamic>>[];
   final responses = <String, Object?>{};
   final throws = <String, Object>{};
+  final gates = <String, Completer<void>>{}; // block a method until the test releases it
 
   @override
   Future<Object?> call(String method, [Object? p]) async {
     calls.add(method);
-    if (p is Map) params.add((p as Map).cast<String, dynamic>());
+    if (p is Map) params.add(p.cast<String, dynamic>());
+    final gate = gates[method];
+    if (gate != null) await gate.future;
     if (throws.containsKey(method)) throw throws[method]!;
     return responses[method];
   }
@@ -160,6 +164,26 @@ _FakeGatewayClient _pushPortClient() => _FakeGatewayClient()
     'nodes': [],
     'pushPortConfigured': true,
   };
+
+Future<({PushController controller, _FakeGatewayClient client, _MemKv pauseKv})>
+    _makePauseController({String? initialPause}) async {
+  final client = _FakeGatewayClient();
+  final pauseKv = _MemKv();
+  if (initialPause != null) {
+    await PausePreferenceStore(pauseKv).save(initialPause);
+  }
+  final controller = PushController(
+    unifiedPush: _FakeUnifiedPushProvider(),
+    extraProviders: [_FakePushProvider('pushport/fcm', 'https://pp.example/ep')],
+    deviceIdStore: DeviceIdStore(_MemKv()),
+    targetStore: PushTargetStore(_MemKv()),
+    providerKv: _MemKv(),
+    pauseStore: PausePreferenceStore(pauseKv),
+    testDeviceId: 'test-device-id',
+  );
+  if (initialPause != null) await controller.loadPausePreference();
+  return (controller: controller, client: client, pauseKv: pauseKv);
+}
 
 void main() {
   test('useProvider activates fake provider and registers on target', () async {
@@ -596,6 +620,120 @@ void main() {
     expect(controller.target, isNull);
     expect(provider.stopCount, greaterThan(0));
     expect(client.calls, contains('push.unregister'));
+    await controller.dispose();
+  });
+
+  test('setPause persists the preference and tells the gateway', () async {
+    final (:controller, :client, :pauseKv) = await _makePauseController();
+    controller.attach(client);
+    await controller.useProvider('pushport/fcm');
+    await Future<void>.delayed(Duration.zero);
+    client.calls.clear();
+    client.params.clear();
+
+    await controller.setPause(pauseIndefinite);
+
+    expect(controller.pausedUntil, pauseIndefinite);
+    expect(await pauseKv.read('push_pause_until'), pauseIndefinite);
+    expect(client.calls, contains('push.setPause'));
+    final call = client.params
+        .firstWhere((p) => p.containsKey('paused_until'));
+    expect(call['device_id'], 'test-device-id');
+    expect(call['paused_until'], pauseIndefinite);
+
+    await controller.dispose();
+  });
+
+  test('setPause(null) clears the preference and tells the gateway', () async {
+    final (:controller, :client, :pauseKv) = await _makePauseController();
+    controller.attach(client);
+    await controller.useProvider('pushport/fcm');
+    await Future<void>.delayed(Duration.zero);
+    await controller.setPause(pauseIndefinite);
+    client.calls.clear();
+    client.params.clear();
+
+    await controller.setPause(null);
+
+    expect(controller.pausedUntil, isNull);
+    expect(await pauseKv.read('push_pause_until'), isNull);
+    expect(client.calls, contains('push.setPause'));
+    expect(client.params.last.containsKey('paused_until'), isFalse);
+
+    await controller.dispose();
+  });
+
+  test('pausedUntil normalizes an elapsed timestamp to null', () async {
+    final past = DateTime.now().toUtc().subtract(const Duration(hours: 1)).toIso8601String();
+    final (:controller, client: _, pauseKv: _) = await _makePauseController(initialPause: past);
+
+    expect(controller.pausedUntil, isNull);
+
+    await controller.dispose();
+  });
+
+  test('pausedUntil returns a future timestamp unchanged', () async {
+    final future = DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String();
+    final (:controller, client: _, pauseKv: _) = await _makePauseController(initialPause: future);
+
+    expect(controller.pausedUntil, future);
+
+    await controller.dispose();
+  });
+
+  test('setPause rethrows a gateway failure but keeps the local preference', () async {
+    final (:controller, :client, :pauseKv) = await _makePauseController();
+    controller.attach(client);
+    await controller.useProvider('pushport/fcm');
+    await Future<void>.delayed(Duration.zero);
+    client.throws['push.setPause'] = Exception('all nodes down');
+
+    await expectLater(controller.setPause(pauseIndefinite), throwsException);
+
+    // The UI relies on this: the preference is persisted and re-applies on the
+    // next register even though the live update did not reach any node.
+    expect(controller.pausedUntil, pauseIndefinite);
+    expect(await pauseKv.read('push_pause_until'), pauseIndefinite);
+
+    await controller.dispose();
+  });
+
+  test('a pause toggled during an in-flight register is applied after it', () async {
+    final (:controller, :client, pauseKv: _) = await _makePauseController();
+    controller.attach(client);
+
+    final registerGate = Completer<void>();
+    client.gates['push.register'] = registerGate;
+    final activation = controller.useProvider('pushport/fcm');
+    await Future<void>.delayed(Duration.zero);
+
+    final pause = controller.setPause(pauseIndefinite);
+    await Future<void>.delayed(Duration.zero);
+    expect(client.calls, isNot(contains('push.setPause')),
+        reason: 'setPause must wait for the in-flight register');
+
+    registerGate.complete();
+    await Future.wait([activation, pause]);
+
+    expect(controller.pausedUntil, pauseIndefinite);
+    final registerAt = client.calls.indexOf('push.register');
+    final setPauseAt = client.calls.indexOf('push.setPause');
+    expect(registerAt, lessThan(setPauseAt),
+        reason: 'the pause reaches the node after the register, not before');
+
+    await controller.dispose();
+  });
+
+  test('register carries the stored pause preference', () async {
+    final (:controller, :client, pauseKv: _) =
+        await _makePauseController(initialPause: pauseIndefinite);
+    controller.attach(client);
+    await controller.useProvider('pushport/fcm');
+    await Future<void>.delayed(Duration.zero);
+
+    final regCall = client.params.firstWhere((p) => p.containsKey('endpoint'));
+    expect(regCall['paused_until'], pauseIndefinite);
+
     await controller.dispose();
   });
 

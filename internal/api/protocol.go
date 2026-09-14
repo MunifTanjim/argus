@@ -71,6 +71,8 @@ const (
 	MethodPushUnregister = "push.unregister" // request: PushDeviceRef; result: nil
 	// MethodPushTest sends a test notification through the real backend to verify delivery.
 	MethodPushTest = "push.test" // request: PushDeviceRef; result: nil
+	// MethodPushSetPause pauses or resumes broadcasts to a device without re-registering.
+	MethodPushSetPause = "push.setPause" // request: PushSetPauseParams; result: nil
 	// MethodPushVAPIDKey returns the gateway's VAPID public key for a device to
 	// subscribe with. Empty Key means Web Push is unavailable.
 	MethodPushVAPIDKey = "push.vapidKey" // request: no params; result: PushVAPIDKey
@@ -229,11 +231,21 @@ type PushRegisterParams struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	P256dh   string `json:"p256dh,omitempty"`
 	Auth     string `json:"auth,omitempty"`
+	// PausedUntil carries the device's current pause preference so the node applies
+	// it atomically at register time. Empty means enabled. See PushSetPauseParams.
+	PausedUntil string `json:"paused_until,omitempty"`
 }
 
 // PushDeviceRef identifies a device by its stable id (for unregister/test).
 type PushDeviceRef struct {
 	DeviceID string `json:"device_id"`
+}
+
+// PushSetPauseParams updates only a device's pause state without re-registering.
+// PausedUntil is an RFC3339 time; empty re-enables the device.
+type PushSetPauseParams struct {
+	DeviceID    string `json:"device_id"`
+	PausedUntil string `json:"paused_until,omitempty"`
 }
 
 // PushDeliverParams carries an opaque, pre-encrypted (aes128gcm) Web Push body for

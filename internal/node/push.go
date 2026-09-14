@@ -27,7 +27,7 @@ func (d *Node) handlePushRegister(_ context.Context, params json.RawMessage) (an
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push.register: endpoint required"}
 	}
 	t := push.Target{Endpoint: p.Endpoint, P256dh: p.P256dh, Auth: p.Auth}
-	if err := d.pushStore.Upsert(p.DeviceID, t); err != nil {
+	if err := d.pushStore.Upsert(p.DeviceID, t, p.PausedUntil); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return nil, nil
@@ -45,6 +45,23 @@ func (d *Node) handlePushUnregister(_ context.Context, params json.RawMessage) (
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push: device_id required"}
 	}
 	if err := d.pushStore.Remove(p.DeviceID); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return nil, nil
+}
+
+func (d *Node) handlePushSetPause(_ context.Context, params json.RawMessage) (any, error) {
+	if d.pushStore == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push notifications not enabled on this node"}
+	}
+	p, err := api.Decode[api.PushSetPauseParams](params)
+	if err != nil {
+		return nil, err
+	}
+	if p.DeviceID == "" {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "push: device_id required"}
+	}
+	if err := d.pushStore.SetPause(p.DeviceID, p.PausedUntil); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
 	}
 	return nil, nil

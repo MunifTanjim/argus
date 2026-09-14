@@ -33,7 +33,12 @@ func (d *Dispatcher) Send(ctx context.Context, n Notification) {
 		return
 	}
 	d.log.Info("push: delivering", "devices", len(recs))
+	now := time.Now()
 	for _, rec := range recs {
+		if rec.Paused(now) {
+			d.log.Info("push: skipping paused device")
+			continue
+		}
 		sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err := d.sender.Send(sctx, rec.Target, n)
 		cancel()
@@ -52,7 +57,8 @@ func (d *Dispatcher) Send(ctx context.Context, n Notification) {
 func (d *Dispatcher) Notify(ctx context.Context, n Notification) { d.Send(ctx, n) }
 
 // SendTo delivers n to a single device (e.g. the test endpoint), pruning the
-// device when its target is gone.
+// device when its target is gone. It deliberately ignores the pause state so a
+// paused device can still confirm delivery with a test notification.
 func (d *Dispatcher) SendTo(ctx context.Context, deviceID string, n Notification) error {
 	t, ok, err := d.store.Get(deviceID)
 	if err != nil {
