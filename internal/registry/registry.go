@@ -61,6 +61,23 @@ func New() *Registry {
 	}
 }
 
+// Seed inserts fully-formed sessions directly, indexing each by pane and agent
+// session id. For demo and test fixtures; no change events are published.
+func (r *Registry) Seed(sessions []session.Session) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range sessions {
+		cp := sessions[i]
+		r.sessions[cp.ID] = &cp
+		if cp.Tmux.PaneID != "" {
+			r.index.setPane(PaneKey(cp.Tmux.Server, cp.Tmux.PaneID), cp.ID)
+		}
+		if cp.AgentSessionID != "" {
+			r.index.setAgentSession(cp.AgentSessionID, cp.ID)
+		}
+	}
+}
+
 // PaneKey identifies a pane across servers; pane ids are only unique per server,
 // so the server must be part of the key.
 func PaneKey(server session.TmuxServer, paneID string) string {
