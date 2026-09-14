@@ -3,9 +3,13 @@ package node
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
 func TestLoadDemoDataParsesNodesAndHistory(t *testing.T) {
@@ -122,5 +126,37 @@ func TestHistoryHandlersServeDemoFixtures(t *testing.T) {
 	projs, ok := res.([]session.HistoryProject)
 	if !ok || len(projs) != 1 {
 		t.Fatalf("projects = %#v", res)
+	}
+}
+
+type captureNotifier struct {
+	mu      sync.Mutex
+	methods []string
+}
+
+func (c *captureNotifier) Notify(method string, _ any) error {
+	c.mu.Lock()
+	c.methods = append(c.methods, method)
+	c.mu.Unlock()
+	return nil
+}
+func (c *captureNotifier) count() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.methods) }
+
+func TestDemoTerminalOpenEmitsOutput(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.demo = true
+	d.demoTerminals = map[string][]byte{"s1": []byte("\x1b[32mhello\x1b[0m\n$ ")}
+
+	cn := &captureNotifier{}
+	ctx := api.WithNotifier(context.Background(), cn)
+	if _, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t1", SessionID: "s1"})); err != nil {
+		t.Fatalf("handleTerminalOpen: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for cn.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cn.count() == 0 {
+		t.Fatal("no terminal.output frames emitted")
 	}
 }
