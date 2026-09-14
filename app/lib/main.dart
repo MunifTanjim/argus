@@ -111,6 +111,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
 
     return MaterialApp(
       title: 'argus',
+      debugShowCheckedModeBanner: false,
       theme: buildArgusTheme(),
       navigatorObservers: [appRouteObserver],
       home: !_loaded
