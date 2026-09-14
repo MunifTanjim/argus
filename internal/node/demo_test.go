@@ -84,7 +84,7 @@ func TestLoadDemoDataRejectsMissingFile(t *testing.T) {
 	}
 }
 
-func TestBuildDemoNodesSeedsRegistryAndIdentity(t *testing.T) {
+func TestBuildDemoNodesSeedsRegistry(t *testing.T) {
 	dd, err := LoadDemoData("testdata/demo_min.yaml")
 	if err != nil {
 		t.Fatalf("LoadDemoData: %v", err)
@@ -103,17 +103,17 @@ func TestBuildDemoNodesSeedsRegistryAndIdentity(t *testing.T) {
 	if !n.demo {
 		t.Fatal("demo flag not set")
 	}
-	if n.identityPubB64 == "" {
-		t.Fatal("ephemeral identity not set")
+	if n.e2ee {
+		t.Fatal("demo nodes must use the plaintext relay uplink, not e2ee")
+	}
+	if n.identityPubB64 != "" {
+		t.Fatal("plaintext demo nodes must not set a Noise identity")
 	}
 	if got := n.Registry().Snapshot(); len(got) != 2 {
 		t.Fatalf("registry snapshot = %d, want 2", len(got))
 	}
 	if len(n.demoHistory) != 1 {
 		t.Fatalf("demoHistory = %d, want 1", len(n.demoHistory))
-	}
-	if !n.e2ee {
-		t.Fatal("e2ee not set")
 	}
 	if len(n.demoTerminals) != 1 {
 		t.Fatalf("demoTerminals = %d, want 1", len(n.demoTerminals))

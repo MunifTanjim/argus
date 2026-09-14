@@ -91,6 +91,9 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		if err != nil {
 			return fail(cmd, err)
 		}
+		for _, dn := range demoNodes {
+			dn.SetLogger(logger.Scoped("demo").L)
+		}
 		local = false
 		serveGW = true
 		if cfg.Gateway.ListenAddr == "" {
