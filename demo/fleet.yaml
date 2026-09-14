@@ -59,6 +59,52 @@ nodes:
             tokens: 132000
             turn_count: 14
             duration_ms: 1240000
+          - session_id: h-argus-4
+            agent: claude
+            first_message: "fix the flaky trustlog sync test"
+            model_name: "Sonnet 5"
+            model_color: "#83a598"
+            last_activity: "2026-07-07T15:31:00Z"
+            tokens: 41000
+            turn_count: 6
+            duration_ms: 220000
+          - session_id: h-argus-5
+            agent: claude
+            title: "Coalesce mobile push notifications"
+            first_message: "batch the push notifications so a burst is one alert"
+            model_name: "Opus 4.8"
+            model_color: "#d3869b"
+            last_activity: "2026-07-06T19:05:00Z"
+            tokens: 96000
+            turn_count: 11
+            duration_ms: 640000
+          - session_id: h-argus-6
+            agent: codex
+            first_message: "wire up the iOS live terminal view"
+            model_name: "GPT-5.5"
+            model_color: "#8ec07c"
+            last_activity: "2026-07-06T11:42:00Z"
+            tokens: 73000
+            turn_count: 8
+            duration_ms: 410000
+          - session_id: h-argus-7
+            agent: claude
+            first_message: "harden the pairing QR against replay"
+            model_name: "Opus 4.8"
+            model_color: "#d3869b"
+            last_activity: "2026-07-05T22:10:00Z"
+            tokens: 58000
+            turn_count: 7
+            duration_ms: 300000
+          - session_id: h-argus-8
+            agent: claude
+            first_message: "speed up the session list first paint"
+            model_name: "Sonnet 5"
+            model_color: "#83a598"
+            last_activity: "2026-07-05T09:26:00Z"
+            tokens: 34000
+            turn_count: 4
+            duration_ms: 150000
       - repo: dotfiles
         cwd: /home/you/dotfiles
         sessions:
