@@ -112,6 +112,12 @@ func TestBuildDemoNodesSeedsRegistryAndIdentity(t *testing.T) {
 	if len(n.demoHistory) != 1 {
 		t.Fatalf("demoHistory = %d, want 1", len(n.demoHistory))
 	}
+	if !n.e2ee {
+		t.Fatal("e2ee not set")
+	}
+	if len(n.demoTerminals) != 1 {
+		t.Fatalf("demoTerminals = %d, want 1", len(n.demoTerminals))
+	}
 }
 
 func TestHistoryHandlersServeDemoFixtures(t *testing.T) {
@@ -158,5 +164,11 @@ func TestDemoTerminalOpenEmitsOutput(t *testing.T) {
 	}
 	if cn.count() == 0 {
 		t.Fatal("no terminal.output frames emitted")
+	}
+	cn.mu.Lock()
+	first := cn.methods[0]
+	cn.mu.Unlock()
+	if first != api.MethodTerminalOutput {
+		t.Fatalf("first method = %q, want %q", first, api.MethodTerminalOutput)
 	}
 }
