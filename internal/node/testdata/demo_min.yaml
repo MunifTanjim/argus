@@ -1,0 +1,22 @@
+nodes:
+  - id: macbook
+    label: MacBook Pro
+    spawn: true
+    sessions:
+      - id: s1
+        agent: claude
+        name: refactor auth
+        repo: argus
+        cwd: /Users/dev/argus
+        status: working
+        source: hook
+        transcript_path: t.jsonl
+    history:
+      - repo: argus
+        cwd: /Users/dev/argus
+        sessions:
+          - session_id: h1
+            agent: claude
+            title: fix flaky test
+            last_activity: "2026-09-10T10:00:00Z"
+            transcript_path: t.jsonl
