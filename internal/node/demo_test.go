@@ -76,3 +76,33 @@ func TestLoadDemoDataRejectsMissingFile(t *testing.T) {
 		t.Fatal("want error for missing transcript file")
 	}
 }
+
+func TestBuildDemoNodesSeedsRegistryAndIdentity(t *testing.T) {
+	dd, err := LoadDemoData("testdata/demo_min.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData: %v", err)
+	}
+	nodes, err := BuildDemoNodes(dd, "test")
+	if err != nil {
+		t.Fatalf("BuildDemoNodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	n := nodes[0]
+	if n.id != "macbook" {
+		t.Fatalf("id = %q, want macbook", n.id)
+	}
+	if !n.demo {
+		t.Fatal("demo flag not set")
+	}
+	if n.identityPubB64 == "" {
+		t.Fatal("ephemeral identity not set")
+	}
+	if got := n.Registry().Snapshot(); len(got) != 2 {
+		t.Fatalf("registry snapshot = %d, want 2", len(got))
+	}
+	if len(n.demoHistory) != 1 {
+		t.Fatalf("demoHistory = %d, want 1", len(n.demoHistory))
+	}
+}
