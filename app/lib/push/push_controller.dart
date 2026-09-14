@@ -9,6 +9,7 @@ import 'apns_provider.dart';
 import 'apns_source.dart';
 import 'device_id.dart';
 import 'fcm_source.dart';
+import 'pause_preference_store.dart';
 import 'notifications.dart';
 import 'push_provider.dart';
 import 'push_target_store.dart';
@@ -34,6 +35,7 @@ class PushController {
     List<PushProvider>? extraProviders,
     DeviceIdStore? deviceIdStore,
     PushTargetStore? targetStore,
+    PausePreferenceStore? pauseStore,
     SecureKv? providerKv,
     void Function(String sessionId)? onSessionTap,
     @visibleForTesting
@@ -41,6 +43,7 @@ class PushController {
   })  : _unifiedPush = unifiedPush ?? UnifiedPushProvider(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(const FlutterSecureKv()),
         _targetStore = targetStore ?? PushTargetStore(const FlutterSecureKv()),
+        _pauseStore = pauseStore ?? PausePreferenceStore(const FlutterSecureKv()),
         _providerKv = providerKv ?? const FlutterSecureKv(),
         // ignore: prefer_initializing_formals — private field, public named param.
         _onSessionTap = onSessionTap {
@@ -51,6 +54,7 @@ class PushController {
   final UnifiedPushProvider _unifiedPush;
   final DeviceIdStore _deviceIdStore;
   final PushTargetStore _targetStore;
+  final PausePreferenceStore _pauseStore;
   final SecureKv _providerKv;
   static const _kProviderKey = 'push_provider';
   final void Function(String sessionId)? _onSessionTap;
@@ -59,12 +63,14 @@ class PushController {
   bool? _lastRegistration;
   PushTarget? _registeredTarget; // target already registered on this connection
   Future<bool>? _registerInFlight; // the running registration for _registeredTarget
+  Future<void> _pushGate = Future.value(); // serializes register vs setPause on the wire
 
   PushProvider? _active;
   PushTarget? _target;
   GatewayClient? _client;
   String? _deviceId;
   String? _selectedDistributor;
+  String? _pausedUntil;
   StreamSubscription<String>? _tapSub;
   StreamSubscription<String>? _apnsTapSub;
   bool _pushPortAvailable = false;
@@ -128,11 +134,24 @@ class PushController {
   /// Whether the connected gateway has a PushPort token configured.
   bool get pushPortAvailable => _pushPortAvailable;
 
+  /// The current pause preference (an RFC3339 time or [pauseIndefinite]), or null
+  /// when notifications are enabled. An elapsed timestamp normalizes to null, so
+  /// callers never see a pause the server already resumed.
+  String? get pausedUntil {
+    final until = _pausedUntil;
+    if (until == null || until == pauseIndefinite) return until;
+    final expiry = DateTime.tryParse(until);
+    if (expiry != null && !DateTime.now().toUtc().isBefore(expiry.toUtc())) {
+      return null;
+    }
+    return until;
+  }
+
   /// Sets up local notifications, permission, tap routing, and starts UnifiedPush
   /// (defaulting to the embedded distributor when present).
   Future<void> init() async {
     _deviceId ??= await _deviceIdStore.getOrCreate();
-    await loadStoredTarget();
+    await Future.wait([loadStoredTarget(), loadPausePreference()]);
     _unifiedPush.preferredDistributor = appPackageName;
 
     await PushNotifications.instance.init();
@@ -414,10 +433,45 @@ class PushController {
   }
 
   Future<bool> _register(GatewayClient client, String deviceId, PushTarget target) async {
-    final ok = await registerWithRetry(client, deviceId, target);
+    final ok = await _serializePushOp(
+      () => registerWithRetry(client, deviceId, target, pausedUntil: _pausedUntil),
+    );
     if (!ok) _registeredTarget = null;
     _lastRegistration = ok;
     _registrations.add(ok);
     return ok;
+  }
+
+  /// Runs [op] after any in-flight register/setPause completes, so a pause toggled
+  /// during a register's retry loop is applied after it, not clobbered by the
+  /// register's stale snapshot. [op] reads [_pausedUntil] when it runs, so the last
+  /// preference wins.
+  Future<T> _serializePushOp<T>(Future<T> Function() op) {
+    final result = _pushGate.then((_) => op());
+    _pushGate = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// Loads the persisted pause preference so a prior pause survives a restart.
+  @visibleForTesting
+  Future<void> loadPausePreference() async {
+    _pausedUntil = await _pauseStore.load();
+  }
+
+  /// [pausedUntil] is an RFC3339 time (or [pauseIndefinite]); null re-enables.
+  /// Persists the preference and, when connected, tells every node so the pause
+  /// holds while the app is closed.
+  Future<void> setPause(String? pausedUntil) async {
+    _pausedUntil = (pausedUntil != null && pausedUntil.isNotEmpty) ? pausedUntil : null;
+    if (_pausedUntil == null) {
+      await _pauseStore.clear();
+    } else {
+      await _pauseStore.save(_pausedUntil!);
+    }
+    final client = _client;
+    final deviceId = _deviceId;
+    if (client != null && deviceId != null) {
+      await _serializePushOp(() => setPauseOnGateway(client, deviceId, _pausedUntil));
+    }
   }
 }

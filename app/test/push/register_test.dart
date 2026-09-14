@@ -52,6 +52,46 @@ void main() {
     });
   });
 
+  test('includes paused_until when a pause preference is set', () async {
+    final fut = registerWithRetry(client, 'dev-1', target,
+        pausedUntil: '2026-06-01T13:00:00Z');
+    await respond(0);
+    expect(await fut, isTrue);
+    final f = frame(sent.single);
+    expect(f['method'], 'push.register');
+    expect((f['params'] as Map)['paused_until'], '2026-06-01T13:00:00Z');
+  });
+
+  test('omits paused_until when there is no pause preference', () async {
+    final fut = registerWithRetry(client, 'dev-1', target);
+    await respond(0);
+    expect(await fut, isTrue);
+    expect((frame(sent.single)['params'] as Map).containsKey('paused_until'),
+        isFalse);
+  });
+
+  test('setPauseOnGateway sends push.setPause with device id and paused_until',
+      () async {
+    final fut = setPauseOnGateway(client, 'dev-1', '2026-06-01T13:00:00Z');
+    await respond(0);
+    await fut;
+    final f = frame(sent.single);
+    expect(f['method'], 'push.setPause');
+    expect(f['params'], {
+      'device_id': 'dev-1',
+      'paused_until': '2026-06-01T13:00:00Z',
+    });
+  });
+
+  test('setPauseOnGateway with an empty value clears the pause', () async {
+    final fut = setPauseOnGateway(client, 'dev-1', '');
+    await respond(0);
+    await fut;
+    final f = frame(sent.single);
+    expect(f['method'], 'push.setPause');
+    expect(f['params'], {'device_id': 'dev-1'});
+  });
+
   test('retries on failure then succeeds', () async {
     final fut = registerWithRetry(client, 'dev-1', target,
         attempts: 3, delay: Duration.zero);

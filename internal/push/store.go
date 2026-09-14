@@ -20,12 +20,34 @@ type Store struct {
 	mu  sync.Mutex
 }
 
+// pauseIndefinite is the sentinel PausedUntil value for "off until the user turns
+// it back on". A far-future timestamp keeps the send-time check a single
+// comparison. The app mirrors this constant by value.
+const pauseIndefinite = "9999-12-31T23:59:59Z"
+
 // Record is the on-disk shape of a device's registration.
 type Record struct {
 	DeviceID string `json:"device_id"`
 	Target
 	CreatedAt string `json:"created_at"`
 	LastSeen  string `json:"last_seen"`
+	// PausedUntil, when set, suppresses broadcast sends to this device until the
+	// given RFC3339 time. Empty means enabled; the pauseIndefinite sentinel means
+	// off until the user re-enables. Old records without the field decode to "".
+	PausedUntil string `json:"paused_until,omitempty"`
+}
+
+// Paused reports whether broadcasts to this device are suppressed at now. An
+// unparseable PausedUntil fails open (delivers) rather than silently dropping.
+func (r Record) Paused(now time.Time) bool {
+	if r.PausedUntil == "" {
+		return false
+	}
+	until, err := time.Parse(time.RFC3339, r.PausedUntil)
+	if err != nil {
+		return false
+	}
+	return now.Before(until)
 }
 
 // NewStore returns a Store persisting under dir (created lazily on first write).
@@ -39,9 +61,11 @@ func storeID(deviceID string) string {
 
 func (s *Store) path(id string) string { return filepath.Join(s.dir, id+".json") }
 
-// Upsert records (or refreshes) a device's target. A new record gets CreatedAt;
-// an existing one keeps it and bumps LastSeen.
-func (s *Store) Upsert(deviceID string, t Target) error {
+// Upsert records (or refreshes) a device's target and pause state. A new record
+// gets CreatedAt; an existing one keeps it and bumps LastSeen. pausedUntil is
+// authoritative: the app supplies its current preference on every register, so
+// a reconnect re-applies (never loses) the pause. Empty means enabled.
+func (s *Store) Upsert(deviceID string, t Target, pausedUntil string) error {
 	if deviceID == "" {
 		return fmt.Errorf("push: empty device id")
 	}
@@ -54,18 +78,43 @@ func (s *Store) Upsert(deviceID string, t Target) error {
 		return err
 	}
 	now := s.now().UTC().Format(time.RFC3339)
-	rec := Record{DeviceID: deviceID, Target: t, CreatedAt: now, LastSeen: now}
+	rec := Record{DeviceID: deviceID, Target: t, CreatedAt: now, LastSeen: now, PausedUntil: pausedUntil}
 	if b, err := os.ReadFile(s.path(storeID(deviceID))); err == nil {
 		var prev Record
 		if json.Unmarshal(b, &prev) == nil && prev.CreatedAt != "" {
 			rec.CreatedAt = prev.CreatedAt
 		}
 	}
+	return s.writeRecord(deviceID, rec)
+}
+
+func (s *Store) writeRecord(deviceID string, rec Record) error {
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(s.path(storeID(deviceID)), b, 0o600)
+}
+
+// SetPause updates only the PausedUntil field of an existing device, preserving
+// its Target and timestamps. An empty pausedUntil re-enables the device. A
+// missing device is an error, so a toggle for an unregistered device is visible.
+func (s *Store) SetPause(deviceID, pausedUntil string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := os.ReadFile(s.path(storeID(deviceID)))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("push: no registration for device")
+		}
+		return err
+	}
+	var rec Record
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return err
+	}
+	rec.PausedUntil = pausedUntil
+	return s.writeRecord(deviceID, rec)
 }
 
 // Get returns a device's target, if registered.

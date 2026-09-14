@@ -53,6 +53,7 @@ var pushFanoutMethods = map[string]bool{
 	api.MethodPushRegister:   true,
 	api.MethodPushUnregister: true,
 	api.MethodPushTest:       true,
+	api.MethodPushSetPause:   true,
 }
 
 // compositeResultMethods return a node-local session_id in their result that must

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../e2e/aggregate.dart' show pushGoneCode;
+import '../push/pause_preference_store.dart' show pauseIndefinite;
 import '../push/push_controller.dart';
 import '../push/pushport_config.dart';
 import '../state/push.dart';
@@ -27,6 +28,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   String? _activeProvider;
   bool _loading = true;
   bool? _registered;
+  String? _pausedUntil;
   StreamSubscription<String>? _failureSub;
   StreamSubscription<bool>? _regSub;
 
@@ -39,6 +41,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     super.initState();
     _registered = _controller.lastRegistration;
     _activeProvider = _controller.activeBackend;
+    _pausedUntil = _controller.pausedUntil;
     _failureSub = _controller.pushFailures.listen((reason) {
       if (mounted) _toast('UnifiedPush registration failed: $reason');
     });
@@ -92,6 +95,9 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                     icon: const Icon(Icons.notifications_active_outlined),
                     label: const Text('Send test notification'),
                   ),
+                  const SizedBox(height: 16),
+                  _header('Pause'),
+                  ..._pauseBody(),
                   const SizedBox(height: 16),
                   _header('Provider'),
                   ..._providerBody(),
@@ -212,6 +218,85 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
 
   String _distributorLabel(String pkg) =>
       pkg == appPackageName ? 'argus (built-in)' : pkg.split('.').last;
+
+  List<Widget> _pauseBody() {
+    final paused = _pausedUntil != null;
+    return [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        value: paused,
+        title: const Text('Pause notifications'),
+        subtitle: Text(
+          paused ? _pauseStatusLabel() : 'This device receives push notifications.',
+          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+        ),
+        onChanged: _onPauseToggle,
+      ),
+    ];
+  }
+
+  String _pauseStatusLabel() {
+    final until = _pausedUntil;
+    if (until == null) return '';
+    if (until == pauseIndefinite) return 'Paused until you turn it back on.';
+    final dt = DateTime.tryParse(until)?.toLocal();
+    if (dt == null) return 'Paused.';
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return 'Paused until $hh:$mm.';
+  }
+
+  Future<void> _onPauseToggle(bool on) async {
+    if (!on) {
+      await _applyPause(null);
+      return;
+    }
+    final choice = await _pickPauseDuration();
+    if (choice == null) return; // dismissed — leave notifications enabled
+    await _applyPause(choice);
+  }
+
+  Future<String?> _pickPauseDuration() {
+    final options = <(String, Duration?)>[
+      ('30 minutes', const Duration(minutes: 30)),
+      ('1 hour', const Duration(hours: 1)),
+      ('4 hours', const Duration(hours: 4)),
+      ('8 hours', const Duration(hours: 8)),
+      ('Until I turn it back on', null),
+    ];
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (label, d) in options)
+              ListTile(
+                title: Text(label),
+                onTap: () => Navigator.pop(
+                  ctx,
+                  d == null
+                      ? pauseIndefinite
+                      : DateTime.now().toUtc().add(d).toIso8601String(),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _applyPause(String? pausedUntil) async {
+    try {
+      await _controller.setPause(pausedUntil);
+    } catch (_) {
+      // The preference is persisted locally and re-applies on the next register,
+      // so still reflect it and warn that the live update did not reach a node.
+      if (mounted) _toast('Saved — could not reach the gateway; applies on reconnect');
+    }
+    if (!mounted) return;
+    setState(() => _pausedUntil = _controller.pausedUntil);
+  }
 
   Future<void> _sendTest() async {
     try {

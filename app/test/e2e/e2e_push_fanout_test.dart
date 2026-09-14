@@ -48,6 +48,26 @@ void main() {
     await client.close();
   });
 
+  test('push.setPause fans out to every node channel', () async {
+    final hits = {'A': 0, 'B': 0};
+    NodeHandler handler(String id) => (m, p) {
+          hits[id] = (hits[id] ?? 0) + 1;
+          return _json(null);
+        };
+    final a = LoopbackNode('A', await generateKeyPair(), handler('A'));
+    final b = LoopbackNode('B', await generateKeyPair(), handler('B'));
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+
+    await client.call('push.setPause',
+        {'device_id': 'd1', 'paused_until': '9999-12-31T23:59:59Z'});
+
+    expect(hits['A'], 1, reason: 'push.setPause must reach node A');
+    expect(hits['B'], 1, reason: 'push.setPause must reach node B');
+    await client.close();
+  });
+
   test('push.register succeeds when at least one node succeeds', () async {
     final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json(null));
     final b = LoopbackNode('B', await generateKeyPair(),
@@ -106,5 +126,6 @@ void main() {
     expect(pushFanoutMethods.contains('push.register'), isTrue);
     expect(pushFanoutMethods.contains('push.unregister'), isTrue);
     expect(pushFanoutMethods.contains('push.test'), isTrue);
+    expect(pushFanoutMethods.contains('push.setPause'), isTrue);
   });
 }

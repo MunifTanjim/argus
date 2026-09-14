@@ -13,6 +13,7 @@ const Set<String> pushFanoutMethods = {
   'push.register',
   'push.unregister',
   'push.test',
+  'push.setPause',
 };
 
 /// Methods carrying a composite session_id the client splits and routes to a node.
