@@ -206,6 +206,9 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 	if p.TermID == "" {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "term_id required"}
 	}
+	if d.demo {
+		return d.demoTerminalOpen(ctx, p)
+	}
 	n, ok := api.NotifierFrom(ctx)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
@@ -333,6 +336,9 @@ func (d *Node) pumpTerm(tm *term) {
 }
 
 func (d *Node) handleTerminalInput(ctx context.Context, params json.RawMessage) (any, error) {
+	if d.demo {
+		return nil, nil
+	}
 	p, err := api.Decode[api.TerminalInputParams](params)
 	if err != nil {
 		return nil, err
@@ -350,6 +356,9 @@ func (d *Node) handleTerminalInput(ctx context.Context, params json.RawMessage) 
 }
 
 func (d *Node) handleTerminalResize(ctx context.Context, params json.RawMessage) (any, error) {
+	if d.demo {
+		return nil, nil
+	}
 	p, err := api.Decode[api.TerminalResizeParams](params)
 	if err != nil {
 		return nil, err
@@ -368,6 +377,9 @@ func (d *Node) handleTerminalResize(ctx context.Context, params json.RawMessage)
 }
 
 func (d *Node) handleTerminalClose(ctx context.Context, params json.RawMessage) (any, error) {
+	if d.demo {
+		return nil, nil
+	}
 	p, err := api.Decode[api.TerminalCloseParams](params)
 	if err != nil {
 		return nil, err
