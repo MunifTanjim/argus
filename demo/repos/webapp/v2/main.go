@@ -7,7 +7,6 @@ import (
 
 func productsHandler(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
-	// treat missing or empty category as "return all"
 	if category == "" {
 		fmt.Fprintf(w, `{"products":[]}`)
 		return
