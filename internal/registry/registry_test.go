@@ -151,3 +151,24 @@ func TestSnapshotStampsStatusLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedInsertsAndIndexes(t *testing.T) {
+	r := New()
+	r.Seed([]session.Session{
+		{ID: "s1", Agent: "claude", AgentSessionID: "cs1"},
+		{ID: "s2", Agent: "codex", Tmux: session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: "%3"}},
+	})
+
+	if got := r.Snapshot(); len(got) != 2 {
+		t.Fatalf("Snapshot len = %d, want 2", len(got))
+	}
+	if _, ok := r.Get("s1"); !ok {
+		t.Fatal("s1 not found")
+	}
+	if id, ok := r.index.findByAgentSession("cs1"); !ok || id != "s1" {
+		t.Fatalf("findByAgentSession(cs1) = %q,%v; want s1,true", id, ok)
+	}
+	if id, ok := r.index.findByPane(PaneKey(session.TmuxServerDefault, "%3")); !ok || id != "s2" {
+		t.Fatalf("findByPane = %q,%v; want s2,true", id, ok)
+	}
+}
