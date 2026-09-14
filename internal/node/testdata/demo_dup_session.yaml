@@ -1,0 +1,12 @@
+nodes:
+  - id: n1
+    label: N1
+    sessions:
+      - id: dup
+        agent: claude
+        status: working
+        source: hook
+      - id: dup
+        agent: claude
+        status: stopped
+        source: hook

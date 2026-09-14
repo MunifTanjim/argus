@@ -11,6 +11,13 @@ nodes:
         status: working
         source: hook
         transcript_path: t.jsonl
+      - id: s2
+        agent: claude
+        name: fix linting
+        status: stopped
+        source: hook
+        terminal_path: t.jsonl
+        repo_spec: .
     history:
       - repo: argus
         cwd: /Users/dev/argus
