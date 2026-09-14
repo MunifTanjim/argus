@@ -1,0 +1,8 @@
+[1;32mmunif@home[0m:[1;34m~/dev/argus[0m[1;33m (feat/demo-data-multinode)[0m$ go test ./internal/node/ -run TestDemo -v
+[1m=== RUN   TestDemoTerminal[0m
+[32m--- PASS: TestDemoTerminal (0.02s)[0m
+[1m=== RUN   TestDemoRepo[0m
+[32m--- PASS: TestDemoRepo (0.11s)[0m
+[1mok  	github.com/MunifTanjim/argus/internal/node	0.14s[0m
+
+[1;32mmunif@home[0m:[1;34m~/dev/argus[0m[1;33m (feat/demo-data-multinode)[0m$ [0m
