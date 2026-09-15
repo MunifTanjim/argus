@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.15](https://github.com/MunifTanjim/argus/compare/0.0.14...0.0.15) (2026-09-15)
+
+
+### Bug Fixes
+
+* **cli:** accept pasted text in the gateway fields ([d662cff](https://github.com/MunifTanjim/argus/commit/d662cff934e9ba104fdd7b2235d52f038c3b4431))
+* **tui:** accept pasted text in the new session flow ([64ec4b7](https://github.com/MunifTanjim/argus/commit/64ec4b793ae2a02fff2abb584911f6ab2e4604c1))
+
 ## [0.0.14](https://github.com/MunifTanjim/argus/compare/0.0.13...0.0.14) (2026-09-15)
 
 
