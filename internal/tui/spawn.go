@@ -82,6 +82,20 @@ func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 	return cur, false
 }
 
+// pasteSpawn routes a paste into the active spawn field. A paste arrives as its
+// own message, not a keypress, so it needs a route separate from handleSpawnKey
+// or it is dropped.
+func (m *model) pasteSpawn(content string) {
+	switch {
+	case m.spawn.step == spawnStepPrompt:
+		m.spawn.prompt += content
+	case m.spawn.step == spawnStepDir && m.spawn.custom:
+		// A path is one line: strip line breaks so a pasted CRLF or LF cannot
+		// submit or corrupt it.
+		m.spawn.cwd += strings.NewReplacer("\r", "", "\n", "").Replace(content)
+	}
+}
+
 // beginSpawn initializes the staged flow. A lone node without tmux stays on the
 // node step so its disabled state is visible rather than auto-selected.
 func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) tea.Cmd {
