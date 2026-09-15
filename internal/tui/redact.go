@@ -145,7 +145,7 @@ func (m model) redactListBody() string {
 func (m model) redactFooter(base string) string {
 	switch {
 	case m.redact.inputActive:
-		return asstStyle.Render("redact (paste secret): " + m.redact.input + "▊  enter add · esc cancel")
+		return asstStyle.Render("redact (paste secret): " + withCursor(m.redact.input, m.redact.inputPos, "▊") + "  enter add · esc cancel")
 	case m.redact.listActive:
 		return asstStyle.Render(fmt.Sprintf("redactions: %d  j/k move · x delete · esc close", len(m.redact.literals)))
 	case m.redact.pendingSave && m.redact.warnConfirm && m.redact.report != nil:
@@ -226,7 +226,7 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 			return m, nil, true
 		case key.Matches(msg, transcriptKeys.Redact): // d: add another, then return here
 			m.redact.listActive, m.redact.listReturn = false, true
-			m.redact.inputActive, m.redact.input = true, ""
+			m.redact.inputActive, m.redact.input, m.redact.inputPos = true, "", 0
 			return m, nil, true
 		}
 		return m, nil, true
@@ -237,7 +237,7 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, transcriptKeys.Redact):
 		m.redact.inputActive = true
-		m.redact.input = ""
+		m.redact.input, m.redact.inputPos = "", 0
 		return m, nil, true
 	case key.Matches(msg, transcriptKeys.RedactList):
 		m.redact.listActive = true
@@ -260,26 +260,20 @@ func (m model) handleRedactInput(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 			m.redact.literals = append(m.redact.literals, s)
 			m.flash = "redaction queued"
 		}
-		m.redact.inputActive, m.redact.input = false, ""
+		m.redact.inputActive, m.redact.input, m.redact.inputPos = false, "", 0
 		if m.redact.listReturn { // came from the list — reopen it on the new entry
 			m.redact.listActive, m.redact.listReturn = true, false
 			m.redact.listCursor = max(0, len(m.redact.literals)-1)
 		}
 		return m, nil, true
 	case tea.KeyEscape:
-		m.redact.inputActive, m.redact.input = false, ""
+		m.redact.inputActive, m.redact.input, m.redact.inputPos = false, "", 0
 		if m.redact.listReturn {
 			m.redact.listActive, m.redact.listReturn = true, false
 		}
 		return m, nil, true
-	case tea.KeyBackspace:
-		if n := len(m.redact.input); n > 0 {
-			m.redact.input = m.redact.input[:n-1]
-		}
-		return m, nil, true
 	}
-	if msg.Text != "" {
-		m.redact.input += msg.Text
-	}
+	// Editing and cursor motion share the common text-buffer editor.
+	m.redact.input, m.redact.inputPos, _ = editText(m.redact.input, m.redact.inputPos, msg)
 	return m, nil, true
 }

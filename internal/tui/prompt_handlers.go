@@ -51,7 +51,7 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		id := m.selectedID
 		txt := strings.TrimSpace(m.prompt.reasonText)
-		m.prompt.reasonText = ""
+		m.prompt.reasonText, m.prompt.reasonPos = "", 0
 		m.focus = focusHistory
 		if txt == "" {
 			return m, nil
@@ -60,15 +60,10 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "shift+enter":
 		// Newline instead of submit (multi-line replies). Only arrives where the
 		// Kitty keyboard protocol is honored; pasting is the universal path.
-		m.prompt.reasonText += "\n"
-	case "backspace":
-		if len(m.prompt.reasonText) > 0 {
-			m.prompt.reasonText = m.prompt.reasonText[:len(m.prompt.reasonText)-1]
-		}
+		m.prompt.reasonText, m.prompt.reasonPos = insertText(m.prompt.reasonText, m.prompt.reasonPos, "\n")
 	default:
-		if msg.Text != "" {
-			m.prompt.reasonText += msg.Text
-		}
+		// Editing and cursor motion share the common text-buffer editor.
+		m.prompt.reasonText, m.prompt.reasonPos, _ = editText(m.prompt.reasonText, m.prompt.reasonPos, msg)
 	}
 	return m, nil
 }
@@ -84,17 +79,15 @@ func (m model) handleDecisionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 		m.prompt.decisionSel = min(len(opts)-1, m.prompt.decisionSel+1)
 	case " ", "space":
 		if denying {
-			m.prompt.reasonText += " "
+			m.prompt.reasonText, m.prompt.reasonPos = insertText(m.prompt.reasonText, m.prompt.reasonPos, " ")
 		}
 	case "enter":
 		return m.submitDecision(ix)
-	case "backspace":
-		if denying && len(m.prompt.reasonText) > 0 {
-			m.prompt.reasonText = m.prompt.reasonText[:len(m.prompt.reasonText)-1]
-		}
 	default:
-		if denying && msg.Text != "" {
-			m.prompt.reasonText += msg.Text
+		// Editing and cursor motion share the common text-buffer editor. Only
+		// the reject choice shows a reason field, so nothing buffers otherwise.
+		if denying {
+			m.prompt.reasonText, m.prompt.reasonPos, _ = editText(m.prompt.reasonText, m.prompt.reasonPos, msg)
 		}
 	}
 	return m, nil
@@ -118,6 +111,13 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 	// "c" = "Chat about this", unless editing a custom answer (then it types).
 	if !accepts && msg.String() == "c" {
 		return m.chatAboutQuestions(ix)
+	}
+
+	// left/right switch tabs, so a custom answer must claim them while it takes
+	// text; otherwise reaching a typo would abandon the question.
+	if accepts && isTextMotion(msg) {
+		m.prompt.text[tab], m.prompt.textPos[tab], _ = editText(m.prompt.text[tab], m.prompt.textPos[tab], msg)
+		return m, nil
 	}
 
 	// j/k navigate like arrows, unless editing a custom answer (then they type).
@@ -145,17 +145,14 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 			sel := m.prompt.sel[tab]
 			m.prompt.toggles[tab][sel] = !m.prompt.toggles[tab][sel]
 		} else if accepts {
-			m.prompt.text[tab] += " "
+			m.prompt.text[tab], m.prompt.textPos[tab] = insertText(m.prompt.text[tab], m.prompt.textPos[tab], " ")
 		}
 	case "enter":
 		return m.commitQuestion(ix)
-	case "backspace":
-		if accepts && len(m.prompt.text[tab]) > 0 {
-			m.prompt.text[tab] = m.prompt.text[tab][:len(m.prompt.text[tab])-1]
-		}
 	default:
-		if accepts && msg.Text != "" {
-			m.prompt.text[tab] += msg.Text
+		// Editing shares the common text-buffer editor; motion was claimed above.
+		if accepts {
+			m.prompt.text[tab], m.prompt.textPos[tab], _ = editText(m.prompt.text[tab], m.prompt.textPos[tab], msg)
 		}
 	}
 	return m, nil
