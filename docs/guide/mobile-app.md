@@ -23,11 +23,12 @@ Updates then arrive automatically through the Play Store like any other app.
 
 ### iOS
 
-The iOS app is distributed through **TestFlight**. To get access, ask the owner
-to add you as a tester in App Store Connect. You will receive an email invitation.
+The app is in **beta** on TestFlight — anyone can join:
 
-1. Install **TestFlight** from the App Store if you do not have it.
-2. Open the invitation email and tap **View in TestFlight**.
+1. Install **[TestFlight](https://apps.apple.com/us/app/testflight/id899247664)**
+   from the App Store if you do not have it.
+2. Open the **[TestFlight beta link](https://testflight.apple.com/join/nVUbHecZ)**
+   on the device and tap **Accept**.
 3. Tap **Install** in TestFlight.
 
 ## Pairing
