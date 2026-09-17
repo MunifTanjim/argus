@@ -77,8 +77,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.Content == "":
 		case m.redact.inputActive:
-			m.redact.input += msg.Content
-			return m, nil
+			var cmd tea.Cmd
+			m.redact.input, cmd = m.redact.input.Update(msg)
+			return m, cmd
 		case m.mode == modeScreen:
 			m.sendTermKey(m.termID, []byte(msg.Content))
 			return m, nil

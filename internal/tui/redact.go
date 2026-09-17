@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/bundle"
@@ -142,10 +143,18 @@ func (m model) redactListBody() string {
 	return b.String()
 }
 
+func newRedactInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.EchoMode = textinput.EchoPassword
+	ti.SetWidth(48)
+	return ti
+}
+
 func (m model) redactFooter(base string) string {
 	switch {
 	case m.redact.inputActive:
-		return asstStyle.Render("redact (paste secret): " + m.redact.input + "▊  enter add · esc cancel")
+		return asstStyle.Render("redact (paste secret): " + m.redact.input.View() + "  enter add · esc cancel")
 	case m.redact.listActive:
 		return asstStyle.Render(fmt.Sprintf("redactions: %d  j/k move · x delete · esc close", len(m.redact.literals)))
 	case m.redact.pendingSave && m.redact.warnConfirm && m.redact.report != nil:
@@ -226,8 +235,9 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 			return m, nil, true
 		case key.Matches(msg, transcriptKeys.Redact): // d: add another, then return here
 			m.redact.listActive, m.redact.listReturn = false, true
-			m.redact.inputActive, m.redact.input = true, ""
-			return m, nil, true
+			m.redact.inputActive = true
+			m.redact.input = newRedactInput()
+			return m, m.redact.input.Focus(), true
 		}
 		return m, nil, true
 	}
@@ -237,8 +247,8 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, transcriptKeys.Redact):
 		m.redact.inputActive = true
-		m.redact.input = ""
-		return m, nil, true
+		m.redact.input = newRedactInput()
+		return m, m.redact.input.Focus(), true
 	case key.Matches(msg, transcriptKeys.RedactList):
 		m.redact.listActive = true
 		m.redact.listCursor = 0
@@ -256,30 +266,30 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 func (m model) handleRedactInput(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	switch msg.Code {
 	case tea.KeyEnter:
-		if s := m.redact.input; s != "" {
+		if s := m.redact.input.Value(); s != "" {
 			m.redact.literals = append(m.redact.literals, s)
 			m.flash = "redaction queued"
 		}
-		m.redact.inputActive, m.redact.input = false, ""
+		m.closeRedactInput()
 		if m.redact.listReturn { // came from the list — reopen it on the new entry
 			m.redact.listActive, m.redact.listReturn = true, false
 			m.redact.listCursor = max(0, len(m.redact.literals)-1)
 		}
 		return m, nil, true
 	case tea.KeyEscape:
-		m.redact.inputActive, m.redact.input = false, ""
+		m.closeRedactInput()
 		if m.redact.listReturn {
 			m.redact.listActive, m.redact.listReturn = true, false
 		}
 		return m, nil, true
-	case tea.KeyBackspace:
-		if n := len(m.redact.input); n > 0 {
-			m.redact.input = m.redact.input[:n-1]
-		}
-		return m, nil, true
 	}
-	if msg.Text != "" {
-		m.redact.input += msg.Text
-	}
-	return m, nil, true
+	var cmd tea.Cmd
+	m.redact.input, cmd = m.redact.input.Update(msg)
+	return m, cmd, true
+}
+
+func (m *model) closeRedactInput() {
+	m.redact.inputActive = false
+	m.redact.input.SetValue("")
+	m.redact.input.Blur()
 }
