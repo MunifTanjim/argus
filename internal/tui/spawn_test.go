@@ -341,7 +341,7 @@ func TestSpawnEmptyHistoryGoesToCustom(t *testing.T) {
 	if m.spawn.step != spawnStepDir || !m.spawn.custom {
 		t.Fatalf("empty history → custom; step=%v custom=%v", m.spawn.step, m.spawn.custom)
 	}
-	if m.spawn.cwd == "" {
+	if m.spawn.cwd.Value() == "" {
 		t.Fatal("custom cwd should be seeded with the fallback")
 	}
 }
@@ -496,11 +496,12 @@ func TestSpawnPaste(t *testing.T) {
 	m := openSpawn(t, c)
 
 	// Dir step, custom path row: paste is stripped of CR and LF line breaks.
-	m.spawn.custom, m.spawn.cwd = true, ""
+	m.spawn.custom = true
+	m.spawn.cwd = newSpawnCwdInput()
 	mm, _ := m.Update(tea.PasteMsg{Content: "/tmp/x\r\n"})
 	m = mm.(model)
-	if m.spawn.cwd != "/tmp/x" {
-		t.Fatalf("custom path after paste = %q, want %q", m.spawn.cwd, "/tmp/x")
+	if m.spawn.cwd.Value() != "/tmp/x" {
+		t.Fatalf("custom path after paste = %q, want %q", m.spawn.cwd.Value(), "/tmp/x")
 	}
 
 	// Prompt step: paste lands verbatim.

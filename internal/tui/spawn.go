@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -51,9 +52,15 @@ type spawnState struct {
 	agents      []api.AgentInfo          // agents launchable on the node; nil while probing
 	cursor      int                      // list cursor (node, agent, and dir steps)
 	custom      bool                     // dir step: free-text path entry active
-	cwd         string                   // resolved working directory
+	cwd         textinput.Model          // resolved working directory
 	prompt      string                   // initial prompt (mandatory; multi-line via shift+enter)
 	fallbackCwd string                   // seeds custom path / empty-history case
+}
+
+func newSpawnCwdInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	return ti
 }
 
 func (s spawnState) active() bool { return s.step != spawnInactive }
@@ -92,7 +99,8 @@ func (m *model) pasteSpawn(content string) {
 	case m.spawn.step == spawnStepDir && m.spawn.custom:
 		// A path is one line: strip line breaks so a pasted CRLF or LF cannot
 		// submit or corrupt it.
-		m.spawn.cwd += strings.NewReplacer("\r", "", "\n", "").Replace(content)
+		cleaned := strings.NewReplacer("\r", "", "\n", "").Replace(content)
+		m.spawn.cwd.SetValue(m.spawn.cwd.Value() + cleaned)
 	}
 }
 
@@ -100,6 +108,7 @@ func (m *model) pasteSpawn(content string) {
 // node step so its disabled state is visible rather than auto-selected.
 func (m *model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) tea.Cmd {
 	m.spawn = spawnState{nodes: nodes, allProjects: projects, fallbackCwd: fallbackCwd}
+	m.spawn.cwd = newSpawnCwdInput()
 	if len(nodes) >= 2 {
 		m.spawn.step = spawnStepNode
 		return nil
@@ -143,7 +152,8 @@ func (s *spawnState) enterDirStep() {
 	s.cursor = 0
 	if len(s.dirs) == 0 {
 		s.custom = true
-		s.cwd = s.fallbackCwd
+		s.cwd.SetValue(s.fallbackCwd)
+		s.cwd.Focus()
 	}
 }
 
@@ -189,12 +199,13 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spawnStepDir:
 		if m.spawn.custom {
-			txt, submit := editText(m.spawn.cwd, msg)
-			m.spawn.cwd = txt
-			if submit {
+			if msg.String() == "enter" {
 				m.spawn.step = spawnStepPrompt
+				return m, nil
 			}
-			return m, nil
+			var cmd tea.Cmd
+			m.spawn.cwd, cmd = m.spawn.cwd.Update(msg)
+			return m, cmd
 		}
 		switch msg.String() {
 		case "up", "k":
@@ -203,11 +214,12 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.spawn.cursor = cursorDown(m.spawn.cursor, m.spawn.dirCursorMax())
 		case "enter":
 			if m.spawn.cursor < len(m.spawn.dirs) {
-				m.spawn.cwd = m.spawn.dirs[m.spawn.cursor].Cwd
+				m.spawn.cwd.SetValue(m.spawn.dirs[m.spawn.cursor].Cwd)
 				m.spawn.step = spawnStepPrompt
 			} else { // the trailing "Custom path…" row
 				m.spawn.custom = true
-				m.spawn.cwd = m.spawn.fallbackCwd
+				m.spawn.cwd.SetValue(m.spawn.fallbackCwd)
+				return m, m.spawn.cwd.Focus()
 			}
 		}
 		return m, nil
@@ -217,7 +229,7 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.spawn.prompt) == "" {
 				return m, nil // mandatory: don't spawn without a prompt
 			}
-			cwd := strings.TrimSpace(m.spawn.cwd)
+			cwd := strings.TrimSpace(m.spawn.cwd.Value())
 			prompt := m.spawn.prompt
 			nodeID := m.spawn.nodeID
 			agent := m.spawn.agent

@@ -355,8 +355,10 @@ func (m model) spawnView() string {
 		footer = navFooter
 	case spawnStepDir:
 		if m.spawn.custom {
+			ci := m.spawn.cwd
+			ci.SetWidth(cardW - 1)
 			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +
-				asstStyle.Render(truncate(m.spawn.cwd, cardW-1)+"▏")
+				asstStyle.Render(ci.View())
 			footer = dimStyle.Render("type a path · enter confirm · esc cancel")
 			break
 		}
