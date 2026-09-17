@@ -141,8 +141,8 @@ func TestSpawnPromptShiftEnterInsertsNewline(t *testing.T) {
 		mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = mm.(model)
 	}
-	if m.spawn.prompt != "line1\nline2" {
-		t.Fatalf("prompt = %q, want \"line1\\nline2\"", m.spawn.prompt)
+	if m.spawn.prompt.Value() != "line1\nline2" {
+		t.Fatalf("prompt = %q, want \"line1\\nline2\"", m.spawn.prompt.Value())
 	}
 	if m.spawn.step != spawnStepPrompt {
 		t.Fatal("shift+enter must not submit")
@@ -162,8 +162,8 @@ func TestSpawnPromptCtrlJInsertsNewline(t *testing.T) {
 	m = mm.(model)
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	m = mm.(model)
-	if m.spawn.prompt != "a\nb" {
-		t.Fatalf("prompt = %q, want \"a\\nb\"", m.spawn.prompt)
+	if m.spawn.prompt.Value() != "a\nb" {
+		t.Fatalf("prompt = %q, want \"a\\nb\"", m.spawn.prompt.Value())
 	}
 	if m.spawn.step != spawnStepPrompt {
 		t.Fatal("ctrl+j must not submit")
@@ -422,24 +422,6 @@ func TestSpawnViewDirListFitsWidth(t *testing.T) {
 
 // Backspace on a multi-byte UTF-8 rune must delete the whole rune, not one byte.
 func TestSpawnPromptRuneAwareBackspace(t *testing.T) {
-	// Test via the editText helper (covers the dir custom-path buffer).
-	for _, tc := range []struct {
-		name  string
-		input string
-		rune  rune
-	}{
-		{"two-byte é", "é", 'é'},
-		{"four-byte rocket", "🚀", '🚀'},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, _ := editText(tc.input, tea.KeyPressMsg{Code: tea.KeyBackspace})
-			if got != "" {
-				t.Fatalf("editText backspace on %q: got %q, want empty", tc.input, got)
-			}
-		})
-	}
-
-	// Also test via the live prompt buffer in the prompt step.
 	c := &spawnPickClient{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}}
 	m := openSpawn(t, c)
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // dir → prompt
@@ -448,14 +430,14 @@ func TestSpawnPromptRuneAwareBackspace(t *testing.T) {
 	r := '🚀'
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 	m = mm.(model)
-	if m.spawn.prompt != string(r) {
-		t.Fatalf("after typing rune: prompt=%q", m.spawn.prompt)
+	if m.spawn.prompt.Value() != string(r) {
+		t.Fatalf("after typing rune: prompt=%q", m.spawn.prompt.Value())
 	}
 
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = mm.(model)
-	if m.spawn.prompt != "" {
-		t.Fatalf("after backspace: prompt=%q, want empty", m.spawn.prompt)
+	if m.spawn.prompt.Value() != "" {
+		t.Fatalf("after backspace: prompt=%q, want empty", m.spawn.prompt.Value())
 	}
 }
 
@@ -506,11 +488,11 @@ func TestSpawnPaste(t *testing.T) {
 
 	// Prompt step: paste lands verbatim.
 	m.spawn.custom = false
-	m.spawn.step = spawnStepPrompt
+	m.enterSpawnPrompt()
 	url := "review https://github.com/o/r/pull/1"
 	mm, _ = m.Update(tea.PasteMsg{Content: url})
 	m = mm.(model)
-	if m.spawn.prompt != url {
-		t.Fatalf("prompt after paste = %q, want %q", m.spawn.prompt, url)
+	if m.spawn.prompt.Value() != url {
+		t.Fatalf("prompt after paste = %q, want %q", m.spawn.prompt.Value(), url)
 	}
 }
