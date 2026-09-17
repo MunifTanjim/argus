@@ -465,7 +465,8 @@ type RespondParams struct {
 	Reason   string         `json:"reason,omitempty"`   // deny message
 	Answers  map[string]any `json:"answers,omitempty"`  // AskUserQuestion: question -> label|[label]|text
 	// QuestionAction is a non-answer action on an AskUserQuestion prompt.
-	// "" = normal answer submit; "chat" = reject with a clarify request.
+	// "" = normal answer submit; "chat" = reject with a clarify request;
+	// "cancel" = reject the tool the way native Claude Code cancel does.
 	QuestionAction string `json:"question_action,omitempty"`
 	// SetMode, on an allow decision (e.g. ExitPlanMode approval), switches the
 	// session's permission mode: "acceptEdits" | "default" | "auto".

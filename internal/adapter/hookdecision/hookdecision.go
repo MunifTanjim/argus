@@ -17,6 +17,7 @@ type hookOut struct {
 		Decision      struct {
 			Behavior           string           `json:"behavior"`
 			Message            string           `json:"message,omitempty"`
+			Interrupt          bool             `json:"interrupt,omitempty"`
 			UpdatedInput       map[string]any   `json:"updatedInput,omitempty"`
 			UpdatedPermissions []map[string]any `json:"updatedPermissions,omitempty"`
 		} `json:"decision"`
@@ -93,11 +94,17 @@ func FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondPar
 	if behavior == "" {
 		behavior = "allow"
 	}
-	if p.QuestionAction == "chat" {
+	if p.QuestionAction == "chat" || p.QuestionAction == "cancel" {
 		behavior = "deny"
 	}
 	out.HookSpecificOutput.Decision.Behavior = behavior
+	// Cancel denies and interrupts the turn, mirroring native Claude Code cancel.
+	if p.QuestionAction == "cancel" {
+		out.HookSpecificOutput.Decision.Interrupt = true
+	}
 	switch {
+	case p.QuestionAction == "cancel":
+		// No message: Claude Code shows its own interrupt text.
 	case p.QuestionAction == "chat":
 		out.HookSpecificOutput.Decision.Message = buildClarifyMessage(toolInput, p.Answers)
 	case behavior == "deny":

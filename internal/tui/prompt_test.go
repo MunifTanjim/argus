@@ -722,14 +722,15 @@ func TestSubmitTabJKMovesSelection(t *testing.T) {
 	}
 }
 
-func TestSubmitTabCancelKeepsPending(t *testing.T) {
+func TestSubmitTabCancelDeclines(t *testing.T) {
 	m := promptModel(multiQuestion())
 	m.prompt.tab = m.numQuestions() // Submit tab
 	m.prompt.submitSel = 1          // Cancel
 	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd != nil || m.focus != focusHistory {
-		t.Errorf("cancel: cmd=%v focus=%v (should not send, return to history)", cmd, m.focus)
+	// Cancel rejects the tool (like native Claude): it sends a response and returns to history.
+	if cmd == nil || m.focus != focusHistory {
+		t.Errorf("cancel: cmd=%v focus=%v (should decline and return to history)", cmd, m.focus)
 	}
 }
 

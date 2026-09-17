@@ -182,11 +182,20 @@ func (m model) handleSubmitTabKey(msg tea.KeyPressMsg, ix *session.Interaction) 
 		if m.prompt.submitSel == 0 {
 			return m.submitAll(ix)
 		}
-		m.focus = focusHistory // Cancel: leave the prompt pending
+		return m.cancelQuestions(ix)
 	case "c":
 		return m.chatAboutQuestions(ix)
 	}
 	return m, nil
+}
+
+// cancelQuestions declines the AskUserQuestion prompt the way native Claude Code
+// cancel does: the tool is rejected so the session stops waiting for an answer.
+func (m model) cancelQuestions(ix *session.Interaction) (tea.Model, tea.Cmd) {
+	id := m.selectedID
+	m.focus = focusHistory
+	m.resetPromptState()
+	return m, m.respondCmd(id, api.RespondParams{Kind: string(ix.Kind), QuestionAction: "cancel"})
 }
 
 // submitDecision sends a permission/plan decision by echoing the chosen option's
