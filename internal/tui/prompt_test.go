@@ -213,6 +213,18 @@ func TestPromptIdlePasteAppendsMultiline(t *testing.T) {
 	}
 }
 
+func TestQuestionCustomAnswerPaste(t *testing.T) {
+	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A"}})
+	q := &ix.Questions[0]
+	m := promptModel(ix)
+	m.prompt.sel[0] = otherIndex(q) // activate the custom field
+	res, _ := m.Update(tea.PasteMsg{Content: "pasted"})
+	m = res.(model)
+	if m.qText(0) != "pasted" {
+		t.Fatalf("paste into custom answer = %q, want pasted", m.qText(0))
+	}
+}
+
 func TestDenyReasonPaste(t *testing.T) {
 	ix := &session.Interaction{
 		Kind: session.InteractionPermission, ToolName: "Bash",
@@ -304,7 +316,7 @@ func TestQuestionCustomAnswerInlineRender(t *testing.T) {
 	// Other row selected with typed text: the row itself shows the text inline.
 	m := promptModel(ix)
 	m.prompt.sel[0] = otherIndex(q)
-	m.prompt.text[0] = "mydb"
+	m.prompt.text[0].SetValue("mydb")
 	out := m.promptBody()
 	if !strings.Contains(out, "mydb") {
 		t.Errorf("inline custom: missing typed text in:\n%s", out)
@@ -313,12 +325,12 @@ func TestQuestionCustomAnswerInlineRender(t *testing.T) {
 		t.Errorf("inline custom: stale placeholder still shown in:\n%s", out)
 	}
 
-	// Other row selected with empty text: cursor shows so the field reads as active.
+	// Other row selected with empty text: the field replaces the placeholder label.
 	m = promptModel(ix)
 	m.prompt.sel[0] = otherIndex(q)
-	m.prompt.text[0] = ""
-	if out := m.promptBody(); !strings.Contains(out, "▏") {
-		t.Errorf("inline custom (empty): missing cursor in:\n%s", out)
+	m.prompt.text[0].SetValue("")
+	if out := m.promptBody(); strings.Contains(out, "type your own…") {
+		t.Errorf("inline custom (empty active): placeholder should be replaced by the field in:\n%s", out)
 	}
 }
 
@@ -329,7 +341,7 @@ func TestQuestionAnswers(t *testing.T) {
 	// Committed "type your own" + typed text → custom answer value.
 	m := promptModel(ix)
 	m.prompt.chosen[0] = otherIndex(q)
-	m.prompt.text[0] = "my custom"
+	m.prompt.text[0].SetValue("my custom")
 	if p := m.questionAnswers(ix); p.Answers["Q"] != "my custom" {
 		t.Fatalf("custom: answers=%v", p.Answers)
 	}
@@ -337,7 +349,7 @@ func TestQuestionAnswers(t *testing.T) {
 	// Committed custom with no text → omitted (unanswered).
 	m = promptModel(ix)
 	m.prompt.chosen[0] = otherIndex(q)
-	m.prompt.text[0] = "   "
+	m.prompt.text[0].SetValue("   ")
 	if p := m.questionAnswers(ix); len(p.Answers) != 0 {
 		t.Errorf("empty custom should be omitted: %v", p.Answers)
 	}
@@ -356,7 +368,7 @@ func TestQuestionMultiSelectWithCustom(t *testing.T) {
 	m := promptModel(ix)
 	m.prompt.toggles[0][0] = true             // "A"
 	m.prompt.toggles[0][otherIndex(q)] = true // custom
-	m.prompt.text[0] = "extra"
+	m.prompt.text[0].SetValue("extra")
 	p := m.questionAnswers(ix)
 	got, _ := p.Answers["Q"].([]string)
 	has := func(s string) bool {
@@ -660,6 +672,41 @@ func TestQuestionJKTypesIntoCustomAnswer(t *testing.T) {
 	}
 }
 
+func TestQuestionCustomAnswerCursorMotion(t *testing.T) {
+	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A"}})
+	q := &ix.Questions[0]
+	m := promptModel(ix)
+	m.prompt.sel[0] = otherIndex(q) // activate the custom field
+	feed := func(msg tea.KeyPressMsg) {
+		res, _ := m.handlePromptKey(msg)
+		m = res.(model)
+	}
+	for _, r := range "helo" {
+		feed(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	feed(tea.KeyPressMsg{Code: tea.KeyLeft})    // cursor before the final 'o'
+	feed(tea.KeyPressMsg{Code: 'l', Text: "l"}) // insert 'l' mid-word
+	if m.qText(0) != "hello" {
+		t.Fatalf("left then insert should give hello, got %q", m.qText(0))
+	}
+}
+
+func TestMultiSelectCustomToggledStillSwitchesTab(t *testing.T) {
+	ix := &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{
+		{Question: "Q1", Options: []string{"A"}, MultiSelect: true},
+		{Question: "Q2", Options: []string{"B"}, MultiSelect: true},
+	}}
+	m := promptModel(ix)
+	q0 := &ix.Questions[0]
+	m.prompt.toggles[0][otherIndex(q0)] = true // custom answer included
+	m.prompt.sel[0] = 0                        // but the highlight is on option A, not custom
+	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = res.(model)
+	if m.prompt.tab != 1 {
+		t.Fatalf("right should switch tab when the custom row is not highlighted, tab=%d", m.prompt.tab)
+	}
+}
+
 func TestSubmitTabJKMovesSelection(t *testing.T) {
 	m := promptModel(multiQuestion())
 	m.prompt.tab = m.numQuestions() // Submit tab
@@ -708,10 +755,10 @@ func TestPromptQuestionCTypesIntoCustomAnswer(t *testing.T) {
 		t.Fatalf("expected cursor on custom row, sel=%d", m.qSel(0))
 	}
 	// Now "c" must append to the custom text, not send a chat request.
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	res, _ = m.handlePromptKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	m = res.(model)
-	if cmd != nil {
-		t.Fatalf("editing custom: 'c' must not send, cmd=%v", cmd)
+	if m.focus != focusDock {
+		t.Fatalf("editing custom: 'c' must not send, focus=%v", m.focus)
 	}
 	if m.qText(0) != "c" {
 		t.Fatalf("editing custom: 'c' should type, text=%q", m.qText(0))

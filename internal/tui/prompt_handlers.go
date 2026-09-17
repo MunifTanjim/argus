@@ -118,30 +118,34 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 
 	switch key {
 	case "left":
-		m.prompt.tab = max(0, m.prompt.tab-1)
+		if !accepts { // while editing a custom answer, left/right move the cursor
+			m.prompt.tab = max(0, m.prompt.tab-1)
+			return m, nil
+		}
 	case "right":
-		m.prompt.tab = min(maxTab, m.prompt.tab+1)
+		if !accepts {
+			m.prompt.tab = min(maxTab, m.prompt.tab+1)
+			return m, nil
+		}
 	case "up", "ctrl+p":
 		m.prompt.sel[tab] = max(0, m.prompt.sel[tab]-1)
+		return m, nil
 	case "down", "ctrl+n":
 		m.prompt.sel[tab] = min(len(opts)-1, m.prompt.sel[tab]+1)
+		return m, nil
+	case "enter":
+		return m.commitQuestion(ix)
 	case " ", "space":
 		if q.MultiSelect {
 			sel := m.prompt.sel[tab]
 			m.prompt.toggles[tab][sel] = !m.prompt.toggles[tab][sel]
-		} else if accepts {
-			m.prompt.text[tab] += " "
+			return m, nil
 		}
-	case "enter":
-		return m.commitQuestion(ix)
-	case "backspace":
-		if accepts && len(m.prompt.text[tab]) > 0 {
-			m.prompt.text[tab] = m.prompt.text[tab][:len(m.prompt.text[tab])-1]
-		}
-	default:
-		if accepts && msg.Text != "" {
-			m.prompt.text[tab] += msg.Text
-		}
+	}
+	if accepts {
+		var cmd tea.Cmd
+		m.prompt.text[tab], cmd = m.prompt.text[tab].Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -153,7 +157,7 @@ func (m model) commitQuestion(ix *session.Interaction) (tea.Model, tea.Cmd) {
 	q := &ix.Questions[tab]
 	if !q.MultiSelect {
 		sel := m.prompt.sel[tab]
-		if sel == otherIndex(q) && strings.TrimSpace(m.prompt.text[tab]) == "" {
+		if sel == otherIndex(q) && strings.TrimSpace(m.qText(tab)) == "" {
 			return m, nil // can't select an empty custom answer
 		}
 		m.prompt.chosen[tab] = sel

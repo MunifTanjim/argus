@@ -29,22 +29,29 @@ const otherLabel = "✎ type your own…"
 // promptState is the prompt dock draft. Questions use the per-question slices;
 // permission/plan/idle use the scalar drafts.
 type promptState struct {
-	tab         int             // active tab: 0..len-1 question, ==len → Submit tab
-	sel         []int           // highlighted option index per question (navigation only)
-	chosen      []int           // committed single-select option per question (-1 = unanswered)
-	toggles     []map[int]bool  // multi-select toggles per question
-	text        []string        // "type your own" draft per question
-	submitSel   int             // 0=Submit, 1=Cancel on the Submit tab
-	decisionSel int             // permission/plan option index (Allow/Deny)
-	reason      textinput.Model // permission/plan deny reason (single-line)
-	reply       textarea.Model  // idle reply composer (multi-line via shift+enter)
-	scroll      int             // dock body scroll offset (lines above the pinned controls)
-	key         string          // identity of the interaction the draft belongs to
+	tab         int               // active tab: 0..len-1 question, ==len → Submit tab
+	sel         []int             // highlighted option index per question (navigation only)
+	chosen      []int             // committed single-select option per question (-1 = unanswered)
+	toggles     []map[int]bool    // multi-select toggles per question
+	text        []textinput.Model // "type your own" draft per question
+	submitSel   int               // 0=Submit, 1=Cancel on the Submit tab
+	decisionSel int               // permission/plan option index (Allow/Deny)
+	reason      textinput.Model   // permission/plan deny reason (single-line)
+	reply       textarea.Model    // idle reply composer (multi-line via shift+enter)
+	scroll      int               // dock body scroll offset (lines above the pinned controls)
+	key         string            // identity of the interaction the draft belongs to
 }
 
 func newDenyReasonInput() textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""
+	return ti
+}
+
+func newQuestionAnswerInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Focus()
 	return ti
 }
 
@@ -158,7 +165,7 @@ func (m *model) ensurePromptState(n int) {
 		sel := make([]int, n)
 		chosen := make([]int, n)
 		tog := make([]map[int]bool, n)
-		txt := make([]string, n)
+		txt := make([]textinput.Model, n)
 		for i := 0; i < n; i++ {
 			chosen[i] = -1
 			if i < len(m.prompt.sel) {
@@ -174,6 +181,8 @@ func (m *model) ensurePromptState(n int) {
 			}
 			if i < len(m.prompt.text) {
 				txt[i] = m.prompt.text[i]
+			} else {
+				txt[i] = newQuestionAnswerInput()
 			}
 		}
 		m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = sel, chosen, tog, txt
@@ -207,7 +216,7 @@ func (m model) qToggles(tab int) map[int]bool {
 
 func (m model) qText(tab int) string {
 	if tab >= 0 && tab < len(m.prompt.text) {
-		return m.prompt.text[tab]
+		return m.prompt.text[tab].Value()
 	}
 	return ""
 }
@@ -267,14 +276,28 @@ func (m model) questionAnswer(q *session.QuestionSpec, tab int) (any, bool) {
 	return nil, false
 }
 
-// otherActive reports whether the "type your own" entry is selected (single) or
-// toggled (multi), i.e. the free-text field should accept input.
+// otherActive reports whether the "type your own" row is highlighted, so the
+// free-text field takes editing keys. Multi-select inclusion is a separate
+// concern (its toggle), so highlighting elsewhere leaves left/right for tabs.
 func (m model) otherActive(q *session.QuestionSpec, tab int) bool {
-	oi := otherIndex(q)
-	if q.MultiSelect {
-		return m.qToggles(tab)[oi]
+	return m.qSel(tab) == otherIndex(q)
+}
+
+// questionCustomActive reports whether the focused dock is editing a question's
+// "type your own" answer, so a paste is routed to that field.
+func (m model) questionCustomActive() bool {
+	if m.mode != modeSession || m.focus != focusDock {
+		return false
 	}
-	return m.qSel(tab) == oi
+	ix := m.interaction()
+	if ix == nil || ix.Kind != session.InteractionQuestion || m.onSubmitTab() {
+		return false
+	}
+	tab := m.prompt.tab
+	if tab < 0 || tab >= len(ix.Questions) || tab >= len(m.prompt.text) {
+		return false
+	}
+	return m.otherActive(&ix.Questions[tab], tab)
 }
 
 // denyReasonActive reports whether the focused dock is editing a permission/plan
@@ -418,9 +441,6 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 		label := StyleSecondary.Render(opt)
 		if i == otherIdx && (otherActive || otherText != "") {
 			text := "✎ " + otherText
-			if otherActive {
-				text += "▏"
-			}
 			if selected {
 				label = StylePrimaryBold.Render(text)
 			} else {
@@ -498,8 +518,14 @@ func (m model) questionLines(ix *session.Interaction, width int) ([]string, int,
 	marks := optionMarks{multi: q.MultiSelect, toggles: m.qToggles(tab),
 		radio: !q.MultiSelect, chosen: m.qChosen(tab)}
 	base := strings.Count(b.String(), "\n")
+	otherText := m.qText(tab)
+	if m.otherActive(q, tab) && tab < len(m.prompt.text) {
+		ti := m.prompt.text[tab]
+		ti.SetWidth(width)
+		otherText = ti.View()
+	}
 	block, a := m.renderOptions(opts, m.qSel(tab), marks,
-		otherIndex(q), m.qText(tab), m.otherActive(q, tab), q.OptionDescriptions, width)
+		otherIndex(q), otherText, m.otherActive(q, tab), q.OptionDescriptions, width)
 	b.WriteString(block)
 	b.WriteString("\n\n" + chatHint())
 	// Question text (and tab bar) above the options scroll; the option list pins.

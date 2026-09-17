@@ -94,6 +94,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prompt.reply, cmd = m.prompt.reply.Update(msg)
 			m.sizeIdleReply()
 			return m, cmd
+		case m.questionCustomActive():
+			tab := m.prompt.tab
+			var cmd tea.Cmd
+			m.prompt.text[tab], cmd = m.prompt.text[tab].Update(msg)
+			return m, cmd
 		case m.denyReasonActive():
 			var cmd tea.Cmd
 			m.prompt.reason, cmd = m.prompt.reason.Update(msg)
