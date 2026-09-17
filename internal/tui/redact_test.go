@@ -32,8 +32,8 @@ func TestRedactInputQueuesLiteral(t *testing.T) {
 		res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
-	if m.redact.input != "sk" {
-		t.Fatalf("input buffer = %q, want sk", m.redact.input)
+	if m.redact.input.Value() != "sk" {
+		t.Fatalf("input buffer = %q, want sk", m.redact.input.Value())
 	}
 
 	// Enter commits.
@@ -231,10 +231,12 @@ func TestRedactFooterStates(t *testing.T) {
 		t.Fatal("expected redact hint, got base footer")
 	}
 
-	// Input active: shows the buffer.
-	m.redact.inputActive, m.redact.input = true, "sk-x"
-	if got := m.redactFooter("BASE"); !contains(got, "sk-x") {
-		t.Fatalf("input footer should echo buffer, got %q", got)
+	// Input active: shows the masked buffer, never the plaintext secret.
+	m.redact.inputActive = true
+	m.redact.input = newRedactInput()
+	m.redact.input.SetValue("sk-x")
+	if got := m.redactFooter("BASE"); !contains(got, "redact (paste secret):") || contains(got, "sk-x") {
+		t.Fatalf("input footer should mask the secret, got %q", got)
 	}
 	m.redact.inputActive = false
 

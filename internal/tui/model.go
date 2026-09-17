@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 
+	"charm.land/bubbles/v2/textinput"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/vt"
 
@@ -183,6 +184,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 			mdCache:     make(map[string]string),
 			jsonHL:      newJSONHighlighter(hasDark),
 		},
+		redact: redactState{input: newRedactInput()},
 	}
 }
 
@@ -215,7 +217,7 @@ func (m *model) syncPromptDraft() {
 type redactState struct {
 	literals    []string
 	inputActive bool
-	input       string
+	input       textinput.Model
 	listActive  bool
 	listCursor  int
 	listReturn  bool // input was opened from the list (D); reopen it when the input closes
