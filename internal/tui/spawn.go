@@ -2,8 +2,9 @@ package tui
 
 import (
 	"strings"
-	"unicode/utf8"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
@@ -53,7 +54,7 @@ type spawnState struct {
 	cursor      int                      // list cursor (node, agent, and dir steps)
 	custom      bool                     // dir step: free-text path entry active
 	cwd         textinput.Model          // resolved working directory
-	prompt      string                   // initial prompt (mandatory; multi-line via shift+enter)
+	prompt      textarea.Model           // initial prompt (mandatory; multi-line via shift+enter)
 	fallbackCwd string                   // seeds custom path / empty-history case
 }
 
@@ -63,31 +64,28 @@ func newSpawnCwdInput() textinput.Model {
 	return ti
 }
 
+func newSpawnPromptArea() textarea.Model {
+	ta := textarea.New()
+	ta.Prompt = ""
+	ta.ShowLineNumbers = false
+	// enter submits (router), so newlines come from shift+enter or the ctrl+j fallback.
+	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
+	return ta
+}
+
+func (m *model) enterSpawnPrompt() tea.Cmd {
+	m.spawn.step = spawnStepPrompt
+	m.spawn.prompt = newSpawnPromptArea()
+	m.spawn.prompt.SetWidth(historyWidth(*m))
+	m.spawn.prompt.SetHeight(max(1, m.height-6))
+	return m.spawn.prompt.Focus()
+}
+
 func (s spawnState) active() bool { return s.step != spawnInactive }
 
 // dirCursorMax is the dir-step selectable row count: one per project plus the
 // trailing "Custom path…" row.
 func (s spawnState) dirCursorMax() int { return len(s.dirs) + 1 }
-
-// editText applies a keypress to a free-text buffer, returning the new text and
-// whether Enter (submit) was pressed. Mirrors the idle composer in
-// prompt_handlers.go.
-func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
-	switch msg.String() {
-	case "enter":
-		return cur, true
-	case "backspace":
-		if cur == "" {
-			return cur, false
-		}
-		_, sz := utf8.DecodeLastRuneInString(cur)
-		return cur[:len(cur)-sz], false
-	}
-	if msg.Text != "" {
-		return cur + msg.Text, false
-	}
-	return cur, false
-}
 
 // pasteSpawn routes a paste into the active spawn field. A paste arrives as its
 // own message, not a keypress, so it needs a route separate from handleSpawnKey
@@ -95,7 +93,7 @@ func editText(cur string, msg tea.KeyPressMsg) (string, bool) {
 func (m *model) pasteSpawn(content string) {
 	switch {
 	case m.spawn.step == spawnStepPrompt:
-		m.spawn.prompt += content
+		m.spawn.prompt.SetValue(m.spawn.prompt.Value() + content)
 	case m.spawn.step == spawnStepDir && m.spawn.custom:
 		// A path is one line: strip line breaks so a pasted CRLF or LF cannot
 		// submit or corrupt it.
@@ -200,8 +198,7 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case spawnStepDir:
 		if m.spawn.custom {
 			if msg.String() == "enter" {
-				m.spawn.step = spawnStepPrompt
-				return m, nil
+				return m, m.enterSpawnPrompt()
 			}
 			var cmd tea.Cmd
 			m.spawn.cwd, cmd = m.spawn.cwd.Update(msg)
@@ -215,35 +212,29 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.spawn.cursor < len(m.spawn.dirs) {
 				m.spawn.cwd.SetValue(m.spawn.dirs[m.spawn.cursor].Cwd)
-				m.spawn.step = spawnStepPrompt
-			} else { // the trailing "Custom path…" row
-				m.spawn.custom = true
-				m.spawn.cwd.SetValue(m.spawn.fallbackCwd)
-				return m, m.spawn.cwd.Focus()
+				return m, m.enterSpawnPrompt()
 			}
+			// the trailing "Custom path…" row
+			m.spawn.custom = true
+			m.spawn.cwd.SetValue(m.spawn.fallbackCwd)
+			return m, m.spawn.cwd.Focus()
 		}
 		return m, nil
 	case spawnStepPrompt:
-		switch msg.String() {
-		case "enter":
-			if strings.TrimSpace(m.spawn.prompt) == "" {
+		if msg.String() == "enter" {
+			if strings.TrimSpace(m.spawn.prompt.Value()) == "" {
 				return m, nil // mandatory: don't spawn without a prompt
 			}
 			cwd := strings.TrimSpace(m.spawn.cwd.Value())
-			prompt := m.spawn.prompt
+			prompt := m.spawn.prompt.Value()
 			nodeID := m.spawn.nodeID
 			agent := m.spawn.agent
 			m.spawn = spawnState{}
 			return m, m.spawnCmd(cwd, nodeID, agent, prompt)
-		case "shift+enter", "ctrl+j":
-			// shift+enter needs the Kitty keyboard protocol; ctrl+j is a
-			// universally-transmitted fallback for inserting a newline.
-			m.spawn.prompt += "\n"
-		default:
-			// Backspace and printable runes share the idle-composer editor.
-			m.spawn.prompt, _ = editText(m.spawn.prompt, msg)
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.spawn.prompt, cmd = m.spawn.prompt.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }

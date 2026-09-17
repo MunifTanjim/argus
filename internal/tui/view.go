@@ -371,18 +371,11 @@ func (m model) spawnView() string {
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
 		footer = navFooter
 	case spawnStepPrompt:
-		lines := strings.Split(m.spawn.prompt, "\n")
-		for i, ln := range lines {
-			lines[i] = truncateLine(ln, cardW)
-		}
-		lines[len(lines)-1] += "▏" // cursor at end; Split always yields ≥1 line
-		// Window to the height after label + blank, keeping the tail (where typing
-		// happens) visible.
-		if budget := max(1, avail-2); len(lines) > budget {
-			lines = lines[len(lines)-budget:]
-		}
+		ta := m.spawn.prompt
+		ta.SetWidth(cardW)
+		ta.SetHeight(max(1, avail-2))
 		body = StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)") + "\n\n" +
-			asstStyle.Render(strings.Join(lines, "\n"))
+			ta.View()
 		footer = dimStyle.Render("enter launch · shift+enter/ctrl+j newline · esc cancel")
 	}
 
