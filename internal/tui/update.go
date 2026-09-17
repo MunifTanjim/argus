@@ -66,6 +66,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Markdown wrap width changed; drop cached renderers/output.
 		m.transcript.mdRenderers = make(map[int]*glamour.TermRenderer)
 		m.transcript.mdCache = make(map[string]string)
+		if m.idleComposerActive() {
+			m.sizeIdleReply()
+		}
 		if m.mode == modeScreen && m.term != nil {
 			cols, rows := m.termDims()
 			m.term.Resize(cols, rows)
@@ -87,8 +90,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pasteSpawn(msg.Content)
 			return m, nil
 		case m.idleComposerActive():
-			// Idle reply composer: append the paste verbatim (newlines and all).
-			m.prompt.reasonText += msg.Content
+			var cmd tea.Cmd
+			m.prompt.reply, cmd = m.prompt.reply.Update(msg)
+			m.sizeIdleReply()
+			return m, cmd
+		case m.denyReasonActive():
+			var cmd tea.Cmd
+			m.prompt.reason, cmd = m.prompt.reason.Update(msg)
+			return m, cmd
 		}
 	case notificationMsg:
 		return m, m.applyEvent(api.Notification(msg))

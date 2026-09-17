@@ -185,6 +185,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 			jsonHL:      newJSONHighlighter(hasDark),
 		},
 		redact: redactState{input: newRedactInput()},
+		prompt: promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
 	}
 }
 

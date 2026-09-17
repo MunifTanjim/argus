@@ -47,30 +47,20 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.sessions[m.selectedID].Controllable() {
 		return m, nil
 	}
-	switch msg.String() {
-	case "enter":
+	if msg.String() == "enter" {
 		id := m.selectedID
-		txt := strings.TrimSpace(m.prompt.reasonText)
-		m.prompt.reasonText = ""
+		txt := strings.TrimSpace(m.prompt.reply.Value())
+		m.prompt.reply.SetValue("")
 		m.focus = focusHistory
 		if txt == "" {
 			return m, nil
 		}
 		return m, m.sendInputCmd(id, txt)
-	case "shift+enter":
-		// Newline instead of submit (multi-line replies). Only arrives where the
-		// Kitty keyboard protocol is honored; pasting is the universal path.
-		m.prompt.reasonText += "\n"
-	case "backspace":
-		if len(m.prompt.reasonText) > 0 {
-			m.prompt.reasonText = m.prompt.reasonText[:len(m.prompt.reasonText)-1]
-		}
-	default:
-		if msg.Text != "" {
-			m.prompt.reasonText += msg.Text
-		}
 	}
-	return m, nil
+	var cmd tea.Cmd
+	m.prompt.reply, cmd = m.prompt.reply.Update(msg)
+	m.sizeIdleReply()
+	return m, cmd
 }
 
 // handleDecisionKey drives the permission/plan allow/deny choice and deny reason.
@@ -80,22 +70,17 @@ func (m model) handleDecisionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 	switch msg.String() {
 	case "up", "ctrl+p":
 		m.prompt.decisionSel = max(0, m.prompt.decisionSel-1)
+		return m, nil
 	case "down", "ctrl+n":
 		m.prompt.decisionSel = min(len(opts)-1, m.prompt.decisionSel+1)
-	case " ", "space":
-		if denying {
-			m.prompt.reasonText += " "
-		}
+		return m, nil
 	case "enter":
 		return m.submitDecision(ix)
-	case "backspace":
-		if denying && len(m.prompt.reasonText) > 0 {
-			m.prompt.reasonText = m.prompt.reasonText[:len(m.prompt.reasonText)-1]
-		}
-	default:
-		if denying && msg.Text != "" {
-			m.prompt.reasonText += msg.Text
-		}
+	}
+	if denying {
+		var cmd tea.Cmd
+		m.prompt.reason, cmd = m.prompt.reason.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -210,7 +195,7 @@ func (m model) submitDecision(ix *session.Interaction) (tea.Model, tea.Cmd) {
 	o := ix.Options[sel]
 	p := api.RespondParams{Kind: string(ix.Kind), OptionValue: o.Value}
 	if o.Reject {
-		p.Reason = strings.TrimSpace(m.prompt.reasonText)
+		p.Reason = strings.TrimSpace(m.prompt.reason.Value())
 	}
 	id := m.selectedID
 	m.focus = focusHistory

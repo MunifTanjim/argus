@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -26,16 +29,49 @@ const otherLabel = "✎ type your own…"
 // promptState is the prompt dock draft. Questions use the per-question slices;
 // permission/plan/idle use the scalar drafts.
 type promptState struct {
-	tab         int            // active tab: 0..len-1 question, ==len → Submit tab
-	sel         []int          // highlighted option index per question (navigation only)
-	chosen      []int          // committed single-select option per question (-1 = unanswered)
-	toggles     []map[int]bool // multi-select toggles per question
-	text        []string       // "type your own" draft per question
-	submitSel   int            // 0=Submit, 1=Cancel on the Submit tab
-	decisionSel int            // permission/plan option index (Allow/Deny)
-	reasonText  string         // permission/plan deny reason + idle reply buffer
-	scroll      int            // dock body scroll offset (lines above the pinned controls)
-	key         string         // identity of the interaction the draft belongs to
+	tab         int             // active tab: 0..len-1 question, ==len → Submit tab
+	sel         []int           // highlighted option index per question (navigation only)
+	chosen      []int           // committed single-select option per question (-1 = unanswered)
+	toggles     []map[int]bool  // multi-select toggles per question
+	text        []string        // "type your own" draft per question
+	submitSel   int             // 0=Submit, 1=Cancel on the Submit tab
+	decisionSel int             // permission/plan option index (Allow/Deny)
+	reason      textinput.Model // permission/plan deny reason (single-line)
+	reply       textarea.Model  // idle reply composer (multi-line via shift+enter)
+	scroll      int             // dock body scroll offset (lines above the pinned controls)
+	key         string          // identity of the interaction the draft belongs to
+}
+
+func newDenyReasonInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	return ti
+}
+
+func newIdleReplyArea() textarea.Model {
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	// Grow with content and self-clamp the scroll offset. A fixed height scrolls
+	// the first line out of view when a newline is added before a re-size.
+	ta.DynamicHeight = true
+	// Mark only the first line, so a multi-line reply is not prefixed on every row.
+	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return "> "
+		}
+		return "  "
+	})
+	// enter submits, so newlines come from shift+enter (Kitty keyboard protocol).
+	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
+	return ta
+}
+
+// sizeIdleReply fits the reply composer to the dock width. Height is dynamic. The
+// textarea shares its viewport by pointer, so width must be set in the update
+// path, never during render, or a render-time resize would corrupt the offset.
+func (m *model) sizeIdleReply() {
+	leftW, _, _ := m.dockWidths()
+	m.prompt.reply.SetWidth(leftW)
 }
 
 // -- Interaction / question accessors -----------------------------------------
@@ -103,9 +139,13 @@ func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
 
 func (m *model) resetPromptState() {
 	m.prompt.tab, m.prompt.submitSel, m.prompt.decisionSel = 0, 0, 0
-	m.prompt.reasonText = ""
+	m.prompt.reason = newDenyReasonInput()
+	m.prompt.reason.Focus()
+	m.prompt.reply = newIdleReplyArea()
+	m.prompt.reply.Focus()
 	m.prompt.scroll = 0
 	m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = nil, nil, nil, nil
+	m.sizeIdleReply() // fit the fresh composer so its first render is not default-sized
 }
 
 // ensurePromptState sizes the per-question slices to n (preserving entries) and
@@ -235,6 +275,19 @@ func (m model) otherActive(q *session.QuestionSpec, tab int) bool {
 		return m.qToggles(tab)[oi]
 	}
 	return m.qSel(tab) == oi
+}
+
+// denyReasonActive reports whether the focused dock is editing a permission/plan
+// deny reason, so a paste is routed to that field.
+func (m model) denyReasonActive() bool {
+	if m.mode != modeSession || m.focus != focusDock {
+		return false
+	}
+	ix := m.interaction()
+	if ix == nil || (ix.Kind != session.InteractionPermission && ix.Kind != session.InteractionPlan) {
+		return false
+	}
+	return m.decisionRejecting(ix)
 }
 
 // focusedOptionPreview returns the preview markdown for the active question's
@@ -468,24 +521,23 @@ func (m model) decisionLines(ix *session.Interaction, width int) ([]string, int,
 	// The reason field appears only on the reject choice.
 	if m.decisionRejecting(ix) {
 		anchor = strings.Count(b.String(), "\n") + 1
-		b.WriteString("\n" + m.rejectInput(ix))
+		b.WriteString("\n" + m.rejectInput(ix, width))
 	}
 	// The plan/permission body above the options scrolls; options + reason pin.
 	return splitAnchorCtrl(&b, anchor, base)
 }
 
 // rejectInput renders the reject feedback field, or the option's placeholder when empty.
-func (m model) rejectInput(ix *session.Interaction) string {
+func (m model) rejectInput(ix *session.Interaction, width int) string {
 	ph := "reason (for deny)"
 	sel := m.prompt.decisionSel
 	if sel >= 0 && sel < len(ix.Options) && ix.Options[sel].Placeholder != "" {
 		ph = ix.Options[sel].Placeholder
 	}
-	prefix := userStyle.Render("> ")
-	if m.prompt.reasonText == "" {
-		return prefix + "▏" + dimStyle.Render(ph)
-	}
-	return prefix + m.prompt.reasonText + "▏"
+	ti := m.prompt.reason
+	ti.Placeholder = ph
+	ti.SetWidth(width)
+	return userStyle.Render("> ") + ti.View()
 }
 
 // idleLines renders the free-text composer for an idle interaction.
@@ -496,7 +548,9 @@ func (m model) idleLines(ix *session.Interaction, width int) ([]string, int, int
 		b.WriteString(body + "\n\n")
 	}
 	anchor := strings.Count(b.String(), "\n")
-	b.WriteString(hardWrap(userStyle.Render("> ")+m.prompt.reasonText+"▏", width))
+	// The composer is sized in the update path (sizeIdleReply): resizing here would
+	// mutate the shared viewport pointer and scroll the next keypress.
+	b.WriteString(m.prompt.reply.View())
 	// The message body above scrolls; the reply composer pins to the bottom.
 	return splitAnchorCtrl(&b, anchor, anchor)
 }

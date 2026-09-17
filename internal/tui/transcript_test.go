@@ -18,6 +18,8 @@ func testModel() model {
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
 		},
+		prompt:    promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
+		redact:    redactState{input: newRedactInput()},
 		termKeyCh: make(chan termKey, termKeyBuf),
 		width:     80,
 		height:    24,
