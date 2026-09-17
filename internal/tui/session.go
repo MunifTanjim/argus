@@ -27,6 +27,9 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if pending {
 			if m.focus == focusHistory {
 				m.focus = focusDock
+				if m.idleComposerActive() {
+					m.sizeIdleReply() // fit width/height before the first render
+				}
 			} else {
 				m.focus = focusHistory
 			}

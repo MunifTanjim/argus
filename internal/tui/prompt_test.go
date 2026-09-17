@@ -25,6 +25,7 @@ func promptModel(ix *session.Interaction) model {
 	m.selectedID = "s1"
 	m.mode = modeSession
 	m.focus = focusDock
+	m.resetPromptState()
 	if ix != nil && ix.Kind == session.InteractionQuestion {
 		m.ensurePromptState(len(ix.Questions))
 	}
@@ -52,16 +53,32 @@ func TestPromptPermissionComposeThenSubmit(t *testing.T) {
 		t.Fatalf("down: sel=%d cmd=%v (nothing should be sent yet)", m.prompt.decisionSel, cmd)
 	}
 	// Typing fills the deny reason locally.
-	res, cmd = m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	res, _ = m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
-	if m.prompt.reasonText != "x" || cmd != nil {
-		t.Fatalf("typing reason: text=%q cmd=%v", m.prompt.reasonText, cmd)
+	if m.prompt.reason.Value() != "x" || m.focus != focusDock {
+		t.Fatalf("typing reason: text=%q focus=%v", m.prompt.reason.Value(), m.focus)
 	}
 	// Only Enter submits and returns to the history.
 	res, cmd = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	if m.focus != focusHistory || cmd == nil {
 		t.Errorf("submit: focus=%v cmd=%v", m.focus, cmd)
+	}
+}
+
+func TestRejectInputShowsFullPlaceholder(t *testing.T) {
+	ix := &session.Interaction{
+		Kind: session.InteractionPermission, ToolName: "Bash",
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell Claude why"},
+		},
+	}
+	m := promptModel(ix)
+	m.prompt.decisionSel = 1 // Deny
+	// The cursor covers the first char, so the tail is what the width bug used to drop.
+	if out := m.rejectInput(ix, 60); !strings.Contains(out, "ell Claude why") {
+		t.Fatalf("deny reason should show the full placeholder, got %q", out)
 	}
 }
 
@@ -118,13 +135,13 @@ func TestPromptIdleTextComposeThenSubmit(t *testing.T) {
 		res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: string(r), Code: r})
 		m = res.(model)
 	}
-	if m.prompt.reasonText != "hi" {
-		t.Fatalf("reasonText=%q want hi", m.prompt.reasonText)
+	if m.prompt.reply.Value() != "hi" {
+		t.Fatalf("reply=%q want hi", m.prompt.reply.Value())
 	}
 	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory || m.prompt.reasonText != "" {
-		t.Errorf("idle submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reasonText)
+	if cmd == nil || m.focus != focusHistory || m.prompt.reply.Value() != "" {
+		t.Errorf("idle submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reply.Value())
 	}
 }
 
@@ -145,13 +162,13 @@ func TestPromptIdleShiftEnterInsertsNewline(t *testing.T) {
 		{tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}, "a\n"},
 		{tea.KeyPressMsg{Text: "b", Code: 'b'}, "a\nb"},
 	} {
-		res, cmd := m.handlePromptKey(s.msg)
+		res, _ := m.handlePromptKey(s.msg)
 		m = res.(model)
-		if cmd != nil {
+		if m.focus != focusDock {
 			t.Fatalf("unexpected submit on %v", s.msg)
 		}
-		if m.prompt.reasonText != s.want {
-			t.Fatalf("reasonText=%q want %q", m.prompt.reasonText, s.want)
+		if m.prompt.reply.Value() != s.want {
+			t.Fatalf("reply=%q want %q", m.prompt.reply.Value(), s.want)
 		}
 	}
 	if m.focus != focusDock {
@@ -161,8 +178,29 @@ func TestPromptIdleShiftEnterInsertsNewline(t *testing.T) {
 	// Plain Enter submits the whole multi-line buffer.
 	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory || m.prompt.reasonText != "" {
-		t.Errorf("multiline submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reasonText)
+	if cmd == nil || m.focus != focusHistory || m.prompt.reply.Value() != "" {
+		t.Errorf("multiline submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reply.Value())
+	}
+}
+
+// Rendering shares the textarea viewport by pointer, so a render between
+// keystrokes must not scroll earlier lines out of the composer.
+func TestIdleReplyKeepsEarlierLinesAcrossRenders(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	feed := func(msg tea.KeyPressMsg) {
+		res, _ := m.handlePromptKey(msg)
+		m = res.(model)
+		_ = m.dockBody(6) // force a render that touches the shared viewport
+	}
+	for _, r := range "one" {
+		feed(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	feed(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	for _, r := range "two" {
+		feed(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if out := m.dockBody(6); !strings.Contains(out, "one") || !strings.Contains(out, "two") {
+		t.Fatalf("composer dropped a line across renders: %q", out)
 	}
 }
 
@@ -170,8 +208,25 @@ func TestPromptIdlePasteAppendsMultiline(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	res, _ := m.Update(tea.PasteMsg{Content: "x\ny"})
 	m = res.(model)
-	if m.prompt.reasonText != "x\ny" {
-		t.Fatalf("after paste reasonText=%q want %q", m.prompt.reasonText, "x\ny")
+	if m.prompt.reply.Value() != "x\ny" {
+		t.Fatalf("after paste reply=%q want %q", m.prompt.reply.Value(), "x\ny")
+	}
+}
+
+func TestDenyReasonPaste(t *testing.T) {
+	ix := &session.Interaction{
+		Kind: session.InteractionPermission, ToolName: "Bash",
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true},
+		},
+	}
+	m := promptModel(ix)
+	m.prompt.decisionSel = 1 // Deny (reject) → reason field active
+	res, _ := m.Update(tea.PasteMsg{Content: "because"})
+	m = res.(model)
+	if m.prompt.reason.Value() != "because" {
+		t.Fatalf("paste into deny reason = %q, want because", m.prompt.reason.Value())
 	}
 }
 
@@ -180,8 +235,8 @@ func TestPromptPasteIgnoredWhenComposerInactive(t *testing.T) {
 	m.focus = focusHistory // dock not focused → composer inactive
 	res, _ := m.Update(tea.PasteMsg{Content: "x\ny"})
 	m = res.(model)
-	if m.prompt.reasonText != "" {
-		t.Fatalf("paste leaked into inactive composer: %q", m.prompt.reasonText)
+	if m.prompt.reply.Value() != "" {
+		t.Fatalf("paste leaked into inactive composer: %q", m.prompt.reply.Value())
 	}
 }
 
@@ -511,31 +566,31 @@ func TestSyncPromptDraftResetsOnChange(t *testing.T) {
 	m := promptModel(a)
 	m.prompt.key = interactionKey(a)
 	m.prompt.decisionSel = 1
-	m.prompt.reasonText = "use rg"
+	m.prompt.reason.SetValue("use rg")
 
 	// Same interaction re-published → draft preserved.
 	m.syncPromptDraft()
-	if m.prompt.reasonText != "use rg" {
-		t.Errorf("same-interaction sync should preserve draft, got %q", m.prompt.reasonText)
+	if m.prompt.reason.Value() != "use rg" {
+		t.Errorf("same-interaction sync should preserve draft, got %q", m.prompt.reason.Value())
 	}
 
 	// A different prompt → draft reset and key updated.
 	b := &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash", ToolInput: `{"command":"rm x"}`}
 	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusAwaitingInput, Interaction: b}
 	m.syncPromptDraft()
-	if m.prompt.reasonText != "" || m.prompt.decisionSel != 0 {
-		t.Errorf("changed prompt should reset draft: reason=%q sel=%d", m.prompt.reasonText, m.prompt.decisionSel)
+	if m.prompt.reason.Value() != "" || m.prompt.decisionSel != 0 {
+		t.Errorf("changed prompt should reset draft: reason=%q sel=%d", m.prompt.reason.Value(), m.prompt.decisionSel)
 	}
 	if m.prompt.key != interactionKey(b) {
 		t.Error("promptKey should track the new interaction")
 	}
 
 	// Dismissal (interaction → nil) also resets.
-	m.prompt.reasonText = "typing"
+	m.prompt.reason.SetValue("typing")
 	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusWorking, Interaction: nil}
 	m.syncPromptDraft()
-	if m.prompt.reasonText != "" || m.prompt.key != "" {
-		t.Errorf("dismissal should reset draft: reason=%q key=%q", m.prompt.reasonText, m.prompt.key)
+	if m.prompt.reason.Value() != "" || m.prompt.key != "" {
+		t.Errorf("dismissal should reset draft: reason=%q key=%q", m.prompt.reason.Value(), m.prompt.key)
 	}
 }
 
@@ -548,12 +603,12 @@ func TestSubmitDecisionClearsDraft(t *testing.T) {
 		},
 	})
 	m.prompt.decisionSel = 1 // Deny
-	m.prompt.reasonText = "use rg instead"
+	m.prompt.reason.SetValue("use rg instead")
 
 	res, _ := m.submitDecision(m.sessions["s1"].Interaction)
 	m = res.(model)
-	if m.prompt.reasonText != "" {
-		t.Errorf("deny reason should be cleared after submit, got %q", m.prompt.reasonText)
+	if m.prompt.reason.Value() != "" {
+		t.Errorf("deny reason should be cleared after submit, got %q", m.prompt.reason.Value())
 	}
 	if m.prompt.decisionSel != 0 {
 		t.Errorf("decisionSel should reset to 0, got %d", m.prompt.decisionSel)
