@@ -53,6 +53,21 @@ func TestFormatDecisionChat(t *testing.T) {
 	}
 }
 
+func TestFormatDecisionCancel(t *testing.T) {
+	toolName := "AskUserQuestion"
+	toolInput := json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"}]}]}`)
+	out := FormatDecision(toolName, toolInput, api.RespondParams{QuestionAction: "cancel"})
+	if !strings.Contains(out, `"behavior":"deny"`) {
+		t.Errorf("cancel: want deny in %s", out)
+	}
+	if !strings.Contains(out, `"interrupt":true`) {
+		t.Errorf("cancel: want interrupt in %s", out)
+	}
+	if strings.Contains(out, "updatedInput") {
+		t.Errorf("cancel: should not inject updatedInput in %s", out)
+	}
+}
+
 func TestFormatDecision(t *testing.T) {
 	out := FormatDecision("Bash", nil, api.RespondParams{Behavior: "deny", Reason: "use rg instead"})
 	if !strings.Contains(out, `"behavior":"deny"`) || !strings.Contains(out, "use rg instead") {
