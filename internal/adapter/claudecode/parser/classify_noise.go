@@ -60,8 +60,8 @@ func hasUserContent(raw json.RawMessage, strContent string) bool {
 }
 
 // isUserNoise reports whether a user-type entry is droppable noise:
-// hard-noise-tag wrapping, empty command output, or interruption messages.
-func isUserNoise(raw json.RawMessage, contentStr string) bool {
+// hard-noise-tag wrapping or empty command output.
+func isUserNoise(contentStr string) bool {
 	trimmed := strings.TrimSpace(contentStr)
 
 	for _, tag := range hardNoiseTags {
@@ -76,8 +76,14 @@ func isUserNoise(raw json.RawMessage, contentStr string) bool {
 		return true
 	}
 
-	// Interruption messages (string content or array with single text block).
-	if strings.HasPrefix(trimmed, "[Request interrupted by user") {
+	return false
+}
+
+// isInterruptMarker reports whether a user entry is the interruption marker
+// Claude Code writes when the user interrupts a turn: string content or an array
+// with a single text block. trimmed is the space-trimmed string content.
+func isInterruptMarker(raw json.RawMessage, trimmed string) bool {
+	if strings.HasPrefix(trimmed, interruptedMarkerPrefix) {
 		return true
 	}
 	return isArrayInterruption(raw)
@@ -98,13 +104,17 @@ func extractToolSearchMatches(raw json.RawMessage) []string {
 	return result.Matches
 }
 
-// isArrayInterruption reports whether content is a single "[Request interrupted by user" text block.
+// interruptedMarkerPrefix is the text Claude Code writes when the user interrupts
+// a turn. It appears as string content or a single text block.
+const interruptedMarkerPrefix = "[Request interrupted by user"
+
+// isArrayInterruption reports whether content is a single interruption-marker text block.
 func isArrayInterruption(raw json.RawMessage) bool {
 	var blocks []textBlockJSON
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return false
 	}
-	if len(blocks) == 1 && blocks[0].Type == "text" && strings.HasPrefix(blocks[0].Text, "[Request interrupted by user") {
+	if len(blocks) == 1 && blocks[0].Type == "text" && strings.HasPrefix(blocks[0].Text, interruptedMarkerPrefix) {
 		return true
 	}
 	return false

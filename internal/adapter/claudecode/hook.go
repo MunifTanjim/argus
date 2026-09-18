@@ -75,11 +75,12 @@ func interactionFor(event string, p hookPayload, autoMode bool) *session.Interac
 }
 
 // replacesInteraction reports whether an event's interaction overwrites any prior
-// one outright rather than deferring to mergeInteraction. Stop ends the turn, so
-// its idle prompt supersedes a stale permission/question/plan the user may have
-// already resolved in their own terminal.
-func replacesInteraction(event string) bool {
-	return event == "Stop"
+// one outright rather than deferring to mergeInteraction. Stop and an idle_prompt
+// Notification both mean the turn ended and Claude returned to the user, so the
+// idle prompt supersedes a stale permission/question/plan. idle_prompt is the only
+// such signal after an interrupt, which fires no Stop hook.
+func replacesInteraction(event string, p hookPayload) bool {
+	return event == "Stop" || (event == "Notification" && p.NotificationType == "idle_prompt")
 }
 
 // permissionInteraction builds the interaction for a PermissionRequest from its
@@ -233,7 +234,7 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	if ix != nil {
 		status = session.StatusAwaitingInput
 	}
-	replace := replacesInteraction(event)
+	replace := replacesInteraction(event, p)
 
 	// /clear resets in place: SessionEnd(reason=clear) then SessionStart(source=
 	// clear). Map each to its true meaning instead of removing the session. End →

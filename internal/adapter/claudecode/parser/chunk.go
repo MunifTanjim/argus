@@ -99,6 +99,7 @@ type Chunk struct {
 	Usage         Usage
 	StopReason    string
 	DurationMs    int64 // first to last message timestamp in chunk
+	Interrupted   bool  // the turn ended here by a user interrupt (fires no Stop hook)
 
 	// System chunk fields.
 	Output      string

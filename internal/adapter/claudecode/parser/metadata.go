@@ -158,7 +158,7 @@ func scanSessionMetadata(path string) sessionMetadata {
 			continue
 		}
 
-		if IsCommandOutput(text) || strings.HasPrefix(text, "[Request interrupted by user") {
+		if IsCommandOutput(text) || strings.HasPrefix(text, interruptedMarkerPrefix) {
 			continue
 		}
 

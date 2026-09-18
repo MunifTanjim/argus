@@ -310,6 +310,33 @@ func applyStatusHint(s *session.Session, hint session.Status) {
 	}
 }
 
+// SurfaceIdle surfaces the idle composer on a session after an interrupted turn.
+// expectKind is a compare-and-swap against the interaction kind the caller
+// observed: "" expects no pending prompt (a turn cleared to working by an
+// interrupt), a prompt kind expects that stale prompt. If the current interaction
+// no longer matches (a hook set a fresh prompt, or it already went idle), the swap
+// is skipped so a genuine pending prompt is never clobbered. Status is Idle, not
+// AwaitingInput, so no push fires. Returns whether anything changed.
+func (r *Registry) SurfaceIdle(id string, expectKind session.InteractionKind) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sessions[id]
+	if !ok || s.Status == session.StatusDead {
+		return false
+	}
+	cur := session.InteractionKind("")
+	if s.Interaction != nil {
+		cur = s.Interaction.Kind
+	}
+	if cur == session.InteractionIdle || cur != expectKind {
+		return false // already idle, or state changed since the caller observed it
+	}
+	s.Status = session.StatusIdle
+	s.Interaction = &session.Interaction{Kind: session.InteractionIdle}
+	r.publish(Event{Type: EventUpdated, Session: *s})
+	return true
+}
+
 // Caller holds r.mu.
 func (r *Registry) markEnded(key string) {
 	if key != "" {

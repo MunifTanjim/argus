@@ -253,3 +253,51 @@ drained:
 		// expected: poller is gone
 	}
 }
+
+func TestSurfaceIdleAfterInterrupt(t *testing.T) {
+	d := newNode(nil)
+	reg := d.Registry()
+	reg.ApplyHook(registry.HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{{Question: "Pick"}}},
+	})
+	id := reg.Snapshot()[0].ID
+
+	// An interrupted turn surfaces the idle composer.
+	d.surfaceIdleAfterInterrupt(id)
+	if got, _ := reg.Get(id); got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("interrupt should surface the idle composer, got %+v", got.Interaction)
+	}
+
+	// Idempotent once idle: a further interrupt signal is a no-op.
+	d.surfaceIdleAfterInterrupt(id)
+	if got, _ := reg.Get(id); got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("idle composer must remain, got %+v", got.Interaction)
+	}
+}
+
+// A native terminal interrupt clears the parked prompt to working (interaction
+// nil). The poll must still surface the idle composer once the transcript shows
+// the interrupt.
+func TestSurfaceIdleAfterInterruptClearedToWorking(t *testing.T) {
+	d := newNode(nil)
+	reg := d.Registry()
+	reg.ApplyHook(registry.HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusWorking,
+	})
+	id := reg.Snapshot()[0].ID
+	if got, _ := reg.Get(id); got.Interaction != nil {
+		t.Fatalf("precondition: want nil interaction, got %+v", got.Interaction)
+	}
+
+	d.surfaceIdleAfterInterrupt(id)
+	got, _ := reg.Get(id)
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("interrupt should surface the idle composer from working, got %+v", got.Interaction)
+	}
+	if got.Status != session.StatusIdle {
+		t.Errorf("status: got %q want idle", got.Status)
+	}
+}

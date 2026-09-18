@@ -218,16 +218,6 @@ func TestClassify_HardNoise(t *testing.T) {
 			typ:     "user",
 			content: json.RawMessage(`"<local-command-stderr></local-command-stderr>"`),
 		},
-		{
-			name:    "interruption string",
-			typ:     "user",
-			content: json.RawMessage(`"[Request interrupted by user at 2025-01-15T10:00:00Z]"`),
-		},
-		{
-			name:    "interruption array",
-			typ:     "user",
-			content: json.RawMessage(`[{"type":"text","text":"[Request interrupted by user at 2025-01-15T10:00:00Z]"}]`),
-		},
 	}
 
 	for _, tt := range tests {
@@ -238,6 +228,23 @@ func TestClassify_HardNoise(t *testing.T) {
 				t.Errorf("expected noise entry %q to be filtered out", tt.name)
 			}
 		})
+	}
+}
+
+func TestClassify_InterruptMarker(t *testing.T) {
+	for _, content := range []json.RawMessage{
+		json.RawMessage(`"[Request interrupted by user at 2025-01-15T10:00:00Z]"`),
+		json.RawMessage(`[{"type":"text","text":"[Request interrupted by user at 2025-01-15T10:00:00Z]"}]`),
+	} {
+		e := makeEntry("user", "int", "2025-01-15T10:00:00Z", content)
+		msg, ok := parser.Classify(e)
+		if !ok {
+			t.Fatalf("interrupt marker should classify, content=%s", content)
+		}
+		ai, isAI := msg.(parser.AIMsg)
+		if !isAI || !ai.IsMeta || !ai.Interrupted {
+			t.Errorf("want interrupted meta AIMsg, got %+v", msg)
+		}
 	}
 }
 

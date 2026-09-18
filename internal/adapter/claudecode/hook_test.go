@@ -77,6 +77,39 @@ func TestProcessHookDrivesStatus(t *testing.T) {
 	}
 }
 
+func TestIdlePromptReplacesStaleInteraction(t *testing.T) {
+	reg := registry.New()
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
+	ev := func(event string, extra map[string]any) HookEvent {
+		m := map[string]any{"session_id": "s", "transcript_path": "/t/s.jsonl", "cwd": "/w"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		raw, _ := json.Marshal(m)
+		return HookEvent{Event: event, TmuxPane: "%0", TmuxSocket: "default", Payload: raw}
+	}
+	q := map[string]any{"tool_name": "AskUserQuestion", "tool_input": json.RawMessage(`{"questions":[{"question":"Pick","options":[{"label":"A"},{"label":"B"}]}]}`)}
+
+	got, _ := ProcessHook(reg, ev("PreToolUse", q))
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionQuestion {
+		t.Fatalf("want pending question, got %+v", got.Interaction)
+	}
+	// idle_prompt (Claude returned to the user after an interrupt) replaces the stale question.
+	got, _ = ProcessHook(reg, ev("Notification", map[string]any{"notification_type": "idle_prompt"}))
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("idle_prompt should replace with idle composer, got %+v", got.Interaction)
+	}
+
+	// permission_prompt must NOT clobber a genuinely pending question.
+	_, _ = ProcessHook(reg, ev("PreToolUse", q))
+	got, _ = ProcessHook(reg, ev("Notification", map[string]any{"notification_type": "permission_prompt"}))
+	if got.Interaction == nil || got.Interaction.Kind != session.InteractionQuestion {
+		t.Fatalf("permission_prompt must not replace the question, got %+v", got.Interaction)
+	}
+}
+
 func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 	reg := registry.New()
 	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{

@@ -32,9 +32,9 @@ func liveStatusFromChunks(pchunks []parser.Chunk) session.Status {
 // classifyLiveStatus reads a transcript and classifies its live status. Returns
 // "" when the path is empty or unreadable (caller keeps the discovered status).
 // Staleness is not death here: the pane exists, so an old transcript means
-// long-idle. A freshness guard corrects an IsOngoing blind spot — an interrupted
-// turn looks ongoing, so an ongoing verdict on a long-stale transcript with
-// nothing pending is reclassified idle.
+// long-idle. IsOngoing reads an interrupted turn as idle from the fold, so the
+// only remaining guard is a freshness fallback for an aborted turn that left no
+// interrupt marker.
 func classifyLiveStatus(path string) session.Status {
 	if path == "" {
 		return ""
@@ -44,7 +44,10 @@ func classifyLiveStatus(path string) session.Status {
 		return ""
 	}
 	st := liveStatusFromChunks(pchunks)
-	if st == session.StatusWorking && !hasPendingWork(pchunks) {
+	if st != session.StatusWorking {
+		return st
+	}
+	if !hasPendingWork(pchunks) {
 		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > liveWorkingTimeout {
 			return session.StatusIdle
 		}

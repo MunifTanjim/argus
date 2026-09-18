@@ -112,6 +112,9 @@ func foldChunks(pchunks []parser.Chunk, agentRefs map[string]string, traces map[
 	for i, pc := range pchunks {
 		out = append(out, foldChunk(pc, agentRefs, traces, i))
 	}
+	if len(out) > 0 && parser.LastTurnInterrupted(pchunks) {
+		out[len(out)-1].Interrupted = true
+	}
 	return out
 }
 
