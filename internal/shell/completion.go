@@ -58,6 +58,12 @@ func IsCompletionEnabled(shellName string) (bool, error) {
 			return false, err
 		}
 		return cmd.StdOut().TrimSpace() == "compdef: function", nil
+	case "bash":
+		cmd := NewCommand(os.Getenv("SHELL"), "-lic", "echo ${BASH_COMPLETION_VERSINFO+enabled}")
+		if err := cmd.Run(); err != nil {
+			return false, err
+		}
+		return cmd.StdOut().TrimSpace() == "enabled", nil
 	default:
 		return false, nil
 	}

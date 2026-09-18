@@ -21,7 +21,7 @@ func ExecutablePath(cmd string) string {
 func DetectShell() string {
 	shell := filepath.Base(os.Getenv("SHELL"))
 	switch shell {
-	case "zsh":
+	case "zsh", "bash":
 		return shell
 	default:
 		return ""
