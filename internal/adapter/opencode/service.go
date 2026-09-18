@@ -118,6 +118,9 @@ type ocToolContent struct {
 	Text string `json:"text"`
 }
 
+var restHTTPClient = &http.Client{Timeout: 10 * time.Second}
+var sseHTTPClient = &http.Client{}
+
 type client struct {
 	base string
 	pass string
@@ -128,7 +131,7 @@ func newClient(info serviceInfo) *client {
 	return &client{
 		base: strings.TrimRight(info.URL, "/"),
 		pass: info.Password,
-		hc:   &http.Client{Timeout: 10 * time.Second},
+		hc:   restHTTPClient,
 	}
 }
 
@@ -230,7 +233,7 @@ func (c *client) openEvents(ctx context.Context) (io.ReadCloser, error) {
 	}
 	req.SetBasicAuth("opencode", c.pass)
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := (&http.Client{}).Do(req)
+	resp, err := sseHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

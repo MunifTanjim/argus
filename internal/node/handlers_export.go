@@ -34,13 +34,10 @@ func (d *Node) handleExportBundle(ctx context.Context, params json.RawMessage) (
 	if len(files) == 0 {
 		return nil, fmt.Errorf("exportBundle: no files collected for %s", p.TranscriptPath)
 	}
-	// Adapters may stage transient sources under the OS temp dir; remove those
-	// once bundled. Real on-disk session files live elsewhere and are untouched.
 	defer func() {
-		tmp := os.TempDir()
 		for _, f := range files {
-			if strings.HasPrefix(f.AbsPath, tmp) {
-				os.Remove(f.AbsPath)
+			if f.Transient {
+				_ = os.Remove(f.AbsPath)
 			}
 		}
 	}()

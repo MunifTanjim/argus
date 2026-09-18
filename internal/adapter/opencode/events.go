@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -27,9 +26,6 @@ type idleReader struct {
 	rc      io.ReadCloser
 	timeout time.Duration
 	timer   *time.Timer
-
-	mu     sync.Mutex
-	closed bool
 }
 
 func newIdleReader(rc io.ReadCloser, timeout time.Duration) *idleReader {
@@ -39,9 +35,6 @@ func newIdleReader(rc io.ReadCloser, timeout time.Duration) *idleReader {
 }
 
 func (ir *idleReader) onIdle() {
-	ir.mu.Lock()
-	ir.closed = true
-	ir.mu.Unlock()
 	_ = ir.rc.Close()
 }
 

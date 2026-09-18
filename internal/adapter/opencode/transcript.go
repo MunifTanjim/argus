@@ -54,7 +54,6 @@ func readSubagentView(_, agentID string) (transcript.TranscriptView, bool, error
 
 type streamingTranscript struct {
 	sessionID string
-	count     int
 	chunks    []transcript.Chunk
 }
 
@@ -67,10 +66,9 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 	if err != nil {
 		return s.chunks, nil // transient; keep last good
 	}
-	if len(view.Chunks) == s.count {
+	if len(view.Chunks) == len(s.chunks) {
 		return s.chunks, nil
 	}
-	s.count = len(view.Chunks)
 	s.chunks = view.Chunks
 	return s.chunks, nil
 }

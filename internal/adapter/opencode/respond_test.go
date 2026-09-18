@@ -30,9 +30,9 @@ func TestRespondPostsPermission(t *testing.T) {
 	d := &discoverer{reg: reg, pendPerm: map[string]string{"ses_1": "perm_9"}}
 	c := newClient(serviceInfo{URL: srv.URL})
 	d.dial = func() (*client, bool) { return c, true }
-	activeDiscoverer = d
+	a := &ocAdapter{disc: d}
 
-	err := ocAdapter{}.Respond(context.Background(), session.Session{AgentSessionID: "ses_1"}, api.RespondParams{Behavior: "deny", Reason: "no"})
+	err := a.Respond(context.Background(), session.Session{AgentSessionID: "ses_1"}, api.RespondParams{Behavior: "deny", Reason: "no"})
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}

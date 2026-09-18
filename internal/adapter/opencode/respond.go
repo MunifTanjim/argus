@@ -8,8 +8,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-var activeDiscoverer *discoverer
-
 func mapResponse(p api.RespondParams) string {
 	if p.Behavior == "deny" || p.OptionValue == "deny" {
 		return "reject"
@@ -17,11 +15,7 @@ func mapResponse(p api.RespondParams) string {
 	return "once"
 }
 
-func respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
-	d := activeDiscoverer
-	if d == nil {
-		return fmt.Errorf("opencode: no active discoverer")
-	}
+func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
 	d.mu.Lock()
 	requestID := d.pendPerm[sess.AgentSessionID]
 	d.mu.Unlock()

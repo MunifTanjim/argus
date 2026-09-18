@@ -39,5 +39,5 @@ func collectSessionFiles(sessionID string) ([]adapter.BundledFile, error) {
 		os.Remove(f.Name())
 		return nil, err
 	}
-	return []adapter.BundledFile{{AbsPath: f.Name(), RelPath: adapter.BundleRoot + "/transcript.json"}}, nil
+	return []adapter.BundledFile{{AbsPath: f.Name(), RelPath: adapter.BundleRoot + "/transcript.json", Transient: true}}, nil
 }

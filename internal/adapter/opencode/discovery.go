@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -30,7 +29,7 @@ type discoverer struct {
 	pendPerm map[string]string // sessionID -> permissionID (set by SSE, read by Respond)
 }
 
-func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
+func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) *discoverer {
 	d := &discoverer{reg: reg, ctx: context.Background(), pendPerm: map[string]string{}}
 	for server, c := range clients {
 		d.servers = append(d.servers, serverClient{server: server, client: c})
@@ -42,7 +41,6 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 		}
 		return newClient(info), true
 	}
-	activeDiscoverer = d
 	return d
 }
 

@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -12,19 +13,22 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-type ocAdapter struct{}
+type ocAdapter struct {
+	disc *discoverer
+}
 
-func New() adapter.Adapter { return ocAdapter{} }
+func New() adapter.Adapter { return &ocAdapter{} }
 
-var _ adapter.Adapter = ocAdapter{}
-var _ adapter.Responder = ocAdapter{}
+var _ adapter.Adapter = (*ocAdapter)(nil)
+var _ adapter.Responder = (*ocAdapter)(nil)
 
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
 func (ocAdapter) AgentColor() string { return "#d3869b" }
 
-func (ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
-	return newDiscoverer(reg, clients)
+func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
+	a.disc = newDiscoverer(reg, clients)
+	return a.disc
 }
 
 func (ocAdapter) SpawnCommand(prompt string) (string, []string) {
@@ -89,8 +93,11 @@ func (ocAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return prepareTextInput(ctx, pc, paneID)
 }
 
-func (ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
-	return respond(ctx, sess, p)
+func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
+	if a.disc == nil {
+		return fmt.Errorf("opencode: no active discoverer")
+	}
+	return a.disc.respond(ctx, sess, p)
 }
 
 // OpenCode needs no argus-managed config.

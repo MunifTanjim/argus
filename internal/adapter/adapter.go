@@ -20,8 +20,9 @@ const BundleRoot = "root"
 
 // BundledFile pairs a source file on disk with its path inside an export bundle.
 type BundledFile struct {
-	AbsPath string // source path on disk
-	RelPath string // path within the bundle (slash-separated, rooted at BundleRoot)
+	AbsPath   string // source path on disk
+	RelPath   string // path within the bundle (slash-separated, rooted at BundleRoot)
+	Transient bool   // the export handler should remove this file after bundling
 }
 
 // RootedFile pairs p with its path inside an export bundle, rooted under
