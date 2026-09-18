@@ -1,12 +1,20 @@
 // app/test/state/control_test.dart
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/transport/jsonrpc.dart';
 import 'package:argus/transport/rpc_client.dart';
 import 'package:argus/state/control.dart';
+
+class _StubService extends SessionService {
+  _StubService(this.onInfo) : super(() => null);
+  final ServerInfo Function() onInfo;
+  @override
+  Future<Result<ServerInfo>> serverInfo() async => Result.ok(onInfo());
+}
 
 void main() {
   test('respond calls sessions.respond with params', () async {
@@ -192,6 +200,29 @@ void main() {
 
   test('null client: nodes returns Error', () async {
     expect(await SessionService(() => null).nodes(), isA<Error>());
+  });
+
+  test('serverInfoProvider refetches when the roster revision bumps', () async {
+    var calls = 0;
+    final container = ProviderContainer(overrides: [
+      sessionServiceProvider.overrideWithValue(
+        _StubService(() {
+          calls++;
+          return const ServerInfo(version: '1', nodes: []);
+        }),
+      ),
+    ]);
+    addTearDown(container.dispose);
+    final sub = container.listen(serverInfoProvider, (_, __) {});
+    addTearDown(sub.close);
+
+    await container.read(serverInfoProvider.future);
+    expect(calls, 1);
+
+    container.read(rosterRevisionProvider.notifier).state++;
+    await Future<void>.delayed(Duration.zero);
+    await container.read(serverInfoProvider.future);
+    expect(calls, 2, reason: 'a roster change must trigger a server.info refetch');
   });
 
   test('kill emits sessions.kill with session_id', () async {

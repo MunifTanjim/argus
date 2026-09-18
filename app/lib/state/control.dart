@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import '../core/result.dart';
 import '../transport/gateway_client.dart';
@@ -157,11 +158,16 @@ final sessionServiceProvider = Provider<SessionService>(
   (ref) => SessionService(() => ref.read(gatewayProvider)?.client),
 );
 
-/// One-shot read of server metadata (version + nodes) for the settings screen.
-/// Refetches when the connection state changes; resolves to null when the call
-/// fails (e.g. not connected).
+/// Bumped on every gateway roster change (node.event), so [serverInfoProvider]
+/// refetches when a node joins or leaves after connect instead of waiting for a
+/// reconnect.
+final rosterRevisionProvider = StateProvider<int>((ref) => 0);
+
+/// Read of server metadata (version + nodes) for the settings screen. Resolves
+/// to null when the call fails (e.g. not connected).
 final serverInfoProvider = FutureProvider.autoDispose<ServerInfo?>((ref) async {
   ref.watch(connStateProvider); // refetch on (re)connect
+  ref.watch(rosterRevisionProvider); // refetch on roster change (node.event)
   final result = await ref.read(sessionServiceProvider).serverInfo();
   return switch (result) {
     Ok(:final value) => value,

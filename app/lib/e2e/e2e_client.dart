@@ -830,7 +830,12 @@ class E2EClient implements GatewayClient {
       unawaited(_adoptNode(desc));
     } else if (evType == 'offline' || evType == 'removed') {
       _loseNode(desc.id);
+    } else {
+      return;
     }
+    // Surface the roster change to the app so views bound to the node list (e.g.
+    // the settings screen) refresh without waiting for a reconnect.
+    _notificationsCtrl?.add(msg);
   }
 
   /// Re-reads each connected node's trust-log tip over its authenticated Noise
