@@ -181,6 +181,9 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		if p.SessionID == "" || p.ID == "" {
 			return
 		}
+		if _, ok := d.argusIDFor(p.SessionID); !ok {
+			return
+		}
 		d.mu.Lock()
 		d.pendPerm[p.SessionID] = p.ID
 		d.mu.Unlock()
@@ -215,11 +218,13 @@ func (d *discoverer) setStatus(agentSessionID string, st session.Status, in *ses
 	if agentSessionID == "" {
 		return
 	}
+	if _, ok := d.argusIDFor(agentSessionID); !ok {
+		return
+	}
 	u := registry.HookUpdate{
 		Agent:          Agent,
 		AgentSessionID: agentSessionID,
 		Status:         st,
-		Frontend:       session.FrontendExternal,
 	}
 	if in != nil {
 		u.Interaction = in

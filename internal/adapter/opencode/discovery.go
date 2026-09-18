@@ -20,7 +20,8 @@ type discoverer struct {
 	reg     *registry.Registry
 	servers []serverClient
 
-	dial func() (*client, bool)
+	dial  func() (*client, bool)
+	panes func(context.Context) map[string]paneInfo
 
 	pumpOnce sync.Once
 	ctx      context.Context
@@ -41,6 +42,7 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 		}
 		return newClient(info), true
 	}
+	d.panes = d.panesByPath
 	return d
 }
 
@@ -55,29 +57,29 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		return err
 	}
 
-	paneByPath := d.panesByPath(ctx)
+	paneByPath := d.panes(ctx)
 
 	found := make([]registry.DiscoveredSession, 0, len(sessions))
 	for _, s := range sessions {
 		dir := s.Location.Directory
-		ds := registry.DiscoveredSession{
+		pi, ok := paneByPath[dir]
+		if !ok {
+			continue
+		}
+		found = append(found, registry.DiscoveredSession{
 			AgentSessionID: s.ID,
 			Cwd:            dir,
 			Repo:           repoName(dir),
 			TranscriptPath: s.ID,
 			Name:           s.Title,
-			Frontend:       session.FrontendExternal,
-		}
-		if pi, ok := paneByPath[dir]; ok {
-			ds.HasPane = true
-			ds.Server = pi.server
-			ds.PaneID = pi.paneID
-			ds.SessionName = pi.sessionName
-			ds.WindowIndex = pi.windowIndex
-			ds.CurrentPath = pi.currentPath
-			ds.Frontend = session.FrontendTmux
-		}
-		found = append(found, ds)
+			Frontend:       session.FrontendTmux,
+			HasPane:        true,
+			Server:         pi.server,
+			PaneID:         pi.paneID,
+			SessionName:    pi.sessionName,
+			WindowIndex:    pi.windowIndex,
+			CurrentPath:    pi.currentPath,
+		})
 	}
 	d.reg.ReconcileSessions(Agent, found)
 

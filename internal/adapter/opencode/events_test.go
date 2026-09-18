@@ -112,6 +112,30 @@ func TestSessionStatusBusySetsWorking(t *testing.T) {
 	}
 }
 
+func TestApplyEventUnknownSessionIgnored(t *testing.T) {
+	reg := registry.New()
+	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+
+	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"unknown_ses"}`)})
+	if got := len(reg.Snapshot()); got != 0 {
+		t.Fatalf("unknown session created %d registry entry(ies), want 0", got)
+	}
+
+	d.applyEvent(sseFrame{
+		Type: "permission.updated",
+		Data: []byte(`{"id":"req_1","sessionID":"unknown_ses","action":"bash","resources":[]}`),
+	})
+	if got := len(reg.Snapshot()); got != 0 {
+		t.Fatalf("unknown permission created %d registry entry(ies), want 0", got)
+	}
+	d.mu.Lock()
+	_, hasPerm := d.pendPerm["unknown_ses"]
+	d.mu.Unlock()
+	if hasPerm {
+		t.Fatal("pendPerm populated for unknown session")
+	}
+}
+
 func TestIdleReaderTripsOnStall(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pw.Close()

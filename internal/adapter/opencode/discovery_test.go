@@ -24,6 +24,17 @@ func TestScanOnceReconcilesSessions(t *testing.T) {
 	d := &discoverer{reg: reg}
 	c := newClient(serviceInfo{URL: srv.URL})
 	d.dial = func() (*client, bool) { return c, true }
+	d.panes = func(context.Context) map[string]paneInfo {
+		return map[string]paneInfo{
+			"/repo/foo": {
+				server:      session.TmuxServerDefault,
+				paneID:      "pane_1",
+				sessionName: "main",
+				windowIndex: 0,
+				currentPath: "/repo/foo",
+			},
+		}
+	}
 
 	if err := d.ScanOnce(context.Background()); err != nil {
 		t.Fatalf("ScanOnce: %v", err)
@@ -39,8 +50,37 @@ func TestScanOnceReconcilesSessions(t *testing.T) {
 	if s.Cwd != "/repo/foo" || s.TranscriptPath != "ses_1" {
 		t.Fatalf("cwd/transcriptPath: %q %q", s.Cwd, s.TranscriptPath)
 	}
-	if s.Frontend != session.FrontendExternal {
-		t.Fatalf("frontend = %q", s.Frontend)
+	if s.Frontend != session.FrontendTmux {
+		t.Fatalf("frontend = %q, want FrontendTmux", s.Frontend)
+	}
+	if s.Tmux.PaneID != "pane_1" {
+		t.Fatalf("Tmux.PaneID = %q, want pane_1", s.Tmux.PaneID)
+	}
+}
+
+func TestScanOnceSkipsSessionsWithoutPane(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"ses_1","projectID":"proj","agent":"build","title":"t","time":{"created":1,"updated":2},"location":{"directory":"/repo/foo"}}],"cursor":{"previous":"","next":""}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	reg := registry.New()
+	d := &discoverer{reg: reg}
+	c := newClient(serviceInfo{URL: srv.URL})
+	d.dial = func() (*client, bool) { return c, true }
+	d.panes = func(context.Context) map[string]paneInfo {
+		return map[string]paneInfo{}
+	}
+
+	if err := d.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+	if got := len(reg.Snapshot()); got != 0 {
+		t.Fatalf("want 0 sessions (no pane), got %d", got)
 	}
 }
 
