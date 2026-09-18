@@ -6,4 +6,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 )
 
-func prepareTextInput(_ context.Context, _ adapter.PaneController, _ string) error { return nil }
+func prepareTextInput(ctx context.Context, pc adapter.PaneController, paneID string) error {
+	inMode, err := pc.PaneInMode(ctx, paneID)
+	if err != nil {
+		return err
+	}
+	if inMode {
+		return pc.CancelMode(ctx, paneID)
+	}
+	return nil
+}
