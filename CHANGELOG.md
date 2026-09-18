@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.0.15](https://github.com/MunifTanjim/argus/compare/0.0.14...0.0.15) (2026-09-18)
+
+
+### Features
+
+* **claude:** mark session idle when user interrupts the turn ([7bbef33](https://github.com/MunifTanjim/argus/commit/7bbef339e230e22d81c741fdf87a0494e7317573))
+* **cli:** support shell completion install for bash ([729bd1b](https://github.com/MunifTanjim/argus/commit/729bd1bc9bbdf1f93c8fb5623706808877b6a4de))
+* interrupt the turn when an AskUserQuestion is cancelled ([16d4fdf](https://github.com/MunifTanjim/argus/commit/16d4fdfe4bfda857eefd4021cec16fdc37bdc97f))
+* **tui:** use charmbracelet textarea for the spawn prompt field ([b74ff4a](https://github.com/MunifTanjim/argus/commit/b74ff4af7dca91bd749cbe44b8f6933c960ae97f))
+* **tui:** use charmbracelet textinput for the question custom answer ([61482c8](https://github.com/MunifTanjim/argus/commit/61482c8a81817447fbe3ab8aee26910a49feba17))
+* **tui:** use charmbracelet textinput for the redact secret field ([eb1c4fa](https://github.com/MunifTanjim/argus/commit/eb1c4fac0792268502808208b65a85f9b73f36e3))
+* **tui:** use charmbracelet textinput for the spawn path field ([ca3c209](https://github.com/MunifTanjim/argus/commit/ca3c209083b0666961daeb2c15a9affaac5a499e))
+* **tui:** use charmbracelet textinput/area for the deny reason and idle reply ([f3e2136](https://github.com/MunifTanjim/argus/commit/f3e21362485d8ac36c06e10fbc4640d0ef382eec))
+
+
+### Bug Fixes
+
+* **cli:** accept pasted text in the gateway fields ([21e5213](https://github.com/MunifTanjim/argus/commit/21e5213a3ada4307a111fb6ea7d0d8f4a6b32002))
+* **tui:** accept pasted text in the new session flow ([7c72e7f](https://github.com/MunifTanjim/argus/commit/7c72e7f27c7464ae895138c9bd07b3fca6887550))
+
 ## [0.0.14](https://github.com/MunifTanjim/argus/compare/0.0.13...0.0.14) (2026-09-15)
 
 
