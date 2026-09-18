@@ -7,6 +7,7 @@ import '../data/session_repository.dart';
 import '../models/chunk.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../state/respond_draft.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
@@ -37,9 +38,10 @@ class RespondSheet extends ConsumerStatefulWidget {
 
 class _RespondSheetState extends ConsumerState<RespondSheet> {
   late final RespondViewModel _vm;
-  bool _denying = false;
-  final _text = TextEditingController();
-  List<QuestionDraft>? _drafts;
+  // The draft outlives this sheet: the user must dismiss the modal to read the
+  // transcript behind it, and the reply typed so far has to survive that.
+  late final RespondDraft _draft;
+  late final TextEditingController _text;
 
   @override
   void initState() {
@@ -47,16 +49,17 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     _vm = RespondViewModel(ref.read(sessionRepositoryProvider));
     _vm.respond.addListener(_onCommand);
     _vm.sendInput.addListener(_onCommand);
+    _draft = ref.read(respondDraftProvider(widget.session.id));
+    // build tolerates a null interaction, so this must too.
+    final ix = widget.session.interaction;
+    if (ix != null) _draft.syncTo(ix);
+    _text = TextEditingController(text: _draft.text)..addListener(_saveText);
   }
+
+  void _saveText() => _draft.text = _text.text;
 
   void _onCommand() {
     if (mounted) setState(() {}); // reflect running state on the buttons
-  }
-
-  List<QuestionDraft> _ensureDrafts(int n) {
-    final d = _drafts;
-    if (d != null && d.length == n) return d;
-    return _drafts = List.generate(n, (_) => QuestionDraft());
   }
 
   @override
@@ -85,6 +88,10 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     if (!mounted) return;
     switch (cmd.result) {
       case Ok():
+        // Detach first: unfocusing on pop mutates the controller's selection,
+        // which would fire _saveText and write the text back after the clear.
+        _text.removeListener(_saveText);
+        _draft.clear(); // sent: the next open starts empty
         Navigator.of(context).pop();
       case Error(:final error):
         ScaffoldMessenger.of(
@@ -188,7 +195,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     Widget optionButton(DecisionOption o, bool primary) {
       void onTap() {
         if (o.reject) {
-          setState(() => _denying = true);
+          setState(() => _draft.denying = true);
         } else {
           _respond(optionRespond(sessionId: _sid, kind: kind, value: o.value));
         }
@@ -213,7 +220,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         ),
       ),
       const SizedBox(height: 16),
-      if (!_denying)
+      if (!_draft.denying)
         for (var i = 0; i < options.length; i++)
           optionButton(options[i], i == 0)
       else ...[
@@ -283,7 +290,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
 
   List<Widget> _questions(Interaction ix) {
     final qs = ix.questions;
-    final drafts = _ensureDrafts(qs.length);
+    final drafts = _draft.questions; // sized by syncTo from this same snapshot
     final canSubmit =
         questionRespond(sessionId: _sid, questions: qs, drafts: drafts) != null;
     return [
@@ -406,8 +413,11 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     final showCustom = q.multiSelect ? d.toggles.contains(oi) : d.chosen == oi;
     if (showCustom) {
       rows.add(
-        TextField(
+        // TextFormField seeds its own controller from initialValue, so the
+        // saved answer reappears when the sheet re-opens.
+        TextFormField(
           autofocus: true,
+          initialValue: d.custom,
           decoration: const InputDecoration(
             labelText: 'Your answer',
             border: OutlineInputBorder(),
