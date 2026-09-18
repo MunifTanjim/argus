@@ -14,9 +14,6 @@ func mapResponse(p api.RespondParams) string {
 	if p.Behavior == "deny" || p.OptionValue == "deny" {
 		return "reject"
 	}
-	if p.SetMode == "always" {
-		return "always"
-	}
 	return "once"
 }
 

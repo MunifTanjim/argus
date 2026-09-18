@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,15 @@ func readServiceInfo() (serviceInfo, bool) {
 }
 
 type ocEnvelope[T any] struct {
-	Data []T `json:"data"`
+	Data   []T      `json:"data"`
+	Cursor ocCursor `json:"cursor"`
+}
+
+// ocCursor is the opaque pagination cursor returned by list endpoints.
+// Fields are null when a page has no neighbor in that direction.
+type ocCursor struct {
+	Previous string `json:"previous"`
+	Next     string `json:"next"`
 }
 
 type ocSession struct {
@@ -129,34 +138,57 @@ func (c *client) do(ctx context.Context, method, path string, body io.Reader) (*
 	return c.hc.Do(req)
 }
 
-func listEnvelope[T any](ctx context.Context, c *client, path, label string) ([]T, error) {
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+// maxListPages bounds cursor pagination so a misbehaving server cannot loop
+// forever. It is far above any realistic session or transcript length.
+const maxListPages = 100
+
+// listEnvelope fetches every page of a cursor-paginated list endpoint.
+// initialQuery is applied to the first request only; subsequent pages use the
+// server-issued cursor, which the server rejects if combined with any other
+// query parameter (e.g. order). Pages accumulate in server order.
+func listEnvelope[T any](ctx context.Context, c *client, path, initialQuery, label string) ([]T, error) {
+	var all []T
+	query := initialQuery
+	for page := 0; page < maxListPages; page++ {
+		p := path
+		if query != "" {
+			p += "?" + query
+		}
+		resp, err := c.do(ctx, http.MethodGet, p, nil)
+		if err != nil {
+			return nil, err
+		}
+		var env ocEnvelope[T]
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("%s: %s", label, resp.Status)
+		}
+		err = json.NewDecoder(resp.Body).Decode(&env)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, env.Data...)
+		if env.Cursor.Next == "" || len(env.Data) == 0 {
+			break
+		}
+		query = "cursor=" + url.QueryEscape(env.Cursor.Next)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", label, resp.Status)
-	}
-	var env ocEnvelope[T]
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, err
-	}
-	return env.Data, nil
+	return all, nil
 }
 
 func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
-	return listEnvelope[ocSession](ctx, c, "/api/session", "list sessions")
+	return listEnvelope[ocSession](ctx, c, "/api/session", "", "list sessions")
 }
 
 func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessage, error) {
-	return listEnvelope[ocMessage](ctx, c, "/api/session/"+sessionID+"/message", "read messages")
+	return listEnvelope[ocMessage](ctx, c, "/api/session/"+sessionID+"/message", "order=asc", "read messages")
 }
 
 func (c *client) respondPermission(ctx context.Context, sessionID, requestID, decision, message string) error {
 	payload, err := json.Marshal(struct {
 		Decision string  `json:"decision"`
-		Message  *string `json:"message"`
+		Message  *string `json:"message,omitempty"`
 	}{Decision: decision, Message: nilIfEmpty(message)})
 	if err != nil {
 		return err

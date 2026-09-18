@@ -159,7 +159,6 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		d.clearInteraction(p.SessionID)
 
 	case "server.connected":
-		// no-op
 	}
 }
 
