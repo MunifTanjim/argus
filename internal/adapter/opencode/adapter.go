@@ -89,10 +89,8 @@ func (ocAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return prepareTextInput(ctx, pc, paneID)
 }
 
-// Respond answers a pending interaction via the OpenCode HTTP service.
-// Task 7 replaces this stub body to delegate to respond(ctx, sess, p).
 func (ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
-	return nil
+	return respond(ctx, sess, p)
 }
 
 // OpenCode needs no argus-managed config.

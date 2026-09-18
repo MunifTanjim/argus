@@ -42,6 +42,7 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 		}
 		return newClient(info), true
 	}
+	activeDiscoverer = d
 	return d
 }
 
