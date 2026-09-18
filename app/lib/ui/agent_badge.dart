@@ -26,7 +26,7 @@ Color agentColor(String agent) {
     case 'antigravity':
       return const Color(0xFF83a598);
     case 'opencode':
-      return const Color(0xFF83a598);
+      return const Color(0xFFd3869b);
     default:
       return AppColors.dim;
   }

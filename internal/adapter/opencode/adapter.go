@@ -21,7 +21,7 @@ var _ adapter.Responder = ocAdapter{}
 
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
-func (ocAdapter) AgentColor() string { return "#83a598" }
+func (ocAdapter) AgentColor() string { return "#d3869b" }
 
 func (ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return newDiscoverer(reg, clients)
