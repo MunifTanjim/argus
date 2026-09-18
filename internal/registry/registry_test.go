@@ -28,6 +28,79 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 	}
 }
 
+func TestSurfaceIdle(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{{Question: "Pick"}}},
+	})
+	id := r.Snapshot()[0].ID
+
+	sub, _ := r.Subscribe()
+
+	// A mismatched expectKind (state changed under the poll) must not swap.
+	if r.SurfaceIdle(id, session.InteractionPermission) {
+		t.Fatal("SurfaceIdle must skip when the observed kind no longer matches")
+	}
+	if !r.SurfaceIdle(id, session.InteractionQuestion) {
+		t.Fatal("SurfaceIdle should replace the stale question")
+	}
+	got, _ := r.Get(id)
+	if got.Status != session.StatusIdle || got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("want idle composer, got status=%q interaction=%+v", got.Status, got.Interaction)
+	}
+	// It emitted an update event (not a push-triggering awaiting-input).
+	select {
+	case ev := <-sub:
+		if ev.Type != EventUpdated || ev.Session.Status != session.StatusIdle {
+			t.Fatalf("want idle EventUpdated, got %+v", ev)
+		}
+	default:
+		t.Fatal("SurfaceIdle should publish an event")
+	}
+	// Idempotent: already the idle composer → no change, no event.
+	if r.SurfaceIdle(id, session.InteractionQuestion) {
+		t.Fatal("SurfaceIdle should be a no-op once idle")
+	}
+	// Missing session → no change.
+	if r.SurfaceIdle("nope", session.InteractionQuestion) {
+		t.Fatal("SurfaceIdle on a missing session should be false")
+	}
+}
+
+// A native interrupt clears the prompt to working (interaction nil). SurfaceIdle
+// with an empty expectKind surfaces idle from that state, but a fresh prompt that
+// arrived under the poll (non-empty kind) must not be clobbered.
+func TestSurfaceIdleFromClearedInteraction(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusWorking,
+	})
+	id := r.Snapshot()[0].ID
+
+	// A fresh prompt arrived (interaction now permission): empty expect must skip.
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission},
+	})
+	if r.SurfaceIdle(id, "") {
+		t.Fatal("empty expect must not clobber a fresh prompt")
+	}
+
+	// Cleared back to working (interaction nil): empty expect surfaces idle.
+	r.ClearInteraction(id)
+	if !r.SurfaceIdle(id, "") {
+		t.Fatal("empty expect should surface idle from a cleared (working) turn")
+	}
+	got, _ := r.Get(id)
+	if got.Status != session.StatusIdle || got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("want idle composer, got status=%q interaction=%+v", got.Status, got.Interaction)
+	}
+}
+
 func TestEndedGraceSuppressesRescanReCreation(t *testing.T) {
 	r := New()
 	r.endedGrace = 10 * time.Second // keep grace active throughout the test

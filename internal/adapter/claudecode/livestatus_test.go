@@ -48,6 +48,17 @@ func TestClassifyLiveStatus(t *testing.T) {
 	if got := classifyLiveStatus("parser/testdata/ongoing_tooluse.jsonl"); got != session.StatusWorking {
 		t.Errorf("ongoing_tooluse: got %q want working", got)
 	}
+	// An interrupted turn (marker or tool-use rejection) reads as idle from the
+	// fold, even with a tool/agent call left pending.
+	for _, f := range []string{
+		"not_ongoing_interrupted.jsonl",
+		"not_ongoing_interrupted_pending.jsonl",
+		"not_ongoing_rejected.jsonl",
+	} {
+		if got := classifyLiveStatus("parser/testdata/" + f); got != session.StatusIdle {
+			t.Errorf("%s: got %q want idle", f, got)
+		}
+	}
 	// No claim on empty/missing path.
 	if got := classifyLiveStatus(""); got != "" {
 		t.Errorf("empty path: got %q want \"\"", got)

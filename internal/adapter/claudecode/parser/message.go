@@ -49,6 +49,7 @@ type AIMsg struct {
 	Usage         Usage
 	StopReason    string
 	IsMeta        bool // internal user message (tool results)
+	Interrupted   bool // the turn ended here by a user interrupt (fires no Stop hook)
 }
 
 func (AIMsg) classifiedMsg() {}

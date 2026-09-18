@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,6 +12,40 @@ import (
 func TestIsOngoing_EmptyChunks(t *testing.T) {
 	if parser.IsOngoing(nil) {
 		t.Error("empty chunks should not be ongoing")
+	}
+}
+
+func TestIsOngoing_InterruptedTurn(t *testing.T) {
+	// An interrupted turn (marker or tool-use rejection) is not ongoing, even
+	// with a tool or agent call left pending.
+	for _, f := range []string{
+		"not_ongoing_interrupted.jsonl",
+		"not_ongoing_interrupted_pending.jsonl",
+		"not_ongoing_rejected.jsonl",
+	} {
+		chunks, err := parser.ReadSession(filepath.Join("testdata", f))
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if parser.IsOngoing(chunks) {
+			t.Errorf("%s: interrupted turn should not be ongoing", f)
+		}
+		if !parser.LastTurnInterrupted(chunks) {
+			t.Errorf("%s: want LastTurnInterrupted", f)
+		}
+	}
+	// A live tool-use turn and an ExitPlanMode turn are not interrupts.
+	for _, f := range []string{"ongoing_tooluse.jsonl", "not_ongoing_exitplan.jsonl"} {
+		chunks, err := parser.ReadSession(filepath.Join("testdata", f))
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if parser.LastTurnInterrupted(chunks) {
+			t.Errorf("%s: want not interrupted", f)
+		}
+	}
+	if parser.LastTurnInterrupted(nil) {
+		t.Error("nil chunks: want not interrupted")
 	}
 }
 

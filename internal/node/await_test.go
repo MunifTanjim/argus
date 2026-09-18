@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -50,6 +51,13 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 		s, _ := d.reg.Get(id)
 		return s.Interaction == nil
 	}
+	respond := func(d *Node, id string, p api.RespondParams) {
+		t.Helper()
+		d.pendingMu.Lock()
+		pd := d.pending[id]
+		d.pendingMu.Unlock()
+		pd.ch <- p
+	}
 
 	// 1. Hook goes away (ctx cancelled): clears, returns "".
 	d, id := setup()
@@ -78,19 +86,32 @@ func TestAwaitDecisionClearsOnAllExits(t *testing.T) {
 		t.Error("timeout: interaction not cleared")
 	}
 
-	// 3. Answered in argus: returns the decision and clears.
+	// 3. Answered in argus: returns a decision and clears.
 	d, id = setup()
 	out = make(chan string, 1)
 	go func() { out <- d.awaitDecision(context.Background(), d.adapterFor(""), id, ev) }()
 	waitParked(d, id)
-	d.pendingMu.Lock()
-	pd := d.pending[id]
-	d.pendingMu.Unlock()
-	pd.ch <- "DECISION"
-	if got := <-out; got != "DECISION" {
-		t.Errorf("answered: out=%q want DECISION", got)
+	respond(d, id, api.RespondParams{Answers: map[string]any{"Q": "A"}})
+	if got := <-out; got == "" {
+		t.Error("answered: want a decision, got empty")
 	}
 	if !cleared(d, id) {
 		t.Error("answered: interaction not cleared")
+	}
+
+	// 4. Cancelled in argus: surfaces the idle composer (not cleared to working), so
+	// the interrupted turn shows "Waiting for input" instead of a stale prompt.
+	d, id = setup()
+	out = make(chan string, 1)
+	go func() { out <- d.awaitDecision(context.Background(), d.adapterFor(""), id, ev) }()
+	waitParked(d, id)
+	respond(d, id, api.RespondParams{QuestionAction: "cancel"})
+	<-out
+	s, _ := d.reg.Get(id)
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Errorf("cancel: want idle composer, got %+v", s.Interaction)
+	}
+	if s.Status == session.StatusWorking {
+		t.Error("cancel: status must not be working after an interrupt")
 	}
 }

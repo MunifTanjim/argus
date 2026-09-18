@@ -58,12 +58,13 @@ type pendingTool struct {
 // populating both flat fields (backward compat) and structured Items.
 func mergeAIBuffer(buf []AIMsg) Chunk {
 	var (
-		texts     []string
-		thinking  int
-		toolCalls []ToolCall
-		model     string
-		stop      string
-		sessionID string
+		texts       []string
+		thinking    int
+		toolCalls   []ToolCall
+		model       string
+		stop        string
+		sessionID   string
+		interrupted bool
 	)
 
 	// Structured items built from ContentBlocks.
@@ -77,6 +78,9 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 
 	for i, m := range buf {
 		itemStarts[i] = len(items)
+		if m.Interrupted {
+			interrupted = true
+		}
 		// --- Flat field accumulation ---
 		if m.Text != "" {
 			texts = append(texts, m.Text)
@@ -247,6 +251,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		Usage:         usage,
 		StopReason:    stop,
 		DurationMs:    dur,
+		Interrupted:   interrupted,
 	}
 }
 

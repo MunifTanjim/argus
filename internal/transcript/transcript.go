@@ -105,6 +105,11 @@ type Chunk struct {
 	StopReason string `json:"stopReason,omitempty"`
 	DurationMs int64  `json:"durationMs,omitempty"`
 
+	// Interrupted marks the final chunk of a transcript whose last turn ended by a
+	// user interrupt (which fires no Stop hook). The subscription poll uses it to
+	// surface the idle composer for a turn the hooks left showing a stale prompt.
+	Interrupted bool `json:"interrupted,omitempty"`
+
 	// Context-window evolution across this AI turn's cycles.
 	HasContext         bool    `json:"hasContext,omitempty"`
 	ContextPct         float64 `json:"contextPct,omitempty"`         // last cycle, 0..100

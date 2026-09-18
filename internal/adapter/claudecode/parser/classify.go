@@ -55,7 +55,14 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 
 	contentStr := ExtractText(e.Message.Content)
 
-	if e.Type == "user" && isUserNoise(e.Message.Content, contentStr) {
+	// The interruption marker folds into the AI turn as a flag (never rendered) so
+	// IsOngoing can see a turn that ended by interrupt; the raw marker text is
+	// otherwise dropped as noise.
+	if e.Type == "user" && isInterruptMarker(e.Message.Content, strings.TrimSpace(contentStr)) {
+		return AIMsg{Timestamp: ts, SessionID: e.SessionID, IsMeta: true, Interrupted: true}, true
+	}
+
+	if e.Type == "user" && isUserNoise(contentStr) {
 		return nil, false
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gitmeta"
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -187,10 +188,15 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		}
 	}
 
+	// Interrupt-aware idle surfacing rides the main-session poll: an interrupted
+	// turn fires no Stop hook, so the poll re-derives idle from the folded
+	// transcript and surfaces the compose prompt. Subagent views never drive status.
+	driveStatus := p.AgentID == ""
+
 	// Start the poller bound to the connection ctx.
 	pollCtx, cancel := context.WithCancel(ctx)
 	cs.add(p.SubID, cancel)
-	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, chunks)
+	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, chunks, driveStatus)
 
 	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Chunks: chunks[from:]}, nil
 }
@@ -208,12 +214,29 @@ func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawM
 	return nil, nil
 }
 
+// surfaceIdleAfterInterrupt surfaces the idle composer when the folded transcript's
+// last turn ended by an interrupt (which fires no Stop hook). It handles both a
+// stranded prompt (interrupted in the user's terminal while argus showed a
+// question/permission) and a turn the parked-decision cleanup already reset to
+// working. The observed interaction kind drives SurfaceIdle's compare-and-swap.
+func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
+	s, ok := d.reg.Get(sessionID)
+	if !ok {
+		return
+	}
+	var expect session.InteractionKind
+	if s.Interaction != nil {
+		expect = s.Interaction.Kind
+	}
+	d.reg.SurfaceIdle(sessionID, expect)
+}
+
 // pollTranscript re-folds the transcript every interval and pushes a delta when
 // chunks change. `sent` must be the FULL chunk list the client holds (cached
 // prefix plus resent tail), not chunks[from:]: diffChunks compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Chunk) (int, bool), sent []transcript.Chunk) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Chunk) (int, bool), sent []transcript.Chunk, driveStatus bool) {
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)
@@ -223,6 +246,7 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 	if taskSignals != nil {
 		lastSignals, _ = taskSignals(sent) // seed from catch-up; don't fire on open
 	}
+	var idleSurfaced bool
 	t := time.NewTicker(transcriptPollInterval)
 	defer t.Stop()
 	for {
@@ -233,6 +257,13 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 			cur, err := st.Refresh()
 			if err != nil {
 				continue // transient (file rotated/locked); try next tick
+			}
+			if driveStatus && len(cur) > 0 {
+				interrupted := cur[len(cur)-1].Interrupted
+				if interrupted && !idleSurfaced {
+					d.surfaceIdleAfterInterrupt(sessionID)
+				}
+				idleSurfaced = interrupted
 			}
 			if taskSignals != nil {
 				// Count only grows; resync the baseline on a shrink (transcript
