@@ -1,8 +1,10 @@
 package opencode
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -65,6 +67,89 @@ func TestApplyEventStatusMap(t *testing.T) {
 	d.mu.Unlock()
 	if pid != "req_1" {
 		t.Fatalf("pendPerm = %q, want req_1", pid)
+	}
+}
+
+func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
+	reg := registry.New()
+	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	seedSession(t, reg, "ses_1")
+
+	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
+		t.Fatalf("after idle, status = %q", got)
+	}
+
+	d.applyEvent(sseFrame{Type: "session.updated", Data: []byte(`{"info":{"id":"ses_1"}}`)})
+	if got := statusOf(t, reg, "ses_1"); got == session.StatusWorking {
+		t.Fatalf("session.updated must not set Working, got %q", got)
+	}
+	d.applyEvent(sseFrame{Type: "message.updated", Data: []byte(`{"sessionID":"ses_1"}`)})
+	if got := statusOf(t, reg, "ses_1"); got == session.StatusWorking {
+		t.Fatalf("message.updated must not set Working, got %q", got)
+	}
+
+	d.applyEvent(sseFrame{Type: "message.part.updated", Data: []byte(`{"part":{"sessionID":"ses_1"}}`)})
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
+		t.Fatalf("message.part.updated should set Working, got %q", got)
+	}
+}
+
+func TestSessionStatusBusySetsWorking(t *testing.T) {
+	reg := registry.New()
+	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	seedSession(t, reg, "ses_1")
+
+	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
+	d.applyEvent(sseFrame{Type: "session.status", Data: []byte(`{"sessionID":"ses_1","status":{"type":"idle"}}`)})
+	if got := statusOf(t, reg, "ses_1"); got == session.StatusWorking {
+		t.Fatalf("session.status idle must not set Working, got %q", got)
+	}
+
+	d.applyEvent(sseFrame{Type: "session.status", Data: []byte(`{"sessionID":"ses_1","status":{"type":"busy"}}`)})
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
+		t.Fatalf("session.status busy should set Working, got %q", got)
+	}
+}
+
+func TestIdleReaderTripsOnStall(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	ir := newIdleReader(pr, 20*time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(ir)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("idle reader returned nil error on a stalled stream")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle reader did not trip within timeout")
+	}
+}
+
+func TestIdleReaderSurvivesActiveStream(t *testing.T) {
+	pr, pw := io.Pipe()
+	go func() {
+		for i := 0; i < 6; i++ {
+			_, _ = pw.Write([]byte(": heartbeat\n"))
+			time.Sleep(10 * time.Millisecond)
+		}
+		pw.Close()
+	}()
+
+	ir := newIdleReader(pr, 100*time.Millisecond)
+	data, err := io.ReadAll(ir)
+	if err != nil {
+		t.Fatalf("active stream tripped the watchdog: %v", err)
+	}
+	if !strings.Contains(string(data), "heartbeat") {
+		t.Fatalf("expected heartbeat data, got %q", string(data))
 	}
 }
 

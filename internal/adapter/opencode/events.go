@@ -6,11 +6,54 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
+
+// eventIdleTimeout closes an /api/event connection that goes silent for longer
+// than this. The live v2.0.8 server emits ": heartbeat" every ~15s, so 3x the
+// cadence tolerates a missed beat while still catching a half-open TCP socket
+// that would otherwise wedge the scanner forever.
+const eventIdleTimeout = 45 * time.Second
+
+// idleReader wraps an SSE body and closes the underlying connection when no
+// bytes arrive within timeout, unblocking a stalled bufio.Scanner so the pump
+// can reconnect. The timer is reset on every Read attempt (each frame,
+// heartbeat, or comment line resets it).
+type idleReader struct {
+	rc      io.ReadCloser
+	timeout time.Duration
+	timer   *time.Timer
+
+	mu     sync.Mutex
+	closed bool
+}
+
+func newIdleReader(rc io.ReadCloser, timeout time.Duration) *idleReader {
+	ir := &idleReader{rc: rc, timeout: timeout}
+	ir.timer = time.AfterFunc(timeout, ir.onIdle)
+	return ir
+}
+
+func (ir *idleReader) onIdle() {
+	ir.mu.Lock()
+	ir.closed = true
+	ir.mu.Unlock()
+	_ = ir.rc.Close()
+}
+
+func (ir *idleReader) Read(p []byte) (int, error) {
+	ir.timer.Reset(ir.timeout)
+	return ir.rc.Read(p)
+}
+
+func (ir *idleReader) Close() error {
+	ir.timer.Stop()
+	return ir.rc.Close()
+}
 
 // sseFrame is the envelope for every SSE event emitted by /api/event.
 // Verified against the live v2.0.8 stream: {"id":string,"type":string,"data":{...}}.
@@ -68,8 +111,9 @@ func (d *discoverer) runEventPump(ctx context.Context) {
 			}
 			continue
 		}
-		_ = parseSSE(body, d.applyEvent)
-		body.Close()
+		ir := newIdleReader(body, eventIdleTimeout)
+		_ = parseSSE(ir, d.applyEvent)
+		ir.Close()
 		if sleep(ctx, time.Second) {
 			return
 		}
@@ -111,9 +155,21 @@ func sessionIDFrom(data json.RawMessage) string {
 
 func (d *discoverer) applyEvent(frame sseFrame) {
 	switch frame.Type {
-	case "session.updated", "message.updated", "message.part.updated":
+	case "message.part.updated":
 		sid := sessionIDFrom(frame.Data)
 		d.setStatus(sid, session.StatusWorking, nil)
+
+	case "session.status":
+		var p struct {
+			SessionID string `json:"sessionID"`
+			Status    struct {
+				Type string `json:"type"`
+			} `json:"status"`
+		}
+		_ = json.Unmarshal(frame.Data, &p)
+		if p.SessionID != "" && p.Status.Type != "" && p.Status.Type != "idle" {
+			d.setStatus(p.SessionID, session.StatusWorking, nil)
+		}
 
 	case "session.idle":
 		sid := sessionIDFrom(frame.Data)

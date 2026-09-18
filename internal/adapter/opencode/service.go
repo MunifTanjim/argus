@@ -105,6 +105,12 @@ type ocToolState struct {
 	Status  string          `json:"status"`
 	Input   json.RawMessage `json:"input,omitempty"`
 	Content []ocToolContent `json:"content,omitempty"`
+	Error   *ocToolError    `json:"error,omitempty"`
+}
+
+type ocToolError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
 type ocToolContent struct {
@@ -183,6 +189,12 @@ func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
 
 func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessage, error) {
 	return listEnvelope[ocMessage](ctx, c, "/api/session/"+sessionID+"/message", "order=asc", "read messages")
+}
+
+// readMessagesRaw fetches every message page without decoding into ocMessage,
+// preserving the server's exact JSON for a lossless export bundle.
+func (c *client) readMessagesRaw(ctx context.Context, sessionID string) ([]json.RawMessage, error) {
+	return listEnvelope[json.RawMessage](ctx, c, "/api/session/"+sessionID+"/message", "order=asc", "read messages")
 }
 
 func (c *client) respondPermission(ctx context.Context, sessionID, requestID, decision, message string) error {

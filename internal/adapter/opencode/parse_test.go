@@ -59,4 +59,7 @@ func TestFoldMessages(t *testing.T) {
 	if !errored.ResultIsError {
 		t.Fatalf("errored tool not flagged: %+v", errored)
 	}
+	if errored.Result != "x" {
+		t.Fatalf("errored tool result = %q, want the error message %q", errored.Result, "x")
+	}
 }

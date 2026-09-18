@@ -49,6 +49,9 @@ func assistantChunk(m ocMessage) transcript.Chunk {
 				it.ToolInput = string(p.State.Input)
 				it.Result = toolContentText(p.State.Content)
 				it.ResultIsError = p.State.Status == "error"
+				if it.ResultIsError && p.State.Error != nil && p.State.Error.Message != "" {
+					it.Result = p.State.Error.Message
+				}
 			}
 			c.Items = append(c.Items, it)
 			c.ToolCount++
