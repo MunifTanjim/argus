@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/adrg/xdg"
+
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/util"
 	"github.com/spf13/cobra"
@@ -68,6 +70,34 @@ func Install(cmd *cobra.Command) error {
 				"autoload -Uz compinit",
 				"compinit",
 			)
+			return ErrCompletionNotEnabled
+		}
+		return nil
+	case "bash":
+		shell.StdErrF("Detected Shell: %s\n", sh)
+
+		// bash-completion loads this one XDG directory, so there is nothing to pick.
+		completionDir := filepath.Join(xdg.DataHome, "bash-completion", "completions")
+		if err := util.EnsureDirExists(completionDir); err != nil {
+			return err
+		}
+
+		f, err := os.Create(filepath.Join(completionDir, shell.CompletionFilename(sh)))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		if err := rootCmd.GenBashCompletionV2(f, true); err != nil {
+			return err
+		}
+
+		if isEnabled, err := shell.IsCompletionEnabled(sh); err != nil {
+			return err
+		} else if !isEnabled {
+			shell.StdErrLn()
+			shell.StdErrLn("Shell completion installed, but not enabled.")
+			shell.StdErrLn("Install the bash-completion package and make sure your shell loads it.")
 			return ErrCompletionNotEnabled
 		}
 		return nil
