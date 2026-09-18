@@ -12,21 +12,24 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-type globalEvent struct {
-	Directory string       `json:"directory"`
-	Payload   eventPayload `json:"payload"`
+// sseFrame is the envelope for every SSE event emitted by /api/event.
+// Verified against the live v2.0.8 stream: {"id":string,"type":string,"data":{...}}.
+// Event type names for session-idle and permission flows are matched by string
+// in applyEvent; unknown types are silently ignored.
+type sseFrame struct {
+	ID   string          `json:"id"`
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
 }
 
-type eventPayload struct {
-	Type       string          `json:"type"`
-	Properties json.RawMessage `json:"properties"`
-}
-
-func parseSSE(r io.Reader, emit func(globalEvent)) error {
+func parseSSE(r io.Reader, emit func(sseFrame)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -34,11 +37,11 @@ func parseSSE(r io.Reader, emit func(globalEvent)) error {
 		if payload == "" {
 			continue
 		}
-		var ev globalEvent
-		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+		var frame sseFrame
+		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
 			continue
 		}
-		emit(ev)
+		emit(frame)
 	}
 	return sc.Err()
 }
@@ -84,60 +87,79 @@ func sleep(ctx context.Context, dur time.Duration) (canceled bool) {
 	}
 }
 
-func (d *discoverer) applyEvent(ev globalEvent) {
-	switch ev.Payload.Type {
-	case "session.status":
-		var p struct {
+// sessionIDFrom extracts a session ID from an SSE event data payload.
+// It tries the top-level sessionID field, then info.id, then part.sessionID.
+func sessionIDFrom(data json.RawMessage) string {
+	var p struct {
+		SessionID string `json:"sessionID"`
+		Info      struct {
+			ID string `json:"id"`
+		} `json:"info"`
+		Part struct {
 			SessionID string `json:"sessionID"`
-			Status    struct {
-				Type string `json:"type"`
-			} `json:"status"`
-		}
-		_ = json.Unmarshal(ev.Payload.Properties, &p)
-		if p.Status.Type != "idle" {
-			d.setStatus(p.SessionID, session.StatusWorking, nil)
-		}
-	case "message.part.updated":
-		var p struct {
-			Part struct {
-				SessionID string `json:"sessionID"`
-			} `json:"part"`
-		}
-		_ = json.Unmarshal(ev.Payload.Properties, &p)
-		d.setStatus(p.Part.SessionID, session.StatusWorking, nil)
+		} `json:"part"`
+	}
+	_ = json.Unmarshal(data, &p)
+	if p.SessionID != "" {
+		return p.SessionID
+	}
+	if p.Info.ID != "" {
+		return p.Info.ID
+	}
+	return p.Part.SessionID
+}
+
+func (d *discoverer) applyEvent(frame sseFrame) {
+	switch frame.Type {
+	case "session.updated", "message.updated", "message.part.updated":
+		sid := sessionIDFrom(frame.Data)
+		d.setStatus(sid, session.StatusWorking, nil)
+
 	case "session.idle":
-		var p struct {
-			SessionID string `json:"sessionID"`
-		}
-		_ = json.Unmarshal(ev.Payload.Properties, &p)
-		d.setStatus(p.SessionID, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
-	case "permission.updated":
+		sid := sessionIDFrom(frame.Data)
+		d.setStatus(sid, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+
+	case "permission.updated", "permission.request":
 		var p struct {
 			ID        string `json:"id"`
 			SessionID string `json:"sessionID"`
-			Type      string `json:"type"`
+			Action    string `json:"action"`
+			Source    *struct {
+				Type string `json:"type"`
+			} `json:"source"`
 		}
-		_ = json.Unmarshal(ev.Payload.Properties, &p)
+		_ = json.Unmarshal(frame.Data, &p)
+		if p.SessionID == "" || p.ID == "" {
+			return
+		}
 		d.mu.Lock()
 		d.pendPerm[p.SessionID] = p.ID
 		d.mu.Unlock()
+		toolName := p.Action
+		if toolName == "" && p.Source != nil {
+			toolName = p.Source.Type
+		}
 		d.setStatus(p.SessionID, session.StatusAwaitingInput, &session.Interaction{
 			Kind:     session.InteractionPermission,
-			ToolName: p.Type,
+			ToolName: toolName,
 			Options: []session.DecisionOption{
 				{Label: "Allow", Value: "allow"},
 				{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell OpenCode why"},
 			},
 		})
+
 	case "permission.replied":
 		var p struct {
 			SessionID string `json:"sessionID"`
 		}
-		_ = json.Unmarshal(ev.Payload.Properties, &p)
+		_ = json.Unmarshal(frame.Data, &p)
 		d.mu.Lock()
 		delete(d.pendPerm, p.SessionID)
 		d.mu.Unlock()
 		d.clearInteraction(p.SessionID)
+
+	case "server.connected":
+		// no-op
 	}
 }
 

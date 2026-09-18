@@ -1,3 +1,6 @@
+// Package opencode adapts OpenCode's live HTTP API (base path /api, Basic auth user "opencode").
+// Verified against v2.0.8: session list, message list, permission reply, and SSE event stream.
+// Empirical tool and message shapes are documented in tool-shapes.md alongside this file.
 package opencode
 
 import (
