@@ -75,7 +75,7 @@ void main() {
     )));
     await tester.pump();
 
-    expect(find.text('Verify trust'), findsNothing);
+    expect(find.text('Verify Trust'), findsNothing);
   });
 
   testWidgets('Verify trust is shown for a live root', (tester) async {
@@ -90,6 +90,6 @@ void main() {
     )));
     await tester.pump();
 
-    expect(find.text('Verify trust'), findsOneWidget);
+    expect(find.text('Verify Trust'), findsOneWidget);
   });
 }

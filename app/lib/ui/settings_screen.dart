@@ -39,14 +39,6 @@ class SettingsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _LabeledField(
-                      label: 'Gateway',
-                      child: SelectableText(
-                        creds?.url ?? '(not paired)',
-                        style: _monoStyle,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.palette_outlined),
@@ -62,8 +54,8 @@ class SettingsScreen extends ConsumerWidget {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.notifications_outlined),
-                      title: const Text('Push notifications'),
-                      subtitle: const Text('UnifiedPush distributor or FCM'),
+                      title: const Text('Push Notifications'),
+                      subtitle: const Text('Delivery method and preferences'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -74,7 +66,7 @@ class SettingsScreen extends ConsumerWidget {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.key_outlined),
-                      title: const Text('Device trust'),
+                      title: const Text('Device Trust'),
                       subtitle: const Text('Status, enrollment & recovery'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
@@ -91,6 +83,14 @@ class SettingsScreen extends ConsumerWidget {
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const AboutScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _LabeledField(
+                      label: 'Gateway',
+                      child: SelectableText(
+                        creds?.url ?? '(not paired)',
+                        style: _monoStyle,
                       ),
                     ),
                     const SizedBox(height: 24),

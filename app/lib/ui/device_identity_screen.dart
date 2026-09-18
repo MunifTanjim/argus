@@ -35,7 +35,7 @@ class DeviceIdentityScreen extends ConsumerWidget {
     final enrollExpanded = isAwaiting || !summary.connected;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Device trust')),
+      appBar: AppBar(title: const Text('Device Trust')),
       body: CenteredBody(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -53,7 +53,7 @@ class DeviceIdentityScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             ExpansionTile(
               initiallyExpanded: enrollExpanded,
-              title: const Text('Enroll this device'),
+              title: const Text('Enroll this Device'),
               children: [
                 identityAsync.when(
                   data: (kp) => _EnrollBody(kp: kp),
@@ -71,7 +71,7 @@ class DeviceIdentityScreen extends ConsumerWidget {
             ),
             if (summary.signers.isNotEmpty && trustSignersVerifiable(status))
               ExpansionTile(
-                title: const Text('Verify trust'),
+                title: const Text('Verify Trust'),
                 children: [_VerifyBody(summary: summary)],
               ),
             const ExpansionTile(
@@ -378,7 +378,7 @@ class _AdvancedBody extends ConsumerWidget {
         children: [
           OutlinedButton(
             onPressed: () => _confirmReset(context, ref),
-            child: const Text('Reset trust anchor'),
+            child: const Text('Reset Trust Anchor'),
           ),
         ],
       ),
@@ -389,7 +389,7 @@ class _AdvancedBody extends ConsumerWidget {
     final ok = await showDialog<bool>(
       context: ctx,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Reset trust anchor?'),
+        title: const Text('Reset Trust Anchor?'),
         content: const Text(
           'This clears the stored trust chain. The device will re-establish '
           'trust on the next connection.',

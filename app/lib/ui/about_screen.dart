@@ -19,14 +19,14 @@ class AboutScreen extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.privacy_tip_outlined),
-              title: const Text('Privacy policy'),
-              subtitle: const Text('What Argus stores, and where'),
+              title: const Text('Privacy Policy'),
+              subtitle: const Text('Read the privacy policy'),
               trailing: const Icon(Icons.open_in_new, size: 18),
               onTap: () => openExternalUrl(_privacyUrl),
             ),
             ListTile(
               leading: const Icon(Icons.description_outlined),
-              title: const Text('Open source licenses'),
+              title: const Text('Open Source Licenses'),
               subtitle: const Text('Licenses of the bundled software'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => showLicensePage(
@@ -37,7 +37,7 @@ class AboutScreen extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.code),
-              title: const Text('Source code'),
+              title: const Text('Source Code'),
               subtitle: const Text('github.com/MunifTanjim/argus'),
               trailing: const Icon(Icons.open_in_new, size: 18),
               onTap: () => openExternalUrl(_projectUrl),

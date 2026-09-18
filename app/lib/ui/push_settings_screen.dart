@@ -81,7 +81,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   Widget build(BuildContext context) {
     final active = _controller.activeBackend;
     return Scaffold(
-      appBar: AppBar(title: const Text('Push notifications')),
+      appBar: AppBar(title: const Text('Push Notifications')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : CenteredBody(
@@ -217,7 +217,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   }
 
   String _distributorLabel(String pkg) =>
-      pkg == appPackageName ? 'argus (built-in)' : pkg.split('.').last;
+      pkg == appPackageName ? 'Embedded FCM' : pkg.split('.').last;
 
   List<Widget> _pauseBody() {
     final paused = _pausedUntil != null;

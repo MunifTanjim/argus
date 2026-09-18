@@ -147,7 +147,7 @@ void main() {
     await tester.pumpWidget(_app(summary, store));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Verify trust'));
+    await tester.tap(find.text('Verify Trust'));
     await tester.pumpAndSettle();
 
     final words = signerSetFingerprintWords([_fixedSigner]);
@@ -206,7 +206,7 @@ void main() {
     await tester.tap(find.text('Advanced'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Reset trust anchor'));
+    await tester.tap(find.text('Reset Trust Anchor'));
     await tester.pumpAndSettle();
 
     expect(kv.deleted, isFalse);
