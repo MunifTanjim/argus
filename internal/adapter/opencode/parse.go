@@ -1,42 +1,42 @@
 package opencode
 
 import (
+	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func foldMessages(items []ocMessageItem) transcript.TranscriptView {
+func foldMessages(msgs []ocMessage) transcript.TranscriptView {
 	view := transcript.TranscriptView{}
-	for _, item := range items {
-		switch item.Info.Role {
+	for _, m := range msgs {
+		switch m.Type {
 		case "user":
-			view.Chunks = append(view.Chunks, userChunk(item))
+			view.Chunks = append(view.Chunks, userChunk(m))
 		case "assistant":
-			view.Chunks = append(view.Chunks, assistantChunk(item))
+			view.Chunks = append(view.Chunks, assistantChunk(m))
 		}
 	}
 	return view
 }
 
-func userChunk(item ocMessageItem) transcript.Chunk {
-	c := transcript.Chunk{ID: item.Info.ID, Kind: transcript.ChunkUser, Timestamp: tsMillis(item.Info.Time.Created)}
-	for _, p := range item.Parts {
-		if p.Type == "text" {
-			c.Text += p.Text
-		}
+func userChunk(m ocMessage) transcript.Chunk {
+	return transcript.Chunk{
+		ID:        m.ID,
+		Kind:      transcript.ChunkUser,
+		Timestamp: tsMillis(m.Time.Created),
+		Text:      m.Text,
 	}
-	return c
 }
 
-func assistantChunk(item ocMessageItem) transcript.Chunk {
+func assistantChunk(m ocMessage) transcript.Chunk {
 	c := transcript.Chunk{
-		ID:        item.Info.ID,
+		ID:        m.ID,
 		Kind:      transcript.ChunkAI,
-		Timestamp: tsMillis(item.Info.Time.Created),
-		ModelName: item.Info.ModelID,
+		Timestamp: tsMillis(m.Time.Created),
+		ModelName: m.Model.ID,
 	}
-	for _, p := range item.Parts {
+	for _, p := range m.Content {
 		switch p.Type {
 		case "reasoning":
 			c.Items = append(c.Items, transcript.Item{ID: p.ID, Kind: transcript.ItemThinking, Text: p.Text})
@@ -44,21 +44,27 @@ func assistantChunk(item ocMessageItem) transcript.Chunk {
 		case "text":
 			c.Items = append(c.Items, transcript.Item{ID: p.ID, Kind: transcript.ItemText, Text: p.Text})
 		case "tool":
-			it := transcript.Item{ID: p.ID, Kind: transcript.ItemTool, ToolName: p.Tool, ToolID: p.CallID}
+			it := transcript.Item{ID: p.ID, Kind: transcript.ItemTool, ToolName: p.Name, ToolID: p.ID}
 			if p.State != nil {
 				it.ToolInput = string(p.State.Input)
-				it.Result = p.State.Output
+				it.Result = toolContentText(p.State.Content)
 				it.ResultIsError = p.State.Status == "error"
 			}
 			c.Items = append(c.Items, it)
 			c.ToolCount++
-		case "subtask":
-			c.Items = append(c.Items, transcript.Item{
-				ID: p.ID, Kind: transcript.ItemSubagent, ToolName: p.Agent, Text: p.Description,
-			})
 		}
 	}
 	return c
+}
+
+func toolContentText(parts []ocToolContent) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type == "text" {
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
 }
 
 // tsMillis converts a Unix millisecond timestamp to RFC3339 UTC, returning ""

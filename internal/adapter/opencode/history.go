@@ -35,11 +35,12 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 	groups := map[string]*dirGroup{}
 	order := []string{}
 	for _, s := range sessions {
-		g, exists := groups[s.Directory]
+		dir := s.Location.Directory
+		g, exists := groups[dir]
 		if !exists {
 			g = &dirGroup{}
-			groups[s.Directory] = g
-			order = append(order, s.Directory)
+			groups[dir] = g
+			order = append(order, dir)
 		}
 		g.sessions = append(g.sessions, s)
 		if s.Time.Updated > g.maxUpd {
@@ -75,7 +76,7 @@ func listHistorySessions(projectDir string, limit, offset int) (session.HistoryS
 
 	var filtered []ocSession
 	for _, s := range all {
-		if s.Directory == projectDir {
+		if s.Location.Directory == projectDir {
 			filtered = append(filtered, s)
 		}
 	}

@@ -43,54 +43,61 @@ func readServiceInfo() (serviceInfo, bool) {
 	return info, true
 }
 
+type ocEnvelope[T any] struct {
+	Data []T `json:"data"`
+}
+
 type ocSession struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectID"`
-	Directory string `json:"directory"`
-	ParentID  string `json:"parentID,omitempty"`
+	Agent     string `json:"agent"`
 	Title     string `json:"title"`
 	Time      struct {
 		Created int64 `json:"created"`
 		Updated int64 `json:"updated"`
+		Idle    int64 `json:"idle"`
+		Viewed  int64 `json:"viewed"`
 	} `json:"time"`
+	Location struct {
+		Directory string `json:"directory"`
+	} `json:"location"`
 }
 
-type ocMessageItem struct {
-	Info  ocMessage `json:"info"`
-	Parts []ocPart  `json:"parts"`
+type ocModelRef struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"providerID"`
+	Variant    string `json:"variant"`
 }
 
 type ocMessage struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID"`
-	Role      string `json:"role"`
-	ParentID  string `json:"parentID,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	ModelID   string `json:"modelID,omitempty"`
-	Time      struct {
-		Created   int64 `json:"created"`
-		Completed int64 `json:"completed,omitempty"`
+	Type    string     `json:"type"`
+	ID      string     `json:"id"`
+	Text    string     `json:"text,omitempty"`
+	Content []ocPart   `json:"content,omitempty"`
+	Agent   string     `json:"agent,omitempty"`
+	Model   ocModelRef `json:"model,omitempty"`
+	Time    struct {
+		Created int64 `json:"created"`
 	} `json:"time"`
 }
 
 type ocPart struct {
-	ID          string       `json:"id"`
-	Type        string       `json:"type"`
-	Text        string       `json:"text,omitempty"`
-	CallID      string       `json:"callID,omitempty"`
-	Tool        string       `json:"tool,omitempty"`
-	State       *ocToolState `json:"state,omitempty"`
-	Agent       string       `json:"agent,omitempty"`
-	Prompt      string       `json:"prompt,omitempty"`
-	Description string       `json:"description,omitempty"`
+	Type  string       `json:"type"`
+	ID    string       `json:"id"`
+	Name  string       `json:"name,omitempty"`
+	Text  string       `json:"text,omitempty"`
+	State *ocToolState `json:"state,omitempty"`
 }
 
 type ocToolState struct {
-	Status   string          `json:"status"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Output   string          `json:"output,omitempty"`
-	Title    string          `json:"title,omitempty"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Status  string          `json:"status"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Content []ocToolContent `json:"content,omitempty"`
+}
+
+type ocToolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type client struct {
@@ -119,41 +126,39 @@ func (c *client) do(ctx context.Context, method, path string, body io.Reader) (*
 	return c.hc.Do(req)
 }
 
+func listEnvelope[T any](ctx context.Context, c *client, path, label string) ([]T, error) {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s", label, resp.Status)
+	}
+	var env ocEnvelope[T]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
 func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/session", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list sessions: %s", resp.Status)
-	}
-	var out []ocSession
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return listEnvelope[ocSession](ctx, c, "/api/session", "list sessions")
 }
 
-func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessageItem, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/session/"+sessionID+"/message", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("read messages: %s", resp.Status)
-	}
-	var out []ocMessageItem
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
+func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessage, error) {
+	return listEnvelope[ocMessage](ctx, c, "/api/session/"+sessionID+"/message", "read messages")
 }
 
-func (c *client) respondPermission(ctx context.Context, sessionID, permissionID, response string) error {
-	body := strings.NewReader(fmt.Sprintf(`{"response":%q}`, response))
-	resp, err := c.do(ctx, http.MethodPost, "/session/"+sessionID+"/permissions/"+permissionID, body)
+func (c *client) respondPermission(ctx context.Context, sessionID, requestID, decision, message string) error {
+	payload, err := json.Marshal(struct {
+		Decision string  `json:"decision"`
+		Message  *string `json:"message"`
+	}{Decision: decision, Message: nilIfEmpty(message)})
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/permission/"+requestID+"/reply", strings.NewReader(string(payload)))
 	if err != nil {
 		return err
 	}
@@ -164,8 +169,15 @@ func (c *client) respondPermission(ctx context.Context, sessionID, permissionID,
 	return nil
 }
 
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func (c *client) openEvents(ctx context.Context) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/global/event", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/event", nil)
 	if err != nil {
 		return nil, err
 	}

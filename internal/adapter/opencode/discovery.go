@@ -61,15 +61,16 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 
 	found := make([]registry.DiscoveredSession, 0, len(sessions))
 	for _, s := range sessions {
+		dir := s.Location.Directory
 		ds := registry.DiscoveredSession{
 			AgentSessionID: s.ID,
-			Cwd:            s.Directory,
-			Repo:           repoName(s.Directory),
+			Cwd:            dir,
+			Repo:           repoName(dir),
 			TranscriptPath: s.ID,
 			Name:           s.Title,
 			Frontend:       session.FrontendExternal,
 		}
-		if pi, ok := paneByPath[s.Directory]; ok {
+		if pi, ok := paneByPath[dir]; ok {
 			ds.HasPane = true
 			ds.Server = pi.server
 			ds.PaneID = pi.paneID

@@ -12,8 +12,8 @@ import (
 
 func TestScanOnceReconcilesSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/session" {
-			_, _ = w.Write([]byte(`[{"id":"ses_1","directory":"/repo/foo","title":"t","time":{"created":1,"updated":2}}]`))
+		if r.URL.Path == "/api/session" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"ses_1","projectID":"proj","agent":"build","title":"t","time":{"created":1,"updated":2},"location":{"directory":"/repo/foo"}}],"cursor":{"previous":"","next":""}}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

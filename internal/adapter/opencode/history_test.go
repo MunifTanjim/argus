@@ -8,12 +8,12 @@ import (
 
 func TestListHistoryProjectsGroupsByDirectory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/session" {
-			_, _ = w.Write([]byte(`[
-				{"id":"a","directory":"/repo/x","title":"t1","time":{"created":1,"updated":9}},
-				{"id":"b","directory":"/repo/x","title":"t2","time":{"created":2,"updated":8}},
-				{"id":"c","directory":"/repo/y","title":"t3","time":{"created":3,"updated":7}}
-			]`))
+		if r.URL.Path == "/api/session" {
+			_, _ = w.Write([]byte(`{"data":[
+				{"id":"a","projectID":"p","title":"t1","time":{"created":1,"updated":9},"location":{"directory":"/repo/x"}},
+				{"id":"b","projectID":"p","title":"t2","time":{"created":2,"updated":8},"location":{"directory":"/repo/x"}},
+				{"id":"c","projectID":"p","title":"t3","time":{"created":3,"updated":7},"location":{"directory":"/repo/y"}}
+			],"cursor":{"previous":"","next":""}}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

@@ -36,10 +36,10 @@ func TestRespondPostsPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
-	if gotPath != "/session/ses_1/permissions/perm_9" {
+	if gotPath != "/api/session/ses_1/permission/perm_9/reply" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if gotBody != `{"response":"reject"}` {
+	if gotBody != `{"decision":"reject","message":"no"}` {
 		t.Fatalf("body = %q", gotBody)
 	}
 }

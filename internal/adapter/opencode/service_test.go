@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -16,8 +15,8 @@ func TestClientListSessions(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path == "/session" {
-			_, _ = w.Write([]byte(`[{"id":"ses_1","directory":"/repo","title":"t","time":{"created":1,"updated":2}}]`))
+		if r.URL.Path == "/api/session" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"ses_1","projectID":"proj","agent":"build","title":"t","time":{"created":1,"updated":2},"location":{"directory":"/repo"}}],"cursor":{"previous":"","next":""}}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -29,15 +28,16 @@ func TestClientListSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listSessions: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "ses_1" || got[0].Directory != "/repo" {
+	if len(got) != 1 || got[0].ID != "ses_1" || got[0].Location.Directory != "/repo" {
 		t.Fatalf("unexpected sessions: %+v", got)
 	}
 }
 
 func TestClientRespondPermission(t *testing.T) {
-	var gotBody string
+	var gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/session/ses_1/permissions/") {
+		if r.Method == http.MethodPost {
+			gotPath = r.URL.Path
 			b, _ := io.ReadAll(r.Body)
 			gotBody = string(b)
 			_, _ = w.Write([]byte("true"))
@@ -47,10 +47,13 @@ func TestClientRespondPermission(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := newClient(serviceInfo{URL: srv.URL, Password: ""})
-	if err := c.respondPermission(context.Background(), "ses_1", "perm_9", "reject"); err != nil {
+	if err := c.respondPermission(context.Background(), "ses_1", "perm_9", "reject", "no"); err != nil {
 		t.Fatalf("respondPermission: %v", err)
 	}
-	if gotBody != `{"response":"reject"}` {
+	if gotPath != "/api/session/ses_1/permission/perm_9/reply" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody != `{"decision":"reject","message":"no"}` {
 		t.Fatalf("body = %s", gotBody)
 	}
 }
