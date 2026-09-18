@@ -96,6 +96,14 @@ type TaskSource interface {
 	TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool)
 }
 
+// Responder answers a pending interaction by an outbound action, for adapters
+// that do not park a blocking hook call (for example an HTTP-service agent).
+// The node type-asserts this on the session's adapter when no parked decision
+// exists for the respond.
+type Responder interface {
+	Respond(ctx context.Context, sess session.Session, p api.RespondParams) error
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string
