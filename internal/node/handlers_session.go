@@ -445,6 +445,11 @@ func (d *Node) handleSessionOpenTerminal(ctx context.Context, params json.RawMes
 	if s.Controllable() {
 		return api.ResumeResult{SessionID: s.ID}, nil
 	}
+	// Spawn in the session's own directory; an unknown cwd would open the pane
+	// somewhere arbitrary (mirrors the resume guard).
+	if s.Cwd == "" {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot open terminal: session working directory is unknown"}
+	}
 	name, args, ok := d.adapterFor(s.Agent).ResumeCommand(s.AgentSessionID)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal not supported for agent " + s.Agent}
