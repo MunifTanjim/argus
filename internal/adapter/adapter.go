@@ -105,6 +105,12 @@ type Responder interface {
 	Respond(ctx context.Context, sess session.Session, p api.RespondParams) error
 }
 
+// Dismisser removes a session from the live list on the user's request, for
+// adapters whose sessions are presence-tracked rather than pane-bound (opencode).
+type Dismisser interface {
+	Dismiss(ctx context.Context, sess session.Session) error
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string

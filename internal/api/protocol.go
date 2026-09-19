@@ -29,6 +29,7 @@ const (
 	MethodSessionInput          = "sessions.input"          // request: InputParams; result: nil
 	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
 	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
+	MethodSessionDismiss        = "sessions.dismiss"        // request: SessionRef; result: nil
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult
 	// Probed live per call.
