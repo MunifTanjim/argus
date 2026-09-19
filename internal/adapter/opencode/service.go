@@ -186,6 +186,46 @@ func listEnvelope[T any](ctx context.Context, c *client, path, initialQuery, lab
 	return all, nil
 }
 
+func (c *client) listActive(ctx context.Context) (map[string]bool, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/session/active", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list active: %s", resp.Status)
+	}
+	var env struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(env.Data))
+	for id := range env.Data {
+		out[id] = true
+	}
+	return out, nil
+}
+
+func (c *client) getSession(ctx context.Context, id string) (ocSession, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/session/"+id, nil)
+	if err != nil {
+		return ocSession{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ocSession{}, fmt.Errorf("get session: %s", resp.Status)
+	}
+	var env struct {
+		Data ocSession `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return ocSession{}, err
+	}
+	return env.Data, nil
+}
+
 func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
 	return listEnvelope[ocSession](ctx, c, "/api/session", "", "list sessions")
 }

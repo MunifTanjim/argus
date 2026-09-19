@@ -124,6 +124,38 @@ func TestReadMessagesPaginatesAscending(t *testing.T) {
 	}
 }
 
+func TestClientListActive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session/active" {
+			_, _ = w.Write([]byte(`{"data":{"ses_1":{"type":"running"},"ses_2":{"type":"running"}}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := newClient(serviceInfo{URL: srv.URL})
+	got, err := c.listActive(context.Background())
+	if err != nil || !got["ses_1"] || !got["ses_2"] || len(got) != 2 {
+		t.Fatalf("listActive: %v %v", got, err)
+	}
+}
+
+func TestClientGetSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session/ses_1" {
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"},"time":{"updated":9}}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := newClient(serviceInfo{URL: srv.URL})
+	s, err := c.getSession(context.Background(), "ses_1")
+	if err != nil || s.ID != "ses_1" || s.Title != "T" || s.Location.Directory != "/repo" {
+		t.Fatalf("getSession: %+v %v", s, err)
+	}
+}
+
 func TestClientRespondPermissionAllowOmitsMessage(t *testing.T) {
 	var gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
