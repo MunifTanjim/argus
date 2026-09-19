@@ -5,93 +5,102 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-func TestScanOnceReconcilesSessions(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/session" {
-			_, _ = w.Write([]byte(`{"data":[{"id":"ses_1","projectID":"proj","agent":"build","title":"t","time":{"created":1,"updated":2},"location":{"directory":"/repo/foo"}}],"cursor":{"previous":"","next":""}}`))
-			return
+// newTestDiscoverer constructs a discoverer with the given registry and an
+// injected dial function returning c (ok=true) or (nil,false) when c is nil.
+// Reused by Task 4/5 tests.
+func newTestDiscoverer(reg *registry.Registry, c *client) *discoverer {
+	d := &discoverer{
+		reg:      reg,
+		ctx:      context.Background(),
+		presence: map[string]*presenceEntry{},
+		pendPerm: map[string]string{},
+	}
+	d.dial = func() (*client, bool) {
+		if c == nil {
+			return nil, false
 		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	reg := registry.New()
-	d := &discoverer{reg: reg}
-	c := newClient(serviceInfo{URL: srv.URL})
-	d.dial = func() (*client, bool) { return c, true }
-	d.panes = func(context.Context) map[string]paneInfo {
-		return map[string]paneInfo{
-			"/repo/foo": {
-				server:      session.TmuxServerDefault,
-				paneID:      "pane_1",
-				sessionName: "main",
-				windowIndex: 0,
-				currentPath: "/repo/foo",
-			},
-		}
+		return c, true
 	}
-
-	if err := d.ScanOnce(context.Background()); err != nil {
-		t.Fatalf("ScanOnce: %v", err)
-	}
-	sessions := reg.Snapshot()
-	if len(sessions) != 1 {
-		t.Fatalf("want 1 session, got %d", len(sessions))
-	}
-	s := sessions[0]
-	if s.Agent != "opencode" || s.AgentSessionID != "ses_1" {
-		t.Fatalf("bad session: %+v", s)
-	}
-	if s.Cwd != "/repo/foo" || s.TranscriptPath != "ses_1" {
-		t.Fatalf("cwd/transcriptPath: %q %q", s.Cwd, s.TranscriptPath)
-	}
-	if s.Frontend != session.FrontendTmux {
-		t.Fatalf("frontend = %q, want FrontendTmux", s.Frontend)
-	}
-	if s.Tmux.PaneID != "pane_1" {
-		t.Fatalf("Tmux.PaneID = %q, want pane_1", s.Tmux.PaneID)
-	}
+	return d
 }
 
-func TestScanOnceSkipsSessionsWithoutPane(t *testing.T) {
+func TestPresenceUpsertAddsAndUpdates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/session" {
-			_, _ = w.Write([]byte(`{"data":[{"id":"ses_1","projectID":"proj","agent":"build","title":"t","time":{"created":1,"updated":2},"location":{"directory":"/repo/foo"}}],"cursor":{"previous":"","next":""}}`))
+		if r.URL.Path == "/api/session/ses_1" {
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"}}}`))
 			return
 		}
-		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(404)
 	}))
 	defer srv.Close()
-
 	reg := registry.New()
-	d := &discoverer{reg: reg}
-	c := newClient(serviceInfo{URL: srv.URL})
-	d.dial = func() (*client, bool) { return c, true }
-	d.panes = func(context.Context) map[string]paneInfo {
-		return map[string]paneInfo{}
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+
+	d.upsert("ses_1", session.StatusWorking, nil)
+	snap := reg.Snapshot()
+	if len(snap) != 1 || snap[0].AgentSessionID != "ses_1" || snap[0].Status != session.StatusWorking {
+		t.Fatalf("after upsert: %+v", snap)
+	}
+	if snap[0].Cwd != "/repo" || snap[0].TranscriptPath != "ses_1" {
+		t.Fatalf("display fields: %+v", snap[0])
 	}
 
-	if err := d.ScanOnce(context.Background()); err != nil {
-		t.Fatalf("ScanOnce: %v", err)
-	}
-	if got := len(reg.Snapshot()); got != 0 {
-		t.Fatalf("want 0 sessions (no pane), got %d", got)
-	}
-}
-
-func TestScanOnceServiceDown(t *testing.T) {
-	reg := registry.New()
-	d := &discoverer{reg: reg}
-	d.dial = func() (*client, bool) { return nil, false }
-	if err := d.ScanOnce(context.Background()); err != nil {
-		t.Fatalf("ScanOnce: %v", err)
-	}
+	d.remove("ses_1")
 	if len(reg.Snapshot()) != 0 {
-		t.Fatal("expected no sessions when service is down")
+		t.Fatalf("after remove, expected empty")
+	}
+}
+
+func TestPresenceSweepIdleAgesOutExceptPermission(t *testing.T) {
+	reg := registry.New()
+	d := newTestDiscoverer(reg, nil)
+	now := time.Now()
+	d.mu.Lock()
+	d.presence["old_idle"] = &presenceEntry{lastActivity: now.Add(-2 * time.Hour), status: session.StatusAwaitingInput, awaitingPermission: false}
+	d.presence["old_perm"] = &presenceEntry{lastActivity: now.Add(-2 * time.Hour), status: session.StatusAwaitingInput, awaitingPermission: true}
+	d.mu.Unlock()
+	reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: "old_idle", Status: session.StatusAwaitingInput})
+	reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: "old_perm", Status: session.StatusAwaitingInput})
+
+	d.sweepIdle()
+
+	ids := map[string]bool{}
+	for _, s := range reg.Snapshot() {
+		ids[s.AgentSessionID] = true
+	}
+	if ids["old_idle"] {
+		t.Fatal("idle session should have aged out")
+	}
+	if !ids["old_perm"] {
+		t.Fatal("awaiting-permission session must not age out")
+	}
+}
+
+func TestScanOnceSeedsRunning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/active":
+			_, _ = w.Write([]byte(`{"data":{"ses_1":{"type":"running"}}}`))
+		case "/api/session/ses_1":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"}}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+	if err := d.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+	snap := reg.Snapshot()
+	if len(snap) != 1 || snap[0].AgentSessionID != "ses_1" || snap[0].Status != session.StatusWorking {
+		t.Fatalf("seed: %+v", snap)
 	}
 }
