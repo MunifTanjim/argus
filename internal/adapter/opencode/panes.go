@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -95,6 +96,8 @@ func (d *discoverer) scanPanes(ctx context.Context) (bound map[string]string, ok
 // paneless. active marks sessions currently running, so a freshly-tracked
 // pane-backed session gets the right status.
 func (d *discoverer) reconcilePanes(ctx context.Context, bound map[string]string, active map[string]bool) {
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
 	for id, paneID := range bound {
 		d.mu.Lock()
 		prev := d.panes[id]
@@ -125,6 +128,11 @@ func (d *discoverer) reconcilePanes(ctx context.Context, bound map[string]string
 	}
 	for _, id := range gone {
 		delete(d.panes, id)
+		// Reset the idle clock so a session that sat idle-in-pane past the TTL is not
+		// swept away the instant its terminal closes; it gets a fresh idle window.
+		if e, ok := d.presence[id]; ok {
+			e.lastActivity = time.Now()
+		}
 	}
 	d.mu.Unlock()
 	for _, id := range gone {

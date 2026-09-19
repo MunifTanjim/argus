@@ -35,6 +35,7 @@ class SessionListScreen extends ConsumerWidget {
       ),
     );
     final canDismiss = s.agent == 'opencode' &&
+        !s.controllable &&
         s.status != SessionStatus.working &&
         (s.interaction == null ||
             s.interaction!.kind == InteractionKind.idle);

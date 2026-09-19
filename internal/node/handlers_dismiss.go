@@ -23,6 +23,11 @@ func (d *Node) handleSessionDismiss(ctx context.Context, params json.RawMessage)
 		(s.Interaction != nil && s.Interaction.Kind != session.InteractionIdle) {
 		return nil, fmt.Errorf("cannot dismiss a session that needs your input")
 	}
+	// A live adopted terminal pane means the session is in use; dismissing it would
+	// not stick (the next pane scan re-adopts it). Close the terminal first.
+	if s.Controllable() {
+		return nil, fmt.Errorf("cannot dismiss a session with an open terminal; close it first")
+	}
 	r, ok := d.adapterFor(s.Agent).(adapter.Dismisser)
 	if !ok {
 		return nil, fmt.Errorf("dismiss unsupported for agent %s", s.Agent)

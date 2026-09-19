@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -28,10 +29,11 @@ type discoverer struct {
 	dial func() (*client, bool)
 
 	pumpOnce sync.Once
-	seedOnce sync.Once
+	seeded   atomic.Bool // idle-seed done (set only after a successful seed, so a transient error retries)
 	ctx      context.Context
 
-	argusTmux *tmux.Client // argus tmux server, for adopting spawned terminal panes
+	argusTmux   *tmux.Client // argus tmux server, for adopting spawned terminal panes
+	reconcileMu sync.Mutex   // serializes pane reconcile passes (concurrent scans must not interleave)
 
 	mu       sync.Mutex
 	presence map[string]*presenceEntry // opencode session id -> entry
@@ -85,11 +87,12 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		for id := range active {
 			d.upsert(id, session.StatusWorking, nil)
 		}
-		d.seedOnce.Do(func() {
+		if !d.seeded.Load() {
 			if sessions, lerr := c.listSessions(ctx); lerr == nil {
 				d.seedIdle(sessions)
+				d.seeded.Store(true)
 			}
-		})
+		}
 		if bound, ok := d.scanPanes(ctx); ok {
 			d.reconcilePanes(ctx, bound, active)
 		}
@@ -154,7 +157,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 // seedIdle adds idle sessions whose last update falls within the idle TTL as
 // AwaitingInput, so a restart surfaces sessions active in the last hour. It skips
 // running/archived sessions and any id already tracked, so it never resurrects a
-// dismissed session on a later scan (guarded by seedOnce to run at startup only).
+// dismissed session on a later scan (the seeded flag runs it once, at startup).
 func (d *discoverer) seedIdle(sessions []ocSession) {
 	cutoff := time.Now().Add(-sessionIdleTTL)
 	for _, s := range sessions {

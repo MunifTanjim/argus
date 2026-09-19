@@ -77,4 +77,19 @@ func TestHandleSessionDismiss(t *testing.T) {
 	if err := call(); err == nil || fd.called {
 		t.Fatalf("question dismiss should be rejected: err=%v called=%v", err, fd.called)
 	}
+
+	// idle but with an open terminal pane → rejected (would not stick; pane re-adopts)
+	fd.called = false
+	s, _ = d.reg.ApplyHook(registry.HookUpdate{
+		Agent:              "opencode",
+		AgentSessionID:     "ses_1",
+		Status:             session.StatusAwaitingInput,
+		Server:             session.TmuxServerArgus,
+		PaneID:             "%7",
+		Interaction:        &session.Interaction{Kind: session.InteractionIdle},
+		ReplaceInteraction: true,
+	})
+	if err := call(); err == nil || fd.called {
+		t.Fatalf("controllable dismiss should be rejected: err=%v called=%v", err, fd.called)
+	}
 }
