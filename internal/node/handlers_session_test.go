@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,81 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
+
+type fakePrompter struct {
+	adapter.Adapter
+	called  bool
+	gotText string
+}
+
+func (f *fakePrompter) SendPrompt(_ context.Context, _ session.Session, text string) error {
+	f.called = true
+	f.gotText = text
+	return nil
+}
+
+type fakeNonPrompter struct{ adapter.Adapter }
+
+func TestHandleSessionInputPromptFallback(t *testing.T) {
+	fp := &fakePrompter{}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["opencode"] = fp
+
+	input := func(id, text string) error {
+		params, _ := json.Marshal(api.InputParams{SessionID: id, Text: text, Submit: true})
+		_, err := d.handleSessionInput(context.Background(), params)
+		return err
+	}
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusIdle, Input: session.InputAPI})
+	if err := input(s.ID, "hello"); err != nil || !fp.called || fp.gotText != "hello" {
+		t.Fatalf("idle prompt: err=%v called=%v text=%q", err, fp.called, fp.gotText)
+	}
+
+	fp.called = false
+	s, _ = d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusWorking})
+	if err := input(s.ID, "hi"); err == nil || fp.called {
+		t.Fatalf("working prompt should be rejected: err=%v called=%v", err, fp.called)
+	}
+}
+
+func TestCanSpawnViewer(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.binCache = map[string]bool{"opencode": true, "claude": true}
+	mk := func(agent string) session.Session {
+		return session.Session{Agent: agent, AgentSessionID: "s1", Cwd: "/tmp"}
+	}
+
+	// opencode's pane is a viewer of a service-backed session, so it can respawn.
+	if !d.canSpawnViewer(mk("opencode")) {
+		t.Fatal("opencode: pane is a viewer, should be spawnable")
+	}
+	// claude is resumable, but its pane is the session's own process: never respawn.
+	if d.canSpawnViewer(mk("claude")) {
+		t.Fatal("claude: pane is the process, must not be viewer-spawnable")
+	}
+	noCwd := mk("opencode")
+	noCwd.Cwd = ""
+	if d.canSpawnViewer(noCwd) {
+		t.Fatal("unknown cwd must not be viewer-spawnable")
+	}
+	d.caps.SpawnSession = false
+	if d.canSpawnViewer(mk("opencode")) {
+		t.Fatal("no tmux must not be viewer-spawnable")
+	}
+}
+
+func TestHandleSessionInputPanelessNonPrompter(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["ghost"] = &fakeNonPrompter{}
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "ghost", AgentSessionID: "g1", Status: session.StatusIdle})
+	params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: "x", Submit: true})
+	if _, err := d.handleSessionInput(context.Background(), params); !errors.Is(err, api.ErrNoTerminalControl) {
+		t.Fatalf("want ErrNoTerminalControl, got %v", err)
+	}
+}
 
 // fakeDiscoverer registers the target session on its Nth ScanOnce, modelling the
 // spawn→ps lag: the process only becomes visible to discovery after a few scans.
@@ -35,6 +111,18 @@ func (f *fakeDiscoverer) ScanOnce(context.Context) error {
 
 // The post-spawn rescan must retry until the session is registered, then stop as
 // soon as it appears (not run the full backoff schedule).
+func TestSpawnEnvDisablesOpencodeTabs(t *testing.T) {
+	if env := spawnEnv("opencode"); len(env) != 1 || env[0] != `OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"enabled":false}}` {
+		t.Fatalf("opencode spawn env = %#v", env)
+	}
+	if env := spawnEnv("/usr/local/bin/opencode"); len(env) != 1 {
+		t.Fatalf("opencode env must apply to an absolute path too: %#v", env)
+	}
+	if env := spawnEnv("claude"); env != nil {
+		t.Fatalf("non-opencode command must get no extra env: %#v", env)
+	}
+}
+
 func TestRescanUntilRegisteredStopsWhenFound(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmux.New("argus-rescan-test"),
@@ -229,6 +317,7 @@ func TestHandleSessionResumeRejectsEmptyParams(t *testing.T) {
 func TestHandleSessionResumeJumpsToInflightLivePane(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep the seeded pane from being pruned
 	// A live pane exists under id "argus:%7" but its agent session id hasn't been
 	// reported yet, so the by-agent-session check misses and the guard is consulted.
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
@@ -252,6 +341,7 @@ func TestHandleSessionResumeJumpsToInflightLivePane(t *testing.T) {
 func TestHandleSessionResumeErrorsWhenInflightPaneGone(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep test state deterministic
 	d.resuming["claude\x00sess-1"] = "argus:%dead"
 	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "sess-1", Cwd: t.TempDir()})
 	if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
@@ -275,6 +365,7 @@ func TestClearResumingOnKill(t *testing.T) {
 func TestHandleSessionResumeJumpsToLiveSession(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep the seeded session from being pruned
 	// Seed a live, controllable session with a matching agent session id.
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
 		AgentSessionID: "live-1",

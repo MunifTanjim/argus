@@ -408,6 +408,7 @@ type NewSessionOpts struct {
 	Command string   // optional command to run (empty = default shell)
 	Args    []string // optional arguments passed to Command as separate argv; ignored when Command is empty
 	Cwd     string   // optional working directory for the session
+	Env     []string // optional environment assignments ("KEY=VALUE") set on the session
 	Width   int      // optional geometry; defaults to a TUI-friendly 120x40
 	Height  int
 }
@@ -441,6 +442,9 @@ func newSessionArgs(opts NewSessionOpts) []string {
 	}
 	if opts.Cwd != "" {
 		sub = append(sub, "-c", opts.Cwd)
+	}
+	for _, e := range opts.Env {
+		sub = append(sub, "-e", e)
 	}
 	if opts.Command != "" {
 		sub = append(sub, opts.Command)

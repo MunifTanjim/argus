@@ -20,8 +20,9 @@ const BundleRoot = "root"
 
 // BundledFile pairs a source file on disk with its path inside an export bundle.
 type BundledFile struct {
-	AbsPath string // source path on disk
-	RelPath string // path within the bundle (slash-separated, rooted at BundleRoot)
+	AbsPath   string // source path on disk
+	RelPath   string // path within the bundle (slash-separated, rooted at BundleRoot)
+	Transient bool   // the export handler should remove this file after bundling
 }
 
 // RootedFile pairs p with its path inside an export bundle, rooted under
@@ -96,10 +97,36 @@ type TaskSource interface {
 	TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool)
 }
 
+// Responder answers a pending interaction by an outbound action, for adapters
+// that do not park a blocking hook call (for example an HTTP-service agent).
+// The node type-asserts this on the session's adapter when no parked decision
+// exists for the respond.
+type Responder interface {
+	Respond(ctx context.Context, sess session.Session, p api.RespondParams) error
+}
+
+// Dismisser removes a session from the live list on the user's request, for
+// adapters whose sessions are presence-tracked rather than pane-bound (opencode).
+type Dismisser interface {
+	Dismiss(ctx context.Context, sess session.Session) error
+}
+
+// Prompter delivers a user prompt to a paneless session over the agent's own API,
+// for agents whose sessions cannot receive tmux keystrokes (opencode).
+type Prompter interface {
+	SendPrompt(ctx context.Context, sess session.Session, text string) error
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string
 	AgentColor() string
+
+	// IsHeadless reports that the agent's session runs with no attached terminal by
+	// default (a background service): a tmux pane is an optional viewer of it. When
+	// true, argus can spawn or respawn a pane for a live session without restarting
+	// it; when false, the pane is the session's own process and losing it ends it.
+	IsHeadless() bool
 
 	NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) Discoverer
 

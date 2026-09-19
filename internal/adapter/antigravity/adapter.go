@@ -21,6 +21,7 @@ var _ adapter.Adapter = agAdapter{}
 func (agAdapter) Agent() string      { return Agent }
 func (agAdapter) AgentName() string  { return "Antigravity" }
 func (agAdapter) AgentColor() string { return "#83a598" } // blue
+func (agAdapter) IsHeadless() bool   { return false }
 
 func (agAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return NewDiscoverer(reg, clients)

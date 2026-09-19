@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/spawn"
@@ -24,7 +26,85 @@ import (
 var submitDelay = 75 * time.Millisecond
 
 func (d *Node) handleSessionsList(context.Context, json.RawMessage) (any, error) {
-	return d.reg.Snapshot(), nil
+	return d.snapshotWithCaps(), nil
+}
+
+// snapshotWithCaps returns the registry snapshot with node-computed capability
+// fields stamped on each session.
+func (d *Node) snapshotWithCaps() []session.Session {
+	snap := d.reg.Snapshot()
+	for i := range snap {
+		snap[i] = d.withCaps(snap[i])
+	}
+	return snap
+}
+
+// withCaps stamps node-computed capability fields onto a session before it is
+// emitted to a client, so they reflect this node's tmux and installed agents.
+func (d *Node) withCaps(s session.Session) session.Session {
+	s.CanOpenTerminal = d.canOpenTerminal(s)
+	return s
+}
+
+// canOpenTerminal reports whether argus can show a terminal for this live session
+// on this node: an existing pane to attach, or a session whose pane is a viewer it
+// can spawn here.
+func (d *Node) canOpenTerminal(s session.Session) bool {
+	return s.Controllable() || d.canSpawnViewer(s)
+}
+
+// canSpawnViewer reports whether argus can spawn a terminal viewer for a session
+// whose agent is headless (adapter.IsHeadless): a pane is a disposable view of a
+// session that lives on its own, not the session's own process. Requires tmux, a
+// known cwd, and the agent's resume binary on PATH.
+func (d *Node) canSpawnViewer(s session.Session) bool {
+	if !d.adapterFor(s.Agent).IsHeadless() || !d.caps.SpawnSession || s.Cwd == "" || s.AgentSessionID == "" {
+		return false
+	}
+	name, _, ok := d.adapterFor(s.Agent).ResumeCommand(s.AgentSessionID)
+	if !ok {
+		return false
+	}
+	return d.binaryAvailable(name)
+}
+
+// recoverViewerPane recovers from a mirror setup failure caused by an adopted
+// viewer pane that died out-of-band, leaving a stale controllable record: it drops
+// the dead pane and respawns the viewer, returning the now-live session. It only
+// applies to sessions whose pane is a viewer (canSpawnViewer); for any other
+// session it reports ok=false so the original error stands.
+func (d *Node) recoverViewerPane(ctx context.Context, s session.Session) (session.Session, *tmux.Client, bool) {
+	if !d.canSpawnViewer(s) {
+		return s, nil, false
+	}
+	d.reg.ClearPane(s.AgentSessionID)
+	if _, err := d.spawnAndAdopt(ctx, s.Agent, s.AgentSessionID, s.Cwd, s.ID); err != nil {
+		return s, nil, false
+	}
+	s2, c2, err := d.resolve(s.ID)
+	if err != nil {
+		return s, nil, false
+	}
+	return s2, c2, true
+}
+
+// binaryAvailable memoizes a PATH lookup for an agent binary. It backs the
+// display signal only; terminal.open does the authoritative check when it spawns.
+func (d *Node) binaryAvailable(name string) bool {
+	if name == "" {
+		return false
+	}
+	d.binMu.Lock()
+	defer d.binMu.Unlock()
+	if d.binCache == nil {
+		d.binCache = map[string]bool{}
+	}
+	if v, ok := d.binCache[name]; ok {
+		return v
+	}
+	_, err := exec.LookPath(name)
+	d.binCache[name] = err == nil
+	return d.binCache[name]
 }
 
 // handleNodeIdentify announces this node's identity over the gateway uplink.
@@ -51,7 +131,7 @@ func (d *Node) handleServerInfo(context.Context, json.RawMessage) (any, error) {
 // handleSessionsRefresh rescans on demand, then returns the current snapshot.
 func (d *Node) handleSessionsRefresh(ctx context.Context, _ json.RawMessage) (any, error) {
 	d.scan(ctx)
-	return d.reg.Snapshot(), nil
+	return d.snapshotWithCaps(), nil
 }
 
 // handleTranscriptView returns the grouped, display-ready chunk view for a session.
@@ -116,14 +196,32 @@ func (d *Node) handleSessionCapture(ctx context.Context, params json.RawMessage)
 	return api.CaptureResult{Screen: screen}, nil
 }
 
-// handleSessionInput sends text (and optionally Enter) to a session's pane, after
-// optionally normalizing the pane for input (exit copy mode; ensure vim insert).
+// handleSessionInput delivers input to a session over its input channel: the
+// agent's own prompt API for an InputAPI session (opencode), or tmux keystrokes
+// for an InputPane session.
 func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.InputParams](params)
 	if err != nil {
 		return nil, err
 	}
-	s, c, err := d.resolve(p.SessionID)
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
+	}
+	switch s.Input {
+	case session.InputAPI:
+		return d.sendPromptInput(ctx, s, p)
+	case session.InputPane:
+		return d.sendPaneInput(ctx, s, p)
+	default:
+		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
+	}
+}
+
+// sendPaneInput sends text (and optionally Enter) to a session's pane, after
+// optionally normalizing the pane for input (exit copy mode; ensure vim insert).
+func (d *Node) sendPaneInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
+	_, c, err := d.resolve(s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +257,27 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 		}
 	}
 	return nil, nil
+}
+
+// sendPromptInput delivers a prompt to an InputAPI session over its agent's API,
+// when the session is idle enough to accept one. It reports the absent terminal
+// control otherwise, as the pane path would.
+func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
+	pr, ok := d.adapterFor(s.Agent).(adapter.Prompter)
+	if !ok || p.Text == "" || !promptEligible(s) {
+		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
+	}
+	if err := pr.SendPrompt(ctx, s, p.Text); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// promptEligible reports whether a session is idle/finished enough to receive a
+// new prompt: not actively working, and not blocked on a permission or question.
+func promptEligible(s session.Session) bool {
+	return s.Status != session.StatusWorking &&
+		(s.Interaction == nil || s.Interaction.Kind == session.InteractionIdle)
 }
 
 // sleepCtx waits for d, returning early if ctx is cancelled.
@@ -273,6 +392,16 @@ func (d *Node) rescanUntilRegistered(id string) {
 	}
 }
 
+// spawnEnv returns extra environment assignments for a spawned command. OpenCode
+// runs with tabs disabled so one pane maps to exactly one session, which is how
+// argus tracks and adopts it.
+func spawnEnv(command string) []string {
+	if filepath.Base(command) == "opencode" {
+		return []string{`OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"enabled":false}}`}
+	}
+	return nil
+}
+
 // launchPane opens a new tmux pane running command in cwd. A blank sessionName
 // gets a node-generated default. Discovery registers the pane shortly; a scan is
 // triggered for immediacy.
@@ -281,7 +410,7 @@ func (d *Node) launchPane(ctx context.Context, sessionName, command string, args
 	if sessionName == "" {
 		sessionName = spawn.SessionName(ctx, c, cwd)
 	}
-	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args})
+	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args, Env: spawnEnv(command)})
 	if err != nil {
 		return "", err
 	}
@@ -294,10 +423,10 @@ func (d *Node) launchPane(ctx context.Context, sessionName, command string, args
 // takes over from the in-flight guard.
 var resumeGraceWindow = 30 * time.Second
 
-// handleSessionResume resumes a past session by its agent session id. If that
-// session is already running live (or a concurrent resume is launching it), it
-// returns that session rather than spawning a duplicate; otherwise it launches the
-// agent's resume command in the session's original cwd.
+// handleSessionResume restarts a past (not currently live) session by its agent
+// session id in a tmux pane, and returns an id the caller can enter once the pane
+// is live. A session that is already running is reused rather than duplicated.
+// This is distinct from opening a terminal view of a live session (terminal.open).
 func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.ResumeParams](params)
 	if err != nil {
@@ -324,66 +453,127 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 		}
 	}
 
-	key := p.Agent + "\x00" + p.AgentSessionID
-	d.resumeMu.Lock()
-	defer d.resumeMu.Unlock()
+	// Reconcile discovery so a pane killed out-of-band is detached before we reuse
+	// or relaunch; a still-live pane stays adopted and is reused below.
+	d.scan(ctx)
 
-	snap := d.reg.Snapshot()
-	// Jump to an already-live, controllable session with this agent session id.
-	for _, s := range snap {
-		if s.Agent == p.Agent && s.AgentSessionID == p.AgentSessionID && s.Controllable() {
+	// A live controllable session with this agent session id is reused as-is; a
+	// paneless record (an OpenCode presence card) is adopted onto by the launch.
+	adoptID := ""
+	for _, s := range d.reg.Snapshot() {
+		if s.Agent != p.Agent || s.AgentSessionID != p.AgentSessionID {
+			continue
+		}
+		if s.Controllable() {
 			return api.ResumeResult{SessionID: s.ID}, nil
 		}
-	}
-	// Don't relaunch while a prior resume of this session is in flight — a duplicate
-	// would race discovery. Jump to that pane if it's already live, else tell the
-	// caller to retry (a kill clears this guard immediately; see clearResuming).
-	if id, ok := d.resuming[key]; ok {
-		for _, s := range snap {
-			if s.ID == id && s.Controllable() {
-				return api.ResumeResult{SessionID: id}, nil
-			}
-		}
-		return nil, &api.RPCError{
-			Code:    api.CodeInvalidRequest,
-			Message: "session was resumed moments ago; wait a few seconds and try again",
-		}
+		adoptID = s.ID
 	}
 
-	name, args, ok := d.adapterFor(p.Agent).ResumeCommand(p.AgentSessionID)
-	if !ok {
-		return nil, &api.RPCError{
-			Code:    api.CodeInvalidRequest,
-			Message: "resume not supported for agent " + p.Agent,
-		}
-	}
-	if _, err := exec.LookPath(name); err != nil {
-		return nil, &api.RPCError{
-			Code:    api.CodeInvalidRequest,
-			Message: fmt.Sprintf("cannot resume: %q is not installed on node %s", name, d.label),
-		}
-	}
-	paneID, err := d.launchPane(ctx, "", name, args, p.Cwd)
+	sid, err := d.spawnAndAdopt(ctx, p.Agent, p.AgentSessionID, p.Cwd, adoptID)
 	if err != nil {
 		return nil, err
 	}
-	sid := string(session.TmuxServerArgus) + ":" + paneID
+	return api.ResumeResult{SessionID: sid}, nil
+}
+
+// spawnAndAdopt launches the agent's resume command in a tmux pane and waits for
+// discovery to adopt it, returning the id of the now-controllable session. A
+// non-empty existingID adopts the pane onto a live paneless record (keeping its
+// id); an empty existingID is a fresh launch keyed by the pane. An in-flight guard
+// stops a concurrent duplicate launch of the same session.
+func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error) {
+	if cwd == "" {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot open terminal: session working directory is unknown"}
+	}
+	if !d.caps.SpawnSession {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal unavailable: tmux not found on node " + d.label}
+	}
+
+	key := agent + "\x00" + agentSessionID
+	d.resumeMu.Lock()
+	unlocked := false
+	unlock := func() {
+		if !unlocked {
+			d.resumeMu.Unlock()
+			unlocked = true
+		}
+	}
+	defer unlock()
+
+	// Don't relaunch while a prior launch of this session is in flight — a duplicate
+	// would race discovery. Jump to it once live, else tell the caller to retry (a
+	// kill clears this guard immediately; see clearResuming).
+	if id, ok := d.resuming[key]; ok {
+		if s, ok := d.reg.Get(id); ok && s.Controllable() {
+			return id, nil
+		}
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
+	}
+
+	name, args, ok := d.adapterFor(agent).ResumeCommand(agentSessionID)
+	if !ok {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal not supported for agent " + agent}
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("cannot open terminal: %q is not installed on node %s", name, d.label)}
+	}
+	paneID, err := d.launchPane(ctx, "", name, args, cwd)
+	if err != nil {
+		return "", err
+	}
+	// An adopted record keeps its id; a fresh launch is pane-keyed, matching the
+	// record discovery will create.
+	sid := existingID
+	if sid == "" {
+		sid = string(session.TmuxServerArgus) + ":" + paneID
+	}
 	d.resuming[key] = sid
 	time.AfterFunc(resumeGraceWindow, func() {
 		d.resumeMu.Lock()
 		delete(d.resuming, key)
 		d.resumeMu.Unlock()
 	})
-	return api.ResumeResult{SessionID: sid}, nil
+	// Release before the wait so an unrelated launch is not blocked behind it.
+	unlock()
+
+	if !d.waitControllable(sid) {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
+	}
+	return sid, nil
 }
 
-// handleSessionKill kills a session's pane.
+// waitControllable rescans discovery with backoff until the session has adopted
+// its spawned pane (Controllable), covering the lag between the pane existing and
+// the agent process appearing in ps. Returns false if it never adopts in time.
+func (d *Node) waitControllable(id string) bool {
+	backoffs := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, 750 * time.Millisecond, 1500 * time.Millisecond, 2 * time.Second}
+	for _, wait := range backoffs {
+		time.Sleep(wait)
+		d.scan(context.Background())
+		if s, ok := d.reg.Get(id); ok && s.Controllable() {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSessionKill removes a session from the list: it kills the tmux pane when
+// the session has one, otherwise it dismisses a paneless presence card (OpenCode).
+// One "remove" verb chosen by pane presence.
 func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SessionRef](params)
 	if err != nil {
 		return nil, err
 	}
-	s, c, err := d.resolve(p.SessionID)
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	if !s.Controllable() {
+		return d.dismissSession(ctx, s)
+	}
+	c, err := d.clientFor(s)
 	if err != nil {
 		return nil, err
 	}
@@ -392,6 +582,24 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	}
 	d.clearResuming(s.ID)
 	go d.scan(context.Background())
+	return nil, nil
+}
+
+// dismissSession removes a paneless presence card via the adapter's Dismisser.
+// Rejected while the session is working or awaiting a question/permission, so a
+// session that needs the user is never hidden.
+func (d *Node) dismissSession(ctx context.Context, s session.Session) (any, error) {
+	if s.Status == session.StatusWorking ||
+		(s.Interaction != nil && s.Interaction.Kind != session.InteractionIdle) {
+		return nil, fmt.Errorf("cannot dismiss a session that needs your input")
+	}
+	r, ok := d.adapterFor(s.Agent).(adapter.Dismisser)
+	if !ok {
+		return nil, fmt.Errorf("cannot remove %s session: no terminal pane and dismiss is unsupported", s.Agent)
+	}
+	if err := r.Dismiss(ctx, s); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 

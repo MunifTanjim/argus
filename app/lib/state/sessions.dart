@@ -52,6 +52,16 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
   void apply(RegistryEvent ev) {
     state = applyEvent(state, ev);
   }
+
+  void remove(String id) {
+    if (!state.containsKey(id)) return;
+    final next = Map<String, Session>.of(state)..remove(id);
+    state = next;
+  }
+
+  void put(Session s) {
+    state = Map<String, Session>.of(state)..[s.id] = s;
+  }
 }
 
 final sessionsProvider =

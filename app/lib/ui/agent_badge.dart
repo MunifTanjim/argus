@@ -10,6 +10,8 @@ String agentLabel(String agent) {
       return 'Codex';
     case 'antigravity':
       return 'Antigravity';
+    case 'opencode':
+      return 'OpenCode';
     default:
       return agent;
   }
@@ -23,6 +25,8 @@ Color agentColor(String agent) {
       return const Color(0xFFb8bb26);
     case 'antigravity':
       return const Color(0xFF83a598);
+    case 'opencode':
+      return const Color(0xFFd3869b);
     default:
       return AppColors.dim;
   }

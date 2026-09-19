@@ -85,6 +85,7 @@ var (
 	ColorAgentClaude      color.Color
 	ColorAgentCodex       color.Color
 	ColorAgentAntigravity color.Color
+	ColorAgentOpenCode    color.Color
 )
 
 // -- Semantic text styles -----------------------------------------------------
@@ -177,6 +178,7 @@ func initTheme(hasDarkBg bool) {
 	ColorAgentClaude = ld(lipgloss.Color("3"), lipgloss.Color("208"))     // orange
 	ColorAgentCodex = ld(lipgloss.Color("2"), lipgloss.Color("114"))      // green
 	ColorAgentAntigravity = ld(lipgloss.Color("4"), lipgloss.Color("75")) // blue
+	ColorAgentOpenCode = ld(lipgloss.Color("5"), lipgloss.Color("175"))   // purple/magenta
 
 	StylePrimaryBold = lipgloss.NewStyle().Bold(true).Foreground(ColorTextPrimary)
 	StyleSecondary = lipgloss.NewStyle().Foreground(ColorTextSecondary)

@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:argus/core/result.dart';
+import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/grouping.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/transport/connection.dart';
@@ -16,6 +19,10 @@ Session _s(String id, String host, String status) =>
 Session _sa(String id, String host, String status, String agent) =>
     Session.fromJson(jsonDecode(
         '{"id":"$id","agent":"$agent","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
+
+Session _sq(String id, String host, String agent) =>
+    Session.fromJson(jsonDecode(
+        '{"id":"$id","agent":"$agent","status":"awaiting_input","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host","interaction":{"kind":"question"}}'));
 
 Widget _app(List<Override> overrides) => ProviderScope(
       overrides: overrides,
@@ -77,6 +84,79 @@ void main() {
     await tester.pump();
     expect(find.textContaining('Reconnecting'), findsOneWidget);
   });
+
+  testWidgets('idle opencode session is dismissible; working/question is not',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final workingSession = _sa('oc:work', 'dev', 'working', 'opencode');
+    final questionSession = _sq('oc:ask', 'dev', 'opencode');
+    final repo = _FakeRepository();
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() =>
+          _SeededSessions([idleSession, workingSession, questionSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+    ]));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('oc:idle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('oc:work')), findsNothing);
+    expect(find.byKey(const ValueKey('oc:ask')), findsNothing);
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+    expect(repo.dismissed, contains('oc:idle'));
+  });
+
+  testWidgets('dismissing removes the row from local state and survives rebuild',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final repo = _FakeRepository();
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([idleSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+      connStateProvider.overrideWith((ref) => ConnState.connected),
+    ]));
+    await tester.pump();
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    // Force a parent rebuild before any server removal event arrives.
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(SessionListScreen)));
+    container.read(connStateProvider.notifier).state = ConnState.reconnecting;
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('oc:idle')), findsNothing);
+    expect(repo.dismissed, contains('oc:idle'));
+  });
+
+  testWidgets('failed dismiss re-inserts the row and shows a SnackBar',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final repo = _FakeRepository()..dismissError = 'node rejected';
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([idleSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+    ]));
+    await tester.pump();
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Failed to dismiss'), findsOneWidget);
+    expect(find.byKey(const ValueKey('oc:idle')), findsOneWidget);
+  });
 }
 
 class _SeededSessions extends SessionsNotifier {
@@ -84,4 +164,61 @@ class _SeededSessions extends SessionsNotifier {
   final List<Session> _seed;
   @override
   Map<String, Session> build() => {for (final s in _seed) s.id: s};
+}
+
+class _FakeRepository implements SessionRepository {
+  final List<String> dismissed = [];
+  String? dismissError;
+
+  @override
+  Future<Result<void>> respond(Map<String, dynamic> params) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> sendInput(String sessionId, String text) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<String>> capture(String sessionId) async =>
+      const Result.ok('');
+
+  @override
+  Future<Result<void>> sendKeys(String sessionId, List<String> keys) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> sendRaw(String sessionId, String text) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> spawn({
+    String? nodeId,
+    String? cwd,
+    String? agent,
+    required String prompt,
+  }) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> kill(String sessionId) {
+    dismissed.add(sessionId);
+    if (dismissError != null) return Future.value(Result.error(dismissError!));
+    return Future.value(Result.ok(null));
+  }
+
+  @override
+  Future<Result<List<NodeRef>>> nodes() async => const Result.ok([]);
+
+  @override
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
+      const Result.ok([]);
+
+  @override
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  }) async =>
+      Result.ok(const ResumeOutcome(sessionId: ''));
 }

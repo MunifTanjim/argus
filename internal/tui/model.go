@@ -112,10 +112,9 @@ type model struct {
 
 	prompt promptState // compose-then-submit draft for the prompt dock
 
-	pendingKill     bool   // awaiting kill confirmation in list view
-	pendingExport   bool   // awaiting export confirmation in history transcript view
-	pendingResumeID string // resumed session id to select once it appears in the list
-	flash           string // transient list-view status (e.g. why a jump was refused)
+	pendingKill   bool   // awaiting kill confirmation in list view
+	pendingExport bool   // awaiting export confirmation in history transcript view
+	flash         string // transient list-view status (e.g. why a jump was refused)
 
 	spawn spawnState // staged "new session" flow (node → dir → name → command)
 

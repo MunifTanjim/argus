@@ -6,7 +6,7 @@ func TestToolRegistryAttribution(t *testing.T) {
 	// Every entry belongs to a known agent.
 	for name, meta := range toolRegistry {
 		switch meta.agent {
-		case agentClaude, agentCodex, agentAntigravity:
+		case agentClaude, agentCodex, agentAntigravity, agentOpenCode:
 		default:
 			t.Errorf("%q: unknown agent %q", name, meta.agent)
 		}

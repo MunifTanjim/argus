@@ -30,10 +30,10 @@ const (
 	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
 	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
-	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult
+	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
 	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
-	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil
+	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
 	MethodSessionFocus = "sessions.focus" // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.

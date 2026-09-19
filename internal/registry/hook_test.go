@@ -38,6 +38,64 @@ func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 	}
 }
 
+func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T) {
+	r := New()
+	// Paneless external session (OpenCode presence).
+	r.ApplyHook(HookUpdate{
+		Agent:          "opencode",
+		AgentSessionID: "ses_1",
+		Frontend:       session.FrontendExternal,
+		Input:          session.InputAPI,
+		Status:         session.StatusAwaitingInput,
+	})
+	first := r.Snapshot()
+	if len(first) != 1 || first[0].Controllable() {
+		t.Fatalf("want 1 paneless session, got %+v", first)
+	}
+	if first[0].Input != session.InputAPI {
+		t.Fatalf("paneless opencode session must be InputAPI, got %q", first[0].Input)
+	}
+	id := first[0].ID
+
+	// A pane is spawned for it and adopted (same agent session id).
+	r.ApplyHook(HookUpdate{
+		Agent:          "opencode",
+		AgentSessionID: "ses_1",
+		Server:         session.TmuxServerArgus,
+		PaneID:         "%5",
+		Frontend:       session.FrontendExternal,
+		Input:          session.InputAPI,
+		Status:         session.StatusAwaitingInput,
+	})
+	adopted := r.Snapshot()
+	if len(adopted) != 1 {
+		t.Fatalf("adoption must not duplicate: %+v", adopted)
+	}
+	if adopted[0].ID != id {
+		t.Fatalf("record ID must stay agent-keyed: %q -> %q", id, adopted[0].ID)
+	}
+	if !adopted[0].Controllable() || adopted[0].Frontend != session.FrontendTmux {
+		t.Fatalf("adopted session should be controllable tmux: %+v", adopted[0])
+	}
+	// The adopted pane is for viewing only: input still goes over the API.
+	if adopted[0].Input != session.InputAPI {
+		t.Fatalf("adopted opencode session must stay InputAPI, got %q", adopted[0].Input)
+	}
+
+	// Pane dies -> revert to paneless external.
+	r.ClearPane("ses_1")
+	reverted := r.Snapshot()
+	if len(reverted) != 1 || reverted[0].Controllable() {
+		t.Fatalf("ClearPane should revert to paneless: %+v", reverted)
+	}
+	if reverted[0].Frontend != session.FrontendExternal {
+		t.Fatalf("reverted session should be external: %+v", reverted[0])
+	}
+	if reverted[0].Input != session.InputAPI {
+		t.Fatalf("reverted opencode session must stay InputAPI, got %q", reverted[0].Input)
+	}
+}
+
 func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 	r := New()
 	got, alive := r.ApplyHook(HookUpdate{

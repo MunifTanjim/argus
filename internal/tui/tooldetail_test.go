@@ -500,6 +500,31 @@ func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 	}
 }
 
+func TestQuestionDetailOpenCode(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "question",
+		ToolInput: `{"questions":[{"header":"Storage","question":"Where should it be stored?",
+			"options":[
+				{"label":"In the sealed token","description":"cleaner migration"},
+				{"label":"App credential only","description":"no token change"}
+			]}]}`,
+		Result: `User has answered your questions: "Where should it be stored?"="In the sealed token". You can now continue.`,
+	}
+	out := m.toolBody(it, 60)
+	if strings.Contains(out, `"questions"`) || strings.Contains(out, `"options"`) {
+		t.Errorf("should not dump raw JSON:\n%s", out)
+	}
+	for _, want := range []string{"OpenCode is asking", "Where should it be stored?", "In the sealed token", "App credential only", "cleaner migration"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "◉") {
+		t.Errorf("chosen option should show a filled radio:\n%s", out)
+	}
+}
+
 func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 	m := testModel()
 	it := transcript.Item{
@@ -538,6 +563,160 @@ func TestWebDetail(t *testing.T) {
 	out = m.toolBody(search, 60)
 	if !strings.Contains(out, "golang lipgloss") {
 		t.Errorf("missing query:\n%s", out)
+	}
+}
+
+func TestOpenCodeEditDetailShowsDiff(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "edit",
+		ToolInput: `{"path":"a.go","oldString":"foo","newString":"bar"}`,
+		Result:    "Edited a.go (1 replacement)",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "foo") || !strings.Contains(out, "bar") {
+		t.Errorf("opencode edit diff should show old/new:\n%s", out)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf("opencode edit should show the path:\n%s", out)
+	}
+}
+
+func TestOpenCodeWriteDetailShowsAddedContent(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "write",
+		ToolInput: `{"filePath":"/x.go","content":"package x\nfunc f(){}"}`,
+		Result:    "Wrote file successfully.",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "package x") || !strings.Contains(out, "/x.go") {
+		t.Errorf("opencode write should show path and content:\n%s", out)
+	}
+}
+
+func TestOpenCodeReadDetailUsesPath(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "read",
+		ToolInput: `{"path":"/repo/main.go"}`,
+		Result:    "package main",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "/repo/main.go") || !strings.Contains(out, "package main") {
+		t.Errorf("opencode read should show path and content:\n%s", out)
+	}
+}
+
+func TestOpenCodeBashAndShellDetail(t *testing.T) {
+	m := testModel()
+	for _, name := range []string{"bash", "shell"} {
+		it := transcript.Item{
+			Kind: transcript.ItemTool, ToolName: name,
+			ToolInput: `{"command":"ls -la","description":"list"}`,
+			Result:    "file.go",
+		}
+		out := m.toolBody(it, 60)
+		if !strings.Contains(out, "$ ls -la") || !strings.Contains(out, "file.go") {
+			t.Errorf("opencode %s should render the command and result:\n%s", name, out)
+		}
+	}
+}
+
+func TestOpenCodeGrepDetailUsesInclude(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "grep",
+		ToolInput: `{"pattern":"handler","include":"*.go"}`,
+		Result:    "x.go:1:func handler()",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, `"handler"`) || !strings.Contains(out, "*.go") {
+		t.Errorf("opencode grep should show pattern and include scope:\n%s", out)
+	}
+	if strings.Contains(out, `"pattern"`) {
+		t.Errorf("should not dump raw JSON:\n%s", out)
+	}
+}
+
+func TestOpenCodeTodoWriteDetail(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "todowrite",
+		ToolInput: `{"todos":[
+			{"content":"do A","status":"completed","priority":"high"},
+			{"content":"do B","status":"pending","priority":"low"}
+		]}`,
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, Icon.Task.Done.Glyph) || !strings.Contains(out, "do A") {
+		t.Errorf("opencode todowrite should render the list:\n%s", out)
+	}
+}
+
+func TestOpenCodeExecuteDetail(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "execute",
+		ToolInput: `{"code":"print(1+1)"}`,
+		Result:    "2",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "print(1+1)") || !strings.Contains(out, "2") {
+		t.Errorf("opencode execute should show code and result:\n%s", out)
+	}
+	if strings.Contains(out, "$ ") {
+		t.Errorf("execute is code, not a shell command; no $ prompt:\n%s", out)
+	}
+}
+
+func TestOpenCodeWebDetail(t *testing.T) {
+	m := testModel()
+	fetch := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "webfetch",
+		ToolInput: `{"url":"https://example.com","format":"markdown"}`, Result: "page body",
+	}
+	if out := m.toolBody(fetch, 60); !strings.Contains(out, "https://example.com") || !strings.Contains(out, "page body") {
+		t.Errorf("opencode webfetch should show url and result:\n%s", out)
+	}
+	search := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "websearch",
+		ToolInput: `{"query":"golang lipgloss"}`, Result: "result list",
+	}
+	if out := m.toolBody(search, 60); !strings.Contains(out, "golang lipgloss") {
+		t.Errorf("opencode websearch should show the query:\n%s", out)
+	}
+}
+
+func TestOpenCodeSkillDetailShowsIDNotXML(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "skill",
+		ToolInput: `{"id":"my-skill"}`,
+		Result:    "<skill_content>a huge blob of xml</skill_content>",
+	}
+	out := m.toolBody(it, 60)
+	if !strings.Contains(out, "my-skill") {
+		t.Errorf("opencode skill should show the id:\n%s", out)
+	}
+	if strings.Contains(out, "huge blob of xml") {
+		t.Errorf("opencode skill should not dump the XML result:\n%s", out)
+	}
+}
+
+func TestOpenCodeTaskDetailShowsDescriptor(t *testing.T) {
+	m := testModel()
+	for _, in := range []string{
+		`{"subagent_type":"researcher","description":"find X","prompt":"do the thing"}`,
+		`{"agent":"researcher","description":"find X","prompt":"do the thing"}`,
+	} {
+		it := transcript.Item{Kind: transcript.ItemTool, ToolName: "task", ToolInput: in}
+		out := m.toolBody(it, 60)
+		for _, want := range []string{"researcher", "find X", "do the thing"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("opencode task should show %q:\n%s", want, out)
+			}
+		}
 	}
 }
 

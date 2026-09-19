@@ -19,6 +19,7 @@ func promptModel(ix *session.Interaction) model {
 			Status:      session.StatusAwaitingInput,
 			Tmux:        session.TmuxLocation{PaneID: "%1", Server: session.TmuxServerDefault},
 			Frontend:    session.FrontendTmux,
+			Input:       session.InputPane,
 			Interaction: ix,
 		},
 	}
@@ -841,6 +842,27 @@ func TestIdleDockComposerForControllable(t *testing.T) {
 	}
 }
 
+func TestIdleDockComposerForInputAPI(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	// Paneless opencode session that accepts API prompts.
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal, // no Tmux pane → not controllable
+		Input:       session.InputAPI,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	lines, _, _ := m.promptLinesWidth(80)
+	out := strings.Join(lines, "\n")
+	if strings.Contains(out, "argus can't send input to this session") {
+		t.Errorf("InputAPI idle dock must NOT show respond-elsewhere, got:\n%s", out)
+	}
+	if !strings.Contains(out, "> ") {
+		t.Errorf("InputAPI idle dock should show the composer, got:\n%s", out)
+	}
+}
+
 // TestDockScrollBodyPinsControls exercises the dock body windowing directly with
 // synthetic lines: the control block pins to the bottom while the body scrolls.
 func TestDockScrollBodyPinsControls(t *testing.T) {
@@ -963,5 +985,48 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 	}
 	if m.prompt.scroll != 0 {
 		t.Errorf("selection should not change scroll; scroll=%d", m.prompt.scroll)
+	}
+}
+
+func inputAPISession() session.Session {
+	return session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal,
+		Input:       session.InputAPI,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+}
+
+func TestIdleKeyInputAPIRoutesInput(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.sessions["s1"] = inputAPISession()
+
+	res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	m = res.(model)
+	if m.prompt.reply.Value() != "x" {
+		t.Errorf("InputAPI idle: reply = %q, want x", m.prompt.reply.Value())
+	}
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd == nil || m.focus != focusHistory {
+		t.Errorf("InputAPI idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focus)
+	}
+}
+
+func TestIdleKeyNoInputChannelSwallows(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	m = res.(model)
+	if m.prompt.reply.Value() != "" || cmd != nil {
+		t.Errorf("no input channel should swallow: reply=%q cmd=%v", m.prompt.reply.Value(), cmd)
 	}
 }
