@@ -52,23 +52,45 @@ func readSubagentView(_, agentID string) (transcript.TranscriptView, bool, error
 	return view, len(view.Chunks) > 0, nil
 }
 
+// transcriptSig returns a monotone signature capturing both message count and
+// intra-message content growth (new items, longer tool results, accumulated text).
+// It can never return -1, so -1 is safe as the uninitialized sentinel.
+func transcriptSig(chunks []transcript.Chunk) int {
+	n := len(chunks)
+	for _, c := range chunks {
+		n += len(c.Items)
+		for _, it := range c.Items {
+			n += len(it.Text) + len(it.Result) + len(it.ToolInput)
+		}
+	}
+	return n
+}
+
 type streamingTranscript struct {
 	sessionID string
 	chunks    []transcript.Chunk
+	sig       int
+	readView  func(string) (transcript.TranscriptView, error)
 }
 
 func newStreamingTranscript(path, _ string, _ bool) adapter.StreamingTranscript {
-	return &streamingTranscript{sessionID: path}
+	return &streamingTranscript{
+		sessionID: path,
+		sig:       -1,
+		readView:  readTranscriptView,
+	}
 }
 
 func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
-	view, err := readTranscriptView(s.sessionID)
+	view, err := s.readView(s.sessionID)
 	if err != nil {
 		return s.chunks, nil // transient; keep last good
 	}
-	if len(view.Chunks) == len(s.chunks) {
+	sig := transcriptSig(view.Chunks)
+	if sig == s.sig {
 		return s.chunks, nil
 	}
+	s.sig = sig
 	s.chunks = view.Chunks
 	return s.chunks, nil
 }
