@@ -500,6 +500,31 @@ func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 	}
 }
 
+func TestQuestionDetailOpenCode(t *testing.T) {
+	m := testModel()
+	it := transcript.Item{
+		Kind: transcript.ItemTool, ToolName: "question",
+		ToolInput: `{"questions":[{"header":"Storage","question":"Where should it be stored?",
+			"options":[
+				{"label":"In the sealed token","description":"cleaner migration"},
+				{"label":"App credential only","description":"no token change"}
+			]}]}`,
+		Result: `User has answered your questions: "Where should it be stored?"="In the sealed token". You can now continue.`,
+	}
+	out := m.toolBody(it, 60)
+	if strings.Contains(out, `"questions"`) || strings.Contains(out, `"options"`) {
+		t.Errorf("should not dump raw JSON:\n%s", out)
+	}
+	for _, want := range []string{"OpenCode is asking", "Where should it be stored?", "In the sealed token", "App credential only", "cleaner migration"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "◉") {
+		t.Errorf("chosen option should show a filled radio:\n%s", out)
+	}
+}
+
 func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 	m := testModel()
 	it := transcript.Item{

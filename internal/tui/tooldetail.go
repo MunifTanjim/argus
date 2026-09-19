@@ -559,6 +559,17 @@ func parseAnsweredAnswers(result string) map[string]string {
 const askUserQuestionPreviewCap = 12
 
 func (m model) askUserQuestionDetail(it transcript.Item, width int) string {
+	return m.questionDetail(it, width, "Claude")
+}
+
+func (m model) opencodeQuestionDetail(it transcript.Item, width int) string {
+	return m.questionDetail(it, width, "OpenCode")
+}
+
+// questionDetail renders a questions/options tool (Claude AskUserQuestion,
+// OpenCode question) as readable prompts with the chosen option marked. The
+// answered result carries "question"="answer" pairs (parseAnsweredAnswers).
+func (m model) questionDetail(it transcript.Item, width int, brand string) string {
 	var in struct {
 		Questions []struct {
 			Header      string `json:"header"`
@@ -581,7 +592,7 @@ func (m model) askUserQuestionDetail(it transcript.Item, width int) string {
 	for _, q := range in.Questions {
 		var b strings.Builder
 
-		head := StyleAccentBold.Render(Icon.Chat.Glyph + " Claude is asking")
+		head := StyleAccentBold.Render(Icon.Chat.Glyph + " " + brand + " is asking")
 		if q.Header != "" {
 			head += "  " + headerChip(q.Header)
 		}

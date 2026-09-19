@@ -10,6 +10,7 @@ const (
 	agentClaude      = "claude"
 	agentCodex       = "codex"
 	agentAntigravity = "antigravity"
+	agentOpenCode    = "opencode"
 )
 
 type toolCategory int
@@ -151,4 +152,7 @@ var toolRegistry = map[string]toolMeta{
 	"wait_agent":   {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
 	"close_agent":  {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
 	"spawn_agent":  {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
+
+	// opencode
+	"question": {agentOpenCode, "Question", catOther, (model).opencodeQuestionDetail},
 }
