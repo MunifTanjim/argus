@@ -129,7 +129,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		Status:         st,
 		Frontend:       session.FrontendExternal,
 		TranscriptPath: id,
-		CanPrompt:      true,
+		Input:          session.InputAPI,
 	}
 	if paneID != "" {
 		u.Server = session.TmuxServerArgus
@@ -188,7 +188,7 @@ func (d *discoverer) seedIdle(sessions []ocSession) {
 			Status:             session.StatusAwaitingInput,
 			Frontend:           session.FrontendExternal,
 			TranscriptPath:     s.ID,
-			CanPrompt:          true,
+			Input:              session.InputAPI,
 			Name:               s.Title,
 			Cwd:                s.Location.Directory,
 			Repo:               repoName(s.Location.Directory),

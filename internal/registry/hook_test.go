@@ -45,12 +45,15 @@ func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T)
 		Agent:          "opencode",
 		AgentSessionID: "ses_1",
 		Frontend:       session.FrontendExternal,
-		CanPrompt:      true,
+		Input:          session.InputAPI,
 		Status:         session.StatusAwaitingInput,
 	})
 	first := r.Snapshot()
 	if len(first) != 1 || first[0].Controllable() {
 		t.Fatalf("want 1 paneless session, got %+v", first)
+	}
+	if first[0].Input != session.InputAPI {
+		t.Fatalf("paneless opencode session must be InputAPI, got %q", first[0].Input)
 	}
 	id := first[0].ID
 
@@ -61,7 +64,7 @@ func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T)
 		Server:         session.TmuxServerArgus,
 		PaneID:         "%5",
 		Frontend:       session.FrontendExternal,
-		CanPrompt:      true,
+		Input:          session.InputAPI,
 		Status:         session.StatusAwaitingInput,
 	})
 	adopted := r.Snapshot()
@@ -74,6 +77,10 @@ func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T)
 	if !adopted[0].Controllable() || adopted[0].Frontend != session.FrontendTmux {
 		t.Fatalf("adopted session should be controllable tmux: %+v", adopted[0])
 	}
+	// The adopted pane is for viewing only: input still goes over the API.
+	if adopted[0].Input != session.InputAPI {
+		t.Fatalf("adopted opencode session must stay InputAPI, got %q", adopted[0].Input)
+	}
 
 	// Pane dies -> revert to paneless external.
 	r.ClearPane("ses_1")
@@ -83,6 +90,9 @@ func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T)
 	}
 	if reverted[0].Frontend != session.FrontendExternal {
 		t.Fatalf("reverted session should be external: %+v", reverted[0])
+	}
+	if reverted[0].Input != session.InputAPI {
+		t.Fatalf("reverted opencode session must stay InputAPI, got %q", reverted[0].Input)
 	}
 }
 

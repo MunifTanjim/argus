@@ -19,6 +19,7 @@ func promptModel(ix *session.Interaction) model {
 			Status:      session.StatusAwaitingInput,
 			Tmux:        session.TmuxLocation{PaneID: "%1", Server: session.TmuxServerDefault},
 			Frontend:    session.FrontendTmux,
+			Input:       session.InputPane,
 			Interaction: ix,
 		},
 	}
@@ -841,24 +842,24 @@ func TestIdleDockComposerForControllable(t *testing.T) {
 	}
 }
 
-func TestIdleDockComposerForCanPrompt(t *testing.T) {
+func TestIdleDockComposerForInputAPI(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	// Paneless opencode session that accepts API prompts.
 	m.sessions["s1"] = session.Session{
 		ID:          "s1",
 		Status:      session.StatusAwaitingInput,
 		Frontend:    session.FrontendExternal, // no Tmux pane → not controllable
-		CanPrompt:   true,
+		Input:       session.InputAPI,
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
 	lines, _, _ := m.promptLinesWidth(80)
 	out := strings.Join(lines, "\n")
 	if strings.Contains(out, "argus can't send input to this session") {
-		t.Errorf("CanPrompt idle dock must NOT show respond-elsewhere, got:\n%s", out)
+		t.Errorf("InputAPI idle dock must NOT show respond-elsewhere, got:\n%s", out)
 	}
 	if !strings.Contains(out, "> ") {
-		t.Errorf("CanPrompt idle dock should show the composer, got:\n%s", out)
+		t.Errorf("InputAPI idle dock should show the composer, got:\n%s", out)
 	}
 }
 
@@ -987,46 +988,45 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 	}
 }
 
-func canPromptSession() session.Session {
+func inputAPISession() session.Session {
 	return session.Session{
 		ID:          "s1",
 		Status:      session.StatusAwaitingInput,
 		Frontend:    session.FrontendExternal,
-		CanPrompt:   true,
+		Input:       session.InputAPI,
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 }
 
-func TestIdleKeyCanPromptRoutesInput(t *testing.T) {
+func TestIdleKeyInputAPIRoutesInput(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.sessions["s1"] = canPromptSession()
+	m.sessions["s1"] = inputAPISession()
 
 	res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
 	if m.prompt.reply.Value() != "x" {
-		t.Errorf("CanPrompt idle: reply = %q, want x", m.prompt.reply.Value())
+		t.Errorf("InputAPI idle: reply = %q, want x", m.prompt.reply.Value())
 	}
 
 	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	if cmd == nil || m.focus != focusHistory {
-		t.Errorf("CanPrompt idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focus)
+		t.Errorf("InputAPI idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focus)
 	}
 }
 
-func TestIdleKeyNonControllableNonCanPromptSwallows(t *testing.T) {
+func TestIdleKeyNoInputChannelSwallows(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	m.sessions["s1"] = session.Session{
 		ID:          "s1",
 		Status:      session.StatusAwaitingInput,
 		Frontend:    session.FrontendExternal,
-		CanPrompt:   false,
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
 	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
 	if m.prompt.reply.Value() != "" || cmd != nil {
-		t.Errorf("non-controllable non-CanPrompt should swallow: reply=%q cmd=%v", m.prompt.reply.Value(), cmd)
+		t.Errorf("no input channel should swallow: reply=%q cmd=%v", m.prompt.reply.Value(), cmd)
 	}
 }

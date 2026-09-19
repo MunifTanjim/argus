@@ -236,6 +236,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
+		refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
 
 		evType := EventUpdated
@@ -275,6 +276,20 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 	r.index.clear("", s.AgentSessionID)
 	s.AgentSessionID = agentSessionID
 	r.index.setAgentSession(agentSessionID, s.ID)
+}
+
+// refreshInput recomputes a session's input channel from its pane state. An
+// InputAPI session (opencode) is left untouched: it prompts over its API whether
+// or not a viewing pane is adopted, and never reverts to keystrokes.
+func refreshInput(s *session.Session) {
+	if s.Input == session.InputAPI {
+		return
+	}
+	if s.Tmux.PaneID != "" {
+		s.Input = session.InputPane
+	} else {
+		s.Input = session.InputNone
+	}
 }
 
 // setTranscriptPath points the session at a new transcript, invalidating the
@@ -423,6 +438,7 @@ func (r *Registry) ClearPane(agentSessionID string) {
 	r.index.clear(PaneKey(s.Tmux.Server, s.Tmux.PaneID), "")
 	s.Tmux = session.TmuxLocation{}
 	s.Frontend = session.FrontendExternal
+	refreshInput(s)
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
@@ -455,10 +471,11 @@ type HookUpdate struct {
 	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
 	// session (see ApplyHook).
 	Frontend session.Frontend
-	// CanPrompt marks a session that accepts prompts over its agent's API. Additive:
-	// once set it stays set; adapters that never send it leave it untouched.
-	CanPrompt bool
-	Status    session.Status
+	// Input marks the session's input channel. InputAPI (agents that take prompts
+	// over their own API) is sticky: once set it stays, and never reverts to a pane
+	// channel. Pane sessions get InputPane from refreshInput, not from the hook.
+	Input  session.InputMode
+	Status session.Status
 	// Summary is a refreshed transcript digest, or nil to keep the cached one.
 	Summary *session.Summary
 	// Interaction is the pending user request, applied when Status is set: non-nil
@@ -537,9 +554,10 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	} else if u.Frontend != "" {
 		s.Frontend = u.Frontend
 	}
-	if u.CanPrompt {
-		s.CanPrompt = true
+	if u.Input == session.InputAPI {
+		s.Input = session.InputAPI
 	}
+	refreshInput(s)
 	// Non-nil replaces the cached summary; nil keeps it.
 	if u.Summary != nil {
 		s.Summary = u.Summary

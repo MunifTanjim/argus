@@ -30,8 +30,7 @@ const (
 	MethodSessionKey            = "sessions.key"            // request: KeyParams; result: nil
 	MethodSessionRespond        = "sessions.respond"        // request: RespondParams; result: nil
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
-	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult
-	MethodSessionOpenTerminal   = "sessions.openTerminal"   // request: SessionRef; result: ResumeResult (spawn a tmux pane for a paneless promptable session)
+	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
 	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
 	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)

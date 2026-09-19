@@ -148,6 +148,6 @@ func (d *discoverer) applyPane(id, paneID string) {
 		AgentSessionID: id,
 		Server:         session.TmuxServerArgus,
 		PaneID:         paneID,
-		CanPrompt:      true,
+		Input:          session.InputAPI,
 	})
 }

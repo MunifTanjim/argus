@@ -184,9 +184,15 @@ type Session struct {
 	// Frontend classifies the session's UI host (tmux/vscode/external).
 	Frontend Frontend `json:"frontend,omitempty"`
 
-	// CanPrompt reports that a paneless session accepts prompts over its agent's
-	// API, so clients may show a composer even without a controllable terminal.
-	CanPrompt bool `json:"can_prompt,omitempty"`
+	// Input is the channel argus uses to send input to the session. It is the
+	// single signal for "can argus send a prompt": InputNone means it cannot.
+	Input InputMode `json:"input_mode,omitempty"`
+
+	// CanOpenTerminal reports that argus can show a terminal for this live session
+	// on its owning node: a pane to attach, or a paneless session whose agent can
+	// spawn a viewer here. Node-computed on emit, so it reflects that node's tmux
+	// and installed agents. It is the single signal clients use to offer a terminal.
+	CanOpenTerminal bool `json:"can_open_terminal,omitempty"`
 
 	// Repo is the basename of the session directory's git repository, when known
 	// (path-derived, not from the transcript).
@@ -214,3 +220,16 @@ type Session struct {
 // Controllable reports whether argus can drive the session's terminal. Only
 // tmux-pane sessions are controllable.
 func (s Session) Controllable() bool { return s.Tmux.PaneID != "" }
+
+// InputMode is the channel argus uses to send input to a session.
+type InputMode string
+
+const (
+	InputNone InputMode = ""     // argus cannot send input
+	InputPane InputMode = "pane" // send tmux keystrokes to the session's pane
+	InputAPI  InputMode = "api"  // send prompts over the agent's own API
+)
+
+// AcceptsInput reports whether argus can send a prompt to the session by any
+// channel. It is the single check clients and the node use for "can prompt".
+func (s Session) AcceptsInput() bool { return s.Input != InputNone }

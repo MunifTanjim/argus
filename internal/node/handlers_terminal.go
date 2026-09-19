@@ -210,6 +210,16 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
+	// A live but paneless session (an OpenCode presence card) has no pane to mirror
+	// yet: spawn and adopt a viewer pane first, then resolve and mirror as usual.
+	if pre, ok := d.reg.Get(p.SessionID); ok && !pre.Controllable() {
+		if !d.canOpenTerminal(pre) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal not available for this session"}
+		}
+		if _, err := d.spawnAndAdopt(ctx, pre.Agent, pre.AgentSessionID, pre.Cwd, pre.ID); err != nil {
+			return nil, err
+		}
+	}
 	s, c, err := d.resolve(p.SessionID)
 	if err != nil {
 		return nil, err

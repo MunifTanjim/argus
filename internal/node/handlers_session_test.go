@@ -43,7 +43,7 @@ func TestHandleSessionInputPromptFallback(t *testing.T) {
 		return err
 	}
 
-	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusIdle})
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusIdle, Input: session.InputAPI})
 	if err := input(s.ID, "hello"); err != nil || !fp.called || fp.gotText != "hello" {
 		t.Fatalf("idle prompt: err=%v called=%v text=%q", err, fp.called, fp.gotText)
 	}
@@ -290,6 +290,7 @@ func TestHandleSessionResumeRejectsEmptyParams(t *testing.T) {
 func TestHandleSessionResumeJumpsToInflightLivePane(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep the seeded pane from being pruned
 	// A live pane exists under id "argus:%7" but its agent session id hasn't been
 	// reported yet, so the by-agent-session check misses and the guard is consulted.
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
@@ -313,6 +314,7 @@ func TestHandleSessionResumeJumpsToInflightLivePane(t *testing.T) {
 func TestHandleSessionResumeErrorsWhenInflightPaneGone(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep test state deterministic
 	d.resuming["claude\x00sess-1"] = "argus:%dead"
 	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "sess-1", Cwd: t.TempDir()})
 	if _, err := d.handleSessionResume(context.Background(), raw); err == nil {
@@ -336,6 +338,7 @@ func TestClearResumingOnKill(t *testing.T) {
 func TestHandleSessionResumeJumpsToLiveSession(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true
+	d.discs = nil // resume rescans first; keep the seeded session from being pruned
 	// Seed a live, controllable session with a matching agent session id.
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
 		AgentSessionID: "live-1",

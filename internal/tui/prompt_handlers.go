@@ -42,7 +42,7 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // handleIdleKey composes a free-text reply, delivered via pane input on submit.
 func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if s := m.sessions[m.selectedID]; !s.Controllable() && !s.CanPrompt {
+	if s := m.sessions[m.selectedID]; !s.AcceptsInput() {
 		return m, nil
 	}
 	if msg.String() == "enter" {

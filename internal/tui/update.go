@@ -20,10 +20,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// resumeSelectTimeout bounds how long the list waits for a just-resumed session to
-// appear before dropping the pending auto-select (see clearPendingResumeMsg).
-const resumeSelectTimeout = 30 * time.Second
-
 func (m model) Init() tea.Cmd {
 	if m.viewer {
 		return m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent)
@@ -220,28 +216,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "resume failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.mode = modeList
-		m.pendingResumeID = msg.sessionID
-		m.selectPendingResume()
-		if m.pendingResumeID == "" {
-			return m, nil
-		}
-		// Not in the list yet; time out the pending selection (see clearPendingResumeMsg).
-		id := m.pendingResumeID
-		return m, tea.Tick(resumeSelectTimeout, func(time.Time) tea.Msg {
-			return clearPendingResumeMsg{id: id}
-		})
-	case openTerminalResultMsg:
-		if msg.err != nil {
-			m.flash = "open terminal failed: " + msg.err.Error()
-			return m, nil
-		}
+		// The node waited until the pane is controllable, so the session is ready to
+		// enter at once.
 		return m.enterScreen(msg.sessionID)
-	case clearPendingResumeMsg:
-		if m.pendingResumeID == msg.id {
-			m.pendingResumeID = ""
-		}
-		return m, nil
 	case exportDoneMsg:
 		if msg.err != nil {
 			m.flash = "export failed: " + msg.err.Error()
@@ -350,19 +327,6 @@ func (m model) spawnCmd(cwd, nodeID, agent, prompt string) tea.Cmd {
 			NodeID: nodeID, Cwd: cwd, Agent: agent, Prompt: prompt,
 		}, nil)
 		return spawnResultMsg{err: err} // a successful spawn surfaces via registry events
-	}
-}
-
-func (m model) openTerminalCmd(sessionID string) tea.Cmd {
-	client := m.client
-	return func() tea.Msg {
-		var res api.ResumeResult
-		err := client.Call(api.MethodSessionOpenTerminal, api.SessionRef{SessionID: sessionID}, &res)
-		id := res.SessionID
-		if id == "" {
-			id = sessionID
-		}
-		return openTerminalResultMsg{sessionID: id, err: err}
 	}
 }
 
@@ -516,23 +480,6 @@ func (m *model) reorder() {
 	if m.cursor >= len(m.order) {
 		m.cursor = max(0, len(m.order)-1)
 	}
-	m.selectPendingResume()
-}
-
-// selectPendingResume moves the list cursor onto a just-resumed session once it
-// is present in the ordered list, clearing the pending id. Freshly spawned
-// sessions arrive via registry events, which re-invoke this through reorder.
-func (m *model) selectPendingResume() {
-	if m.pendingResumeID == "" {
-		return
-	}
-	for i, id := range m.order {
-		if id == m.pendingResumeID {
-			m.cursor = i
-			m.pendingResumeID = ""
-			break
-		}
-	}
 }
 
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -668,13 +615,9 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	id := m.order[m.cursor]
 	s := m.sessions[id]
-	// Promptable (OpenCode) sessions route through the node, which verifies the pane
-	// is alive and respawns it if it was killed, then the reply enters the screen.
-	if s.CanPrompt {
-		m.flash = "opening terminal…"
-		return m, m.openTerminalCmd(id)
-	}
-	if !s.Controllable() {
+	// enterScreen opens the terminal view via terminal.open, which spawns and adopts
+	// a pane on demand for a live paneless session (OpenCode).
+	if !s.CanOpenTerminal {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}

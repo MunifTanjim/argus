@@ -97,12 +97,12 @@ func sessionModel(ix *session.Interaction) model {
 	return m
 }
 
-func TestSessionRawKeyPanelessPromptableOpensTerminal(t *testing.T) {
+func TestSessionRawKeyPanelessViewableOpensTerminal(t *testing.T) {
 	m := testModel()
 	rc := &recordingClient{}
 	m.client = rc
 	m.sessions = map[string]session.Session{
-		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanPrompt: true, Frontend: session.FrontendExternal},
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true, Frontend: session.FrontendExternal},
 	}
 	m.selectedID = "oc"
 	m.mode = modeSession
@@ -110,28 +110,26 @@ func TestSessionRawKeyPanelessPromptableOpensTerminal(t *testing.T) {
 
 	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("paneless promptable session should trigger a command on ctrl+s")
+		t.Fatal("viewable paneless session should trigger a command on ctrl+s")
 	}
 	runCmd(cmd)
 	found := false
 	for _, method := range rc.calledMethods() {
-		if method == api.MethodSessionOpenTerminal {
+		if method == api.MethodTerminalOpen {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected %q call, got %v", api.MethodSessionOpenTerminal, rc.calledMethods())
+		t.Fatalf("expected %q call, got %v", api.MethodTerminalOpen, rc.calledMethods())
 	}
 }
 
-func TestSessionRawKeyControllablePromptableRoutesToNode(t *testing.T) {
-	// A promptable session with a live pane still routes through the node so a
-	// killed pane is caught and respawned rather than attaching to a dead pane.
+func TestSessionRawKeyControllableOpensTerminal(t *testing.T) {
 	m := testModel()
 	rc := &recordingClient{}
 	m.client = rc
 	m.sessions = map[string]session.Session{
-		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanPrompt: true,
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true,
 			Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%3"}},
 	}
 	m.selectedID = "oc"
@@ -140,17 +138,17 @@ func TestSessionRawKeyControllablePromptableRoutesToNode(t *testing.T) {
 
 	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("controllable promptable session should still trigger a command")
+		t.Fatal("controllable session should trigger a command")
 	}
 	runCmd(cmd)
 	found := false
 	for _, method := range rc.calledMethods() {
-		if method == api.MethodSessionOpenTerminal {
+		if method == api.MethodTerminalOpen {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected %q call, got %v", api.MethodSessionOpenTerminal, rc.calledMethods())
+		t.Fatalf("expected %q call, got %v", api.MethodTerminalOpen, rc.calledMethods())
 	}
 }
 
