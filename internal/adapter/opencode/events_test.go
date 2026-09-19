@@ -48,11 +48,11 @@ func TestApplyEventStatusMap(t *testing.T) {
 	seedSession(t, reg, "ses_1")
 
 	d.applyEvent(sseFrame{
-		Type: "session.idle",
+		Type: "session.execution.succeeded",
 		Data: []byte(`{"sessionID":"ses_1"}`),
 	})
 	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
-		t.Fatalf("after idle, status = %q", got)
+		t.Fatalf("after execution.succeeded, status = %q", got)
 	}
 
 	d.applyEvent(sseFrame{
@@ -127,9 +127,9 @@ func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 	d := newTestDiscoverer(reg, nil)
 	seedSession(t, reg, "ses_1")
 
-	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
+	d.applyEvent(sseFrame{Type: "session.execution.succeeded", Data: []byte(`{"sessionID":"ses_1"}`)})
 	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
-		t.Fatalf("after idle, status = %q", got)
+		t.Fatalf("after execution.succeeded, status = %q", got)
 	}
 
 	d.applyEvent(sseFrame{Type: "session.updated", Data: []byte(`{"info":{"id":"ses_1"}}`)})
@@ -141,27 +141,50 @@ func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 		t.Fatalf("message.updated must not set Working, got %q", got)
 	}
 
-	d.applyEvent(sseFrame{Type: "message.part.updated", Data: []byte(`{"part":{"sessionID":"ses_1"}}`)})
+	d.applyEvent(sseFrame{Type: "session.execution.started", Data: []byte(`{"sessionID":"ses_1"}`)})
 	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
-		t.Fatalf("message.part.updated should set Working, got %q", got)
+		t.Fatalf("session.execution.started should set Working, got %q", got)
 	}
 }
 
-func TestSessionStatusBusySetsWorking(t *testing.T) {
-	reg := registry.New()
-	d := newTestDiscoverer(reg, nil)
-	seedSession(t, reg, "ses_1")
+func TestActivityEventsSetsWorking(t *testing.T) {
+	activityEvents := []string{
+		"session.execution.started",
+		"session.step.started",
+		"session.step.streamed",
+		"session.text.started",
+		"session.text.delta",
+		"session.text.ended",
+	}
+	for _, evt := range activityEvents {
+		t.Run(evt, func(t *testing.T) {
+			reg := registry.New()
+			d := newTestDiscoverer(reg, nil)
+			seedSession(t, reg, "ses_1")
 
-	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
-	d.applyEvent(sseFrame{Type: "session.status", Data: []byte(`{"sessionID":"ses_1","status":{"type":"idle"}}`)})
-	if got := statusOf(t, reg, "ses_1"); got == session.StatusWorking {
-		t.Fatalf("session.status idle must not set Working, got %q", got)
+			d.applyEvent(sseFrame{Type: "session.execution.succeeded", Data: []byte(`{"sessionID":"ses_1"}`)})
+			d.applyEvent(sseFrame{Type: evt, Data: []byte(`{"sessionID":"ses_1"}`)})
+			if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
+				t.Fatalf("%s should set Working, got %q", evt, got)
+			}
+		})
 	}
 
-	d.applyEvent(sseFrame{Type: "session.status", Data: []byte(`{"sessionID":"ses_1","status":{"type":"busy"}}`)})
-	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
-		t.Fatalf("session.status busy should set Working, got %q", got)
-	}
+	t.Run("session.execution.succeeded sets idle", func(t *testing.T) {
+		reg := registry.New()
+		d := newTestDiscoverer(reg, nil)
+		seedSession(t, reg, "ses_1")
+
+		d.applyEvent(sseFrame{Type: "session.execution.started", Data: []byte(`{"sessionID":"ses_1"}`)})
+		d.applyEvent(sseFrame{Type: "session.execution.succeeded", Data: []byte(`{"sessionID":"ses_1"}`)})
+		if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
+			t.Fatalf("after execution.succeeded, status = %q", got)
+		}
+		s, _ := reg.Get(sessionKeyFor(reg, "ses_1"))
+		if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+			t.Fatalf("expected idle interaction, got %+v", s.Interaction)
+		}
+	})
 }
 
 func TestApplyEventPermissionGuardsEmptyIDs(t *testing.T) {
@@ -205,9 +228,9 @@ func TestApplyEventBuildsPresence(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
 
-	d.applyEvent(sseFrame{Type: "message.part.updated", Data: json.RawMessage(`{"part":{"sessionID":"ses_1"}}`)})
+	d.applyEvent(sseFrame{Type: "session.execution.started", Data: json.RawMessage(`{"sessionID":"ses_1"}`)})
 	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
-		t.Fatalf("after part.updated: %q", got)
+		t.Fatalf("after execution.started: %q", got)
 	}
 
 	d.applyEvent(sseFrame{Type: "permission.asked", Data: json.RawMessage(`{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}`)})
@@ -268,7 +291,7 @@ func TestIdleReaderSurvivesActiveStream(t *testing.T) {
 func TestParseSSE(t *testing.T) {
 	stream := ": heartbeat\n" +
 		"\n" +
-		`data: {"id":"evt_1","type":"session.idle","data":{"sessionID":"ses_1"}}` + "\n" +
+		`data: {"id":"evt_1","type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}` + "\n" +
 		"\n" +
 		`data: {"id":"evt_2","type":"permission.asked","data":{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}}` + "\n"
 
@@ -279,8 +302,8 @@ func TestParseSSE(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 frames, got %d: %+v", len(got), got)
 	}
-	if got[0].Type != "session.idle" {
-		t.Fatalf("frame[0].Type = %q, want session.idle", got[0].Type)
+	if got[0].Type != "session.execution.succeeded" {
+		t.Fatalf("frame[0].Type = %q, want session.execution.succeeded", got[0].Type)
 	}
 	if got[1].Type != "permission.asked" {
 		t.Fatalf("frame[1].Type = %q, want permission.asked", got[1].Type)
@@ -294,7 +317,7 @@ func TestParseSSEAndApply(t *testing.T) {
 
 	stream := ": heartbeat\n" +
 		"\n" +
-		`data: {"id":"evt_1","type":"session.idle","data":{"sessionID":"ses_1"}}` + "\n" +
+		`data: {"id":"evt_1","type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}` + "\n" +
 		"\n" +
 		`data: {"id":"evt_2","type":"permission.asked","data":{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}}` + "\n"
 

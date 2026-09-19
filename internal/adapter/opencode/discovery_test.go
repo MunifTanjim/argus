@@ -151,7 +151,7 @@ func TestDismissRemovesAndReappearsOnActivity(t *testing.T) {
 	if len(reg.Snapshot()) != 0 {
 		t.Fatal("dismiss should remove from list")
 	}
-	a.disc.applyEvent(sseFrame{Type: "message.part.updated", Data: json.RawMessage(`{"part":{"sessionID":"ses_1"}}`)})
+	a.disc.applyEvent(sseFrame{Type: "session.execution.started", Data: json.RawMessage(`{"sessionID":"ses_1"}`)})
 	if len(reg.Snapshot()) != 1 {
 		t.Fatal("new activity should re-add")
 	}

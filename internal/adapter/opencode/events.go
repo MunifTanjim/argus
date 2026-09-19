@@ -147,22 +147,11 @@ func sessionIDFrom(data json.RawMessage) string {
 
 func (d *discoverer) applyEvent(frame sseFrame) {
 	switch frame.Type {
-	case "message.part.updated":
+	case "session.execution.started", "session.step.started", "session.step.streamed",
+		"session.text.started", "session.text.delta", "session.text.ended":
 		d.upsert(sessionIDFrom(frame.Data), session.StatusWorking, nil)
 
-	case "session.status":
-		var p struct {
-			SessionID string `json:"sessionID"`
-			Status    struct {
-				Type string `json:"type"`
-			} `json:"status"`
-		}
-		_ = json.Unmarshal(frame.Data, &p)
-		if p.SessionID != "" && p.Status.Type != "" && p.Status.Type != "idle" {
-			d.upsert(p.SessionID, session.StatusWorking, nil)
-		}
-
-	case "session.idle":
+	case "session.execution.succeeded", "session.execution.failed":
 		d.upsert(sessionIDFrom(frame.Data), session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
 
 	case "permission.asked":
