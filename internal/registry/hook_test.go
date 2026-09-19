@@ -38,6 +38,54 @@ func TestApplyHookEnrichesDiscoveredSession(t *testing.T) {
 	}
 }
 
+func TestApplyHookAdoptsPaneOntoPanelessRecordThenClearPaneReverts(t *testing.T) {
+	r := New()
+	// Paneless external session (OpenCode presence).
+	r.ApplyHook(HookUpdate{
+		Agent:          "opencode",
+		AgentSessionID: "ses_1",
+		Frontend:       session.FrontendExternal,
+		CanPrompt:      true,
+		Status:         session.StatusAwaitingInput,
+	})
+	first := r.Snapshot()
+	if len(first) != 1 || first[0].Controllable() {
+		t.Fatalf("want 1 paneless session, got %+v", first)
+	}
+	id := first[0].ID
+
+	// A pane is spawned for it and adopted (same agent session id).
+	r.ApplyHook(HookUpdate{
+		Agent:          "opencode",
+		AgentSessionID: "ses_1",
+		Server:         session.TmuxServerArgus,
+		PaneID:         "%5",
+		Frontend:       session.FrontendExternal,
+		CanPrompt:      true,
+		Status:         session.StatusAwaitingInput,
+	})
+	adopted := r.Snapshot()
+	if len(adopted) != 1 {
+		t.Fatalf("adoption must not duplicate: %+v", adopted)
+	}
+	if adopted[0].ID != id {
+		t.Fatalf("record ID must stay agent-keyed: %q -> %q", id, adopted[0].ID)
+	}
+	if !adopted[0].Controllable() || adopted[0].Frontend != session.FrontendTmux {
+		t.Fatalf("adopted session should be controllable tmux: %+v", adopted[0])
+	}
+
+	// Pane dies -> revert to paneless external.
+	r.ClearPane("ses_1")
+	reverted := r.Snapshot()
+	if len(reverted) != 1 || reverted[0].Controllable() {
+		t.Fatalf("ClearPane should revert to paneless: %+v", reverted)
+	}
+	if reverted[0].Frontend != session.FrontendExternal {
+		t.Fatalf("reverted session should be external: %+v", reverted[0])
+	}
+}
+
 func TestApplyHookCreatesWhenNoMatch(t *testing.T) {
 	r := New()
 	got, alive := r.ApplyHook(HookUpdate{

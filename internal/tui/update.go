@@ -231,6 +231,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(resumeSelectTimeout, func(time.Time) tea.Msg {
 			return clearPendingResumeMsg{id: id}
 		})
+	case openTerminalResultMsg:
+		if msg.err != nil {
+			m.flash = "open terminal failed: " + msg.err.Error()
+			return m, nil
+		}
+		return m.enterScreen(msg.sessionID)
 	case clearPendingResumeMsg:
 		if m.pendingResumeID == msg.id {
 			m.pendingResumeID = ""
@@ -344,6 +350,19 @@ func (m model) spawnCmd(cwd, nodeID, agent, prompt string) tea.Cmd {
 			NodeID: nodeID, Cwd: cwd, Agent: agent, Prompt: prompt,
 		}, nil)
 		return spawnResultMsg{err: err} // a successful spawn surfaces via registry events
+	}
+}
+
+func (m model) openTerminalCmd(sessionID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.ResumeResult
+		err := client.Call(api.MethodSessionOpenTerminal, api.SessionRef{SessionID: sessionID}, &res)
+		id := res.SessionID
+		if id == "" {
+			id = sessionID
+		}
+		return openTerminalResultMsg{sessionID: id, err: err}
 	}
 }
 

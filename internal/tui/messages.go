@@ -58,6 +58,13 @@ type resumeResultMsg struct {
 	err       error
 }
 
+// openTerminalResultMsg carries the result of spawning a terminal pane for a
+// paneless promptable session; on success the screen view is entered.
+type openTerminalResultMsg struct {
+	sessionID string
+	err       error
+}
+
 // clearPendingResumeMsg drops a still-pending resume selection so a stale id can't
 // later match a reused tmux pane id.
 type clearPendingResumeMsg struct{ id string }

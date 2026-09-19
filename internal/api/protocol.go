@@ -32,6 +32,7 @@ const (
 	MethodSessionDismiss        = "sessions.dismiss"        // request: SessionRef; result: nil
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult
+	MethodSessionOpenTerminal   = "sessions.openTerminal"   // request: SessionRef; result: ResumeResult (spawn a tmux pane for a paneless promptable session)
 	// Probed live per call.
 	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
 	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil

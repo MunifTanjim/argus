@@ -405,6 +405,59 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 	return api.ResumeResult{SessionID: sid}, nil
 }
 
+// handleSessionOpenTerminal spawns a tmux pane running the agent's resume command
+// for a paneless promptable session (OpenCode), so its live terminal can be
+// viewed. Discovery adopts the pane onto the existing session record. If the
+// session already has a pane, it is returned as-is (reuse).
+func (d *Node) handleSessionOpenTerminal(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.SessionRef](params)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	if s.Controllable() {
+		return api.ResumeResult{SessionID: s.ID}, nil
+	}
+	if !s.CanPrompt {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal spawn not supported for this session"}
+	}
+	if !d.caps.SpawnSession {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal unavailable: tmux not found on node " + d.label}
+	}
+	name, args, ok := d.adapterFor(s.Agent).ResumeCommand(s.AgentSessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal not supported for agent " + s.Agent}
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("cannot open terminal: %q is not installed on node %s", name, d.label)}
+	}
+	if _, err := d.launchPane(ctx, "", name, args, s.Cwd); err != nil {
+		return nil, err
+	}
+	if !d.waitControllable(s.ID) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal is starting; try again in a moment"}
+	}
+	return api.ResumeResult{SessionID: s.ID}, nil
+}
+
+// waitControllable rescans discovery with backoff until the session has adopted
+// its spawned pane (Controllable), covering the lag between the pane existing and
+// the agent process appearing in ps. Returns false if it never adopts in time.
+func (d *Node) waitControllable(id string) bool {
+	backoffs := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, 750 * time.Millisecond, 1500 * time.Millisecond, 2 * time.Second}
+	for _, wait := range backoffs {
+		time.Sleep(wait)
+		d.scan(context.Background())
+		if s, ok := d.reg.Get(id); ok && s.Controllable() {
+			return true
+		}
+	}
+	return false
+}
+
 // handleSessionKill kills a session's pane.
 func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SessionRef](params)

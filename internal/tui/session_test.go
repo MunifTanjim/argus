@@ -97,6 +97,53 @@ func sessionModel(ix *session.Interaction) model {
 	return m
 }
 
+func TestSessionRawKeyPanelessPromptableOpensTerminal(t *testing.T) {
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanPrompt: true, Frontend: session.FrontendExternal},
+	}
+	m.selectedID = "oc"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("paneless promptable session should trigger a command on ctrl+s")
+	}
+	runCmd(cmd)
+	found := false
+	for _, method := range rc.calledMethods() {
+		if method == api.MethodSessionOpenTerminal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q call, got %v", api.MethodSessionOpenTerminal, rc.calledMethods())
+	}
+}
+
+func TestSessionRawKeyPanelessNonPromptableRefuses(t *testing.T) {
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"ext": {ID: "ext", Status: session.StatusAwaitingInput, Frontend: session.FrontendVSCode},
+	}
+	m.selectedID = "ext"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatal("non-promptable paneless session should not trigger a command")
+	}
+	if got := res.(model).flash; !strings.Contains(got, "terminal control unavailable") {
+		t.Fatalf("expected refusal flash, got %q", got)
+	}
+}
+
 func TestSessionHeaderShowsBranch(t *testing.T) {
 	m := sessionModel(nil)
 	s := m.sessions["s1"]

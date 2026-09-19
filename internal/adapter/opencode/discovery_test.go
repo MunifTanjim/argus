@@ -24,6 +24,7 @@ func newTestDiscoverer(reg *registry.Registry, c *client) *discoverer {
 		reg:      reg,
 		ctx:      context.Background(),
 		presence: map[string]*presenceEntry{},
+		panes:    map[string]string{},
 		pendPerm: map[string]string{},
 		pendForm: map[string]*pendingForm{},
 	}

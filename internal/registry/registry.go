@@ -405,6 +405,27 @@ func (r *Registry) ClearInteraction(id string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+// ClearPane detaches an adopted tmux pane from an agent-keyed session (found by
+// agent session id), reverting it to a paneless external session. Used when an
+// on-demand terminal pane dies while the underlying session still exists. No-op
+// when the session is unknown or already paneless.
+func (r *Registry) ClearPane(agentSessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.index.findByAgentSession(agentSessionID)
+	if !ok {
+		return
+	}
+	s := r.sessions[id]
+	if s == nil || s.Tmux.PaneID == "" {
+		return
+	}
+	r.index.clear(PaneKey(s.Tmux.Server, s.Tmux.PaneID), "")
+	s.Tmux = session.TmuxLocation{}
+	s.Frontend = session.FrontendExternal
+	r.publish(Event{Type: EventUpdated, Session: *s})
+}
+
 // SetBranch updates a session's current git branch, publishing an update only
 // when it changes. No-op for an unknown id. Called when a client opens a session
 // (path-derived, so it catches a mid-session checkout).
@@ -489,6 +510,13 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 			r.index.setPane(pKey, id)
 		}
 		created = true
+	} else if pKey != "" && s.Tmux.PaneID == "" {
+		// Adopt an on-demand pane onto an existing paneless record (an OpenCode
+		// session spawned into a tmux pane for terminal control). The record keeps
+		// its agent-keyed ID; the pane key is added as an alias.
+		s.Tmux.Server = u.Server
+		s.Tmux.PaneID = u.PaneID
+		r.index.setPane(pKey, s.ID)
 	}
 
 	r.reindexAgentSession(s, u.AgentSessionID)

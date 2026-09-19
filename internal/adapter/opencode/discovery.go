@@ -31,8 +31,11 @@ type discoverer struct {
 	seedOnce sync.Once
 	ctx      context.Context
 
+	argusTmux *tmux.Client // argus tmux server, for adopting spawned terminal panes
+
 	mu       sync.Mutex
 	presence map[string]*presenceEntry // opencode session id -> entry
+	panes    map[string]string         // opencode session id -> adopted pane id (argus server)
 	pendPerm map[string]string         // sessionID -> permissionID (SSE → Respond)
 	pendForm map[string]*pendingForm   // sessionID -> pending question form (SSE → Respond)
 }
@@ -50,14 +53,17 @@ type pendingField struct {
 	valueByLabel  map[string]string
 }
 
-// clients is accepted for interface compatibility; the presence model uses no tmux panes.
-func newDiscoverer(reg *registry.Registry, _ map[session.TmuxServer]*tmux.Client) *discoverer {
+// clients supplies the argus tmux server, used only to adopt spawned terminal
+// panes; the live session list itself stays presence-driven, not pane-driven.
+func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) *discoverer {
 	d := &discoverer{
-		reg:      reg,
-		ctx:      context.Background(),
-		presence: map[string]*presenceEntry{},
-		pendPerm: map[string]string{},
-		pendForm: map[string]*pendingForm{},
+		reg:       reg,
+		argusTmux: clients[session.TmuxServerArgus],
+		ctx:       context.Background(),
+		presence:  map[string]*presenceEntry{},
+		panes:     map[string]string{},
+		pendPerm:  map[string]string{},
+		pendForm:  map[string]*pendingForm{},
 	}
 	d.dial = func() (*client, bool) {
 		info, ok := readServiceInfo()
@@ -84,6 +90,9 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 				d.seedIdle(sessions)
 			}
 		})
+		if bound, ok := d.scanPanes(ctx); ok {
+			d.reconcilePanes(ctx, bound, active)
+		}
 	}
 	d.pumpOnce.Do(func() {
 		go d.runEventPump(d.ctx)
@@ -106,6 +115,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 	e.status = st
 	e.awaitingPermission = in != nil && in.Kind == session.InteractionPermission
 	needHydrate := !e.hydrated
+	paneID := d.panes[id]
 	d.mu.Unlock()
 
 	u := registry.HookUpdate{
@@ -115,6 +125,10 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		Frontend:       session.FrontendExternal,
 		TranscriptPath: id,
 		CanPrompt:      true,
+	}
+	if paneID != "" {
+		u.Server = session.TmuxServerArgus
+		u.PaneID = paneID
 	}
 	if in != nil {
 		u.Interaction = in
@@ -192,6 +206,7 @@ func (d *discoverer) dismiss(id string) { d.remove(id) }
 func (d *discoverer) remove(id string) {
 	d.mu.Lock()
 	delete(d.presence, id)
+	delete(d.panes, id)
 	delete(d.pendPerm, id)
 	delete(d.pendForm, id)
 	d.mu.Unlock()
@@ -204,6 +219,9 @@ func (d *discoverer) sweepIdle() {
 	d.mu.Lock()
 	for id, e := range d.presence {
 		if e.awaitingPermission {
+			continue
+		}
+		if _, hasPane := d.panes[id]; hasPane {
 			continue
 		}
 		if e.lastActivity.Before(cutoff) {
@@ -227,6 +245,15 @@ func (d *discoverer) ageOutLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if c, ok := d.dial(); ok {
+				var active map[string]bool
+				if a, aerr := c.listActive(ctx); aerr == nil {
+					active = a
+				}
+				if bound, ok := d.scanPanes(ctx); ok {
+					d.reconcilePanes(ctx, bound, active)
+				}
+			}
 			d.sweepIdle()
 		}
 	}
