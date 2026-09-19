@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -156,6 +157,51 @@ func TestDismissRemovesAndReappearsOnActivity(t *testing.T) {
 		t.Fatal("new activity should re-add")
 	}
 }
+
+func TestScanOnceSeedsRecentIdleSessions(t *testing.T) {
+	now := time.Now().UnixMilli()
+	recent := now - (10 * time.Minute).Milliseconds()
+	old := now - (2 * time.Hour).Milliseconds()
+	list := `{"data":[` +
+		`{"id":"ses_run","title":"Run","location":{"directory":"/repo"},"time":{"updated":` + itoa(now) + `}},` +
+		`{"id":"ses_idle","title":"Idle","location":{"directory":"/repo"},"time":{"updated":` + itoa(recent) + `}},` +
+		`{"id":"ses_old","title":"Old","location":{"directory":"/repo"},"time":{"updated":` + itoa(old) + `}}` +
+		`]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/active":
+			_, _ = w.Write([]byte(`{"data":{"ses_run":{"type":"running"}}}`))
+		case "/api/session":
+			_, _ = w.Write([]byte(list))
+		case "/api/session/ses_run":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_run","title":"Run","location":{"directory":"/repo"}}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+	if err := d.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+
+	got := map[string]session.Status{}
+	for _, s := range reg.Snapshot() {
+		got[s.AgentSessionID] = s.Status
+	}
+	if got["ses_run"] != session.StatusWorking {
+		t.Fatalf("running session should stay Working: %v", got)
+	}
+	if got["ses_idle"] != session.StatusAwaitingInput {
+		t.Fatalf("recent idle session should seed as AwaitingInput: %v", got)
+	}
+	if _, ok := got["ses_old"]; ok {
+		t.Fatalf("session idle beyond the TTL must not seed: %v", got)
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func TestAdapterSendPromptPostsViaClient(t *testing.T) {
 	var gotPath, gotBody string

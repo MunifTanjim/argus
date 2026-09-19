@@ -28,6 +28,7 @@ type discoverer struct {
 	dial func() (*client, bool)
 
 	pumpOnce sync.Once
+	seedOnce sync.Once
 	ctx      context.Context
 
 	mu       sync.Mutex
@@ -78,6 +79,11 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		for id := range active {
 			d.upsert(id, session.StatusWorking, nil)
 		}
+		d.seedOnce.Do(func() {
+			if sessions, lerr := c.listSessions(ctx); lerr == nil {
+				d.seedIdle(sessions)
+			}
+		})
 	}
 	d.pumpOnce.Do(func() {
 		go d.runEventPump(d.ctx)
@@ -129,6 +135,48 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		}
 	}
 	d.reg.ApplyHook(u)
+}
+
+// seedIdle adds idle sessions whose last update falls within the idle TTL as
+// AwaitingInput, so a restart surfaces sessions active in the last hour. It skips
+// running/archived sessions and any id already tracked, so it never resurrects a
+// dismissed session on a later scan (guarded by seedOnce to run at startup only).
+func (d *discoverer) seedIdle(sessions []ocSession) {
+	cutoff := time.Now().Add(-sessionIdleTTL)
+	for _, s := range sessions {
+		if s.ID == "" || s.Time.Archived != 0 {
+			continue
+		}
+		updated := time.UnixMilli(s.Time.Updated)
+		if updated.Before(cutoff) {
+			continue
+		}
+		d.mu.Lock()
+		if _, exists := d.presence[s.ID]; exists {
+			d.mu.Unlock()
+			continue
+		}
+		d.presence[s.ID] = &presenceEntry{
+			lastActivity: updated,
+			status:       session.StatusAwaitingInput,
+			hydrated:     true,
+		}
+		d.mu.Unlock()
+
+		d.reg.ApplyHook(registry.HookUpdate{
+			Agent:              Agent,
+			AgentSessionID:     s.ID,
+			Status:             session.StatusAwaitingInput,
+			Frontend:           session.FrontendExternal,
+			TranscriptPath:     s.ID,
+			CanPrompt:          true,
+			Name:               s.Title,
+			Cwd:                s.Location.Directory,
+			Repo:               repoName(s.Location.Directory),
+			Interaction:        &session.Interaction{Kind: session.InteractionIdle},
+			ReplaceInteraction: true,
+		})
+	}
 }
 
 func (d *discoverer) sendPrompt(ctx context.Context, sessionID, text string) error {

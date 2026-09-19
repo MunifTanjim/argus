@@ -65,10 +65,11 @@ type ocSession struct {
 	Agent     string `json:"agent"`
 	Title     string `json:"title"`
 	Time      struct {
-		Created int64 `json:"created"`
-		Updated int64 `json:"updated"`
-		Idle    int64 `json:"idle"`
-		Viewed  int64 `json:"viewed"`
+		Created  int64 `json:"created"`
+		Updated  int64 `json:"updated"`
+		Idle     int64 `json:"idle"`
+		Viewed   int64 `json:"viewed"`
+		Archived int64 `json:"archived"`
 	} `json:"time"`
 	Location struct {
 		Directory string `json:"directory"`
