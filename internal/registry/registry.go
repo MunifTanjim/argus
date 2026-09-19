@@ -427,6 +427,7 @@ type HookUpdate struct {
 	Server         session.TmuxServer
 	PaneID         string // from $TMUX_PANE; primary correlation key
 	AgentSessionID string
+	Name           string
 	Cwd            string
 	Repo           string // git repo basename for Cwd, when known
 	TranscriptPath string
@@ -488,6 +489,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 
 	r.reindexAgentSession(s, u.AgentSessionID)
+	if u.Name != "" {
+		s.Name = u.Name
+	}
 	if u.Cwd != "" {
 		s.Cwd = u.Cwd
 	}

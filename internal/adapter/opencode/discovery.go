@@ -98,6 +98,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 	if !existed {
 		if c, ok := d.dial(); ok {
 			if s, err := c.getSession(d.ctx, id); err == nil {
+				u.Name = s.Title
 				u.Cwd = s.Location.Directory
 				u.Repo = repoName(s.Location.Directory)
 			}

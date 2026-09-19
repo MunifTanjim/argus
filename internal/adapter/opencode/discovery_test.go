@@ -47,7 +47,7 @@ func TestPresenceUpsertAddsAndUpdates(t *testing.T) {
 	if len(snap) != 1 || snap[0].AgentSessionID != "ses_1" || snap[0].Status != session.StatusWorking {
 		t.Fatalf("after upsert: %+v", snap)
 	}
-	if snap[0].Cwd != "/repo" || snap[0].TranscriptPath != "ses_1" {
+	if snap[0].Name != "T" || snap[0].Cwd != "/repo" || snap[0].TranscriptPath != "ses_1" {
 		t.Fatalf("display fields: %+v", snap[0])
 	}
 
