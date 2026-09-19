@@ -84,6 +84,11 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 	}
 	active, err := c.listActive(ctx)
 	if err == nil {
+		// Adopt argus-spawned terminal panes first, so a pane-backed session surfaces
+		// already controllable rather than appearing paneless until the next scan.
+		if bound, ok := d.scanPanes(ctx); ok {
+			d.reconcilePanes(ctx, bound, active)
+		}
 		for id := range active {
 			d.upsert(id, session.StatusWorking, nil)
 		}
@@ -92,9 +97,6 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 				d.seedIdle(sessions)
 				d.seeded.Store(true)
 			}
-		}
-		if bound, ok := d.scanPanes(ctx); ok {
-			d.reconcilePanes(ctx, bound, active)
 		}
 	}
 	d.pumpOnce.Do(func() {
