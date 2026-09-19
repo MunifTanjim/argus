@@ -103,6 +103,54 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.dismissed, contains('oc:idle'));
   });
+
+  testWidgets('dismissing removes the row from local state and survives rebuild',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final repo = _FakeRepository();
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([idleSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+      connStateProvider.overrideWith((ref) => ConnState.connected),
+    ]));
+    await tester.pump();
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    // Force a parent rebuild before any server removal event arrives.
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(SessionListScreen)));
+    container.read(connStateProvider.notifier).state = ConnState.reconnecting;
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('oc:idle')), findsNothing);
+    expect(repo.dismissed, contains('oc:idle'));
+  });
+
+  testWidgets('failed dismiss re-inserts the row and shows a SnackBar',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final repo = _FakeRepository()..dismissError = 'node rejected';
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([idleSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+    ]));
+    await tester.pump();
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Failed to dismiss'), findsOneWidget);
+    expect(find.byKey(const ValueKey('oc:idle')), findsOneWidget);
+  });
 }
 
 class _SeededSessions extends SessionsNotifier {
@@ -114,10 +162,17 @@ class _SeededSessions extends SessionsNotifier {
 
 class _FakeRepository implements SessionRepository {
   final List<String> dismissed = [];
+  String? dismissError;
 
   @override
   Future<Result<void>> dismiss(String sessionId) async {
     dismissed.add(sessionId);
+    if (dismissError != null) {
+      // Mimic a network round-trip so the dismissed widget is disposed before
+      // the failure re-inserts it, matching production timing.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      return Result.error(dismissError!);
+    }
     return Result.ok(null);
   }
 

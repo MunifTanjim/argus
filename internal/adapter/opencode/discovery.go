@@ -18,6 +18,7 @@ type presenceEntry struct {
 	lastActivity       time.Time
 	status             session.Status
 	awaitingPermission bool
+	hydrated           bool
 }
 
 type discoverer struct {
@@ -82,6 +83,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 	e.lastActivity = time.Now()
 	e.status = st
 	e.awaitingPermission = in != nil && in.Kind == session.InteractionPermission
+	needHydrate := !e.hydrated
 	d.mu.Unlock()
 
 	u := registry.HookUpdate{
@@ -95,12 +97,17 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		u.Interaction = in
 		u.ReplaceInteraction = true
 	}
-	if !existed {
+	if needHydrate {
 		if c, ok := d.dial(); ok {
 			if s, err := c.getSession(d.ctx, id); err == nil {
 				u.Name = s.Title
 				u.Cwd = s.Location.Directory
 				u.Repo = repoName(s.Location.Directory)
+				d.mu.Lock()
+				if e, ok := d.presence[id]; ok {
+					e.hydrated = true
+				}
+				d.mu.Unlock()
 			}
 		}
 	}

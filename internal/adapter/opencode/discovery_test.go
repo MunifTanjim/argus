@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +58,51 @@ func TestPresenceUpsertAddsAndUpdates(t *testing.T) {
 	if len(reg.Snapshot()) != 0 {
 		t.Fatalf("after remove, expected empty")
 	}
+}
+
+func TestPresenceUpsertRetriesHydrationUntilSuccess(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session/ses_1" {
+			if fail.Load() {
+				w.WriteHeader(500)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"}}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+
+	d.upsert("ses_1", session.StatusWorking, nil)
+	snap := reg.Snapshot()
+	if len(snap) != 1 || snap[0].AgentSessionID != "ses_1" {
+		t.Fatalf("after failed hydrate: %+v", snap)
+	}
+	if snap[0].Name != "" {
+		t.Fatalf("expected empty Name after failed getSession: %+v", snap[0])
+	}
+	d.mu.Lock()
+	if d.presence["ses_1"].hydrated {
+		t.Fatal("entry must not be hydrated after getSession failure")
+	}
+	d.mu.Unlock()
+
+	fail.Store(false)
+	d.upsert("ses_1", session.StatusWorking, nil)
+	snap = reg.Snapshot()
+	if len(snap) != 1 || snap[0].Name != "T" || snap[0].Cwd != "/repo" {
+		t.Fatalf("after successful retry: %+v", snap[0])
+	}
+	d.mu.Lock()
+	if !d.presence["ses_1"].hydrated {
+		t.Fatal("entry must be hydrated after getSession success")
+	}
+	d.mu.Unlock()
 }
 
 func TestPresenceSweepIdleAgesOutExceptPermission(t *testing.T) {

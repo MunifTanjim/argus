@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/result.dart';
 import '../data/session_repository.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
@@ -47,9 +48,22 @@ class SessionListScreen extends ConsumerWidget {
         padding: const EdgeInsets.only(right: 16),
         child: const Icon(Icons.close, color: Colors.white),
       ),
-      onDismissed: (_) => ref.read(sessionRepositoryProvider).dismiss(s.id),
+      onDismissed: (_) => _dismiss(context, ref, s),
       child: card,
     );
+  }
+
+  Future<void> _dismiss(BuildContext context, WidgetRef ref, Session s) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final notifier = ref.read(sessionsProvider.notifier);
+    notifier.remove(s.id);
+    final result = await ref.read(sessionRepositoryProvider).dismiss(s.id);
+    if (result case Error(:final error)) {
+      notifier.put(s);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to dismiss: $error')),
+      );
+    }
   }
 
   Future<void> _refresh(WidgetRef ref) async {
