@@ -18,6 +18,48 @@ const messagesFixture = `{"data":[
 	]}
 ],"cursor":{"previous":"","next":""}}`
 
+const subagentFixture = `{"data":[
+	{"type":"assistant","id":"m1","time":{"created":1},"model":{"id":"glm"},"content":[
+		{"type":"tool","id":"call_1","name":"subagent","state":{"status":"completed","input":{"agent":"explore","description":"look at X","prompt":"do it"},"metadata":{"sessionID":"ses_child"}}},
+		{"type":"tool","id":"call_2","name":"task","state":{"status":"error","input":{},"error":{"type":"aborted","message":"spawn failed"}}}
+	]}
+],"cursor":{"previous":"","next":""}}`
+
+func TestFoldMessagesSubagent(t *testing.T) {
+	var env ocEnvelope[ocMessage]
+	if err := json.Unmarshal([]byte(subagentFixture), &env); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	items := foldMessages(env.Data).Chunks[0].Items
+
+	var sub, failed transcript.Item
+	for _, it := range items {
+		switch it.ToolName {
+		case "subagent":
+			sub = it
+		case "task":
+			failed = it
+		}
+	}
+
+	// A subagent with a child session id becomes a drillable ItemSubagent.
+	if sub.Kind != transcript.ItemSubagent {
+		t.Fatalf("subagent kind = %q, want %q", sub.Kind, transcript.ItemSubagent)
+	}
+	if len(sub.Subagents) != 1 {
+		t.Fatalf("want 1 subagent ref, got %d", len(sub.Subagents))
+	}
+	s := sub.Subagents[0]
+	if s.ID != "ses_child" || s.Type != "explore" || s.Desc != "look at X" || !s.HasTrace {
+		t.Fatalf("subagent ref = %+v", s)
+	}
+
+	// A task that never spawned a child (no metadata.sessionID) stays a plain tool.
+	if failed.Kind != transcript.ItemTool {
+		t.Fatalf("childless task kind = %q, want %q", failed.Kind, transcript.ItemTool)
+	}
+}
+
 func TestFoldMessages(t *testing.T) {
 	var env ocEnvelope[ocMessage]
 	if err := json.Unmarshal([]byte(messagesFixture), &env); err != nil {
@@ -55,6 +97,12 @@ func TestFoldMessages(t *testing.T) {
 	}
 	if completed.ToolInput != `{"path":"foo.go"}` {
 		t.Fatalf("tool input: %q", completed.ToolInput)
+	}
+	if completed.InputPreview != "foo.go" {
+		t.Fatalf("read preview = %q, want foo.go", completed.InputPreview)
+	}
+	if errored.InputPreview != "nope" {
+		t.Fatalf("bash preview = %q, want nope", errored.InputPreview)
 	}
 	if !errored.ResultIsError {
 		t.Fatalf("errored tool not flagged: %+v", errored)

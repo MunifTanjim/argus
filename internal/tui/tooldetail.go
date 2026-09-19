@@ -379,18 +379,23 @@ func (m model) closeAgentDetail(it transcript.Item, width int) string {
 
 func (m model) readDetail(it transcript.Item, width int) string {
 	var in struct {
-		FilePath string `json:"file_path"`
+		FilePath string `json:"file_path"` // claude
+		Path     string `json:"path"`      // opencode
 	}
 	unmarshalInput(it.ToolInput, &in)
+	path := in.FilePath
+	if path == "" {
+		path = in.Path
+	}
 
 	var sb strings.Builder
-	if in.FilePath != "" {
-		sb.WriteString(StyleSecondary.Render(in.FilePath) + "\n")
+	if path != "" {
+		sb.WriteString(StyleSecondary.Render(path) + "\n")
 	}
 	if it.Result != "" {
 		sb.WriteString(sectionRule(width) + "\n")
 		sb.WriteString(m.renderToolText(it.Result, width))
-	} else if it.ToolInput != "" && in.FilePath == "" {
+	} else if it.ToolInput != "" && path == "" {
 		sb.WriteString(m.renderToolText(it.ToolInput, width))
 	}
 	return strings.TrimRight(sb.String(), "\n")
@@ -454,13 +459,17 @@ func (m model) planDetail(it transcript.Item, width int) string {
 func (m model) grepDetail(it transcript.Item, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`
-		Glob    string `json:"glob"`
+		Glob    string `json:"glob"`    // claude
+		Include string `json:"include"` // opencode
 		Path    string `json:"path"`
 	}
 	unmarshalInput(it.ToolInput, &in)
 
 	header := StyleSecondaryBold.Render(`"` + in.Pattern + `"`)
 	scope := in.Glob
+	if scope == "" {
+		scope = in.Include
+	}
 	if in.Path != "" {
 		if scope != "" {
 			scope += " "
@@ -564,6 +573,81 @@ func (m model) askUserQuestionDetail(it transcript.Item, width int) string {
 
 func (m model) opencodeQuestionDetail(it transcript.Item, width int) string {
 	return m.questionDetail(it, width, "OpenCode")
+}
+
+// opencodeExecuteDetail renders the executed code block and its result. Unlike
+// bash, the input is code, not a shell command, so it is shown without a "$" prompt.
+func (m model) opencodeExecuteDetail(it transcript.Item, width int) string {
+	var in struct {
+		Code string `json:"code"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+
+	var sb strings.Builder
+	if in.Code != "" {
+		sb.WriteString(m.renderToolText(in.Code, width))
+	} else if it.ToolInput != "" {
+		sb.WriteString(m.renderToolText(it.ToolInput, width))
+	}
+	if it.Result != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n" + sectionRule(width) + "\n")
+		}
+		sb.WriteString(sectionLabel(resultLabelText(it), it.ResultIsError) + "\n")
+		sb.WriteString(m.renderToolText(it.Result, width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// opencodeSkillDetail shows the loaded skill id. The result is the full skill XML,
+// which the generic body would dump, so only the id is shown.
+func (m model) opencodeSkillDetail(it transcript.Item, width int) string {
+	var in struct {
+		ID string `json:"id"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+	if in.ID == "" {
+		return m.genericToolBody(it, width)
+	}
+	return StyleSecondaryBold.Render(in.ID)
+}
+
+// opencodeTaskDetail previews a dispatched sub-agent: its type, a one-line
+// description, and the prompt. The multi-task "task" input shape varies by model,
+// so an unrecognised input falls back to the generic body.
+func (m model) opencodeTaskDetail(it transcript.Item, width int) string {
+	var in struct {
+		Agent        string `json:"agent"`
+		SubagentType string `json:"subagent_type"`
+		Description  string `json:"description"`
+		Prompt       string `json:"prompt"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+	kind := in.Agent
+	if kind == "" {
+		kind = in.SubagentType
+	}
+	if kind == "" && in.Description == "" && in.Prompt == "" {
+		return m.genericToolBody(it, width)
+	}
+
+	var sb strings.Builder
+	if kind != "" {
+		sb.WriteString(StyleSecondaryBold.Render(kind))
+	}
+	if in.Description != "" {
+		if sb.Len() > 0 {
+			sb.WriteString(" ")
+		}
+		sb.WriteString(StyleDim.Render(in.Description))
+	}
+	if in.Prompt != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n" + sectionRule(width) + "\n")
+		}
+		sb.WriteString(m.renderToolText(in.Prompt, width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // questionDetail renders a questions/options tool (Claude AskUserQuestion,

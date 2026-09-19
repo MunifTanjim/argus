@@ -7,7 +7,12 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
+var serviceDial func() (*client, bool) // test override
+
 func serviceClient() (*client, bool) {
+	if serviceDial != nil {
+		return serviceDial()
+	}
 	info, ok := readServiceInfo()
 	if !ok {
 		return nil, false
@@ -27,14 +32,18 @@ func readTranscriptView(sessionID string) (transcript.TranscriptView, error) {
 	return foldMessages(items), nil
 }
 
-func findToolDetail(sessionID, _, toolID string) (transcript.ToolDetail, bool, error) {
+func findToolDetail(sessionID, agentID, toolID string) (transcript.ToolDetail, bool, error) {
+	// A subagent's tools live in its own child session, not the parent transcript.
+	if agentID != "" {
+		sessionID = agentID
+	}
 	view, err := readTranscriptView(sessionID)
 	if err != nil {
 		return transcript.ToolDetail{}, false, err
 	}
 	for _, ch := range view.Chunks {
 		for _, it := range ch.Items {
-			if it.Kind == transcript.ItemTool && it.ToolID == toolID {
+			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent) && it.ToolID == toolID {
 				return transcript.ToolDetail{ToolInput: it.ToolInput, Result: it.Result, ResultIsError: it.ResultIsError}, true, nil
 			}
 		}

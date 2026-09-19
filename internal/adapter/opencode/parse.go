@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -47,10 +48,15 @@ func assistantChunk(m ocMessage) transcript.Chunk {
 			it := transcript.Item{ID: p.ID, Kind: transcript.ItemTool, ToolName: p.Name, ToolID: p.ID}
 			if p.State != nil {
 				it.ToolInput = string(p.State.Input)
+				it.InputPreview = toolPreview(p.Name, p.State.Input)
 				it.Result = toolContentText(p.State.Content)
 				it.ResultIsError = p.State.Status == "error"
 				if it.ResultIsError && p.State.Error != nil && p.State.Error.Message != "" {
 					it.Result = p.State.Error.Message
+				}
+				if sub, ok := subagentRef(p); ok {
+					it.Kind = transcript.ItemSubagent
+					it.Subagents = []transcript.Subagent{sub}
 				}
 			}
 			c.Items = append(c.Items, it)
@@ -58,6 +64,90 @@ func assistantChunk(m ocMessage) transcript.Chunk {
 		}
 	}
 	return c
+}
+
+// subagentRef turns a completed task/subagent tool part into a drillable subagent
+// reference. OpenCode carries the child session id in state.metadata.sessionID; the
+// child transcript is fetched by that id. ok is false for other tools, or when no
+// child session was recorded (e.g. a spawn that errored before starting).
+func subagentRef(p ocPart) (transcript.Subagent, bool) {
+	if p.Name != "task" && p.Name != "subagent" {
+		return transcript.Subagent{}, false
+	}
+	var meta struct {
+		SessionID string `json:"sessionID"`
+	}
+	json.Unmarshal(p.State.Metadata, &meta)
+	if meta.SessionID == "" {
+		return transcript.Subagent{}, false
+	}
+	var in struct {
+		Agent        string `json:"agent"`
+		SubagentType string `json:"subagent_type"`
+		Description  string `json:"description"`
+	}
+	json.Unmarshal(p.State.Input, &in)
+	typ := in.Agent
+	if typ == "" {
+		typ = in.SubagentType
+	}
+	return transcript.Subagent{
+		ID:       meta.SessionID,
+		Type:     typ,
+		Desc:     in.Description,
+		Status:   p.State.Status,
+		HasTrace: true,
+	}, true
+}
+
+// toolPreview builds the one-line summary shown next to a tool name before it is
+// expanded, picking the most identifying input field per tool. Empty for tools
+// with no natural one-liner (the row then shows just the name).
+func toolPreview(name string, input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var in map[string]any
+	if json.Unmarshal(input, &in) != nil {
+		return ""
+	}
+	pick := func(keys ...string) string {
+		for _, k := range keys {
+			if s, ok := in[k].(string); ok && s != "" {
+				return s
+			}
+		}
+		return ""
+	}
+	switch name {
+	case "read", "edit":
+		return pick("path", "filePath", "file_path")
+	case "write":
+		return pick("filePath", "path")
+	case "bash", "shell":
+		return firstLine(pick("command"))
+	case "execute":
+		return firstLine(pick("code"))
+	case "grep", "glob":
+		return pick("pattern")
+	case "webfetch":
+		return pick("url")
+	case "websearch":
+		return pick("query")
+	case "skill":
+		return pick("id")
+	case "task", "subagent":
+		return pick("description", "agent", "subagent_type")
+	default:
+		return ""
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func toolContentText(parts []ocToolContent) string {

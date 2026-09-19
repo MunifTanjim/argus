@@ -68,3 +68,39 @@ func TestStreamingTranscriptRefreshDetectsInMessageUpdate(t *testing.T) {
 		t.Fatalf("second Refresh: expected tool result %q, got %q", "file.go", chunks2[1].Items[0].Result)
 	}
 }
+
+func TestFindToolDetailReadsChildSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/ses_parent/message":
+			_, _ = w.Write([]byte(`{"data":[` +
+				`{"type":"assistant","id":"m1","time":{"created":1},"content":[` +
+				`{"type":"tool","id":"sub_1","name":"subagent","state":{"status":"completed","input":{"agent":"explore"},"metadata":{"sessionID":"ses_child"}}}` +
+				`]}],"cursor":{"previous":"","next":""}}`))
+		case "/api/session/ses_child/message":
+			_, _ = w.Write([]byte(`{"data":[` +
+				`{"type":"assistant","id":"cm1","time":{"created":1},"content":[` +
+				`{"type":"tool","id":"w_1","name":"write","state":{"status":"completed","input":{"filePath":"/tmp/x"},"content":[{"type":"text","text":"Wrote file successfully."}]}}` +
+				`]}],"cursor":{"previous":"","next":""}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	serviceDial = func() (*client, bool) { return newClient(serviceInfo{URL: srv.URL}), true }
+	t.Cleanup(func() { serviceDial = nil })
+
+	// The child's tool id lives in the child session; the drill-in passes agentID.
+	td, found, err := findToolDetail("ses_parent", "ses_child", "w_1")
+	if err != nil || !found {
+		t.Fatalf("findToolDetail: found=%v err=%v", found, err)
+	}
+	if td.Result != "Wrote file successfully." || td.ToolInput != `{"filePath":"/tmp/x"}` {
+		t.Fatalf("child tool detail = %+v", td)
+	}
+
+	// Without the child agentID it reads the parent, which has no such tool id.
+	if _, found, _ := findToolDetail("ses_parent", "", "w_1"); found {
+		t.Fatal("child tool id must not resolve against the parent transcript")
+	}
+}

@@ -103,10 +103,11 @@ type ocPart struct {
 }
 
 type ocToolState struct {
-	Status  string          `json:"status"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	Content []ocToolContent `json:"content,omitempty"`
-	Error   *ocToolError    `json:"error,omitempty"`
+	Status   string          `json:"status"`
+	Input    json.RawMessage `json:"input,omitempty"`
+	Content  []ocToolContent `json:"content,omitempty"`
+	Error    *ocToolError    `json:"error,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 type ocToolError struct {
