@@ -27,6 +27,7 @@ var _ adapter.Prompter = (*ocAdapter)(nil)
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
 func (ocAdapter) AgentColor() string { return "#d3869b" }
+func (ocAdapter) IsHeadless() bool   { return true }
 
 func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)

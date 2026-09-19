@@ -55,6 +55,33 @@ func TestHandleSessionInputPromptFallback(t *testing.T) {
 	}
 }
 
+func TestCanSpawnViewer(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.binCache = map[string]bool{"opencode": true, "claude": true}
+	mk := func(agent string) session.Session {
+		return session.Session{Agent: agent, AgentSessionID: "s1", Cwd: "/tmp"}
+	}
+
+	// opencode's pane is a viewer of a service-backed session, so it can respawn.
+	if !d.canSpawnViewer(mk("opencode")) {
+		t.Fatal("opencode: pane is a viewer, should be spawnable")
+	}
+	// claude is resumable, but its pane is the session's own process: never respawn.
+	if d.canSpawnViewer(mk("claude")) {
+		t.Fatal("claude: pane is the process, must not be viewer-spawnable")
+	}
+	noCwd := mk("opencode")
+	noCwd.Cwd = ""
+	if d.canSpawnViewer(noCwd) {
+		t.Fatal("unknown cwd must not be viewer-spawnable")
+	}
+	d.caps.SpawnSession = false
+	if d.canSpawnViewer(mk("opencode")) {
+		t.Fatal("no tmux must not be viewer-spawnable")
+	}
+}
+
 func TestHandleSessionInputPanelessNonPrompter(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.adapters["ghost"] = &fakeNonPrompter{}

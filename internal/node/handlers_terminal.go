@@ -250,7 +250,17 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 
 	m, err := d.setupMirror(ctx, c, s, p.TermID)
 	if err != nil {
-		return nil, err
+		// The adopted viewer pane may have died out-of-band, leaving a stale
+		// controllable record. Respawn the viewer and retry once, so the user is not
+		// forced to refresh. Only sessions whose pane is a viewer recover; a session
+		// whose pane is its own process reports the original error.
+		if s2, c2, ok := d.recoverViewerPane(ctx, s); ok {
+			s, c = s2, c2
+			m, err = d.setupMirror(ctx, c, s, p.TermID)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Detach the attach process from the request context; it lives until close.
 	attachCtx, cancel := context.WithCancel(context.Background())

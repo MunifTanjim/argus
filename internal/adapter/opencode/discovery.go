@@ -98,10 +98,10 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 				d.seeded.Store(true)
 			}
 		}
+		d.sweepIdle()
 	}
 	d.pumpOnce.Do(func() {
 		go d.runEventPump(d.ctx)
-		go d.ageOutLoop(d.ctx)
 	})
 	return err
 }
@@ -236,31 +236,6 @@ func (d *discoverer) sweepIdle() {
 	d.mu.Unlock()
 	for _, id := range stale {
 		d.remove(id)
-	}
-}
-
-func (d *discoverer) ageOutLoop(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if c, ok := d.dial(); ok {
-				var active map[string]bool
-				if a, aerr := c.listActive(ctx); aerr == nil {
-					active = a
-				}
-				if bound, ok := d.scanPanes(ctx); ok {
-					d.reconcilePanes(ctx, bound, active)
-				}
-			}
-			d.sweepIdle()
-		}
 	}
 }
 

@@ -122,6 +122,12 @@ type Adapter interface {
 	AgentName() string
 	AgentColor() string
 
+	// IsHeadless reports that the agent's session runs with no attached terminal by
+	// default (a background service): a tmux pane is an optional viewer of it. When
+	// true, argus can spawn or respawn a pane for a live session without restarting
+	// it; when false, the pane is the session's own process and losing it ends it.
+	IsHeadless() bool
+
 	NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) Discoverer
 
 	// SpawnCommand returns the CLI command to launch a session.

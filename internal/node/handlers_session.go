@@ -47,13 +47,18 @@ func (d *Node) withCaps(s session.Session) session.Session {
 }
 
 // canOpenTerminal reports whether argus can show a terminal for this live session
-// on this node: an existing pane to attach, or a paneless session whose agent can
-// spawn a viewer here (resume command + tmux + known cwd + binary on PATH).
+// on this node: an existing pane to attach, or a session whose pane is a viewer it
+// can spawn here.
 func (d *Node) canOpenTerminal(s session.Session) bool {
-	if s.Controllable() {
-		return true
-	}
-	if !d.caps.SpawnSession || s.Cwd == "" {
+	return s.Controllable() || d.canSpawnViewer(s)
+}
+
+// canSpawnViewer reports whether argus can spawn a terminal viewer for a session
+// whose agent is headless (adapter.IsHeadless): a pane is a disposable view of a
+// session that lives on its own, not the session's own process. Requires tmux, a
+// known cwd, and the agent's resume binary on PATH.
+func (d *Node) canSpawnViewer(s session.Session) bool {
+	if !d.adapterFor(s.Agent).IsHeadless() || !d.caps.SpawnSession || s.Cwd == "" || s.AgentSessionID == "" {
 		return false
 	}
 	name, _, ok := d.adapterFor(s.Agent).ResumeCommand(s.AgentSessionID)
@@ -61,6 +66,26 @@ func (d *Node) canOpenTerminal(s session.Session) bool {
 		return false
 	}
 	return d.binaryAvailable(name)
+}
+
+// recoverViewerPane recovers from a mirror setup failure caused by an adopted
+// viewer pane that died out-of-band, leaving a stale controllable record: it drops
+// the dead pane and respawns the viewer, returning the now-live session. It only
+// applies to sessions whose pane is a viewer (canSpawnViewer); for any other
+// session it reports ok=false so the original error stands.
+func (d *Node) recoverViewerPane(ctx context.Context, s session.Session) (session.Session, *tmux.Client, bool) {
+	if !d.canSpawnViewer(s) {
+		return s, nil, false
+	}
+	d.reg.ClearPane(s.AgentSessionID)
+	if _, err := d.spawnAndAdopt(ctx, s.Agent, s.AgentSessionID, s.Cwd, s.ID); err != nil {
+		return s, nil, false
+	}
+	s2, c2, err := d.resolve(s.ID)
+	if err != nil {
+		return s, nil, false
+	}
+	return s2, c2, true
 }
 
 // binaryAvailable memoizes a PATH lookup for an agent binary. It backs the
