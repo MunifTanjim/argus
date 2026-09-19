@@ -95,8 +95,15 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 		if !alive {
 			continue
 		}
+		projDir := ""
+		if ps.Cwd != "" {
+			if pd, err := parser.ProjectDirForPath(ps.Cwd); err == nil {
+				projDir = pd
+			}
+		}
+		sid := effectiveSessionID(ps, entries, projDir)
 		d := registry.DiscoveredSession{
-			AgentSessionID: ps.SessionID,
+			AgentSessionID: sid,
 			Name:           ps.Name,
 			Cwd:            ps.Cwd,
 			Repo:           repoName(ps.Cwd),
@@ -110,10 +117,8 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 		if !d.HasPane {
 			d.Frontend = frontendFor(ps.Entrypoint, false)
 		}
-		if ps.Cwd != "" {
-			if projDir, err := parser.ProjectDirForPath(ps.Cwd); err == nil {
-				d.TranscriptPath = filepath.Join(projDir, ps.SessionID+".jsonl")
-			}
+		if projDir != "" {
+			d.TranscriptPath = filepath.Join(projDir, sid+".jsonl")
 		}
 		out = append(out, d)
 	}
