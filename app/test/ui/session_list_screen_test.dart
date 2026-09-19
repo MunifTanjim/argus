@@ -171,13 +171,6 @@ class _FakeRepository implements SessionRepository {
   String? dismissError;
 
   @override
-  Future<Result<void>> dismiss(String sessionId) {
-    dismissed.add(sessionId);
-    if (dismissError != null) return Future.value(Result.error(dismissError!));
-    return Future.value(Result.ok(null));
-  }
-
-  @override
   Future<Result<void>> respond(Map<String, dynamic> params) async =>
       Result.ok(null);
 
@@ -207,7 +200,11 @@ class _FakeRepository implements SessionRepository {
       Result.ok(null);
 
   @override
-  Future<Result<void>> kill(String sessionId) async => Result.ok(null);
+  Future<Result<void>> kill(String sessionId) {
+    dismissed.add(sessionId);
+    if (dismissError != null) return Future.value(Result.error(dismissError!));
+    return Future.value(Result.ok(null));
+  }
 
   @override
   Future<Result<List<NodeRef>>> nodes() async => const Result.ok([]);

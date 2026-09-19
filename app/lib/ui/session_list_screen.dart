@@ -56,7 +56,7 @@ class SessionListScreen extends ConsumerWidget {
 
   Future<void> _dismiss(BuildContext context, WidgetRef ref, Session s) async {
     ref.read(sessionsProvider.notifier).remove(s.id);
-    final result = await ref.read(sessionRepositoryProvider).dismiss(s.id);
+    final result = await ref.read(sessionRepositoryProvider).kill(s.id);
     if (result case Error(:final error)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted) return;

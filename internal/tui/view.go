@@ -245,7 +245,11 @@ func (m model) listView() string {
 		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, listKeys.Quit)
 	switch {
 	case m.pendingKill && m.cursor < len(m.order):
-		footer = asstStyle.Render("kill this session? y/n")
+		verb := "kill"
+		if !m.sessions[m.order[m.cursor]].Controllable() {
+			verb = "dismiss"
+		}
+		footer = asstStyle.Render(verb + " this session? y/n")
 	case m.flash != "":
 		footer = asstStyle.Render(m.flash)
 	}

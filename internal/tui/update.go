@@ -776,12 +776,22 @@ func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	s := m.sessions[m.order[m.cursor]]
-	if !s.Controllable() {
+	// `x` removes a session: kill its pane, or dismiss a paneless presence card.
+	if !s.Controllable() && !dismissable(s) {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}
 	m.pendingKill = true
 	return m, nil
+}
+
+// dismissable reports whether a paneless session can be dismissed: OpenCode only,
+// and not while it is working or awaiting a question/permission. Mirrors the node
+// guard and the app control.
+func dismissable(s session.Session) bool {
+	return s.Agent == "opencode" && !s.Controllable() &&
+		s.Status != session.StatusWorking &&
+		(s.Interaction == nil || s.Interaction.Kind == session.InteractionIdle)
 }
 
 func (m model) actListRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {

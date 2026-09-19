@@ -19,77 +19,53 @@ type fakeDismisser struct {
 
 func (f *fakeDismisser) Dismiss(context.Context, session.Session) error { f.called = true; return nil }
 
-func TestHandleSessionDismiss(t *testing.T) {
+// A paneless session is dismissed via the unified sessions.kill verb; the dismiss
+// is refused while the session is working or awaiting a question/permission.
+func TestHandleSessionKillDismissesPanelessSession(t *testing.T) {
 	fd := &fakeDismisser{}
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.adapters["opencode"] = fd
 
-	s, _ := d.reg.ApplyHook(registry.HookUpdate{
-		Agent:          "opencode",
-		AgentSessionID: "ses_1",
-		Status:         session.StatusIdle,
-	})
-
-	call := func() error {
-		params, _ := json.Marshal(api.SessionRef{SessionID: s.ID})
-		_, err := d.handleSessionDismiss(context.Background(), params)
+	set := func(status session.Status, in *session.Interaction) session.Session {
+		s, _ := d.reg.ApplyHook(registry.HookUpdate{
+			Agent:              "opencode",
+			AgentSessionID:     "ses_1",
+			Status:             status,
+			Interaction:        in,
+			ReplaceInteraction: true,
+		})
+		return s
+	}
+	call := func(id string) error {
+		params, _ := json.Marshal(api.SessionRef{SessionID: id})
+		_, err := d.handleSessionKill(context.Background(), params)
 		return err
 	}
 
-	// idle → allowed
-	if err := call(); err != nil || !fd.called {
+	// idle → dismissed
+	s := set(session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+	if err := call(s.ID); err != nil || !fd.called {
 		t.Fatalf("idle dismiss: err=%v called=%v", err, fd.called)
 	}
 
 	// working → rejected
 	fd.called = false
-	s, _ = d.reg.ApplyHook(registry.HookUpdate{
-		Agent:          "opencode",
-		AgentSessionID: "ses_1",
-		Status:         session.StatusWorking,
-	})
-	if err := call(); err == nil || fd.called {
+	s = set(session.StatusWorking, nil)
+	if err := call(s.ID); err == nil || fd.called {
 		t.Fatalf("working dismiss should be rejected: err=%v called=%v", err, fd.called)
 	}
 
 	// awaiting permission → rejected
 	fd.called = false
-	s, _ = d.reg.ApplyHook(registry.HookUpdate{
-		Agent:              "opencode",
-		AgentSessionID:     "ses_1",
-		Status:             session.StatusAwaitingInput,
-		Interaction:        &session.Interaction{Kind: session.InteractionPermission},
-		ReplaceInteraction: true,
-	})
-	if err := call(); err == nil || fd.called {
+	s = set(session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionPermission})
+	if err := call(s.ID); err == nil || fd.called {
 		t.Fatalf("permission dismiss should be rejected: err=%v called=%v", err, fd.called)
 	}
 
 	// awaiting question → rejected
 	fd.called = false
-	s, _ = d.reg.ApplyHook(registry.HookUpdate{
-		Agent:              "opencode",
-		AgentSessionID:     "ses_1",
-		Status:             session.StatusAwaitingInput,
-		Interaction:        &session.Interaction{Kind: session.InteractionQuestion},
-		ReplaceInteraction: true,
-	})
-	if err := call(); err == nil || fd.called {
+	s = set(session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionQuestion})
+	if err := call(s.ID); err == nil || fd.called {
 		t.Fatalf("question dismiss should be rejected: err=%v called=%v", err, fd.called)
-	}
-
-	// idle but with an open terminal pane → rejected (would not stick; pane re-adopts)
-	fd.called = false
-	s, _ = d.reg.ApplyHook(registry.HookUpdate{
-		Agent:              "opencode",
-		AgentSessionID:     "ses_1",
-		Status:             session.StatusAwaitingInput,
-		Server:             session.TmuxServerArgus,
-		PaneID:             "%7",
-		Interaction:        &session.Interaction{Kind: session.InteractionIdle},
-		ReplaceInteraction: true,
-	})
-	if err := call(); err == nil || fd.called {
-		t.Fatalf("controllable dismiss should be rejected: err=%v called=%v", err, fd.called)
 	}
 }

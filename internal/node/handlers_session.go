@@ -476,13 +476,22 @@ func (d *Node) waitControllable(id string) bool {
 	return false
 }
 
-// handleSessionKill kills a session's pane.
+// handleSessionKill removes a session from the list: it kills the tmux pane when
+// the session has one, otherwise it dismisses a paneless presence card (OpenCode).
+// One "remove" verb chosen by pane presence.
 func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SessionRef](params)
 	if err != nil {
 		return nil, err
 	}
-	s, c, err := d.resolve(p.SessionID)
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	if !s.Controllable() {
+		return d.dismissSession(ctx, s)
+	}
+	c, err := d.clientFor(s)
 	if err != nil {
 		return nil, err
 	}
@@ -491,6 +500,24 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	}
 	d.clearResuming(s.ID)
 	go d.scan(context.Background())
+	return nil, nil
+}
+
+// dismissSession removes a paneless presence card via the adapter's Dismisser.
+// Rejected while the session is working or awaiting a question/permission, so a
+// session that needs the user is never hidden.
+func (d *Node) dismissSession(ctx context.Context, s session.Session) (any, error) {
+	if s.Status == session.StatusWorking ||
+		(s.Interaction != nil && s.Interaction.Kind != session.InteractionIdle) {
+		return nil, fmt.Errorf("cannot dismiss a session that needs your input")
+	}
+	r, ok := d.adapterFor(s.Agent).(adapter.Dismisser)
+	if !ok {
+		return nil, fmt.Errorf("cannot remove %s session: no terminal pane and dismiss is unsupported", s.Agent)
+	}
+	if err := r.Dismiss(ctx, s); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
