@@ -56,8 +56,8 @@ func TestApplyEventStatusMap(t *testing.T) {
 	}
 
 	d.applyEvent(sseFrame{
-		Type: "permission.updated",
-		Data: []byte(`{"id":"req_1","sessionID":"ses_1","action":"bash","resources":[]}`),
+		Type: "permission.asked",
+		Data: []byte(`{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}`),
 	})
 	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
 		t.Fatalf("after permission, status = %q", got)
@@ -68,8 +68,8 @@ func TestApplyEventStatusMap(t *testing.T) {
 	d.mu.Lock()
 	pid := d.pendPerm["ses_1"]
 	d.mu.Unlock()
-	if pid != "req_1" {
-		t.Fatalf("pendPerm = %q, want req_1", pid)
+	if pid != "per_abc" {
+		t.Fatalf("pendPerm = %q, want per_abc", pid)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestApplyEventPermissionGuardsEmptyIDs(t *testing.T) {
 
 	// missing id field: guard must skip (no upsert, no pendPerm)
 	d.applyEvent(sseFrame{
-		Type: "permission.updated",
-		Data: []byte(`{"sessionID":"ses_1","action":"bash"}`),
+		Type: "permission.asked",
+		Data: []byte(`{"sessionID":"ses_1","action":"read"}`),
 	})
 	if got := len(reg.Snapshot()); got != 0 {
 		t.Fatalf("permission without id created %d entry(ies), want 0", got)
@@ -136,8 +136,8 @@ func TestApplyEventPermissionGuardsEmptyIDs(t *testing.T) {
 
 	// missing sessionID field: guard must skip
 	d.applyEvent(sseFrame{
-		Type: "permission.updated",
-		Data: []byte(`{"id":"req_1","action":"bash"}`),
+		Type: "permission.asked",
+		Data: []byte(`{"id":"per_abc","action":"read"}`),
 	})
 	if got := len(reg.Snapshot()); got != 0 {
 		t.Fatalf("permission without sessionID created %d entry(ies), want 0", got)
@@ -161,11 +161,11 @@ func TestApplyEventBuildsPresence(t *testing.T) {
 		t.Fatalf("after part.updated: %q", got)
 	}
 
-	d.applyEvent(sseFrame{Type: "permission.updated", Data: json.RawMessage(`{"id":"req_1","sessionID":"ses_1","action":"bash"}`)})
+	d.applyEvent(sseFrame{Type: "permission.asked", Data: json.RawMessage(`{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}`)})
 	d.mu.Lock()
 	pid := d.pendPerm["ses_1"]
 	d.mu.Unlock()
-	if pid != "req_1" {
+	if pid != "per_abc" {
 		t.Fatalf("pendPerm=%q", pid)
 	}
 
@@ -221,7 +221,7 @@ func TestParseSSE(t *testing.T) {
 		"\n" +
 		`data: {"id":"evt_1","type":"session.idle","data":{"sessionID":"ses_1"}}` + "\n" +
 		"\n" +
-		`data: {"id":"evt_2","type":"permission.updated","data":{"id":"req_1","sessionID":"ses_1","action":"bash"}}` + "\n"
+		`data: {"id":"evt_2","type":"permission.asked","data":{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}}` + "\n"
 
 	var got []sseFrame
 	if err := parseSSE(strings.NewReader(stream), func(f sseFrame) { got = append(got, f) }); err != nil {
@@ -233,8 +233,8 @@ func TestParseSSE(t *testing.T) {
 	if got[0].Type != "session.idle" {
 		t.Fatalf("frame[0].Type = %q, want session.idle", got[0].Type)
 	}
-	if got[1].Type != "permission.updated" {
-		t.Fatalf("frame[1].Type = %q, want permission.updated", got[1].Type)
+	if got[1].Type != "permission.asked" {
+		t.Fatalf("frame[1].Type = %q, want permission.asked", got[1].Type)
 	}
 }
 
@@ -247,7 +247,7 @@ func TestParseSSEAndApply(t *testing.T) {
 		"\n" +
 		`data: {"id":"evt_1","type":"session.idle","data":{"sessionID":"ses_1"}}` + "\n" +
 		"\n" +
-		`data: {"id":"evt_2","type":"permission.updated","data":{"id":"req_1","sessionID":"ses_1","action":"bash"}}` + "\n"
+		`data: {"id":"evt_2","type":"permission.asked","data":{"id":"per_abc","sessionID":"ses_1","action":"read","resources":["file.txt"],"source":{"type":"tool","id":"tool_1","name":"fs.read"}}}` + "\n"
 
 	if err := parseSSE(strings.NewReader(stream), d.applyEvent); err != nil {
 		t.Fatalf("parseSSE: %v", err)
@@ -263,7 +263,7 @@ func TestParseSSEAndApply(t *testing.T) {
 	d.mu.Lock()
 	pid := d.pendPerm["ses_1"]
 	d.mu.Unlock()
-	if pid != "req_1" {
-		t.Fatalf("pendPerm[ses_1] = %q, want req_1", pid)
+	if pid != "per_abc" {
+		t.Fatalf("pendPerm[ses_1] = %q, want per_abc", pid)
 	}
 }

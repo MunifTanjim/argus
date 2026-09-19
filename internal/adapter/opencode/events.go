@@ -165,7 +165,7 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 	case "session.idle":
 		d.upsert(sessionIDFrom(frame.Data), session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
 
-	case "permission.updated", "permission.request":
+	case "permission.asked":
 		var p struct {
 			ID        string `json:"id"`
 			SessionID string `json:"sessionID"`
@@ -194,7 +194,7 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 			},
 		})
 
-	case "permission.replied":
+	case "permission.replied", "permission.rejected":
 		var p struct {
 			SessionID string `json:"sessionID"`
 		}
