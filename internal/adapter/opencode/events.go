@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -149,8 +148,7 @@ func sessionIDFrom(data json.RawMessage) string {
 func (d *discoverer) applyEvent(frame sseFrame) {
 	switch frame.Type {
 	case "message.part.updated":
-		sid := sessionIDFrom(frame.Data)
-		d.setStatus(sid, session.StatusWorking, nil)
+		d.upsert(sessionIDFrom(frame.Data), session.StatusWorking, nil)
 
 	case "session.status":
 		var p struct {
@@ -161,12 +159,11 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		}
 		_ = json.Unmarshal(frame.Data, &p)
 		if p.SessionID != "" && p.Status.Type != "" && p.Status.Type != "idle" {
-			d.setStatus(p.SessionID, session.StatusWorking, nil)
+			d.upsert(p.SessionID, session.StatusWorking, nil)
 		}
 
 	case "session.idle":
-		sid := sessionIDFrom(frame.Data)
-		d.setStatus(sid, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+		d.upsert(sessionIDFrom(frame.Data), session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
 
 	case "permission.updated", "permission.request":
 		var p struct {
@@ -181,9 +178,6 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		if p.SessionID == "" || p.ID == "" {
 			return
 		}
-		if _, ok := d.argusIDFor(p.SessionID); !ok {
-			return
-		}
 		d.mu.Lock()
 		d.pendPerm[p.SessionID] = p.ID
 		d.mu.Unlock()
@@ -191,7 +185,7 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		if toolName == "" && p.Source != nil {
 			toolName = p.Source.Type
 		}
-		d.setStatus(p.SessionID, session.StatusAwaitingInput, &session.Interaction{
+		d.upsert(p.SessionID, session.StatusAwaitingInput, &session.Interaction{
 			Kind:     session.InteractionPermission,
 			ToolName: toolName,
 			Options: []session.DecisionOption{
@@ -208,42 +202,11 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		d.mu.Lock()
 		delete(d.pendPerm, p.SessionID)
 		d.mu.Unlock()
-		d.clearInteraction(p.SessionID)
+		d.upsert(p.SessionID, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+
+	case "session.deleted":
+		d.remove(sessionIDFrom(frame.Data))
 
 	case "server.connected":
 	}
-}
-
-func (d *discoverer) setStatus(agentSessionID string, st session.Status, in *session.Interaction) {
-	if agentSessionID == "" {
-		return
-	}
-	if _, ok := d.argusIDFor(agentSessionID); !ok {
-		return
-	}
-	u := registry.HookUpdate{
-		Agent:          Agent,
-		AgentSessionID: agentSessionID,
-		Status:         st,
-	}
-	if in != nil {
-		u.Interaction = in
-		u.ReplaceInteraction = true
-	}
-	d.reg.ApplyHook(u)
-}
-
-func (d *discoverer) clearInteraction(agentSessionID string) {
-	if id, ok := d.argusIDFor(agentSessionID); ok {
-		d.reg.ClearInteraction(id)
-	}
-}
-
-func (d *discoverer) argusIDFor(agentSessionID string) (string, bool) {
-	for _, s := range d.reg.Snapshot() {
-		if s.Agent == Agent && s.AgentSessionID == agentSessionID {
-			return s.ID, true
-		}
-	}
-	return "", false
 }

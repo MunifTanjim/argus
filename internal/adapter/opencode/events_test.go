@@ -1,7 +1,10 @@
 package opencode
 
 import (
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +44,7 @@ func statusOf(t *testing.T, reg *registry.Registry, agentSessionID string) sessi
 
 func TestApplyEventStatusMap(t *testing.T) {
 	reg := registry.New()
-	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	d := newTestDiscoverer(reg, nil)
 	seedSession(t, reg, "ses_1")
 
 	d.applyEvent(sseFrame{
@@ -72,7 +75,7 @@ func TestApplyEventStatusMap(t *testing.T) {
 
 func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 	reg := registry.New()
-	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	d := newTestDiscoverer(reg, nil)
 	seedSession(t, reg, "ses_1")
 
 	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
@@ -97,7 +100,7 @@ func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 
 func TestSessionStatusBusySetsWorking(t *testing.T) {
 	reg := registry.New()
-	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	d := newTestDiscoverer(reg, nil)
 	seedSession(t, reg, "ses_1")
 
 	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"ses_1"}`)})
@@ -112,27 +115,63 @@ func TestSessionStatusBusySetsWorking(t *testing.T) {
 	}
 }
 
-func TestApplyEventUnknownSessionIgnored(t *testing.T) {
+func TestApplyEventPermissionGuardsEmptyIDs(t *testing.T) {
 	reg := registry.New()
-	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	d := newTestDiscoverer(reg, nil)
 
-	d.applyEvent(sseFrame{Type: "session.idle", Data: []byte(`{"sessionID":"unknown_ses"}`)})
-	if got := len(reg.Snapshot()); got != 0 {
-		t.Fatalf("unknown session created %d registry entry(ies), want 0", got)
-	}
-
+	// missing id field: guard must skip (no upsert, no pendPerm)
 	d.applyEvent(sseFrame{
 		Type: "permission.updated",
-		Data: []byte(`{"id":"req_1","sessionID":"unknown_ses","action":"bash","resources":[]}`),
+		Data: []byte(`{"sessionID":"ses_1","action":"bash"}`),
 	})
 	if got := len(reg.Snapshot()); got != 0 {
-		t.Fatalf("unknown permission created %d registry entry(ies), want 0", got)
+		t.Fatalf("permission without id created %d entry(ies), want 0", got)
 	}
 	d.mu.Lock()
-	_, hasPerm := d.pendPerm["unknown_ses"]
+	_, hasPerm := d.pendPerm["ses_1"]
 	d.mu.Unlock()
 	if hasPerm {
-		t.Fatal("pendPerm populated for unknown session")
+		t.Fatal("pendPerm populated without permission id")
+	}
+
+	// missing sessionID field: guard must skip
+	d.applyEvent(sseFrame{
+		Type: "permission.updated",
+		Data: []byte(`{"id":"req_1","action":"bash"}`),
+	})
+	if got := len(reg.Snapshot()); got != 0 {
+		t.Fatalf("permission without sessionID created %d entry(ies), want 0", got)
+	}
+}
+
+func TestApplyEventBuildsPresence(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/session/") {
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"}}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+
+	d.applyEvent(sseFrame{Type: "message.part.updated", Data: json.RawMessage(`{"part":{"sessionID":"ses_1"}}`)})
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusWorking {
+		t.Fatalf("after part.updated: %q", got)
+	}
+
+	d.applyEvent(sseFrame{Type: "permission.updated", Data: json.RawMessage(`{"id":"req_1","sessionID":"ses_1","action":"bash"}`)})
+	d.mu.Lock()
+	pid := d.pendPerm["ses_1"]
+	d.mu.Unlock()
+	if pid != "req_1" {
+		t.Fatalf("pendPerm=%q", pid)
+	}
+
+	d.applyEvent(sseFrame{Type: "session.deleted", Data: json.RawMessage(`{"sessionID":"ses_1"}`)})
+	if len(reg.Snapshot()) != 0 {
+		t.Fatal("session.deleted should remove")
 	}
 }
 
@@ -201,7 +240,7 @@ func TestParseSSE(t *testing.T) {
 
 func TestParseSSEAndApply(t *testing.T) {
 	reg := registry.New()
-	d := &discoverer{reg: reg, pendPerm: map[string]string{}}
+	d := newTestDiscoverer(reg, nil)
 	seedSession(t, reg, "ses_1")
 
 	stream := ": heartbeat\n" +
