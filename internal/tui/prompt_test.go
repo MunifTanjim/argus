@@ -841,6 +841,27 @@ func TestIdleDockComposerForControllable(t *testing.T) {
 	}
 }
 
+func TestIdleDockComposerForCanPrompt(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	// Paneless opencode session that accepts API prompts.
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal, // no Tmux pane → not controllable
+		CanPrompt:   true,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	lines, _, _ := m.promptLinesWidth(80)
+	out := strings.Join(lines, "\n")
+	if strings.Contains(out, "argus can't send input to this session") {
+		t.Errorf("CanPrompt idle dock must NOT show respond-elsewhere, got:\n%s", out)
+	}
+	if !strings.Contains(out, "> ") {
+		t.Errorf("CanPrompt idle dock should show the composer, got:\n%s", out)
+	}
+}
+
 // TestDockScrollBodyPinsControls exercises the dock body windowing directly with
 // synthetic lines: the control block pins to the bottom while the body scrolls.
 func TestDockScrollBodyPinsControls(t *testing.T) {

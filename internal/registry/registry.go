@@ -434,7 +434,10 @@ type HookUpdate struct {
 	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
 	// session (see ApplyHook).
 	Frontend session.Frontend
-	Status   session.Status
+	// CanPrompt marks a session that accepts prompts over its agent's API. Additive:
+	// once set it stays set; adapters that never send it leave it untouched.
+	CanPrompt bool
+	Status    session.Status
 	// Summary is a refreshed transcript digest, or nil to keep the cached one.
 	Summary *session.Summary
 	// Interaction is the pending user request, applied when Status is set: non-nil
@@ -505,6 +508,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		s.Frontend = session.FrontendTmux
 	} else if u.Frontend != "" {
 		s.Frontend = u.Frontend
+	}
+	if u.CanPrompt {
+		s.CanPrompt = true
 	}
 	// Non-nil replaces the cached summary; nil keeps it.
 	if u.Summary != nil {

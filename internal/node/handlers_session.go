@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/spawn"
@@ -123,7 +124,14 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
-	s, c, err := d.resolve(p.SessionID)
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
+	}
+	if !s.Controllable() {
+		return d.sendPromptFallback(ctx, s, p)
+	}
+	_, c, err := d.resolve(p.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +167,26 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 		}
 	}
 	return nil, nil
+}
+
+// sendPromptFallback delivers input to a paneless session over its agent's API
+// when the agent is a Prompter and the session is idle enough to accept a prompt.
+// Otherwise it reports the absent terminal control, as the tmux path would.
+func (d *Node) sendPromptFallback(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
+	if pr, ok := d.adapterFor(s.Agent).(adapter.Prompter); ok && p.Text != "" && promptEligible(s) {
+		if err := pr.SendPrompt(ctx, s, p.Text); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
+}
+
+// promptEligible reports whether a session is idle/finished enough to receive a
+// new prompt: not actively working, and not blocked on a permission or question.
+func promptEligible(s session.Session) bool {
+	return s.Status != session.StatusWorking &&
+		(s.Interaction == nil || s.Interaction.Kind == session.InteractionIdle)
 }
 
 // sleepCtx waits for d, returning early if ctx is cancelled.

@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -153,6 +154,30 @@ func TestDismissRemovesAndReappearsOnActivity(t *testing.T) {
 	a.disc.applyEvent(sseFrame{Type: "message.part.updated", Data: json.RawMessage(`{"part":{"sessionID":"ses_1"}}`)})
 	if len(reg.Snapshot()) != 1 {
 		t.Fatal("new activity should re-add")
+	}
+}
+
+func TestAdapterSendPromptPostsViaClient(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			gotPath = r.URL.Path
+			b, _ := io.ReadAll(r.Body)
+			gotBody = string(b)
+			_, _ = w.Write([]byte(`{"data":{}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	a := &ocAdapter{disc: newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))}
+
+	if err := a.SendPrompt(context.Background(), session.Session{Agent: Agent, AgentSessionID: "ses_1"}, "hello"); err != nil {
+		t.Fatalf("SendPrompt: %v", err)
+	}
+	if gotPath != "/api/session/ses_1/prompt" || gotBody != `{"text":"hello"}` {
+		t.Fatalf("path=%s body=%s", gotPath, gotBody)
 	}
 }
 

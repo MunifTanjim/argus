@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -107,6 +108,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		Status:         st,
 		Frontend:       session.FrontendExternal,
 		TranscriptPath: id,
+		CanPrompt:      true,
 	}
 	if in != nil {
 		u.Interaction = in
@@ -127,6 +129,14 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		}
 	}
 	d.reg.ApplyHook(u)
+}
+
+func (d *discoverer) sendPrompt(ctx context.Context, sessionID, text string) error {
+	c, ok := d.dial()
+	if !ok {
+		return fmt.Errorf("opencode: service unavailable")
+	}
+	return c.sendPrompt(ctx, sessionID, text)
 }
 
 func (d *discoverer) dismiss(id string) { d.remove(id) }

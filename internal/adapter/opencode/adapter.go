@@ -22,6 +22,7 @@ func New() adapter.Adapter { return &ocAdapter{} }
 var _ adapter.Adapter = (*ocAdapter)(nil)
 var _ adapter.Responder = (*ocAdapter)(nil)
 var _ adapter.Dismisser = (*ocAdapter)(nil)
+var _ adapter.Prompter = (*ocAdapter)(nil)
 
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
@@ -100,6 +101,13 @@ func (a *ocAdapter) Dismiss(_ context.Context, sess session.Session) error {
 	}
 	a.disc.dismiss(sess.AgentSessionID)
 	return nil
+}
+
+func (a *ocAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
+	if a.disc == nil {
+		return fmt.Errorf("opencode: no active discoverer")
+	}
+	return a.disc.sendPrompt(ctx, sess.AgentSessionID, text)
 }
 
 func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {

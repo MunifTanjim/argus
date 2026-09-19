@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,54 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
+
+type fakePrompter struct {
+	adapter.Adapter
+	called  bool
+	gotText string
+}
+
+func (f *fakePrompter) SendPrompt(_ context.Context, _ session.Session, text string) error {
+	f.called = true
+	f.gotText = text
+	return nil
+}
+
+type fakeNonPrompter struct{ adapter.Adapter }
+
+func TestHandleSessionInputPromptFallback(t *testing.T) {
+	fp := &fakePrompter{}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["opencode"] = fp
+
+	input := func(id, text string) error {
+		params, _ := json.Marshal(api.InputParams{SessionID: id, Text: text, Submit: true})
+		_, err := d.handleSessionInput(context.Background(), params)
+		return err
+	}
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusIdle})
+	if err := input(s.ID, "hello"); err != nil || !fp.called || fp.gotText != "hello" {
+		t.Fatalf("idle prompt: err=%v called=%v text=%q", err, fp.called, fp.gotText)
+	}
+
+	fp.called = false
+	s, _ = d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusWorking})
+	if err := input(s.ID, "hi"); err == nil || fp.called {
+		t.Fatalf("working prompt should be rejected: err=%v called=%v", err, fp.called)
+	}
+}
+
+func TestHandleSessionInputPanelessNonPrompter(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["ghost"] = &fakeNonPrompter{}
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "ghost", AgentSessionID: "g1", Status: session.StatusIdle})
+	params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: "x", Submit: true})
+	if _, err := d.handleSessionInput(context.Background(), params); !errors.Is(err, api.ErrNoTerminalControl) {
+		t.Fatalf("want ErrNoTerminalControl, got %v", err)
+	}
+}
 
 // fakeDiscoverer registers the target session on its Nth ScanOnce, modelling the
 // spawn→ps lag: the process only becomes visible to discovery after a few scans.

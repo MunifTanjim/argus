@@ -259,6 +259,22 @@ func (c *client) respondPermission(ctx context.Context, sessionID, requestID, de
 	return nil
 }
 
+func (c *client) sendPrompt(ctx context.Context, sessionID, text string) error {
+	payload, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/prompt", strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("send prompt: %s", resp.Status)
+	}
+	return nil
+}
+
 func (c *client) replyForm(ctx context.Context, sessionID, formID string, answer map[string]any) error {
 	payload, err := json.Marshal(map[string]any{"answer": answer})
 	if err != nil {

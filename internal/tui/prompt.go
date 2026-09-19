@@ -359,9 +359,9 @@ func (m model) promptLinesWidth(width int) ([]string, int, int) {
 		return []string{dimStyle.Render("(no pending interaction)")}, 0, 0
 	}
 
-	// Paneless idle session: argus has no pane to deliver input to, so show a
-	// static "respond elsewhere" indicator instead of an editable composer.
-	if s := m.sessions[m.selectedID]; ix.Kind == session.InteractionIdle && !s.Controllable() {
+	// Paneless idle session with no API prompt path: argus has no way to deliver
+	// input, so show a static "respond elsewhere" indicator instead of a composer.
+	if s := m.sessions[m.selectedID]; ix.Kind == session.InteractionIdle && !s.Controllable() && !s.CanPrompt {
 		label := StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend))
 		sub := dimStyle.Render("argus can't send input to this session")
 		return strings.Split(label+"\n"+sub, "\n"), 0, 0

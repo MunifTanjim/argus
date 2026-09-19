@@ -202,6 +202,32 @@ func TestClientReplyForm(t *testing.T) {
 	}
 }
 
+func TestClientSendPrompt(t *testing.T) {
+	var gotPath, gotBody, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			b, _ := io.ReadAll(r.Body)
+			gotBody = string(b)
+			_, _ = w.Write([]byte(`{"data":{}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := newClient(serviceInfo{URL: srv.URL})
+	if err := c.sendPrompt(context.Background(), "ses_1", "hello"); err != nil {
+		t.Fatalf("sendPrompt: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/session/ses_1/prompt" {
+		t.Fatalf("method=%s path=%s", gotMethod, gotPath)
+	}
+	if gotBody != `{"text":"hello"}` {
+		t.Fatalf("body = %s", gotBody)
+	}
+}
+
 func TestClientRespondPermission(t *testing.T) {
 	var gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

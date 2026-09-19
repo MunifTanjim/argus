@@ -111,6 +111,12 @@ type Dismisser interface {
 	Dismiss(ctx context.Context, sess session.Session) error
 }
 
+// Prompter delivers a user prompt to a paneless session over the agent's own API,
+// for agents whose sessions cannot receive tmux keystrokes (opencode).
+type Prompter interface {
+	SendPrompt(ctx context.Context, sess session.Session, text string) error
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string

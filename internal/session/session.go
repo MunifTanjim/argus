@@ -184,6 +184,10 @@ type Session struct {
 	// Frontend classifies the session's UI host (tmux/vscode/external).
 	Frontend Frontend `json:"frontend,omitempty"`
 
+	// CanPrompt reports that a paneless session accepts prompts over its agent's
+	// API, so clients may show a composer even without a controllable terminal.
+	CanPrompt bool `json:"can_prompt,omitempty"`
+
 	// Repo is the basename of the session directory's git repository, when known
 	// (path-derived, not from the transcript).
 	Repo string `json:"repo,omitempty"`
