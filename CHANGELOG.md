@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.16](https://github.com/MunifTanjim/argus/compare/0.0.15...0.0.16) (2026-09-19)
+
+
+### Bug Fixes
+
+* **claude:** drop duplicate session after /clear on compacted session ([6f76e86](https://github.com/MunifTanjim/argus/commit/6f76e869c686d9bd92f63c5a1e1637579466127c))
+* **claude:** follow compaction to the parked job's session id in discovery ([7028a53](https://github.com/MunifTanjim/argus/commit/7028a537d3cc1dd078ae2ae1d4b03ed22fc9f479))
+
 ## [0.0.15](https://github.com/MunifTanjim/argus/compare/0.0.14...0.0.15) (2026-09-18)
 
 
