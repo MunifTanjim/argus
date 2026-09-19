@@ -40,6 +40,69 @@ func TestReconcileSessionsAddsTmuxAndPrunes(t *testing.T) {
 	}
 }
 
+// TestReconcileSessionsEvictsParkedJobDuplicate covers /clear on a compacted
+// (parked) session: for one scan the paned card resolves to the old id while the
+// paneless background job reports the new id, which creates a standalone external
+// duplicate. The next scan converges both on the new id.
+func TestReconcileSessionsEvictsParkedJobDuplicate(t *testing.T) {
+	r := New()
+	const oldID, newID = "old-parked", "new-cleared"
+
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc(oldID, "%24", "a", session.TmuxServerArgus),
+	})
+
+	// Divergent scan.
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc(oldID, "%24", "a", session.TmuxServerArgus),
+		{AgentSessionID: newID, Frontend: session.FrontendExternal},
+	})
+
+	// Converged scan.
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc(newID, "%24", "a", session.TmuxServerArgus),
+		{AgentSessionID: newID, Frontend: session.FrontendExternal},
+	})
+
+	if n := len(r.Snapshot()); n != 1 {
+		t.Fatalf("want 1 merged session, got %d", n)
+	}
+	s, ok := r.Get("argus:%24")
+	if !ok || s.Frontend != session.FrontendTmux || s.AgentSessionID != newID {
+		t.Fatalf("paned session must own new id as tmux: ok=%v %+v", ok, s)
+	}
+	if _, ok := r.Get("claude:" + newID); ok {
+		t.Error("external duplicate must be evicted")
+	}
+}
+
+// Eviction must not depend on the paned entry being reconciled before the
+// paneless one: the converged scan below lists the external card first.
+func TestReconcileSessionsEvictsParkedJobDuplicatePanelessFirst(t *testing.T) {
+	r := New()
+	const oldID, newID = "old-parked", "new-cleared"
+
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc(oldID, "%24", "a", session.TmuxServerArgus),
+	})
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		tmuxDisc(oldID, "%24", "a", session.TmuxServerArgus),
+		{AgentSessionID: newID, Frontend: session.FrontendExternal},
+	})
+	r.ReconcileSessions("claude", []DiscoveredSession{
+		{AgentSessionID: newID, Frontend: session.FrontendExternal},
+		tmuxDisc(newID, "%24", "a", session.TmuxServerArgus),
+	})
+
+	if n := len(r.Snapshot()); n != 1 {
+		t.Fatalf("want 1 merged session, got %d", n)
+	}
+	s, ok := r.Get("argus:%24")
+	if !ok || s.Frontend != session.FrontendTmux || s.AgentSessionID != newID {
+		t.Fatalf("paned session must own new id as tmux: ok=%v %+v", ok, s)
+	}
+}
+
 // A freshly opened pane-bearing session has no transcript yet, so discovery
 // carries no StatusHint. It must still land as idle with an idle Interaction so
 // clients show the compose to send the first prompt; a paneless one (can't be

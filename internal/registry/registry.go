@@ -272,6 +272,16 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 	if agentSessionID == "" || s.AgentSessionID == agentSessionID {
 		return
 	}
+	// A Claude session id belongs to one conversation, so a different session
+	// already holding this id is the same conversation surfaced twice: after /clear
+	// on a compacted session, a paned session adopts the id its parked background job
+	// reports while the job's own paneless card lingers. Evict that duplicate — the
+	// shared id would otherwise mark it alive through the sweep as a second card.
+	if other, ok := r.index.findByAgentSession(agentSessionID); ok && other != s.ID {
+		if dup := r.sessions[other]; dup != nil && dup.Tmux.PaneID == "" {
+			r.remove(other, "", session.StatusDead)
+		}
+	}
 	r.index.clear("", s.AgentSessionID)
 	s.AgentSessionID = agentSessionID
 	r.index.setAgentSession(agentSessionID, s.ID)
