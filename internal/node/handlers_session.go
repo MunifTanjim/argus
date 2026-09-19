@@ -418,8 +418,9 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 
 // handleSessionOpenTerminal spawns a tmux pane running the agent's resume command
 // for a paneless promptable session (OpenCode), so its live terminal can be
-// viewed. Discovery adopts the pane onto the existing session record. If the
-// session already has a pane, it is returned as-is (reuse).
+// viewed. Discovery adopts the pane onto the existing session record. A discovery
+// refresh runs first so a killed pane is detached before deciding: if a live pane
+// remains it is reused, otherwise a fresh one is spawned.
 func (d *Node) handleSessionOpenTerminal(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.SessionRef](params)
 	if err != nil {
@@ -429,14 +430,20 @@ func (d *Node) handleSessionOpenTerminal(ctx context.Context, params json.RawMes
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
-	if s.Controllable() {
-		return api.ResumeResult{SessionID: s.ID}, nil
-	}
 	if !s.CanPrompt {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal spawn not supported for this session"}
 	}
 	if !d.caps.SpawnSession {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal unavailable: tmux not found on node " + d.label}
+	}
+	// Reconcile discovery so a killed pane is detached from the record before we
+	// decide; a still-live pane stays adopted and is reused.
+	d.scan(ctx)
+	if s, ok = d.reg.Get(p.SessionID); !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	if s.Controllable() {
+		return api.ResumeResult{SessionID: s.ID}, nil
 	}
 	name, args, ok := d.adapterFor(s.Agent).ResumeCommand(s.AgentSessionID)
 	if !ok {

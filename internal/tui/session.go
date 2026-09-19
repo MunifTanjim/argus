@@ -37,11 +37,13 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, sessionKeys.Raw):
 		s := m.sessions[m.selectedID]
+		// Promptable (OpenCode) sessions route through the node, which verifies the
+		// pane is alive and respawns it if it was killed, then enters the screen.
+		if s.CanPrompt {
+			m.flash = "opening terminal…"
+			return m, m.openTerminalCmd(m.selectedID)
+		}
 		if !s.Controllable() {
-			if s.CanPrompt {
-				m.flash = "opening terminal…"
-				return m, m.openTerminalCmd(m.selectedID)
-			}
 			m.flash = string(s.Frontend) + " session: terminal control unavailable"
 			return m, nil
 		}

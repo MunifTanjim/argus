@@ -666,12 +666,19 @@ func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
-	s := m.sessions[m.order[m.cursor]]
+	id := m.order[m.cursor]
+	s := m.sessions[id]
+	// Promptable (OpenCode) sessions route through the node, which verifies the pane
+	// is alive and respawns it if it was killed, then the reply enters the screen.
+	if s.CanPrompt {
+		m.flash = "opening terminal…"
+		return m, m.openTerminalCmd(id)
+	}
 	if !s.Controllable() {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}
-	return m.enterScreen(m.order[m.cursor])
+	return m.enterScreen(id)
 }
 
 // actListJump jumps the user's tmux client to the selected session's window, or

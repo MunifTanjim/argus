@@ -124,6 +124,36 @@ func TestSessionRawKeyPanelessPromptableOpensTerminal(t *testing.T) {
 	}
 }
 
+func TestSessionRawKeyControllablePromptableRoutesToNode(t *testing.T) {
+	// A promptable session with a live pane still routes through the node so a
+	// killed pane is caught and respawned rather than attaching to a dead pane.
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanPrompt: true,
+			Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%3"}},
+	}
+	m.selectedID = "oc"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("controllable promptable session should still trigger a command")
+	}
+	runCmd(cmd)
+	found := false
+	for _, method := range rc.calledMethods() {
+		if method == api.MethodSessionOpenTerminal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q call, got %v", api.MethodSessionOpenTerminal, rc.calledMethods())
+	}
+}
+
 func TestSessionRawKeyPanelessNonPromptableRefuses(t *testing.T) {
 	m := testModel()
 	rc := &recordingClient{}
