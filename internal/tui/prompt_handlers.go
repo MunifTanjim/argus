@@ -42,9 +42,7 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // handleIdleKey composes a free-text reply, delivered via pane input on submit.
 func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Paneless idle dock is informational only: swallow keys silently (the
-	// indicator already explains there's no pane to deliver input to).
-	if !m.sessions[m.selectedID].Controllable() {
+	if s := m.sessions[m.selectedID]; !s.Controllable() && !s.CanPrompt {
 		return m, nil
 	}
 	if msg.String() == "enter" {

@@ -986,3 +986,47 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 		t.Errorf("selection should not change scroll; scroll=%d", m.prompt.scroll)
 	}
 }
+
+func canPromptSession() session.Session {
+	return session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal,
+		CanPrompt:   true,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+}
+
+func TestIdleKeyCanPromptRoutesInput(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.sessions["s1"] = canPromptSession()
+
+	res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	m = res.(model)
+	if m.prompt.reply.Value() != "x" {
+		t.Errorf("CanPrompt idle: reply = %q, want x", m.prompt.reply.Value())
+	}
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd == nil || m.focus != focusHistory {
+		t.Errorf("CanPrompt idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focus)
+	}
+}
+
+func TestIdleKeyNonControllableNonCanPromptSwallows(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.sessions["s1"] = session.Session{
+		ID:          "s1",
+		Status:      session.StatusAwaitingInput,
+		Frontend:    session.FrontendExternal,
+		CanPrompt:   false,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	m = res.(model)
+	if m.prompt.reply.Value() != "" || cmd != nil {
+		t.Errorf("non-controllable non-CanPrompt should swallow: reply=%q cmd=%v", m.prompt.reply.Value(), cmd)
+	}
+}
