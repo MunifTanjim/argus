@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/session_repository.dart';
+import '../models/enums.dart';
+import '../models/session.dart';
 import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../state/sessions.dart';
@@ -13,6 +16,41 @@ import 'theme.dart';
 
 class SessionListScreen extends ConsumerWidget {
   const SessionListScreen({super.key});
+
+  Widget _buildCard(
+    BuildContext context,
+    WidgetRef ref,
+    Session s,
+    SessionSection section,
+    bool grouped,
+    bool multiAgent,
+  ) {
+    final card = SessionCard(
+      session: s,
+      showNode: section.needsYou && grouped,
+      showAgent: multiAgent,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => SessionDetailScreen(session: s)),
+      ),
+    );
+    final canDismiss = s.agent == 'opencode' &&
+        s.status != SessionStatus.working &&
+        (s.interaction == null ||
+            s.interaction!.kind != InteractionKind.permission);
+    if (!canDismiss) return card;
+    return Dismissible(
+      key: ValueKey(s.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        color: Colors.red,
+        padding: const EdgeInsets.only(right: 16),
+        child: const Icon(Icons.close, color: Colors.white),
+      ),
+      onDismissed: (_) => ref.read(sessionRepositoryProvider).dismiss(s.id),
+      child: card,
+    );
+  }
 
   Future<void> _refresh(WidgetRef ref) async {
     final client = ref.read(gatewayProvider)?.client;
@@ -71,16 +109,13 @@ class SessionListScreen extends ConsumerWidget {
                             for (final s in section.sessions)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
-                                child: SessionCard(
-                                  session: s,
-                                  showNode: section.needsYou && grouped,
-                                  showAgent: multiAgent,
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          SessionDetailScreen(session: s),
-                                    ),
-                                  ),
+                                child: _buildCard(
+                                  context,
+                                  ref,
+                                  s,
+                                  section,
+                                  grouped,
+                                  multiAgent,
                                 ),
                               ),
                             const SizedBox(height: 8),

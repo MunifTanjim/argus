@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:argus/core/result.dart';
+import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/grouping.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/transport/connection.dart';
@@ -77,6 +80,29 @@ void main() {
     await tester.pump();
     expect(find.textContaining('Reconnecting'), findsOneWidget);
   });
+
+  testWidgets('idle opencode session is dismissible; working is not',
+      (tester) async {
+    final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
+    final workingSession = _sa('oc:work', 'dev', 'working', 'opencode');
+    final repo = _FakeRepository();
+
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(
+          () => _SeededSessions([idleSession, workingSession])),
+      gatewayProvider.overrideWithValue(null),
+      sessionRepositoryProvider.overrideWithValue(repo),
+    ]));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('oc:idle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('oc:work')), findsNothing);
+
+    await tester.drag(
+        find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+    expect(repo.dismissed, contains('oc:idle'));
+  });
 }
 
 class _SeededSessions extends SessionsNotifier {
@@ -84,4 +110,62 @@ class _SeededSessions extends SessionsNotifier {
   final List<Session> _seed;
   @override
   Map<String, Session> build() => {for (final s in _seed) s.id: s};
+}
+
+class _FakeRepository implements SessionRepository {
+  final List<String> dismissed = [];
+
+  @override
+  Future<Result<void>> dismiss(String sessionId) async {
+    dismissed.add(sessionId);
+    return Result.ok(null);
+  }
+
+  @override
+  Future<Result<void>> respond(Map<String, dynamic> params) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> sendInput(String sessionId, String text) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<String>> capture(String sessionId) async =>
+      const Result.ok('');
+
+  @override
+  Future<Result<void>> sendKeys(String sessionId, List<String> keys) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> sendRaw(String sessionId, String text) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> spawn({
+    String? nodeId,
+    String? cwd,
+    String? agent,
+    required String prompt,
+  }) async =>
+      Result.ok(null);
+
+  @override
+  Future<Result<void>> kill(String sessionId) async => Result.ok(null);
+
+  @override
+  Future<Result<List<NodeRef>>> nodes() async => const Result.ok([]);
+
+  @override
+  Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
+      const Result.ok([]);
+
+  @override
+  Future<Result<ResumeOutcome>> resume({
+    String? nodeId,
+    required String agent,
+    required String agentSessionId,
+    required String cwd,
+  }) async =>
+      Result.ok(const ResumeOutcome(sessionId: ''));
 }

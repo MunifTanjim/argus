@@ -109,6 +109,9 @@ class SessionService {
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 
+  Future<Result<void>> dismiss(String sessionId) =>
+      _guard((c) => c.call('sessions.dismiss', {'session_id': sessionId}));
+
   /// Fetches server-wide metadata (version + connected nodes) for the settings
   /// screen (server.info).
   Future<Result<ServerInfo>> serverInfo() => _guard((c) async {

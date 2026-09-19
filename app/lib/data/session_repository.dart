@@ -21,6 +21,7 @@ abstract class SessionRepository {
     required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
+  Future<Result<void>> dismiss(String sessionId);
   Future<Result<List<NodeRef>>> nodes();
 
   /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
@@ -70,6 +71,9 @@ class SessionRepositoryRemote implements SessionRepository {
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);
+
+  @override
+  Future<Result<void>> dismiss(String sessionId) => _service.dismiss(sessionId);
 
   @override
   Future<Result<List<NodeRef>>> nodes() => _service.nodes();
