@@ -84,6 +84,18 @@ func (f *fakeDiscoverer) ScanOnce(context.Context) error {
 
 // The post-spawn rescan must retry until the session is registered, then stop as
 // soon as it appears (not run the full backoff schedule).
+func TestSpawnEnvDisablesOpencodeTabs(t *testing.T) {
+	if env := spawnEnv("opencode"); len(env) != 1 || env[0] != `OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"enabled":false}}` {
+		t.Fatalf("opencode spawn env = %#v", env)
+	}
+	if env := spawnEnv("/usr/local/bin/opencode"); len(env) != 1 {
+		t.Fatalf("opencode env must apply to an absolute path too: %#v", env)
+	}
+	if env := spawnEnv("claude"); env != nil {
+		t.Fatalf("non-opencode command must get no extra env: %#v", env)
+	}
+}
+
 func TestRescanUntilRegisteredStopsWhenFound(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmux.New("argus-rescan-test"),

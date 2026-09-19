@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -301,6 +302,16 @@ func (d *Node) rescanUntilRegistered(id string) {
 	}
 }
 
+// spawnEnv returns extra environment assignments for a spawned command. OpenCode
+// runs with tabs disabled so one pane maps to exactly one session, which is how
+// argus tracks and adopts it.
+func spawnEnv(command string) []string {
+	if filepath.Base(command) == "opencode" {
+		return []string{`OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"enabled":false}}`}
+	}
+	return nil
+}
+
 // launchPane opens a new tmux pane running command in cwd. A blank sessionName
 // gets a node-generated default. Discovery registers the pane shortly; a scan is
 // triggered for immediacy.
@@ -309,7 +320,7 @@ func (d *Node) launchPane(ctx context.Context, sessionName, command string, args
 	if sessionName == "" {
 		sessionName = spawn.SessionName(ctx, c, cwd)
 	}
-	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args})
+	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args, Env: spawnEnv(command)})
 	if err != nil {
 		return "", err
 	}
