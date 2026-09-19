@@ -165,15 +165,10 @@ class _FakeRepository implements SessionRepository {
   String? dismissError;
 
   @override
-  Future<Result<void>> dismiss(String sessionId) async {
+  Future<Result<void>> dismiss(String sessionId) {
     dismissed.add(sessionId);
-    if (dismissError != null) {
-      // Mimic a network round-trip so the dismissed widget is disposed before
-      // the failure re-inserts it, matching production timing.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      return Result.error(dismissError!);
-    }
-    return Result.ok(null);
+    if (dismissError != null) return Future.value(Result.error(dismissError!));
+    return Future.value(Result.ok(null));
   }
 
   @override

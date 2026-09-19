@@ -54,15 +54,16 @@ class SessionListScreen extends ConsumerWidget {
   }
 
   Future<void> _dismiss(BuildContext context, WidgetRef ref, Session s) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final notifier = ref.read(sessionsProvider.notifier);
-    notifier.remove(s.id);
+    ref.read(sessionsProvider.notifier).remove(s.id);
     final result = await ref.read(sessionRepositoryProvider).dismiss(s.id);
     if (result case Error(:final error)) {
-      notifier.put(s);
-      messenger.showSnackBar(
-        SnackBar(content: Text('Failed to dismiss: $error')),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        ref.read(sessionsProvider.notifier).put(s);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to dismiss: $error')),
+        );
+      });
     }
   }
 
