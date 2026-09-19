@@ -211,6 +211,37 @@ func TestBuildDiscoveredPaneOnly(t *testing.T) {
 	}
 }
 
+// TestBuildDiscoveredFollowsCompaction: after a compaction the interactive pane's
+// pid-file keeps the pre-compaction id but records the live job in parkedJobId; the
+// pane record must follow to the new id (and transcript), not the stale one.
+func TestBuildDiscoveredFollowsCompaction(t *testing.T) {
+	procs := map[int]string{100: "ttys002", 200: "ttys050"}
+	paneByTTY := map[string]paneInfo{
+		"ttys002": {server: session.TmuxServerArgus, paneID: "%0", sessionName: "s0", currentPath: "/repo"},
+	}
+	entries := []procSession{
+		{PID: 100, SessionID: "old-full-id", ParkedJobId: "newpre", Entrypoint: "cli", Cwd: "/x"},
+		{PID: 200, SessionID: "newpre-full-id", JobId: "newpre", Entrypoint: "cli", Cwd: "/x"},
+	}
+	got := buildDiscovered(procs, paneByTTY, entries)
+
+	var paneCard *registry.DiscoveredSession
+	for i := range got {
+		if got[i].AgentSessionID == "old-full-id" {
+			t.Fatalf("stale pre-compaction id must not surface: %+v", got[i])
+		}
+		if got[i].HasPane {
+			paneCard = &got[i]
+		}
+	}
+	if paneCard == nil || paneCard.PaneID != "%0" || paneCard.AgentSessionID != "newpre-full-id" {
+		t.Fatalf("pane must follow compaction to the new id: %+v", paneCard)
+	}
+	if !strings.Contains(paneCard.TranscriptPath, "newpre-full-id.jsonl") {
+		t.Fatalf("transcript must follow the new id: %q", paneCard.TranscriptPath)
+	}
+}
+
 // TestScanOnceSurfacesStuckPaneThenUpgrades drives a real tmux pane. First scan sees
 // a live claude on that pane with no proc-session file (stuck at the trust/model
 // gate): it must surface as an attachable pane-keyed session. Once the proc-session

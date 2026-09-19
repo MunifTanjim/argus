@@ -39,6 +39,36 @@ func TestReadProcSession(t *testing.T) {
 	}
 }
 
+func TestEffectiveSessionIDFollowsParkedJob(t *testing.T) {
+	interactive := procSession{PID: 100, SessionID: "old-full-id", ParkedJobId: "newpre", Cwd: "/x"}
+	bg := procSession{PID: 200, SessionID: "newpre-full-id", JobId: "newpre"}
+
+	// Resolves the parked prefix to the bg job's full session id.
+	if got := effectiveSessionID(interactive, []procSession{interactive, bg}, ""); got != "newpre-full-id" {
+		t.Fatalf("parked -> bg jobId: got %q", got)
+	}
+
+	// No parked job: unchanged.
+	plain := procSession{PID: 300, SessionID: "plain-id"}
+	if got := effectiveSessionID(plain, []procSession{plain}, ""); got != "plain-id" {
+		t.Fatalf("no parked job should be unchanged: got %q", got)
+	}
+
+	// No sibling bg proc: fall back to the transcript filename by prefix.
+	projDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projDir, "newpre-full-id.jsonl"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveSessionID(interactive, []procSession{interactive}, projDir); got != "newpre-full-id" {
+		t.Fatalf("parked -> transcript glob: got %q", got)
+	}
+
+	// No sibling and no transcript: fall back to the raw sessionId.
+	if got := effectiveSessionID(interactive, []procSession{interactive}, t.TempDir()); got != "old-full-id" {
+		t.Fatalf("unresolvable parked job should fall back: got %q", got)
+	}
+}
+
 func TestListProcSessions(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {

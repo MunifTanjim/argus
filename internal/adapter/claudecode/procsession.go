@@ -23,6 +23,43 @@ type procSession struct {
 	// Entrypoint is how the session launched ("cli" or "claude-vscode"); the
 	// authoritative frontend signal.
 	Entrypoint string `json:"entrypoint"`
+	// ParkedJobId is set on an interactive session that compacted: the pre-compaction
+	// SessionID stays put, but the live conversation runs as a background job whose id
+	// (a SessionID prefix) is recorded here. JobId is that id on the bg process itself.
+	ParkedJobId string `json:"parkedJobId"`
+	JobId       string `json:"jobId"`
+}
+
+// effectiveSessionID returns the session currently shown in the pane. After a
+// compaction that is a background job (ParkedJobId), not the pre-compaction
+// SessionID.
+func effectiveSessionID(ps procSession, all []procSession, projDir string) string {
+	if ps.ParkedJobId == "" {
+		return ps.SessionID
+	}
+	for _, o := range all {
+		if o.JobId == ps.ParkedJobId && o.SessionID != "" {
+			return o.SessionID
+		}
+	}
+	if id, ok := transcriptIDByPrefix(projDir, ps.ParkedJobId); ok {
+		return id
+	}
+	return ps.SessionID
+}
+
+// transcriptIDByPrefix resolves a job-id prefix to a full session id by matching
+// the transcript filename. ok is false unless exactly one transcript matches, so
+// an ambiguous prefix falls back rather than guessing.
+func transcriptIDByPrefix(projDir, prefix string) (string, bool) {
+	if projDir == "" || prefix == "" {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(projDir, prefix+"*.jsonl"))
+	if err != nil || len(matches) != 1 {
+		return "", false
+	}
+	return strings.TrimSuffix(filepath.Base(matches[0]), ".jsonl"), true
 }
 
 // claudeSessionsDirOverride lets tests point the reader at a temp directory; empty
