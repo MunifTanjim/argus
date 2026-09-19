@@ -107,6 +107,8 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 	d.reg.ApplyHook(u)
 }
 
+func (d *discoverer) dismiss(id string) { d.remove(id) }
+
 func (d *discoverer) remove(id string) {
 	d.mu.Lock()
 	delete(d.presence, id)

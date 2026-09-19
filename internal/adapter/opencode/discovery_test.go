@@ -2,8 +2,10 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +81,31 @@ func TestPresenceSweepIdleAgesOutExceptPermission(t *testing.T) {
 	}
 	if !ids["old_perm"] {
 		t.Fatal("awaiting-permission session must not age out")
+	}
+}
+
+func TestDismissRemovesAndReappearsOnActivity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/session/") {
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1","title":"T","location":{"directory":"/repo"}}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	a := &ocAdapter{disc: newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))}
+
+	a.disc.upsert("ses_1", session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+	if err := a.Dismiss(context.Background(), session.Session{Agent: Agent, AgentSessionID: "ses_1"}); err != nil {
+		t.Fatalf("Dismiss: %v", err)
+	}
+	if len(reg.Snapshot()) != 0 {
+		t.Fatal("dismiss should remove from list")
+	}
+	a.disc.applyEvent(sseFrame{Type: "message.part.updated", Data: json.RawMessage(`{"part":{"sessionID":"ses_1"}}`)})
+	if len(reg.Snapshot()) != 1 {
+		t.Fatal("new activity should re-add")
 	}
 }
 
