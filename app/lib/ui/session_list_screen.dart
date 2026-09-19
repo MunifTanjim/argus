@@ -37,7 +37,7 @@ class SessionListScreen extends ConsumerWidget {
     final canDismiss = s.agent == 'opencode' &&
         s.status != SessionStatus.working &&
         (s.interaction == null ||
-            s.interaction!.kind != InteractionKind.permission);
+            s.interaction!.kind == InteractionKind.idle);
     if (!canDismiss) return card;
     return Dismissible(
       key: ValueKey(s.id),

@@ -23,6 +23,7 @@ func newTestDiscoverer(reg *registry.Registry, c *client) *discoverer {
 		ctx:      context.Background(),
 		presence: map[string]*presenceEntry{},
 		pendPerm: map[string]string{},
+		pendForm: map[string]*pendingForm{},
 	}
 	d.dial = func() (*client, bool) {
 		if c == nil {

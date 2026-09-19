@@ -19,11 +19,9 @@ func (d *Node) handleSessionDismiss(ctx context.Context, params json.RawMessage)
 	if !ok {
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
-	if s.Status == session.StatusWorking {
-		return nil, fmt.Errorf("cannot dismiss a running session")
-	}
-	if s.Interaction != nil && s.Interaction.Kind == session.InteractionPermission {
-		return nil, fmt.Errorf("cannot dismiss a session awaiting a permission")
+	if s.Status == session.StatusWorking ||
+		(s.Interaction != nil && s.Interaction.Kind != session.InteractionIdle) {
+		return nil, fmt.Errorf("cannot dismiss a session that needs your input")
 	}
 	r, ok := d.adapterFor(s.Agent).(adapter.Dismisser)
 	if !ok {

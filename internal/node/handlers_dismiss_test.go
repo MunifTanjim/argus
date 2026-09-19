@@ -64,4 +64,17 @@ func TestHandleSessionDismiss(t *testing.T) {
 	if err := call(); err == nil || fd.called {
 		t.Fatalf("permission dismiss should be rejected: err=%v called=%v", err, fd.called)
 	}
+
+	// awaiting question → rejected
+	fd.called = false
+	s, _ = d.reg.ApplyHook(registry.HookUpdate{
+		Agent:              "opencode",
+		AgentSessionID:     "ses_1",
+		Status:             session.StatusAwaitingInput,
+		Interaction:        &session.Interaction{Kind: session.InteractionQuestion},
+		ReplaceInteraction: true,
+	})
+	if err := call(); err == nil || fd.called {
+		t.Fatalf("question dismiss should be rejected: err=%v called=%v", err, fd.called)
+	}
 }

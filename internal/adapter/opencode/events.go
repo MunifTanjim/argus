@@ -204,9 +204,108 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		d.mu.Unlock()
 		d.upsert(p.SessionID, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
 
+	case "form.created":
+		d.applyFormCreated(frame.Data)
+
+	case "form.replied", "form.cancelled":
+		sid := sessionIDFrom(frame.Data)
+		if sid == "" {
+			return
+		}
+		d.mu.Lock()
+		delete(d.pendForm, sid)
+		d.mu.Unlock()
+		d.upsert(sid, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+
 	case "session.deleted":
 		d.remove(sessionIDFrom(frame.Data))
 
 	case "server.connected":
 	}
+}
+
+// formInfo is the Form.Info payload of a form.created event. OpenCode delivers
+// it either nested under data.form or flat as the data object; applyFormCreated
+// tolerates both.
+type formInfo struct {
+	ID        string      `json:"id"`
+	SessionID string      `json:"sessionID"`
+	Title     string      `json:"title"`
+	Fields    []formField `json:"fields"`
+}
+
+type formField struct {
+	Key         string       `json:"key"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Required    bool         `json:"required"`
+	Type        string       `json:"type"`
+	Options     []formOption `json:"options"`
+}
+
+type formOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+func (d *discoverer) applyFormCreated(data json.RawMessage) {
+	var wrap struct {
+		Form *formInfo `json:"form"`
+	}
+	_ = json.Unmarshal(data, &wrap)
+	info := wrap.Form
+	if info == nil || info.SessionID == "" {
+		var flat formInfo
+		if json.Unmarshal(data, &flat) == nil {
+			info = &flat
+		}
+	}
+	if info == nil || info.SessionID == "" || info.ID == "" {
+		return
+	}
+
+	pf := &pendingForm{formID: info.ID}
+	var questions []session.QuestionSpec
+	for _, f := range info.Fields {
+		if f.Type == "hidden" || f.Type == "external" {
+			continue
+		}
+		header := f.Title
+		if header == "" {
+			header = info.Title
+		}
+		question := f.Description
+		if question == "" {
+			question = f.Title
+		}
+		spec := session.QuestionSpec{
+			Header:      header,
+			Question:    question,
+			MultiSelect: f.Type == "multiselect",
+		}
+		valueByLabel := map[string]string{}
+		for _, opt := range f.Options {
+			spec.Options = append(spec.Options, opt.Label)
+			spec.OptionDescriptions = append(spec.OptionDescriptions, opt.Description)
+			valueByLabel[opt.Label] = opt.Value
+		}
+		questions = append(questions, spec)
+		pf.fields = append(pf.fields, pendingField{
+			key:          f.Key,
+			question:     question,
+			multiselect:  f.Type == "multiselect",
+			valueByLabel: valueByLabel,
+		})
+	}
+
+	d.mu.Lock()
+	d.pendForm[info.SessionID] = pf
+	d.mu.Unlock()
+
+	d.upsert(info.SessionID, session.StatusAwaitingInput, &session.Interaction{
+		Kind:      session.InteractionQuestion,
+		Message:   info.Title,
+		Questions: questions,
+	})
 }

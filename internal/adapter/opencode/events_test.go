@@ -73,6 +73,55 @@ func TestApplyEventStatusMap(t *testing.T) {
 	}
 }
 
+func TestApplyEventFormCreatedSurfacesQuestion(t *testing.T) {
+	reg := registry.New()
+	d := newTestDiscoverer(reg, nil)
+	seedSession(t, reg, "ses_1")
+
+	d.applyEvent(sseFrame{
+		Type: "form.created",
+		Data: []byte(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"Pick one","metadata":{"kind":"question","tool":"ask"},"mode":"form","fields":[{"key":"q0","title":"Choice","description":"Which one?","type":"string","options":[{"value":"y","label":"Yes","description":"do it"},{"value":"n","label":"No"}]}]}}`),
+	})
+
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
+		t.Fatalf("after form.created, status = %q", got)
+	}
+	s, _ := reg.Get(sessionKeyFor(reg, "ses_1"))
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionQuestion {
+		t.Fatalf("expected question interaction, got %+v", s.Interaction)
+	}
+	if len(s.Interaction.Questions) != 1 {
+		t.Fatalf("want 1 question, got %d", len(s.Interaction.Questions))
+	}
+	q := s.Interaction.Questions[0]
+	if len(q.Options) != 2 || q.Options[0] != "Yes" || q.Options[1] != "No" {
+		t.Fatalf("options = %v", q.Options)
+	}
+	if q.Question != "Which one?" {
+		t.Fatalf("question = %q", q.Question)
+	}
+	d.mu.Lock()
+	pf := d.pendForm["ses_1"]
+	d.mu.Unlock()
+	if pf == nil || pf.formID != "frm_1" {
+		t.Fatalf("pendForm = %+v", pf)
+	}
+	if len(pf.fields) != 1 || pf.fields[0].key != "q0" || pf.fields[0].valueByLabel["Yes"] != "y" {
+		t.Fatalf("pendField = %+v", pf.fields)
+	}
+
+	d.applyEvent(sseFrame{Type: "form.replied", Data: []byte(`{"id":"frm_1","sessionID":"ses_1","answer":{"q0":"y"}}`)})
+	if s, _ := reg.Get(sessionKeyFor(reg, "ses_1")); s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("after form.replied, interaction = %+v", s.Interaction)
+	}
+	d.mu.Lock()
+	_, still := d.pendForm["ses_1"]
+	d.mu.Unlock()
+	if still {
+		t.Fatal("form.replied should clear pendForm")
+	}
+}
+
 func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, nil)

@@ -32,6 +32,20 @@ type discoverer struct {
 	mu       sync.Mutex
 	presence map[string]*presenceEntry // opencode session id -> entry
 	pendPerm map[string]string         // sessionID -> permissionID (SSE → Respond)
+	pendForm map[string]*pendingForm   // sessionID -> pending question form (SSE → Respond)
+}
+
+type pendingForm struct {
+	formID string
+	fields []pendingField
+}
+
+// pendingField carries what Respond needs to translate an answer keyed by the
+// emitted QuestionSpec.Question back into the form field key and option value.
+type pendingField struct {
+	key, question string
+	multiselect   bool
+	valueByLabel  map[string]string
 }
 
 // clients is accepted for interface compatibility; the presence model uses no tmux panes.
@@ -41,6 +55,7 @@ func newDiscoverer(reg *registry.Registry, _ map[session.TmuxServer]*tmux.Client
 		ctx:      context.Background(),
 		presence: map[string]*presenceEntry{},
 		pendPerm: map[string]string{},
+		pendForm: map[string]*pendingForm{},
 	}
 	d.dial = func() (*client, bool) {
 		info, ok := readServiceInfo()
@@ -120,6 +135,7 @@ func (d *discoverer) remove(id string) {
 	d.mu.Lock()
 	delete(d.presence, id)
 	delete(d.pendPerm, id)
+	delete(d.pendForm, id)
 	d.mu.Unlock()
 	d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
 }

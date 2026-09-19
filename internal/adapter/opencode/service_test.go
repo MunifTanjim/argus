@@ -177,6 +177,31 @@ func TestClientRespondPermissionAllowOmitsMessage(t *testing.T) {
 	}
 }
 
+func TestClientReplyForm(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			gotPath = r.URL.Path
+			b, _ := io.ReadAll(r.Body)
+			gotBody = string(b)
+			_, _ = w.Write([]byte("true"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := newClient(serviceInfo{URL: srv.URL})
+	if err := c.replyForm(context.Background(), "ses_1", "frm_1", map[string]any{"q0": "v0"}); err != nil {
+		t.Fatalf("replyForm: %v", err)
+	}
+	if gotPath != "/api/session/ses_1/form/frm_1/reply" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody != `{"answer":{"q0":"v0"}}` {
+		t.Fatalf("body = %s", gotBody)
+	}
+}
+
 func TestClientRespondPermission(t *testing.T) {
 	var gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

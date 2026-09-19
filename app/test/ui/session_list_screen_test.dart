@@ -20,6 +20,10 @@ Session _sa(String id, String host, String status, String agent) =>
     Session.fromJson(jsonDecode(
         '{"id":"$id","agent":"$agent","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
 
+Session _sq(String id, String host, String agent) =>
+    Session.fromJson(jsonDecode(
+        '{"id":"$id","agent":"$agent","status":"awaiting_input","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host","interaction":{"kind":"question"}}'));
+
 Widget _app(List<Override> overrides) => ProviderScope(
       overrides: overrides,
       child: const MaterialApp(home: SessionListScreen()),
@@ -81,15 +85,16 @@ void main() {
     expect(find.textContaining('Reconnecting'), findsOneWidget);
   });
 
-  testWidgets('idle opencode session is dismissible; working is not',
+  testWidgets('idle opencode session is dismissible; working/question is not',
       (tester) async {
     final idleSession = _sa('oc:idle', 'dev', 'idle', 'opencode');
     final workingSession = _sa('oc:work', 'dev', 'working', 'opencode');
+    final questionSession = _sq('oc:ask', 'dev', 'opencode');
     final repo = _FakeRepository();
 
     await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(
-          () => _SeededSessions([idleSession, workingSession])),
+      sessionsProvider.overrideWith(() =>
+          _SeededSessions([idleSession, workingSession, questionSession])),
       gatewayProvider.overrideWithValue(null),
       sessionRepositoryProvider.overrideWithValue(repo),
     ]));
@@ -97,6 +102,7 @@ void main() {
 
     expect(find.byKey(const ValueKey('oc:idle')), findsOneWidget);
     expect(find.byKey(const ValueKey('oc:work')), findsNothing);
+    expect(find.byKey(const ValueKey('oc:ask')), findsNothing);
 
     await tester.drag(
         find.byKey(const ValueKey('oc:idle')), const Offset(-500, 0));
