@@ -290,14 +290,11 @@ func (m model) assistantBrand() (StyledIcon, string) {
 	if m.mode == modeHistoryTranscript {
 		agent = m.history.openAgent
 	}
-	switch agent {
-	case "codex":
-		return Icon.Claude, "Codex"
-	case "antigravity":
-		return Icon.Claude, "Antigravity"
-	default:
-		return Icon.Claude, "Claude"
+	name, _ := agentLabel(agent)
+	if name == "" {
+		name = "Claude"
 	}
+	return Icon.Claude, name
 }
 
 func (m model) aiHeader(c transcript.Chunk, width int) string {
