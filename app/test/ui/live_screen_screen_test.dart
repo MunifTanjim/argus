@@ -154,6 +154,30 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('input field is multi-line and grows to three lines',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.minLines, 1);
+    expect(field.maxLines, 3);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('multi-line text sends with the newline preserved',
+      (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    await tester.enterText(find.byType(TextField), 'a\nb');
+    await tester.tap(find.text('Send'));
+    await tester.pump();
+
+    expect(repo.sends.last, utf8.encode('a\nb'));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('streamed output does not throw', (tester) async {
     final repo = _FakeTerminalRepo();
     await _pump(tester, repo);

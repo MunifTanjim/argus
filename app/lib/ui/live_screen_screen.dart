@@ -341,6 +341,8 @@ class _InputBarState extends State<_InputBar> {
                   child: TextField(
                     controller: widget.controller,
                     style: const TextStyle(fontFamily: 'monospace'),
+                    minLines: 1,
+                    maxLines: 3,
                     onChanged: (v) {
                       // With Ctrl/Alt armed, apply it to the last rune (not a
                       // substring, so an emoji isn't split into a lone surrogate).
@@ -349,7 +351,6 @@ class _InputBarState extends State<_InputBar> {
                         _pressChar(String.fromCharCode(v.runes.last));
                       }
                     },
-                    onSubmitted: (_) => _sendText(),
                     decoration: const InputDecoration(
                       isDense: true,
                       contentPadding:
