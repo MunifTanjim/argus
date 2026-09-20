@@ -143,6 +143,25 @@ final Map<String, ToolMeta> toolRegistry = {
   'Task': const ToolMeta('', ToolCategory.task),
   'Agent': const ToolMeta('', ToolCategory.task),
   'Skill': const ToolMeta('', ToolCategory.skill),
+
+  // opencode emits lowercase, unprefixed tool names. Keyed separately from the
+  // other agents; detail bodies are handled in tool_detail.dart, mirroring the
+  // TUI's toolRegistry.
+  'read': const ToolMeta('Read', ToolCategory.read),
+  'edit': const ToolMeta('Edit', ToolCategory.edit),
+  'write': const ToolMeta('Write', ToolCategory.write),
+  'bash': const ToolMeta('Bash', ToolCategory.bash),
+  'shell': const ToolMeta('Shell', ToolCategory.bash),
+  'execute': const ToolMeta('Execute', ToolCategory.bash),
+  'grep': const ToolMeta('Grep', ToolCategory.grep),
+  'glob': const ToolMeta('Glob', ToolCategory.glob),
+  'webfetch': const ToolMeta('Webfetch', ToolCategory.web),
+  'websearch': const ToolMeta('Websearch', ToolCategory.web),
+  'todowrite': const ToolMeta('Todo', ToolCategory.todo),
+  'skill': const ToolMeta('Skill', ToolCategory.skill),
+  'task': const ToolMeta('Task', ToolCategory.task),
+  'subagent': const ToolMeta('Subagent', ToolCategory.task),
+  'question': const ToolMeta('Question', ToolCategory.other),
 };
 
 ToolMeta? toolMeta(String? name) => name == null ? null : toolRegistry[name];

@@ -115,4 +115,102 @@ void main() {
     expect(s.frontend, FrontendKind.tmux);
     expect(s.controllable, isTrue);
   });
+
+  // input_mode is the single "can argus send a prompt" signal, mirroring the
+  // backend session.AcceptsInput(). omitempty means a missing key is InputNone.
+  Session oc({String status = 'idle', Map<String, dynamic>? interaction}) =>
+      Session.fromJson({
+        'id': 'oc1',
+        'agent': 'opencode',
+        'status': status,
+        'source': 'hooked',
+        'tmux': {'pane_id': ''},
+        'frontend': 'external',
+        'input_mode': 'api',
+        if (interaction != null) 'interaction': interaction,
+      });
+
+  test('parses input_mode api: accepts input, not controllable', () {
+    final s = oc();
+    expect(s.inputMode, InputMode.api);
+    expect(s.acceptsInput, isTrue);
+    expect(s.controllable, isFalse);
+  });
+
+  test('missing input_mode is InputMode.none and rejects input', () {
+    final s = Session.fromJson({
+      'id': 's1',
+      'agent': 'claude',
+      'status': 'idle',
+      'source': 'hooked',
+      'tmux': {'pane_id': ''},
+      'frontend': 'vscode',
+    });
+    expect(s.inputMode, InputMode.none);
+    expect(s.acceptsInput, isFalse);
+  });
+
+  test('input_mode pane accepts input', () {
+    final s = Session.fromJson({
+      'id': 's1',
+      'agent': 'claude',
+      'status': 'idle',
+      'source': 'hooked',
+      'tmux': {'pane_id': '%1'},
+      'frontend': 'tmux',
+      'input_mode': 'pane',
+    });
+    expect(s.inputMode, InputMode.pane);
+    expect(s.acceptsInput, isTrue);
+  });
+
+  test('canKill: tmux session (controllable) can always be killed', () {
+    final s = Session.fromJson({
+      'id': 's1',
+      'agent': 'claude',
+      'status': 'working',
+      'source': 'hooked',
+      'tmux': {'pane_id': '%1'},
+      'frontend': 'tmux',
+      'input_mode': 'pane',
+    });
+    expect(s.canKill, isTrue);
+  });
+
+  test('canKill: idle opencode session can be torn down', () {
+    expect(oc().canKill, isTrue);
+    expect(
+        oc(status: 'awaiting_input', interaction: {'kind': 'idle'}).canKill,
+        isTrue);
+  });
+
+  test('canKill: working opencode session can be torn down (unconditional)', () {
+    expect(oc(status: 'working').canKill, isTrue);
+  });
+
+  test('canKill: opencode awaiting a permission can be torn down', () {
+    final s = oc(
+        status: 'awaiting_input',
+        interaction: {'kind': 'permission', 'tool_name': 'bash'});
+    expect(s.canKill, isTrue);
+  });
+
+  test('can_open_terminal: true for a paneless opencode session', () {
+    final s = Session.fromJson({
+      'id': 'oc1',
+      'agent': 'opencode',
+      'status': 'idle',
+      'source': 'hooked',
+      'tmux': {'pane_id': ''},
+      'frontend': 'external',
+      'input_mode': 'api',
+      'can_open_terminal': true,
+    });
+    expect(s.controllable, isFalse);
+    expect(s.canOpenTerminal, isTrue);
+  });
+
+  test('can_open_terminal defaults to false when omitted', () {
+    expect(oc().canOpenTerminal, isFalse);
+  });
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/chunk.dart';
 import 'package:argus/ui/tool_detail.dart';
+import 'package:argus/ui/tool_registry.dart';
 
 Widget _wrap(Item i) => MaterialApp(
     home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
@@ -150,6 +151,93 @@ void main() {
         toolInput: '{"x":1}',
         result: 'done')));
     expect(find.textContaining('done'), findsOneWidget);
+  });
+
+  // opencode tool calls: lowercase names and their own input key shapes.
+  testWidgets('opencode read uses the path key and infers language',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'read',
+        toolInput: '{"path":"/x/foo.py"}',
+        result: '10: print("hi")')));
+    expect(find.text('python'), findsOneWidget);
+    expect(find.textContaining('/x/foo.py'), findsOneWidget);
+  });
+
+  testWidgets('opencode edit renders a diff from oldString/newString',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'edit',
+        toolInput:
+            '{"path":"/x/a.dart","oldString":"var x = 1;","newString":"var x = 2;"}',
+        result: 'Edited /x/a.dart (1 replacement)')));
+    expect(find.text('diff'), findsOneWidget); // diff box header
+    expect(find.textContaining('/x/a.dart'), findsWidgets);
+  });
+
+  testWidgets('opencode write renders new content as an all-add diff',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'write',
+        toolInput: '{"filePath":"/x/new.txt","content":"hello\\nworld"}')));
+    expect(find.text('diff'), findsOneWidget);
+  });
+
+  testWidgets('opencode bash shows the command', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'bash',
+        toolInput: '{"command":"go build ./...","description":"build"}',
+        result: 'ok')));
+    expect(find.textContaining('go build'), findsOneWidget);
+  });
+
+  testWidgets('opencode execute renders code, not raw JSON', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'execute',
+        toolInput: '{"code":"print(2 + 2)"}',
+        result: '4')));
+    expect(find.textContaining('print(2 + 2)'), findsOneWidget);
+    expect(find.textContaining('"code"'), findsNothing);
+  });
+
+  testWidgets('opencode grep uses the include key for scope', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'grep',
+        toolInput: '{"pattern":"foo","path":"internal","include":"*.go"}',
+        result: 'internal/a.go:1')));
+    expect(find.textContaining('foo'), findsOneWidget);
+    expect(find.textContaining('*.go'), findsOneWidget);
+  });
+
+  testWidgets('opencode skill uses the id key', (tester) async {
+    await tester.pumpWidget(_wrap(const Item(
+        id: 'i',
+        kind: ItemKind.tool,
+        toolName: 'skill',
+        toolInput: '{"id":"my-skill"}',
+        result: '<skill_content>body</skill_content>')));
+    expect(find.textContaining('my-skill'), findsOneWidget);
+  });
+
+  test('opencode tool names are registered with display and category', () {
+    expect(toolMeta('read')!.display, 'Read');
+    expect(toolMeta('read')!.category, ToolCategory.read);
+    expect(toolMeta('edit')!.category, ToolCategory.edit);
+    expect(toolMeta('bash')!.category, ToolCategory.bash);
+    expect(toolMeta('todowrite')!.display, 'Todo');
+    expect(toolMeta('question')!.category, ToolCategory.other);
   });
 
   test('answeredAnswer parses question→answer pairs', () {

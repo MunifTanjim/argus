@@ -31,11 +31,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   // fetched rather than being dropped while the list is still empty.
   void _openPending() {
     if (!mounted) return;
-    final id = ref.read(pendingPushSessionProvider);
+    final id = ref.read(pendingOpenSessionProvider);
     if (id == null) return;
     final session = ref.read(sessionsProvider)[id];
     if (session == null) return;
-    ref.read(pendingPushSessionProvider.notifier).state = null;
+    ref.read(pendingOpenSessionProvider.notifier).state = null;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => SessionDetailScreen(session: session)),
     );
@@ -45,7 +45,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget build(BuildContext context) {
     // Open on a new tap, and re-check when the session list arrives for a tap
     // that pointed at a not-yet-known session.
-    ref.listen<String?>(pendingPushSessionProvider, (_, __) => _openPending());
+    ref.listen<String?>(pendingOpenSessionProvider, (_, __) => _openPending());
     ref.listen<Map<String, Session>>(sessionsProvider, (_, __) => _openPending());
 
     final tabs = [

@@ -47,10 +47,14 @@ Widget toolDetailBody(Item item) {
   final detail = toolMeta(item.toolName)?.detail;
   if (detail != null) return detail(item);
   switch (item.toolName) {
+    // opencode names are lowercase; they share these renderers with the other
+    // agents, and the extractors below read both key shapes.
     case 'Edit':
     case 'MultiEdit':
     case 'Write':
     case 'NotebookEdit':
+    case 'edit':
+    case 'write':
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         editDiffView(item),
         // Edit results echo the changed file region; wrap so long lines stay
@@ -58,27 +62,39 @@ Widget toolDetailBody(Item item) {
         _resultSection(item, wrap: true),
       ]);
     case 'Bash':
+    case 'bash':
+    case 'shell':
       return _bash(item);
+    case 'execute':
+      return _execute(item);
     case 'Read':
     case 'NotebookRead':
+    case 'read':
       return _read(item);
     case 'Grep':
+    case 'grep':
       return _grep(item);
     case 'Glob':
     case 'LS':
+    case 'glob':
       return _glob(item);
     case 'WebFetch':
     case 'WebSearch':
+    case 'webfetch':
+    case 'websearch':
       return _web(item);
     case 'TodoWrite':
+    case 'todowrite':
       return _todo(item);
     case 'AskUserQuestion':
+    case 'question':
       return _askUserQuestion(item);
     case 'EnterPlanMode':
       return _generic(item, resultLang: 'markdown');
     case 'ExitPlanMode':
       return _exitPlanMode(item);
     case 'Skill':
+    case 'skill':
       return _skill(item);
     default:
       return _generic(item);
@@ -181,7 +197,9 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
 }
 
 Widget _skill(Item it) {
-  final name = toolInputStr(_input(it)['skill']);
+  // Claude uses `skill`; opencode uses `id`.
+  final m = _input(it);
+  final name = toolInputStr(m['skill'] ?? m['id']);
   final result = it.result ?? '';
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     _label('Skill'),
@@ -213,8 +231,24 @@ Widget _bash(Item it) {
   ]);
 }
 
+// opencode's `execute` runs code, not a shell command (unlike `bash`/`shell`),
+// so its input is under `code`.
+Widget _execute(Item it) {
+  final m = _input(it);
+  final code = toolInputStr(m['code']);
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (code.isNotEmpty)
+      codeBlock(code, lang: 'javascript')
+    else if ((it.toolInput ?? '').isNotEmpty)
+      codeBlock(it.toolInput!),
+    _resultSection(it),
+  ]);
+}
+
 Widget _read(Item it) {
-  final path = toolInputStr(_input(it)['file_path']);
+  // Claude uses `file_path`; opencode uses `path`.
+  final m = _input(it);
+  final path = toolInputStr(m['file_path'] ?? m['path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (path.isNotEmpty) _header(path),
     // Prefer the file extension; fall back to auto-detection when unknown.
@@ -227,7 +261,8 @@ Widget _read(Item it) {
 
 Widget _grep(Item it) {
   final m = _input(it);
-  var scope = toolInputStr(m['glob']);
+  // Claude uses `glob`; opencode uses `include`.
+  var scope = toolInputStr(m['glob'] ?? m['include']);
   final path = toolInputStr(m['path']);
   if (path.isNotEmpty) scope = scope.isEmpty ? path : '$scope $path';
   final head = '"${toolInputStr(m['pattern'])}"${scope.isEmpty ? '' : ' in $scope'}';

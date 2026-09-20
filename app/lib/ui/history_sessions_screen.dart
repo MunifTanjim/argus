@@ -141,6 +141,7 @@ class _SessionCard extends StatelessWidget {
       if (session.modelName != null && session.modelName!.isNotEmpty)
         session.modelName!,
       if (session.turnCount > 0) '${session.turnCount} turns',
+      if (session.tokens > 0) _compactTokens(session.tokens),
       if (session.lastActivity.isNotEmpty) relativeTime(session.lastActivity),
     ];
 
@@ -155,4 +156,10 @@ class _SessionCard extends StatelessWidget {
       onTap: onTap,
     );
   }
+}
+
+String _compactTokens(int n) {
+  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+  return '$n';
 }

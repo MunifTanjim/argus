@@ -24,7 +24,12 @@ Widget editDiffView(Item item) {
         style: _mono.copyWith(color: AppColors.text));
   }
 
-  final path = (input['file_path'] ?? input['notebook_path']) as String?;
+  // Key names vary by agent: Claude uses file_path/notebook_path; opencode uses
+  // path or filePath.
+  final path = (input['file_path'] ??
+      input['notebook_path'] ??
+      input['path'] ??
+      input['filePath']) as String?;
   final blocks = <Widget>[];
   if (path != null && path.isNotEmpty) {
     blocks.add(Padding(
@@ -63,6 +68,15 @@ Widget editDiffView(Item item) {
       }
       break;
     case 'Write':
+      blocks.add(diffView('', toolInputStr(input['content']), lang: path));
+      break;
+    // opencode edit uses oldString/newString; write uses content.
+    case 'edit':
+      blocks.add(diffView(toolInputStr(input['oldString']),
+          toolInputStr(input['newString']),
+          lang: path));
+      break;
+    case 'write':
       blocks.add(diffView('', toolInputStr(input['content']), lang: path));
       break;
     case 'NotebookEdit':

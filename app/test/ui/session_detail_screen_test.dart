@@ -254,6 +254,92 @@ void main() {
     expect(repo.stores, hasLength(2)); // re-opened onto the fresh store
   });
 
+  // opencode: paneless, input_mode api, so it accepts prompts and can be torn
+  // down via the single Kill Session action.
+  Session oc({String status = 'idle', String inputMode = 'api'}) =>
+      Session.fromJson({
+        'id': 'oc:%1',
+        'agent': 'opencode',
+        'status': status,
+        'source': 'hooked',
+        'frontend': 'external',
+        'input_mode': inputMode,
+        'tmux': {'pane_id': ''},
+        'repo': 'proj',
+        'node_label': 'mac',
+        'interaction': {'kind': 'idle'},
+      });
+
+  Widget appFor(Session s, {List<Override> extra = const []}) => ProviderScope(
+        overrides: [
+          gatewayProvider.overrideWithValue(null),
+          transcriptProvider(s.id)
+              .overrideWith(() => _SeededTranscript(const [])),
+          ...extra,
+        ],
+        child: MaterialApp(home: SessionDetailScreen(session: s)),
+      );
+
+  testWidgets('idle opencode session shows a tappable reply bar', (tester) async {
+    await tester.pumpWidget(appFor(oc()));
+    await tester.pump();
+    expect(find.byType(InteractionBar), findsOneWidget);
+    expect(find.text('Respond'), findsOneWidget);
+    expect(
+        find.text("argus can't send input to this session"), findsNothing);
+  });
+
+  testWidgets('idle decision-only session shows the respond-elsewhere notice',
+      (tester) async {
+    final vscode = Session.fromJson({
+      'id': 'vs:%1',
+      'agent': 'claude',
+      'status': 'awaiting_input',
+      'source': 'hooked',
+      'frontend': 'vscode',
+      'tmux': {'pane_id': ''},
+      'repo': 'proj',
+      'interaction': {'kind': 'idle'},
+    });
+    await tester.pumpWidget(appFor(vscode));
+    await tester.pump();
+    expect(
+        find.text("argus can't send input to this session"), findsOneWidget);
+  });
+
+  testWidgets('Kill Session is enabled for an idle opencode session and calls kill',
+      (tester) async {
+    final fake = _FakeSessionControl();
+    await tester.pumpWidget(appFor(oc(),
+        extra: [sessionRepositoryProvider.overrideWithValue(fake)]));
+    await tester.pump();
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Kill Session'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Kill').last);
+    await tester.pumpAndSettle();
+    expect(fake.killedIds, contains('oc:%1'));
+  });
+
+  testWidgets('Kill Session is enabled for a working opencode session',
+      (tester) async {
+    final fake = _FakeSessionControl();
+    await tester.pumpWidget(appFor(oc(status: 'working'),
+        extra: [sessionRepositoryProvider.overrideWithValue(fake)]));
+    await tester.pump();
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Kill Session'));
+    await tester.pumpAndSettle();
+    // Kill is unconditional: the confirm dialog opens and kill is sent.
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Kill').last);
+    await tester.pumpAndSettle();
+    expect(fake.killedIds, contains('oc:%1'));
+  });
+
   testWidgets('starting session shows startup notice and no input bar',
       (tester) async {
     await tester.pumpWidget(_app(

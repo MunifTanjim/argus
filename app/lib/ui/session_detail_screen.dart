@@ -194,7 +194,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Live Screen',
-            onPressed: live.controllable
+            onPressed: live.canOpenTerminal
                 ? () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => LiveScreenScreen(session: live),
@@ -218,7 +218,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                   ),
                 );
               } else if (value == 'kill') {
-                if (!live.controllable) return;
+                if (!live.canKill) return;
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -272,7 +272,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 ),
               PopupMenuItem<String>(
                 value: 'kill',
-                enabled: live.controllable,
+                enabled: live.canKill,
                 child: const ListTile(
                   leading: Icon(Icons.dangerous),
                   title: Text('Kill Session'),
@@ -305,7 +305,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             if (live.interaction != null)
               InteractionBar(
                 interaction: live.interaction!,
-                informationalMessage: (!live.controllable &&
+                informationalMessage: (!live.acceptsInput &&
                         live.interaction!.kind == InteractionKind.idle)
                     ? respondElsewhereLabel(live.frontend)
                     : null,
