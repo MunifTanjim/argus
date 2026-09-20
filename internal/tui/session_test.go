@@ -97,6 +97,95 @@ func sessionModel(ix *session.Interaction) model {
 	return m
 }
 
+func TestResumeEntersTranscriptNotScreen(t *testing.T) {
+	m := testModel()
+	m.sessions = map[string]session.Session{"s1": {ID: "s1"}}
+	m.mode = modeList
+	res, _ := m.Update(resumeResultMsg{sessionID: "s1"})
+	m = res.(model)
+	if m.mode != modeSession {
+		t.Fatalf("resume mode = %v, want modeSession (transcript)", m.mode)
+	}
+	if m.selectedID != "s1" {
+		t.Fatalf("selectedID = %q, want s1", m.selectedID)
+	}
+}
+
+func TestSessionRawKeyPanelessViewableOpensTerminal(t *testing.T) {
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true, Frontend: session.FrontendExternal},
+	}
+	m.selectedID = "oc"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("viewable paneless session should trigger a command on ctrl+s")
+	}
+	runCmd(cmd)
+	found := false
+	for _, method := range rc.calledMethods() {
+		if method == api.MethodTerminalOpen {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q call, got %v", api.MethodTerminalOpen, rc.calledMethods())
+	}
+}
+
+func TestSessionRawKeyControllableOpensTerminal(t *testing.T) {
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true,
+			Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%3"}},
+	}
+	m.selectedID = "oc"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("controllable session should trigger a command")
+	}
+	runCmd(cmd)
+	found := false
+	for _, method := range rc.calledMethods() {
+		if method == api.MethodTerminalOpen {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q call, got %v", api.MethodTerminalOpen, rc.calledMethods())
+	}
+}
+
+func TestSessionRawKeyPanelessNonPromptableRefuses(t *testing.T) {
+	m := testModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions = map[string]session.Session{
+		"ext": {ID: "ext", Status: session.StatusAwaitingInput, Frontend: session.FrontendVSCode},
+	}
+	m.selectedID = "ext"
+	m.mode = modeSession
+	m.focus, m.historyView = focusHistory, histTranscript
+
+	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatal("non-promptable paneless session should not trigger a command")
+	}
+	if got := res.(model).flash; !strings.Contains(got, "terminal control unavailable") {
+		t.Fatalf("expected refusal flash, got %q", got)
+	}
+}
+
 func TestSessionHeaderShowsBranch(t *testing.T) {
 	m := sessionModel(nil)
 	s := m.sessions["s1"]

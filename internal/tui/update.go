@@ -20,10 +20,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// resumeSelectTimeout bounds how long the list waits for a just-resumed session to
-// appear before dropping the pending auto-select (see clearPendingResumeMsg).
-const resumeSelectTimeout = 30 * time.Second
-
 func (m model) Init() tea.Cmd {
 	if m.viewer {
 		return m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent)
@@ -220,22 +216,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "resume failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.mode = modeList
-		m.pendingResumeID = msg.sessionID
-		m.selectPendingResume()
-		if m.pendingResumeID == "" {
-			return m, nil
-		}
-		// Not in the list yet; time out the pending selection (see clearPendingResumeMsg).
-		id := m.pendingResumeID
-		return m, tea.Tick(resumeSelectTimeout, func(time.Time) tea.Msg {
-			return clearPendingResumeMsg{id: id}
-		})
-	case clearPendingResumeMsg:
-		if m.pendingResumeID == msg.id {
-			m.pendingResumeID = ""
-		}
-		return m, nil
+		return m.enterSession(msg.sessionID)
 	case exportDoneMsg:
 		if msg.err != nil {
 			m.flash = "export failed: " + msg.err.Error()
@@ -497,23 +478,6 @@ func (m *model) reorder() {
 	if m.cursor >= len(m.order) {
 		m.cursor = max(0, len(m.order)-1)
 	}
-	m.selectPendingResume()
-}
-
-// selectPendingResume moves the list cursor onto a just-resumed session once it
-// is present in the ordered list, clearing the pending id. Freshly spawned
-// sessions arrive via registry events, which re-invoke this through reorder.
-func (m *model) selectPendingResume() {
-	if m.pendingResumeID == "" {
-		return
-	}
-	for i, id := range m.order {
-		if id == m.pendingResumeID {
-			m.cursor = i
-			m.pendingResumeID = ""
-			break
-		}
-	}
 }
 
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -629,7 +593,13 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
-	m.selectedID = m.order[m.cursor]
+	return m.enterSession(m.order[m.cursor])
+}
+
+// enterSession opens a session's transcript view. It subscribes by session id, so
+// a just-resumed session works before discovery adds it to the local list.
+func (m model) enterSession(id string) (model, tea.Cmd) {
+	m.selectedID = id
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
 	m.transcript.err = nil
@@ -637,22 +607,24 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.transcript.expanded = make(map[string]bool)
 	m.toolBodies = make(map[string]toolBodyEntry) // per-session tool-body cache
 	m.resetPromptState()
-	m.prompt.key = interactionKey(m.sessions[m.selectedID].Interaction)
-	ref := subRef{subID: newSubID(), sessionID: m.selectedID, cacheKey: m.cacheKeyFor(m.selectedID)}
-	cmd := m.bindStream(ref)
-	return m, cmd
+	m.prompt.key = interactionKey(m.sessions[id].Interaction)
+	ref := subRef{subID: newSubID(), sessionID: id, cacheKey: m.cacheKeyFor(id)}
+	return m, m.bindStream(ref)
 }
 
 func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
-	s := m.sessions[m.order[m.cursor]]
-	if !s.Controllable() {
+	id := m.order[m.cursor]
+	s := m.sessions[id]
+	// enterScreen opens the terminal view via terminal.open, which spawns and adopts
+	// a pane on demand for a live paneless session (OpenCode).
+	if !s.CanOpenTerminal {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}
-	return m.enterScreen(m.order[m.cursor])
+	return m.enterScreen(id)
 }
 
 // actListJump jumps the user's tmux client to the selected session's window, or
@@ -750,12 +722,19 @@ func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	s := m.sessions[m.order[m.cursor]]
-	if !s.Controllable() {
+	// `x` removes a session: kill its pane, or dismiss a paneless presence card.
+	if !s.Controllable() && !dismissable(s) {
 		m.flash = string(s.Frontend) + " session: terminal control unavailable"
 		return m, nil
 	}
 	m.pendingKill = true
 	return m, nil
+}
+
+// dismissable reports whether a paneless OpenCode session can be removed. Kill is
+// unconditional, so status and interaction do not gate it.
+func dismissable(s session.Session) bool {
+	return s.Agent == "opencode" && !s.Controllable()
 }
 
 func (m model) actListRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {

@@ -46,6 +46,26 @@ func TestAssistantBrandResolvesAgent(t *testing.T) {
 	}
 }
 
+func TestAssistantBrandOpenCode(t *testing.T) {
+	m := testModel()
+	m.mode = modeSession
+	m.selectedID = "s1"
+	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "opencode"}}
+	if _, name := m.assistantBrand(); name != "OpenCode" {
+		t.Errorf("opencode brand = %q, want OpenCode", name)
+	}
+}
+
+func TestAssistantBrandDefaultClaude(t *testing.T) {
+	m := testModel()
+	m.mode = modeSession
+	m.selectedID = "s1"
+	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: ""}}
+	if _, name := m.assistantBrand(); name != "Claude" {
+		t.Errorf("empty-agent brand = %q, want Claude", name)
+	}
+}
+
 func sampleChunks() []transcript.Chunk {
 	return []transcript.Chunk{
 		{ID: "u1", Kind: transcript.ChunkUser, Text: "hello"},
