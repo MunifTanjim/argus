@@ -144,15 +144,50 @@ func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
 
 // -- Per-question draft state -------------------------------------------------
 
+// resetPromptState clears the per-interaction drafts. It leaves the idle reply
+// composer untouched: that draft belongs to the session and persists across
+// interaction changes (see saveReplyDraft).
 func (m *model) resetPromptState() {
 	m.prompt.tab, m.prompt.submitSel, m.prompt.decisionSel = 0, 0, 0
 	m.prompt.reason = newDenyReasonInput()
 	m.prompt.reason.Focus()
-	m.prompt.reply = newIdleReplyArea()
-	m.prompt.reply.Focus()
 	m.prompt.scroll = 0
 	m.prompt.sel, m.prompt.chosen, m.prompt.toggles, m.prompt.text = nil, nil, nil, nil
-	m.sizeIdleReply() // fit the fresh composer so its first render is not default-sized
+}
+
+// saveReplyDraft stashes the selected session's composer text so it survives a
+// session switch. An empty draft drops the entry to keep the map free of blanks.
+func (m *model) saveReplyDraft() {
+	if m.selectedID == "" {
+		return
+	}
+	if m.replyDrafts == nil {
+		m.replyDrafts = map[string]string{}
+	}
+	if strings.TrimSpace(m.prompt.reply.Value()) == "" {
+		delete(m.replyDrafts, m.selectedID)
+		return
+	}
+	m.replyDrafts[m.selectedID] = m.prompt.reply.Value()
+}
+
+// pruneReplyDrafts drops drafts whose session left the registry, so the map does
+// not retain unsent text for sessions that no longer exist.
+func (m *model) pruneReplyDrafts() {
+	for id := range m.replyDrafts {
+		if _, ok := m.sessions[id]; !ok {
+			delete(m.replyDrafts, id)
+		}
+	}
+}
+
+func (m *model) loadReplyDraft(id string) {
+	m.prompt.reply = newIdleReplyArea()
+	if d := m.replyDrafts[id]; d != "" {
+		m.prompt.reply.SetValue(d)
+	}
+	m.prompt.reply.Focus()
+	m.sizeIdleReply() // fit the composer so its first render is not default-sized
 }
 
 // ensurePromptState sizes the per-question slices to n (preserving entries) and

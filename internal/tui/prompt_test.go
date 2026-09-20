@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
+	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -27,6 +30,7 @@ func promptModel(ix *session.Interaction) model {
 	m.mode = modeSession
 	m.focus = focusDock
 	m.resetPromptState()
+	m.loadReplyDraft("s1")
 	if ix != nil && ix.Kind == session.InteractionQuestion {
 		m.ensurePromptState(len(ix.Questions))
 	}
@@ -604,6 +608,102 @@ func TestSyncPromptDraftResetsOnChange(t *testing.T) {
 	m.syncPromptDraft()
 	if m.prompt.reason.Value() != "" || m.prompt.key != "" {
 		t.Errorf("dismissal should reset draft: reason=%q key=%q", m.prompt.reason.Value(), m.prompt.key)
+	}
+}
+
+func TestIdleReplyDraftSurvivesInteractionChange(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.prompt.key = interactionKey(m.sessions["s1"].Interaction)
+	m.prompt.reply.SetValue("half-written")
+
+	// A different interaction arrives for the same session; the idle composer
+	// draft must survive (it belongs to the session, not the interaction).
+	b := &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"}
+	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusAwaitingInput, Interaction: b}
+	m.syncPromptDraft()
+
+	if m.prompt.reply.Value() != "half-written" {
+		t.Errorf("idle reply draft should survive interaction change, got %q", m.prompt.reply.Value())
+	}
+}
+
+func TestIdleReplyDraftPerSession(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.sessions["s2"] = session.Session{
+		ID:          "s2",
+		Status:      session.StatusAwaitingInput,
+		Tmux:        session.TmuxLocation{PaneID: "%2", Server: session.TmuxServerDefault},
+		Frontend:    session.FrontendTmux,
+		Input:       session.InputPane,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	}
+	m.prompt.reply.SetValue("draft for s1")
+
+	m, _ = m.enterSession("s2")
+	if m.prompt.reply.Value() != "" {
+		t.Fatalf("s2 composer should start empty, got %q", m.prompt.reply.Value())
+	}
+	m.prompt.reply.SetValue("draft for s2")
+
+	m, _ = m.enterSession("s1")
+	if m.prompt.reply.Value() != "draft for s1" {
+		t.Errorf("s1 draft should be restored, got %q", m.prompt.reply.Value())
+	}
+
+	m, _ = m.enterSession("s2")
+	if m.prompt.reply.Value() != "draft for s2" {
+		t.Errorf("s2 draft should be restored, got %q", m.prompt.reply.Value())
+	}
+}
+
+func TestSubmitIdleReplyClearsPerSessionDraft(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.prompt.reply.SetValue("send me")
+
+	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd == nil {
+		t.Fatal("idle submit should return a send command")
+	}
+	if m.prompt.reply.Value() != "" {
+		t.Errorf("composer should clear after submit, got %q", m.prompt.reply.Value())
+	}
+
+	// Re-entering the session must not restore the sent draft.
+	m, _ = m.enterSession("s1")
+	if m.prompt.reply.Value() != "" {
+		t.Errorf("sent draft must not resurface on re-entry, got %q", m.prompt.reply.Value())
+	}
+}
+
+func TestReplyDraftPrunedOnRemove(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.replyDrafts["s1"] = "unsent"
+
+	params, _ := json.Marshal(registry.Event{
+		Type:    registry.EventRemoved,
+		Session: session.Session{ID: "s1"},
+	})
+	m.applyEvent(api.Notification{Method: api.MethodSessionEvent, Params: params})
+
+	if _, ok := m.replyDrafts["s1"]; ok {
+		t.Errorf("draft for a removed session should be pruned, drafts=%v", m.replyDrafts)
+	}
+}
+
+func TestReplyDraftPrunedOnSnapshotReplace(t *testing.T) {
+	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
+	m.replyDrafts["s1"] = "keep"
+	m.replyDrafts["gone"] = "drop"
+
+	res, _ := m.Update(sessionsReplacedMsg([]session.Session{{ID: "s1"}}))
+	m = res.(model)
+
+	if m.replyDrafts["s1"] != "keep" {
+		t.Errorf("draft for a live session should survive a snapshot, got %q", m.replyDrafts["s1"])
+	}
+	if _, ok := m.replyDrafts["gone"]; ok {
+		t.Errorf("draft for an absent session should be pruned, drafts=%v", m.replyDrafts)
 	}
 }
 

@@ -123,6 +123,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, s := range msg {
 			m.sessions[s.ID] = s
 		}
+		m.pruneReplyDrafts()
 		m.reorder()
 		return m, m.maybeSpin()
 	case transcriptMsg:
@@ -441,6 +442,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		}
 	case registry.EventRemoved:
 		delete(m.sessions, ev.Session.ID)
+		delete(m.replyDrafts, ev.Session.ID)
 	}
 	m.syncPromptDraft() // reset a stale draft if the open session's prompt changed
 	m.reorder()
@@ -599,6 +601,7 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // enterSession opens a session's transcript view. It subscribes by session id, so
 // a just-resumed session works before discovery adds it to the local list.
 func (m model) enterSession(id string) (model, tea.Cmd) {
+	m.saveReplyDraft()
 	m.selectedID = id
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
@@ -607,6 +610,7 @@ func (m model) enterSession(id string) (model, tea.Cmd) {
 	m.transcript.expanded = make(map[string]bool)
 	m.toolBodies = make(map[string]toolBodyEntry) // per-session tool-body cache
 	m.resetPromptState()
+	m.loadReplyDraft(id)
 	m.prompt.key = interactionKey(m.sessions[id].Interaction)
 	ref := subRef{subID: newSubID(), sessionID: id, cacheKey: m.cacheKeyFor(id)}
 	return m, m.bindStream(ref)

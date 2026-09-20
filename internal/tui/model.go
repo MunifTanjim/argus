@@ -110,7 +110,8 @@ type model struct {
 	termErr   error         // terminal.open failure, shown in the box
 	termKeyCh chan termKey  // ordered keystroke queue drained by sendTermKeyLoop
 
-	prompt promptState // compose-then-submit draft for the prompt dock
+	prompt      promptState       // compose-then-submit draft for the prompt dock
+	replyDrafts map[string]string // unsent idle-reply drafts, keyed by session id
 
 	pendingKill   bool   // awaiting kill confirmation in list view
 	pendingExport bool   // awaiting export confirmation in history transcript view
@@ -185,8 +186,9 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 			jsonHL:      newCodeHighlighter(hasDark, "json"),
 			jsHL:        newCodeHighlighter(hasDark, "javascript"),
 		},
-		redact: redactState{input: newRedactInput()},
-		prompt: promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
+		redact:      redactState{input: newRedactInput()},
+		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
+		replyDrafts: map[string]string{},
 	}
 }
 

@@ -49,6 +49,7 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		id := m.selectedID
 		txt := strings.TrimSpace(m.prompt.reply.Value())
 		m.prompt.reply.SetValue("")
+		delete(m.replyDrafts, id)
 		m.focus = focusHistory
 		if txt == "" {
 			return m, nil
