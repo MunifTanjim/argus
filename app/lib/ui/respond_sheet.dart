@@ -7,6 +7,7 @@ import '../data/session_repository.dart';
 import '../models/chunk.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../state/prompt_drafts.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
@@ -47,6 +48,11 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     _vm = RespondViewModel(ref.read(sessionRepositoryProvider));
     _vm.respond.addListener(_onCommand);
     _vm.sendInput.addListener(_onCommand);
+    if (widget.session.interaction?.kind == InteractionKind.idle) {
+      final draft = ref.read(promptDraftsProvider.notifier).get(_sid);
+      _text.text = draft;
+      _text.selection = TextSelection.collapsed(offset: draft.length);
+    }
   }
 
   void _onCommand() {
@@ -77,14 +83,21 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   Future<void> _sendInput(String text) => _finish(
     _vm.sendInput,
     () => _vm.sendInput.execute((sessionId: _sid, text: text)),
+    onOk: () => ref.read(promptDraftsProvider.notifier).clear(_sid),
   );
 
-  /// Runs [exec], then pops on success or shows the error from [cmd].
-  Future<void> _finish(Command<void> cmd, Future<void> Function() exec) async {
+  /// Runs [exec], then pops on success or shows the error from [cmd]. [onOk] runs
+  /// before the pop, while the widget is still mounted.
+  Future<void> _finish(
+    Command<void> cmd,
+    Future<void> Function() exec, {
+    VoidCallback? onOk,
+  }) async {
     await exec();
     if (!mounted) return;
     switch (cmd.result) {
       case Ok():
+        onOk?.call();
         Navigator.of(context).pop();
       case Error(:final error):
         ScaffoldMessenger.of(
@@ -258,6 +271,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       autofocus: true,
       minLines: 1,
       maxLines: 6,
+      onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
       decoration: const InputDecoration(
         labelText: 'Reply',
         border: OutlineInputBorder(),

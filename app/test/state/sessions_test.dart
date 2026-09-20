@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/registry_event.dart';
+import 'package:argus/state/prompt_drafts.dart';
 import 'package:argus/state/sessions.dart';
 
 const _s1 =
@@ -81,6 +82,36 @@ void main() {
     expect(state.containsKey('A:s1'), isFalse);
     expect(state.containsKey('A:s3'), isTrue);
     expect(state.containsKey('B:s2'), isTrue);
+  });
+
+  test('removing a session drops its draft', () {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+    final n = c.read(sessionsProvider.notifier);
+    final drafts = c.read(promptDraftsProvider.notifier);
+    n.replaceAll(parseSessions(jsonDecode('[$_s1]')));
+    drafts.set('mac:%1', 'unsent');
+    expect(c.read(promptDraftsProvider)['mac:%1'], 'unsent');
+
+    n.apply(
+      RegistryEvent.fromJson(jsonDecode('{"type":"removed","session":$_s1}')),
+    );
+    expect(c.read(promptDraftsProvider).containsKey('mac:%1'), isFalse);
+  });
+
+  test('retainNodes drops drafts of absent nodes', () {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+    final n = c.read(sessionsProvider.notifier);
+    final drafts = c.read(promptDraftsProvider.notifier);
+    n.replaceAll(parseSessions(jsonDecode('[$_sA1,$_sB2]')));
+    drafts.set('A:s1', 'keep-a');
+    drafts.set('B:s2', 'drop-b');
+
+    n.retainNodes({'A'});
+
+    expect(c.read(promptDraftsProvider)['A:s1'], 'keep-a');
+    expect(c.read(promptDraftsProvider).containsKey('B:s2'), isFalse);
   });
 
   test('retainNodes drops sessions of absent nodes', () {

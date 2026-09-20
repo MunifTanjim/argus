@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/registry_event.dart';
 import '../models/session.dart';
+import 'prompt_drafts.dart';
 
 List<Session> parseSessions(Object? raw) => (raw as List? ?? const [])
     .map((e) => Session.fromJson(e as Map<String, dynamic>))
@@ -21,11 +22,18 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
   @override
   Map<String, Session> build() => const {};
 
+  void _pruneDrafts() =>
+      ref.read(promptDraftsProvider.notifier).retain(state.keys);
+
   void replaceAll(Iterable<Session> sessions) {
     state = {for (final s in sessions) s.id: s};
+    _pruneDrafts();
   }
 
-  void clear() => state = const {};
+  void clear() {
+    state = const {};
+    _pruneDrafts();
+  }
 
   /// Replaces only [nodeId]'s slice: drops that node's current sessions, then
   /// inserts [sessions]. Other nodes' sessions are untouched — enables progressive
@@ -37,6 +45,7 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
     };
     for (final s in sessions) next[s.id] = s;
     state = next;
+    _pruneDrafts();
   }
 
   /// Drops sessions whose origin node is not in [nodeIds] — clears sessions from
@@ -47,16 +56,19 @@ class SessionsNotifier extends Notifier<Map<String, Session>> {
         if (e.value.nodeId != null && nodeIds.contains(e.value.nodeId))
           e.key: e.value,
     };
+    _pruneDrafts();
   }
 
   void apply(RegistryEvent ev) {
     state = applyEvent(state, ev);
+    _pruneDrafts();
   }
 
   void remove(String id) {
     if (!state.containsKey(id)) return;
     final next = Map<String, Session>.of(state)..remove(id);
     state = next;
+    _pruneDrafts();
   }
 
   void put(Session s) {

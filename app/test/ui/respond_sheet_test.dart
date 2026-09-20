@@ -143,6 +143,72 @@ void main() {
     expect(c.inputCalls.single, ['mac:%1', 'next task']);
   });
 
+  testWidgets('idle draft survives sheet close and reopen', (tester) async {
+    final c = _RecordingControl();
+    final container = ProviderContainer(
+        overrides: [sessionRepositoryProvider.overrideWithValue(c)]);
+    addTearDown(container.dispose);
+    final s = _session({'kind': 'idle'});
+
+    Future<void> pumpSheet() => tester.pumpWidget(UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(home: Scaffold(body: RespondSheet(session: s))),
+        ));
+
+    await pumpSheet();
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'draft reply');
+    await tester.pump();
+
+    // Close the sheet: replace it with an empty tree so its state disposes.
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: Scaffold(body: SizedBox())),
+    ));
+    await tester.pump();
+
+    await pumpSheet();
+    await tester.pump();
+
+    expect(find.text('draft reply'), findsOneWidget);
+  });
+
+  testWidgets('idle draft cleared after a successful send', (tester) async {
+    final c = _RecordingControl();
+    final container = ProviderContainer(
+        overrides: [sessionRepositoryProvider.overrideWithValue(c)]);
+    addTearDown(container.dispose);
+    final s = _session({'kind': 'idle'});
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: Builder(
+          builder: (ctx) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => showRespondSheet(ctx, s),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'next task');
+    await tester.tap(find.text('Send'));
+    await tester.pumpAndSettle();
+    expect(c.inputCalls.single, ['mac:%1', 'next task']);
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, isEmpty);
+  });
+
   testWidgets('permission deny with blank reason omits reason key',
       (tester) async {
     final c = _RecordingControl();
