@@ -290,14 +290,11 @@ func (m model) assistantBrand() (StyledIcon, string) {
 	if m.mode == modeHistoryTranscript {
 		agent = m.history.openAgent
 	}
-	switch agent {
-	case "codex":
-		return Icon.Claude, "Codex"
-	case "antigravity":
-		return Icon.Claude, "Antigravity"
-	default:
-		return Icon.Claude, "Claude"
+	name, _ := agentLabel(agent)
+	if name == "" {
+		name = "Claude"
 	}
+	return Icon.Claude, name
 }
 
 func (m model) aiHeader(c transcript.Chunk, width int) string {
@@ -825,7 +822,8 @@ func (m model) transcriptBody() string {
 // NotebookEdit) as a colored diff. Returns ok=false for any other tool.
 func editDiff(name, input string) (string, bool) {
 	switch name {
-	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+	case "Edit", "MultiEdit", "Write", "NotebookEdit", // claude
+		"edit", "write": // opencode
 	default:
 		return "", false
 	}
@@ -838,13 +836,14 @@ func editDiff(name, input string) (string, bool) {
 	}
 
 	var sb strings.Builder
-	if path := str(in["file_path"], in["notebook_path"]); path != "" {
+	// OpenCode uses "path"/"filePath"; the field name varies by agent model.
+	if path := str(in["file_path"], in["notebook_path"], in["path"], in["filePath"]); path != "" {
 		sb.WriteString(dimStyle.Render("● "+path) + "\n")
 	}
 
 	switch name {
-	case "Edit":
-		oldS, newS := str(in["old_string"]), str(in["new_string"])
+	case "Edit", "edit":
+		oldS, newS := str(in["old_string"], in["oldString"]), str(in["new_string"], in["newString"])
 		if oldS == "" && newS == "" {
 			return "", false
 		}
@@ -864,7 +863,7 @@ func editDiff(name, input string) (string, bool) {
 			}
 			sb.WriteString(strings.Join(lineDiff(str(em["old_string"]), str(em["new_string"])), "\n"))
 		}
-	case "Write":
+	case "Write", "write":
 		content := str(in["content"])
 		if content == "" {
 			return "", false

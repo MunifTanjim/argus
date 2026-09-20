@@ -112,10 +112,9 @@ type model struct {
 
 	prompt promptState // compose-then-submit draft for the prompt dock
 
-	pendingKill     bool   // awaiting kill confirmation in list view
-	pendingExport   bool   // awaiting export confirmation in history transcript view
-	pendingResumeID string // resumed session id to select once it appears in the list
-	flash           string // transient list-view status (e.g. why a jump was refused)
+	pendingKill   bool   // awaiting kill confirmation in list view
+	pendingExport bool   // awaiting export confirmation in history transcript view
+	flash         string // transient list-view status (e.g. why a jump was refused)
 
 	spawn spawnState // staged "new session" flow (node → dir → name → command)
 
@@ -144,7 +143,8 @@ type transcriptState struct {
 	expanded    map[string]bool               // chunk id -> expanded (override default)
 	mdRenderers map[int]*glamour.TermRenderer // markdown renderers, keyed by wrap width
 	mdCache     map[string]string             // markdown cache, keyed by width+content
-	jsonHL      *jsonHighlighter              // JSON syntax highlighter for tool bodies
+	jsonHL      *codeHighlighter              // JSON syntax highlighter for tool bodies
+	jsHL        *codeHighlighter              // JavaScript highlighter for opencode execute
 }
 
 // historyState holds the read-only History view: the project list, a project's
@@ -182,7 +182,8 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 			expanded:    make(map[string]bool),
 			mdRenderers: make(map[int]*glamour.TermRenderer),
 			mdCache:     make(map[string]string),
-			jsonHL:      newJSONHighlighter(hasDark),
+			jsonHL:      newCodeHighlighter(hasDark, "json"),
+			jsHL:        newCodeHighlighter(hasDark, "javascript"),
 		},
 		redact: redactState{input: newRedactInput()},
 		prompt: promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},

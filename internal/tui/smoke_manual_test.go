@@ -27,7 +27,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	initIcons()
 	initStyles()
 	m.hasDark = true
-	m.transcript.jsonHL = newJSONHighlighter(true)
+	m.transcript.jsonHL = newCodeHighlighter(true, "json")
 	m.transcript.chunks = view.Chunks
 
 	lines, first := m.layoutChunks()

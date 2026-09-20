@@ -6,8 +6,8 @@ import (
 )
 
 func TestJSONHighlightValid(t *testing.T) {
-	h := newJSONHighlighter(true)
-	out, ok := h.highlight(`{"command":"ls -la","count":3}`)
+	h := newCodeHighlighter(true, "json")
+	out, ok := h.highlightJSON(`{"command":"ls -la","count":3}`)
 	if !ok {
 		t.Fatal("expected valid JSON to highlight")
 	}
@@ -24,11 +24,24 @@ func TestJSONHighlightValid(t *testing.T) {
 }
 
 func TestJSONHighlightInvalid(t *testing.T) {
-	h := newJSONHighlighter(false)
-	if _, ok := h.highlight("not json at all"); ok {
+	h := newCodeHighlighter(false, "json")
+	if _, ok := h.highlightJSON("not json at all"); ok {
 		t.Error("expected ok=false for non-JSON input")
 	}
-	if _, ok := h.highlight(""); ok {
+	if _, ok := h.highlightJSON(""); ok {
 		t.Error("expected ok=false for empty input")
+	}
+}
+
+func TestJavaScriptHighlight(t *testing.T) {
+	h := newCodeHighlighter(true, "javascript")
+	out, ok := h.highlight("const x = 2 + 2;")
+	if !ok {
+		t.Fatal("expected javascript to highlight")
+	}
+	for _, want := range []string{"const", "x"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("highlighted output missing %q:\n%s", want, out)
+		}
 	}
 }

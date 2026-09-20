@@ -10,6 +10,7 @@ const (
 	agentClaude      = "claude"
 	agentCodex       = "codex"
 	agentAntigravity = "antigravity"
+	agentOpenCode    = "opencode"
 )
 
 type toolCategory int
@@ -151,4 +152,21 @@ var toolRegistry = map[string]toolMeta{
 	"wait_agent":   {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
 	"close_agent":  {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
 	"spawn_agent":  {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
+
+	// opencode (lowercase tool names, distinct from the other agents' keys)
+	"read":      {agentOpenCode, "Read", catRead, (model).readDetail},
+	"edit":      {agentOpenCode, "Edit", catEdit, (model).editToolDetail},
+	"write":     {agentOpenCode, "Write", catWrite, (model).editToolDetail},
+	"bash":      {agentOpenCode, "Bash", catBash, (model).bashDetail},
+	"shell":     {agentOpenCode, "Shell", catBash, (model).bashDetail},
+	"execute":   {agentOpenCode, "Execute", catBash, (model).opencodeExecuteDetail},
+	"grep":      {agentOpenCode, "Grep", catGrep, (model).grepDetail},
+	"glob":      {agentOpenCode, "Glob", catGlob, (model).globDetail},
+	"webfetch":  {agentOpenCode, "Webfetch", catWeb, (model).webDetail},
+	"websearch": {agentOpenCode, "Websearch", catWeb, (model).webDetail},
+	"todowrite": {agentOpenCode, "Todo", catTodo, (model).todoDetail},
+	"skill":     {agentOpenCode, "Skill", catSkill, (model).opencodeSkillDetail},
+	"task":      {agentOpenCode, "Task", catTask, (model).opencodeTaskDetail},
+	"subagent":  {agentOpenCode, "Subagent", catTask, (model).opencodeTaskDetail},
+	"question":  {agentOpenCode, "Question", catOther, (model).opencodeQuestionDetail},
 }
