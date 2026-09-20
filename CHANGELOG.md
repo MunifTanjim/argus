@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.16](https://github.com/MunifTanjim/argus/compare/0.0.15...0.0.16) (2026-09-20)
+
+
+### Features
+
+* **node:** support HTTP-service agents ([e0be88d](https://github.com/MunifTanjim/argus/commit/e0be88d111f280123845d5395bd9b63b999ad77e))
+* **opencode:** add the OpenCode adapter ([2e327d3](https://github.com/MunifTanjim/argus/commit/2e327d3a93e355d9bd6aa04476bf4f992a55d264))
+* **tui:** persist unsent idle reply drafts per session ([e0ffa35](https://github.com/MunifTanjim/argus/commit/e0ffa35def2f623f0bb08f90c9e1497776ffea7d))
+* **tui:** render and drive OpenCode sessions ([d5604c2](https://github.com/MunifTanjim/argus/commit/d5604c2b26c1644d9d8b9da9684cd0e5be4a802e))
+
+
+### Bug Fixes
+
+* **claude:** drop duplicate session after /clear on compacted session ([6f76e86](https://github.com/MunifTanjim/argus/commit/6f76e869c686d9bd92f63c5a1e1637579466127c))
+* **claude:** follow compaction to the parked job's session id in discovery ([7028a53](https://github.com/MunifTanjim/argus/commit/7028a537d3cc1dd078ae2ae1d4b03ed22fc9f479))
+
 ## [0.0.15](https://github.com/MunifTanjim/argus/compare/0.0.14...0.0.15) (2026-09-18)
 
 
