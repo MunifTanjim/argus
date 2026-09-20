@@ -77,6 +77,22 @@ TerminalExitReason terminalExitReasonFromWire(String? s) {
   }
 }
 
+/// How argus sends input to a session. Mirrors the backend session.InputMode.
+/// [InputMode.none] means argus cannot send a prompt; the wire value is
+/// omitted in that case.
+enum InputMode { none, pane, api }
+
+InputMode inputModeFromWire(String? s) {
+  switch (s) {
+    case 'pane':
+      return InputMode.pane;
+    case 'api':
+      return InputMode.api;
+    default:
+      return InputMode.none;
+  }
+}
+
 enum FrontendKind { tmux, vscode, external, unknown }
 
 FrontendKind frontendFromWire(String? s) {

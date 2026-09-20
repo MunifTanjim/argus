@@ -45,7 +45,7 @@ void main() {
     // The tap arrives (and sets the pending session) before HomeShell mounts,
     // and the session list is already populated.
     container.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
-    container.read(pendingPushSessionProvider.notifier).state = 's1';
+    container.read(pendingOpenSessionProvider.notifier).state = 's1';
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -57,7 +57,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.byType(SessionDetailScreen), findsOneWidget);
-    expect(container.read(pendingPushSessionProvider), isNull);
+    expect(container.read(pendingOpenSessionProvider), isNull);
   });
 
   testWidgets('opens a pending session once the list is fetched', (tester) async {
@@ -66,7 +66,7 @@ void main() {
     );
     addTearDown(container.dispose);
     // Cold start: the tap sets a pending session, but the list has not arrived.
-    container.read(pendingPushSessionProvider.notifier).state = 's1';
+    container.read(pendingOpenSessionProvider.notifier).state = 's1';
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -76,7 +76,7 @@ void main() {
 
     // Nothing to open yet; the request must be kept, not discarded.
     expect(find.byType(SessionDetailScreen), findsNothing);
-    expect(container.read(pendingPushSessionProvider), 's1');
+    expect(container.read(pendingOpenSessionProvider), 's1');
 
     // The session list is fetched; the pending session opens now.
     container.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
@@ -84,6 +84,6 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.byType(SessionDetailScreen), findsOneWidget);
-    expect(container.read(pendingPushSessionProvider), isNull);
+    expect(container.read(pendingOpenSessionProvider), isNull);
   });
 }

@@ -156,6 +156,7 @@ class Session {
   final String statusLabel;
   final SessionSource source;
   final FrontendKind frontend;
+  final InputMode inputMode;
   final String? repo;
   final String? branch;
   final Summary? summary;
@@ -163,6 +164,10 @@ class Session {
   final String? nodeId;
   final String? nodeLabel;
   final bool offline;
+
+  /// Node-computed on emit: true for a real pane, or a paneless session whose
+  /// agent can spawn a viewer here.
+  final bool canOpenTerminal;
 
   const Session({
     required this.id,
@@ -172,6 +177,7 @@ class Session {
     this.statusLabel = '',
     required this.source,
     this.frontend = FrontendKind.unknown,
+    this.inputMode = InputMode.none,
     this.agentSessionId,
     this.name,
     this.cwd,
@@ -183,6 +189,7 @@ class Session {
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
+    this.canOpenTerminal = false,
   });
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
@@ -197,6 +204,7 @@ class Session {
         statusLabel: j['status_label'] as String? ?? '',
         source: sourceFromWire(j['source'] as String?),
         frontend: frontendFromWire(j['frontend'] as String?),
+        inputMode: inputModeFromWire(j['input_mode'] as String?),
         repo: j['repo'] as String?,
         branch: j['branch'] as String?,
         summary: j['summary'] == null
@@ -208,6 +216,7 @@ class Session {
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
         offline: j['offline'] as bool? ?? false,
+        canOpenTerminal: j['can_open_terminal'] as bool? ?? false,
       );
 
   /// The label shown wherever a session needs a title: repo, else name, else id.
@@ -226,4 +235,18 @@ class Session {
   /// Whether argus can drive this session's terminal. Derived from frontend:
   /// only tmux sessions are controllable; vscode/external are decision-only.
   bool get controllable => frontend == FrontendKind.tmux;
+
+  /// Whether argus can send a free-text prompt to this session by any channel.
+  /// Mirrors the backend session.AcceptsInput(): true for tmux (pane) and for
+  /// API agents like opencode, false for decision-only sessions.
+  bool get acceptsInput => inputMode != InputMode.none;
+
+  /// Whether a paneless API session can be torn down (dismissed). Kill is
+  /// unconditional, so status and interaction do not gate it.
+  bool get _dismissable => inputMode == InputMode.api && !controllable;
+
+  /// Whether the "Kill Session" action applies. A tmux session's pane is killed;
+  /// a paneless API session is dismissed. The backend routes sessions.kill for
+  /// both; this only gates when the single action is offered.
+  bool get canKill => controllable || _dismissable;
 }

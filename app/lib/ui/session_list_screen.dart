@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/session.dart';
 import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../state/sessions.dart';
@@ -13,6 +14,24 @@ import 'theme.dart';
 
 class SessionListScreen extends ConsumerWidget {
   const SessionListScreen({super.key});
+
+  // Tearing a session down lives on the detail screen's "Kill Session" action,
+  // so the list is tap-to-open only.
+  Widget _buildCard(
+    BuildContext context,
+    Session s,
+    SessionSection section,
+    bool grouped,
+    bool multiAgent,
+  ) =>
+      SessionCard(
+        session: s,
+        showNode: section.needsYou && grouped,
+        showAgent: multiAgent,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => SessionDetailScreen(session: s)),
+        ),
+      );
 
   Future<void> _refresh(WidgetRef ref) async {
     final client = ref.read(gatewayProvider)?.client;
@@ -71,16 +90,12 @@ class SessionListScreen extends ConsumerWidget {
                             for (final s in section.sessions)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
-                                child: SessionCard(
-                                  session: s,
-                                  showNode: section.needsYou && grouped,
-                                  showAgent: multiAgent,
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          SessionDetailScreen(session: s),
-                                    ),
-                                  ),
+                                child: _buildCard(
+                                  context,
+                                  s,
+                                  section,
+                                  grouped,
+                                  multiAgent,
                                 ),
                               ),
                             const SizedBox(height: 8),
