@@ -464,6 +464,30 @@ func TestNewSessionArgsIncludesCommandAndArgs(t *testing.T) {
 	}
 }
 
+func TestNewSessionArgsIncludesEnvBeforeCommand(t *testing.T) {
+	got := newSessionArgs(NewSessionOpts{
+		Name: "argus", Command: "opencode", Args: []string{"--session", "ses_1"},
+		Env: []string{"FOO=bar"},
+	})
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "-e FOO=bar") {
+		t.Fatalf("missing env flag in %q", joined)
+	}
+	// -e must precede the command so tmux applies it to the session, not as an arg.
+	ei, ci := -1, -1
+	for i, a := range got {
+		switch a {
+		case "FOO=bar":
+			ei = i
+		case "opencode":
+			ci = i
+		}
+	}
+	if ei < 0 || ci < 0 || ei > ci {
+		t.Fatalf("env must appear before command: %#v", got)
+	}
+}
+
 func TestNewSessionArgsOmitsArgsWhenEmpty(t *testing.T) {
 	got := newSessionArgs(NewSessionOpts{Name: "x", Command: "claude"})
 	if got[len(got)-1] != "claude" {

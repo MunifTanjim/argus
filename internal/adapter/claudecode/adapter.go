@@ -24,6 +24,7 @@ var _ adapter.TaskSource = ccAdapter{}
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
 func (ccAdapter) AgentColor() string { return "#fe8019" }
+func (ccAdapter) IsHeadless() bool   { return false }
 
 func (ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return NewDiscoverer(reg, clients)

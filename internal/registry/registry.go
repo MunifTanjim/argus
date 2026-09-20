@@ -236,6 +236,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
+		refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
 
 		evType := EventUpdated
@@ -275,6 +276,20 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 	r.index.clear("", s.AgentSessionID)
 	s.AgentSessionID = agentSessionID
 	r.index.setAgentSession(agentSessionID, s.ID)
+}
+
+// refreshInput derives the input channel from pane state, but leaves an InputAPI
+// session (opencode) untouched: it prompts over its API whether or not a viewing
+// pane is adopted, and never reverts to keystrokes.
+func refreshInput(s *session.Session) {
+	if s.Input == session.InputAPI {
+		return
+	}
+	if s.Tmux.PaneID != "" {
+		s.Input = session.InputPane
+	} else {
+		s.Input = session.InputNone
+	}
 }
 
 // setTranscriptPath points the session at a new transcript, invalidating the
@@ -405,6 +420,28 @@ func (r *Registry) ClearInteraction(id string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+// ClearPane detaches an adopted tmux pane from an agent-keyed session (found by
+// agent session id), reverting it to a paneless external session. Used when an
+// on-demand terminal pane dies while the underlying session still exists. No-op
+// when the session is unknown or already paneless.
+func (r *Registry) ClearPane(agentSessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.index.findByAgentSession(agentSessionID)
+	if !ok {
+		return
+	}
+	s := r.sessions[id]
+	if s == nil || s.Tmux.PaneID == "" {
+		return
+	}
+	r.index.clear(PaneKey(s.Tmux.Server, s.Tmux.PaneID), "")
+	s.Tmux = session.TmuxLocation{}
+	s.Frontend = session.FrontendExternal
+	refreshInput(s)
+	r.publish(Event{Type: EventUpdated, Session: *s})
+}
+
 // SetBranch updates a session's current git branch, publishing an update only
 // when it changes. No-op for an unknown id. Called when a client opens a session
 // (path-derived, so it catches a mid-session checkout).
@@ -427,13 +464,18 @@ type HookUpdate struct {
 	Server         session.TmuxServer
 	PaneID         string // from $TMUX_PANE; primary correlation key
 	AgentSessionID string
+	Name           string
 	Cwd            string
 	Repo           string // git repo basename for Cwd, when known
 	TranscriptPath string
 	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
 	// session (see ApplyHook).
 	Frontend session.Frontend
-	Status   session.Status
+	// InputAPI (agents that prompt over their own API) is sticky: once set it stays
+	// and never reverts to a pane channel. Pane sessions get InputPane from
+	// refreshInput, not from the hook.
+	Input  session.InputMode
+	Status session.Status
 	// Summary is a refreshed transcript digest, or nil to keep the cached one.
 	Summary *session.Summary
 	// Interaction is the pending user request, applied when Status is set: non-nil
@@ -475,6 +517,12 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		if id == "" {
 			id = u.Agent + ":" + u.AgentSessionID
 		}
+		// A headless agent's pane is a disposable viewer, so key on its stable
+		// AgentSessionID instead: a pane-based ID would change across adopt/respawn
+		// and split session identity (notification dedup, cross-scan correlation).
+		if u.Input == session.InputAPI && u.AgentSessionID != "" {
+			id = u.Agent + ":" + u.AgentSessionID
+		}
 		s = &session.Session{ID: id, Agent: u.Agent, Status: session.StatusIdle, Source: session.SourceHooked}
 		if u.PaneID != "" {
 			s.Tmux.Server = u.Server
@@ -485,9 +533,19 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 			r.index.setPane(pKey, id)
 		}
 		created = true
+	} else if pKey != "" && s.Tmux.PaneID == "" {
+		// Adopt an on-demand pane onto an existing paneless record (an OpenCode
+		// session spawned into a tmux pane for terminal control). The record keeps
+		// its agent-keyed ID; the pane key is added as an alias.
+		s.Tmux.Server = u.Server
+		s.Tmux.PaneID = u.PaneID
+		r.index.setPane(pKey, s.ID)
 	}
 
 	r.reindexAgentSession(s, u.AgentSessionID)
+	if u.Name != "" {
+		s.Name = u.Name
+	}
 	if u.Cwd != "" {
 		s.Cwd = u.Cwd
 	}
@@ -502,6 +560,10 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	} else if u.Frontend != "" {
 		s.Frontend = u.Frontend
 	}
+	if u.Input == session.InputAPI {
+		s.Input = session.InputAPI
+	}
+	refreshInput(s)
 	// Non-nil replaces the cached summary; nil keeps it.
 	if u.Summary != nil {
 		s.Summary = u.Summary

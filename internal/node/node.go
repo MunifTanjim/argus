@@ -114,6 +114,9 @@ type Node struct {
 	// than spawning a duplicate.
 	resumeMu sync.Mutex
 	resuming map[string]string // agent+session key -> launched session id
+
+	binMu    sync.Mutex
+	binCache map[string]bool // agent binary name -> found on PATH (memoized)
 }
 
 // SetLogger routes operational logging to l. Off by default so an embedded node
@@ -395,7 +398,7 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	// A client may hang up mid-stream (e.g. a liveness probe); stop on the first
 	// failed notify rather than spamming one per session against a dead connection.
 	for _, s := range d.reg.Snapshot() {
-		if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: s}); err != nil {
+		if err := n.Notify(api.MethodSessionEvent, registry.Event{Type: registry.EventAdded, Session: d.withCaps(s)}); err != nil {
 			break
 		}
 	}
@@ -409,6 +412,7 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 				if !ok {
 					return
 				}
+				ev.Session = d.withCaps(ev.Session)
 				if err := n.Notify(api.MethodSessionEvent, ev); err != nil {
 					return
 				}

@@ -40,9 +40,9 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 }
 
 // handleSessionRespond resolves the session's parked PermissionRequest with the
-// hook decision JSON. Anything not parked is a no-op (raw screen view is the
-// manual fallback).
-func (d *Node) handleSessionRespond(_ context.Context, params json.RawMessage) (any, error) {
+// hook decision JSON. When no hook is parked, falls back to the adapter's
+// Responder capability for HTTP-service agents (e.g. opencode).
+func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.RespondParams](params)
 	if err != nil {
 		return nil, err
@@ -50,9 +50,18 @@ func (d *Node) handleSessionRespond(_ context.Context, params json.RawMessage) (
 	if pd := d.takePending(p.SessionID); pd != nil {
 		pd.ch <- p
 		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "kind", p.Kind)
-	} else {
-		// No parked hook: log so a silently-dropped answer is visible.
-		d.log.Warn("respond with no parked decision, dropped", "session", p.SessionID, "kind", p.Kind)
+		return nil, nil
 	}
+	if s, ok := d.reg.Get(p.SessionID); ok {
+		if r, ok := d.adapterFor(s.Agent).(adapter.Responder); ok {
+			if err := r.Respond(ctx, s, p); err != nil {
+				d.log.Warn("responder failed", "session", p.SessionID, "err", err)
+				return nil, err
+			}
+			d.reg.ClearInteraction(p.SessionID)
+			return nil, nil
+		}
+	}
+	d.log.Warn("respond with no parked decision, dropped", "session", p.SessionID, "kind", p.Kind)
 	return nil, nil
 }
