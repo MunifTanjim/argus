@@ -13,6 +13,10 @@ nodes:
         frontend: tmux
         transcript_path: transcripts/claude-argus.jsonl
         terminal_path: terminals/claude-argus.txt
+        tmux:
+          server: argus
+          pane_id: "%1"
+          session_name: argus
         summary:
           model_name: "Opus 4.8"
           model_color: "#d3869b"
