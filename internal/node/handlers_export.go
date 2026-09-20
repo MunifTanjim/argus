@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,6 +34,13 @@ func (d *Node) handleExportBundle(ctx context.Context, params json.RawMessage) (
 	if len(files) == 0 {
 		return nil, fmt.Errorf("exportBundle: no files collected for %s", p.TranscriptPath)
 	}
+	defer func() {
+		for _, f := range files {
+			if f.Transient {
+				_ = os.Remove(f.AbsPath)
+			}
+		}
+	}()
 
 	entry := ""
 	srcs := make([]bundle.SourceFile, 0, len(files))

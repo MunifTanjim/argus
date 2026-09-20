@@ -6,6 +6,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/antigravity"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/adapter/codex"
+	"github.com/MunifTanjim/argus/internal/adapter/opencode"
 )
 
 // All returns every registered adapter in priority order. The first entry is the default.
@@ -14,6 +15,7 @@ func All() []adapter.Adapter {
 		claudecode.New(),
 		codex.New(),
 		antigravity.New(),
+		opencode.New(),
 	}
 }
 

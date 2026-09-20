@@ -22,6 +22,7 @@ var _ adapter.Adapter = cxAdapter{}
 func (cxAdapter) Agent() string      { return Agent }
 func (cxAdapter) AgentName() string  { return "Codex" }
 func (cxAdapter) AgentColor() string { return "#b8bb26" } // green
+func (cxAdapter) IsHeadless() bool   { return false }
 
 func (cxAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	return NewDiscoverer(reg, clients)
