@@ -187,6 +187,50 @@ func TestActivityEventsSetsWorking(t *testing.T) {
 	})
 }
 
+// A reasoning model emits a trailing session.step.streamed after form.created
+// (observed with muse). That activity event must not downgrade the session to
+// Working and clear the pending question.
+func TestActivityEventKeepsPendingForm(t *testing.T) {
+	reg := registry.New()
+	d := newTestDiscoverer(reg, nil)
+	seedSession(t, reg, "ses_1")
+
+	d.applyEvent(sseFrame{
+		Type: "form.created",
+		Data: []byte(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"Pick one","fields":[{"key":"q0","title":"Choice","description":"Which one?","type":"string","options":[{"value":"y","label":"Yes"},{"value":"n","label":"No"}]}]}}`),
+	})
+	d.applyEvent(sseFrame{Type: "session.step.streamed", Data: []byte(`{"sessionID":"ses_1"}`)})
+
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
+		t.Fatalf("trailing step.streamed set status = %q, want awaiting_input", got)
+	}
+	s, _ := reg.Get(sessionKeyFor(reg, "ses_1"))
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionQuestion {
+		t.Fatalf("pending question cleared by trailing activity event: %+v", s.Interaction)
+	}
+}
+
+// A trailing activity event must likewise not clear a pending permission prompt.
+func TestActivityEventKeepsPendingPermission(t *testing.T) {
+	reg := registry.New()
+	d := newTestDiscoverer(reg, nil)
+	seedSession(t, reg, "ses_1")
+
+	d.applyEvent(sseFrame{
+		Type: "permission.asked",
+		Data: []byte(`{"id":"per_abc","sessionID":"ses_1","action":"read","source":{"type":"tool"}}`),
+	})
+	d.applyEvent(sseFrame{Type: "session.step.streamed", Data: []byte(`{"sessionID":"ses_1"}`)})
+
+	if got := statusOf(t, reg, "ses_1"); got != session.StatusAwaitingInput {
+		t.Fatalf("trailing step.streamed set status = %q, want awaiting_input", got)
+	}
+	s, _ := reg.Get(sessionKeyFor(reg, "ses_1"))
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionPermission {
+		t.Fatalf("pending permission cleared by trailing activity event: %+v", s.Interaction)
+	}
+}
+
 func TestApplyEventPermissionGuardsEmptyIDs(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, nil)

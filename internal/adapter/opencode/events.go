@@ -149,7 +149,16 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 	switch frame.Type {
 	case "session.execution.started", "session.step.started", "session.step.streamed",
 		"session.text.started", "session.text.delta", "session.text.ended":
-		d.upsert(sessionIDFrom(frame.Data), session.StatusWorking, nil)
+		id := sessionIDFrom(frame.Data)
+		// A reasoning model emits a trailing activity event after form.created or
+		// permission.asked (observed with muse). A bare Working upsert would clear the
+		// pending prompt (mergeInteraction drops a rich interaction for a nil one). The
+		// session waits on the user, not the agent, so hold it at the prompt until the
+		// reply event clears the pending entry.
+		if d.hasPendingPrompt(id) {
+			return
+		}
+		d.upsert(id, session.StatusWorking, nil)
 
 	case "session.execution.succeeded", "session.execution.failed":
 		d.upsert(sessionIDFrom(frame.Data), session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
@@ -167,21 +176,11 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		if p.SessionID == "" || p.ID == "" {
 			return
 		}
-		d.mu.Lock()
-		d.pendPerm[p.SessionID] = p.ID
-		d.mu.Unlock()
-		toolName := p.Action
-		if toolName == "" && p.Source != nil {
-			toolName = p.Source.Type
+		src := ""
+		if p.Source != nil {
+			src = p.Source.Type
 		}
-		d.upsert(p.SessionID, session.StatusAwaitingInput, &session.Interaction{
-			Kind:     session.InteractionPermission,
-			ToolName: toolName,
-			Options: []session.DecisionOption{
-				{Label: "Allow", Value: "allow"},
-				{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell OpenCode why"},
-			},
-		})
+		d.applyPermission(p.SessionID, p.ID, p.Action, src)
 
 	case "permission.replied", "permission.rejected":
 		var p struct {
@@ -238,6 +237,16 @@ type formOption struct {
 	Description string `json:"description"`
 }
 
+// ocPermission is a Permission.Request item from the permission.asked event or the
+// per-session permission list.
+type ocPermission struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Source *struct {
+		Type string `json:"type"`
+	} `json:"source"`
+}
+
 func (d *discoverer) applyFormCreated(data json.RawMessage) {
 	var wrap struct {
 		Form *formInfo `json:"form"`
@@ -253,7 +262,32 @@ func (d *discoverer) applyFormCreated(data json.RawMessage) {
 	if info == nil || info.SessionID == "" || info.ID == "" {
 		return
 	}
+	d.applyForm(info)
+}
 
+// applyPermission is shared by the permission.asked event and the scan reconcile
+// path, so both surface an identical permission interaction.
+func (d *discoverer) applyPermission(sessionID, requestID, action, sourceType string) {
+	d.mu.Lock()
+	d.pendPerm[sessionID] = requestID
+	d.mu.Unlock()
+	toolName := action
+	if toolName == "" {
+		toolName = sourceType
+	}
+	d.upsert(sessionID, session.StatusAwaitingInput, &session.Interaction{
+		Kind:     session.InteractionPermission,
+		ToolName: toolName,
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell OpenCode why"},
+		},
+	})
+}
+
+// applyForm is shared by the form.created event and the scan reconcile path
+// (backfill after a missed event), so both surface an identical question interaction.
+func (d *discoverer) applyForm(info *formInfo) {
 	pf := &pendingForm{formID: info.ID}
 	var questions []session.QuestionSpec
 	for _, f := range info.Fields {

@@ -28,9 +28,10 @@ type discoverer struct {
 
 	dial func() (*client, bool)
 
-	pumpOnce sync.Once
-	seeded   atomic.Bool // idle-seed done (set only after a successful seed, so a transient error retries)
-	ctx      context.Context
+	pumpOnce    sync.Once
+	pumpStarted atomic.Bool // set when the event pump goroutine has been launched
+	seeded      atomic.Bool // idle-seed done (set only after a successful seed, so a transient error retries)
+	ctx         context.Context
 
 	argusTmux   *tmux.Client // argus tmux server, for adopting spawned terminal panes
 	reconcileMu sync.Mutex   // serializes pane reconcile passes (concurrent scans must not interleave)
@@ -78,6 +79,15 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 }
 
 func (d *discoverer) ScanOnce(ctx context.Context) error {
+	// Start the live event pump on the first scan, before the dial check. The pump
+	// retries its own connection, so it must not depend on the service being
+	// reachable at this instant; otherwise a scan while the service is briefly down
+	// skips it and live updates never begin. Without the pump, prompts appear only
+	// when a later scan backfills them.
+	d.pumpOnce.Do(func() {
+		d.pumpStarted.Store(true)
+		go d.runEventPump(d.ctx)
+	})
 	c, ok := d.dial()
 	if !ok {
 		return nil
@@ -89,7 +99,18 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		if bound, ok := d.scanPanes(ctx); ok {
 			d.reconcilePanes(ctx, bound, active)
 		}
+		// Sync pending prompts against the server before marking active sessions
+		// Working, so a backfilled prompt is in place when the loop below skips it.
+		d.reconcilePending(ctx, c, active)
 		for id := range active {
+			// A session that waits for a form or permission reply stays in the active
+			// list. Its interaction and AwaitingInput status come over SSE, so a bare
+			// Working upsert here would clear the pending prompt (mergeInteraction drops
+			// a rich interaction for a nil one). reconcilePending has already set the
+			// pend entry for such a session, so skip it here.
+			if d.hasPendingPrompt(id) {
+				continue
+			}
 			d.upsert(id, session.StatusWorking, nil)
 		}
 		if !d.seeded.Load() {
@@ -100,9 +121,6 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		}
 		d.sweepIdle()
 	}
-	d.pumpOnce.Do(func() {
-		go d.runEventPump(d.ctx)
-	})
 	return err
 }
 
@@ -228,6 +246,99 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 	return id, nil
 }
 
+// reconcilePending makes argus's pending-prompt state match the server's. The SSE
+// event stream has no backfill, so a form.created or a reply can be missed across a
+// pump (re)connect — most commonly when argus starts while a question already sits
+// open. For each candidate session it fetches the live forms and permissions and:
+//   - renders a prompt the server has but argus missed (backfill), and
+//   - drops a prompt argus tracks that the server no longer reports (returns to idle).
+//
+// Candidates are the server's active sessions (may hold a missed prompt) plus every
+// session argus tracks as pending (may have been answered while disconnected). A
+// fetch error leaves that session untouched: only a successful list drives a change.
+func (d *discoverer) reconcilePending(ctx context.Context, c *client, active map[string]bool) {
+	ids := map[string]bool{}
+	for id := range active {
+		ids[id] = true
+	}
+	d.mu.Lock()
+	for id := range d.pendForm {
+		ids[id] = true
+	}
+	for id := range d.pendPerm {
+		ids[id] = true
+	}
+	d.mu.Unlock()
+
+	for id := range ids {
+		d.reconcileSession(ctx, c, id)
+	}
+}
+
+func (d *discoverer) reconcileSession(ctx context.Context, c *client, id string) {
+	forms, err := c.listForms(ctx, id)
+	if err != nil {
+		return
+	}
+	if len(forms) > 0 {
+		form := &forms[0]
+		d.mu.Lock()
+		pf := d.pendForm[id]
+		d.mu.Unlock()
+		if pf == nil || pf.formID != form.ID {
+			d.applyForm(form)
+		}
+		return
+	}
+	d.mu.Lock()
+	_, hadForm := d.pendForm[id]
+	d.mu.Unlock()
+	if hadForm {
+		d.mu.Lock()
+		delete(d.pendForm, id)
+		d.mu.Unlock()
+		d.upsert(id, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+	}
+
+	perms, err := c.listPermissions(ctx, id)
+	if err != nil {
+		return
+	}
+	if len(perms) > 0 {
+		p := perms[0]
+		d.mu.Lock()
+		reqID := d.pendPerm[id]
+		d.mu.Unlock()
+		if reqID != p.ID {
+			src := ""
+			if p.Source != nil {
+				src = p.Source.Type
+			}
+			d.applyPermission(id, p.ID, p.Action, src)
+		}
+		return
+	}
+	d.mu.Lock()
+	_, hadPerm := d.pendPerm[id]
+	d.mu.Unlock()
+	if hadPerm {
+		d.mu.Lock()
+		delete(d.pendPerm, id)
+		d.mu.Unlock()
+		d.upsert(id, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle})
+	}
+}
+
+// hasPendingPrompt reports whether the session waits on a user reply to a form or
+// permission prompt.
+func (d *discoverer) hasPendingPrompt(id string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, form := d.pendForm[id]
+	_, perm := d.pendPerm[id]
+	return form || perm
+}
+
 func (d *discoverer) dismiss(id string) { d.remove(id) }
 
 func (d *discoverer) remove(id string) {
@@ -245,7 +356,14 @@ func (d *discoverer) sweepIdle() {
 	var stale []string
 	d.mu.Lock()
 	for id, e := range d.presence {
+		// A session with an unanswered permission (awaitingPermission) or question
+		// (pendForm) prompt waits on the user, not the agent, and must not age out.
+		// Since the ScanOnce guard stops refreshing its lastActivity, without this it
+		// would be swept after the idle TTL, and remove() would drop its pendForm.
 		if e.awaitingPermission {
+			continue
+		}
+		if _, formPending := d.pendForm[id]; formPending {
 			continue
 		}
 		if _, hasPane := d.panes[id]; hasPane {
