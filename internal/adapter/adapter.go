@@ -117,6 +117,13 @@ type Prompter interface {
 	SendPrompt(ctx context.Context, sess session.Session, text string) error
 }
 
+// Spawner creates a new session over the agent's own service API, for headless
+// agents whose sessions are not launched as a tmux pane process (opencode). It
+// returns the agent's own session id, which the registry keys the record by.
+type Spawner interface {
+	SpawnSession(ctx context.Context, cwd, prompt string) (agentSessionID string, err error)
+}
+
 type Adapter interface {
 	Agent() string
 	AgentName() string

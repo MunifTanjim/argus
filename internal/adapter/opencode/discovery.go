@@ -206,6 +206,28 @@ func (d *discoverer) sendPrompt(ctx context.Context, sessionID, text string) err
 	return c.sendPrompt(ctx, sessionID, text)
 }
 
+// spawnSession creates a new OpenCode session over the service API and returns its id.
+func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+	c, ok := d.dial()
+	if !ok {
+		return "", fmt.Errorf("opencode: service unavailable")
+	}
+	id, err := c.createSession(ctx, cwd)
+	if err != nil {
+		return "", err
+	}
+	// Register before prompting: the session already exists on the server, and an
+	// idle (unprompted) session is not in /api/session/active, so a later scan would
+	// not find it. Registering first keeps it tracked even if the prompt fails.
+	d.upsert(id, session.StatusWorking, nil)
+	if prompt != "" {
+		if err := c.sendPrompt(ctx, id, prompt); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
+}
+
 func (d *discoverer) dismiss(id string) { d.remove(id) }
 
 func (d *discoverer) remove(id string) {

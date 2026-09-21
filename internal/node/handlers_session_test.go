@@ -32,6 +32,100 @@ func (f *fakePrompter) SendPrompt(_ context.Context, _ session.Session, text str
 
 type fakeNonPrompter struct{ adapter.Adapter }
 
+type fakeSpawner struct {
+	adapter.Adapter
+	gotCwd, gotPrompt string
+	id                string
+	err               error
+}
+
+func (fakeSpawner) IsHeadless() bool                       { return true }
+func (fakeSpawner) Agent() string                          { return "fake" }
+func (fakeSpawner) AgentName() string                      { return "Fake" }
+func (fakeSpawner) AgentColor() string                     { return "#000000" }
+func (fakeSpawner) SpawnCommand(string) (string, []string) { return "sh", nil } // sh exists in PATH
+func (f *fakeSpawner) SpawnSession(_ context.Context, cwd, prompt string) (string, error) {
+	f.gotCwd, f.gotPrompt = cwd, prompt
+	return f.id, f.err
+}
+
+func TestHandleSessionSpawnHeadlessUsesServiceNoTmux(t *testing.T) {
+	fs := &fakeSpawner{id: "ses_x"}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.caps.SpawnSession = false // no tmux; the service path must not require it
+	d.adapters["fake"] = fs
+
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: "/repo", Prompt: "hi"})
+	res, err := d.handleSessionSpawn(context.Background(), params)
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	sr := res.(api.SpawnResult)
+	if sr.SessionID != "fake:ses_x" {
+		t.Fatalf("SessionID = %q, want fake:ses_x", sr.SessionID)
+	}
+	if sr.PaneID != "" {
+		t.Fatalf("PaneID = %q, want empty (no pane spawned)", sr.PaneID)
+	}
+	if fs.gotCwd != "/repo" || fs.gotPrompt != "hi" {
+		t.Fatalf("SpawnSession args: cwd=%q prompt=%q", fs.gotCwd, fs.gotPrompt)
+	}
+}
+
+func TestHandleSessionSpawnHeadlessSurfacesError(t *testing.T) {
+	fs := &fakeSpawner{err: errors.New("service unavailable")}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["fake"] = fs
+
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: "/repo", Prompt: "hi"})
+	_, err := d.handleSessionSpawn(context.Background(), params)
+	if err == nil || !strings.Contains(err.Error(), "service unavailable") {
+		t.Fatalf("expected wrapped spawn error, got %v", err)
+	}
+}
+
+func TestHandleAgentsListSpawnerSpawnableWithoutTmux(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.caps.SpawnSession = false
+	d.adapterList = append(d.adapterList, &fakeSpawner{})
+
+	res, err := d.handleAgentsList(context.Background(), mustSpawnJSON(t, api.AgentsListParams{}))
+	if err != nil {
+		t.Fatalf("agents.list: %v", err)
+	}
+	agents := res.(api.AgentsListResult).Agents
+	byID := map[string]api.AgentInfo{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	if !byID["fake"].Spawnable {
+		t.Fatalf("headless Spawner must be spawnable without tmux: %+v", byID["fake"])
+	}
+	if byID["claude"].Spawnable {
+		t.Fatalf("pane agent must not be spawnable without tmux: %+v", byID["claude"])
+	}
+}
+
+func mustSpawnJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+func TestHandleSessionSpawnNonHeadlessRequiresTmux(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.caps.SpawnSession = false
+
+	params, _ := json.Marshal(api.SpawnParams{Agent: "claude", Cwd: "/repo", Prompt: "hi"})
+	_, err := d.handleSessionSpawn(context.Background(), params)
+	if err == nil || !strings.Contains(err.Error(), "tmux not found") {
+		t.Fatalf("expected tmux guard error, got %v", err)
+	}
+}
+
 func TestHandleSessionInputPromptFallback(t *testing.T) {
 	fp := &fakePrompter{}
 	d := newNode(map[session.TmuxServer]*tmux.Client{})

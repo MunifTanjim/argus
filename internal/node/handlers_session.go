@@ -11,6 +11,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/spawn"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -323,8 +324,11 @@ func (d *Node) handleAgentsList(_ context.Context, params json.RawMessage) (any,
 	agents := make([]api.AgentInfo, 0, len(d.adapterList))
 	for _, a := range d.adapterList {
 		name, _ := a.SpawnCommand("")
+		// A Spawner (headless) agent creates sessions over its service API, so it
+		// spawns without tmux; every other agent's spawn opens a tmux pane.
+		_, isSpawner := a.(adapter.Spawner)
 		spawnable := false
-		if d.caps.SpawnSession && name != "" {
+		if (d.caps.SpawnSession || isSpawner) && name != "" {
 			if _, err := exec.LookPath(name); err == nil {
 				spawnable = true
 			}
@@ -343,6 +347,20 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	p, err := api.Decode[api.SpawnParams](params)
 	if err != nil {
 		return nil, err
+	}
+	// A Spawner agent (headless, e.g. opencode) has no pane process: create the
+	// session over its service API and register it under the canonical agent-keyed
+	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
+	a := d.adapterFor(p.Agent)
+	if sp, ok := a.(adapter.Spawner); ok {
+		id, err := sp.SpawnSession(ctx, p.Cwd, p.Prompt)
+		if err != nil {
+			return nil, &api.RPCError{
+				Code:    api.CodeInvalidRequest,
+				Message: "cannot spawn " + a.AgentName() + " session: " + err.Error(),
+			}
+		}
+		return api.SpawnResult{SessionID: registry.AgentSessionKey(p.Agent, id)}, nil
 	}
 	if !d.caps.SpawnSession {
 		return nil, &api.RPCError{
@@ -386,9 +404,9 @@ func (d *Node) rescanUntilRegistered(id string) {
 	}
 }
 
-// spawnEnv returns extra environment assignments for a spawned command. OpenCode
-// runs with tabs disabled so one pane maps to exactly one session, which is how
-// argus tracks and adopts it.
+// spawnEnv returns extra environment assignments for a spawned command. An
+// OpenCode viewer pane (opencode --session <id>) runs with tabs disabled so one
+// pane maps to exactly one session, which is how argus tracks and adopts it.
 func spawnEnv(command string) []string {
 	if filepath.Base(command) == "opencode" {
 		return []string{`OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"enabled":false}}`}

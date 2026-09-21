@@ -23,6 +23,7 @@ var _ adapter.Adapter = (*ocAdapter)(nil)
 var _ adapter.Responder = (*ocAdapter)(nil)
 var _ adapter.Dismisser = (*ocAdapter)(nil)
 var _ adapter.Prompter = (*ocAdapter)(nil)
+var _ adapter.Spawner = (*ocAdapter)(nil)
 
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
@@ -34,11 +35,11 @@ func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.Tm
 	return a.disc
 }
 
-func (ocAdapter) SpawnCommand(prompt string) (string, []string) {
-	if prompt == "" {
-		return "opencode", nil
-	}
-	return "opencode", []string{"run", "--prompt", prompt}
+// SpawnCommand names the binary only: OpenCode is headless, so spawn goes through
+// the service API (SpawnSession), not a launched pane. The name still backs the
+// installed-agent PATH probe in handleAgentsList.
+func (ocAdapter) SpawnCommand(string) (string, []string) {
+	return "opencode", nil
 }
 
 func (ocAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
@@ -109,6 +110,13 @@ func (a *ocAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 		return fmt.Errorf("opencode: no active discoverer")
 	}
 	return a.disc.sendPrompt(ctx, sess.AgentSessionID, text)
+}
+
+func (a *ocAdapter) SpawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+	if a.disc == nil {
+		return "", fmt.Errorf("opencode: no active discoverer")
+	}
+	return a.disc.spawnSession(ctx, cwd, prompt)
 }
 
 func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {

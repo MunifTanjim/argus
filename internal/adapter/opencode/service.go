@@ -242,6 +242,37 @@ func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
 	return listEnvelope[ocSession](ctx, c, "/api/session", "", "list sessions")
 }
 
+// createSession creates a new session and returns its id. A non-empty dir sets
+// the session's working directory, so discovery hydrates the right cwd and repo.
+func (c *client) createSession(ctx context.Context, dir string) (string, error) {
+	body := map[string]any{}
+	if dir != "" {
+		body["location"] = map[string]string{"directory": dir}
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/api/session", strings.NewReader(string(payload)))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("create session: %s", resp.Status)
+	}
+	var env struct {
+		Data ocSession `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return "", err
+	}
+	if env.Data.ID == "" {
+		return "", fmt.Errorf("create session: empty id in response")
+	}
+	return env.Data.ID, nil
+}
+
 func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessage, error) {
 	return listEnvelope[ocMessage](ctx, c, "/api/session/"+sessionID+"/message", "order=asc", "read messages")
 }

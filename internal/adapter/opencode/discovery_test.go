@@ -63,6 +63,84 @@ func TestPresenceUpsertAddsAndUpdates(t *testing.T) {
 	}
 }
 
+func TestSpawnSessionCreatesPromptsAndRegisters(t *testing.T) {
+	var createBody, promptBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			b, _ := io.ReadAll(r.Body)
+			createBody = string(b)
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_new","title":"New","location":{"directory":"/repo"}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_new/prompt":
+			b, _ := io.ReadAll(r.Body)
+			promptBody = string(b)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/session/ses_new":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_new","title":"New","location":{"directory":"/repo"}}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+
+	id, err := d.spawnSession(context.Background(), "/repo", "do the thing")
+	if err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	if id != "ses_new" {
+		t.Fatalf("id = %q, want ses_new", id)
+	}
+	if !strings.Contains(createBody, `"directory":"/repo"`) {
+		t.Fatalf("create body missing cwd: %q", createBody)
+	}
+	if !strings.Contains(promptBody, "do the thing") {
+		t.Fatalf("prompt body missing text: %q", promptBody)
+	}
+	snap := reg.Snapshot()
+	if len(snap) != 1 || snap[0].AgentSessionID != "ses_new" || snap[0].Status != session.StatusWorking {
+		t.Fatalf("after spawn: %+v", snap)
+	}
+	if snap[0].ID != Agent+":ses_new" || snap[0].Cwd != "/repo" || snap[0].Input != session.InputAPI {
+		t.Fatalf("registered record: %+v", snap[0])
+	}
+}
+
+func TestSpawnSessionServiceUnavailable(t *testing.T) {
+	d := newTestDiscoverer(registry.New(), nil)
+	if _, err := d.spawnSession(context.Background(), "/repo", "hi"); err == nil {
+		t.Fatal("expected error when service is unavailable")
+	}
+}
+
+func TestSpawnSessionWithoutPromptSkipsPrompt(t *testing.T) {
+	prompted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_np"}}`))
+		case r.URL.Path == "/api/session/ses_np/prompt":
+			prompted = true
+			_, _ = w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/session/ses_np":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_np"}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	reg := registry.New()
+	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
+
+	if _, err := d.spawnSession(context.Background(), "", ""); err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	if prompted {
+		t.Fatal("prompt endpoint called for an empty prompt")
+	}
+}
+
 func TestPresenceUpsertRetriesHydrationUntilSuccess(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)

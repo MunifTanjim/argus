@@ -67,6 +67,13 @@ func PaneKey(server session.TmuxServer, paneID string) string {
 	return string(server) + ":" + paneID
 }
 
+// AgentSessionKey is the session id keyed by the agent's own session id. Headless
+// agents (opencode) are keyed this way because their pane is a disposable viewer,
+// so a pane-based id would not stay stable across adopt/respawn.
+func AgentSessionKey(agent, agentSessionID string) string {
+	return agent + ":" + agentSessionID
+}
+
 // Get returns a copy of the session with the given ID and whether it exists.
 func (r *Registry) Get(id string) (session.Session, bool) {
 	r.mu.Lock()
@@ -189,7 +196,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			}
 			id := paneK
 			if id == "" {
-				id = agent + ":" + f.AgentSessionID
+				id = AgentSessionKey(agent, f.AgentSessionID)
 			}
 			s = &session.Session{
 				ID:     id,
@@ -525,13 +532,13 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		// Prefer a pane-based ID so a later discovery scan correlates to this record.
 		id := pKey
 		if id == "" {
-			id = u.Agent + ":" + u.AgentSessionID
+			id = AgentSessionKey(u.Agent, u.AgentSessionID)
 		}
 		// A headless agent's pane is a disposable viewer, so key on its stable
 		// AgentSessionID instead: a pane-based ID would change across adopt/respawn
 		// and split session identity (notification dedup, cross-scan correlation).
 		if u.Input == session.InputAPI && u.AgentSessionID != "" {
-			id = u.Agent + ":" + u.AgentSessionID
+			id = AgentSessionKey(u.Agent, u.AgentSessionID)
 		}
 		s = &session.Session{ID: id, Agent: u.Agent, Status: session.StatusIdle, Source: session.SourceHooked}
 		if u.PaneID != "" {
