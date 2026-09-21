@@ -25,6 +25,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"url":              true, // `pair` only: QR base-URL override
 		"timeout":          true, // `pair` only: device-connect wait
 		"agent":            true, // `hook` only: selects the adapter, not a config key
+		"detach":           true, // `spawn` only: per-invocation background spawn, not a config key
 		"argus-managed":    true, // `hook` only: install marker, parsed and ignored
 		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key

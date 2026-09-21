@@ -18,13 +18,15 @@ import (
 // argus's private socket) and attach to it, tmux hidden. Self-contained — a node,
 // if running, discovers the session; if not, it's just a normal agent run.
 func newSpawnCmd() *cobra.Command {
+	var detach bool
 	cmd := &cobra.Command{
 		Use:   "spawn <agent> [args…]",
 		Short: "Run an agent inside tmux so argus can watch and control it",
 		Long: "Launch an AI coding agent inside tmux and attach to it. tmux stays " +
 			"invisible, so it feels like running the agent directly — but argus can now " +
 			"watch and control the session. Everything after <agent> is passed straight " +
-			"to the agent (e.g. `argus spawn claude --resume`).",
+			"to the agent (e.g. `argus spawn claude --resume`). With --detach, the session " +
+			"runs in the background without attaching, for argus to drive.",
 		Args:              cobra.MinimumNArgs(1),
 		SilenceUsage:      true,
 		SilenceErrors:     true,
@@ -53,6 +55,18 @@ func newSpawnCmd() *cobra.Command {
 
 			cwd, _ := os.Getwd()
 			name := spawn.SessionName(ctx, client, cwd)
+
+			// Detached sessions run the raw command with no attach. The exit-pause shim
+			// cannot run here: with no terminal, its `read` would hang the pane forever.
+			if detach {
+				if _, err := client.NewSession(ctx, tmux.NewSessionOpts{
+					Name: name, Cwd: cwd, Command: command, Args: passthrough,
+				}); err != nil {
+					return fail(cmd, err)
+				}
+				return nil
+			}
+
 			// The agent runs under a shell shim (spawnRunScript) but stays the pane's
 			// foreground process, so tty-based discovery still finds it.
 			runArgs := append([]string{"-c", spawnRunScript, "argus:spawn", command}, passthrough...)
@@ -73,6 +87,7 @@ func newSpawnCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "run the session in the background without attaching")
 	// Stop parsing flags at the first positional so everything after <agent> is
 	// passed through to the agent instead of being interpreted by argus.
 	cmd.Flags().SetInterspersed(false)
