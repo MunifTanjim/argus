@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.17](https://github.com/MunifTanjim/argus/compare/0.0.16...0.0.17) (2026-09-21)
+
+
+### Features
+
+* **cli:** add --detach flag to spawn command ([4cbda9d](https://github.com/MunifTanjim/argus/commit/4cbda9d2b898cfe330f332e08223200384a6fb91))
+
+
+### Bug Fixes
+
+* **opencode:** reconcile pending prompts properly ([cff3743](https://github.com/MunifTanjim/argus/commit/cff37430d25b048a828d8cf284cfb0a094b49be5))
+* **opencode:** spawn sessions over the service api ([3bf64de](https://github.com/MunifTanjim/argus/commit/3bf64de9b029a7ad662c0dead2777e12ed38bbe6))
+
 ## [0.0.16](https://github.com/MunifTanjim/argus/compare/0.0.15...0.0.16) (2026-09-20)
 
 
