@@ -167,21 +167,11 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 		if p.SessionID == "" || p.ID == "" {
 			return
 		}
-		d.mu.Lock()
-		d.pendPerm[p.SessionID] = p.ID
-		d.mu.Unlock()
-		toolName := p.Action
-		if toolName == "" && p.Source != nil {
-			toolName = p.Source.Type
+		src := ""
+		if p.Source != nil {
+			src = p.Source.Type
 		}
-		d.upsert(p.SessionID, session.StatusAwaitingInput, &session.Interaction{
-			Kind:     session.InteractionPermission,
-			ToolName: toolName,
-			Options: []session.DecisionOption{
-				{Label: "Allow", Value: "allow"},
-				{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell OpenCode why"},
-			},
-		})
+		d.applyPermission(p.SessionID, p.ID, p.Action, src)
 
 	case "permission.replied", "permission.rejected":
 		var p struct {
@@ -238,6 +228,16 @@ type formOption struct {
 	Description string `json:"description"`
 }
 
+// ocPermission is a Permission.Request item from the permission.asked event or the
+// per-session permission list.
+type ocPermission struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Source *struct {
+		Type string `json:"type"`
+	} `json:"source"`
+}
+
 func (d *discoverer) applyFormCreated(data json.RawMessage) {
 	var wrap struct {
 		Form *formInfo `json:"form"`
@@ -253,7 +253,33 @@ func (d *discoverer) applyFormCreated(data json.RawMessage) {
 	if info == nil || info.SessionID == "" || info.ID == "" {
 		return
 	}
+	d.applyForm(info)
+}
 
+// applyPermission records a pending permission and renders it as a permission
+// interaction. Shared by the permission.asked event and scan reconciliation.
+func (d *discoverer) applyPermission(sessionID, requestID, action, sourceType string) {
+	d.mu.Lock()
+	d.pendPerm[sessionID] = requestID
+	d.mu.Unlock()
+	toolName := action
+	if toolName == "" {
+		toolName = sourceType
+	}
+	d.upsert(sessionID, session.StatusAwaitingInput, &session.Interaction{
+		Kind:     session.InteractionPermission,
+		ToolName: toolName,
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true, Placeholder: "Tell OpenCode why"},
+		},
+	})
+}
+
+// applyForm records a pending question form and renders it as a question
+// interaction. Shared by the form.created event and scan reconciliation (backfill
+// after a missed event).
+func (d *discoverer) applyForm(info *formInfo) {
 	pf := &pendingForm{formID: info.ID}
 	var questions []session.QuestionSpec
 	for _, f := range info.Fields {

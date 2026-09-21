@@ -220,6 +220,49 @@ func (c *client) listActive(ctx context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
+// listForms returns the forms still awaiting an answer on the session. OpenCode
+// drops a form from this list once it is answered or cancelled, so the list is the
+// authoritative "what is pending now" for a session.
+func (c *client) listForms(ctx context.Context, sessionID string) ([]formInfo, error) {
+	var env struct {
+		Data []formInfo `json:"data"`
+	}
+	if err := c.getPending(ctx, "/api/session/"+sessionID+"/form", "list forms", &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
+// listPermissions returns the permissions still awaiting a reply on the session.
+func (c *client) listPermissions(ctx context.Context, sessionID string) ([]ocPermission, error) {
+	var env struct {
+		Data []ocPermission `json:"data"`
+	}
+	if err := c.getPending(ctx, "/api/session/"+sessionID+"/permission", "list permissions", &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
+// getPending GETs path and decodes the JSON body into env. A 404 (the session or
+// resource is gone) leaves env at its zero value and returns nil, so a caller
+// treats it as "nothing pending". Any other non-200 returns an error so the caller
+// keeps its state rather than clearing on a transient failure.
+func (c *client) getPending(ctx context.Context, path, label string, env any) error {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", label, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(env)
+}
+
 func (c *client) getSession(ctx context.Context, id string) (ocSession, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/api/session/"+id, nil)
 	if err != nil {
