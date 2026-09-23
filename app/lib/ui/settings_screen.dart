@@ -12,6 +12,7 @@ import 'device_identity_screen.dart';
 import 'push_settings_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'voice_screen.dart';
 
 const _monoStyle = TextStyle(fontFamily: 'monospace', color: AppColors.text);
 const _dimStyle = TextStyle(color: AppColors.dim);
@@ -60,6 +61,17 @@ class SettingsScreen extends ConsumerWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const PushSettingsScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.mic_none),
+                      title: const Text('Voice Input'),
+                      subtitle: const Text('OpenRouter key and model'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const VoiceScreen()),
                       ),
                     ),
                     const SizedBox(height: 24),

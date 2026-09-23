@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing QR code shown by `argus pair`.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dictate a prompt instead of typing it. Audio is sent to OpenRouter with your own API key.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
