@@ -13,6 +13,7 @@ import '../state/gateway.dart';
 import '../state/sessions.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
+import '../state/voice.dart';
 import '../transport/connection.dart';
 import 'changed_files_screen.dart';
 import 'interaction_bar.dart';
@@ -310,6 +311,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                     ? respondElsewhereLabel(live.frontend)
                     : null,
                 onRespond: () => showRespondSheet(context, live),
+                // Dictation only fits a free-text reply. The other interaction
+                // kinds are answered with buttons, so there is no field for a
+                // transcript to land in.
+                onDictate: live.interaction!.kind == InteractionKind.idle &&
+                        live.acceptsInput &&
+                        ref.watch(
+                            voicePrefsProvider.select((p) => p.enabled))
+                    ? () => showRespondSheet(context, live,
+                        startRecording: true)
+                    : null,
               ),
           ],
         ),

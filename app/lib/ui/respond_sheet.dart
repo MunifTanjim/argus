@@ -13,9 +13,17 @@ import '../state/respond_view_model.dart';
 import 'code_block.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
+import 'voice_input_bar.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
-Future<void> showRespondSheet(BuildContext context, Session session) {
+///
+/// [startRecording] begins dictation as soon as the sheet is laid out, for the
+/// mic on the interaction bar: one tap from the conversation view to talking.
+Future<void> showRespondSheet(
+  BuildContext context,
+  Session session, {
+  bool startRecording = false,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -23,14 +31,19 @@ Future<void> showRespondSheet(BuildContext context, Session session) {
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
       ),
-      child: RespondSheet(session: session),
+      child: RespondSheet(session: session, startRecording: startRecording),
     ),
   );
 }
 
 class RespondSheet extends ConsumerStatefulWidget {
-  const RespondSheet({super.key, required this.session});
+  const RespondSheet({
+    super.key,
+    required this.session,
+    this.startRecording = false,
+  });
   final Session session;
+  final bool startRecording;
 
   @override
   ConsumerState<RespondSheet> createState() => _RespondSheetState();
@@ -276,6 +289,12 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         labelText: 'Reply',
         border: OutlineInputBorder(),
       ),
+    ),
+    ?voiceInputBar(
+      ref,
+      _text,
+      onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
+      autoStart: widget.startRecording,
     ),
     const SizedBox(height: 12),
     FilledButton(

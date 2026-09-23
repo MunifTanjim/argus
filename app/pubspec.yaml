@@ -51,6 +51,9 @@ dependencies:
   cryptography_plus: ^3.0.0
   # Terminal emulator for the live tmux screen; fed capture-pane snapshots.
   xterm: ^4.0.0
+  # Microphone capture for voice input; Flutter has no built-in recorder. Used
+  # by ui/voice_input_button.dart, which uploads the wav to OpenRouter.
+  record: ^7.1.1
   url_launcher: ^6.3.2
   pointycastle: ^4.0.0
   http: ^1.2.0

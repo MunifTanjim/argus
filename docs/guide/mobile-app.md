@@ -83,3 +83,28 @@ in the published app. Source builds must embed a PushPort app id.
 - **De-Googled devices** — install any UnifiedPush distributor (e.g.
   [ntfy](https://ntfy.sh)), then select it in **Settings → Push notifications**.
 - **PushPort** — an alternative to UnifiedPush. See the [PushPort guide](/guide/pushport).
+
+## Voice Input
+
+Dictate a prompt instead of typing it. Off by default — it needs your own
+[OpenRouter](https://openrouter.ai) key.
+
+Paste the key in **Settings → Voice Input** and press **Save**. Then pick a
+speech-to-text model. The list is fetched from OpenRouter, cheapest first, with
+the price per minute of audio beside each name. The default is Whisper Large v3
+Turbo.
+
+A mic button then appears in three places:
+
+- the reply field in the respond sheet,
+- the initial prompt field when you start a session,
+- the interaction bar at the bottom of a conversation, when the session is
+  waiting on a free-text reply. Tapping that one opens the reply sheet and
+  starts recording straight away.
+
+Tap to record, tap again to stop. The transcript lands in the field for you
+to edit, and you send it yourself — nothing is sent automatically.
+
+The recording goes straight from your device to `openrouter.ai`. It does not
+pass through the gateway, and it is deleted from the device as soon as it is
+uploaded. Transcription is billed to your OpenRouter account.

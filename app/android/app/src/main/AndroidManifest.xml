@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Android 13+ runtime permission for showing push notifications. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice input: record a prompt and transcribe it via OpenRouter. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
         android:label="Argus"
         android:name="${applicationName}"
