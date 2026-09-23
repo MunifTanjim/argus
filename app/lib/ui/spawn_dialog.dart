@@ -10,6 +10,7 @@ import '../state/history_view_model.dart';
 import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
 import 'theme.dart';
+import 'voice_input_bar.dart';
 
 /// A fixed place to spawn in, such as a workspace: the dialog hides its node
 /// and directory pickers.
@@ -63,6 +64,9 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   List<NodeRef> _remoteNodes = const [];
   String? _nodeId;
   late String _prompt = widget.target?.prompt ?? '';
+  // Dictation writes into the field directly, so the prompt needs a controller
+  // as well as the mirrored _prompt the Spawn button gates on.
+  late final _promptCtl = TextEditingController(text: _prompt);
 
   // null while probing; picker shows only when >=2.
   List<AgentInfo>? _agents;
@@ -149,6 +153,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   void dispose() {
     _vm.spawn.removeListener(_onCommand);
     _vm.dispose();
+    _promptCtl.dispose();
     super.dispose();
   }
 
@@ -301,9 +306,9 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               decoration: const InputDecoration(labelText: 'Custom path'),
               onChanged: (v) => setState(() => _customPath = v),
             ),
-          TextFormField(
+          TextField(
             key: const Key('spawn-prompt'),
-            initialValue: _prompt,
+            controller: _promptCtl,
             decoration: const InputDecoration(
               labelText: 'Initial prompt',
               hintText: 'What should this session work on?',
@@ -311,6 +316,11 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
             minLines: 3,
             maxLines: null,
             keyboardType: TextInputType.multiline,
+            onChanged: (v) => setState(() => _prompt = v),
+          ),
+          ?voiceInputBar(
+            ref,
+            _promptCtl,
             onChanged: (v) => setState(() => _prompt = v),
           ),
           if (!spawnable)

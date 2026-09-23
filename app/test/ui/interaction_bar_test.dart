@@ -62,6 +62,42 @@ void main() {
     expect(find.text('Respond'), findsOneWidget);
   });
 
+  testWidgets('the mic is absent unless onDictate is given', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: InteractionBar(
+          interaction: const Interaction(kind: InteractionKind.idle),
+          onRespond: () {},
+        ),
+      ),
+    ));
+    expect(find.byKey(const Key('interaction-dictate')), findsNothing);
+  });
+
+  testWidgets('tapping the mic fires onDictate and not onRespond',
+      (tester) async {
+    var responded = false;
+    var dictated = false;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: InteractionBar(
+          interaction: const Interaction(kind: InteractionKind.idle),
+          onRespond: () => responded = true,
+          onDictate: () => dictated = true,
+        ),
+      ),
+    ));
+
+    await tester.tap(find.byKey(const Key('interaction-dictate')));
+    // The mic sits inside the bar's InkWell; it must swallow the tap, or the
+    // respond sheet opens twice.
+    expect(dictated, isTrue);
+    expect(responded, isFalse);
+
+    await tester.tap(find.text('Respond'));
+    expect(responded, isTrue);
+  });
+
   test('respondElsewhereLabel maps frontend', () {
     expect(respondElsewhereLabel(FrontendKind.vscode), 'Respond in VSCode');
     expect(respondElsewhereLabel(FrontendKind.external), 'Respond in your terminal');

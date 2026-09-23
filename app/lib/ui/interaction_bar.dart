@@ -22,11 +22,16 @@ class InteractionBar extends StatelessWidget {
       {super.key,
       required this.interaction,
       required this.onRespond,
-      this.informationalMessage});
+      this.informationalMessage,
+      this.onDictate});
 
   final Interaction interaction;
   final VoidCallback onRespond;
   final String? informationalMessage;
+
+  /// Shows a mic beside the label when set. Null hides it — the caller decides,
+  /// since only a free-text reply can be dictated and only with a key stored.
+  final VoidCallback? onDictate;
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +69,16 @@ class InteractionBar extends StatelessWidget {
                         color: AppColors.secondary,
                         fontWeight: FontWeight.bold)),
               ),
+              if (onDictate != null)
+                IconButton(
+                  key: const Key('interaction-dictate'),
+                  icon: const Icon(Icons.mic_none, color: AppColors.secondary),
+                  tooltip: 'Dictate a reply',
+                  // Sits inside the bar's InkWell, so it must swallow the tap;
+                  // otherwise the row's onRespond fires too and the sheet opens
+                  // twice.
+                  onPressed: onDictate,
+                ),
               const Text('Respond',
                   style: TextStyle(color: AppColors.secondary)),
               const Icon(Icons.chevron_right, color: AppColors.secondary),
