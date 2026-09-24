@@ -135,3 +135,66 @@ func TestWorkingDiffModifiedAndUntracked(t *testing.T) {
 		t.Errorf("untracked diff not synthesized:\n%s", diff)
 	}
 }
+
+func TestChangedFilesSinceTarget(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-b", "main")
+	write(t, dir, "base.txt", "a")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "base")
+	gitCmd(t, dir, "checkout", "-b", "feat")
+	write(t, dir, "committed.txt", "c")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "c")
+	write(t, dir, "base.txt", "changed")
+	write(t, dir, "new.txt", "n")
+
+	base, err := TargetBase(ctx, dir, "main")
+	if err != nil || base == "" {
+		t.Fatalf("TargetBase = %q, %v", base, err)
+	}
+	_, files, err := ChangedFilesSince(ctx, dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ChangeType{}
+	for _, f := range files {
+		got[f.Path] = f.Change
+	}
+	want := map[string]ChangeType{"committed.txt": ChangeAdded, "base.txt": ChangeModified, "new.txt": ChangeUntracked}
+	for p, c := range want {
+		if got[p] != c {
+			t.Errorf("%s = %q, want %q (all: %v)", p, got[p], c, got)
+		}
+	}
+	diff, _, err := DiffSince(ctx, dir, base, "committed.txt", "")
+	if err != nil || !strings.Contains(diff, "+c") {
+		t.Errorf("DiffSince committed = %q, %v", diff, err)
+	}
+	if _, err := TargetBase(ctx, dir, "nope"); err == nil {
+		t.Error("an unknown target should fail")
+	}
+}
+
+func TestDiffSinceShowsRename(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-b", "main")
+	write(t, dir, "a.txt", "one\ntwo\nthree\nfour\nfive\n")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "base")
+	gitCmd(t, dir, "checkout", "-b", "feat")
+	gitCmd(t, dir, "mv", "a.txt", "b.txt")
+	write(t, dir, "b.txt", "one\ntwo\nthree\nfour\nFIVE\n")
+	gitCmd(t, dir, "commit", "-am", "rename")
+
+	base, err := TargetBase(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, _, err := DiffSince(ctx, dir, base, "b.txt", "a.txt")
+	if err != nil || !strings.Contains(diff, "rename from a.txt") || strings.Contains(diff, "+one") {
+		t.Errorf("want a rename diff, got:\n%s (err %v)", diff, err)
+	}
+}

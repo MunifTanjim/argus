@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -118,9 +119,11 @@ func parseWorktrees(out string) []Worktree {
 // any working tree of the repository.
 func AddWorktree(ctx context.Context, repoDir, path, branch, start string) error {
 	if _, ok := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); ok {
-		return runGit(ctx, "worktree add", "-C", repoDir, "worktree", "add", path, branch)
+		return runGit(ctx, "worktree add", "-C", repoDir, "worktree", "add", "--end-of-options", path, branch)
 	}
-	args := []string{"-C", repoDir, "worktree", "add", "-b", branch, path}
+	// --no-track: the start point is a base, not an upstream; tracking
+	// origin/<base> would point pull and push at the base branch.
+	args := []string{"-C", repoDir, "worktree", "add", "--no-track", "-b", branch, "--end-of-options", path}
 	if start != "" {
 		args = append(args, start)
 	}
@@ -171,6 +174,98 @@ func git(ctx context.Context, dir string, args ...string) (string, bool) {
 		return "", false
 	}
 	return cmd.StdOut().TrimSpace().String(), true
+}
+
+func RefExists(ctx context.Context, repoDir, ref string) bool {
+	_, ok := git(ctx, repoDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return ok
+}
+
+func HasRemote(ctx context.Context, repoDir, name string) bool {
+	_, ok := git(ctx, repoDir, "remote", "get-url", name)
+	return ok
+}
+
+// Fetch updates <remote>/<branch>. The explicit refspec updates the tracking
+// ref even when the remote's configured refspec does not cover the branch (a
+// single-branch clone).
+func Fetch(ctx context.Context, repoDir, remote, branch string) error {
+	refspec := "+refs/heads/" + branch + ":refs/remotes/" + remote + "/" + branch
+	return runGit(ctx, "fetch", "-C", repoDir, "fetch", "--quiet", "--end-of-options", remote, refspec)
+}
+
+func AddWorktreeTracking(ctx context.Context, repoDir, path, branch string) error {
+	return runGit(ctx, "worktree add", "-C", repoDir, "worktree", "add", "--track", "-b", branch, "--end-of-options", path, "origin/"+branch)
+}
+
+func AddWorktreeDetached(ctx context.Context, repoDir, path, ref string) error {
+	return runGit(ctx, "worktree add", "-C", repoDir, "worktree", "add", "--detach", "--end-of-options", path, ref)
+}
+
+// DeleteBranch deletes a local branch, merged or not.
+func DeleteBranch(ctx context.Context, repoDir, branch string) error {
+	return runGit(ctx, "branch -D", "-C", repoDir, "branch", "-D", "--end-of-options", branch)
+}
+
+func ValidBranchName(ctx context.Context, name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") {
+		return false
+	}
+	return shell.NewCommandContext(ctx, "git", "check-ref-format", "--branch", name).Run() == nil
+}
+
+// Branch is a branch name known locally, on origin, or both.
+type Branch struct {
+	Name       string
+	Remote     bool // exists as origin/<Name>
+	Local      bool // exists as refs/heads/<Name>
+	CheckedOut bool // a worktree has it checked out
+}
+
+// Branches lists local and origin branches merged by name, sorted by name.
+func Branches(ctx context.Context, repoDir string) ([]Branch, error) {
+	out, ok := git(ctx, repoDir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+	if !ok {
+		return nil, fmt.Errorf("gittree: cannot list branches in %s", repoDir)
+	}
+	byName := map[string]*Branch{}
+	get := func(name string) *Branch {
+		if b, ok := byName[name]; ok {
+			return b
+		}
+		b := &Branch{Name: name}
+		byName[name] = b
+		return b
+	}
+	for _, ref := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(ref, "refs/heads/"):
+			get(strings.TrimPrefix(ref, "refs/heads/")).Local = true
+		case strings.HasPrefix(ref, "refs/remotes/origin/"):
+			if name := strings.TrimPrefix(ref, "refs/remotes/origin/"); name != "HEAD" {
+				get(name).Remote = true
+			}
+		}
+	}
+	if loc, err := Resolve(ctx, repoDir); err == nil {
+		markCheckedOut(ctx, loc.GitDir, byName)
+	}
+	res := make([]Branch, 0, len(byName))
+	for _, b := range byName {
+		res = append(res, *b)
+	}
+	sort.Slice(res, func(i, j int) bool { return res[i].Name < res[j].Name })
+	return res, nil
+}
+
+func markCheckedOut(ctx context.Context, gitDir string, byName map[string]*Branch) {
+	if wts, err := ListWorktrees(ctx, gitDir); err == nil {
+		for _, wt := range wts {
+			if b, ok := byName[wt.Branch]; ok && wt.Branch != "" {
+				b.CheckedOut = true
+			}
+		}
+	}
 }
 
 // RepoName names the repository containing dir by its common git dir, so a

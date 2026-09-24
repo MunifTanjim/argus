@@ -299,6 +299,55 @@ func TestStatePersistsAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTargetResolvesAndStores(t *testing.T) {
+	ctx := context.Background()
+	root, _ := repoWithWorktree(t)
+	r := newRegistry(t)
+	wsID, err := r.AdoptSession(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ps, _ := r.Snapshot(ctx)
+	if ps[0].DefaultBranch != "main" || ps[0].Workspaces[0].TargetBranch != "main" {
+		t.Fatalf("unset target should resolve to the default: project=%q ws=%q", ps[0].DefaultBranch, ps[0].Workspaces[0].TargetBranch)
+	}
+	if err := r.SetWorkspaceTarget(ctx, wsID, "develop"); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok, err := r.TargetBranch(ctx, wsID); err != nil || !ok || b != "develop" {
+		t.Fatalf("TargetBranch = %q ok=%v err=%v, want develop", b, ok, err)
+	}
+	if err := r.SetWorkspaceTarget(ctx, wsID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := r.TargetBranch(ctx, wsID); b != "main" {
+		t.Errorf("reset target = %q, want main", b)
+	}
+}
+
+func TestAdoptWorkspaceStoresTargetAtomically(t *testing.T) {
+	ctx := context.Background()
+	root, wt := repoWithWorktree(t)
+	r := newRegistry(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	wsID, err := r.AdoptWorkspace(ctx, wt, "develop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := r.TargetBranch(ctx, wsID); b != "develop" {
+		t.Errorf("target = %q, want develop", b)
+	}
+	if _, err := r.AdoptSession(ctx, wt); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := r.TargetBranch(ctx, wsID); b != "develop" {
+		t.Errorf("a later session adoption changed the target to %q", b)
+	}
+}
+
 func TestProjectNamedAfterRepoWhenFirstSeenInWorktree(t *testing.T) {
 	ctx := context.Background()
 	root, wt := repoWithWorktree(t)

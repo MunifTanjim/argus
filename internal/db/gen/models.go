@@ -21,11 +21,12 @@ type Project struct {
 }
 
 type Workspace struct {
-	ID         string
-	ProjectID  string
-	Dir        string
-	IsMain     bool
-	IsGone     bool
-	CreatedAt  time.Time
-	LastSeenAt time.Time
+	ID           string
+	ProjectID    string
+	Dir          string
+	IsMain       bool
+	IsGone       bool
+	CreatedAt    time.Time
+	LastSeenAt   time.Time
+	TargetBranch string
 }

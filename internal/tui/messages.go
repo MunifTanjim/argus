@@ -34,17 +34,22 @@ type projectsActionMsg struct {
 	verb     string
 	ok       string // flash on success; defaults to "<verb> done"
 	selectID string // workspace to select once the tree reloads (create)
-	err      error
+	// reloadChanges drops the Changes list so it re-fetches against the new
+	// target after the tree reloads (set target).
+	reloadChanges bool
+	err           error
 }
 
 type changedFilesMsg struct {
-	ws    string
-	files []api.ChangedFile
-	err   error
+	ws      string
+	against string
+	files   []api.ChangedFile
+	err     error
 }
 
 type wsDiffMsg struct {
 	ws, path, diff string
+	against        string
 	notShown       bool
 	err            error
 }
@@ -114,4 +119,29 @@ type transcriptDeltaMsg struct {
 	ref     subRef
 	delta   api.TranscriptDelta
 	initial bool
+}
+
+type branchesMsg struct {
+	projectID string
+	branches  []api.BranchInfo
+	err       error
+}
+
+type prsMsg struct {
+	projectID string
+	prs       []api.PRInfo
+	err       error
+}
+
+type issuesMsg struct {
+	projectID string
+	issues    []api.IssueInfo
+	err       error
+}
+
+type createDoneMsg struct {
+	res    api.WorkspaceCreateResult
+	source string
+	seq    int // createState.seq of the picker that sent it
+	err    error
 }

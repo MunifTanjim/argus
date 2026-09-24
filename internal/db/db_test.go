@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -32,4 +33,32 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("re-Open: %v", err)
 	}
 	sqlDB2.Close()
+}
+
+func TestWorkspaceHasTargetBranch(t *testing.T) {
+	sqlDB, err := Open(filepath.Join(t.TempDir(), "argus.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	var dflt sql.NullString
+	found := false
+	rows, err := sqlDB.Query(`SELECT name, dflt_value FROM pragma_table_info('workspace')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name, &dflt); err != nil {
+			t.Fatal(err)
+		}
+		if name == "target_branch" {
+			found = true
+			break
+		}
+	}
+	if !found || dflt.String != "''" {
+		t.Fatalf("target_branch column: found=%v default=%q, want found with ''", found, dflt.String)
+	}
 }

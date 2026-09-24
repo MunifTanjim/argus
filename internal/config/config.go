@@ -31,6 +31,9 @@ type WorkspaceConfig struct {
 	// WorktreeDirTemplate is the Go-template path for a new worktree, resolved
 	// relative to the project's main working tree. Vars: {{.Repo}}, {{.Branch}}.
 	WorktreeDirTemplate string
+	// IssueBranchTemplate names the branch of a workspace created from an
+	// issue. Vars: {{.Number}}, {{.Title}}, {{.Slug}}.
+	IssueBranchTemplate string
 }
 
 type GatewayConfig struct {
@@ -134,6 +137,7 @@ var defaults = map[string]any{
 	"e2ee.enabled":                    false,
 	"lock.genesis":                    "",
 	"workspace.worktree-dir-template": ".worktrees/{{.Branch}}",
+	"workspace.issue-branch-template": "issue-{{.Number}}-{{.Slug}}",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -252,6 +256,7 @@ func FromViper(v *viper.Viper) Config {
 		},
 		Workspace: WorkspaceConfig{
 			WorktreeDirTemplate: v.GetString("workspace.worktree-dir-template"),
+			IssueBranchTemplate: v.GetString("workspace.issue-branch-template"),
 		},
 	}
 }

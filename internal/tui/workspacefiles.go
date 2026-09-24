@@ -12,21 +12,22 @@ import (
 
 // --- fetch commands & messages ------------------------------------------------
 
-func (m model) fetchChangedFiles(ws string) tea.Cmd {
+func (m model) fetchChangedFiles(ws, against string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var r api.ChangedFilesResult
-		err := client.Call(api.MethodWorkspaceChangedFiles, api.WorkspaceRef{WorkspaceID: ws}, &r)
-		return changedFilesMsg{ws: ws, files: r.Files, err: err}
+		err := client.Call(api.MethodWorkspaceChangedFiles, api.WorkspaceRef{WorkspaceID: ws, Against: against}, &r)
+		return changedFilesMsg{ws: ws, against: against, files: r.Files, err: err}
 	}
 }
 
-func (m model) fetchWorkspaceDiff(ws, p string) tea.Cmd {
+func (m model) fetchWorkspaceDiff(ws string, f api.ChangedFile, against string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var r api.WorkspaceDiffResult
-		err := client.Call(api.MethodWorkspaceDiff, api.WorkspaceFileParams{WorkspaceID: ws, Path: p}, &r)
-		return wsDiffMsg{ws: ws, path: p, diff: r.Diff, notShown: r.NotShown, err: err}
+		params := api.WorkspaceFileParams{WorkspaceID: ws, Path: f.Path, OrigPath: f.OrigPath, Against: against}
+		err := client.Call(api.MethodWorkspaceDiff, params, &r)
+		return wsDiffMsg{ws: ws, path: f.Path, against: against, diff: r.Diff, notShown: r.NotShown, err: err}
 	}
 }
 
@@ -65,7 +66,7 @@ func (m model) ensureTabData() (tea.Model, tea.Cmd) {
 	case tabChanges:
 		if m.projects.changes.files == nil && !m.projects.changes.loading && m.projects.changes.err == nil {
 			m.projects.changes.loading = true
-			return m, m.fetchChangedFiles(ws)
+			return m, m.fetchChangedFiles(ws, m.projects.changes.against)
 		}
 	case tabFiles:
 		if m.projects.files.entries == nil && !m.projects.files.loading && m.projects.files.err == nil {
@@ -138,6 +139,14 @@ func (m model) paneChangesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch {
+	case key.Matches(msg, projectsKeys.DiffMode):
+		if c.against == "" {
+			c.against = api.AgainstTarget
+		} else {
+			c.against = ""
+		}
+		c.files, c.cursor, c.err, c.loading = nil, 0, nil, true
+		return m, m.fetchChangedFiles(m.projects.dataWS, c.against)
 	case key.Matches(msg, projectsKeys.Up):
 		c.cursor = cursorUp(c.cursor)
 	case key.Matches(msg, projectsKeys.Down):
@@ -150,7 +159,7 @@ func (m model) paneChangesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if c.cursor < len(c.files) {
 			f := c.files[c.cursor]
 			c.viewing, c.diff, c.diffPath, c.notShown, c.scroll = true, "", f.Path, false, 0
-			return m, m.fetchWorkspaceDiff(m.projects.dataWS, f.Path)
+			return m, m.fetchWorkspaceDiff(m.projects.dataWS, f, c.against)
 		}
 	}
 	return m, nil
@@ -240,6 +249,13 @@ func (m model) wsTabHeader(r projectsRow) string {
 	ctx := r.label
 	if r.branch != "" {
 		ctx += "  " + r.branch
+	}
+	if m.projects.tab == tabChanges {
+		mode := "uncommitted"
+		if m.projects.changes.against == api.AgainstTarget {
+			mode = "vs " + r.target
+		}
+		ctx += "  ·  " + mode
 	}
 	return strings.Join(parts, StyleDim.Render("  ")) + StyleDim.Render("   ·  "+ctx)
 }

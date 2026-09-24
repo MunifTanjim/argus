@@ -166,6 +166,128 @@ func TestAddWorktreeReusesExistingBranch(t *testing.T) {
 	}
 }
 
+func TestBranchesMergesLocalAndRemote(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+
+	remote := t.TempDir()
+	run(t, remote, "git", "init", "--bare", "-b", "main")
+	run(t, root, "git", "remote", "add", "origin", remote)
+	run(t, root, "git", "push", "origin", "main")
+	run(t, root, "git", "branch", "only-local")
+	run(t, root, "git", "push", "origin", "main:only-remote")
+	run(t, root, "git", "fetch", "origin")
+
+	bs, err := Branches(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Branch{}
+	for _, b := range bs {
+		got[b.Name] = b
+	}
+	if b := got["main"]; !b.Local || !b.Remote || !b.CheckedOut {
+		t.Errorf("main = %+v, want local, remote, checked out", b)
+	}
+	if b := got["feature"]; !b.Local || b.Remote || !b.CheckedOut {
+		t.Errorf("feature = %+v, want local and checked out in the linked worktree", b)
+	}
+	if b := got["only-local"]; !b.Local || b.Remote || b.CheckedOut {
+		t.Errorf("only-local = %+v", b)
+	}
+	if b := got["only-remote"]; b.Local || !b.Remote {
+		t.Errorf("only-remote = %+v", b)
+	}
+	if _, ok := got["HEAD"]; ok {
+		t.Error("origin/HEAD must be skipped")
+	}
+}
+
+func TestFetchAndRemoteHelpers(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+	if HasRemote(ctx, root, "origin") {
+		t.Fatal("fresh repo has no origin")
+	}
+	run(t, root, "git", "remote", "add", "origin", filepath.Join(t.TempDir(), "missing"))
+	if !HasRemote(ctx, root, "origin") {
+		t.Fatal("origin not detected")
+	}
+	if err := Fetch(ctx, root, "origin", "main"); err == nil {
+		t.Error("fetch from a missing remote should fail")
+	}
+	if !RefExists(ctx, root, "main") || RefExists(ctx, root, "origin/main") {
+		t.Error("RefExists wrong for main / origin/main")
+	}
+}
+
+func TestAddWorktreeTrackingAndDetached(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+	remote := t.TempDir()
+	run(t, remote, "git", "init", "--bare", "-b", "main")
+	run(t, root, "git", "remote", "add", "origin", remote)
+	run(t, root, "git", "push", "origin", "main:rbranch")
+	run(t, root, "git", "fetch", "origin")
+
+	tr := filepath.Join(t.TempDir(), "tr")
+	if err := AddWorktreeTracking(ctx, root, tr, "rbranch"); err != nil {
+		t.Fatalf("AddWorktreeTracking: %v", err)
+	}
+	if loc, _ := Resolve(ctx, tr); loc.Branch != "rbranch" {
+		t.Errorf("tracking worktree branch = %q", loc.Branch)
+	}
+
+	dt := filepath.Join(t.TempDir(), "dt")
+	if err := AddWorktreeDetached(ctx, root, dt, "main"); err != nil {
+		t.Fatalf("AddWorktreeDetached: %v", err)
+	}
+	if loc, _ := Resolve(ctx, dt); loc.Branch != "" {
+		t.Errorf("detached worktree branch = %q, want empty", loc.Branch)
+	}
+}
+
+func TestValidBranchName(t *testing.T) {
+	ctx := context.Background()
+	for name, want := range map[string]bool{
+		"feat/login": true, "42-fix": true, "": false, "a..b": false, "-x": false, "has space": false,
+	} {
+		if got := ValidBranchName(ctx, name); got != want {
+			t.Errorf("ValidBranchName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestFetchTreatsBranchAsRefNotOption(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+	remote := t.TempDir()
+	run(t, remote, "git", "init", "--bare", "-b", "main")
+	run(t, root, "git", "remote", "add", "origin", remote)
+	run(t, root, "git", "push", "origin", "main")
+	if err := Fetch(ctx, root, "origin", "--dry-run"); err == nil {
+		t.Fatal("a branch named like an option must not be read as an option")
+	}
+}
+
+func TestFetchUpdatesTrackingRefInSingleBranchClone(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+	remote := t.TempDir()
+	run(t, remote, "git", "init", "--bare", "-b", "main")
+	run(t, root, "git", "remote", "add", "origin", remote)
+	run(t, root, "git", "push", "origin", "main", "main:dev")
+	clone := filepath.Join(t.TempDir(), "c")
+	run(t, root, "git", "clone", "-q", "--single-branch", "--branch", "main", remote, clone)
+
+	if err := Fetch(ctx, clone, "origin", "dev"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !RefExists(ctx, clone, "origin/dev") {
+		t.Error("origin/dev not updated; a single-branch clone's refspec skipped it")
+	}
+}
+
 func TestRepoName(t *testing.T) {
 	root, wt := initRepo(t) // main repo + a linked worktree named "wt"
 	sub := filepath.Join(root, "pkg", "deep")

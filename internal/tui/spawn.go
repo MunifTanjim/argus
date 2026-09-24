@@ -44,18 +44,20 @@ const (
 // spawnState drives the staged "new session" flow and is the source of truth for
 // the spawn footer and key handling.
 type spawnState struct {
-	step        spawnStep
-	nodes       []api.NodeInfo           // node step shown when ≥2
-	allProjects []session.HistoryProject // unfiltered, server order
-	dirs        []session.HistoryProject // projects filtered to nodeID
-	nodeID      string                   // chosen node ("" = local/single)
-	agent       string                   // chosen agent id ("" = node default)
-	agents      []api.AgentInfo          // agents launchable on the node; nil while probing
-	cursor      int                      // list cursor (node, agent, and dir steps)
-	custom      bool                     // dir step: free-text path entry active
-	cwd         textinput.Model          // resolved working directory
-	prompt      textarea.Model           // initial prompt (mandatory; multi-line via shift+enter)
-	fallbackCwd string                   // seeds custom path / empty-history case
+	step         spawnStep
+	nodes        []api.NodeInfo           // node step shown when ≥2
+	allProjects  []session.HistoryProject // unfiltered, server order
+	dirs         []session.HistoryProject // projects filtered to nodeID
+	nodeID       string                   // chosen node ("" = local/single)
+	agent        string                   // chosen agent id ("" = node default)
+	agents       []api.AgentInfo          // agents launchable on the node; nil while probing
+	cursor       int                      // list cursor (node, agent, and dir steps)
+	custom       bool                     // dir step: free-text path entry active
+	cwd          textinput.Model          // resolved working directory
+	prompt       textarea.Model           // initial prompt (mandatory; multi-line via shift+enter)
+	fallbackCwd  string                   // seeds custom path / empty-history case
+	fixedCwd     bool                     // cwd preset by the caller; skip the dir step
+	presetPrompt string                   // seeds the prompt step
 }
 
 func newSpawnCwdInput() textinput.Model {
@@ -128,18 +130,38 @@ func (m *model) startAgentStep() tea.Cmd {
 	return m.fetchSpawnAgents(m.spawn.nodeID)
 }
 
-func (m *model) applySpawnAgents(msg spawnAgentsMsg) {
+func (m *model) applySpawnAgents(msg spawnAgentsMsg) tea.Cmd {
 	if m.spawn.step != spawnStepAgent || msg.nodeID != m.spawn.nodeID {
-		return // flow moved on (cancelled), or the node changed under a slow probe
+		return nil // flow moved on (cancelled), or the node changed under a slow probe
 	}
 	if msg.err != nil || len(msg.agents) <= 1 {
 		if len(msg.agents) == 1 {
 			m.spawn.agent = msg.agents[0].ID
 		}
-		m.spawn.enterDirStep()
-		return
+		return m.afterAgentStep()
 	}
 	m.spawn.agents = msg.agents // cursor stays 0 (set by startAgentStep; frozen while loading)
+	return nil
+}
+
+// beginPresetSpawn starts the flow at the agent step with the node, directory,
+// and prompt already chosen (the issue workspace offer).
+func (m *model) beginPresetSpawn(nodeID, cwd, prompt string) tea.Cmd {
+	m.spawn = spawnState{nodeID: nodeID, fixedCwd: true, presetPrompt: prompt}
+	m.spawn.cwd = newSpawnCwdInput()
+	m.spawn.cwd.SetValue(cwd)
+	return m.startAgentStep()
+}
+
+// afterAgentStep enters the dir step, or the prompt step when the dir is preset.
+func (m *model) afterAgentStep() tea.Cmd {
+	if !m.spawn.fixedCwd {
+		m.spawn.enterDirStep()
+		return nil
+	}
+	cmd := m.enterSpawnPrompt()
+	m.spawn.prompt.SetValue(m.spawn.presetPrompt)
+	return cmd
 }
 
 // enterDirStep filters projects to the chosen node, positions at the most recent,
@@ -191,7 +213,7 @@ func (m model) handleSpawnKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.spawn.cursor < len(m.spawn.agents) {
 				m.spawn.agent = m.spawn.agents[m.spawn.cursor].ID
-				m.spawn.enterDirStep()
+				return m, m.afterAgentStep()
 			}
 		}
 		return m, nil

@@ -23,31 +23,36 @@ import (
 // Project is one repository (kind "git") or one non-git directory (kind
 // "plain"), with its workspaces.
 type Project struct {
-	ID         string
-	Name       string
-	Kind       string
-	Dir        string
-	Root       string // open path: the main workspace's dir ("" for a bare repo)
-	IsGone     bool
-	Hidden     bool
-	Pinned     bool
-	CreatedAt  time.Time
-	LastSeenAt time.Time
-	Workspaces []Workspace
+	ID   string
+	Name string
+	Kind string
+	Dir  string
+	Root string // open path: the main workspace's dir ("" for a bare repo)
+	// DefaultBranch is resolved live; "" for a plain or unresolvable project.
+	DefaultBranch string
+	IsGone        bool
+	Hidden        bool
+	Pinned        bool
+	CreatedAt     time.Time
+	LastSeenAt    time.Time
+	Workspaces    []Workspace
 }
 
 // Workspace is one git worktree, or the single directory of a plain project.
 // Branch and Head are empty for a gone or plain workspace; Branch is empty for
 // a detached HEAD.
 type Workspace struct {
-	ID         string
-	Dir        string
-	IsMain     bool
-	IsGone     bool
-	Branch     string
-	Head       string
-	CreatedAt  time.Time
-	LastSeenAt time.Time
+	ID     string
+	Dir    string
+	IsMain bool
+	IsGone bool
+	Branch string
+	Head   string
+	// TargetBranch is the stored target, or the project's default branch when
+	// unset.
+	TargetBranch string
+	CreatedAt    time.Time
+	LastSeenAt   time.Time
 }
 
 type Registry struct {
@@ -64,6 +69,16 @@ func New(sqlDB *sql.DB) *Registry {
 // the workspace id. A non-git cwd becomes a plain Project with one workspace.
 // An empty cwd, or a cwd inside a bare repo with no working tree, is a no-op.
 func (r *Registry) AdoptSession(ctx context.Context, cwd string) (string, error) {
+	return r.adopt(ctx, cwd, nil)
+}
+
+// AdoptWorkspace records a newly created worktree and its target branch in one
+// transaction, so a failure leaves no half-registered workspace.
+func (r *Registry) AdoptWorkspace(ctx context.Context, dir, target string) (string, error) {
+	return r.adopt(ctx, dir, &target)
+}
+
+func (r *Registry) adopt(ctx context.Context, cwd string, target *string) (string, error) {
 	if cwd == "" {
 		return "", nil
 	}
@@ -75,11 +90,11 @@ func (r *Registry) AdoptSession(ctx context.Context, cwd string) (string, error)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.record(ctx, cwd, loc, plain)
+	return r.record(ctx, cwd, loc, plain, target)
 }
 
 // record requires the caller to hold r.mu.
-func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location, plain bool) (string, error) {
+func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location, plain bool, target *string) (string, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -108,6 +123,11 @@ func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location,
 		}
 		wsID = idFor(loc.WorktreeRoot)
 		if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: wsID, ProjectID: projID, Dir: loc.WorktreeRoot, IsMain: loc.IsMain}); err != nil {
+			return "", err
+		}
+	}
+	if target != nil {
+		if err := q.SetWorkspaceTarget(ctx, gen.SetWorkspaceTargetParams{TargetBranch: *target, ID: wsID}); err != nil {
 			return "", err
 		}
 	}
@@ -195,6 +215,30 @@ func projectUpdated(id string, rows int64, err error) error {
 	return err
 }
 
+func (r *Registry) SetWorkspaceTarget(ctx context.Context, id, branch string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.q.SetWorkspaceTarget(ctx, gen.SetWorkspaceTargetParams{TargetBranch: branch, ID: id})
+}
+
+// TargetBranch returns a workspace's stored target, or its project's default
+// branch when unset. ok is false when no such workspace is recorded.
+func (r *Registry) TargetBranch(ctx context.Context, id string) (string, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, err := r.q.GetWorkspace(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if w.TargetBranch != "" {
+		return w.TargetBranch, true, nil
+	}
+	return gittree.DefaultBranch(ctx, w.Dir), true, nil
+}
+
 // Snapshot reconciles every Project against the live filesystem and returns the
 // tree with live branch/head filled in.
 func (r *Registry) Snapshot(ctx context.Context) ([]Project, error) {
@@ -227,7 +271,11 @@ func (r *Registry) snapshot(ctx context.Context) (out []Project, promoted bool, 
 		if err != nil {
 			return nil, false, err
 		}
-		out = append(out, buildProject(p, wss, live))
+		def := ""
+		if p.Kind == "git" && !p.IsGone {
+			def = gittree.DefaultBranch(ctx, p.Dir)
+		}
+		out = append(out, buildProject(p, wss, live, def))
 	}
 	return out, promoted, nil
 }
@@ -288,7 +336,7 @@ func (r *Registry) promote(ctx context.Context, p gen.Project) (bool, error) {
 	if err != nil || loc.WorktreeRoot != p.Dir {
 		return false, nil
 	}
-	if _, err := r.record(ctx, p.Dir, loc, false); err != nil {
+	if _, err := r.record(ctx, p.Dir, loc, false, nil); err != nil {
 		return false, err
 	}
 	return true, r.markGone(ctx, p.ID)
@@ -326,9 +374,9 @@ func (r *Registry) touchPlain(ctx context.Context, p gen.Project) error {
 	return tx.Commit()
 }
 
-func buildProject(p gen.Project, wss []gen.Workspace, live map[string]gittree.Worktree) Project {
+func buildProject(p gen.Project, wss []gen.Workspace, live map[string]gittree.Worktree, def string) Project {
 	proj := Project{
-		ID: p.ID, Name: p.Name, Kind: p.Kind, Dir: p.Dir,
+		ID: p.ID, Name: p.Name, Kind: p.Kind, Dir: p.Dir, DefaultBranch: def,
 		IsGone: p.IsGone, Hidden: p.Hidden, Pinned: p.Pinned,
 		CreatedAt: p.CreatedAt, LastSeenAt: p.LastSeenAt,
 	}
@@ -336,6 +384,10 @@ func buildProject(p gen.Project, wss []gen.Workspace, live map[string]gittree.Wo
 		ws := Workspace{
 			ID: w.ID, Dir: w.Dir, IsMain: w.IsMain, IsGone: w.IsGone,
 			CreatedAt: w.CreatedAt, LastSeenAt: w.LastSeenAt,
+		}
+		ws.TargetBranch = w.TargetBranch
+		if ws.TargetBranch == "" {
+			ws.TargetBranch = def
 		}
 		if lw, ok := live[w.Dir]; ok {
 			ws.Branch = lw.Branch

@@ -14,13 +14,14 @@ CREATE TABLE project (
 );
 
 CREATE TABLE workspace (
-    id           TEXT PRIMARY KEY,
-    project_id   TEXT NOT NULL REFERENCES project (id) ON DELETE CASCADE,
-    dir          TEXT NOT NULL UNIQUE,
-    is_main      BOOLEAN NOT NULL DEFAULT 0,
-    is_gone      BOOLEAN NOT NULL DEFAULT 0,
-    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id            TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL REFERENCES project (id) ON DELETE CASCADE,
+    dir           TEXT NOT NULL UNIQUE,
+    is_main       BOOLEAN NOT NULL DEFAULT 0,
+    is_gone       BOOLEAN NOT NULL DEFAULT 0,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    target_branch TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX workspace_idx_project_id ON workspace (project_id);

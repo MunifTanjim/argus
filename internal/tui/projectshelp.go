@@ -11,8 +11,6 @@ import (
 func (m model) projectsFooter() string {
 	k := projectsKeys
 	switch {
-	case m.projects.inputMode == pmNewBranch:
-		return asstStyle.Render("new branch: " + m.projects.input.View() + "  enter · esc")
 	case m.projects.inputMode == pmRename:
 		return asstStyle.Render("rename: " + m.projects.input.View() + "  enter · esc")
 	case m.projects.inputMode == pmFilter:
@@ -23,8 +21,14 @@ func (m model) projectsFooter() string {
 			verb = "force-remove"
 		}
 		return asstStyle.Render(verb + " this workspace? y/n")
+	case m.projects.offerSpawn != nil:
+		return asstStyle.Render("start an agent with this issue? y/n")
 	case m.flash != "":
 		return asstStyle.Render(m.flash)
+	case m.projects.create.active:
+		return m.createFooter()
+	case m.projects.retarget != nil:
+		return m.footer(helpAs(k.Up, "↑/↓", "move"), helpAs(k.Enter, "enter", "select"), helpAs(k.Back, "esc", "cancel"))
 	case m.projects.showHelp:
 		return m.footer(helpAs(k.Back, "any key", "close"))
 	case m.projects.focus == focusTree && m.sidebarVisible():
@@ -46,6 +50,9 @@ func (m model) projectsFooter() string {
 		}
 	}
 	bindings := []key.Binding{k.Up, listKeys.TabNext, open}
+	if m.projects.tab == tabChanges {
+		bindings = append(bindings, k.DiffMode)
+	}
 	if m.sidebarVisible() {
 		bindings = append(bindings, helpAs(k.Focus, "tab", "tree"))
 	}
@@ -74,9 +81,10 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Up, "↑/↓ j/k", "move / scroll"),
 			helpAs(k.Enter, "enter", "open"),
 			helpAs(k.Back, "esc", "close / up / tree"),
+			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
 		}},
 		{"Manage", []key.Binding{
-			helpAs(k.New, "n", "new workspace"),
+			helpAs(k.New, "n", "new workspace (branch, PR, issue)"),
 			helpAs(k.Remove, "x", "remove workspace"),
 			helpAs(k.ForceRemove, "X", "force remove"),
 			helpAs(k.Rename, "R", "rename project"),
@@ -84,6 +92,7 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Hide, "H", "hide project"),
 			helpAs(k.ShowHidden, "z", "show hidden"),
 			helpAs(k.ShowGone, "o", "show gone"),
+			helpAs(k.Target, "T", "change target branch"),
 		}},
 		{"Screen", []key.Binding{
 			helpAs(k.Widen, "< >", "resize sidebar"),

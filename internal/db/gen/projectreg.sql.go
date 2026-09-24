@@ -33,7 +33,7 @@ func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at
+SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at, target_branch
 FROM workspace
 WHERE id = ?
 `
@@ -49,6 +49,7 @@ func (q *Queries) GetWorkspace(ctx context.Context, id string) (Workspace, error
 		&i.IsGone,
 		&i.CreatedAt,
 		&i.LastSeenAt,
+		&i.TargetBranch,
 	)
 	return i, err
 }
@@ -93,7 +94,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 }
 
 const listWorkspacesByProject = `-- name: ListWorkspacesByProject :many
-SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at
+SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at, target_branch
 FROM workspace
 WHERE project_id = ?
 ORDER BY is_main DESC, dir
@@ -116,6 +117,7 @@ func (q *Queries) ListWorkspacesByProject(ctx context.Context, projectID string)
 			&i.IsGone,
 			&i.CreatedAt,
 			&i.LastSeenAt,
+			&i.TargetBranch,
 		); err != nil {
 			return nil, err
 		}
@@ -211,6 +213,20 @@ func (q *Queries) SetProjectPinned(ctx context.Context, arg SetProjectPinnedPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setWorkspaceTarget = `-- name: SetWorkspaceTarget :exec
+UPDATE workspace SET target_branch = ? WHERE id = ?
+`
+
+type SetWorkspaceTargetParams struct {
+	TargetBranch string
+	ID           string
+}
+
+func (q *Queries) SetWorkspaceTarget(ctx context.Context, arg SetWorkspaceTargetParams) error {
+	_, err := q.db.ExecContext(ctx, setWorkspaceTarget, arg.TargetBranch, arg.ID)
+	return err
 }
 
 const touchProject = `-- name: TouchProject :exec
