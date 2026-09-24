@@ -86,6 +86,8 @@ func initStyles() {
 	asstStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAssistant)
 }
 
+const maxCardWidth = 78
+
 // statusGlyph is the list marker for a status. Working sessions use an animated
 // spinner from the card renderer instead of this static dot.
 func statusGlyph(s session.Status) string {
@@ -151,6 +153,8 @@ func (m model) View() tea.View {
 		content = m.historyTranscriptView()
 	case modeLogs:
 		content = m.logsView()
+	case modeProjects:
+		content = m.projectsView()
 	default:
 		content = m.listView()
 	}
@@ -207,7 +211,7 @@ func (m model) listView() string {
 	}
 
 	// Populated.
-	cardW := min(m.containerWidth(), 78)
+	cardW := min(m.containerWidth(), maxCardWidth)
 	if cardW < 30 {
 		cardW = 30
 	}
@@ -242,7 +246,7 @@ func (m model) listView() string {
 	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-chrome))
 
 	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
-		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, listKeys.Quit)
+		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Projects, listKeys.Refresh, listKeys.Quit)
 	switch {
 	case m.pendingKill && m.cursor < len(m.order):
 		verb := "kill"
@@ -311,7 +315,7 @@ func (m model) emptyListView(title string, chrome int) string {
 	top := max(0, (avail-lipgloss.Height(welcome))/2)
 	block := strings.Repeat("\n", top) + centerBlock(welcome, lipgloss.Width(welcome), m.width)
 
-	cardW := min(m.containerWidth(), 78)
+	cardW := min(m.containerWidth(), maxCardWidth)
 	if cardW < 30 {
 		cardW = 30
 	}

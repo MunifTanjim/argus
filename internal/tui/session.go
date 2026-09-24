@@ -82,7 +82,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.activeSub = subRef{}
 		}
 		m.sessionSub = subRef{} // clear stashed drill state on exit
-		m.mode = modeList
+		m.mode = m.sessionReturn
 		return m, cmd
 	}
 	if m.historyView == histDetail {

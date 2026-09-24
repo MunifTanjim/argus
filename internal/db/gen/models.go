@@ -16,6 +16,8 @@ type Project struct {
 	IsGone     bool
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+	Hidden     bool
+	Pinned     bool
 }
 
 type Workspace struct {

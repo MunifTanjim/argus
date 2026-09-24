@@ -139,6 +139,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.history.projCursor >= len(m.history.projects) {
 			m.history.projCursor = max(0, len(m.history.projects)-1)
 		}
+	case projectsTreeMsg:
+		m.projects.loading = false
+		m.projects.tree, m.projects.err = msg.tree, msg.err
+		if msg.tree == nil {
+			m.projects.tree = []api.ProjectNode{}
+		}
+		m.projects.rebuild()
+		if m.projects.want != "" {
+			m.projects.reveal(m.projects.want)
+			m.projects.want = ""
+		}
+		return m.ensureTabData()
+	case projectsActionMsg:
+		if msg.err != nil {
+			m.flash = msg.verb + ": " + msg.err.Error()
+			return m, nil
+		}
+		m.flash = msg.ok
+		if m.flash == "" {
+			m.flash = msg.verb + " done"
+		}
+		m.projects.want = msg.selectID
+		return m, m.fetchProjects() // refresh the tree after a mutation
+	case changedFilesMsg:
+		if msg.ws == m.projects.dataWS {
+			m.projects.changes.loading = false
+			m.projects.changes.err = msg.err
+			m.projects.changes.files = msg.files
+			if m.projects.changes.files == nil {
+				m.projects.changes.files = []api.ChangedFile{}
+			}
+		}
+	case wsDiffMsg:
+		if msg.ws == m.projects.dataWS && msg.path == m.projects.changes.diffPath {
+			m.projects.changes.diff, m.projects.changes.notShown, m.projects.changes.err = msg.diff, msg.notShown, msg.err
+		}
+	case listDirMsg:
+		if msg.ws == m.projects.dataWS && msg.dir == m.projects.files.dir {
+			m.projects.files.loading = false
+			m.projects.files.err = msg.err
+			m.projects.files.entries = msg.entries
+			if m.projects.files.entries == nil {
+				m.projects.files.entries = []api.DirEntry{}
+			}
+		}
+	case readFileMsg:
+		if msg.ws == m.projects.dataWS && msg.path == m.projects.files.filePath {
+			m.projects.files.content, m.projects.files.notShown, m.projects.files.err = msg.content, msg.notShown, msg.err
+		}
 	case histSessionsMsg:
 		m.history.loading = false
 		if msg.err != nil {
@@ -304,7 +353,7 @@ func (m model) anyWorking() bool {
 // none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
 // spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
-	if m.mode == modeList && !m.spinning && m.anyWorking() {
+	if (m.mode == modeList || m.mode == modeProjects) && !m.spinning && m.anyWorking() {
 		m.spinning = true
 		return spinTickCmd()
 	}
@@ -524,6 +573,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleHistoryTranscriptKey(msg)
 	case modeLogs:
 		return m.handleLogsKey(msg)
+	case modeProjects:
+		return m.handleProjectsKey(msg)
 	}
 
 	// modeList: any key dismisses a transient flash before dispatching (the jump
@@ -551,6 +602,7 @@ var listTable = []keyTableEntry{
 	{listKeys.New, model.actListNew},
 	{listKeys.Kill, model.actListKill},
 	{listKeys.Refresh, model.actListRefresh},
+	{listKeys.Projects, model.actListProjects},
 	{listKeys.Quit, model.actListQuit},
 }
 
@@ -603,6 +655,9 @@ func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) enterSession(id string) (model, tea.Cmd) {
 	m.saveReplyDraft()
 	m.selectedID = id
+	if m.mode != modeSession {
+		m.sessionReturn = m.mode // return here on exit (session list or projects sidebar)
+	}
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
 	m.transcript.err = nil

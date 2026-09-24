@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -140,6 +142,161 @@ func FileContents(ctx context.Context, dir, path, origPath string) (old, new str
 		return "", "", true, nil
 	}
 	return old, new, false, nil
+}
+
+type DirEntry struct {
+	Name  string // base name
+	Path  string // repo-relative slash path, for the next ListDir/ReadFile
+	IsDir bool
+}
+
+// ListDir lists the children of rel (a repo-relative slash path; "" is the root),
+// hiding .git and git-ignored entries. dir need not be a git repo; a plain
+// directory lists without ignore filtering. Directories sort first.
+func ListDir(ctx context.Context, dir, rel string) (root string, entries []DirEntry, err error) {
+	root = dir
+	inRepo := false
+	if r, e := repoRoot(ctx, dir); e == nil {
+		root, inRepo = r, true
+	}
+	full, err := repoRelPath(root, rel)
+	if err != nil {
+		return "", nil, err
+	}
+	des, err := os.ReadDir(full)
+	if err != nil {
+		return "", nil, err
+	}
+	names := make([]string, 0, len(des))
+	dirOf := make(map[string]bool, len(des))
+	for _, de := range des {
+		if de.Name() == ".git" {
+			continue
+		}
+		names = append(names, de.Name())
+		dirOf[de.Name()] = de.IsDir()
+	}
+	var ignored map[string]bool
+	if inRepo {
+		ignored = checkIgnore(ctx, root, full, names)
+	}
+	for _, n := range names {
+		if ignored[n] {
+			continue
+		}
+		entries = append(entries, DirEntry{Name: n, Path: path.Join(rel, n), IsDir: dirOf[n]})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return entries[i].Name < entries[j].Name
+	})
+	return root, entries, nil
+}
+
+// checkIgnore reads matches from stdout, so git's exit code (1 = none ignored)
+// is irrelevant.
+func checkIgnore(ctx context.Context, root, full string, names []string) map[string]bool {
+	var in strings.Builder
+	for _, n := range names {
+		in.WriteString(filepath.Join(full, n))
+		in.WriteByte(0)
+	}
+	cmd := shell.NewCommandContext(ctx, "git", "-C", root, "check-ignore", "--stdin", "-z").
+		WithStdIn(strings.NewReader(in.String()))
+	_ = cmd.Run()
+	ignored := map[string]bool{}
+	for _, p := range strings.Split(cmd.StdOut().String(), "\x00") {
+		if p != "" {
+			ignored[filepath.Base(p)] = true
+		}
+	}
+	return ignored
+}
+
+// ReadFile returns the working-tree content of a repo-relative file. notShown is
+// true for a binary or oversized file. A symlink returns its target text (it is
+// never followed).
+func ReadFile(ctx context.Context, dir, rel string) (content string, notShown bool, err error) {
+	root := dir
+	if r, e := repoRoot(ctx, dir); e == nil {
+		root = r
+	}
+	full, err := repoRelPath(root, rel)
+	if err != nil {
+		return "", false, err
+	}
+	fi, err := os.Lstat(full)
+	if err != nil {
+		return "", false, err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if target, e := os.Readlink(full); e == nil {
+			return target, false, nil
+		}
+		return "", true, nil
+	}
+	if fi.IsDir() {
+		return "", false, fmt.Errorf("gitstatus: is a directory: %s", rel)
+	}
+	// Reading a FIFO or device can block forever.
+	if !fi.Mode().IsRegular() {
+		return "", false, fmt.Errorf("gitstatus: not a regular file: %s", rel)
+	}
+	if fi.Size() > maxContentBytes {
+		return "", true, nil
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "", false, err
+	}
+	if isBinary(string(b)) {
+		return "", true, nil
+	}
+	return string(b), false, nil
+}
+
+// WorkingDiff returns a unified diff of a repo-relative path against HEAD. An
+// untracked (or new-repo) path is rendered as an all-added diff from its
+// content. notShown is true for a binary or oversized result.
+func WorkingDiff(ctx context.Context, dir, p string) (diff string, notShown bool, err error) {
+	root, err := repoRoot(ctx, dir)
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := repoRelPath(root, p); err != nil {
+		return "", false, err
+	}
+	cmd := shell.NewCommandContext(ctx, "git", "-C", root, "diff", "--no-color", "HEAD", "--", p)
+	_ = cmd.Run() // HEAD may be absent in a new repo; fall through to the added-file path
+	out := cmd.StdOut().String()
+	if strings.TrimSpace(out) != "" {
+		if len(out) > maxContentBytes || isBinary(out) {
+			return "", true, nil
+		}
+		return out, false, nil
+	}
+	content, ns, rerr := ReadFile(ctx, dir, p)
+	if rerr != nil {
+		return "", false, nil
+	}
+	if ns {
+		return "", true, nil
+	}
+	return synthAddedDiff(p, content), false, nil
+}
+
+func synthAddedDiff(p, content string) string {
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	var b strings.Builder
+	fmt.Fprintf(&b, "--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", p, len(lines))
+	for _, ln := range lines {
+		b.WriteString("+")
+		b.WriteString(ln)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // gitShowRev returns the content of a repo-relative path at a git rev. content is

@@ -5,6 +5,7 @@ package gittree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,58 @@ func parseWorktrees(out string) []Worktree {
 		}
 	}
 	return res
+}
+
+// AddWorktree creates a worktree at path on branch. An existing branch is checked
+// out as is; a new one is created from start (empty = current HEAD). repoDir is
+// any working tree of the repository.
+func AddWorktree(ctx context.Context, repoDir, path, branch, start string) error {
+	if _, ok := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); ok {
+		return runGit(ctx, "worktree add", "-C", repoDir, "worktree", "add", path, branch)
+	}
+	args := []string{"-C", repoDir, "worktree", "add", "-b", branch, path}
+	if start != "" {
+		args = append(args, start)
+	}
+	return runGit(ctx, "worktree add", args...)
+}
+
+// RemoveWorktree refuses a dirty worktree unless force is set.
+func RemoveWorktree(ctx context.Context, repoDir, path string, force bool) error {
+	args := []string{"-C", repoDir, "worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, path)
+	return runGit(ctx, "worktree remove", args...)
+}
+
+// DefaultBranch resolves the repository's default branch: origin/HEAD, then main,
+// then master, then the current branch. Empty when none resolves.
+func DefaultBranch(ctx context.Context, repoDir string) string {
+	if r, ok := git(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); ok {
+		return strings.TrimPrefix(r, "origin/")
+	}
+	for _, b := range []string{"main", "master"} {
+		if _, ok := git(ctx, repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+b); ok {
+			return b
+		}
+	}
+	if b, ok := git(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "HEAD"); ok {
+		return b
+	}
+	return ""
+}
+
+func runGit(ctx context.Context, what string, args ...string) error {
+	cmd := shell.NewCommandContext(ctx, "git", args...)
+	if err := cmd.Run(); err != nil {
+		if msg := cmd.StdErr().TrimSpace().String(); msg != "" {
+			return fmt.Errorf("gittree: %s: %s", what, msg)
+		}
+		return fmt.Errorf("gittree: %s: %w", what, err)
+	}
+	return nil
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, bool) {

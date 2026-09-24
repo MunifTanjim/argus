@@ -23,6 +23,7 @@ const (
 	modeHistorySessions   // read-only: a project's past sessions
 	modeHistoryTranscript // read-only: a past session's transcript (reuses the transcript region)
 	modeLogs              // embedded-node log tail (only when the TUI spawned the node)
+	modeProjects          // two-pane workspace sidebar: tree + a workspace's sessions
 )
 
 type focusArea int
@@ -91,9 +92,10 @@ type model struct {
 	redactSrcDir string      // extracted cache dir to redact from
 	redact       redactState // queued literals + input/confirm state
 
-	mode         viewMode
-	screenReturn viewMode // mode to restore when leaving the live screen (ctrl+])
-	selectedID   string
+	mode          viewMode
+	screenReturn  viewMode // mode to restore when leaving the live screen (ctrl+])
+	sessionReturn viewMode // mode to restore when leaving a session view (list or projects)
+	selectedID    string
 
 	focus       focusArea   // session screen: which pane has focus
 	historyView historyKind // session screen: transcript or detail
@@ -123,6 +125,8 @@ type model struct {
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)
 
 	history historyState // read-only browsing of past sessions on disk
+
+	projects projectsState // two-pane workspace sidebar (tree + sessions)
 
 	// Logs tab: present only with an embedded node (logs != nil). logsScroll is the
 	// absolute top-line offset when paused; logsFollow pins to the newest line and
@@ -189,6 +193,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		redact:      redactState{input: newRedactInput()},
 		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
 		replyDrafts: map[string]string{},
+		projects:    projectsState{collapsed: make(map[string]bool)},
 	}
 }
 

@@ -1,0 +1,214 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/MunifTanjim/argus/internal/api"
+)
+
+// Workspace/project management on the projects screen: create (branch input),
+// remove (confirm + force), and curate (rename input, hide/pin toggles).
+
+func newProjectsInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.SetWidth(40)
+	return ti
+}
+
+func (m model) inputActive() bool { return m.projects.inputMode != pmNone }
+
+// cursorProjectID is the project the cursor row belongs to (project or workspace
+// row); "" on a node row or an empty tree.
+func (m model) cursorProjectID() string {
+	rows, c := m.projects.rows, m.projects.cursor
+	if c < 0 || c >= len(rows) {
+		return ""
+	}
+	switch rows[c].kind {
+	case rowProject:
+		return rows[c].id
+	case rowWorkspace:
+		for i := c; i >= 0; i-- {
+			if rows[i].kind == rowProject {
+				return rows[i].id
+			}
+		}
+	}
+	return ""
+}
+
+func (m model) findProject(id string) (api.ProjectNode, bool) {
+	for _, p := range m.projects.tree {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return api.ProjectNode{}, false
+}
+
+func (m model) startInput(mode projInputMode, target, initial string) (tea.Model, tea.Cmd) {
+	m.projects.inputMode = mode
+	m.projects.inputTarget = target
+	m.projects.input = newProjectsInput()
+	m.projects.input.SetValue(initial)
+	return m, m.projects.input.Focus()
+}
+
+func (m model) handleProjectsInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.Code == tea.KeyEscape {
+		mode := m.projects.inputMode
+		m.projects.inputMode = pmNone
+		if mode == pmFilter {
+			m.projects.setFilter("")
+			return m.ensureTabData()
+		}
+		return m, nil
+	}
+	if msg.String() == "enter" {
+		val := strings.TrimSpace(m.projects.input.Value())
+		mode, target := m.projects.inputMode, m.projects.inputTarget
+		m.projects.inputMode = pmNone
+		if val == "" {
+			return m, nil
+		}
+		switch mode {
+		case pmNewBranch:
+			return m, m.createWorkspaceCmd(target, val)
+		case pmRename:
+			return m, m.renameProjectCmd(target, val)
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.projects.input, cmd = m.projects.input.Update(msg)
+	if m.projects.inputMode != pmFilter {
+		return m, cmd
+	}
+	m.projects.setFilter(m.projects.input.Value())
+	mm, sync := m.ensureTabData()
+	return mm, tea.Batch(cmd, sync)
+}
+
+// handleRemoveConfirm consumes the y/n answer to a pending remove.
+func (m model) handleRemoveConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	wsID, force := m.projects.pendingRemove, m.projects.pendingRemoveForce
+	m.projects.pendingRemove, m.projects.pendingRemoveForce = "", false
+	if msg.String() == "y" {
+		return m, m.removeWorkspaceCmd(wsID, force)
+	}
+	return m, nil
+}
+
+// --- management key actions (invoked from the tree) ---------------------------
+
+func (m model) actNewWorkspace() (tea.Model, tea.Cmd) {
+	projID := m.cursorProjectID()
+	if projID == "" {
+		m.flash = "select a project or workspace first"
+		return m, nil
+	}
+	return m.startInput(pmNewBranch, projID, "")
+}
+
+func (m model) actRenameProject() (tea.Model, tea.Cmd) {
+	projID := m.cursorProjectID()
+	if projID == "" {
+		m.flash = "select a project first"
+		return m, nil
+	}
+	p, _ := m.findProject(projID)
+	return m.startInput(pmRename, projID, p.Name)
+}
+
+func (m model) actToggleHidden() (tea.Model, tea.Cmd) {
+	projID := m.cursorProjectID()
+	if projID == "" {
+		return m, nil
+	}
+	p, _ := m.findProject(projID)
+	ok := "unhid " + p.Name
+	if !p.Hidden {
+		ok = "hid " + p.Name
+		if !m.projects.showHidden {
+			ok += " · z shows hidden"
+		}
+	}
+	return m, m.setHiddenCmd(projID, !p.Hidden, ok)
+}
+
+func (m model) actTogglePinned() (tea.Model, tea.Cmd) {
+	projID := m.cursorProjectID()
+	if projID == "" {
+		return m, nil
+	}
+	p, _ := m.findProject(projID)
+	ok := "unpinned " + p.Name
+	if !p.Pinned {
+		ok = "pinned " + p.Name
+	}
+	return m, m.setPinnedCmd(projID, !p.Pinned, ok)
+}
+
+func (m model) actRemoveWorkspace(force bool) (tea.Model, tea.Cmd) {
+	if m.projects.cursor >= len(m.projects.rows) {
+		return m, nil
+	}
+	r := m.projects.rows[m.projects.cursor]
+	if r.kind != rowWorkspace {
+		m.flash = "select a workspace to remove"
+		return m, nil
+	}
+	if r.isMain {
+		m.flash = "cannot remove the main worktree"
+		return m, nil
+	}
+	m.projects.pendingRemove, m.projects.pendingRemoveForce = r.id, force
+	return m, nil
+}
+
+// --- commands -----------------------------------------------------------------
+
+func (m model) createWorkspaceCmd(projectID, branch string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.WorkspaceCreateResult
+		err := client.Call(api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: projectID, Branch: branch}, &res)
+		return projectsActionMsg{verb: "create workspace", selectID: res.WorkspaceID, err: err}
+	}
+}
+
+func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, nil)
+		return projectsActionMsg{verb: "remove workspace", err: err}
+	}
+}
+
+func (m model) renameProjectCmd(projectID, name string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodProjectRename, api.ProjectRenameParams{ProjectID: projectID, Name: name}, nil)
+		return projectsActionMsg{verb: "rename", err: err}
+	}
+}
+
+func (m model) setHiddenCmd(projectID string, hidden bool, ok string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodProjectSetHidden, api.ProjectFlagParams{ProjectID: projectID, Value: hidden}, nil)
+		return projectsActionMsg{verb: "hide", ok: ok, err: err}
+	}
+}
+
+func (m model) setPinnedCmd(projectID string, pinned bool, ok string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodProjectSetPinned, api.ProjectFlagParams{ProjectID: projectID, Value: pinned}, nil)
+		return projectsActionMsg{verb: "pin", ok: ok, err: err}
+	}
+}

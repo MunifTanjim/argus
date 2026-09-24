@@ -91,6 +91,30 @@ func TestResolveNotRepo(t *testing.T) {
 	}
 }
 
+func TestAddRemoveWorktreeAndDefaultBranch(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+
+	if b := DefaultBranch(ctx, root); b != "main" {
+		t.Errorf("DefaultBranch = %q, want main", b)
+	}
+
+	wt := filepath.Join(t.TempDir(), "new")
+	if err := AddWorktree(ctx, root, wt, "newbranch", DefaultBranch(ctx, root)); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	loc, err := Resolve(ctx, wt)
+	if err != nil || loc.Branch != "newbranch" {
+		t.Fatalf("resolve new worktree: branch=%q err=%v", loc.Branch, err)
+	}
+	if err := RemoveWorktree(ctx, root, wt, false); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree dir not removed: %v", err)
+	}
+}
+
 func TestListWorktrees(t *testing.T) {
 	ctx := context.Background()
 	root, worktree := initRepo(t)
@@ -120,6 +144,25 @@ func TestListWorktrees(t *testing.T) {
 	}
 	if l := byDir[linkedLoc.WorktreeRoot]; l.IsMain || l.Branch != "feature" {
 		t.Errorf("linked worktree = %+v", l)
+	}
+}
+
+func TestAddWorktreeReusesExistingBranch(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+
+	wt := filepath.Join(t.TempDir(), "again")
+	if err := AddWorktree(ctx, root, wt, "reuse", "main"); err != nil {
+		t.Fatalf("first AddWorktree: %v", err)
+	}
+	if err := RemoveWorktree(ctx, root, wt, false); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if err := AddWorktree(ctx, root, wt, "reuse", "main"); err != nil {
+		t.Fatalf("AddWorktree on the kept branch: %v", err)
+	}
+	if loc, err := Resolve(ctx, wt); err != nil || loc.Branch != "reuse" {
+		t.Fatalf("resolve re-added worktree: branch=%q err=%v", loc.Branch, err)
 	}
 }
 

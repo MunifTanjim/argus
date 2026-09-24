@@ -521,8 +521,14 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.fanoutSessions(method, raw, out)
 	case method == api.MethodSessionsHistoryProjects:
 		return m.fanoutHistoryProjects(raw, out)
+	case method == api.MethodProjectList:
+		return m.fanoutProjects(raw, out)
 	case sessionAddressed[method]:
 		return m.routeBySession(method, raw, out)
+	case workspaceAddressed[method]:
+		return m.routeByWorkspace(method, raw, out)
+	case projectAddressed[method]:
+		return m.routeByProject(method, raw, out)
 	case nodeAddressed[method]:
 		return m.routeByNode(method, raw, out)
 	case method == api.MethodTranscriptUnsubscribe:
@@ -671,6 +677,45 @@ func (m *E2EClient) fanoutHistoryProjects(raw json.RawMessage, out any) error {
 	return assign(out, all)
 }
 
+// fanoutProjects composites each project and workspace id with the node id so
+// they match the composited session.workspace_id.
+func (m *E2EClient) fanoutProjects(raw json.RawMessage, out any) error {
+	chans := m.channelsSnapshot()
+	type res struct {
+		projects []api.ProjectNode
+		nodeID   string
+		label    string
+	}
+	results := make([]res, len(chans))
+	var wg sync.WaitGroup
+	for i, nc := range chans {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var r api.ProjectListResult
+			if err := m.callNode(nc.nodeID, api.MethodProjectList, raw, &r); err != nil {
+				log.Printf("client: warn: project.list on node %s failed: %v", nc.nodeID, err)
+				return
+			}
+			results[i] = res{projects: r.Projects, nodeID: nc.nodeID, label: nc.label}
+		}()
+	}
+	wg.Wait()
+	merged := []api.ProjectNode{}
+	for _, r := range results {
+		for _, p := range r.projects {
+			p.NodeID = r.nodeID
+			p.NodeLabel = r.label
+			p.ID = session.CompositeID(r.nodeID, p.ID)
+			for j := range p.Workspaces {
+				p.Workspaces[j].ID = session.CompositeID(r.nodeID, p.Workspaces[j].ID)
+			}
+			merged = append(merged, p)
+		}
+	}
+	return assign(out, api.ProjectListResult{Projects: merged})
+}
+
 // fanoutPush fans out a push.register/unregister/test call to every connected
 // node channel (each node holds its own device store). Succeeds if at least one
 // node accepted; returns an aggregated error if all fail. For push.test,
@@ -760,6 +805,50 @@ func (m *E2EClient) routeBySession(method string, raw json.RawMessage, out any) 
 		}
 	}
 	return nil
+}
+
+func (m *E2EClient) routeByWorkspace(method string, raw json.RawMessage, out any) error {
+	composite, err := workspaceIDFromParams(raw)
+	if err != nil {
+		return err
+	}
+	nodeID, localID, ok := session.SplitCompositeID(composite)
+	if !ok {
+		return &api.RPCError{Code: api.CodeInvalidRequest, Message: "workspace id is not gateway-qualified: " + composite}
+	}
+	local, err := setStringField(raw, "workspace_id", localID)
+	if err != nil {
+		return err
+	}
+	return m.callNode(nodeID, method, local, out)
+}
+
+func (m *E2EClient) routeByProject(method string, raw json.RawMessage, out any) error {
+	composite, err := projectIDFromParams(raw)
+	if err != nil {
+		return err
+	}
+	nodeID, localID, ok := session.SplitCompositeID(composite)
+	if !ok {
+		return &api.RPCError{Code: api.CodeInvalidRequest, Message: "project id is not gateway-qualified: " + composite}
+	}
+	local, err := setStringField(raw, "project_id", localID)
+	if err != nil {
+		return err
+	}
+	if method != api.MethodWorkspaceCreate {
+		return m.callNode(nodeID, method, local, out)
+	}
+	var res json.RawMessage
+	if err := m.callNode(nodeID, method, local, &res); err != nil {
+		return err
+	}
+	if wsID, e := workspaceIDFromParams(res); e == nil && wsID != "" {
+		if res, err = setStringField(res, "workspace_id", session.CompositeID(nodeID, wsID)); err != nil {
+			return err
+		}
+	}
+	return assignRaw(out, res)
 }
 
 // routeByNode routes by an explicit node_id (or the sole node) and composites any

@@ -2,6 +2,7 @@ package projectreg
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,6 +114,54 @@ func TestAdoptPlainProject(t *testing.T) {
 	}
 }
 
+func TestPlainProjectBecomesGitAfterInit(t *testing.T) {
+	ctx := context.Background()
+	for _, readopt := range []bool{false, true} {
+		r := newRegistry(t)
+		dir := cleanDir(t.TempDir())
+		wsID, err := r.AdoptSession(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		git(t, dir, "init", "-b", "main")
+		if readopt {
+			if again, err := r.AdoptSession(ctx, dir); err != nil || again != wsID {
+				t.Fatalf("re-adopt after git init: id=%q err=%v, want %q", again, err, wsID)
+			}
+		}
+		projects, err := r.Snapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var live []Project
+		for _, p := range projects {
+			if !p.IsGone {
+				live = append(live, p)
+			}
+		}
+		if len(live) != 1 || live[0].Kind != "git" || len(live[0].Workspaces) != 1 || live[0].Workspaces[0].ID != wsID {
+			t.Errorf("readopt=%v: want one git project owning %s, got %+v", readopt, wsID, live)
+		}
+
+		if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+			t.Fatal(err)
+		}
+		projects, err = r.Snapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		live = live[:0]
+		for _, p := range projects {
+			if !p.IsGone {
+				live = append(live, p)
+			}
+		}
+		if len(live) != 1 || live[0].Kind != "plain" || len(live[0].Workspaces) != 1 || live[0].Workspaces[0].IsGone {
+			t.Errorf("readopt=%v: after removing .git want the plain project back, got %+v", readopt, live)
+		}
+	}
+}
+
 func TestReconcileMarksRemovedWorktreeGone(t *testing.T) {
 	ctx := context.Background()
 	r := newRegistry(t)
@@ -140,6 +189,85 @@ func TestReconcileMarksRemovedWorktreeGone(t *testing.T) {
 	}
 	if gone != 1 || live != 1 {
 		t.Fatalf("want 1 gone + 1 live workspace, got gone=%d live=%d", gone, live)
+	}
+}
+
+func TestSnapshotReportsGoneInTheSameList(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	dir := filepath.Join(t.TempDir(), "p")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AdoptSession(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || !projects[0].IsGone {
+		t.Errorf("the first list after the dir went should show it gone: %+v", projects)
+	}
+}
+
+func TestWorkspaceDir(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	dir := t.TempDir()
+	wsID, err := r.AdoptSession(ctx, dir)
+	if err != nil || wsID == "" {
+		t.Fatalf("AdoptSession: %v", err)
+	}
+	got, ok, err := r.WorkspaceDir(ctx, wsID)
+	if err != nil || !ok || got == "" {
+		t.Fatalf("WorkspaceDir: got=%q ok=%v err=%v", got, ok, err)
+	}
+	if _, ok, _ := r.WorkspaceDir(ctx, "nonexistent"); ok {
+		t.Error("unknown workspace id must return ok=false")
+	}
+}
+
+func TestProjectCuration(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	if _, err := r.AdoptSession(ctx, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := r.Snapshot(ctx)
+	id := ps[0].ID
+
+	if err := r.RenameProject(ctx, id, "My Project"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // setting the same value again is not "unknown"
+		if err := r.SetProjectHidden(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetProjectPinned(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ = r.Snapshot(ctx)
+	if p := ps[0]; p.Name != "My Project" || !p.Hidden || !p.Pinned {
+		t.Fatalf("curation not applied: %+v", p)
+	}
+}
+
+func TestCurationRejectsUnknownProject(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	for name, err := range map[string]error{
+		"rename": r.RenameProject(ctx, "nope", "x"),
+		"hide":   r.SetProjectHidden(ctx, "nope", true),
+		"pin":    r.SetProjectPinned(ctx, "nope", true),
+	} {
+		if !errors.Is(err, ErrUnknownProject) {
+			t.Errorf("%s of an unknown project: err=%v, want ErrUnknownProject", name, err)
+		}
 	}
 }
 
