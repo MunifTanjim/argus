@@ -9,10 +9,54 @@ import (
 	"context"
 )
 
-const listProjects = `-- name: ListProjects :many
-SELECT id, name, kind, dir, is_gone, created_at, last_seen_at
+const getProject = `-- name: GetProject :one
+SELECT id, name, kind, dir, is_gone, created_at, last_seen_at, hidden, pinned
 FROM project
-ORDER BY name
+WHERE id = ?
+`
+
+func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProject, id)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Kind,
+		&i.Dir,
+		&i.IsGone,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.Hidden,
+		&i.Pinned,
+	)
+	return i, err
+}
+
+const getWorkspace = `-- name: GetWorkspace :one
+SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at
+FROM workspace
+WHERE id = ?
+`
+
+func (q *Queries) GetWorkspace(ctx context.Context, id string) (Workspace, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspace, id)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Dir,
+		&i.IsMain,
+		&i.IsGone,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+	)
+	return i, err
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT id, name, kind, dir, is_gone, created_at, last_seen_at, hidden, pinned
+FROM project
+ORDER BY pinned DESC, name
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -32,6 +76,8 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.IsGone,
 			&i.CreatedAt,
 			&i.LastSeenAt,
+			&i.Hidden,
+			&i.Pinned,
 		); err != nil {
 			return nil, err
 		}
@@ -84,6 +130,20 @@ func (q *Queries) ListWorkspacesByProject(ctx context.Context, projectID string)
 	return items, nil
 }
 
+const mainWorkspaceDir = `-- name: MainWorkspaceDir :one
+SELECT dir
+FROM workspace
+WHERE project_id = ? AND is_main = 1
+LIMIT 1
+`
+
+func (q *Queries) MainWorkspaceDir(ctx context.Context, projectID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, mainWorkspaceDir, projectID)
+	var dir string
+	err := row.Scan(&dir)
+	return dir, err
+}
+
 const markProjectGone = `-- name: MarkProjectGone :exec
 UPDATE project SET is_gone = 1 WHERE id = ?
 `
@@ -100,6 +160,57 @@ UPDATE workspace SET is_gone = 1 WHERE project_id = ?
 func (q *Queries) MarkWorkspacesGone(ctx context.Context, projectID string) error {
 	_, err := q.db.ExecContext(ctx, markWorkspacesGone, projectID)
 	return err
+}
+
+const renameProject = `-- name: RenameProject :execrows
+UPDATE project SET name = ? WHERE id = ?
+`
+
+type RenameProjectParams struct {
+	Name string
+	ID   string
+}
+
+func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameProject, arg.Name, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setProjectHidden = `-- name: SetProjectHidden :execrows
+UPDATE project SET hidden = ? WHERE id = ?
+`
+
+type SetProjectHiddenParams struct {
+	Hidden bool
+	ID     string
+}
+
+func (q *Queries) SetProjectHidden(ctx context.Context, arg SetProjectHiddenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectHidden, arg.Hidden, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setProjectPinned = `-- name: SetProjectPinned :execrows
+UPDATE project SET pinned = ? WHERE id = ?
+`
+
+type SetProjectPinnedParams struct {
+	Pinned bool
+	ID     string
+}
+
+func (q *Queries) SetProjectPinned(ctx context.Context, arg SetProjectPinnedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectPinned, arg.Pinned, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const touchProject = `-- name: TouchProject :exec
@@ -143,6 +254,7 @@ const upsertWorkspace = `-- name: UpsertWorkspace :exec
 INSERT INTO workspace (id, project_id, dir, is_main)
 VALUES (?, ?, ?, ?)
 ON CONFLICT (dir) DO UPDATE SET
+    project_id = excluded.project_id,
     is_main = excluded.is_main,
     is_gone = 0,
     last_seen_at = CURRENT_TIMESTAMP

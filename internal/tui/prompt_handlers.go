@@ -15,7 +15,7 @@ import (
 func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := m.sessions[m.selectedID]
 	if s.Interaction == nil {
-		m.mode = modeList
+		m.mode = m.sessionReturn
 		return m, nil
 	}
 

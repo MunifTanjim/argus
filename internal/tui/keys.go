@@ -44,8 +44,8 @@ func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, 
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown                        key.Binding
-	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Quit key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown                                  key.Binding
+	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Projects, Quit key.Binding
 }{
 	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:     nb([]string{"down", "j"}, "", ""),
@@ -61,7 +61,41 @@ var listKeys = struct {
 	New:      nb([]string{"n"}, "n", "new"),
 	Kill:     nb([]string{"x"}, "x", "kill"),
 	Refresh:  nb([]string{"r"}, "r", "refresh"),
+	Projects: nb([]string{"p"}, "p", "projects"),
 	Quit:     nb([]string{"q"}, "q", "quit"),
+}
+
+var projectsKeys = struct {
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter, Focus key.Binding
+	Widen, Narrow, ToggleSidebar, Filter, Help                         key.Binding
+	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
+	Refresh, Back                                                      key.Binding
+}{
+	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
+	Down:          nb([]string{"down", "j"}, "", ""),
+	Top:           nb([]string{"g"}, "", ""),
+	Bottom:        nb([]string{"G"}, "g/G", "ends"),
+	HalfUp:        nb([]string{"ctrl+u", "pgup"}, "", ""),
+	HalfDown:      nb([]string{"ctrl+d", "pgdown"}, "", ""),
+	Left:          nb([]string{"left", "h"}, "h/l", "fold"),
+	Right:         nb([]string{"right", "l"}, "", ""),
+	Enter:         nb([]string{"enter", " ", "space"}, "enter", "open"),
+	Focus:         nb([]string{"tab"}, "tab", "pane"),
+	Widen:         nb([]string{">", "."}, "<>", "resize"),
+	Narrow:        nb([]string{"<", ","}, "", ""),
+	ToggleSidebar: nb([]string{"ctrl+b"}, "^b", "sidebar"),
+	Filter:        nb([]string{"/"}, "/", "filter"),
+	Help:          nb([]string{"?"}, "?", "help"),
+	New:           nb([]string{"n"}, "n", "new"),
+	Rename:        nb([]string{"R"}, "R", "rename"),
+	Hide:          nb([]string{"H"}, "H", "hide"),
+	Pin:           nb([]string{"P"}, "P", "pin"),
+	Remove:        nb([]string{"x"}, "x", "remove"),
+	ForceRemove:   nb([]string{"X"}, "", ""),
+	ShowHidden:    nb([]string{"z"}, "z", "hidden"),
+	ShowGone:      nb([]string{"o"}, "o", "gone"),
+	Refresh:       nb([]string{"r"}, "r", "refresh"),
+	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
 
 var transcriptKeys = struct {
@@ -197,4 +231,10 @@ func (m model) footer(bindings ...key.Binding) string {
 	}
 	h.SetWidth(w)
 	return h.ShortHelpView(bindings)
+}
+
+// helpAs returns a copy of b with different help text.
+func helpAs(b key.Binding, k, desc string) key.Binding {
+	b.SetHelp(k, desc)
+	return b
 }

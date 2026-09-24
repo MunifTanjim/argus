@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,13 @@ type Client interface {
 // Run connects the TUI and blocks until the user quits. Non-nil logs (embedded
 // node) are tailed in the Logs tab.
 func Run(client Client, logs *logbuf.Buffer) error {
+	// The client library logs warnings (e.g. a node timing out) via the standard
+	// logger; keep them off the alt-screen.
+	if logs != nil {
+		log.SetOutput(logs)
+	} else {
+		log.SetOutput(io.Discard)
+	}
 	// Detect background ONCE: the OSC 11 query can fail once alt-screen is active.
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
@@ -233,6 +241,7 @@ func extractBundle(bundlePath, dest string) (bundle.Manifest, error) {
 // RunViewer runs the TUI as an offline viewer over an extracted .argus bundle,
 // opening directly in the transcript view.
 func RunViewer(client *fileClient, bundlePath string, redact bool) error {
+	log.SetOutput(io.Discard) // keep any stray standard-logger output off the alt-screen
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
 	initIcons()

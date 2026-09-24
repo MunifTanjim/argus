@@ -108,6 +108,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		// TUI's terminal, stays at its discard default).
 		d.SetLogger(logger.Scoped("node").L)
 		enableProjectRegistry(d, logger.Scoped("node").L)
+		d.SetWorktreeDirTemplate(cfg.Workspace.WorktreeDirTemplate)
 		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
 		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 	}

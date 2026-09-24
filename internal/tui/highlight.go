@@ -33,6 +33,24 @@ func newCodeHighlighter(hasDark bool, language string) *codeHighlighter {
 	}
 }
 
+// The lexer falls back to plaintext, never nil, so Tokenise cannot panic.
+func newCodeHighlighterForFile(hasDark bool, filename string) *codeHighlighter {
+	lexer := lexers.Match(filename)
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+	styleName := "gruvbox-light"
+	if hasDark {
+		styleName = "gruvbox"
+	}
+	profile := colorprofile.Detect(os.Stderr, os.Environ())
+	return &codeHighlighter{
+		lexer:     chroma.Coalesce(lexer),
+		formatter: formatters.Get(chromaFormatter(profile)),
+		style:     styles.Get(styleName),
+	}
+}
+
 // highlight colorizes s as the highlighter's language. ok is false on a tokenise
 // or format error (callers fall back to plain rendering).
 func (h *codeHighlighter) highlight(s string) (string, bool) {

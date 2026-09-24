@@ -14,15 +14,23 @@ type Config struct {
 	Socket string
 	Token  string // shared gateway token: presented by clients/nodes, required by the gateway
 	// Mode selects the run topology: "node", "gateway", or empty to infer from URL/token.
-	Mode    string
-	Gateway GatewayConfig
-	Node    NodeConfig
-	Push    PushConfig
-	Log     LogConfig
-	Tunnel  TunnelConfig
-	Tmux    TmuxConfig
-	E2EE    E2EEConfig
-	Lock    LockConfig
+	Mode      string
+	Gateway   GatewayConfig
+	Node      NodeConfig
+	Push      PushConfig
+	Log       LogConfig
+	Tunnel    TunnelConfig
+	Tmux      TmuxConfig
+	E2EE      E2EEConfig
+	Lock      LockConfig
+	Workspace WorkspaceConfig
+}
+
+// WorkspaceConfig tunes workspace (git worktree) management.
+type WorkspaceConfig struct {
+	// WorktreeDirTemplate is the Go-template path for a new worktree, resolved
+	// relative to the project's main working tree. Vars: {{.Repo}}, {{.Branch}}.
+	WorktreeDirTemplate string
 }
 
 type GatewayConfig struct {
@@ -103,28 +111,29 @@ type LockConfig struct {
 
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
-	"socket":                        GetRuntimePath("argus.sock"),
-	"token":                         "",
-	"gateway.url":                   "",
-	"gateway.listen-addr":           ":8443",
-	"mode":                          "",
-	"node.id":                       "",
-	"node.label":                    "",
-	"push.desktop.enabled":          false,
-	"push.mobile.delay":             "0s",
-	"log.level":                     "info",
-	"log.format":                    "pretty",
-	"tunnel.provider":               "",
-	"tunnel.cloudflare.token":       "",
-	"tunnel.cloudflare.tunnel-name": "",
-	"tunnel.cloudflare.hostname":    "",
-	"tunnel.external.url":           "",
-	"tunnel.zrok.name":              "",
-	"tunnel.ngrok.domain":           "",
-	"tmux.mirror-session-prefix":    "_",
-	"tmux.mirror-session-suffix":    "_",
-	"e2ee.enabled":                  false,
-	"lock.genesis":                  "",
+	"socket":                          GetRuntimePath("argus.sock"),
+	"token":                           "",
+	"gateway.url":                     "",
+	"gateway.listen-addr":             ":8443",
+	"mode":                            "",
+	"node.id":                         "",
+	"node.label":                      "",
+	"push.desktop.enabled":            false,
+	"push.mobile.delay":               "0s",
+	"log.level":                       "info",
+	"log.format":                      "pretty",
+	"tunnel.provider":                 "",
+	"tunnel.cloudflare.token":         "",
+	"tunnel.cloudflare.tunnel-name":   "",
+	"tunnel.cloudflare.hostname":      "",
+	"tunnel.external.url":             "",
+	"tunnel.zrok.name":                "",
+	"tunnel.ngrok.domain":             "",
+	"tmux.mirror-session-prefix":      "_",
+	"tmux.mirror-session-suffix":      "_",
+	"e2ee.enabled":                    false,
+	"lock.genesis":                    "",
+	"workspace.worktree-dir-template": ".worktrees/{{.Branch}}",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -240,6 +249,9 @@ func FromViper(v *viper.Viper) Config {
 		},
 		Lock: LockConfig{
 			Genesis: v.GetString("lock.genesis"),
+		},
+		Workspace: WorkspaceConfig{
+			WorktreeDirTemplate: v.GetString("workspace.worktree-dir-template"),
 		},
 	}
 }

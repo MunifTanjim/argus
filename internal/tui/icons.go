@@ -77,6 +77,8 @@ type iconSet struct {
 	Help      StyledIcon
 	Memory    StyledIcon
 	Node      StyledIcon
+	Pin       StyledIcon
+	Hidden    StyledIcon
 	Output    StyledIcon
 	Selected  StyledIcon
 	Session   StyledIcon
@@ -127,6 +129,8 @@ func initIcons() {
 		Help:      StyledIcon{"\U000F02D7", ColorAccent},        // nf-md-help_circle_outline
 		Memory:    StyledIcon{"\U000F01C0", ColorTextDim},       // nf-md-book_open_variant
 		Node:      StyledIcon{"\U000F0429", ColorTextSecondary}, // nf-md-server
+		Pin:       StyledIcon{"\U000F0403", ColorAccent},        // nf-md-pin
+		Hidden:    StyledIcon{"\U000F0209", ColorTextMuted},     // nf-md-eye_off
 		Session:   StyledIcon{"\U000F0237", ColorTextDim},       // nf-md-fingerprint
 		Shell:     StyledIcon{"\uF120", ColorToolBash},          // nf-fa-terminal
 		Skill:     StyledIcon{"\uF19D", ColorToolSkill},         // nf-fa-graduation_cap

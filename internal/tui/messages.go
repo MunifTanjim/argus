@@ -22,6 +22,44 @@ type histProjectsMsg struct {
 	projects []session.HistoryProject
 	err      error
 }
+
+type projectsTreeMsg struct {
+	tree []api.ProjectNode
+	err  error
+}
+
+// projectsActionMsg is a management action's result; verb labels it on the
+// flash line.
+type projectsActionMsg struct {
+	verb     string
+	ok       string // flash on success; defaults to "<verb> done"
+	selectID string // workspace to select once the tree reloads (create)
+	err      error
+}
+
+type changedFilesMsg struct {
+	ws    string
+	files []api.ChangedFile
+	err   error
+}
+
+type wsDiffMsg struct {
+	ws, path, diff string
+	notShown       bool
+	err            error
+}
+
+type listDirMsg struct {
+	ws, dir string
+	entries []api.DirEntry
+	err     error
+}
+
+type readFileMsg struct {
+	ws, path, content string
+	notShown          bool
+	err               error
+}
 type histSessionsMsg struct {
 	projectDir string
 	offset     int

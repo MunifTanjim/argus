@@ -28,6 +28,23 @@ var sessionAddressed = map[string]bool{
 	api.MethodTerminalOpen:          true,
 }
 
+// workspaceAddressed methods route by a composite workspace_id.
+var workspaceAddressed = map[string]bool{
+	api.MethodWorkspaceChangedFiles: true,
+	api.MethodWorkspaceDiff:         true,
+	api.MethodWorkspaceListDir:      true,
+	api.MethodWorkspaceReadFile:     true,
+	api.MethodWorkspaceRemove:       true,
+}
+
+// projectAddressed methods route by a composite project_id.
+var projectAddressed = map[string]bool{
+	api.MethodWorkspaceCreate:  true,
+	api.MethodProjectRename:    true,
+	api.MethodProjectSetHidden: true,
+	api.MethodProjectSetPinned: true,
+}
+
 // nodeAddressed methods route by an explicit node_id (or the sole node).
 var nodeAddressed = map[string]bool{
 	api.MethodSessionSpawn:              true,
@@ -108,7 +125,26 @@ func stringField(params json.RawMessage, field string) (string, error) {
 	return "", nil
 }
 
+func setStringField(params json.RawMessage, field, value string) (json.RawMessage, error) {
+	m := map[string]json.RawMessage{}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &m); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	m[field] = raw
+	return json.Marshal(m)
+}
+
 func sessionIDFromParams(p json.RawMessage) (string, error) { return stringField(p, "session_id") }
+func workspaceIDFromParams(p json.RawMessage) (string, error) {
+	return stringField(p, "workspace_id")
+}
+func projectIDFromParams(p json.RawMessage) (string, error) { return stringField(p, "project_id") }
 func nodeIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "node_id") }
 func subIDFromParams(p json.RawMessage) (string, error)     { return stringField(p, "sub_id") }
 func termIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "term_id") }

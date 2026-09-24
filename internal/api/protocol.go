@@ -106,6 +106,18 @@ const (
 	MethodSessionTasks    = "sessions.tasks"   // request: SessionRef; result: TasksResult
 	MethodTasksChanged    = "tasks.changed"    // notification: TasksChanged (server→client)
 	MethodProjectList     = "project.list"     // request: no params; result: ProjectListResult (node-local)
+	// Read-only workspace RPCs. The client splits the composite workspace_id and
+	// routes to the owning node.
+	MethodWorkspaceChangedFiles = "workspace.changedFiles" // request: WorkspaceRef; result: ChangedFilesResult
+	MethodWorkspaceDiff         = "workspace.diff"         // request: WorkspaceFileParams; result: WorkspaceDiffResult
+	MethodWorkspaceListDir      = "workspace.listDir"      // request: WorkspaceFileParams; result: ListDirResult
+	MethodWorkspaceReadFile     = "workspace.readFile"     // request: WorkspaceFileParams; result: ReadFileResult
+	// Mutating workspace/project management (project_id-addressed except remove).
+	MethodWorkspaceCreate  = "workspace.create"  // request: WorkspaceCreateParams; result: WorkspaceCreateResult
+	MethodWorkspaceRemove  = "workspace.remove"  // request: WorkspaceRemoveParams; result: nil
+	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: nil
+	MethodProjectSetHidden = "project.setHidden" // request: ProjectFlagParams; result: nil
+	MethodProjectSetPinned = "project.setPinned" // request: ProjectFlagParams; result: nil
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -147,14 +159,85 @@ type ProjectNode struct {
 	Dir        string          `json:"dir"`
 	Root       string          `json:"root,omitempty"`
 	IsGone     bool            `json:"is_gone,omitempty"`
+	Hidden     bool            `json:"hidden,omitempty"`
+	Pinned     bool            `json:"pinned,omitempty"`
 	CreatedAt  string          `json:"created_at,omitempty"`   // RFC3339
 	LastSeenAt string          `json:"last_seen_at,omitempty"` // RFC3339
 	Workspaces []WorkspaceNode `json:"workspaces"`
+	// Set only by the aggregating client, not the node.
+	NodeID    string `json:"node_id,omitempty"`
+	NodeLabel string `json:"node_label,omitempty"`
 }
 
 // ProjectListResult is one node's project tree (node-local; ids not composited).
 type ProjectListResult struct {
 	Projects []ProjectNode `json:"projects"`
+}
+
+// WorkspaceRef addresses a workspace by its (composite) id.
+type WorkspaceRef struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceFileParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	Path        string `json:"path"` // repo-relative slash path ("" = root, for listDir)
+}
+
+// WorkspaceCreateParams creates a worktree on a new branch in a project.
+type WorkspaceCreateParams struct {
+	ProjectID string `json:"project_id"`
+	Branch    string `json:"branch"`
+}
+
+// WorkspaceCreateResult reports the created workspace.
+type WorkspaceCreateResult struct {
+	WorkspaceID string `json:"workspace_id"`
+	Dir         string `json:"dir"`
+}
+
+// WorkspaceRemoveParams removes a worktree. Force removes a dirty worktree.
+type WorkspaceRemoveParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	Force       bool   `json:"force,omitempty"`
+}
+
+// ProjectRenameParams sets a project's display name.
+type ProjectRenameParams struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+type ProjectFlagParams struct {
+	ProjectID string `json:"project_id"`
+	Value     bool   `json:"value"`
+}
+
+type WorkspaceDiffResult struct {
+	Path     string `json:"path"`
+	Diff     string `json:"diff,omitempty"`
+	NotShown bool   `json:"not_shown,omitempty"` // binary or oversized
+}
+
+type DirEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"` // repo-relative slash path
+	IsDir bool   `json:"is_dir,omitempty"`
+}
+
+// ListDirResult lists one directory's children (git-ignored entries and .git
+// hidden), directories first.
+type ListDirResult struct {
+	Root    string     `json:"root,omitempty"`
+	Path    string     `json:"path,omitempty"`
+	Entries []DirEntry `json:"entries"`
+}
+
+// ReadFileResult carries a working-tree file's content.
+type ReadFileResult struct {
+	Path     string `json:"path"`
+	Content  string `json:"content,omitempty"`
+	NotShown bool   `json:"not_shown,omitempty"` // binary or oversized
 }
 
 // ChangedFile is one entry in a session working directory's git status.

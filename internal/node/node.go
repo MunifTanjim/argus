@@ -87,9 +87,10 @@ type Node struct {
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
-	projreg       *projectreg.Registry           // node-local project/workspace registry; nil = disabled
-	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
-	pushDeliverer atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
+	projreg         *projectreg.Registry           // node-local project/workspace registry; nil = disabled
+	worktreeDirTmpl string                         // Go-template path for new worktrees
+	pushStore       *push.Store                    // per-node Web Push subscription store; nil = push disabled
+	pushDeliverer   atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
 
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
@@ -188,6 +189,10 @@ func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
 // SetProjectRegistry with nil disables the registry: project.list returns
 // empty and sessions carry no workspace_id.
 func (d *Node) SetProjectRegistry(r *projectreg.Registry) { d.projreg = r }
+
+// SetWorktreeDirTemplate sets the Go-template path for new worktrees (vars .Repo,
+// .Branch), resolved relative to a project's main working tree.
+func (d *Node) SetWorktreeDirTemplate(t string) { d.worktreeDirTmpl = t }
 
 // SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
 // Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).
