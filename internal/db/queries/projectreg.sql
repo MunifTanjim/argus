@@ -39,15 +39,18 @@ FROM project
 ORDER BY pinned DESC, name;
 
 -- name: ListWorkspacesByProject :many
-SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at
+SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at, target_branch
 FROM workspace
 WHERE project_id = ?
 ORDER BY is_main DESC, dir;
 
 -- name: GetWorkspace :one
-SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at
+SELECT id, project_id, dir, is_main, is_gone, created_at, last_seen_at, target_branch
 FROM workspace
 WHERE id = ?;
+
+-- name: SetWorkspaceTarget :exec
+UPDATE workspace SET target_branch = ? WHERE id = ?;
 
 -- name: MainWorkspaceDir :one
 SELECT dir

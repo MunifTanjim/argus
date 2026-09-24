@@ -19,7 +19,6 @@ type projInputMode int
 
 const (
 	pmNone projInputMode = iota
-	pmNewBranch
 	pmRename
 	pmFilter
 )
@@ -47,6 +46,7 @@ type projectsRow struct {
 	label   string
 	branch  string   // workspace only
 	plain   bool     // workspace only: the directory of a plain project
+	target  string   // workspace only: resolved target branch
 	ws      []string // workspace ids under this row (itself for a workspace row)
 	isGone  bool
 	isMain  bool
@@ -78,6 +78,11 @@ type projectsState struct {
 	inputTarget        string // project id the input acts on
 	pendingRemove      string // workspace id awaiting a remove confirmation
 	pendingRemoveForce bool   // the pending remove is a force-remove
+
+	create     createState
+	createSeq  int         // last picker seq, so a hidden picker's late result can be told apart
+	offerSpawn *spawnOffer // pending "start an agent with this issue?" answer
+	retarget   *retargetState
 
 	tab     wsTab
 	dataWS  string // workspace id the pane was last synced to
@@ -159,6 +164,15 @@ func (p *projectsState) setFilter(q string) {
 	}
 }
 
+type spawnOffer struct{ nodeID, cwd, prompt string }
+
+// retargetState is the T flow: a branch picker that sets a workspace's target.
+type retargetState struct {
+	workspaceID string
+	projectID   string
+	pick        branchPicker
+}
+
 type wsTab int
 
 const (
@@ -169,6 +183,7 @@ const (
 
 // changesState is the Changes tab: a changed-file list plus an inline diff.
 type changesState struct {
+	against  string // "" = uncommitted; api.AgainstTarget = vs the target branch
 	files    []api.ChangedFile
 	cursor   int
 	loading  bool
@@ -276,7 +291,7 @@ func buildProjectRows(st projectsState) []projectsRow {
 			for _, w := range p.Workspaces {
 				rows = append(rows, projectsRow{
 					kind: rowWorkspace, depth: depth + 1, id: w.ID, label: filepath.Base(w.Dir),
-					branch: w.Branch, plain: p.Kind == "plain", ws: []string{w.ID}, isGone: w.IsGone, isMain: w.IsMain,
+					branch: w.Branch, plain: p.Kind == "plain", target: w.TargetBranch, ws: []string{w.ID}, isGone: w.IsGone, isMain: w.IsMain,
 				})
 			}
 		}
@@ -425,6 +440,19 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.projects.pendingRemove != "" {
 		return m.handleRemoveConfirm(msg)
 	}
+	if o := m.projects.offerSpawn; o != nil {
+		m.projects.offerSpawn = nil
+		if msg.String() == "y" {
+			return m, m.beginPresetSpawn(o.nodeID, o.cwd, o.prompt)
+		}
+		return m, nil
+	}
+	if m.projects.create.active {
+		return m.handleCreateKey(msg)
+	}
+	if m.projects.retarget != nil {
+		return m.handleRetargetKey(msg)
+	}
 	if m.projects.showHelp {
 		m.projects.showHelp = false
 		return m, nil
@@ -553,6 +581,8 @@ func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.actRemoveWorkspace(false)
 	case key.Matches(msg, projectsKeys.ForceRemove):
 		return m.actRemoveWorkspace(true)
+	case key.Matches(msg, projectsKeys.Target):
+		return m.actRetarget()
 	}
 	return m, nil
 }
@@ -607,6 +637,9 @@ func (m model) projectsEnter() (tea.Model, tea.Cmd) {
 // --- view ---------------------------------------------------------------------
 
 func (m model) projectsView() string {
+	if m.spawn.active() {
+		return m.spawnView()
+	}
 	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + dimStyle.Render("  ·  projects")
 	if m.projects.loading && m.projects.tree != nil {
 		title += dimStyle.Render("  ·  refreshing…")
@@ -645,6 +678,12 @@ func (m model) projectsView() string {
 // projectsMain is the center column: the workspace tabs, or an overview when the
 // cursor is on a node or project row.
 func (m model) projectsMain(w, h int) string {
+	if m.projects.create.active {
+		return m.createView(w, h)
+	}
+	if rt := m.projects.retarget; rt != nil {
+		return StylePrimaryBold.Render("Change target branch") + "\n\n" + rt.pick.view(w, max(1, h-2), false)
+	}
 	r, ok := m.cursorRow()
 	if !ok {
 		return dimStyle.Render("no projects")
@@ -787,7 +826,7 @@ func (m model) projectsSummary(r projectsRow, w int) string {
 	b.WriteString(truncateLine(StylePrimaryBold.Render(p.Name)+projectLabel("", p.Hidden, p.Pinned)+dimStyle.Render("  "+dir), w) + "\n\n")
 	for _, ws := range visibleWorkspaces(p.Workspaces, m.projects.showGone) {
 		row := projectsRow{
-			kind: rowWorkspace, id: ws.ID, label: filepath.Base(ws.Dir), branch: ws.Branch, plain: p.Kind == "plain",
+			kind: rowWorkspace, id: ws.ID, label: filepath.Base(ws.Dir), branch: ws.Branch, plain: p.Kind == "plain", target: ws.TargetBranch,
 			ws: []string{ws.ID}, isGone: ws.IsGone, isMain: ws.IsMain,
 		}
 		b.WriteString(m.projRowLine(row, false, false, act, w) + "\n")

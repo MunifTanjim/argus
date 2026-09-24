@@ -276,3 +276,10 @@ func TestLockGenesisFromFile(t *testing.T) {
 		t.Fatalf("lock.genesis from file = %q, want abc123", c.Lock.Genesis)
 	}
 }
+
+func TestIssueBranchTemplateDefault(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").Workspace.IssueBranchTemplate; got != "issue-{{.Number}}-{{.Slug}}" {
+		t.Errorf("IssueBranchTemplate = %q, want issue-{{.Number}}-{{.Slug}}", got)
+	}
+}

@@ -69,6 +69,7 @@ var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter, Focus key.Binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                         key.Binding
 	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
+	Target, DiffMode                                                   key.Binding
 	Refresh, Back                                                      key.Binding
 }{
 	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
@@ -94,8 +95,16 @@ var projectsKeys = struct {
 	ForceRemove:   nb([]string{"X"}, "", ""),
 	ShowHidden:    nb([]string{"z"}, "z", "hidden"),
 	ShowGone:      nb([]string{"o"}, "o", "gone"),
+	Target:        nb([]string{"T"}, "T", "target"),
+	DiffMode:      nb([]string{"t"}, "t", "vs target"),
 	Refresh:       nb([]string{"r"}, "r", "refresh"),
 	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
+}
+
+var createKeys = struct {
+	Target key.Binding
+}{
+	Target: nb([]string{"ctrl+t"}, "^t", "target"),
 }
 
 var transcriptKeys = struct {

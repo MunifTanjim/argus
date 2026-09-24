@@ -109,6 +109,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.SetLogger(logger.Scoped("node").L)
 		enableProjectRegistry(d, logger.Scoped("node").L)
 		d.SetWorktreeDirTemplate(cfg.Workspace.WorktreeDirTemplate)
+		d.SetIssueBranchTemplate(cfg.Workspace.IssueBranchTemplate)
 		clickCmd := desktopClickCmd(cfg) // shared by the node's desktop notifier and the local Watch below
 		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 	}

@@ -118,6 +118,11 @@ const (
 	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: nil
 	MethodProjectSetHidden = "project.setHidden" // request: ProjectFlagParams; result: nil
 	MethodProjectSetPinned = "project.setPinned" // request: ProjectFlagParams; result: nil
+	// Create-picker reads and target changes.
+	MethodProjectBranches    = "project.branches"    // request: ProjectRef; result: BranchesResult
+	MethodProjectPRs         = "project.prs"         // request: ProjectRef; result: PRsResult
+	MethodProjectIssues      = "project.issues"      // request: ProjectRef; result: IssuesResult
+	MethodWorkspaceSetTarget = "workspace.setTarget" // request: WorkspaceSetTargetParams; result: nil
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -140,30 +145,34 @@ const (
 // the project tree. Branch and Head are computed live at read; they are empty
 // for a gone or plain workspace, and Branch is empty for a detached HEAD.
 type WorkspaceNode struct {
-	ID         string `json:"id"`
-	Dir        string `json:"dir"`
-	IsMain     bool   `json:"is_main,omitempty"`
-	IsGone     bool   `json:"is_gone,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	Head       string `json:"head,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`   // RFC3339
-	LastSeenAt string `json:"last_seen_at,omitempty"` // RFC3339
+	ID     string `json:"id"`
+	Dir    string `json:"dir"`
+	IsMain bool   `json:"is_main,omitempty"`
+	IsGone bool   `json:"is_gone,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	Head   string `json:"head,omitempty"`
+	// TargetBranch is the stored target, or the project's default branch.
+	TargetBranch string `json:"target_branch,omitempty"`
+	CreatedAt    string `json:"created_at,omitempty"`   // RFC3339
+	LastSeenAt   string `json:"last_seen_at,omitempty"` // RFC3339
 }
 
 // ProjectNode is a repository or plain directory with its workspaces. Root is
 // the main workspace's dir, empty for a bare repo.
 type ProjectNode struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Kind       string          `json:"kind"` // git|plain
-	Dir        string          `json:"dir"`
-	Root       string          `json:"root,omitempty"`
-	IsGone     bool            `json:"is_gone,omitempty"`
-	Hidden     bool            `json:"hidden,omitempty"`
-	Pinned     bool            `json:"pinned,omitempty"`
-	CreatedAt  string          `json:"created_at,omitempty"`   // RFC3339
-	LastSeenAt string          `json:"last_seen_at,omitempty"` // RFC3339
-	Workspaces []WorkspaceNode `json:"workspaces"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"` // git|plain
+	Dir  string `json:"dir"`
+	Root string `json:"root,omitempty"`
+	// DefaultBranch is resolved live.
+	DefaultBranch string          `json:"default_branch,omitempty"`
+	IsGone        bool            `json:"is_gone,omitempty"`
+	Hidden        bool            `json:"hidden,omitempty"`
+	Pinned        bool            `json:"pinned,omitempty"`
+	CreatedAt     string          `json:"created_at,omitempty"`   // RFC3339
+	LastSeenAt    string          `json:"last_seen_at,omitempty"` // RFC3339
+	Workspaces    []WorkspaceNode `json:"workspaces"`
 	// Set only by the aggregating client, not the node.
 	NodeID    string `json:"node_id,omitempty"`
 	NodeLabel string `json:"node_label,omitempty"`
@@ -174,26 +183,90 @@ type ProjectListResult struct {
 	Projects []ProjectNode `json:"projects"`
 }
 
-// WorkspaceRef addresses a workspace by its (composite) id.
+// WorkspaceRef addresses a workspace by its (composite) id. Against selects
+// the changed-files view: "" (uncommitted) or AgainstTarget.
 type WorkspaceRef struct {
 	WorkspaceID string `json:"workspace_id"`
+	Against     string `json:"against,omitempty"`
 }
 
 type WorkspaceFileParams struct {
 	WorkspaceID string `json:"workspace_id"`
-	Path        string `json:"path"` // repo-relative slash path ("" = root, for listDir)
+	Path        string `json:"path"`                // repo-relative slash path ("" = root, for listDir)
+	Against     string `json:"against,omitempty"`   // diff only: "" (vs HEAD) or AgainstTarget
+	OrigPath    string `json:"orig_path,omitempty"` // diff only: rename source, so the diff shows the rename
 }
 
-// WorkspaceCreateParams creates a worktree on a new branch in a project.
+const (
+	SourceNew    = "new"
+	SourceBranch = "branch"
+	SourcePR     = "pr"
+	SourceIssue  = "issue"
+
+	AgainstTarget = "target"
+)
+
 type WorkspaceCreateParams struct {
-	ProjectID string `json:"project_id"`
-	Branch    string `json:"branch"`
+	ProjectID    string `json:"project_id"`
+	Source       string `json:"source,omitempty"`        // SourceNew (default) | SourceBranch | SourcePR | SourceIssue
+	Branch       string `json:"branch,omitempty"`        // new: name to create; branch: name to check out
+	Number       int    `json:"number,omitempty"`        // pr, issue
+	TargetBranch string `json:"target_branch,omitempty"` // "" = project default branch
 }
 
-// WorkspaceCreateResult reports the created workspace.
+// WorkspaceCreateResult's Prompt carries an issue's text for an optional agent
+// spawn.
 type WorkspaceCreateResult struct {
 	WorkspaceID string `json:"workspace_id"`
 	Dir         string `json:"dir"`
+	Warning     string `json:"warning,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+}
+
+// ProjectRef addresses a project by its (composite) id.
+type ProjectRef struct {
+	ProjectID string `json:"project_id"`
+}
+
+type BranchInfo struct {
+	Name       string `json:"name"`
+	Remote     bool   `json:"remote,omitempty"`
+	Local      bool   `json:"local,omitempty"`
+	CheckedOut bool   `json:"checked_out,omitempty"`
+}
+
+type BranchesResult struct {
+	Branches []BranchInfo `json:"branches"`
+}
+
+type PRInfo struct {
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	Author     string `json:"author,omitempty"`
+	HeadBranch string `json:"head_branch"`
+	BaseBranch string `json:"base_branch"`
+	URL        string `json:"url,omitempty"`
+}
+
+type PRsResult struct {
+	PRs []PRInfo `json:"prs"`
+}
+
+type IssueInfo struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Author string `json:"author,omitempty"`
+	URL    string `json:"url,omitempty"`
+}
+
+type IssuesResult struct {
+	Issues []IssueInfo `json:"issues"`
+}
+
+// WorkspaceSetTargetParams sets a workspace's target branch ("" = default).
+type WorkspaceSetTargetParams struct {
+	WorkspaceID  string `json:"workspace_id"`
+	TargetBranch string `json:"target_branch"`
 }
 
 // WorkspaceRemoveParams removes a worktree. Force removes a dirty worktree.

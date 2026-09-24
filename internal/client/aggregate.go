@@ -35,6 +35,7 @@ var workspaceAddressed = map[string]bool{
 	api.MethodWorkspaceListDir:      true,
 	api.MethodWorkspaceReadFile:     true,
 	api.MethodWorkspaceRemove:       true,
+	api.MethodWorkspaceSetTarget:    true,
 }
 
 // projectAddressed methods route by a composite project_id.
@@ -43,6 +44,9 @@ var projectAddressed = map[string]bool{
 	api.MethodProjectRename:    true,
 	api.MethodProjectSetHidden: true,
 	api.MethodProjectSetPinned: true,
+	api.MethodProjectBranches:  true,
+	api.MethodProjectPRs:       true,
+	api.MethodProjectIssues:    true,
 }
 
 // nodeAddressed methods route by an explicit node_id (or the sole node).

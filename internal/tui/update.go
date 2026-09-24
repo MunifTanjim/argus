@@ -161,9 +161,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = msg.verb + " done"
 		}
 		m.projects.want = msg.selectID
+		if msg.reloadChanges {
+			m.projects.changes = changesState{against: m.projects.changes.against}
+		}
 		return m, m.fetchProjects() // refresh the tree after a mutation
+	case branchesMsg:
+		c := &m.projects.create
+		if c.active && msg.projectID == c.projectID {
+			c.branches.branches, c.branches.loaded, c.branches.err = msg.branches, true, msg.err
+			if c.picking {
+				c.targetPick.branches, c.targetPick.loaded, c.targetPick.err = msg.branches, true, msg.err
+			}
+		}
+		if rt := m.projects.retarget; rt != nil && msg.projectID == rt.projectID {
+			rt.pick.branches, rt.pick.loaded, rt.pick.err = msg.branches, true, msg.err
+		}
+	case prsMsg:
+		c := &m.projects.create
+		if c.active && msg.projectID == c.projectID {
+			c.prs, c.prsLoaded, c.prsErr = msg.prs, true, msg.err
+		}
+	case issuesMsg:
+		c := &m.projects.create
+		if c.active && msg.projectID == c.projectID {
+			c.issues, c.issuesLoaded, c.issuesErr = msg.issues, true, msg.err
+		}
+	case createDoneMsg:
+		if msg.seq != m.projects.create.seq {
+			// A hidden picker's call finished after a newer picker opened: report
+			// it without touching the newer picker or the cursor.
+			if msg.err != nil {
+				m.flash = "create workspace: " + msg.err.Error()
+				return m, nil
+			}
+			m.flash = "workspace created"
+			return m, m.fetchProjects()
+		}
+		if msg.err != nil {
+			m.projects.create.creating = false
+			m.projects.create.err = msg.err.Error()
+			if !m.projects.create.active {
+				m.flash = "create workspace: " + msg.err.Error()
+			}
+			return m, nil
+		}
+		m.projects.create = createState{}
+		m.projects.want = msg.res.WorkspaceID
+		m.flash = msg.res.Warning
+		if msg.source == api.SourceIssue && msg.res.Prompt != "" {
+			nodeID, _, _ := session.SplitCompositeID(msg.res.WorkspaceID)
+			m.projects.offerSpawn = &spawnOffer{nodeID: nodeID, cwd: msg.res.Dir, prompt: msg.res.Prompt}
+		}
+		return m, m.fetchProjects()
 	case changedFilesMsg:
-		if msg.ws == m.projects.dataWS {
+		if msg.ws == m.projects.dataWS && msg.against == m.projects.changes.against {
 			m.projects.changes.loading = false
 			m.projects.changes.err = msg.err
 			m.projects.changes.files = msg.files
@@ -172,7 +223,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case wsDiffMsg:
-		if msg.ws == m.projects.dataWS && msg.path == m.projects.changes.diffPath {
+		if msg.ws == m.projects.dataWS && msg.path == m.projects.changes.diffPath && msg.against == m.projects.changes.against {
 			m.projects.changes.diff, m.projects.changes.notShown, m.projects.changes.err = msg.diff, msg.notShown, msg.err
 		}
 	case listDirMsg:
@@ -254,8 +305,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.beginSpawn(nodes, msg.projects, msg.cwd)
 	case spawnAgentsMsg:
-		m.applySpawnAgents(msg)
-		return m, nil
+		return m, m.applySpawnAgents(msg)
 	case spawnResultMsg:
 		if msg.err != nil {
 			m.flash = "spawn failed: " + msg.err.Error()
@@ -353,7 +403,7 @@ func (m model) anyWorking() bool {
 // none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
 // spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
-	if (m.mode == modeList || m.mode == modeProjects) && !m.spinning && m.anyWorking() {
+	if (m.mode == modeList || m.mode == modeProjects) && !m.spinning && (m.anyWorking() || m.projects.create.creating) {
 		m.spinning = true
 		return spinTickCmd()
 	}

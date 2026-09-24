@@ -261,6 +261,59 @@ func ReadFile(ctx context.Context, dir, rel string) (content string, notShown bo
 // untracked (or new-repo) path is rendered as an all-added diff from its
 // content. notShown is true for a binary or oversized result.
 func WorkingDiff(ctx context.Context, dir, p string) (diff string, notShown bool, err error) {
+	return DiffSince(ctx, dir, "HEAD", p, "")
+}
+
+// TargetBase returns the merge base of HEAD and target, preferring
+// origin/<target> when it exists. It does not fetch.
+func TargetBase(ctx context.Context, dir, target string) (string, error) {
+	root, err := repoRoot(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	ref := "origin/" + target
+	if !revExists(ctx, root, ref) {
+		ref = target
+	}
+	if !revExists(ctx, root, ref) {
+		return "", fmt.Errorf("gitstatus: unknown target branch: %s", target)
+	}
+	base := mergeBase(ctx, root, ref)
+	if base == "" {
+		return "", fmt.Errorf("gitstatus: no merge base with %s", ref)
+	}
+	return base, nil
+}
+
+// ChangedFilesSince lists files that differ between base and the working tree,
+// plus untracked files.
+func ChangedFilesSince(ctx context.Context, dir, base string) (root string, files []ChangedFile, err error) {
+	root, err = repoRoot(ctx, dir)
+	if err != nil {
+		return "", nil, err
+	}
+	cmd := shell.NewCommandContext(ctx, "git", "-C", root, "diff", "--name-status", "-M", "-z", base, "--")
+	if err := cmd.Run(); err != nil {
+		return "", nil, fmt.Errorf("gitstatus: git diff failed in %s: %w", root, err)
+	}
+	files = parseNameStatusZ(cmd.StdOut().String())
+	un := shell.NewCommandContext(ctx, "git", "-C", root, "ls-files", "--others", "--exclude-standard", "-z")
+	if err := un.Run(); err != nil {
+		return "", nil, fmt.Errorf("gitstatus: git ls-files failed in %s: %w", root, err)
+	}
+	for _, p := range strings.Split(un.StdOut().String(), "\x00") {
+		if p != "" {
+			files = append(files, ChangedFile{Path: p, Change: ChangeUntracked})
+		}
+	}
+	return root, files, nil
+}
+
+// DiffSince returns a unified diff of a repo-relative path between base and the
+// working tree; origPath (a rename source, or "") lets git show the rename. An
+// untracked path is rendered as an all-added diff. notShown is true for a
+// binary or oversized result.
+func DiffSince(ctx context.Context, dir, base, p, origPath string) (diff string, notShown bool, err error) {
 	root, err := repoRoot(ctx, dir)
 	if err != nil {
 		return "", false, err
@@ -268,8 +321,15 @@ func WorkingDiff(ctx context.Context, dir, p string) (diff string, notShown bool
 	if _, err := repoRelPath(root, p); err != nil {
 		return "", false, err
 	}
-	cmd := shell.NewCommandContext(ctx, "git", "-C", root, "diff", "--no-color", "HEAD", "--", p)
-	_ = cmd.Run() // HEAD may be absent in a new repo; fall through to the added-file path
+	args := []string{"-C", root, "diff", "--no-color", "-M", base, "--", p}
+	if origPath != "" {
+		if _, err := repoRelPath(root, origPath); err != nil {
+			return "", false, err
+		}
+		args = append(args, origPath)
+	}
+	cmd := shell.NewCommandContext(ctx, "git", args...)
+	_ = cmd.Run() // base may be absent (HEAD in a new repo); fall through to the added-file path
 	out := cmd.StdOut().String()
 	if strings.TrimSpace(out) != "" {
 		if len(out) > maxContentBytes || isBinary(out) {

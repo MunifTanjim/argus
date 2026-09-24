@@ -282,16 +282,8 @@ func TestNewWorkspaceFlow(t *testing.T) {
 	m.projects.selectRow("n1:p1")
 	res, _ := m.actNewWorkspace()
 	mm := res.(model)
-	if mm.projects.inputMode != pmNewBranch || mm.projects.inputTarget != "n1:p1" {
-		t.Fatalf("new-workspace input not armed: mode=%v target=%q", mm.projects.inputMode, mm.projects.inputTarget)
-	}
-	mm.projects.input.SetValue("feature-x")
-	res2, cmd := mm.handleProjectsInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if res2.(model).projects.inputMode != pmNone {
-		t.Error("input mode not cleared after submit")
-	}
-	if cmd == nil {
-		t.Error("expected a create-workspace command")
+	if !mm.projects.create.active || mm.projects.create.projectID != "n1:p1" {
+		t.Fatalf("new-workspace picker not open: %+v", mm.projects.create)
 	}
 }
 
@@ -694,5 +686,106 @@ func TestPlainWorkspaceLabel(t *testing.T) {
 	line := ansi.Strip(m.projRowLine(rows[1], false, true, nil, 60))
 	if strings.Contains(line, "detached") {
 		t.Errorf("plain workspace row = %q, want no detached mark", line)
+	}
+}
+
+func TestRetargetWorkspace(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	m.projects.selectRow("n1:w2")
+	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
+	m = res.(model)
+	if m.projects.retarget == nil || cmd == nil {
+		t.Fatal("T should open the target picker and load branches")
+	}
+	res, _ = m.Update(branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main", Local: true}, {Name: "dev", Local: true}}})
+	m = res.(model)
+	for _, r := range "dev" {
+		res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = res.(model)
+	}
+	res, cmd = m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if m.projects.retarget != nil || cmd == nil {
+		t.Fatal("enter should close the picker and call setTarget")
+	}
+	cmd()
+	rc := m.client.(*recordingClient)
+	p := rc.params[len(rc.params)-1].(api.WorkspaceSetTargetParams)
+	if p.WorkspaceID != "n1:w2" || p.TargetBranch != "dev" {
+		t.Errorf("setTarget params = %+v", p)
+	}
+}
+
+func TestRetargetNeedsWorkspaceRow(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:p1")
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
+	if mm := res.(model); mm.projects.retarget != nil || mm.flash == "" {
+		t.Error("T on a project row should only show a hint")
+	}
+}
+
+func TestChangesDiffModeToggle(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	m.projects.tree[0].Workspaces[0].TargetBranch = "main"
+	m.projects.rebuild()
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	m.projects.tab = tabChanges
+	m.projects.dataWS = "n1:w1"
+	m.projects.changes.files = []api.ChangedFile{}
+	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 't', Text: "t"})
+	m = res.(model)
+	if m.projects.changes.against != api.AgainstTarget || cmd == nil {
+		t.Fatalf("t should switch to target mode and reload: against=%q", m.projects.changes.against)
+	}
+	cmd()
+	rc := m.client.(*recordingClient)
+	if p := rc.params[len(rc.params)-1].(api.WorkspaceRef); p.Against != api.AgainstTarget {
+		t.Errorf("changedFiles params = %+v", p)
+	}
+	if !strings.Contains(ansi.Strip(m.projectsView()), "vs main") {
+		t.Error("tab header should show the diff mode")
+	}
+	res, _ = m.Update(changedFilesMsg{ws: "n1:w1", against: "", files: []api.ChangedFile{{Path: "stale"}}})
+	if n := len(res.(model).projects.changes.files); n != 0 {
+		t.Errorf("a result for the other mode must be dropped, got %d files", n)
+	}
+}
+
+func TestSetTargetReloadsChanges(t *testing.T) {
+	m := projectsTestModel()
+	m.projects.selectRow("n1:w1")
+	m.projects.dataWS = "n1:w1"
+	m.projects.tab = tabChanges
+	m.projects.changes.against = api.AgainstTarget
+	m.projects.changes.files = []api.ChangedFile{{Path: "old-target.go"}}
+	m.client = &recordingClient{}
+	cmd := m.setTargetCmd("n1:w1", "dev")
+	res, _ := m.Update(cmd())
+	c := res.(model).projects.changes
+	if c.files != nil || c.against != api.AgainstTarget {
+		t.Errorf("after set target: files=%v against=%q, want files cleared and mode kept", c.files, c.against)
+	}
+}
+
+func TestDiffRequestCarriesRenameSource(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	m.projects.tab = tabChanges
+	m.projects.dataWS = "n1:w1"
+	m.projects.changes.files = []api.ChangedFile{{Path: "b.go", OrigPath: "a.go", Change: "renamed"}}
+	_, cmd := m.handleProjectsPaneKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmd()
+	rc := m.client.(*recordingClient)
+	if p := rc.params[len(rc.params)-1].(api.WorkspaceFileParams); p.OrigPath != "a.go" || p.Path != "b.go" {
+		t.Errorf("diff params = %+v, want the rename source a.go", p)
 	}
 }

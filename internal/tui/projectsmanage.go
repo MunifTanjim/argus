@@ -76,8 +76,6 @@ func (m model) handleProjectsInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		switch mode {
-		case pmNewBranch:
-			return m, m.createWorkspaceCmd(target, val)
 		case pmRename:
 			return m, m.renameProjectCmd(target, val)
 		}
@@ -111,7 +109,7 @@ func (m model) actNewWorkspace() (tea.Model, tea.Cmd) {
 		m.flash = "select a project or workspace first"
 		return m, nil
 	}
-	return m.startInput(pmNewBranch, projID, "")
+	return m.startCreate(projID)
 }
 
 func (m model) actRenameProject() (tea.Model, tea.Cmd) {
@@ -170,16 +168,32 @@ func (m model) actRemoveWorkspace(force bool) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// --- commands -----------------------------------------------------------------
-
-func (m model) createWorkspaceCmd(projectID, branch string) tea.Cmd {
-	client := m.client
-	return func() tea.Msg {
-		var res api.WorkspaceCreateResult
-		err := client.Call(api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: projectID, Branch: branch}, &res)
-		return projectsActionMsg{verb: "create workspace", selectID: res.WorkspaceID, err: err}
+func (m model) actRetarget() (tea.Model, tea.Cmd) {
+	wsID := m.selectedWorkspaceID()
+	if wsID == "" {
+		m.flash = "select a workspace to change its target"
+		return m, nil
 	}
+	projID := m.cursorProjectID()
+	m.projects.retarget = &retargetState{workspaceID: wsID, projectID: projID, pick: newBranchPicker()}
+	return m, m.fetchBranchesCmd(projID)
 }
+
+func (m model) handleRetargetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	rt := m.projects.retarget
+	if msg.String() == "esc" {
+		m.projects.retarget = nil
+		return m, nil
+	}
+	picked, cmd := rt.pick.key(msg)
+	if picked == nil {
+		return m, cmd
+	}
+	m.projects.retarget = nil
+	return m, m.setTargetCmd(rt.workspaceID, picked.Name)
+}
+
+// --- commands -----------------------------------------------------------------
 
 func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
 	client := m.client
@@ -210,5 +224,13 @@ func (m model) setPinnedCmd(projectID string, pinned bool, ok string) tea.Cmd {
 	return func() tea.Msg {
 		err := client.Call(api.MethodProjectSetPinned, api.ProjectFlagParams{ProjectID: projectID, Value: pinned}, nil)
 		return projectsActionMsg{verb: "pin", ok: ok, err: err}
+	}
+}
+
+func (m model) setTargetCmd(workspaceID, branch string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodWorkspaceSetTarget, api.WorkspaceSetTargetParams{WorkspaceID: workspaceID, TargetBranch: branch}, nil)
+		return projectsActionMsg{verb: "set target", ok: "target: " + branch, reloadChanges: true, err: err}
 	}
 }

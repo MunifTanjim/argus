@@ -74,6 +74,11 @@ func (cmd *Command) WithEnv(env []string) *Command {
 	return cmd
 }
 
+func (cmd *Command) WithDir(dir string) *Command {
+	cmd.cmd.Dir = dir
+	return cmd
+}
+
 func (cmd *Command) String() string {
 	return cmd.cmd.String()
 }

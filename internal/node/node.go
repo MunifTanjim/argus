@@ -22,6 +22,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -87,10 +88,12 @@ type Node struct {
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
-	projreg         *projectreg.Registry           // node-local project/workspace registry; nil = disabled
-	worktreeDirTmpl string                         // Go-template path for new worktrees
-	pushStore       *push.Store                    // per-node Web Push subscription store; nil = push disabled
-	pushDeliverer   atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
+	projreg         *projectreg.Registry                                              // node-local project/workspace registry; nil = disabled
+	worktreeDirTmpl string                                                            // Go-template path for new worktrees
+	issueTmpl       string                                                            // Go-template branch name for issue workspaces
+	forgeFor        func(ctx context.Context, repoDir string) (forge.Provider, error) // seam for tests; defaults to forge.For
+	pushStore       *push.Store                                                       // per-node Web Push subscription store; nil = push disabled
+	pushDeliverer   atomic.Pointer[push.Deliverer]                                    // egress for encrypted mobile pushes (uplink RPC or in-process)
 
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
@@ -193,6 +196,10 @@ func (d *Node) SetProjectRegistry(r *projectreg.Registry) { d.projreg = r }
 // SetWorktreeDirTemplate sets the Go-template path for new worktrees (vars .Repo,
 // .Branch), resolved relative to a project's main working tree.
 func (d *Node) SetWorktreeDirTemplate(t string) { d.worktreeDirTmpl = t }
+
+// SetIssueBranchTemplate sets the Go-template branch name for workspaces
+// created from an issue (vars .Number, .Title, .Slug).
+func (d *Node) SetIssueBranchTemplate(t string) { d.issueTmpl = t }
 
 // SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
 // Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).
@@ -402,6 +409,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		caps:         caps,
 		log:          slog.New(slog.DiscardHandler),
 		pending:      map[string]*pendingDecision{},
+		forgeFor:     forge.For,
 		conns:        map[api.Notifier]*connSubs{},
 		terms:        map[api.Notifier]*connTerms{},
 		sessionTerms: map[string]*term{},

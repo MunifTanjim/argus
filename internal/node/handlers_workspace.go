@@ -40,9 +40,19 @@ func (d *Node) handleWorkspaceChangedFiles(ctx context.Context, params json.RawM
 	if err != nil {
 		return nil, err
 	}
-	root, files, err := gitstatus.ChangedFiles(ctx, dir)
+	base, err := d.diffBase(ctx, p.WorkspaceID, dir, p.Against)
 	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+		return nil, err
+	}
+	var root string
+	var files []gitstatus.ChangedFile
+	if base == "" {
+		root, files, err = gitstatus.ChangedFiles(ctx, dir)
+	} else {
+		root, files, err = gitstatus.ChangedFilesSince(ctx, dir, base)
+	}
+	if err != nil {
+		return nil, invalid("%s", err)
 	}
 	out := make([]api.ChangedFile, len(files))
 	for i, f := range files {
@@ -66,7 +76,14 @@ func (d *Node) handleWorkspaceDiff(ctx context.Context, params json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	diff, notShown, err := gitstatus.WorkingDiff(ctx, dir, p.Path)
+	base, err := d.diffBase(ctx, p.WorkspaceID, dir, p.Against)
+	if err != nil {
+		return nil, err
+	}
+	if base == "" {
+		base = "HEAD"
+	}
+	diff, notShown, err := gitstatus.DiffSince(ctx, dir, base, p.Path, p.OrigPath)
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
@@ -91,43 +108,6 @@ func (d *Node) handleWorkspaceListDir(ctx context.Context, params json.RawMessag
 		out[i] = api.DirEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir}
 	}
 	return api.ListDirResult{Root: root, Path: p.Path, Entries: out}, nil
-}
-
-func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage) (any, error) {
-	p, err := api.Decode[api.WorkspaceCreateParams](params)
-	if err != nil {
-		return nil, err
-	}
-	if d.projreg == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "project registry disabled"}
-	}
-	branch := strings.TrimSpace(p.Branch)
-	if p.ProjectID == "" || branch == "" {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "project_id and branch are required"}
-	}
-	name, mainDir, ok, err := d.projreg.ProjectInfo(ctx, p.ProjectID)
-	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
-	}
-	if !ok {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown project: " + p.ProjectID}
-	}
-	if mainDir == "" {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "project has no main working tree to branch from"}
-	}
-	path, err := renderWorktreePath(d.worktreeDirTmpl, name, branch, mainDir)
-	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "worktree template: " + err.Error()}
-	}
-	start := gittree.DefaultBranch(ctx, mainDir)
-	if err := gittree.AddWorktree(ctx, mainDir, path, branch, start); err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
-	}
-	wsID, err := d.projreg.AdoptSession(ctx, path)
-	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
-	}
-	return api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path}, nil
 }
 
 func (d *Node) handleWorkspaceRemove(ctx context.Context, params json.RawMessage) (any, error) {
@@ -213,4 +193,42 @@ func (d *Node) handleWorkspaceReadFile(ctx context.Context, params json.RawMessa
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
 	return api.ReadFileResult{Path: p.Path, Content: content, NotShown: notShown}, nil
+}
+
+func (d *Node) handleWorkspaceSetTarget(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.WorkspaceSetTargetParams](params)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := d.workspaceDir(ctx, p.WorkspaceID); err != nil {
+		return nil, err
+	}
+	target := strings.TrimSpace(p.TargetBranch)
+	if target != "" && !gittree.ValidBranchName(ctx, target) {
+		return nil, invalid("invalid branch name: %q", target)
+	}
+	if err := d.projreg.SetWorkspaceTarget(ctx, p.WorkspaceID, target); err != nil {
+		return nil, invalid("%s", err)
+	}
+	return nil, nil
+}
+
+// diffBase returns "" for the uncommitted view, or the merge base with the
+// workspace's target branch for AgainstTarget.
+func (d *Node) diffBase(ctx context.Context, wsID, dir, against string) (string, error) {
+	if against != api.AgainstTarget {
+		return "", nil
+	}
+	target, _, err := d.projreg.TargetBranch(ctx, wsID)
+	if err != nil {
+		return "", invalid("%s", err)
+	}
+	if target == "" {
+		return "", invalid("workspace has no target branch")
+	}
+	base, err := gitstatus.TargetBase(ctx, dir, target)
+	if err != nil {
+		return "", invalid("%s", err)
+	}
+	return base, nil
 }

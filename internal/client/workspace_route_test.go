@@ -106,3 +106,37 @@ func TestWorkspaceCreateCompositesResultID(t *testing.T) {
 		t.Errorf("dir = %q, want it passed through", res.Dir)
 	}
 }
+
+func TestPickerCallsRouteByCompositeID(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	got := map[string]string{}
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		var m map[string]string
+		_ = json.Unmarshal(params, &m)
+		got[method] = m["project_id"] + m["workspace_id"]
+		return []byte(`{}`), nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{api.MethodProjectBranches, api.MethodProjectPRs, api.MethodProjectIssues} {
+		if err := c.Call(m, api.ProjectRef{ProjectID: "n1:p1"}, nil); err != nil {
+			t.Fatalf("%s: %v", m, err)
+		}
+		if got[m] != "p1" {
+			t.Errorf("%s reached node with %q, want p1", m, got[m])
+		}
+	}
+	if err := c.Call(api.MethodWorkspaceSetTarget, api.WorkspaceSetTargetParams{WorkspaceID: "n1:w1", TargetBranch: "x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got[api.MethodWorkspaceSetTarget] != "w1" {
+		t.Errorf("setTarget reached node with %q, want w1", got[api.MethodWorkspaceSetTarget])
+	}
+}
