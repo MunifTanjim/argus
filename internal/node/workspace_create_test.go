@@ -288,7 +288,7 @@ func TestPickerReadCallsAndSetTarget(t *testing.T) {
 		t.Errorf("issues = %+v, %v", res, err)
 	}
 	d.forgeFor = func(context.Context, string) (forge.Provider, error) { return nil, forge.ErrNoProvider }
-	if _, err := d.handleProjectPRs(ctx, raw); rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "no provider") {
+	if _, err := d.handleProjectPRs(ctx, raw); rpcCode(err) != api.CodeInvalidRequest || err.Error() != forge.ErrNoProvider.Error() {
 		t.Errorf("no provider: err = %v", err)
 	}
 

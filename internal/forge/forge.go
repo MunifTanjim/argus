@@ -37,7 +37,7 @@ type Issue struct {
 	URL    string
 }
 
-var ErrNoProvider = errors.New("forge: no provider for this remote")
+var ErrNoProvider = errors.New("PRs and issues need a github.com origin remote")
 
 // For picks the provider for repoDir's origin remote.
 func For(ctx context.Context, repoDir string) (Provider, error) {

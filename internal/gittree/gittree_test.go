@@ -2,6 +2,7 @@ package gittree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,6 +164,36 @@ func TestAddWorktreeReusesExistingBranch(t *testing.T) {
 	}
 	if loc, err := Resolve(ctx, wt); err != nil || loc.Branch != "reuse" {
 		t.Fatalf("resolve re-added worktree: branch=%q err=%v", loc.Branch, err)
+	}
+}
+
+func TestRemoveDirtyWorktreeIsErrDirty(t *testing.T) {
+	ctx := context.Background()
+	root, _ := initRepo(t)
+	wt := filepath.Join(t.TempDir(), "dirty")
+	if err := AddWorktree(ctx, root, wt, "dirty", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveWorktree(ctx, root, wt, false); !errors.Is(err, ErrDirtyWorktree) {
+		t.Errorf("remove of a dirty worktree: err=%v, want ErrDirtyWorktree", err)
+	}
+	if err := RemoveWorktree(ctx, root, wt, true); err != nil {
+		t.Errorf("force remove: %v", err)
+	}
+}
+
+func TestGitMessageKeepsTheFailure(t *testing.T) {
+	for in, want := range map[string]string{
+		"Preparing worktree (checking out 'x')\nfatal: 'x' is already used by worktree at '/w'": "'x' is already used by worktree at '/w'",
+		"error: pathspec 'a' did not match\nerror: pathspec 'b' did not match":                  "pathspec 'a' did not match; pathspec 'b' did not match",
+		"hint: something\nplain failure":                                                        "plain failure",
+	} {
+		if got := gitMessage(in); got != want {
+			t.Errorf("gitMessage(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

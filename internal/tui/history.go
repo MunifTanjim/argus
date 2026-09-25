@@ -165,7 +165,7 @@ func (m model) exportOrFlashFooter(footer string) string {
 	case m.pendingExport:
 		return asstStyle.Render("export this session? y/n")
 	case m.flash != "":
-		return asstStyle.Render(m.flash)
+		return asstStyle.Render(firstLine(m.flash))
 	}
 	return footer
 }

@@ -907,6 +907,20 @@ func TestRemoveRefusesLiveSessions(t *testing.T) {
 	}
 }
 
+func TestMultiLineErrorFlashesOneLine(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m, _ = upd(m, projectsActionMsg{verb: "remove workspace", err: errString("first line\nsecond line")})
+	if f := ansi.Strip(m.projectsFooter()); strings.Contains(f, "\n") || !strings.Contains(f, "remove workspace: first line …") {
+		t.Errorf("footer = %q, want only the first line", f)
+	}
+	h := homeTestModel()
+	h.flash = "a\nb"
+	if f := ansi.Strip(h.listView()); !strings.Contains(f, "a …") {
+		t.Errorf("Home footer should show one line:\n%s", f)
+	}
+}
+
 func TestKillFailureIsFlashed(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &failingClient{err: errString("no such pane")}

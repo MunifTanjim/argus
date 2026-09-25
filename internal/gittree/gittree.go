@@ -16,6 +16,10 @@ import (
 
 var ErrNotRepo = errors.New("gittree: not a git repository")
 
+// ErrDirtyWorktree reports a remove refused because the worktree has modified
+// or untracked files.
+var ErrDirtyWorktree = errors.New("worktree has uncommitted changes")
+
 type Location struct {
 	GitDir       string // absolute common git directory; the repository identity
 	WorktreeRoot string // absolute worktree working directory ("" for a bare repo)
@@ -137,7 +141,11 @@ func RemoveWorktree(ctx context.Context, repoDir, path string, force bool) error
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	return runGit(ctx, "worktree remove", args...)
+	err := runGit(ctx, "worktree remove", args...)
+	if err != nil && strings.Contains(err.Error(), "contains modified or untracked files") {
+		return ErrDirtyWorktree
+	}
+	return err
 }
 
 // DefaultBranch resolves the repository's default branch: origin/HEAD, then main,
@@ -160,12 +168,35 @@ func DefaultBranch(ctx context.Context, repoDir string) string {
 func runGit(ctx context.Context, what string, args ...string) error {
 	cmd := shell.NewCommandContext(ctx, "git", args...)
 	if err := cmd.Run(); err != nil {
-		if msg := cmd.StdErr().TrimSpace().String(); msg != "" {
-			return fmt.Errorf("gittree: %s: %s", what, msg)
+		if msg := gitMessage(cmd.StdErr().String()); msg != "" {
+			return fmt.Errorf("%s: %s", what, msg)
 		}
-		return fmt.Errorf("gittree: %s: %w", what, err)
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	return nil
+}
+
+// gitMessage reduces git's stderr to the failure: its fatal: and error: lines
+// without the prefix, else the last line. Progress and hint lines are dropped.
+func gitMessage(stderr string) string {
+	var failures []string
+	last := ""
+	for _, ln := range strings.Split(stderr, "\n") {
+		if ln = strings.TrimSpace(ln); ln == "" {
+			continue
+		}
+		last = ln
+		for _, prefix := range []string{"fatal: ", "error: "} {
+			if rest, ok := strings.CutPrefix(ln, prefix); ok {
+				failures = append(failures, rest)
+				break
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return strings.Join(failures, "; ")
+	}
+	return last
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, bool) {
