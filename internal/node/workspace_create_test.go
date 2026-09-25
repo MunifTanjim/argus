@@ -54,8 +54,8 @@ func createFixture(t *testing.T) (*Node, string, string) {
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "commit", "-m", "init")
 	d := nodeWithRegistry(t)
-	d.SetWorktreeDirTemplate(".worktrees/{{.Branch}}")
-	d.SetIssueBranchTemplate("{{.Number}}-{{.Slug}}")
+	d.SetWorktreeDirTemplate(".worktrees/{{.Branch.Name}}")
+	d.SetIssueBranchTemplate("{{.Issue.Number}}-{{.Issue.Slug}}")
 	if _, err := d.projreg.AdoptSession(context.Background(), dir); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +127,21 @@ func TestCreateNewWithUnknownTargetLeavesNothing(t *testing.T) {
 	ps, _ := d.projreg.Snapshot(context.Background())
 	if len(ps[0].Workspaces) != 1 {
 		t.Errorf("a failed create left a workspace row: %+v", ps[0].Workspaces)
+	}
+}
+
+func TestCreateNewWithExistingBranchWarns(t *testing.T) {
+	d, projID, main := createFixture(t)
+	runGit(t, main, "branch", "kept")
+	res, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Branch: "kept", TargetBranch: "main"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if loc, _ := gittree.Resolve(context.Background(), res.Dir); loc.Branch != "kept" {
+		t.Errorf("branch = %q", loc.Branch)
+	}
+	if res.Warning != "branch kept exists; checked it out as is" {
+		t.Errorf("warning = %q, want a note that the existing branch was used", res.Warning)
 	}
 }
 
@@ -253,8 +268,54 @@ func TestCreateRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestTemplatesRejectUnknownKeys(t *testing.T) {
+	d := newTestNode(t)
+	if err := d.SetWorktreeDirTemplate(".worktrees/{{.Branch.Nmae}}"); err == nil {
+		t.Error("a worktree template with an unknown key should be rejected")
+	}
+	if err := d.SetIssueBranchTemplate("{{.Issue.Numbr}}-{{.Issue.Slug}}"); err == nil {
+		t.Error("an issue branch template with an unknown key should be rejected")
+	}
+	if err := d.SetWorktreeDirTemplate(".worktrees/{{.Branch}}"); err == nil {
+		t.Error("a worktree template that prints a whole variable group should be rejected")
+	}
+	if err := d.SetIssueBranchTemplate("{{if .Issue}}x{{end}}"); err == nil {
+		t.Error("an issue branch template that uses a whole variable group should be rejected")
+	}
+	if err := d.SetWorktreeDirTemplate("../{{.Repo.Name}}-{{.Branch.Name}}"); err != nil {
+		t.Errorf("a valid template was rejected: %v", err)
+	}
+	if err := d.SetIssueBranchTemplate("{{.Issue.Number}}-{{.Issue.Title}}-{{.Issue.Slug}}"); err != nil {
+		t.Errorf("a valid template was rejected: %v", err)
+	}
+}
+
+func TestWorktreeBranchSlugFlattensSlashes(t *testing.T) {
+	got, err := renderWorktreePath(".worktrees/{{.Branch.Slug}}", "repo", "feat/a/b", "/main")
+	if want := filepath.Join("/main", ".worktrees", "feat-a-b"); err != nil || got != want {
+		t.Errorf("renderWorktreePath = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestWorktreeRepoIsTheDirectoryName(t *testing.T) {
+	d, projID, main := createFixture(t)
+	if err := d.projreg.RenameProject(context.Background(), projID, "Display Name"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetWorktreeDirTemplate("../{{.Repo.Name}}-{{.Branch.Name}}"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Branch: "feat"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if want := filepath.Base(main) + "-feat"; filepath.Base(res.Dir) != want {
+		t.Errorf("worktree dir = %q, want %q (renaming a project must not move new worktrees)", filepath.Base(res.Dir), want)
+	}
+}
+
 func TestRenderIssueBranchEmptySlug(t *testing.T) {
-	got, err := renderIssueBranch("{{.Number}}-{{.Slug}}", forge.Issue{Number: 42, Title: "修复"})
+	got, err := renderIssueBranch("{{.Issue.Number}}-{{.Issue.Slug}}", forge.Issue{Number: 42, Title: "修复"})
 	if err != nil || got != "42" {
 		t.Errorf("renderIssueBranch = %q, %v; want 42", got, err)
 	}
@@ -281,7 +342,7 @@ func TestPickerReadCallsAndSetTarget(t *testing.T) {
 	d.forgeFor = func(context.Context, string) (forge.Provider, error) {
 		return fakeForge{pr: forge.PullRequest{Number: 1, Title: "t", HeadBranch: "h", BaseBranch: "b"}, issue: forge.Issue{Number: 2, Title: "i"}}, nil
 	}
-	if res, err := d.handleProjectPRs(ctx, raw); err != nil || len(res.(api.PRsResult).PRs) != 1 {
+	if res, err := d.handleProjectPRs(ctx, raw); err != nil || len(res.(api.PRsResult).PRs) != 1 || res.(api.PRsResult).Truncated {
 		t.Errorf("prs = %+v, %v", res, err)
 	}
 	if res, err := d.handleProjectIssues(ctx, raw); err != nil || res.(api.IssuesResult).Issues[0].Title != "i" {

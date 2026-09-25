@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,16 @@ func enableProjectRegistry(d *node.Node, log *slog.Logger) {
 		return
 	}
 	d.SetProjectRegistry(projectreg.New(sqlDB))
+}
+
+func setWorkspaceTemplates(d *node.Node, cfg *config.Config) error {
+	if err := d.SetWorktreeDirTemplate(cfg.Workspace.WorktreeDirTemplate); err != nil {
+		return fmt.Errorf("workspace.worktree-dir-template: %w", err)
+	}
+	if err := d.SetIssueBranchTemplate(cfg.Workspace.IssueBranchTemplate); err != nil {
+		return fmt.Errorf("workspace.issue-branch-template: %w", err)
+	}
+	return nil
 }
 
 func newProjectCmd() *cobra.Command {

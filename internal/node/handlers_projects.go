@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -204,7 +205,7 @@ func (d *Node) handleProjectPRs(ctx context.Context, params json.RawMessage) (an
 	for i, pr := range prs {
 		out[i] = api.PRInfo{Number: pr.Number, Title: pr.Title, Author: pr.Author, HeadBranch: pr.HeadBranch, BaseBranch: pr.BaseBranch, URL: pr.URL}
 	}
-	return api.PRsResult{PRs: out}, nil
+	return api.PRsResult{PRs: out, Truncated: len(prs) >= forge.ListLimit}, nil
 }
 
 func (d *Node) handleProjectIssues(ctx context.Context, params json.RawMessage) (any, error) {
@@ -228,5 +229,5 @@ func (d *Node) handleProjectIssues(ctx context.Context, params json.RawMessage) 
 	for i, x := range is {
 		out[i] = api.IssueInfo{Number: x.Number, Title: x.Title, Author: x.Author, URL: x.URL}
 	}
-	return api.IssuesResult{Issues: out}, nil
+	return api.IssuesResult{Issues: out, Truncated: len(is) >= forge.ListLimit}, nil
 }

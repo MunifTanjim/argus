@@ -51,7 +51,7 @@ const prFields = "number,title,author,headRefName,baseRefName,url"
 
 func (github) ListPRs(ctx context.Context, repoDir string) ([]PullRequest, error) {
 	var raw []ghPR
-	if err := gh(ctx, repoDir, &raw, "pr", "list", "--state", "open", "--limit", "100", "--json", prFields); err != nil {
+	if err := gh(ctx, repoDir, &raw, "pr", "list", "--state", "open", "--limit", strconv.Itoa(ListLimit), "--json", prFields); err != nil {
 		return nil, err
 	}
 	out := make([]PullRequest, len(raw))
@@ -69,7 +69,7 @@ func (github) GetPR(ctx context.Context, repoDir string, number int) (PullReques
 
 func (github) ListIssues(ctx context.Context, repoDir string) ([]Issue, error) {
 	var raw []ghIssue
-	if err := gh(ctx, repoDir, &raw, "issue", "list", "--state", "open", "--limit", "100", "--json", "number,title,author,url"); err != nil {
+	if err := gh(ctx, repoDir, &raw, "issue", "list", "--state", "open", "--limit", strconv.Itoa(ListLimit), "--json", "number,title,author,url"); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, len(raw))

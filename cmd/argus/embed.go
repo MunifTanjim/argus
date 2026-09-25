@@ -285,8 +285,9 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 	d.SetVersion(version)
 	enableProjectRegistry(d, log.With("scope", "node"))
-	d.SetWorktreeDirTemplate(cfg.Workspace.WorktreeDirTemplate)
-	d.SetIssueBranchTemplate(cfg.Workspace.IssueBranchTemplate)
+	if err := setWorkspaceTemplates(d, cfg); err != nil {
+		return nil, nil, err
+	}
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	if cfg.E2EE.Enabled {

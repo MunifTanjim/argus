@@ -235,17 +235,17 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if rt := m.projects.retarget; rt != nil && msg.projectID == rt.projectID {
-			rt.pick.branches, rt.pick.loaded, rt.pick.err = msg.branches, true, msg.err
+			rt.pick.load(msg.branches, msg.err)
 		}
 	case prsMsg:
 		c := &m.projects.create
 		if c.active && msg.projectID == c.projectID {
-			c.prs, c.prsLoaded, c.prsErr = msg.prs, true, msg.err
+			c.prs, c.prsLoaded, c.prsErr, c.prsTruncated = msg.prs, true, msg.err, msg.truncated
 		}
 	case issuesMsg:
 		c := &m.projects.create
 		if c.active && msg.projectID == c.projectID {
-			c.issues, c.issuesLoaded, c.issuesErr = msg.issues, true, msg.err
+			c.issues, c.issuesLoaded, c.issuesErr, c.issuesTruncated = msg.issues, true, msg.err, msg.truncated
 		}
 	case createDoneMsg:
 		if msg.seq != m.projects.create.seq || !m.projects.create.active {
@@ -496,7 +496,8 @@ func (m model) anyWorking() bool {
 // none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
 // spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
-	if (m.mode == modeList || m.mode == modeProjects || m.embedded()) && !m.spinning && (m.anyWorking() || m.projects.create.creating) {
+	busy := m.anyWorking() || m.projects.create.creating || (m.projects.create.active && m.projects.create.listLoading())
+	if (m.mode == modeList || m.mode == modeProjects || m.embedded()) && !m.spinning && busy {
 		m.spinning = true
 		return spinTickCmd()
 	}

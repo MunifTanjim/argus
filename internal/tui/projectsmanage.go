@@ -242,7 +242,13 @@ func (m model) actRetarget() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	projID := m.cursorProjectID()
-	m.projects.retarget = &retargetState{workspaceID: wsID, projectID: projID, pick: newBranchPicker()}
+	pick := newBranchPicker()
+	pick.current = m.targetOf(wsID)
+	label := wsID
+	if r, ok := m.cursorRow(); ok {
+		label = r.label
+	}
+	m.projects.retarget = &retargetState{workspaceID: wsID, projectID: projID, label: label, pick: pick}
 	return m, m.fetchBranchesCmd(projID)
 }
 

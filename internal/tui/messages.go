@@ -147,12 +147,14 @@ type branchesMsg struct {
 type prsMsg struct {
 	projectID string
 	prs       []api.PRInfo
+	truncated bool
 	err       error
 }
 
 type issuesMsg struct {
 	projectID string
 	issues    []api.IssueInfo
+	truncated bool
 	err       error
 }
 

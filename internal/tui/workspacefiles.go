@@ -270,10 +270,12 @@ func (m model) wsHeader(r projectsRow) string {
 	if r.branch != "" {
 		out += StyleDim.Render("  " + r.branch)
 	}
+	if r.target != "" && r.target != r.branch {
+		out += StyleDim.Render(" → " + r.target)
+	}
 	return out
 }
 
-// changesMode names what the Changes list compares against.
 // changesHeader names the file list's mode and base, with its size, and marks a
 // reload that still shows the old list.
 func (m model) changesHeader() string {
