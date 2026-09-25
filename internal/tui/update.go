@@ -390,6 +390,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "spawn failed: " + msg.err.Error()
 		}
 		return m, nil
+	case killResultMsg:
+		if msg.err != nil {
+			m.flash = "kill failed: " + msg.err.Error()
+		}
+		return m, nil
 	case resumeResultMsg:
 		if msg.err != nil {
 			m.flash = "resume failed: " + msg.err.Error()
@@ -558,8 +563,8 @@ func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
 func (m model) killCmd(id string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		_ = client.Call(api.MethodSessionKill, api.SessionRef{SessionID: id}, nil)
-		return nil // registry events will remove it
+		// On success, registry events remove the session.
+		return killResultMsg{err: client.Call(api.MethodSessionKill, api.SessionRef{SessionID: id}, nil)}
 	}
 }
 

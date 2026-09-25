@@ -110,6 +110,8 @@ type spawnAgentsMsg struct {
 // Successful spawns surface via registry events; only the error is acted on.
 type spawnResultMsg struct{ err error }
 
+type killResultMsg struct{ err error }
+
 // resumeResultMsg carries the result of a resume; on success the resumed
 // session's transcript view is entered.
 type resumeResultMsg struct {
