@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -576,6 +577,8 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.projects.showGone = !m.projects.showGone
 		m.projects.rebuild()
 		return m.syncPane()
+	case key.Matches(msg, projectsKeys.Refresh) && m.projects.focus == focusPane && m.projects.fileView.open():
+		return m.reloadFileView()
 	case key.Matches(msg, projectsKeys.Refresh):
 		m.projects.loading, m.projects.err = true, nil
 		return m, m.fetchProjects()
@@ -733,24 +736,31 @@ func (m model) handleFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.applyTreeRequest(m.projects.ftree.key(msg, m.cardListPageStep()))
 }
 
-// reloadFileTree drops every cached listing and fetches the root and each
-// unfolded directory again, so the tree keeps its shape.
+// reloadFileTree fetches the root and each unfolded directory again. The old
+// listings stay until the answers replace them, so the tree keeps its shape and
+// the cursor its path.
 func (m model) reloadFileTree() (tea.Model, tea.Cmd) {
 	ws := m.projects.ftree.ws
-	expanded := m.projects.ftree.expanded
-	m.projects.ftree = newFileTree(ws)
-	m.projects.ftree.expanded = expanded
 	dirs := []string{""}
-	for d := range expanded {
+	for d := range m.projects.ftree.expanded {
 		dirs = append(dirs, d)
 	}
 	sort.Strings(dirs)
 	cmds := make([]tea.Cmd, len(dirs))
 	for i, d := range dirs {
-		m.projects.ftree.dirs[d] = &treeDir{loading: true}
 		cmds[i] = m.fetchListDir(ws, d)
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// reloadFileView fetches the open file or diff again; the old content stays
+// until the answer arrives.
+func (m model) reloadFileView() (tea.Model, tea.Cmd) {
+	f := m.projects.fileView
+	if f.diff {
+		return m, m.fetchWorkspaceDiff(f.ws, api.ChangedFile{Path: f.path, OrigPath: f.orig}, f.against, f.rev)
+	}
+	return m, m.fetchReadFile(f.ws, f.path)
 }
 
 func (m model) applyTreeRequest(req treeRequest) (tea.Model, tea.Cmd) {
@@ -905,15 +915,7 @@ func (m model) projectsView() string {
 		return m.helpScreen()
 	}
 
-	// Collapsed sidebar: the main pane owns the full width.
-	if !m.sidebarVisible() {
-		return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(m.bodyWidthFor(-dividerWidth), h), h), footer, m.width, m.height)
-	}
-
-	// centerW mirrors framedBody's flex split so content wraps to fit.
-	leftW := m.projectsLeftW()
-	centerW := m.bodyWidthFor(leftW)
-	return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(centerW, h), h), footer, m.width, m.height)
+	return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(m.projectsCenterW(), h), h), footer, m.width, m.height)
 }
 
 // helpScreen draws the key help over the whole frame; any key closes it.
@@ -936,7 +938,7 @@ func (m model) projectsMain(w, h int) string {
 		!m.projects.create.active && m.projects.retarget == nil {
 		wideW := min(w, maxContentWidth)
 		head := centerBlock(truncateLine(m.wsHeader(r), cardW), cardW, w)
-		return head + "\n\n" + centerBlock(m.fileViewBody(wideW, max(1, h-2)), wideW, w)
+		return head + "\n\n" + centerBlock(m.fileViewBody(wideW, m.fileViewHeight()), wideW, w)
 	}
 	return centerBlock(m.projectsColumn(cardW, h), cardW, w)
 }
@@ -1247,6 +1249,8 @@ func (m model) currentWorkspace() string {
 // place of the pane content.
 type fileViewState struct {
 	ws, path          string
+	orig              string   // diff only: the rename source
+	wrap              bool     // wrap long lines instead of cutting them
 	lines             []string // highlighted once on load; rendering only windows them
 	diff              bool
 	against           string // diff only: the Changes mode it was opened in
@@ -1281,6 +1285,66 @@ func (m *model) closeFileView() {
 	}
 }
 
+// projectsCenterW is the projects screen's center column width; it mirrors
+// framedBody's flex split so content wraps to fit.
+func (m model) projectsCenterW() int {
+	if !m.sidebarVisible() {
+		return m.bodyWidthFor(-dividerWidth)
+	}
+	return m.bodyWidthFor(m.projectsLeftW())
+}
+
+// fileViewWidth is the width the open file lays out in.
+func (m model) fileViewWidth() int {
+	if m.mode == modeSession {
+		return m.containerWidth()
+	}
+	return min(m.projectsCenterW(), maxContentWidth)
+}
+
+// fileViewHeight is the height the open file lays out in: its title line and
+// its content lines.
+func (m model) fileViewHeight() int {
+	if m.mode == modeSession {
+		h, _ := m.sessionLayout()
+		return h
+	}
+	return max(1, m.height-4-2) // the projects pane, below the workspace header
+}
+
+// fileViewMaxScroll is the scroll, in source lines, that puts the last line at
+// the bottom; wrapped lines count their rows.
+func (m model) fileViewMaxScroll() int {
+	f := m.projects.fileView
+	avail := m.fileViewHeight() - 1
+	if !f.wrap {
+		return max(0, len(f.lines)-avail)
+	}
+	rows := 0
+	for i := len(f.lines) - 1; i >= 0; i-- {
+		if rows += len(wrapLine(f.lines[i], m.fileViewWidth())); rows > avail {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func wrapLine(s string, w int) []string {
+	return strings.Split(xansi.Hardwrap(s, max(1, w), true), "\n")
+}
+
+func fileViewRows(lines []string, scroll, avail, w int, wrap bool) string {
+	var out []string
+	for i := min(scroll, cursorBottom(len(lines))); i < len(lines) && len(out) < avail; i++ {
+		if wrap {
+			out = append(out, wrapLine(lines[i], w)...)
+		} else {
+			out = append(out, xansi.Truncate(lines[i], max(1, w), "…"))
+		}
+	}
+	return strings.Join(out[:min(len(out), avail)], "\n")
+}
+
 func (m model) fileViewBody(w, h int) string {
 	f := m.projects.fileView
 	switch {
@@ -1293,11 +1357,16 @@ func (m model) fileViewBody(w, h int) string {
 	case f.diff && len(f.lines) == 0:
 		return dimStyle.Render(f.path + ": no changes")
 	}
-	title := f.path
-	if f.rev != "" {
-		title = f.rev[:min(len(f.rev), 7)] + " · " + f.path
+	title := renamePath(f.orig, f.path)
+	switch {
+	case f.rev != "":
+		title = f.rev[:min(len(f.rev), 7)] + " · " + title
+	case f.diff && f.against == api.AgainstTarget:
+		title += " · vs " + m.targetOf(f.ws)
+	case f.diff:
+		title += " · uncommitted"
 	}
-	return dimStyle.Render(title) + "\n" + scrollView(f.lines, f.scroll, max(1, h-1), w)
+	return dimStyle.Render(title) + "\n" + fileViewRows(f.lines, f.scroll, max(1, h-1), w, f.wrap)
 }
 
 // handleFileViewKey scrolls or closes the open file and swallows keys meant for
@@ -1312,14 +1381,31 @@ func (m model) handleFileViewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool)
 	switch {
 	case key.Matches(msg, k.Back):
 		m.closeFileView()
+	case key.Matches(msg, k.Refresh):
+		mm, cmd := m.reloadFileView()
+		return mm, cmd, true
 	case key.Matches(msg, k.Up):
 		f.scroll = max(0, f.scroll-1)
 	case key.Matches(msg, k.Down):
-		f.scroll = min(f.scroll+1, cursorBottom(len(f.lines)))
+		f.scroll = min(f.scroll+1, m.fileViewMaxScroll())
 	case key.Matches(msg, k.HalfUp):
 		f.scroll = max(0, f.scroll-m.cardListPageStep())
 	case key.Matches(msg, k.HalfDown):
-		f.scroll = min(f.scroll+m.cardListPageStep(), cursorBottom(len(f.lines)))
+		f.scroll = min(f.scroll+m.cardListPageStep(), m.fileViewMaxScroll())
+	case key.Matches(msg, k.Top):
+		f.scroll = 0
+	case key.Matches(msg, k.Bottom):
+		f.scroll = m.fileViewMaxScroll()
+	case key.Matches(msg, k.Wrap):
+		f.wrap = !f.wrap
+		f.scroll = min(f.scroll, m.fileViewMaxScroll())
+	case key.Matches(msg, k.NextFile), key.Matches(msg, k.PrevFile):
+		d := 1
+		if key.Matches(msg, k.PrevFile) {
+			d = -1
+		}
+		mm, cmd := m.stepDiff(d)
+		return mm, cmd, true
 	case key.Matches(msg, k.Focus), key.Matches(msg, k.FocusPrev), key.Matches(msg, k.Help),
 		key.Matches(msg, k.ToggleSidebar), key.Matches(msg, k.ToggleFiles),
 		key.Matches(msg, sessionKeys.Files), key.Matches(msg, sessionKeys.Focus):

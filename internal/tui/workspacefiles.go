@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -133,13 +134,27 @@ func (m model) paneSessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // fetches everything again.
 func (c *changesState) reload() { *c = changesState{ws: c.ws, against: c.against, gen: c.gen + 1} }
 
+// refreshChanges fetches both lists, and an open commit's files, again while the
+// old ones stay on screen, so the cursor and the open commit hold. gen drops
+// answers to requests from before.
+func (m *model) refreshChanges() tea.Cmd {
+	c := &m.projects.changes
+	c.gen++
+	c.loading, c.err, c.commitsLoading, c.commitsErr = true, nil, true, nil
+	cmds := []tea.Cmd{m.fetchChangedFiles(c.ws, c.against, c.gen), m.fetchCommits(c.ws, c.gen)}
+	if c.commit != nil {
+		c.commitErr = nil
+		cmds = append(cmds, m.fetchCommitFiles(c.ws, c.commit.SHA))
+	}
+	return tea.Batch(cmds...)
+}
+
 // changesKey handles the sidebar's Changes tab; the lists load in syncSidebar.
 func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	c := &m.projects.changes
 	k := projectsKeys
 	if key.Matches(msg, k.Refresh) {
-		c.reload()
-		return m, nil
+		return m, m.refreshChanges()
 	}
 	if c.commit != nil {
 		return m.commitFilesKey(msg)
@@ -147,6 +162,10 @@ func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	n := len(c.files) + len(c.commits)
 	switch {
 	case key.Matches(msg, k.DiffMode):
+		if c.against == "" && m.targetOf(c.ws) == "" {
+			m.flash = "no target branch · T in the tree sets one"
+			return m, nil
+		}
 		if c.against == "" {
 			c.against = api.AgainstTarget
 		} else {
@@ -207,9 +226,29 @@ func (m model) commitFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// stepDiff opens the file d places from the open diff, in the list it came from.
+func (m model) stepDiff(d int) (tea.Model, tea.Cmd) {
+	f := m.projects.fileView
+	c := &m.projects.changes
+	switch {
+	case !f.diff:
+	case f.rev != "" && c.commit != nil && c.commit.SHA == f.rev:
+		if i := c.commitCursor + d; i >= 0 && i < len(c.commitFiles) {
+			c.commitCursor = i
+			return m.openDiff(c.commitFiles[i], f.rev)
+		}
+	case f.rev == "":
+		if i := c.cursor + d; i >= 0 && i < len(c.files) {
+			c.cursor = i
+			return m.openDiff(c.files[i], "")
+		}
+	}
+	return m, nil
+}
+
 func (m model) openDiff(f api.ChangedFile, rev string) (tea.Model, tea.Cmd) {
 	c := m.projects.changes
-	m.projects.fileView = fileViewState{ws: c.ws, path: f.Path, diff: true, against: c.against, rev: rev, loading: true}
+	m.projects.fileView = fileViewState{ws: c.ws, path: f.Path, orig: f.OrigPath, diff: true, against: c.against, rev: rev, loading: true}
 	m.projects.focus = focusPane
 	return m, m.fetchWorkspaceDiff(c.ws, f, c.against, rev)
 }
@@ -235,12 +274,41 @@ func (m model) wsHeader(r projectsRow) string {
 }
 
 // changesMode names what the Changes list compares against.
-func (m model) changesMode() string {
-	if m.projects.changes.against != api.AgainstTarget {
-		return "uncommitted"
+// changesHeader names the file list's mode and base, with its size, and marks a
+// reload that still shows the old list.
+func (m model) changesHeader() string {
+	c := m.projects.changes
+	head := "UNCOMMITTED"
+	if c.against == api.AgainstTarget {
+		head = "CHANGES · vs " + m.targetOf(c.ws)
 	}
-	w, _ := m.findWorkspace(m.projects.changes.ws)
-	return "vs " + w.TargetBranch
+	if c.files != nil {
+		head += " · " + strconv.Itoa(len(c.files))
+		if c.loading {
+			head += " · loading…"
+		}
+	}
+	return head
+}
+
+func (m model) targetOf(wsID string) string {
+	w, _ := m.findWorkspace(wsID)
+	return w.TargetBranch
+}
+
+// diffModeKey labels t with the mode it switches to; with no target it only
+// hints, so it is not offered.
+func (m model) diffModeKey() key.Binding {
+	k := projectsKeys.DiffMode
+	c := m.projects.changes
+	switch {
+	case c.against == api.AgainstTarget:
+		return helpAs(k, "t", "uncommitted")
+	case m.targetOf(c.ws) == "":
+		k.SetEnabled(false)
+		return k
+	}
+	return helpAs(k, "t", "vs "+m.targetOf(c.ws))
 }
 
 // changesView is the Changes tab body: the diff mode and the changed files, then
@@ -253,7 +321,7 @@ func (m model) changesView(w, h int, focused bool) string {
 	gutter := strings.Repeat(" ", screenMargin)
 	tw := max(1, w-screenMargin)
 	note := func(s string) string { return gutter + truncateLine(dimStyle.Render(s), tw) }
-	lines := []string{note(m.changesMode())}
+	var lines []string
 	curLine := 0
 	switch {
 	case c.err != nil:
@@ -285,7 +353,7 @@ func (m model) changesView(w, h int, focused bool) string {
 		}
 		lines = append(lines, commitRow(cm, sel, focused, tw))
 	}
-	return strings.Join(windowSpan(lines, curLine, curLine+1, h), "\n")
+	return note(m.changesHeader()) + "\n" + strings.Join(windowSpan(lines, curLine, curLine+1, max(1, h-1)), "\n")
 }
 
 // commitFilesView is a drilled-in commit: its sha and subject, then its files.
@@ -309,16 +377,22 @@ func (m model) commitFilesView(w, h int, focused bool) string {
 	return head + strings.Join(windowSpan(rows, c.commitCursor, c.commitCursor+1, max(1, h-1)), "\n")
 }
 
-// commitsHeader heads the COMMITS section with the target it counts from.
+// commitsHeader heads the COMMITS section with the target it counts from and
+// the count.
 func (m model) commitsHeader() string {
-	if w, _ := m.findWorkspace(m.projects.changes.ws); w.TargetBranch != "" {
-		return "COMMITS · vs " + w.TargetBranch
+	c := m.projects.changes
+	head := "COMMITS"
+	if t := m.targetOf(c.ws); t != "" {
+		head += " · vs " + t
 	}
-	return "COMMITS"
+	if c.commits != nil {
+		head += " · " + strconv.Itoa(len(c.commits))
+	}
+	return head
 }
 
 func changeRow(f api.ChangedFile, sel, focused bool, tw int) string {
-	path := truncateLeft(f.Path, max(1, tw-2))
+	path := truncateLeft(renamePath(f.OrigPath, f.Path), max(1, tw-2))
 	if sel && focused {
 		path = cursorStyle.Render(path)
 	}
@@ -333,23 +407,19 @@ func commitRow(cm api.Commit, sel, focused bool, tw int) string {
 	return sideMarker(sel, focused) + truncateLine(StyleSecondary.Render(cm.Short)+" "+subject, tw)
 }
 
+func renamePath(orig, p string) string {
+	if orig == "" {
+		return p
+	}
+	return orig + " → " + p
+}
+
 // truncateLeft cuts from the left so a path keeps its file name.
 func truncateLeft(s string, width int) string {
 	if n := lipgloss.Width(s); n > width {
 		return "…" + xansi.TruncateLeft(s, n-width+1, "")
 	}
 	return s
-}
-
-// scrollView windows lines to avail rows from scroll, truncating each to w.
-func scrollView(lines []string, scroll, avail, w int) string {
-	scroll = min(scroll, cursorBottom(len(lines)))
-	end := min(len(lines), scroll+avail)
-	out := make([]string, 0, end-scroll)
-	for _, ln := range lines[scroll:end] {
-		out = append(out, truncateLine(ln, w))
-	}
-	return strings.Join(out, "\n")
 }
 
 func changeMarker(change string) string {

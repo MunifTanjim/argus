@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -469,8 +470,8 @@ func TestScrollStopsAtTheEnd(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		m, _ = upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if s := m.projects.fileView.scroll; s > 2 {
-		t.Errorf("file scroll ran past the end: %d", s)
+	if s := m.projects.fileView.scroll; s != 0 {
+		t.Errorf("a file that fits should not scroll: %d", s)
 	}
 
 }
@@ -501,5 +502,46 @@ func TestLOpensAFile(t *testing.T) {
 	ft.setDir("", []api.DirEntry{{Name: "go.mod", Path: "go.mod"}}, nil)
 	if req := press(&ft, "l"); req.openFile == nil || *req.openFile != "go.mod" {
 		t.Errorf("l on a file should open it: %+v", req)
+	}
+}
+
+func TestRefreshKeepsTreeCursor(t *testing.T) {
+	m := wideWorkspace()
+	m.projects.focus = focusFiles
+	m.client = &recordingClient{}
+	m, _ = upd(m, listDirMsg{ws: "n1:w1", dir: "", entries: []api.DirEntry{{Name: "a", Path: "a", IsDir: true}, {Name: "z.go", Path: "z.go"}}})
+	m, _ = upd(m, keyMsg("l"))
+	m, _ = upd(m, listDirMsg{ws: "n1:w1", dir: "a", entries: []api.DirEntry{{Name: "x.go", Path: "a/x.go"}}})
+	m, _ = upd(m, keyMsg("j")) // a/x.go
+	m, cmd := upd(m, keyMsg("r"))
+	ft := m.projects.ftree
+	if r := ft.rows()[ft.cursor]; cmd == nil || r.entry.Path != "a/x.go" {
+		t.Errorf("r should keep the tree and its cursor while it reloads: cursor on %q", r.entry.Path)
+	}
+}
+
+func TestFileViewGoesToEnds(t *testing.T) {
+	m := openedFile(wideWorkspace())
+	var b strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: b.String()})
+	m.projects.focus = focusPane
+	m, _ = upd(m, keyMsg("G"))
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "line 100") || strings.Contains(out, "line 1\n") {
+		t.Errorf("G should show the last line:\n%s", out)
+	}
+	if want := 100 - (m.fileViewHeight() - 1); m.projects.fileView.scroll != want {
+		t.Errorf("G should stop with the last line at the bottom: scroll=%d want %d", m.projects.fileView.scroll, want)
+	}
+	m, _ = upd(m, keyMsg("j"))
+	if want := 100 - (m.fileViewHeight() - 1); m.projects.fileView.scroll != want {
+		t.Errorf("j at the end should not scroll further: %d", m.projects.fileView.scroll)
+	}
+	m, _ = upd(m, keyMsg("g"))
+	if m.projects.fileView.scroll != 0 {
+		t.Errorf("g should go to the top: %d", m.projects.fileView.scroll)
 	}
 }

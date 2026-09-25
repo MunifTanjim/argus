@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/session"
 	"strings"
 	"testing"
 
@@ -48,7 +51,7 @@ func TestChangesTabFetchesFilesAndCommits(t *testing.T) {
 }
 
 func TestDiffModeReloadsOnlyFiles(t *testing.T) {
-	m := changesFocused(api.ChangedFile{Path: "a.go"})
+	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
 	rc := &recordingClient{}
 	m.client = rc
@@ -95,7 +98,7 @@ func TestCommitDiffUsesRevAndDropsStale(t *testing.T) {
 	}
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", rev: "abc1234", diff: "@@ -1 +1 @@\n-a\n+commit side"})
 	out := ansi.Strip(m.View().Content)
-	if !strings.Contains(out, "+commit side") || !strings.Contains(out, "abc1234 · b.go") {
+	if !strings.Contains(out, "+commit side") || !strings.Contains(out, "abc1234 · a.go → b.go") {
 		t.Errorf("the pane should show the commit diff under its sha:\n%s", out)
 	}
 }
@@ -201,7 +204,7 @@ func TestCommitFileDiffCarriesRev(t *testing.T) {
 	}
 }
 
-func TestRefreshClosesCommit(t *testing.T) {
+func TestRefreshKeepsCommitAndRefetches(t *testing.T) {
 	m := withCommits(changesFocused(), commitN(1))
 	m, _ = upd(m, keyMsg("enter"))
 	if m.projects.changes.commit == nil {
@@ -210,12 +213,13 @@ func TestRefreshClosesCommit(t *testing.T) {
 	m.client = &recordingClient{}
 	m, cmd := upd(m, keyMsg("r"))
 	runCmd(cmd)
-	if c := m.projects.changes; c.commit != nil || c.commits != nil || c.files != nil {
-		t.Fatalf("r should close the commit and drop both lists: %+v", c)
+	if c := m.projects.changes; c.commit == nil || len(c.commits) != 1 {
+		t.Fatalf("r should keep the open commit and the lists: %+v", c)
 	}
-	if paramsFor(m, api.MethodWorkspaceChangedFiles) == nil || paramsFor(m, api.MethodWorkspaceCommits) == nil {
-		t.Error("r should fetch both lists again")
+	if paramsFor(m, api.MethodWorkspaceChangedFiles) == nil || paramsFor(m, api.MethodWorkspaceCommits) == nil || paramsFor(m, api.MethodWorkspaceCommitFiles) == nil {
+		t.Error("r should fetch both lists and the commit's files again")
 	}
+	m, _ = upd(m, keyMsg("esc"))
 }
 
 func TestCommitRowsFitWidth(t *testing.T) {
@@ -247,7 +251,7 @@ func TestCommitCursorStaysVisible(t *testing.T) {
 }
 
 func TestCursorStaysOnCommitWhenFilesArrive(t *testing.T) {
-	m := filesFocused()
+	m := withTarget(filesFocused(), "main")
 	m.client = &recordingClient{}
 	m, _ = upd(m, keyMsg("]"))
 	m = withCommits(m, commitN(1), commitN(2))
@@ -275,7 +279,7 @@ func TestRefreshDropsAnswersFromBefore(t *testing.T) {
 	m, _ = upd(m, keyMsg("r"))
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", gen: before, commits: []api.Commit{commitN(9)}})
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", gen: before, files: []api.ChangedFile{{Path: "old.go"}}})
-	if c := m.projects.changes; c.commits != nil || c.files != nil {
+	if c := m.projects.changes; len(c.commits) != 0 || len(c.files) != 0 {
 		t.Errorf("answers requested before r must be dropped: commits=%v files=%v", c.commits, c.files)
 	}
 }
@@ -293,5 +297,47 @@ func TestLOpensLikeEnterInChanges(t *testing.T) {
 	m, _ = upd(m, keyMsg("l"))
 	if f := m.projects.fileView; !f.open() || f.path != "b.go" {
 		t.Errorf("l on a commit's file should open its diff: %+v", f)
+	}
+}
+
+func TestRefreshKeepsChangesPlace(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "a.go"}, api.ChangedFile{Path: "b.go"})
+	m = withCommits(m, commitN(1))
+	m, _ = upd(m, keyMsg("j"))
+	m, cmd := upd(m, keyMsg("r"))
+	if c := m.projects.changes; cmd == nil || c.cursor != 1 || len(c.files) != 2 || !c.loading {
+		t.Fatalf("r should refetch and keep the list and cursor: cursor=%d files=%d loading=%v", c.cursor, len(c.files), c.loading)
+	}
+	m, _ = upd(m, keyMsg("G"))
+	m, _ = upd(m, keyMsg("enter")) // open the commit
+	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: commitN(1).SHA, files: []api.ChangedFile{{Path: "c.go"}}})
+	m, cmd = upd(m, keyMsg("r"))
+	if c := m.projects.changes; cmd == nil || c.commit == nil || c.cursor != 2 {
+		t.Errorf("r should keep an open commit: commit=%v cursor=%d", c.commit, c.cursor)
+	}
+}
+
+func TestRefreshReloadsOpenDiff(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "b.go", OrigPath: "a.go", Change: "renamed"})
+	m, _ = upd(m, keyMsg("enter"))
+	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", diff: "@@\n+x"})
+	rc := &recordingClient{}
+	m.client = rc
+	m, cmd := upd(m, keyMsg("r"))
+	runCmd(cmd)
+	if p, ok := paramsFor(m, api.MethodWorkspaceDiff).(api.WorkspaceFileParams); !ok || p.OrigPath != "a.go" {
+		t.Errorf("r in the diff should refetch it with its rename source: %v", rc.calls)
+	}
+	if !m.projects.fileView.open() || len(m.projects.fileView.lines) == 0 {
+		t.Error("the old diff should stay on screen while it reloads")
+	}
+}
+
+func TestIdleSessionRefreshesChanges(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "a.go"})
+	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusWorking}
+	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusIdle}})
+	if cmd := m.applyEvent(api.Notification{Method: api.MethodSessionEvent, Params: params}); cmd == nil || !m.projects.changes.loading {
+		t.Error("a session in the workspace going idle should refresh the changes")
 	}
 }

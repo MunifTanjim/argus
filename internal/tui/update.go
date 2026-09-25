@@ -302,6 +302,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if c.commits == nil {
 				c.commits = []api.Commit{}
 			}
+			c.cursor = min(c.cursor, cursorBottom(len(c.files)+len(c.commits)))
 		}
 	case commitFilesMsg:
 		if c := &m.projects.changes; msg.ws == c.ws && c.commit != nil && msg.sha == c.commit.SHA {
@@ -309,6 +310,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if c.commitFiles == nil {
 				c.commitFiles = []api.ChangedFile{}
 			}
+			c.commitCursor = min(c.commitCursor, cursorBottom(len(c.commitFiles)))
 		}
 	case listDirMsg:
 		if msg.ws == m.projects.ftree.ws {
@@ -625,6 +627,11 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 			cmd = bellCmd()
 		}
 		m.sessions[ev.Session.ID] = ev.Session
+		// An agent that stops working has likely changed files in its workspace.
+		if existed && prev.Status == session.StatusWorking && ev.Session.Status != session.StatusWorking &&
+			ev.Session.WorkspaceID != "" && ev.Session.WorkspaceID == m.projects.changes.ws && m.projects.changes.files != nil {
+			cmd = tea.Batch(cmd, m.refreshChanges())
+		}
 		// /clear swaps the open session's transcript in place; re-subscribe so the
 		// stale (pre-clear) stream is dropped and the new file streams from the start.
 		if c := m.resubscribeOnClear(prev, existed, ev.Session); c != nil {
