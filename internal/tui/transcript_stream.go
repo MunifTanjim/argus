@@ -35,7 +35,7 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 // delta keeps tailing (see restoreChunkCursor), and returns the subscribe command.
 func (m *model) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
-	m.transcript.chunks = m.transcriptCache[ref.key()].chunks
+	m.setChunks(m.transcriptCache[ref.key()].chunks)
 	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
 	m.transcript.scroll = m.maxScroll()
 	return m.subscribeCmd(ref, len(m.transcript.chunks))
@@ -69,6 +69,18 @@ func applyDelta(chunks []transcript.Chunk, d api.TranscriptDelta) []transcript.C
 	out = append(out, chunks[:from]...)
 	out = append(out, d.Chunks...)
 	return out
+}
+
+func (m *model) setChunks(chunks []transcript.Chunk) {
+	m.transcript.chunks = chunks
+	clear(m.transcript.cards)
+}
+
+func (m *model) applyChunkDelta(d api.TranscriptDelta) {
+	for _, c := range m.transcript.chunks[min(d.FromIndex, len(m.transcript.chunks)):] {
+		delete(m.transcript.cards, c.ID)
+	}
+	m.transcript.chunks = applyDelta(m.transcript.chunks, d)
 }
 
 // subscribeCmd opens a subscription and delivers the catch-up as a transcriptDeltaMsg.

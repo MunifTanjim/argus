@@ -132,7 +132,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prevID := m.currentChunkID()
 			// Tail-follow only if the view was already pinned to the bottom.
 			atBottom := m.transcript.scroll >= m.maxScroll()
-			m.transcript.chunks, m.transcript.err = msg.chunks, msg.err
+			m.setChunks(msg.chunks)
+			m.transcript.err = msg.err
 			m.restoreChunkCursor(prevID, atBottom)
 		}
 	case histProjectsMsg:
@@ -261,7 +262,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.sessCursor = max(0, len(m.history.sessions)-1)
 		}
 	case histTranscriptMsg:
-		m.transcript.chunks, m.transcript.err = msg.chunks, msg.err
+		m.setChunks(msg.chunks)
+		m.transcript.err = msg.err
 		m.transcript.cursor, m.transcript.scroll = 0, 0
 	case histSubagentMsg:
 		// Match by agentID, not topFrame(): the user may have drilled into a leaf above this frame.
@@ -300,7 +302,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prevID := m.currentChunkID()
 		atBottom := m.transcript.scroll >= m.maxScroll()
-		m.transcript.chunks = applyDelta(m.transcript.chunks, msg.delta)
+		m.applyChunkDelta(msg.delta)
 		m.transcriptCache[msg.ref.key()] = cachedTranscript{chunks: m.transcript.chunks}
 		m.restoreChunkCursor(prevID, atBottom)
 	case spawnNodesMsg:
