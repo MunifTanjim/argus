@@ -65,7 +65,7 @@ func (m model) handleProjectsInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.projects.inputMode = pmNone
 		if mode == pmFilter {
 			m.projects.setFilter("")
-			return m.ensureTabData()
+			return m.syncPane()
 		}
 		return m, nil
 	}
@@ -88,7 +88,7 @@ func (m model) handleProjectsInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, cmd
 	}
 	m.projects.setFilter(m.projects.input.Value())
-	mm, sync := m.ensureTabData()
+	mm, sync := m.syncPane()
 	return mm, tea.Batch(cmd, sync)
 }
 

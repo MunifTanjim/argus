@@ -206,6 +206,22 @@ func TestIssueCreateOffersSpawn(t *testing.T) {
 	}
 }
 
+func TestHiddenPickerCreateOnlyReports(t *testing.T) {
+	m := createTestModel(t)
+	m.projects.create.creating = true
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide; the call runs on
+	m = res.(model)
+	m.projects.selectRow("n1:w1")
+	res, _ = m.Update(createDoneMsg{seq: m.projects.create.seq,
+		res:    api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Prompt: "Fix"},
+		source: api.SourceIssue,
+	})
+	m = res.(model)
+	if m.projects.offerSpawn != nil || m.projects.want == "n1:w9" || !strings.Contains(m.flash, "workspace created") {
+		t.Errorf("a hidden picker's result should only be flashed: offer=%v want=%q flash=%q", m.projects.offerSpawn, m.projects.want, m.flash)
+	}
+}
+
 func TestNonIssueCreateDoesNotOfferSpawn(t *testing.T) {
 	m := createTestModel(t)
 	res, _ := m.Update(createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})

@@ -33,35 +33,22 @@ func (m model) projectsFooter() string {
 		return m.footer(helpAs(k.Up, "↑/↓", "move"), helpAs(k.Enter, "enter", "select"), helpAs(k.Back, "esc", "cancel"))
 	case m.projects.showHelp:
 		return m.footer(helpAs(k.Back, "any key", "close"))
+	case m.projects.focus == focusFiles && m.filesVisible():
+		return m.footer(append(m.sidebarBindings("pane"), m.sideKey(k.ToggleFiles), k.Help)...)
 	case m.projects.focus == focusTree && m.sidebarVisible():
 		bindings := []key.Binding{k.Up, k.Left, k.Enter, k.Focus, k.Spawn, k.New, k.Remove, k.Filter}
 		if m.projects.filter != "" {
 			bindings = append(bindings, helpAs(k.Back, "esc", "clear filter"))
 		}
-		return m.footer(append(bindings, helpAs(k.Back, "q", "quit"), k.Help)...)
-	case m.paneViewing():
+		return m.footer(append(bindings, helpAs(k.Back, "q", "quit"), m.sideKey(k.ToggleFiles), k.Help)...)
+	case m.projects.fileView.open() && m.projects.focus == focusPane:
 		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^d/^u", "page"), helpAs(k.Back, "esc", "close"), k.Help)
 	}
-	open, back := k.Enter, k.Back
-	switch m.projects.tab {
-	case tabChanges:
-		open = helpAs(k.Enter, "enter", "diff")
-	case tabFiles:
-		if m.projects.files.dir != "" {
-			back = helpAs(k.Back, "esc", "up")
-		}
+	bindings := []key.Binding{k.Up, k.Enter, k.Spawn, listKeys.Kill}
+	if m.sidebarVisible() || m.nextFromPane() == "files" {
+		bindings = append(bindings, helpAs(k.Focus, "tab", m.nextFromPane()))
 	}
-	bindings := []key.Binding{k.Up, listKeys.TabNext, open, k.Spawn}
-	if m.projects.tab == tabSessions {
-		bindings = append(bindings, listKeys.Kill)
-	}
-	if m.projects.tab == tabChanges {
-		bindings = append(bindings, k.DiffMode)
-	}
-	if m.sidebarVisible() {
-		bindings = append(bindings, helpAs(k.Focus, "tab", "tree"))
-	}
-	return m.footer(append(bindings, k.Help, back)...)
+	return m.footer(append(bindings, k.Help, k.Back)...)
 }
 
 // projectsHelpView lists every projects-screen key, grouped by where it acts.
@@ -78,16 +65,18 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Left, "h ←", "fold / parent"),
 			helpAs(k.Right, "l →", "unfold / open pane"),
 			helpAs(k.Enter, "enter", "open / fold"),
-			helpAs(k.Focus, "tab", "switch pane"),
+			helpAs(k.Focus, "tab shift+tab", "cycle focus"),
 			helpAs(k.Filter, "/", "filter"),
 		}},
 		{"Pane", []key.Binding{
-			helpAs(listKeys.TabNext, "h/l", "prev / next tab"),
 			helpAs(k.Up, "↑/↓ j/k", "move / scroll"),
-			helpAs(k.Enter, "enter", "open"),
-			helpAs(k.Back, "esc", "close / up / tree"),
+			helpAs(k.Enter, "enter", "open session"),
+			helpAs(k.Back, "esc", "close / tree"),
+			helpAs(listKeys.Kill, "x", "kill session"),
+			helpAs(sessionKeys.Files, "^f", "session: go to right sidebar"),
+			helpAs(k.SideTabNext, "[ ]", "right sidebar: Files / Changes"),
 			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
-			helpAs(listKeys.Kill, "x", "sessions: kill session"),
+			helpAs(k.Back, "esc h", "changes: back from a commit"),
 		}},
 		{"Manage", []key.Binding{
 			helpAs(k.Spawn, "s", "start a session in the workspace"),
@@ -102,7 +91,8 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Target, "T", "change target branch"),
 		}},
 		{"Screen", []key.Binding{
-			helpAs(k.Widen, "< >", "resize sidebar"),
+			helpAs(k.Widen, "< >", "resize focused sidebar"),
+			helpAs(k.ToggleFiles, "^e", "toggle right sidebar"),
 			helpAs(k.ToggleSidebar, "^b", "toggle sidebar"),
 			helpAs(k.Refresh, "r", "refresh"),
 			helpAs(k.Help, "?", "help"),
@@ -122,15 +112,58 @@ func (m model) projectsHelpView() string {
 		}
 		cols[i] = strings.Join(lines, "\n")
 	}
-	var parts []string
-	for i, c := range cols {
-		if i > 0 {
-			parts = append(parts, "    ")
+	// All groups side by side, else two per row, else stacked.
+	for _, perRow := range []int{len(cols), 2} {
+		if out := helpGrid(cols, perRow); m.width <= 0 || lipgloss.Width(out) <= m.frameWidth() {
+			return out
 		}
-		parts = append(parts, c)
-	}
-	if out := lipgloss.JoinHorizontal(lipgloss.Top, parts...); m.width <= 0 || lipgloss.Width(out) <= m.frameWidth() {
-		return out
 	}
 	return strings.Join(cols, "\n\n")
+}
+
+func helpGrid(cols []string, perRow int) string {
+	var rows []string
+	for start := 0; start < len(cols); start += perRow {
+		var parts []string
+		for i, c := range cols[start:min(start+perRow, len(cols))] {
+			if i > 0 {
+				parts = append(parts, "    ")
+			}
+			parts = append(parts, c)
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
+	}
+	return strings.Join(rows, "\n\n")
+}
+
+// nextFromPane names where tab goes from the pane.
+func (m model) nextFromPane() string {
+	if m.filesVisible() && m.currentWorkspace() != "" {
+		return m.sideTabLabel()
+	}
+	return "tree"
+}
+
+func (m model) sideTabLabel() string { return strings.ToLower(sideTabNames[m.projects.sideTab]) }
+
+func (m model) sideKey(b key.Binding) key.Binding {
+	return helpAs(b, b.Help().Key, m.sideTabLabel())
+}
+
+// sidebarBindings are the focused right sidebar's keys for its current tab and
+// row; escDesc names where esc goes from the top level.
+func (m model) sidebarBindings(escDesc string) []key.Binding {
+	k := projectsKeys
+	esc := helpAs(k.Back, "esc", escDesc)
+	if m.projects.sideTab == sideFiles {
+		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Left, "h/l", "fold"), helpAs(k.Enter, "enter", "open"), esc}
+	}
+	c := m.projects.changes
+	switch {
+	case c.commit != nil:
+		return []key.Binding{k.Up, helpAs(k.Enter, "enter", "diff"), helpAs(k.Back, "esc", "back")}
+	case c.cursor >= len(c.files) && c.cursor < len(c.files)+len(c.commits):
+		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "files"), esc}
+	}
+	return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "diff"), k.DiffMode, esc}
 }

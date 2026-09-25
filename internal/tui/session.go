@@ -22,6 +22,16 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusHistory // dock vanished; reclaim focus
 	}
 
+	if m.focus == focusHistory {
+		if key.Matches(msg, sessionKeys.Files) && m.filesVisible() && m.currentWorkspace() != "" {
+			m.projects.focus = focusFiles
+			return m, nil
+		}
+		if mm, cmd, ok := m.handleFileViewKey(msg); ok {
+			return mm, cmd
+		}
+	}
+
 	switch {
 	case key.Matches(msg, sessionKeys.Focus):
 		if pending {
@@ -98,7 +108,12 @@ func (m model) historyFocused() bool {
 
 // sessionFooter is the key-hint line, varying by focused region and sub-view.
 func (m model) sessionFooter() string {
+	k := projectsKeys
 	switch {
+	case m.projects.focus == focusFiles && m.filesVisible():
+		return m.footer(append(m.sidebarBindings("back"), k.Refresh)...)
+	case m.projects.fileView.open() && m.focus == focusHistory:
+		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^d/^u", "page"), helpAs(k.Back, "esc", "close"), m.sideKey(sessionKeys.Files))
 	case m.focus == focusDock:
 		multi := m.isMultiQuestion()
 		binds := []key.Binding{promptKeys.Up}
@@ -125,6 +140,9 @@ func (m model) sessionFooter() string {
 		}
 		if m.sessions[m.selectedID].Status == session.StatusStarting {
 			binds = append(binds, sessionKeys.Raw)
+		}
+		if m.filesVisible() && m.currentWorkspace() != "" {
+			binds = append(binds, m.sideKey(sessionKeys.Files))
 		}
 		return m.footer(binds...)
 	}
@@ -405,6 +423,10 @@ func (m model) sessionView() string {
 	}
 
 	body := m.historyBody()
+	if m.projects.fileView.open() {
+		histH, _ := m.sessionLayout()
+		body = m.center(m.fileViewBody(m.containerWidth(), histH), m.containerWidth())
+	}
 	if m.sessionInteraction() != nil {
 		_, dockH := m.sessionLayout()
 		ruleColor := ColorBorder

@@ -130,57 +130,6 @@ func TestProjectsEnterOnWorkspaceFocusesPane(t *testing.T) {
 	}
 }
 
-func TestCycleTabFetchesData(t *testing.T) {
-	m := projectsTestModel()
-	m.projects.selectRow("n1:w1")
-	m.projects.focus = focusPane
-	res, cmd := m.handleProjectsPaneKey(tea.KeyPressMsg{Code: 'l'}) // next tab
-	mm := res.(model)
-	if mm.projects.tab != tabChanges {
-		t.Fatalf("tab = %v, want tabChanges", mm.projects.tab)
-	}
-	if mm.projects.dataWS != "n1:w1" {
-		t.Errorf("dataWS = %q, want n1:w1", mm.projects.dataWS)
-	}
-	if cmd == nil {
-		t.Error("expected a fetch command on tab switch")
-	}
-}
-
-func TestPaneChangesEnterOpensDiff(t *testing.T) {
-	m := projectsTestModel()
-	m.projects.selectRow("n1:w1")
-	m.projects.focus = focusPane
-	m.projects.tab = tabChanges
-	m.projects.dataWS = "n1:w1"
-	m.projects.changes.files = []api.ChangedFile{{Path: "a.go", Change: "modified"}}
-	res, cmd := m.handleProjectsPaneKey(tea.KeyPressMsg{Code: ' '}) // enter
-	mm := res.(model)
-	if !mm.projects.changes.viewing || mm.projects.changes.diffPath != "a.go" {
-		t.Fatalf("diff not opened: %+v", mm.projects.changes)
-	}
-	if cmd == nil {
-		t.Error("expected a diff fetch command")
-	}
-}
-
-func TestPaneFilesEnterDescendsDir(t *testing.T) {
-	m := projectsTestModel()
-	m.projects.selectRow("n1:w1")
-	m.projects.focus = focusPane
-	m.projects.tab = tabFiles
-	m.projects.dataWS = "n1:w1"
-	m.projects.files.entries = []api.DirEntry{{Name: "src", Path: "src", IsDir: true}}
-	res, cmd := m.handleProjectsPaneKey(tea.KeyPressMsg{Code: ' '})
-	mm := res.(model)
-	if mm.projects.files.dir != "src" || !mm.projects.files.loading {
-		t.Fatalf("did not descend: %+v", mm.projects.files)
-	}
-	if cmd == nil {
-		t.Error("expected a listDir fetch command")
-	}
-}
-
 func TestProjectsViewRenders(t *testing.T) {
 	m := projectsTestModel()
 	m.projects.selectRow("n1:w1")
@@ -228,6 +177,36 @@ func TestToggleSidebar(t *testing.T) {
 	res, _ = mm.handleProjectsKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if !res.(model).sidebarVisible() {
 		t.Error("ctrl+b again should show the sidebar")
+	}
+}
+
+func TestNarrowingMovesFocusOffTheTree(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1")
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 70, Height: 30})
+	if m.projects.focus != focusPane {
+		t.Errorf("the pane should take focus when the tree collapses: focus=%v", m.projects.focus)
+	}
+
+	m = projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.cursor = 0
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 70, Height: 30})
+	if m.mode != modeList || m.projects.focus != focusPane {
+		t.Errorf("on the Home row the Home pane should take focus: mode=%v focus=%v", m.mode, m.projects.focus)
+	}
+}
+
+func TestHelpFitsCommonTerminal(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.showHelp = true
+	out := ansi.Strip(m.View().Content)
+	for _, want := range []string{"cycle focus", "kill session", "change target branch", "quit (tree)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help at 120x30 is missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -490,13 +469,12 @@ func TestTreeMoveSyncsPane(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:w1")
-	m.projects.tab = tabChanges
 	m.projects.dataWS = "n1:w1"
-	m.projects.changes.files = []api.ChangedFile{{Path: "old.go"}}
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 'j'})
+	m.projects.wsCursor = 2
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'j'})
 	mm := res.(model)
-	if mm.projects.dataWS != "n1:w2" || mm.projects.changes.files != nil || cmd == nil {
-		t.Errorf("moving to n1:w2 should drop w1's changes and fetch w2's: dataWS=%q files=%v", mm.projects.dataWS, mm.projects.changes.files)
+	if mm.projects.dataWS != "n1:w2" || mm.projects.wsCursor != 0 {
+		t.Errorf("moving to n1:w2 should reset the pane: dataWS=%q wsCursor=%d", mm.projects.dataWS, mm.projects.wsCursor)
 	}
 }
 
@@ -508,11 +486,10 @@ func TestFooterFollowsFocus(t *testing.T) {
 		t.Errorf("tree footer = %q", f)
 	}
 	m.projects.focus = focusPane
-	if f := m.projectsFooter(); !strings.Contains(f, "tabs") || !strings.Contains(f, "tree") {
+	if f := m.projectsFooter(); strings.Contains(f, "tabs") || !strings.Contains(f, "tree") {
 		t.Errorf("pane footer = %q", f)
 	}
-	m.projects.tab = tabChanges
-	m.projects.changes.viewing = true
+	m.projects.fileView = fileViewState{ws: "n1:w1", path: "a.go", diff: true}
 	if f := m.projectsFooter(); !strings.Contains(f, "scroll") || !strings.Contains(f, "close") {
 		t.Errorf("viewer footer = %q", f)
 	}
@@ -543,26 +520,59 @@ func TestFilterInputIsLive(t *testing.T) {
 	}
 }
 
+func TestRevealClearsFilterThatHidesTarget(t *testing.T) {
+	m := projectsTestModel()
+	m.projects.setFilter("feat")
+	m.projects.reveal("n1:w1")
+	if m.projects.cursorRowID() != "n1:w1" || m.projects.filter != "" {
+		t.Errorf("reveal should clear a filter that hides the row: cursor=%q filter=%q", m.projects.cursorRowID(), m.projects.filter)
+	}
+
+	m.projects.setFilter("repo")
+	m.projects.reveal("n1:w2")
+	if m.projects.cursorRowID() != "n1:w2" || m.projects.filter != "repo" {
+		t.Errorf("reveal should keep a filter that shows the row: cursor=%q filter=%q", m.projects.cursorRowID(), m.projects.filter)
+	}
+}
+
 func TestBlankFilterKeepsFolding(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:p1")
 	for _, k := range []tea.KeyPressMsg{{Code: '/', Text: "/"}, {Code: ' ', Text: " "}, {Code: tea.KeyEnter}} {
-		res, _ := m.handleProjectsKey(k)
-		m = res.(model)
+		m, _ = upd(m, k)
 	}
 	if m.projects.filter != "" {
 		t.Fatalf("a blank filter should not apply: %q", m.projects.filter)
 	}
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	m = res.(model)
+	m, _ = upd(m, keyMsg("h"))
 	if !m.projects.collapsed["n1:p1"] {
 		t.Error("h should fold the project after a blank filter")
 	}
-	res, _ = m.moveTree(len(m.projects.rows) + 3)
+	res, _ := m.moveTree(len(m.projects.rows) + 3)
 	m = res.(model)
 	if m.projects.cursor >= len(m.projects.rows) {
 		t.Errorf("moveTree should clamp to the last row: cursor=%d rows=%d", m.projects.cursor, len(m.projects.rows))
+	}
+}
+
+func TestFilterFromPaneFocusesTree(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.inputActive() || m.projects.focus != focusTree {
+		t.Errorf("/ from the pane should filter in the tree: input=%v focus=%v", m.inputActive(), m.projects.focus)
+	}
+
+	m = projectsTestModel()
+	m.width, m.height = 70, 30 // tree collapsed
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if m.inputActive() || !strings.Contains(m.flash, "shows the tree") {
+		t.Errorf("/ with no tree on screen should only hint: input=%v flash=%q", m.inputActive(), m.flash)
 	}
 }
 
@@ -705,68 +715,6 @@ func TestRetargetNeedsWorkspaceRow(t *testing.T) {
 	}
 }
 
-func TestChangesDiffModeToggle(t *testing.T) {
-	m := projectsTestModel()
-	m.width, m.height = 120, 30
-	m.client = &recordingClient{}
-	m.projects.tree[0].Workspaces[0].TargetBranch = "main"
-	m.projects.rebuild()
-	m.projects.selectRow("n1:w1")
-	m.projects.focus = focusPane
-	m.projects.tab = tabChanges
-	m.projects.dataWS = "n1:w1"
-	m.projects.changes.files = []api.ChangedFile{}
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 't', Text: "t"})
-	m = res.(model)
-	if m.projects.changes.against != api.AgainstTarget || cmd == nil {
-		t.Fatalf("t should switch to target mode and reload: against=%q", m.projects.changes.against)
-	}
-	cmd()
-	rc := m.client.(*recordingClient)
-	if p := rc.params[len(rc.params)-1].(api.WorkspaceRef); p.Against != api.AgainstTarget {
-		t.Errorf("changedFiles params = %+v", p)
-	}
-	if !strings.Contains(ansi.Strip(m.projectsView()), "vs main") {
-		t.Error("tab header should show the diff mode")
-	}
-	res, _ = m.Update(changedFilesMsg{ws: "n1:w1", against: "", files: []api.ChangedFile{{Path: "stale"}}})
-	if n := len(res.(model).projects.changes.files); n != 0 {
-		t.Errorf("a result for the other mode must be dropped, got %d files", n)
-	}
-}
-
-func TestSetTargetReloadsChanges(t *testing.T) {
-	m := projectsTestModel()
-	m.projects.selectRow("n1:w1")
-	m.projects.dataWS = "n1:w1"
-	m.projects.tab = tabChanges
-	m.projects.changes.against = api.AgainstTarget
-	m.projects.changes.files = []api.ChangedFile{{Path: "old-target.go"}}
-	m.client = &recordingClient{}
-	cmd := m.setTargetCmd("n1:w1", "dev")
-	res, _ := m.Update(cmd())
-	c := res.(model).projects.changes
-	if c.files != nil || c.against != api.AgainstTarget {
-		t.Errorf("after set target: files=%v against=%q, want files cleared and mode kept", c.files, c.against)
-	}
-}
-
-func TestDiffRequestCarriesRenameSource(t *testing.T) {
-	m := projectsTestModel()
-	m.client = &recordingClient{}
-	m.projects.selectRow("n1:w1")
-	m.projects.focus = focusPane
-	m.projects.tab = tabChanges
-	m.projects.dataWS = "n1:w1"
-	m.projects.changes.files = []api.ChangedFile{{Path: "b.go", OrigPath: "a.go", Change: "renamed"}}
-	_, cmd := m.handleProjectsPaneKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	cmd()
-	rc := m.client.(*recordingClient)
-	if p := rc.params[len(rc.params)-1].(api.WorkspaceFileParams); p.OrigPath != "a.go" || p.Path != "b.go" {
-		t.Errorf("diff params = %+v, want the rename source a.go", p)
-	}
-}
-
 func TestSpawnSessionInWorkspace(t *testing.T) {
 	for _, focus := range []projectsFocus{focusTree, focusPane} {
 		m := projectsTestModel()
@@ -867,7 +815,6 @@ func TestKillFromWorkspaceSessionsTab(t *testing.T) {
 	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Repo: "repo", Tmux: session.TmuxLocation{PaneID: "%1"}}
 	m.projects.selectRow("n1:w1")
 	m.projects.focus = focusPane
-	m.projects.tab = tabSessions
 
 	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = res.(model)
@@ -885,6 +832,21 @@ func TestKillFromWorkspaceSessionsTab(t *testing.T) {
 	cmd()
 	if p := rc.params[len(rc.params)-1].(api.SessionRef); p.SessionID != "n1:s1" {
 		t.Errorf("kill sent for %q, want n1:s1", p.SessionID)
+	}
+}
+
+func TestPaneCursorClampsWhenLastSessionGoes(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1") // sessions n1:s1, n1:s3
+	m.projects.focus = focusPane
+	m, _ = upd(m, keyMsg("j"))
+	if m.projects.wsCursor != 1 {
+		t.Fatalf("j should select the second card: cursor=%d", m.projects.wsCursor)
+	}
+	m, _ = upd(m, sessionsReplacedMsg([]session.Session{m.sessions["n1:s1"], m.sessions["n1:s2"]}))
+	if m.projects.wsCursor != 0 {
+		t.Errorf("the cursor should move to the remaining card: cursor=%d", m.projects.wsCursor)
 	}
 }
 

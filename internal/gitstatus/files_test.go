@@ -136,6 +136,46 @@ func TestWorkingDiffModifiedAndUntracked(t *testing.T) {
 	}
 }
 
+func TestWorkingDiffUnchangedTrackedFileIsEmpty(t *testing.T) {
+	ctx := context.Background()
+	dir := gitInit(t)
+	write(t, dir, "a.txt", "one\n")
+	commit(t, dir)
+
+	diff, notShown, err := WorkingDiff(ctx, dir, "a.txt")
+	if err != nil || notShown || diff != "" {
+		t.Errorf("a reverted file should have no diff, got %q (notShown=%v err=%v)", diff, notShown, err)
+	}
+}
+
+func TestWorkingDiffInNewRepoIsAllAdded(t *testing.T) {
+	ctx := context.Background()
+	dir := gitInit(t)
+	write(t, dir, "staged.txt", "s\n")
+	gitCmd(t, dir, "add", "staged.txt")
+	write(t, dir, "loose.txt", "l\n")
+
+	for p, want := range map[string]string{"staged.txt": "+s", "loose.txt": "+l"} {
+		diff, _, err := WorkingDiff(ctx, dir, p)
+		if err != nil || !strings.Contains(diff, want) {
+			t.Errorf("%s in a repo with no commits: diff %q, err %v", p, diff, err)
+		}
+	}
+}
+
+func TestDiffSinceReportsGitFailure(t *testing.T) {
+	ctx := context.Background()
+	dir := gitInit(t)
+	write(t, dir, "a.txt", "one\n")
+	commit(t, dir)
+	write(t, dir, "a.txt", "two\n")
+	write(t, dir, ".git/index", "corrupt")
+
+	if _, _, err := DiffSince(ctx, dir, "HEAD", "a.txt", ""); err == nil {
+		t.Error("a failing git diff should return an error, not an all-added diff")
+	}
+}
+
 func TestChangedFilesSinceTarget(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

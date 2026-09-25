@@ -28,6 +28,7 @@ type projectsFocus int
 const (
 	focusTree projectsFocus = iota
 	focusPane
+	focusFiles
 )
 
 type projRowKind int
@@ -82,18 +83,22 @@ type projectsState struct {
 	inputMode          projInputMode
 	inputTarget        string // project id the input acts on
 	pendingRemove      string // workspace id awaiting a remove confirmation
-	pendingKill        string // session id awaiting a kill confirmation (Sessions tab)
+	pendingKill        string // session id awaiting a kill confirmation
 	pendingRemoveForce bool   // the pending remove is a force-remove
+
+	sideTab     sideTab
+	ftree       fileTree
+	changes     changesState
+	filesHidden bool // user toggled the right sidebar off
+	filesW      int  // right sidebar width (0 = default); resizable
+	fileView    fileViewState
 
 	create     createState
 	createSeq  int         // last picker seq, so a hidden picker's late result can be told apart
 	offerSpawn *spawnOffer // pending "start an agent with this issue?" answer
 	retarget   *retargetState
 
-	tab     wsTab
-	dataWS  string // workspace id the pane was last synced to
-	changes changesState
-	files   filesState
+	dataWS string // workspace id the pane was last synced to
 }
 
 // flatten is the tree's rows: Home first, then the projects.
@@ -128,7 +133,8 @@ func (p *projectsState) selectRow(id string) bool {
 	return false
 }
 
-// reveal unfolds the node and project holding workspace wsID and selects it.
+// reveal unfolds the node and project holding workspace wsID and selects it,
+// clearing a filter that hides it.
 func (p *projectsState) reveal(wsID string) {
 	for _, pr := range p.tree {
 		for _, w := range pr.Workspaces {
@@ -136,7 +142,11 @@ func (p *projectsState) reveal(wsID string) {
 				delete(p.collapsed, pr.NodeID)
 				delete(p.collapsed, pr.ID)
 				p.rows = p.flatten()
-				p.selectRow(wsID)
+				if !p.selectRow(wsID) && p.filter != "" {
+					p.filter = ""
+					p.rows = p.flatten()
+					p.selectRow(wsID)
+				}
 				return
 			}
 		}
@@ -184,40 +194,35 @@ type retargetState struct {
 	pick        branchPicker
 }
 
-type wsTab int
+// sideTab is the right sidebar's tab.
+type sideTab int
 
 const (
-	tabSessions wsTab = iota
-	tabChanges
-	tabFiles
+	sideFiles sideTab = iota
+	sideChanges
 )
 
-// changesState is the Changes tab: a changed-file list plus an inline diff.
-type changesState struct {
-	against  string // "" = uncommitted; api.AgainstTarget = vs the target branch
-	files    []api.ChangedFile
-	cursor   int
-	loading  bool
-	err      error
-	viewing  bool // showing the diff of the selected file
-	diff     string
-	diffPath string
-	notShown bool
-	scroll   int
-}
+var sideTabNames = []string{"Files", "Changes"}
 
-// filesState is the Files tab: a directory listing plus a file viewer.
-type filesState struct {
-	dir      string // current repo-relative dir ("" = root)
-	entries  []api.DirEntry
-	cursor   int
-	loading  bool
-	err      error
-	viewing  bool // showing a file's content
-	content  string
-	filePath string
-	notShown bool
-	scroll   int
+// changesState is the Changes tab: one workspace's changed files and its commits
+// since the target branch. A diff opens in the pane through fileView.
+type changesState struct {
+	ws      string
+	against string // "" = uncommitted; api.AgainstTarget = vs the target branch
+	gen     int    // bumped by reload, so a list requested before it is dropped
+	files   []api.ChangedFile
+	cursor  int // over the changed files, then the commits
+	loading bool
+	err     error
+
+	commits        []api.Commit
+	commitsLoading bool
+	commitsErr     error
+
+	commit       *api.Commit // the commit drilled into; nil shows the list
+	commitFiles  []api.ChangedFile
+	commitCursor int
+	commitErr    error
 }
 
 func (m model) fetchProjects() tea.Cmd {
@@ -334,12 +339,41 @@ func workspaceIDs(p api.ProjectNode) []string {
 // collapses (compact mode), mirroring Crush's breakpoint behavior.
 const sidebarMinWidth = 80
 
-func (m model) projectsLeftW() int {
-	w := m.projects.leftW
-	if w == 0 {
-		w = 34
+func (m model) projectsLeftW() int { return clampWidth(m.rawLeftW(), 20, m.leftMaxW()) }
+
+func (m model) rawLeftW() int {
+	if m.projects.leftW == 0 {
+		return 34
 	}
-	return clampWidth(w, 20, m.frameWidth()-30)
+	return m.projects.leftW
+}
+
+func (m model) rawFilesW() int {
+	if m.projects.filesW == 0 {
+		return filesDefaultW
+	}
+	return m.projects.filesW
+}
+
+// minPaneWidth is the room the center pane keeps however wide the sidebars get.
+const minPaneWidth = 30
+
+// leftMaxW and filesMaxW bound each sidebar so that, with the other one at its
+// own width, the pane keeps minPaneWidth columns.
+func (m model) leftMaxW() int {
+	w := m.frameWidth() - dividerWidth - minPaneWidth
+	if m.filesVisible() {
+		w -= m.rawFilesW() + screenMargin + dividerWidth
+	}
+	return w
+}
+
+func (m model) filesMaxW() int {
+	w := m.frameWidth() - screenMargin - dividerWidth - minPaneWidth
+	if m.sidebarVisible() {
+		w -= m.rawLeftW() + dividerWidth
+	}
+	return w
 }
 
 // sidebarVisible reports whether the left sidebar is shown: not toggled off by
@@ -483,10 +517,12 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.flash = ""
-	// With no tree on screen, the Home row's pane is the Home pane itself.
-	if !m.sidebarVisible() && m.onHomeRow() && !key.Matches(msg, projectsKeys.ToggleSidebar) {
-		mm, _ := m.enterHome()
-		return mm.(model).handleKey(msg)
+	if m.projects.focus == focusFiles && m.filesVisible() {
+		return m.handleFilesKey(msg)
+	}
+	if !m.sidebarVisible() && m.projects.focus == focusTree && !key.Matches(msg, projectsKeys.ToggleSidebar) {
+		mm, _ := m.leaveHiddenTree()
+		return mm.handleKey(msg)
 	}
 	switch {
 	case key.Matches(msg, projectsKeys.Help):
@@ -497,44 +533,45 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, projectsKeys.Back):
 		return m.projectsBack()
 	case key.Matches(msg, projectsKeys.Filter):
+		if !m.sidebarVisible() {
+			m.flash = "the filter needs the tree · ^b shows the tree"
+			return m, nil
+		}
+		m.projects.focus = focusTree
 		return m.startInput(pmFilter, "", m.projects.filter)
 	case key.Matches(msg, projectsKeys.Spawn):
 		return m.actSpawnSession()
 	case key.Matches(msg, projectsKeys.ShowHidden):
 		m.projects.showHidden = !m.projects.showHidden
 		m.projects.rebuild()
-		return m.ensureTabData()
+		return m.syncPane()
 	case key.Matches(msg, projectsKeys.ShowGone):
 		m.projects.showGone = !m.projects.showGone
 		m.projects.rebuild()
-		return m.ensureTabData()
+		return m.syncPane()
 	case key.Matches(msg, projectsKeys.Refresh):
 		m.projects.loading, m.projects.err = true, nil
 		return m, m.fetchProjects()
-	case key.Matches(msg, projectsKeys.Widen):
-		m.projects.leftW = clampWidth(m.projectsLeftW()+4, 20, m.frameWidth()-30)
-		return m, nil
-	case key.Matches(msg, projectsKeys.Narrow):
-		m.projects.leftW = clampWidth(m.projectsLeftW()-4, 20, m.frameWidth()-30)
+	case key.Matches(msg, projectsKeys.Widen), key.Matches(msg, projectsKeys.Narrow):
+		d := 4
+		if key.Matches(msg, projectsKeys.Narrow) {
+			d = -4
+		}
+		if m.projects.focus == focusFiles {
+			m.projects.filesW = clampWidth(m.projectsFilesW()+d, 20, m.filesMaxW())
+		} else {
+			m.projects.leftW = clampWidth(m.projectsLeftW()+d, 20, m.leftMaxW())
+		}
 		return m, nil
 	case key.Matches(msg, projectsKeys.ToggleSidebar):
 		m.projects.sidebarHidden = !m.projects.sidebarHidden
-		if !m.sidebarVisible() {
-			if m.onHomeRow() {
-				return m.enterHome()
-			}
-			m.projects.focus = focusPane
-			return m.ensureTabData()
-		}
-		return m, nil
+		return m.leaveHiddenTree()
 	case key.Matches(msg, projectsKeys.Focus):
-		if !m.sidebarVisible() {
-			return m, nil
-		}
-		if m.projects.focus == focusTree {
-			return m.focusPane()
-		}
-		m.projects.focus = focusTree
+		return m.cycleFocus(1)
+	case key.Matches(msg, projectsKeys.FocusPrev):
+		return m.cycleFocus(-1)
+	case key.Matches(msg, projectsKeys.ToggleFiles):
+		m.projects.filesHidden = !m.projects.filesHidden
 		return m, nil
 	}
 	// A hidden/collapsed sidebar forces the main pane to own all input.
@@ -542,6 +579,22 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectsTreeKey(msg)
 	}
 	return m.handleProjectsPaneKey(msg)
+}
+
+// leaveHiddenTree moves focus off the tree once it no longer shows (ctrl+b, or a
+// terminal narrower than sidebarMinWidth). With no tree on screen, the Home
+// row's pane is the Home pane itself.
+func (m model) leaveHiddenTree() (model, tea.Cmd) {
+	if m.mode != modeProjects || m.projects.focus != focusTree || m.sidebarVisible() {
+		return m, nil
+	}
+	if m.onHomeRow() {
+		mm, cmd := m.enterHome()
+		return mm.(model), cmd
+	}
+	m.projects.focus = focusPane
+	mm, cmd := m.syncPane()
+	return mm.(model), cmd
 }
 
 // enterHome moves focus into the Home pane (the homepage's session list).
@@ -565,7 +618,7 @@ func (m model) focusPane() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.projects.focus = focusPane
-	return m.ensureTabData()
+	return m.syncPane()
 }
 
 // treeFocused reports whether the tree has focus and is on screen; a hidden tree
@@ -574,23 +627,128 @@ func (m model) treeFocused() bool {
 	return m.projects.focus == focusTree && m.sidebarVisible()
 }
 
+// cycleFocus moves focus to the next visible, focusable panel: tree, pane,
+// files. The Home row's pane is the Home pane itself.
+func (m model) cycleFocus(d int) (tea.Model, tea.Cmd) {
+	var order []projectsFocus
+	if m.sidebarVisible() {
+		order = append(order, focusTree)
+	}
+	order = append(order, focusPane)
+	if m.filesVisible() && m.currentWorkspace() != "" {
+		order = append(order, focusFiles)
+	}
+	i := 0
+	for j, f := range order {
+		if f == m.projects.focus {
+			i = j
+		}
+	}
+	next := order[(i+d+len(order))%len(order)]
+	if next == focusPane {
+		return m.focusPane()
+	}
+	m.projects.focus = next
+	return m, nil
+}
+
+// handleFilesKey drives the file tree on the projects screen and from a
+// session; esc returns focus to the pane.
+func (m model) handleFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	k := projectsKeys
+	switch {
+	case key.Matches(msg, k.Back):
+		if m.projects.sideTab == sideChanges && m.projects.changes.commit != nil {
+			m.projects.changes.commit = nil
+			return m, nil
+		}
+		m.projects.focus = focusPane
+		return m, nil
+	case key.Matches(msg, k.Focus), key.Matches(msg, k.FocusPrev):
+		if m.mode != modeProjects {
+			m.projects.focus = focusPane
+			return m, nil
+		}
+		if key.Matches(msg, k.FocusPrev) {
+			return m.cycleFocus(-1)
+		}
+		return m.cycleFocus(1)
+	case key.Matches(msg, k.ToggleFiles):
+		m.projects.filesHidden = true
+		return m, nil
+	case key.Matches(msg, k.ToggleSidebar):
+		m.projects.sidebarHidden = !m.projects.sidebarHidden
+		return m, nil
+	case key.Matches(msg, k.Widen), key.Matches(msg, k.Narrow):
+		d := 4
+		if key.Matches(msg, k.Narrow) {
+			d = -4
+		}
+		m.projects.filesW = clampWidth(m.projectsFilesW()+d, 20, m.filesMaxW())
+		return m, nil
+	case key.Matches(msg, k.SideTabNext), key.Matches(msg, k.SideTabPrev):
+		d := 1
+		if key.Matches(msg, k.SideTabPrev) {
+			d = -1
+		}
+		m.projects.sideTab = sideTab((int(m.projects.sideTab) + d + len(sideTabNames)) % len(sideTabNames))
+		return m, nil
+	case key.Matches(msg, k.Help) && m.mode == modeProjects:
+		m.projects.showHelp = true
+		return m, nil
+	}
+	if m.projects.sideTab == sideChanges {
+		return m.changesKey(msg)
+	}
+	if key.Matches(msg, k.Refresh) {
+		return m.reloadFileTree()
+	}
+	return m.applyTreeRequest(m.projects.ftree.key(msg, m.cardListPageStep()))
+}
+
+// reloadFileTree drops every cached listing and fetches the root and each
+// unfolded directory again, so the tree keeps its shape.
+func (m model) reloadFileTree() (tea.Model, tea.Cmd) {
+	ws := m.projects.ftree.ws
+	expanded := m.projects.ftree.expanded
+	m.projects.ftree = newFileTree(ws)
+	m.projects.ftree.expanded = expanded
+	dirs := []string{""}
+	for d := range expanded {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	cmds := make([]tea.Cmd, len(dirs))
+	for i, d := range dirs {
+		m.projects.ftree.dirs[d] = &treeDir{loading: true}
+		cmds[i] = m.fetchListDir(ws, d)
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m model) applyTreeRequest(req treeRequest) (tea.Model, tea.Cmd) {
+	switch {
+	case req.loadDir != nil:
+		return m, m.fetchListDir(m.projects.ftree.ws, *req.loadDir)
+	case req.openFile != nil:
+		return m.openFile(*req.openFile)
+	}
+	return m, nil
+}
+
 // projectsBack closes an open viewer, then steps out of the pane; on the tree it
 // only clears a filter.
 func (m model) projectsBack() (tea.Model, tea.Cmd) {
 	if m.treeFocused() {
 		if m.projects.filter != "" {
 			m.projects.setFilter("")
-			return m.ensureTabData()
+			return m.syncPane()
 		}
 		return m, nil
 	}
 	switch {
-	case m.projects.tab == tabChanges && m.projects.changes.viewing:
-		m.projects.changes.viewing = false
-	case m.projects.tab == tabFiles && m.projects.files.viewing:
-		m.projects.files.viewing = false
-	case m.projects.tab == tabFiles && m.projects.files.dir != "":
-		return m.filesUp()
+	case m.projects.fileView.open():
+		m.closeFileView()
 	case m.sidebarVisible():
 		m.projects.focus = focusTree
 	default: // no tree to return to: go to the Home pane
@@ -603,7 +761,7 @@ func (m model) projectsBack() (tea.Model, tea.Cmd) {
 // moveTree moves the tree cursor and syncs the pane to the new selection.
 func (m model) moveTree(i int) (tea.Model, tea.Cmd) {
 	m.projects.cursor = min(i, cursorBottom(len(m.projects.rows)))
-	return m.ensureTabData()
+	return m.syncPane()
 }
 
 func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -723,30 +881,29 @@ func (m model) projectsView() string {
 
 	// Collapsed sidebar: the main pane owns the full width.
 	if !m.sidebarVisible() {
-		return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(m.frameWidth(), h), h), footer, m.width, m.height)
+		return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(m.bodyWidthFor(-dividerWidth), h), h), footer, m.width, m.height)
 	}
 
-	// Columns: left sidebar (fixed, resizable) | center (flex). composeH also
-	// takes a third panel for a right sidebar; it is unused until its content
-	// is designed. centerW mirrors composeH's flex split so content wraps to fit.
+	// centerW mirrors framedBody's flex split so content wraps to fit.
 	leftW := m.projectsLeftW()
-	centerW := max(1, m.frameWidth()-leftW-dividerWidth)
+	centerW := m.bodyWidthFor(leftW)
 	return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(centerW, h), h), footer, m.width, m.height)
 }
 
-// projectsMain is the center column: the workspace tabs, or an overview when the
-// cursor is on a node or project row.
+// projectsMain is the center column: the workspace's sessions, or an overview
+// when the cursor is on a node or project row.
 func (m model) projectsMain(w, h int) string {
 	if m.onHomeRow() && !m.projects.create.active && m.projects.retarget == nil {
 		return m.homePreview() // the Home list centers itself
 	}
 	cardW := min(w, maxCardWidth)
-	// An open diff or file widens only its content, like Logs: the tab strip
-	// stays in the card column so it does not jump.
-	if r, ok := m.cursorRow(); ok && r.kind == rowWorkspace && m.paneViewing() && !m.projects.create.active && m.projects.retarget == nil {
+	// An open file or diff widens only its content, like Logs: the header stays
+	// in the card column so it does not jump.
+	if r, ok := m.cursorRow(); ok && r.kind == rowWorkspace && m.projects.fileView.open() &&
+		!m.projects.create.active && m.projects.retarget == nil {
 		wideW := min(w, maxContentWidth)
-		head := centerBlock(truncateLine(m.wsTabHeader(r), cardW), cardW, w)
-		return head + "\n\n" + centerBlock(m.projectsPaneContent(wideW, max(1, h-2)), wideW, w)
+		head := centerBlock(truncateLine(m.wsHeader(r), cardW), cardW, w)
+		return head + "\n\n" + centerBlock(m.fileViewBody(wideW, max(1, h-2)), wideW, w)
 	}
 	return centerBlock(m.projectsColumn(cardW, h), cardW, w)
 }
@@ -765,7 +922,7 @@ func (m model) projectsColumn(w, h int) string {
 	if r.kind != rowWorkspace {
 		return m.projectsSummary(r, w)
 	}
-	return truncateLine(m.wsTabHeader(r), w) + "\n\n" + m.projectsPaneContent(w, max(1, h-2))
+	return truncateLine(m.wsHeader(r), w) + "\n\n" + m.projectsSessionPane(w, max(1, h-2))
 }
 
 // homePreview is the Sessions tab rendered at pane size for the tree-focused
@@ -983,24 +1140,152 @@ func (m model) embedded() bool {
 }
 
 // homeSplash reports whether the focused Home pane shows the welcome splash.
+// The tree-focused Home row previews the Home pane as modeList too, but frames
+// the splash in the pane.
 func (m model) homeSplash() bool {
-	return m.mode == modeList && len(m.order) == 0 && !m.spawn.active()
+	return m.mode == modeList && m.projects.focus != focusTree && len(m.order) == 0 && !m.spawn.active()
 }
 
-// bodyWidth is the width the framed views lay out in: the pane when embedded, else the terminal. Input handling and rendering both read it,
-// so scroll math and drawing agree.
+// bodyWidth is the width the framed views lay out in: the pane between the
+// sidebars that show, else the terminal. Input handling and rendering both read
+// it, so scroll math and drawing agree.
 func (m model) bodyWidth() int {
-	switch {
-	case m.viewer || m.homeSplash():
-		return m.width
-	case !m.embedded(): // the projects screen itself
-		return m.frameWidth()
-	case m.sidebarVisible():
-		return max(1, m.frameWidth()-m.projectsLeftW()-dividerWidth)
-	case m.fullBleed():
+	if m.viewer || m.homeSplash() {
 		return m.width
 	}
-	return m.frameWidth()
+	if !m.embedded() {
+		return m.frameWidth() // the projects screen itself; its panes use bodyWidthFor
+	}
+	w := m.frameWidth()
+	switch {
+	case m.sidebarVisible():
+		w -= m.projectsLeftW() + dividerWidth
+	case m.fullBleed():
+		w = m.width
+	}
+	if m.filesVisible() {
+		w -= m.projectsFilesW() + screenMargin + dividerWidth
+	}
+	return max(1, w)
+}
+
+// bodyWidthFor is the projects screen's pane width next to a left panel of
+// width leftW (-dividerWidth for none), minus the right sidebar when it shows.
+func (m model) bodyWidthFor(leftW int) int {
+	w := m.frameWidth() - leftW - dividerWidth
+	if m.filesVisible() {
+		w -= m.projectsFilesW() + screenMargin + dividerWidth
+	}
+	return max(1, w)
+}
+
+const (
+	filesMinWidth = 120
+	filesDefaultW = 34
+)
+
+func (m model) filesVisible() bool {
+	return !m.projects.filesHidden && m.width >= filesMinWidth && !m.viewer && !m.homeSplash()
+}
+
+func (m model) projectsFilesW() int { return clampWidth(m.rawFilesW(), 20, m.filesMaxW()) }
+
+// currentWorkspace is the workspace the file tree shows: the tree cursor's on
+// the projects screen, or the open session's; "" elsewhere.
+func (m model) currentWorkspace() string {
+	switch m.mode {
+	case modeProjects:
+		return m.selectedWorkspaceID()
+	case modeSession, modeScreen:
+		return m.sessions[m.selectedID].WorkspaceID
+	}
+	return ""
+}
+
+// fileViewState is a file or, with diff set, a changed file's diff, shown in
+// place of the pane content.
+type fileViewState struct {
+	ws, path          string
+	lines             []string // highlighted once on load; rendering only windows them
+	diff              bool
+	against           string // diff only: the Changes mode it was opened in
+	rev               string // diff only: the commit sha, or "" for the working tree
+	notShown, loading bool
+	err               error
+	scroll            int
+}
+
+func (f fileViewState) open() bool { return f.path != "" }
+
+func viewLines(s string) []string {
+	if s = strings.TrimSuffix(s, "\n"); s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+func (m model) openFile(p string) (tea.Model, tea.Cmd) {
+	ws := m.projects.ftree.ws
+	m.projects.fileView = fileViewState{ws: ws, path: p, loading: true}
+	m.projects.focus = focusPane
+	return m, m.fetchReadFile(ws, p)
+}
+
+// closeFileView closes the open file or diff and returns focus to the sidebar
+// it was opened from, when the sidebar still shows.
+func (m *model) closeFileView() {
+	m.projects.fileView = fileViewState{}
+	if m.filesVisible() && m.currentWorkspace() != "" {
+		m.projects.focus = focusFiles
+	}
+}
+
+func (m model) fileViewBody(w, h int) string {
+	f := m.projects.fileView
+	switch {
+	case f.err != nil:
+		return dimStyle.Render("error: " + f.err.Error())
+	case f.loading:
+		return dimStyle.Render("loading " + f.path + "…")
+	case f.notShown:
+		return dimStyle.Render(f.path + ": binary or too large")
+	case f.diff && len(f.lines) == 0:
+		return dimStyle.Render(f.path + ": no changes")
+	}
+	title := f.path
+	if f.rev != "" {
+		title = f.rev[:min(len(f.rev), 7)] + " · " + f.path
+	}
+	return dimStyle.Render(title) + "\n" + scrollView(f.lines, f.scroll, max(1, h-1), w)
+}
+
+// handleFileViewKey scrolls or closes the open file and swallows keys meant for
+// the content behind it; handled is false when no file is open or the key
+// moves focus or toggles a panel.
+func (m model) handleFileViewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	f := &m.projects.fileView
+	if !f.open() {
+		return m, nil, false
+	}
+	k := projectsKeys
+	switch {
+	case key.Matches(msg, k.Back):
+		m.closeFileView()
+	case key.Matches(msg, k.Up):
+		f.scroll = max(0, f.scroll-1)
+	case key.Matches(msg, k.Down):
+		f.scroll = min(f.scroll+1, cursorBottom(len(f.lines)))
+	case key.Matches(msg, k.HalfUp):
+		f.scroll = max(0, f.scroll-m.cardListPageStep())
+	case key.Matches(msg, k.HalfDown):
+		f.scroll = min(f.scroll+m.cardListPageStep(), cursorBottom(len(f.lines)))
+	case key.Matches(msg, k.Focus), key.Matches(msg, k.FocusPrev), key.Matches(msg, k.Help),
+		key.Matches(msg, k.ToggleSidebar), key.Matches(msg, k.ToggleFiles),
+		key.Matches(msg, sessionKeys.Files), key.Matches(msg, sessionKeys.Focus):
+		return m, nil, false
+	}
+	// Any other key would act on the content hidden behind the file.
+	return m, nil, true
 }
 
 // fullBleed reports whether the pane spans the whole terminal width with no
@@ -1064,20 +1349,53 @@ func (m model) embedInProjects(content string) string {
 	return m.frameTitle() + "\n\n" + m.framedBody(content, m.bodyHeight())
 }
 
-// framedBody lays out the sidebar (which draws its own margin column) and the
-// pane, or just the pane inside the margin when the sidebar is hidden.
+// framedBody lays out the left sidebar (which owns the left margin), the pane,
+// and the right sidebar (which owns the right margin), each when it shows.
 func (m model) framedBody(pane string, h int) string {
-	if m.fullBleed() {
-		return composeH(m.width, h, flexPanel(pane))
+	var panels []hpanel
+	switch {
+	case m.fullBleed():
+		panels = append(panels, flexPanel(pane))
+	case !m.sidebarVisible():
+		panels = append(panels, flexPanel(indentBlock(pane, strings.Repeat(" ", screenMargin))))
+	default:
+		leftW := m.projectsLeftW()
+		panels = append(panels, fixedPanel(m.projectsTreePane(leftW, h), leftW+screenMargin), flexPanel(pane))
 	}
-	if !m.sidebarVisible() {
-		return composeH(m.width, h, flexPanel(indentBlock(pane, strings.Repeat(" ", screenMargin))))
+	if m.filesVisible() {
+		fw := m.projectsFilesW()
+		panels = append(panels, fixedPanel(m.filesPane(fw, h), fw+screenMargin))
 	}
-	leftW := m.projectsLeftW()
-	return composeH(m.width, h,
-		fixedPanel(m.projectsTreePane(leftW, h), leftW+screenMargin),
-		flexPanel(pane),
-	)
+	return composeH(m.width, h, panels...)
+}
+
+// filesPane is the right sidebar: the tab strip, then the current workspace's
+// tree or changes, or a hint.
+func (m model) filesPane(w, h int) string {
+	gutter := strings.Repeat(" ", screenMargin)
+	focused := m.projects.focus == focusFiles
+	head := gutter + truncateLine(m.sideTabStrip(focused), max(1, w-screenMargin)) + "\n\n"
+	switch {
+	case m.currentWorkspace() == "":
+		return head + gutter + dimStyle.Render("select a workspace")
+	case m.projects.sideTab == sideChanges:
+		return head + m.changesView(w, max(1, h-2), focused)
+	}
+	return head + m.projects.ftree.view(w, max(1, h-2), focused)
+}
+
+func (m model) sideTabStrip(focused bool) string {
+	parts := make([]string, len(sideTabNames))
+	for i, n := range sideTabNames {
+		parts[i] = StyleDim.Render(n)
+		if sideTab(i) == m.projects.sideTab {
+			parts[i] = paneTitle(n, focused)
+			if !focused {
+				parts[i] = StylePrimaryBold.Render(n)
+			}
+		}
+	}
+	return strings.Join(parts, StyleDim.Render("  "))
 }
 
 // homeBrand prefixes a pane header with the argus mark, unless the frame header

@@ -69,8 +69,8 @@ var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter, Focus key.Binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                         key.Binding
 	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
-	Target, DiffMode, Spawn                                            key.Binding
-	Refresh, Back                                                      key.Binding
+	Target, DiffMode, Spawn, FocusPrev, ToggleFiles                    key.Binding
+	SideTabPrev, SideTabNext, Refresh, Back                            key.Binding
 }{
 	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:          nb([]string{"down", "j"}, "", ""),
@@ -98,6 +98,10 @@ var projectsKeys = struct {
 	Target:        nb([]string{"T"}, "T", "target"),
 	DiffMode:      nb([]string{"t"}, "t", "vs target"),
 	Spawn:         nb([]string{"s"}, "s", "session"),
+	FocusPrev:     nb([]string{"shift+tab"}, "", ""),
+	ToggleFiles:   nb([]string{"ctrl+e"}, "^e", "files"),
+	SideTabPrev:   nb([]string{"["}, "", ""),
+	SideTabNext:   nb([]string{"]"}, "[/]", "tabs"),
 	Refresh:       nb([]string{"r"}, "r", "refresh"),
 	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
@@ -156,10 +160,11 @@ var detailKeys = struct {
 // sessionKeys are the composite-screen keys handled before the focused region:
 // focus toggle and the raw-screen switch.
 var sessionKeys = struct {
-	Focus, Raw key.Binding
+	Focus, Raw, Files key.Binding
 }{
 	Focus: nb([]string{"tab"}, "tab", "answer"),
 	Raw:   nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
+	Files: nb([]string{"ctrl+f"}, "^f", "files"),
 }
 
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.

@@ -56,7 +56,60 @@ func (m model) resyncCmd() tea.Cmd {
 	}
 }
 
+// Update runs the message, then keeps the file tree on the current workspace.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	res, cmd := m.update(msg)
+	next, ok := res.(model)
+	if !ok {
+		return res, cmd
+	}
+	next, sync := next.syncSidebar()
+	return next, tea.Batch(cmd, sync)
+}
+
+// syncSidebar resets the tree and the changes when the current workspace
+// changes, loads what the shown tab needs, and takes focus off a hidden sidebar.
+func (m model) syncSidebar() (model, tea.Cmd) {
+	if m.projects.focus == focusFiles && (!m.filesVisible() || m.currentWorkspace() == "") {
+		m.projects.focus = focusPane
+		if m.filesVisible() && m.mode == modeProjects && m.sidebarVisible() {
+			m.projects.focus = focusTree // the cursor left the workspaces; the tree is where it moved
+		}
+	}
+	ws := m.currentWorkspace()
+	if ws != m.projects.ftree.ws {
+		m.projects.ftree = newFileTree(ws)
+		if m.projects.fileView.ws != "" && m.projects.fileView.ws != ws {
+			m.projects.fileView = fileViewState{}
+		}
+	}
+	if ws != m.projects.changes.ws {
+		m.projects.changes = changesState{ws: ws, gen: m.projects.changes.gen}
+	}
+	if ws == "" || !m.filesVisible() {
+		return m, nil
+	}
+	if m.projects.sideTab == sideChanges {
+		c := &m.projects.changes
+		var cmds []tea.Cmd
+		if c.files == nil && !c.loading && c.err == nil {
+			c.loading = true
+			cmds = append(cmds, m.fetchChangedFiles(ws, c.against, c.gen))
+		}
+		if c.commits == nil && !c.commitsLoading && c.commitsErr == nil {
+			c.commitsLoading = true
+			cmds = append(cmds, m.fetchCommits(ws, c.gen))
+		}
+		return m, tea.Batch(cmds...)
+	}
+	if _, ok := m.projects.ftree.dirs[""]; ok {
+		return m, nil
+	}
+	m.projects.ftree.dirs[""] = &treeDir{loading: true}
+	return m, m.fetchListDir(ws, "")
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -71,6 +124,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.term.Resize(cols, rows)
 			return m, m.termResizeCmd(m.termID, cols, rows)
 		}
+		return m.leaveHiddenTree()
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
@@ -156,7 +210,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.projects.want = ""
 		}
-		return m.ensureTabData()
+		return m.syncPane()
 	case projectsActionMsg:
 		if msg.err != nil {
 			m.flash = msg.verb + ": " + msg.err.Error()
@@ -168,7 +222,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects.want = msg.selectID
 		if msg.reloadChanges {
-			m.projects.changes = changesState{against: m.projects.changes.against}
+			m.projects.changes.reload()
 		}
 		return m, m.fetchProjects() // refresh the tree after a mutation
 	case branchesMsg:
@@ -193,22 +247,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.issues, c.issuesLoaded, c.issuesErr = msg.issues, true, msg.err
 		}
 	case createDoneMsg:
-		if msg.seq != m.projects.create.seq {
-			// A hidden picker's call finished after a newer picker opened: report
-			// it without touching the newer picker or the cursor.
+		if msg.seq != m.projects.create.seq || !m.projects.create.active {
+			// A hidden picker's call finished: report it without touching a newer
+			// picker, the cursor, or the keys the user pressed since.
+			if msg.seq == m.projects.create.seq {
+				m.projects.create = createState{}
+			}
 			if msg.err != nil {
 				m.flash = "create workspace: " + msg.err.Error()
 				return m, nil
 			}
 			m.flash = "workspace created"
+			if msg.res.Warning != "" {
+				m.flash += " · " + msg.res.Warning
+			}
 			return m, m.fetchProjects()
 		}
 		if msg.err != nil {
 			m.projects.create.creating = false
 			m.projects.create.err = msg.err.Error()
-			if !m.projects.create.active {
-				m.flash = "create workspace: " + msg.err.Error()
-			}
 			return m, nil
 		}
 		m.projects.create = createState{}
@@ -220,30 +277,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetchProjects()
 	case changedFilesMsg:
-		if msg.ws == m.projects.dataWS && msg.against == m.projects.changes.against {
-			m.projects.changes.loading = false
-			m.projects.changes.err = msg.err
-			m.projects.changes.files = msg.files
-			if m.projects.changes.files == nil {
-				m.projects.changes.files = []api.ChangedFile{}
+		if c := &m.projects.changes; msg.ws == c.ws && msg.against == c.against && msg.gen == c.gen {
+			prev := len(c.files)
+			c.loading, c.err, c.files = false, msg.err, msg.files
+			if c.files == nil {
+				c.files = []api.ChangedFile{}
+			}
+			// The commits follow the files in the cursor's index, so a cursor on a
+			// commit moves with the file count.
+			if c.cursor >= prev && len(c.commits) > 0 {
+				c.cursor += len(c.files) - prev
+			} else {
+				c.cursor = min(c.cursor, cursorBottom(len(c.files)))
 			}
 		}
 	case wsDiffMsg:
-		if msg.ws == m.projects.dataWS && msg.path == m.projects.changes.diffPath && msg.against == m.projects.changes.against {
-			m.projects.changes.diff, m.projects.changes.notShown, m.projects.changes.err = msg.diff, msg.notShown, msg.err
+		if f := &m.projects.fileView; f.diff && msg.ws == f.ws && msg.path == f.path && msg.against == f.against && msg.rev == f.rev {
+			f.lines, f.notShown, f.err, f.loading = viewLines(m.highlightDiff(msg.diff)), msg.notShown, msg.err, false
 		}
-	case listDirMsg:
-		if msg.ws == m.projects.dataWS && msg.dir == m.projects.files.dir {
-			m.projects.files.loading = false
-			m.projects.files.err = msg.err
-			m.projects.files.entries = msg.entries
-			if m.projects.files.entries == nil {
-				m.projects.files.entries = []api.DirEntry{}
+	case commitsMsg:
+		if c := &m.projects.changes; msg.ws == c.ws && msg.gen == c.gen {
+			c.commitsLoading, c.commitsErr, c.commits = false, msg.err, msg.commits
+			if c.commits == nil {
+				c.commits = []api.Commit{}
 			}
 		}
+	case commitFilesMsg:
+		if c := &m.projects.changes; msg.ws == c.ws && c.commit != nil && msg.sha == c.commit.SHA {
+			c.commitErr, c.commitFiles = msg.err, msg.files
+			if c.commitFiles == nil {
+				c.commitFiles = []api.ChangedFile{}
+			}
+		}
+	case listDirMsg:
+		if msg.ws == m.projects.ftree.ws {
+			m.projects.ftree.setDir(msg.dir, msg.entries, msg.err)
+		}
 	case readFileMsg:
-		if msg.ws == m.projects.dataWS && msg.path == m.projects.files.filePath {
-			m.projects.files.content, m.projects.files.notShown, m.projects.files.err = msg.content, msg.notShown, msg.err
+		if f := &m.projects.fileView; !f.diff && msg.ws == f.ws && msg.path == f.path {
+			f.lines, f.notShown, f.err, f.loading = viewLines(m.highlightFile(msg.path, msg.content)), msg.notShown, msg.err, false
 		}
 	case histSessionsMsg:
 		m.history.loading = false
@@ -592,6 +664,7 @@ func (m *model) reorder() {
 	if m.cursor >= len(m.order) {
 		m.cursor = max(0, len(m.order)-1)
 	}
+	m.projects.wsCursor = min(m.projects.wsCursor, cursorBottom(len(m.paneSessions())))
 }
 
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -622,6 +695,14 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleSidebar) {
 		m.projects.sidebarHidden = !m.projects.sidebarHidden
 		return m, nil
+	}
+
+	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleFiles) {
+		m.projects.filesHidden = !m.projects.filesHidden
+		return m, nil
+	}
+	if m.mode == modeSession && m.projects.focus == focusFiles {
+		return m.handleFilesKey(msg)
 	}
 
 	// The composite session screen owns its own navigation/fold/compose keys.
@@ -724,6 +805,9 @@ func (m model) enterSession(id string) (model, tea.Cmd) {
 	}
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
+	if m.projects.focus == focusFiles {
+		m.projects.focus = focusPane
+	}
 	m.transcript.err = nil
 	m.transcript.detailStack = nil
 	m.transcript.expanded = make(map[string]bool)

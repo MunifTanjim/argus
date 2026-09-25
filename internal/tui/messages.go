@@ -43,15 +43,29 @@ type projectsActionMsg struct {
 type changedFilesMsg struct {
 	ws      string
 	against string
+	gen     int
 	files   []api.ChangedFile
 	err     error
 }
 
 type wsDiffMsg struct {
 	ws, path, diff string
-	against        string
+	against, rev   string
 	notShown       bool
 	err            error
+}
+
+type commitsMsg struct {
+	ws      string
+	gen     int
+	commits []api.Commit
+	err     error
+}
+
+type commitFilesMsg struct {
+	ws, sha string
+	files   []api.ChangedFile
+	err     error
 }
 
 type listDirMsg struct {
