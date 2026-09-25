@@ -22,6 +22,9 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	}
 	api.LogAttr(ctx, "agent", ev.Agent)
 	s, alive := a.ProcessHook(d.reg, ev)
+	if alive {
+		d.adoptSessionWorkspace(ctx, s)
+	}
 	event := a.EventName(ev)
 	api.LogAttr(ctx, "event", event)
 	if tool, _ := a.PermissionPayload(ev); tool != "" {

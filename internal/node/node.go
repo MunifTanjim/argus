@@ -22,6 +22,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -86,6 +87,7 @@ type Node struct {
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
+	projreg       *projectreg.Registry           // node-local project/workspace registry; nil = disabled
 	pushStore     *push.Store                    // per-node Web Push subscription store; nil = push disabled
 	pushDeliverer atomic.Pointer[push.Deliverer] // egress for encrypted mobile pushes (uplink RPC or in-process)
 
@@ -135,6 +137,31 @@ func (d *Node) scan(ctx context.Context) {
 			d.log.Warn("discovery scan failed", "err", err)
 		}
 	}
+	if d.projreg != nil {
+		for _, s := range d.reg.Snapshot() {
+			d.adoptSessionWorkspace(ctx, s)
+		}
+	}
+}
+
+// Worktree mapping is stable, so a session with a workspace id is not resolved
+// again.
+func (d *Node) adoptSessionWorkspace(ctx context.Context, s session.Session) {
+	if d.projreg == nil || s.WorkspaceID != "" || s.Status == session.StatusDead {
+		return
+	}
+	dir := sessionDir(s)
+	if dir == "" {
+		return
+	}
+	wsID, err := d.projreg.AdoptSession(ctx, dir)
+	if err != nil {
+		d.log.Warn("adopt workspace", "session", s.ID, "err", err)
+		return
+	}
+	if wsID != "" {
+		d.reg.SetWorkspaceID(s.ID, wsID)
+	}
 }
 
 func (d *Node) adapterFor(agent string) adapter.Adapter {
@@ -157,6 +184,10 @@ func (d *Node) DesktopNotifyEnabled() bool { return d.desktopNotify }
 // SetPushStore enables node-side push registration (register/unregister/test).
 // Call before StartPush. nil disables push.
 func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
+
+// SetProjectRegistry with nil disables the registry: project.list returns
+// empty and sessions carry no workspace_id.
+func (d *Node) SetProjectRegistry(r *projectreg.Registry) { d.projreg = r }
 
 // SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
 // Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).

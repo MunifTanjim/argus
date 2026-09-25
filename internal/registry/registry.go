@@ -473,6 +473,17 @@ func (r *Registry) SetBranch(id, branch string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+func (r *Registry) SetWorkspaceID(id, workspaceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	if s == nil || s.WorkspaceID == workspaceID {
+		return
+	}
+	s.WorkspaceID = workspaceID
+	r.publish(Event{Type: EventUpdated, Session: *s})
+}
+
 // HookUpdate carries the correlation keys and fields from an agent hook event. Empty
 // string fields leave an existing session unchanged. A non-empty Status sets the
 // status; StatusDead removes the session.

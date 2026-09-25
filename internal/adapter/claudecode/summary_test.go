@@ -133,32 +133,3 @@ func TestRefreshesSummary(t *testing.T) {
 		}
 	}
 }
-
-func TestRepoName(t *testing.T) {
-	root := t.TempDir()
-	repo := filepath.Join(root, "myrepo")
-	nested := filepath.Join(repo, "internal", "pkg")
-	plain := filepath.Join(root, "plaindir")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(plain, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := repoName(repo); got != "myrepo" {
-		t.Errorf("repoName(repo) = %q, want myrepo", got)
-	}
-	if got := repoName(nested); got != "myrepo" { // walks up to the repo root
-		t.Errorf("repoName(nested) = %q, want myrepo", got)
-	}
-	if got := repoName(plain); got != "plaindir" { // not a repo: basename of dir
-		t.Errorf("repoName(non-repo) = %q, want plaindir", got)
-	}
-	if got := repoName(""); got != "" {
-		t.Errorf("repoName(\"\") = %q, want empty", got)
-	}
-}

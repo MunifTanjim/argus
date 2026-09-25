@@ -22,6 +22,7 @@ func containerEnv(hostDir string) ([]string, error) {
 		"XDG_STATE_HOME=" + containerHome + "/state",
 		"XDG_CACHE_HOME=" + containerHome + "/cache",
 		"XDG_RUNTIME_DIR=" + containerHome + "/run",
+		"XDG_DATA_HOME=" + containerDataHome,
 	}, nil
 }
 

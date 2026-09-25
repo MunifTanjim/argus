@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/histcache"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -109,7 +110,7 @@ func listHistoryProjects() ([]session.HistoryProject, error) {
 	}
 	out := make([]session.HistoryProject, 0, len(byCwd))
 	for cwd, a := range byCwd {
-		repo := repoName(cwd)
+		repo := gittree.RepoName(cwd)
 		label := repo
 		if label == "" {
 			label = filepath.Base(cwd)

@@ -24,6 +24,8 @@ jobs:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
+              - '**/*.sql'
+              - 'sqlc.yaml'
               - 'Makefile'
               - '.github/workflows/ci.yml'
             app:
@@ -48,6 +50,12 @@ jobs:
         run: make fmt-check
       - name: Vet
         run: make vet
+      - name: Setup sqlc
+        uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: '1.31.1'
+      - name: Check sqlc Output
+        run: make sqlc-check
       - name: Build
         run: make build
       - name: Test

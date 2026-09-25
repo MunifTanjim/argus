@@ -67,6 +67,9 @@ var compositeResultMethods = map[string]bool{
 // Offline (it is currently reported).
 func withOrigin(s session.Session, nodeID, label string) session.Session {
 	s.ID = session.CompositeID(nodeID, s.ID)
+	if s.WorkspaceID != "" {
+		s.WorkspaceID = session.CompositeID(nodeID, s.WorkspaceID)
+	}
 	s.NodeID = nodeID
 	s.NodeLabel = label
 	s.Offline = false

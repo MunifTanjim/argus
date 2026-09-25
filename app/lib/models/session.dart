@@ -159,6 +159,7 @@ class Session {
   final InputMode inputMode;
   final String? repo;
   final String? branch;
+  final String? workspaceId;
   final Summary? summary;
   final Interaction? interaction;
   final String? nodeId;
@@ -184,6 +185,7 @@ class Session {
     this.transcriptPath,
     this.repo,
     this.branch,
+    this.workspaceId,
     this.summary,
     this.interaction,
     this.nodeId,
@@ -207,6 +209,7 @@ class Session {
         inputMode: inputModeFromWire(j['input_mode'] as String?),
         repo: j['repo'] as String?,
         branch: j['branch'] as String?,
+        workspaceId: j['workspace_id'] as String?,
         summary: j['summary'] == null
             ? null
             : Summary.fromJson(j['summary'] as Map<String, dynamic>),

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -206,7 +207,7 @@ func TestBuildDiscoveredPaneOnly(t *testing.T) {
 	}
 	po := paneOnly[0]
 	if !po.HasPane || po.PaneID != "%1" || po.Frontend != session.FrontendTmux ||
-		po.AgentSessionID != "" || po.Cwd != "/repo/b" || po.Repo != repoName("/repo/b") {
+		po.AgentSessionID != "" || po.Cwd != "/repo/b" || po.Repo != gittree.RepoName("/repo/b") {
 		t.Fatalf("pane-only session: %+v", po)
 	}
 }

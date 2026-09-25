@@ -11,6 +11,7 @@ import (
 var HomeDir = xdg.Home
 var CacheDir = filepath.Join(xdg.CacheHome, ProjectName)
 var ConfigDir = filepath.Join(xdg.ConfigHome, ProjectName)
+var DataDir = filepath.Join(xdg.DataHome, ProjectName)
 var StateDir = filepath.Join(xdg.StateHome, ProjectName)
 var RuntimeDir = resolveRuntimeDir()
 
@@ -52,6 +53,10 @@ func GetCachePath(name string) string {
 
 func GetConfigPath(name string) string {
 	return filepath.Join(ConfigDir, name)
+}
+
+func GetDataPath(name string) string {
+	return filepath.Join(DataDir, name)
 }
 
 func GetStatePath(name string) string {
