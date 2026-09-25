@@ -17,6 +17,7 @@ import (
 
 // handleSessionKey routes keys on the session screen by focus.
 func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.flash = ""
 	pending := m.sessionInteraction() != nil
 	if !pending && m.focus == focusDock {
 		m.focus = focusHistory // dock vanished; reclaim focus
@@ -110,10 +111,12 @@ func (m model) historyFocused() bool {
 func (m model) sessionFooter() string {
 	k := projectsKeys
 	switch {
+	case m.flash != "":
+		return asstStyle.Render(firstLine(m.flash))
 	case m.projects.focus == focusFiles && m.filesVisible():
 		return m.footer(append(m.sidebarBindings("back"), k.Refresh)...)
 	case m.projects.fileView.open() && m.focus == focusHistory:
-		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^d/^u", "page"), helpAs(k.Back, "esc", "close"), m.sideKey(sessionKeys.Files))
+		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^u/^d", "page"), helpAs(k.Back, "esc", "close"), m.sideKey(sessionKeys.Files))
 	case m.focus == focusDock:
 		multi := m.isMultiQuestion()
 		binds := []key.Binding{promptKeys.Up}
@@ -419,7 +422,7 @@ func (m model) sessionView() string {
 	header = m.center(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth())
 
 	if s.Status == session.StatusStarting {
-		return pinFooter(header+"\n\n"+startingNotice(m), m.sessionFooter(), m.bodyWidth(), m.bodyHeight())
+		return m.pin(header+"\n\n"+startingNotice(m), m.sessionFooter())
 	}
 
 	body := m.historyBody()
@@ -445,7 +448,7 @@ func (m model) sessionView() string {
 		dock := rule + "\n" + indentBlock(dockBody, strings.Repeat(" ", contentPadX))
 		body = body + "\n" + m.center(dock, m.containerWidth())
 	}
-	return pinFooter(header+"\n\n"+body, m.sessionFooter(), m.bodyWidth(), m.bodyHeight())
+	return m.pin(header+"\n\n"+body, m.sessionFooter())
 }
 
 // startingNotice renders the startup-gate message centered in place of the

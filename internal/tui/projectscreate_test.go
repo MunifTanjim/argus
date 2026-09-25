@@ -222,6 +222,17 @@ func TestHiddenPickerCreateOnlyReports(t *testing.T) {
 	}
 }
 
+func TestTreeLooksUnfocusedUnderPicker(t *testing.T) {
+	m := createTestModel(t)
+	m.projects.focus = focusTree
+	unfocused := m
+	unfocused.projects.create = createState{}
+	unfocused.projects.focus = focusPane
+	if got, want := m.projectsTreePane(30, 20), unfocused.projectsTreePane(30, 20); got != want {
+		t.Errorf("the tree should draw unfocused while the picker takes keys:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestNonIssueCreateDoesNotOfferSpawn(t *testing.T) {
 	m := createTestModel(t)
 	res, _ := m.Update(createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})

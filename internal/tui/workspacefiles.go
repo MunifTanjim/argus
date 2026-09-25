@@ -80,6 +80,11 @@ func (m model) syncPane() (tea.Model, tea.Cmd) {
 // --- pane key handling --------------------------------------------------------
 
 func (m model) handleProjectsPaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	k := projectsKeys
+	if key.Matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove) {
+		m.flash = "manage keys work in the tree · esc to go there"
+		return m, nil
+	}
 	if mm, cmd, ok := m.handleFileViewKey(msg); ok {
 		return mm, cmd
 	}
@@ -93,6 +98,18 @@ func (m model) paneSessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.projects.wsCursor = cursorUp(m.projects.wsCursor)
 	case key.Matches(msg, projectsKeys.Down):
 		m.projects.wsCursor = cursorDown(m.projects.wsCursor, len(ss))
+	case key.Matches(msg, projectsKeys.Top):
+		m.projects.wsCursor = 0
+	case key.Matches(msg, projectsKeys.Bottom):
+		m.projects.wsCursor = cursorBottom(len(ss))
+	case key.Matches(msg, projectsKeys.HalfUp):
+		m.projects.wsCursor = max(0, m.projects.wsCursor-m.cardListPageStep())
+	case key.Matches(msg, projectsKeys.HalfDown):
+		m.projects.wsCursor = min(cursorBottom(len(ss)), m.projects.wsCursor+m.cardListPageStep())
+	case key.Matches(msg, listKeys.Jump):
+		if m.projects.wsCursor < len(ss) {
+			return m.jumpTo(ss[m.projects.wsCursor])
+		}
 	case key.Matches(msg, projectsKeys.Enter):
 		if m.projects.wsCursor < len(ss) {
 			return m.enterSession(ss[m.projects.wsCursor].ID)
@@ -150,7 +167,7 @@ func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		c.cursor = max(0, c.cursor-m.cardListPageStep())
 	case key.Matches(msg, k.HalfDown):
 		c.cursor = min(cursorBottom(n), c.cursor+m.cardListPageStep())
-	case key.Matches(msg, k.Enter):
+	case key.Matches(msg, k.Enter, k.Right):
 		switch {
 		case c.cursor < len(c.files):
 			return m.openDiff(c.files[c.cursor], "")
@@ -182,7 +199,7 @@ func (m model) commitFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		c.commitCursor = max(0, c.commitCursor-m.cardListPageStep())
 	case key.Matches(msg, k.HalfDown):
 		c.commitCursor = min(cursorBottom(n), c.commitCursor+m.cardListPageStep())
-	case key.Matches(msg, k.Enter):
+	case key.Matches(msg, k.Enter, k.Right):
 		if c.commitCursor < n {
 			return m.openDiff(c.commitFiles[c.commitCursor], c.commit.SHA)
 		}

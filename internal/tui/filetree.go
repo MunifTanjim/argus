@@ -108,9 +108,9 @@ func (t *fileTree) key(msg tea.KeyPressMsg, page int) treeRequest {
 		t.cursor = min(cursorBottom(n), t.cursor+page)
 	case key.Matches(msg, k.Left):
 		t.left(rows)
-	case key.Matches(msg, k.Right):
+	case key.Matches(msg, k.Right) && t.cursor < n && rows[t.cursor].entry.IsDir:
 		return t.unfold(rows)
-	case key.Matches(msg, k.Enter):
+	case key.Matches(msg, k.Enter, k.Right):
 		if t.cursor >= n || rows[t.cursor].note != "" {
 			return treeRequest{}
 		}

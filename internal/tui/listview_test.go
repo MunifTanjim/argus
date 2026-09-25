@@ -14,12 +14,12 @@ func TestListViewEmptyStateIsFriendly(t *testing.T) {
 	m := testModel() // no sessions: m.order is empty
 	// Footers render via the help bubble (per-token styled); strip ANSI so the
 	// assertions see the plain text.
-	out := ansi.Strip(m.listView())
+	out := ansi.Strip(m.View().Content)
 
 	for _, want := range []string{
 		"Watch and control all your AI agents.", // tagline
 		"No sessions yet.",                      // greeting
-		"n new · r refresh · q quit",            // trimmed footer
+		"s spawn · r refresh · q quit",          // trimmed footer
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("empty welcome should contain %q:\n%s", want, out)
