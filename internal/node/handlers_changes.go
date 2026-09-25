@@ -99,14 +99,7 @@ func (d *Node) handleCommits(ctx context.Context, params json.RawMessage) (any, 
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
-	out := make([]api.Commit, len(log.Commits))
-	for i, c := range log.Commits {
-		out[i] = api.Commit{
-			SHA: c.SHA, Short: c.Short, Subject: c.Subject,
-			Author: c.Author, UnixSec: c.UnixSec,
-		}
-	}
-	return api.CommitsResult{Commits: out, Unpushed: log.Unpushed}, nil
+	return api.CommitsResult{Commits: toAPICommits(log.Commits), Unpushed: log.Unpushed}, nil
 }
 
 func (d *Node) handleCommitFiles(ctx context.Context, params json.RawMessage) (any, error) {
@@ -129,13 +122,7 @@ func (d *Node) handleCommitFiles(ctx context.Context, params json.RawMessage) (a
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
-	out := make([]api.ChangedFile, len(files))
-	for i, f := range files {
-		out[i] = api.ChangedFile{
-			Path: f.Path, OrigPath: f.OrigPath, Change: string(f.Change), Staged: f.Staged,
-		}
-	}
-	return api.ChangedFilesResult{Files: out}, nil
+	return api.ChangedFilesResult{Files: toAPICommitFiles(files)}, nil
 }
 
 // sessionDir is the working directory to run git in: the hook-reported Cwd when
@@ -145,4 +132,20 @@ func sessionDir(s session.Session) string {
 		return s.Cwd
 	}
 	return s.Tmux.CurrentPath
+}
+
+func toAPICommits(cs []gitstatus.Commit) []api.Commit {
+	out := make([]api.Commit, len(cs))
+	for i, c := range cs {
+		out[i] = api.Commit{SHA: c.SHA, Short: c.Short, Subject: c.Subject, Author: c.Author, UnixSec: c.UnixSec}
+	}
+	return out
+}
+
+func toAPICommitFiles(fs []gitstatus.ChangedFile) []api.ChangedFile {
+	out := make([]api.ChangedFile, len(fs))
+	for i, f := range fs {
+		out[i] = api.ChangedFile{Path: f.Path, OrigPath: f.OrigPath, Change: string(f.Change), Staged: f.Staged}
+	}
+	return out
 }

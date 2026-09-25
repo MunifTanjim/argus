@@ -76,6 +76,13 @@ func (d *Node) handleWorkspaceDiff(ctx context.Context, params json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
+	if p.Rev != "" {
+		diff, notShown, err := gitstatus.CommitDiff(ctx, dir, p.Rev, p.Path, p.OrigPath)
+		if err != nil {
+			return nil, invalid("%s", err)
+		}
+		return api.WorkspaceDiffResult{Path: p.Path, Diff: diff, NotShown: notShown}, nil
+	}
 	base, err := d.diffBase(ctx, p.WorkspaceID, dir, p.Against)
 	if err != nil {
 		return nil, err
@@ -88,6 +95,51 @@ func (d *Node) handleWorkspaceDiff(ctx context.Context, params json.RawMessage) 
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
 	return api.WorkspaceDiffResult{Path: p.Path, Diff: diff, NotShown: notShown}, nil
+}
+
+// handleWorkspaceCommits does not use diffBase because it fails on an empty
+// target, which here means "no scope": an empty list.
+func (d *Node) handleWorkspaceCommits(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.WorkspaceRef](params)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := d.workspaceDir(ctx, p.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	target, _, err := d.projreg.TargetBranch(ctx, p.WorkspaceID)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
+	if target == "" {
+		return api.CommitsResult{Commits: []api.Commit{}}, nil
+	}
+	base, err := gitstatus.TargetBase(ctx, dir, target)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
+	commits, err := gitstatus.CommitsSince(ctx, dir, base)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
+	return api.CommitsResult{Commits: toAPICommits(commits)}, nil
+}
+
+func (d *Node) handleWorkspaceCommitFiles(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.WorkspaceCommitParams](params)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := d.workspaceDir(ctx, p.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	files, err := gitstatus.CommitFiles(ctx, dir, p.SHA)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
+	return api.ChangedFilesResult{Files: toAPICommitFiles(files)}, nil
 }
 
 func (d *Node) handleWorkspaceListDir(ctx context.Context, params json.RawMessage) (any, error) {

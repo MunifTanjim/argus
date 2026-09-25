@@ -586,3 +586,110 @@ func TestCommitFileContents(t *testing.T) {
 		}
 	})
 }
+
+func TestCommitsSince(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-b", "main")
+	write(t, dir, "a.txt", "1\n")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "base")
+	base := headSHA(t, dir)
+	write(t, dir, "a.txt", "1\n2\n")
+	gitCmd(t, dir, "commit", "-am", "second")
+	write(t, dir, "b.txt", "x\n")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "third")
+
+	commits, err := CommitsSince(ctx, dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 2 || commits[0].Subject != "third" || commits[1].Subject != "second" {
+		t.Fatalf("commits = %+v, want third, second", commits)
+	}
+	if commits[0].SHA == "" || commits[0].Short == "" || commits[0].UnixSec == 0 {
+		t.Errorf("missing fields: %+v", commits[0])
+	}
+	none, err := CommitsSince(ctx, dir, headSHA(t, dir))
+	if err != nil || len(none) != 0 {
+		t.Errorf("base at HEAD: commits = %+v, err = %v, want none", none, err)
+	}
+}
+
+func TestCommitDiff(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-b", "main")
+	write(t, dir, "a.txt", "one\ntwo\nthree\nfour\nfive\n")
+	write(t, dir, "gone.txt", "bye\n")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-m", "root")
+	root := headSHA(t, dir)
+	write(t, dir, "a.txt", "one\ntwo\nthree\nfour\nFIVE\n")
+	gitCmd(t, dir, "commit", "-am", "edit")
+	edit := headSHA(t, dir)
+	gitCmd(t, dir, "rm", "gone.txt")
+	gitCmd(t, dir, "commit", "-m", "delete")
+	del := headSHA(t, dir)
+	gitCmd(t, dir, "mv", "a.txt", "b.txt")
+	gitCmd(t, dir, "commit", "-m", "rename")
+	ren := headSHA(t, dir)
+
+	for _, tc := range []struct{ name, sha, path, orig, want, notWant string }{
+		{"root commit", root, "a.txt", "", "+one", ""},
+		{"edit", edit, "a.txt", "", "+FIVE", "+one"},
+		{"delete", del, "gone.txt", "", "-bye", ""},
+		{"rename", ren, "b.txt", "a.txt", "rename from a.txt", "+one"},
+	} {
+		diff, notShown, err := CommitDiff(ctx, dir, tc.sha, tc.path, tc.orig)
+		if err != nil || notShown || !strings.Contains(diff, tc.want) || (tc.notWant != "" && strings.Contains(diff, tc.notWant)) {
+			t.Errorf("%s: diff = %q, notShown = %v, err = %v", tc.name, diff, notShown, err)
+		}
+	}
+	if _, _, err := CommitDiff(ctx, dir, "--output=/tmp/x", "a.txt", ""); err == nil {
+		t.Error("a non-hex sha must be rejected")
+	}
+}
+
+func TestCommitDiffIgnoresShowSignature(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen not available")
+	}
+	keyDir := t.TempDir()
+	key := filepath.Join(keyDir, "k")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v\n%s", err, out)
+	}
+	pub, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := filepath.Join(keyDir, "allowed")
+	if err := os.WriteFile(allowed, append([]byte("t@e "), pub...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-b", "main")
+	gitCmd(t, dir, "config", "gpg.format", "ssh")
+	gitCmd(t, dir, "config", "user.signingkey", key)
+	gitCmd(t, dir, "config", "gpg.ssh.allowedSignersFile", allowed)
+	gitCmd(t, dir, "config", "log.showSignature", "true")
+	write(t, dir, "a.txt", "1\n")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-S", "-m", "signed")
+
+	diff, _, err := CommitDiff(context.Background(), dir, headSHA(t, dir), "a.txt", "")
+	if err != nil || !strings.HasPrefix(diff, "diff --git") {
+		t.Errorf("the diff should start at its header, with no signature lines: %q, %v", diff, err)
+	}
+}

@@ -140,3 +140,34 @@ func TestPickerCallsRouteByCompositeID(t *testing.T) {
 		t.Errorf("setTarget reached node with %q, want w1", got[api.MethodWorkspaceSetTarget])
 	}
 }
+
+func TestCommitCallsRouteByWorkspace(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	got := map[string]string{}
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		var m map[string]string
+		_ = json.Unmarshal(params, &m)
+		got[method] = m["workspace_id"]
+		return []byte(`{}`), nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(api.MethodWorkspaceCommits, api.WorkspaceRef{WorkspaceID: "n1:w1"}, nil); err != nil {
+		t.Fatalf("commits: %v", err)
+	}
+	if err := c.Call(api.MethodWorkspaceCommitFiles, api.WorkspaceCommitParams{WorkspaceID: "n1:w1", SHA: "abc1234"}, nil); err != nil {
+		t.Fatalf("commitFiles: %v", err)
+	}
+	for _, m := range []string{api.MethodWorkspaceCommits, api.MethodWorkspaceCommitFiles} {
+		if got[m] != "w1" {
+			t.Errorf("%s reached node with workspace_id %q, want the node-local w1", m, got[m])
+		}
+	}
+}

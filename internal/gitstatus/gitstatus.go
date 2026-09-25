@@ -329,7 +329,13 @@ func DiffSince(ctx context.Context, dir, base, p, origPath string) (diff string,
 		args = append(args, origPath)
 	}
 	cmd := shell.NewCommandContext(ctx, "git", args...)
-	_ = cmd.Run() // base may be absent (HEAD in a new repo); fall through to the added-file path
+	if err := cmd.Run(); err != nil {
+		if revExists(ctx, root, base) {
+			return "", false, fmt.Errorf("gitstatus: git diff failed in %s: %w", root, err)
+		}
+		// No base (HEAD in a new repo): every file is new.
+		return addedDiff(ctx, dir, p)
+	}
 	out := cmd.StdOut().String()
 	if strings.TrimSpace(out) != "" {
 		if len(out) > maxContentBytes || isBinary(out) {
@@ -337,6 +343,18 @@ func DiffSince(ctx context.Context, dir, base, p, origPath string) (diff string,
 		}
 		return out, false, nil
 	}
+	if tracked(ctx, root, p) {
+		return "", false, nil
+	}
+	return addedDiff(ctx, dir, p)
+}
+
+func tracked(ctx context.Context, root, p string) bool {
+	cmd := shell.NewCommandContext(ctx, "git", "-C", root, "ls-files", "--error-unmatch", "--", p)
+	return cmd.Run() == nil
+}
+
+func addedDiff(ctx context.Context, dir, p string) (diff string, notShown bool, err error) {
 	content, ns, rerr := ReadFile(ctx, dir, p)
 	if rerr != nil {
 		return "", false, nil
@@ -464,14 +482,32 @@ func Commits(ctx context.Context, dir string) (CommitLog, error) {
 	if mb == "" {
 		return CommitLog{}, nil
 	}
+	commits, err := commitLog(ctx, root, mb)
+	if err != nil {
+		return CommitLog{}, err
+	}
+	return CommitLog{Commits: commits, Unpushed: unpushed}, nil
+}
+
+// CommitsSince lists commits reachable from HEAD but not from base, newest
+// first, excluding merges.
+func CommitsSince(ctx context.Context, dir, base string) ([]Commit, error) {
+	root, err := repoRoot(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	return commitLog(ctx, root, base)
+}
+
+func commitLog(ctx context.Context, root, base string) ([]Commit, error) {
 	const sep = "\x1f"
 	format := strings.Join([]string{"%H", "%h", "%s", "%an", "%at"}, sep)
 	cmd := shell.NewCommandContext(ctx, "git", "-C", root,
-		"log", "--no-merges", "--format="+format, mb+"..HEAD")
+		"log", "--no-merges", "--format="+format, base+"..HEAD")
 	if err := cmd.Run(); err != nil {
-		return CommitLog{}, fmt.Errorf("gitstatus: git log failed in %s: %w", root, err)
+		return nil, fmt.Errorf("gitstatus: git log failed in %s: %w", root, err)
 	}
-	return CommitLog{Commits: parseCommitLog(cmd.StdOut().String(), sep), Unpushed: unpushed}, nil
+	return parseCommitLog(cmd.StdOut().String(), sep), nil
 }
 
 func parseCommitLog(out, sep string) []Commit {
@@ -540,6 +576,39 @@ func CommitFiles(ctx context.Context, dir, sha string) ([]ChangedFile, error) {
 		return nil, fmt.Errorf("gitstatus: git diff-tree failed: %w", err)
 	}
 	return parseNameStatusZ(cmd.StdOut().String()), nil
+}
+
+// CommitDiff returns the unified diff of a repo-relative path in one commit,
+// against its first parent (or everything, for the root commit). origPath (a
+// rename source, or "") lets git show the rename. notShown is true for a binary
+// or oversized result.
+func CommitDiff(ctx context.Context, dir, sha, p, origPath string) (diff string, notShown bool, err error) {
+	if !isHexSHA(sha) {
+		return "", false, fmt.Errorf("gitstatus: invalid commit sha: %q", sha)
+	}
+	root, err := repoRoot(ctx, dir)
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := repoRelPath(root, p); err != nil {
+		return "", false, err
+	}
+	args := []string{"-C", root, "show", "--format=", "--no-show-signature", "--no-color", "-M", sha, "--", p}
+	if origPath != "" {
+		if _, err := repoRelPath(root, origPath); err != nil {
+			return "", false, err
+		}
+		args = append(args, origPath)
+	}
+	cmd := shell.NewCommandContext(ctx, "git", args...)
+	if err := cmd.Run(); err != nil {
+		return "", false, fmt.Errorf("gitstatus: git show failed: %w", err)
+	}
+	out := cmd.StdOut().String()
+	if len(out) > maxContentBytes || isBinary(out) {
+		return "", true, nil
+	}
+	return out, false, nil
 }
 
 // parseNameStatusZ parses NUL-separated `git diff-tree --name-status -z` records.

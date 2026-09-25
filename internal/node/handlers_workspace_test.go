@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -157,5 +158,105 @@ func TestWorkspaceListDirAndUnknownID(t *testing.T) {
 	bad, _ := json.Marshal(api.WorkspaceFileParams{WorkspaceID: "nope"})
 	if _, err := d.handleWorkspaceListDir(ctx, bad); rpcCode(err) != api.CodeInvalidRequest {
 		t.Errorf("unknown workspace: err = %v, want CodeInvalidRequest", err)
+	}
+}
+
+func TestWorkspaceCommitsFilesAndDiff(t *testing.T) {
+	d, projID, _ := createFixture(t)
+	res, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Branch: "feat", TargetBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(res.Dir, "c.txt"), []byte("c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, res.Dir, "add", ".")
+	runGit(t, res.Dir, "commit", "-m", "add c")
+	ctx := context.Background()
+
+	ref, _ := json.Marshal(api.WorkspaceRef{WorkspaceID: res.WorkspaceID})
+	r, err := d.handleWorkspaceCommits(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr := r.(api.CommitsResult)
+	if len(cr.Commits) != 1 || cr.Commits[0].Subject != "add c" || cr.Unpushed {
+		t.Fatalf("commits = %+v, want only the workspace's commit since main", cr)
+	}
+	sha := cr.Commits[0].SHA
+
+	cf, _ := json.Marshal(api.WorkspaceCommitParams{WorkspaceID: res.WorkspaceID, SHA: sha})
+	fr, err := d.handleWorkspaceCommitFiles(ctx, cf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files := fr.(api.ChangedFilesResult).Files; len(files) != 1 || files[0].Path != "c.txt" || files[0].Change != "added" {
+		t.Errorf("commit files = %+v, want c.txt added", files)
+	}
+
+	df, _ := json.Marshal(api.WorkspaceFileParams{WorkspaceID: res.WorkspaceID, Path: "c.txt", Rev: sha})
+	dr, err := d.handleWorkspaceDiff(ctx, df)
+	if err != nil || !strings.Contains(dr.(api.WorkspaceDiffResult).Diff, "+c") {
+		t.Errorf("commit diff = %+v, %v", dr, err)
+	}
+}
+
+func TestWorkspaceCommitsErrors(t *testing.T) {
+	d, projID, _ := createFixture(t)
+	res, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Branch: "feat", TargetBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := d.projreg.SetWorkspaceTarget(ctx, res.WorkspaceID, "nope"); err != nil {
+		t.Fatal(err)
+	}
+	ref, _ := json.Marshal(api.WorkspaceRef{WorkspaceID: res.WorkspaceID})
+	if _, err := d.handleWorkspaceCommits(ctx, ref); rpcCode(err) != api.CodeInvalidRequest {
+		t.Errorf("unknown target: err = %v, want CodeInvalidRequest", err)
+	}
+	bad, _ := json.Marshal(api.WorkspaceRef{WorkspaceID: "nope"})
+	if _, err := d.handleWorkspaceCommits(ctx, bad); rpcCode(err) != api.CodeInvalidRequest {
+		t.Errorf("unknown workspace: err = %v, want CodeInvalidRequest", err)
+	}
+	cf, _ := json.Marshal(api.WorkspaceCommitParams{WorkspaceID: res.WorkspaceID, SHA: "--output=x"})
+	if _, err := d.handleWorkspaceCommitFiles(ctx, cf); rpcCode(err) != api.CodeInvalidRequest {
+		t.Errorf("bad sha: err = %v, want CodeInvalidRequest", err)
+	}
+	df, _ := json.Marshal(api.WorkspaceFileParams{WorkspaceID: res.WorkspaceID, Path: "f.txt", Rev: "--output=x"})
+	if _, err := d.handleWorkspaceDiff(ctx, df); rpcCode(err) != api.CodeInvalidRequest {
+		t.Errorf("bad rev: err = %v, want CodeInvalidRequest", err)
+	}
+}
+
+func TestWorkspaceCommitsNoTargetIsEmpty(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "init")
+	runGit(t, dir, "checkout", "--detach")
+
+	d := nodeWithRegistry(t)
+	wsID, err := d.projreg.AdoptSession(ctx, dir)
+	if err != nil || wsID == "" {
+		t.Fatalf("AdoptSession: %q, %v", wsID, err)
+	}
+	if target, _, _ := d.projreg.TargetBranch(ctx, wsID); target != "" {
+		t.Fatalf("fixture should have no target branch, got %q", target)
+	}
+	ref, _ := json.Marshal(api.WorkspaceRef{WorkspaceID: wsID})
+	r, err := d.handleWorkspaceCommits(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := r.(api.CommitsResult).Commits; c == nil || len(c) != 0 {
+		t.Errorf("no target: commits = %#v, want an empty, non-nil list", c)
 	}
 }

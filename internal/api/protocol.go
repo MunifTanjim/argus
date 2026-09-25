@@ -112,6 +112,8 @@ const (
 	MethodWorkspaceDiff         = "workspace.diff"         // request: WorkspaceFileParams; result: WorkspaceDiffResult
 	MethodWorkspaceListDir      = "workspace.listDir"      // request: WorkspaceFileParams; result: ListDirResult
 	MethodWorkspaceReadFile     = "workspace.readFile"     // request: WorkspaceFileParams; result: ReadFileResult
+	MethodWorkspaceCommits      = "workspace.commits"      // request: WorkspaceRef; result: CommitsResult (since the target merge base)
+	MethodWorkspaceCommitFiles  = "workspace.commitFiles"  // request: WorkspaceCommitParams; result: ChangedFilesResult
 	// Mutating workspace/project management (project_id-addressed except remove).
 	MethodWorkspaceCreate  = "workspace.create"  // request: WorkspaceCreateParams; result: WorkspaceCreateResult
 	MethodWorkspaceRemove  = "workspace.remove"  // request: WorkspaceRemoveParams; result: nil
@@ -195,6 +197,12 @@ type WorkspaceFileParams struct {
 	Path        string `json:"path"`                // repo-relative slash path ("" = root, for listDir)
 	Against     string `json:"against,omitempty"`   // diff only: "" (vs HEAD) or AgainstTarget
 	OrigPath    string `json:"orig_path,omitempty"` // diff only: rename source, so the diff shows the rename
+	Rev         string `json:"rev,omitempty"`       // diff only: a commit sha; shows that commit's change and ignores Against
+}
+
+type WorkspaceCommitParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	SHA         string `json:"sha"`
 }
 
 const (

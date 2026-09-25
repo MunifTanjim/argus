@@ -21,6 +21,7 @@ func (c *stubQuarantinedClient) Quarantined() bool               { return c.q }
 
 func quarantinedModel(q bool, sessions ...session.Session) model {
 	m := modelWith(sessions...)
+	m.projects.focus = focusPane
 	m.client = &stubQuarantinedClient{q: q}
 	return m
 }

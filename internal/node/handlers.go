@@ -52,6 +52,8 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodWorkspaceDiff, d.handleWorkspaceDiff)
 	srv.Handle(api.MethodWorkspaceListDir, d.handleWorkspaceListDir)
 	srv.Handle(api.MethodWorkspaceReadFile, d.handleWorkspaceReadFile)
+	srv.Handle(api.MethodWorkspaceCommits, d.handleWorkspaceCommits)
+	srv.Handle(api.MethodWorkspaceCommitFiles, d.handleWorkspaceCommitFiles)
 	srv.Handle(api.MethodWorkspaceCreate, d.handleWorkspaceCreate)
 	srv.Handle(api.MethodWorkspaceRemove, d.handleWorkspaceRemove)
 	srv.Handle(api.MethodProjectRename, d.handleProjectRename)

@@ -16,6 +16,7 @@ func homeTestModel() model {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.mode = modeList
+	m.projects.focus = focusPane
 	m.order = []string{"n1:s1", "n1:s2", "n1:s3"}
 	return m
 }
@@ -499,6 +500,30 @@ func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 	}
 }
 
+func TestEmptyHomeRowFramesSplashInPane(t *testing.T) {
+	m := homeTestModel()
+	m.order, m.sessions = nil, map[string]session.Session{}
+	m.projects.filesHidden = false
+	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = res.(model)
+	if !m.treeFocused() || !m.onHomeRow() {
+		t.Fatalf("want the tree focused on Home: focus=%v row=%q", m.projects.focus, m.projects.cursorRowID())
+	}
+	if !m.filesVisible() {
+		t.Error("the right sidebar should show next to the tree")
+	}
+	out := m.View().Content
+	if n := strings.Count(out, "\n") + 1; n != m.height {
+		t.Errorf("view is %d rows, want %d", n, m.height)
+	}
+	assertFits(t, out, m.width)
+	for _, ln := range strings.Split(ansi.Strip(out), "\n") {
+		if strings.Contains(ln, "Sessions") && strings.Contains(ln, "argus") {
+			t.Errorf("the framed splash should not repeat the argus brand: %q", ln)
+		}
+	}
+}
+
 func TestFramedScreenHasLeftMargin(t *testing.T) {
 	check := func(name string, m model) {
 		t.Helper()
@@ -575,16 +600,8 @@ func TestPanesCenterTheirContentColumn(t *testing.T) {
 		t.Errorf("workspace cards at column %d, want centered at %d", c, wantCards)
 	}
 
-	ws.projects.tab = tabChanges
-	ws.projects.dataWS = "n1:w1"
-	ws.projects.changes.files = []api.ChangedFile{{Path: "a.go", Change: "modified"}}
-	if c := columnOf(ws.View().Content, "Sessions  Changes"); c != wantCards {
-		t.Errorf("Changes list header at %d, want centered with the cards at %d", c, wantCards)
-	}
-
-	ws.projects.changes.viewing = true
-	ws.projects.changes.diff = "@@ -1 +1 @@\n-a\n+bb"
-	if c := columnOf(ws.View().Content, "Sessions  Changes"); c != wantCards {
+	ws.projects.fileView = fileViewState{ws: "n1:w1", path: "a.go", diff: true, lines: []string{"@@ -1 +1 @@", "-a", "+bb"}}
+	if c := columnOf(ws.View().Content, "repo  main"); c != wantCards {
 		t.Errorf("diff viewer header moved to %d, want it to stay at %d", c, wantCards)
 	}
 	wantText := paneX + (paneW-min(paneW, maxContentWidth))/2
