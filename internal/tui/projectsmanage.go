@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -266,10 +267,26 @@ func (m model) handleRetargetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, m.setTargetCmd(rt.workspaceID, picked.Name)
 }
 
-// actSpawnSession starts the new-session flow in the selected workspace, with
-// its node and directory fixed.
+// actSpawnSession starts a session in the selected workspace, or the selected
+// project's main workspace, with its node and directory fixed. On the Home row
+// it runs the full spawn flow.
 func (m model) actSpawnSession() (tea.Model, tea.Cmd) {
-	w, ok := m.findWorkspace(m.selectedWorkspaceID())
+	wsID := m.selectedWorkspaceID()
+	if r, ok := m.cursorRow(); ok {
+		switch r.kind {
+		case rowHome:
+			return m.actListNew(tea.KeyPressMsg{})
+		case rowProject:
+			if p, ok := m.findProject(r.id); ok {
+				for _, w := range p.Workspaces {
+					if w.IsMain {
+						wsID = w.ID
+					}
+				}
+			}
+		}
+	}
+	w, ok := m.findWorkspace(wsID)
 	switch {
 	case !ok:
 		m.flash = "select a workspace to start a session in"
@@ -296,10 +313,10 @@ func (m model) findWorkspace(id string) (api.WorkspaceNode, bool) {
 // --- commands -----------------------------------------------------------------
 
 func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
-	client := m.client
+	client, ok, next := m.client, "removed "+m.workspaceLabel(workspaceID), m.projects.removeNeighbor(workspaceID)
 	return func() tea.Msg {
 		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, nil)
-		return projectsActionMsg{verb: "remove workspace", removed: workspaceID, err: err}
+		return projectsActionMsg{verb: "remove workspace", ok: ok, selectID: next, removed: workspaceID, err: err}
 	}
 }
 
@@ -307,30 +324,43 @@ func (m model) renameProjectCmd(projectID, name string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		err := client.Call(api.MethodProjectRename, api.ProjectRenameParams{ProjectID: projectID, Name: name}, nil)
-		return projectsActionMsg{verb: "rename", err: err}
+		return projectsActionMsg{verb: "rename", ok: "renamed to " + name, err: err}
 	}
 }
 
 func (m model) setHiddenCmd(projectID string, hidden bool, ok string) tea.Cmd {
-	client := m.client
+	client, verb := m.client, "hide"
+	if !hidden {
+		verb = "unhide"
+	}
 	return func() tea.Msg {
 		err := client.Call(api.MethodProjectSetHidden, api.ProjectFlagParams{ProjectID: projectID, Value: hidden}, nil)
-		return projectsActionMsg{verb: "hide", ok: ok, err: err}
+		return projectsActionMsg{verb: verb, ok: ok, err: err}
 	}
 }
 
 func (m model) setPinnedCmd(projectID string, pinned bool, ok string) tea.Cmd {
-	client := m.client
+	client, verb := m.client, "pin"
+	if !pinned {
+		verb = "unpin"
+	}
 	return func() tea.Msg {
 		err := client.Call(api.MethodProjectSetPinned, api.ProjectFlagParams{ProjectID: projectID, Value: pinned}, nil)
-		return projectsActionMsg{verb: "pin", ok: ok, err: err}
+		return projectsActionMsg{verb: verb, ok: ok, err: err}
 	}
 }
 
 func (m model) setTargetCmd(workspaceID, branch string) tea.Cmd {
-	client := m.client
+	client, ok := m.client, "target of "+m.workspaceLabel(workspaceID)+" → "+branch
 	return func() tea.Msg {
 		err := client.Call(api.MethodWorkspaceSetTarget, api.WorkspaceSetTargetParams{WorkspaceID: workspaceID, TargetBranch: branch}, nil)
-		return projectsActionMsg{verb: "set target", ok: "target: " + branch, reloadChanges: true, err: err}
+		return projectsActionMsg{verb: "set target", ok: ok, reloadChanges: true, err: err}
 	}
+}
+
+func (m model) workspaceLabel(id string) string {
+	if w, ok := m.findWorkspace(id); ok {
+		return filepath.Base(w.Dir)
+	}
+	return "workspace"
 }

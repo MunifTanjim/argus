@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -100,6 +101,14 @@ func (m model) fetchIssuesCmd(projectID string) tea.Cmd {
 		err := client.Call(api.MethodProjectIssues, api.ProjectRef{ProjectID: projectID}, &r)
 		return issuesMsg{projectID: projectID, issues: r.Issues, truncated: r.Truncated, err: err}
 	}
+}
+
+func createdFlash(res api.WorkspaceCreateResult) string {
+	s := "created workspace " + filepath.Base(res.Dir)
+	if res.Warning != "" {
+		s += " · " + res.Warning
+	}
+	return s
 }
 
 func (m model) createCmd(p api.WorkspaceCreateParams) tea.Cmd {

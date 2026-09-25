@@ -217,7 +217,7 @@ func TestHiddenPickerCreateOnlyReports(t *testing.T) {
 		source: api.SourceIssue,
 	})
 	m = res.(model)
-	if m.projects.offerSpawn != nil || m.projects.want == "n1:w9" || !strings.Contains(m.flash, "workspace created") {
+	if m.projects.offerSpawn != nil || m.projects.want == "n1:w9" || !strings.Contains(m.flash, "created workspace") {
 		t.Errorf("a hidden picker's result should only be flashed: offer=%v want=%q flash=%q", m.projects.offerSpawn, m.projects.want, m.flash)
 	}
 }
@@ -294,6 +294,15 @@ func TestCreateErrorsShowInPickerAndClearOnEdit(t *testing.T) {
 	m, _ = upd(m, keyMsg("enter"))
 	if m.flash != "" || !strings.Contains(m.projects.create.err, "busy is checked out in another workspace") {
 		t.Errorf("a busy branch should report in the picker: flash=%q err=%q", m.flash, m.projects.create.err)
+	}
+}
+
+func TestCreateFlashNamesTheWorkspace(t *testing.T) {
+	m := createTestModel(t)
+	m.projects.create.creating = true
+	m, _ = upd(m, createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/login", Warning: "fetch failed"}, source: api.SourceNew})
+	if m.flash != "created workspace login · fetch failed" {
+		t.Errorf("flash = %q", m.flash)
 	}
 }
 

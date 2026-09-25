@@ -207,6 +207,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Home pane keeps the cursor on Home.
 			if m.mode == modeProjects {
 				m.projects.reveal(m.projects.want)
+				if m.projects.cursorRowID() != m.projects.want {
+					m.projects.selectRow(m.projects.want) // a project or node row
+				}
 			}
 			m.projects.want = ""
 		}
@@ -221,7 +224,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flash == "" {
 			m.flash = msg.verb + " done"
 		}
-		m.projects.want = msg.selectID
+		// After a remove, move only a cursor that still sits on the removed row.
+		if msg.removed == "" || m.projects.cursorRowID() == msg.removed {
+			m.projects.want = msg.selectID
+		}
 		if msg.reloadChanges {
 			m.projects.changes.reload()
 		}
@@ -258,10 +264,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.flash = "create workspace: " + msg.err.Error()
 				return m, nil
 			}
-			m.flash = "workspace created"
-			if msg.res.Warning != "" {
-				m.flash += " · " + msg.res.Warning
-			}
+			m.flash = createdFlash(msg.res)
 			return m, m.fetchProjects()
 		}
 		if msg.err != nil {
@@ -271,7 +274,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects.create = createState{}
 		m.projects.want = msg.res.WorkspaceID
-		m.flash = msg.res.Warning
+		m.flash = createdFlash(msg.res)
 		if msg.source == api.SourceIssue && msg.res.Prompt != "" {
 			nodeID, _, _ := session.SplitCompositeID(msg.res.WorkspaceID)
 			m.projects.offerSpawn = &spawnOffer{nodeID: nodeID, cwd: msg.res.Dir, prompt: msg.res.Prompt}
@@ -628,6 +631,13 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 			cmd = bellCmd()
 		}
 		m.sessions[ev.Session.ID] = ev.Session
+		// A session in a workspace the tree lacks means a new repo or worktree.
+		if ws := ev.Session.WorkspaceID; ws != "" && !m.projects.loading {
+			if _, ok := m.findWorkspace(ws); !ok {
+				m.projects.loading = true
+				cmd = tea.Batch(cmd, m.fetchProjects())
+			}
+		}
 		// An agent that stops working has likely changed files in its workspace.
 		if existed && prev.Status == session.StatusWorking && ev.Session.Status != session.StatusWorking &&
 			ev.Session.WorkspaceID != "" && ev.Session.WorkspaceID == m.projects.changes.ws && m.projects.changes.files != nil {
