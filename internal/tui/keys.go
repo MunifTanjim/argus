@@ -70,7 +70,7 @@ var projectsKeys = struct {
 	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
 	Target, DiffMode, Spawn, FocusPrev, ToggleFiles                    key.Binding
 	SideTabPrev, SideTabNext, Refresh, Back                            key.Binding
-	Wrap, NextFile, PrevFile                                           key.Binding
+	Wrap, NextFile, PrevFile, Forget                                   key.Binding
 }{
 	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:          nb([]string{"down", "j"}, "", ""),
@@ -104,6 +104,7 @@ var projectsKeys = struct {
 	SideTabNext:   nb([]string{"]"}, "[/]", "tabs"),
 	Refresh:       nb([]string{"r"}, "r", "refresh"),
 	Wrap:          nb([]string{"w"}, "w", "wrap"),
+	Forget:        nb([]string{"F"}, "F", "forget"),
 	NextFile:      nb([]string{"J"}, "J/K", "file"),
 	PrevFile:      nb([]string{"K"}, "", ""),
 	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),

@@ -257,6 +257,32 @@ func TestProjectCuration(t *testing.T) {
 	}
 }
 
+func TestForgetProjectDropsItsRows(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, _ := repoWithWorktree(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := r.Snapshot(ctx)
+	id, wsID := ps[0].ID, ps[0].Workspaces[0].ID
+	if err := r.ForgetProject(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if ps, _ := r.Snapshot(ctx); len(ps) != 0 {
+		t.Errorf("a forgotten project should leave the list: %+v", ps)
+	}
+	if _, ok, _ := r.WorkspaceDir(ctx, wsID); ok {
+		t.Error("a forgotten project's workspaces should be gone too")
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Errorf("forget must not touch the files: %v", err)
+	}
+	if err := r.ForgetProject(ctx, id); !errors.Is(err, ErrUnknownProject) {
+		t.Errorf("forget of an unknown project: err=%v", err)
+	}
+}
+
 func TestCurationRejectsUnknownProject(t *testing.T) {
 	ctx := context.Background()
 	r := newRegistry(t)

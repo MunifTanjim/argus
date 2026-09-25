@@ -86,6 +86,7 @@ type projectsState struct {
 	inputTarget        string          // project id the input acts on
 	pendingRemove      string          // workspace id awaiting a remove confirmation
 	pendingKill        string          // session id awaiting a kill confirmation
+	pendingForget      string          // project id awaiting a forget confirmation
 	pendingRemoveForce bool            // the pending remove is a force-remove
 	removing           map[string]bool // workspaces with a remove in flight
 
@@ -520,6 +521,13 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.projects.pendingRemove != "" {
 		return m.handleRemoveConfirm(msg)
 	}
+	if id := m.projects.pendingForget; id != "" {
+		m.projects.pendingForget = ""
+		if msg.String() == "y" {
+			return m, m.forgetProjectCmd(id)
+		}
+		return m, nil
+	}
 	if id := m.projects.pendingKill; id != "" {
 		m.projects.pendingKill = ""
 		if msg.String() == "y" {
@@ -826,6 +834,8 @@ func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.actNewWorkspace()
 	case key.Matches(msg, projectsKeys.Rename):
 		return m.actRenameProject()
+	case key.Matches(msg, projectsKeys.Forget):
+		return m.actForgetProject()
 	case key.Matches(msg, projectsKeys.Hide):
 		return m.actToggleHidden()
 	case key.Matches(msg, projectsKeys.Pin):

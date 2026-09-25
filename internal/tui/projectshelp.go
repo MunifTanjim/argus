@@ -19,6 +19,9 @@ func (m model) projectsFooter() string {
 		return asstStyle.Render(killPrompt(m.sessions[m.projects.pendingKill]))
 	case m.projects.pendingRemove != "":
 		return asstStyle.Render(m.removePrompt())
+	case m.projects.pendingForget != "":
+		p, _ := m.findProject(m.projects.pendingForget)
+		return asstStyle.Render("forget project " + p.Name + "? it leaves the list; its files stay · y/n")
 	case m.projects.offerSpawn != nil:
 		return asstStyle.Render("start an agent with this issue? y/n")
 	case m.flash != "":
@@ -107,6 +110,7 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Remove, "x", "remove workspace"),
 			helpAs(k.ForceRemove, "X", "force remove"),
 			helpAs(k.Rename, "R", "rename project"),
+			helpAs(k.Forget, "F", "forget project (files stay)"),
 			helpAs(k.Pin, "P", "pin project"),
 			helpAs(k.Hide, "H", "hide project"),
 			helpAs(k.ShowHidden, "z", "show hidden"),

@@ -59,6 +59,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodProjectRename, d.handleProjectRename)
 	srv.Handle(api.MethodProjectSetHidden, d.handleProjectSetHidden)
 	srv.Handle(api.MethodProjectSetPinned, d.handleProjectSetPinned)
+	srv.Handle(api.MethodProjectForget, d.handleProjectForget)
 	srv.Handle(api.MethodProjectBranches, d.handleProjectBranches)
 	srv.Handle(api.MethodProjectPRs, d.handleProjectPRs)
 	srv.Handle(api.MethodProjectIssues, d.handleProjectIssues)

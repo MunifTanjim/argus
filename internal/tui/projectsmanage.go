@@ -127,6 +127,42 @@ func (m model) actRenameProject() (tea.Model, tea.Cmd) {
 	return m.startInput(pmRename, projID, p.Name)
 }
 
+func (m model) actForgetProject() (tea.Model, tea.Cmd) {
+	projID := m.cursorProjectID()
+	if projID == "" {
+		m.flash = "select a project first"
+		return m, nil
+	}
+	p, _ := m.findProject(projID)
+	act := m.workspaceActivity()
+	live := 0
+	for _, w := range p.Workspaces {
+		live += act[w.ID].live
+	}
+	if live > 0 {
+		it := "it"
+		if live > 1 {
+			it = "them"
+		}
+		m.flash = p.Name + " has " + plural(live, "live session") + " · kill " + it + " first"
+		return m, nil
+	}
+	m.projects.pendingForget = projID
+	return m, nil
+}
+
+func (m model) forgetProjectCmd(projectID string) tea.Cmd {
+	client := m.client
+	name := "project"
+	if p, ok := m.findProject(projectID); ok {
+		name = p.Name
+	}
+	return func() tea.Msg {
+		err := client.Call(api.MethodProjectForget, api.ProjectRef{ProjectID: projectID}, nil)
+		return projectsActionMsg{verb: "forget project", ok: "forgot " + name, err: err}
+	}
+}
+
 func (m model) actToggleHidden() (tea.Model, tea.Cmd) {
 	projID := m.cursorProjectID()
 	if projID == "" {

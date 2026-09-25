@@ -30,6 +30,9 @@ ON CONFLICT (dir) DO UPDATE SET
     is_gone = 0,
     last_seen_at = CURRENT_TIMESTAMP;
 
+-- name: DeleteProject :execrows
+DELETE FROM project WHERE id = ?;
+
 -- name: MarkWorkspacesGone :exec
 UPDATE workspace SET is_gone = 1 WHERE project_id = ?;
 
