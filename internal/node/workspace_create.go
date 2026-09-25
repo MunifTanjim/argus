@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -53,7 +53,7 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	if p.TargetBranch != "" && !gittree.ValidBranchName(ctx, p.TargetBranch) {
 		return nil, invalid("invalid target branch: %q", p.TargetBranch)
 	}
-	name, mainDir, ok, err := d.projreg.ProjectInfo(ctx, p.ProjectID)
+	_, mainDir, ok, err := d.projreg.ProjectInfo(ctx, p.ProjectID)
 	if err != nil {
 		return nil, invalid("%s", err)
 	}
@@ -71,7 +71,8 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	if !gittree.ValidBranchName(ctx, plan.branch) {
 		return nil, invalid("invalid branch name: %q", plan.branch)
 	}
-	path, err := renderWorktreePath(d.worktreeDirTmpl, name, plan.branch, mainDir)
+	// .Repo is the main worktree's directory, not the renamable display name.
+	path, err := renderWorktreePath(d.worktreeDirTmpl, filepath.Base(mainDir), plan.branch, mainDir)
 	if err != nil {
 		return nil, invalid("worktree template: %s", err)
 	}
@@ -190,6 +191,10 @@ func (d *Node) addWorktree(ctx context.Context, p api.WorkspaceCreateParams, pla
 		// The start point is irrelevant: CheckoutPR moves the worktree to the PR head.
 		return "", gittree.AddWorktreeDetached(ctx, mainDir, path, "HEAD")
 	}
+	if gittree.RefExists(ctx, mainDir, "refs/heads/"+plan.branch) {
+		// A removed workspace keeps its branch; reuse it rather than fail.
+		return "branch " + plan.branch + " exists; checked it out as is", gittree.AddWorktree(ctx, mainDir, path, plan.branch, "")
+	}
 	target := plan.target
 	if target == "" {
 		target = gittree.DefaultBranch(ctx, mainDir)
@@ -219,14 +224,14 @@ func prBranch(number int) string {
 
 func renderIssueBranch(tmpl string, is forge.Issue) (string, error) {
 	if tmpl == "" {
-		tmpl = "issue-{{.Number}}-{{.Slug}}"
+		tmpl = "issue-{{.Issue.Number}}-{{.Issue.Slug}}"
 	}
-	t, err := template.New("issue-branch").Parse(tmpl)
+	t, err := parseTemplate("issue-branch", tmpl, issueBranchVars)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	data := map[string]any{"Number": is.Number, "Title": is.Title, "Slug": forge.Slug(is.Title)}
+	data := map[string]any{"Issue": map[string]any{"Number": is.Number, "Title": is.Title, "Slug": forge.Slug(is.Title)}}
 	if err := t.Execute(&b, data); err != nil {
 		return "", err
 	}

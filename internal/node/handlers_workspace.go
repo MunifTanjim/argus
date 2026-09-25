@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"text/template"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gitstatus"
@@ -233,14 +232,18 @@ func within(root, path string) bool {
 // main working tree. An absolute result is used as-is.
 func renderWorktreePath(tmpl, repo, branch, mainDir string) (string, error) {
 	if tmpl == "" {
-		tmpl = ".worktrees/{{.Branch}}"
+		tmpl = ".worktrees/{{.Branch.Slug}}"
 	}
-	t, err := template.New("worktree").Parse(tmpl)
+	t, err := parseTemplate("worktree", tmpl, worktreeDirVars)
 	if err != nil {
 		return "", err
 	}
+	data := map[string]any{
+		"Repo":   map[string]string{"Name": repo},
+		"Branch": map[string]string{"Name": branch, "Slug": strings.ReplaceAll(branch, "/", "-")},
+	}
 	var b strings.Builder
-	if err := t.Execute(&b, map[string]string{"Repo": repo, "Branch": branch}); err != nil {
+	if err := t.Execute(&b, data); err != nil {
 		return "", err
 	}
 	rel := b.String()

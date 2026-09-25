@@ -277,9 +277,16 @@ func TestLockGenesisFromFile(t *testing.T) {
 	}
 }
 
+func TestWorktreeDirTemplateDefault(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").Workspace.WorktreeDirTemplate; got != ".worktrees/{{.Branch.Slug}}" {
+		t.Errorf("WorktreeDirTemplate = %q, want .worktrees/{{.Branch.Slug}}", got)
+	}
+}
+
 func TestIssueBranchTemplateDefault(t *testing.T) {
 	isolateConfigDir(t)
-	if got := load(t, "").Workspace.IssueBranchTemplate; got != "issue-{{.Number}}-{{.Slug}}" {
-		t.Errorf("IssueBranchTemplate = %q, want issue-{{.Number}}-{{.Slug}}", got)
+	if got := load(t, "").Workspace.IssueBranchTemplate; got != "issue-{{.Issue.Number}}-{{.Issue.Slug}}" {
+		t.Errorf("IssueBranchTemplate = %q, want issue-{{.Issue.Number}}-{{.Issue.Slug}}", got)
 	}
 }

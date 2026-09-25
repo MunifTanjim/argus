@@ -17,6 +17,7 @@ type branchPicker struct {
 	err      error
 	filter   textinput.Model
 	cursor   int
+	current  string // marked in the list, and where the cursor starts
 }
 
 func newBranchPicker() branchPicker {
@@ -35,6 +36,15 @@ func (b branchPicker) matches() []api.BranchInfo {
 		}
 	}
 	return out
+}
+
+func (b *branchPicker) load(branches []api.BranchInfo, err error) {
+	b.branches, b.loaded, b.err = branches, true, err
+	for i, br := range b.matches() {
+		if br.Name == b.current {
+			b.cursor = i
+		}
+	}
 }
 
 func (b *branchPicker) key(msg tea.KeyPressMsg) (*api.BranchInfo, tea.Cmd) {
@@ -79,6 +89,9 @@ func (b branchPicker) view(w, h int, dimInUse bool) string {
 		}
 		if dimInUse && br.CheckedOut {
 			text = dimStyle.Render(br.Name + "  (in use)")
+		}
+		if br.Name == b.current {
+			text += dimStyle.Render("  (current)")
 		}
 		lines[i] = truncateLine(cursorLine(text, i == b.cursor, true), w)
 	}

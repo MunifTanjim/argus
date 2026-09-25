@@ -24,27 +24,29 @@ var createTabNames = []string{"New", "Branches", "PRs", "Issues"}
 
 // createState is the "new workspace" picker on the projects screen.
 type createState struct {
-	active        bool
-	projectID     string
-	project       string
-	defaultTarget string
-	tab           createTab
-	name          textinput.Model // New tab
-	filter        textinput.Model // PRs and Issues tabs
-	cursor        int             // PRs and Issues tabs
-	target        string          // "" = default branch
-	branches      branchPicker
-	prs           []api.PRInfo
-	prsLoaded     bool
-	prsErr        error
-	issues        []api.IssueInfo
-	issuesLoaded  bool
-	issuesErr     error
-	picking       bool // target picker open
-	targetPick    branchPicker
-	creating      bool
-	err           string
-	seq           int // tags this picker's create call; see projectsState.createSeq
+	active          bool
+	projectID       string
+	project         string
+	defaultTarget   string
+	tab             createTab
+	name            textinput.Model // New tab
+	filter          textinput.Model // PRs and Issues tabs
+	cursor          int             // PRs and Issues tabs
+	target          string          // "" = default branch
+	branches        branchPicker
+	prs             []api.PRInfo
+	prsLoaded       bool
+	prsErr          error
+	prsTruncated    bool
+	issues          []api.IssueInfo
+	issuesLoaded    bool
+	issuesErr       error
+	issuesTruncated bool
+	picking         bool // target picker open
+	targetPick      branchPicker
+	creating        bool
+	err             string
+	seq             int // tags this picker's create call; see projectsState.createSeq
 }
 
 func (m model) startCreate(projectID string) (tea.Model, tea.Cmd) {
@@ -87,7 +89,7 @@ func (m model) fetchPRsCmd(projectID string) tea.Cmd {
 	return func() tea.Msg {
 		var r api.PRsResult
 		err := client.Call(api.MethodProjectPRs, api.ProjectRef{ProjectID: projectID}, &r)
-		return prsMsg{projectID: projectID, prs: r.PRs, err: err}
+		return prsMsg{projectID: projectID, prs: r.PRs, truncated: r.Truncated, err: err}
 	}
 }
 
@@ -96,7 +98,7 @@ func (m model) fetchIssuesCmd(projectID string) tea.Cmd {
 	return func() tea.Msg {
 		var r api.IssuesResult
 		err := client.Call(api.MethodProjectIssues, api.ProjectRef{ProjectID: projectID}, &r)
-		return issuesMsg{projectID: projectID, issues: r.Issues, err: err}
+		return issuesMsg{projectID: projectID, issues: r.Issues, truncated: r.Truncated, err: err}
 	}
 }
 
@@ -107,6 +109,31 @@ func (m model) createCmd(p api.WorkspaceCreateParams) tea.Cmd {
 		err := client.Call(api.MethodWorkspaceCreate, p, &r)
 		return createDoneMsg{res: r, source: p.Source, seq: seq, err: err}
 	}
+}
+
+// retryFailedTab clears the current tab's load error so ensureCreateData
+// fetches it again.
+func (c *createState) retryFailedTab() {
+	switch {
+	case c.tab == ctBranches && c.branches.err != nil:
+		c.branches.loaded, c.branches.err = false, nil
+	case c.tab == ctPRs && c.prsErr != nil:
+		c.prsLoaded, c.prsErr = false, nil
+	case c.tab == ctIssues && c.issuesErr != nil:
+		c.issuesLoaded, c.issuesErr = false, nil
+	}
+}
+
+func (c createState) listLoading() bool {
+	switch c.tab {
+	case ctBranches:
+		return !c.branches.loaded
+	case ctPRs:
+		return !c.prsLoaded
+	case ctIssues:
+		return !c.issuesLoaded
+	}
+	return false
 }
 
 // ensureCreateData loads the current tab's list the first time it is shown.
@@ -146,6 +173,7 @@ func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		c.tab = createTab((int(c.tab) + d + len(createTabNames)) % len(createTabNames))
 		c.cursor, c.err = 0, ""
+		c.retryFailedTab()
 		c.filter.SetValue("")
 		c.branches.filter.SetValue("")
 		c.branches.cursor = 0
@@ -156,7 +184,7 @@ func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			c.name.Blur()
 			focus = c.filter.Focus()
 		}
-		return m, tea.Batch(focus, m.ensureCreateData())
+		return m, tea.Batch(focus, m.ensureCreateData(), m.maybeSpin())
 	case "ctrl+t":
 		if c.tab == ctPRs {
 			return m, nil
@@ -171,6 +199,7 @@ func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.submitCreate()
 	}
+	c.err = "" // an edit answers the last error
 	var cmd tea.Cmd
 	switch c.tab {
 	case ctNew:
@@ -251,7 +280,7 @@ func (m model) submitCreate() (tea.Model, tea.Cmd) {
 		}
 		br := ms[c.branches.cursor]
 		if br.CheckedOut {
-			m.flash = br.Name + " is checked out in another workspace"
+			c.err = br.Name + " is checked out in another workspace"
 			return m, nil
 		}
 		p.Source, p.Branch = api.SourceBranch, br.Name
@@ -304,13 +333,13 @@ func (m model) createView(w, h int) string {
 		body = c.branches.view(w, bodyH, true)
 	case ctPRs:
 		prs := m.filteredPRs()
-		body = m.createListView(w, bodyH, c.prsLoaded, c.prsErr, len(c.prs), len(prs), func(i int) string {
+		body = m.createListView(w, bodyH, c.prsLoaded, c.prsErr, c.prsTruncated, len(c.prs), len(prs), func(i int) string {
 			p := prs[i]
 			return "#" + strconv.Itoa(p.Number) + "  " + p.Title + dimStyle.Render("  "+p.Author+"  "+p.HeadBranch+" → "+p.BaseBranch)
 		})
 	case ctIssues:
 		is := m.filteredIssues()
-		body = m.createListView(w, bodyH, c.issuesLoaded, c.issuesErr, len(c.issues), len(is), func(i int) string {
+		body = m.createListView(w, bodyH, c.issuesLoaded, c.issuesErr, c.issuesTruncated, len(c.issues), len(is), func(i int) string {
 			return "#" + strconv.Itoa(is[i].Number) + "  " + is[i].Title + dimStyle.Render("  "+is[i].Author)
 		})
 	}
@@ -320,14 +349,17 @@ func (m model) createView(w, h int) string {
 	return top + body
 }
 
-func (m model) createListView(w, h int, loaded bool, err error, total, n int, line func(int) string) string {
+func (m model) createListView(w, h int, loaded bool, err error, truncated bool, total, n int, line func(int) string) string {
 	c := m.projects.create
 	head := dimStyle.Render("filter: ") + c.filter.View()
+	if truncated {
+		head += dimStyle.Render("  (first " + strconv.Itoa(total) + "; filter searches only these)")
+	}
 	switch {
 	case err != nil:
 		return head + "\n\n" + dimStyle.Render("error: "+firstLine(err.Error()))
 	case !loaded:
-		return head + "\n\n" + dimStyle.Render("loading…")
+		return head + "\n\n" + dimStyle.Render(spinnerFrame(m)+" loading…")
 	case total == 0:
 		return head + "\n\n" + dimStyle.Render("none open")
 	case n == 0:

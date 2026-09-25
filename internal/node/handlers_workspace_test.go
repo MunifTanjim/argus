@@ -29,7 +29,7 @@ func TestWorkspaceCreateAndRemove(t *testing.T) {
 	runGit(t, dir, "commit", "-m", "init")
 
 	d := nodeWithRegistry(t)
-	d.SetWorktreeDirTemplate(".worktrees/{{.Branch}}")
+	d.SetWorktreeDirTemplate(".worktrees/{{.Branch.Name}}")
 	if _, err := d.projreg.AdoptSession(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRemoveWorkspaceGuardsLiveSessions(t *testing.T) {
 	runGit(t, dir, "commit", "-m", "init")
 
 	d := nodeWithRegistry(t)
-	d.SetWorktreeDirTemplate(".worktrees/{{.Branch}}")
+	d.SetWorktreeDirTemplate(".worktrees/{{.Branch.Name}}")
 	if _, err := d.projreg.AdoptSession(ctx, dir); err != nil {
 		t.Fatal(err)
 	}

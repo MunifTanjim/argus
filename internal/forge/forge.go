@@ -37,6 +37,9 @@ type Issue struct {
 	URL    string
 }
 
+// ListLimit caps ListPRs and ListIssues.
+const ListLimit = 100
+
 var ErrNoProvider = errors.New("PRs and issues need a github.com origin remote")
 
 // For picks the provider for repoDir's origin remote.

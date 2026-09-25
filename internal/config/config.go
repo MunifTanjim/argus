@@ -29,10 +29,11 @@ type Config struct {
 // WorkspaceConfig tunes workspace (git worktree) management.
 type WorkspaceConfig struct {
 	// WorktreeDirTemplate is the Go-template path for a new worktree, resolved
-	// relative to the project's main working tree. Vars: {{.Repo}}, {{.Branch}}.
+	// relative to the project's main working tree. Vars: {{.Repo.Name}},
+	// {{.Branch.Name}}, {{.Branch.Slug}}.
 	WorktreeDirTemplate string
 	// IssueBranchTemplate names the branch of a workspace created from an
-	// issue. Vars: {{.Number}}, {{.Title}}, {{.Slug}}.
+	// issue. Vars: {{.Issue.Number}}, {{.Issue.Title}}, {{.Issue.Slug}}.
 	IssueBranchTemplate string
 }
 
@@ -136,8 +137,8 @@ var defaults = map[string]any{
 	"tmux.mirror-session-suffix":      "_",
 	"e2ee.enabled":                    false,
 	"lock.genesis":                    "",
-	"workspace.worktree-dir-template": ".worktrees/{{.Branch}}",
-	"workspace.issue-branch-template": "issue-{{.Number}}-{{.Slug}}",
+	"workspace.worktree-dir-template": ".worktrees/{{.Branch.Slug}}",
+	"workspace.issue-branch-template": "issue-{{.Issue.Number}}-{{.Issue.Slug}}",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,

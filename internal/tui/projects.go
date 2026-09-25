@@ -204,6 +204,7 @@ type spawnOffer struct{ nodeID, cwd, prompt string }
 type retargetState struct {
 	workspaceID string
 	projectID   string
+	label       string // the workspace's name, for the picker's header
 	pick        branchPicker
 }
 
@@ -958,7 +959,11 @@ func (m model) projectsColumn(w, h int) string {
 		return m.createView(w, h)
 	}
 	if rt := m.projects.retarget; rt != nil {
-		return StylePrimaryBold.Render("Change target branch") + "\n\n" + rt.pick.view(w, max(1, h-2), false)
+		head := StylePrimaryBold.Render("Target for " + rt.label)
+		if rt.pick.current != "" {
+			head += dimStyle.Render(" · now " + rt.pick.current)
+		}
+		return head + "\n\n" + rt.pick.view(w, max(1, h-2), false)
 	}
 	r, ok := m.cursorRow()
 	if !ok {

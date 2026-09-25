@@ -109,8 +109,8 @@ func TestCreateRefusesInUseBranch(t *testing.T) {
 	m = res.(model)
 	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd != nil || m.projects.create.creating || m.flash == "" {
-		t.Errorf("an in-use branch must not create: creating=%v flash=%q", m.projects.create.creating, m.flash)
+	if cmd != nil || m.projects.create.creating || m.projects.create.err == "" {
+		t.Errorf("an in-use branch must not create: creating=%v err=%q", m.projects.create.creating, m.projects.create.err)
 	}
 }
 
@@ -230,6 +230,70 @@ func TestTreeLooksUnfocusedUnderPicker(t *testing.T) {
 	unfocused.projects.focus = focusPane
 	if got, want := m.projectsTreePane(30, 20), unfocused.projectsTreePane(30, 20); got != want {
 		t.Errorf("the tree should draw unfocused while the picker takes keys:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestPresetSpawnShowsWhereItRuns(t *testing.T) {
+	m := createTestModel(t)
+	m.projects.create = createState{}
+	cmd := m.beginPresetSpawn("n1", "/repo/.worktrees/42-fix", "Fix")
+	_ = cmd
+	m, _ = upd(m, spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "in /repo/.worktrees/42-fix") {
+		t.Errorf("the prompt step should show the directory it runs in:\n%s", out)
+	}
+}
+
+func toPRsTab(m model) model {
+	for m.projects.create.tab != ctPRs {
+		m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	}
+	return m
+}
+
+func TestPRsTabRetriesAfterAnError(t *testing.T) {
+	m := toPRsTab(createTestModel(t))
+	m, _ = upd(m, prsMsg{projectID: "n1:p1", err: errString("gh down")})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, cmd := upd(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	rc := &recordingClient{}
+	m.client = rc
+	runCmd(cmd)
+	out := ansi.Strip(m.View().Content)
+	if strings.Contains(out, "gh down") || !strings.Contains(out, "loading…") {
+		t.Errorf("coming back to a failed tab should load it again:\n%s", out)
+	}
+}
+
+func TestPRsTabSaysWhenTruncatedAndSpins(t *testing.T) {
+	m := toPRsTab(createTestModel(t))
+	if !m.spinning {
+		t.Error("switching to a loading list should start the spinner")
+	}
+	prs := make([]api.PRInfo, 100)
+	for i := range prs {
+		prs[i] = api.PRInfo{Number: i + 1, Title: "t"}
+	}
+	m, _ = upd(m, prsMsg{projectID: "n1:p1", prs: prs, truncated: true})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "first 100") {
+		t.Errorf("a cut-off list should say so:\n%s", out)
+	}
+}
+
+func TestCreateErrorsShowInPickerAndClearOnEdit(t *testing.T) {
+	m := createTestModel(t)
+	m.projects.create.creating = true
+	m, _ = upd(m, createDoneMsg{seq: m.projects.create.seq, err: errString("boom")})
+	m, _ = upd(m, keyMsg("x"))
+	if m.projects.create.err != "" {
+		t.Errorf("editing the name should clear the error: %q", m.projects.create.err)
+	}
+
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyTab}) // Branches
+	m, _ = upd(m, branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "busy", CheckedOut: true}}})
+	m, _ = upd(m, keyMsg("enter"))
+	if m.flash != "" || !strings.Contains(m.projects.create.err, "busy is checked out in another workspace") {
+		t.Errorf("a busy branch should report in the picker: flash=%q err=%q", m.flash, m.projects.create.err)
 	}
 }
 

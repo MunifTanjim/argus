@@ -258,7 +258,8 @@ type PRInfo struct {
 }
 
 type PRsResult struct {
-	PRs []PRInfo `json:"prs"`
+	PRs       []PRInfo `json:"prs"`
+	Truncated bool     `json:"truncated,omitempty"` // the forge's list limit cut it off
 }
 
 type IssueInfo struct {
@@ -269,7 +270,8 @@ type IssueInfo struct {
 }
 
 type IssuesResult struct {
-	Issues []IssueInfo `json:"issues"`
+	Issues    []IssueInfo `json:"issues"`
+	Truncated bool        `json:"truncated,omitempty"` // the forge's list limit cut it off
 }
 
 // WorkspaceSetTargetParams sets a workspace's target branch ("" = default).

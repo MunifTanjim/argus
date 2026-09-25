@@ -193,13 +193,27 @@ func (d *Node) SetPushStore(store *push.Store) { d.pushStore = store }
 // empty and sessions carry no workspace_id.
 func (d *Node) SetProjectRegistry(r *projectreg.Registry) { d.projreg = r }
 
-// SetWorktreeDirTemplate sets the Go-template path for new worktrees (vars .Repo,
-// .Branch), resolved relative to a project's main working tree.
-func (d *Node) SetWorktreeDirTemplate(t string) { d.worktreeDirTmpl = t }
+// SetWorktreeDirTemplate sets the Go-template path for new worktrees (vars
+// .Repo.Name, .Branch.Name, .Branch.Slug), relative to a project's main working
+// tree. It rejects a template that does not parse or names an unknown var.
+func (d *Node) SetWorktreeDirTemplate(t string) error {
+	if _, err := renderWorktreePath(t, "repo", "branch", "/"); err != nil {
+		return err
+	}
+	d.worktreeDirTmpl = t
+	return nil
+}
 
 // SetIssueBranchTemplate sets the Go-template branch name for workspaces
-// created from an issue (vars .Number, .Title, .Slug).
-func (d *Node) SetIssueBranchTemplate(t string) { d.issueTmpl = t }
+// created from an issue (vars .Issue.Number, .Issue.Title, .Issue.Slug). It
+// rejects a template that does not parse or names an unknown var.
+func (d *Node) SetIssueBranchTemplate(t string) error {
+	if _, err := renderIssueBranch(t, forge.Issue{Number: 1, Title: "title"}); err != nil {
+		return err
+	}
+	d.issueTmpl = t
+	return nil
+}
 
 // SetPushDeliverer wires how encrypted mobile pushes reach the gateway for egress.
 // Safe to call concurrently (e.g. from runUplink on reconnect while StartPush reads it).

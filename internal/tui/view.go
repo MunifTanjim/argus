@@ -384,11 +384,16 @@ func (m model) spawnView() string {
 		body = StyleSecondaryBold.Render("Choose a directory") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
 	case spawnStepPrompt:
+		head := StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)")
+		rows := avail - 2
+		if m.spawn.fixedCwd { // the dir step was skipped, so say where it runs
+			head += "\n" + dimStyle.Render("in "+truncateLeft(m.spawn.cwd.Value(), max(1, cardW-3)))
+			rows--
+		}
 		ta := m.spawn.prompt
 		ta.SetWidth(cardW)
-		ta.SetHeight(max(1, avail-2))
-		body = StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)") + "\n\n" +
-			ta.View()
+		ta.SetHeight(max(1, rows))
+		body = head + "\n\n" + ta.View()
 	}
 	return m.pin(m.center(title+"\n\n"+body, cardW), m.spawnFooter())
 }

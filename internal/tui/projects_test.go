@@ -1043,6 +1043,34 @@ func TestForgetProject(t *testing.T) {
 	}
 }
 
+func TestRetargetShowsContext(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	m.projects.tree[0].Workspaces[1].TargetBranch = "dev"
+	m.projects.rebuild()
+	m.projects.selectRow("n1:w2")
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "repo-feat  feature → dev") {
+		t.Errorf("the workspace header should show the target:\n%s", out)
+	}
+	m.projects.tree[0].Workspaces[0].TargetBranch = "main"
+	m.projects.rebuild()
+	m.projects.selectRow("n1:w1")
+	if out := ansi.Strip(m.View().Content); strings.Contains(out, "→ main") {
+		t.Errorf("a workspace targeting its own branch should not show an arrow:\n%s", out)
+	}
+	m.projects.selectRow("n1:w2")
+	m, _ = upd(m, keyMsg("T"))
+	m, _ = upd(m, branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main"}, {Name: "dev"}, {Name: "feat"}}})
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "Target for repo-feat · now dev") || !strings.Contains(out, "dev  (current)") {
+		t.Errorf("the target picker should name the workspace and mark the current target:\n%s", out)
+	}
+	if m.projects.retarget.pick.cursor != 1 {
+		t.Errorf("the cursor should start on the current target: %d", m.projects.retarget.pick.cursor)
+	}
+}
+
 func TestKillFailureIsFlashed(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &failingClient{err: errString("no such pane")}
