@@ -269,6 +269,7 @@ func TestNewWorkspaceFlow(t *testing.T) {
 
 func TestRemoveWorkspaceConfirm(t *testing.T) {
 	m := projectsTestModel()
+	delete(m.sessions, "n1:s2") // a live session would refuse the remove
 	m.projects.selectRow("n1:w2")
 	res, _ := m.actRemoveWorkspace(false)
 	mm := res.(model)
@@ -818,7 +819,7 @@ func TestKillFromWorkspaceSessionsTab(t *testing.T) {
 
 	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = res.(model)
-	if m.projects.pendingKill != "n1:s1" || !strings.Contains(ansi.Strip(m.projectsFooter()), "kill this session? y/n") {
+	if m.projects.pendingKill != "n1:s1" || !strings.Contains(ansi.Strip(m.projectsFooter()), "kill session repo · %1? y/n") {
 		t.Fatalf("x should ask to kill n1:s1: pending=%q footer=%q", m.projects.pendingKill, m.projectsFooter())
 	}
 	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
@@ -856,6 +857,55 @@ type failingClient struct {
 }
 
 func (c *failingClient) Call(string, any, any) error { return c.err }
+
+func TestRemovePromptNamesWorkspace(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	delete(m.sessions, "n1:s2") // w2 has no live sessions
+	m.projects.selectRow("n1:w2")
+	m, _ = upd(m, keyMsg("x"))
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "remove workspace repo-feat (feature)? y/n") {
+		t.Errorf("remove prompt = %q", f)
+	}
+	m, _ = upd(m, keyMsg("n"))
+	m, _ = upd(m, keyMsg("X"))
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "force-remove workspace repo-feat (feature)? uncommitted changes are lost · y/n") {
+		t.Errorf("force-remove prompt = %q", f)
+	}
+}
+
+func TestRemoveInFlightShowsAndBlocksRepeat(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	delete(m.sessions, "n1:s2")
+	m.projects.selectRow("n1:w2")
+	m, _ = upd(m, keyMsg("x"))
+	m, cmd := upd(m, keyMsg("y"))
+	if cmd == nil || !strings.Contains(ansi.Strip(m.View().Content), "removing…") {
+		t.Fatalf("a confirmed remove should show on its row:\n%s", ansi.Strip(m.View().Content))
+	}
+	m, _ = upd(m, keyMsg("x"))
+	if m.projects.pendingRemove != "" || !strings.Contains(m.flash, "already removing repo-feat") {
+		t.Errorf("x during a remove: pending=%q flash=%q", m.projects.pendingRemove, m.flash)
+	}
+	m, _ = upd(m, cmd())
+	if strings.Contains(ansi.Strip(m.View().Content), "removing…") {
+		t.Error("the mark should clear when the remove finishes")
+	}
+}
+
+func TestRemoveRefusesLiveSessions(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w2") // n1:s2 is live here
+	for _, k := range []string{"x", "X"} {
+		mm, _ := upd(m, keyMsg(k))
+		if mm.projects.pendingRemove != "" || !strings.Contains(mm.flash, "repo-feat has 1 live session · kill it first") {
+			t.Errorf("%s with a live session: pending=%q flash=%q", k, mm.projects.pendingRemove, mm.flash)
+		}
+	}
+}
 
 func TestKillFailureIsFlashed(t *testing.T) {
 	m := projectsTestModel()

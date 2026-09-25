@@ -212,6 +212,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.syncPane()
 	case projectsActionMsg:
+		delete(m.projects.removing, msg.removed)
 		if msg.err != nil {
 			m.flash = msg.verb + ": " + msg.err.Error()
 			return m, nil
@@ -948,6 +949,24 @@ func killRefusal(s session.Session) string {
 		return string(s.Frontend) + " session: terminal control unavailable"
 	}
 	return ""
+}
+
+func killPrompt(s session.Session) string {
+	return killVerb(s) + " session " + sessionRef(s) + "? y/n"
+}
+
+func sessionRef(s session.Session) string {
+	name := s.Name
+	if name == "" {
+		name = s.Tmux.SessionName
+	}
+	if name == "" {
+		name = paneTag(s)
+	}
+	if s.Repo == "" {
+		return name
+	}
+	return s.Repo + " · " + name
 }
 
 func killVerb(s session.Session) string {

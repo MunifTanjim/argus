@@ -180,10 +180,8 @@ func (d *Node) handleWorkspaceRemove(ctx context.Context, params json.RawMessage
 	if isMain {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot remove the main worktree"}
 	}
-	if !p.Force {
-		if n := d.liveSessionsInWorkspace(p.WorkspaceID); n > 0 {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("%d live session(s) in this workspace; close them or force-remove", n)}
-		}
+	if n := d.liveSessionsInWorkspace(p.WorkspaceID, dir); n > 0 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("%d live session(s) in this workspace; kill them first", n)}
 	}
 	runDir := dir
 	if _, mainDir, ok, _ := d.projreg.ProjectInfo(ctx, projID); ok && mainDir != "" {
@@ -195,16 +193,36 @@ func (d *Node) handleWorkspaceRemove(ctx context.Context, params json.RawMessage
 	return nil, nil
 }
 
-// liveSessionsInWorkspace counts non-dead sessions whose (node-local) workspace
-// id matches wsID.
-func (d *Node) liveSessionsInWorkspace(wsID string) int {
+// A session gets its workspace id on the next scan, so one without an id
+// counts when its directory is inside dir.
+func (d *Node) liveSessionsInWorkspace(wsID, dir string) int {
 	n := 0
 	for _, s := range d.reg.Snapshot() {
-		if s.WorkspaceID == wsID && s.Status != session.StatusDead {
+		if s.Status == session.StatusDead {
+			continue
+		}
+		if s.WorkspaceID == wsID || (s.WorkspaceID == "" && sessionInDir(s, dir)) {
 			n++
 		}
 	}
 	return n
+}
+
+// sessionInDir resolves symlinks in the session's directory because registry
+// directories come from git, which reports real paths.
+func sessionInDir(s session.Session, dir string) bool {
+	sd := sessionDir(s)
+	if sd == "" {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(sd); err == nil {
+		sd = real
+	}
+	return within(dir, filepath.Clean(sd))
+}
+
+func within(root, path string) bool {
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 // renderWorktreePath resolves the worktree path template against the project's

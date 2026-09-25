@@ -97,6 +97,10 @@ func (m model) handleRemoveConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	wsID, force := m.projects.pendingRemove, m.projects.pendingRemoveForce
 	m.projects.pendingRemove, m.projects.pendingRemoveForce = "", false
 	if msg.String() == "y" {
+		if m.projects.removing == nil {
+			m.projects.removing = map[string]bool{}
+		}
+		m.projects.removing[wsID] = true
 		return m, m.removeWorkspaceCmd(wsID, force)
 	}
 	return m, nil
@@ -165,8 +169,34 @@ func (m model) actRemoveWorkspace(force bool) (tea.Model, tea.Cmd) {
 		m.flash = "cannot remove the main worktree"
 		return m, nil
 	}
+	if m.projects.removing[r.id] {
+		m.flash = "already removing " + r.label
+		return m, nil
+	}
+	if n := m.workspaceActivity()[r.id].live; n > 0 {
+		it := "it"
+		if n > 1 {
+			it = "them"
+		}
+		m.flash = r.label + " has " + plural(n, "live session") + " · kill " + it + " first"
+		return m, nil
+	}
 	m.projects.pendingRemove, m.projects.pendingRemoveForce = r.id, force
 	return m, nil
+}
+
+func (m model) removePrompt() string {
+	name := "this workspace"
+	if r, ok := m.projects.row(m.projects.pendingRemove); ok {
+		name = r.label
+		if r.branch != "" {
+			name += " (" + r.branch + ")"
+		}
+	}
+	if m.projects.pendingRemoveForce {
+		return "force-remove workspace " + name + "? uncommitted changes are lost · y/n"
+	}
+	return "remove workspace " + name + "? y/n"
 }
 
 func (m model) actRetarget() (tea.Model, tea.Cmd) {
@@ -227,7 +257,7 @@ func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, nil)
-		return projectsActionMsg{verb: "remove workspace", err: err}
+		return projectsActionMsg{verb: "remove workspace", removed: workspaceID, err: err}
 	}
 }
 

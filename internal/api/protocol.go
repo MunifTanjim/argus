@@ -277,7 +277,8 @@ type WorkspaceSetTargetParams struct {
 	TargetBranch string `json:"target_branch"`
 }
 
-// WorkspaceRemoveParams removes a worktree. Force removes a dirty worktree.
+// WorkspaceRemoveParams removes a worktree. Force removes a dirty worktree; a
+// workspace with live sessions is refused either way.
 type WorkspaceRemoveParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Force       bool   `json:"force,omitempty"`

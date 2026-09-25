@@ -81,10 +81,11 @@ type projectsState struct {
 	// Management: a text input (new branch / rename / filter) and a remove confirmation.
 	input              textinput.Model
 	inputMode          projInputMode
-	inputTarget        string // project id the input acts on
-	pendingRemove      string // workspace id awaiting a remove confirmation
-	pendingKill        string // session id awaiting a kill confirmation
-	pendingRemoveForce bool   // the pending remove is a force-remove
+	inputTarget        string          // project id the input acts on
+	pendingRemove      string          // workspace id awaiting a remove confirmation
+	pendingKill        string          // session id awaiting a kill confirmation
+	pendingRemoveForce bool            // the pending remove is a force-remove
+	removing           map[string]bool // workspaces with a remove in flight
 
 	sideTab     sideTab
 	ftree       fileTree
@@ -131,6 +132,15 @@ func (p *projectsState) selectRow(id string) bool {
 	}
 	p.cursor = min(p.cursor, cursorBottom(len(p.rows)))
 	return false
+}
+
+func (p *projectsState) row(id string) (projectsRow, bool) {
+	for _, r := range p.rows {
+		if r.id == id {
+			return r, true
+		}
+	}
+	return projectsRow{}, false
 }
 
 // reveal unfolds the node and project holding workspace wsID and selects it,
@@ -1022,6 +1032,9 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 			text += dimStyle.Render("  " + r.branch)
 		default:
 			text += dimStyle.Render("  (detached)")
+		}
+		if m.projects.removing[r.id] {
+			text += dimStyle.Render("  removing…")
 		}
 	}
 	if r.isGone {
