@@ -130,6 +130,7 @@ func toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
 			Root:          p.Root,
 			DefaultBranch: p.DefaultBranch,
 			IsGone:        p.IsGone,
+			Error:         p.Error,
 			Hidden:        p.Hidden,
 			Pinned:        p.Pinned,
 			CreatedAt:     rfc3339(p.CreatedAt),

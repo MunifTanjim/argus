@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/db"
 )
@@ -189,6 +190,112 @@ func TestReconcileMarksRemovedWorktreeGone(t *testing.T) {
 	}
 	if gone != 1 || live != 1 {
 		t.Fatalf("want 1 gone + 1 live workspace, got gone=%d live=%d", gone, live)
+	}
+}
+
+func TestGitFailureKeepsProjectAndReportsIt(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, _ := repoWithWorktree(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Snapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	path := os.Getenv("PATH")
+	t.Setenv("PATH", t.TempDir()) // git is missing, the repo is not
+	ps, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := ps[0]; p.IsGone || p.Error == "" || len(p.Workspaces) != 2 || p.Workspaces[0].IsGone {
+		t.Errorf("a git failure should keep the project and report it: gone=%v error=%q workspaces=%+v", p.IsGone, p.Error, p.Workspaces)
+	}
+
+	t.Setenv("PATH", path)
+	ps, _ = r.Snapshot(ctx)
+	if p := ps[0]; p.IsGone || p.Error != "" {
+		t.Errorf("the next list with git working should clear the error: gone=%v error=%q", p.IsGone, p.Error)
+	}
+}
+
+func TestLastSeenMovesOnlyOnAdopt(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, _ := repoWithWorktree(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, table := range []string{"project", "workspace"} {
+		if _, err := r.db.Exec("UPDATE "+table+" SET last_seen_at = ?", old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ps, _ := r.Snapshot(ctx)
+	if !ps[0].LastSeenAt.Equal(old) || !ps[0].Workspaces[0].LastSeenAt.Equal(old) {
+		t.Errorf("a list should not move last_seen_at: project=%v workspace=%v", ps[0].LastSeenAt, ps[0].Workspaces[0].LastSeenAt)
+	}
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ = r.Snapshot(ctx)
+	if !ps[0].LastSeenAt.After(old) || !ps[0].Workspaces[0].LastSeenAt.After(old) {
+		t.Errorf("an adopt should move last_seen_at: project=%v workspace=%v", ps[0].LastSeenAt, ps[0].Workspaces[0].LastSeenAt)
+	}
+}
+
+func TestSnapshotSkipsProjectForgottenMidList(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, _ := repoWithWorktree(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := r.Snapshot(ctx)
+	rows, err := r.q.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes := probeAll(ctx, rows) // git runs here, without the lock
+	if err := r.ForgetProject(ctx, ps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := r.apply(ctx, rows, probes, r.records)
+	if err != nil || len(out) != 0 {
+		t.Errorf("a project forgotten between probe and apply should be skipped: out=%+v err=%v", out, err)
+	}
+}
+
+func TestSnapshotKeepsWorkspaceAddedMidList(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, _ := repoWithWorktree(t)
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.q.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	since := r.records
+	probes := probeAll(ctx, rows)
+	added := filepath.Join(t.TempDir(), "added")
+	git(t, root, "worktree", "add", "-b", "added", added)
+	wsID, err := r.AdoptWorkspace(ctx, added, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := r.apply(ctx, rows, probes, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range out[0].Workspaces {
+		if w.ID == wsID && w.IsGone {
+			t.Error("a workspace recorded between probe and apply was marked gone")
+		}
 	}
 }
 

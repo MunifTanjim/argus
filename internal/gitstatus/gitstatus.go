@@ -145,9 +145,11 @@ func FileContents(ctx context.Context, dir, path, origPath string) (old, new str
 }
 
 type DirEntry struct {
-	Name  string // base name
-	Path  string // repo-relative slash path, for the next ListDir/ReadFile
-	IsDir bool
+	Name    string // base name
+	Path    string // repo-relative slash path, for the next ListDir/ReadFile
+	IsDir   bool   // for a symlink: its target is a directory inside the repo
+	Symlink bool
+	Target  string // symlink only: the link text
 }
 
 // ListDir lists the children of rel (a repo-relative slash path; "" is the root),
@@ -163,28 +165,39 @@ func ListDir(ctx context.Context, dir, rel string) (root string, entries []DirEn
 	if err != nil {
 		return "", nil, err
 	}
+	if _, err := resolveInRepo(root, full); err != nil {
+		return "", nil, err
+	}
 	des, err := os.ReadDir(full)
 	if err != nil {
 		return "", nil, err
 	}
 	names := make([]string, 0, len(des))
-	dirOf := make(map[string]bool, len(des))
+	byName := make(map[string]DirEntry, len(des))
 	for _, de := range des {
 		if de.Name() == ".git" {
 			continue
 		}
 		names = append(names, de.Name())
-		dirOf[de.Name()] = de.IsDir()
+		e := DirEntry{Name: de.Name(), Path: path.Join(rel, de.Name()), IsDir: de.IsDir()}
+		if de.Type()&os.ModeSymlink != 0 {
+			e.Symlink = true
+			e.Target, _ = os.Readlink(filepath.Join(full, de.Name()))
+			if resolved, err := resolveInRepo(root, filepath.Join(full, de.Name())); err == nil {
+				fi, err := os.Stat(resolved)
+				e.IsDir = err == nil && fi.IsDir()
+			}
+		}
+		byName[de.Name()] = e
 	}
 	var ignored map[string]bool
 	if inRepo {
 		ignored = checkIgnore(ctx, root, full, names)
 	}
 	for _, n := range names {
-		if ignored[n] {
-			continue
+		if !ignored[n] {
+			entries = append(entries, byName[n])
 		}
-		entries = append(entries, DirEntry{Name: n, Path: path.Join(rel, n), IsDir: dirOf[n]})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].IsDir != entries[j].IsDir {
@@ -216,8 +229,8 @@ func checkIgnore(ctx context.Context, root, full string, names []string) map[str
 }
 
 // ReadFile returns the working-tree content of a repo-relative file. notShown is
-// true for a binary or oversized file. A symlink returns its target text (it is
-// never followed).
+// true for a binary or oversized file. A symlink to a file inside the repo shows
+// that file; any other symlink shows its target text.
 func ReadFile(ctx context.Context, dir, rel string) (content string, notShown bool, err error) {
 	root := dir
 	if r, e := repoRoot(ctx, dir); e == nil {
@@ -227,15 +240,26 @@ func ReadFile(ctx context.Context, dir, rel string) (content string, notShown bo
 	if err != nil {
 		return "", false, err
 	}
+	if _, err := resolveInRepo(root, filepath.Dir(full)); err != nil {
+		return "", false, err
+	}
 	fi, err := os.Lstat(full)
 	if err != nil {
 		return "", false, err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		if target, e := os.Readlink(full); e == nil {
+		target, err := os.Readlink(full)
+		if err != nil {
+			return "", true, nil
+		}
+		resolved, err := resolveInRepo(root, full)
+		if err != nil {
 			return target, false, nil
 		}
-		return "", true, nil
+		if fi, err = os.Stat(resolved); err != nil || !fi.Mode().IsRegular() {
+			return target, false, nil
+		}
+		full = resolved
 	}
 	if fi.IsDir() {
 		return "", false, fmt.Errorf("gitstatus: is a directory: %s", rel)
@@ -334,7 +358,7 @@ func DiffSince(ctx context.Context, dir, base, p, origPath string) (diff string,
 			return "", false, fmt.Errorf("gitstatus: git diff failed in %s: %w", root, err)
 		}
 		// No base (HEAD in a new repo): every file is new.
-		return addedDiff(ctx, dir, p)
+		return addedDiff(ctx, root, p)
 	}
 	out := cmd.StdOut().String()
 	if strings.TrimSpace(out) != "" {
@@ -346,7 +370,7 @@ func DiffSince(ctx context.Context, dir, base, p, origPath string) (diff string,
 	if tracked(ctx, root, p) {
 		return "", false, nil
 	}
-	return addedDiff(ctx, dir, p)
+	return addedDiff(ctx, root, p)
 }
 
 func tracked(ctx context.Context, root, p string) bool {
@@ -354,8 +378,14 @@ func tracked(ctx context.Context, root, p string) bool {
 	return cmd.Run() == nil
 }
 
-func addedDiff(ctx context.Context, dir, p string) (diff string, notShown bool, err error) {
-	content, ns, rerr := ReadFile(ctx, dir, p)
+// addedDiff shows a symlink as its link text, as git stores it.
+func addedDiff(ctx context.Context, root, p string) (diff string, notShown bool, err error) {
+	if full, err := repoRelPath(root, p); err == nil {
+		if target, err := os.Readlink(full); err == nil {
+			return synthAddedDiff(p, target), false, nil
+		}
+	}
+	content, ns, rerr := ReadFile(ctx, root, p)
 	if rerr != nil {
 		return "", false, nil
 	}
@@ -413,6 +443,24 @@ func repoRelPath(root, path string) (string, error) {
 		return "", fmt.Errorf("gitstatus: path escapes repo: %s", path)
 	}
 	return full, nil
+}
+
+// resolveInRepo follows every symlink in full and returns the real path, or an
+// error when it lands outside the repo at root.
+func resolveInRepo(root, full string) (string, error) {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(realRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("gitstatus: path escapes repo: %s", full)
+	}
+	return resolved, nil
 }
 
 // repoRoot resolves the top-level directory of the repo containing dir so every

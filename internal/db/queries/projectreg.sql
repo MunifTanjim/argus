@@ -6,8 +6,10 @@ ON CONFLICT (dir) DO UPDATE SET
     last_seen_at = CURRENT_TIMESTAMP
 RETURNING id;
 
--- name: TouchProject :exec
-UPDATE project SET is_gone = 0, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?;
+-- ReviveProject clears is_gone for a project a list found again; last_seen_at
+-- moves only when a session adopts it.
+-- name: ReviveProject :exec
+UPDATE project SET is_gone = 0 WHERE id = ?;
 
 -- name: MarkProjectGone :exec
 UPDATE project SET is_gone = 1 WHERE id = ?;
@@ -32,6 +34,15 @@ ON CONFLICT (dir) DO UPDATE SET
 
 -- name: DeleteProject :execrows
 DELETE FROM project WHERE id = ?;
+
+-- SyncWorkspace records a worktree a list found, leaving last_seen_at alone.
+-- name: SyncWorkspace :exec
+INSERT INTO workspace (id, project_id, dir, is_main)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (dir) DO UPDATE SET
+    project_id = excluded.project_id,
+    is_main = excluded.is_main,
+    is_gone = 0;
 
 -- name: MarkWorkspacesGone :exec
 UPDATE workspace SET is_gone = 1 WHERE project_id = ?;

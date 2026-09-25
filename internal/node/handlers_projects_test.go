@@ -113,3 +113,10 @@ func TestProjectListEmptyWithoutRegistry(t *testing.T) {
 		t.Fatalf("want 0 projects without registry, got %d", got)
 	}
 }
+
+func TestProjectNodesCarryGitError(t *testing.T) {
+	nodes := toProjectNodes([]projectreg.Project{{ID: "p1", Kind: "git", Error: "worktree list: git missing"}})
+	if nodes[0].Error != "worktree list: git missing" {
+		t.Errorf("error = %q", nodes[0].Error)
+	}
+}

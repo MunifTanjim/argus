@@ -157,7 +157,7 @@ func (d *Node) handleWorkspaceListDir(ctx context.Context, params json.RawMessag
 	}
 	out := make([]api.DirEntry, len(entries))
 	for i, e := range entries {
-		out[i] = api.DirEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir}
+		out[i] = api.DirEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Symlink: e.Symlink, Target: e.Target}
 	}
 	return api.ListDirResult{Root: root, Path: p.Path, Entries: out}, nil
 }

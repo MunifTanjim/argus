@@ -31,6 +31,7 @@ type Project struct {
 	// DefaultBranch is resolved live; "" for a plain or unresolvable project.
 	DefaultBranch string
 	IsGone        bool
+	Error         string // git failed on it this list; its rows are the last known
 	Hidden        bool
 	Pinned        bool
 	CreatedAt     time.Time
@@ -59,10 +60,14 @@ type Registry struct {
 	db *sql.DB
 	q  *gen.Queries
 	mu sync.Mutex
+	// records counts committed records; recordedAt holds a project's count at
+	// its last record, so apply can tell which projects changed after a probe.
+	records    uint64
+	recordedAt map[string]uint64
 }
 
 func New(sqlDB *sql.DB) *Registry {
-	return &Registry{db: sqlDB, q: gen.New(sqlDB)}
+	return &Registry{db: sqlDB, q: gen.New(sqlDB), recordedAt: map[string]uint64{}}
 }
 
 // AdoptSession records the Project and Workspace that contain cwd and returns
@@ -102,10 +107,10 @@ func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location,
 	defer tx.Rollback()
 	q := r.q.WithTx(tx)
 
-	var wsID string
+	var projID, wsID string
 	if plain {
 		dir := cleanDir(cwd)
-		projID := idFor("plain:" + dir)
+		projID = idFor("plain:" + dir)
 		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: filepath.Base(dir), Kind: "plain", Dir: dir}); err != nil {
 			return "", err
 		}
@@ -117,7 +122,7 @@ func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location,
 		if loc.WorktreeRoot == "" {
 			return "", nil // bare repo, no working tree to adopt
 		}
-		projID := idFor(loc.GitDir)
+		projID = idFor(loc.GitDir)
 		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: projectName(loc), Kind: "git", Dir: loc.GitDir}); err != nil {
 			return "", err
 		}
@@ -134,6 +139,8 @@ func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location,
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	r.records++
+	r.recordedAt[projID] = r.records
 	return wsID, nil
 }
 
@@ -251,9 +258,6 @@ func (r *Registry) TargetBranch(ctx context.Context, id string) (string, bool, e
 // Snapshot reconciles every Project against the live filesystem and returns the
 // tree with live branch/head filled in.
 func (r *Registry) Snapshot(ctx context.Context) ([]Project, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	out, promoted, err := r.snapshot(ctx)
 	if err == nil && promoted {
 		out, _, err = r.snapshot(ctx) // list the git projects the promotion added
@@ -261,18 +265,37 @@ func (r *Registry) Snapshot(ctx context.Context) ([]Project, error) {
 	return out, err
 }
 
-func (r *Registry) snapshot(ctx context.Context) (out []Project, promoted bool, err error) {
+// snapshot probes the filesystem and git without the lock, so an adopt does not
+// wait on git, then applies the results under it.
+func (r *Registry) snapshot(ctx context.Context) ([]Project, bool, error) {
+	r.mu.Lock()
 	rows, err := r.q.ListProjects(ctx)
+	since := r.records
+	r.mu.Unlock()
 	if err != nil {
 		return nil, false, err
 	}
+	return r.apply(ctx, rows, probeAll(ctx, rows), since)
+}
+
+// since is the record count when the probes began.
+func (r *Registry) apply(ctx context.Context, rows []gen.Project, probes []probe, since uint64) (out []Project, promoted bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	out = make([]Project, 0, len(rows))
-	for _, p := range rows {
-		live, pr, err := r.reconcile(ctx, p)
+	for i, row := range rows {
+		p, err := r.q.GetProject(ctx, row.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // forgotten since the list
+		}
 		if err != nil {
 			return nil, false, err
 		}
-		promoted = promoted || pr
+		rec, err := r.reconcile(ctx, p, probes[i], r.recordedAt[p.ID] > since)
+		if err != nil {
+			return nil, false, err
+		}
+		promoted = promoted || rec.promoted
 		if p, err = r.q.GetProject(ctx, p.ID); err != nil { // reconcile may have changed is_gone
 			return nil, false, err
 		}
@@ -281,61 +304,115 @@ func (r *Registry) snapshot(ctx context.Context) (out []Project, promoted bool, 
 			return nil, false, err
 		}
 		def := ""
-		if p.Kind == "git" && !p.IsGone {
-			def = gittree.DefaultBranch(ctx, p.Dir)
+		if p.Kind == "git" && !p.IsGone && rec.gitErr == "" {
+			def = probes[i].defaultBranch
 		}
-		out = append(out, buildProject(p, wss, live, def))
+		proj := buildProject(p, wss, rec.live, def)
+		proj.Error = rec.gitErr
+		out = append(out, proj)
 	}
 	return out, promoted, nil
 }
 
-// reconcile updates one Project's persisted workspaces from the live filesystem
-// and returns the live worktree state keyed by dir (empty for a plain or gone
-// project). promoted is true when a plain project turned into a git one.
-func (r *Registry) reconcile(ctx context.Context, p gen.Project) (live map[string]gittree.Worktree, promoted bool, err error) {
-	live = map[string]gittree.Worktree{}
+// probe is one project's live filesystem and git state, gathered without the
+// lock or the database.
+type probe struct {
+	exists        bool               // the project's dir (the git dir, for git) exists
+	gitMarker     bool               // plain: the dir now holds a .git
+	worktrees     []gittree.Worktree // git: unset when gitErr is
+	gitErr        error
+	defaultBranch string
+}
+
+const probeWorkers = 8
+
+func probeAll(ctx context.Context, rows []gen.Project) []probe {
+	out := make([]probe, len(rows))
+	sem := make(chan struct{}, probeWorkers)
+	var wg sync.WaitGroup
+	for i, p := range rows {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			out[i] = probeProject(ctx, p)
+		})
+	}
+	wg.Wait()
+	return out
+}
+
+func probeProject(ctx context.Context, p gen.Project) probe {
+	if p.Kind == "plain" {
+		return probe{exists: dirExists(p.Dir), gitMarker: pathExists(filepath.Join(p.Dir, ".git"))}
+	}
+	wts, err := gittree.ListWorktrees(ctx, p.Dir)
+	if err != nil {
+		return probe{exists: pathExists(p.Dir), gitErr: err}
+	}
+	return probe{exists: true, worktrees: wts, defaultBranch: gittree.DefaultBranch(ctx, p.Dir)}
+}
+
+type reconciled struct {
+	live     map[string]gittree.Worktree // keyed by dir; empty for a plain or gone project
+	promoted bool                        // a plain project turned into a git one
+	gitErr   string                      // git failed on a project whose git dir exists
+}
+
+// reconcile updates one Project's persisted workspaces from its probe. A git
+// failure on a project whose git dir still exists changes nothing and is
+// reported, so the next list that git answers recovers it.
+func (r *Registry) reconcile(ctx context.Context, p gen.Project, pr probe, recordedSinceProbe bool) (reconciled, error) {
+	res := reconciled{live: map[string]gittree.Worktree{}}
 
 	if p.Kind == "plain" {
-		if !dirExists(p.Dir) {
-			return live, false, r.markGone(ctx, p.ID)
+		if !pr.exists {
+			return res, r.markGone(ctx, p.ID)
 		}
-		if pathExists(filepath.Join(p.Dir, ".git")) {
+		if pr.gitMarker {
 			if p.IsGone {
-				return live, false, nil // its workspace moved to the git project
+				return res, nil // its workspace moved to the git project
 			}
-			if promoted, err := r.promote(ctx, p); promoted || err != nil {
-				return live, promoted, err
+			promoted, err := r.promote(ctx, p)
+			if promoted || err != nil {
+				res.promoted = promoted
+				return res, err
 			}
 		}
-		return live, false, r.touchPlain(ctx, p)
+		return res, r.syncPlain(ctx, p)
 	}
 
-	worktrees, err := gittree.ListWorktrees(ctx, p.Dir)
-	if err != nil {
-		return live, false, r.markGone(ctx, p.ID)
+	if pr.gitErr != nil {
+		if !pr.exists {
+			return res, r.markGone(ctx, p.ID)
+		}
+		res.gitErr = pr.gitErr.Error()
+		return res, nil
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return live, false, err
+		return res, err
 	}
 	defer tx.Rollback()
 	q := r.q.WithTx(tx)
-	if err := q.MarkWorkspacesGone(ctx, p.ID); err != nil {
-		return live, false, err
+	// A worktree recorded after the probe began is missing from the probe.
+	if !recordedSinceProbe {
+		if err := q.MarkWorkspacesGone(ctx, p.ID); err != nil {
+			return res, err
+		}
 	}
-	for _, wt := range worktrees {
+	for _, wt := range pr.worktrees {
 		if wt.Bare {
 			continue
 		}
-		live[wt.Dir] = wt
-		if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: idFor(wt.Dir), ProjectID: p.ID, Dir: wt.Dir, IsMain: wt.IsMain}); err != nil {
-			return live, false, err
+		res.live[wt.Dir] = wt
+		if err := q.SyncWorkspace(ctx, gen.SyncWorkspaceParams{ID: idFor(wt.Dir), ProjectID: p.ID, Dir: wt.Dir, IsMain: wt.IsMain}); err != nil {
+			return res, err
 		}
 	}
-	if err := q.TouchProject(ctx, p.ID); err != nil {
-		return live, false, err
+	if err := q.ReviveProject(ctx, p.ID); err != nil {
+		return res, err
 	}
-	return live, false, tx.Commit()
+	return res, tx.Commit()
 }
 
 // promote moves a plain project whose directory became a repository root (git
@@ -367,17 +444,17 @@ func (r *Registry) markGone(ctx context.Context, projID string) error {
 	return tx.Commit()
 }
 
-func (r *Registry) touchPlain(ctx context.Context, p gen.Project) error {
+func (r *Registry) syncPlain(ctx context.Context, p gen.Project) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	q := r.q.WithTx(tx)
-	if err := q.TouchProject(ctx, p.ID); err != nil {
+	if err := q.ReviveProject(ctx, p.ID); err != nil {
 		return err
 	}
-	if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: idFor(p.Dir), ProjectID: p.ID, Dir: p.Dir, IsMain: true}); err != nil {
+	if err := q.SyncWorkspace(ctx, gen.SyncWorkspaceParams{ID: idFor(p.Dir), ProjectID: p.ID, Dir: p.Dir, IsMain: true}); err != nil {
 		return err
 	}
 	return tx.Commit()

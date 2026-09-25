@@ -193,6 +193,17 @@ func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (i
 	return result.RowsAffected()
 }
 
+const reviveProject = `-- name: ReviveProject :exec
+UPDATE project SET is_gone = 0 WHERE id = ?
+`
+
+// ReviveProject clears is_gone for a project a list found again; last_seen_at
+// moves only when a session adopts it.
+func (q *Queries) ReviveProject(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, reviveProject, id)
+	return err
+}
+
 const setProjectHidden = `-- name: SetProjectHidden :execrows
 UPDATE project SET hidden = ? WHERE id = ?
 `
@@ -241,12 +252,30 @@ func (q *Queries) SetWorkspaceTarget(ctx context.Context, arg SetWorkspaceTarget
 	return err
 }
 
-const touchProject = `-- name: TouchProject :exec
-UPDATE project SET is_gone = 0, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?
+const syncWorkspace = `-- name: SyncWorkspace :exec
+INSERT INTO workspace (id, project_id, dir, is_main)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (dir) DO UPDATE SET
+    project_id = excluded.project_id,
+    is_main = excluded.is_main,
+    is_gone = 0
 `
 
-func (q *Queries) TouchProject(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, touchProject, id)
+type SyncWorkspaceParams struct {
+	ID        string
+	ProjectID string
+	Dir       string
+	IsMain    bool
+}
+
+// SyncWorkspace records a worktree a list found, leaving last_seen_at alone.
+func (q *Queries) SyncWorkspace(ctx context.Context, arg SyncWorkspaceParams) error {
+	_, err := q.db.ExecContext(ctx, syncWorkspace,
+		arg.ID,
+		arg.ProjectID,
+		arg.Dir,
+		arg.IsMain,
+	)
 	return err
 }
 

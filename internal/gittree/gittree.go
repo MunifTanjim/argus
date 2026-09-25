@@ -61,7 +61,10 @@ func Resolve(ctx context.Context, dir string) (Location, error) {
 func ListWorktrees(ctx context.Context, gitDir string) ([]Worktree, error) {
 	cmd := shell.NewCommandContext(ctx, "git", "--git-dir="+gitDir, "worktree", "list", "--porcelain")
 	if err := cmd.Run(); err != nil {
-		return nil, err
+		if msg := gitMessage(cmd.StdErr().String()); msg != "" {
+			return nil, fmt.Errorf("worktree list: %s", msg)
+		}
+		return nil, fmt.Errorf("worktree list: %w", err)
 	}
 	return parseWorktrees(cmd.StdOut().String()), nil
 }

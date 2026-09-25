@@ -171,6 +171,7 @@ type ProjectNode struct {
 	// DefaultBranch is resolved live.
 	DefaultBranch string          `json:"default_branch,omitempty"`
 	IsGone        bool            `json:"is_gone,omitempty"`
+	Error         string          `json:"error,omitempty"` // git failed on it this list; workspaces are the last known
 	Hidden        bool            `json:"hidden,omitempty"`
 	Pinned        bool            `json:"pinned,omitempty"`
 	CreatedAt     string          `json:"created_at,omitempty"`   // RFC3339
@@ -305,9 +306,11 @@ type WorkspaceDiffResult struct {
 }
 
 type DirEntry struct {
-	Name  string `json:"name"`
-	Path  string `json:"path"` // repo-relative slash path
-	IsDir bool   `json:"is_dir,omitempty"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`             // repo-relative slash path
+	IsDir   bool   `json:"is_dir,omitempty"` // for a symlink: its target is a directory in the repo
+	Symlink bool   `json:"symlink,omitempty"`
+	Target  string `json:"target,omitempty"` // symlink only: the link text
 }
 
 // ListDirResult lists one directory's children (git-ignored entries and .git
