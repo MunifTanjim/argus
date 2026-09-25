@@ -332,16 +332,16 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 // --- views --------------------------------------------------------------------
 
 func (m model) historyProjectsView() string {
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(modeHistoryProjects)
+	title := m.homeBrand() + m.homeTabs(modeHistoryProjects)
 	cardW := historyWidth(m)
 	if m.history.err != nil {
-		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
+		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW)
 	}
 	if m.history.projects == nil {
-		return centerBlock(title+"\n\n"+dimStyle.Render("loading projects…"), cardW, m.width)
+		return m.center(title+"\n\n"+dimStyle.Render("loading projects…"), cardW)
 	}
 	if len(m.history.projects) == 0 {
-		return centerBlock(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
+		return m.center(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render("esc back"), cardW)
 	}
 	cards := make([]string, len(m.history.projects))
 	prevNode := ""
@@ -353,38 +353,38 @@ func (m model) historyProjectsView() string {
 		prevNode = p.NodeID
 		cards[i] = card
 	}
-	body := renderCardList(cards, m.history.projCursor, max(1, m.height-4))
+	body := renderCardList(cards, m.history.projCursor, max(1, m.bodyHeight()-4))
 	footer := m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
 		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back)
-	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
+	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
 }
 
 func (m model) historySessionsView() string {
-	title := headerStyle.Render("argus · history · "+m.history.project.Label) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
+	title := headerStyle.Render(m.withBrand("history · "+m.history.project.Label)) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
 	cardW := historyWidth(m)
 	if m.history.err != nil {
-		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
+		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW)
 	}
 	if len(m.history.sessions) == 0 {
 		msg := "loading sessions…"
 		if !m.history.loading {
 			msg = "no sessions in this project"
 		}
-		return centerBlock(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render("esc back"), cardW, m.width)
+		return m.center(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render("esc back"), cardW)
 	}
 	showAgent := historyMultiAgent(m.history.sessions)
 	cards := make([]string, len(m.history.sessions))
 	for i, s := range m.history.sessions {
 		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
 	}
-	body := renderCardList(cards, m.history.sessCursor, max(1, m.height-4))
+	body := renderCardList(cards, m.history.sessCursor, max(1, m.bodyHeight()-4))
 	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
 	if m.history.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
 	binds = append(binds, historySessionsKeys.Back)
 	footer := m.exportOrFlashFooter(m.footer(binds...))
-	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
+	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
 }
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
@@ -406,11 +406,11 @@ func renderCardList(cards []string, cursor, avail int) string {
 }
 
 func (m model) historyTranscriptView() string {
-	header := centerBlock(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
+	header := m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth())
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	if m.redactListActive() {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
-		body = centerBlock(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
+		body = m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth())
 	}
 
 	binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold, transcriptKeys.Detail, transcriptKeys.Bottom}
@@ -419,7 +419,7 @@ func (m model) historyTranscriptView() string {
 	}
 	binds = append(binds, transcriptKeys.Back)
 	footer := m.redactFooter(m.exportOrFlashFooter(m.footer(binds...)))
-	return pinFooter(header+"\n\n"+body, footer, m.width, m.height)
+	return pinFooter(header+"\n\n"+body, footer, m.bodyWidth(), m.bodyHeight())
 }
 
 // historyTranscriptHeader renders the open-transcript header: a manifest-driven
@@ -435,7 +435,7 @@ func (m model) historyTranscriptHeader() string {
 		if label == "" {
 			label = "session"
 		}
-		header := headerStyle.Render("argus · " + label)
+		header := headerStyle.Render(m.withBrand(label))
 		if title != "" {
 			header += dimStyle.Render("  " + truncate(title, 50))
 		}
@@ -444,7 +444,10 @@ func (m model) historyTranscriptHeader() string {
 		}
 		return header
 	}
-	parts := []string{"argus", "history"}
+	parts := []string{"history"}
+	if !m.embedded() {
+		parts = append([]string{"argus"}, parts...)
+	}
 	if lbl := m.history.project.Label; lbl != "" {
 		parts = append(parts, lbl)
 	}

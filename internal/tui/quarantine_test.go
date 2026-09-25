@@ -27,20 +27,20 @@ func quarantinedModel(q bool, sessions ...session.Session) model {
 
 func TestListViewQuarantineBanner(t *testing.T) {
 	s := session.Session{ID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%1"}}
-	out := quarantinedModel(true, s).listView()
+	out := quarantinedModel(true, s).View().Content
 	if !strings.Contains(out, "QUARANTINED") {
-		t.Fatalf("quarantined list view missing QUARANTINED banner:\n%s", out)
+		t.Fatalf("quarantined screen missing QUARANTINED banner:\n%s", out)
 	}
 	if !strings.Contains(out, "argus lock pin") {
-		t.Fatalf("quarantined list view missing pin hint:\n%s", out)
+		t.Fatalf("quarantined screen missing pin hint:\n%s", out)
 	}
 }
 
 func TestListViewNoBannerWhenNotQuarantined(t *testing.T) {
 	s := session.Session{ID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%1"}}
-	out := quarantinedModel(false, s).listView()
+	out := quarantinedModel(false, s).View().Content
 	if strings.Contains(out, "QUARANTINED") {
-		t.Fatalf("non-quarantined list view must not show QUARANTINED banner:\n%s", out)
+		t.Fatalf("non-quarantined screen must not show QUARANTINED banner:\n%s", out)
 	}
 }
 
@@ -70,11 +70,11 @@ func TestEmptyListViewQuarantineHeight(t *testing.T) {
 	out := m.listView()
 	lines := strings.Split(out, "\n")
 
-	if len(lines) != height {
-		t.Fatalf("output = %d lines, want %d", len(lines), height)
+	if len(lines) != m.bodyHeight() {
+		t.Fatalf("output = %d lines, want the view height %d", len(lines), m.bodyHeight())
 	}
 
-	last := lipgloss.NewStyle().Render(lines[height-1])
+	last := lipgloss.NewStyle().Render(lines[len(lines)-1])
 	if !strings.Contains(last, "n") {
 		t.Fatalf("footer key hint not found on last line: %q", last)
 	}
@@ -89,7 +89,7 @@ func TestEmptyListViewQuarantineHeight(t *testing.T) {
 	if bannerLine < 0 {
 		t.Fatal("QUARANTINED not found in output")
 	}
-	if bannerLine == height-1 {
+	if bannerLine == len(lines)-1 {
 		t.Fatal("QUARANTINED banner must not be on the last (footer) line")
 	}
 }

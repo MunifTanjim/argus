@@ -14,6 +14,7 @@ import (
 
 func projectsTestModel() model {
 	m := testModel()
+	m.projects.sidebarHidden = false
 	m.projects.collapsed = map[string]bool{}
 	m.projects.tree = []api.ProjectNode{{
 		ID: "n1:p1", Name: "argus", Kind: "git", Dir: "/repo/.git", NodeID: "n1", NodeLabel: "home",
@@ -22,7 +23,7 @@ func projectsTestModel() model {
 			{ID: "n1:w2", Dir: "/repo-feat", Branch: "feature"},
 		},
 	}}
-	m.projects.rows = buildProjectRows(m.projects)
+	m.projects.rebuild()
 	m.sessions = map[string]session.Session{
 		"n1:s1": {ID: "n1:s1", WorkspaceID: "n1:w1", Repo: "repo"},
 		"n1:s2": {ID: "n1:s2", WorkspaceID: "n1:w2", Repo: "repo"},
@@ -35,13 +36,13 @@ func projectsTestModel() model {
 func TestBuildProjectRows(t *testing.T) {
 	m := projectsTestModel()
 	// A single node shows no node row: project, then its two workspaces.
-	if len(m.projects.rows) != 3 {
-		t.Fatalf("got %d rows, want 3: %+v", len(m.projects.rows), m.projects.rows)
+	if len(m.projects.rows) != 4 {
+		t.Fatalf("got %d rows, want 4 (Home first): %+v", len(m.projects.rows), m.projects.rows)
 	}
-	if m.projects.rows[0].kind != rowProject || m.projects.rows[0].depth != 0 {
-		t.Fatalf("unexpected first row: %+v", m.projects.rows[0])
+	if m.projects.rows[1].kind != rowProject || m.projects.rows[1].depth != 0 {
+		t.Fatalf("unexpected first row: %+v", m.projects.rows[1])
 	}
-	if m.projects.rows[1].kind != rowWorkspace || m.projects.rows[2].kind != rowWorkspace {
+	if m.projects.rows[2].kind != rowWorkspace || m.projects.rows[3].kind != rowWorkspace {
 		t.Fatalf("workspaces missing: %+v", m.projects.rows)
 	}
 }
@@ -114,8 +115,8 @@ func TestProjectsCollapseTogglesRows(t *testing.T) {
 	res, _ := m.projectsEnter()
 	mm := res.(model)
 	// Collapsing the project hides its two workspaces.
-	if len(mm.projects.rows) != 1 {
-		t.Fatalf("after collapse got %d rows, want 1 (project)", len(mm.projects.rows))
+	if len(mm.projects.rows) != 2 {
+		t.Fatalf("after collapse got %d rows, want 2 (Home, project)", len(mm.projects.rows))
 	}
 }
 
@@ -334,19 +335,6 @@ func TestShowHiddenFiltersRows(t *testing.T) {
 	}
 }
 
-func TestActListProjectsOpensScreen(t *testing.T) {
-	m := testModel()
-	m.projects.collapsed = map[string]bool{}
-	res, cmd := m.actListProjects(tea.KeyPressMsg{})
-	mm := res.(model)
-	if mm.mode != modeProjects {
-		t.Errorf("mode = %v, want modeProjects", mm.mode)
-	}
-	if cmd == nil {
-		t.Error("expected a fetch command")
-	}
-}
-
 func TestTreeLeftRight(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
@@ -361,11 +349,11 @@ func TestTreeLeftRight(t *testing.T) {
 		t.Fatalf("h on a workspace: cursor on %q, want n1:p1", got)
 	}
 	m = press(m, 'h') // unfolded project: fold
-	if !m.projects.collapsed["n1:p1"] || len(m.projects.rows) != 1 {
+	if !m.projects.collapsed["n1:p1"] || len(m.projects.rows) != 2 {
 		t.Fatalf("h on an unfolded project should fold it: %+v", m.projects.rows)
 	}
 	m = press(m, 'l') // folded project: unfold
-	if m.projects.collapsed["n1:p1"] || len(m.projects.rows) != 3 {
+	if m.projects.collapsed["n1:p1"] || len(m.projects.rows) != 4 {
 		t.Fatalf("l on a folded project should unfold it: %+v", m.projects.rows)
 	}
 	m = press(m, 'l') // unfolded project: step into the first workspace
@@ -418,17 +406,6 @@ func TestCreateSelectsNewWorkspace(t *testing.T) {
 	}
 }
 
-func TestActListProjectsSelectsSessionWorkspace(t *testing.T) {
-	m := projectsTestModel()
-	m.mode = modeList
-	m.order = []string{"n1:s1", "n1:s2"}
-	m.cursor = 1 // n1:s2 lives in n1:w2
-	res, _ := m.actListProjects(tea.KeyPressMsg{})
-	if got := res.(model).projects.cursorRowID(); got != "n1:w2" {
-		t.Errorf("projects opened on %q, want n1:w2", got)
-	}
-}
-
 func TestRefreshKeepsTree(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
@@ -466,15 +443,15 @@ func TestWorkspaceRowBadge(t *testing.T) {
 	if a := act["n1:w1"]; a.live != 2 || a.waiting != 1 {
 		t.Fatalf("w1 activity = %+v, want 2 live (dead excluded), 1 waiting", a)
 	}
-	line := ansi.Strip(m.projRowLine(m.projects.rows[1], false, true, act, 40))
+	line := ansi.Strip(m.projRowLine(m.projects.rows[2], false, true, act, 40))
 	if !strings.HasSuffix(line, "◆ 2") {
 		t.Errorf("waiting workspace row = %q, want a ◆ 2 badge", line)
 	}
-	if line := m.projRowLine(m.projects.rows[0], false, true, act, 40); strings.Contains(line, "◆") {
+	if line := m.projRowLine(m.projects.rows[1], false, true, act, 40); strings.Contains(line, "◆") {
 		t.Errorf("unfolded project row should not repeat the badge: %q", line)
 	}
 	m.projects.setFolded("n1:p1", true)
-	if line := ansi.Strip(m.projRowLine(m.projects.rows[0], false, true, act, 40)); !strings.HasSuffix(line, "◆ 3") {
+	if line := ansi.Strip(m.projRowLine(m.projects.rows[1], false, true, act, 40)); !strings.HasSuffix(line, "◆ 3") {
 		t.Errorf("folded project row = %q, want the summed ◆ 3 badge", line)
 	}
 }
@@ -551,7 +528,7 @@ func TestFilterInputIsLive(t *testing.T) {
 		res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
-	if m.projects.filter != "feat" || len(m.projects.rows) != 2 || m.projects.cursorRowID() != "n1:w2" {
+	if m.projects.filter != "feat" || len(m.projects.rows) != 3 || m.projects.cursorRowID() != "n1:w2" {
 		t.Fatalf("live filter: filter=%q rows=%+v cursor=%q", m.projects.filter, m.projects.rows, m.projects.cursorRowID())
 	}
 	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -561,7 +538,7 @@ func TestFilterInputIsLive(t *testing.T) {
 	}
 	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = res.(model)
-	if m.projects.filter != "" || m.mode != modeProjects || len(m.projects.rows) != 3 {
+	if m.projects.filter != "" || m.mode != modeProjects || len(m.projects.rows) != 4 {
 		t.Errorf("esc should clear the filter before leaving: filter=%q mode=%v", m.projects.filter, m.mode)
 	}
 }
@@ -606,7 +583,7 @@ func TestHiddenAndPinnedProjectsAreMarked(t *testing.T) {
 	m.projects.tree[0].Hidden, m.projects.tree[0].Pinned = true, true
 	m.projects.showHidden = true
 	m.projects.rebuild()
-	r := m.projects.rows[0]
+	r := m.projects.rows[1]
 	if !r.hidden || !r.pinned {
 		t.Fatalf("project row flags = hidden:%v pinned:%v, want both", r.hidden, r.pinned)
 	}
@@ -652,16 +629,16 @@ func TestGoneRowsNeedTheirOwnToggle(t *testing.T) {
 	m.projects.tree[0].Workspaces[1].IsGone = true
 	m.projects.tree = append(m.projects.tree, api.ProjectNode{ID: "n1:p2", Name: "old", NodeID: "n1", IsGone: true})
 	m.projects.rebuild()
-	if len(m.projects.rows) != 2 {
+	if len(m.projects.rows) != 3 {
 		t.Fatalf("gone rows should be hidden by default: %+v", m.projects.rows)
 	}
 	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'z'})
-	if got := len(res.(model).projects.rows); got != 2 {
+	if got := len(res.(model).projects.rows); got != 3 {
 		t.Errorf("z (hidden) should not reveal gone rows, got %d rows", got)
 	}
 	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'o'})
 	mm := res.(model)
-	if len(mm.projects.rows) != 4 {
+	if len(mm.projects.rows) != 5 {
 		t.Fatalf("o should reveal the gone workspace and project: %+v", mm.projects.rows)
 	}
 	if !strings.Contains(ansi.Strip(mm.projectsTreePane(40, 20)), "+gone") {
@@ -787,5 +764,137 @@ func TestDiffRequestCarriesRenameSource(t *testing.T) {
 	rc := m.client.(*recordingClient)
 	if p := rc.params[len(rc.params)-1].(api.WorkspaceFileParams); p.OrigPath != "a.go" || p.Path != "b.go" {
 		t.Errorf("diff params = %+v, want the rename source a.go", p)
+	}
+}
+
+func TestSpawnSessionInWorkspace(t *testing.T) {
+	for _, focus := range []projectsFocus{focusTree, focusPane} {
+		m := projectsTestModel()
+		m.width, m.height = 120, 30
+		m.client = &recordingClient{}
+		m.projects.selectRow("n1:w2")
+		m.projects.focus = focus
+		res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+		m = res.(model)
+		if !m.spawn.active() || m.spawn.nodeID != "n1" || !m.spawn.fixedCwd || m.spawn.cwd.Value() != "/repo-feat" || cmd == nil {
+			t.Errorf("focus %v: s should start a spawn fixed to n1:/repo-feat: %+v", focus, m.spawn)
+		}
+	}
+}
+
+func TestSpawnSessionNeedsLiveWorkspace(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:p1")
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if mm := res.(model); mm.spawn.active() || mm.flash == "" {
+		t.Error("s on a project row should only show a hint")
+	}
+
+	m.projects.tree[0].Workspaces[1].IsGone = true
+	m.projects.showGone = true
+	m.projects.rebuild()
+	m.projects.selectRow("n1:w2")
+	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if mm := res.(model); mm.spawn.active() || mm.flash == "" {
+		t.Error("s on a gone workspace should only show a hint")
+	}
+}
+
+func TestSessionFromProjectsRendersInPane(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	mm, _ := m.enterSession("n1:s1")
+	if got, want := mm.bodyWidth(), mm.frameWidth()-mm.projectsLeftW()-dividerWidth; got != want {
+		t.Errorf("bodyWidth = %d, want the pane width %d", got, want)
+	}
+	if got := mm.bodyHeight(); got != 28 {
+		t.Errorf("bodyHeight = %d, want 28 (below the frame header)", got)
+	}
+	out := ansi.Strip(mm.View().Content)
+	if !strings.Contains(out, "Projects") {
+		t.Error("the sidebar should stay visible while a session is open")
+	}
+	for i, ln := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(ln); w > 120 {
+			t.Fatalf("line %d is %d wide, wider than the terminal", i, w)
+		}
+	}
+}
+
+func TestSessionFromHomeEmbeds(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.mode = modeList
+	mm, _ := m.enterSession("n1:s1")
+	if mm.bodyWidth() != mm.frameWidth()-mm.projectsLeftW()-dividerWidth || mm.bodyHeight() != 28 {
+		t.Errorf("Home session body = %dx%d, want the pane", mm.bodyWidth(), mm.bodyHeight())
+	}
+}
+
+func TestScreenFromPaneSessionUsesPaneSize(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.mode, m.sessionReturn, m.screenReturn = modeScreen, modeProjects, modeSession
+	cols, _ := m.termDims()
+	if want := m.bodyWidth() - 2; cols != want || m.bodyWidth() == 120 {
+		t.Errorf("screen cols = %d, want pane-based %d", cols, want)
+	}
+	m.projects.sidebarHidden = true
+	if cols, _ := m.termDims(); cols != m.frameWidth()-2 {
+		t.Errorf("screen with the sidebar hidden: cols = %d, want full-width %d", cols, m.frameWidth()-2)
+	}
+}
+
+func TestCtrlBInPaneSessionTogglesSidebar(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1")
+	mm, _ := m.enterSession("n1:s1")
+	res, _ := mm.handleKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	if got := res.(model); got.bodyWidth() != got.frameWidth() || got.mode != modeSession {
+		t.Errorf("ctrl+b should hide the sidebar and keep the session: width=%d mode=%v", got.bodyWidth(), got.mode)
+	}
+}
+
+func TestKillFromWorkspaceSessionsTab(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	rc := &recordingClient{}
+	m.client = rc
+	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Repo: "repo", Tmux: session.TmuxLocation{PaneID: "%1"}}
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	m.projects.tab = tabSessions
+
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = res.(model)
+	if m.projects.pendingKill != "n1:s1" || !strings.Contains(ansi.Strip(m.projectsFooter()), "kill this session? y/n") {
+		t.Fatalf("x should ask to kill n1:s1: pending=%q footer=%q", m.projects.pendingKill, m.projectsFooter())
+	}
+	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if mm := res.(model); mm.projects.pendingKill != "" {
+		t.Error("any key but y should cancel")
+	}
+	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if res.(model).projects.pendingKill != "" || cmd == nil {
+		t.Fatal("y should clear the prompt and kill")
+	}
+	cmd()
+	if p := rc.params[len(rc.params)-1].(api.SessionRef); p.SessionID != "n1:s1" {
+		t.Errorf("kill sent for %q, want n1:s1", p.SessionID)
+	}
+}
+
+func TestKillFromWorkspaceNeedsTerminalControl(t *testing.T) {
+	m := projectsTestModel() // fixture sessions have no tmux pane
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1")
+	m.projects.focus = focusPane
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if mm := res.(model); mm.projects.pendingKill != "" || mm.flash == "" {
+		t.Errorf("a session without terminal control should only show a hint: pending=%q flash=%q", mm.projects.pendingKill, mm.flash)
 	}
 }

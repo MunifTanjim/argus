@@ -26,7 +26,7 @@ const (
 
 // containerWidth is the width of the card column, centered within the terminal.
 func (m model) containerWidth() int {
-	w := m.width
+	w := m.bodyWidth()
 	if w > maxContentWidth {
 		w = maxContentWidth
 	}
@@ -177,6 +177,12 @@ func indentBlock(text, indent string) string {
 		lines[i] = indent + l
 	}
 	return strings.Join(lines, "\n")
+}
+
+// center places a view's content column in the middle of the view's width (the
+// pane when framed).
+func (m model) center(content string, contentWidth int) string {
+	return centerBlock(content, contentWidth, m.bodyWidth())
 }
 
 // centerBlock left-pads each line so a contentWidth-wide block sits centered in
@@ -629,7 +635,7 @@ func (m model) layoutChunks() (lines []string, first []int) {
 			lines = append(lines, "")
 		}
 		first[i] = len(lines)
-		block := centerBlock(m.renderChunk(i, i == m.transcript.cursor), m.containerWidth(), m.width)
+		block := m.center(m.renderChunk(i, i == m.transcript.cursor), m.containerWidth())
 		lines = append(lines, strings.Split(block, "\n")...)
 	}
 	return lines, first
@@ -643,7 +649,7 @@ func (m model) viewportHeight() int {
 		h, _ := m.sessionLayout()
 		return h
 	}
-	return max(1, m.height-5)
+	return max(1, m.bodyHeight()-5)
 }
 
 // chunkSpan returns the [start,end) line range of chunk i within first/total.

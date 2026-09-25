@@ -119,6 +119,15 @@ func (m model) paneSessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.projects.wsCursor < len(ss) {
 			return m.enterSession(ss[m.projects.wsCursor].ID)
 		}
+	case key.Matches(msg, listKeys.Kill):
+		if m.projects.wsCursor < len(ss) {
+			s := ss[m.projects.wsCursor]
+			if refusal := killRefusal(s); refusal != "" {
+				m.flash = refusal
+				return m, nil
+			}
+			m.projects.pendingKill = s.ID
+		}
 	}
 	return m, nil
 }

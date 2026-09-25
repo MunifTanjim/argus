@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // Workspace/project management on the projects screen: create (branch input),
@@ -191,6 +192,33 @@ func (m model) handleRetargetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.projects.retarget = nil
 	return m, m.setTargetCmd(rt.workspaceID, picked.Name)
+}
+
+// actSpawnSession starts the new-session flow in the selected workspace, with
+// its node and directory fixed.
+func (m model) actSpawnSession() (tea.Model, tea.Cmd) {
+	w, ok := m.findWorkspace(m.selectedWorkspaceID())
+	switch {
+	case !ok:
+		m.flash = "select a workspace to start a session in"
+		return m, nil
+	case w.IsGone:
+		m.flash = "this workspace is gone"
+		return m, nil
+	}
+	nodeID, _, _ := session.SplitCompositeID(w.ID)
+	return m, m.beginPresetSpawn(nodeID, w.Dir, "")
+}
+
+func (m model) findWorkspace(id string) (api.WorkspaceNode, bool) {
+	for _, p := range m.projects.tree {
+		for _, w := range p.Workspaces {
+			if w.ID == id {
+				return w, true
+			}
+		}
+	}
+	return api.WorkspaceNode{}, false
 }
 
 // --- commands -----------------------------------------------------------------

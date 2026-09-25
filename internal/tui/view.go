@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -158,6 +159,9 @@ func (m model) View() tea.View {
 	default:
 		content = m.listView()
 	}
+	if m.embedded() {
+		content = m.embedInProjects(content)
+	}
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
@@ -186,20 +190,26 @@ func (m model) quarantined() bool {
 	return m.client != nil && m.client.Quarantined()
 }
 
-func (m model) listView() string {
+func (m model) listView() string { return m.renderList("") }
+
+// renderList draws the Home session list. footer replaces the list's own key
+// footer when set (the tree-focused Home preview shows the tree's keys).
+func (m model) renderList(footer string) string {
 	if m.spawn.active() {
 		return m.spawnView()
 	}
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus")
-	if m.reconnecting {
+	// The status bar shows connection and quarantine state when framed; the bare
+	// splash has no bar, so it keeps them in its own header.
+	bare := !m.embedded()
+	title := m.homeBrand() + m.homeTabs(modeList)
+	if bare && m.reconnecting {
 		title += dimStyle.Render("  (reconnecting…)")
 	}
-	title += "    " + m.homeTabs(modeList)
 
 	// chrome counts non-content rows: title + blank-after-title + footer + blank-before-footer.
 	// +1 when the quarantine banner is present (it adds a second title row).
 	chrome := 4
-	if m.quarantined() {
+	if bare && m.quarantined() {
 		title += "\n" + StyleErrorBold.Render("⚠ QUARANTINED") +
 			dimStyle.Render("  pin this device: argus lock pin")
 		chrome++
@@ -207,7 +217,7 @@ func (m model) listView() string {
 
 	// Empty state.
 	if len(m.order) == 0 {
-		return m.emptyListView(title, chrome)
+		return m.emptyListView(title, chrome, footer)
 	}
 
 	// Populated.
@@ -243,23 +253,21 @@ func (m model) listView() string {
 		}
 	}
 
-	lines = windowSpan(lines, curStart, curEnd, max(1, m.height-chrome))
+	lines = windowSpan(lines, curStart, curEnd, max(1, m.bodyHeight()-chrome))
 
-	footer := m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
-		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Projects, listKeys.Refresh, listKeys.Quit)
 	switch {
-	case m.pendingKill && m.cursor < len(m.order):
-		verb := "kill"
-		if !m.sessions[m.order[m.cursor]].Controllable() {
-			verb = "dismiss"
-		}
-		footer = asstStyle.Render(verb + " this session? y/n")
+	case footer != "":
+	case m.pendingKill && m.cursor >= 0 && m.cursor < len(m.order):
+		footer = asstStyle.Render(killVerb(m.sessions[m.order[m.cursor]]) + " this session? y/n")
 	case m.flash != "":
 		footer = asstStyle.Render(m.flash)
+	default:
+		footer = m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
+			listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, m.listBackKey())
 	}
 
-	block := centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, m.width)
-	return pinFooter(block, footer, m.width, m.height)
+	block := m.center(title+"\n\n"+strings.Join(lines, "\n"), cardW)
+	return pinFooter(block, footer, m.bodyWidth(), m.bodyHeight())
 }
 
 // argusMark is the pre-rendered truecolor logo (gold "A" in a white ring).
@@ -297,13 +305,13 @@ func argusLogo(width, height int) string {
 
 // emptyListView renders the welcome screen: the argus logo, wordmark, tagline, and a
 // spawn hint, centered in the space between the tab bar and the footer.
-func (m model) emptyListView(title string, chrome int) string {
-	textW := max(16, min(m.width-2, 52))
+func (m model) emptyListView(title string, chrome int, footer string) string {
+	textW := max(16, min(m.bodyWidth()-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
 		StyleAccentBold.Render("n") + dimStyle.Render(" to spawn one right here.")
 	welcome := lipgloss.JoinVertical(lipgloss.Center,
-		argusLogo(m.width, m.height),
+		argusLogo(m.bodyWidth(), m.bodyHeight()),
 		"",
 		headerStyle.Render("Argus"),
 		center.Render(StyleSecondary.Render("Watch and control all your AI agents.")),
@@ -311,16 +319,18 @@ func (m model) emptyListView(title string, chrome int) string {
 		center.Render(hint),
 	)
 
-	avail := max(1, m.height-chrome)
+	avail := max(1, m.bodyHeight()-chrome)
 	top := max(0, (avail-lipgloss.Height(welcome))/2)
-	block := strings.Repeat("\n", top) + centerBlock(welcome, lipgloss.Width(welcome), m.width)
+	block := strings.Repeat("\n", top) + m.center(welcome, lipgloss.Width(welcome))
 
 	cardW := min(m.containerWidth(), maxCardWidth)
 	if cardW < 30 {
 		cardW = 30
 	}
-	footer := m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, listKeys.Quit)
-	return pinFooter(centerBlock(title, cardW, m.width)+"\n\n"+block, footer, m.width, m.height)
+	if footer == "" {
+		footer = m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, m.listBackKey())
+	}
+	return pinFooter(m.center(title, cardW)+"\n\n"+block, footer, m.bodyWidth(), m.bodyHeight())
 }
 
 // spawnView renders the "new session" flow. List steps (node, dir) render one
@@ -328,9 +338,8 @@ func (m model) emptyListView(title string, chrome int) string {
 // input line. Rows are width-clamped so long lists/paths never overflow.
 func (m model) spawnView() string {
 	cardW := historyWidth(m)
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") +
-		dimStyle.Render("  ·  new session")
-	avail := max(1, m.height-4)
+	title := headerStyle.Render(m.withBrand("new session"))
+	avail := max(1, m.bodyHeight()-4)
 	navFooter := dimStyle.Render("↑/↓ move · enter select · esc cancel")
 
 	var body, footer string
@@ -387,7 +396,7 @@ func (m model) spawnView() string {
 		footer = dimStyle.Render("enter launch · shift+enter/ctrl+j newline · esc cancel")
 	}
 
-	return pinFooter(centerBlock(title+"\n\n"+body, cardW, m.width), footer, m.width, m.height)
+	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
 }
 
 // spawnChoiceRow renders one selectable node/dir row: cursor marker, label, and
@@ -410,7 +419,7 @@ func spawnChoiceRow(label, sub string, sel bool, w int) string {
 func (m model) screenView() string {
 	s := m.sessions[m.selectedID]
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("argus · "+s.Tmux.SessionName) +
+	b.WriteString(headerStyle.Render(m.withBrand(s.Tmux.SessionName)) +
 		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s))) + "\n\n")
 
 	var body string
@@ -444,7 +453,7 @@ func (m model) screenView() string {
 	b.WriteString(box)
 
 	footer := dimStyle.Render("keys go to the session · ") + m.footer(screenLeave)
-	return pinFooter(b.String(), footer, m.width, m.height)
+	return pinFooter(b.String(), footer, m.bodyWidth(), m.bodyHeight())
 }
 
 func truncate(s string, n int) string {
@@ -455,4 +464,12 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-1] + "…"
+}
+
+// listBackKey is esc → tree, or q → quit when no tree is visible.
+func (m model) listBackKey() key.Binding {
+	if m.sidebarVisible() {
+		return listKeys.Back
+	}
+	return listKeys.Quit
 }

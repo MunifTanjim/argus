@@ -9,7 +9,7 @@ import (
 
 // logsAvail is the body line count: total height minus 4 chrome lines (title, two
 // blanks, footer).
-func (m model) logsAvail() int { return max(1, m.height-4) }
+func (m model) logsAvail() int { return max(1, m.bodyHeight()-4) }
 
 // hasLogsTab reports whether the Logs tab exists (only when the TUI spawned an
 // embedded node and holds its log buffer).
@@ -36,11 +36,16 @@ func (m model) logsView() string {
 	if !m.hasLogsTab() {
 		return ""
 	}
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " + m.homeTabs(modeLogs)
+	title := m.homeBrand() + m.homeTabs(modeLogs)
 	// Gutter-pad the header to line up with the other home tabs, but keep the log
 	// body flush-left at full width (logs read better left-aligned).
 	cardW := historyWidth(m)
-	gutter := strings.Repeat(" ", max(0, (m.width-cardW)/2))
+	// The tabs row lines up with the other home tabs (centered card column). A
+	// full-bleed body spans the terminal, so its tabs row adds the margin back.
+	gutter := strings.Repeat(" ", max(0, (m.bodyWidth()-cardW)/2))
+	if m.fullBleed() {
+		gutter = strings.Repeat(" ", screenMargin+max(0, (m.frameWidth()-cardW)/2))
+	}
 	var body string
 	if m.logs.Len() == 0 {
 		body = dimStyle.Render("no logs yet")
@@ -57,7 +62,7 @@ func (m model) logsView() string {
 		// yields >=avail display lines, so clamping to avail fills the screen.
 		var disp []string
 		for _, ln := range m.logs.LinesRange(off, avail) {
-			disp = append(disp, strings.Split(ansi.Hardwrap(ln, m.width, false), "\n")...)
+			disp = append(disp, strings.Split(ansi.Hardwrap(ln, m.bodyWidth(), false), "\n")...)
 		}
 		if len(disp) > avail {
 			if m.logsFollow {
@@ -69,7 +74,7 @@ func (m model) logsView() string {
 		body = strings.Join(disp, "\n")
 	}
 	footer := m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back)
-	return pinFooter(gutter+title+"\n\n"+body, footer, m.width, m.height)
+	return pinFooter(gutter+title+"\n\n"+body, footer, m.bodyWidth(), m.bodyHeight())
 }
 
 func (m model) handleLogsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

@@ -24,6 +24,9 @@ func testModel() model {
 		termKeyCh:   make(chan termKey, termKeyBuf),
 		width:       80,
 		height:      24,
+		// No sidebar: views get the full width under the frame header, so view
+		// tests need not account for the tree column.
+		projects: projectsState{sidebarHidden: true},
 	}
 }
 

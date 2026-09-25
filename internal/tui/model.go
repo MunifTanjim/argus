@@ -94,7 +94,7 @@ type model struct {
 
 	mode          viewMode
 	screenReturn  viewMode // mode to restore when leaving the live screen (ctrl+])
-	sessionReturn viewMode // mode to restore when leaving a session view (list or projects)
+	sessionReturn viewMode // mode to restore when leaving a session view
 	selectedID    string
 
 	focus       focusArea   // session screen: which pane has focus
@@ -193,7 +193,12 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		redact:      redactState{input: newRedactInput()},
 		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
 		replyDrafts: map[string]string{},
-		projects:    projectsState{collapsed: make(map[string]bool)},
+		projects: projectsState{
+			collapsed: make(map[string]bool),
+			focus:     focusPane,
+			loading:   true,
+			rows:      []projectsRow{homeRow()},
+		},
 	}
 }
 

@@ -172,8 +172,8 @@ func TestWindowResizeWhileAttached(t *testing.T) {
 
 	res, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = res.(model)
-	if m.term.Width() != max(10, 100-2) {
-		t.Errorf("emulator width=%d want %d", m.term.Width(), max(10, 100-2))
+	if cols, _ := m.termDims(); m.term.Width() != cols {
+		t.Errorf("emulator width=%d want %d", m.term.Width(), cols)
 	}
 	runCmd(cmd)
 	if !slices.Contains(c.calledMethods(), api.MethodTerminalResize) {

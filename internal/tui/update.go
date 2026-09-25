@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
@@ -24,7 +25,7 @@ func (m model) Init() tea.Cmd {
 	if m.viewer {
 		return m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent)
 	}
-	return tea.Batch(m.refreshCmd(), spinResumeCmd())
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), spinResumeCmd())
 }
 
 // spinResumeCmd re-arms the list spinner on a timer, so it resumes even when no
@@ -147,7 +148,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects.rebuild()
 		if m.projects.want != "" {
-			m.projects.reveal(m.projects.want)
+			// Only jump the tree cursor while the tree screen is what shows; the
+			// Home pane keeps the cursor on Home.
+			if m.mode == modeProjects {
+				m.projects.reveal(m.projects.want)
+			}
 			m.projects.want = ""
 		}
 		return m.ensureTabData()
@@ -374,6 +379,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// typing reports whether a text input owns the keyboard, so editing keys like
+// ctrl+b stay with it.
+func (m model) typing() bool {
+	return (m.mode == modeSession && m.focus == focusDock) || m.redact.inputActive
+}
+
 // idleComposerActive reports whether the idle free-text composer is focused, so
 // pastes route into it the same way handlePromptKey routes keystrokes.
 func (m model) idleComposerActive() bool {
@@ -403,7 +414,7 @@ func (m model) anyWorking() bool {
 // none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
 // spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
-	if (m.mode == modeList || m.mode == modeProjects) && !m.spinning && (m.anyWorking() || m.projects.create.creating) {
+	if (m.mode == modeList || m.mode == modeProjects || m.embedded()) && !m.spinning && (m.anyWorking() || m.projects.create.creating) {
 		m.spinning = true
 		return spinTickCmd()
 	}
@@ -589,12 +600,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	// Ctrl+C quits from any other mode.
 	if msg.String() == "ctrl+c" {
-		if m.activeSub.subID != "" {
-			subID := m.activeSub.subID
-			m.activeSub = subRef{}
-			return m, tea.Batch(m.unsubscribeCmd(subID), tea.Quit)
-		}
-		return m, tea.Quit
+		return m.quit()
 	}
 	// Kill confirmation gate (list view).
 	if m.pendingKill {
@@ -607,6 +613,13 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Spawn flow gate (list view).
 	if m.spawn.active() {
 		return m.handleSpawnKey(msg)
+	}
+
+	// ctrl+b toggles the projects sidebar from every framed view; while typing it
+	// stays a cursor key.
+	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleSidebar) {
+		m.projects.sidebarHidden = !m.projects.sidebarHidden
+		return m, nil
 	}
 
 	// The composite session screen owns its own navigation/fold/compose keys.
@@ -652,8 +665,7 @@ var listTable = []keyTableEntry{
 	{listKeys.New, model.actListNew},
 	{listKeys.Kill, model.actListKill},
 	{listKeys.Refresh, model.actListRefresh},
-	{listKeys.Projects, model.actListProjects},
-	{listKeys.Quit, model.actListQuit},
+	{listKeys.Back, model.actListBack},
 }
 
 func (m model) actListUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -685,7 +697,7 @@ func (m model) actListHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // viewport height and a card's nominal line count (~5). Shared by all card lists.
 func (m model) cardListPageStep() int {
 	const cardLines = 5
-	return max(1, max(1, m.height-4)/cardLines/2)
+	return max(1, max(1, m.bodyHeight()-4)/cardLines/2)
 }
 
 func (m model) actListDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -706,7 +718,7 @@ func (m model) enterSession(id string) (model, tea.Cmd) {
 	m.saveReplyDraft()
 	m.selectedID = id
 	if m.mode != modeSession {
-		m.sessionReturn = m.mode // return here on exit (session list or projects sidebar)
+		m.sessionReturn = m.mode // return here on exit
 	}
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
@@ -830,14 +842,28 @@ func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
-	s := m.sessions[m.order[m.cursor]]
-	// `x` removes a session: kill its pane, or dismiss a paneless presence card.
-	if !s.Controllable() && !dismissable(s) {
-		m.flash = string(s.Frontend) + " session: terminal control unavailable"
+	if refusal := killRefusal(m.sessions[m.order[m.cursor]]); refusal != "" {
+		m.flash = refusal
 		return m, nil
 	}
 	m.pendingKill = true
 	return m, nil
+}
+
+// killRefusal explains why `x` cannot remove s, or is "" when it can: kill its
+// pane, or dismiss a paneless presence card.
+func killRefusal(s session.Session) string {
+	if !s.Controllable() && !dismissable(s) {
+		return string(s.Frontend) + " session: terminal control unavailable"
+	}
+	return ""
+}
+
+func killVerb(s session.Session) string {
+	if s.Controllable() {
+		return "kill"
+	}
+	return "dismiss"
 }
 
 // dismissable reports whether a paneless OpenCode session can be removed. Kill is
@@ -855,13 +881,29 @@ func (m model) actListRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, m.refreshCmd()
 }
 
-func (m model) actListQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// quit leaves argus, closing an open transcript subscription first.
+func (m model) quit() (tea.Model, tea.Cmd) {
 	if m.activeSub.subID != "" {
 		subID := m.activeSub.subID
 		m.activeSub = subRef{}
 		return m, tea.Batch(m.unsubscribeCmd(subID), tea.Quit)
 	}
 	return m, tea.Quit
+}
+
+// actListBack returns from the Home pane to the tree on the Home row. With the
+// sidebar hidden there is no tree: q quits and esc/tab do nothing.
+func (m model) actListBack(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !m.sidebarVisible() {
+		if msg.String() == "q" {
+			return m.quit()
+		}
+		return m, nil
+	}
+	m.mode = modeProjects
+	m.projects.focus = focusTree
+	m.projects.cursor = 0
+	return m, nil
 }
 
 func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
