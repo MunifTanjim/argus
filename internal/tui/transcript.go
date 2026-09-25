@@ -101,7 +101,7 @@ func (m model) chunkExpandable(c transcript.Chunk) bool {
 			return true
 		}
 		// Count wrapped display lines, not source lines.
-		return len(strings.Split(m.renderMD(c.Text, m.userBubbleInner()), "\n")) > maxCollapsedLines
+		return len(strings.Split(m.renderMD(c.Text, userBubbleInner(m.transcriptWidth())), "\n")) > maxCollapsedLines
 	case transcript.ChunkSystem:
 		return c.Detail != ""
 	case transcript.ChunkShell:
@@ -245,22 +245,22 @@ func hiddenHint(n int) string {
 func (m model) renderChunk(i int, selected bool) string {
 	c := m.transcript.chunks[i]
 	accent := selected && m.historyFocused()
+	container := m.transcriptWidth()
 	switch c.Kind {
 	case transcript.ChunkAI:
-		return m.renderAICard(c, selected, accent)
+		return m.renderAICard(c, container, selected, accent)
 	case transcript.ChunkUser:
-		return m.renderUserCard(c, selected, accent)
+		return m.renderUserCard(c, container, selected, accent)
 	case transcript.ChunkShell:
-		return m.renderShellCard(c, selected, accent)
+		return m.renderShellCard(c, container, selected, accent)
 	case transcript.ChunkCompact:
-		return m.renderCompact(c)
+		return renderCompact(c, container)
 	default:
-		return m.renderSystem(c, selected, accent)
+		return m.renderSystem(c, container, selected, accent)
 	}
 }
 
-func (m model) renderAICard(c transcript.Chunk, selected, accent bool) string {
-	container := m.transcriptWidth()
+func (m model) renderAICard(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -447,17 +447,16 @@ func toolPreview(it transcript.Item) string {
 	return out
 }
 
-func (m model) userBubbleWidth() int {
-	return max(m.transcriptWidth()*3/4, 20)
+func userBubbleWidth(container int) int {
+	return max(container*3/4, 20)
 }
 
-func (m model) userBubbleInner() int {
-	return max(m.userBubbleWidth()-6, 20)
+func userBubbleInner(container int) int {
+	return max(userBubbleWidth(container)-6, 20)
 }
 
-func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.transcriptWidth()
-	maxBubble := m.userBubbleWidth()
+func (m model) renderUserCard(c transcript.Chunk, container int, selected, accent bool) string {
+	maxBubble := userBubbleWidth(container)
 	sel := selIndicator(selected)
 	expandable := m.chunkExpandable(c)
 	expanded := m.chunkExpanded(c)
@@ -474,7 +473,7 @@ func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string 
 	}
 	header := sel + strings.Repeat(" ", gap) + right
 
-	body := m.renderMD(c.Text, m.userBubbleInner())
+	body := m.renderMD(c.Text, userBubbleInner(container))
 	if expanded {
 		for _, it := range c.Items {
 			row := itemRow(it)
@@ -506,8 +505,7 @@ func (m model) renderUserCard(c transcript.Chunk, selected, accent bool) string 
 	return header + "\n" + indentBlock(aligned, sel)
 }
 
-func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
-	container := m.transcriptWidth()
+func (m model) renderSystem(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -543,8 +541,7 @@ func (m model) renderSystem(c transcript.Chunk, selected, accent bool) string {
 	return indentBlock(card, selIndicator(selected))
 }
 
-func (m model) renderShellCard(c transcript.Chunk, selected, accent bool) string {
-	container := m.transcriptWidth()
+func (m model) renderShellCard(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -606,8 +603,7 @@ func (m model) shellBody(c transcript.Chunk, iw int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) renderCompact(c transcript.Chunk) string {
-	container := m.transcriptWidth()
+func renderCompact(c transcript.Chunk, container int) string {
 	text := c.Summary
 	if text == "" {
 		text = "Context compressed"
@@ -626,17 +622,41 @@ func (m model) renderCompact(c transcript.Chunk) string {
 
 // -- Layout, view, scrolling --------------------------------------------------
 
-// layoutChunks renders every chunk to display lines, recording each chunk's
+// cardKey holds the inputs besides the chunk itself that a rendered card
+// depends on. Chunk content changes drop the entry instead (setChunks,
+// applyChunkDelta).
+type cardKey struct {
+	width                      int
+	selected, accent, expanded bool
+	brand                      string
+}
+
+type cardEntry struct {
+	key   cardKey
+	lines []string
+}
+
+// layoutChunks lays every chunk out as display lines, recording each chunk's
 // first line index (for cursor scrolling). A blank separator precedes each card.
 func (m model) layoutChunks() (lines []string, first []int) {
+	bodyW, containerW := m.bodyWidth(), m.containerWidth()
+	focused := m.historyFocused()
+	_, brand := m.assistantBrand()
 	first = make([]int, len(m.transcript.chunks))
-	for i := range m.transcript.chunks {
+	for i, c := range m.transcript.chunks {
 		if i > 0 {
 			lines = append(lines, "")
 		}
 		first[i] = len(lines)
-		block := m.center(m.renderChunk(i, i == m.transcript.cursor), m.containerWidth())
-		lines = append(lines, strings.Split(block, "\n")...)
+		selected := i == m.transcript.cursor
+		key := cardKey{width: bodyW, selected: selected, accent: selected && focused, expanded: m.chunkExpanded(c), brand: brand}
+		e, ok := m.transcript.cards[c.ID]
+		if !ok || e.key != key {
+			block := centerBlock(m.renderChunk(i, selected), containerW, bodyW)
+			e = cardEntry{key: key, lines: strings.Split(block, "\n")}
+			m.transcript.cards[c.ID] = e
+		}
+		lines = append(lines, e.lines...)
 	}
 	return lines, first
 }

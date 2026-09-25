@@ -17,6 +17,7 @@ func testModel() model {
 			expanded:    map[string]bool{},
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
+			cards:       map[string]cardEntry{},
 		},
 		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
 		replyDrafts: map[string]string{},

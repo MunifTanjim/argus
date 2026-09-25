@@ -278,7 +278,8 @@ func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Address for follow-up per-tool detail fetches on this transcript.
 	m.history.openNodeID, m.history.openPath, m.history.openAgent = m.history.project.NodeID, s.TranscriptPath, s.Agent
 	m.history.openSessionID, m.history.openResumable = s.SessionID, s.Resumable
-	m.transcript.chunks, m.transcript.err = nil, nil
+	m.setChunks(nil)
+	m.transcript.err = nil
 	m.transcript.cursor, m.transcript.scroll = 0, 0
 	m.transcript.detailStack = nil
 	m.historyView = histTranscript

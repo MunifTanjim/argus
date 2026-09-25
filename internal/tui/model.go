@@ -148,6 +148,7 @@ type transcriptState struct {
 	expanded    map[string]bool               // chunk id -> expanded (override default)
 	mdRenderers map[int]*glamour.TermRenderer // markdown renderers, keyed by wrap width
 	mdCache     map[string]string             // markdown cache, keyed by width+content
+	cards       map[string]cardEntry          // rendered card lines, keyed by chunk id
 	jsonHL      *codeHighlighter              // JSON syntax highlighter for tool bodies
 	jsHL        *codeHighlighter              // JavaScript highlighter for opencode execute
 }
@@ -187,6 +188,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 			expanded:    make(map[string]bool),
 			mdRenderers: make(map[int]*glamour.TermRenderer),
 			mdCache:     make(map[string]string),
+			cards:       make(map[string]cardEntry),
 			jsonHL:      newCodeHighlighter(hasDark, "json"),
 			jsHL:        newCodeHighlighter(hasDark, "javascript"),
 		},
