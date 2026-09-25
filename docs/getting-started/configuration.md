@@ -40,6 +40,43 @@ log:
   format: pretty        # pretty | json
 ```
 
+## Workspaces
+
+In the TUI, `n` creates a git worktree for a new workspace. Two templates set the
+names. Both use Go template syntax.
+
+::: v-pre
+| Key | Default | Variables |
+|---|---|---|
+| `workspace.worktree-dir-template` | `.worktrees/{{.Branch}}` | `.Repo`, `.Branch` |
+| `workspace.issue-branch-template` | `issue-{{.Number}}-{{.Slug}}` | `.Number`, `.Title`, `.Slug` |
+:::
+
+A relative worktree path starts at the project's main worktree. `.Repo` is the
+name of the main worktree's directory. `.Slug` is the issue title in lowercase
+with dashes, cut to 40 characters. A workspace from a PR uses the local branch
+`pr-<number>`, and `.Branch` is that name.
+
+The node checks both templates when it starts. A template with an unknown
+variable stops the start with an error that names the key.
+
+```yaml
+workspace:
+  worktree-dir-template: ../{{.Repo}}-{{.Branch}}
+  issue-branch-template: issue-{{.Number}}
+```
+
+The environment variables are `ARGUS_WORKSPACE_WORKTREE_DIR_TEMPLATE` and
+`ARGUS_WORKSPACE_ISSUE_BRANCH_TEMPLATE`.
+
+The default path is inside the repository. Add `.worktrees/` to `.gitignore` or
+to `.git/info/exclude`. If you do not, git shows the worktrees as untracked files.
+
+Workspaces from a PR or an issue need these:
+
+- The GitHub CLI (`gh`), logged in with `gh auth login`.
+- An `origin` remote on `github.com`.
+
 ## End-to-End Encryption
 
 `e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport,
