@@ -317,14 +317,14 @@ func TestSessionLayoutSumsToViewport(t *testing.T) {
 		t.Fatal("dock height 0 with pending interaction")
 	}
 	// history + dock + chrome(4) == viewport; the rule is part of dock.
-	if h+d != max(1, m.height-4) {
-		t.Errorf("history(%d)+dock(%d) != %d", h, d, m.height-4)
+	if h+d != max(1, m.bodyHeight()-4) {
+		t.Errorf("history(%d)+dock(%d) != %d", h, d, m.bodyHeight()-4)
 	}
 	m = sessionModel(nil)
 	m.height = 30
 	h, d = m.sessionLayout()
-	if d != 0 || h != max(1, m.height-4) {
-		t.Errorf("no-dock layout: h=%d d=%d want h=%d", h, d, m.height-4)
+	if d != 0 || h != max(1, m.bodyHeight()-4) {
+		t.Errorf("no-dock layout: h=%d d=%d want h=%d", h, d, m.bodyHeight()-4)
 	}
 }
 

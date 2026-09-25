@@ -44,8 +44,8 @@ func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, 
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown                                  key.Binding
-	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Projects, Quit key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown                              key.Binding
+	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit key.Binding
 }{
 	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:     nb([]string{"down", "j"}, "", ""),
@@ -61,7 +61,7 @@ var listKeys = struct {
 	New:      nb([]string{"n"}, "n", "new"),
 	Kill:     nb([]string{"x"}, "x", "kill"),
 	Refresh:  nb([]string{"r"}, "r", "refresh"),
-	Projects: nb([]string{"p"}, "p", "projects"),
+	Back:     nb([]string{"esc", "escape", "q", "tab"}, "esc", "tree"),
 	Quit:     nb([]string{"q"}, "q", "quit"),
 }
 
@@ -69,7 +69,7 @@ var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter, Focus key.Binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                         key.Binding
 	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
-	Target, DiffMode                                                   key.Binding
+	Target, DiffMode, Spawn                                            key.Binding
 	Refresh, Back                                                      key.Binding
 }{
 	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
@@ -97,6 +97,7 @@ var projectsKeys = struct {
 	ShowGone:      nb([]string{"o"}, "o", "gone"),
 	Target:        nb([]string{"T"}, "T", "target"),
 	DiffMode:      nb([]string{"t"}, "t", "vs target"),
+	Spawn:         nb([]string{"s"}, "s", "session"),
 	Refresh:       nb([]string{"r"}, "r", "refresh"),
 	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
 }
@@ -234,7 +235,7 @@ func (m model) footer(bindings ...key.Binding) string {
 	h.Styles.ShortDesc = StyleDim
 	h.Styles.ShortSeparator = StyleDim
 	h.ShortSeparator = " · "
-	w := m.width
+	w := m.bodyWidth()
 	if w <= 0 {
 		w = 200 // no viewport yet (e.g. tests): don't truncate
 	}

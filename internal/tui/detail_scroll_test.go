@@ -176,7 +176,8 @@ func TestDetailUpReanchorsToViewport(t *testing.T) {
 func TestDetailHalfDownClampsScroll(t *testing.T) {
 	m := tallFocusedDetailModel(t)
 	k := tea.KeyPressMsg{}
-	for i := 0; i < 10; i++ {
+	for prev := -1; m.topFrame().scroll != prev; {
+		prev = m.topFrame().scroll
 		mm, _ := m.actDetailHalfDown(k)
 		m = mm.(model)
 	}

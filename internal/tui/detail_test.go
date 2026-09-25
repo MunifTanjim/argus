@@ -86,6 +86,7 @@ func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
 	})
 	m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
 	m.height = 40
+	m.viewer = true // centering applies only to the bare full-screen viewer
 	out := m.detailBody()
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -175,7 +176,7 @@ func TestDetailScrollHint(t *testing.T) {
 		items = append(items, transcript.Item{Kind: transcript.ItemText, Text: "line of output"})
 	}
 	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: items})
-	m.width, m.height = 80, 10
+	m.width, m.height = 80, 12 // viewport 5 under the frame header
 
 	out := m.detailBody()
 	if !strings.Contains(out, "▼") {

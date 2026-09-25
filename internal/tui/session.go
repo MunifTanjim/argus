@@ -145,9 +145,9 @@ func (m model) historyBody() string {
 // footer(1) = 4. The history/dock rule is part of dockH, not chrome.
 func (m model) sessionLayout() (historyH, dockH int) {
 	if m.sessionInteraction() == nil {
-		return max(1, m.height-4), 0
+		return max(1, m.bodyHeight()-4), 0
 	}
-	avail := max(1, m.height-4) // header + 2 surrounding blanks + footer
+	avail := max(1, m.bodyHeight()-4) // header + 2 surrounding blanks + footer
 	if m.focus != focusDock {
 		return max(1, avail-2), 2
 	}
@@ -382,7 +382,10 @@ func (m model) sessionView() string {
 	if name == "" {
 		name = s.Tmux.SessionName
 	}
-	parts := []string{"argus"}
+	var parts []string
+	if !m.embedded() {
+		parts = append(parts, "argus")
+	}
 	if s.Repo != "" {
 		parts = append(parts, s.Repo)
 	}
@@ -395,10 +398,10 @@ func (m model) sessionView() string {
 		header += headerStyle.Render(" · ") + branch
 	}
 	header += dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
-	header = centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth(), m.width)
+	header = m.center(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth())
 
 	if s.Status == session.StatusStarting {
-		return pinFooter(header+"\n\n"+startingNotice(m), m.sessionFooter(), m.width, m.height)
+		return pinFooter(header+"\n\n"+startingNotice(m), m.sessionFooter(), m.bodyWidth(), m.bodyHeight())
 	}
 
 	body := m.historyBody()
@@ -418,9 +421,9 @@ func (m model) sessionView() string {
 			dockBody = m.dockBody(dockH - 1)
 		}
 		dock := rule + "\n" + indentBlock(dockBody, strings.Repeat(" ", contentPadX))
-		body = body + "\n" + centerBlock(dock, m.containerWidth(), m.width)
+		body = body + "\n" + m.center(dock, m.containerWidth())
 	}
-	return pinFooter(header+"\n\n"+body, m.sessionFooter(), m.width, m.height)
+	return pinFooter(header+"\n\n"+body, m.sessionFooter(), m.bodyWidth(), m.bodyHeight())
 }
 
 // startingNotice renders the startup-gate message centered in place of the
@@ -430,5 +433,5 @@ func startingNotice(m model) string {
 		"Session is starting or waiting at a startup prompt.",
 		"Press " + sessionKeys.Raw.Help().Key + " to open the live screen and continue.",
 	}
-	return centerBlock(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth(), m.width)
+	return m.center(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth())
 }

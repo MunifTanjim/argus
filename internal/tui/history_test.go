@@ -40,7 +40,7 @@ func TestHistResumeGatingUnknownCwd(t *testing.T) {
 }
 
 func TestHistorySessionsViewShowsFlash(t *testing.T) {
-	m := model{width: 80, height: 24}
+	m := model{width: 80, height: 24, projects: projectsState{sidebarHidden: true}}
 	m.history.project = session.HistoryProject{Label: "proj", Cwd: "/tmp"}
 	m.history.sessions = []session.HistorySession{
 		{SessionID: "s1", Agent: "claude", LastActivity: "2026-01-01T00:00:00Z"},

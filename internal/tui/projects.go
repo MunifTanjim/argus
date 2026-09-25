@@ -36,7 +36,12 @@ const (
 	rowNode projRowKind = iota
 	rowProject
 	rowWorkspace
+	rowHome
 )
+
+const homeRowID = "home"
+
+func homeRow() projectsRow { return projectsRow{kind: rowHome, id: homeRowID} }
 
 // projectsRow is one flattened line of the tree, honoring the collapsed set.
 type projectsRow struct {
@@ -77,6 +82,7 @@ type projectsState struct {
 	inputMode          projInputMode
 	inputTarget        string // project id the input acts on
 	pendingRemove      string // workspace id awaiting a remove confirmation
+	pendingKill        string // session id awaiting a kill confirmation (Sessions tab)
 	pendingRemoveForce bool   // the pending remove is a force-remove
 
 	create     createState
@@ -90,10 +96,15 @@ type projectsState struct {
 	files   filesState
 }
 
+// flatten is the tree's rows: Home first, then the projects.
+func (p projectsState) flatten() []projectsRow {
+	return append([]projectsRow{homeRow()}, buildProjectRows(p)...)
+}
+
 // rebuild re-flattens the tree, keeping the cursor on the same row id.
 func (p *projectsState) rebuild() {
 	sel := p.cursorRowID()
-	p.rows = buildProjectRows(*p)
+	p.rows = p.flatten()
 	p.selectRow(sel)
 }
 
@@ -124,7 +135,7 @@ func (p *projectsState) reveal(wsID string) {
 			if w.ID == wsID {
 				delete(p.collapsed, pr.NodeID)
 				delete(p.collapsed, pr.ID)
-				p.rows = buildProjectRows(*p)
+				p.rows = p.flatten()
 				p.selectRow(wsID)
 				return
 			}
@@ -151,7 +162,7 @@ func (p *projectsState) setFolded(id string, folded bool) {
 func (p *projectsState) setFilter(q string) {
 	sel := p.cursorRowID()
 	p.filter = strings.TrimSpace(q)
-	p.rows = buildProjectRows(*p)
+	p.rows = p.flatten()
 	if p.selectRow(sel) {
 		return
 	}
@@ -216,21 +227,6 @@ func (m model) fetchProjects() tea.Cmd {
 		err := client.Call(api.MethodProjectList, nil, &res)
 		return projectsTreeMsg{tree: res.Projects, err: err}
 	}
-}
-
-// actListProjects opens the workspace sidebar from the session list, selecting
-// the workspace of the session under the list cursor.
-func (m model) actListProjects(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.loading, m.projects.err = true, nil
-	if m.cursor < len(m.order) {
-		if ws := m.sessions[m.order[m.cursor]].WorkspaceID; ws != "" {
-			m.projects.want = ws
-			m.projects.reveal(ws)
-		}
-	}
-	return m, tea.Batch(m.fetchProjects(), m.maybeSpin())
 }
 
 // buildProjectRows flattens st.tree under st's fold, visibility, and filter
@@ -343,7 +339,7 @@ func (m model) projectsLeftW() int {
 	if w == 0 {
 		w = 34
 	}
-	return clampWidth(w, 20, m.width-30)
+	return clampWidth(w, 20, m.frameWidth()-30)
 }
 
 // sidebarVisible reports whether the left sidebar is shown: not toggled off by
@@ -421,6 +417,28 @@ func (m model) activityBadge(act map[string]wsActivity, ws []string) string {
 		b := act[id]
 		a.live, a.working, a.waiting = a.live+b.live, a.working+b.working, a.waiting+b.waiting
 	}
+	return m.badgeFor(a)
+}
+
+// homeBadge counts every live session, with or without a workspace.
+func (m model) homeBadge() string {
+	var a wsActivity
+	for _, s := range m.sessions {
+		if s.Offline || s.Status == session.StatusDead {
+			continue
+		}
+		a.live++
+		switch s.Status {
+		case session.StatusWorking:
+			a.working++
+		case session.StatusAwaitingInput:
+			a.waiting++
+		}
+	}
+	return m.badgeFor(a)
+}
+
+func (m model) badgeFor(a wsActivity) string {
 	n := strconv.Itoa(a.live)
 	switch {
 	case a.live == 0:
@@ -440,6 +458,13 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.projects.pendingRemove != "" {
 		return m.handleRemoveConfirm(msg)
 	}
+	if id := m.projects.pendingKill; id != "" {
+		m.projects.pendingKill = ""
+		if msg.String() == "y" {
+			return m, m.killCmd(id)
+		}
+		return m, nil
+	}
 	if o := m.projects.offerSpawn; o != nil {
 		m.projects.offerSpawn = nil
 		if msg.String() == "y" {
@@ -458,14 +483,23 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.flash = ""
+	// With no tree on screen, the Home row's pane is the Home pane itself.
+	if !m.sidebarVisible() && m.onHomeRow() && !key.Matches(msg, projectsKeys.ToggleSidebar) {
+		mm, _ := m.enterHome()
+		return mm.(model).handleKey(msg)
+	}
 	switch {
 	case key.Matches(msg, projectsKeys.Help):
 		m.projects.showHelp = true
 		return m, nil
+	case m.treeFocused() && msg.String() == "q":
+		return m.quit()
 	case key.Matches(msg, projectsKeys.Back):
 		return m.projectsBack()
 	case key.Matches(msg, projectsKeys.Filter):
 		return m.startInput(pmFilter, "", m.projects.filter)
+	case key.Matches(msg, projectsKeys.Spawn):
+		return m.actSpawnSession()
 	case key.Matches(msg, projectsKeys.ShowHidden):
 		m.projects.showHidden = !m.projects.showHidden
 		m.projects.rebuild()
@@ -478,14 +512,17 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.projects.loading, m.projects.err = true, nil
 		return m, m.fetchProjects()
 	case key.Matches(msg, projectsKeys.Widen):
-		m.projects.leftW = clampWidth(m.projectsLeftW()+4, 20, m.width-30)
+		m.projects.leftW = clampWidth(m.projectsLeftW()+4, 20, m.frameWidth()-30)
 		return m, nil
 	case key.Matches(msg, projectsKeys.Narrow):
-		m.projects.leftW = clampWidth(m.projectsLeftW()-4, 20, m.width-30)
+		m.projects.leftW = clampWidth(m.projectsLeftW()-4, 20, m.frameWidth()-30)
 		return m, nil
 	case key.Matches(msg, projectsKeys.ToggleSidebar):
 		m.projects.sidebarHidden = !m.projects.sidebarHidden
 		if !m.sidebarVisible() {
+			if m.onHomeRow() {
+				return m.enterHome()
+			}
 			m.projects.focus = focusPane
 			return m.ensureTabData()
 		}
@@ -507,7 +544,22 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.handleProjectsPaneKey(msg)
 }
 
+// enterHome moves focus into the Home pane (the homepage's session list).
+func (m model) enterHome() (tea.Model, tea.Cmd) {
+	m.projects.focus = focusPane
+	m.mode = modeList
+	return m, m.maybeSpin()
+}
+
+func (m model) onHomeRow() bool {
+	r, ok := m.cursorRow()
+	return ok && r.kind == rowHome
+}
+
 func (m model) focusPane() (tea.Model, tea.Cmd) {
+	if m.onHomeRow() {
+		return m.enterHome()
+	}
 	if m.selectedWorkspaceID() == "" {
 		m.flash = "select a workspace to open its pane"
 		return m, nil
@@ -516,15 +568,20 @@ func (m model) focusPane() (tea.Model, tea.Cmd) {
 	return m.ensureTabData()
 }
 
-// projectsBack closes an open viewer, then steps out of the pane, then clears
-// the filter, then leaves.
+// treeFocused reports whether the tree has focus and is on screen; a hidden tree
+// never holds focus in effect.
+func (m model) treeFocused() bool {
+	return m.projects.focus == focusTree && m.sidebarVisible()
+}
+
+// projectsBack closes an open viewer, then steps out of the pane; on the tree it
+// only clears a filter.
 func (m model) projectsBack() (tea.Model, tea.Cmd) {
-	if m.projects.focus == focusTree {
+	if m.treeFocused() {
 		if m.projects.filter != "" {
 			m.projects.setFilter("")
 			return m.ensureTabData()
 		}
-		m.mode = modeList
 		return m, nil
 	}
 	switch {
@@ -536,8 +593,9 @@ func (m model) projectsBack() (tea.Model, tea.Cmd) {
 		return m.filesUp()
 	case m.sidebarVisible():
 		m.projects.focus = focusTree
-	default:
-		m.mode = modeList // no sidebar to return focus to
+	default: // no tree to return to: go to the Home pane
+		m.projects.cursor = 0
+		return m.enterHome()
 	}
 	return m, nil
 }
@@ -590,6 +648,9 @@ func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // treeRight unfolds a folded row, steps into an unfolded one, or focuses a
 // workspace's pane.
 func (m model) treeRight() (tea.Model, tea.Cmd) {
+	if m.onHomeRow() {
+		return m.enterHome()
+	}
 	r, ok := m.cursorRow()
 	switch {
 	case !ok || (r.kind != rowWorkspace && !r.hasKids):
@@ -622,6 +683,9 @@ func (m model) treeLeft() (tea.Model, tea.Cmd) {
 }
 
 func (m model) projectsEnter() (tea.Model, tea.Cmd) {
+	if m.onHomeRow() {
+		return m.enterHome()
+	}
 	r, ok := m.cursorRow()
 	switch {
 	case !ok:
@@ -640,44 +704,54 @@ func (m model) projectsView() string {
 	if m.spawn.active() {
 		return m.spawnView()
 	}
-	title := Icon.Claude.Render() + " " + headerStyle.Render("argus") + dimStyle.Render("  ·  projects")
-	if m.projects.loading && m.projects.tree != nil {
-		title += dimStyle.Render("  ·  refreshing…")
+	// The Home row draws the framed Home layout, the same as when the Home pane
+	// has focus, so the tabs and footer do not move when focus changes; only the
+	// footer's keys differ.
+	if m.onHomeRow() && m.sidebarVisible() && !m.projects.showHelp {
+		mm := m
+		mm.mode, mm.cursor = modeList, -1
+		return mm.embedInProjects(mm.renderList(mm.projectsFooter()))
 	}
+	title := m.frameTitle()
 	footer := m.projectsFooter()
-
-	if m.projects.err != nil {
-		return pinFooter(title+"\n\n"+dimStyle.Render("error: "+m.projects.err.Error()), footer, m.width, m.height)
-	}
-	if m.projects.tree == nil {
-		return pinFooter(title+"\n\n"+dimStyle.Render("loading projects…"), footer, m.width, m.height)
-	}
 
 	h := max(1, m.height-4)
 	if m.projects.showHelp {
-		return pinFooter(title+"\n\n"+composeH(m.width, h, flexPanel(m.projectsHelpView())), footer, m.width, m.height)
+		help := indentBlock(m.projectsHelpView(), strings.Repeat(" ", screenMargin))
+		return pinFooter(title+"\n\n"+composeH(m.width, h, flexPanel(help)), footer, m.width, m.height)
 	}
 
 	// Collapsed sidebar: the main pane owns the full width.
 	if !m.sidebarVisible() {
-		return pinFooter(title+"\n\n"+composeH(m.width, h, flexPanel(m.projectsMain(m.width, h))), footer, m.width, m.height)
+		return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(m.frameWidth(), h), h), footer, m.width, m.height)
 	}
 
 	// Columns: left sidebar (fixed, resizable) | center (flex). composeH also
 	// takes a third panel for a right sidebar; it is unused until its content
 	// is designed. centerW mirrors composeH's flex split so content wraps to fit.
 	leftW := m.projectsLeftW()
-	centerW := max(1, m.width-leftW-dividerWidth)
-	body := composeH(m.width, h,
-		fixedPanel(m.projectsTreePane(leftW, h), leftW),
-		flexPanel(m.projectsMain(centerW, h)),
-	)
-	return pinFooter(title+"\n\n"+body, footer, m.width, m.height)
+	centerW := max(1, m.frameWidth()-leftW-dividerWidth)
+	return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(centerW, h), h), footer, m.width, m.height)
 }
 
 // projectsMain is the center column: the workspace tabs, or an overview when the
 // cursor is on a node or project row.
 func (m model) projectsMain(w, h int) string {
+	if m.onHomeRow() && !m.projects.create.active && m.projects.retarget == nil {
+		return m.homePreview() // the Home list centers itself
+	}
+	cardW := min(w, maxCardWidth)
+	// An open diff or file widens only its content, like Logs: the tab strip
+	// stays in the card column so it does not jump.
+	if r, ok := m.cursorRow(); ok && r.kind == rowWorkspace && m.paneViewing() && !m.projects.create.active && m.projects.retarget == nil {
+		wideW := min(w, maxContentWidth)
+		head := centerBlock(truncateLine(m.wsTabHeader(r), cardW), cardW, w)
+		return head + "\n\n" + centerBlock(m.projectsPaneContent(wideW, max(1, h-2)), wideW, w)
+	}
+	return centerBlock(m.projectsColumn(cardW, h), cardW, w)
+}
+
+func (m model) projectsColumn(w, h int) string {
 	if m.projects.create.active {
 		return m.createView(w, h)
 	}
@@ -692,6 +766,14 @@ func (m model) projectsMain(w, h int) string {
 		return m.projectsSummary(r, w)
 	}
 	return truncateLine(m.wsTabHeader(r), w) + "\n\n" + m.projectsPaneContent(w, max(1, h-2))
+}
+
+// homePreview is the Sessions tab rendered at pane size for the tree-focused
+// Home row; no card is selected, since the list does not have focus.
+func (m model) homePreview() string {
+	mm := m
+	mm.mode, mm.cursor = modeList, -1
+	return mm.listView()
 }
 
 func paneTitle(text string, focused bool) string {
@@ -713,19 +795,40 @@ func (m model) projectsTreePane(w, avail int) string {
 	if m.projects.filter != "" {
 		title += "  /" + m.projects.filter
 	}
-	head := truncateLine(paneTitle(title, focused), w) + "\n\n"
-	if len(m.projects.rows) == 0 {
-		if m.projects.filter != "" {
-			return head + dimStyle.Render("no matches")
-		}
-		return head + dimStyle.Render("no projects")
+	head := paneTitle(title, focused)
+	if m.projects.loading && m.projects.tree != nil {
+		head += dimStyle.Render("  refreshing…")
 	}
+	margin := strings.Repeat(" ", screenMargin)
+	head = margin + truncateLine(head, w) + "\n\n"
 	act := m.workspaceActivity()
 	lines := make([]string, len(m.projects.rows))
 	for i, r := range m.projects.rows {
-		lines[i] = m.projRowLine(r, i == m.projects.cursor, focused, act, w)
+		lines[i] = m.treeMarker(i == m.projects.cursor, focused) + m.projRowLine(r, i == m.projects.cursor, focused, act, w)
+	}
+	switch {
+	case m.projects.err != nil:
+		lines = append(lines, margin+truncateLine(dimStyle.Render("error: "+m.projects.err.Error()), w))
+	case m.projects.tree == nil:
+		lines = append(lines, margin+dimStyle.Render("loading projects…"))
+	case len(m.projects.rows) == 1 && m.projects.filter != "":
+		lines = append(lines, margin+dimStyle.Render("no matches"))
+	case len(m.projects.rows) == 1:
+		lines = append(lines, margin+dimStyle.Render("no projects"))
 	}
 	return head + strings.Join(windowSpan(lines, m.projects.cursor, m.projects.cursor+1, max(1, avail-2)), "\n")
+}
+
+// treeMarker fills the screen margin so row text lines up with the Projects
+// title.
+func (m model) treeMarker(sel, focused bool) string {
+	switch {
+	case !sel:
+		return strings.Repeat(" ", screenMargin)
+	case focused:
+		return lipgloss.NewStyle().Foreground(ColorFocus).Render("▌") + " "
+	}
+	return StyleDim.Render("▌") + " "
 }
 
 // The bar dims without focus instead of hiding, so the selection stays visible
@@ -744,6 +847,8 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 	indent := strings.Repeat("  ", r.depth)
 	var text string
 	switch r.kind {
+	case rowHome:
+		text = Icon.Home.Render() + " " + StyleSecondaryBold.Render("Home")
 	case rowNode:
 		text = indent + collapseMark(m.projects.isFolded(r.id), true) + Icon.Node.Render() + " " + StyleSecondaryBold.Render(r.label)
 	case rowProject:
@@ -766,10 +871,16 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 		text += dimStyle.Render(" (gone)")
 	}
 	var badge string
-	if r.kind == rowWorkspace || m.projects.isFolded(r.id) {
+	switch {
+	case r.kind == rowHome:
+		badge = m.homeBadge()
+	case r.kind == rowWorkspace || m.projects.isFolded(r.id):
 		badge = m.activityBadge(act, r.ws)
 	}
-	return withBadge(cursorLine(text, sel, focused), badge, w)
+	if sel && focused {
+		text = cursorStyle.Render(text)
+	}
+	return withBadge(text, badge, w)
 }
 
 func withBadge(line, badge string, w int) string {
@@ -858,4 +969,130 @@ func (m model) projectsSessionPane(w, avail int) string {
 		cursor = m.projects.wsCursor
 	}
 	return renderCardList(cards, cursor, avail)
+}
+
+// embedded reports whether the current view renders inside the projects frame
+// (the projects screen is the only root; every other mode is its pane). The
+// single-transcript viewer, and the welcome splash of a focused Home with no
+// sessions, use the whole terminal.
+func (m model) embedded() bool {
+	if m.viewer || m.homeSplash() {
+		return false
+	}
+	return m.mode != modeProjects || m.spawn.active()
+}
+
+// homeSplash reports whether the focused Home pane shows the welcome splash.
+func (m model) homeSplash() bool {
+	return m.mode == modeList && len(m.order) == 0 && !m.spawn.active()
+}
+
+// bodyWidth is the width the framed views lay out in: the pane when embedded, else the terminal. Input handling and rendering both read it,
+// so scroll math and drawing agree.
+func (m model) bodyWidth() int {
+	switch {
+	case m.viewer || m.homeSplash():
+		return m.width
+	case !m.embedded(): // the projects screen itself
+		return m.frameWidth()
+	case m.sidebarVisible():
+		return max(1, m.frameWidth()-m.projectsLeftW()-dividerWidth)
+	case m.fullBleed():
+		return m.width
+	}
+	return m.frameWidth()
+}
+
+// fullBleed reports whether the pane spans the whole terminal width with no
+// margin: the Logs tab, whose long lines read best edge to edge.
+func (m model) fullBleed() bool { return m.mode == modeLogs && !m.sidebarVisible() }
+
+// screenMargin is the left margin of every projects-screen state, so content
+// never touches the terminal edge and nothing shifts when the sidebar toggles.
+const screenMargin = 2
+
+// frameWidth is the terminal width inside the screen margin.
+func (m model) frameWidth() int { return max(1, m.width-screenMargin) }
+
+// bodyHeight is the height the framed views lay out in: below the frame header
+// when embedded, else the terminal.
+func (m model) bodyHeight() int {
+	if m.embedded() {
+		return max(1, m.height-2)
+	}
+	return m.height
+}
+
+// frameTitle is the status bar shared by every projects-screen state: the argus
+// mark on the left, and on the right the global state worth seeing from any
+// pane (sessions waiting, a dropped connection, quarantine).
+func (m model) frameTitle() string {
+	left := strings.Repeat(" ", screenMargin) + Icon.Claude.Render() + " " + headerStyle.Render("argus")
+	var parts []string
+	if n := m.waitingCount(); n > 0 {
+		attn := lipgloss.NewStyle().Foreground(statusColor(session.StatusAwaitingInput))
+		parts = append(parts, attn.Render(statusGlyph(session.StatusAwaitingInput)+" "+strconv.Itoa(n)+" need you"))
+	}
+	if m.reconnecting {
+		parts = append(parts, dimStyle.Render("reconnecting…"))
+	}
+	if m.quarantined() {
+		parts = append(parts, StyleErrorBold.Render("⚠ QUARANTINED")+dimStyle.Render(" · argus lock pin"))
+	}
+	if len(parts) == 0 {
+		return left
+	}
+	right := strings.Join(parts, dimStyle.Render(" · "))
+	gap := max(1, m.width-screenMargin-lipgloss.Width(left)-lipgloss.Width(right))
+	return truncateLine(left+strings.Repeat(" ", gap)+right, m.width)
+}
+
+// waitingCount is the number of reachable sessions waiting for the user.
+func (m model) waitingCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if s.Status == session.StatusAwaitingInput && !s.Offline {
+			n++
+		}
+	}
+	return n
+}
+
+// embedInProjects frames a view as the projects pane, under the frame header
+// and next to the sidebar. The view keeps its own header inside the pane.
+func (m model) embedInProjects(content string) string {
+	return m.frameTitle() + "\n\n" + m.framedBody(content, m.bodyHeight())
+}
+
+// framedBody lays out the sidebar (which draws its own margin column) and the
+// pane, or just the pane inside the margin when the sidebar is hidden.
+func (m model) framedBody(pane string, h int) string {
+	if m.fullBleed() {
+		return composeH(m.width, h, flexPanel(pane))
+	}
+	if !m.sidebarVisible() {
+		return composeH(m.width, h, flexPanel(indentBlock(pane, strings.Repeat(" ", screenMargin))))
+	}
+	leftW := m.projectsLeftW()
+	return composeH(m.width, h,
+		fixedPanel(m.projectsTreePane(leftW, h), leftW+screenMargin),
+		flexPanel(pane),
+	)
+}
+
+// homeBrand prefixes a pane header with the argus mark, unless the frame header
+// above it already shows one.
+func (m model) homeBrand() string {
+	if m.embedded() {
+		return ""
+	}
+	return Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    "
+}
+
+// withBrand is "argus · rest" full screen, or just rest under the frame header.
+func (m model) withBrand(rest string) string {
+	if m.embedded() {
+		return rest
+	}
+	return "argus · " + rest
 }

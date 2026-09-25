@@ -79,7 +79,7 @@ func (m *model) enterSpawnPrompt() tea.Cmd {
 	m.spawn.step = spawnStepPrompt
 	m.spawn.prompt = newSpawnPromptArea()
 	m.spawn.prompt.SetWidth(historyWidth(*m))
-	m.spawn.prompt.SetHeight(max(1, m.height-6))
+	m.spawn.prompt.SetHeight(max(1, m.bodyHeight()-6))
 	return m.spawn.prompt.Focus()
 }
 

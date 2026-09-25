@@ -577,10 +577,10 @@ func scrollHint(above, below, width int) string {
 // detailBody renders the active frame: breadcrumb + item list sliced to the
 // viewport (a row reserved for the scroll indicator on overflow), centered.
 func (m model) detailBody() string {
-	cw, tw := m.transcriptWidth(), m.width
+	cw := m.transcriptWidth()
 	f := m.topFrame()
 	if f == nil {
-		return centerBlock(dimStyle.Render("(nothing to show)"), m.containerWidth(), tw)
+		return m.center(dimStyle.Render("(nothing to show)"), m.containerWidth())
 	}
 	lines, _, _ := m.frameLines(f, cw)
 	// Align the breadcrumb/header with item text, which sits past the accent gutter.
@@ -598,7 +598,7 @@ func (m model) detailBody() string {
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
 	if len(lines) <= bodyH {
-		return centerBlock(prefix+strings.Join(lines, "\n"), m.containerWidth(), tw)
+		return m.center(prefix+strings.Join(lines, "\n"), m.containerWidth())
 	}
 	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
 	scroll := min(f.scroll, len(lines)-ch)
@@ -608,7 +608,7 @@ func (m model) detailBody() string {
 	end := scroll + ch
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
-	return centerBlock(prefix+body+"\n"+hint, m.containerWidth(), tw)
+	return m.center(prefix+body+"\n"+hint, m.containerWidth())
 }
 
 func (m model) renderDetail(c transcript.Chunk) string {

@@ -137,7 +137,7 @@ type termOpenedMsg struct {
 
 // termDims maps the screen box geometry to the attach's cols/rows.
 func (m model) termDims() (cols, rows int) {
-	return max(10, m.width-2), max(1, m.height-6)
+	return max(10, m.bodyWidth()-2), max(1, m.bodyHeight()-6)
 }
 
 // enterScreen opens a live attach for id and switches to the screen view. It must

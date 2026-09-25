@@ -15,6 +15,8 @@ func (m model) projectsFooter() string {
 		return asstStyle.Render("rename: " + m.projects.input.View() + "  enter · esc")
 	case m.projects.inputMode == pmFilter:
 		return asstStyle.Render("filter: " + m.projects.input.View() + "  enter keep · esc clear")
+	case m.projects.pendingKill != "":
+		return asstStyle.Render(killVerb(m.sessions[m.projects.pendingKill]) + " this session? y/n")
 	case m.projects.pendingRemove != "":
 		verb := "remove"
 		if m.projects.pendingRemoveForce {
@@ -32,11 +34,11 @@ func (m model) projectsFooter() string {
 	case m.projects.showHelp:
 		return m.footer(helpAs(k.Back, "any key", "close"))
 	case m.projects.focus == focusTree && m.sidebarVisible():
-		back := k.Back
+		bindings := []key.Binding{k.Up, k.Left, k.Enter, k.Focus, k.Spawn, k.New, k.Remove, k.Filter}
 		if m.projects.filter != "" {
-			back = helpAs(k.Back, "esc", "clear filter")
+			bindings = append(bindings, helpAs(k.Back, "esc", "clear filter"))
 		}
-		return m.footer(k.Up, k.Left, k.Enter, k.Focus, k.New, k.Remove, k.Filter, k.Help, back)
+		return m.footer(append(bindings, helpAs(k.Back, "q", "quit"), k.Help)...)
 	case m.paneViewing():
 		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^d/^u", "page"), helpAs(k.Back, "esc", "close"), k.Help)
 	}
@@ -49,7 +51,10 @@ func (m model) projectsFooter() string {
 			back = helpAs(k.Back, "esc", "up")
 		}
 	}
-	bindings := []key.Binding{k.Up, listKeys.TabNext, open}
+	bindings := []key.Binding{k.Up, listKeys.TabNext, open, k.Spawn}
+	if m.projects.tab == tabSessions {
+		bindings = append(bindings, listKeys.Kill)
+	}
 	if m.projects.tab == tabChanges {
 		bindings = append(bindings, k.DiffMode)
 	}
@@ -82,8 +87,10 @@ func (m model) projectsHelpView() string {
 			helpAs(k.Enter, "enter", "open"),
 			helpAs(k.Back, "esc", "close / up / tree"),
 			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
+			helpAs(listKeys.Kill, "x", "sessions: kill session"),
 		}},
 		{"Manage", []key.Binding{
+			helpAs(k.Spawn, "s", "start a session in the workspace"),
 			helpAs(k.New, "n", "new workspace (branch, PR, issue)"),
 			helpAs(k.Remove, "x", "remove workspace"),
 			helpAs(k.ForceRemove, "X", "force remove"),
@@ -99,7 +106,7 @@ func (m model) projectsHelpView() string {
 			helpAs(k.ToggleSidebar, "^b", "toggle sidebar"),
 			helpAs(k.Refresh, "r", "refresh"),
 			helpAs(k.Help, "?", "help"),
-			helpAs(k.Back, "esc q", "back"),
+			helpAs(k.Back, "q", "quit (tree) · back (pane)"),
 		}},
 	}
 	cols := make([]string, len(groups))
@@ -122,7 +129,7 @@ func (m model) projectsHelpView() string {
 		}
 		parts = append(parts, c)
 	}
-	if out := lipgloss.JoinHorizontal(lipgloss.Top, parts...); m.width <= 0 || lipgloss.Width(out) <= m.width {
+	if out := lipgloss.JoinHorizontal(lipgloss.Top, parts...); m.width <= 0 || lipgloss.Width(out) <= m.frameWidth() {
 		return out
 	}
 	return strings.Join(cols, "\n\n")
