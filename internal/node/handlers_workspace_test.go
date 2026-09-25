@@ -97,7 +97,7 @@ func TestRemoveWorkspaceGuardsLiveSessions(t *testing.T) {
 	}
 	cr := res.(api.WorkspaceCreateResult)
 
-	// A live session inside the new worktree blocks a non-force remove.
+	// A live session inside the new worktree blocks every remove, force included.
 	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
 		AgentSessionID: "s1", Cwd: cr.Dir, Frontend: session.FrontendTmux,
 	}})
@@ -105,18 +105,20 @@ func TestRemoveWorkspaceGuardsLiveSessions(t *testing.T) {
 		d.adoptSessionWorkspace(ctx, s)
 	}
 
-	rm, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID})
-	if _, err := d.handleWorkspaceRemove(ctx, rm); rpcCode(err) != api.CodeInvalidRequest {
-		t.Errorf("remove with a live session: err = %v, want CodeInvalidRequest", err)
+	for _, force := range []bool{false, true} {
+		rm, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID, Force: force})
+		if _, err := d.handleWorkspaceRemove(ctx, rm); rpcCode(err) != api.CodeInvalidRequest {
+			t.Errorf("remove (force=%v) with a live session: err = %v, want CodeInvalidRequest", force, err)
+		}
 	}
 
-	// Force removes despite the live session.
-	rmF, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID, Force: true})
-	if _, err := d.handleWorkspaceRemove(ctx, rmF); err != nil {
-		t.Fatalf("force remove: %v", err)
+	d.reg.ReconcileSessions("claude", nil)
+	rm, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID})
+	if _, err := d.handleWorkspaceRemove(ctx, rm); err != nil {
+		t.Fatalf("remove after the session ended: %v", err)
 	}
 	if _, err := os.Stat(cr.Dir); !os.IsNotExist(err) {
-		t.Errorf("worktree not removed by force: %v", err)
+		t.Errorf("worktree not removed: %v", err)
 	}
 }
 
@@ -258,5 +260,29 @@ func TestWorkspaceCommitsNoTargetIsEmpty(t *testing.T) {
 	}
 	if c := r.(api.CommitsResult).Commits; c == nil || len(c) != 0 {
 		t.Errorf("no target: commits = %#v, want an empty, non-nil list", c)
+	}
+}
+
+func TestRemoveWorkspaceGuardsSessionsWithoutWorkspaceID(t *testing.T) {
+	d, projID, _ := createFixture(t)
+	ctx := context.Background()
+	raw, _ := json.Marshal(api.WorkspaceCreateParams{ProjectID: projID, Branch: "feat"})
+	res, err := d.handleWorkspaceCreate(ctx, raw)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cr := res.(api.WorkspaceCreateResult)
+	sub := filepath.Join(cr.Dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{
+		{AgentSessionID: "in", Cwd: sub, Frontend: session.FrontendTmux},
+		{AgentSessionID: "sibling", Cwd: cr.Dir + "-other", Frontend: session.FrontendTmux},
+	})
+
+	rm, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID, Force: true})
+	if _, err := d.handleWorkspaceRemove(ctx, rm); rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "1 live session") {
+		t.Errorf("remove with an unadopted session inside: err = %v, want 1 live session", err)
 	}
 }

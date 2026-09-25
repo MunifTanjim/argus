@@ -16,13 +16,9 @@ func (m model) projectsFooter() string {
 	case m.projects.inputMode == pmFilter:
 		return asstStyle.Render("filter: " + m.projects.input.View() + "  enter keep · esc clear")
 	case m.projects.pendingKill != "":
-		return asstStyle.Render(killVerb(m.sessions[m.projects.pendingKill]) + " this session? y/n")
+		return asstStyle.Render(killPrompt(m.sessions[m.projects.pendingKill]))
 	case m.projects.pendingRemove != "":
-		verb := "remove"
-		if m.projects.pendingRemoveForce {
-			verb = "force-remove"
-		}
-		return asstStyle.Render(verb + " this workspace? y/n")
+		return asstStyle.Render(m.removePrompt())
 	case m.projects.offerSpawn != nil:
 		return asstStyle.Render("start an agent with this issue? y/n")
 	case m.flash != "":
