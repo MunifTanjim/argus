@@ -22,7 +22,7 @@ func (m model) projectsFooter() string {
 	case m.projects.offerSpawn != nil:
 		return asstStyle.Render("start an agent with this issue? y/n")
 	case m.flash != "":
-		return asstStyle.Render(m.flash)
+		return asstStyle.Render(firstLine(m.flash))
 	case m.projects.create.active:
 		return m.createFooter()
 	case m.projects.retarget != nil:

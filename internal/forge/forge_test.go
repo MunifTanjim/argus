@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeGH puts a `gh` script on PATH that prints canned JSON by subcommand.
@@ -49,8 +50,46 @@ esac`)
 
 func TestGitHubMissingGHReturnsError(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no gh anywhere
-	if _, err := (github{}).ListPRs(context.Background(), t.TempDir()); err == nil {
-		t.Fatal("expected an error when gh is missing")
+	if _, err := (github{}).ListPRs(context.Background(), t.TempDir()); err == nil || err.Error() != "GitHub CLI (gh) is not installed" {
+		t.Fatalf("err = %v, want a plain not-installed message", err)
+	}
+}
+
+func TestGitHubLoggedOutSaysHowToLogIn(t *testing.T) {
+	fakeGH(t, `printf 'To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable.\n' >&2; exit 4`)
+	_, err := (github{}).ListIssues(context.Background(), t.TempDir())
+	if err == nil || err.Error() != "GitHub CLI is not logged in; run gh auth login" {
+		t.Fatalf("err = %v, want the log-in hint", err)
+	}
+}
+
+func TestGitHubErrorKeepsFirstLine(t *testing.T) {
+	fakeGH(t, `printf 'HTTP 502: bad gateway\nretry later\n' >&2; exit 1`)
+	_, err := (github{}).ListIssues(context.Background(), t.TempDir())
+	if err == nil || err.Error() != "gh: HTTP 502: bad gateway" {
+		t.Fatalf("err = %v, want gh's first line", err)
+	}
+}
+
+func TestGitHubTimeoutNamesTheContextThatExpired(t *testing.T) {
+	fakeGH(t, `sleep 5`)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := (github{}).ListIssues(ctx, t.TempDir())
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errGHTimeout) {
+		t.Errorf("outer deadline: err = %v, want the caller's deadline", err)
+	}
+
+	inner, cancel := context.WithTimeoutCause(context.Background(), 0, errGHTimeout)
+	defer cancel()
+	if err := ghError(inner, errors.New("killed"), ""); !errors.Is(err, errGHTimeout) {
+		t.Errorf("gh deadline: err = %v, want %v", err, errGHTimeout)
+	}
+}
+
+func TestNoProviderMessage(t *testing.T) {
+	if ErrNoProvider.Error() != "PRs and issues need a github.com origin remote" {
+		t.Errorf("ErrNoProvider = %q", ErrNoProvider)
 	}
 }
 

@@ -325,7 +325,7 @@ func (m model) createListView(w, h int, loaded bool, err error, total, n int, li
 	head := dimStyle.Render("filter: ") + c.filter.View()
 	switch {
 	case err != nil:
-		return head + "\n\n" + dimStyle.Render("error: "+err.Error())
+		return head + "\n\n" + dimStyle.Render("error: "+firstLine(err.Error()))
 	case !loaded:
 		return head + "\n\n" + dimStyle.Render("loading…")
 	case total == 0:

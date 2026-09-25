@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -188,7 +189,10 @@ func (d *Node) handleWorkspaceRemove(ctx context.Context, params json.RawMessage
 		runDir = mainDir // remove must not run from inside the worktree being removed
 	}
 	if err := gittree.RemoveWorktree(ctx, runDir, dir, p.Force); err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+		if errors.Is(err, gittree.ErrDirtyWorktree) {
+			return nil, invalid("workspace has uncommitted changes; force-remove discards them")
+		}
+		return nil, invalid("%s", err)
 	}
 	return nil, nil
 }

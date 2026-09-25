@@ -63,7 +63,7 @@ func (b branchPicker) view(w, h int, dimInUse bool) string {
 	head := dimStyle.Render("filter: ") + b.filter.View()
 	switch {
 	case b.err != nil:
-		return head + "\n\n" + dimStyle.Render("error: "+b.err.Error())
+		return head + "\n\n" + dimStyle.Render("error: "+firstLine(b.err.Error()))
 	case !b.loaded:
 		return head + "\n\n" + dimStyle.Render("loading branches…")
 	}

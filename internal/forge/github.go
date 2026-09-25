@@ -2,14 +2,19 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
 const ghTimeout = 20 * time.Second
+
+var errGHTimeout = fmt.Errorf("gh timed out after %s", ghTimeout)
 
 type github struct{}
 
@@ -85,17 +90,33 @@ func (github) CheckoutPR(ctx context.Context, worktreeDir string, number int, br
 }
 
 func gh(ctx context.Context, dir string, out any, args ...string) error {
-	ctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	ctx, cancel := context.WithTimeoutCause(ctx, ghTimeout, errGHTimeout)
 	defer cancel()
 	cmd := shell.NewCommandContext(ctx, "gh", args...).WithDir(dir)
 	if err := cmd.Run(); err != nil {
-		if msg := cmd.StdErr().TrimSpace().String(); msg != "" {
-			return fmt.Errorf("gh: %s", msg)
-		}
-		return fmt.Errorf("gh: %w", err)
+		return ghError(ctx, err, cmd.StdErr().String())
 	}
 	if out == nil {
 		return nil
 	}
 	return cmd.StdOut().JSONUnmarshal(out)
+}
+
+func ghError(ctx context.Context, err error, stderr string) error {
+	switch {
+	case errors.Is(err, exec.ErrNotFound):
+		return errors.New("GitHub CLI (gh) is not installed")
+	case errors.Is(context.Cause(ctx), errGHTimeout):
+		return errGHTimeout
+	case ctx.Err() != nil:
+		return fmt.Errorf("gh stopped: %w", context.Cause(ctx))
+	case strings.Contains(stderr, "gh auth login"):
+		return errors.New("GitHub CLI is not logged in; run gh auth login")
+	}
+	for _, ln := range strings.Split(stderr, "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			return fmt.Errorf("gh: %s", ln)
+		}
+	}
+	return fmt.Errorf("gh: %w", err)
 }

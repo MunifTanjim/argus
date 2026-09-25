@@ -260,7 +260,7 @@ func (m model) renderList(footer string) string {
 	case m.pendingKill && m.cursor >= 0 && m.cursor < len(m.order):
 		footer = asstStyle.Render(killPrompt(m.sessions[m.order[m.cursor]]))
 	case m.flash != "":
-		footer = asstStyle.Render(m.flash)
+		footer = asstStyle.Render(firstLine(m.flash))
 	default:
 		footer = m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
 			listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, m.listBackKey())

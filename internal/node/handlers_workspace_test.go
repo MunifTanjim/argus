@@ -113,9 +113,16 @@ func TestRemoveWorkspaceGuardsLiveSessions(t *testing.T) {
 	}
 
 	d.reg.ReconcileSessions("claude", nil)
+	if err := os.WriteFile(filepath.Join(cr.Dir, "wip.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	rm, _ := json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID})
+	if _, err := d.handleWorkspaceRemove(ctx, rm); err == nil || err.Error() != "workspace has uncommitted changes; force-remove discards them" {
+		t.Errorf("remove of a dirty workspace: err = %v", err)
+	}
+	rm, _ = json.Marshal(api.WorkspaceRemoveParams{WorkspaceID: cr.WorkspaceID, Force: true})
 	if _, err := d.handleWorkspaceRemove(ctx, rm); err != nil {
-		t.Fatalf("remove after the session ended: %v", err)
+		t.Fatalf("force remove after the session ended: %v", err)
 	}
 	if _, err := os.Stat(cr.Dir); !os.IsNotExist(err) {
 		t.Errorf("worktree not removed: %v", err)

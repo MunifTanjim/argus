@@ -241,6 +241,9 @@ func (m model) footer(bindings ...key.Binding) string {
 	h.Styles.ShortSeparator = StyleDim
 	h.ShortSeparator = " · "
 	w := m.bodyWidth()
+	if m.width > 0 {
+		w = min(w, m.width-2*screenMargin) // a centered footer keeps the screen margin
+	}
 	if w <= 0 {
 		w = 200 // no viewport yet (e.g. tests): don't truncate
 	}
