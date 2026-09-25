@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -106,7 +107,7 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 			AgentSessionID: sid,
 			Name:           ps.Name,
 			Cwd:            ps.Cwd,
-			Repo:           repoName(ps.Cwd),
+			Repo:           gittree.RepoName(ps.Cwd),
 		}
 		if tty != "" {
 			if pi, ok := paneByTTY[normalizeTTY(tty)]; ok {
@@ -158,7 +159,7 @@ func bindPane(d *registry.DiscoveredSession, pi paneInfo) {
 	d.CurrentPath = pi.currentPath
 	d.Frontend = session.FrontendTmux
 	if pi.currentPath != "" {
-		d.Repo = repoName(pi.currentPath)
+		d.Repo = gittree.RepoName(pi.currentPath)
 	}
 }
 

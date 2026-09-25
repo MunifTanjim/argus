@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/histcache"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -23,7 +24,7 @@ func ListHistoryProjects() ([]session.HistoryProject, error) {
 	}
 	out := make([]session.HistoryProject, 0, len(projects))
 	for _, p := range projects {
-		repo := repoName(p.Cwd)
+		repo := gittree.RepoName(p.Cwd)
 		label := repo
 		if label == "" {
 			label = filepath.Base(p.Cwd)

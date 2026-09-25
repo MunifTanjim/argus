@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -182,7 +183,7 @@ func buildDiscovered(snaps []snapshot, meta map[string]threadMeta, paneByKey, fa
 			AgentSessionID: s.threadID,
 			TranscriptPath: transcript,
 			Cwd:            m.cwd,
-			Repo:           repoName(m.cwd),
+			Repo:           gittree.RepoName(m.cwd),
 			Summary:        summaryFor(m, modelNames),
 		}
 
@@ -217,7 +218,7 @@ func bindPane(d *registry.DiscoveredSession, pi paneInfo) {
 	d.Frontend = session.FrontendTmux
 	if pi.currentPath != "" {
 		d.Cwd = pi.currentPath
-		d.Repo = repoName(pi.currentPath)
+		d.Repo = gittree.RepoName(pi.currentPath)
 	}
 }
 
@@ -261,22 +262,4 @@ func sessionsRootFrom(transcriptPath string) string {
 		return ""
 	}
 	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(transcriptPath))))
-}
-
-// Falls back to dir's basename when no .git ancestor is found.
-func repoName(dir string) string {
-	for d := dir; d != ""; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return filepath.Base(d)
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Base(dir)
 }

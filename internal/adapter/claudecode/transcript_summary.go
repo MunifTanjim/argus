@@ -1,8 +1,6 @@
 package claudecode
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
@@ -67,24 +65,4 @@ func refreshesSummary(event string) bool {
 		return true
 	}
 	return false
-}
-
-// repoName returns a display name for dir: the basename of the nearest ancestor
-// holding a ".git" entry (worktrees/submodules use a file, not a dir), else the
-// basename of dir itself. Returns "" only when dir is empty.
-func repoName(dir string) string {
-	for d := dir; d != ""; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return filepath.Base(d)
-		}
-		parent := filepath.Dir(d)
-		if parent == d { // reached the filesystem root
-			break
-		}
-		d = parent
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Base(dir)
 }

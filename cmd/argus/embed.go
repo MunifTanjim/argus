@@ -284,6 +284,7 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 	d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 	d.SetVersion(version)
+	enableProjectRegistry(d, log.With("scope", "node"))
 	// Without this the embedded node drops every desktop alert.
 	d.SetDesktopNotify(cfg.Push.Desktop.Enabled, desktopClickCmd(cfg))
 	if cfg.E2EE.Enabled {

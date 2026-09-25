@@ -3,12 +3,11 @@ package opencode
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -162,7 +161,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 			if s, err := c.getSession(d.ctx, id); err == nil {
 				u.Name = s.Title
 				u.Cwd = s.Location.Directory
-				u.Repo = repoName(s.Location.Directory)
+				u.Repo = gittree.RepoName(s.Location.Directory)
 				d.mu.Lock()
 				if e, ok := d.presence[id]; ok {
 					e.hydrated = true
@@ -209,7 +208,7 @@ func (d *discoverer) seedIdle(sessions []ocSession) {
 			Input:              session.InputAPI,
 			Name:               s.Title,
 			Cwd:                s.Location.Directory,
-			Repo:               repoName(s.Location.Directory),
+			Repo:               gittree.RepoName(s.Location.Directory),
 			Interaction:        &session.Interaction{Kind: session.InteractionIdle},
 			ReplaceInteraction: true,
 		})
@@ -377,23 +376,4 @@ func (d *discoverer) sweepIdle() {
 	for _, id := range stale {
 		d.remove(id)
 	}
-}
-
-// repoName returns the git repo basename for dir, falling back to dir's basename.
-// Mirrors the same helper in internal/adapter/codex.
-func repoName(dir string) string {
-	for d := dir; d != ""; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return filepath.Base(d)
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Base(dir)
 }

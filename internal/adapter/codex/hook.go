@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -114,7 +115,7 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		PaneID:             paneID,
 		AgentSessionID:     p.SessionID,
 		Cwd:                p.Cwd,
-		Repo:               repoName(p.Cwd),
+		Repo:               gittree.RepoName(p.Cwd),
 		TranscriptPath:     p.TranscriptPath,
 		Frontend:           frontend,
 		Status:             status,

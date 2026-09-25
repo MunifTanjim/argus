@@ -47,6 +47,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodSessionCommits, d.handleCommits)
 	srv.Handle(api.MethodSessionCommitFiles, d.handleCommitFiles)
 	srv.Handle(api.MethodSessionTasks, d.handleTasks)
+	srv.Handle(api.MethodProjectList, d.handleProjectList)
 	srv.Handle(api.MethodLockInit, d.handleLockInit)
 	srv.Handle(api.MethodLockSign, d.handleLockSign)
 	srv.Handle(api.MethodLockRevoke, d.handleLockRevoke)

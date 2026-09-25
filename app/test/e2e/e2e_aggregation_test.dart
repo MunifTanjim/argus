@@ -27,6 +27,23 @@ void main() {
     await client.close();
   });
 
+  test('sessions.list composites workspace_id per node', () async {
+    final a = LoopbackNode('A', await generateKeyPair(),
+        (m, p) => _json([{'id': 's1', 'workspace_id': 'w1'}]));
+    final b = LoopbackNode('B', await generateKeyPair(),
+        (m, p) => _json([{'id': 's2', 'workspace_id': 'w1'}, {'id': 's3'}]));
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+
+    final list = (await client.call('sessions.list')) as List;
+    final byId = {for (final s in list) (s as Map)['id']: s as Map};
+    expect(byId['A:s1']!['workspace_id'], 'A:w1');
+    expect(byId['B:s2']!['workspace_id'], 'B:w1');
+    expect(byId['B:s3']!['workspace_id'], isNull);
+    await client.close();
+  });
+
   test('a failing node is dropped from the fanout, others returned', () async {
     final a = LoopbackNode('A', await generateKeyPair(),
         (m, p) => _json([{'id': 's1'}]));

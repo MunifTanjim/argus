@@ -16,6 +16,10 @@ const (
 	testImage     = "argus-e2elive:test"
 	runLabel      = "argus.e2elive"
 	containerHome = "/home/argus"
+	// containerDataHome holds the SQLite database inside the container, off
+	// the bind-mounted home: on Docker Desktop, SQLite's memory map of its WAL
+	// index faults (SIGBUS) on the bind mount.
+	containerDataHome = "/tmp/argus-data"
 )
 
 // repoRoot walks up from the package directory until it finds go.mod. Tests run

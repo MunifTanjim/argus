@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -86,7 +87,7 @@ func buildDiscovered(procs []agyProc, paneByTTY map[string]paneInfo) []registry.
 		ds := registry.DiscoveredSession{
 			AgentSessionID: pr.conversationID,
 			Cwd:            pr.cwd,
-			Repo:           repoName(pr.cwd),
+			Repo:           gittree.RepoName(pr.cwd),
 			Frontend:       session.FrontendExternal,
 			TranscriptPath: pr.transcriptPath,
 			Summary:        pr.summary,
@@ -101,7 +102,7 @@ func buildDiscovered(procs []agyProc, paneByTTY map[string]paneInfo) []registry.
 			ds.Frontend = session.FrontendTmux
 			if pi.currentPath != "" {
 				ds.Cwd = pi.currentPath
-				ds.Repo = repoName(pi.currentPath)
+				ds.Repo = gittree.RepoName(pi.currentPath)
 			}
 		}
 		out = append(out, ds)
@@ -204,23 +205,4 @@ func cwdFromLsof(pid int) string {
 		}
 	}
 	return ""
-}
-
-// repoName returns the basename of the nearest ancestor holding a ".git" entry,
-// else the basename of dir.
-func repoName(dir string) string {
-	for d := dir; d != ""; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return filepath.Base(d)
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Base(dir)
 }

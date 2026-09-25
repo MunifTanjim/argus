@@ -8,6 +8,7 @@ BINDIR  ?= $(PREFIX)/bin
 APP_DIR ?= app
 
 .PHONY: build argus test test-all vet fmt fmt-check tidy check clean install uninstall help \
+	sqlc sqlc-check \
 	app-get app-analyze app-test app-fmt app-check app-run app-build app-clean
 
 build: argus ## Build the binary into bin/
@@ -36,7 +37,16 @@ fmt-check: ## Fail if any file is not gofmt-clean
 tidy: ## Tidy go.mod/go.sum
 	go mod tidy
 
-check: fmt-check vet test ## Run fmt-check, vet, and tests
+sqlc: ## Regenerate the sqlc query layer (internal/db/gen)
+	sqlc generate
+
+sqlc-check: ## Fail if the committed sqlc output is stale
+	@sqlc generate
+	@if [ -n "$$(git status --porcelain -- internal/db/gen)" ]; then \
+		echo "sqlc output is stale; run 'make sqlc'"; git status --short -- internal/db/gen; exit 1; \
+	fi
+
+check: fmt-check vet sqlc-check test ## Run fmt-check, vet, sqlc-check, and tests
 
 install: build ## Install the binary into BINDIR (default ~/.local/bin)
 	install -d $(BINDIR)

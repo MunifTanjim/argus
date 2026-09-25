@@ -49,9 +49,11 @@ String compositeId(String nodeId, String id) => '$nodeId:$id';
 
 Map<String, dynamic> withOriginJson(Map<String, dynamic> s, String nodeId, String? label) {
   final id = s['id'];
+  final ws = s['workspace_id'];
   return {
     ...s,
     'id': compositeId(nodeId, id is String ? id : ''),
+    if (ws is String && ws.isNotEmpty) 'workspace_id': compositeId(nodeId, ws),
     'node_id': nodeId,
     'node_label': label,
     'offline': false,

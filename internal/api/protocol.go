@@ -105,6 +105,7 @@ const (
 	MethodTrustLogChanged = "trustlog.changed" // gateway->node notification: TrustLogChangedParams
 	MethodSessionTasks    = "sessions.tasks"   // request: SessionRef; result: TasksResult
 	MethodTasksChanged    = "tasks.changed"    // notification: TasksChanged (server→client)
+	MethodProjectList     = "project.list"     // request: no params; result: ProjectListResult (node-local)
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -122,6 +123,39 @@ const (
 	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
 )
+
+// WorkspaceNode is one git worktree (or a plain project's single directory) in
+// the project tree. Branch and Head are computed live at read; they are empty
+// for a gone or plain workspace, and Branch is empty for a detached HEAD.
+type WorkspaceNode struct {
+	ID         string `json:"id"`
+	Dir        string `json:"dir"`
+	IsMain     bool   `json:"is_main,omitempty"`
+	IsGone     bool   `json:"is_gone,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Head       string `json:"head,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`   // RFC3339
+	LastSeenAt string `json:"last_seen_at,omitempty"` // RFC3339
+}
+
+// ProjectNode is a repository or plain directory with its workspaces. Root is
+// the main workspace's dir, empty for a bare repo.
+type ProjectNode struct {
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Kind       string          `json:"kind"` // git|plain
+	Dir        string          `json:"dir"`
+	Root       string          `json:"root,omitempty"`
+	IsGone     bool            `json:"is_gone,omitempty"`
+	CreatedAt  string          `json:"created_at,omitempty"`   // RFC3339
+	LastSeenAt string          `json:"last_seen_at,omitempty"` // RFC3339
+	Workspaces []WorkspaceNode `json:"workspaces"`
+}
+
+// ProjectListResult is one node's project tree (node-local; ids not composited).
+type ProjectListResult struct {
+	Projects []ProjectNode `json:"projects"`
+}
 
 // ChangedFile is one entry in a session working directory's git status.
 type ChangedFile struct {

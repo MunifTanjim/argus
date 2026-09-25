@@ -29,6 +29,7 @@ func TestContainerEnvCreatesHostDirsAndContainerVars(t *testing.T) {
 		"XDG_STATE_HOME":  containerHome + "/state",
 		"XDG_CACHE_HOME":  containerHome + "/cache",
 		"XDG_RUNTIME_DIR": containerHome + "/run",
+		"XDG_DATA_HOME":   containerDataHome,
 	}
 	got := map[string]string{}
 	var keys []string
@@ -41,6 +42,11 @@ func TestContainerEnvCreatesHostDirsAndContainerVars(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("env %s = %q, want %q", k, got[k], v)
 		}
+	}
+	// SQLite memory-maps its WAL index next to the database, and that map
+	// faults on a Docker Desktop bind mount, so the data dir stays off it.
+	if strings.HasPrefix(got["XDG_DATA_HOME"], containerHome+"/") {
+		t.Errorf("XDG_DATA_HOME = %q is on the bind mount", got["XDG_DATA_HOME"])
 	}
 	sort.Strings(keys)
 	if len(keys) != len(want) {
