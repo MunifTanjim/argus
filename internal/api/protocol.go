@@ -120,6 +120,7 @@ const (
 	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: nil
 	MethodProjectSetHidden = "project.setHidden" // request: ProjectFlagParams; result: nil
 	MethodProjectSetPinned = "project.setPinned" // request: ProjectFlagParams; result: nil
+	MethodProjectForget    = "project.forget"    // request: ProjectRef; result: nil (drops the rows, keeps the files)
 	// Create-picker reads and target changes.
 	MethodProjectBranches    = "project.branches"    // request: ProjectRef; result: BranchesResult
 	MethodProjectPRs         = "project.prs"         // request: ProjectRef; result: PRsResult

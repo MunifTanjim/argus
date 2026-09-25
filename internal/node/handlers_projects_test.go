@@ -2,9 +2,11 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -73,6 +75,31 @@ func TestAdoptSessionWorkspaceAndProjectList(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("session workspace_id %q not found in project tree", got.WorkspaceID)
+	}
+}
+
+func TestProjectForgetRefusesLiveSessions(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	d := nodeWithRegistry(t)
+	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{
+		AgentSessionID: "s1", Cwd: dir, Frontend: session.FrontendTmux,
+	}})
+	for _, s := range d.reg.Snapshot() {
+		d.adoptSessionWorkspace(ctx, s)
+	}
+	projects, _ := d.projreg.Snapshot(ctx)
+	raw, _ := json.Marshal(api.ProjectRef{ProjectID: projects[0].ID})
+
+	if _, err := d.handleProjectForget(ctx, raw); rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "1 live session") {
+		t.Errorf("forget with a live session: err = %v", err)
+	}
+	d.reg.ReconcileSessions("claude", nil)
+	if _, err := d.handleProjectForget(ctx, raw); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	if ps, _ := d.projreg.Snapshot(ctx); len(ps) != 0 {
+		t.Errorf("the project should be forgotten: %+v", ps)
 	}
 }
 

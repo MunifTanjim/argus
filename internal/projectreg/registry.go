@@ -208,6 +208,15 @@ func (r *Registry) SetProjectPinned(ctx context.Context, id string, pinned bool)
 	return projectUpdated(id, n, err)
 }
 
+// ForgetProject drops a project and, by cascade, its workspaces from the
+// registry. The files stay; a session that starts there later adopts it again.
+func (r *Registry) ForgetProject(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, err := r.q.DeleteProject(ctx, id)
+	return projectUpdated(id, n, err)
+}
+
 func projectUpdated(id string, rows int64, err error) error {
 	if err == nil && rows == 0 {
 		return fmt.Errorf("%w: %s", ErrUnknownProject, id)

@@ -46,6 +46,7 @@ var projectAddressed = map[string]bool{
 	api.MethodProjectRename:    true,
 	api.MethodProjectSetHidden: true,
 	api.MethodProjectSetPinned: true,
+	api.MethodProjectForget:    true,
 	api.MethodProjectBranches:  true,
 	api.MethodProjectPRs:       true,
 	api.MethodProjectIssues:    true,

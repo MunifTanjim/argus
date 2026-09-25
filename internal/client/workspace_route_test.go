@@ -74,6 +74,36 @@ func TestRouteByProjectSplitsCompositeID(t *testing.T) {
 	}
 }
 
+func TestProjectForgetRoutesByProject(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+
+	var gotProjectID string
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		if method == api.MethodProjectForget {
+			var p api.ProjectRef
+			_ = json.Unmarshal(params, &p)
+			gotProjectID = p.ProjectID
+		}
+		return nil, nil, nil
+	}
+
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("NewE2EClient: %v", err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := c.Call(api.MethodProjectForget, api.ProjectRef{ProjectID: "n1:p1"}, nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if gotProjectID != "p1" {
+		t.Errorf("node received project_id %q, want the node-local p1", gotProjectID)
+	}
+}
+
 func TestWorkspaceCreateCompositesResultID(t *testing.T) {
 	f, clientConn := newFakeGatewayNode(t, "n1")
 	defer f.peer.Close()

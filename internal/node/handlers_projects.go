@@ -3,12 +3,14 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/projectreg"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // handleProjectList is node-local: ids are not composited.
@@ -67,6 +69,39 @@ func (d *Node) handleProjectSetPinned(ctx context.Context, params json.RawMessag
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
 	return nil, nil
+}
+
+func (d *Node) handleProjectForget(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.ProjectRef](params)
+	if err != nil {
+		return nil, err
+	}
+	if d.projreg == nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "project registry disabled"}
+	}
+	if p.ProjectID == "" {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "project_id is required"}
+	}
+	if n := d.liveSessionsInProject(ctx, p.ProjectID); n > 0 {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("%d live session(s) in this project; kill them first", n)}
+	}
+	if err := d.projreg.ForgetProject(ctx, p.ProjectID); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+	}
+	return nil, nil
+}
+
+func (d *Node) liveSessionsInProject(ctx context.Context, projID string) int {
+	n := 0
+	for _, s := range d.reg.Snapshot() {
+		if s.WorkspaceID == "" || s.Status == session.StatusDead {
+			continue
+		}
+		if _, _, p, ok, _ := d.projreg.WorkspaceInfo(ctx, s.WorkspaceID); ok && p == projID {
+			n++
+		}
+	}
+	return n
 }
 
 func toProjectNodes(ps []projectreg.Project) []api.ProjectNode {

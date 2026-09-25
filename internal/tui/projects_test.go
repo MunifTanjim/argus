@@ -1017,6 +1017,32 @@ func TestProjectHintOffersUnfoldOnlyWhenFolded(t *testing.T) {
 	}
 }
 
+func TestForgetProject(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:p1")
+	mm, _ := upd(m, keyMsg("F"))
+	if mm.projects.pendingForget != "" || !strings.Contains(mm.flash, "argus has 3 live sessions · kill them first") {
+		t.Errorf("F with live sessions: pending=%q flash=%q", mm.projects.pendingForget, mm.flash)
+	}
+	m.sessions = map[string]session.Session{}
+	m.order = nil
+	rc := &recordingClient{}
+	m.client = rc
+	m, _ = upd(m, keyMsg("F"))
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "forget project argus? it leaves the list; its files stay · y/n") {
+		t.Fatalf("forget prompt = %q", f)
+	}
+	if mm, _ := upd(m, keyMsg("n")); mm.projects.pendingForget != "" {
+		t.Error("n should cancel")
+	}
+	m, cmd := upd(m, keyMsg("y"))
+	runCmd(cmd)
+	if p, ok := paramsFor(m, api.MethodProjectForget).(api.ProjectRef); !ok || p.ProjectID != "n1:p1" {
+		t.Errorf("y should forget n1:p1: calls=%v", rc.calls)
+	}
+}
+
 func TestKillFailureIsFlashed(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &failingClient{err: errString("no such pane")}
