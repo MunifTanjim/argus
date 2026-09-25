@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -39,48 +38,74 @@ func setWorkspaceTemplates(d *node.Node, cfg *config.Config) error {
 	return nil
 }
 
-func newProjectCmd() *cobra.Command {
+func newProjectCmd() *cobra.Command { return projectCmd(localCallerFor) }
+
+func projectCmd(dial callerFor) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Inspect the local project/workspace registry",
+		Short: "Inspect and curate the local project registry",
 	}
-	cmd.AddCommand(newProjectListCmd())
+	cmd.AddCommand(
+		newProjectListCmd(dial),
+		registryCmd(dial, "rename <project> <name>", "Rename a project", 2, func(call caller, list api.ProjectListResult, args []string) error {
+			p, err := resolveProject(list, args[0])
+			if err != nil {
+				return err
+			}
+			if err := call(api.MethodProjectRename, api.ProjectRenameParams{ProjectID: p.ID, Name: args[1]}, nil); err != nil {
+				return err
+			}
+			shell.StdOutF("renamed %s to %s\n", p.Name, args[1])
+			return nil
+		}),
+		projectFlagCmd(dial, "hide", "Hide a project", api.MethodProjectSetHidden, true, "hid"),
+		projectFlagCmd(dial, "unhide", "Show a hidden project", api.MethodProjectSetHidden, false, "unhid"),
+		projectFlagCmd(dial, "pin", "Pin a project to the top", api.MethodProjectSetPinned, true, "pinned"),
+		projectFlagCmd(dial, "unpin", "Unpin a project", api.MethodProjectSetPinned, false, "unpinned"),
+		registryCmd(dial, "forget <project>", "Drop a project from the registry; its files stay", 1, func(call caller, list api.ProjectListResult, args []string) error {
+			p, err := resolveProject(list, args[0])
+			if err != nil {
+				return err
+			}
+			if err := call(api.MethodProjectForget, api.ProjectRef{ProjectID: p.ID}, nil); err != nil {
+				return err
+			}
+			shell.StdOutF("forgot %s\n", p.Name)
+			return nil
+		}),
+	)
 	return cmd
 }
 
-func newProjectListCmd() *cobra.Command {
+func projectFlagCmd(dial callerFor, verb, short, method string, value bool, done string) *cobra.Command {
+	return registryCmd(dial, verb+" <project>", short, 1, func(call caller, list api.ProjectListResult, args []string) error {
+		p, err := resolveProject(list, args[0])
+		if err != nil {
+			return err
+		}
+		if err := call(method, api.ProjectFlagParams{ProjectID: p.ID, Value: value}, nil); err != nil {
+			return err
+		}
+		shell.StdOutF("%s %s\n", done, p.Name)
+		return nil
+	})
+}
+
+func newProjectListCmd(dial callerFor) *cobra.Command {
 	var asJSON bool
-	cmd := &cobra.Command{
-		Use:           "list",
-		Short:         "List projects and workspaces discovered on this node",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := resolveConfig(cmd)
-			if err != nil {
-				return fail(cmd, err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			res, err := callLocal[api.ProjectListResult](ctx, cfg, api.MethodProjectList, nil)
-			if err != nil {
-				return fail(cmd, err)
-			}
-			if asJSON {
-				b, err := json.MarshalIndent(res, "", "  ")
-				if err != nil {
-					return fail(cmd, err)
-				}
-				shell.StdOutF("%s\n", b)
-				return nil
-			}
+	cmd := registryCmd(dial, "list", "List projects and workspaces discovered on this node", 0, func(_ caller, res api.ProjectListResult, _ []string) error {
+		if !asJSON {
 			printProjectTree(res)
 			return nil
-		},
-	}
+		}
+		b, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return err
+		}
+		shell.StdOutF("%s\n", b)
+		return nil
+	})
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
-	addClientFlags(cmd.Flags())
 	return cmd
 }
 
@@ -103,13 +128,13 @@ func printProjectTree(res api.ProjectListResult) {
 		if root == "" {
 			root = p.Dir // a bare repo has no main working tree
 		}
-		shell.StdOutF("%s  %s%s\n  %s\n", p.Kind, p.Name, marks, root)
+		shell.StdOutF("%s  %s%s  [%s]\n  %s\n", p.Kind, p.Name, marks, shortID(p.ID), root)
 		for _, w := range p.Workspaces {
 			marker := " "
 			if w.IsMain {
 				marker = "*"
 			}
-			shell.StdOutF("  %s %-24s %-8s %s%s\n", marker, workspaceBranch(p.Kind, w), w.Head, w.Dir, goneMark(w.IsGone))
+			shell.StdOutF("  %s %-24s %-8s %s%s  [%s]\n", marker, workspaceBranch(p.Kind, w), w.Head, w.Dir, goneMark(w.IsGone), shortID(w.ID))
 		}
 	}
 }
