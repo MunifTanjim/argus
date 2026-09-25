@@ -759,14 +759,14 @@ func TestSessionFooterIncludesRawHintWhenStarting(t *testing.T) {
 	s.Status = session.StatusStarting
 	m.sessions["s1"] = s
 
-	if !strings.Contains(foot(m), "ctrl+s") {
+	if !strings.Contains(foot(m), "^s") {
 		t.Errorf("starting session footer should include ctrl+s hint: %q", foot(m))
 	}
 
 	// Non-starting session should not include ctrl+s in the default footer.
 	s.Status = session.StatusIdle
 	m.sessions["s1"] = s
-	if strings.Contains(foot(m), "ctrl+s") {
+	if strings.Contains(foot(m), "^s") {
 		t.Errorf("idle session footer should not include ctrl+s hint: %q", foot(m))
 	}
 }

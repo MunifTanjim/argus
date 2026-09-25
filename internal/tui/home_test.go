@@ -408,7 +408,7 @@ func TestHomeLayoutStableAcrossFocus(t *testing.T) {
 			t.Errorf("row %d moves with focus:\n pane: %q\n tree: %q", i, pl[i], tl[i])
 		}
 	}
-	if !strings.Contains(tl[len(tl)-1]+tl[len(tl)-2], "fold") {
+	if !strings.Contains(tl[len(tl)-1]+tl[len(tl)-2], "/ filter") {
 		t.Error("tree-focused Home footer should show the tree's keys")
 	}
 }
@@ -497,6 +497,92 @@ func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 	m.order = []string{"n1:s1"}
 	if !m.embedded() {
 		t.Error("with a session, Home should be framed again")
+	}
+}
+
+func TestHomeSKeyStartsSession(t *testing.T) {
+	m := homeTestModel()
+	res, cmd := m.handleKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if mm := res.(model); cmd == nil || mm.flash != "" || mm.mode == modeScreen {
+		t.Errorf("s on Home should start a session: cmd=%v flash=%q mode=%v", cmd != nil, mm.flash, mm.mode)
+	}
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: 'n', Text: "n"}); cmd != nil {
+		t.Error("n on Home should do nothing")
+	}
+	f := ansi.Strip(m.View().Content)
+	if !strings.Contains(f, "s spawn") || strings.Contains(f, "screen") {
+		t.Errorf("Home footer should offer s spawn and no screen key:\n%s", f)
+	}
+}
+
+func TestHelpOpensFromHomeTabs(t *testing.T) {
+	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
+		m := homeTestModel()
+		m.mode = mode
+		m, _ = upd(m, tea.KeyPressMsg{Code: '?', Text: "?"})
+		if out := ansi.Strip(m.View().Content); !m.projects.showHelp || !strings.Contains(out, "Manage (tree)") || !strings.Contains(out, "any key close") {
+			t.Errorf("mode %v: ? should show the help:\n%s", mode, out)
+		}
+		m, _ = upd(m, keyMsg("j"))
+		if m.projects.showHelp || m.mode != mode {
+			t.Errorf("mode %v: any key should close the help and stay: help=%v mode=%v", mode, m.projects.showHelp, m.mode)
+		}
+	}
+}
+
+func TestTabFromHomeTabsReachesTree(t *testing.T) {
+	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
+		for _, k := range []tea.KeyPressMsg{{Code: tea.KeyTab}, {Code: tea.KeyTab, Mod: tea.ModShift}} {
+			m := homeTestModel()
+			m.mode = mode
+			m, _ = upd(m, k)
+			if m.mode != modeProjects || !m.treeFocused() {
+				t.Errorf("mode %v, %s: want the tree: mode=%v focus=%v", mode, k.String(), m.mode, m.projects.focus)
+			}
+		}
+	}
+}
+
+func TestFooterSpansTheFrameInEveryState(t *testing.T) {
+	base := homeTestModel()
+	states := map[string]model{}
+	states["home pane"] = base
+	hist := base
+	hist.mode = modeHistoryProjects
+	hist.history.projects = []session.HistoryProject{{Label: "p", NodeID: "n1"}}
+	states["history"] = hist
+	sess := base
+	sess.mode, sess.selectedID = modeSession, "n1:s1"
+	states["session"] = sess
+	ws := base
+	ws.mode, ws.projects.focus = modeProjects, focusTree
+	ws.projects.selectRow("n1:w1")
+	states["workspace row"] = ws
+	for name, m := range states {
+		lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+		if len(lines) != m.height {
+			t.Errorf("%s: %d rows, want %d", name, len(lines), m.height)
+			continue
+		}
+		if last := lines[len(lines)-1]; strings.Contains(last, "│") || strings.TrimSpace(last) == "" {
+			t.Errorf("%s: the last row should be a footer across the frame: %q", name, last)
+		}
+		if above := lines[len(lines)-3]; !strings.Contains(above, "│") {
+			t.Errorf("%s: the tree should reach the row above the footer gap: %q", name, above)
+		}
+	}
+}
+
+func TestSessionShowsAndClearsFlash(t *testing.T) {
+	m := homeTestModel()
+	m.mode, m.selectedID = modeSession, "n1:s1"
+	m.flash = "terminal detached"
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "terminal detached") {
+		t.Fatalf("the session view should show the flash:\n%s", out)
+	}
+	m, _ = upd(m, keyMsg("j"))
+	if m.flash != "" {
+		t.Errorf("a key in the session should clear the flash: %q", m.flash)
 	}
 }
 

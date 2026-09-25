@@ -279,3 +279,19 @@ func TestRefreshDropsAnswersFromBefore(t *testing.T) {
 		t.Errorf("answers requested before r must be dropped: commits=%v files=%v", c.commits, c.files)
 	}
 }
+
+func TestLOpensLikeEnterInChanges(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "a.go"})
+	m.client = &recordingClient{}
+	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
+	m, _ = upd(m, keyMsg("j")) // the commit row
+	m, _ = upd(m, keyMsg("l"))
+	if m.projects.changes.commit == nil {
+		t.Fatal("l on a commit row should open the commit")
+	}
+	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: "abc1234", files: []api.ChangedFile{{Path: "b.go"}}})
+	m, _ = upd(m, keyMsg("l"))
+	if f := m.projects.fileView; !f.open() || f.path != "b.go" {
+		t.Errorf("l on a commit's file should open its diff: %+v", f)
+	}
+}

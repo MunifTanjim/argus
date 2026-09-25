@@ -287,7 +287,7 @@ func TestFooterAndHelpListFileKeys(t *testing.T) {
 	}
 	m.projects.showHelp = true
 	h := ansi.Strip(m.projectsHelpView())
-	for _, want := range []string{"toggle right sidebar", "^f", "shift+tab", "[ ]"} {
+	for _, want := range []string{"toggle right sidebar", "^f", "shift+tab", "[/]"} {
 		if !strings.Contains(h, want) {
 			t.Errorf("help missing %q", want)
 		}
@@ -493,5 +493,13 @@ func TestEnteringSessionDropsFilesFocus(t *testing.T) {
 	mm, _ := m.enterSession("n1:s1") // e.g. a resume result arriving while files had focus
 	if mm.projects.focus == focusFiles {
 		t.Error("a newly opened session should not start with the file tree focused")
+	}
+}
+
+func TestLOpensAFile(t *testing.T) {
+	ft := newFileTree("n1:w1")
+	ft.setDir("", []api.DirEntry{{Name: "go.mod", Path: "go.mod"}}, nil)
+	if req := press(&ft, "l"); req.openFile == nil || *req.openFile != "go.mod" {
+		t.Errorf("l on a file should open it: %+v", req)
 	}
 }

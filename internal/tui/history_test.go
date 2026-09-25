@@ -45,8 +45,9 @@ func TestHistorySessionsViewShowsFlash(t *testing.T) {
 	m.history.sessions = []session.HistorySession{
 		{SessionID: "s1", Agent: "claude", LastActivity: "2026-01-01T00:00:00Z"},
 	}
+	m.mode = modeHistorySessions
 	m.flash = "resume unavailable: unknown working directory"
-	out := ansi.Strip(m.historySessionsView())
+	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "unknown working directory") {
 		t.Fatalf("flash not rendered in history sessions view:\n%s", out)
 	}

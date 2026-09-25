@@ -73,8 +73,11 @@ func (m model) logsView() string {
 		}
 		body = strings.Join(disp, "\n")
 	}
-	footer := m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back)
-	return pinFooter(gutter+title+"\n\n"+body, footer, m.bodyWidth(), m.bodyHeight())
+	return m.pin(gutter+title+"\n\n"+body, m.logsFooter())
+}
+
+func (m model) logsFooter() string {
+	return m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, m.homeTreeKey(), projectsKeys.Help)
 }
 
 func (m model) handleLogsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -93,6 +96,7 @@ var logsTable = []keyTableEntry{
 	{logsKeys.Bottom, model.actLogsBottom},
 	{listKeys.TabPrev, model.actLogsToHistory},  // left/h → History
 	{listKeys.TabNext, model.actLogsToSessions}, // right/l → Sessions
+	{homeTree, model.actListBack},
 	{logsKeys.Back, model.actLogsToSessions},
 }
 

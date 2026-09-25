@@ -141,6 +141,11 @@ func interactionHint(ix *session.Interaction) string {
 
 func (m model) View() tea.View {
 	var content string
+	if m.projects.showHelp && m.mode != modeProjects {
+		v := tea.NewView(m.helpScreen())
+		v.AltScreen = true
+		return v
+	}
 	switch m.mode {
 	case modeSession:
 		content = m.sessionView()
@@ -160,7 +165,7 @@ func (m model) View() tea.View {
 		content = m.listView()
 	}
 	if m.embedded() {
-		content = m.embedInProjects(content)
+		content = m.embedInProjects(content, m.currentFooter())
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -190,11 +195,10 @@ func (m model) quarantined() bool {
 	return m.client != nil && m.client.Quarantined()
 }
 
-func (m model) listView() string { return m.renderList("") }
+func (m model) listView() string { return m.renderList() }
 
-// renderList draws the Home session list. footer replaces the list's own key
-// footer when set (the tree-focused Home preview shows the tree's keys).
-func (m model) renderList(footer string) string {
+// renderList draws the Home session list.
+func (m model) renderList() string {
 	if m.spawn.active() {
 		return m.spawnView()
 	}
@@ -217,7 +221,7 @@ func (m model) renderList(footer string) string {
 
 	// Empty state.
 	if len(m.order) == 0 {
-		return m.emptyListView(title, chrome, footer)
+		return m.emptyListView(title, chrome)
 	}
 
 	// Populated.
@@ -255,19 +259,21 @@ func (m model) renderList(footer string) string {
 
 	lines = windowSpan(lines, curStart, curEnd, max(1, m.bodyHeight()-chrome))
 
-	switch {
-	case footer != "":
-	case m.pendingKill && m.cursor >= 0 && m.cursor < len(m.order):
-		footer = asstStyle.Render(killPrompt(m.sessions[m.order[m.cursor]]))
-	case m.flash != "":
-		footer = asstStyle.Render(firstLine(m.flash))
-	default:
-		footer = m.footer(listKeys.Up, listKeys.Open, listKeys.Screen, listKeys.Jump,
-			listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, m.listBackKey())
-	}
-
 	block := m.center(title+"\n\n"+strings.Join(lines, "\n"), cardW)
-	return pinFooter(block, footer, m.bodyWidth(), m.bodyHeight())
+	return m.pin(block, m.listFooter())
+}
+
+func (m model) listFooter() string {
+	switch {
+	case len(m.order) == 0:
+		return m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, m.listBackKey())
+	case m.pendingKill && m.cursor >= 0 && m.cursor < len(m.order):
+		return asstStyle.Render(killPrompt(m.sessions[m.order[m.cursor]]))
+	case m.flash != "":
+		return asstStyle.Render(firstLine(m.flash))
+	}
+	return m.footer(listKeys.Up, listKeys.Open, listKeys.Jump,
+		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, m.listBackKey(), projectsKeys.Help)
 }
 
 // argusMark is the pre-rendered truecolor logo (gold "A" in a white ring).
@@ -305,11 +311,11 @@ func argusLogo(width, height int) string {
 
 // emptyListView renders the welcome screen: the argus logo, wordmark, tagline, and a
 // spawn hint, centered in the space between the tab bar and the footer.
-func (m model) emptyListView(title string, chrome int, footer string) string {
+func (m model) emptyListView(title string, chrome int) string {
 	textW := max(16, min(m.bodyWidth()-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
-		StyleAccentBold.Render("n") + dimStyle.Render(" to spawn one right here.")
+		StyleAccentBold.Render("s") + dimStyle.Render(" to spawn one right here.")
 	welcome := lipgloss.JoinVertical(lipgloss.Center,
 		argusLogo(m.bodyWidth(), m.bodyHeight()),
 		"",
@@ -327,10 +333,7 @@ func (m model) emptyListView(title string, chrome int, footer string) string {
 	if cardW < 30 {
 		cardW = 30
 	}
-	if footer == "" {
-		footer = m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, m.listBackKey())
-	}
-	return pinFooter(m.center(title, cardW)+"\n\n"+block, footer, m.bodyWidth(), m.bodyHeight())
+	return m.pin(m.center(title, cardW)+"\n\n"+block, m.listFooter())
 }
 
 // spawnView renders the "new session" flow. List steps (node, dir) render one
@@ -340,9 +343,7 @@ func (m model) spawnView() string {
 	cardW := historyWidth(m)
 	title := headerStyle.Render(m.withBrand("new session"))
 	avail := max(1, m.bodyHeight()-4)
-	navFooter := dimStyle.Render("↑/↓ move · enter select · esc cancel")
-
-	var body, footer string
+	var body string
 	switch m.spawn.step {
 	case spawnStepNode:
 		cards := make([]string, len(m.spawn.nodes))
@@ -355,12 +356,10 @@ func (m model) spawnView() string {
 		}
 		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
-		footer = navFooter
 	case spawnStepAgent:
 		if m.spawn.agents == nil {
 			body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
 				dimStyle.Render("Detecting agents…")
-			footer = dimStyle.Render("esc cancel")
 			break
 		}
 		cards := make([]string, len(m.spawn.agents))
@@ -369,14 +368,12 @@ func (m model) spawnView() string {
 		}
 		body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
-		footer = navFooter
 	case spawnStepDir:
 		if m.spawn.custom {
 			ci := m.spawn.cwd
 			ci.SetWidth(cardW - 1)
 			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +
 				asstStyle.Render(ci.View())
-			footer = dimStyle.Render("type a path · enter confirm · esc cancel")
 			break
 		}
 		cards := make([]string, 0, m.spawn.dirCursorMax())
@@ -386,17 +383,26 @@ func (m model) spawnView() string {
 		cards = append(cards, spawnChoiceRow("Custom path…", "", m.spawn.cursor == len(m.spawn.dirs), cardW))
 		body = StyleSecondaryBold.Render("Choose a directory") + "\n\n" +
 			renderCardList(cards, m.spawn.cursor, max(1, avail-2))
-		footer = navFooter
 	case spawnStepPrompt:
 		ta := m.spawn.prompt
 		ta.SetWidth(cardW)
 		ta.SetHeight(max(1, avail-2))
 		body = StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)") + "\n\n" +
 			ta.View()
-		footer = dimStyle.Render("enter launch · shift+enter/ctrl+j newline · esc cancel")
 	}
+	return m.pin(m.center(title+"\n\n"+body, cardW), m.spawnFooter())
+}
 
-	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
+func (m model) spawnFooter() string {
+	switch {
+	case m.spawn.step == spawnStepAgent && m.spawn.agents == nil:
+		return dimStyle.Render("esc cancel")
+	case m.spawn.step == spawnStepDir && m.spawn.custom:
+		return dimStyle.Render("type a path · enter confirm · esc cancel")
+	case m.spawn.step == spawnStepPrompt:
+		return dimStyle.Render("enter launch · shift+enter/^j newline · esc cancel")
+	}
+	return dimStyle.Render("↑/↓ move · enter select · esc cancel")
 }
 
 // spawnChoiceRow renders one selectable node/dir row: cursor marker, label, and
@@ -452,8 +458,11 @@ func (m model) screenView() string {
 		Render(strings.Join(lines, "\n"))
 	b.WriteString(box)
 
-	footer := dimStyle.Render("keys go to the session · ") + m.footer(screenLeave)
-	return pinFooter(b.String(), footer, m.bodyWidth(), m.bodyHeight())
+	return m.pin(b.String(), m.screenFooter())
+}
+
+func (m model) screenFooter() string {
+	return dimStyle.Render("keys go to the session · ") + m.footer(screenLeave)
 }
 
 func truncate(s string, n int) string {
@@ -467,6 +476,13 @@ func truncate(s string, n int) string {
 }
 
 // listBackKey is esc → tree, or q → quit when no tree is visible.
+// homeTreeKey is the History and Logs hint for tab, shown only when the tree is.
+func (m model) homeTreeKey() key.Binding {
+	b := homeTree
+	b.SetEnabled(m.sidebarVisible())
+	return b
+}
+
 func (m model) listBackKey() key.Binding {
 	if m.sidebarVisible() {
 		return listKeys.Back

@@ -210,6 +210,25 @@ func TestHelpFitsCommonTerminal(t *testing.T) {
 	}
 }
 
+func TestTogglesBelowBreakpointOnlyHint(t *testing.T) {
+	for _, mode := range []viewMode{modeProjects, modeList} {
+		m := projectsTestModel()
+		m.mode = mode
+		m.projects.focus = focusPane
+		m.width, m.height = 70, 30
+		mm, _ := upd(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+		if mm.projects.sidebarHidden || !strings.Contains(mm.flash, "needs 80 columns") {
+			t.Errorf("mode %v: ^b at 70 cols: hidden=%v flash=%q", mode, mm.projects.sidebarHidden, mm.flash)
+		}
+		m.width = 100
+		m.projects.filesHidden = false
+		mm, _ = upd(m, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+		if mm.projects.filesHidden || !strings.Contains(mm.flash, "needs 120 columns") {
+			t.Errorf("mode %v: ^e at 100 cols: hidden=%v flash=%q", mode, mm.projects.filesHidden, mm.flash)
+		}
+	}
+}
+
 func TestSidebarAutoCollapsesWhenNarrow(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 60, 30 // below sidebarMinWidth
@@ -916,8 +935,85 @@ func TestMultiLineErrorFlashesOneLine(t *testing.T) {
 	}
 	h := homeTestModel()
 	h.flash = "a\nb"
-	if f := ansi.Strip(h.listView()); !strings.Contains(f, "a …") {
+	if f := ansi.Strip(h.View().Content); !strings.Contains(f, "a …") {
 		t.Errorf("Home footer should show one line:\n%s", f)
+	}
+}
+
+func TestWorkspacePaneListKeys(t *testing.T) {
+	t.Setenv("TMUX", "")
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w1") // n1:s1, n1:s3
+	m.projects.focus = focusPane
+	m, _ = upd(m, keyMsg("G"))
+	if m.projects.wsCursor != 1 {
+		t.Errorf("G should select the last card: cursor=%d", m.projects.wsCursor)
+	}
+	m, _ = upd(m, keyMsg("g"))
+	if m.projects.wsCursor != 0 {
+		t.Errorf("g should select the first card: cursor=%d", m.projects.wsCursor)
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if m.projects.wsCursor != 1 {
+		t.Errorf("^d should page down: cursor=%d", m.projects.wsCursor)
+	}
+	m, _ = upd(m, keyMsg("O"))
+	if m.flash == "" {
+		t.Error("O should try to jump to the session's pane")
+	}
+}
+
+func TestManageKeysInPaneHintTheTree(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:w2")
+	m.projects.focus = focusPane
+	for _, k := range []string{"n", "R", "H", "P", "T", "X"} {
+		mm, _ := upd(m, keyMsg(k))
+		if mm.flash != "manage keys work in the tree · esc to go there" || mm.projects.create.active || mm.projects.pendingRemove != "" {
+			t.Errorf("%s in the pane: flash=%q", k, mm.flash)
+		}
+	}
+	if h := ansi.Strip(m.projectsHelpView()); !strings.Contains(h, "Manage (tree)") {
+		t.Error("the help should say the manage keys act in the tree")
+	}
+}
+
+func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 200, 30
+	for row, want := range map[string]struct{ has, lacks []string }{
+		homeRowID: {has: []string{"enter open", "tab pane", "/ filter"}, lacks: []string{"fold", "s spawn", "n new", "x remove"}},
+		"n1:p1":   {has: []string{"h/l fold", "n new"}, lacks: []string{"tab pane", "s spawn", "x remove"}},
+		"n1:w2":   {has: []string{"h/l fold", "tab pane", "s spawn", "n new", "x remove"}},
+	} {
+		m.projects.selectRow(row)
+		f := ansi.Strip(m.projectsFooter())
+		for _, w := range want.has {
+			if !strings.Contains(f, w) {
+				t.Errorf("%s footer lacks %q: %q", row, w, f)
+			}
+		}
+		for _, w := range want.lacks {
+			if strings.Contains(f, w) {
+				t.Errorf("%s footer has dead key %q: %q", row, w, f)
+			}
+		}
+	}
+}
+
+func TestProjectHintOffersUnfoldOnlyWhenFolded(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.selectRow("n1:p1")
+	if strings.Contains(ansi.Strip(m.View().Content), "l unfold") {
+		t.Error("an unfolded project should not offer l unfold")
+	}
+	m.projects.setFolded("n1:p1", true)
+	m.projects.selectRow("n1:p1")
+	if !strings.Contains(ansi.Strip(m.View().Content), "l unfold") {
+		t.Error("a folded project should offer l unfold")
 	}
 }
 

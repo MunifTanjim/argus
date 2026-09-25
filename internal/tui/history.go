@@ -90,6 +90,7 @@ var historyProjectsTable = []keyTableEntry{
 	{historyProjectsKeys.Refresh, model.actHistProjRefresh},
 	{listKeys.TabPrev, model.actHistProjBack}, // left/h → Sessions tab
 	{listKeys.TabNext, model.actOpenLogs},     // right/l → Logs tab (when spawned)
+	{homeTree, model.actListBack},
 	{historyProjectsKeys.Back, model.actHistProjBack},
 }
 
@@ -355,9 +356,12 @@ func (m model) historyProjectsView() string {
 		cards[i] = card
 	}
 	body := renderCardList(cards, m.history.projCursor, max(1, m.bodyHeight()-4))
-	footer := m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
-		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back)
-	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
+	return m.pin(m.center(title+"\n\n"+body, cardW), m.historyProjectsFooter())
+}
+
+func (m model) historyProjectsFooter() string {
+	return m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
+		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back, m.homeTreeKey(), projectsKeys.Help)
 }
 
 func (m model) historySessionsView() string {
@@ -379,13 +383,16 @@ func (m model) historySessionsView() string {
 		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
 	}
 	body := renderCardList(cards, m.history.sessCursor, max(1, m.bodyHeight()-4))
+	return m.pin(m.center(title+"\n\n"+body, cardW), m.historySessionsFooter())
+}
+
+func (m model) historySessionsFooter() string {
 	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
 	if m.history.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
 	binds = append(binds, historySessionsKeys.Back)
-	footer := m.exportOrFlashFooter(m.footer(binds...))
-	return pinFooter(m.center(title+"\n\n"+body, cardW), footer, m.bodyWidth(), m.bodyHeight())
+	return m.exportOrFlashFooter(m.footer(binds...))
 }
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
@@ -413,14 +420,16 @@ func (m model) historyTranscriptView() string {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
 		body = m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth())
 	}
+	return m.pin(header+"\n\n"+body, m.historyTranscriptFooter())
+}
 
+func (m model) historyTranscriptFooter() string {
 	binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if !m.viewer {
 		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
 	}
 	binds = append(binds, transcriptKeys.Back)
-	footer := m.redactFooter(m.exportOrFlashFooter(m.footer(binds...)))
-	return pinFooter(header+"\n\n"+body, footer, m.bodyWidth(), m.bodyHeight())
+	return m.redactFooter(m.exportOrFlashFooter(m.footer(binds...)))
 }
 
 // historyTranscriptHeader renders the open-transcript header: a manifest-driven

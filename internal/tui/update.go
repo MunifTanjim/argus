@@ -699,15 +699,24 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+b toggles the projects sidebar from every framed view; while typing it
 	// stays a cursor key.
 	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleSidebar) {
-		m.projects.sidebarHidden = !m.projects.sidebarHidden
+		m.toggleSidebar()
 		return m, nil
 	}
 
 	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleFiles) {
-		m.projects.filesHidden = !m.projects.filesHidden
+		m.toggleFiles()
+		return m, nil
+	}
+	if m.projects.showHelp && m.mode != modeProjects {
+		m.projects.showHelp = false
+		return m, nil
+	}
+	if (m.mode == modeList || m.mode == modeHistoryProjects || m.mode == modeLogs) && key.Matches(msg, projectsKeys.Help) {
+		m.projects.showHelp = true
 		return m, nil
 	}
 	if m.mode == modeSession && m.projects.focus == focusFiles {
+		m.flash = ""
 		return m.handleFilesKey(msg)
 	}
 
@@ -747,7 +756,6 @@ var listTable = []keyTableEntry{
 	{listKeys.HalfUp, model.actListHalfUp},
 	{listKeys.HalfDown, model.actListHalfDown},
 	{listKeys.Open, model.actListOpen},
-	{listKeys.Screen, model.actListScreen},
 	{listKeys.Jump, model.actListJump},
 	{listKeys.TabNext, model.actListHistory}, // right/l → History tab
 	{listKeys.TabPrev, model.actOpenLogs},    // left/h → Logs tab (when spawned)
@@ -825,28 +833,17 @@ func (m model) enterSession(id string) (model, tea.Cmd) {
 	return m, m.bindStream(ref)
 }
 
-func (m model) actListScreen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.cursor >= len(m.order) {
-		return m, nil
-	}
-	id := m.order[m.cursor]
-	s := m.sessions[id]
-	// enterScreen opens the terminal view via terminal.open, which spawns and adopts
-	// a pane on demand for a live paneless session (OpenCode).
-	if !s.CanOpenTerminal {
-		m.flash = string(s.Frontend) + " session: terminal control unavailable"
-		return m, nil
-	}
-	return m.enterScreen(id)
-}
-
 // actListJump jumps the user's tmux client to the selected session's window, or
 // sets a flash explaining why the jump was refused (see planJump).
 func (m model) actListJump(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.cursor >= len(m.order) {
 		return m, nil
 	}
-	s := m.sessions[m.order[m.cursor]]
+	return m.jumpTo(m.sessions[m.order[m.cursor]])
+}
+
+// jumpTo reveals s's tmux pane in the terminal argus runs in.
+func (m model) jumpTo(s session.Session) (tea.Model, tea.Cmd) {
 	host, _ := os.Hostname()
 	paneID, reason := planJump(s, host, os.Getenv("TMUX"))
 	if reason != "" {

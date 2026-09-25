@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -388,6 +389,22 @@ func (m model) filesMaxW() int {
 
 // sidebarVisible reports whether the left sidebar is shown: not toggled off by
 // the user and the terminal is wide enough (else it auto-collapses).
+func (m *model) toggleSidebar() {
+	if m.width < sidebarMinWidth {
+		m.flash = fmt.Sprintf("the tree needs %d columns", sidebarMinWidth)
+		return
+	}
+	m.projects.sidebarHidden = !m.projects.sidebarHidden
+}
+
+func (m *model) toggleFiles() {
+	if m.width < filesMinWidth {
+		m.flash = fmt.Sprintf("the right sidebar needs %d columns", filesMinWidth)
+		return
+	}
+	m.projects.filesHidden = !m.projects.filesHidden
+}
+
 func (m model) sidebarVisible() bool {
 	return !m.projects.sidebarHidden && m.width >= sidebarMinWidth
 }
@@ -574,14 +591,14 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, projectsKeys.ToggleSidebar):
-		m.projects.sidebarHidden = !m.projects.sidebarHidden
+		m.toggleSidebar()
 		return m.leaveHiddenTree()
 	case key.Matches(msg, projectsKeys.Focus):
 		return m.cycleFocus(1)
 	case key.Matches(msg, projectsKeys.FocusPrev):
 		return m.cycleFocus(-1)
 	case key.Matches(msg, projectsKeys.ToggleFiles):
-		m.projects.filesHidden = !m.projects.filesHidden
+		m.toggleFiles()
 		return m, nil
 	}
 	// A hidden/collapsed sidebar forces the main pane to own all input.
@@ -878,15 +895,14 @@ func (m model) projectsView() string {
 	if m.onHomeRow() && m.sidebarVisible() && !m.projects.showHelp {
 		mm := m
 		mm.mode, mm.cursor = modeList, -1
-		return mm.embedInProjects(mm.renderList(mm.projectsFooter()))
+		return mm.embedInProjects(mm.renderList(), m.projectsFooter())
 	}
 	title := m.frameTitle()
 	footer := m.projectsFooter()
 
 	h := max(1, m.height-4)
 	if m.projects.showHelp {
-		help := indentBlock(m.projectsHelpView(), strings.Repeat(" ", screenMargin))
-		return pinFooter(title+"\n\n"+composeH(m.width, h, flexPanel(help)), footer, m.width, m.height)
+		return m.helpScreen()
 	}
 
 	// Collapsed sidebar: the main pane owns the full width.
@@ -898,6 +914,13 @@ func (m model) projectsView() string {
 	leftW := m.projectsLeftW()
 	centerW := m.bodyWidthFor(leftW)
 	return pinFooter(title+"\n\n"+m.framedBody(m.projectsMain(centerW, h), h), footer, m.width, m.height)
+}
+
+// helpScreen draws the key help over the whole frame; any key closes it.
+func (m model) helpScreen() string {
+	help := indentBlock(m.projectsHelpView(), strings.Repeat(" ", screenMargin))
+	footer := m.footer(helpAs(projectsKeys.Help, "any key", "close"))
+	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, max(1, m.height-4), flexPanel(help)), footer, m.width, m.height)
 }
 
 // projectsMain is the center column: the workspace's sessions, or an overview
@@ -951,7 +974,8 @@ func paneTitle(text string, focused bool) string {
 }
 
 func (m model) projectsTreePane(w, avail int) string {
-	focused := m.projects.focus == focusTree
+	// A picker or the spawn flow in the pane takes the keys while focus stays here.
+	focused := m.projects.focus == focusTree && !m.projects.create.active && m.projects.retarget == nil && !m.spawn.active()
 	title := "Projects"
 	if m.projects.showHidden {
 		title += "  +hidden"
@@ -1112,7 +1136,11 @@ func (m model) projectsSummary(r projectsRow, w int) string {
 		}
 		b.WriteString(m.projRowLine(row, false, false, act, w) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render(truncateLine("l unfold · n new workspace · R rename", w)))
+	hint := "n new workspace · R rename"
+	if m.projects.isFolded(p.ID) {
+		hint = "l unfold · " + hint
+	}
+	b.WriteString("\n" + dimStyle.Render(truncateLine(hint, w)))
 	return b.String()
 }
 
@@ -1358,8 +1386,47 @@ func (m model) waitingCount() int {
 
 // embedInProjects frames a view as the projects pane, under the frame header
 // and next to the sidebar. The view keeps its own header inside the pane.
-func (m model) embedInProjects(content string) string {
-	return m.frameTitle() + "\n\n" + m.framedBody(content, m.bodyHeight())
+// embedInProjects frames a view: the status bar, the sidebars around the pane,
+// and the footer across the whole frame below them.
+func (m model) embedInProjects(content, footer string) string {
+	body := m.frameTitle() + "\n\n" + m.framedBody(content, max(1, m.bodyHeight()-footerRows))
+	return pinFooter(body, footer, m.width, m.height)
+}
+
+// footerRows is the height a pinned footer takes: a blank row and the footer.
+const footerRows = 2
+
+// pin places a view's footer: below the whole frame when the view is framed
+// (embedInProjects draws it), else at the bottom of the terminal.
+func (m model) pin(body, footer string) string {
+	if m.embedded() {
+		return body
+	}
+	return pinFooter(body, footer, m.bodyWidth(), m.bodyHeight())
+}
+
+// currentFooter is the footer of the view the frame embeds.
+func (m model) currentFooter() string {
+	if m.spawn.active() {
+		return m.spawnFooter()
+	}
+	switch m.mode {
+	case modeSession:
+		return m.sessionFooter()
+	case modeScreen:
+		return m.screenFooter()
+	case modeHistoryProjects:
+		return m.historyProjectsFooter()
+	case modeHistorySessions:
+		return m.historySessionsFooter()
+	case modeHistoryTranscript:
+		return m.historyTranscriptFooter()
+	case modeLogs:
+		return m.logsFooter()
+	case modeProjects:
+		return m.projectsFooter()
+	}
+	return m.listFooter()
 }
 
 // framedBody lays out the left sidebar (which owns the left margin), the pane,

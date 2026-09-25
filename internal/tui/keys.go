@@ -44,8 +44,8 @@ func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, 
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown                              key.Binding
-	Open, Screen, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown                      key.Binding
+	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit key.Binding
 }{
 	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:     nb([]string{"down", "j"}, "", ""),
@@ -54,14 +54,13 @@ var listKeys = struct {
 	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
 	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
 	Open:     nb([]string{"enter"}, "enter", "open"),
-	Screen:   nb([]string{"s"}, "s", "screen"),
 	Jump:     nb([]string{"O"}, "O", "jump"),
 	TabPrev:  nb([]string{"left", "h"}, "", ""),
 	TabNext:  nb([]string{"right", "l"}, "h/l", "tabs"),
-	New:      nb([]string{"n"}, "n", "new"),
+	New:      nb([]string{"s"}, "s", "spawn"),
 	Kill:     nb([]string{"x"}, "x", "kill"),
 	Refresh:  nb([]string{"r"}, "r", "refresh"),
-	Back:     nb([]string{"esc", "escape", "q", "tab"}, "esc", "tree"),
+	Back:     nb([]string{"esc", "escape", "q", "tab", "shift+tab"}, "esc", "tree"),
 	Quit:     nb([]string{"q"}, "q", "quit"),
 }
 
@@ -82,7 +81,7 @@ var projectsKeys = struct {
 	Right:         nb([]string{"right", "l"}, "", ""),
 	Enter:         nb([]string{"enter", " ", "space"}, "enter", "open"),
 	Focus:         nb([]string{"tab"}, "tab", "pane"),
-	Widen:         nb([]string{">", "."}, "<>", "resize"),
+	Widen:         nb([]string{">", "."}, "</>", "resize"),
 	Narrow:        nb([]string{"<", ","}, "", ""),
 	ToggleSidebar: nb([]string{"ctrl+b"}, "^b", "sidebar"),
 	Filter:        nb([]string{"/"}, "/", "filter"),
@@ -97,7 +96,7 @@ var projectsKeys = struct {
 	ShowGone:      nb([]string{"o"}, "o", "gone"),
 	Target:        nb([]string{"T"}, "T", "target"),
 	DiffMode:      nb([]string{"t"}, "t", "vs target"),
-	Spawn:         nb([]string{"s"}, "s", "session"),
+	Spawn:         nb([]string{"s"}, "s", "spawn"),
 	FocusPrev:     nb([]string{"shift+tab"}, "", ""),
 	ToggleFiles:   nb([]string{"ctrl+e"}, "^e", "files"),
 	SideTabPrev:   nb([]string{"["}, "", ""),
@@ -132,7 +131,7 @@ var transcriptKeys = struct {
 	Detail:      nb([]string{"enter"}, "enter", "detail"),
 	ExpandAll:   nb([]string{"o"}, "", ""),
 	CollapseAll: nb([]string{"O"}, "", ""),
-	Raw:         nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
+	Raw:         nb([]string{"ctrl+s"}, "^s", "raw"),
 	Answer:      nb([]string{"tab"}, "tab", "answer"),
 	Export:      nb([]string{"E"}, "E", "export"),
 	Back:        nb([]string{"esc", "escape", "q"}, "esc", "back"),
@@ -153,7 +152,7 @@ var detailKeys = struct {
 	Bottom:   nb([]string{"G"}, "", ""),
 	Fold:     nb([]string{" ", "space"}, "space", "expand"),
 	Drill:    nb([]string{"enter"}, "enter", "drill"),
-	Raw:      nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
+	Raw:      nb([]string{"ctrl+s"}, "^s", "raw"),
 	Back:     nb([]string{"esc", "escape"}, "esc", "back"),
 }
 
@@ -163,7 +162,7 @@ var sessionKeys = struct {
 	Focus, Raw, Files key.Binding
 }{
 	Focus: nb([]string{"tab"}, "tab", "answer"),
-	Raw:   nb([]string{"ctrl+s"}, "ctrl+s", "raw"),
+	Raw:   nb([]string{"ctrl+s"}, "^s", "raw"),
 	Files: nb([]string{"ctrl+f"}, "^f", "files"),
 }
 
@@ -173,7 +172,7 @@ var promptKeys = struct {
 }{
 	Up:       nb([]string{"up", "ctrl+p"}, "↑/↓", "select"),
 	Down:     nb([]string{"down", "ctrl+n"}, "", ""),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "ctrl+u/ctrl+d", "scroll"), // combined label; HalfDown's stays empty
+	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "^u/^d", "scroll"), // combined label; HalfDown's stays empty
 	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
 	TabPrev:  nb([]string{"left"}, "←/→", "tabs"),
 	TabNext:  nb([]string{"right"}, "", ""),
@@ -226,7 +225,10 @@ var logsKeys = struct {
 
 // screenLeave is the only app binding in live-screen passthrough; every other key
 // is forwarded to the pane.
-var screenLeave = nb([]string{"ctrl+]"}, "ctrl+]", "leave")
+// homeTree returns from the History and Logs tabs to the tree.
+var homeTree = nb([]string{"tab", "shift+tab"}, "tab", "tree")
+
+var screenLeave = nb([]string{"ctrl+]"}, "^]", "leave")
 
 // --- footers ------------------------------------------------------------------
 
@@ -240,11 +242,8 @@ func (m model) footer(bindings ...key.Binding) string {
 	h.Styles.ShortDesc = StyleDim
 	h.Styles.ShortSeparator = StyleDim
 	h.ShortSeparator = " · "
-	w := m.bodyWidth()
-	if m.width > 0 {
-		w = min(w, m.width-2*screenMargin) // a centered footer keeps the screen margin
-	}
-	if w <= 0 {
+	w := m.width - 2*screenMargin // footers span the frame inside the screen margin
+	if m.width <= 0 {
 		w = 200 // no viewport yet (e.g. tests): don't truncate
 	}
 	h.SetWidth(w)
