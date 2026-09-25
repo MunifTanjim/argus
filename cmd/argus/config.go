@@ -54,10 +54,16 @@ var flagKeys = map[string]string{
 	"ngrok-domain":           "tunnel.ngrok.domain",
 }
 
+// addSocketFlag is the only connection flag of a command that always talks to
+// the local node.
+func addSocketFlag(f *pflag.FlagSet) {
+	f.String("socket", "", "argusd JSON-RPC socket to connect to (default: XDG runtime path)")
+}
+
 // addClientFlags registers the node/gateway-reaching flags shared by the root TUI
 // and ping. Defined once so they stay in sync; viper keys live in flagKeys.
 func addClientFlags(f *pflag.FlagSet) {
-	f.String("socket", "", "argusd JSON-RPC socket to connect to (default: XDG runtime path)")
+	addSocketFlag(f)
 	f.String("gateway", "", "remote gateway (the /client route is implicit): ws(s)://host, or ssh://[user@]host[:ssh-port][?port=N]; overrides --socket [$ARGUS_GATEWAY_URL]")
 	f.String("token", "", "bearer token for the gateway [$ARGUS_TOKEN]")
 }

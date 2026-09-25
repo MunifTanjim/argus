@@ -29,6 +29,9 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"argus-managed":    true, // `hook` only: install marker, parsed and ignored
 		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
 		"json":             true, // `project list` only: output format, not a node/client setting
+		"source":           true, // `workspace create` only: what the name argument is
+		"target":           true, // `workspace create` only: per-workspace target branch
+		"force":            true, // `workspace remove` only: must never be config-backed — a stored true would discard changes silently
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
 		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
 		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a config key
