@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestChangesListRendersInSidebar(t *testing.T) {
 	long := "internal/some/deeply/nested/package/dir/filetree_really_long_name.go"
 	m := changesFocused(api.ChangedFile{Path: "a.go", Change: "added"}, api.ChangedFile{Path: long, Change: "modified"})
 	out := ansi.Strip(m.View().Content)
-	for _, want := range []string{"A a.go", "M …", "filetree_really_long_name.go", "uncommitted"} {
+	for _, want := range []string{"A a.go", "M …", "filetree_really_long_name.go", "UNCOMMITTED · 2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sidebar missing %q:\n%s", want, out)
 		}
@@ -141,8 +142,8 @@ func TestChangesEnterOpensDiffInPane(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		m, _ = upd(m, keyMsg("j"))
 	}
-	if s := m.projects.fileView.scroll; s > 2 {
-		t.Errorf("diff scroll ran past the end: %d", s)
+	if s := m.projects.fileView.scroll; s != 0 {
+		t.Errorf("a diff that fits should not scroll: %d", s)
 	}
 	m, _ = upd(m, keyMsg("esc"))
 	if m.projects.fileView.open() || m.projects.focus != focusFiles || m.projects.sideTab != sideChanges {
@@ -188,8 +189,8 @@ func TestChangesDiffModeToggle(t *testing.T) {
 func TestChangesRefreshRefetches(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "a.go"})
 	m, cmd := upd(m, keyMsg("r"))
-	if m.projects.changes.files != nil || !m.projects.changes.loading || cmd == nil {
-		t.Errorf("r on the Changes tab should reload the list: %+v", m.projects.changes)
+	if len(m.projects.changes.files) != 1 || !m.projects.changes.loading || cmd == nil {
+		t.Errorf("r on the Changes tab should reload the list and keep the old one meanwhile: %+v", m.projects.changes)
 	}
 }
 
@@ -204,10 +205,10 @@ func TestSetTargetReloadsChanges(t *testing.T) {
 }
 
 func TestSidebarFootersListTabKeys(t *testing.T) {
-	m := changesFocused(api.ChangedFile{Path: "a.go"})
+	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
 	m.width = 200
 	f := ansi.Strip(m.projectsFooter())
-	for _, want := range []string{"[/] tabs", "enter diff", "t vs target", "^e changes"} {
+	for _, want := range []string{"[/] tabs", "enter diff", "t vs main", "^e changes"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("Changes footer missing %q: %q", want, f)
 		}
@@ -227,5 +228,108 @@ func TestWorkspacePaneHasNoTabs(t *testing.T) {
 	}
 	if f := ansi.Strip(m.projectsFooter()); strings.Contains(f, "tabs") || strings.Contains(f, "vs target") {
 		t.Errorf("pane footer should not list tab or Changes keys: %q", f)
+	}
+}
+
+func withTarget(m model, target string) model {
+	m.projects.tree[0].Workspaces[0].TargetBranch = target
+	m.projects.rebuild()
+	return m
+}
+
+func TestChangesHeaderStaysPinned(t *testing.T) {
+	var files []api.ChangedFile
+	for i := 0; i < 40; i++ {
+		files = append(files, api.ChangedFile{Path: fmt.Sprintf("f%02d.go", i), Change: "modified"})
+	}
+	m := changesFocused(files...)
+	m, _ = upd(m, keyMsg("G"))
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "UNCOMMITTED · 40") {
+		t.Errorf("the mode header should stay on screen at the bottom of a long list:\n%s", out)
+	}
+}
+
+func TestDiffModeShowsLoadingAndTarget(t *testing.T) {
+	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t vs main") {
+		t.Errorf("t should name the mode it switches to: %q", f)
+	}
+	m, _ = upd(m, keyMsg("t"))
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "CHANGES · vs main · 1 · loading…") {
+		t.Errorf("after t the header should show the new mode loading:\n%s", out)
+	}
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t uncommitted") {
+		t.Errorf("t should name the mode it switches back to: %q", f)
+	}
+}
+
+func TestDiffModeWithoutTargetHints(t *testing.T) {
+	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "")
+	m, cmd := upd(m, keyMsg("t"))
+	if cmd != nil || m.projects.changes.against != "" || !strings.Contains(m.flash, "no target branch · T in the tree sets one") {
+		t.Errorf("t with no target: against=%q flash=%q", m.projects.changes.against, m.flash)
+	}
+}
+
+func TestCommitRowFooterOffersDiffMode(t *testing.T) {
+	m := withTarget(changesFocused(), "main")
+	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
+	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t vs main") {
+		t.Errorf("t works on a commit row, so the footer should offer it: %q", f)
+	}
+}
+
+func TestDiffTitleNamesItsBase(t *testing.T) {
+	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
+	m, _ = upd(m, keyMsg("enter"))
+	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "a.go", diff: "@@ -1 +1 @@\n-a\n+b"})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "a.go · uncommitted") {
+		t.Errorf("the diff title should name its base:\n%s", out)
+	}
+}
+
+func TestRenamedFileShowsBothPaths(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "new.go", OrigPath: "old.go", Change: "renamed"})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "R old.go → new.go") {
+		t.Errorf("a renamed row should show both paths:\n%s", out)
+	}
+	m, _ = upd(m, keyMsg("enter"))
+	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "new.go", diff: "@@\n+x"})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "old.go → new.go · uncommitted") {
+		t.Errorf("a renamed diff title should show both paths:\n%s", out)
+	}
+}
+
+func TestLongDiffLinesCutVisiblyOrWrap(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "a.go", Change: "modified"})
+	m, _ = upd(m, keyMsg("enter"))
+	long := "+" + strings.Repeat("x", 300) + "TAIL"
+	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "a.go", diff: "@@ -1 +1 @@\n" + long})
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "x…") || strings.Contains(out, "TAIL") {
+		t.Errorf("a cut line should end with …:\n%s", out)
+	}
+	m, _ = upd(m, keyMsg("w"))
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "TAIL") {
+		t.Errorf("w should wrap the line so its end shows:\n%s", out)
+	}
+	assertFits(t, m.View().Content, m.width)
+}
+
+func TestShiftJKStepThroughTheDiffList(t *testing.T) {
+	m := changesFocused(api.ChangedFile{Path: "a.go"}, api.ChangedFile{Path: "b.go"})
+	m, _ = upd(m, keyMsg("enter"))
+	m, cmd := upd(m, keyMsg("J"))
+	if f := m.projects.fileView; f.path != "b.go" || cmd == nil || m.projects.changes.cursor != 1 || m.projects.focus != focusPane {
+		t.Fatalf("J should open the next file: path=%q cursor=%d focus=%v", f.path, m.projects.changes.cursor, m.projects.focus)
+	}
+	m, _ = upd(m, keyMsg("J"))
+	if m.projects.fileView.path != "b.go" {
+		t.Error("J on the last file should stay")
+	}
+	m, _ = upd(m, keyMsg("K"))
+	if m.projects.fileView.path != "a.go" || m.projects.changes.cursor != 0 {
+		t.Errorf("K should open the previous file: path=%q", m.projects.fileView.path)
 	}
 }

@@ -116,7 +116,7 @@ func (m model) sessionFooter() string {
 	case m.projects.focus == focusFiles && m.filesVisible():
 		return m.footer(append(m.sidebarBindings("back"), k.Refresh)...)
 	case m.projects.fileView.open() && m.focus == focusHistory:
-		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^u/^d", "page"), helpAs(k.Back, "esc", "close"), m.sideKey(sessionKeys.Files))
+		return m.footer(append(m.fileViewBindings(), m.sideKey(sessionKeys.Files))...)
 	case m.focus == focusDock:
 		multi := m.isMultiQuestion()
 		binds := []key.Binding{promptKeys.Up}
@@ -427,8 +427,7 @@ func (m model) sessionView() string {
 
 	body := m.historyBody()
 	if m.projects.fileView.open() {
-		histH, _ := m.sessionLayout()
-		body = m.center(m.fileViewBody(m.containerWidth(), histH), m.containerWidth())
+		body = m.center(m.fileViewBody(m.containerWidth(), m.fileViewHeight()), m.containerWidth())
 	}
 	if m.sessionInteraction() != nil {
 		_, dockH := m.sessionLayout()

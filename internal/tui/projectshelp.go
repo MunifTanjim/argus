@@ -38,13 +38,23 @@ func (m model) projectsFooter() string {
 		}
 		return m.footer(append(bindings, helpAs(k.Back, "q", "quit"), m.sideKey(k.ToggleFiles), k.Help)...)
 	case m.projects.fileView.open() && m.projects.focus == focusPane:
-		return m.footer(helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^u/^d", "page"), helpAs(k.Back, "esc", "close"), k.Help)
+		return m.footer(append(m.fileViewBindings(), k.Help)...)
 	}
 	bindings := []key.Binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill}
 	if m.sidebarVisible() || m.nextFromPane() == "files" {
 		bindings = append(bindings, helpAs(k.Focus, "tab", m.nextFromPane()))
 	}
 	return m.footer(append(bindings, k.Help, helpAs(k.Back, "esc", "tree"))...)
+}
+
+// fileViewBindings are the keys of an open file or diff; J/K step only a diff.
+func (m model) fileViewBindings() []key.Binding {
+	k := projectsKeys
+	b := []key.Binding{helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^u/^d", "page"), helpAs(k.Bottom, "g/G", "ends")}
+	if m.projects.fileView.diff {
+		b = append(b, k.NextFile)
+	}
+	return append(b, k.Wrap, helpAs(k.Refresh, "r", "reload"), helpAs(k.Back, "esc", "close"))
 }
 
 // treeRowBindings are the tree keys that act on the selected row.
@@ -89,6 +99,8 @@ func (m model) projectsHelpView() string {
 			helpAs(k.SideTabNext, "[/]", "right sidebar: Files / Changes"),
 			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
 			helpAs(k.Back, "esc h", "changes: back from a commit"),
+			helpAs(k.NextFile, "J/K", "diff: next / previous file"),
+			helpAs(k.Wrap, "w", "open file: wrap long lines"),
 		}},
 		{"Manage (tree)", []key.Binding{
 			helpAs(k.New, "n", "new workspace (branch, PR, issue)"),
@@ -175,7 +187,7 @@ func (m model) sidebarBindings(escDesc string) []key.Binding {
 	case c.commit != nil:
 		return []key.Binding{k.Up, helpAs(k.Enter, "enter", "diff"), helpAs(k.Back, "esc", "back")}
 	case c.cursor >= len(c.files) && c.cursor < len(c.files)+len(c.commits):
-		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "files"), esc}
+		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "files"), m.diffModeKey(), esc}
 	}
-	return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "diff"), k.DiffMode, esc}
+	return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "diff"), m.diffModeKey(), esc}
 }
