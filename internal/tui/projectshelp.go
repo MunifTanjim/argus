@@ -66,11 +66,11 @@ func (m model) treeRowBindings() []key.Binding {
 	r, _ := m.cursorRow()
 	switch r.kind {
 	case rowHome:
-		return []key.Binding{k.Up, k.Enter, k.Focus, k.Filter}
+		return []key.Binding{k.Up, k.Enter, k.Focus, k.Spawn, k.Filter}
 	case rowWorkspace:
 		return []key.Binding{k.Up, k.Left, k.Enter, k.Focus, k.Spawn, k.New, k.Remove, k.Filter}
 	case rowProject:
-		return []key.Binding{k.Up, k.Left, k.Enter, k.New, k.Filter}
+		return []key.Binding{k.Up, k.Left, k.Enter, k.Spawn, k.New, k.Filter}
 	}
 	return []key.Binding{k.Up, k.Left, k.Enter, k.Filter}
 }

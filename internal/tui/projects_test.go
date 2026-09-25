@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"strings"
 	"testing"
 
@@ -753,10 +755,12 @@ func TestSpawnSessionInWorkspace(t *testing.T) {
 func TestSpawnSessionNeedsLiveWorkspace(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
+	m.projects.tree[0].Workspaces[0].IsMain = false // a bare repo: no main worktree
+	m.projects.rebuild()
 	m.projects.selectRow("n1:p1")
 	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 's', Text: "s"})
 	if mm := res.(model); mm.spawn.active() || mm.flash == "" {
-		t.Error("s on a project row should only show a hint")
+		t.Error("s on a project with no main workspace should only show a hint")
 	}
 
 	m.projects.tree[0].Workspaces[1].IsGone = true
@@ -984,8 +988,8 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 200, 30
 	for row, want := range map[string]struct{ has, lacks []string }{
-		homeRowID: {has: []string{"enter open", "tab pane", "/ filter"}, lacks: []string{"fold", "s spawn", "n new", "x remove"}},
-		"n1:p1":   {has: []string{"h/l fold", "n new"}, lacks: []string{"tab pane", "s spawn", "x remove"}},
+		homeRowID: {has: []string{"enter open", "tab pane", "s spawn", "/ filter"}, lacks: []string{"fold", "n new", "x remove"}},
+		"n1:p1":   {has: []string{"h/l fold", "s spawn", "n new"}, lacks: []string{"tab pane", "x remove"}},
 		"n1:w2":   {has: []string{"h/l fold", "tab pane", "s spawn", "n new", "x remove"}},
 	} {
 		m.projects.selectRow(row)
@@ -1068,6 +1072,88 @@ func TestRetargetShowsContext(t *testing.T) {
 	}
 	if m.projects.retarget.pick.cursor != 1 {
 		t.Errorf("the cursor should start on the current target: %d", m.projects.retarget.pick.cursor)
+	}
+}
+
+func TestSpawnFromHomeAndProjectRows(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	m.projects.cursor = 0 // Home
+	if _, cmd := upd(m, keyMsg("s")); cmd == nil {
+		t.Error("s on the Home row should start the spawn flow")
+	}
+	m.projects.selectRow("n1:p1")
+	mm, _ := upd(m, keyMsg("s"))
+	if !mm.spawn.active() || !mm.spawn.fixedCwd || mm.spawn.cwd.Value() != "/repo" {
+		t.Errorf("s on a project row should spawn in its main workspace: active=%v cwd=%q", mm.spawn.active(), mm.spawn.cwd.Value())
+	}
+	for _, row := range []string{homeRowID, "n1:p1"} {
+		m.projects.selectRow(row)
+		if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "s spawn") {
+			t.Errorf("%s footer should offer s spawn: %q", row, f)
+		}
+	}
+}
+
+func TestActionFlashesNameTheirObject(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	for want, cmd := range map[string]tea.Cmd{
+		"removed repo-feat":         m.removeWorkspaceCmd("n1:w2", false),
+		"renamed to X":              m.renameProjectCmd("n1:p1", "X"),
+		"target of repo-feat → dev": m.setTargetCmd("n1:w2", "dev"),
+	} {
+		if got := cmd().(projectsActionMsg).ok; got != want {
+			t.Errorf("flash = %q, want %q", got, want)
+		}
+	}
+	m.client = &failingClient{err: errString("x")}
+	if v := m.setHiddenCmd("n1:p1", false, "")().(projectsActionMsg).verb; v != "unhide" {
+		t.Errorf("unhide error verb = %q", v)
+	}
+	if v := m.setPinnedCmd("n1:p1", false, "")().(projectsActionMsg).verb; v != "unpin" {
+		t.Errorf("unpin error verb = %q", v)
+	}
+}
+
+func TestRemoveSelectsANeighbor(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = &recordingClient{}
+	m.projects.tree = append(m.projects.tree, api.ProjectNode{
+		ID: "n1:p2", Name: "zeta", Kind: "git", NodeID: "n1",
+		Workspaces: []api.WorkspaceNode{{ID: "n1:w3", Dir: "/zeta", IsMain: true, Branch: "main"}},
+	})
+	m.projects.rebuild()
+	delete(m.sessions, "n1:s2")
+	m.projects.selectRow("n1:w2") // the last workspace of argus; zeta's rows follow
+	m, _ = upd(m, keyMsg("x"))
+	m, cmd := upd(m, keyMsg("y"))
+	m, _ = upd(m, cmd())
+	tree := []api.ProjectNode{m.projects.tree[0], m.projects.tree[1]}
+	tree[0].Workspaces = tree[0].Workspaces[:1] // w2 is gone
+	m, _ = upd(m, projectsTreeMsg{tree: tree})
+	if got := m.projects.cursorRowID(); got != "n1:w1" {
+		t.Errorf("after the remove the cursor should go to the workspace above: %q", got)
+	}
+}
+
+func TestUnknownWorkspaceRefetchesTree(t *testing.T) {
+	m := projectsTestModel()
+	rc := &recordingClient{}
+	m.client = rc
+	event := func(ws string) api.Notification {
+		params, _ := json.Marshal(registry.Event{Type: registry.EventAdded, Session: session.Session{ID: "n1:s9", WorkspaceID: ws}})
+		return api.Notification{Method: api.MethodSessionEvent, Params: params}
+	}
+	runCmd(m.applyEvent(event("n1:w1")))
+	if len(rc.calls) != 0 {
+		t.Fatalf("a known workspace should not refetch the tree: calls=%v", rc.calls)
+	}
+	runCmd(m.applyEvent(event("n1:w-new")))
+	if !m.projects.loading || len(rc.calls) == 0 || rc.calls[len(rc.calls)-1] != api.MethodProjectList {
+		t.Errorf("an unknown workspace should refetch the tree: calls=%v", rc.calls)
 	}
 }
 

@@ -137,6 +137,28 @@ func (p *projectsState) selectRow(id string) bool {
 	return false
 }
 
+// removeNeighbor is the row to select once workspace id leaves the tree: the
+// workspace above it in its project, else the one below, else the project.
+func (p *projectsState) removeNeighbor(id string) string {
+	for i, r := range p.rows {
+		if r.id != id {
+			continue
+		}
+		if i > 0 && p.rows[i-1].kind == rowWorkspace {
+			return p.rows[i-1].id
+		}
+		if i+1 < len(p.rows) && p.rows[i+1].kind == rowWorkspace && p.rows[i+1].depth == r.depth {
+			return p.rows[i+1].id
+		}
+		for j := i - 1; j >= 0; j-- {
+			if p.rows[j].depth < r.depth {
+				return p.rows[j].id
+			}
+		}
+	}
+	return ""
+}
+
 func (p *projectsState) row(id string) (projectsRow, bool) {
 	for _, r := range p.rows {
 		if r.id == id {
