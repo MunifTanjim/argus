@@ -57,6 +57,7 @@ type projectsRow struct {
 	target  string   // workspace only: resolved target branch
 	ws      []string // workspace ids under this row (itself for a workspace row)
 	isGone  bool
+	gitErr  bool // project only: git failed on it this list
 	isMain  bool
 	hidden  bool // project only
 	pinned  bool // project only
@@ -320,7 +321,7 @@ func buildProjectRows(st projectsState) []projectsRow {
 		for _, p := range byNode[nid] {
 			rows = append(rows, projectsRow{
 				kind: rowProject, depth: depth, id: p.ID, label: p.Name, ws: workspaceIDs(p),
-				isGone: p.IsGone, hidden: p.Hidden, pinned: p.Pinned, hasKids: len(p.Workspaces) > 0,
+				isGone: p.IsGone, gitErr: p.Error != "", hidden: p.Hidden, pinned: p.Pinned, hasKids: len(p.Workspaces) > 0,
 			})
 			if folded(p.ID) {
 				continue
@@ -1083,6 +1084,9 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 		text = indent + collapseMark(m.projects.isFolded(r.id), true) + Icon.Node.Render() + " " + StyleSecondaryBold.Render(r.label)
 	case rowProject:
 		text = indent + collapseMark(m.projects.isFolded(r.id), r.hasKids) + projectLabel(r.label, r.hidden, r.pinned)
+		if r.gitErr {
+			text += StyleErrorBold.Render(" (git error)")
+		}
 	case rowWorkspace:
 		bullet := "• "
 		if r.isMain {
@@ -1168,6 +1172,9 @@ func (m model) projectsSummary(r projectsRow, w int) string {
 		dir = p.Dir
 	}
 	b.WriteString(truncateLine(StylePrimaryBold.Render(p.Name)+projectLabel("", p.Hidden, p.Pinned)+dimStyle.Render("  "+dir), w) + "\n\n")
+	if p.Error != "" {
+		b.WriteString(truncateLine(StyleErrorBold.Render("git error: "+p.Error), w) + "\n\n")
+	}
 	for _, ws := range visibleWorkspaces(p.Workspaces, m.projects.showGone) {
 		row := projectsRow{
 			kind: rowWorkspace, id: ws.ID, label: filepath.Base(ws.Dir), branch: ws.Branch, plain: p.Kind == "plain", target: ws.TargetBranch,

@@ -1157,6 +1157,18 @@ func TestUnknownWorkspaceRefetchesTree(t *testing.T) {
 	}
 }
 
+func TestProjectGitErrorShows(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.projects.tree[0].Error = "worktree list: git missing"
+	m.projects.rebuild()
+	m.projects.selectRow("n1:p1")
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "argus (git error)") || !strings.Contains(out, "git error: worktree list: git missing") {
+		t.Errorf("a project with a git error should say so in the tree and its pane:\n%s", out)
+	}
+}
+
 func TestKillFailureIsFlashed(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &failingClient{err: errString("no such pane")}

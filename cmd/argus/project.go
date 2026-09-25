@@ -90,25 +90,45 @@ func printProjectTree(res api.ProjectListResult) {
 		return
 	}
 	for _, p := range res.Projects {
-		gone := ""
-		if p.IsGone {
-			gone = " (gone)"
+		var marks string
+		for _, m := range []struct {
+			on   bool
+			text string
+		}{{p.IsGone, "gone"}, {p.Error != "", "git error: " + p.Error}, {p.Hidden, "hidden"}, {p.Pinned, "pinned"}} {
+			if m.on {
+				marks += " (" + m.text + ")"
+			}
 		}
-		shell.StdOutF("%s  %s%s\n  %s\n", p.Kind, p.Name, gone, p.Dir)
+		root := p.Root
+		if root == "" {
+			root = p.Dir // a bare repo has no main working tree
+		}
+		shell.StdOutF("%s  %s%s\n  %s\n", p.Kind, p.Name, marks, root)
 		for _, w := range p.Workspaces {
 			marker := " "
 			if w.IsMain {
 				marker = "*"
 			}
-			branch := w.Branch
-			if branch == "" {
-				branch = "(detached)"
-			}
-			wgone := ""
-			if w.IsGone {
-				wgone = " (gone)"
-			}
-			shell.StdOutF("  %s %-24s %-8s %s%s\n", marker, branch, w.Head, w.Dir, wgone)
+			shell.StdOutF("  %s %-24s %-8s %s%s\n", marker, workspaceBranch(p.Kind, w), w.Head, w.Dir, goneMark(w.IsGone))
 		}
 	}
+}
+
+func workspaceBranch(kind string, w api.WorkspaceNode) string {
+	switch {
+	case w.Branch != "" && w.TargetBranch != "" && w.TargetBranch != w.Branch:
+		return w.Branch + " → " + w.TargetBranch
+	case w.Branch != "":
+		return w.Branch
+	case kind == "git" && !w.IsGone:
+		return "(detached)"
+	}
+	return "-"
+}
+
+func goneMark(gone bool) string {
+	if gone {
+		return " (gone)"
+	}
+	return ""
 }

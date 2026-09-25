@@ -142,6 +142,9 @@ func TestWorkspaceListDirAndUnknownID(t *testing.T) {
 	}
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "commit", "-m", "init")
+	if err := os.Symlink("main.go", filepath.Join(dir, "link.go")); err != nil {
+		t.Fatal(err)
+	}
 
 	d := nodeWithRegistry(t)
 	wsID, err := d.projreg.AdoptSession(ctx, dir)
@@ -154,14 +157,15 @@ func TestWorkspaceListDirAndUnknownID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleWorkspaceListDir: %v", err)
 	}
-	found := false
+	got := map[string]api.DirEntry{}
 	for _, e := range res.(api.ListDirResult).Entries {
-		if e.Name == "main.go" {
-			found = true
-		}
+		got[e.Name] = e
 	}
-	if !found {
+	if _, ok := got["main.go"]; !ok {
 		t.Errorf("main.go not listed: %+v", res)
+	}
+	if e := got["link.go"]; !e.Symlink || e.Target != "main.go" {
+		t.Errorf("a symlink should carry its target: %+v", e)
 	}
 
 	bad, _ := json.Marshal(api.WorkspaceFileParams{WorkspaceID: "nope"})

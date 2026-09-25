@@ -176,6 +176,9 @@ func (t fileTree) view(w, h int, focused bool) string {
 		default:
 			text = indent + "  " + r.entry.Name
 		}
+		if r.note == "" && r.entry.Symlink {
+			text += dimStyle.Render(" → " + r.entry.Target)
+		}
 		sel := i == t.cursor
 		if sel && focused {
 			text = cursorStyle.Render(text)

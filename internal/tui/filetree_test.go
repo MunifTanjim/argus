@@ -545,3 +545,12 @@ func TestFileViewGoesToEnds(t *testing.T) {
 		t.Errorf("g should go to the top: %d", m.projects.fileView.scroll)
 	}
 }
+
+func TestTreeShowsSymlinkTargets(t *testing.T) {
+	ft := newFileTree("n1:w1")
+	ft.setDir("", []api.DirEntry{{Name: "docs", Path: "docs", IsDir: true, Symlink: true, Target: "site/docs"}, {Name: "cfg", Path: "cfg", Symlink: true, Target: "/etc/cfg"}}, nil)
+	out := ansi.Strip(ft.view(60, 10, true))
+	if !strings.Contains(out, "▸ docs → site/docs") || !strings.Contains(out, "cfg → /etc/cfg") {
+		t.Errorf("symlink rows should show their targets:\n%s", out)
+	}
+}

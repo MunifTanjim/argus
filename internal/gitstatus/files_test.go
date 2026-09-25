@@ -238,3 +238,71 @@ func TestDiffSinceShowsRename(t *testing.T) {
 		t.Errorf("want a rename diff, got:\n%s (err %v)", diff, err)
 	}
 }
+
+func symlinkRepo(t *testing.T) (dir, outside string) {
+	t.Helper()
+	dir = gitInit(t)
+	write(t, dir, "real/a.txt", "inside\n")
+	outside = t.TempDir()
+	write(t, outside, "secret.txt", "outside\n")
+	for link, target := range map[string]string{
+		"inlink": "real", "flink": "real/a.txt",
+		"outlink": outside, "outfile": filepath.Join(outside, "secret.txt"),
+	} {
+		if err := os.Symlink(target, filepath.Join(dir, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir, outside
+}
+
+func TestListDirMarksSymlinks(t *testing.T) {
+	ctx := context.Background()
+	dir, outside := symlinkRepo(t)
+	_, entries, err := ListDir(ctx, dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]DirEntry{}
+	for _, e := range entries {
+		got[e.Name] = e
+	}
+	if e := got["inlink"]; !e.Symlink || !e.IsDir || e.Target != "real" {
+		t.Errorf("a link to a folder in the repo should be a folder symlink: %+v", e)
+	}
+	if e := got["outlink"]; !e.Symlink || e.IsDir || e.Target != outside {
+		t.Errorf("a link out of the repo should not open as a folder: %+v", e)
+	}
+	if e := got["flink"]; !e.Symlink || e.IsDir {
+		t.Errorf("a link to a file should be a file symlink: %+v", e)
+	}
+	if _, inner, err := ListDir(ctx, dir, "inlink"); err != nil || len(inner) != 1 || inner[0].Name != "a.txt" {
+		t.Errorf("an in-repo folder link should list its target: %+v %v", inner, err)
+	}
+	if _, _, err := ListDir(ctx, dir, "outlink"); err == nil {
+		t.Error("listing through a link out of the repo should fail")
+	}
+}
+
+func TestReadFileFollowsOnlyInRepoSymlinks(t *testing.T) {
+	ctx := context.Background()
+	dir, outside := symlinkRepo(t)
+	if c, _, err := ReadFile(ctx, dir, "flink"); err != nil || c != "inside\n" {
+		t.Errorf("a link to a repo file should show the file: %q %v", c, err)
+	}
+	if c, _, err := ReadFile(ctx, dir, "outfile"); err != nil || c != filepath.Join(outside, "secret.txt") {
+		t.Errorf("a link out of the repo should show its target, not the file: %q %v", c, err)
+	}
+	if _, _, err := ReadFile(ctx, dir, "outlink/secret.txt"); err == nil {
+		t.Error("reading through a link out of the repo should fail")
+	}
+}
+
+func TestUntrackedSymlinkDiffShowsLinkText(t *testing.T) {
+	ctx := context.Background()
+	dir, _ := symlinkRepo(t)
+	diff, _, err := WorkingDiff(ctx, dir, "flink")
+	if err != nil || !strings.Contains(diff, "+real/a.txt") || strings.Contains(diff, "+inside") {
+		t.Errorf("an untracked symlink diffs as its link text, as git stores it: %q %v", diff, err)
+	}
+}
