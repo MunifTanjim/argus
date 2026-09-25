@@ -850,6 +850,23 @@ func TestPaneCursorClampsWhenLastSessionGoes(t *testing.T) {
 	}
 }
 
+type failingClient struct {
+	recordingClient
+	err error
+}
+
+func (c *failingClient) Call(string, any, any) error { return c.err }
+
+func TestKillFailureIsFlashed(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &failingClient{err: errString("no such pane")}
+	msg := m.killCmd("n1:s1")()
+	m, _ = upd(m, msg)
+	if !strings.Contains(m.flash, "kill failed: no such pane") {
+		t.Errorf("a failed kill should be flashed: %q", m.flash)
+	}
+}
+
 func TestKillFromWorkspaceNeedsTerminalControl(t *testing.T) {
 	m := projectsTestModel() // fixture sessions have no tmux pane
 	m.width, m.height = 120, 30
