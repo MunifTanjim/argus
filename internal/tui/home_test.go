@@ -132,16 +132,21 @@ func TestEnterOnHomeFocusesHomePane(t *testing.T) {
 	m.projects.focus = focusTree
 	m.projects.rebuild()
 	m.projects.cursor = 0
-	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: 'l', Text: "l"}, {Code: tea.KeyTab}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: 'l', Text: "l"}} {
 		res, _ := m.handleProjectsKey(k)
 		if mm := res.(model); mm.mode != modeList || mm.projects.focus != focusPane {
 			t.Errorf("%q on Home: mode=%v focus=%v, want the Home pane", k.String(), mm.mode, mm.projects.focus)
 		}
 	}
+	for _, r := range []rune{'w', 'l'} {
+		if mm := pressKeys(m, cw(r)...); mm.mode != modeList || mm.projects.focus != focusPane {
+			t.Errorf("<C-w>%c on Home: mode=%v focus=%v, want the Home pane", r, mm.mode, mm.projects.focus)
+		}
+	}
 }
 
 func TestHomePaneKeysReturnToTree(t *testing.T) {
-	for _, k := range []tea.KeyPressMsg{{Code: 'q', Text: "q"}, {Code: tea.KeyEscape}, {Code: tea.KeyTab}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}} {
 		m := homeTestModel()
 		m.projects.rebuild()
 		m.projects.cursor = 2 // a workspace, to prove we land on Home
@@ -163,12 +168,12 @@ func TestTreeQQuitsAndEscDoesNothing(t *testing.T) {
 	m.mode = modeProjects
 	m.projects.focus = focusTree
 	m.projects.rebuild()
-	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'Q', Text: "Q"})
 	if cmd == nil {
-		t.Fatal("q on the tree should quit")
+		t.Fatal("Q on the tree should quit")
 	}
 	if _, quit := cmd().(tea.QuitMsg); !quit {
-		t.Error("q on the tree should return tea.Quit")
+		t.Error("Q on the tree should return tea.Quit")
 	}
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if mm := res.(model); mm.mode != modeProjects {
@@ -187,9 +192,9 @@ func TestPKeyDoesNothing(t *testing.T) {
 func TestNarrowTerminalHomeQuits(t *testing.T) {
 	m := homeTestModel()
 	m.width = 60 // sidebar auto-hides below 80
-	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'Q', Text: "Q"})
 	if cmd == nil {
-		t.Fatal("q with no tree to return to should quit")
+		t.Fatal("Q with no tree to return to should quit")
 	}
 	if _, quit := cmd().(tea.QuitMsg); !quit {
 		t.Error("want tea.Quit")
@@ -231,32 +236,27 @@ func TestInitFetchesProjects(t *testing.T) {
 	t.Errorf("Init should fetch project.list; calls = %v", rc.calls)
 }
 
-func ctrlB() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl} }
-
-func TestCtrlBWorksOutsideTheTree(t *testing.T) {
+func TestLeaderOWorksOutsideTheTree(t *testing.T) {
 	m := homeTestModel() // Home pane
-	res, _ := m.handleKey(ctrlB())
-	m = res.(model)
+	m = typeKeys(m, " o")
 	if m.sidebarVisible() {
-		t.Fatal("ctrl+b in the Home pane should hide the sidebar")
+		t.Fatal("␣o in the Home pane should hide the sidebar")
 	}
-	res, _ = m.handleKey(ctrlB())
-	m = res.(model)
-	res, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = typeKeys(m, " o")
+	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if mm := res.(model); !mm.sidebarVisible() || mm.mode != modeProjects {
-		t.Errorf("ctrl+b twice then esc should reach the tree: visible=%v mode=%v", mm.sidebarVisible(), mm.mode)
+		t.Errorf("␣o twice then esc should reach the tree: visible=%v mode=%v", mm.sidebarVisible(), mm.mode)
 	}
 
 	s := homeTestModel()
 	ss, _ := s.enterSession("n1:s1") // opened from Home: sessionReturn = modeList
-	res, _ = ss.handleKey(ctrlB())
-	if res.(model).sidebarVisible() {
-		t.Error("ctrl+b in a session opened from Home should hide the sidebar")
+	if typeKeys(ss, " o").sidebarVisible() {
+		t.Error("␣o in a session opened from Home should hide the sidebar")
 	}
 }
 
 func TestNoVisibleTreeEscGoesHome(t *testing.T) {
-	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Code: 'q', Text: "q"}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}} {
 		m := homeTestModel()
 		m.mode = modeProjects
 		m.projects.focus = focusTree
@@ -276,13 +276,12 @@ func TestHiddenTreeOnHomeRowEntersHome(t *testing.T) {
 	m.projects.focus = focusTree
 	m.projects.rebuild()
 	m.projects.cursor = 0
-	res, _ := m.handleKey(ctrlB())
-	if mm := res.(model); mm.mode != modeList {
-		t.Errorf("ctrl+b on the Home row: mode=%v, want the Home pane", mm.mode)
+	if mm := typeKeys(m, " o"); mm.mode != modeList {
+		t.Errorf("␣o on the Home row: mode=%v, want the Home pane", mm.mode)
 	}
 
 	m.width = 70 // resized below the breakpoint while on the Home row
-	res, _ = m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	res, _ := m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if mm := res.(model); mm.mode != modeList || mm.cursor != 1 {
 		t.Errorf("a key on a hidden Home row should act in the Home pane: mode=%v cursor=%d", mm.mode, mm.cursor)
 	}
@@ -519,9 +518,9 @@ func TestHelpOpensFromHomeTabs(t *testing.T) {
 	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
 		m := homeTestModel()
 		m.mode = mode
-		m, _ = upd(m, tea.KeyPressMsg{Code: '?', Text: "?"})
+		m = typeKeys(m, "g?")
 		if out := ansi.Strip(m.View().Content); !m.projects.showHelp || !strings.Contains(out, "Manage (tree)") || !strings.Contains(out, "any key close") {
-			t.Errorf("mode %v: ? should show the help:\n%s", mode, out)
+			t.Errorf("mode %v: g? should show the help:\n%s", mode, out)
 		}
 		m, _ = upd(m, keyMsg("j"))
 		if m.projects.showHelp || m.mode != mode {
@@ -530,15 +529,13 @@ func TestHelpOpensFromHomeTabs(t *testing.T) {
 	}
 }
 
-func TestTabFromHomeTabsReachesTree(t *testing.T) {
+func TestFocusLeftFromHomeTabsReachesTree(t *testing.T) {
 	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
-		for _, k := range []tea.KeyPressMsg{{Code: tea.KeyTab}, {Code: tea.KeyTab, Mod: tea.ModShift}} {
-			m := homeTestModel()
-			m.mode = mode
-			m, _ = upd(m, k)
-			if m.mode != modeProjects || !m.treeFocused() {
-				t.Errorf("mode %v, %s: want the tree: mode=%v focus=%v", mode, k.String(), m.mode, m.projects.focus)
-			}
+		m := homeTestModel()
+		m.mode = mode
+		m = pressKeys(m, cw('h')...)
+		if m.mode != modeProjects || !m.treeFocused() {
+			t.Errorf("mode %v, <C-w>h: want the tree: mode=%v focus=%v", mode, m.mode, m.projects.focus)
 		}
 	}
 }

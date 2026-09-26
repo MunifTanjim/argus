@@ -70,8 +70,29 @@ func addClientFlags(f *pflag.FlagSet) {
 
 // resolveConfig builds cmd's effective config, layering (lowest first) defaults, the
 // config file, env vars, and flags. Config path: --config, else $ARGUS_CONFIG, else
-// the default under ConfigDir.
+// the default under ConfigDir. It does not read tui.keymap.
 func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
+	c, _, err := loadConfig(cmd)
+	return c, err
+}
+
+// resolveTUIConfig is resolveConfig plus tui.keymap. Only the commands that
+// start the TUI read keymaps, so a bad keymap section stops no other command.
+func resolveTUIConfig(cmd *cobra.Command) (*config.Config, error) {
+	c, path, err := loadConfig(cmd)
+	if err != nil {
+		return nil, err
+	}
+	km, err := config.ReadKeymaps(path)
+	if err != nil {
+		return nil, err
+	}
+	c.TUI.Keymaps = km
+	return c, nil
+}
+
+// loadConfig returns the validated config and the path of the file it read.
+func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 	v := viper.New()
 
 	noConfig, _ := cmd.Flags().GetBool("no-config")
@@ -84,7 +105,7 @@ func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
 		cfgPath = "" // also ignore $ARGUS_CONFIG
 	}
 	if err := config.Load(v, cfgPath, noConfig); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
@@ -95,7 +116,7 @@ func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
 
 	c := config.FromViper(v)
 	if err := c.Validate(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &c, nil
+	return &c, v.ConfigFileUsed(), nil
 }

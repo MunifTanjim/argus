@@ -29,7 +29,7 @@ func paramsFor(m model, method string) any {
 func TestChangesTabFetchesFilesAndCommits(t *testing.T) {
 	m := filesFocused()
 	m.client = &recordingClient{}
-	m, cmd := upd(m, keyMsg("]"))
+	m, cmd := typeKeysCmd(m, "gt")
 	if !m.projects.changes.loading || !m.projects.changes.commitsLoading {
 		t.Fatalf("both lists should start loading: %+v", m.projects.changes)
 	}
@@ -119,7 +119,7 @@ func TestCommitsSectionRendersUnderChanges(t *testing.T) {
 	m.projects.rebuild()
 	m.projects.focus = focusFiles
 	m.client = &recordingClient{}
-	m, _ = upd(m, keyMsg("]"))
+	m = typeKeys(m, "gt")
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go", Change: "modified"}}})
 	m = withCommits(m, commitN(1), commitN(2))
 	out := ansi.Strip(m.View().Content)
@@ -211,13 +211,13 @@ func TestRefreshKeepsCommitAndRefetches(t *testing.T) {
 		t.Fatal("setup: enter should open the commit")
 	}
 	m.client = &recordingClient{}
-	m, cmd := upd(m, keyMsg("r"))
+	m, cmd := typeKeysCmd(m, "gr")
 	runCmd(cmd)
 	if c := m.projects.changes; c.commit == nil || len(c.commits) != 1 {
-		t.Fatalf("r should keep the open commit and the lists: %+v", c)
+		t.Fatalf("gr should keep the open commit and the lists: %+v", c)
 	}
 	if paramsFor(m, api.MethodWorkspaceChangedFiles) == nil || paramsFor(m, api.MethodWorkspaceCommits) == nil || paramsFor(m, api.MethodWorkspaceCommitFiles) == nil {
-		t.Error("r should fetch both lists and the commit's files again")
+		t.Error("gr should fetch both lists and the commit's files again")
 	}
 	m, _ = upd(m, keyMsg("esc"))
 }
@@ -253,7 +253,7 @@ func TestCommitCursorStaysVisible(t *testing.T) {
 func TestCursorStaysOnCommitWhenFilesArrive(t *testing.T) {
 	m := withTarget(filesFocused(), "main")
 	m.client = &recordingClient{}
-	m, _ = upd(m, keyMsg("]"))
+	m = typeKeys(m, "gt")
 	m = withCommits(m, commitN(1), commitN(2))
 	m, _ = upd(m, keyMsg("G")) // the files are still loading
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}})
@@ -265,7 +265,7 @@ func TestCursorStaysOnCommitWhenFilesArrive(t *testing.T) {
 	if c := m.projects.changes; c.cursor != 2 {
 		t.Errorf("t should keep commit 2 selected: cursor=%d", c.cursor)
 	}
-	m, _ = upd(m, keyMsg("g"))
+	m = typeKeys(m, "gg")
 	m, _ = upd(m, keyMsg("t"))
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go"}, {Path: "b.go"}}})
 	if c := m.projects.changes; c.cursor != 0 {
@@ -276,11 +276,11 @@ func TestCursorStaysOnCommitWhenFilesArrive(t *testing.T) {
 func TestRefreshDropsAnswersFromBefore(t *testing.T) {
 	m := changesFocused()
 	before := m.projects.changes.gen
-	m, _ = upd(m, keyMsg("r"))
+	m = typeKeys(m, "gr")
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", gen: before, commits: []api.Commit{commitN(9)}})
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", gen: before, files: []api.ChangedFile{{Path: "old.go"}}})
 	if c := m.projects.changes; len(c.commits) != 0 || len(c.files) != 0 {
-		t.Errorf("answers requested before r must be dropped: commits=%v files=%v", c.commits, c.files)
+		t.Errorf("answers requested before gr must be dropped: commits=%v files=%v", c.commits, c.files)
 	}
 }
 
@@ -304,16 +304,16 @@ func TestRefreshKeepsChangesPlace(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "a.go"}, api.ChangedFile{Path: "b.go"})
 	m = withCommits(m, commitN(1))
 	m, _ = upd(m, keyMsg("j"))
-	m, cmd := upd(m, keyMsg("r"))
+	m, cmd := typeKeysCmd(m, "gr")
 	if c := m.projects.changes; cmd == nil || c.cursor != 1 || len(c.files) != 2 || !c.loading {
-		t.Fatalf("r should refetch and keep the list and cursor: cursor=%d files=%d loading=%v", c.cursor, len(c.files), c.loading)
+		t.Fatalf("gr should refetch and keep the list and cursor: cursor=%d files=%d loading=%v", c.cursor, len(c.files), c.loading)
 	}
 	m, _ = upd(m, keyMsg("G"))
 	m, _ = upd(m, keyMsg("enter")) // open the commit
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: commitN(1).SHA, files: []api.ChangedFile{{Path: "c.go"}}})
-	m, cmd = upd(m, keyMsg("r"))
+	m, cmd = typeKeysCmd(m, "gr")
 	if c := m.projects.changes; cmd == nil || c.commit == nil || c.cursor != 2 {
-		t.Errorf("r should keep an open commit: commit=%v cursor=%d", c.commit, c.cursor)
+		t.Errorf("gr should keep an open commit: commit=%v cursor=%d", c.commit, c.cursor)
 	}
 }
 
@@ -323,10 +323,10 @@ func TestRefreshReloadsOpenDiff(t *testing.T) {
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", diff: "@@\n+x"})
 	rc := &recordingClient{}
 	m.client = rc
-	m, cmd := upd(m, keyMsg("r"))
+	m, cmd := typeKeysCmd(m, "gr")
 	runCmd(cmd)
 	if p, ok := paramsFor(m, api.MethodWorkspaceDiff).(api.WorkspaceFileParams); !ok || p.OrigPath != "a.go" {
-		t.Errorf("r in the diff should refetch it with its rename source: %v", rc.calls)
+		t.Errorf("gr in the diff should refetch it with its rename source: %v", rc.calls)
 	}
 	if !m.projects.fileView.open() || len(m.projects.fileView.lines) == 0 {
 		t.Error("the old diff should stay on screen while it reloads")

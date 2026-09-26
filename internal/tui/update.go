@@ -10,7 +10,6 @@ import (
 	"sort"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
@@ -24,9 +23,9 @@ import (
 
 func (m model) Init() tea.Cmd {
 	if m.viewer {
-		return m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent)
+		return tea.Batch(m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent), m.kittyCheckCmd())
 	}
-	return tea.Batch(m.refreshCmd(), m.fetchProjects(), spinResumeCmd())
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), spinResumeCmd(), m.kittyCheckCmd())
 }
 
 // spinResumeCmd re-arms the list spinner on a timer, so it resumes even when no
@@ -128,6 +127,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.leaveHiddenTree()
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case keyTimeoutMsg:
+		return m.keyTimeout(msg)
+	case tea.KeyboardEnhancementsMsg:
+		m.kittyKeys = msg.SupportsKeyDisambiguation()
+		return m, nil
+	case kittyCheckMsg:
+		return m.kittyCheck(), nil
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":
@@ -718,9 +724,21 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeScreen {
 		return m.handleScreenKey(msg)
 	}
-	// Ctrl+C quits from any other mode.
 	if msg.String() == "ctrl+c" {
 		return m.quit()
+	}
+	if !m.keysRaw() {
+		return m.resolveKey(msg)
+	}
+	if len(m.keyBuf) > 0 {
+		m.clearKeys()
+	}
+	return m.runKey(msg)
+}
+
+func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.mode == modeScreen {
+		return m.handleScreenKey(msg)
 	}
 	// Kill confirmation gate (list view).
 	if m.pendingKill {
@@ -735,14 +753,20 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSpawnKey(msg)
 	}
 
-	// ctrl+b toggles the projects sidebar from every framed view; while typing it
-	// stays a cursor key.
-	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleSidebar) {
+	if !m.keysRaw() {
+		if mm, cmd, ok := m.handlePaneKey(msg); ok {
+			return mm, cmd
+		}
+	}
+
+	// The sidebar toggles work from every framed view; while typing their keys
+	// stay text.
+	if m.mode != modeProjects && !m.viewer && !m.typing() && m.matches(msg, projectsKeys.ToggleSidebar) {
 		m.toggleSidebar()
 		return m, nil
 	}
 
-	if m.mode != modeProjects && !m.viewer && !m.typing() && key.Matches(msg, projectsKeys.ToggleFiles) {
+	if m.mode != modeProjects && !m.viewer && !m.typing() && m.matches(msg, projectsKeys.ToggleFiles) {
 		m.toggleFiles()
 		return m, nil
 	}
@@ -750,7 +774,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.projects.showHelp = false
 		return m, nil
 	}
-	if (m.mode == modeList || m.mode == modeHistoryProjects || m.mode == modeLogs) && key.Matches(msg, projectsKeys.Help) {
+	if (m.mode == modeList || m.mode == modeHistoryProjects || m.mode == modeLogs) && m.matches(msg, projectsKeys.Help) {
 		m.projects.showHelp = true
 		return m, nil
 	}
@@ -796,12 +820,13 @@ var listTable = []keyTableEntry{
 	{listKeys.HalfDown, model.actListHalfDown},
 	{listKeys.Open, model.actListOpen},
 	{listKeys.Jump, model.actListJump},
-	{listKeys.TabNext, model.actListHistory}, // right/l → History tab
-	{listKeys.TabPrev, model.actOpenLogs},    // left/h → Logs tab (when spawned)
+	{listKeys.TabNext, model.actListHistory}, // next tab → History tab
+	{listKeys.TabPrev, model.actOpenLogs},    // prev tab → Logs tab (when spawned)
 	{listKeys.New, model.actListNew},
 	{listKeys.Kill, model.actListKill},
 	{listKeys.Refresh, model.actListRefresh},
 	{listKeys.Back, model.actListBack},
+	{listKeys.Quit, model.actQuit},
 }
 
 func (m model) actListUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -978,8 +1003,8 @@ func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// killRefusal explains why `x` cannot remove s, or is "" when it can: kill its
-// pane, or dismiss a paneless presence card.
+// killRefusal is "" when kill can remove s: kill its pane, or dismiss a
+// paneless presence card.
 func killRefusal(s session.Session) string {
 	if !s.Controllable() && !dismissable(s) {
 		return string(s.Frontend) + " session: terminal control unavailable"
@@ -1037,20 +1062,11 @@ func (m model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// actListBack returns from the Home pane to the tree on the Home row. With the
-// sidebar hidden there is no tree: q quits and esc/tab do nothing.
-func (m model) actListBack(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if !m.sidebarVisible() {
-		if msg.String() == "q" {
-			return m.quit()
-		}
-		return m, nil
-	}
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.cursor = 0
-	return m, nil
-}
+// actListBack returns from the Home pane to the tree on the Home row, when the
+// tree is visible.
+func (m model) actListBack(tea.KeyPressMsg) (tea.Model, tea.Cmd) { return m.openTree() }
+
+func (m model) actQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) { return m.quit() }
 
 func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if isScreenLeave(msg) {

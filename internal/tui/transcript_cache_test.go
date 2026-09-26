@@ -52,6 +52,12 @@ func mixedChunks(n int) []transcript.Chunk {
 	return out
 }
 
+func setAllExpanded(m *model, on bool) {
+	for i := range m.transcript.chunks {
+		m.setExpanded(i, on)
+	}
+}
+
 // The cached layout tracks every input a card renders from.
 func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 	m := testModel()
@@ -63,7 +69,7 @@ func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 	m.transcript.cursor = 3
 	assertLayoutFresh(t, m, "cursor moved")
 
-	m.toggleExpand(3)
+	m.setExpanded(3, true)
 	assertLayoutFresh(t, m, "card expanded")
 
 	m.focus = focusHistory
@@ -72,7 +78,7 @@ func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 	m.width = 120
 	assertLayoutFresh(t, m, "width changed")
 
-	m.setAllExpanded(true)
+	setAllExpanded(&m, true)
 	assertLayoutFresh(t, m, "all expanded")
 
 	m.sessions = map[string]session.Session{"": {Agent: "antigravity"}}
@@ -135,7 +141,7 @@ func BenchmarkTranscriptScroll(b *testing.B) {
 	m.transcript.cursor = 100
 	m.layoutChunks()
 	for b.Loop() {
-		res, _ := m.actSmartNext(tea.KeyPressMsg{})
+		res, _ := m.actCardNext(tea.KeyPressMsg{})
 		_ = res.(model).View()
 	}
 }

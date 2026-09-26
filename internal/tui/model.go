@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/vt"
 
@@ -127,6 +128,14 @@ type model struct {
 	history historyState // read-only browsing of past sessions on disk
 
 	projects projectsState // two-pane workspace sidebar (tree + sessions)
+
+	keys      *keymap // resolved keymaps; nil in models built without withKeymaps
+	kittyKeys bool    // the terminal reported the Kitty keyboard protocol
+
+	keyBuf    []tea.KeyPressMsg // keys of a pending sequence
+	keyMatch  string            // id of the complete match inside keyBuf, "" when none
+	keyMatchN int               // keys of keyBuf that keyMatch covers
+	keyGen    int               // bumped on every wait; a keyTimeoutMsg from an older wait is stale
 
 	// Logs tab: present only with an embedded node (logs != nil). logsScroll is the
 	// absolute top-line offset when paused; logsFollow pins to the newest line and

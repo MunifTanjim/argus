@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -88,6 +89,7 @@ func sampleChunks() []transcript.Chunk {
 
 func loaded() model {
 	m := testModel()
+	m.mode = modeSession
 	m.transcript.chunks = sampleChunks()
 	return m
 }
@@ -224,29 +226,28 @@ func TestExpandDefaultsAndToggle(t *testing.T) {
 		t.Errorf("AI chunk with items should be expandable")
 	}
 	m.transcript.cursor = 1
-	m.toggleExpand(1)
+	m.setExpanded(1, true)
 	if !m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Errorf("AI chunk should be expanded after toggle")
 	}
 }
 
-func TestSpaceKeyTogglesFold(t *testing.T) {
+func TestFoldKeysExpandAndCollapse(t *testing.T) {
 	m := loaded()
 	m.transcript.cursor = 1 // the expandable AI chunk
 	if m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Fatal("AI chunk should start collapsed")
 	}
 
-	// space (which reports msg.String() == "space" in Bubble Tea v2) folds it open.
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: ' '})
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = res.(model)
 	if !m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Error("space should expand the selected card")
+		t.Error("l should expand the selected card")
 	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: ' '})
+	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	m = res.(model)
 	if m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Error("space should collapse the selected card")
+		t.Error("h should collapse the selected card")
 	}
 }
 
@@ -295,29 +296,29 @@ func TestRestoreChunkCursorByID(t *testing.T) {
 	}
 }
 
-func TestKeyTurnNav(t *testing.T) {
+func TestKeyCardNav(t *testing.T) {
 	m := loaded()
 	m.height = 6 // tiny viewport
 	last := len(m.transcript.chunks) - 1
 
-	// J/K move the chunk cursor between turns and clamp at the ends.
+	// }/{ move the chunk cursor between cards and clamp at the ends.
 	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'J'})
+		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 		m = res.(model)
 	}
 	if m.transcript.cursor != last {
 		t.Errorf("cursor should clamp at last chunk %d, got %d", last, m.transcript.cursor)
 	}
 	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'K'})
+		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
 		m = res.(model)
 	}
 	if m.transcript.cursor != 0 {
-		t.Errorf("after turn-nav up: cursor=%d, want 0", m.transcript.cursor)
+		t.Errorf("after card-nav up: cursor=%d, want 0", m.transcript.cursor)
 	}
 }
 
-func TestKeyTurnNavReanchorsToVisible(t *testing.T) {
+func TestKeyCardNavReanchorsToVisible(t *testing.T) {
 	m := loaded()
 	m.height = 6 // tiny viewport so the cursor can scroll out of view
 	m.transcript.cursor = 0
@@ -332,121 +333,217 @@ func TestKeyTurnNavReanchorsToVisible(t *testing.T) {
 	wantFirst := m.firstVisibleChunk()
 	scrollBefore := m.transcript.scroll
 
-	// J with an off-screen cursor selects the first visible card without moving
+	// } with an off-screen cursor selects the first visible card without moving
 	// the viewport (instead of yanking back up to cursor+1).
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'J'})
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	m = res.(model)
 	if m.transcript.cursor != wantFirst {
-		t.Errorf("J off-screen: tcursor=%d, want first-visible %d", m.transcript.cursor, wantFirst)
+		t.Errorf("} off-screen: tcursor=%d, want first-visible %d", m.transcript.cursor, wantFirst)
 	}
 	if m.transcript.scroll != scrollBefore {
-		t.Errorf("J off-screen should not move the viewport: %d -> %d", scrollBefore, m.transcript.scroll)
+		t.Errorf("} off-screen should not move the viewport: %d -> %d", scrollBefore, m.transcript.scroll)
 	}
 
-	// With the cursor now visible, J advances by one as before.
+	// With the cursor now visible, } advances by one as before.
 	if m.cursorVisible() {
 		prev := m.transcript.cursor
-		res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: 'J'})
+		res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 		m = res.(model)
 		if m.transcript.cursor != min(prev+1, len(m.transcript.chunks)-1) {
-			t.Errorf("J visible: tcursor=%d, want %d", m.transcript.cursor, min(prev+1, len(m.transcript.chunks)-1))
+			t.Errorf("} visible: tcursor=%d, want %d", m.transcript.cursor, min(prev+1, len(m.transcript.chunks)-1))
 		}
 	}
 }
 
-func TestArrowLineScroll(t *testing.T) {
-	m := loaded()
-	m.height = 6 // tiny viewport so content exceeds it
-	cursor0 := m.transcript.cursor
+func scrollTestView(height int, texts ...string) model {
+	m := testModel()
+	m.mode = modeSession
+	m.height = height
+	for i, text := range texts {
+		m.transcript.chunks = append(m.transcript.chunks,
+			transcript.Chunk{ID: fmt.Sprintf("u%d", i), Kind: transcript.ChunkUser, Text: text})
+	}
+	return m
+}
 
-	// Arrows scroll the viewport by lines without moving the chunk cursor.
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = res.(model)
-	if m.transcript.scroll == 0 {
-		t.Errorf("down arrow should advance scroll, got %d", m.transcript.scroll)
+func pressScrollKey(m model, code rune) model {
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: code, Text: string(code)})
+	return res.(model)
+}
+
+func lineScrollTestView() model {
+	m := scrollTestView(14, "a", "b", "c", "d", "e", "f", "g")
+	m.transcript.chunks[3] = transcript.Chunk{ID: "a3", Kind: transcript.ChunkAI, Text: strings.Repeat("line\n\n", 20)}
+	return m
+}
+
+func TestLineScrollDownNeverSkipsACard(t *testing.T) {
+	m := lineScrollTestView()
+	lines, first := m.layoutChunks()
+	last := len(first) - 1
+	for range 200 {
+		cursor, scroll := m.transcript.cursor, m.transcript.scroll
+		_, end := chunkSpan(cursor, first, len(lines))
+		bottomHidden := end > scroll+m.viewportHeight()
+		m = pressScrollKey(m, 'j')
+		switch {
+		case bottomHidden:
+			if m.transcript.cursor != cursor || m.transcript.scroll <= scroll {
+				t.Fatalf("j with card %d cut off at the bottom should scroll: cursor %d->%d scroll %d->%d", cursor, cursor, m.transcript.cursor, scroll, m.transcript.scroll)
+			}
+		case cursor < last:
+			if m.transcript.cursor != cursor+1 {
+				t.Fatalf("j with card %d fully visible should select the next card, cursor=%d", cursor, m.transcript.cursor)
+			}
+		default:
+			if m.transcript.cursor != last || m.transcript.scroll != scroll {
+				t.Fatalf("j at the fully visible last card should stay put: cursor=%d scroll %d->%d", m.transcript.cursor, scroll, m.transcript.scroll)
+			}
+			return
+		}
+		if !m.cursorVisible() {
+			t.Fatalf("j left card %d off screen at scroll %d", m.transcript.cursor, m.transcript.scroll)
+		}
 	}
-	if m.transcript.cursor != cursor0 {
-		t.Errorf("down arrow should not move the chunk cursor: %d -> %d", cursor0, m.transcript.cursor)
+	t.Fatal("j never reached the last card")
+}
+
+func TestLineScrollUpNeverSkipsACard(t *testing.T) {
+	m := lineScrollTestView()
+	lines, first := m.layoutChunks()
+	m.transcript.cursor = len(first) - 1
+	m.transcript.scroll = m.maxScroll()
+	for range 200 {
+		cursor, scroll := m.transcript.cursor, m.transcript.scroll
+		start, _ := chunkSpan(cursor, first, len(lines))
+		topHidden := start < scroll
+		m = pressScrollKey(m, 'k')
+		switch {
+		case topHidden:
+			if m.transcript.cursor != cursor || m.transcript.scroll >= scroll {
+				t.Fatalf("k with card %d cut off at the top should scroll: cursor %d->%d scroll %d->%d", cursor, cursor, m.transcript.cursor, scroll, m.transcript.scroll)
+			}
+		case cursor > 0:
+			if m.transcript.cursor != cursor-1 {
+				t.Fatalf("k with card %d fully visible should select the previous card, cursor=%d", cursor, m.transcript.cursor)
+			}
+		default:
+			if m.transcript.cursor != 0 || m.transcript.scroll != 0 {
+				t.Fatalf("k at the first card should stay put: cursor=%d scroll=%d", m.transcript.cursor, m.transcript.scroll)
+			}
+			return
+		}
+		if !m.cursorVisible() {
+			t.Fatalf("k left card %d off screen at scroll %d", m.transcript.cursor, m.transcript.scroll)
+		}
 	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: tea.KeyUp})
-	m = res.(model)
-	if m.transcript.scroll != 0 {
-		t.Errorf("up arrow should return scroll toward 0, got %d", m.transcript.scroll)
+	t.Fatal("k never reached the first card")
+}
+
+func TestLineScrollRevealsNextCardBelowViewport(t *testing.T) {
+	m := scrollTestView(14, "a", "b", "c", "d", "e", "f", "g", "h")
+	lines, first := m.layoutChunks()
+	h := m.viewportHeight()
+	cursor := 1
+	_, end := chunkSpan(cursor, first, len(lines))
+	m.transcript.cursor, m.transcript.scroll = cursor, end-h
+	if m.transcript.scroll <= 0 || first[cursor+1] < end {
+		t.Fatalf("setup: card %d should end at the bottom of a scrolled viewport (h=%d, first=%v)", cursor, h, first)
+	}
+
+	m = pressScrollKey(m, 'j')
+	if m.transcript.cursor != cursor+1 {
+		t.Fatalf("j should select the next card, cursor=%d", m.transcript.cursor)
+	}
+	if first[cursor+1] >= m.transcript.scroll+h {
+		t.Errorf("j should scroll the newly selected card into view, scroll=%d first=%d h=%d", m.transcript.scroll, first[cursor+1], h)
 	}
 }
 
-func TestSmartTurnAdvancesWhenCardFits(t *testing.T) {
+func TestLineScrollInsideLongCardKeepsSelection(t *testing.T) {
+	m := scrollTestView(14, "a", "b", "c")
+	m.transcript.chunks[1] = transcript.Chunk{ID: "a1", Kind: transcript.ChunkAI, Text: strings.Repeat("line\n\n", 40)}
+	lines, first := m.layoutChunks()
+	if start, end := chunkSpan(1, first, len(lines)); end-start < m.viewportHeight()+6 {
+		t.Fatalf("setup: card 1 should be taller than the viewport plus two scroll steps (span=%d, h=%d)", end-start, m.viewportHeight())
+	}
+	m.transcript.cursor = 1
+	m.transcript.scroll = first[1] + 3
+
+	m = pressScrollKey(m, 'j')
+	if m.transcript.cursor != 1 {
+		t.Errorf("j inside a long card should keep it selected, cursor=%d", m.transcript.cursor)
+	}
+	m = pressScrollKey(m, 'k')
+	m = pressScrollKey(m, 'k')
+	if m.transcript.cursor != 1 {
+		t.Errorf("k inside a long card should keep it selected, cursor=%d", m.transcript.cursor)
+	}
+}
+
+func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
+	m := loaded()
+	m.height = 200 // every card fits: nothing to scroll
+	m.transcript.cursor = 0
+	last := len(m.transcript.chunks) - 1
+	press := func(k tea.KeyPressMsg) {
+		res, _ := m.handleTranscriptKey(k)
+		m = res.(model)
+	}
+
+	for i := 1; i <= last; i++ {
+		press(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		if m.transcript.cursor != i || m.transcript.scroll != 0 {
+			t.Fatalf("j #%d: cursor=%d scroll=%d, want cursor=%d scroll=0", i, m.transcript.cursor, m.transcript.scroll, i)
+		}
+	}
+	press(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if m.transcript.cursor != last {
+		t.Fatalf("j at the last card should stay put, cursor=%d", m.transcript.cursor)
+	}
+	press(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.transcript.cursor != last-1 {
+		t.Fatalf("up should select the previous card, cursor=%d", m.transcript.cursor)
+	}
+}
+
+func TestCardNavWhenCardFits(t *testing.T) {
 	m := loaded()
 	m.height = 40 // tall viewport: every card fits
 	m.transcript.cursor = 0
 
-	// j selects the next turn (no scrolling) when the current card fits.
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j'})
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	m = res.(model)
 	if m.transcript.cursor != 1 {
-		t.Errorf("j should select the next turn, cursor=%d", m.transcript.cursor)
+		t.Errorf("} should select the next card, cursor=%d", m.transcript.cursor)
 	}
 	if m.transcript.scroll != 0 {
-		t.Errorf("j should not scroll when the card fits, scroll=%d", m.transcript.scroll)
+		t.Errorf("} should not scroll when the card fits, scroll=%d", m.transcript.scroll)
 	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: 'k'})
+	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
 	m = res.(model)
 	if m.transcript.cursor != 0 {
-		t.Errorf("k should select the previous turn, cursor=%d", m.transcript.cursor)
+		t.Errorf("{ should select the previous card, cursor=%d", m.transcript.cursor)
 	}
 }
 
-func TestSmartTurnScrollsOversizedCard(t *testing.T) {
+func TestCardNavSkipsOversizedCard(t *testing.T) {
 	m := loaded()
 	m.height = 6 // tiny viewport so the selected card overflows it
 	m.transcript.cursor = 0
 
-	_, _, _, overflow := m.selectedChunkOverflow()
-	if !overflow {
+	lines, first := m.layoutChunks()
+	if start, end := chunkSpan(0, first, len(lines)); end-start <= m.viewportHeight() {
 		t.Fatal("setup: selected card should overflow the viewport")
 	}
 
-	// j scrolls through the oversized card instead of skipping its body.
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j'})
+	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	m = res.(model)
-	if m.transcript.scroll == 0 {
-		t.Errorf("j should scroll an oversized card, scroll=%d", m.transcript.scroll)
-	}
-	if m.transcript.cursor != 0 {
-		t.Errorf("j should not move the cursor while scrolling, cursor=%d", m.transcript.cursor)
-	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: 'k'})
-	m = res.(model)
-	if m.transcript.scroll != 0 {
-		t.Errorf("k should scroll back up, scroll=%d", m.transcript.scroll)
-	}
-}
-
-// TestSmartTurnAtLastCardStaysAtBottom verifies j on a fully-scrolled last card stays put.
-func TestSmartTurnAtLastCardStaysAtBottom(t *testing.T) {
-	m := testModel()
-	m.height = 6 // tiny viewport so the last card overflows it
-	m.transcript.chunks = []transcript.Chunk{
-		{ID: "u1", Kind: transcript.ChunkUser, Text: "hi"},
-		{ID: "u2", Kind: transcript.ChunkUser, Text: strings.Repeat("line\n", 40)},
-	}
-	m.transcript.cursor = 1 // last card
-
-	_, end, h, overflow := m.selectedChunkOverflow()
-	if !overflow {
-		t.Fatal("setup: last card should overflow the viewport")
-	}
-	m.transcript.scroll = end - h // scroll to the bottom of the tall last card
-	m.clampScrollNow()
-	bottom := m.transcript.scroll
-
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j'})
-	m = res.(model)
-	if m.transcript.scroll != bottom {
-		t.Fatalf("j at bottom of last card should stay put: %d -> %d", bottom, m.transcript.scroll)
-	}
 	if m.transcript.cursor != 1 {
-		t.Fatalf("cursor should stay on the last card, got %d", m.transcript.cursor)
+		t.Errorf("} should jump past an oversized card, cursor=%d", m.transcript.cursor)
+	}
+	if start, _ := chunkSpan(1, first, len(lines)); m.transcript.scroll != start {
+		t.Errorf("} should pin the next card to the top, scroll=%d, want %d", m.transcript.scroll, start)
 	}
 }
 

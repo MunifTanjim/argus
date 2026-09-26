@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -288,5 +289,63 @@ func TestIssueBranchTemplateDefault(t *testing.T) {
 	isolateConfigDir(t)
 	if got := load(t, "").Workspace.IssueBranchTemplate; got != "issue-{{.Issue.Number}}-{{.Issue.Slug}}" {
 		t.Errorf("IssueBranchTemplate = %q, want issue-{{.Issue.Number}}-{{.Issue.Slug}}", got)
+	}
+}
+
+func TestKeyTimeoutDefault(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.TUI.KeyTimeout != time.Second {
+		t.Errorf("tui.key-timeout = %v, want 1s", c.TUI.KeyTimeout)
+	}
+}
+
+func TestLeaderDefault(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.TUI.LeaderKey != "<Space>" {
+		t.Errorf("tui.leader-key = %q, want <Space>", c.TUI.LeaderKey)
+	}
+}
+
+func TestReadKeymapsKeepsCaseAndDots(t *testing.T) {
+	path := writeConfig(t, `
+tui:
+  key-timeout: 500ms
+  keymap:
+    global:
+      "g.": toggle show-hidden
+      "G": goto bottom
+      "z": ""
+      "x":
+    transcript:
+      "gt": goto top
+      "n": 5
+`)
+	km, err := config.ReadKeymaps(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]map[string]string{
+		"global":     {"g.": "toggle show-hidden", "G": "goto bottom", "z": "", "x": ""},
+		"transcript": {"gt": "goto top", "n": "5"},
+	}
+	if !reflect.DeepEqual(km, want) {
+		t.Errorf("keymaps = %v, want %v", km, want)
+	}
+	if c := load(t, path); c.TUI.KeyTimeout != 500*time.Millisecond {
+		t.Errorf("tui.key-timeout = %v, want 500ms", c.TUI.KeyTimeout)
+	}
+}
+
+func TestReadKeymapsWithoutFile(t *testing.T) {
+	km, err := config.ReadKeymaps("")
+	if err != nil || km != nil {
+		t.Errorf("no file should give no keymaps: %v %v", km, err)
+	}
+}
+
+func TestReadKeymapsBadShape(t *testing.T) {
+	path := writeConfig(t, "tui:\n  keymap:\n    global: 5\n")
+	if _, err := config.ReadKeymaps(path); err == nil {
+		t.Error("a section that is not a map should fail")
 	}
 }

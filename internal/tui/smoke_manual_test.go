@@ -34,7 +34,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	t.Logf("collapsed layout: %d lines, %d chunk offsets", len(lines), len(first))
 
 	// Expand-all layout (exercise item rows + last-output bodies).
-	m.setAllExpanded(true)
+	setAllExpanded(&m, true)
 	linesExp, _ := m.layoutChunks()
 	t.Logf("expanded layout: %d lines", len(linesExp))
 
@@ -46,7 +46,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	}
 
 	// Print the top-of-transcript window for eyeballing.
-	m.setAllExpanded(false)
+	setAllExpanded(&m, false)
 	m.transcript.cursor, m.transcript.scroll = 0, 0
 	out := m.transcriptBody()
 	preview := strings.SplitN(out, "\n", 45)

@@ -408,6 +408,13 @@ func TestMultiQuestionTabBarRenders(t *testing.T) {
 	}
 }
 
+func TestMultiQuestionFooterLabelsBothTabKeys(t *testing.T) {
+	m := promptModel(multiQuestion())
+	if h := m.helpBinding(promptKeys.TabPrev).Help(); h.Key != "←/→" || h.Desc != "tabs" {
+		t.Errorf("question tabs label = %q %q, want ←/→ tabs", h.Key, h.Desc)
+	}
+}
+
 func TestMultiQuestionTabNavigation(t *testing.T) {
 	m := promptModel(multiQuestion())
 	// right advances the tab, left goes back, both clamp.

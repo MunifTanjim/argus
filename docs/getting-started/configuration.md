@@ -42,7 +42,7 @@ log:
 
 ## Workspaces
 
-In the TUI, `n` creates a git worktree for a new workspace. Two templates set the
+In the TUI, `a` creates a git worktree for a new workspace. Two templates set the
 names. Both use Go template syntax.
 
 ::: v-pre
@@ -118,11 +118,183 @@ Use full paths, or set `PATH` in the script.
   TUI or `argus workspace setup <workspace>`.
 - **Teardown** runs before argus deletes the worktree. It stops after 20
   seconds. If it fails, the remove stops and the worktree stays. A forced
-  remove (`X`, or `--force`) continues and shows the failure as a warning. If
+  remove (`D`, or `--force`) continues and shows the failure as a warning. If
   the workspace has uncommitted changes, a remove that is not forced stops
   before teardown runs.
 
 Make both scripts safe to run more than one time.
+
+## Keymaps
+
+The default keys follow Vim. The command table lists them. You can change any key in `tui.keymap`. A mapping has a key sequence on the left and a command name on the right. `argus view` also uses these keymaps.
+
+A command name is one of these:
+
+- A verb and an argument that change the view or the focus, for example `focus left` or `toggle line-wrap`. `open` alone opens the selected item.
+- An entity and an action on the selected entity, for example `project pin` or `session kill`.
+- A single word: `back`, `quit`, `help`, `refresh`, or `filter-projects`.
+
+Extra spaces in a command name do not matter.
+
+```yaml
+tui:
+  leader-key: "<Space>"
+  key-timeout: 1s
+  keymap:
+    global:
+      "<Leader>x": toggle show-gone
+      "<C-q>": quit
+    transcript:
+      "j": next card
+      "gg": ""
+```
+
+- Priority, from highest to lowest: the screen section, then `global`, then the defaults.
+- A mapping adds a key to the command. The default keys stay, unless you remove a key with `""` or map it to a different command.
+- A mapping in `global` applies only on screens that have its command.
+- Screen names: `home`, `projects`, `session`, `transcript`, `detail`, `history`, `logs`.
+- In a text input, sequences do not work. Single keys of text input commands, for example `workspace pick-target` and `answer submit`, use the keymaps.
+- y/n prompts and the live screen do not use keymaps.
+- Environment variables cannot set keymaps. `key-timeout` has `ARGUS_TUI_KEY_TIMEOUT`.
+
+### Leader
+
+`tui.leader-key` sets the key that `<Leader>` stands for. The default is `<Space>`. The environment variable is `ARGUS_TUI_LEADER_KEY`.
+
+The leader must be one key. A leader that is not valid notation or is more than one key triggers a startup warning that names it. Argus uses `<Space>` instead.
+
+In text inputs, the leader has no meaning. A printable leader such as `<Space>` types itself.
+
+### Key notation
+
+::: v-pre
+| Form | Meaning |
+|---|---|
+| `g`, `G`, `.`, `?` | A plain character. Case matters. |
+| `g.`, `gg`, `g<C-b>` | A sequence: the keys in order. |
+| `<C-x>` | ctrl+x |
+| `<M-x>`, `<A-x>` | alt+x |
+| `<S-x>` | shift+x |
+| `<D-x>` | super+x |
+| `<C-S-b>`, `<M-C-t>` | More than one modifier, in any order. |
+| `<CR>`, `<Enter>`, `<Return>` | enter |
+| `<Esc>` | escape |
+| `<Space>` | space |
+| `<Tab>`, `<S-Tab>` | tab, shift+tab |
+| `<BS>` | backspace |
+| `<Up>`, `<Down>`, `<Left>`, `<Right>` | arrows |
+| `<PageUp>`, `<PageDown>`, `<Home>`, `<End>` | paging keys |
+| `<F1>` to `<F12>` | function keys |
+| `<lt>` | the `<` character |
+| `<Leader>` | the leader key (set by `tui.leader-key`, default `<Space>`) |
+:::
+
+Modifier letters and key names are not case-sensitive: `<cr>` equals `<CR>`, and `<c-b>` equals `<C-b>`. With ctrl, the letter case does not matter: `<C-B>` equals `<C-b>`. Write shift as `S-`. With alt, the letter case matters: `<M-a>` and `<M-A>` are different keys.
+
+### Sequences
+
+If a key maps to a command and also starts a longer sequence, the TUI waits `key-timeout` for the next key. If the timer ends, the mapped command runs. If a key only starts a longer sequence and the timer ends, the key is dropped.
+
+Press `<Esc>` to cancel pending keys. While keys are pending, the footer shows the pending keys and the keys that can follow with their commands. It also shows the command that runs when the timer ends as `(wait) <command>`.
+
+If the next key fits no sequence, the TUI runs the complete part first, if one exists. Then it handles the new key as a new sequence. For example, with `tx` mapped, pressing `t` then `j` runs `toggle diff-vs-target`, then `next`.
+
+### Keys that need the Kitty keyboard protocol
+
+These mappings need the Kitty keyboard protocol:
+
+- a key with two or more modifiers
+- a key with super, for example `<D-x>`
+- `<C-CR>`, `<S-CR>`, `<C-Tab>`, `<C-BS>`, and `<S-BS>`
+- ctrl with a character other than a letter or `@ [ \ ] ^ _ ?`, for example `<C-.>` or `<C-1>`
+
+If the terminal did not report the protocol, the TUI shows a warning at startup:
+
+`keymap: <C-S-b> needs a terminal with the Kitty keyboard protocol`
+
+### Errors
+
+A bad entry is skipped. The other entries still load. A bad entry is one of these:
+
+- an unknown screen
+- an unknown command, or an unknown argument or action
+- bad notation
+- a shell command
+- a sequence for a command that works only in a text input (for example `workspace pick-target`)
+
+At startup, the footer shows the first error and a count:
+
+`keymap: transcript "gt": unknown argument "tpo" for goto (bottom, top) (+2 more)`
+
+### Commands
+
+The `g?` sequence shows the command name next to each key.
+
+<!-- keymap-commands:start -->
+| Command | Screens | Default keys |
+|---|---|---|
+| `answer submit` | detail, session | `<CR>` |
+| `back` | detail, history, home, logs, projects, session, transcript | `<Esc>` |
+| `filter-projects` | projects | `/` |
+| `focus down` | detail, history, home, logs, projects, session, transcript | `<C-w>j` |
+| `focus left` | detail, history, home, logs, projects, session, transcript | `<C-w>h` |
+| `focus next` | detail, history, home, logs, projects, session, transcript | `<C-w>w` |
+| `focus prev` | detail, history, home, logs, projects, session, transcript | `<C-w>W` |
+| `focus prompt` | detail, session | `<Tab>` |
+| `focus right` | detail, history, home, logs, projects, session, transcript | `<C-w>l` |
+| `focus up` | detail, history, home, logs, projects, session, transcript | `<C-w>k` |
+| `fold close` | detail, projects, session, transcript | `<Left>` `h` `zc` |
+| `fold open` | detail, projects, session, transcript | `<Right>` `l` `zo` |
+| `goto bottom` | detail, history, home, logs, projects, session, transcript | `G` |
+| `goto top` | detail, history, home, logs, projects, session, transcript | `gg` |
+| `help` | history, home, logs, projects | `g?` |
+| `next` | detail, history, home, projects, session, transcript | `<Down>` `j` |
+| `next card` | session, transcript | `}` |
+| `next diff-file` | detail, projects, session | `]f` |
+| `open` | detail, history, home, projects, session, transcript | `<CR>` |
+| `open live-screen` | detail, session | `<C-t>` |
+| `open setup-log` | projects | `L` |
+| `open tmux-pane` | home, projects | `O` |
+| `option select` | detail, session | `<Space>` |
+| `prev` | detail, history, home, projects, session, transcript | `<Up>` `k` |
+| `prev card` | session, transcript | `{` |
+| `prev diff-file` | detail, projects, session | `[f` |
+| `project forget` | projects | `F` |
+| `project hide` | projects | `H` |
+| `project pin` | projects | `P` |
+| `project rename` | projects | `r` |
+| `quit` | home, projects | `Q` |
+| `redaction add` | detail, transcript | `d` |
+| `redaction list` | detail, transcript | `D` |
+| `redaction remove` | detail, transcript | `u` |
+| `redaction save` | detail, transcript | `W` |
+| `refresh` | detail, history, home, projects, session | `gr` |
+| `scroll down` | detail, logs, projects, session, transcript | `<Down>` `j` |
+| `scroll half-page-down` | detail, history, home, logs, projects, session, transcript | `<C-d>` `<PageDown>` |
+| `scroll half-page-up` | detail, history, home, logs, projects, session, transcript | `<C-u>` `<PageUp>` |
+| `scroll up` | detail, logs, projects, session, transcript | `<Up>` `k` |
+| `session kill` | home, projects | `dd` |
+| `session load-more` | history | `m` |
+| `session resume` | history, transcript | `R` |
+| `session spawn` | home, projects | `s` |
+| `sidebar narrower` | detail, projects, session | `<C-w><lt>` |
+| `sidebar wider` | detail, projects, session | `<C-w>>` |
+| `tab next` | detail, history, home, logs, projects, session | `<Right>` `gt` |
+| `tab prev` | detail, history, home, logs, projects, session | `<Left>` `gT` |
+| `toggle diff-vs-target` | detail, projects, session | `t` |
+| `toggle left-sidebar` | detail, history, home, logs, projects, session, transcript | `<Leader>o` |
+| `toggle line-wrap` | detail, projects, session | `yow` |
+| `toggle right-sidebar` | detail, history, home, logs, projects, session, transcript | `<Leader>e` |
+| `toggle show-gone` | projects | `zg` |
+| `toggle show-hidden` | projects | `z.` |
+| `transcript export` | history, transcript | `E` |
+| `workspace change-target` | projects | `T` |
+| `workspace force-remove` | projects | `D` |
+| `workspace new` | projects | `a` |
+| `workspace pick-target` | projects | `<C-t>` |
+| `workspace remove` | projects | `dd` |
+| `workspace rerun-setup` | projects | `S` |
+<!-- keymap-commands:end -->
 
 ## End-to-End Encryption
 

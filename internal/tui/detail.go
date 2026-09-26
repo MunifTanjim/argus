@@ -213,7 +213,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var detailTable = []keyTableEntry{
 	{detailKeys.Down, model.actDetailDown},
 	{detailKeys.Up, model.actDetailUp},
-	{detailKeys.Fold, model.actDetailFold},
+	{detailKeys.Collapse, model.actDetailCollapse},
+	{detailKeys.Expand, model.actDetailExpand},
 	{detailKeys.Drill, model.actDetailDrill},
 	{detailKeys.HalfDown, model.actDetailHalfDown},
 	{detailKeys.HalfUp, model.actDetailHalfUp},
@@ -273,15 +274,21 @@ func (m model) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
 	return h, start, end, end-start > h
 }
 
-func (m model) actDetailFold(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m model) actDetailCollapse(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := m.topFrame()
-	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) {
+	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && f.isExpanded(f.cursor) {
 		f.toggle(f.cursor)
 		m.ensureDetailVisible()
-		if f.isExpanded(f.cursor) {
-			// Expanding a tool reveals its body; fetch on demand.
-			return m, m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
-		}
+	}
+	return m, nil
+}
+
+func (m model) actDetailExpand(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	f := m.topFrame()
+	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && !f.isExpanded(f.cursor) {
+		f.toggle(f.cursor)
+		m.ensureDetailVisible()
+		return m, m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
 	}
 	return m, nil
 }

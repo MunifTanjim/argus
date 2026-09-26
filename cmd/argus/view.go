@@ -30,7 +30,11 @@ tool input and output. Share them only with people you trust.`,
 			if _, err := os.Stat(path); err != nil {
 				return fail(cmd, err)
 			}
-			if err := tui.RunBundle(path, redact); err != nil {
+			cfg, err := resolveTUIConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			if err := tui.RunBundle(path, redact, cfg.TUI); err != nil {
 				return fail(cmd, err)
 			}
 			return nil

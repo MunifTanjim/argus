@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
@@ -182,6 +181,18 @@ func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if c.picking {
 		return m.handleTargetPickKey(msg)
 	}
+	if m.matches(msg, createKeys.Target) {
+		if c.tab == ctPRs {
+			return m, nil
+		}
+		c.picking = true
+		c.targetPick = newBranchPicker()
+		if c.branches.loaded {
+			c.targetPick.branches, c.targetPick.loaded, c.targetPick.err = c.branches.branches, true, c.branches.err
+			return m, nil
+		}
+		return m, m.fetchBranchesCmd(c.projectID)
+	}
 	switch msg.String() {
 	case "esc":
 		m.projects.create = createState{}
@@ -205,17 +216,6 @@ func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			focus = c.filter.Focus()
 		}
 		return m, tea.Batch(focus, m.ensureCreateData(), m.maybeSpin())
-	case "ctrl+t":
-		if c.tab == ctPRs {
-			return m, nil
-		}
-		c.picking = true
-		c.targetPick = newBranchPicker()
-		if c.branches.loaded {
-			c.targetPick.branches, c.targetPick.loaded, c.targetPick.err = c.branches.branches, true, c.branches.err
-			return m, nil
-		}
-		return m, m.fetchBranchesCmd(c.projectID)
 	case "enter":
 		return m.submitCreate()
 	}
@@ -327,7 +327,7 @@ func (m model) createView(w, h int) string {
 	c := m.projects.create
 	head := StylePrimaryBold.Render("New workspace in "+c.project) + dimStyle.Render("   target: "+c.targetLabel())
 	if c.tab != ctPRs {
-		head += dimStyle.Render("  (^t)")
+		head += dimStyle.Render("  (" + m.keyText(createKeys.Target) + ")")
 	}
 	if p, ok := m.findProject(c.projectID); ok && p.Scripts != nil && p.Scripts.Setup != "" {
 		head += "\n" + dimStyle.Render("setup: "+commandLine(p.Scripts.Setup))
@@ -401,16 +401,15 @@ func spinnerFrame(m model) string {
 
 func (m model) createFooter() string {
 	c := m.projects.create
-	k := projectsKeys
 	switch {
 	case c.creating:
-		return m.footer(helpAs(k.Back, "esc", "hide"))
+		return m.footer(hint("esc", "hide"))
 	case c.picking:
-		return m.footer(helpAs(k.Up, "↑/↓", "move"), helpAs(k.Enter, "enter", "select"), helpAs(k.Back, "esc", "back"))
+		return m.footer(hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "back"))
 	}
-	b := []key.Binding{helpAs(k.Enter, "enter", "create"), helpAs(k.Focus, "tab", "next tab")}
+	b := []binding{hint("enter", "create"), hint("tab", "next tab")}
 	if c.tab != ctPRs {
 		b = append(b, createKeys.Target)
 	}
-	return m.footer(append(b, helpAs(k.Back, "esc", "cancel"))...)
+	return m.footer(append(b, hint("esc", "cancel"))...)
 }

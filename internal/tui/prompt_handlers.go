@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -23,9 +22,9 @@ func (m model) handlePromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// controls. These keys are never text or selection, so intercept them for
 	// every interaction kind before the per-kind handlers run.
 	switch {
-	case key.Matches(msg, promptKeys.HalfUp):
+	case m.matches(msg, promptKeys.HalfUp):
 		return m.scrollDock(-1), nil
-	case key.Matches(msg, promptKeys.HalfDown):
+	case m.matches(msg, promptKeys.HalfDown):
 		return m.scrollDock(1), nil
 	}
 
@@ -45,7 +44,7 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if s := m.sessions[m.selectedID]; !s.AcceptsInput() {
 		return m, nil
 	}
-	if msg.String() == "enter" {
+	if m.matches(msg, promptKeys.Submit) {
 		id := m.selectedID
 		txt := strings.TrimSpace(m.prompt.reply.Value())
 		m.prompt.reply.SetValue("")
@@ -66,14 +65,14 @@ func (m model) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) handleDecisionKey(msg tea.KeyPressMsg, ix *session.Interaction) (tea.Model, tea.Cmd) {
 	opts := decisionOptions(ix)
 	denying := m.decisionRejecting(ix)
-	switch msg.String() {
-	case "up", "ctrl+p":
+	switch {
+	case m.matches(msg, promptKeys.Up):
 		m.prompt.decisionSel = max(0, m.prompt.decisionSel-1)
 		return m, nil
-	case "down", "ctrl+n":
+	case m.matches(msg, promptKeys.Down):
 		m.prompt.decisionSel = min(len(opts)-1, m.prompt.decisionSel+1)
 		return m, nil
-	case "enter":
+	case m.matches(msg, promptKeys.Submit):
 		return m.submitDecision(ix)
 	}
 	if denying {
@@ -104,42 +103,27 @@ func (m model) handleQuestionKey(msg tea.KeyPressMsg, ix *session.Interaction) (
 		return m.chatAboutQuestions(ix)
 	}
 
-	// j/k navigate like arrows, unless editing a custom answer (then they type).
-	key := msg.String()
-	if !accepts {
-		switch key {
-		case "j":
-			key = "down"
-		case "k":
-			key = "up"
-		}
-	}
-
-	switch key {
-	case "left":
-		if !accepts { // while editing a custom answer, left/right move the cursor
-			m.prompt.tab = max(0, m.prompt.tab-1)
-			return m, nil
-		}
-	case "right":
-		if !accepts {
-			m.prompt.tab = min(maxTab, m.prompt.tab+1)
-			return m, nil
-		}
-	case "up", "ctrl+p":
+	// While a custom answer is edited, j/k and the question-tab keys go to the
+	// text input.
+	switch {
+	case !accepts && m.matches(msg, promptKeys.TabPrev):
+		m.prompt.tab = max(0, m.prompt.tab-1)
+		return m, nil
+	case !accepts && m.matches(msg, promptKeys.TabNext):
+		m.prompt.tab = min(maxTab, m.prompt.tab+1)
+		return m, nil
+	case m.matches(msg, promptKeys.Up) || (!accepts && msg.String() == "k"):
 		m.prompt.sel[tab] = max(0, m.prompt.sel[tab]-1)
 		return m, nil
-	case "down", "ctrl+n":
+	case m.matches(msg, promptKeys.Down) || (!accepts && msg.String() == "j"):
 		m.prompt.sel[tab] = min(len(opts)-1, m.prompt.sel[tab]+1)
 		return m, nil
-	case "enter":
+	case m.matches(msg, promptKeys.Submit):
 		return m.commitQuestion(ix)
-	case " ", "space":
-		if q.MultiSelect {
-			sel := m.prompt.sel[tab]
-			m.prompt.toggles[tab][sel] = !m.prompt.toggles[tab][sel]
-			return m, nil
-		}
+	case q.MultiSelect && m.matches(msg, promptKeys.Toggle):
+		sel := m.prompt.sel[tab]
+		m.prompt.toggles[tab][sel] = !m.prompt.toggles[tab][sel]
+		return m, nil
 	}
 	if accepts {
 		var cmd tea.Cmd
@@ -170,19 +154,19 @@ func (m model) commitQuestion(ix *session.Interaction) (tea.Model, tea.Cmd) {
 
 // handleSubmitTabKey drives the Submit/Cancel review tab.
 func (m model) handleSubmitTabKey(msg tea.KeyPressMsg, ix *session.Interaction) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "left":
+	switch {
+	case m.matches(msg, promptKeys.TabPrev):
 		m.prompt.tab = len(ix.Questions) - 1
-	case "up", "ctrl+p", "k":
+	case m.matches(msg, promptKeys.Up) || msg.String() == "k":
 		m.prompt.submitSel = max(0, m.prompt.submitSel-1)
-	case "down", "ctrl+n", "j":
+	case m.matches(msg, promptKeys.Down) || msg.String() == "j":
 		m.prompt.submitSel = min(1, m.prompt.submitSel+1)
-	case "enter":
+	case m.matches(msg, promptKeys.Submit):
 		if m.prompt.submitSel == 0 {
 			return m.submitAll(ix)
 		}
 		return m.cancelQuestions(ix)
-	case "c":
+	case msg.String() == "c":
 		return m.chatAboutQuestions(ix)
 	}
 	return m, nil

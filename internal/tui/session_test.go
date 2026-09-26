@@ -122,9 +122,9 @@ func TestSessionRawKeyPanelessViewableOpensTerminal(t *testing.T) {
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
 
-	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("viewable paneless session should trigger a command on ctrl+s")
+		t.Fatal("viewable paneless session should trigger a command on ctrl+t")
 	}
 	runCmd(cmd)
 	found := false
@@ -150,7 +150,7 @@ func TestSessionRawKeyControllableOpensTerminal(t *testing.T) {
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
 
-	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("controllable session should trigger a command")
 	}
@@ -177,7 +177,7 @@ func TestSessionRawKeyPanelessNonPromptableRefuses(t *testing.T) {
 	m.mode = modeSession
 	m.focus, m.historyView = focusHistory, histTranscript
 
-	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatal("non-promptable paneless session should not trigger a command")
 	}
@@ -244,10 +244,10 @@ func TestSessionEscIsContextual(t *testing.T) {
 	}
 	m = sessionModel(&session.Interaction{Kind: session.InteractionPermission})
 	m.focus = focusDock
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = res.(model)
 	if m.focus != focusHistory || m.mode != modeSession {
-		t.Fatalf("dock esc: focus=%v mode=%v", m.focus, m.mode)
+		t.Fatalf("dock tab: focus=%v mode=%v", m.focus, m.mode)
 	}
 }
 
@@ -759,15 +759,15 @@ func TestSessionFooterIncludesRawHintWhenStarting(t *testing.T) {
 	s.Status = session.StatusStarting
 	m.sessions["s1"] = s
 
-	if !strings.Contains(foot(m), "^s") {
-		t.Errorf("starting session footer should include ctrl+s hint: %q", foot(m))
+	if !strings.Contains(foot(m), "^t") {
+		t.Errorf("starting session footer should include ctrl+t hint: %q", foot(m))
 	}
 
-	// Non-starting session should not include ctrl+s in the default footer.
+	// Non-starting session should not include ctrl+t in the default footer.
 	s.Status = session.StatusIdle
 	m.sessions["s1"] = s
-	if strings.Contains(foot(m), "^s") {
-		t.Errorf("idle session footer should not include ctrl+s hint: %q", foot(m))
+	if strings.Contains(foot(m), "^t") {
+		t.Errorf("idle session footer should not include ctrl+t hint: %q", foot(m))
 	}
 }
 

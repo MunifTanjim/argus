@@ -24,6 +24,7 @@ type Config struct {
 	E2EE      E2EEConfig
 	Lock      LockConfig
 	Workspace WorkspaceConfig
+	TUI       TUIConfig
 }
 
 // WorkspaceConfig tunes workspace (git worktree) management.
@@ -35,6 +36,16 @@ type WorkspaceConfig struct {
 	// IssueBranchTemplate names the branch of a workspace created from an
 	// issue. Vars: {{.Issue.Number}}, {{.Issue.Title}}, {{.Issue.Slug}}.
 	IssueBranchTemplate string
+}
+
+type TUIConfig struct {
+	// KeyTimeout is how long a key that also starts a longer mapping waits for
+	// the next key.
+	KeyTimeout time.Duration
+	// LeaderKey is the key that `<Leader>` stands for in keymaps.
+	LeaderKey string
+	// Keymaps is tui.keymap as written: screen → key sequence → command.
+	Keymaps map[string]map[string]string
 }
 
 type GatewayConfig struct {
@@ -139,6 +150,8 @@ var defaults = map[string]any{
 	"lock.genesis":                    "",
 	"workspace.worktree-dir-template": ".worktrees/{{.Branch.Slug}}",
 	"workspace.issue-branch-template": "issue-{{.Issue.Number}}-{{.Issue.Slug}}",
+	"tui.key-timeout":                 "1s",
+	"tui.leader-key":                  "<Space>",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -258,6 +271,10 @@ func FromViper(v *viper.Viper) Config {
 		Workspace: WorkspaceConfig{
 			WorktreeDirTemplate: v.GetString("workspace.worktree-dir-template"),
 			IssueBranchTemplate: v.GetString("workspace.issue-branch-template"),
+		},
+		TUI: TUIConfig{
+			KeyTimeout: v.GetDuration("tui.key-timeout"),
+			LeaderKey:  v.GetString("tui.leader-key"),
 		},
 	}
 }

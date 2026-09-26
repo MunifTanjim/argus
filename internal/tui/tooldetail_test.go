@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,7 +15,28 @@ import (
 func TestMain(m *testing.M) {
 	initTheme(true)
 	initIcons()
-	os.Exit(m.Run())
+	strictScreens = true
+	code := m.Run()
+	if u := unlistedBindings(); len(u) > 0 && code == 0 {
+		fmt.Fprintf(os.Stderr, "bindings matched on a screen that does not list them:\n  %s\n", strings.Join(u, "\n  "))
+		code = 1
+	}
+	if u := unusedNames(unusedExempt); len(u) > 0 && code == 0 && fullRun() {
+		fmt.Fprintf(os.Stderr, "commands listed on a screen that no test matches there:\n  %s\n", strings.Join(u, "\n  "))
+		code = 1
+	}
+	os.Exit(code)
+}
+
+// fullRun reports whether every test ran, so that a command no test matched is
+// a registry error and not a filtered run.
+func fullRun() bool {
+	for _, f := range []string{"test.run", "test.skip"} {
+		if fl := flag.Lookup(f); fl != nil && fl.Value.String() != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func TestToolCategoryColorsActive(t *testing.T) {

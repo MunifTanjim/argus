@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/key"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -89,28 +87,28 @@ func (t fileTree) rows() []treeRow {
 	return out
 }
 
-func (t *fileTree) key(msg tea.KeyPressMsg, page int) treeRequest {
+func (t *fileTree) key(is func(...binding) bool, page int) treeRequest {
 	rows := t.rows()
 	n := len(rows)
 	k := projectsKeys
 	switch {
-	case key.Matches(msg, k.Up):
+	case is(k.Up):
 		t.cursor = cursorUp(t.cursor)
-	case key.Matches(msg, k.Down):
+	case is(k.Down):
 		t.cursor = cursorDown(t.cursor, n)
-	case key.Matches(msg, k.Top):
+	case is(k.Top):
 		t.cursor = 0
-	case key.Matches(msg, k.Bottom):
+	case is(k.Bottom):
 		t.cursor = cursorBottom(n)
-	case key.Matches(msg, k.HalfUp):
+	case is(k.HalfUp):
 		t.cursor = max(0, t.cursor-page)
-	case key.Matches(msg, k.HalfDown):
+	case is(k.HalfDown):
 		t.cursor = min(cursorBottom(n), t.cursor+page)
-	case key.Matches(msg, k.Left):
+	case is(k.Left):
 		t.left(rows)
-	case key.Matches(msg, k.Right) && t.cursor < n && rows[t.cursor].entry.IsDir:
+	case is(k.Right) && t.cursor < n && rows[t.cursor].entry.IsDir:
 		return t.unfold(rows)
-	case key.Matches(msg, k.Enter, k.Right):
+	case is(k.Enter, k.Right):
 		if t.cursor >= n || rows[t.cursor].note != "" {
 			return treeRequest{}
 		}

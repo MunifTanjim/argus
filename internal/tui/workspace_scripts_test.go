@@ -67,6 +67,18 @@ func TestPaneShowsSetupBlock(t *testing.T) {
 	}
 }
 
+func TestSetupBlockFollowsMappedKeys(t *testing.T) {
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"projects": {
+		"<C-s>": "workspace rerun-setup", "<C-o>": "open setup-log",
+	}})
+	m.width, m.height = 120, 30
+	m = withSetup(m, 1, &api.ScriptRun{State: "failed", Command: "pnpm install", ExitCode: 1})
+	m.projects.selectRow("n1:w2")
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "^s runs setup again · ^o shows the full log") {
+		t.Errorf("the setup block names the mapped keys:\n%s", out)
+	}
+}
+
 func withScripts(m model, setup, teardown string) model {
 	m.projects.tree[0].Scripts = &api.ProjectScripts{Setup: setup, Teardown: teardown}
 	m.projects.rebuild()
@@ -125,7 +137,7 @@ func TestRemovePromptNamesTeardown(t *testing.T) {
 	m.width, m.height = 120, 30
 	delete(m.sessions, "n1:s2")
 	m.projects.selectRow("n1:w2")
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "remove workspace repo-feat (feature)? runs teardown: docker compose down · y/n") {
 		t.Errorf("remove prompt = %q", f)
 	}
@@ -281,7 +293,7 @@ func TestMultiLineCommandsStayOnOneLine(t *testing.T) {
 	m.width, m.height = 120, 30
 	delete(m.sessions, "n1:s2")
 	m.projects.selectRow("n1:w2")
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	if f := m.projectsFooter(); !strings.Contains(ansi.Strip(f), "runs teardown: pnpm install … · y/n") || strings.Contains(f, "\x1b[2J") {
 		t.Errorf("remove prompt = %q", f)
 	}
@@ -339,7 +351,7 @@ func TestForceRemovePromptNamesTeardown(t *testing.T) {
 	m.width, m.height = 120, 30
 	delete(m.sessions, "n1:s2")
 	m.projects.selectRow("n1:w2")
-	m, _ = upd(m, keyMsg("X"))
+	m = typeKeys(m, "D")
 	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "force-remove workspace repo-feat (feature)? uncommitted changes are lost · runs teardown: docker compose down · y/n") {
 		t.Errorf("force-remove prompt = %q", f)
 	}

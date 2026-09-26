@@ -77,7 +77,10 @@ func (m model) logsView() string {
 }
 
 func (m model) logsFooter() string {
-	return m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, m.homeTreeKey(), projectsKeys.Help)
+	if len(m.keyBuf) > 0 {
+		return asstStyle.Render(m.keyHint())
+	}
+	return m.footer(listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, m.treeKey(), projectsKeys.Help)
 }
 
 func (m model) handleLogsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -94,9 +97,8 @@ var logsTable = []keyTableEntry{
 	{logsKeys.HalfDown, model.actLogsHalfDown},
 	{logsKeys.Top, model.actLogsTop},
 	{logsKeys.Bottom, model.actLogsBottom},
-	{listKeys.TabPrev, model.actLogsToHistory},  // left/h → History
-	{listKeys.TabNext, model.actLogsToSessions}, // right/l → Sessions
-	{homeTree, model.actListBack},
+	{listKeys.TabPrev, model.actLogsToHistory},  // prev tab → History
+	{listKeys.TabNext, model.actLogsToSessions}, // next tab → Sessions
 	{logsKeys.Back, model.actLogsToSessions},
 }
 

@@ -1,22 +1,34 @@
 package tui
 
 import (
+	"reflect"
+
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
-// Single source of truth for app keybindings: each binding carries both its keys
-// (for key.Matches dispatch) and its help text (for footers), so the two can't
-// drift. Live screen passthrough keys are not here — they are forwarded directly
-// to the PTY, not dispatched as app actions.
+// Live screen passthrough keys are not here: they go to the PTY directly.
 //
-// Help labels are display-only. Paired actions (up/down, g/G) put the combined
-// label on one binding and leave the other's help empty, so the footer shows one entry.
+// Paired actions (labelPairs) share one footer label on the binding that has the
+// help text; the partner's help is empty, so the footer shows one entry.
 
-// nb builds a binding from its keys plus a display label and description.
-func nb(keys []string, label, desc string) key.Binding {
-	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(label, desc))
+// binding is a key binding, the command name that keymaps use for it, and its
+// default keys in Vim notation.
+type binding struct {
+	key.Binding
+	name     string
+	defaults string
+	defKey   string // name and defaults: bindings with equal defKey have equal default keys
+}
+
+func nb(name, defaults, desc string) binding {
+	return binding{
+		Binding:  key.NewBinding(key.WithKeys([]string{}...), key.WithHelp("", desc)),
+		name:     name,
+		defaults: defaults,
+		defKey:   name + "\x00" + defaults,
+	}
 }
 
 // keyAction applies a matched key to the model. Method expressions (e.g.
@@ -25,7 +37,7 @@ type keyAction = func(m model, msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 
 // keyTableEntry pairs a binding with the action it triggers.
 type keyTableEntry struct {
-	b   key.Binding
+	b   binding
 	act keyAction
 }
 
@@ -33,7 +45,7 @@ type keyTableEntry struct {
 // nothing matched (the caller falls back, e.g. to text input).
 func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, tea.Cmd, bool) {
 	for _, e := range table {
-		if key.Matches(msg, e.b) {
+		if m.matches(msg, e.b) {
 			mm, cmd := e.act(m, msg)
 			return mm, cmd, true
 		}
@@ -41,209 +53,293 @@ func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, 
 	return m, nil, false
 }
 
+func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
+	sk := m.keymap().screenKeys(m.screen())
+	if strictScreens {
+		for _, b := range bs {
+			checkListed(m.screen(), b)
+		}
+	}
+	k := msg.String()
+	for _, b := range bs {
+		if !b.Enabled() {
+			continue
+		}
+		if sk.has(b, k) {
+			return true
+		}
+	}
+	return false
+}
+
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown                      key.Binding
-	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown                      binding
+	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit binding
 }{
-	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:     nb([]string{"down", "j"}, "", ""),
-	Top:      nb([]string{"g"}, "", ""),
-	Bottom:   nb([]string{"G"}, "g/G", "ends"),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Open:     nb([]string{"enter"}, "enter", "open"),
-	Jump:     nb([]string{"O"}, "O", "jump"),
-	TabPrev:  nb([]string{"left", "h"}, "", ""),
-	TabNext:  nb([]string{"right", "l"}, "h/l", "tabs"),
-	New:      nb([]string{"s"}, "s", "spawn"),
-	Kill:     nb([]string{"x"}, "x", "kill"),
-	Refresh:  nb([]string{"r"}, "r", "refresh"),
-	Back:     nb([]string{"esc", "escape", "q", "tab", "shift+tab"}, "esc", "tree"),
-	Quit:     nb([]string{"q"}, "q", "quit"),
+	Up:       nb("prev", "<Up> k", "move"),
+	Down:     nb("next", "<Down> j", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", "ends"),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Open:     nb("open", "<CR>", "open"),
+	Jump:     nb("open tmux-pane", "O", "jump"),
+	TabPrev:  nb("tab prev", "gT", ""),
+	TabNext:  nb("tab next", "gt", "tabs"),
+	New:      nb("session spawn", "s", "spawn"),
+	Kill:     nb("session kill", "dd", "kill"),
+	Refresh:  nb("refresh", "gr", "refresh"),
+	Back:     nb("back", "<Esc>", "tree"),
+	Quit:     nb("quit", "Q", "quit"),
 }
 
 var projectsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter, Focus key.Binding
-	Widen, Narrow, ToggleSidebar, Filter, Help                         key.Binding
-	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone  key.Binding
-	Target, DiffMode, Spawn, FocusPrev, ToggleFiles                    key.Binding
-	SideTabPrev, SideTabNext, Refresh, Back                            key.Binding
-	Wrap, NextFile, PrevFile, Forget                                   key.Binding
-	RunSetup, SetupLog                                                 key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter       binding
+	Widen, Narrow, ToggleSidebar, Filter, Help                        binding
+	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone binding
+	Target, DiffMode, Spawn, ToggleFiles                              binding
+	SideTabPrev, SideTabNext, Refresh, Back                           binding
+	Forget                                                            binding
+	RunSetup, SetupLog                                                binding
 }{
-	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:          nb([]string{"down", "j"}, "", ""),
-	Top:           nb([]string{"g"}, "", ""),
-	Bottom:        nb([]string{"G"}, "g/G", "ends"),
-	HalfUp:        nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown:      nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Left:          nb([]string{"left", "h"}, "h/l", "fold"),
-	Right:         nb([]string{"right", "l"}, "", ""),
-	Enter:         nb([]string{"enter", " ", "space"}, "enter", "open"),
-	Focus:         nb([]string{"tab"}, "tab", "pane"),
-	Widen:         nb([]string{">", "."}, "</>", "resize"),
-	Narrow:        nb([]string{"<", ","}, "", ""),
-	ToggleSidebar: nb([]string{"ctrl+b"}, "^b", "sidebar"),
-	Filter:        nb([]string{"/"}, "/", "filter"),
-	Help:          nb([]string{"?"}, "?", "help"),
-	New:           nb([]string{"n"}, "n", "new"),
-	Rename:        nb([]string{"R"}, "R", "rename"),
-	Hide:          nb([]string{"H"}, "H", "hide"),
-	Pin:           nb([]string{"P"}, "P", "pin"),
-	Remove:        nb([]string{"x"}, "x", "remove"),
-	ForceRemove:   nb([]string{"X"}, "", ""),
-	ShowHidden:    nb([]string{"z"}, "z", "hidden"),
-	ShowGone:      nb([]string{"o"}, "o", "gone"),
-	Target:        nb([]string{"T"}, "T", "target"),
-	DiffMode:      nb([]string{"t"}, "t", "vs target"),
-	Spawn:         nb([]string{"s"}, "s", "spawn"),
-	FocusPrev:     nb([]string{"shift+tab"}, "", ""),
-	ToggleFiles:   nb([]string{"ctrl+e"}, "^e", "files"),
-	SideTabPrev:   nb([]string{"["}, "", ""),
-	SideTabNext:   nb([]string{"]"}, "[/]", "tabs"),
-	Refresh:       nb([]string{"r"}, "r", "refresh"),
-	Wrap:          nb([]string{"w"}, "w", "wrap"),
-	Forget:        nb([]string{"F"}, "F", "forget"),
-	NextFile:      nb([]string{"J"}, "J/K", "file"),
-	PrevFile:      nb([]string{"K"}, "", ""),
-	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
-	RunSetup:      nb([]string{"S"}, "S", "setup again"),
-	SetupLog:      nb([]string{"L"}, "L", "setup log"),
+	Up:            nb("prev", "<Up> k", "move"),
+	Down:          nb("next", "<Down> j", ""),
+	Top:           nb("goto top", "gg", ""),
+	Bottom:        nb("goto bottom", "G", "ends"),
+	HalfUp:        nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown:      nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Left:          nb("fold close", "h <Left> zc", "fold"),
+	Right:         nb("fold open", "l <Right> zo", ""),
+	Enter:         nb("open", "<CR>", "open"),
+	Widen:         nb("sidebar wider", "<C-w>>", "resize"),
+	Narrow:        nb("sidebar narrower", "<C-w><lt>", ""),
+	ToggleSidebar: nb("toggle left-sidebar", "<Leader>o", "sidebar"),
+	Filter:        nb("filter-projects", "/", "filter"),
+	Help:          nb("help", "g?", "help"),
+	New:           nb("workspace new", "a", "new"),
+	Rename:        nb("project rename", "r", "rename"),
+	Hide:          nb("project hide", "H", "hide"),
+	Pin:           nb("project pin", "P", "pin"),
+	Remove:        nb("workspace remove", "dd", "remove"),
+	ForceRemove:   nb("workspace force-remove", "D", ""),
+	ShowHidden:    nb("toggle show-hidden", "z.", "hidden"),
+	ShowGone:      nb("toggle show-gone", "zg", "gone"),
+	Target:        nb("workspace change-target", "T", "target"),
+	DiffMode:      nb("toggle diff-vs-target", "t", "vs target"),
+	Spawn:         nb("session spawn", "s", "spawn"),
+	ToggleFiles:   nb("toggle right-sidebar", "<Leader>e", "files"),
+	SideTabPrev:   nb("tab prev", "gT", ""),
+	SideTabNext:   nb("tab next", "gt", "tabs"),
+	Refresh:       nb("refresh", "gr", "refresh"),
+	Forget:        nb("project forget", "F", "forget"),
+	Back:          nb("back", "<Esc>", "back"),
+	RunSetup:      nb("workspace rerun-setup", "S", "setup again"),
+	SetupLog:      nb("open setup-log", "L", "setup log"),
 }
 
 var createKeys = struct {
-	Target key.Binding
+	Target binding
 }{
-	Target: nb([]string{"ctrl+t"}, "^t", "target"),
+	Target: nb("workspace pick-target", "<C-t>", "target"),
 }
 
 var transcriptKeys = struct {
-	ScrollUp, ScrollDown, TurnNext, TurnPrev, CardNext, CardPrev, HalfUp, HalfDown key.Binding
-	Top, Bottom, Fold, Detail, ExpandAll, CollapseAll                              key.Binding
-	Raw, Answer, Export, Back, Resume                                              key.Binding
-	Redact, RedactSave, RedactList                                                 key.Binding
+	ScrollUp, ScrollDown, CardNext, CardPrev, HalfUp, HalfDown binding
+	Top, Bottom, Collapse, Expand, Detail                      binding
+	Answer, Export, Back, Resume                               binding
+	Redact, RedactSave, RedactList                             binding
 }{
-	ScrollUp:    nb([]string{"up"}, "↑/↓", "scroll"),
-	ScrollDown:  nb([]string{"down"}, "", ""),
-	TurnNext:    nb([]string{"j"}, "j/k", "turn"),
-	TurnPrev:    nb([]string{"k"}, "", ""),
-	CardNext:    nb([]string{"J"}, "", ""), // force jump past an oversized card
-	CardPrev:    nb([]string{"K"}, "", ""),
-	HalfUp:      nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown:    nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Top:         nb([]string{"g"}, "", ""),
-	Bottom:      nb([]string{"G"}, "g/G", "ends"),
-	Fold:        nb([]string{" ", "space"}, "space", "fold"),
-	Detail:      nb([]string{"enter"}, "enter", "detail"),
-	ExpandAll:   nb([]string{"o"}, "", ""),
-	CollapseAll: nb([]string{"O"}, "", ""),
-	Raw:         nb([]string{"ctrl+s"}, "^s", "raw"),
-	Answer:      nb([]string{"tab"}, "tab", "answer"),
-	Export:      nb([]string{"E"}, "E", "export"),
-	Back:        nb([]string{"esc", "escape", "q"}, "esc", "back"),
-	Resume:      nb([]string{"R"}, "R", "resume"),
-	Redact:      nb([]string{"d"}, "d", "redact"),
-	RedactList:  nb([]string{"D"}, "D", "redactions"),
-	RedactSave:  nb([]string{"W"}, "W", "save redacted"),
+	ScrollUp:   nb("scroll up", "<Up> k", "scroll"),
+	ScrollDown: nb("scroll down", "<Down> j", ""),
+	CardNext:   nb("next card", "}", "card"),
+	CardPrev:   nb("prev card", "{", ""),
+	HalfUp:     nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown:   nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Top:        nb("goto top", "gg", ""),
+	Bottom:     nb("goto bottom", "G", "ends"),
+	Collapse:   nb("fold close", "h <Left> zc", "fold"),
+	Expand:     nb("fold open", "l <Right> zo", ""),
+	Detail:     nb("open", "<CR>", "detail"),
+	Answer:     nb("focus prompt", "<Tab>", "answer"),
+	Export:     nb("transcript export", "E", "export"),
+	Back:       nb("back", "<Esc>", "back"),
+	Resume:     nb("session resume", "R", "resume"),
+	Redact:     nb("redaction add", "d", "redact"),
+	RedactList: nb("redaction list", "D", "redactions"),
+	RedactSave: nb("redaction save", "W", "save redacted"),
 }
 
 var detailKeys = struct {
-	Up, Down, HalfUp, HalfDown, Top, Bottom, Fold, Drill, Raw, Back key.Binding
+	Up, Down, HalfUp, HalfDown, Top, Bottom, Collapse, Expand, Drill, Back binding
 }{
-	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:     nb([]string{"down", "j"}, "", ""),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Top:      nb([]string{"g"}, "", ""),
-	Bottom:   nb([]string{"G"}, "", ""),
-	Fold:     nb([]string{" ", "space"}, "space", "expand"),
-	Drill:    nb([]string{"enter"}, "enter", "drill"),
-	Raw:      nb([]string{"ctrl+s"}, "^s", "raw"),
-	Back:     nb([]string{"esc", "escape"}, "esc", "back"),
+	Up:       nb("prev", "<Up> k", "move"),
+	Down:     nb("next", "<Down> j", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", ""),
+	Collapse: nb("fold close", "h <Left> zc", "fold"),
+	Expand:   nb("fold open", "l <Right> zo", ""),
+	Drill:    nb("open", "<CR>", "drill"),
+	Back:     nb("back", "<Esc>", "back"),
 }
 
 // sessionKeys are the composite-screen keys handled before the focused region:
 // focus toggle and the raw-screen switch.
 var sessionKeys = struct {
-	Focus, Raw, Files key.Binding
+	Focus, Raw binding
 }{
-	Focus: nb([]string{"tab"}, "tab", "answer"),
-	Raw:   nb([]string{"ctrl+s"}, "^s", "raw"),
-	Files: nb([]string{"ctrl+f"}, "^f", "files"),
+	Focus: nb("focus prompt", "<Tab>", "answer"),
+	Raw:   nb("open live-screen", "<C-t>", "raw"),
+}
+
+// paneKeys move focus between the tree, the main pane, the files sidebar, and
+// the dock.
+var paneKeys = struct {
+	Left, Down, Up, Right, Next, Prev binding
+}{
+	Left:  nb("focus left", "<C-w>h", "tree"),
+	Down:  nb("focus down", "<C-w>j", ""),
+	Up:    nb("focus up", "<C-w>k", ""),
+	Right: nb("focus right", "<C-w>l", "files"),
+	Next:  nb("focus next", "<C-w>w", "pane"),
+	Prev:  nb("focus prev", "<C-w>W", ""),
 }
 
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
-	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Toggle, Read key.Binding
+	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Toggle, Read binding
 }{
-	Up:       nb([]string{"up", "ctrl+p"}, "↑/↓", "select"),
-	Down:     nb([]string{"down", "ctrl+n"}, "", ""),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "^u/^d", "scroll"), // combined label; HalfDown's stays empty
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	TabPrev:  nb([]string{"left"}, "←/→", "tabs"),
-	TabNext:  nb([]string{"right"}, "", ""),
-	Submit:   nb([]string{"enter"}, "enter", "submit"),
-	Next:     nb([]string{"enter"}, "enter", "next"), // footer label for multi-question advance
-	Toggle:   nb([]string{" ", "space"}, "space", "toggle"),
-	Read:     nb([]string{"tab", "esc", "escape"}, "tab/esc", "read"),
+	Up:       nb("prev", "<Up>", "select"),
+	Down:     nb("next", "<Down>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", "scroll"),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	TabPrev:  nb("tab prev", "<Left>", "tabs"),
+	TabNext:  nb("tab next", "<Right>", ""),
+	Submit:   nb("answer submit", "<CR>", "submit"),
+	Next:     nb("answer submit", "<CR>", "next"), // footer label for multi-question advance
+	Toggle:   nb("option select", "<Space>", "toggle"),
+	Read:     nb("focus prompt", "<Tab>", "read"),
 }
 
 var historyProjectsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, Refresh, Back key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, Refresh, Back binding
 }{
-	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:     nb([]string{"down", "j"}, "", ""),
-	Top:      nb([]string{"g"}, "", ""),
-	Bottom:   nb([]string{"G"}, "g/G", "ends"),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Open:     nb([]string{"enter"}, "enter", "open"),
-	Refresh:  nb([]string{"r"}, "r", "refresh"),
-	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Up:       nb("prev", "<Up> k", "move"),
+	Down:     nb("next", "<Down> j", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", "ends"),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Open:     nb("open", "<CR>", "open"),
+	Refresh:  nb("refresh", "gr", "refresh"),
+	Back:     nb("back", "<Esc>", "back"),
 }
 
 var historySessionsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back, Resume key.Binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back, Resume binding
 }{
-	Up:       nb([]string{"up", "k"}, "↑/↓", "move"),
-	Down:     nb([]string{"down", "j"}, "", ""),
-	Top:      nb([]string{"g"}, "", ""),
-	Bottom:   nb([]string{"G"}, "g/G", "ends"),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Open:     nb([]string{"enter"}, "enter", "open"),
-	More:     nb([]string{"m"}, "m", "more"),
-	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
-	Resume:   nb([]string{"R"}, "R", "resume"),
+	Up:       nb("prev", "<Up> k", "move"),
+	Down:     nb("next", "<Down> j", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", "ends"),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Open:     nb("open", "<CR>", "open"),
+	More:     nb("session load-more", "m", "more"),
+	Back:     nb("back", "<Esc>", "back"),
+	Resume:   nb("session resume", "R", "resume"),
 }
 
 var logsKeys = struct {
-	Up, Down, HalfUp, HalfDown, Top, Bottom, Back key.Binding
+	Up, Down, HalfUp, HalfDown, Top, Bottom, Back binding
 }{
-	Up:       nb([]string{"up", "k"}, "↑/↓", "scroll"),
-	Down:     nb([]string{"down", "j"}, "", ""),
-	HalfUp:   nb([]string{"ctrl+u", "pgup"}, "", ""),
-	HalfDown: nb([]string{"ctrl+d", "pgdown"}, "", ""),
-	Top:      nb([]string{"g"}, "", ""),
-	Bottom:   nb([]string{"G"}, "g/G", "ends"),
-	Back:     nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	Up:       nb("scroll up", "<Up> k", "scroll"),
+	Down:     nb("scroll down", "<Down> j", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", "ends"),
+	Back:     nb("back", "<Esc>", "back"),
+}
+
+// fileViewKeys drive the file, diff, or setup log open in the projects pane.
+var fileViewKeys = struct {
+	Up, Down, HalfUp, HalfDown, Top, Bottom, Wrap, NextFile, PrevFile, Refresh, Back binding
+}{
+	Up:       nb("scroll up", "<Up> k", "scroll"),
+	Down:     nb("scroll down", "<Down> j", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	Top:      nb("goto top", "gg", ""),
+	Bottom:   nb("goto bottom", "G", "ends"),
+	Wrap:     nb("toggle line-wrap", "yow", "wrap"),
+	NextFile: nb("next diff-file", "]f", "file"),
+	PrevFile: nb("prev diff-file", "[f", ""),
+	Refresh:  nb("refresh", "gr", "refresh"),
+	Back:     nb("back", "<Esc>", "back"),
+}
+
+var redactListKeys = struct {
+	Up, Down, Remove binding
+}{
+	Up:     nb("prev", "<Up> k", ""),
+	Down:   nb("next", "<Down> j", "move"),
+	Remove: nb("redaction remove", "u", "remove"),
 }
 
 // screenLeave is the only app binding in live-screen passthrough; every other key
 // is forwarded to the pane.
-// homeTree returns from the History and Logs tabs to the tree.
-var homeTree = nb([]string{"tab", "shift+tab"}, "tab", "tree")
+var screenLeave = nb("", "<C-]>", "leave")
 
-var screenLeave = nb([]string{"ctrl+]"}, "^]", "leave")
+// textInputSets are the binding sets that only text inputs read, where the
+// resolver builds no sequences.
+func textInputSets() []any { return []any{createKeys, promptKeys} }
+
+func keySets() []any {
+	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
+		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys}
+}
+
+func allBindingSets() []any { return append(keySets(), textInputSets()...) }
+
+// bindingsOf flattens binding sets (structs of binding fields) and single
+// bindings into one list.
+func bindingsOf(items ...any) []binding {
+	var out []binding
+	for _, it := range items {
+		if b, ok := it.(binding); ok {
+			out = append(out, b)
+			continue
+		}
+		v := reflect.ValueOf(it)
+		for i := range v.NumField() {
+			if b, ok := v.Field(i).Interface().(binding); ok {
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
+// defaultKeymap serves models built without withKeymaps, such as test models.
+var defaultKeymap, _ = buildKeymap(nil, 0, "")
+
+func (m model) keymap() *keymap {
+	if m.keys != nil {
+		return m.keys
+	}
+	return defaultKeymap
+}
 
 // --- footers ------------------------------------------------------------------
 
 // footer renders a one-line help view from the given bindings (empty-help ones are
 // skipped). Built per call so it needs no model state and works in tests with a
 // model literal.
-func (m model) footer(bindings ...key.Binding) string {
+func (m model) footer(bindings ...binding) string {
 	h := help.New()
 	h.Styles = help.DefaultStyles(m.hasDark)
 	h.Styles.ShortKey = StyleSecondary
@@ -255,11 +351,21 @@ func (m model) footer(bindings ...key.Binding) string {
 		w = 200 // no viewport yet (e.g. tests): don't truncate
 	}
 	h.SetWidth(w)
-	return h.ShortHelpView(bindings)
+	kb := make([]key.Binding, len(bindings))
+	for i, b := range bindings {
+		kb[i] = m.helpBinding(b)
+	}
+	return h.ShortHelpView(kb)
 }
 
-// helpAs returns a copy of b with different help text.
-func helpAs(b key.Binding, k, desc string) key.Binding {
-	b.SetHelp(k, desc)
+func helpAs(b binding, desc string) binding {
+	b.SetHelp("", desc)
 	return b
+}
+
+// hint is a footer entry for a key that its handler reads as typed, so
+// helpBinding never relabels it. Its key list is empty but not nil because help
+// skips a binding with nil keys.
+func hint(label, desc string) binding {
+	return binding{Binding: key.NewBinding(key.WithKeys([]string{}...), key.WithHelp(label, desc)), defaults: "", defKey: ""}
 }

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
@@ -123,7 +122,7 @@ func (m model) redactListActive() bool {
 // are shown in full so they can be told apart and managed.
 func (m model) redactListBody() string {
 	if len(m.redact.literals) == 0 {
-		return dimStyle.Render("no redactions queued — press d to add a secret")
+		return dimStyle.Render("no redactions queued — press " + m.keyText(transcriptKeys.Redact) + " to add a secret")
 	}
 	var b strings.Builder
 	b.WriteString(asstStyle.Render(fmt.Sprintf("queued redactions (%d)", len(m.redact.literals))))
@@ -153,10 +152,6 @@ func newRedactInput() textinput.Model {
 
 func (m model) redactFooter(base string) string {
 	switch {
-	case m.redact.inputActive:
-		return asstStyle.Render("redact (paste secret): " + m.redact.input.View() + "  enter add · esc cancel")
-	case m.redact.listActive:
-		return asstStyle.Render(fmt.Sprintf("redactions: %d  j/k move · x delete · esc close", len(m.redact.literals)))
 	case m.redact.pendingSave && m.redact.warnConfirm && m.redact.report != nil:
 		// Danger first, so it can't be truncated behind a y/n prompt.
 		line := fmt.Sprintf("⚠ %d item(s) hold secrets that can't be removed — they WILL remain in the export. y save anyway · any cancel",
@@ -173,12 +168,21 @@ func (m model) redactFooter(base string) string {
 			line += "  ⚠ no match: " + strings.Join(zm, ", ")
 		}
 		return asstStyle.Render(line)
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
+	case m.redact.inputActive:
+		return asstStyle.Render("redact (paste secret): " + m.redact.input.View() + "  enter add · esc cancel")
+	case m.redact.listActive:
+		return asstStyle.Render(fmt.Sprintf("redactions: %d  ", len(m.redact.literals)) + m.hintText(redactListKeys.Down,
+			helpAs(redactListKeys.Remove, "delete"), helpAs(transcriptKeys.Back, "close")))
 	case m.flash != "": // transient flash (save done / error) beats the queued-count hint
 		return base
 	case len(m.redact.literals) > 0:
-		return asstStyle.Render(fmt.Sprintf("%d redaction(s) queued · d add · D list · W save", len(m.redact.literals)))
+		return asstStyle.Render(fmt.Sprintf("%d redaction(s) queued · ", len(m.redact.literals)) + m.hintText(
+			helpAs(transcriptKeys.Redact, "add"), helpAs(transcriptKeys.RedactList, "list"),
+			helpAs(transcriptKeys.RedactSave, "save")))
 	case m.redactMode:
-		return asstStyle.Render("redact: d add secret")
+		return asstStyle.Render("redact: " + m.hintText(helpAs(transcriptKeys.Redact, "add secret")))
 	}
 	return base
 }
@@ -218,22 +222,22 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	}
 	if m.redact.listActive {
 		switch {
-		case key.Matches(msg, transcriptKeys.Back):
+		case m.matches(msg, transcriptKeys.Back):
 			m.redact.listActive = false
 			return m, nil, true
-		case msg.Text == "j":
+		case m.matches(msg, redactListKeys.Down):
 			m.redact.listCursor = min(m.redact.listCursor+1, max(0, len(m.redact.literals)-1))
 			return m, nil, true
-		case msg.Text == "k":
+		case m.matches(msg, redactListKeys.Up):
 			m.redact.listCursor = max(0, m.redact.listCursor-1)
 			return m, nil, true
-		case msg.Text == "x":
+		case m.matches(msg, redactListKeys.Remove):
 			if i := m.redact.listCursor; i < len(m.redact.literals) {
 				m.redact.literals = append(m.redact.literals[:i], m.redact.literals[i+1:]...)
 				m.redact.listCursor = max(0, min(i, len(m.redact.literals)-1))
 			}
 			return m, nil, true
-		case key.Matches(msg, transcriptKeys.Redact): // d: add another, then return here
+		case m.matches(msg, transcriptKeys.Redact): // d: add another, then return here
 			m.redact.listActive, m.redact.listReturn = false, true
 			m.redact.inputActive = true
 			m.redact.input = newRedactInput()
@@ -245,15 +249,15 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 		return m.handleRedactInput(msg)
 	}
 	switch {
-	case key.Matches(msg, transcriptKeys.Redact):
+	case m.matches(msg, transcriptKeys.Redact):
 		m.redact.inputActive = true
 		m.redact.input = newRedactInput()
 		return m, m.redact.input.Focus(), true
-	case key.Matches(msg, transcriptKeys.RedactList):
+	case m.matches(msg, transcriptKeys.RedactList):
 		m.redact.listActive = true
 		m.redact.listCursor = 0
 		return m, nil, true
-	case key.Matches(msg, transcriptKeys.RedactSave):
+	case m.matches(msg, transcriptKeys.RedactSave):
 		if len(m.redact.literals) == 0 {
 			m.flash = "no redactions queued"
 			return m, nil, true

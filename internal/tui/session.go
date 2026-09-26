@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -24,17 +23,13 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.focus == focusHistory {
-		if key.Matches(msg, sessionKeys.Files) && m.filesVisible() && m.currentWorkspace() != "" {
-			m.projects.focus = focusFiles
-			return m, nil
-		}
 		if mm, cmd, ok := m.handleFileViewKey(msg); ok {
 			return mm, cmd
 		}
 	}
 
 	switch {
-	case key.Matches(msg, sessionKeys.Focus):
+	case m.matches(msg, sessionKeys.Focus):
 		if pending {
 			if m.focus == focusHistory {
 				m.focus = focusDock
@@ -46,7 +41,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case key.Matches(msg, sessionKeys.Raw):
+	case m.matches(msg, sessionKeys.Raw):
 		s := m.sessions[m.selectedID]
 		// enterScreen opens the terminal view via terminal.open, which spawns and
 		// adopts a pane on demand for a live paneless session (OpenCode).
@@ -59,7 +54,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.focus == focusDock {
 		// Read returns to reading; prompt stays pending.
-		if key.Matches(msg, promptKeys.Read) {
+		if m.matches(msg, promptKeys.Read) {
 			m.focus = focusHistory
 			return m, nil
 		}
@@ -67,7 +62,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// focus == history
-	if key.Matches(msg, transcriptKeys.Back) {
+	if m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			// A frame with a subID owns a subagent subscription: tear it down and
 			// restore the stashed session stream. A leaf frame above a subagent frame
@@ -87,12 +82,7 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		var cmd tea.Cmd
-		if m.activeSub.subID != "" {
-			cmd = m.unsubscribeCmd(m.activeSub.subID)
-			m.activeSub = subRef{}
-		}
-		m.sessionSub = subRef{} // clear stashed drill state on exit
+		cmd := m.closeSessionStreams()
 		m.mode = m.sessionReturn
 		return m, cmd
 	}
@@ -100,6 +90,19 @@ func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleDetailKey(msg)
 	}
 	return m.handleTranscriptKey(msg)
+}
+
+// closeSessionStreams ends the session's transcript subscription and, from a
+// subagent drill-in, the stashed session stream.
+func (m *model) closeSessionStreams() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, s := range []subRef{m.activeSub, m.sessionSub} {
+		if s.subID != "" {
+			cmds = append(cmds, m.unsubscribeCmd(s.subID))
+		}
+	}
+	m.activeSub, m.sessionSub = subRef{}, subRef{}
+	return tea.Batch(cmds...)
 }
 
 // historyFocused reports whether the history region (not the dock) holds focus.
@@ -111,15 +114,17 @@ func (m model) historyFocused() bool {
 func (m model) sessionFooter() string {
 	k := projectsKeys
 	switch {
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
 	case m.projects.focus == focusFiles && m.filesVisible():
 		return m.footer(append(m.sidebarBindings("back"), k.Refresh)...)
 	case m.projects.fileView.open() && m.focus == focusHistory:
-		return m.footer(append(m.fileViewBindings(), m.sideKey(sessionKeys.Files))...)
+		return m.footer(append(m.fileViewBindings(), m.sideKey(paneKeys.Right))...)
 	case m.focus == focusDock:
 		multi := m.isMultiQuestion()
-		binds := []key.Binding{promptKeys.Up}
+		binds := []binding{promptKeys.Up}
 		if multi {
 			binds = append(binds, promptKeys.TabPrev, promptKeys.Next)
 		} else {
@@ -134,9 +139,9 @@ func (m model) sessionFooter() string {
 		}
 		return m.footer(binds...)
 	case m.historyView == histDetail:
-		return m.footer(detailKeys.Up, detailKeys.Fold, detailKeys.Drill, detailKeys.Back, detailKeys.Raw)
+		return m.footer(detailKeys.Up, detailKeys.Collapse, detailKeys.Drill, detailKeys.Back, sessionKeys.Raw)
 	default:
-		binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold,
+		binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse,
 			transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back}
 		if m.sessionInteraction() != nil {
 			binds = append(binds, transcriptKeys.Answer)
@@ -145,7 +150,7 @@ func (m model) sessionFooter() string {
 			binds = append(binds, sessionKeys.Raw)
 		}
 		if m.filesVisible() && m.currentWorkspace() != "" {
-			binds = append(binds, m.sideKey(sessionKeys.Files))
+			binds = append(binds, m.sideKey(paneKeys.Right))
 		}
 		return m.footer(binds...)
 	}
@@ -455,7 +460,7 @@ func (m model) sessionView() string {
 func startingNotice(m model) string {
 	lines := []string{
 		"Session is starting or waiting at a startup prompt.",
-		"Press " + sessionKeys.Raw.Help().Key + " to open the live screen and continue.",
+		"Press " + m.keyText(sessionKeys.Raw) + " to open the live screen and continue.",
 	}
 	return m.center(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth())
 }

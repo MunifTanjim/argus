@@ -18,7 +18,7 @@ import (
 // Compose-then-submit prompt dock: nothing is sent to Claude until Enter. On
 // submit the node resolves the parked PermissionRequest hook structurally
 // (decision / answers), so the prompt never appears in Claude's pane. Idle
-// replies go through pane input; ctrl+s drops to the raw screen view.
+// replies go through pane input; open live-screen drops to the raw screen view.
 //
 // AskUserQuestion with several questions renders as a tabbed panel + trailing
 // "Submit" review tab; a single question hides the tabs and submits on Enter.

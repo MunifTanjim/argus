@@ -27,7 +27,7 @@ func newRootCmd(version string) *cobra.Command {
 		SilenceErrors: true,
 		// Default action (no subcommand): run the TUI client.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := resolveConfig(cmd)
+			cfg, err := resolveTUIConfig(cmd)
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -98,7 +98,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			defer client.Close()
 
-			if err := tui.Run(client, emb.Logs()); err != nil {
+			if err := tui.Run(client, emb.Logs(), cfg.TUI); err != nil {
 				return fail(cmd, err)
 			}
 			return nil
