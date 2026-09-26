@@ -16,6 +16,7 @@ import (
 
 func projectsTestModel() model {
 	m := testModel()
+	m.mode = modeProjects
 	m.projects.sidebarHidden = false
 	m.projects.collapsed = map[string]bool{}
 	m.projects.tree = []api.ProjectNode{{
@@ -150,12 +151,12 @@ func TestResizeLeftSidebar(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	before := m.projectsLeftW()
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: '>'})
+	res, _ := m.handleProjectsKey(seqKey("<C-w>>"))
 	mm := res.(model)
 	if mm.projectsLeftW() <= before {
 		t.Errorf("widen: leftW %d did not grow past %d", mm.projectsLeftW(), before)
 	}
-	res, _ = mm.handleProjectsKey(tea.KeyPressMsg{Code: '<'})
+	res, _ = mm.handleProjectsKey(seqKey("<C-w><lt>"))
 	mm2 := res.(model)
 	if mm2.projectsLeftW() != before {
 		t.Errorf("narrow: leftW = %d, want back to %d", mm2.projectsLeftW(), before)
@@ -168,17 +169,17 @@ func TestToggleSidebar(t *testing.T) {
 	if !m.sidebarVisible() {
 		t.Fatal("sidebar should start visible on a wide terminal")
 	}
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	res, _ := m.handleProjectsKey(seqKey("<Space>o"))
 	mm := res.(model)
 	if mm.sidebarVisible() {
-		t.Error("ctrl+b should hide the sidebar")
+		t.Error("␣o should hide the sidebar")
 	}
 	if mm.projects.focus != focusPane {
 		t.Error("hiding the sidebar should move focus to the pane")
 	}
-	res, _ = mm.handleProjectsKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	if !res.(model).sidebarVisible() {
-		t.Error("ctrl+b again should show the sidebar")
+	mm = typeKeys(mm, " o")
+	if !mm.sidebarVisible() {
+		t.Error("␣o again should show the sidebar")
 	}
 }
 
@@ -205,7 +206,7 @@ func TestHelpFitsCommonTerminal(t *testing.T) {
 	m.width, m.height = 120, 30
 	m.projects.showHelp = true
 	out := ansi.Strip(m.View().Content)
-	for _, want := range []string{"cycle focus", "kill session", "change target branch", "quit (tree)"} {
+	for _, want := range []string{"cycle focus", "kill session", "change target branch", "quit · quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help at 120x30 is missing %q:\n%s", want, out)
 		}
@@ -218,15 +219,15 @@ func TestTogglesBelowBreakpointOnlyHint(t *testing.T) {
 		m.mode = mode
 		m.projects.focus = focusPane
 		m.width, m.height = 70, 30
-		mm, _ := upd(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+		mm := typeKeys(m, " o")
 		if mm.projects.sidebarHidden || !strings.Contains(mm.flash, "needs 80 columns") {
-			t.Errorf("mode %v: ^b at 70 cols: hidden=%v flash=%q", mode, mm.projects.sidebarHidden, mm.flash)
+			t.Errorf("mode %v: ␣o at 70 cols: hidden=%v flash=%q", mode, mm.projects.sidebarHidden, mm.flash)
 		}
 		m.width = 100
 		m.projects.filesHidden = false
-		mm, _ = upd(m, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+		mm = typeKeys(m, " e")
 		if mm.projects.filesHidden || !strings.Contains(mm.flash, "needs 120 columns") {
-			t.Errorf("mode %v: ^e at 100 cols: hidden=%v flash=%q", mode, mm.projects.filesHidden, mm.flash)
+			t.Errorf("mode %v: ␣e at 100 cols: hidden=%v flash=%q", mode, mm.projects.filesHidden, mm.flash)
 		}
 	}
 }
@@ -284,7 +285,7 @@ func TestNewWorkspaceFlow(t *testing.T) {
 	res, _ := m.actNewWorkspace()
 	mm := res.(model)
 	if !mm.projects.create.active || mm.projects.create.projectID != "n1:p1" {
-		t.Fatalf("new-workspace picker not open: %+v", mm.projects.create)
+		t.Fatalf("workspace new picker not open: %+v", mm.projects.create)
 	}
 }
 
@@ -330,9 +331,9 @@ func TestShowHiddenFiltersRows(t *testing.T) {
 	if len(m.projects.rows) != 0 {
 		t.Fatalf("hidden project should be filtered, got %d rows", len(m.projects.rows))
 	}
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'z'})
+	res, _ := m.handleProjectsKey(seqKey("z."))
 	if len(res.(model).projects.rows) == 0 {
-		t.Error("z should reveal hidden projects")
+		t.Error("z. should reveal hidden projects")
 	}
 }
 
@@ -371,10 +372,9 @@ func TestFocusPaneNeedsWorkspace(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:p1")
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	mm := res.(model)
+	mm := pressKeys(m, cw('l')...)
 	if mm.projects.focus != focusTree || mm.flash == "" {
-		t.Errorf("tab on a project row: focus=%v flash=%q, want tree focus and a hint", mm.projects.focus, mm.flash)
+		t.Errorf("<C-w>l on a project row: focus=%v flash=%q, want tree focus and a hint", mm.projects.focus, mm.flash)
 	}
 }
 
@@ -442,7 +442,7 @@ func TestReplyBeforeARefetchKeepsTheCreatedWorkspaceWanted(t *testing.T) {
 func TestRefreshKeepsTree(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 'r'})
+	res, cmd := m.handleProjectsKey(seqKey("gr"))
 	mm := res.(model)
 	if mm.projects.tree == nil || len(mm.projects.rows) == 0 || cmd == nil {
 		t.Fatalf("refresh should keep the tree and fetch: tree=%v rows=%d", mm.projects.tree, len(mm.projects.rows))
@@ -507,10 +507,10 @@ func TestProjectRowShowsSummary(t *testing.T) {
 func TestHelpOverlay(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 160, 30
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: '?'})
+	res, _ := m.handleProjectsKey(seqKey("g?"))
 	mm := res.(model)
 	if !mm.projects.showHelp || !strings.Contains(mm.projectsView(), "force remove") {
-		t.Fatal("? should open the full key list")
+		t.Fatal("g? should open the full key list")
 	}
 	res, _ = mm.handleProjectsKey(tea.KeyPressMsg{Code: 'j'})
 	mm = res.(model)
@@ -696,14 +696,14 @@ func TestGoneRowsNeedTheirOwnToggle(t *testing.T) {
 	if len(m.projects.rows) != 3 {
 		t.Fatalf("gone rows should be hidden by default: %+v", m.projects.rows)
 	}
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'z'})
+	res, _ := m.handleProjectsKey(seqKey("z."))
 	if got := len(res.(model).projects.rows); got != 3 {
-		t.Errorf("z (hidden) should not reveal gone rows, got %d rows", got)
+		t.Errorf("z. (hidden) should not reveal gone rows, got %d rows", got)
 	}
-	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'o'})
+	res, _ = m.handleProjectsKey(seqKey("zg"))
 	mm := res.(model)
 	if len(mm.projects.rows) != 5 {
-		t.Fatalf("o should reveal the gone workspace and project: %+v", mm.projects.rows)
+		t.Fatalf("zg should reveal the gone workspace and project: %+v", mm.projects.rows)
 	}
 	if !strings.Contains(ansi.Strip(mm.projectsTreePane(40, 20)), "+gone") {
 		t.Error("tree title should say gone rows are shown")
@@ -857,9 +857,8 @@ func TestCtrlBInPaneSessionTogglesSidebar(t *testing.T) {
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:w1")
 	mm, _ := m.enterSession("n1:s1")
-	res, _ := mm.handleKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	if got := res.(model); got.bodyWidth() != got.frameWidth() || got.mode != modeSession {
-		t.Errorf("ctrl+b should hide the sidebar and keep the session: width=%d mode=%v", got.bodyWidth(), got.mode)
+	if got := typeKeys(mm, " o"); got.bodyWidth() != got.frameWidth() || got.mode != modeSession {
+		t.Errorf("␣o should hide the sidebar and keep the session: width=%d mode=%v", got.bodyWidth(), got.mode)
 	}
 }
 
@@ -872,10 +871,10 @@ func TestKillFromWorkspaceSessionsTab(t *testing.T) {
 	m.projects.selectRow("n1:w1")
 	m.projects.focus = focusPane
 
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	res, _ := m.handleProjectsKey(seqKey("dd"))
 	m = res.(model)
 	if m.projects.pendingKill != "n1:s1" || !strings.Contains(ansi.Strip(m.projectsFooter()), "kill session repo · %1? y/n") {
-		t.Fatalf("x should ask to kill n1:s1: pending=%q footer=%q", m.projects.pendingKill, m.projectsFooter())
+		t.Fatalf("dd should ask to kill n1:s1: pending=%q footer=%q", m.projects.pendingKill, m.projectsFooter())
 	}
 	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if mm := res.(model); mm.projects.pendingKill != "" {
@@ -918,12 +917,12 @@ func TestRemovePromptNamesWorkspace(t *testing.T) {
 	m.width, m.height = 120, 30
 	delete(m.sessions, "n1:s2") // w2 has no live sessions
 	m.projects.selectRow("n1:w2")
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "remove workspace repo-feat (feature)? y/n") {
 		t.Errorf("remove prompt = %q", f)
 	}
 	m, _ = upd(m, keyMsg("n"))
-	m, _ = upd(m, keyMsg("X"))
+	m, _ = upd(m, keyMsg("D"))
 	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "force-remove workspace repo-feat (feature)? uncommitted changes are lost · y/n") {
 		t.Errorf("force-remove prompt = %q", f)
 	}
@@ -935,14 +934,14 @@ func TestRemoveInFlightShowsAndBlocksRepeat(t *testing.T) {
 	m.client = &recordingClient{}
 	delete(m.sessions, "n1:s2")
 	m.projects.selectRow("n1:w2")
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	m, cmd := upd(m, keyMsg("y"))
 	if cmd == nil || !strings.Contains(ansi.Strip(m.View().Content), "removing…") {
 		t.Fatalf("a confirmed remove should show on its row:\n%s", ansi.Strip(m.View().Content))
 	}
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	if m.projects.pendingRemove != "" || !strings.Contains(m.flash, "already removing repo-feat") {
-		t.Errorf("x during a remove: pending=%q flash=%q", m.projects.pendingRemove, m.flash)
+		t.Errorf("dd during a remove: pending=%q flash=%q", m.projects.pendingRemove, m.flash)
 	}
 	m, _ = upd(m, cmd())
 	if strings.Contains(ansi.Strip(m.View().Content), "removing…") {
@@ -954,8 +953,8 @@ func TestRemoveRefusesLiveSessions(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:w2") // n1:s2 is live here
-	for _, k := range []string{"x", "X"} {
-		mm, _ := upd(m, keyMsg(k))
+	for _, k := range []string{"dd", "D"} {
+		mm := typeKeys(m, k)
 		if mm.projects.pendingRemove != "" || !strings.Contains(mm.flash, "repo-feat has 1 live session · kill it first") {
 			t.Errorf("%s with a live session: pending=%q flash=%q", k, mm.projects.pendingRemove, mm.flash)
 		}
@@ -986,9 +985,9 @@ func TestWorkspacePaneListKeys(t *testing.T) {
 	if m.projects.wsCursor != 1 {
 		t.Errorf("G should select the last card: cursor=%d", m.projects.wsCursor)
 	}
-	m, _ = upd(m, keyMsg("g"))
+	m = typeKeys(m, "gg")
 	if m.projects.wsCursor != 0 {
-		t.Errorf("g should select the first card: cursor=%d", m.projects.wsCursor)
+		t.Errorf("gg should select the first card: cursor=%d", m.projects.wsCursor)
 	}
 	m, _ = upd(m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if m.projects.wsCursor != 1 {
@@ -1005,7 +1004,7 @@ func TestManageKeysInPaneHintTheTree(t *testing.T) {
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:w2")
 	m.projects.focus = focusPane
-	for _, k := range []string{"n", "R", "H", "P", "T", "X"} {
+	for _, k := range []string{"a", "r", "H", "P", "T", "D"} {
 		mm, _ := upd(m, keyMsg(k))
 		if mm.flash != "manage keys work in the tree · esc to go there" || mm.projects.create.active || mm.projects.pendingRemove != "" {
 			t.Errorf("%s in the pane: flash=%q", k, mm.flash)
@@ -1020,9 +1019,9 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 200, 30
 	for row, want := range map[string]struct{ has, lacks []string }{
-		homeRowID: {has: []string{"enter open", "tab pane", "s spawn", "/ filter"}, lacks: []string{"fold", "n new", "x remove"}},
-		"n1:p1":   {has: []string{"h/l fold", "s spawn", "n new"}, lacks: []string{"tab pane", "x remove"}},
-		"n1:w2":   {has: []string{"h/l fold", "tab pane", "s spawn", "n new", "x remove"}},
+		homeRowID: {has: []string{"enter open", "^ww/^wW pane", "s spawn", "/ filter"}, lacks: []string{"fold", "a new", "dd remove"}},
+		"n1:p1":   {has: []string{"h/l fold", "s spawn", "a new"}, lacks: []string{"^ww/^wW pane", "dd remove"}},
+		"n1:w2":   {has: []string{"h/l fold", "^ww/^wW pane", "s spawn", "a new", "dd remove"}},
 	} {
 		m.projects.selectRow(row)
 		f := ansi.Strip(m.projectsFooter())
@@ -1036,6 +1035,18 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 				t.Errorf("%s footer has dead key %q: %q", row, w, f)
 			}
 		}
+	}
+}
+
+func TestProjectHintFollowsMappedKeys(t *testing.T) {
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"projects": {
+		"<C-n>": "workspace new", "<C-r>": "project rename", "<C-l>": "fold open",
+	}})
+	m.width, m.height = 120, 30
+	m.projects.setFolded("n1:p1", true)
+	m.projects.selectRow("n1:p1")
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "^l unfold · ^n new workspace · ^r rename") {
+		t.Errorf("the project hint names the mapped keys:\n%s", out)
 	}
 }
 
@@ -1160,7 +1171,7 @@ func TestRemoveSelectsANeighbor(t *testing.T) {
 	m.projects.rebuild()
 	delete(m.sessions, "n1:s2")
 	m.projects.selectRow("n1:w2") // the last workspace of argus; zeta's rows follow
-	m, _ = upd(m, keyMsg("x"))
+	m = typeKeys(m, "dd")
 	m, cmd := upd(m, keyMsg("y"))
 	m, _ = upd(m, cmd())
 	tree := []api.ProjectNode{m.projects.tree[0], m.projects.tree[1]}
@@ -1216,7 +1227,7 @@ func TestKillFromWorkspaceNeedsTerminalControl(t *testing.T) {
 	m.width, m.height = 120, 30
 	m.projects.selectRow("n1:w1")
 	m.projects.focus = focusPane
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	res, _ := m.handleProjectsKey(seqKey("dd"))
 	if mm := res.(model); mm.projects.pendingKill != "" || mm.flash == "" {
 		t.Errorf("a session without terminal control should only show a hint: pending=%q flash=%q", mm.projects.pendingKill, mm.flash)
 	}

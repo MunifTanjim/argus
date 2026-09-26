@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 )
 
@@ -24,121 +23,148 @@ func (m model) projectsFooter() string {
 		return asstStyle.Render("forget project " + p.Name + "? it leaves the list; its files stay · y/n")
 	case m.projects.offerSpawn != nil:
 		return asstStyle.Render("start an agent with this issue? y/n")
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
 	case m.projects.create.active:
 		return m.createFooter()
 	case m.projects.retarget != nil:
-		return m.footer(helpAs(k.Up, "↑/↓", "move"), helpAs(k.Enter, "enter", "select"), helpAs(k.Back, "esc", "cancel"))
+		return m.footer(hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "cancel"))
 	case m.projects.showHelp:
-		return m.footer(helpAs(k.Back, "any key", "close"))
+		return m.footer(hint("any key", "close"))
 	case m.projects.focus == focusFiles && m.filesVisible():
 		return m.footer(append(m.sidebarBindings("pane"), m.sideKey(k.ToggleFiles), k.Help)...)
 	case m.projects.focus == focusTree && m.sidebarVisible():
 		bindings := m.treeRowBindings()
 		if m.projects.filter != "" {
-			bindings = append(bindings, helpAs(k.Back, "esc", "clear filter"))
+			bindings = append(bindings, helpAs(k.Back, "clear filter"))
 		}
-		return m.footer(append(bindings, helpAs(k.Back, "q", "quit"), m.sideKey(k.ToggleFiles), k.Help)...)
+		return m.footer(append(bindings, listKeys.Quit, m.sideKey(k.ToggleFiles), k.Help)...)
 	case m.projects.fileView.open() && m.projects.focus == focusPane:
 		return m.footer(append(m.fileViewBindings(), k.Help)...)
 	}
-	bindings := []key.Binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill}
+	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill}
 	if m.sidebarVisible() || m.nextFromPane() == "files" {
-		bindings = append(bindings, helpAs(k.Focus, "tab", m.nextFromPane()))
+		bindings = append(bindings, helpAs(paneKeys.Next, m.nextFromPane()))
 	}
-	return m.footer(append(bindings, k.Help, helpAs(k.Back, "esc", "tree"))...)
+	return m.footer(append(bindings, k.Help, helpAs(k.Back, "tree"))...)
 }
 
-// fileViewBindings are the keys of an open file or diff; J/K step only a diff.
-func (m model) fileViewBindings() []key.Binding {
-	k := projectsKeys
-	b := []key.Binding{helpAs(k.Up, "↑/↓", "scroll"), helpAs(k.HalfDown, "^u/^d", "page"), helpAs(k.Bottom, "g/G", "ends")}
+// fileViewBindings are the keys of an open file or diff; ]f/[f step only a diff.
+func (m model) fileViewBindings() []binding {
+	fk := fileViewKeys
+	b := []binding{helpAs(fk.Up, "scroll"), helpAs(fk.HalfDown, "page"), helpAs(fk.Bottom, "ends")}
 	if m.projects.fileView.diff {
-		b = append(b, k.NextFile)
+		b = append(b, fk.NextFile)
 	}
-	return append(b, k.Wrap, helpAs(k.Refresh, "r", "reload"), helpAs(k.Back, "esc", "close"))
+	return append(b, fk.Wrap, helpAs(fk.Refresh, "reload"), helpAs(fk.Back, "close"))
 }
 
 // treeRowBindings are the tree keys that act on the selected row.
-func (m model) treeRowBindings() []key.Binding {
+func (m model) treeRowBindings() []binding {
 	k := projectsKeys
 	r, _ := m.cursorRow()
 	switch r.kind {
 	case rowHome:
-		return []key.Binding{k.Up, k.Enter, k.Focus, k.Spawn, k.Filter}
+		return []binding{k.Up, k.Enter, paneKeys.Next, k.Spawn, k.Filter}
 	case rowWorkspace:
-		return []key.Binding{k.Up, k.Left, k.Enter, k.Focus, k.Spawn, k.New, k.Remove, k.Filter}
+		return []binding{k.Up, k.Left, k.Enter, paneKeys.Next, k.Spawn, k.New, k.Remove, k.Filter}
 	case rowProject:
-		return []key.Binding{k.Up, k.Left, k.Enter, k.Spawn, k.New, k.Filter}
+		return []binding{k.Up, k.Left, k.Enter, k.Spawn, k.New, k.Filter}
 	}
-	return []key.Binding{k.Up, k.Left, k.Enter, k.Filter}
+	return []binding{k.Up, k.Left, k.Enter, k.Filter}
 }
 
 // projectsHelpView lists every projects-screen key, grouped by where it acts.
+// commitBackKeys names the keys that leave an open commit: back, and collapse
+// while it still has a key on the projects screen.
+func (m model) commitBackKeys() string {
+	keys := m.helpKeys(projectsKeys.Back)
+	if ids := m.keymap().screenKeys("projects").keys(projectsKeys.Left); len(ids) > 0 {
+		keys += " " + keyLabel(ids[0])
+	}
+	return keys
+}
+
 func (m model) projectsHelpView() string {
 	k := projectsKeys
+	type helpRow struct {
+		key  string
+		desc string
+		name string
+	}
+	row := func(b binding, desc string) helpRow {
+		return helpRow{key: m.helpKeys(b), desc: desc, name: b.name}
+	}
+	lrKey := m.helpKeys(paneKeys.Left) + "/" + m.helpKeys(paneKeys.Right)
 	groups := []struct {
 		title string
-		keys  []key.Binding
+		rows  []helpRow
 	}{
-		{"Tree", []key.Binding{
-			helpAs(k.Up, "↑/↓ j/k", "move"),
-			helpAs(k.Bottom, "g/G", "top / bottom"),
-			helpAs(k.HalfDown, "^u/^d", "page"),
-			helpAs(k.Left, "h ←", "fold / parent"),
-			helpAs(k.Right, "l →", "unfold / open pane"),
-			helpAs(k.Enter, "enter", "open / fold"),
-			helpAs(k.Focus, "tab shift+tab", "cycle focus"),
-			helpAs(k.Filter, "/", "filter"),
+		{"Tree", []helpRow{
+			row(k.Up, "move"),
+			row(k.Bottom, "top / bottom"),
+			row(k.HalfDown, "page"),
+			row(k.Left, "fold / unfold"),
+			row(k.Enter, "open / fold"),
+			row(paneKeys.Next, "cycle focus"),
+			row(k.Filter, "filter"),
 		}},
-		{"Pane", []key.Binding{
-			helpAs(k.Up, "↑/↓ j/k", "move / scroll"),
-			helpAs(k.Enter, "enter", "open session"),
-			helpAs(listKeys.Jump, "O", "jump to its tmux pane"),
-			helpAs(k.Back, "esc", "close / tree"),
-			helpAs(listKeys.Kill, "x", "kill session"),
-			helpAs(k.SetupLog, "L", "workspace setup log"),
-			helpAs(sessionKeys.Files, "^f", "session: go to right sidebar"),
-			helpAs(k.SideTabNext, "[/]", "right sidebar: Files / Changes"),
-			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
-			helpAs(k.Back, "esc h", "changes: back from a commit"),
-			helpAs(k.NextFile, "J/K", "diff: next / previous file"),
-			helpAs(k.Wrap, "w", "open file: wrap long lines"),
+		{"Pane", []helpRow{
+			row(k.Up, "move / scroll"),
+			row(k.Enter, "open session"),
+			row(listKeys.Jump, "jump to its tmux pane"),
+			row(k.Back, "close / tree"),
+			row(listKeys.Kill, "kill session"),
+			row(k.SetupLog, "workspace setup log"),
+			{key: lrKey, desc: "focus left / right pane", name: paneKeys.Left.name},
+			row(paneKeys.Down, "session: focus the prompt"),
+			row(k.SideTabNext, "right sidebar: Files / Changes"),
+			row(k.DiffMode, "changes: uncommitted / vs target"),
+			{key: m.commitBackKeys(), desc: "changes: back from a commit", name: k.Back.name},
+			row(fileViewKeys.NextFile, "diff: next / previous file"),
+			row(fileViewKeys.Wrap, "open file: wrap long lines"),
 		}},
-		{"Manage (tree)", []key.Binding{
-			helpAs(k.New, "n", "new workspace (branch, PR, issue)"),
-			helpAs(k.Remove, "x", "remove workspace"),
-			helpAs(k.ForceRemove, "X", "force remove"),
-			helpAs(k.Rename, "R", "rename project"),
-			helpAs(k.Forget, "F", "forget project (files stay)"),
-			helpAs(k.Pin, "P", "pin project"),
-			helpAs(k.Hide, "H", "hide project"),
-			helpAs(k.ShowHidden, "z", "show hidden"),
-			helpAs(k.ShowGone, "o", "show gone"),
-			helpAs(k.Target, "T", "change target branch"),
-			helpAs(k.RunSetup, "S", "run setup again"),
+		{"Manage (tree)", []helpRow{
+			row(k.New, "new workspace (branch/PR/issue)"),
+			row(k.Remove, "remove workspace"),
+			row(k.ForceRemove, "force remove"),
+			row(k.Rename, "rename project"),
+			row(k.Forget, "forget project (files stay)"),
+			row(k.Pin, "pin project"),
+			row(k.Hide, "hide project"),
+			row(k.ShowHidden, "show hidden"),
+			row(k.ShowGone, "show gone"),
+			row(k.Target, "change target branch"),
+			row(k.RunSetup, "run setup again"),
 		}},
-		{"Screen", []key.Binding{
-			helpAs(k.Spawn, "s", "spawn in the selected workspace"),
-			helpAs(k.Widen, "</>", "resize focused sidebar"),
-			helpAs(k.ToggleFiles, "^e", "toggle right sidebar"),
-			helpAs(k.ToggleSidebar, "^b", "toggle sidebar"),
-			helpAs(k.Refresh, "r", "refresh"),
-			helpAs(k.Help, "?", "help"),
-			helpAs(k.Back, "q", "quit (tree) · back (pane)"),
+		{"Screen", []helpRow{
+			row(k.Spawn, "spawn in the selected workspace"),
+			row(k.Widen, "resize focused sidebar"),
+			row(k.ToggleFiles, "toggle right sidebar"),
+			row(k.ToggleSidebar, "toggle sidebar"),
+			row(k.Refresh, "refresh"),
+			row(k.Help, "help"),
+			row(listKeys.Quit, "quit"),
 		}},
 	}
 	cols := make([]string, len(groups))
 	for i, g := range groups {
 		kw := 0
-		for _, b := range g.keys {
-			kw = max(kw, lipgloss.Width(b.Help().Key))
+		for _, r := range g.rows {
+			kw = max(kw, lipgloss.Width(r.key))
 		}
 		lines := []string{StyleAccentBold.Render(g.title)}
-		for _, b := range g.keys {
-			h := b.Help()
-			lines = append(lines, StyleSecondary.Render(h.Key+strings.Repeat(" ", kw-lipgloss.Width(h.Key)))+"  "+StyleDim.Render(h.Desc))
+		for _, r := range g.rows {
+			if r.key == "" {
+				continue
+			}
+			desc := r.desc
+			if r.name != "" {
+				desc += " · " + r.name
+			}
+			lines = append(lines, StyleSecondary.Render(r.key+strings.Repeat(" ", kw-lipgloss.Width(r.key)))+"  "+StyleDim.Render(desc))
 		}
 		cols[i] = strings.Join(lines, "\n")
 	}
@@ -157,7 +183,7 @@ func helpGrid(cols []string, perRow int) string {
 		var parts []string
 		for i, c := range cols[start:min(start+perRow, len(cols))] {
 			if i > 0 {
-				parts = append(parts, "    ")
+				parts = append(parts, "  ")
 			}
 			parts = append(parts, c)
 		}
@@ -166,7 +192,6 @@ func helpGrid(cols []string, perRow int) string {
 	return strings.Join(rows, "\n\n")
 }
 
-// nextFromPane names where tab goes from the pane.
 func (m model) nextFromPane() string {
 	if m.filesVisible() && m.currentWorkspace() != "" {
 		return m.sideTabLabel()
@@ -176,24 +201,24 @@ func (m model) nextFromPane() string {
 
 func (m model) sideTabLabel() string { return strings.ToLower(sideTabNames[m.projects.sideTab]) }
 
-func (m model) sideKey(b key.Binding) key.Binding {
-	return helpAs(b, b.Help().Key, m.sideTabLabel())
+func (m model) sideKey(b binding) binding {
+	return helpAs(b, m.sideTabLabel())
 }
 
 // sidebarBindings are the focused right sidebar's keys for its current tab and
 // row; escDesc names where esc goes from the top level.
-func (m model) sidebarBindings(escDesc string) []key.Binding {
+func (m model) sidebarBindings(escDesc string) []binding {
 	k := projectsKeys
-	esc := helpAs(k.Back, "esc", escDesc)
+	esc := helpAs(k.Back, escDesc)
 	if m.projects.sideTab == sideFiles {
-		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Left, "h/l", "fold"), helpAs(k.Enter, "enter", "open"), esc}
+		return []binding{k.Up, k.SideTabNext, helpAs(k.Left, "fold"), helpAs(k.Enter, "open"), esc}
 	}
 	c := m.projects.changes
 	switch {
 	case c.commit != nil:
-		return []key.Binding{k.Up, helpAs(k.Enter, "enter", "diff"), helpAs(k.Back, "esc", "back")}
+		return []binding{k.Up, helpAs(k.Enter, "diff"), helpAs(k.Back, "back")}
 	case c.cursor >= len(c.files) && c.cursor < len(c.files)+len(c.commits):
-		return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "files"), m.diffModeKey(), esc}
+		return []binding{k.Up, k.SideTabNext, helpAs(k.Enter, "files"), m.diffModeKey(), esc}
 	}
-	return []key.Binding{k.Up, k.SideTabNext, helpAs(k.Enter, "enter", "diff"), m.diffModeKey(), esc}
+	return []binding{k.Up, k.SideTabNext, helpAs(k.Enter, "diff"), m.diffModeKey(), esc}
 }

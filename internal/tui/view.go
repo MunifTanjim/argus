@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -265,12 +264,14 @@ func (m model) renderList() string {
 
 func (m model) listFooter() string {
 	switch {
-	case len(m.order) == 0:
-		return m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, m.listBackKey())
 	case m.pendingKill && m.cursor >= 0 && m.cursor < len(m.order):
 		return asstStyle.Render(killPrompt(m.sessions[m.order[m.cursor]]))
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
+	case len(m.order) == 0:
+		return m.footer(listKeys.TabNext, listKeys.New, listKeys.Refresh, m.listBackKey())
 	}
 	return m.footer(listKeys.Up, listKeys.Open, listKeys.Jump,
 		listKeys.TabNext, listKeys.New, listKeys.Kill, listKeys.Refresh, m.listBackKey(), projectsKeys.Help)
@@ -315,7 +316,7 @@ func (m model) emptyListView(title string, chrome int) string {
 	textW := max(16, min(m.bodyWidth()-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
-		StyleAccentBold.Render("s") + dimStyle.Render(" to spawn one right here.")
+		StyleAccentBold.Render(m.keyText(listKeys.New)) + dimStyle.Render(" to spawn one right here.")
 	welcome := lipgloss.JoinVertical(lipgloss.Center,
 		argusLogo(m.bodyWidth(), m.bodyHeight()),
 		"",
@@ -484,15 +485,15 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-// listBackKey is esc → tree, or q → quit when no tree is visible.
-// homeTreeKey is the History and Logs hint for tab, shown only when the tree is.
-func (m model) homeTreeKey() key.Binding {
-	b := homeTree
+// treeKey is the History and Logs hint for focus left, shown only when the
+// tree is.
+func (m model) treeKey() binding {
+	b := paneKeys.Left
 	b.SetEnabled(m.sidebarVisible())
 	return b
 }
 
-func (m model) listBackKey() key.Binding {
+func (m model) listBackKey() binding {
 	if m.sidebarVisible() {
 		return listKeys.Back
 	}

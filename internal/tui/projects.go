@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -449,7 +448,7 @@ func (m model) setupBlock(w int) string {
 			lines = append(lines, truncateLine(dimStyle.Render(l), w))
 		}
 	}
-	lines = append(lines, truncateLine(dimStyle.Render("S runs setup again · L shows the full log"), w))
+	lines = append(lines, truncateLine(dimStyle.Render(m.keyText(projectsKeys.RunSetup)+" runs setup again · "+m.keyText(projectsKeys.SetupLog)+" shows the full log"), w))
 	return strings.Join(lines, "\n") + "\n\n"
 }
 
@@ -658,48 +657,47 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.flash = ""
+	if m.matches(msg, listKeys.Quit) {
+		return m.quit()
+	}
 	if m.projects.focus == focusFiles && m.filesVisible() {
 		return m.handleFilesKey(msg)
 	}
-	if !m.sidebarVisible() && m.projects.focus == focusTree && !key.Matches(msg, projectsKeys.ToggleSidebar) {
+	if !m.sidebarVisible() && m.projects.focus == focusTree && !m.matches(msg, projectsKeys.ToggleSidebar) {
 		mm, _ := m.leaveHiddenTree()
-		return mm.handleKey(msg)
+		return mm.runKey(msg)
 	}
 	switch {
-	case key.Matches(msg, projectsKeys.Help):
+	case m.matches(msg, projectsKeys.Help):
 		m.projects.showHelp = true
 		return m, nil
-	case m.treeFocused() && msg.String() == "q":
-		return m.quit()
-	case key.Matches(msg, projectsKeys.Back):
+	case m.matches(msg, projectsKeys.Back) && !(m.projects.fileView.open() && m.projects.focus == focusPane):
 		return m.projectsBack()
-	case key.Matches(msg, projectsKeys.Filter):
+	case m.matches(msg, projectsKeys.Filter):
 		if !m.sidebarVisible() {
-			m.flash = "the filter needs the tree · ^b shows the tree"
+			m.flash = "the filter needs the tree · " + m.keyText(projectsKeys.ToggleSidebar) + " shows the tree"
 			return m, nil
 		}
 		m.projects.focus = focusTree
 		return m.startInput(pmFilter, "", m.projects.filter)
-	case key.Matches(msg, projectsKeys.Spawn):
+	case m.matches(msg, projectsKeys.Spawn):
 		return m.actSpawnSession()
-	case key.Matches(msg, projectsKeys.SetupLog):
+	case m.matches(msg, projectsKeys.SetupLog):
 		return m.actOpenSetupLog()
-	case key.Matches(msg, projectsKeys.ShowHidden):
+	case m.matches(msg, projectsKeys.ShowHidden):
 		m.projects.showHidden = !m.projects.showHidden
 		m.projects.rebuild()
 		return m.syncPane()
-	case key.Matches(msg, projectsKeys.ShowGone):
+	case m.matches(msg, projectsKeys.ShowGone):
 		m.projects.showGone = !m.projects.showGone
 		m.projects.rebuild()
 		return m.syncPane()
-	case key.Matches(msg, projectsKeys.Refresh) && m.projects.focus == focusPane && m.projects.fileView.open():
-		return m.reloadFileView()
-	case key.Matches(msg, projectsKeys.Refresh):
+	case m.matches(msg, projectsKeys.Refresh) && !(m.projects.fileView.open() && m.projects.focus == focusPane):
 		m.projects.err = nil
 		return m, m.loadProjects()
-	case key.Matches(msg, projectsKeys.Widen), key.Matches(msg, projectsKeys.Narrow):
+	case m.matches(msg, projectsKeys.Widen), m.matches(msg, projectsKeys.Narrow):
 		d := 4
-		if key.Matches(msg, projectsKeys.Narrow) {
+		if m.matches(msg, projectsKeys.Narrow) {
 			d = -4
 		}
 		if m.projects.focus == focusFiles {
@@ -708,14 +706,10 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.projects.leftW = clampWidth(m.projectsLeftW()+d, 20, m.leftMaxW())
 		}
 		return m, nil
-	case key.Matches(msg, projectsKeys.ToggleSidebar):
+	case m.matches(msg, projectsKeys.ToggleSidebar):
 		m.toggleSidebar()
 		return m.leaveHiddenTree()
-	case key.Matches(msg, projectsKeys.Focus):
-		return m.cycleFocus(1)
-	case key.Matches(msg, projectsKeys.FocusPrev):
-		return m.cycleFocus(-1)
-	case key.Matches(msg, projectsKeys.ToggleFiles):
+	case m.matches(msg, projectsKeys.ToggleFiles):
 		m.toggleFiles()
 		return m, nil
 	}
@@ -726,9 +720,9 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.handleProjectsPaneKey(msg)
 }
 
-// leaveHiddenTree moves focus off the tree once it no longer shows (ctrl+b, or a
-// terminal narrower than sidebarMinWidth). With no tree on screen, the Home
-// row's pane is the Home pane itself.
+// leaveHiddenTree moves focus off the tree once it no longer shows
+// (toggle left-sidebar, or a terminal narrower than sidebarMinWidth). With no
+// tree on screen, the Home row's pane is the Home pane itself.
 func (m model) leaveHiddenTree() (model, tea.Cmd) {
 	if m.mode != modeProjects || m.projects.focus != focusTree || m.sidebarVisible() {
 		return m, nil
@@ -802,53 +796,44 @@ func (m model) cycleFocus(d int) (tea.Model, tea.Cmd) {
 func (m model) handleFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := projectsKeys
 	switch {
-	case key.Matches(msg, k.Back):
+	case m.matches(msg, k.Back):
 		if m.projects.sideTab == sideChanges && m.projects.changes.commit != nil {
 			m.projects.changes.commit = nil
 			return m, nil
 		}
 		m.projects.focus = focusPane
 		return m, nil
-	case key.Matches(msg, k.Focus), key.Matches(msg, k.FocusPrev):
-		if m.mode != modeProjects {
-			m.projects.focus = focusPane
-			return m, nil
-		}
-		if key.Matches(msg, k.FocusPrev) {
-			return m.cycleFocus(-1)
-		}
-		return m.cycleFocus(1)
-	case key.Matches(msg, k.ToggleFiles):
+	case m.matches(msg, k.ToggleFiles):
 		m.projects.filesHidden = true
 		return m, nil
-	case key.Matches(msg, k.ToggleSidebar):
+	case m.matches(msg, k.ToggleSidebar):
 		m.projects.sidebarHidden = !m.projects.sidebarHidden
 		return m, nil
-	case key.Matches(msg, k.Widen), key.Matches(msg, k.Narrow):
+	case m.matches(msg, k.Widen), m.matches(msg, k.Narrow):
 		d := 4
-		if key.Matches(msg, k.Narrow) {
+		if m.matches(msg, k.Narrow) {
 			d = -4
 		}
 		m.projects.filesW = clampWidth(m.projectsFilesW()+d, 20, m.filesMaxW())
 		return m, nil
-	case key.Matches(msg, k.SideTabNext), key.Matches(msg, k.SideTabPrev):
+	case m.matches(msg, k.SideTabNext), m.matches(msg, k.SideTabPrev):
 		d := 1
-		if key.Matches(msg, k.SideTabPrev) {
+		if m.matches(msg, k.SideTabPrev) {
 			d = -1
 		}
 		m.projects.sideTab = sideTab((int(m.projects.sideTab) + d + len(sideTabNames)) % len(sideTabNames))
 		return m, nil
-	case key.Matches(msg, k.Help) && m.mode == modeProjects:
+	case m.mode == modeProjects && m.matches(msg, k.Help):
 		m.projects.showHelp = true
 		return m, nil
 	}
 	if m.projects.sideTab == sideChanges {
 		return m.changesKey(msg)
 	}
-	if key.Matches(msg, k.Refresh) {
+	if m.matches(msg, k.Refresh) {
 		return m.reloadFileTree()
 	}
-	return m.applyTreeRequest(m.projects.ftree.key(msg, m.cardListPageStep()))
+	return m.applyTreeRequest(m.projects.ftree.key(func(bs ...binding) bool { return m.matches(msg, bs...) }, m.cardListPageStep()))
 }
 
 // reloadFileTree fetches the root and each unfolded directory again. The old
@@ -922,41 +907,41 @@ func (m model) moveTree(i int) (tea.Model, tea.Cmd) {
 func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	n := len(m.projects.rows)
 	switch {
-	case key.Matches(msg, projectsKeys.Up):
+	case m.matches(msg, projectsKeys.Up):
 		return m.moveTree(cursorUp(m.projects.cursor))
-	case key.Matches(msg, projectsKeys.Down):
+	case m.matches(msg, projectsKeys.Down):
 		return m.moveTree(cursorDown(m.projects.cursor, n))
-	case key.Matches(msg, projectsKeys.Top):
+	case m.matches(msg, projectsKeys.Top):
 		return m.moveTree(0)
-	case key.Matches(msg, projectsKeys.Bottom):
+	case m.matches(msg, projectsKeys.Bottom):
 		return m.moveTree(cursorBottom(n))
-	case key.Matches(msg, projectsKeys.HalfUp):
+	case m.matches(msg, projectsKeys.HalfUp):
 		return m.moveTree(max(0, m.projects.cursor-m.cardListPageStep()))
-	case key.Matches(msg, projectsKeys.HalfDown):
+	case m.matches(msg, projectsKeys.HalfDown):
 		return m.moveTree(min(cursorBottom(n), m.projects.cursor+m.cardListPageStep()))
-	case key.Matches(msg, projectsKeys.Left):
+	case m.matches(msg, projectsKeys.Left):
 		return m.treeLeft()
-	case key.Matches(msg, projectsKeys.Right):
+	case m.matches(msg, projectsKeys.Right):
 		return m.treeRight()
-	case key.Matches(msg, projectsKeys.Enter):
+	case m.matches(msg, projectsKeys.Enter):
 		return m.projectsEnter()
-	case key.Matches(msg, projectsKeys.New):
+	case m.matches(msg, projectsKeys.New):
 		return m.actNewWorkspace()
-	case key.Matches(msg, projectsKeys.Rename):
+	case m.matches(msg, projectsKeys.Rename):
 		return m.actRenameProject()
-	case key.Matches(msg, projectsKeys.Forget):
+	case m.matches(msg, projectsKeys.Forget):
 		return m.actForgetProject()
-	case key.Matches(msg, projectsKeys.Hide):
+	case m.matches(msg, projectsKeys.Hide):
 		return m.actToggleHidden()
-	case key.Matches(msg, projectsKeys.Pin):
+	case m.matches(msg, projectsKeys.Pin):
 		return m.actTogglePinned()
-	case key.Matches(msg, projectsKeys.Remove):
+	case m.matches(msg, projectsKeys.Remove):
 		return m.actRemoveWorkspace(false)
-	case key.Matches(msg, projectsKeys.ForceRemove):
+	case m.matches(msg, projectsKeys.ForceRemove):
 		return m.actRemoveWorkspace(true)
-	case key.Matches(msg, projectsKeys.Target):
+	case m.matches(msg, projectsKeys.Target):
 		return m.actRetarget()
-	case key.Matches(msg, projectsKeys.RunSetup):
+	case m.matches(msg, projectsKeys.RunSetup):
 		return m.actRunSetup()
 	}
 	return m, nil
@@ -1043,7 +1028,7 @@ func (m model) projectsView() string {
 // helpScreen draws the key help over the whole frame; any key closes it.
 func (m model) helpScreen() string {
 	help := indentBlock(m.projectsHelpView(), strings.Repeat(" ", screenMargin))
-	footer := m.footer(helpAs(projectsKeys.Help, "any key", "close"))
+	footer := m.footer(hint("any key", "close"))
 	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, max(1, m.height-4), flexPanel(help)), footer, m.width, m.height)
 }
 
@@ -1276,9 +1261,9 @@ func (m model) projectsSummary(r projectsRow, w int) string {
 		}
 		b.WriteString(m.projRowLine(row, false, false, act, w) + "\n")
 	}
-	hint := "n new workspace · R rename"
+	hint := m.keyText(projectsKeys.New) + " new workspace · " + m.keyText(projectsKeys.Rename) + " rename"
 	if m.projects.isFolded(p.ID) {
-		hint = "l unfold · " + hint
+		hint = m.keyText(projectsKeys.Right) + " unfold · " + hint
 	}
 	b.WriteString("\n" + dimStyle.Render(truncateLine(hint, w)))
 	return b.String()
@@ -1543,38 +1528,38 @@ func (m model) handleFileViewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool)
 	if !f.open() {
 		return m, nil, false
 	}
-	k := projectsKeys
+	fk := fileViewKeys
+	pk := projectsKeys
 	switch {
-	case key.Matches(msg, k.Back):
+	case m.matches(msg, fk.Back):
 		m.closeFileView()
-	case key.Matches(msg, k.Refresh):
+	case m.matches(msg, fk.Refresh):
 		mm, cmd := m.reloadFileView()
 		return mm, cmd, true
-	case key.Matches(msg, k.Up):
+	case m.matches(msg, fk.Up):
 		f.scroll = max(0, f.scroll-1)
-	case key.Matches(msg, k.Down):
+	case m.matches(msg, fk.Down):
 		f.scroll = min(f.scroll+1, m.fileViewMaxScroll())
-	case key.Matches(msg, k.HalfUp):
+	case m.matches(msg, fk.HalfUp):
 		f.scroll = max(0, f.scroll-m.cardListPageStep())
-	case key.Matches(msg, k.HalfDown):
+	case m.matches(msg, fk.HalfDown):
 		f.scroll = min(f.scroll+m.cardListPageStep(), m.fileViewMaxScroll())
-	case key.Matches(msg, k.Top):
+	case m.matches(msg, fk.Top):
 		f.scroll = 0
-	case key.Matches(msg, k.Bottom):
+	case m.matches(msg, fk.Bottom):
 		f.scroll = m.fileViewMaxScroll()
-	case key.Matches(msg, k.Wrap):
+	case m.matches(msg, fk.Wrap):
 		f.wrap = !f.wrap
 		f.scroll = min(f.scroll, m.fileViewMaxScroll())
-	case key.Matches(msg, k.NextFile), key.Matches(msg, k.PrevFile):
+	case m.matches(msg, fk.NextFile), m.matches(msg, fk.PrevFile):
 		d := 1
-		if key.Matches(msg, k.PrevFile) {
+		if m.matches(msg, fk.PrevFile) {
 			d = -1
 		}
 		mm, cmd := m.stepDiff(d)
 		return mm, cmd, true
-	case key.Matches(msg, k.Focus), key.Matches(msg, k.FocusPrev), key.Matches(msg, k.Help),
-		key.Matches(msg, k.ToggleSidebar), key.Matches(msg, k.ToggleFiles),
-		key.Matches(msg, sessionKeys.Files), key.Matches(msg, sessionKeys.Focus):
+	case m.matches(msg, pk.ToggleSidebar), m.matches(msg, pk.ToggleFiles),
+		m.mode != modeProjects && m.matches(msg, sessionKeys.Focus):
 		return m, nil, false
 	}
 	// Any other key would act on the content hidden behind the file.

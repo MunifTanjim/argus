@@ -49,7 +49,7 @@ func TestComposeHDegenerate(t *testing.T) {
 func TestFooterKeepsScreenMargin(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 100, 30
-	long := helpAs(projectsKeys.Help, "?", strings.Repeat("x", m.width-5)) // one column past the margin
+	long := helpAs(projectsKeys.Help, strings.Repeat("x", m.width-5)) // one column past the margin
 	if w := lipgloss.Width(m.footer(long)); w > m.width-2*screenMargin {
 		t.Errorf("footer is %d wide; a centered footer must leave %d columns each side of %d", w, screenMargin, m.width)
 	}

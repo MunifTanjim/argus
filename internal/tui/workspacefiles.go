@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -82,8 +81,8 @@ func (m model) syncPane() (tea.Model, tea.Cmd) {
 
 func (m model) handleProjectsPaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := projectsKeys
-	if key.Matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup) {
-		m.flash = "manage keys work in the tree · esc to go there"
+	if m.matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup) {
+		m.flash = "manage keys work in the tree · " + m.keyText(projectsKeys.Back) + " to go there"
 		return m, nil
 	}
 	if mm, cmd, ok := m.handleFileViewKey(msg); ok {
@@ -95,27 +94,27 @@ func (m model) handleProjectsPaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) paneSessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	ss := m.paneSessions()
 	switch {
-	case key.Matches(msg, projectsKeys.Up):
+	case m.matches(msg, projectsKeys.Up):
 		m.projects.wsCursor = cursorUp(m.projects.wsCursor)
-	case key.Matches(msg, projectsKeys.Down):
+	case m.matches(msg, projectsKeys.Down):
 		m.projects.wsCursor = cursorDown(m.projects.wsCursor, len(ss))
-	case key.Matches(msg, projectsKeys.Top):
+	case m.matches(msg, projectsKeys.Top):
 		m.projects.wsCursor = 0
-	case key.Matches(msg, projectsKeys.Bottom):
+	case m.matches(msg, projectsKeys.Bottom):
 		m.projects.wsCursor = cursorBottom(len(ss))
-	case key.Matches(msg, projectsKeys.HalfUp):
+	case m.matches(msg, projectsKeys.HalfUp):
 		m.projects.wsCursor = max(0, m.projects.wsCursor-m.cardListPageStep())
-	case key.Matches(msg, projectsKeys.HalfDown):
+	case m.matches(msg, projectsKeys.HalfDown):
 		m.projects.wsCursor = min(cursorBottom(len(ss)), m.projects.wsCursor+m.cardListPageStep())
-	case key.Matches(msg, listKeys.Jump):
+	case m.matches(msg, listKeys.Jump):
 		if m.projects.wsCursor < len(ss) {
 			return m.jumpTo(ss[m.projects.wsCursor])
 		}
-	case key.Matches(msg, projectsKeys.Enter):
+	case m.matches(msg, projectsKeys.Enter):
 		if m.projects.wsCursor < len(ss) {
 			return m.enterSession(ss[m.projects.wsCursor].ID)
 		}
-	case key.Matches(msg, listKeys.Kill):
+	case m.matches(msg, listKeys.Kill):
 		if m.projects.wsCursor < len(ss) {
 			s := ss[m.projects.wsCursor]
 			if refusal := killRefusal(s); refusal != "" {
@@ -153,7 +152,7 @@ func (m *model) refreshChanges() tea.Cmd {
 func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	c := &m.projects.changes
 	k := projectsKeys
-	if key.Matches(msg, k.Refresh) {
+	if m.matches(msg, k.Refresh) {
 		return m, m.refreshChanges()
 	}
 	if c.commit != nil {
@@ -161,9 +160,9 @@ func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	n := len(c.files) + len(c.commits)
 	switch {
-	case key.Matches(msg, k.DiffMode):
+	case m.matches(msg, k.DiffMode):
 		if c.against == "" && m.targetOf(c.ws) == "" {
-			m.flash = "no target branch · T in the tree sets one"
+			m.flash = "no target branch · " + m.keyTextOn("projects", projectsKeys.Target) + " in the tree sets one"
 			return m, nil
 		}
 		if c.against == "" {
@@ -174,19 +173,19 @@ func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// The old files stay until the new list arrives, so the cursor keeps its row.
 		c.loading, c.err = true, nil
 		return m, m.fetchChangedFiles(c.ws, c.against, c.gen)
-	case key.Matches(msg, k.Up):
+	case m.matches(msg, k.Up):
 		c.cursor = cursorUp(c.cursor)
-	case key.Matches(msg, k.Down):
+	case m.matches(msg, k.Down):
 		c.cursor = cursorDown(c.cursor, n)
-	case key.Matches(msg, k.Top):
+	case m.matches(msg, k.Top):
 		c.cursor = 0
-	case key.Matches(msg, k.Bottom):
+	case m.matches(msg, k.Bottom):
 		c.cursor = cursorBottom(n)
-	case key.Matches(msg, k.HalfUp):
+	case m.matches(msg, k.HalfUp):
 		c.cursor = max(0, c.cursor-m.cardListPageStep())
-	case key.Matches(msg, k.HalfDown):
+	case m.matches(msg, k.HalfDown):
 		c.cursor = min(cursorBottom(n), c.cursor+m.cardListPageStep())
-	case key.Matches(msg, k.Enter, k.Right):
+	case m.matches(msg, k.Enter, k.Right):
 		switch {
 		case c.cursor < len(c.files):
 			return m.openDiff(c.files[c.cursor], "")
@@ -204,21 +203,21 @@ func (m model) commitFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := projectsKeys
 	n := len(c.commitFiles)
 	switch {
-	case key.Matches(msg, k.Left):
+	case m.matches(msg, k.Left):
 		c.commit = nil
-	case key.Matches(msg, k.Up):
+	case m.matches(msg, k.Up):
 		c.commitCursor = cursorUp(c.commitCursor)
-	case key.Matches(msg, k.Down):
+	case m.matches(msg, k.Down):
 		c.commitCursor = cursorDown(c.commitCursor, n)
-	case key.Matches(msg, k.Top):
+	case m.matches(msg, k.Top):
 		c.commitCursor = 0
-	case key.Matches(msg, k.Bottom):
+	case m.matches(msg, k.Bottom):
 		c.commitCursor = cursorBottom(n)
-	case key.Matches(msg, k.HalfUp):
+	case m.matches(msg, k.HalfUp):
 		c.commitCursor = max(0, c.commitCursor-m.cardListPageStep())
-	case key.Matches(msg, k.HalfDown):
+	case m.matches(msg, k.HalfDown):
 		c.commitCursor = min(cursorBottom(n), c.commitCursor+m.cardListPageStep())
-	case key.Matches(msg, k.Enter, k.Right):
+	case m.matches(msg, k.Enter, k.Right):
 		if c.commitCursor < n {
 			return m.openDiff(c.commitFiles[c.commitCursor], c.commit.SHA)
 		}
@@ -300,17 +299,17 @@ func (m model) targetOf(wsID string) string {
 
 // diffModeKey labels t with the mode it switches to; with no target it only
 // hints, so it is not offered.
-func (m model) diffModeKey() key.Binding {
+func (m model) diffModeKey() binding {
 	k := projectsKeys.DiffMode
 	c := m.projects.changes
 	switch {
 	case c.against == api.AgainstTarget:
-		return helpAs(k, "t", "uncommitted")
+		return helpAs(k, "uncommitted")
 	case m.targetOf(c.ws) == "":
 		k.SetEnabled(false)
 		return k
 	}
-	return helpAs(k, "t", "vs "+m.targetOf(c.ws))
+	return helpAs(k, "vs "+m.targetOf(c.ws))
 }
 
 // changesView is the Changes tab body: the diff mode and the changed files, then

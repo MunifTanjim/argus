@@ -64,3 +64,36 @@ func TestNoConfigMutuallyExclusiveWithConfig(t *testing.T) {
 		t.Error("--no-config combined with --config should error")
 	}
 }
+
+func TestResolveTUIConfigReadsKeymaps(t *testing.T) {
+	withConfigFile(t, "tui:\n  keymap:\n    global:\n      \"g.\": toggle-show-hidden-projects\n")
+	root := newRootCmd("test")
+	if err := root.Flags().Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	cfg, err := resolveTUIConfig(root)
+	if err != nil {
+		t.Fatalf("resolveTUIConfig: %v", err)
+	}
+	if got := cfg.TUI.Keymaps["global"]["g."]; got != "toggle-show-hidden-projects" {
+		t.Errorf(`keymaps["global"]["g."] = %q`, got)
+	}
+}
+
+func TestBadKeymapsStopOnlyTheTUI(t *testing.T) {
+	withConfigFile(t, "token: filetok\ntui:\n  keymap: [g, G]\n")
+	root := newRootCmd("test")
+	if err := root.Flags().Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	cfg, err := resolveConfig(root)
+	if err != nil {
+		t.Fatalf("resolveConfig must not read keymaps: %v", err)
+	}
+	if cfg.Token != "filetok" || cfg.TUI.Keymaps != nil {
+		t.Errorf("token = %q, keymaps = %v", cfg.Token, cfg.TUI.Keymaps)
+	}
+	if _, err := resolveTUIConfig(root); err == nil {
+		t.Error("resolveTUIConfig should report the bad keymaps")
+	}
+}

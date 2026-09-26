@@ -19,7 +19,7 @@ func TestListViewEmptyStateIsFriendly(t *testing.T) {
 	for _, want := range []string{
 		"Watch and control all your AI agents.", // tagline
 		"No sessions yet.",                      // greeting
-		"s spawn · r refresh · q quit",          // trimmed footer
+		"s spawn · gr refresh · Q quit",         // trimmed footer
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("empty welcome should contain %q:\n%s", want, out)

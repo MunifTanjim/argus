@@ -174,7 +174,7 @@ func (m model) actToggleHidden() (tea.Model, tea.Cmd) {
 	if !p.Hidden {
 		ok = "hid " + p.Name
 		if !m.projects.showHidden {
-			ok += " · z shows hidden"
+			ok += " · " + m.keyText(projectsKeys.ShowHidden) + " shows hidden"
 		}
 	}
 	return m, m.setHiddenCmd(projID, !p.Hidden, ok)

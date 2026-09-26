@@ -17,6 +17,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bundle"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
@@ -36,7 +37,7 @@ type Client interface {
 
 // Run connects the TUI and blocks until the user quits. Non-nil logs (embedded
 // node) are tailed in the Logs tab.
-func Run(client Client, logs *logbuf.Buffer) error {
+func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 	// The client library logs warnings (e.g. a node timing out) via the standard
 	// logger; keep them off the alt-screen.
 	if logs != nil {
@@ -50,7 +51,7 @@ func Run(client Client, logs *logbuf.Buffer) error {
 	initIcons()
 	initStyles()
 
-	m := newModel(client, hasDark, logs)
+	m := newModel(client, hasDark, logs).withKeymaps(cfg)
 	go sendTermKeyLoop(client, m.termKeyCh) // single ordered sender for live-terminal input
 	p := tea.NewProgram(m)
 	go func() {
@@ -97,7 +98,7 @@ func newViewerModel(client *fileClient, hasDark bool) model {
 
 // RunBundle extracts and validates the bundle before launching the TUI, so a bad
 // bundle errors out without ever opening the alt-screen.
-func RunBundle(bundlePath string, redact bool) error {
+func RunBundle(bundlePath string, redact bool, cfg config.TUIConfig) error {
 	pruneOldExtractions()
 
 	dest, err := bundleExtractDir(bundlePath)
@@ -118,7 +119,7 @@ func RunBundle(bundlePath string, redact bool) error {
 	if err != nil {
 		return err
 	}
-	return RunViewer(client, bundlePath, redact)
+	return RunViewer(client, bundlePath, redact, cfg)
 }
 
 // extractPrefix marks argus view's extraction and temp dirs in TempDir so
@@ -240,13 +241,13 @@ func extractBundle(bundlePath, dest string) (bundle.Manifest, error) {
 
 // RunViewer runs the TUI as an offline viewer over an extracted .argus bundle,
 // opening directly in the transcript view.
-func RunViewer(client *fileClient, bundlePath string, redact bool) error {
+func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TUIConfig) error {
 	log.SetOutput(io.Discard) // keep any stray standard-logger output off the alt-screen
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
 	initIcons()
 	initStyles()
-	m := newViewerModel(client, hasDark)
+	m := newViewerModel(client, hasDark).withKeymaps(cfg)
 	m.redactMode = redact
 	m.bundlePath = bundlePath
 	m.redactSrcDir = client.destDir

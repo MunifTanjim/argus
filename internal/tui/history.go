@@ -5,7 +5,6 @@ import (
 	"image/color"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -88,9 +87,8 @@ var historyProjectsTable = []keyTableEntry{
 	{historyProjectsKeys.HalfDown, model.actHistProjHalfDown},
 	{historyProjectsKeys.Open, model.actHistProjOpen},
 	{historyProjectsKeys.Refresh, model.actHistProjRefresh},
-	{listKeys.TabPrev, model.actHistProjBack}, // left/h → Sessions tab
-	{listKeys.TabNext, model.actOpenLogs},     // right/l → Logs tab (when spawned)
-	{homeTree, model.actListBack},
+	{listKeys.TabPrev, model.actHistProjBack}, // prev tab → Sessions tab
+	{listKeys.TabNext, model.actOpenLogs},     // next tab → Logs tab (when spawned)
 	{historyProjectsKeys.Back, model.actHistProjBack},
 }
 
@@ -165,6 +163,8 @@ func (m model) exportOrFlashFooter(footer string) string {
 	switch {
 	case m.pendingExport:
 		return asstStyle.Render("export this session? y/n")
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
 	}
@@ -302,7 +302,7 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 	if mm, cmd, ok := m.handleRedactKey(msg); ok {
 		return mm, cmd
 	}
-	if key.Matches(msg, transcriptKeys.Back) {
+	if m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			if m.popDetail() { // root frame → back to transcript
 				m.historyView = histTranscript
@@ -315,13 +315,13 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 		m.mode = modeHistorySessions
 		return m, nil
 	}
-	if key.Matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript && !m.viewer {
+	if m.matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript && !m.viewer {
 		return m.startHistoryResume(m.history.openResumable, m.history.openNodeID, m.history.openAgent, m.history.openSessionID)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)
 	}
-	if key.Matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
+	if m.matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
 		if m.viewer {
 			return m, nil
 		}
@@ -336,14 +336,15 @@ func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 func (m model) historyProjectsView() string {
 	title := m.homeBrand() + m.homeTabs(modeHistoryProjects)
 	cardW := historyWidth(m)
+	backHint := m.keyText(historyProjectsKeys.Back) + " back"
 	if m.history.err != nil {
-		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW)
+		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW)
 	}
 	if m.history.projects == nil {
 		return m.center(title+"\n\n"+dimStyle.Render("loading projects…"), cardW)
 	}
 	if len(m.history.projects) == 0 {
-		return m.center(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render("esc back"), cardW)
+		return m.center(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render(backHint), cardW)
 	}
 	cards := make([]string, len(m.history.projects))
 	prevNode := ""
@@ -360,22 +361,26 @@ func (m model) historyProjectsView() string {
 }
 
 func (m model) historyProjectsFooter() string {
+	if len(m.keyBuf) > 0 {
+		return asstStyle.Render(m.keyHint())
+	}
 	return m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
-		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back, m.homeTreeKey(), projectsKeys.Help)
+		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back, m.treeKey(), projectsKeys.Help)
 }
 
 func (m model) historySessionsView() string {
 	title := headerStyle.Render(m.withBrand("history · "+m.history.project.Label)) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
 	cardW := historyWidth(m)
+	backHint := m.keyText(historySessionsKeys.Back) + " back"
 	if m.history.err != nil {
-		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render("esc back"), cardW)
+		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW)
 	}
 	if len(m.history.sessions) == 0 {
 		msg := "loading sessions…"
 		if !m.history.loading {
 			msg = "no sessions in this project"
 		}
-		return m.center(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render("esc back"), cardW)
+		return m.center(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render(backHint), cardW)
 	}
 	showAgent := historyMultiAgent(m.history.sessions)
 	cards := make([]string, len(m.history.sessions))
@@ -387,7 +392,7 @@ func (m model) historySessionsView() string {
 }
 
 func (m model) historySessionsFooter() string {
-	binds := []key.Binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
+	binds := []binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
 	if m.history.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
@@ -424,7 +429,7 @@ func (m model) historyTranscriptView() string {
 }
 
 func (m model) historyTranscriptFooter() string {
-	binds := []key.Binding{transcriptKeys.ScrollUp, transcriptKeys.TurnNext, transcriptKeys.Fold, transcriptKeys.Detail, transcriptKeys.Bottom}
+	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if !m.viewer {
 		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
 	}

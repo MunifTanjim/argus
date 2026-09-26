@@ -118,7 +118,7 @@ func (m model) chunkExpanded(c transcript.Chunk) bool {
 	return false
 }
 
-func (m *model) toggleExpand(i int) {
+func (m *model) setExpanded(i int, on bool) {
 	if i < 0 || i >= len(m.transcript.chunks) {
 		return
 	}
@@ -126,15 +126,7 @@ func (m *model) toggleExpand(i int) {
 	if !m.chunkExpandable(c) {
 		return
 	}
-	m.transcript.expanded[c.ID] = !m.chunkExpanded(c)
-}
-
-func (m *model) setAllExpanded(v bool) {
-	for _, c := range m.transcript.chunks {
-		if m.chunkExpandable(c) {
-			m.transcript.expanded[c.ID] = v
-		}
-	}
+	m.transcript.expanded[c.ID] = on
 }
 
 // currentChunkID returns the id of the selected chunk (for cursor preservation).
@@ -682,19 +674,6 @@ func chunkSpan(i int, first []int, total int) (int, int) {
 	return start, end
 }
 
-// selectedChunkOverflow returns the selected chunk's [start,end) line span,
-// viewport height, and whether it overflows. j/k scroll an oversized card before
-// moving the selection.
-func (m model) selectedChunkOverflow() (start, end, h int, overflow bool) {
-	lines, first := m.layoutChunks()
-	h = m.viewportHeight()
-	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
-		return 0, 0, h, false
-	}
-	start, end = chunkSpan(m.transcript.cursor, first, len(lines))
-	return start, end, h, end-start > h
-}
-
 // ensureChunkVisible scrolls so the selected chunk sits within the viewport.
 func (m *model) ensureChunkVisible() {
 	lines, first := m.layoutChunks()
@@ -724,6 +703,26 @@ func (m model) cursorVisible() bool {
 	return start < m.transcript.scroll+m.viewportHeight() && end > m.transcript.scroll
 }
 
+// keepCursorVisible moves the cursor one card at a time toward the viewport,
+// stopping at the first card not wholly outside it.
+func (m *model) keepCursorVisible() {
+	lines, first := m.layoutChunks()
+	c := &m.transcript.cursor
+	if *c < 0 || *c >= len(first) {
+		return
+	}
+	top, bottom := m.transcript.scroll, m.transcript.scroll+m.viewportHeight()
+	for *c < len(first)-1 {
+		if _, end := chunkSpan(*c, first, len(lines)); end > top {
+			break
+		}
+		*c++
+	}
+	for *c > 0 && first[*c] >= bottom {
+		*c--
+	}
+}
+
 // chunkAtLine returns the index of the chunk whose span contains the given line
 // (the fallback when a single chunk is taller than the viewport).
 func (m model) chunkAtLine(line int) int {
@@ -739,7 +738,6 @@ func (m model) chunkAtLine(line int) int {
 
 // firstVisibleChunk/lastVisibleChunk return the first/last chunk starting within
 // the viewport, falling back to chunkAtLine(scroll) when a tall chunk fills it.
-// j/k use these to re-anchor selection after line-scrolling.
 func (m model) firstVisibleChunk() int {
 	_, first := m.layoutChunks()
 	h := m.viewportHeight()

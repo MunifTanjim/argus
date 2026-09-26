@@ -32,21 +32,25 @@ The TUI opens on the projects screen. The screen has three columns:
 - **Right sidebar**: the **Files** tree and the **Changes** list of the current
   workspace.
 
-Argus adds a project when a session starts in it. Press `?` to see every key. The
+Argus adds a project when a session starts in it. Press `g?` to see every key. The
 main keys are:
 
 | Key | Action |
 |---|---|
-| `tab` / `shift+tab` | Move focus between the tree, the pane, and the right sidebar |
+| `<C-w>h` / `<C-w>l` | Move focus left or right |
+| `<C-w>j` | In a session, move focus to the prompt dock |
+| `<C-w>w` / `<C-w>W` | Cycle focus forward or backward |
 | `s` | Start a session in the selected workspace |
-| `n` | Create a workspace from a new branch, a branch, a PR, or an issue |
-| `x` / `X` | Remove a workspace, or remove it and discard its uncommitted changes |
+| `a` | Create a workspace from a new branch, a branch, a PR, or an issue |
+| `dd` / `D` | Remove a workspace, or remove it and discard its uncommitted changes |
 | `T` | Change the target branch of a workspace |
-| `R` / `H` / `P` | Rename, hide, or pin a project |
+| `r` / `H` / `P` | Rename, hide, or pin a project |
 | `F` | Forget a project. Its files stay. |
-| `^b` / `^e` | Show or hide the tree, or the right sidebar |
+| `<Leader>o` / `<Leader>e` | Show or hide the tree, or the right sidebar |
 | `S` | Run the workspace's setup script again |
 | `L` | Show the output of the workspace's last setup run |
+
+`<Leader>` is the leader key. The default leader is `<Space>`, so `<Leader>o` is `<Space>o` and `<Leader>e` is `<Space>e`. You can change these keys. See [Keymaps](../getting-started/configuration.md#keymaps).
 
 A workspace with live sessions cannot be removed. Kill its sessions first.
 
@@ -57,7 +61,7 @@ lines of its output. See
 
 The **Changes** list shows the uncommitted changes. Press `t` to show all changes
 since the target branch. The list also shows the commits since the target branch.
-Press `enter` on a file to open its diff, and `J` or `K` to open the next or
+Press `enter` on a file to open its diff, and `]f` or `[f` to open the next or
 previous file.
 
 Workspaces from a PR or an issue need the GitHub CLI. See

@@ -17,7 +17,7 @@ func createTestModel(t *testing.T) model {
 	m.client = &recordingClient{}
 	m.projects.tree[0].DefaultBranch = "main"
 	m.projects.selectRow("n1:p1")
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'n'})
+	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'a'})
 	return res.(model)
 }
 

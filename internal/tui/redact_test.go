@@ -436,7 +436,7 @@ func TestRedactListDelete(t *testing.T) {
 	// Move to index 1 and delete.
 	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = res.(model)
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	m = res.(model)
 	if len(m.redact.literals) != 2 || m.redact.literals[1] != "ccc" {
 		t.Fatalf("delete failed: %v", m.redact.literals)

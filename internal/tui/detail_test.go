@@ -43,6 +43,7 @@ func TestFilledTool(t *testing.T) {
 
 func detailTestModel(c transcript.Chunk) model {
 	m := testModel()
+	m.mode = modeSession
 	m.transcript.chunks = []transcript.Chunk{c}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
@@ -384,13 +385,12 @@ func TestDetailKeyNav(t *testing.T) {
 	if m.topFrame().cursor != 1 {
 		t.Fatalf("cursor=%d want 1", m.topFrame().cursor)
 	}
-	// space toggles expansion of the selected item (root items start collapsed,
-	// so the first space expands).
+	// Root items start collapsed, so l expands the selected item.
 	before := m.topFrame().isExpanded(1)
-	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: ' '})
+	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = res.(model)
 	if m.topFrame().isExpanded(1) == before {
-		t.Error("space should toggle the selected item's expansion")
+		t.Error("l should expand the selected item")
 	}
 	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
