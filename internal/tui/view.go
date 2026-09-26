@@ -390,6 +390,10 @@ func (m model) spawnView() string {
 			head += "\n" + dimStyle.Render("in "+truncateLeft(m.spawn.cwd.Value(), max(1, cardW-3)))
 			rows--
 		}
+		if m.setupRunningAt(m.spawn.cwd.Value()) {
+			head += "\n" + dimStyle.Render("setup is still running")
+			rows--
+		}
 		ta := m.spawn.prompt
 		ta.SetWidth(cardW)
 		ta.SetHeight(max(1, rows))

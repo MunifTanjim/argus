@@ -19,6 +19,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"github.com/MunifTanjim/argus/internal/wsscript"
 )
 
 func (m model) Init() tea.Cmd {
@@ -196,7 +197,17 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.projCursor = max(0, len(m.history.projects)-1)
 		}
 	case projectsTreeMsg:
-		m.projects.loading = false
+		var follow tea.Cmd
+		// Only the reply to the last fetch, with no refetch after it, can show
+		// that a wanted row is not there.
+		final := msg.seq == m.projects.fetchSeq && !m.projects.refetch
+		if msg.seq == m.projects.fetchSeq {
+			m.projects.loading = false
+			if m.projects.refetch {
+				m.projects.refetch = false
+				follow = m.loadProjects()
+			}
+		}
 		m.projects.tree, m.projects.err = msg.tree, msg.err
 		if msg.tree == nil {
 			m.projects.tree = []api.ProjectNode{}
@@ -211,9 +222,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.projects.selectRow(m.projects.want) // a project or node row
 				}
 			}
-			m.projects.want = ""
+			if final || m.projects.cursorRowID() == m.projects.want {
+				m.projects.want = ""
+			}
 		}
-		return m.syncPane()
+		mm, cmd := m.syncPane()
+		m = mm.(model)
+		return m, tea.Batch(cmd, follow, m.maybeSpin())
 	case projectsActionMsg:
 		delete(m.projects.removing, msg.removed)
 		if msg.err != nil {
@@ -231,7 +246,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.reloadChanges {
 			m.projects.changes.reload()
 		}
-		return m, m.fetchProjects() // refresh the tree after a mutation
+		return m, m.loadProjects() // refresh the tree after a mutation
 	case branchesMsg:
 		c := &m.projects.create
 		if c.active && msg.projectID == c.projectID {
@@ -265,7 +280,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.flash = createdFlash(msg.res)
-			return m, m.fetchProjects()
+			return m, m.loadProjects()
 		}
 		if msg.err != nil {
 			m.projects.create.creating = false
@@ -279,7 +294,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nodeID, _, _ := session.SplitCompositeID(msg.res.WorkspaceID)
 			m.projects.offerSpawn = &spawnOffer{nodeID: nodeID, cwd: msg.res.Dir, prompt: msg.res.Prompt}
 		}
-		return m, m.fetchProjects()
+		return m, m.loadProjects()
 	case changedFilesMsg:
 		if c := &m.projects.changes; msg.ws == c.ws && msg.against == c.against && msg.gen == c.gen {
 			prev := len(c.files)
@@ -322,6 +337,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readFileMsg:
 		if f := &m.projects.fileView; !f.diff && msg.ws == f.ws && msg.path == f.path {
 			f.lines, f.notShown, f.err, f.loading = viewLines(m.highlightFile(msg.path, msg.content)), msg.notShown, msg.err, false
+		}
+	case setupLogMsg:
+		if f := &m.projects.fileView; f.log && f.ws == msg.ws {
+			f.lines, f.err, f.loading = viewLines(wsscript.CleanOutput(msg.output)), msg.err, false
 		}
 	case histSessionsMsg:
 		m.history.loading = false
@@ -499,7 +518,7 @@ func (m model) anyWorking() bool {
 // none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
 // spinResumeCmd and registry events.
 func (m *model) maybeSpin() tea.Cmd {
-	busy := m.anyWorking() || m.projects.create.creating || (m.projects.create.active && m.projects.create.listLoading())
+	busy := m.anyWorking() || m.projects.create.creating || (m.projects.create.active && m.projects.create.listLoading()) || m.anySetupRunning()
 	if (m.mode == modeList || m.mode == modeProjects || m.embedded()) && !m.spinning && busy {
 		m.spinning = true
 		return spinTickCmd()
@@ -576,6 +595,9 @@ func (m model) killCmd(id string) tea.Cmd {
 }
 
 func (m *model) applyEvent(n api.Notification) tea.Cmd {
+	if n.Method == api.MethodProjectChanged {
+		return m.loadProjects()
+	}
 	if n.Method == api.MethodTerminalOutput {
 		var o api.TerminalOutput
 		if json.Unmarshal(n.Params, &o) != nil {
@@ -632,10 +654,9 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		}
 		m.sessions[ev.Session.ID] = ev.Session
 		// A session in a workspace the tree lacks means a new repo or worktree.
-		if ws := ev.Session.WorkspaceID; ws != "" && !m.projects.loading {
+		if ws := ev.Session.WorkspaceID; ws != "" {
 			if _, ok := m.findWorkspace(ws); !ok {
-				m.projects.loading = true
-				cmd = tea.Batch(cmd, m.fetchProjects())
+				cmd = tea.Batch(cmd, m.loadProjects())
 			}
 		}
 		// An agent that stops working has likely changed files in its workspace.

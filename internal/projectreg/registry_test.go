@@ -493,3 +493,15 @@ func TestProjectNamedAfterRepoWhenFirstSeenInWorktree(t *testing.T) {
 		t.Errorf("project name = %q, want the repo name %q", got, want)
 	}
 }
+
+func TestAdoptReportsNewWorkspace(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	dir := t.TempDir()
+	if _, isNew, err := r.Adopt(ctx, dir); err != nil || !isNew {
+		t.Fatalf("first adopt: isNew=%v err=%v", isNew, err)
+	}
+	if _, isNew, err := r.Adopt(ctx, dir); err != nil || isNew {
+		t.Errorf("second adopt: isNew=%v err=%v", isNew, err)
+	}
+}

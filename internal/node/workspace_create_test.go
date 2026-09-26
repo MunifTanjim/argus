@@ -268,6 +268,19 @@ func TestCreateRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestCreateRefusesPlainProject(t *testing.T) {
+	d := nodeWithRegistry(t)
+	ctx := context.Background()
+	if _, err := d.projreg.AdoptSession(ctx, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := d.projreg.Snapshot(ctx)
+	_, err := create(t, d, api.WorkspaceCreateParams{ProjectID: ps[0].ID, Branch: "feat"})
+	if rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "not a git project") {
+		t.Errorf("err = %v, want a not-a-git-project error", err)
+	}
+}
+
 func TestTemplatesRejectUnknownKeys(t *testing.T) {
 	d := newTestNode(t)
 	if err := d.SetWorktreeDirTemplate(".worktrees/{{.Branch.Nmae}}"); err == nil {

@@ -116,7 +116,7 @@ const (
 	MethodWorkspaceCommitFiles  = "workspace.commitFiles"  // request: WorkspaceCommitParams; result: ChangedFilesResult
 	// Mutating workspace/project management (project_id-addressed except remove).
 	MethodWorkspaceCreate  = "workspace.create"  // request: WorkspaceCreateParams; result: WorkspaceCreateResult
-	MethodWorkspaceRemove  = "workspace.remove"  // request: WorkspaceRemoveParams; result: nil
+	MethodWorkspaceRemove  = "workspace.remove"  // request: WorkspaceRemoveParams; result: WorkspaceRemoveResult
 	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: nil
 	MethodProjectSetHidden = "project.setHidden" // request: ProjectFlagParams; result: nil
 	MethodProjectSetPinned = "project.setPinned" // request: ProjectFlagParams; result: nil
@@ -126,6 +126,9 @@ const (
 	MethodProjectPRs         = "project.prs"         // request: ProjectRef; result: PRsResult
 	MethodProjectIssues      = "project.issues"      // request: ProjectRef; result: IssuesResult
 	MethodWorkspaceSetTarget = "workspace.setTarget" // request: WorkspaceSetTargetParams; result: nil
+	MethodWorkspaceRunSetup  = "workspace.runSetup"  // request: WorkspaceRef; result: nil
+	MethodWorkspaceSetupLog  = "workspace.setupLog"  // request: WorkspaceRef; result: SetupLogResult
+	MethodProjectChanged     = "project.changed"     // notification: empty params (server→client); refetch project.list
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -155,9 +158,10 @@ type WorkspaceNode struct {
 	Branch string `json:"branch,omitempty"`
 	Head   string `json:"head,omitempty"`
 	// TargetBranch is the stored target, or the project's default branch.
-	TargetBranch string `json:"target_branch,omitempty"`
-	CreatedAt    string `json:"created_at,omitempty"`   // RFC3339
-	LastSeenAt   string `json:"last_seen_at,omitempty"` // RFC3339
+	TargetBranch string     `json:"target_branch,omitempty"`
+	CreatedAt    string     `json:"created_at,omitempty"`   // RFC3339
+	LastSeenAt   string     `json:"last_seen_at,omitempty"` // RFC3339
+	Setup        *ScriptRun `json:"setup,omitempty"`        // the last setup run; absent after a node restart
 }
 
 // ProjectNode is a repository or plain directory with its workspaces. Root is
@@ -176,6 +180,7 @@ type ProjectNode struct {
 	Pinned        bool            `json:"pinned,omitempty"`
 	CreatedAt     string          `json:"created_at,omitempty"`   // RFC3339
 	LastSeenAt    string          `json:"last_seen_at,omitempty"` // RFC3339
+	Scripts       *ProjectScripts `json:"scripts,omitempty"`      // from .argus/settings*.toml in the main worktree
 	Workspaces    []WorkspaceNode `json:"workspaces"`
 	// Set only by the aggregating client, not the node.
 	NodeID    string `json:"node_id,omitempty"`
@@ -231,6 +236,7 @@ type WorkspaceCreateResult struct {
 	Dir         string `json:"dir"`
 	Warning     string `json:"warning,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
+	Setup       string `json:"setup,omitempty"` // the setup command that started in the background
 }
 
 // ProjectRef addresses a project by its (composite) id.
@@ -286,6 +292,31 @@ type WorkspaceSetTargetParams struct {
 type WorkspaceRemoveParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Force       bool   `json:"force,omitempty"`
+}
+
+// ScriptRun is a workspace's last setup run.
+type ScriptRun struct {
+	State      string `json:"state"` // running|ok|failed
+	Command    string `json:"command"`
+	ExitCode   int    `json:"exit_code,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"` // RFC3339
+	EndedAt    string `json:"ended_at,omitempty"`   // RFC3339
+	OutputTail string `json:"output_tail,omitempty"`
+}
+
+type ProjectScripts struct {
+	Setup    string `json:"setup,omitempty"`
+	Teardown string `json:"teardown,omitempty"`
+}
+
+// WorkspaceRemoveResult carries a teardown failure that a forced remove
+// passed over.
+type WorkspaceRemoveResult struct {
+	Warning string `json:"warning,omitempty"`
+}
+
+type SetupLogResult struct {
+	Output string `json:"output"`
 }
 
 // ProjectRenameParams sets a project's display name.

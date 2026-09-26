@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/wsscript"
 )
 
 type projInputMode int
@@ -59,15 +61,18 @@ type projectsRow struct {
 	isGone  bool
 	gitErr  bool // project only: git failed on it this list
 	isMain  bool
-	hidden  bool // project only
-	pinned  bool // project only
-	hasKids bool // node/project: whether it can collapse
+	hidden  bool   // project only
+	pinned  bool   // project only
+	hasKids bool   // node/project: whether it can collapse
+	setup   string // workspace only: "running" or "failed"; "" otherwise
 }
 
 type projectsState struct {
 	tree          []api.ProjectNode
 	err           error
 	loading       bool
+	fetchSeq      int  // seq of the newest tree fetch
+	refetch       bool // a change arrived during a fetch; fetch again after it
 	rows          []projectsRow
 	cursor        int             // index into rows (tree pane)
 	want          string          // workspace id to reveal and select on the next tree load
@@ -263,12 +268,24 @@ type changesState struct {
 }
 
 func (m model) fetchProjects() tea.Cmd {
-	client := m.client
+	client, seq := m.client, m.projects.fetchSeq
 	return func() tea.Msg {
 		var res api.ProjectListResult
 		err := client.Call(api.MethodProjectList, nil, &res)
-		return projectsTreeMsg{tree: res.Projects, err: err}
+		return projectsTreeMsg{tree: res.Projects, seq: seq, err: err}
 	}
+}
+
+// loadProjects fetches the tree, or, while a fetch runs, fetches it once more
+// after that fetch replies, so a change made during it is not lost.
+func (m *model) loadProjects() tea.Cmd {
+	if m.projects.loading {
+		m.projects.refetch = true
+		return nil
+	}
+	m.projects.fetchSeq++
+	m.projects.loading = true
+	return m.fetchProjects()
 }
 
 // buildProjectRows flattens st.tree under st's fold, visibility, and filter
@@ -329,7 +346,8 @@ func buildProjectRows(st projectsState) []projectsRow {
 			for _, w := range p.Workspaces {
 				rows = append(rows, projectsRow{
 					kind: rowWorkspace, depth: depth + 1, id: w.ID, label: filepath.Base(w.Dir),
-					branch: w.Branch, plain: p.Kind == "plain", target: w.TargetBranch, ws: []string{w.ID}, isGone: w.IsGone, isMain: w.IsMain,
+					branch: w.Branch, plain: p.Kind == "plain", target: w.TargetBranch, ws: []string{w.ID}, isGone: w.IsGone,
+					isMain: w.IsMain, setup: setupState(w.Setup),
 				})
 			}
 		}
@@ -370,6 +388,69 @@ func workspaceIDs(p api.ProjectNode) []string {
 		ids[i] = w.ID
 	}
 	return ids
+}
+
+func setupState(run *api.ScriptRun) string {
+	if run == nil || run.State == "ok" {
+		return ""
+	}
+	return run.State
+}
+
+func (m model) workspaceSetup(wsID string) *api.ScriptRun {
+	w, _ := m.findWorkspace(wsID)
+	return w.Setup
+}
+
+func (m model) anySetupRunning() bool {
+	for _, p := range m.projects.tree {
+		for _, w := range p.Workspaces {
+			if w.Setup != nil && w.Setup.State == "running" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m model) setupRunningAt(dir string) bool {
+	for _, p := range m.projects.tree {
+		for _, w := range p.Workspaces {
+			if w.Dir == dir && w.Setup != nil && w.Setup.State == "running" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// setupBlock heads the workspace pane while its setup runs or after it failed.
+func (m model) setupBlock(w int) string {
+	run := m.workspaceSetup(m.selectedWorkspaceID())
+	if run == nil || run.State == "ok" {
+		return ""
+	}
+	cmd := commandLine(run.Command)
+	var head string
+	switch {
+	case run.State == "failed" && cmd == "":
+		head = StyleErrorBold.Render("setup failed")
+	case run.State == "failed":
+		head = StyleErrorBold.Render(fmt.Sprintf("setup failed (exit %d) · %s", run.ExitCode, cmd))
+	case cmd == "":
+		head = StyleSecondaryBold.Render("setup running")
+	default:
+		head = StyleSecondaryBold.Render("setup running · " + cmd)
+	}
+	lines := []string{truncateLine(head, w)}
+	tail := strings.Split(wsscript.CleanOutput(run.OutputTail), "\n")
+	for _, l := range tail[max(0, len(tail)-8):] {
+		if l != "" {
+			lines = append(lines, truncateLine(dimStyle.Render(l), w))
+		}
+	}
+	lines = append(lines, truncateLine(dimStyle.Render("S runs setup again · L shows the full log"), w))
+	return strings.Join(lines, "\n") + "\n\n"
 }
 
 // sidebarMinWidth is the terminal width below which the left sidebar auto-
@@ -601,6 +682,8 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.startInput(pmFilter, "", m.projects.filter)
 	case key.Matches(msg, projectsKeys.Spawn):
 		return m.actSpawnSession()
+	case key.Matches(msg, projectsKeys.SetupLog):
+		return m.actOpenSetupLog()
 	case key.Matches(msg, projectsKeys.ShowHidden):
 		m.projects.showHidden = !m.projects.showHidden
 		m.projects.rebuild()
@@ -612,8 +695,8 @@ func (m model) handleProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, projectsKeys.Refresh) && m.projects.focus == focusPane && m.projects.fileView.open():
 		return m.reloadFileView()
 	case key.Matches(msg, projectsKeys.Refresh):
-		m.projects.loading, m.projects.err = true, nil
-		return m, m.fetchProjects()
+		m.projects.err = nil
+		return m, m.loadProjects()
 	case key.Matches(msg, projectsKeys.Widen), key.Matches(msg, projectsKeys.Narrow):
 		d := 4
 		if key.Matches(msg, projectsKeys.Narrow) {
@@ -789,6 +872,9 @@ func (m model) reloadFileTree() (tea.Model, tea.Cmd) {
 // until the answer arrives.
 func (m model) reloadFileView() (tea.Model, tea.Cmd) {
 	f := m.projects.fileView
+	if f.log {
+		return m, m.fetchSetupLog(f.ws)
+	}
 	if f.diff {
 		return m, m.fetchWorkspaceDiff(f.ws, api.ChangedFile{Path: f.path, OrigPath: f.orig}, f.against, f.rev)
 	}
@@ -870,6 +956,8 @@ func (m model) handleProjectsTreeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.actRemoveWorkspace(true)
 	case key.Matches(msg, projectsKeys.Target):
 		return m.actRetarget()
+	case key.Matches(msg, projectsKeys.RunSetup):
+		return m.actRunSetup()
 	}
 	return m, nil
 }
@@ -1093,6 +1181,12 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 			bullet = "★ "
 		}
 		text = indent + bullet + r.label
+		switch r.setup {
+		case "running":
+			text += dimStyle.Render("  " + spinnerFrame(m) + " setting up…")
+		case "failed":
+			text += StyleErrorBold.Render("  setup failed")
+		}
 		switch {
 		case r.isGone, r.plain:
 		case r.branch != "":
@@ -1198,9 +1292,11 @@ func plural(n int, noun string) string {
 }
 
 func (m model) projectsSessionPane(w, avail int) string {
+	block := m.setupBlock(min(w, maxCardWidth))
+	avail = max(1, avail-lipgloss.Height(block))
 	ss := m.paneSessions()
 	if len(ss) == 0 {
-		return dimStyle.Render("no sessions in this workspace")
+		return block + dimStyle.Render("no sessions in this workspace")
 	}
 	focused := m.projects.focus == focusPane
 	cardW := min(w, maxCardWidth)
@@ -1212,7 +1308,7 @@ func (m model) projectsSessionPane(w, avail int) string {
 	if focused {
 		cursor = m.projects.wsCursor
 	}
-	return renderCardList(cards, cursor, avail)
+	return block + renderCardList(cards, cursor, avail)
 }
 
 // embedded reports whether the current view renders inside the projects frame
@@ -1297,6 +1393,7 @@ type fileViewState struct {
 	wrap              bool     // wrap long lines instead of cutting them
 	lines             []string // highlighted once on load; rendering only windows them
 	diff              bool
+	log               bool   // the workspace's setup log
 	against           string // diff only: the Changes mode it was opened in
 	rev               string // diff only: the commit sha, or "" for the working tree
 	notShown, loading bool
@@ -1305,6 +1402,25 @@ type fileViewState struct {
 }
 
 func (f fileViewState) open() bool { return f.path != "" }
+
+func commandLine(cmd string) string {
+	first, rest, _ := strings.Cut(strings.TrimSpace(cmd), "\n")
+	first = strings.ReplaceAll(first, "\t", " ")
+	first = strings.TrimSpace(stripControls(xansi.Strip(first)))
+	if strings.TrimSpace(rest) != "" {
+		first += " …"
+	}
+	return first
+}
+
+func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r != '\t' && unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
 
 func viewLines(s string) []string {
 	if s = strings.TrimSuffix(s, "\n"); s == "" {
@@ -1400,9 +1516,15 @@ func (m model) fileViewBody(w, h int) string {
 		return dimStyle.Render(f.path + ": binary or too large")
 	case f.diff && len(f.lines) == 0:
 		return dimStyle.Render(f.path + ": no changes")
+	case f.log && len(f.lines) == 0 && m.workspaceSetup(f.ws) != nil:
+		return dimStyle.Render("no output")
+	case f.log && len(f.lines) == 0:
+		return dimStyle.Render("no setup run")
 	}
 	title := renamePath(f.orig, f.path)
 	switch {
+	case f.log:
+		title = "setup log · " + m.workspaceLabel(f.ws)
 	case f.rev != "":
 		title = f.rev[:min(len(f.rev), 7)] + " · " + title
 	case f.diff && f.against == api.AgainstTarget:

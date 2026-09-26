@@ -134,7 +134,7 @@ func printProjectTree(res api.ProjectListResult) {
 			if w.IsMain {
 				marker = "*"
 			}
-			shell.StdOutF("  %s %-24s %-8s %s%s  [%s]\n", marker, workspaceBranch(p.Kind, w), w.Head, w.Dir, goneMark(w.IsGone), shortID(w.ID))
+			shell.StdOutF("  %s %-24s %-8s %s%s%s  [%s]\n", marker, workspaceBranch(p.Kind, w), w.Head, w.Dir, goneMark(w.IsGone), setupMark(w.Setup), shortID(w.ID))
 		}
 	}
 }
@@ -154,6 +154,18 @@ func workspaceBranch(kind string, w api.WorkspaceNode) string {
 func goneMark(gone bool) string {
 	if gone {
 		return " (gone)"
+	}
+	return ""
+}
+
+func setupMark(run *api.ScriptRun) string {
+	switch {
+	case run == nil:
+		return ""
+	case run.State == "running":
+		return " (setting up)"
+	case run.State == "failed":
+		return " (setup failed)"
 	}
 	return ""
 }

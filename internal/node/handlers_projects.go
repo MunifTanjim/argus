@@ -12,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/wsscript"
 )
 
 // handleProjectList is node-local: ids are not composited.
@@ -23,7 +24,7 @@ func (d *Node) handleProjectList(ctx context.Context, _ json.RawMessage) (any, e
 	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
-	return api.ProjectListResult{Projects: toProjectNodes(projects)}, nil
+	return api.ProjectListResult{Projects: d.toProjectNodes(projects)}, nil
 }
 
 func (d *Node) handleProjectRename(ctx context.Context, params json.RawMessage) (any, error) {
@@ -105,12 +106,12 @@ func (d *Node) liveSessionsInProject(ctx context.Context, projID string) int {
 	return n
 }
 
-func toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
+func (d *Node) toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
 	out := make([]api.ProjectNode, 0, len(ps))
 	for _, p := range ps {
 		wss := make([]api.WorkspaceNode, 0, len(p.Workspaces))
 		for _, w := range p.Workspaces {
-			wss = append(wss, api.WorkspaceNode{
+			node := api.WorkspaceNode{
 				ID:           w.ID,
 				Dir:          w.Dir,
 				IsMain:       w.IsMain,
@@ -120,9 +121,13 @@ func toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
 				TargetBranch: w.TargetBranch,
 				CreatedAt:    rfc3339(w.CreatedAt),
 				LastSeenAt:   rfc3339(w.LastSeenAt),
-			})
+			}
+			if run, ok := d.scripts.Status(w.ID); ok {
+				node.Setup = scriptRun(run, d.scripts.Output(w.ID))
+			}
+			wss = append(wss, node)
 		}
-		out = append(out, api.ProjectNode{
+		pn := api.ProjectNode{
 			ID:            p.ID,
 			Name:          p.Name,
 			Kind:          p.Kind,
@@ -136,7 +141,13 @@ func toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
 			CreatedAt:     rfc3339(p.CreatedAt),
 			LastSeenAt:    rfc3339(p.LastSeenAt),
 			Workspaces:    wss,
-		})
+		}
+		if p.Kind == "git" && p.Root != "" {
+			if s, err := wsscript.Load(p.Root); err == nil && (s.Setup != "" || s.Teardown != "") {
+				pn.Scripts = &api.ProjectScripts{Setup: s.Setup, Teardown: s.Teardown}
+			}
+		}
+		out = append(out, pn)
 	}
 	return out
 }

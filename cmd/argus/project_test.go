@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -94,19 +95,37 @@ func TestResolveWorkspace(t *testing.T) {
 }
 
 type fakeNode struct {
-	list  api.ProjectListResult
-	calls []string
-	last  any
+	list      api.ProjectListResult
+	calls     []string
+	last      any
+	lists     []api.ProjectListResult // served in order after list, for --wait polls
+	removeRes api.WorkspaceRemoveResult
+	createRes *api.WorkspaceCreateResult // nil serves the default result
+	log       string
 }
 
 func (f *fakeNode) call(method string, params, out any) error {
 	f.calls = append(f.calls, method)
 	f.last = params
 	if method == api.MethodProjectList {
-		*out.(*api.ProjectListResult) = f.list
+		l := f.list
+		if n := len(f.calls); n > 1 && len(f.lists) > 0 {
+			l, f.lists = f.lists[0], f.lists[1:]
+		}
+		*out.(*api.ProjectListResult) = l
 	}
 	if method == api.MethodWorkspaceCreate {
-		*out.(*api.WorkspaceCreateResult) = api.WorkspaceCreateResult{Dir: "/repo/.worktrees/new", Warning: "fetch failed"}
+		res := api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new", Warning: "fetch failed", Setup: "pnpm install"}
+		if f.createRes != nil {
+			res = *f.createRes
+		}
+		*out.(*api.WorkspaceCreateResult) = res
+	}
+	if method == api.MethodWorkspaceRemove && out != nil {
+		*out.(*api.WorkspaceRemoveResult) = f.removeRes
+	}
+	if method == api.MethodWorkspaceSetupLog {
+		*out.(*api.SetupLogResult) = api.SetupLogResult{Output: f.log}
 	}
 	return nil
 }
@@ -153,4 +172,149 @@ func runRegistryCommand(call caller, args []string) error {
 	root.AddCommand(projectCmd(dial), workspaceCmd(dial))
 	root.SetArgs(args)
 	return root.Execute()
+}
+
+func listWithSetup(state string, code int, tail string) api.ProjectListResult {
+	l := projectFixture()
+	l.Projects[0].Workspaces = append(l.Projects[0].Workspaces, api.WorkspaceNode{
+		ID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new",
+		Setup: &api.ScriptRun{State: state, Command: "pnpm install", ExitCode: code, OutputTail: tail},
+	})
+	return l
+}
+
+func fastSetupPoll(t *testing.T) {
+	old := setupPoll
+	setupPoll = time.Millisecond
+	t.Cleanup(func() { setupPoll = old })
+}
+
+func TestCreateWaitsForSetup(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{list: projectFixture(), lists: []api.ProjectListResult{listWithSetup("running", 0, ""), listWithSetup("ok", 0, "")}}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err != nil {
+			t.Errorf("create --wait: %v", err)
+		}
+	})
+	if !strings.Contains(out, "setup started: pnpm install") || !strings.Contains(out, "setup done") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func TestCreateWaitReportsSetupFailure(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{list: projectFixture(), lists: []api.ProjectListResult{listWithSetup("failed", 1, "ERR_PNPM_NO_LOCKFILE")}}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err == nil {
+			t.Error("a failed setup should make --wait fail")
+		}
+	})
+	if !strings.Contains(out, "ERR_PNPM_NO_LOCKFILE") {
+		t.Errorf("output should carry the tail: %q", out)
+	}
+}
+
+// A setup that fails before it starts (a bad settings file) leaves create with
+// no setup command, but --wait must still report the failure.
+func TestCreateWaitReportsASetupThatFailedToStart(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{
+		list:      projectFixture(),
+		createRes: &api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new"},
+		lists:     []api.ProjectListResult{listWithSetup("failed", -1, ".argus/settings.toml: bad")},
+	}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err == nil {
+			t.Error("a setup that failed to start should make --wait fail")
+		}
+	})
+	if !strings.Contains(out, ".argus/settings.toml: bad") {
+		t.Errorf("output should carry the error: %q", out)
+	}
+}
+
+func TestCreateWaitWithoutSetupIsQuiet(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{list: projectFixture(), createRes: &api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new"}}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err != nil {
+			t.Errorf("create --wait with no setup: %v", err)
+		}
+	})
+	if strings.Contains(out, "setup") {
+		t.Errorf("no setup should print nothing about setup: %q", out)
+	}
+}
+
+func TestWaitReportsALostSetup(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("running", 0, ""), projectFixture()}}
+	f.calls = []string{"seed"} // serve lists from the first poll on
+	out := captureStdout(t, func() {
+		err := waitSetup(f.call, "wwwwww333333ffff")
+		if err == nil || err.Error() != "setup state lost (node restarted or workspace removed)" {
+			t.Errorf("a setup that disappears mid-wait: %v", err)
+		}
+	})
+	if strings.Contains(out, "setup done") {
+		t.Errorf("a lost setup is not done: %q", out)
+	}
+}
+
+func TestSetupAndSetupLogCommands(t *testing.T) {
+	f := &fakeNode{list: projectFixture(), log: "installing\ndone\n"}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "setup", "wwwwww222222"}); err != nil {
+			t.Error(err)
+		}
+		if err := runRegistryCommand(f.call, []string{"workspace", "setup-log", "wwwwww222222"}); err != nil {
+			t.Error(err)
+		}
+	})
+	if !contains(f.calls, api.MethodWorkspaceRunSetup) || !strings.Contains(out, "installing") {
+		t.Errorf("calls=%v output=%q", f.calls, out)
+	}
+}
+
+func TestRemovePrintsTeardownWarning(t *testing.T) {
+	f := &fakeNode{list: projectFixture(), removeRes: api.WorkspaceRemoveResult{Warning: "teardown failed (exit 4): db"}}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "remove", "wwwwww222222", "--force"}); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(out, "warning: teardown failed (exit 4): db") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func TestListMarksSetupState(t *testing.T) {
+	out := captureStdout(t, func() { printProjectTree(listWithSetup("running", 0, "")) })
+	if !strings.Contains(out, "(setting up)") {
+		t.Errorf("output = %q", out)
+	}
+	out = captureStdout(t, func() { printProjectTree(listWithSetup("failed", 1, "")) })
+	if !strings.Contains(out, "(setup failed)") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func contains(xs []string, x string) bool {
+	for _, s := range xs {
+		if s == x {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWaitReportsASetupWithNoExitCode(t *testing.T) {
+	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("failed", -1, "timed out after 15m")}}
+	f.calls = []string{"seed"}
+	captureStdout(t, func() {
+		if err := waitSetup(f.call, "wwwwww333333ffff"); err == nil || err.Error() != "setup failed" {
+			t.Errorf("a setup that never exited has no exit code to show: %v", err)
+		}
+	})
 }

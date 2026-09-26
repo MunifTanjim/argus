@@ -145,10 +145,18 @@ func RemoveWorktree(ctx context.Context, repoDir, path string, force bool) error
 	}
 	args = append(args, path)
 	err := runGit(ctx, "worktree remove", args...)
-	if err != nil && strings.Contains(err.Error(), "contains modified or untracked files") {
+	if err != nil && !force && HasChanges(ctx, path) {
 		return ErrDirtyWorktree
 	}
 	return err
+}
+
+// HasChanges reports whether the worktree at dir has modified or untracked
+// files. Ignored files do not count, as for git worktree remove. It is false
+// when git cannot read the worktree.
+func HasChanges(ctx context.Context, dir string) bool {
+	out, ok := git(ctx, dir, "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal")
+	return ok && out != ""
 }
 
 // DefaultBranch resolves the repository's default branch: origin/HEAD, then main,

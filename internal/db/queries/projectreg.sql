@@ -35,6 +35,9 @@ ON CONFLICT (dir) DO UPDATE SET
 -- name: DeleteProject :execrows
 DELETE FROM project WHERE id = ?;
 
+-- name: DeleteWorkspace :exec
+DELETE FROM workspace WHERE id = ?;
+
 -- SyncWorkspace records a worktree a list found, leaving last_seen_at alone.
 -- name: SyncWorkspace :exec
 INSERT INTO workspace (id, project_id, dir, is_main)

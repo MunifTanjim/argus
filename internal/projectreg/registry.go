@@ -74,23 +74,30 @@ func New(sqlDB *sql.DB) *Registry {
 // the workspace id. A non-git cwd becomes a plain Project with one workspace.
 // An empty cwd, or a cwd inside a bare repo with no working tree, is a no-op.
 func (r *Registry) AdoptSession(ctx context.Context, cwd string) (string, error) {
-	return r.adopt(ctx, cwd, nil)
+	wsID, _, err := r.adopt(ctx, cwd, nil)
+	return wsID, err
 }
 
 // AdoptWorkspace records a newly created worktree and its target branch in one
 // transaction, so a failure leaves no half-registered workspace.
 func (r *Registry) AdoptWorkspace(ctx context.Context, dir, target string) (string, error) {
-	return r.adopt(ctx, dir, &target)
+	wsID, _, err := r.adopt(ctx, dir, &target)
+	return wsID, err
 }
 
-func (r *Registry) adopt(ctx context.Context, cwd string, target *string) (string, error) {
+// Adopt is AdoptSession that also reports whether the workspace is new.
+func (r *Registry) Adopt(ctx context.Context, cwd string) (string, bool, error) {
+	return r.adopt(ctx, cwd, nil)
+}
+
+func (r *Registry) adopt(ctx context.Context, cwd string, target *string) (string, bool, error) {
 	if cwd == "" {
-		return "", nil
+		return "", false, nil
 	}
 	loc, err := gittree.Resolve(ctx, cwd)
 	plain := errors.Is(err, gittree.ErrNotRepo)
 	if err != nil && !plain {
-		return "", err
+		return "", false, err
 	}
 
 	r.mu.Lock()
@@ -99,49 +106,55 @@ func (r *Registry) adopt(ctx context.Context, cwd string, target *string) (strin
 }
 
 // record requires the caller to hold r.mu.
-func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location, plain bool, target *string) (string, error) {
+func (r *Registry) record(ctx context.Context, cwd string, loc gittree.Location, plain bool, target *string) (string, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer tx.Rollback()
 	q := r.q.WithTx(tx)
 
-	var projID, wsID string
+	var projID, wsID, wsDir string
+	var wsIsMain bool
 	if plain {
 		dir := cleanDir(cwd)
 		projID = idFor("plain:" + dir)
-		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: filepath.Base(dir), Kind: "plain", Dir: dir}); err != nil {
-			return "", err
-		}
 		wsID = idFor(dir)
-		if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: wsID, ProjectID: projID, Dir: dir, IsMain: true}); err != nil {
-			return "", err
+		wsDir = dir
+		wsIsMain = true
+		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: filepath.Base(dir), Kind: "plain", Dir: dir}); err != nil {
+			return "", false, err
 		}
 	} else {
 		if loc.WorktreeRoot == "" {
-			return "", nil // bare repo, no working tree to adopt
+			return "", false, nil // bare repo, no working tree to adopt
 		}
 		projID = idFor(loc.GitDir)
-		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: projectName(loc), Kind: "git", Dir: loc.GitDir}); err != nil {
-			return "", err
-		}
 		wsID = idFor(loc.WorktreeRoot)
-		if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: wsID, ProjectID: projID, Dir: loc.WorktreeRoot, IsMain: loc.IsMain}); err != nil {
-			return "", err
+		wsDir = loc.WorktreeRoot
+		wsIsMain = loc.IsMain
+		if _, err := q.UpsertProject(ctx, gen.UpsertProjectParams{ID: projID, Name: projectName(loc), Kind: "git", Dir: loc.GitDir}); err != nil {
+			return "", false, err
 		}
+	}
+
+	_, gerr := q.GetWorkspace(ctx, wsID)
+	isNew := errors.Is(gerr, sql.ErrNoRows)
+
+	if err := q.UpsertWorkspace(ctx, gen.UpsertWorkspaceParams{ID: wsID, ProjectID: projID, Dir: wsDir, IsMain: wsIsMain}); err != nil {
+		return "", false, err
 	}
 	if target != nil {
 		if err := q.SetWorkspaceTarget(ctx, gen.SetWorkspaceTargetParams{TargetBranch: *target, ID: wsID}); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return "", err
+		return "", false, err
 	}
 	r.records++
 	r.recordedAt[projID] = r.records
-	return wsID, nil
+	return wsID, isNew, nil
 }
 
 // WorkspaceDir returns the working directory of the workspace with the given
@@ -192,6 +205,17 @@ func (r *Registry) ProjectInfo(ctx context.Context, id string) (name, mainDir st
 	return p.Name, dir, true, nil
 }
 
+// ProjectKind returns a project's kind: "git" or "plain".
+func (r *Registry) ProjectKind(ctx context.Context, id string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, err := r.q.GetProject(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return p.Kind, nil
+}
+
 var ErrUnknownProject = errors.New("unknown project")
 
 func (r *Registry) RenameProject(ctx context.Context, id, name string) error {
@@ -222,6 +246,12 @@ func (r *Registry) ForgetProject(ctx context.Context, id string) error {
 	defer r.mu.Unlock()
 	n, err := r.q.DeleteProject(ctx, id)
 	return projectUpdated(id, n, err)
+}
+
+func (r *Registry) ForgetWorkspace(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.q.DeleteWorkspace(ctx, id)
 }
 
 func projectUpdated(id string, rows int64, err error) error {
@@ -422,7 +452,7 @@ func (r *Registry) promote(ctx context.Context, p gen.Project) (bool, error) {
 	if err != nil || loc.WorktreeRoot != p.Dir {
 		return false, nil
 	}
-	if _, err := r.record(ctx, p.Dir, loc, false, nil); err != nil {
+	if _, _, err := r.record(ctx, p.Dir, loc, false, nil); err != nil {
 		return false, err
 	}
 	return true, r.markGone(ctx, p.ID)

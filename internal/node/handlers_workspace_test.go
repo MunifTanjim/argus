@@ -67,6 +67,9 @@ func TestWorkspaceCreateAndRemove(t *testing.T) {
 	if _, err := os.Stat(cr.Dir); !os.IsNotExist(err) {
 		t.Errorf("worktree not removed: %v", err)
 	}
+	if _, ok, _ := d.projreg.WorkspaceDir(ctx, cr.WorkspaceID); ok {
+		t.Error("a removed workspace kept its registry row")
+	}
 }
 
 func TestRemoveWorkspaceGuardsLiveSessions(t *testing.T) {

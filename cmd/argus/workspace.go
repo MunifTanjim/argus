@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -61,6 +63,45 @@ func registryCmd(dial callerFor, use, short string, nargs int, run func(call cal
 	return cmd
 }
 
+// setupPoll is how often --wait checks a setup.
+var setupPoll = time.Second
+
+// No run on the first poll means there is no setup to wait for.
+func waitSetup(call caller, wsID string) error {
+	for seen := false; ; seen = true {
+		var list api.ProjectListResult
+		if err := call(api.MethodProjectList, nil, &list); err != nil {
+			return err
+		}
+		var run *api.ScriptRun
+		for _, p := range list.Projects {
+			for _, w := range p.Workspaces {
+				if w.ID == wsID {
+					run = w.Setup
+				}
+			}
+		}
+		switch {
+		case run == nil && !seen:
+			return nil
+		case run == nil:
+			return errors.New("setup state lost (node restarted or workspace removed)")
+		case run.State == "ok":
+			shell.StdOutF("setup done\n")
+			return nil
+		case run.State == "failed":
+			if run.OutputTail != "" {
+				shell.StdOutF("%s\n", run.OutputTail)
+			}
+			if run.ExitCode < 0 {
+				return errors.New("setup failed") // it never exited: a settings error, a timeout, or a stop
+			}
+			return fmt.Errorf("setup failed (exit %d)", run.ExitCode)
+		}
+		time.Sleep(setupPoll)
+	}
+}
+
 func newWorkspaceCmd() *cobra.Command { return workspaceCmd(localCallerFor) }
 
 func workspaceCmd(dial callerFor) *cobra.Command {
@@ -69,6 +110,7 @@ func workspaceCmd(dial callerFor) *cobra.Command {
 		Short: "Create, remove, and retarget workspaces on the local node",
 	}
 	var source, target string
+	var wait bool
 	create := registryCmd(dial, "create <project> <name>", "Create a workspace: <name> is a branch, or a PR or issue number", 2, func(call caller, list api.ProjectListResult, args []string) error {
 		p, err := resolveProject(list, args[0])
 		if err != nil {
@@ -95,10 +137,18 @@ func workspaceCmd(dial callerFor) *cobra.Command {
 		if res.Warning != "" {
 			shell.StdOutF("warning: %s\n", res.Warning)
 		}
+		if res.Setup != "" {
+			shell.StdOutF("setup started: %s\n", res.Setup)
+		}
+		if wait {
+			// A setup that failed before it started returns no command.
+			return waitSetup(call, res.WorkspaceID)
+		}
 		return nil
 	})
 	create.Flags().StringVar(&source, "source", api.SourceNew, "what <name> is: new (a new branch), branch, pr, or issue")
 	create.Flags().StringVar(&target, "target", "", "target branch to compare against (default: the repository's default branch)")
+	create.Flags().BoolVar(&wait, "wait", false, "wait for the setup script to finish")
 
 	var force bool
 	remove := registryCmd(dial, "remove <workspace>", "Remove a workspace's worktree; its branch stays", 1, func(call caller, list api.ProjectListResult, args []string) error {
@@ -106,15 +156,49 @@ func workspaceCmd(dial callerFor) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: w.ID, Force: force}, nil); err != nil {
+		var res api.WorkspaceRemoveResult
+		if err := call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: w.ID, Force: force}, &res); err != nil {
 			return err
 		}
 		shell.StdOutF("removed %s\n", w.Dir)
+		if res.Warning != "" {
+			shell.StdOutF("warning: %s\n", res.Warning)
+		}
 		return nil
 	})
 	remove.Flags().BoolVar(&force, "force", false, "discard uncommitted changes (live sessions still refuse)")
 
-	cmd.AddCommand(create, remove, registryCmd(dial, "target <workspace> <branch>", "Set the branch a workspace compares against", 2, func(call caller, list api.ProjectListResult, args []string) error {
+	var setupWait bool
+	setup := registryCmd(dial, "setup <workspace>", "Run a workspace's setup script again", 1, func(call caller, list api.ProjectListResult, args []string) error {
+		w, err := resolveWorkspace(list, args[0])
+		if err != nil {
+			return err
+		}
+		if err := call(api.MethodWorkspaceRunSetup, api.WorkspaceRef{WorkspaceID: w.ID}, nil); err != nil {
+			return err
+		}
+		shell.StdOutF("setup started in %s\n", w.Dir)
+		if setupWait {
+			return waitSetup(call, w.ID)
+		}
+		return nil
+	})
+	setup.Flags().BoolVar(&setupWait, "wait", false, "wait for the setup script to finish")
+
+	setupLog := registryCmd(dial, "setup-log <workspace>", "Print the output of a workspace's last setup run", 1, func(call caller, list api.ProjectListResult, args []string) error {
+		w, err := resolveWorkspace(list, args[0])
+		if err != nil {
+			return err
+		}
+		var res api.SetupLogResult
+		if err := call(api.MethodWorkspaceSetupLog, api.WorkspaceRef{WorkspaceID: w.ID}, &res); err != nil {
+			return err
+		}
+		shell.StdOutF("%s", res.Output)
+		return nil
+	})
+
+	cmd.AddCommand(create, remove, setup, setupLog, registryCmd(dial, "target <workspace> <branch>", "Set the branch a workspace compares against", 2, func(call caller, list api.ProjectListResult, args []string) error {
 		w, err := resolveWorkspace(list, args[0])
 		if err != nil {
 			return err
