@@ -115,7 +115,7 @@ func TestProjectListEmptyWithoutRegistry(t *testing.T) {
 }
 
 func TestProjectNodesCarryGitError(t *testing.T) {
-	nodes := toProjectNodes([]projectreg.Project{{ID: "p1", Kind: "git", Error: "worktree list: git missing"}})
+	nodes := newTestNode(t).toProjectNodes([]projectreg.Project{{ID: "p1", Kind: "git", Error: "worktree list: git missing"}})
 	if nodes[0].Error != "worktree list: git missing" {
 		t.Errorf("error = %q", nodes[0].Error)
 	}

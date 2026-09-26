@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -34,9 +35,17 @@ func sandboxHookDirs(t *testing.T) {
 	t.Helper()
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	old := config.StateDir
-	config.StateDir = t.TempDir()
-	t.Cleanup(func() { config.StateDir = old })
+	oldState, oldData := config.StateDir, config.DataDir
+	config.StateDir, config.DataDir = t.TempDir(), t.TempDir()
+	t.Cleanup(func() { config.StateDir, config.DataDir = oldState, oldData })
+}
+
+func TestSandboxHookDirsMovesTheDataDir(t *testing.T) {
+	real := config.DataDir
+	sandboxHookDirs(t)
+	if config.DataDir == real {
+		t.Errorf("tests must not use the real data dir: %s", real)
+	}
 }
 
 func TestConnectLocalSpawn(t *testing.T) {
@@ -157,5 +166,45 @@ func TestNodeAbsent(t *testing.T) {
 	// A real dial to a missing socket classifies as absent.
 	if _, err := api.Dial(shortSocket(t)); err == nil || !nodeAbsent(err) {
 		t.Fatalf("missing socket should be node-absent, got %v", err)
+	}
+}
+
+// Stopping the embedded node waits for Run to return, so its deferred cleanup
+// (which stops running workspace setups) ends before the process exits.
+func TestEmbeddedNodeStopWaitsForRun(t *testing.T) {
+	sandboxHookDirs(t)
+	sock := shortSocket(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, emb, err := startEmbeddedNode(ctx, &config.Config{}, sock)
+	if err != nil {
+		t.Fatalf("startEmbeddedNode: %v", err)
+	}
+	conn, err := dialWithRetry(func() (net.Conn, error) { return net.Dial("unix", sock) }, 3*time.Second)
+	if err != nil {
+		t.Fatalf("embedded node did not start: %v", err)
+	}
+	conn.Close()
+	if emb.wait(50 * time.Millisecond) {
+		t.Fatal("the node stopped before its context ended")
+	}
+	cancel()
+	if !emb.wait(3 * time.Second) {
+		t.Fatal("wait should return true once Run has returned")
+	}
+	if _, err := api.Dial(sock); err == nil {
+		t.Error("the node should no longer serve once wait returns")
+	}
+}
+
+func TestEmbeddedWaitIsBounded(t *testing.T) {
+	emb := &embedded{done: make(chan struct{})}
+	start := time.Now()
+	if emb.wait(100*time.Millisecond) || time.Since(start) > 2*time.Second {
+		t.Errorf("wait on a node that never stops should give up after its bound (took %v)", time.Since(start))
+	}
+	var none *embedded
+	if !none.wait(time.Second) {
+		t.Error("with no embedded node there is nothing to wait for")
 	}
 }

@@ -222,18 +222,67 @@ func (m model) actRemoveWorkspace(force bool) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) actRunSetup() (tea.Model, tea.Cmd) {
+	wsID := m.selectedWorkspaceID()
+	if wsID == "" {
+		m.flash = "select a workspace to run its setup"
+		return m, nil
+	}
+	m.flash = "running setup"
+	client := m.client
+	return m, func() tea.Msg {
+		err := client.Call(api.MethodWorkspaceRunSetup, api.WorkspaceRef{WorkspaceID: wsID}, nil)
+		return projectsActionMsg{verb: "run setup", ok: "running setup", err: err}
+	}
+}
+
+func (m model) actOpenSetupLog() (tea.Model, tea.Cmd) {
+	wsID := m.selectedWorkspaceID()
+	if wsID == "" {
+		m.flash = "select a workspace to see its setup log"
+		return m, nil
+	}
+	m.projects.fileView = fileViewState{ws: wsID, path: "setup log", log: true, loading: true}
+	m.projects.focus = focusPane
+	return m, m.fetchSetupLog(wsID)
+}
+
+func (m model) fetchSetupLog(wsID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var r api.SetupLogResult
+		err := client.Call(api.MethodWorkspaceSetupLog, api.WorkspaceRef{WorkspaceID: wsID}, &r)
+		return setupLogMsg{ws: wsID, output: r.Output, err: err}
+	}
+}
+
+func (m model) projectOfWorkspace(wsID string) string {
+	for _, p := range m.projects.tree {
+		for _, w := range p.Workspaces {
+			if w.ID == wsID {
+				return p.ID
+			}
+		}
+	}
+	return ""
+}
+
 func (m model) removePrompt() string {
 	name := "this workspace"
+	teardown := ""
 	if r, ok := m.projects.row(m.projects.pendingRemove); ok {
 		name = r.label
 		if r.branch != "" {
 			name += " (" + r.branch + ")"
 		}
+		if p, ok := m.findProject(m.projectOfWorkspace(r.id)); ok && p.Scripts != nil && p.Scripts.Teardown != "" {
+			teardown = "runs teardown: " + commandLine(p.Scripts.Teardown) + " · "
+		}
 	}
 	if m.projects.pendingRemoveForce {
-		return "force-remove workspace " + name + "? uncommitted changes are lost · y/n"
+		return "force-remove workspace " + name + "? uncommitted changes are lost · " + teardown + "y/n"
 	}
-	return "remove workspace " + name + "? y/n"
+	return "remove workspace " + name + "? " + teardown + "y/n"
 }
 
 func (m model) actRetarget() (tea.Model, tea.Cmd) {
@@ -315,8 +364,13 @@ func (m model) findWorkspace(id string) (api.WorkspaceNode, bool) {
 func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
 	client, ok, next := m.client, "removed "+m.workspaceLabel(workspaceID), m.projects.removeNeighbor(workspaceID)
 	return func() tea.Msg {
-		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, nil)
-		return projectsActionMsg{verb: "remove workspace", ok: ok, selectID: next, removed: workspaceID, err: err}
+		var res api.WorkspaceRemoveResult
+		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, &res)
+		done := ok
+		if res.Warning != "" {
+			done += " · " + res.Warning
+		}
+		return projectsActionMsg{verb: "remove workspace", ok: done, selectID: next, removed: workspaceID, err: err}
 	}
 }
 

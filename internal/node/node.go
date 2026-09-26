@@ -30,6 +30,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
+	"github.com/MunifTanjim/argus/internal/wsscript"
 )
 
 // Node holds the wired-up core.
@@ -88,6 +89,7 @@ type Node struct {
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
+	scripts         *wsscript.Runner
 	projreg         *projectreg.Registry                                              // node-local project/workspace registry; nil = disabled
 	worktreeDirTmpl string                                                            // Go-template path for new worktrees
 	issueTmpl       string                                                            // Go-template branch name for issue workspaces
@@ -158,13 +160,16 @@ func (d *Node) adoptSessionWorkspace(ctx context.Context, s session.Session) {
 	if dir == "" {
 		return
 	}
-	wsID, err := d.projreg.AdoptSession(ctx, dir)
+	wsID, isNew, err := d.projreg.Adopt(ctx, dir)
 	if err != nil {
 		d.log.Warn("adopt workspace", "session", s.ID, "err", err)
 		return
 	}
 	if wsID != "" {
 		d.reg.SetWorkspaceID(s.ID, wsID)
+	}
+	if isNew {
+		d.notifyProjectsChanged()
 	}
 }
 
@@ -430,6 +435,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		resuming:     map[string]string{},
 	}
 	d.notifier = push.NewOSNotifier(nil, nil)
+	d.scripts = wsscript.NewRunner(d.notifyProjectsChanged)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
 		return c.Reveal(ctx, paneID)
 	}
@@ -509,6 +515,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if err != nil {
 		return err
 	}
+	defer d.scripts.Close()
 	d.log.Info("serving local API", "socket", socketPath)
 	defer func() {
 		l.Close()

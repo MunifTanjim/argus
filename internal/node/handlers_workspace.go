@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gitstatus"
@@ -183,17 +184,39 @@ func (d *Node) handleWorkspaceRemove(ctx context.Context, params json.RawMessage
 	if n := d.liveSessionsInWorkspace(p.WorkspaceID, dir); n > 0 {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("%d live session(s) in this workspace; kill them first", n)}
 	}
+	const dirtyMsg = "workspace has uncommitted changes; force-remove discards them"
+	// Refuse a dirty workspace before stopping its setup or running teardown.
+	if !p.Force && gittree.HasChanges(ctx, dir) {
+		return nil, invalid(dirtyMsg)
+	}
+	_, mainDir, _, err := d.projreg.ProjectInfo(ctx, projID)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
 	runDir := dir
-	if _, mainDir, ok, _ := d.projreg.ProjectInfo(ctx, projID); ok && mainDir != "" {
+	if mainDir != "" {
 		runDir = mainDir // remove must not run from inside the worktree being removed
+	}
+	d.scripts.StopSetup(p.WorkspaceID, 2*time.Second)
+	var warning string
+	if msg := d.runTeardown(ctx, p.WorkspaceID, dir, mainDir); msg != "" {
+		if !p.Force {
+			return nil, invalid("%s", msg)
+		}
+		warning = msg
 	}
 	if err := gittree.RemoveWorktree(ctx, runDir, dir, p.Force); err != nil {
 		if errors.Is(err, gittree.ErrDirtyWorktree) {
-			return nil, invalid("workspace has uncommitted changes; force-remove discards them")
+			return nil, invalid(dirtyMsg)
 		}
 		return nil, invalid("%s", err)
 	}
-	return nil, nil
+	if err := d.projreg.ForgetWorkspace(ctx, p.WorkspaceID); err != nil {
+		d.log.Warn("forget removed workspace", "workspace", p.WorkspaceID, "err", err)
+	}
+	d.scripts.Forget(p.WorkspaceID)
+	d.notifyProjectsChanged()
+	return api.WorkspaceRemoveResult{Warning: warning}, nil
 }
 
 // A session gets its workspace id on the next scan, so one without an id

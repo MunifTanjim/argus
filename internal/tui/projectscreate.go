@@ -105,10 +105,21 @@ func (m model) fetchIssuesCmd(projectID string) tea.Cmd {
 
 func createdFlash(res api.WorkspaceCreateResult) string {
 	s := "created workspace " + filepath.Base(res.Dir)
+	if res.Setup != "" {
+		s += " · setting up"
+	}
 	if res.Warning != "" {
 		s += " · " + res.Warning
 	}
 	return s
+}
+
+func truncateEachLine(s string, w int) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = truncateLine(lines[i], w)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) createCmd(p api.WorkspaceCreateParams) tea.Cmd {
@@ -318,6 +329,9 @@ func (m model) createView(w, h int) string {
 	if c.tab != ctPRs {
 		head += dimStyle.Render("  (^t)")
 	}
+	if p, ok := m.findProject(c.projectID); ok && p.Scripts != nil && p.Scripts.Setup != "" {
+		head += "\n" + dimStyle.Render("setup: "+commandLine(p.Scripts.Setup))
+	}
 	var tabs []string
 	for i, n := range createTabNames {
 		if createTab(i) == c.tab {
@@ -326,8 +340,8 @@ func (m model) createView(w, h int) string {
 			tabs = append(tabs, StyleDim.Render(n))
 		}
 	}
-	top := truncateLine(head, w) + "\n\n" + strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
-	bodyH := max(1, h-4)
+	top := truncateEachLine(head, w) + "\n\n" + strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
+	bodyH := max(1, h-4-strings.Count(head, "\n"))
 	switch {
 	case c.creating:
 		return top + spinnerFrame(m) + " creating…"

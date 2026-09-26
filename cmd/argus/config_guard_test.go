@@ -32,6 +32,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"source":           true, // `workspace create` only: what the name argument is
 		"target":           true, // `workspace create` only: per-workspace target branch
 		"force":            true, // `workspace remove` only: must never be config-backed — a stored true would discard changes silently
+		"wait":             true, // `workspace create/setup` only: per-invocation wait
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
 		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
 		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a config key

@@ -82,7 +82,7 @@ func (m model) syncPane() (tea.Model, tea.Cmd) {
 
 func (m model) handleProjectsPaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := projectsKeys
-	if key.Matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget) {
+	if key.Matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup) {
 		m.flash = "manage keys work in the tree · esc to go there"
 		return m, nil
 	}

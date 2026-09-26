@@ -98,6 +98,7 @@ func (m model) projectsHelpView() string {
 			helpAs(listKeys.Jump, "O", "jump to its tmux pane"),
 			helpAs(k.Back, "esc", "close / tree"),
 			helpAs(listKeys.Kill, "x", "kill session"),
+			helpAs(k.SetupLog, "L", "workspace setup log"),
 			helpAs(sessionKeys.Files, "^f", "session: go to right sidebar"),
 			helpAs(k.SideTabNext, "[/]", "right sidebar: Files / Changes"),
 			helpAs(k.DiffMode, "t", "changes: uncommitted / vs target"),
@@ -116,6 +117,7 @@ func (m model) projectsHelpView() string {
 			helpAs(k.ShowHidden, "z", "show hidden"),
 			helpAs(k.ShowGone, "o", "show gone"),
 			helpAs(k.Target, "T", "change target branch"),
+			helpAs(k.RunSetup, "S", "run setup again"),
 		}},
 		{"Screen", []key.Binding{
 			helpAs(k.Spawn, "s", "spawn in the selected workspace"),

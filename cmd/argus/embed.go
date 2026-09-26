@@ -103,9 +103,36 @@ func localNodeRunning(socket string) (bool, error) {
 	return false, err
 }
 
+// embedded is an in-process node. done closes once its Run returns.
+type embedded struct {
+	logs *logbuf.Buffer
+	done <-chan struct{}
+}
+
+func (e *embedded) Logs() *logbuf.Buffer {
+	if e == nil {
+		return nil
+	}
+	return e.logs
+}
+
+// wait gives Run's cleanup time to stop running workspace setups, which the
+// process would otherwise leave behind on exit.
+func (e *embedded) wait(timeout time.Duration) bool {
+	if e == nil {
+		return true
+	}
+	select {
+	case <-e.done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // connectLocalSpawn starts an ephemeral embedded node (tied to ctx), waits for it to
-// accept, then connects. Returns the node's log buffer for the TUI's Logs tab.
-func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (tui.Client, *logbuf.Buffer, error) {
+// accept, then connects.
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket string) (tui.Client, *embedded, error) {
 	return connectLocalSpawnWithGateway(ctx, cfg, "", token, socket, nil)
 }
 
@@ -114,7 +141,7 @@ func connectLocalSpawn(ctx context.Context, cfg *config.Config, token, socket st
 // (connected spawn): the node uplinks to that gateway so this machine joins the fleet,
 // and the TUI drives the gateway so it sees the whole fleet, this machine included.
 // genesisHash is the client's resolved trust root; nil means TOFU.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, genesisHash []byte) (tui.Client, *logbuf.Buffer, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, genesisHash []byte) (tui.Client, *embedded, error) {
 	var wsURL string
 	var gatewayClient *http.Client
 	if gatewayURL != "" {
@@ -132,11 +159,12 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 		}
 		probe.Close()
 	}
-	d, logs, serr := startEmbeddedNode(ctx, cfg, socket)
+	d, emb, serr := startEmbeddedNode(ctx, cfg, socket)
 	if serr != nil {
 		shell.StdErrF("argus: %v\n", serr)
 		return nil, nil, serr
 	}
+	logs := emb.logs
 	if gatewayURL != "" {
 		// The embedded node accepts mobile push registrations fanned over relay
 		// channels, so it needs a store (the daemon/co-located paths do the same).
@@ -166,13 +194,13 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 	if err != nil {
 		return nil, nil, err
 	}
-	return c, logs, nil
+	return c, emb, nil
 }
 
 // connectLocalGateway starts an ephemeral embedded node AND a co-located gateway
 // (pairing + push, no tunnel), then points the TUI at that gateway over loopback
 // so it sees the whole fleet. Mirrors `argus start --token` minus the tunnel.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (tui.Client, *logbuf.Buffer, error) {
+func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (tui.Client, *embedded, error) {
 	// Bind before the TUI takes the screen so a port-in-use fails cleanly.
 	ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
 	if err != nil {
@@ -191,13 +219,13 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	// as a disconnect.
 	ctx, cancel := context.WithCancel(ctx)
 
-	d, logs, serr := startEmbeddedNode(ctx, cfg, socket)
+	d, emb, serr := startEmbeddedNode(ctx, cfg, socket)
 	if serr != nil {
 		cancel()
 		shell.StdErrF("argus: %v\n", serr)
 		return nil, nil, serr
 	}
-	baseLog := logger.NewBufferLogger(logs)
+	baseLog := logger.NewBufferLogger(emb.logs)
 	gwLog := baseLog.With("scope", "gateway")
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
 		node:          d,
@@ -248,7 +276,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 		cancel()
 		return nil, nil, err
 	}
-	return c, logs, nil
+	return c, emb, nil
 }
 
 // loopbackDialAddr returns a host:port for reaching a listener from this host: its
@@ -269,14 +297,14 @@ func nodeAbsent(err error) bool {
 }
 
 // startEmbeddedNode runs a node in-process until ctx is cancelled. Logs go to an
-// in-memory buffer (returned) for the TUI's Logs tab, not stderr, to keep the
+// in-memory buffer (in the returned embedded) for the TUI's Logs tab, not stderr, to keep the
 // alt-screen clean. Like `argus start` it reconciles installed Claude Code hooks,
 // but keeps the installed binary path: this ephemeral launch may run from a
 // different path than the install, which must not be written into the user's hooks.
 //
 // Fail-closed: a non-empty but unusable lock.genesis is returned as an error so the
 // node is never started in open mode when a genesis is configured.
-func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *logbuf.Buffer, error) {
+func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (*node.Node, *embedded, error) {
 	d := node.New()
 	logs := logbuf.New(1000)
 	log := logger.NewBufferLogger(logs)
@@ -296,8 +324,12 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 		}
 	}
 	reconcileEmbeddedHooks(log.With("scope", "hooks"))
-	go func() { _ = d.Run(ctx, socket) }()
-	return d, logs, nil
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = d.Run(ctx, socket)
+	}()
+	return d, &embedded{logs: logs, done: done}, nil
 }
 
 // reconcileEmbeddedHooks reconciles hooks best-effort (empty bin keeps the installed path).

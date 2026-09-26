@@ -439,6 +439,32 @@ func TestE2EClientStreamsNotifications(t *testing.T) {
 	}
 }
 
+func TestE2EClientForwardsProjectChanged(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	f.handle = func(_ string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return json.RawMessage(`{}`), nil, &fakeNote{method: api.MethodProjectChanged, params: json.RawMessage(`{}`)}
+	}
+
+	c, _ := NewE2EClient(clientConn)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := c.callNode("n1", "sessions.refresh", nil, nil); err != nil {
+		t.Fatalf("callNode: %v", err)
+	}
+
+	select {
+	case ev := <-c.Events():
+		if ev.Method != api.MethodProjectChanged || string(ev.Params) != `{}` {
+			t.Fatalf("notification = %s %s, want project.changed {}", ev.Method, ev.Params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("project.changed never reached Events()")
+	}
+}
+
 // A node that pushes as soon as its channel is up (registry snapshot) sends the
 // first sealed frame right behind msg2. The client must have the channel usable
 // by then: dropping that frame both loses the state and desyncs the dec-nonce,

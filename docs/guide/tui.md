@@ -45,8 +45,15 @@ main keys are:
 | `R` / `H` / `P` | Rename, hide, or pin a project |
 | `F` | Forget a project. Its files stay. |
 | `^b` / `^e` | Show or hide the tree, or the right sidebar |
+| `S` | Run the workspace's setup script again |
+| `L` | Show the output of the workspace's last setup run |
 
 A workspace with live sessions cannot be removed. Kill its sessions first.
+
+While a setup script runs, the workspace row shows "setting up…". If it
+fails, the row shows "setup failed", and the workspace pane shows the last
+lines of its output. See
+[Configuration](/getting-started/configuration#workspace-scripts).
 
 The **Changes** list shows the uncommitted changes. Press `t` to show all changes
 since the target branch. The list also shows the commits since the target branch.

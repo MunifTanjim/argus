@@ -60,6 +60,13 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	if !ok {
 		return nil, invalid("unknown project: %s", p.ProjectID)
 	}
+	kind, err := d.projreg.ProjectKind(ctx, p.ProjectID)
+	if err != nil {
+		return nil, invalid("%s", err)
+	}
+	if kind != "git" {
+		return nil, invalid("not a git project; workspaces need a git repository")
+	}
 	if mainDir == "" {
 		return nil, invalid("project has no main working tree to branch from")
 	}
@@ -111,7 +118,11 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	if err != nil {
 		return rollback(err)
 	}
-	return api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path, Warning: warning, Prompt: plan.prompt}, nil
+	res := api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path, Warning: warning, Prompt: plan.prompt}
+	// Setup outlives this request, whose context ends with the reply.
+	res.Setup = d.startSetup(context.WithoutCancel(ctx), wsID, mainDir)
+	d.notifyProjectsChanged()
+	return res, nil
 }
 
 func pathBusy(path string) bool {

@@ -71,6 +71,7 @@ var projectsKeys = struct {
 	Target, DiffMode, Spawn, FocusPrev, ToggleFiles                    key.Binding
 	SideTabPrev, SideTabNext, Refresh, Back                            key.Binding
 	Wrap, NextFile, PrevFile, Forget                                   key.Binding
+	RunSetup, SetupLog                                                 key.Binding
 }{
 	Up:            nb([]string{"up", "k"}, "↑/↓", "move"),
 	Down:          nb([]string{"down", "j"}, "", ""),
@@ -108,6 +109,8 @@ var projectsKeys = struct {
 	NextFile:      nb([]string{"J"}, "J/K", "file"),
 	PrevFile:      nb([]string{"K"}, "", ""),
 	Back:          nb([]string{"esc", "escape", "q"}, "esc", "back"),
+	RunSetup:      nb([]string{"S"}, "S", "setup again"),
+	SetupLog:      nb([]string{"L"}, "L", "setup log"),
 }
 
 var createKeys = struct {

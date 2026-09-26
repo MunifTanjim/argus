@@ -201,3 +201,33 @@ func TestCommitCallsRouteByWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupCallsRouteByWorkspace(t *testing.T) {
+	for _, method := range []string{api.MethodWorkspaceRunSetup, api.MethodWorkspaceSetupLog} {
+		f, clientConn := newFakeGatewayNode(t, "n1")
+		var got string
+		f.handle = func(m string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+			if m == method {
+				var p api.WorkspaceRef
+				_ = json.Unmarshal(params, &p)
+				got = p.WorkspaceID
+			}
+			return nil, nil, nil
+		}
+		c, err := NewE2EClient(clientConn)
+		if err != nil {
+			t.Fatalf("NewE2EClient: %v", err)
+		}
+		if err := c.Connect(); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		if err := c.Call(method, api.WorkspaceRef{WorkspaceID: "n1:w1"}, nil); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		if got != "w1" {
+			t.Errorf("%s: node received workspace_id %q, want w1", method, got)
+		}
+		c.Close()
+		f.peer.Close()
+	}
+}

@@ -407,6 +407,38 @@ func TestCreateSelectsNewWorkspace(t *testing.T) {
 	}
 }
 
+func withNewWorkspace(tree []api.ProjectNode) []api.ProjectNode {
+	out := []api.ProjectNode{tree[0]}
+	out[0].Workspaces = append(append([]api.WorkspaceNode{}, tree[0].Workspaces...), api.WorkspaceNode{ID: "n1:w3", Dir: "/repo-new", Branch: "new"})
+	return out
+}
+
+func TestStaleTreeReplyKeepsTheCreatedWorkspaceWanted(t *testing.T) {
+	m := projectsTestModel()
+	m.projects.selectRow("n1:p1")
+	old := m.projects.tree
+	m, _ = upd(m, projectsActionMsg{verb: "create workspace", selectID: "n1:w3"})
+	m, _ = upd(m, projectsTreeMsg{seq: m.projects.fetchSeq - 1, tree: old})
+	m, _ = upd(m, projectsTreeMsg{seq: m.projects.fetchSeq, tree: withNewWorkspace(old)})
+	if got := m.projects.cursorRowID(); got != "n1:w3" {
+		t.Errorf("a reply from before the create must not drop the jump: cursor on %q", got)
+	}
+}
+
+func TestReplyBeforeARefetchKeepsTheCreatedWorkspaceWanted(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m.projects.selectRow("n1:p1")
+	old := m.projects.tree
+	m.projects.loading = true
+	m, _ = upd(m, projectsActionMsg{verb: "create workspace", selectID: "n1:w3"})
+	m, _ = upd(m, projectsTreeMsg{seq: m.projects.fetchSeq, tree: old})
+	m, _ = upd(m, projectsTreeMsg{seq: m.projects.fetchSeq, tree: withNewWorkspace(old)})
+	if got := m.projects.cursorRowID(); got != "n1:w3" {
+		t.Errorf("the fetch in flight during the create predates it: cursor on %q", got)
+	}
+}
+
 func TestRefreshKeepsTree(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30

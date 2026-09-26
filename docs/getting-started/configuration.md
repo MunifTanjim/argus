@@ -77,6 +77,53 @@ Workspaces from a PR or an issue need these:
 - The GitHub CLI (`gh`), logged in with `gh auth login`.
 - An `origin` remote on `github.com`.
 
+## Workspace scripts
+
+A project can run a script after argus creates a workspace (`setup`) and
+before argus removes one (`teardown`). Put them in the repository:
+
+```toml
+# .argus/settings.toml (commit it)
+[scripts]
+setup    = "pnpm install && ln -s \"$ARGUS_ROOT_PATH/.env\" .env"
+teardown = "docker compose down --volumes"
+```
+
+`.argus/settings.local.toml` holds personal changes. Add it to `.gitignore`.
+A key in the local file replaces the same key in the shared file. An empty
+value (`setup = ""`) turns a script off. Argus reads both files from the
+project's main worktree each time it runs a script. If a settings file does not
+parse, setup fails with the parse error, and a remove that is not forced stops.
+
+Scripts run with `$SHELL -c` (or `/bin/sh`) in the workspace directory, with
+these environment variables:
+
+| Variable | Value |
+|---|---|
+| `ARGUS_WORKSPACE_PATH` | The workspace directory |
+| `ARGUS_ROOT_PATH` | The main worktree |
+| `ARGUS_WORKSPACE_NAME` | The base name of the workspace directory |
+| `ARGUS_BRANCH` | The workspace branch (empty for a detached HEAD) |
+| `ARGUS_TARGET_BRANCH` | The target branch |
+
+The shell is not interactive. It does not read rc files such as `.zshrc` or
+`.bashrc`, and `PATH` starts as the `PATH` of the argus node. The shell still
+reads the files that every shell reads, for example `~/.zshenv` for zsh and
+the file in `$BASH_ENV` for bash. When the node runs as a service, the script
+does not find tools that an rc file adds to `PATH` (for example, nvm or pnpm).
+Use full paths, or set `PATH` in the script.
+
+- **Setup** runs in the background after the workspace exists. It stops after
+  15 minutes. If it fails, the workspace stays. Run it again with `S` in the
+  TUI or `argus workspace setup <workspace>`.
+- **Teardown** runs before argus deletes the worktree. It stops after 20
+  seconds. If it fails, the remove stops and the worktree stays. A forced
+  remove (`X`, or `--force`) continues and shows the failure as a warning. If
+  the workspace has uncommitted changes, a remove that is not forced stops
+  before teardown runs.
+
+Make both scripts safe to run more than one time.
+
 ## End-to-End Encryption
 
 `e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport,

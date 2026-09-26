@@ -21,6 +21,15 @@ func (q *Queries) DeleteProject(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected()
 }
 
+const deleteWorkspace = `-- name: DeleteWorkspace :exec
+DELETE FROM workspace WHERE id = ?
+`
+
+func (q *Queries) DeleteWorkspace(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteWorkspace, id)
+	return err
+}
+
 const getProject = `-- name: GetProject :one
 SELECT id, name, kind, dir, is_gone, created_at, last_seen_at, hidden, pinned
 FROM project

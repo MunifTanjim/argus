@@ -36,6 +36,8 @@ var workspaceAddressed = map[string]bool{
 	api.MethodWorkspaceReadFile:     true,
 	api.MethodWorkspaceRemove:       true,
 	api.MethodWorkspaceSetTarget:    true,
+	api.MethodWorkspaceRunSetup:     true,
+	api.MethodWorkspaceSetupLog:     true,
 	api.MethodWorkspaceCommits:      true,
 	api.MethodWorkspaceCommitFiles:  true,
 }

@@ -25,6 +25,7 @@ type histProjectsMsg struct {
 
 type projectsTreeMsg struct {
 	tree []api.ProjectNode
+	seq  int
 	err  error
 }
 
@@ -163,4 +164,9 @@ type createDoneMsg struct {
 	source string
 	seq    int // createState.seq of the picker that sent it
 	err    error
+}
+
+type setupLogMsg struct {
+	ws, output string
+	err        error
 }
