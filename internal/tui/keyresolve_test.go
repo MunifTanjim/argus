@@ -11,23 +11,23 @@ import (
 
 func seqModel() model {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"global":   {"g.": "toggle show-hidden"},
-		"projects": {"g": "goto top", "yy": "toggle show-gone", "<Space>x": "toggle left-sidebar"},
+		"global":       {"g.": "toggle show-hidden"},
+		"project-tree": {"g": "goto top", "yy": "toggle show-gone", "<Space>x": "toggle left-sidebar"},
 	})
 	m.width, m.height = 120, 30
-	m.projects.cursor = 2
+	m = moveTree(m, 2)
 	return m
 }
 
 func TestSequenceRunsItsCommand(t *testing.T) {
 	m := seqModel()
 	m, _ = upd(m, keyMsg("g"))
-	if m.projects.cursor != 2 {
+	if m.left.tree.cursor != 2 {
 		t.Fatal("g must wait while g. can follow")
 	}
 	m, _ = upd(m, keyMsg("."))
-	if !m.projects.showHidden || m.projects.cursor != 2 {
-		t.Errorf("g. should toggle hidden projects only: hidden=%v cursor=%d", m.projects.showHidden, m.projects.cursor)
+	if !m.left.tree.showHidden || m.left.tree.cursor != 2 {
+		t.Errorf("g. should toggle hidden projects only: hidden=%v cursor=%d", m.left.tree.showHidden, m.left.tree.cursor)
 	}
 }
 
@@ -35,8 +35,8 @@ func TestTimeoutRunsTheShortKey(t *testing.T) {
 	m := seqModel()
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyTimeoutMsg{gen: m.keyGen})
-	if m.projects.cursor != 0 || m.projects.showHidden {
-		t.Errorf("after the timeout g goes to the top: cursor=%d hidden=%v", m.projects.cursor, m.projects.showHidden)
+	if m.left.tree.cursor != 0 || m.left.tree.showHidden {
+		t.Errorf("after the timeout g goes to the top: cursor=%d hidden=%v", m.left.tree.cursor, m.left.tree.showHidden)
 	}
 }
 
@@ -44,8 +44,8 @@ func TestOtherKeyRunsTheShortKeyThenItself(t *testing.T) {
 	m := seqModel()
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyMsg("j"))
-	if m.projects.cursor != 1 {
-		t.Errorf("g then j: top, then down one row; cursor=%d", m.projects.cursor)
+	if m.left.tree.cursor != 1 {
+		t.Errorf("g then j: top, then down one row; cursor=%d", m.left.tree.cursor)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestEscCancelsASequence(t *testing.T) {
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyMsg("esc"))
 	m, _ = upd(m, keyTimeoutMsg{gen: m.keyGen})
-	if len(m.keyBuf) != 0 || m.projects.cursor != 2 {
-		t.Errorf("esc drops the pending g: buf=%d cursor=%d", len(m.keyBuf), m.projects.cursor)
+	if len(m.keyBuf) != 0 || m.left.tree.cursor != 2 {
+		t.Errorf("esc drops the pending g: buf=%d cursor=%d", len(m.keyBuf), m.left.tree.cursor)
 	}
 }
 
@@ -65,8 +65,8 @@ func TestStaleTimerDoesNothing(t *testing.T) {
 	old := m.keyGen
 	m, _ = upd(m, keyMsg("."))
 	m, _ = upd(m, keyTimeoutMsg{gen: old})
-	if m.projects.cursor != 2 {
-		t.Errorf("an old timer must not run g: cursor=%d", m.projects.cursor)
+	if m.left.tree.cursor != 2 {
+		t.Errorf("an old timer must not run g: cursor=%d", m.left.tree.cursor)
 	}
 }
 
@@ -74,12 +74,12 @@ func TestPrefixOnlyTimeoutDropsTheKeys(t *testing.T) {
 	m := seqModel()
 	m, _ = upd(m, keyMsg("y"))
 	m, _ = upd(m, keyTimeoutMsg{gen: m.keyGen})
-	if len(m.keyBuf) != 0 || m.projects.showGone {
+	if len(m.keyBuf) != 0 || m.left.tree.showGone {
 		t.Error("a lone y that only starts yy is dropped")
 	}
 	m, _ = upd(m, keyMsg("y"))
 	m, _ = upd(m, keyMsg("y"))
-	if !m.projects.showGone {
+	if !m.left.tree.showGone {
 		t.Error("yy should toggle gone projects")
 	}
 }
@@ -98,8 +98,8 @@ func TestKeyAfterSequenceGoesToTheOpenedInput(t *testing.T) {
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyMsg("/"))
 	m, _ = upd(m, keyMsg("g"))
-	if !m.inputActive() || m.projects.input.Value() != "g" || m.projects.cursor != 0 {
-		t.Errorf("g runs, / opens the filter, and g is typed: input=%v value=%q cursor=%d", m.inputActive(), m.projects.input.Value(), m.projects.cursor)
+	if !m.inputActive() || m.left.tree.input.Value() != "g" || m.left.tree.cursor != 0 {
+		t.Errorf("g runs, / opens the filter, and g is typed: input=%v value=%q cursor=%d", m.inputActive(), m.left.tree.input.Value(), m.left.tree.cursor)
 	}
 }
 
@@ -124,16 +124,16 @@ func TestFooterShowsThePendingKeys(t *testing.T) {
 // then w breaks av; w must still run.
 func TestRestKeyAfterNewWaitIsNotLost(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"projects": {"g": "goto top", "gab": "toggle show-gone", "av": "toggle show-hidden"},
+		"project-tree": {"g": "goto top", "gab": "toggle show-gone", "av": "toggle show-hidden"},
 	})
 	m.width, m.height = 120, 30
-	m.projects.cursor = 2
+	m = moveTree(m, 2)
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyMsg("a"))
 	m, _ = upd(m, keyMsg("w"))
-	if m.projects.cursor != 0 || m.projects.showGone || m.projects.showHidden || len(m.keyBuf) != 0 {
+	if m.left.tree.cursor != 0 || m.left.tree.showGone || m.left.tree.showHidden || len(m.keyBuf) != 0 {
 		t.Errorf("g runs goto top; gab, av not completed; w unbound: cursor=%d gone=%v hidden=%v keyBuf=%d",
-			m.projects.cursor, m.projects.showGone, m.projects.showHidden, len(m.keyBuf))
+			m.left.tree.cursor, m.left.tree.showGone, m.left.tree.showHidden, len(m.keyBuf))
 	}
 }
 
@@ -141,10 +141,10 @@ func TestRestKeyAfterNewWaitIsNotLost(t *testing.T) {
 // the flush runs / (filter-projects, opens an empty input) before the rest key.
 func rawModeModel() model {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"projects": {"/x": "toggle show-hidden", "yy": "toggle show-gone"},
+		"project-tree": {"/x": "toggle show-hidden", "yy": "toggle show-gone"},
 	})
 	m.width, m.height = 120, 30
-	m.projects.cursor = 2
+	m = moveTree(m, 2)
 	return m
 }
 
@@ -153,9 +153,9 @@ func TestRawModeAfterMatchGetsRestKeysInOrder(t *testing.T) {
 	m, _ = upd(m, keyMsg("/")) // / waits: /x is longer, / is filter-projects (exact match)
 	m, _ = upd(m, keyMsg("y")) // y mismatches, / runs (filter opens, empty input), y goes to input
 	m, _ = upd(m, keyMsg("o")) // raw: o goes to input
-	if !m.inputActive() || m.projects.input.Value() != "yo" || len(m.keyBuf) != 0 {
+	if !m.inputActive() || m.left.tree.input.Value() != "yo" || len(m.keyBuf) != 0 {
 		t.Errorf("/ opens filter, y and o type in order: active=%v value=%q keyBuf=%d",
-			m.inputActive(), m.projects.input.Value(), len(m.keyBuf))
+			m.inputActive(), m.left.tree.input.Value(), len(m.keyBuf))
 	}
 }
 
@@ -163,11 +163,11 @@ func TestPendingKeyDroppedWhenStateGoesRaw(t *testing.T) {
 	m := seqModel()
 	m, _ = upd(m, keyMsg("g")) // g waits
 	gen := m.keyGen
-	m.projects.offerSpawn = &spawnOffer{nodeID: "n1"} // inject a raw state
+	m.left.tree.offerSpawn = &spawnOffer{nodeID: "n1"} // inject a raw state
 	m, _ = upd(m, keyTimeoutMsg{gen: gen})
-	if m.projects.offerSpawn == nil || m.projects.cursor != 2 || len(m.keyBuf) != 0 {
+	if m.left.tree.offerSpawn == nil || m.left.tree.cursor != 2 || len(m.keyBuf) != 0 {
 		t.Errorf("pending g must be dropped when state turns raw: offer=%v cursor=%d keyBuf=%d",
-			m.projects.offerSpawn, m.projects.cursor, len(m.keyBuf))
+			m.left.tree.offerSpawn, m.left.tree.cursor, len(m.keyBuf))
 	}
 }
 
@@ -176,8 +176,8 @@ func TestMismatchMultiKeyDropsEarliestAndRunsLast(t *testing.T) {
 	// y starts yy (longer), then j mismatches; y is dropped, j runs next.
 	m, _ = upd(m, keyMsg("y"))
 	m, _ = upd(m, keyMsg("j"))
-	if m.projects.cursor != 3 {
-		t.Errorf("y dropped, j moves cursor down from 2 to 3; cursor=%d", m.projects.cursor)
+	if m.left.tree.cursor != 3 {
+		t.Errorf("y dropped, j moves cursor down from 2 to 3; cursor=%d", m.left.tree.cursor)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestHistoryProjectsFooterShowsPendingKeys(t *testing.T) {
 		"global": {"gj": "next"},
 	})
 	m.width, m.height = 120, 30
-	m.mode = modeHistoryProjects
+	m = withView(m, viewHistoryProjects)
 	m, _ = upd(m, keyMsg("g")) // g waits: gj is longer, g is goto top (exact match)
 	f := ansi.Strip(m.View().Content)
 	if !strings.Contains(f, "g…") {
@@ -197,27 +197,27 @@ func TestHistoryProjectsFooterShowsPendingKeys(t *testing.T) {
 
 func TestKeyAfterOpeningTheLiveScreenGoesToThePane(t *testing.T) {
 	m := testModel()
-	m.mode, m.selectedID = modeSession, "s1"
+	m = withLive(m, "s1")
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", CanOpenTerminal: true}}
-	m = withKeymap(m, map[string]map[string]string{"session": {"zz": "open live-screen", "zzy": "fold close"}})
+	m = withKeymap(m, map[string]map[string]string{"transcript": {"zz": "open live-screen", "zzy": "fold close"}})
 	m, _ = upd(m, keyMsg("z"))
 	m, _ = upd(m, keyMsg("z"))
 	m, _ = upd(m, keyMsg("j"))
-	defer m.leaveScreen()
-	if m.mode != modeScreen || len(m.termKeyCh) != 1 {
-		t.Errorf("zz opens the live screen and j goes to the pane: mode=%v queued=%d", m.mode, len(m.termKeyCh))
+	defer leaveScreen(m)
+	if viewOf(m) != viewScreen || len(m.termKeyCh) != 1 {
+		t.Errorf("zz opens the live screen and j goes to the pane: view=%v queued=%d", viewOf(m), len(m.termKeyCh))
 	}
 }
 
 func TestHiddenTreeKeyRunsAfterOneTimeout(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"projects": {"g": "goto top", "gz": "toggle show-gone"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"workspace": {"g": "goto top", "gz": "toggle show-gone"}})
 	m.width, m.height = 120, 30
-	m.projects.sidebarHidden = true
-	m.projects.focus = focusTree
-	m.projects.selectRow("n1:w1")
+	m.left.hidden = true
+	m = withFocus(m, leftSidebar)
+	m = selectRow(m, "n1:w1")
 	m, _ = upd(m, keyMsg("g"))
 	m, _ = upd(m, keyTimeoutMsg{gen: m.keyGen})
-	if len(m.keyBuf) != 0 || m.projects.focus != focusPane {
-		t.Errorf("g runs in the pane after one timeout: keyBuf=%d focus=%v", len(m.keyBuf), m.projects.focus)
+	if len(m.keyBuf) != 0 || m.focused != mainPane {
+		t.Errorf("g runs in the pane after one timeout: keyBuf=%d focus=%v", len(m.keyBuf), m.focused)
 	}
 }

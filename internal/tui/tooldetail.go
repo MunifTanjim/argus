@@ -14,7 +14,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
+func (m tview) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 	if it.ToolID == "" {
 		return nil
 	}
@@ -23,24 +23,24 @@ func (m model) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 	}
 	m.toolBodies[it.ToolID] = toolBodyEntry{loading: true}
 	client := m.client
-	toolID := it.ToolID
-	if m.mode == modeHistoryTranscript {
+	toolID, owner := it.ToolID, m.owner()
+	if !m.live {
 		nodeID, path, agent := m.history.openNodeID, m.history.openPath, m.history.openAgent
 		return func() tea.Msg {
 			var td api.ToolDetail
 			err := client.Call(api.MethodSessionHistoryToolDetail, api.HistoryToolDetailParams{
 				NodeID: nodeID, TranscriptPath: path, Agent: agent, AgentID: agentID, ToolID: toolID,
 			}, &td)
-			return toolDetailMsg{toolID: toolID, detail: td, err: err}
+			return toolDetailMsg{owner: owner, toolID: toolID, detail: td, err: err}
 		}
 	}
-	sessionID := m.selectedID
+	sessionID := m.sessionID
 	return func() tea.Msg {
 		var td api.ToolDetail
 		err := client.Call(api.MethodSessionToolDetail, api.ToolDetailParams{
 			SessionID: sessionID, AgentID: agentID, ToolID: toolID,
 		}, &td)
-		return toolDetailMsg{toolID: toolID, detail: td, err: err}
+		return toolDetailMsg{owner: owner, toolID: toolID, detail: td, err: err}
 	}
 }
 
@@ -85,8 +85,8 @@ func hardWrap(s string, width int) string {
 // never run off-screen.
 func (m model) renderToolText(s string, width int) string {
 	s = strings.TrimRight(s, "\n")
-	if m.transcript.jsonHL != nil {
-		if out, ok := m.transcript.jsonHL.highlightJSON(s); ok {
+	if m.render.jsonHL != nil {
+		if out, ok := m.render.jsonHL.highlightJSON(s); ok {
 			return hardWrap(strings.TrimRight(out, "\n"), width)
 		}
 	}
@@ -96,8 +96,8 @@ func (m model) renderToolText(s string, width int) string {
 // renderJS colorizes s as JavaScript, falling back to plain wrapped text.
 func (m model) renderJS(s string, width int) string {
 	s = strings.TrimRight(s, "\n")
-	if m.transcript.jsHL != nil {
-		if out, ok := m.transcript.jsHL.highlight(s); ok {
+	if m.render.jsHL != nil {
+		if out, ok := m.render.jsHL.highlight(s); ok {
 			return hardWrap(strings.TrimRight(out, "\n"), width)
 		}
 	}

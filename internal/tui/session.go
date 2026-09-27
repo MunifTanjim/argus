@@ -4,160 +4,21 @@ import (
 	"fmt"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// The session screen: a history region (transcript or detail drill-down) plus a
-// prompt dock shown only while an interaction is pending. Tab moves focus; each
-// pane keeps its own keys.
-
-// handleSessionKey routes keys on the session screen by focus.
-func (m model) handleSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.flash = ""
-	pending := m.sessionInteraction() != nil
-	if !pending && m.focus == focusDock {
-		m.focus = focusHistory // dock vanished; reclaim focus
-	}
-
-	if m.focus == focusHistory {
-		if mm, cmd, ok := m.handleFileViewKey(msg); ok {
-			return mm, cmd
-		}
-	}
-
-	switch {
-	case m.matches(msg, sessionKeys.Focus):
-		if pending {
-			if m.focus == focusHistory {
-				m.focus = focusDock
-				if m.idleComposerActive() {
-					m.sizeIdleReply() // fit width/height before the first render
-				}
-			} else {
-				m.focus = focusHistory
-			}
-		}
-		return m, nil
-	case m.matches(msg, sessionKeys.Raw):
-		s := m.sessions[m.selectedID]
-		// enterScreen opens the terminal view via terminal.open, which spawns and
-		// adopts a pane on demand for a live paneless session (OpenCode).
-		if !s.CanOpenTerminal {
-			m.flash = string(s.Frontend) + " session: terminal control unavailable"
-			return m, nil
-		}
-		return m.enterScreen(m.selectedID)
-	}
-
-	if m.focus == focusDock {
-		// Read returns to reading; prompt stays pending.
-		if m.matches(msg, promptKeys.Read) {
-			m.focus = focusHistory
-			return m, nil
-		}
-		return m.handlePromptKey(msg)
-	}
-
-	// focus == history
-	if m.matches(msg, transcriptKeys.Back) {
-		if m.historyView == histDetail {
-			// A frame with a subID owns a subagent subscription: tear it down and
-			// restore the stashed session stream. A leaf frame above a subagent frame
-			// has empty subID and must pop normally first so the subagent frame isn't
-			// torn down prematurely.
-			if f := m.topFrame(); f != nil && f.subID != "" {
-				cmd := m.unsubscribeCmd(f.subID)
-				m.activeSub = m.sessionSub
-				m.sessionSub = subRef{}
-				// Re-subscribe to catch deltas missed while drilled in.
-				have := len(m.transcriptCache[m.activeSub.key()].chunks)
-				m.popDetail()
-				return m, tea.Batch(cmd, m.subscribeCmd(m.activeSub, have))
-			}
-			if m.popDetail() { // popped the root → back to the card list
-				m.historyView = histTranscript
-			}
-			return m, nil
-		}
-		cmd := m.closeSessionStreams()
-		m.mode = m.sessionReturn
-		return m, cmd
-	}
-	if m.historyView == histDetail {
-		return m.handleDetailKey(msg)
-	}
-	return m.handleTranscriptKey(msg)
-}
-
-// closeSessionStreams ends the session's transcript subscription and, from a
-// subagent drill-in, the stashed session stream.
-func (m *model) closeSessionStreams() tea.Cmd {
-	var cmds []tea.Cmd
-	for _, s := range []subRef{m.activeSub, m.sessionSub} {
-		if s.subID != "" {
-			cmds = append(cmds, m.unsubscribeCmd(s.subID))
-		}
-	}
-	m.activeSub, m.sessionSub = subRef{}, subRef{}
-	return tea.Batch(cmds...)
-}
+// A live transcript is a history region over a prompt dock that shows only
+// while an interaction is pending.
 
 // historyFocused reports whether the history region (not the dock) holds focus.
 func (m model) historyFocused() bool {
-	return m.focus == focusHistory
-}
-
-// sessionFooter is the key-hint line, varying by focused region and sub-view.
-func (m model) sessionFooter() string {
-	k := projectsKeys
-	switch {
-	case len(m.keyBuf) > 0:
-		return asstStyle.Render(m.keyHint())
-	case m.flash != "":
-		return asstStyle.Render(firstLine(m.flash))
-	case m.projects.focus == focusFiles && m.filesVisible():
-		return m.footer(append(m.sidebarBindings("back"), k.Refresh)...)
-	case m.projects.fileView.open() && m.focus == focusHistory:
-		return m.footer(append(m.fileViewBindings(), m.sideKey(paneKeys.Right))...)
-	case m.focus == focusDock:
-		multi := m.isMultiQuestion()
-		binds := []binding{promptKeys.Up}
-		if multi {
-			binds = append(binds, promptKeys.TabPrev, promptKeys.Next)
-		} else {
-			binds = append(binds, promptKeys.Submit)
-		}
-		if m.dockScrolls() {
-			binds = append(binds, promptKeys.HalfUp)
-		}
-		binds = append(binds, promptKeys.Read)
-		if !multi {
-			binds = append(binds, sessionKeys.Raw)
-		}
-		return m.footer(binds...)
-	case m.historyView == histDetail:
-		return m.footer(detailKeys.Up, detailKeys.Collapse, detailKeys.Drill, detailKeys.Back, sessionKeys.Raw)
-	default:
-		binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse,
-			transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back}
-		if m.sessionInteraction() != nil {
-			binds = append(binds, transcriptKeys.Answer)
-		}
-		if m.sessions[m.selectedID].Status == session.StatusStarting {
-			binds = append(binds, sessionKeys.Raw)
-		}
-		if m.filesVisible() && m.currentWorkspace() != "" {
-			binds = append(binds, m.sideKey(paneKeys.Right))
-		}
-		return m.footer(binds...)
-	}
+	return m.focused != sessionDock
 }
 
 // historyBody renders the top region (transcript or detail sub-view).
-func (m model) historyBody() string {
+func (m tview) historyBody() string {
 	if m.historyView == histDetail {
 		return m.detailBody()
 	}
@@ -167,25 +28,25 @@ func (m model) historyBody() string {
 // sessionLayout returns the history-region and dock heights. dockH is 0 with no
 // pending interaction; an unfocused dock collapses to rule + summary line
 // (dockH == 2); only the focused dock expands to the full option panel.
-// Chrome sessionView always draws: header(1) + 2 body-surrounding blanks +
-// footer(1) = 4. The history/dock rule is part of dockH, not chrome.
 func (m model) sessionLayout() (historyH, dockH int) {
+	avail := m.sessionRows()
 	if m.sessionInteraction() == nil {
-		return max(1, m.bodyHeight()-4), 0
+		return avail, 0
 	}
-	avail := max(1, m.bodyHeight()-4) // header + 2 surrounding blanks + footer
-	if m.focus != focusDock {
-		return max(1, avail-2), 2
-	}
-	capH := avail - 1                         // focused: expand to fit, history keeps ≥1 line
-	dockH = min(m.dockContentLines()+1, capH) // +1 for the focus rule
-	if dockH < 3 {
-		dockH = 3
-	}
-	if dockH > avail-1 {
-		dockH = avail - 1
-	}
+	dockH = m.dock.dockHeight(&ctx{m: &m}, avail)
 	return max(1, avail-dockH), dockH
+}
+
+// sessionRows is the height the history region and the dock share: the body
+// less the header, the blank under it, and the footer rows.
+func (m model) sessionRows() int { return max(1, m.bodyHeight()-4) }
+
+// dockHeight is the dock's height out of avail rows, its rule included.
+func (d dockComp) dockHeight(c *ctx, avail int) int {
+	if c.m.focused != sessionDock {
+		return 2
+	}
+	return min(max(d.dockContentLines(c)+1, 3), avail-1)
 }
 
 // dockSummary is the one-line description shown in the collapsed dock.
@@ -235,9 +96,9 @@ func (m model) dockContentWidth() int { return max(1, m.containerWidth()-2*conte
 // dockWidths splits the dock into an option-list column and a preview column.
 // side is false (single full-width column) when there's no preview or the
 // terminal is too narrow to split.
-func (m model) dockWidths() (leftW, rightW int, side bool) {
-	W := m.dockContentWidth()
-	if m.focusedOptionPreview() == "" {
+func (d dockComp) dockWidths(c *ctx) (leftW, rightW int, side bool) {
+	W := c.m.dockContentWidth()
+	if d.focusedOptionPreview(c) == "" {
 		return W, 0, false
 	}
 	leftW = W * 2 / 5
@@ -250,10 +111,10 @@ func (m model) dockWidths() (leftW, rightW int, side bool) {
 
 // dockContentLines is the unclamped line count of the dock body: the option
 // list, plus any preview (beside it = taller column; stacked = sum).
-func (m model) dockContentLines() int {
-	preview := m.focusedOptionPreview()
-	leftW, _, side := m.dockWidths()
-	leftLines, _, _ := m.promptLinesWidth(leftW)
+func (d dockComp) dockContentLines(c *ctx) int {
+	preview := d.focusedOptionPreview(c)
+	leftW, _, side := d.dockWidths(c)
+	leftLines, _, _ := d.promptLinesWidth(c, leftW)
 	if preview == "" {
 		return len(leftLines)
 	}
@@ -267,11 +128,11 @@ func (m model) dockContentLines() int {
 // dockBody composes the dock body within height rows: a single option column,
 // or options + boxed preview (side-by-side, or stacked when too narrow). The
 // option column is windowed around its active control so controls stay visible.
-func (m model) dockBody(height int) string {
-	preview := m.focusedOptionPreview()
-	leftW, rightW, side := m.dockWidths()
-	lines, anchor, ctrlStart := m.promptLinesWidth(leftW)
-	left := m.dockScrollBody(lines, height, anchor, ctrlStart, leftW)
+func (d dockComp) dockBody(c *ctx, height int) string {
+	preview := d.focusedOptionPreview(c)
+	leftW, rightW, side := d.dockWidths(c)
+	lines, anchor, ctrlStart := d.promptLinesWidth(c, leftW)
+	left := d.dockScrollBody(lines, height, anchor, ctrlStart, leftW)
 
 	switch {
 	case preview == "":
@@ -324,9 +185,9 @@ func dockGeom(lines []string, totalH, ctrlStart int) (body, ctrl []string, bodyH
 
 // dockScrollBody renders the focused dock within height rows: the control block
 // (options / reply field) pins to the bottom while the body above scrolls by
-// m.prompt.scroll, with a ▲/▼ overflow hint. When the body fits it's returned
+// d.scroll, with a ▲/▼ overflow hint. When the body fits it's returned
 // whole; when the controls themselves overflow it falls back to anchor windowing.
-func (m model) dockScrollBody(lines []string, height, anchor, ctrlStart, width int) string {
+func (d dockComp) dockScrollBody(lines []string, height, anchor, ctrlStart, width int) string {
 	body, ctrl, bodyH, ok := dockGeom(lines, height, ctrlStart)
 	if !ok {
 		if len(lines) <= height {
@@ -334,7 +195,7 @@ func (m model) dockScrollBody(lines []string, height, anchor, ctrlStart, width i
 		}
 		return windowLines(strings.Join(lines, "\n"), height, anchor)
 	}
-	scroll := max(0, min(m.prompt.scroll, len(body)-bodyH))
+	scroll := max(0, min(d.scroll, len(body)-bodyH))
 	end := scroll + bodyH
 	out := strings.Join(body[scroll:end], "\n")
 	if bodyH < height-len(ctrl) { // a hint row was reserved
@@ -345,9 +206,9 @@ func (m model) dockScrollBody(lines []string, height, anchor, ctrlStart, width i
 
 // dockScrollGeom returns the max scroll offset and the half-page step for the
 // focused dock body at the given total height (0 / 1 when the body doesn't scroll).
-func (m model) dockScrollGeom(height int) (maxScroll, page int) {
-	leftW, _, _ := m.dockWidths()
-	lines, _, ctrlStart := m.promptLinesWidth(leftW)
+func (d dockComp) dockScrollGeom(c *ctx, height int) (maxScroll, page int) {
+	leftW, _, _ := d.dockWidths(c)
+	lines, _, ctrlStart := d.promptLinesWidth(c, leftW)
 	body, _, bodyH, ok := dockGeom(lines, height, ctrlStart)
 	if !ok {
 		return 0, 1
@@ -357,22 +218,20 @@ func (m model) dockScrollGeom(height int) (maxScroll, page int) {
 
 // dockScrolls reports whether the focused dock body currently overflows (so the
 // footer should advertise the scroll keys).
-func (m model) dockScrolls() bool {
-	if m.focus != focusDock || m.sessionInteraction() == nil {
+func (d dockComp) dockScrolls(c *ctx) bool {
+	if c.m.focused != sessionDock || c.m.sessionInteraction() == nil {
 		return false
 	}
-	_, dockH := m.sessionLayout()
-	maxScroll, _ := m.dockScrollGeom(dockH - 1)
+	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
 	return maxScroll > 0
 }
 
 // scrollDock moves the dock body scroll offset by dir half-pages, clamped.
-func (m model) scrollDock(dir int) model {
-	_, dockH := m.sessionLayout()
-	maxScroll, page := m.dockScrollGeom(dockH - 1)
-	cur := min(m.prompt.scroll, maxScroll) // re-clamp first: a resize may have shrunk the body
-	m.prompt.scroll = max(0, min(cur+dir*page, maxScroll))
-	return m
+func (d dockComp) scrollDock(c *ctx, dir int) dockComp {
+	maxScroll, page := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
+	cur := min(d.scroll, maxScroll) // re-clamp first: a resize may have shrunk the body
+	d.scroll = max(0, min(cur+dir*page, maxScroll))
+	return d
 }
 
 // windowLines returns at most height lines from s, scrolled so the anchor stays
@@ -399,60 +258,27 @@ func windowLines(s string, height, anchor int) string {
 	return strings.Join(lines[offset:offset+height], "\n")
 }
 
-// sessionView composes the session screen: header, history region, and a
-// conditional prompt dock separated by a rule that turns accent-colored while the
-// dock holds focus.
-func (m model) sessionView() string {
-	s := m.sessions[m.selectedID]
+// sessionHeader is the header over session s's live transcript, centered in a
+// main pane w wide, with its title in style title.
+func sessionHeader(s session.Session, w int, title lipgloss.Style) string {
 	name := s.Name
 	if name == "" {
 		name = s.Tmux.SessionName
 	}
 	var parts []string
-	if !m.embedded() {
-		parts = append(parts, "argus")
-	}
 	if s.Repo != "" {
 		parts = append(parts, s.Repo)
 	}
 	if name != "" {
 		parts = append(parts, name)
 	}
-	header := headerStyle.Render(strings.Join(parts, " · "))
+	header := title.Render(strings.Join(parts, " · "))
 	if s.Branch != "" {
 		branch := Icon.Branch.Render() + lipgloss.NewStyle().Foreground(ColorGitBranch).Render(" "+s.Branch)
-		header += headerStyle.Render(" · ") + branch
+		header += title.Render(" · ") + branch
 	}
 	header += dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
-	header = m.center(indentBlock(header, strings.Repeat(" ", contentPadX)), m.containerWidth())
-
-	if s.Status == session.StatusStarting {
-		return m.pin(header+"\n\n"+startingNotice(m), m.sessionFooter())
-	}
-
-	body := m.historyBody()
-	if m.projects.fileView.open() {
-		body = m.center(m.fileViewBody(m.containerWidth(), m.fileViewHeight()), m.containerWidth())
-	}
-	if m.sessionInteraction() != nil {
-		_, dockH := m.sessionLayout()
-		ruleColor := ColorBorder
-		if m.focus == focusDock {
-			ruleColor = ColorAccent
-		}
-		rule := lipgloss.NewStyle().Foreground(ruleColor).
-			Render(strings.Repeat("─", m.containerWidth()))
-		// Rule takes one dock line; focused gets the windowed body, unfocused a
-		// single summary line. Body is inset from the rule by contentPadX; centered
-		// to align with the transcript above.
-		dockBody := m.dockSummaryLine(m.dockContentWidth())
-		if m.focus == focusDock {
-			dockBody = m.dockBody(dockH - 1)
-		}
-		dock := rule + "\n" + indentBlock(dockBody, strings.Repeat(" ", contentPadX))
-		body = body + "\n" + m.center(dock, m.containerWidth())
-	}
-	return m.pin(header+"\n\n"+body, m.sessionFooter())
+	return centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), containerWidthOf(w), w)
 }
 
 // startingNotice renders the startup-gate message centered in place of the

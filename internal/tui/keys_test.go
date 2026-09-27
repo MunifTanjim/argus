@@ -57,52 +57,52 @@ func TestFileViewAndRedactListHaveTheirOwnKeys(t *testing.T) {
 // The home tabs route via the list dispatch table: gt switches to the History
 // tab, while gT (the leftmost tab) stays on Sessions.
 func TestListDispatchRoutesToAction(t *testing.T) {
-	m := testModel() // modeList (Sessions tab) by default
+	m := testModel() // viewHome (Sessions tab) by default
 	got, cmd := typeKeysCmd(m, "gt")
-	if got.mode != modeHistoryProjects {
-		t.Fatalf("gt should open the History tab, got mode %v", got.mode)
+	if viewOf(got) != viewHistoryProjects {
+		t.Fatalf("gt should open the History tab, got view %v", viewOf(got))
 	}
 	if cmd == nil {
 		t.Error("opening history should kick off a fetch command")
 	}
 
-	if got := typeKeys(testModel(), "gT"); got.mode != modeList {
-		t.Fatalf("gT on Sessions should stay on the list, got mode %v", got.mode)
+	if got := typeKeys(testModel(), "gT"); viewOf(got) != viewHome {
+		t.Fatalf("gT on Sessions should stay on the list, got view %v", viewOf(got))
 	}
 }
 
 func TestHistoryTabPrevReturnsToSessions(t *testing.T) {
 	m := testModel()
-	m.mode = modeHistoryProjects
-	if got := typeKeys(m, "gT"); got.mode != modeList {
-		t.Fatalf("gT on History should return to Sessions, got mode %v", got.mode)
+	m = withView(m, viewHistoryProjects)
+	if got := typeKeys(m, "gT"); viewOf(got) != viewHome {
+		t.Fatalf("gT on History should return to Sessions, got view %v", viewOf(got))
 	}
 }
 
 func TestScreenNames(t *testing.T) {
 	cases := []struct {
-		mode   viewMode
+		view   shownView
 		detail bool
 		want   string
 	}{
-		{modeList, false, "home"},
-		{modeProjects, false, "projects"},
-		{modeSession, false, "session"},
-		{modeSession, true, "detail"},
-		{modeHistoryTranscript, false, "transcript"},
-		{modeHistoryTranscript, true, "detail"},
-		{modeHistoryProjects, false, "history"},
-		{modeHistorySessions, false, "history"},
-		{modeLogs, false, "logs"},
-		{modeScreen, false, ""},
+		{viewHome, false, "home"},
+		{viewTree, false, "workspace"},
+		{viewSession, false, "transcript"},
+		{viewSession, true, "transcript"},
+		{viewHistoryTranscript, false, "transcript"},
+		{viewHistoryTranscript, true, "transcript"},
+		{viewHistoryProjects, false, "history"},
+		{viewHistorySessions, false, "history"},
+		{viewLogs, false, "logs"},
+		{viewScreen, false, ""},
 	}
 	for _, c := range cases {
-		m := model{mode: c.mode}
+		m := withView(model{}, c.view)
 		if c.detail {
-			m.historyView = histDetail
+			m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 		}
 		if got := m.screen(); got != c.want {
-			t.Errorf("mode %d detail %v: screen %q, want %q", c.mode, c.detail, got, c.want)
+			t.Errorf("view %d detail %v: screen %q, want %q", c.view, c.detail, got, c.want)
 		}
 	}
 }

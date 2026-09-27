@@ -30,7 +30,7 @@ func press(t *fileTree, s string) treeRequest {
 		r := []rune(s)[0]
 		msg = tea.KeyPressMsg{Code: r, Text: s}
 	}
-	m := model{mode: modeProjects}
+	m := withFocus(model{}, rightSidebar)
 	return t.key(func(bs ...binding) bool { return m.matches(msg, bs...) }, 5)
 }
 
@@ -111,11 +111,11 @@ func TestFileTreeViewFitsAndMarksCursor(t *testing.T) {
 func wideWorkspace() model {
 	m := homeTestModel()
 	m.width, m.height = 160, 30
-	m.projects.filesHidden = false
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.selectRow("n1:w1")
+	m.right.hidden = false
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m = selectRow(m, "n1:w1")
 	m, _ = m.syncSidebar() // as Update would after the cursor move
 	return m
 }
@@ -128,11 +128,11 @@ func upd(m model, msg tea.Msg) (model, tea.Cmd) {
 func TestRightSidebarFollowsWorkspaceAndLoadsRoot(t *testing.T) {
 	m := wideWorkspace()
 	m, cmd := upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // to n1:w2
-	if m.projects.ftree.ws != "n1:w2" || cmd == nil {
-		t.Fatalf("tree should follow the workspace and load its root: ws=%q", m.projects.ftree.ws)
+	if m.right.fileTree.ws != "n1:w2" || cmd == nil {
+		t.Fatalf("tree should follow the workspace and load its root: ws=%q", m.right.fileTree.ws)
 	}
 	m, _ = upd(m, listDirMsg{ws: "n1:w1", dir: "", entries: []api.DirEntry{{Name: "stale", Path: "stale"}}})
-	if d := m.projects.ftree.dirs[""]; d != nil && len(d.entries) > 0 {
+	if d := m.right.fileTree.dirs[""]; d != nil && len(d.entries) > 0 {
 		t.Error("a listing for the old workspace must be ignored")
 	}
 	m, _ = upd(m, listDirMsg{ws: "n1:w2", dir: "", entries: []api.DirEntry{{Name: "a.go", Path: "a.go"}}})
@@ -143,7 +143,7 @@ func TestRightSidebarFollowsWorkspaceAndLoadsRoot(t *testing.T) {
 
 func TestRightSidebarHintWithoutWorkspace(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.selectRow("n1:p1")
+	m = selectRow(m, "n1:p1")
 	m, _ = upd(m, tea.KeyPressMsg{Code: 'k', Text: "k"}) // Home row
 	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "Files") || !strings.Contains(out, "select a workspace") {
@@ -154,40 +154,40 @@ func TestRightSidebarHintWithoutWorkspace(t *testing.T) {
 func TestFocusCyclesThroughFiles(t *testing.T) {
 	m := wideWorkspace()
 	m = pressKeys(m, cw('w')...)
-	if m.projects.focus != focusPane {
-		t.Fatalf("<C-w>w from the tree: focus=%v, want pane", m.projects.focus)
+	if m.focused != mainPane {
+		t.Fatalf("<C-w>w from the tree: focus=%v, want pane", m.focused)
 	}
 	m = pressKeys(m, cw('w')...)
-	if m.projects.focus != focusFiles {
-		t.Fatalf("<C-w>w from the pane: focus=%v, want files", m.projects.focus)
+	if m.focused != rightSidebar {
+		t.Fatalf("<C-w>w from the pane: focus=%v, want files", m.focused)
 	}
 	m = pressKeys(m, cw('w')...)
-	if m.projects.focus != focusTree {
-		t.Fatalf("<C-w>w from files: focus=%v, want tree", m.projects.focus)
+	if m.focused != leftSidebar {
+		t.Fatalf("<C-w>w from files: focus=%v, want tree", m.focused)
 	}
 	m = pressKeys(m, cw('W')...)
-	if m.projects.focus != focusFiles {
-		t.Errorf("<C-w>W from the tree: focus=%v, want files", m.projects.focus)
+	if m.focused != rightSidebar {
+		t.Errorf("<C-w>W from the tree: focus=%v, want files", m.focused)
 	}
 }
 
 func TestHidingFilesMovesFocusAndWidensPane(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	withFiles := m.bodyWidthFor(m.projectsLeftW())
 	m = typeKeys(m, " e")
-	if m.filesVisible() || m.projects.focus != focusPane {
-		t.Fatalf("␣e should hide files and move focus to the pane: visible=%v focus=%v", m.filesVisible(), m.projects.focus)
+	if m.filesVisible() || m.focused != mainPane {
+		t.Fatalf("␣e should hide files and move focus to the pane: visible=%v focus=%v", m.filesVisible(), m.focused)
 	}
 	if m.bodyWidthFor(m.projectsLeftW()) <= withFiles {
 		t.Errorf("hiding files should widen the pane: %d -> %d", withFiles, m.bodyWidthFor(m.projectsLeftW()))
 	}
 
 	n := wideWorkspace()
-	n.projects.focus = focusFiles
+	n = withFocus(n, rightSidebar)
 	n, _ = upd(n, tea.WindowSizeMsg{Width: 110, Height: 30}) // below 120
-	if n.filesVisible() || n.projects.focus == focusFiles {
-		t.Errorf("auto-hide should take focus off the files panel: focus=%v", n.projects.focus)
+	if n.filesVisible() || n.focused == rightSidebar {
+		t.Errorf("auto-hide should take focus off the files panel: focus=%v", n.focused)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestRightSidebarFitsAndResizes(t *testing.T) {
 		t.Fatal("the long name should render (truncated) in the sidebar")
 	}
 	assertFits(t, m.View().Content, m.width)
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	before := m.projectsFilesW()
 	m = pressKeys(m, ctrlKey('w'), keyMsg(">"))
 	if m.projectsFilesW() <= before {
@@ -213,24 +213,24 @@ func withTreeLoaded(m model, ws string) model {
 
 func TestOpenFileFromTreeShowsInPane(t *testing.T) {
 	m := withTreeLoaded(wideWorkspace(), "n1:w1")
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	m, cmd := upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.projects.fileView.open() || m.projects.fileView.path != "go.mod" || cmd == nil {
-		t.Fatalf("enter on a file should open it and fetch: %+v", m.projects.fileView)
+	if !m.hasOpenFile() || fileOf(m).path != "go.mod" || cmd == nil {
+		t.Fatalf("enter on a file should open it and fetch: %+v", fileOf(m))
 	}
-	if m.projects.focus != focusPane {
-		t.Errorf("focus should move to the opened file: focus=%v", m.projects.focus)
+	if m.focused != mainPane {
+		t.Errorf("focus should move to the opened file: focus=%v", m.focused)
 	}
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: "module argus"})
 	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "module argus") || !strings.Contains(out, "repo  main") {
 		t.Errorf("the pane should show the file under the unchanged header:\n%s", out)
 	}
-	cursor := m.projects.ftree.cursor
+	cursor := m.right.fileTree.cursor
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.projects.fileView.open() || m.projects.focus != focusFiles || m.projects.ftree.cursor != cursor {
+	if m.hasOpenFile() || m.focused != rightSidebar || m.right.fileTree.cursor != cursor {
 		t.Errorf("esc should close the file and return to its tree row: open=%v focus=%v cursor=%d",
-			m.projects.fileView.open(), m.projects.focus, m.projects.ftree.cursor)
+			m.hasOpenFile(), m.focused, m.right.fileTree.cursor)
 	}
 }
 
@@ -238,56 +238,56 @@ func TestEscWithSidebarHiddenKeepsPaneFocus(t *testing.T) {
 	m := openedFile(wideWorkspace())
 	m = typeKeys(m, " e") // hide the sidebar
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.projects.fileView.open() || m.projects.focus != focusPane {
+	if m.hasOpenFile() || m.focused != mainPane {
 		t.Errorf("with the sidebar hidden, esc should close the file and keep the pane: open=%v focus=%v",
-			m.projects.fileView.open(), m.projects.focus)
+			m.hasOpenFile(), m.focused)
 	}
 }
 
 func TestFileClosesWhenWorkspaceChanges(t *testing.T) {
 	m := withTreeLoaded(wideWorkspace(), "n1:w1")
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m.projects.focus = focusTree
+	m = withFocus(m, leftSidebar)
 	m, _ = upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // to n1:w2
-	if m.projects.fileView.open() {
+	if m.hasOpenFile() {
 		t.Error("changing the workspace should close the open file")
 	}
 }
 
 func TestFocusRightFromSessionOpensFileInPlaceOfTranscript(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	mm, _ := m.enterSession("n1:s1") // session in n1:w1
 	m, _ = mm.syncSidebar()
 	m = withTreeLoaded(m, "n1:w1")
 	m = pressKeys(m, cw('l')...)
-	if m.projects.focus != focusFiles {
-		t.Fatalf("<C-w>l in a session should focus the file tree: focus=%v", m.projects.focus)
+	if m.focused != rightSidebar {
+		t.Fatalf("<C-w>l in a session should focus the file tree: focus=%v", m.focused)
 	}
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: "module argus"})
-	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "module argus") || m.projects.focus == focusFiles {
-		t.Fatalf("the file should replace the transcript and take focus: focus=%v\n%s", m.projects.focus, out)
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "module argus") || m.focused == rightSidebar {
+		t.Fatalf("the file should replace the transcript and take focus: focus=%v\n%s", m.focused, out)
 	}
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape}) // close the file
-	if m.projects.fileView.open() || m.projects.focus != focusFiles || m.mode != modeSession {
-		t.Fatalf("esc should close the file and return to the tree: open=%v focus=%v mode=%v",
-			m.projects.fileView.open(), m.projects.focus, m.mode)
+	if m.hasOpenFile() || m.focused != rightSidebar || viewOf(m) != viewSession {
+		t.Fatalf("esc should close the file and return to the tree: open=%v focus=%v view=%v",
+			m.hasOpenFile(), m.focused, viewOf(m))
 	}
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape}) // tree → session
-	if m.projects.focus == focusFiles || m.mode != modeSession {
-		t.Errorf("esc in the tree should return to the session: focus=%v mode=%v", m.projects.focus, m.mode)
+	if m.focused == rightSidebar || viewOf(m) != viewSession {
+		t.Errorf("esc in the tree should return to the session: focus=%v view=%v", m.focused, viewOf(m))
 	}
 }
 
 func TestFooterAndHelpListFileKeys(t *testing.T) {
 	m := wideWorkspace()
 	m.width = 200
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "␣e files") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "␣e files") {
 		t.Errorf("tree footer should list ␣e files: %q", f)
 	}
-	m.projects.showHelp = true
+	m.showHelp = true
 	h := ansi.Strip(m.projectsHelpView())
 	for _, want := range []string{"toggle right sidebar", "^wh/^wl", "^wW", "gT/gt"} {
 		if !strings.Contains(h, want) {
@@ -298,21 +298,21 @@ func TestFooterAndHelpListFileKeys(t *testing.T) {
 
 func filesFocused() model {
 	m := withTreeLoaded(wideWorkspace(), "n1:w1")
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	return m
 }
 
 func TestFilesEscReturnsToPaneOnProjectsScreen(t *testing.T) {
 	m := filesFocused()
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.projects.focus != focusPane || m.mode != modeProjects {
-		t.Errorf("esc in files: focus=%v mode=%v, want the pane on the projects screen", m.projects.focus, m.mode)
+	if m.focused != mainPane || viewOf(m) != viewTree {
+		t.Errorf("esc in files: focus=%v view=%v, want the pane on the projects screen", m.focused, viewOf(m))
 	}
 	h := filesFocused()
-	h.projects.sidebarHidden = true
+	h.left.hidden = true
 	h, _ = upd(h, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if h.mode != modeProjects || h.projects.cursorRowID() != "n1:w1" {
-		t.Errorf("esc in files with the left sidebar hidden must not jump to Home: mode=%v row=%q", h.mode, h.projects.cursorRowID())
+	if viewOf(h) != viewTree || h.left.tree.cursorRowID() != "n1:w1" {
+		t.Errorf("esc in files with the left sidebar hidden must not jump to Home: view=%v row=%q", viewOf(h), h.left.tree.cursorRowID())
 	}
 }
 
@@ -336,14 +336,14 @@ func TestFilesReloadRefetchesRootAndUnfoldedDirs(t *testing.T) {
 	if len(dirs) != 2 {
 		t.Fatalf("gr should re-fetch the root and the unfolded dir, fetched %q", dirs)
 	}
-	if rc.calls[0] == api.MethodProjectList || m.projects.focus != focusFiles {
-		t.Errorf("gr in files must reload the tree, not the project list; focus=%v", m.projects.focus)
+	if rc.calls[0] == api.MethodProjectList || m.focused != rightSidebar {
+		t.Errorf("gr in files must reload the tree, not the project list; focus=%v", m.focused)
 	}
 }
 
 func TestSessionFilesKeysShareHandler(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	mm, _ := m.enterSession("n1:s1")
 	m, _ = mm.syncSidebar()
 	m = withTreeLoaded(m, "n1:w1")
@@ -358,80 +358,126 @@ func TestSessionFilesKeysShareHandler(t *testing.T) {
 func TestCtrlBKeepsFilesFocus(t *testing.T) {
 	m := filesFocused()
 	m = typeKeys(m, " o")
-	if m.projects.focus != focusFiles || m.sidebarVisible() {
-		t.Errorf("␣o from files should hide the left sidebar and keep files focused: focus=%v", m.projects.focus)
+	if m.focused != rightSidebar || m.sidebarVisible() {
+		t.Errorf("␣o from files should hide the left sidebar and keep files focused: focus=%v", m.focused)
 	}
 }
 
 func TestFilesFocusFallsBackToTreeWithoutWorkspace(t *testing.T) {
 	m := filesFocused()
-	m.projects.selectRow("n1:p1") // e.g. a filter moved the cursor
+	m = selectRow(m, "n1:p1") // e.g. a filter moved the cursor
+	m, _ = m.repairFocus()
 	m, _ = m.syncSidebar()
-	if m.projects.focus != focusTree {
-		t.Errorf("no workspace with the left tree visible: focus=%v, want the tree", m.projects.focus)
+	if m.focused != leftSidebar {
+		t.Errorf("no workspace with the left tree visible: focus=%v, want the tree", m.focused)
 	}
 }
 
 func TestProjectsFooterUsesFullWidth(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.setFilter("repo")
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "? help") {
+	m.left.tree.setFilter("repo")
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "? help") {
 		t.Errorf("the projects footer spans the terminal and should fit ? help at 160 cols: %q", f)
 	}
 }
 
 func openedFile(m model) model {
 	m = withTreeLoaded(m, "n1:w1")
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: "module argus"})
 	return m
 }
 
+// A file open over a workspace pane passes the keys that act on the tree to the
+// pane, which runs each once; the pane's own list keys stay with the file.
+func TestFileOverAWorkspacePassesTheTreeKeysToThePane(t *testing.T) {
+	base := func() model {
+		m := withFocus(openedFile(wideWorkspace()), mainPane)
+		m.client = &recordingClient{}
+		return m
+	}
+	manage := func(m model) bool { return strings.Contains(m.flash, "manage keys work in the tree") }
+	cases := []struct {
+		name string
+		keys []tea.KeyPressMsg
+		ok   func(m model) bool
+	}{
+		{"/", []tea.KeyPressMsg{keyMsg("/")}, func(m model) bool { return m.focused == leftSidebar && m.left.tree.inputMode == pmFilter }},
+		{"s", []tea.KeyPressMsg{keyMsg("s")}, spawnOpen},
+		{"L", []tea.KeyPressMsg{keyMsg("L")}, func(m model) bool { return fileOf(m).log }},
+		{"z.", []tea.KeyPressMsg{keyMsg("z"), keyMsg(".")}, func(m model) bool { return m.left.tree.showHidden && !m.left.tree.showGone }},
+		{"zg", []tea.KeyPressMsg{keyMsg("z"), keyMsg("g")}, func(m model) bool { return m.left.tree.showGone && !m.left.tree.showHidden }},
+		{"<C-w>>", cw('>'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()+4 }},
+		{"<C-w><lt>", cw('<'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()-4 }},
+	}
+	for _, k := range []string{"a", "r", "H", "P", "T", "D", "F", "S"} {
+		cases = append(cases, struct {
+			name string
+			keys []tea.KeyPressMsg
+			ok   func(m model) bool
+		}{k, []tea.KeyPressMsg{keyMsg(k)}, manage})
+	}
+	for _, c := range cases {
+		m := pressKeys(base(), c.keys...)
+		if !m.hasOpenFile() || !c.ok(m) || paneOf(m).cursor != 0 || paneOf(m).killID != "" {
+			t.Errorf("%s over the file: file open=%v result=%v pane cursor=%d kill=%q flash=%q",
+				c.name, m.hasOpenFile(), c.ok(m), paneOf(m).cursor, paneOf(m).killID, m.flash)
+		}
+	}
+	for _, keys := range [][]tea.KeyPressMsg{{keyMsg("O")}, {keyMsg("enter")}, {keyMsg("d"), keyMsg("d")}} {
+		m := pressKeys(base(), keys...)
+		if !m.hasOpenFile() || viewOf(m) != viewTree || paneOf(m).killID != "" || m.flash != "" {
+			t.Errorf("%q over the file acted on the pane: file open=%v view=%v kill=%q flash=%q",
+				keyTexts(keys), m.hasOpenFile(), viewOf(m), paneOf(m).killID, m.flash)
+		}
+	}
+}
+
 func TestOpenFileSwallowsKeysForHiddenContent(t *testing.T) {
 	m := openedFile(wideWorkspace())
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	for _, keys := range [][]tea.KeyPressMsg{{keyMsg("enter")}, {keyMsg("d"), keyMsg("d")}, {keyMsg("l")}} {
 		mm := pressKeys(m, keys...)
-		if mm.mode != modeProjects || mm.projects.pendingKill != "" || !mm.projects.fileView.open() {
-			t.Errorf("%q acted on the content behind the open file: mode=%v kill=%q", keyTexts(keys), mm.mode, mm.projects.pendingKill)
+		if viewOf(mm) != viewTree || paneOf(mm).killID != "" || !mm.hasOpenFile() {
+			t.Errorf("%q acted on the content behind the open file: view=%v kill=%q", keyTexts(keys), viewOf(mm), paneOf(mm).killID)
 		}
 	}
 }
 
 func TestViewerAndSessionFilesFooters(t *testing.T) {
 	m := openedFile(wideWorkspace())
-	m.projects.focus = focusPane
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "scroll") || !strings.Contains(f, "close") {
+	m = withFocus(m, mainPane)
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "scroll") || !strings.Contains(f, "close") {
 		t.Errorf("pane footer with a file open = %q", f)
 	}
 
 	s := wideWorkspace()
-	s.projects.focus = focusPane
+	s = withFocus(s, mainPane)
 	ss, _ := s.enterSession("n1:s1")
 	s, _ = ss.syncSidebar()
 	s = withTreeLoaded(s, "n1:w1")
-	if f := ansi.Strip(s.sessionFooter()); !strings.Contains(f, "^wl files") {
+	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "^wl files") {
 		t.Errorf("session footer should offer ^wl files: %q", f)
 	}
 	s = pressKeys(s, cw('l')...)
-	if f := ansi.Strip(s.sessionFooter()); !strings.Contains(f, "h/l fold") {
+	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "h/l fold") {
 		t.Errorf("session footer with the file tree focused = %q", f)
 	}
 	s, _ = upd(s, tea.KeyPressMsg{Code: tea.KeyEnter}) // focus moves to the file
-	if f := ansi.Strip(s.sessionFooter()); !strings.Contains(f, "close") {
+	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "close") {
 		t.Errorf("session footer with a file open = %q", f)
 	}
 }
 
 func TestPaneFooterNamesNextFocus(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusPane
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "^ww/^wW files") {
+	m = withFocus(m, mainPane)
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "^ww/^wW files") {
 		t.Errorf("with files visible, <C-w>w goes to files: %q", f)
 	}
-	m.projects.filesHidden = true
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "^ww/^wW tree") {
+	m.right.hidden = true
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "^ww/^wW tree") {
 		t.Errorf("with files hidden, <C-w>w goes to the tree: %q", f)
 	}
 }
@@ -439,11 +485,11 @@ func TestPaneFooterNamesNextFocus(t *testing.T) {
 func TestSidebarsCannotSqueezePane(t *testing.T) {
 	m := wideWorkspace()
 	m.width = 130
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	for i := 0; i < 30; i++ {
 		m, _ = upd(m, tea.KeyPressMsg{Code: '>', Text: ">"})
 	}
-	m.projects.focus = focusTree
+	m = withFocus(m, leftSidebar)
 	for i := 0; i < 30; i++ {
 		m, _ = upd(m, tea.KeyPressMsg{Code: '>', Text: ">"})
 	}
@@ -467,11 +513,11 @@ func TestTreeCursorStaysOnEntryWhenDirAboveLoads(t *testing.T) {
 func TestScrollStopsAtTheEnd(t *testing.T) {
 	m := openedFile(wideWorkspace())
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: "1\n2\n3"})
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	for i := 0; i < 10; i++ {
 		m, _ = upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if s := m.projects.fileView.scroll; s != 0 {
+	if s := fileOf(m).scroll; s != 0 {
 		t.Errorf("a file that fits should not scroll: %d", s)
 	}
 
@@ -480,7 +526,7 @@ func TestScrollStopsAtTheEnd(t *testing.T) {
 func TestFileViewHighlightsOnceOnLoad(t *testing.T) {
 	m := openedFile(wideWorkspace())
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: "module argus\n\ngo 1.24"})
-	f := &m.projects.fileView
+	f := fileOf(m)
 	if len(f.lines) != 3 {
 		t.Fatalf("load should store the highlighted lines: %q", f.lines)
 	}
@@ -493,7 +539,7 @@ func TestFileViewHighlightsOnceOnLoad(t *testing.T) {
 func TestEnteringSessionDropsFilesFocus(t *testing.T) {
 	m := filesFocused()
 	mm, _ := m.enterSession("n1:s1") // e.g. a resume result arriving while files had focus
-	if mm.projects.focus == focusFiles {
+	if mm.focused == rightSidebar {
 		t.Error("a newly opened session should not start with the file tree focused")
 	}
 }
@@ -508,17 +554,22 @@ func TestLOpensAFile(t *testing.T) {
 
 func TestRefreshKeepsTreeCursor(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusFiles
+	m = withFocus(m, rightSidebar)
 	m.client = &recordingClient{}
 	m, _ = upd(m, listDirMsg{ws: "n1:w1", dir: "", entries: []api.DirEntry{{Name: "a", Path: "a", IsDir: true}, {Name: "z.go", Path: "z.go"}}})
 	m, _ = upd(m, keyMsg("l"))
 	m, _ = upd(m, listDirMsg{ws: "n1:w1", dir: "a", entries: []api.DirEntry{{Name: "x.go", Path: "a/x.go"}}})
 	m, _ = upd(m, keyMsg("j")) // a/x.go
 	m, cmd := typeKeysCmd(m, "gr")
-	ft := m.projects.ftree
+	ft := m.right.fileTree
 	if r := ft.rows()[ft.cursor]; cmd == nil || r.entry.Path != "a/x.go" {
 		t.Errorf("gr should keep the tree and its cursor while it reloads: cursor on %q", r.entry.Path)
 	}
+}
+
+func mainFileHeight(m model) int {
+	_, h := m.mainSize()
+	return fileViewHeight(h)
 }
 
 func TestFileViewGoesToEnds(t *testing.T) {
@@ -528,22 +579,22 @@ func TestFileViewGoesToEnds(t *testing.T) {
 		fmt.Fprintf(&b, "line %d\n", i)
 	}
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "go.mod", content: b.String()})
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	m, _ = upd(m, keyMsg("G"))
 	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "line 100") || strings.Contains(out, "line 1\n") {
 		t.Errorf("G should show the last line:\n%s", out)
 	}
-	if want := 100 - (m.fileViewHeight() - 1); m.projects.fileView.scroll != want {
-		t.Errorf("G should stop with the last line at the bottom: scroll=%d want %d", m.projects.fileView.scroll, want)
+	if want := 100 - (mainFileHeight(m) - 1); fileOf(m).scroll != want {
+		t.Errorf("G should stop with the last line at the bottom: scroll=%d want %d", fileOf(m).scroll, want)
 	}
 	m, _ = upd(m, keyMsg("j"))
-	if want := 100 - (m.fileViewHeight() - 1); m.projects.fileView.scroll != want {
-		t.Errorf("j at the end should not scroll further: %d", m.projects.fileView.scroll)
+	if want := 100 - (mainFileHeight(m) - 1); fileOf(m).scroll != want {
+		t.Errorf("j at the end should not scroll further: %d", fileOf(m).scroll)
 	}
 	m = typeKeys(m, "gg")
-	if m.projects.fileView.scroll != 0 {
-		t.Errorf("gg should go to the top: %d", m.projects.fileView.scroll)
+	if fileOf(m).scroll != 0 {
+		t.Errorf("gg should go to the top: %d", fileOf(m).scroll)
 	}
 }
 
@@ -551,7 +602,7 @@ func TestFileViewPaneBindingsUseFileViewKeys(t *testing.T) {
 	rc := &recordingClient{}
 	m := openedFile(wideWorkspace())
 	m.client = rc
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	_, cmd := typeKeysCmd(m, "gr")
 	if cmd == nil {
 		t.Fatal("gr with pane focus and file open should produce a reload command")
@@ -571,9 +622,9 @@ func TestFileViewPaneBindingsUseFileViewKeys(t *testing.T) {
 	}
 
 	m2 := openedFile(wideWorkspace())
-	m2.projects.focus = focusPane
+	m2 = withFocus(m2, mainPane)
 	m2, _ = upd(m2, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m2.projects.fileView.open() {
+	if m2.hasOpenFile() {
 		t.Error("esc with pane focus should close the file view")
 	}
 }
@@ -589,10 +640,10 @@ func TestTreeShowsSymlinkTargets(t *testing.T) {
 
 func TestDetailFilesSidebarBindingsAreListed(t *testing.T) {
 	m := filesFocused()
-	m.mode = modeSession
-	m.historyView = histDetail
-	// gr: exercises the full handleFilesKey switch (no case matches gr), then Refresh matches.
-	// t: exercises the switch and falls through to fileTree.key, checking fold/unfold/open.
+	m = withView(m, viewSession)
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
+	// gr: the container's keys, then the Files tab's refresh.
+	// t: the container's keys, then every key of the Files tab.
 	typeKeys(m, "gr")
 	typeKeys(m, "t")
 	// TestMain's strict check reports any unlisted bindings and fails the run.

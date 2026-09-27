@@ -31,23 +31,23 @@ func TestViewerModelStartsInTranscript(t *testing.T) {
 	if !model.viewer {
 		t.Fatal("want model.viewer == true")
 	}
-	if model.mode != modeHistoryTranscript {
-		t.Fatalf("want modeHistoryTranscript, got %v", model.mode)
+	if viewOf(model) != viewHistoryTranscript {
+		t.Fatalf("want viewHistoryTranscript, got %v", viewOf(model))
 	}
-	if model.history.openAgent != "claude" {
-		t.Fatalf("want openAgent=claude, got %q", model.history.openAgent)
+	if trOf(model).history.openAgent != "claude" {
+		t.Fatalf("want openAgent=claude, got %q", trOf(model).history.openAgent)
 	}
-	if model.history.openPath != fc.entryPath {
-		t.Fatalf("want openPath=%q, got %q", fc.entryPath, model.history.openPath)
+	if trOf(model).history.openPath != fc.entryPath {
+		t.Fatalf("want openPath=%q, got %q", fc.entryPath, trOf(model).history.openPath)
 	}
-	if model.history.openSession.Title != "T" {
-		t.Fatalf("openSession not seeded from manifest: got title %q", model.history.openSession.Title)
+	if trOf(model).history.openSession.Title != "T" {
+		t.Fatalf("openSession not seeded from manifest: got title %q", trOf(model).history.openSession.Title)
 	}
 }
 
 func TestViewerHeaderFromManifest(t *testing.T) {
 	m, _ := newTestViewerModel(t)
-	h := m.historyTranscriptHeader()
+	h := tvOf(&m).historyTranscriptHeader()
 	if !strings.Contains(h, "T") {
 		t.Fatalf("viewer header should show manifest title/label, got %q", h)
 	}
@@ -58,24 +58,24 @@ func TestViewerHeaderFromManifest(t *testing.T) {
 
 func TestViewerResumeInert(t *testing.T) {
 	m, _ := newTestViewerModel(t)
-	m.historyView = histTranscript
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'R'})
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histTranscript })
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'R'})
 	if cmd != nil {
 		t.Fatal("resume key in viewer should be inert")
 	}
-	if res.(model).mode != modeHistoryTranscript {
-		t.Fatal("resume key in viewer should not change mode")
+	if viewOf(res.(model)) != viewHistoryTranscript {
+		t.Fatal("resume key in viewer should not change view")
 	}
 }
 
 // TestViewerBackQuits asserts that pressing the Back key at the top transcript
-// level in viewer mode returns a tea.Quit command rather than navigating to the
+// level in the viewer returns a tea.Quit command rather than navigating to the
 // (non-existent) session list.
 func TestViewerBackQuits(t *testing.T) {
 	m, _ := newTestViewerModel(t)
-	m.historyView = histTranscript // ensure top level, no detail frames
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histTranscript }) // ensure top level, no detail frames
 
-	_, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	_, cmd := m.baseKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("back key in viewer: want non-nil quit cmd, got nil")
 	}
@@ -84,12 +84,12 @@ func TestViewerBackQuits(t *testing.T) {
 	}
 }
 
-// TestViewerExportInert asserts that pressing the export key in viewer mode is a
+// TestViewerExportInert asserts that pressing the export key in the viewer is a
 // no-op: actExportSession returns a nil command so no RPC is made and no file is
 // written.
 func TestViewerExportInert(t *testing.T) {
 	m, _ := newTestViewerModel(t)
-	_, cmd := m.actExportSession(tea.KeyPressMsg{})
+	cmd := tvOf(&m).actExportSession(tea.KeyPressMsg{})
 	if cmd != nil {
 		t.Fatalf("actExportSession in viewer: want nil cmd, got non-nil")
 	}

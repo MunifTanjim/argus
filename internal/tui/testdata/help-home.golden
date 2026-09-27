@@ -1,0 +1,30 @@
+  󱙺 argus
+
+  Tree                                             Pane
+  ↑ k/↓ j            move · prev                   ↑ k/↓ j    move / scroll · prev
+  gg/G shift+g       top / bottom · goto bottom    enter      open session · open
+  ^u pgup/^d pgdown  page · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
+  h ← zc/l → zo      fold / unfold · fold close    esc        close / tree · back
+  enter              open / fold · open            dd         kill session · session kill
+  ^ww/^wW            cycle focus · focus next      L shift+l  workspace setup log · open setup-log
+  /                  filter · filter-projects      ^wh/^wl    focus left / right pane · focus left
+                                                   ^wj        session: focus the prompt · focus down
+                                                   gT/gt      right sidebar: Files / Changes · tab next
+                                                   t          changes: uncommitted / vs target · toggle diff-vs-target
+                                                   esc h      changes: back from a commit · back
+                                                   ]f/[f      diff: next / previous file · next diff-file
+                                                   yow        open file: wrap long lines · toggle line-wrap
+
+  Manage (tree)                                               Screen
+  a          new workspace (branch/PR/issue) · workspace new  s          spawn in the selected workspace · session spawn
+  dd         remove workspace · workspace remove              ^w</^w>    resize focused sidebar · sidebar wider
+  D shift+d  force remove · workspace force-remove            ␣e         toggle right sidebar · toggle right-sidebar
+  r          rename project · project rename                  ␣o         toggle sidebar · toggle left-sidebar
+  F shift+f  forget project (files stay) · project forget     gr         refresh · refresh
+  P shift+p  pin project · project pin                        g?         help · help
+  H shift+h  hide project · project hide                      Q shift+q  quit · quit
+  z.         show hidden · toggle show-hidden
+  zg         show gone · toggle show-gone
+  T shift+t  change target branch · workspace change-target
+
+                                                     any key close

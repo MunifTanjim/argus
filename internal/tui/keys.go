@@ -31,9 +31,9 @@ func nb(name, defaults, desc string) binding {
 	}
 }
 
-// keyAction applies a matched key to the model. Method expressions (e.g.
-// model.actOpen) satisfy this, so tables can name model methods directly.
-type keyAction = func(m model, msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
+// keyAction applies a matched key to a transcript. Method expressions (e.g.
+// tview.actTop) satisfy this, so tables can name transcript methods directly.
+type keyAction = func(m tview, msg tea.KeyPressMsg) tea.Cmd
 
 // keyTableEntry pairs a binding with the action it triggers.
 type keyTableEntry struct {
@@ -43,14 +43,13 @@ type keyTableEntry struct {
 
 // dispatch runs the first table entry whose binding matches msg. ok is false when
 // nothing matched (the caller falls back, e.g. to text input).
-func (m model) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Model, tea.Cmd, bool) {
+func (m tview) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Cmd, bool) {
 	for _, e := range table {
 		if m.matches(msg, e.b) {
-			mm, cmd := e.act(m, msg)
-			return mm, cmd, true
+			return e.act(m, msg), true
 		}
 	}
-	return m, nil, false
+	return nil, false
 }
 
 func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
@@ -186,8 +185,8 @@ var detailKeys = struct {
 	Back:     nb("back", "<Esc>", "back"),
 }
 
-// sessionKeys are the composite-screen keys handled before the focused region:
-// focus toggle and the raw-screen switch.
+// sessionKeys are the keys a live transcript and the session dock take before
+// their own: the prompt focus toggle and the live screen.
 var sessionKeys = struct {
 	Focus, Raw binding
 }{
@@ -210,7 +209,9 @@ var paneKeys = struct {
 
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
-	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Toggle, Read binding
+	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Select, Read binding
+	Unselect                                                                 binding
+	Back                                                                     binding
 }{
 	Up:       nb("prev", "<Up>", "select"),
 	Down:     nb("next", "<Down>", ""),
@@ -220,8 +221,10 @@ var promptKeys = struct {
 	TabNext:  nb("tab next", "<Right>", ""),
 	Submit:   nb("answer submit", "<CR>", "submit"),
 	Next:     nb("answer submit", "<CR>", "next"), // footer label for multi-question advance
-	Toggle:   nb("option select", "<Space>", "toggle"),
+	Select:   nb("option select", "<Space>", "toggle"),
+	Unselect: nb("option unselect", "<Space>", ""),
 	Read:     nb("focus prompt", "<Tab>", "read"),
+	Back:     nb("back", "<Esc>", "back"),
 }
 
 var historyProjectsKeys = struct {

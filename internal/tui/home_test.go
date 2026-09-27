@@ -15,8 +15,8 @@ import (
 func homeTestModel() model {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
-	m.mode = modeList
-	m.projects.focus = focusPane
+	m = withView(m, viewHome)
+	m = withFocus(m, mainPane)
 	m.order = []string{"n1:s1", "n1:s2", "n1:s3"}
 	return m
 }
@@ -30,16 +30,16 @@ func assertFits(t *testing.T, out string, w int) {
 	}
 }
 
-func TestHomeModesRenderInsideProjectsFrame(t *testing.T) {
-	for _, mode := range []viewMode{modeList, modeHistoryProjects, modeLogs} {
+func TestHomeTabsRenderInsideTheFrame(t *testing.T) {
+	for _, view := range []shownView{viewHome, viewHistoryProjects, viewLogs} {
 		m := homeTestModel()
-		m.mode = mode
-		if !m.embedded() || m.bodyWidth() != m.frameWidth()-m.projectsLeftW()-dividerWidth {
-			t.Errorf("mode %v: embedded=%v bodyWidth=%d", mode, m.embedded(), m.bodyWidth())
+		m = withView(m, view)
+		if !framed(m) || m.bodyWidth() != m.frameWidth()-m.projectsLeftW()-dividerWidth {
+			t.Errorf("view %v: embedded=%v bodyWidth=%d", view, framed(m), m.bodyWidth())
 		}
 		out := m.View().Content
 		if !strings.Contains(ansi.Strip(out), "Projects") {
-			t.Errorf("mode %v: sidebar missing", mode)
+			t.Errorf("view %v: sidebar missing", view)
 		}
 		assertFits(t, out, 120)
 	}
@@ -47,47 +47,47 @@ func TestHomeModesRenderInsideProjectsFrame(t *testing.T) {
 
 func TestSessionFromHistoryEmbeds(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeHistoryTranscript
+	m = withView(m, viewHistoryTranscript)
 	mm, _ := m.enterSession("n1:s1")
-	if mm.sessionReturn != modeHistoryTranscript || !mm.embedded() {
-		t.Errorf("a session resumed from History should embed: return=%v embedded=%v", mm.sessionReturn, mm.embedded())
+	if returnView(mm) != viewHistoryTranscript || !framed(mm) {
+		t.Errorf("a session resumed from History should embed: return=%v embedded=%v", returnView(mm), framed(mm))
 	}
 }
 
 func TestViewerNeverEmbeds(t *testing.T) {
 	m := homeTestModel()
 	m.viewer = true
-	m.mode = modeHistoryTranscript
-	if m.embedded() || m.bodyWidth() != 120 {
-		t.Errorf("viewer: embedded=%v bodyWidth=%d, want full screen", m.embedded(), m.bodyWidth())
+	m = withView(m, viewHistoryTranscript)
+	if framed(m) || m.bodyWidth() != 120 {
+		t.Errorf("viewer: embedded=%v bodyWidth=%d, want full screen", framed(m), m.bodyWidth())
 	}
 }
 
 func TestHiddenSidebarGivesHomeFullWidth(t *testing.T) {
 	m := homeTestModel()
-	m.projects.sidebarHidden = true
-	if !m.embedded() || m.bodyWidth() != m.frameWidth() {
-		t.Errorf("hidden sidebar: embedded=%v bodyWidth=%d, want framed at full width", m.embedded(), m.bodyWidth())
+	m.left.hidden = true
+	if !framed(m) || m.bodyWidth() != m.frameWidth() {
+		t.Errorf("hidden sidebar: embedded=%v bodyWidth=%d, want framed at full width", framed(m), m.bodyWidth())
 	}
 }
 
 func TestHomeRowIsFirstAndSurvivesFilter(t *testing.T) {
 	m := homeTestModel()
-	m.projects.rebuild()
-	if r := m.projects.rows[0]; r.kind != rowHome || r.id != homeRowID {
+	m.left.tree.rebuild()
+	if r := m.left.tree.rows[0]; r.kind != rowHome || r.id != homeRowID {
 		t.Fatalf("first row = %+v, want Home", r)
 	}
-	m.projects.setFilter("zzz")
-	if len(m.projects.rows) != 1 || m.projects.rows[0].kind != rowHome {
-		t.Errorf("a no-match filter should leave only Home: %+v", m.projects.rows)
+	m.left.tree.setFilter("zzz")
+	if len(m.left.tree.rows) != 1 || m.left.tree.rows[0].kind != rowHome {
+		t.Errorf("a no-match filter should leave only Home: %+v", m.left.tree.rows)
 	}
 }
 
 func TestHomeBadgeCountsAllLiveSessions(t *testing.T) {
 	m := homeTestModel()
 	m.sessions["n1:s9"] = session.Session{ID: "n1:s9", Status: session.StatusAwaitingInput} // no workspace
-	m.projects.rebuild()
-	line := ansi.Strip(m.projRowLine(m.projects.rows[0], false, true, m.workspaceActivity(), 40))
+	m.left.tree.rebuild()
+	line := ansi.Strip(m.projRowLine(m.left.tree.rows[0], false, true, m.workspaceActivity(), 40))
 	if !strings.HasSuffix(line, "◆ 4") {
 		t.Errorf("Home row = %q, want a ◆ 4 badge across every live session", line)
 	}
@@ -95,14 +95,14 @@ func TestHomeBadgeCountsAllLiveSessions(t *testing.T) {
 
 func TestTreeShowsHomeWhileProjectsLoadOrFail(t *testing.T) {
 	m := homeTestModel()
-	m.projects.tree = nil
-	m.projects.rebuild()
-	tree := ansi.Strip(m.projectsTreePane(40, 20))
+	m.left.tree.data = nil
+	m.left.tree.rebuild()
+	tree := ansi.Strip(treePane(m, 40, 20))
 	if !strings.Contains(tree, "Home") || !strings.Contains(tree, "loading projects") {
 		t.Errorf("loading tree = %q", tree)
 	}
-	m.projects.err = errString("registry disabled")
-	tree = ansi.Strip(m.projectsTreePane(40, 20))
+	m.left.tree.err = errString("registry disabled")
+	tree = ansi.Strip(treePane(m, 40, 20))
 	if !strings.Contains(tree, "Home") || !strings.Contains(tree, "registry disabled") {
 		t.Errorf("error tree = %q", tree)
 	}
@@ -113,11 +113,11 @@ func TestTreeShowsHomeWhileProjectsLoadOrFail(t *testing.T) {
 
 func TestHomePreviewHasNoSelectedCard(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.cursor = 0 // Home
-	preview := m.homePreview()
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m.left.tree.cursor = 0 // Home
+	preview := m.View().Content
 	if strings.Contains(preview, "┏") { // the selected card uses heavy chrome
 		t.Error("the Home preview must not highlight a card")
 	}
@@ -128,19 +128,19 @@ func TestHomePreviewHasNoSelectedCard(t *testing.T) {
 
 func TestEnterOnHomeFocusesHomePane(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.cursor = 0
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m.left.tree.cursor = 0
 	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: 'l', Text: "l"}} {
-		res, _ := m.handleProjectsKey(k)
-		if mm := res.(model); mm.mode != modeList || mm.projects.focus != focusPane {
-			t.Errorf("%q on Home: mode=%v focus=%v, want the Home pane", k.String(), mm.mode, mm.projects.focus)
+		res, _ := m.runKey(k)
+		if mm := res.(model); viewOf(mm) != viewHome || mm.focused != mainPane {
+			t.Errorf("%q on Home: view=%v focus=%v, want the Home pane", k.String(), viewOf(mm), mm.focused)
 		}
 	}
 	for _, r := range []rune{'w', 'l'} {
-		if mm := pressKeys(m, cw(r)...); mm.mode != modeList || mm.projects.focus != focusPane {
-			t.Errorf("<C-w>%c on Home: mode=%v focus=%v, want the Home pane", r, mm.mode, mm.projects.focus)
+		if mm := pressKeys(m, cw(r)...); viewOf(mm) != viewHome || mm.focused != mainPane {
+			t.Errorf("<C-w>%c on Home: view=%v focus=%v, want the Home pane", r, viewOf(mm), mm.focused)
 		}
 	}
 }
@@ -148,12 +148,12 @@ func TestEnterOnHomeFocusesHomePane(t *testing.T) {
 func TestHomePaneKeysReturnToTree(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}} {
 		m := homeTestModel()
-		m.projects.rebuild()
-		m.projects.cursor = 2 // a workspace, to prove we land on Home
+		m.left.tree.rebuild()
+		m.left.tree.cursor = 2 // a workspace, to prove we land on Home
 		res, cmd := m.handleKey(k)
 		mm := res.(model)
-		if mm.mode != modeProjects || mm.projects.focus != focusTree || mm.projects.cursorRowID() != homeRowID {
-			t.Errorf("%q: mode=%v focus=%v row=%q, want the tree on Home", k.String(), mm.mode, mm.projects.focus, mm.projects.cursorRowID())
+		if viewOf(mm) != viewTree || mm.focused != leftSidebar || mm.left.tree.cursorRowID() != homeRowID {
+			t.Errorf("%q: view=%v focus=%v row=%q, want the tree on Home", k.String(), viewOf(mm), mm.focused, mm.left.tree.cursorRowID())
 		}
 		if cmd != nil {
 			if _, quit := cmd().(tea.QuitMsg); quit {
@@ -165,9 +165,9 @@ func TestHomePaneKeysReturnToTree(t *testing.T) {
 
 func TestTreeQQuitsAndEscDoesNothing(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
 	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'Q', Text: "Q"})
 	if cmd == nil {
 		t.Fatal("Q on the tree should quit")
@@ -176,16 +176,16 @@ func TestTreeQQuitsAndEscDoesNothing(t *testing.T) {
 		t.Error("Q on the tree should return tea.Quit")
 	}
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if mm := res.(model); mm.mode != modeProjects {
-		t.Errorf("esc on the tree left the screen: mode=%v", mm.mode)
+	if mm := res.(model); viewOf(mm) != viewTree {
+		t.Errorf("esc on the tree left the screen: view=%v", viewOf(mm))
 	}
 }
 
 func TestPKeyDoesNothing(t *testing.T) {
 	m := homeTestModel()
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if mm := res.(model); mm.mode != modeList {
-		t.Errorf("p changed mode to %v", mm.mode)
+	if mm := res.(model); viewOf(mm) != viewHome {
+		t.Errorf("p changed view to %v", viewOf(mm))
 	}
 }
 
@@ -200,16 +200,16 @@ func TestNarrowTerminalHomeQuits(t *testing.T) {
 		t.Error("want tea.Quit")
 	}
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if mm := res.(model); mm.mode != modeList {
-		t.Errorf("esc with no tree changed mode to %v", mm.mode)
+	if mm := res.(model); viewOf(mm) != viewHome {
+		t.Errorf("esc with no tree changed view to %v", viewOf(mm))
 	}
 }
 
 func TestNewModelStartsOnHome(t *testing.T) {
 	m := newModel(&recordingClient{}, true, nil)
 	m.width, m.height = 120, 30
-	if m.mode != modeList || m.projects.focus != focusPane || m.projects.cursorRowID() != homeRowID {
-		t.Fatalf("start: mode=%v focus=%v row=%q, want the Home pane", m.mode, m.projects.focus, m.projects.cursorRowID())
+	if viewOf(m) != viewHome || m.focused != mainPane || m.left.tree.cursorRowID() != homeRowID {
+		t.Fatalf("start: view=%v focus=%v row=%q, want the Home pane", viewOf(m), m.focused, m.left.tree.cursorRowID())
 	}
 	if out := ansi.Strip(m.View().Content); strings.Contains(out, "Projects") || !strings.Contains(out, "No sessions yet") {
 		t.Error("with no sessions, the start view should be the full-screen splash")
@@ -244,12 +244,12 @@ func TestLeaderOWorksOutsideTheTree(t *testing.T) {
 	}
 	m = typeKeys(m, " o")
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if mm := res.(model); !mm.sidebarVisible() || mm.mode != modeProjects {
-		t.Errorf("␣o twice then esc should reach the tree: visible=%v mode=%v", mm.sidebarVisible(), mm.mode)
+	if mm := res.(model); !mm.sidebarVisible() || viewOf(mm) != viewTree {
+		t.Errorf("␣o twice then esc should reach the tree: visible=%v view=%v", mm.sidebarVisible(), viewOf(mm))
 	}
 
 	s := homeTestModel()
-	ss, _ := s.enterSession("n1:s1") // opened from Home: sessionReturn = modeList
+	ss, _ := s.enterSession("n1:s1") // opened from Home: returns to viewHome
 	if typeKeys(ss, " o").sidebarVisible() {
 		t.Error("␣o in a session opened from Home should hide the sidebar")
 	}
@@ -258,40 +258,39 @@ func TestLeaderOWorksOutsideTheTree(t *testing.T) {
 func TestNoVisibleTreeEscGoesHome(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}} {
 		m := homeTestModel()
-		m.mode = modeProjects
-		m.projects.focus = focusTree
-		m.projects.rebuild()
-		m.projects.selectRow("n1:w1")
-		m.width = 70 // tree auto-hidden
-		res, _ := m.handleKey(k)
-		if mm := res.(model); mm.mode != modeList {
-			t.Errorf("%q with no visible tree: mode=%v, want the Home pane", k.String(), mm.mode)
+		m = withView(m, viewTree)
+		m = withFocus(m, leftSidebar)
+		m.left.tree.rebuild()
+		m = selectRow(m, "n1:w1")
+		m, _ = upd(m, tea.WindowSizeMsg{Width: 70, Height: m.height}) // tree auto-hidden
+		if mm, _ := upd(m, k); viewOf(mm) != viewHome {
+			t.Errorf("%q with no visible tree: view=%v, want the Home pane", k.String(), viewOf(mm))
 		}
 	}
 }
 
 func TestHiddenTreeOnHomeRowEntersHome(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.cursor = 0
-	if mm := typeKeys(m, " o"); mm.mode != modeList {
-		t.Errorf("␣o on the Home row: mode=%v, want the Home pane", mm.mode)
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m.left.tree.cursor = 0
+	if mm := typeKeys(m, " o"); viewOf(mm) != viewHome {
+		t.Errorf("␣o on the Home row: view=%v, want the Home pane", viewOf(mm))
 	}
 
-	m.width = 70 // resized below the breakpoint while on the Home row
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 70, Height: m.height}) // resized below the breakpoint while on the Home row
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if mm := res.(model); mm.mode != modeList || mm.cursor != 1 {
-		t.Errorf("a key on a hidden Home row should act in the Home pane: mode=%v cursor=%d", mm.mode, mm.cursor)
+	if mm := res.(model); viewOf(mm) != viewHome || homeOf(mm).cursor != 1 {
+		t.Errorf("a key on a hidden Home row should act in the Home pane: view=%v cursor=%d", viewOf(mm), homeOf(mm).cursor)
 	}
 }
 
 func TestTreeStartedSpawnRendersInPane(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.rebuild()
-	m.projects.selectRow("n1:w1")
+	m = withView(m, viewTree)
+	m.left.tree.rebuild()
+	m = selectRow(m, "n1:w1")
 	m.client = &recordingClient{}
 	m.beginPresetSpawn("n1", "/repo", "")
 	out := ansi.Strip(m.View().Content)
@@ -303,11 +302,11 @@ func TestTreeStartedSpawnRendersInPane(t *testing.T) {
 
 func TestTreeReloadKeepsHomeWhileHomePaneShows(t *testing.T) {
 	m := homeTestModel() // Home pane
-	m.projects.rebuild()
-	m.projects.cursor = 0
-	m.projects.want = "n1:w2" // e.g. a workspace create finished meanwhile
-	res, _ := m.Update(projectsTreeMsg{tree: m.projects.tree})
-	if got := res.(model).projects.cursorRowID(); got != homeRowID {
+	m.left.tree.rebuild()
+	m.left.tree.cursor = 0
+	m.left.tree.want = "n1:w2" // e.g. a workspace create finished meanwhile
+	res, _ := m.Update(projectsTreeMsg{tree: m.left.tree.data})
+	if got := res.(model).left.tree.cursorRowID(); got != homeRowID {
 		t.Errorf("tree reload moved the cursor to %q while the Home pane shows", got)
 	}
 }
@@ -315,7 +314,7 @@ func TestTreeReloadKeepsHomeWhileHomePaneShows(t *testing.T) {
 func TestSpinnerRunsInFramedViews(t *testing.T) {
 	m := homeTestModel()
 	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusWorking}
-	m.mode, m.sessionReturn = modeSession, modeList
+	m = withView(m, viewSession)
 	m.spinning = false
 	if cmd := m.maybeSpin(); cmd == nil {
 		t.Error("the sidebar badges should keep spinning in a framed session view")
@@ -324,25 +323,24 @@ func TestSpinnerRunsInFramedViews(t *testing.T) {
 
 func TestFilteredTreeFooterStillShowsQuit(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.setFilter("argus")
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "clear filter") || !strings.Contains(f, "quit") {
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m.left.tree.setFilter("argus")
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "clear filter") || !strings.Contains(f, "quit") {
 		t.Errorf("filtered tree footer = %q, want both clear filter and quit", f)
 	}
 }
 
 func TestListViewSurvivesPendingKillWithNoCursor(t *testing.T) {
 	m := homeTestModel()
-	m.pendingKill = true
-	m.cursor = -1
+	m = withHome(m, homeComp{cursor: -1, pendingKill: true})
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("listView panicked: %v", r)
 		}
 	}()
-	_ = m.listView()
+	_ = paneView(m)
 }
 
 func linesContaining(out, sub string) int {
@@ -391,11 +389,11 @@ func TestHomeTabsStayInPane(t *testing.T) {
 
 func TestHomeLayoutStableAcrossFocus(t *testing.T) {
 	pane := homeTestModel() // Home pane focused
-	pane.projects.rebuild()
-	pane.projects.cursor = 0
+	pane.left.tree.rebuild()
+	pane.left.tree.cursor = 0
 	tree := pane
-	tree.mode = modeProjects
-	tree.projects.focus = focusTree
+	tree = withView(tree, viewTree)
+	tree = withFocus(tree, leftSidebar)
 
 	pl := strings.Split(ansi.Strip(pane.View().Content), "\n")
 	tl := strings.Split(ansi.Strip(tree.View().Content), "\n")
@@ -414,10 +412,10 @@ func TestHomeLayoutStableAcrossFocus(t *testing.T) {
 
 func TestWorkspaceRowKeepsFrameHeader(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.selectRow("n1:w1")
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m = selectRow(m, "n1:w1")
 	if first := strings.SplitN(ansi.Strip(m.View().Content), "\n", 2)[0]; !strings.Contains(first, frameRow) {
 		t.Errorf("row 0 should be the frame header on a workspace too, got %q", first)
 	}
@@ -438,10 +436,10 @@ func cardColumn(out string) int {
 func TestHomeCardsAlignWithWorkspace(t *testing.T) {
 	home := homeTestModel()
 	ws := homeTestModel()
-	ws.mode = modeProjects
-	ws.projects.focus = focusPane
-	ws.projects.rebuild()
-	ws.projects.selectRow("n1:w1")
+	ws = withView(ws, viewTree)
+	ws = withFocus(ws, mainPane)
+	ws.left.tree.rebuild()
+	ws = selectRow(ws, "n1:w1")
 	hc, wc := cardColumn(home.View().Content), cardColumn(ws.View().Content)
 	if hc < 0 || hc != wc {
 		t.Errorf("Home cards start at column %d, workspace cards at %d; want the same", hc, wc)
@@ -451,13 +449,13 @@ func TestHomeCardsAlignWithWorkspace(t *testing.T) {
 
 func TestHiddenSidebarHomeMatchesWorkspace(t *testing.T) {
 	home := homeTestModel()
-	home.projects.sidebarHidden = true
+	home.left.hidden = true
 	ws := homeTestModel()
-	ws.projects.sidebarHidden = true
-	ws.mode = modeProjects
-	ws.projects.focus = focusPane
-	ws.projects.rebuild()
-	ws.projects.selectRow("n1:w1")
+	ws.left.hidden = true
+	ws = withView(ws, viewTree)
+	ws = withFocus(ws, mainPane)
+	ws.left.tree.rebuild()
+	ws = selectRow(ws, "n1:w1")
 
 	hl := strings.Split(ansi.Strip(home.View().Content), "\n")
 	wl := strings.Split(ansi.Strip(ws.View().Content), "\n")
@@ -475,8 +473,8 @@ func TestHiddenSidebarHomeMatchesWorkspace(t *testing.T) {
 func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 	m := homeTestModel()
 	m.order, m.sessions = nil, map[string]session.Session{}
-	if m.embedded() || m.bodyWidth() != m.width {
-		t.Fatalf("empty Home should use the whole screen: embedded=%v bodyWidth=%d", m.embedded(), m.bodyWidth())
+	if framed(m) || m.bodyWidth() != m.width {
+		t.Fatalf("empty Home should use the whole screen: embedded=%v bodyWidth=%d", framed(m), m.bodyWidth())
 	}
 	out := ansi.Strip(m.View().Content)
 	if strings.Contains(out, "Projects") {
@@ -488,13 +486,13 @@ func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	mm := res.(model)
-	if mm.mode != modeProjects || !strings.Contains(ansi.Strip(mm.View().Content), "Projects") {
-		t.Errorf("esc from the splash should show the tree: mode=%v", mm.mode)
+	if viewOf(mm) != viewTree || !strings.Contains(ansi.Strip(mm.View().Content), "Projects") {
+		t.Errorf("esc from the splash should show the tree: view=%v", viewOf(mm))
 	}
 
 	m.sessions = map[string]session.Session{"n1:s1": {ID: "n1:s1", WorkspaceID: "n1:w1", Repo: "repo"}}
 	m.order = []string{"n1:s1"}
-	if !m.embedded() {
+	if !framed(m) {
 		t.Error("with a session, Home should be framed again")
 	}
 }
@@ -502,8 +500,8 @@ func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 func TestHomeSKeyStartsSession(t *testing.T) {
 	m := homeTestModel()
 	res, cmd := m.handleKey(tea.KeyPressMsg{Code: 's', Text: "s"})
-	if mm := res.(model); cmd == nil || mm.flash != "" || mm.mode == modeScreen {
-		t.Errorf("s on Home should start a session: cmd=%v flash=%q mode=%v", cmd != nil, mm.flash, mm.mode)
+	if mm := res.(model); cmd == nil || mm.flash != "" || viewOf(mm) == viewScreen {
+		t.Errorf("s on Home should start a session: cmd=%v flash=%q view=%v", cmd != nil, mm.flash, viewOf(mm))
 	}
 	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: 'n', Text: "n"}); cmd != nil {
 		t.Error("n on Home should do nothing")
@@ -515,27 +513,27 @@ func TestHomeSKeyStartsSession(t *testing.T) {
 }
 
 func TestHelpOpensFromHomeTabs(t *testing.T) {
-	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
+	for _, view := range []shownView{viewHome, viewHistoryProjects} {
 		m := homeTestModel()
-		m.mode = mode
+		m = withView(m, view)
 		m = typeKeys(m, "g?")
-		if out := ansi.Strip(m.View().Content); !m.projects.showHelp || !strings.Contains(out, "Manage (tree)") || !strings.Contains(out, "any key close") {
-			t.Errorf("mode %v: g? should show the help:\n%s", mode, out)
+		if out := ansi.Strip(m.View().Content); !m.showHelp || !strings.Contains(out, "Manage (tree)") || !strings.Contains(out, "any key close") {
+			t.Errorf("view %v: g? should show the help:\n%s", view, out)
 		}
 		m, _ = upd(m, keyMsg("j"))
-		if m.projects.showHelp || m.mode != mode {
-			t.Errorf("mode %v: any key should close the help and stay: help=%v mode=%v", mode, m.projects.showHelp, m.mode)
+		if m.showHelp || viewOf(m) != view {
+			t.Errorf("view %v: any key should close the help and stay: help=%v view=%v", view, m.showHelp, viewOf(m))
 		}
 	}
 }
 
 func TestFocusLeftFromHomeTabsReachesTree(t *testing.T) {
-	for _, mode := range []viewMode{modeList, modeHistoryProjects} {
+	for _, view := range []shownView{viewHome, viewHistoryProjects} {
 		m := homeTestModel()
-		m.mode = mode
+		m = withView(m, view)
 		m = pressKeys(m, cw('h')...)
-		if m.mode != modeProjects || !m.treeFocused() {
-			t.Errorf("mode %v, <C-w>h: want the tree: mode=%v focus=%v", mode, m.mode, m.projects.focus)
+		if viewOf(m) != viewTree || !m.treeFocused() {
+			t.Errorf("view %v, <C-w>h: want the tree: view=%v focus=%v", view, viewOf(m), m.focused)
 		}
 	}
 }
@@ -545,15 +543,15 @@ func TestFooterSpansTheFrameInEveryState(t *testing.T) {
 	states := map[string]model{}
 	states["home pane"] = base
 	hist := base
-	hist.mode = modeHistoryProjects
-	hist.history.projects = []session.HistoryProject{{Label: "p", NodeID: "n1"}}
+	hist = withHistoryProjects(hist, session.HistoryProject{Label: "p", NodeID: "n1"})
 	states["history"] = hist
 	sess := base
-	sess.mode, sess.selectedID = modeSession, "n1:s1"
+	sess = withLive(sess, "n1:s1")
 	states["session"] = sess
 	ws := base
-	ws.mode, ws.projects.focus = modeProjects, focusTree
-	ws.projects.selectRow("n1:w1")
+	ws = withView(ws, viewTree)
+	ws = withFocus(ws, leftSidebar)
+	ws = selectRow(ws, "n1:w1")
 	states["workspace row"] = ws
 	for name, m := range states {
 		lines := strings.Split(ansi.Strip(m.View().Content), "\n")
@@ -572,7 +570,7 @@ func TestFooterSpansTheFrameInEveryState(t *testing.T) {
 
 func TestSessionShowsAndClearsFlash(t *testing.T) {
 	m := homeTestModel()
-	m.mode, m.selectedID = modeSession, "n1:s1"
+	m = withLive(m, "n1:s1")
 	m.flash = "terminal detached"
 	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "terminal detached") {
 		t.Fatalf("the session view should show the flash:\n%s", out)
@@ -586,11 +584,11 @@ func TestSessionShowsAndClearsFlash(t *testing.T) {
 func TestEmptyHomeRowFramesSplashInPane(t *testing.T) {
 	m := homeTestModel()
 	m.order, m.sessions = nil, map[string]session.Session{}
-	m.projects.filesHidden = false
+	m.right.hidden = false
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = res.(model)
 	if !m.treeFocused() || !m.onHomeRow() {
-		t.Fatalf("want the tree focused on Home: focus=%v row=%q", m.projects.focus, m.projects.cursorRowID())
+		t.Fatalf("want the tree focused on Home: focus=%v row=%q", m.focused, m.left.tree.cursorRowID())
 	}
 	if !m.filesVisible() {
 		t.Error("the right sidebar should show next to the tree")
@@ -622,16 +620,16 @@ func TestFramedScreenHasLeftMargin(t *testing.T) {
 	home := homeTestModel()
 	check("home", home)
 	hidden := homeTestModel()
-	hidden.projects.sidebarHidden = true
+	hidden.left.hidden = true
 	check("home, sidebar hidden", hidden)
 	if want := screenMargin + (hidden.frameWidth()-maxCardWidth)/2; cardColumn(hidden.View().Content) != want {
 		t.Errorf("hidden-sidebar cards start at column %d, want centered at %d", cardColumn(hidden.View().Content), want)
 	}
 	ws := homeTestModel()
-	ws.mode = modeProjects
-	ws.projects.focus = focusTree
-	ws.projects.rebuild()
-	ws.projects.selectRow("n1:w1")
+	ws = withView(ws, viewTree)
+	ws = withFocus(ws, leftSidebar)
+	ws.left.tree.rebuild()
+	ws = selectRow(ws, "n1:w1")
 	check("workspace", ws)
 	s, _ := homeTestModel().enterSession("n1:s1")
 	check("session", s)
@@ -649,10 +647,10 @@ func columnOf(out, sub string) int {
 
 func TestTreeRowsAlignWithTitle(t *testing.T) {
 	m := homeTestModel()
-	m.mode = modeProjects
-	m.projects.focus = focusTree
-	m.projects.rebuild()
-	m.projects.selectRow("n1:p1") // cursor on the project row
+	m = withView(m, viewTree)
+	m = withFocus(m, leftSidebar)
+	m.left.tree.rebuild()
+	m = selectRow(m, "n1:p1") // cursor on the project row
 	out := m.View().Content
 	title := columnOf(out, "Projects")
 	if row := columnOf(out, "▾ argus"); row != title {
@@ -675,15 +673,15 @@ func TestPanesCenterTheirContentColumn(t *testing.T) {
 
 	ws := homeTestModel()
 	ws.width = 220
-	ws.mode = modeProjects
-	ws.projects.focus = focusPane
-	ws.projects.rebuild()
-	ws.projects.selectRow("n1:w1")
+	ws = withView(ws, viewTree)
+	ws = withFocus(ws, mainPane)
+	ws.left.tree.rebuild()
+	ws = selectRow(ws, "n1:w1")
 	if c := cardColumn(ws.View().Content); c != wantCards {
 		t.Errorf("workspace cards at column %d, want centered at %d", c, wantCards)
 	}
 
-	ws.projects.fileView = fileViewState{ws: "n1:w1", path: "a.go", diff: true, lines: []string{"@@ -1 +1 @@", "-a", "+bb"}}
+	ws = withFile(ws, fileComp{ws: "n1:w1", path: "a.go", diff: true, lines: []string{"@@ -1 +1 @@", "-a", "+bb"}})
 	if c := columnOf(ws.View().Content, "repo  main"); c != wantCards {
 		t.Errorf("diff viewer header moved to %d, want it to stay at %d", c, wantCards)
 	}
@@ -721,6 +719,17 @@ func TestStatusBarShowsGlobalState(t *testing.T) {
 	}
 }
 
+func TestNarrowStatusBarKeepsTheState(t *testing.T) {
+	m := homeTestModel()
+	m.width = 30
+	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", Status: session.StatusAwaitingInput}
+	m.reconnecting = true
+	bar := ansi.Strip(m.frameTitle())
+	if !strings.HasSuffix(bar, "1 need you · reconnecting…") || ansi.StringWidth(bar) > m.width {
+		t.Errorf("a narrow status bar should cut the brand, not the state: %q", bar)
+	}
+}
+
 func TestStatusBarQuietWhenAllIsWell(t *testing.T) {
 	m := homeTestModel()
 	bar := strings.Split(ansi.Strip(m.View().Content), "\n")[0]
@@ -737,5 +746,20 @@ func TestSplashKeepsConnectionState(t *testing.T) {
 	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "reconnecting") || !strings.Contains(out, "QUARANTINED") {
 		t.Error("the full-screen splash has no status bar, so it must keep its own indicators")
+	}
+}
+
+func TestPaneHeadStyleShowsFocus(t *testing.T) {
+	m := homeTestModel()
+	m, _ = m.enterSession("n1:s1")
+	m = withFocus(m, mainPane)
+	if got := m.paneHeadStyle().GetForeground(); got != ColorAccent {
+		t.Errorf("a focused pane's title should use the accent, got %v", got)
+	}
+	for _, k := range []container{sessionDock, leftSidebar} {
+		m = withFocus(m, k)
+		if got := m.paneHeadStyle().GetForeground(); got == ColorAccent {
+			t.Errorf("focus on %v: the pane's title should not use the accent", k)
+		}
 	}
 }

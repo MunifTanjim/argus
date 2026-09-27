@@ -26,13 +26,12 @@ func promptModel(ix *session.Interaction) model {
 			Interaction: ix,
 		},
 	}
-	m.selectedID = "s1"
-	m.mode = modeSession
-	m.focus = focusDock
-	m.resetPromptState()
-	m.loadReplyDraft("s1")
+	m = withLive(m, "s1")
+	m = withFocus(m, sessionDock)
+	m.dock.resetPromptState()
+	m.dock.loadReplyDraft(&ctx{m: &m}, "s1")
 	if ix != nil && ix.Kind == session.InteractionQuestion {
-		m.ensurePromptState(len(ix.Questions))
+		m.dock.ensurePromptState(len(ix.Questions))
 	}
 	return m
 }
@@ -52,22 +51,22 @@ func TestPromptPermissionComposeThenSubmit(t *testing.T) {
 	})
 
 	// Navigating to "Deny" only changes the local draft; nothing is sent.
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	if m.prompt.decisionSel != 1 || cmd != nil {
-		t.Fatalf("down: sel=%d cmd=%v (nothing should be sent yet)", m.prompt.decisionSel, cmd)
+	if m.dock.decisionSel != 1 || cmd != nil {
+		t.Fatalf("down: sel=%d cmd=%v (nothing should be sent yet)", m.dock.decisionSel, cmd)
 	}
 	// Typing fills the deny reason locally.
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	res, _ = m.runKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
-	if m.prompt.reason.Value() != "x" || m.focus != focusDock {
-		t.Fatalf("typing reason: text=%q focus=%v", m.prompt.reason.Value(), m.focus)
+	if m.dock.reason.Value() != "x" || m.focused != sessionDock {
+		t.Fatalf("typing reason: text=%q focus=%v", m.dock.reason.Value(), m.focused)
 	}
 	// Only Enter submits and returns to the history.
-	res, cmd = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.focus != focusHistory || cmd == nil {
-		t.Errorf("submit: focus=%v cmd=%v", m.focus, cmd)
+	if m.focused != mainPane || cmd == nil {
+		t.Errorf("submit: focus=%v cmd=%v", m.focused, cmd)
 	}
 }
 
@@ -80,9 +79,9 @@ func TestRejectInputShowsFullPlaceholder(t *testing.T) {
 		},
 	}
 	m := promptModel(ix)
-	m.prompt.decisionSel = 1 // Deny
+	m.dock.decisionSel = 1 // Deny
 	// The cursor covers the first char, so the tail is what the width bug used to drop.
-	if out := m.rejectInput(ix, 60); !strings.Contains(out, "ell Claude why") {
+	if out := m.dock.rejectInput(ix, 60); !strings.Contains(out, "ell Claude why") {
 		t.Fatalf("deny reason should show the full placeholder, got %q", out)
 	}
 }
@@ -97,7 +96,7 @@ func TestIdleDockPanelessEnterIsSilent(t *testing.T) {
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	if m.flash != "" {
 		t.Errorf("enter on the informational idle dock must not flash, got %q", m.flash)
@@ -109,16 +108,16 @@ func TestIdleDockPanelessEnterIsSilent(t *testing.T) {
 
 func TestPromptQuestionSelect(t *testing.T) {
 	m := promptModel(question(session.QuestionSpec{Question: "Pick", Options: []string{"A", "B"}}))
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	if m.qSel(0) != 1 {
-		t.Fatalf("sel=%d want 1", m.qSel(0))
+	if m.dock.qSel(0) != 1 {
+		t.Fatalf("sel=%d want 1", m.dock.qSel(0))
 	}
 	// Single question → Enter submits directly.
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.focus != focusHistory || cmd == nil {
-		t.Errorf("submit: focus=%v cmd=%v", m.focus, cmd)
+	if m.focused != mainPane || cmd == nil {
+		t.Errorf("submit: focus=%v cmd=%v", m.focused, cmd)
 	}
 }
 
@@ -127,26 +126,26 @@ func TestPromptMultiSelectToggle(t *testing.T) {
 		Question: "Pick many", Options: []string{"A", "B", "C"}, MultiSelect: true,
 	}))
 	// space toggles the highlighted option without submitting.
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: ' '})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: ' '})
 	m = res.(model)
-	if !m.qToggles(0)[0] || cmd != nil {
-		t.Fatalf("toggle: toggles=%v cmd=%v", m.qToggles(0), cmd)
+	if !m.dock.qToggles(0)[0] || cmd != nil {
+		t.Fatalf("toggle: toggles=%v cmd=%v", m.dock.qToggles(0), cmd)
 	}
 }
 
 func TestPromptIdleTextComposeThenSubmit(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	for _, r := range "hi" {
-		res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: string(r), Code: r})
+		res, _ := m.runKey(tea.KeyPressMsg{Text: string(r), Code: r})
 		m = res.(model)
 	}
-	if m.prompt.reply.Value() != "hi" {
-		t.Fatalf("reply=%q want hi", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "hi" {
+		t.Fatalf("reply=%q want hi", m.dock.reply.Value())
 	}
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory || m.prompt.reply.Value() != "" {
-		t.Errorf("idle submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reply.Value())
+	if cmd == nil || m.focused != mainPane || m.dock.reply.Value() != "" {
+		t.Errorf("idle submit: cmd=%v focus=%v text=%q", cmd, m.focused, m.dock.reply.Value())
 	}
 }
 
@@ -167,24 +166,24 @@ func TestPromptIdleShiftEnterInsertsNewline(t *testing.T) {
 		{tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}, "a\n"},
 		{tea.KeyPressMsg{Text: "b", Code: 'b'}, "a\nb"},
 	} {
-		res, _ := m.handlePromptKey(s.msg)
+		res, _ := m.runKey(s.msg)
 		m = res.(model)
-		if m.focus != focusDock {
+		if m.focused != sessionDock {
 			t.Fatalf("unexpected submit on %v", s.msg)
 		}
-		if m.prompt.reply.Value() != s.want {
-			t.Fatalf("reply=%q want %q", m.prompt.reply.Value(), s.want)
+		if m.dock.reply.Value() != s.want {
+			t.Fatalf("reply=%q want %q", m.dock.reply.Value(), s.want)
 		}
 	}
-	if m.focus != focusDock {
-		t.Errorf("focus moved off dock before submit: %v", m.focus)
+	if m.focused != sessionDock {
+		t.Errorf("focus moved off dock before submit: %v", m.focused)
 	}
 
 	// Plain Enter submits the whole multi-line buffer.
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory || m.prompt.reply.Value() != "" {
-		t.Errorf("multiline submit: cmd=%v focus=%v text=%q", cmd, m.focus, m.prompt.reply.Value())
+	if cmd == nil || m.focused != mainPane || m.dock.reply.Value() != "" {
+		t.Errorf("multiline submit: cmd=%v focus=%v text=%q", cmd, m.focused, m.dock.reply.Value())
 	}
 }
 
@@ -193,9 +192,9 @@ func TestPromptIdleShiftEnterInsertsNewline(t *testing.T) {
 func TestIdleReplyKeepsEarlierLinesAcrossRenders(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	feed := func(msg tea.KeyPressMsg) {
-		res, _ := m.handlePromptKey(msg)
+		res, _ := m.runKey(msg)
 		m = res.(model)
-		_ = m.dockBody(6) // force a render that touches the shared viewport
+		_ = m.dock.dockBody(&ctx{m: &m}, 6) // force a render that touches the shared viewport
 	}
 	for _, r := range "one" {
 		feed(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -204,7 +203,7 @@ func TestIdleReplyKeepsEarlierLinesAcrossRenders(t *testing.T) {
 	for _, r := range "two" {
 		feed(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	if out := m.dockBody(6); !strings.Contains(out, "one") || !strings.Contains(out, "two") {
+	if out := m.dock.dockBody(&ctx{m: &m}, 6); !strings.Contains(out, "one") || !strings.Contains(out, "two") {
 		t.Fatalf("composer dropped a line across renders: %q", out)
 	}
 }
@@ -213,8 +212,8 @@ func TestPromptIdlePasteAppendsMultiline(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	res, _ := m.Update(tea.PasteMsg{Content: "x\ny"})
 	m = res.(model)
-	if m.prompt.reply.Value() != "x\ny" {
-		t.Fatalf("after paste reply=%q want %q", m.prompt.reply.Value(), "x\ny")
+	if m.dock.reply.Value() != "x\ny" {
+		t.Fatalf("after paste reply=%q want %q", m.dock.reply.Value(), "x\ny")
 	}
 }
 
@@ -222,11 +221,11 @@ func TestQuestionCustomAnswerPaste(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A"}})
 	q := &ix.Questions[0]
 	m := promptModel(ix)
-	m.prompt.sel[0] = otherIndex(q) // activate the custom field
+	m.dock.sel[0] = otherIndex(q) // activate the custom field
 	res, _ := m.Update(tea.PasteMsg{Content: "pasted"})
 	m = res.(model)
-	if m.qText(0) != "pasted" {
-		t.Fatalf("paste into custom answer = %q, want pasted", m.qText(0))
+	if m.dock.qText(0) != "pasted" {
+		t.Fatalf("paste into custom answer = %q, want pasted", m.dock.qText(0))
 	}
 }
 
@@ -239,27 +238,27 @@ func TestDenyReasonPaste(t *testing.T) {
 		},
 	}
 	m := promptModel(ix)
-	m.prompt.decisionSel = 1 // Deny (reject) → reason field active
+	m.dock.decisionSel = 1 // Deny (reject) → reason field active
 	res, _ := m.Update(tea.PasteMsg{Content: "because"})
 	m = res.(model)
-	if m.prompt.reason.Value() != "because" {
-		t.Fatalf("paste into deny reason = %q, want because", m.prompt.reason.Value())
+	if m.dock.reason.Value() != "because" {
+		t.Fatalf("paste into deny reason = %q, want because", m.dock.reason.Value())
 	}
 }
 
 func TestPromptPasteIgnoredWhenComposerInactive(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.focus = focusHistory // dock not focused → composer inactive
+	m = withFocus(m, mainPane) // dock not focused → composer inactive
 	res, _ := m.Update(tea.PasteMsg{Content: "x\ny"})
 	m = res.(model)
-	if m.prompt.reply.Value() != "" {
-		t.Fatalf("paste leaked into inactive composer: %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "" {
+		t.Fatalf("paste leaked into inactive composer: %q", m.dock.reply.Value())
 	}
 }
 
 func TestPromptViewRenders(t *testing.T) {
 	m := promptModel(question(session.QuestionSpec{Question: "Pick one", Options: []string{"Alpha", "Beta"}}))
-	out := m.promptBody()
+	out := m.dock.promptBody(&ctx{m: &m})
 	for _, want := range []string{"Pick one", "Alpha", "Beta"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("promptBody missing %q in:\n%s", want, out)
@@ -271,7 +270,7 @@ func TestSingleQuestionHeaderChip(t *testing.T) {
 	m := promptModel(question(session.QuestionSpec{
 		Header: "Database", Question: "Pick one", Options: []string{"A", "B"},
 	}))
-	if out := m.promptBody(); !strings.Contains(out, "Database") {
+	if out := m.dock.promptBody(&ctx{m: &m}); !strings.Contains(out, "Database") {
 		t.Errorf("single-question heading should show the header chip:\n%s", out)
 	}
 }
@@ -306,7 +305,7 @@ func TestQuestionOptionDescriptionsRender(t *testing.T) {
 		Options:            []string{"Alpha", "Beta"},
 		OptionDescriptions: []string{"the first one", "the second one"},
 	}))
-	out := m.promptBody()
+	out := m.dock.promptBody(&ctx{m: &m})
 	for _, want := range []string{"Alpha", "the first one", "Beta", "the second one"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("promptBody missing %q in:\n%s", want, out)
@@ -320,9 +319,9 @@ func TestQuestionCustomAnswerInlineRender(t *testing.T) {
 
 	// Other row selected with typed text: the row itself shows the text inline.
 	m := promptModel(ix)
-	m.prompt.sel[0] = otherIndex(q)
-	m.prompt.text[0].SetValue("mydb")
-	out := m.promptBody()
+	m.dock.sel[0] = otherIndex(q)
+	m.dock.text[0].SetValue("mydb")
+	out := m.dock.promptBody(&ctx{m: &m})
 	if !strings.Contains(out, "mydb") {
 		t.Errorf("inline custom: missing typed text in:\n%s", out)
 	}
@@ -332,9 +331,9 @@ func TestQuestionCustomAnswerInlineRender(t *testing.T) {
 
 	// Other row selected with empty text: the field replaces the placeholder label.
 	m = promptModel(ix)
-	m.prompt.sel[0] = otherIndex(q)
-	m.prompt.text[0].SetValue("")
-	if out := m.promptBody(); strings.Contains(out, "type your own…") {
+	m.dock.sel[0] = otherIndex(q)
+	m.dock.text[0].SetValue("")
+	if out := m.dock.promptBody(&ctx{m: &m}); strings.Contains(out, "type your own…") {
 		t.Errorf("inline custom (empty active): placeholder should be replaced by the field in:\n%s", out)
 	}
 }
@@ -345,24 +344,24 @@ func TestQuestionAnswers(t *testing.T) {
 
 	// Committed "type your own" + typed text → custom answer value.
 	m := promptModel(ix)
-	m.prompt.chosen[0] = otherIndex(q)
-	m.prompt.text[0].SetValue("my custom")
-	if p := m.questionAnswers(ix); p.Answers["Q"] != "my custom" {
+	m.dock.chosen[0] = otherIndex(q)
+	m.dock.text[0].SetValue("my custom")
+	if p := m.dock.questionAnswers(ix); p.Answers["Q"] != "my custom" {
 		t.Fatalf("custom: answers=%v", p.Answers)
 	}
 
 	// Committed custom with no text → omitted (unanswered).
 	m = promptModel(ix)
-	m.prompt.chosen[0] = otherIndex(q)
-	m.prompt.text[0].SetValue("   ")
-	if p := m.questionAnswers(ix); len(p.Answers) != 0 {
+	m.dock.chosen[0] = otherIndex(q)
+	m.dock.text[0].SetValue("   ")
+	if p := m.dock.questionAnswers(ix); len(p.Answers) != 0 {
 		t.Errorf("empty custom should be omitted: %v", p.Answers)
 	}
 
 	// Committed predefined option.
 	m = promptModel(ix)
-	m.prompt.chosen[0] = 1
-	if p := m.questionAnswers(ix); p.Answers["Q"] != "B" {
+	m.dock.chosen[0] = 1
+	if p := m.dock.questionAnswers(ix); p.Answers["Q"] != "B" {
 		t.Fatalf("predefined: answers=%v", p.Answers)
 	}
 }
@@ -371,10 +370,10 @@ func TestQuestionMultiSelectWithCustom(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A", "B"}, MultiSelect: true})
 	q := &ix.Questions[0]
 	m := promptModel(ix)
-	m.prompt.toggles[0][0] = true             // "A"
-	m.prompt.toggles[0][otherIndex(q)] = true // custom
-	m.prompt.text[0].SetValue("extra")
-	p := m.questionAnswers(ix)
+	m.dock.toggles[0][0] = true             // "A"
+	m.dock.toggles[0][otherIndex(q)] = true // custom
+	m.dock.text[0].SetValue("extra")
+	p := m.dock.questionAnswers(ix)
 	got, _ := p.Answers["Q"].([]string)
 	has := func(s string) bool {
 		for _, v := range got {
@@ -400,7 +399,7 @@ func multiQuestion() *session.Interaction {
 
 func TestMultiQuestionTabBarRenders(t *testing.T) {
 	m := promptModel(multiQuestion())
-	out := m.promptBody()
+	out := m.dock.promptBody(&ctx{m: &m})
 	for _, want := range []string{"Database", "Cache", "Submit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tab bar missing %q in:\n%s", want, out)
@@ -418,15 +417,15 @@ func TestMultiQuestionFooterLabelsBothTabKeys(t *testing.T) {
 func TestMultiQuestionTabNavigation(t *testing.T) {
 	m := promptModel(multiQuestion())
 	// right advances the tab, left goes back, both clamp.
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = res.(model)
-	if m.prompt.tab != 1 {
-		t.Fatalf("right: tab=%d want 1", m.prompt.tab)
+	if m.dock.tab != 1 {
+		t.Fatalf("right: tab=%d want 1", m.dock.tab)
 	}
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	m = res.(model)
-	if m.prompt.tab != 0 {
-		t.Fatalf("left: tab=%d want 0", m.prompt.tab)
+	if m.dock.tab != 0 {
+		t.Fatalf("left: tab=%d want 0", m.dock.tab)
 	}
 }
 
@@ -434,39 +433,39 @@ func TestMultiQuestionEnterAdvancesThenSubmit(t *testing.T) {
 	m := promptModel(multiQuestion())
 
 	// Enter on Q0 commits it and focuses the next tab (does not submit).
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.prompt.tab != 1 || cmd != nil || !m.qAnswered(0) {
-		t.Fatalf("after Q0 enter: tab=%d cmd=%v answered0=%v", m.prompt.tab, cmd, m.qAnswered(0))
+	if m.dock.tab != 1 || cmd != nil || !m.dock.qAnswered(&ctx{m: &m}, 0) {
+		t.Fatalf("after Q0 enter: tab=%d cmd=%v answered0=%v", m.dock.tab, cmd, m.dock.qAnswered(&ctx{m: &m}, 0))
 	}
 
 	// Pick the second option on Q1, then Enter lands on the Submit tab.
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	res, cmd = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if !m.onSubmitTab() || cmd != nil {
-		t.Fatalf("after Q1 enter: tab=%d onSubmit=%v cmd=%v", m.prompt.tab, m.onSubmitTab(), cmd)
+	if !m.dock.onSubmitTab(&ctx{m: &m}) || cmd != nil {
+		t.Fatalf("after Q1 enter: tab=%d onSubmit=%v cmd=%v", m.dock.tab, m.dock.onSubmitTab(&ctx{m: &m}), cmd)
 	}
 
 	// The review lists both headers; Enter on Submit sends all answers.
-	out := m.promptBody()
+	out := m.dock.promptBody(&ctx{m: &m})
 	if !strings.Contains(out, "Submit") || !strings.Contains(out, "Postgres") || !strings.Contains(out, "Memory") {
 		t.Errorf("submit review missing answers:\n%s", out)
 	}
-	res, cmd = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory {
-		t.Errorf("submit all: cmd=%v focus=%v", cmd, m.focus)
+	if cmd == nil || m.focused != mainPane {
+		t.Errorf("submit all: cmd=%v focus=%v", cmd, m.focused)
 	}
 }
 
 func TestMultiQuestionAnswersIndependent(t *testing.T) {
 	ix := multiQuestion()
 	m := promptModel(ix)
-	m.prompt.chosen[0] = 0 // Postgres
-	m.prompt.chosen[1] = 1 // Memory
-	p := m.questionAnswers(ix)
+	m.dock.chosen[0] = 0 // Postgres
+	m.dock.chosen[1] = 1 // Memory
+	p := m.dock.questionAnswers(ix)
 	if p.Answers["Which DB?"] != "Postgres" || p.Answers["Which cache?"] != "Memory" {
 		t.Fatalf("independent answers: %v", p.Answers)
 	}
@@ -478,28 +477,28 @@ func TestNavigationDoesNotSelect(t *testing.T) {
 	m := promptModel(ix)
 
 	// Move the highlight on Q0 with ↓; do NOT press Enter.
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	if m.qSel(0) != 1 {
-		t.Fatalf("highlight should move: qSel=%d", m.qSel(0))
+	if m.dock.qSel(0) != 1 {
+		t.Fatalf("highlight should move: qSel=%d", m.dock.qSel(0))
 	}
-	if m.qAnswered(0) {
+	if m.dock.qAnswered(&ctx{m: &m}, 0) {
 		t.Error("navigating must not answer the question")
 	}
-	if p := m.questionAnswers(ix); len(p.Answers) != 0 {
+	if p := m.dock.questionAnswers(ix); len(p.Answers) != 0 {
 		t.Errorf("navigation produced an answer: %v", p.Answers)
 	}
-	if got := m.answerSummary(&ix.Questions[0], 0); !strings.Contains(got, "not answered") {
+	if got := m.dock.answerSummary(&ix.Questions[0], 0); !strings.Contains(got, "not answered") {
 		t.Errorf("review should show (not answered), got %q", got)
 	}
 
 	// Enter commits the highlighted option.
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if !m.qAnswered(0) || m.qChosen(0) != 1 {
-		t.Fatalf("Enter should select: answered=%v chosen=%d", m.qAnswered(0), m.qChosen(0))
+	if !m.dock.qAnswered(&ctx{m: &m}, 0) || m.dock.qChosen(0) != 1 {
+		t.Fatalf("Enter should select: answered=%v chosen=%d", m.dock.qAnswered(&ctx{m: &m}, 0), m.dock.qChosen(0))
 	}
-	if p := m.questionAnswers(ix); p.Answers["Which DB?"] != "SQLite" {
+	if p := m.dock.questionAnswers(ix); p.Answers["Which DB?"] != "SQLite" {
 		t.Errorf("committed answer: %v", p.Answers)
 	}
 }
@@ -508,8 +507,8 @@ func TestNavigationDoesNotSelect(t *testing.T) {
 func TestSubmitOmitsUnanswered(t *testing.T) {
 	ix := multiQuestion()
 	m := promptModel(ix)
-	m.prompt.chosen[0] = 0 // Q0 answered; Q1 left unanswered
-	p := m.questionAnswers(ix)
+	m.dock.chosen[0] = 0 // Q0 answered; Q1 left unanswered
+	p := m.dock.questionAnswers(ix)
 	if _, ok := p.Answers["Which DB?"]; !ok {
 		t.Error("answered question missing")
 	}
@@ -522,14 +521,14 @@ func TestSubmitOmitsUnanswered(t *testing.T) {
 func TestSingleSelectRadioRender(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A", "B"}})
 	m := promptModel(ix)
-	if out := m.promptBody(); !strings.Contains(out, "○") {
+	if out := m.dock.promptBody(&ctx{m: &m}); !strings.Contains(out, "○") {
 		t.Errorf("single-select should render empty radios:\n%s", out)
 	}
-	if strings.Contains(m.promptBody(), "◉") {
+	if strings.Contains(m.dock.promptBody(&ctx{m: &m}), "◉") {
 		t.Errorf("no option should be filled before selection")
 	}
-	m.prompt.chosen[0] = 1
-	if out := m.promptBody(); !strings.Contains(out, "◉") {
+	m.dock.chosen[0] = 1
+	if out := m.dock.promptBody(&ctx{m: &m}); !strings.Contains(out, "◉") {
 		t.Errorf("committed option should render a filled radio:\n%s", out)
 	}
 }
@@ -588,40 +587,40 @@ func TestInteractionKey(t *testing.T) {
 func TestSyncPromptDraftResetsOnChange(t *testing.T) {
 	a := &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash", ToolInput: `{"command":"ls"}`}
 	m := promptModel(a)
-	m.prompt.key = interactionKey(a)
-	m.prompt.decisionSel = 1
-	m.prompt.reason.SetValue("use rg")
+	m.dock.key = interactionKey(a)
+	m.dock.decisionSel = 1
+	m.dock.reason.SetValue("use rg")
 
 	// Same interaction re-published → draft preserved.
 	m.syncPromptDraft()
-	if m.prompt.reason.Value() != "use rg" {
-		t.Errorf("same-interaction sync should preserve draft, got %q", m.prompt.reason.Value())
+	if m.dock.reason.Value() != "use rg" {
+		t.Errorf("same-interaction sync should preserve draft, got %q", m.dock.reason.Value())
 	}
 
 	// A different prompt → draft reset and key updated.
 	b := &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash", ToolInput: `{"command":"rm x"}`}
 	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusAwaitingInput, Interaction: b}
 	m.syncPromptDraft()
-	if m.prompt.reason.Value() != "" || m.prompt.decisionSel != 0 {
-		t.Errorf("changed prompt should reset draft: reason=%q sel=%d", m.prompt.reason.Value(), m.prompt.decisionSel)
+	if m.dock.reason.Value() != "" || m.dock.decisionSel != 0 {
+		t.Errorf("changed prompt should reset draft: reason=%q sel=%d", m.dock.reason.Value(), m.dock.decisionSel)
 	}
-	if m.prompt.key != interactionKey(b) {
+	if m.dock.key != interactionKey(b) {
 		t.Error("promptKey should track the new interaction")
 	}
 
 	// Dismissal (interaction → nil) also resets.
-	m.prompt.reason.SetValue("typing")
+	m.dock.reason.SetValue("typing")
 	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusWorking, Interaction: nil}
 	m.syncPromptDraft()
-	if m.prompt.reason.Value() != "" || m.prompt.key != "" {
-		t.Errorf("dismissal should reset draft: reason=%q key=%q", m.prompt.reason.Value(), m.prompt.key)
+	if m.dock.reason.Value() != "" || m.dock.key != "" {
+		t.Errorf("dismissal should reset draft: reason=%q key=%q", m.dock.reason.Value(), m.dock.key)
 	}
 }
 
 func TestIdleReplyDraftSurvivesInteractionChange(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.prompt.key = interactionKey(m.sessions["s1"].Interaction)
-	m.prompt.reply.SetValue("half-written")
+	m.dock.key = interactionKey(m.sessions["s1"].Interaction)
+	m.dock.reply.SetValue("half-written")
 
 	// A different interaction arrives for the same session; the idle composer
 	// draft must survive (it belongs to the session, not the interaction).
@@ -629,8 +628,8 @@ func TestIdleReplyDraftSurvivesInteractionChange(t *testing.T) {
 	m.sessions["s1"] = session.Session{ID: "s1", Status: session.StatusAwaitingInput, Interaction: b}
 	m.syncPromptDraft()
 
-	if m.prompt.reply.Value() != "half-written" {
-		t.Errorf("idle reply draft should survive interaction change, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "half-written" {
+		t.Errorf("idle reply draft should survive interaction change, got %q", m.dock.reply.Value())
 	}
 }
 
@@ -644,48 +643,48 @@ func TestIdleReplyDraftPerSession(t *testing.T) {
 		Input:       session.InputPane,
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
-	m.prompt.reply.SetValue("draft for s1")
+	m.dock.reply.SetValue("draft for s1")
 
 	m, _ = m.enterSession("s2")
-	if m.prompt.reply.Value() != "" {
-		t.Fatalf("s2 composer should start empty, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "" {
+		t.Fatalf("s2 composer should start empty, got %q", m.dock.reply.Value())
 	}
-	m.prompt.reply.SetValue("draft for s2")
+	m.dock.reply.SetValue("draft for s2")
 
 	m, _ = m.enterSession("s1")
-	if m.prompt.reply.Value() != "draft for s1" {
-		t.Errorf("s1 draft should be restored, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "draft for s1" {
+		t.Errorf("s1 draft should be restored, got %q", m.dock.reply.Value())
 	}
 
 	m, _ = m.enterSession("s2")
-	if m.prompt.reply.Value() != "draft for s2" {
-		t.Errorf("s2 draft should be restored, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "draft for s2" {
+		t.Errorf("s2 draft should be restored, got %q", m.dock.reply.Value())
 	}
 }
 
 func TestSubmitIdleReplyClearsPerSessionDraft(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.prompt.reply.SetValue("send me")
+	m.dock.reply.SetValue("send me")
 
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	if cmd == nil {
 		t.Fatal("idle submit should return a send command")
 	}
-	if m.prompt.reply.Value() != "" {
-		t.Errorf("composer should clear after submit, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "" {
+		t.Errorf("composer should clear after submit, got %q", m.dock.reply.Value())
 	}
 
 	// Re-entering the session must not restore the sent draft.
 	m, _ = m.enterSession("s1")
-	if m.prompt.reply.Value() != "" {
-		t.Errorf("sent draft must not resurface on re-entry, got %q", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "" {
+		t.Errorf("sent draft must not resurface on re-entry, got %q", m.dock.reply.Value())
 	}
 }
 
 func TestReplyDraftPrunedOnRemove(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.replyDrafts["s1"] = "unsent"
+	m.dock.drafts["s1"] = "unsent"
 
 	params, _ := json.Marshal(registry.Event{
 		Type:    registry.EventRemoved,
@@ -693,24 +692,24 @@ func TestReplyDraftPrunedOnRemove(t *testing.T) {
 	})
 	m.applyEvent(api.Notification{Method: api.MethodSessionEvent, Params: params})
 
-	if _, ok := m.replyDrafts["s1"]; ok {
-		t.Errorf("draft for a removed session should be pruned, drafts=%v", m.replyDrafts)
+	if _, ok := m.dock.drafts["s1"]; ok {
+		t.Errorf("draft for a removed session should be pruned, drafts=%v", m.dock.drafts)
 	}
 }
 
 func TestReplyDraftPrunedOnSnapshotReplace(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	m.replyDrafts["s1"] = "keep"
-	m.replyDrafts["gone"] = "drop"
+	m.dock.drafts["s1"] = "keep"
+	m.dock.drafts["gone"] = "drop"
 
 	res, _ := m.Update(sessionsReplacedMsg([]session.Session{{ID: "s1"}}))
 	m = res.(model)
 
-	if m.replyDrafts["s1"] != "keep" {
-		t.Errorf("draft for a live session should survive a snapshot, got %q", m.replyDrafts["s1"])
+	if m.dock.drafts["s1"] != "keep" {
+		t.Errorf("draft for a live session should survive a snapshot, got %q", m.dock.drafts["s1"])
 	}
-	if _, ok := m.replyDrafts["gone"]; ok {
-		t.Errorf("draft for an absent session should be pruned, drafts=%v", m.replyDrafts)
+	if _, ok := m.dock.drafts["gone"]; ok {
+		t.Errorf("draft for an absent session should be pruned, drafts=%v", m.dock.drafts)
 	}
 }
 
@@ -722,28 +721,26 @@ func TestSubmitDecisionClearsDraft(t *testing.T) {
 			{Label: "Deny", Value: "deny", Reject: true},
 		},
 	})
-	m.prompt.decisionSel = 1 // Deny
-	m.prompt.reason.SetValue("use rg instead")
+	m.dock.decisionSel = 1 // Deny
+	m.dock.reason.SetValue("use rg instead")
 
-	res, _ := m.submitDecision(m.sessions["s1"].Interaction)
-	m = res.(model)
-	if m.prompt.reason.Value() != "" {
-		t.Errorf("deny reason should be cleared after submit, got %q", m.prompt.reason.Value())
+	m.dock, _ = m.dock.submitDecision(&ctx{m: &m}, m.sessions["s1"].Interaction)
+	if m.dock.reason.Value() != "" {
+		t.Errorf("deny reason should be cleared after submit, got %q", m.dock.reason.Value())
 	}
-	if m.prompt.decisionSel != 0 {
-		t.Errorf("decisionSel should reset to 0, got %d", m.prompt.decisionSel)
+	if m.dock.decisionSel != 0 {
+		t.Errorf("decisionSel should reset to 0, got %d", m.dock.decisionSel)
 	}
 }
 
 func TestSubmitAllClearsDraft(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A", "B"}})
 	m := promptModel(ix)
-	m.prompt.chosen[0] = 1 // committed "B"
+	m.dock.chosen[0] = 1 // committed "B"
 
-	res, _ := m.submitAll(ix)
-	m = res.(model)
-	if m.prompt.chosen != nil || m.qChosen(0) != -1 {
-		t.Errorf("question draft should be reset after submit: chosen=%v", m.prompt.chosen)
+	m.dock, _ = m.dock.submitAll(&ctx{m: &m}, ix)
+	if m.dock.chosen != nil || m.dock.qChosen(0) != -1 {
+		t.Errorf("question draft should be reset after submit: chosen=%v", m.dock.chosen)
 	}
 }
 
@@ -752,15 +749,15 @@ func TestQuestionJKNavigation(t *testing.T) {
 	m := promptModel(ix)
 
 	// j moves the highlight down, k moves it up (like the arrows).
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = res.(model)
-	if m.qSel(0) != 1 {
-		t.Fatalf("j: qSel=%d want 1", m.qSel(0))
+	if m.dock.qSel(0) != 1 {
+		t.Fatalf("j: qSel=%d want 1", m.dock.qSel(0))
 	}
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	m = res.(model)
-	if m.qSel(0) != 0 {
-		t.Fatalf("k: qSel=%d want 0", m.qSel(0))
+	if m.dock.qSel(0) != 0 {
+		t.Fatalf("k: qSel=%d want 0", m.dock.qSel(0))
 	}
 }
 
@@ -768,15 +765,15 @@ func TestQuestionJKTypesIntoCustomAnswer(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A", "B"}})
 	q := &ix.Questions[0]
 	m := promptModel(ix)
-	m.prompt.sel[0] = otherIndex(q) // highlight the "type your own" row → accepts text
+	m.dock.sel[0] = otherIndex(q) // highlight the "type your own" row → accepts text
 
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = res.(model)
-	if m.qText(0) != "j" {
-		t.Errorf("j should type into the custom field: text=%q", m.qText(0))
+	if m.dock.qText(0) != "j" {
+		t.Errorf("j should type into the custom field: text=%q", m.dock.qText(0))
 	}
-	if m.qSel(0) != otherIndex(q) {
-		t.Errorf("j should not move the highlight while editing custom: qSel=%d", m.qSel(0))
+	if m.dock.qSel(0) != otherIndex(q) {
+		t.Errorf("j should not move the highlight while editing custom: qSel=%d", m.dock.qSel(0))
 	}
 }
 
@@ -784,9 +781,9 @@ func TestQuestionCustomAnswerCursorMotion(t *testing.T) {
 	ix := question(session.QuestionSpec{Question: "Q", Options: []string{"A"}})
 	q := &ix.Questions[0]
 	m := promptModel(ix)
-	m.prompt.sel[0] = otherIndex(q) // activate the custom field
+	m.dock.sel[0] = otherIndex(q) // activate the custom field
 	feed := func(msg tea.KeyPressMsg) {
-		res, _ := m.handlePromptKey(msg)
+		res, _ := m.runKey(msg)
 		m = res.(model)
 	}
 	for _, r := range "helo" {
@@ -794,8 +791,8 @@ func TestQuestionCustomAnswerCursorMotion(t *testing.T) {
 	}
 	feed(tea.KeyPressMsg{Code: tea.KeyLeft})    // cursor before the final 'o'
 	feed(tea.KeyPressMsg{Code: 'l', Text: "l"}) // insert 'l' mid-word
-	if m.qText(0) != "hello" {
-		t.Fatalf("left then insert should give hello, got %q", m.qText(0))
+	if m.dock.qText(0) != "hello" {
+		t.Fatalf("left then insert should give hello, got %q", m.dock.qText(0))
 	}
 }
 
@@ -806,49 +803,49 @@ func TestMultiSelectCustomToggledStillSwitchesTab(t *testing.T) {
 	}}
 	m := promptModel(ix)
 	q0 := &ix.Questions[0]
-	m.prompt.toggles[0][otherIndex(q0)] = true // custom answer included
-	m.prompt.sel[0] = 0                        // but the highlight is on option A, not custom
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	m.dock.toggles[0][otherIndex(q0)] = true // custom answer included
+	m.dock.sel[0] = 0                        // but the highlight is on option A, not custom
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = res.(model)
-	if m.prompt.tab != 1 {
-		t.Fatalf("right should switch tab when the custom row is not highlighted, tab=%d", m.prompt.tab)
+	if m.dock.tab != 1 {
+		t.Fatalf("right should switch tab when the custom row is not highlighted, tab=%d", m.dock.tab)
 	}
 }
 
 func TestSubmitTabJKMovesSelection(t *testing.T) {
 	m := promptModel(multiQuestion())
-	m.prompt.tab = m.numQuestions() // Submit tab
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m.dock.tab = m.numQuestions() // Submit tab
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = res.(model)
-	if m.prompt.submitSel != 1 {
-		t.Fatalf("j on submit tab: submitSel=%d want 1", m.prompt.submitSel)
+	if m.dock.submitSel != 1 {
+		t.Fatalf("j on submit tab: submitSel=%d want 1", m.dock.submitSel)
 	}
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	m = res.(model)
-	if m.prompt.submitSel != 0 {
-		t.Fatalf("k on submit tab: submitSel=%d want 0", m.prompt.submitSel)
+	if m.dock.submitSel != 0 {
+		t.Fatalf("k on submit tab: submitSel=%d want 0", m.dock.submitSel)
 	}
 }
 
 func TestSubmitTabCancelDeclines(t *testing.T) {
 	m := promptModel(multiQuestion())
-	m.prompt.tab = m.numQuestions() // Submit tab
-	m.prompt.submitSel = 1          // Cancel
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.dock.tab = m.numQuestions() // Submit tab
+	m.dock.submitSel = 1          // Cancel
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 	// Cancel rejects the tool (like native Claude): it sends a response and returns to history.
-	if cmd == nil || m.focus != focusHistory {
-		t.Errorf("cancel: cmd=%v focus=%v (should decline and return to history)", cmd, m.focus)
+	if cmd == nil || m.focused != mainPane {
+		t.Errorf("cancel: cmd=%v focus=%v (should decline and return to history)", cmd, m.focused)
 	}
 }
 
 func TestPromptQuestionChatAboutThis(t *testing.T) {
 	// Pressing "c" on an unanswered question still sends (chat is valid empty).
 	m := promptModel(question(session.QuestionSpec{Question: "Pick", Options: []string{"A", "B"}}))
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	res, cmd := m.runKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	m = res.(model)
-	if m.focus != focusHistory || cmd == nil {
-		t.Fatalf("chat: focus=%v cmd=%v (want history + sent)", m.focus, cmd)
+	if m.focused != mainPane || cmd == nil {
+		t.Fatalf("chat: focus=%v cmd=%v (want history + sent)", m.focused, cmd)
 	}
 }
 
@@ -858,19 +855,19 @@ func TestPromptQuestionCTypesIntoCustomAnswer(t *testing.T) {
 	m := promptModel(question(q))
 	// With one option the "type your own" row is index 1; arrow-down lands on it,
 	// activating the free-text field.
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	if m.qSel(0) != otherIndex(&q) {
-		t.Fatalf("expected cursor on custom row, sel=%d", m.qSel(0))
+	if m.dock.qSel(0) != otherIndex(&q) {
+		t.Fatalf("expected cursor on custom row, sel=%d", m.dock.qSel(0))
 	}
 	// Now "c" must append to the custom text, not send a chat request.
-	res, _ = m.handlePromptKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	res, _ = m.runKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	m = res.(model)
-	if m.focus != focusDock {
-		t.Fatalf("editing custom: 'c' must not send, focus=%v", m.focus)
+	if m.focused != sessionDock {
+		t.Fatalf("editing custom: 'c' must not send, focus=%v", m.focused)
 	}
-	if m.qText(0) != "c" {
-		t.Fatalf("editing custom: 'c' should type, text=%q", m.qText(0))
+	if m.dock.qText(0) != "c" {
+		t.Fatalf("editing custom: 'c' should type, text=%q", m.dock.qText(0))
 	}
 }
 
@@ -878,8 +875,8 @@ func TestSubmitDecisionOptionlessIsNoOp(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionPermission})
 	// No Options must be a defensive no-op, never a silent allow.
 	ix := &session.Interaction{Kind: session.InteractionPermission}
-	m.prompt.decisionSel = 0
-	_, cmd := m.submitDecision(ix)
+	m.dock.decisionSel = 0
+	_, cmd := m.dock.submitDecision(&ctx{m: &m}, ix)
 	if cmd != nil {
 		t.Fatalf("optionless submitDecision should be a no-op, got a command")
 	}
@@ -923,7 +920,7 @@ func TestIdleDockInformationalForPaneless(t *testing.T) {
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
-	lines, _, _ := m.promptLinesWidth(80)
+	lines, _, _ := m.dock.promptLinesWidth(&ctx{m: &m}, 80)
 	out := strings.Join(lines, "\n")
 	if !strings.Contains(out, "Respond in VSCode") {
 		t.Errorf("paneless idle dock should show the indicator, got:\n%s", out)
@@ -939,7 +936,7 @@ func TestIdleDockInformationalForPaneless(t *testing.T) {
 func TestIdleDockComposerForControllable(t *testing.T) {
 	// Default promptModel session is tmux/controllable with a pane.
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
-	lines, _, _ := m.promptLinesWidth(80)
+	lines, _, _ := m.dock.promptLinesWidth(&ctx{m: &m}, 80)
 	out := strings.Join(lines, "\n")
 	if strings.Contains(out, "Respond in VSCode") {
 		t.Errorf("controllable idle dock must not show the indicator, got:\n%s", out)
@@ -959,7 +956,7 @@ func TestIdleDockComposerForInputAPI(t *testing.T) {
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
-	lines, _, _ := m.promptLinesWidth(80)
+	lines, _, _ := m.dock.promptLinesWidth(&ctx{m: &m}, 80)
 	out := strings.Join(lines, "\n")
 	if strings.Contains(out, "argus can't send input to this session") {
 		t.Errorf("InputAPI idle dock must NOT show respond-elsewhere, got:\n%s", out)
@@ -984,8 +981,8 @@ func TestDockScrollBodyPinsControls(t *testing.T) {
 	width := 40
 
 	// scroll=0: top of body + pinned controls; bottom of body hidden.
-	m.prompt.scroll = 0
-	out := m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	m.dock.scroll = 0
+	out := m.dock.dockScrollBody(lines, height, anchor, ctrlStart, width)
 	if got := len(strings.Split(out, "\n")); got != height {
 		t.Fatalf("rendered %d rows, want height %d:\n%s", got, height, out)
 	}
@@ -999,8 +996,8 @@ func TestDockScrollBodyPinsControls(t *testing.T) {
 	}
 
 	// Max scroll: bottom of body visible, controls still pinned.
-	m.prompt.scroll = 13 // maxScroll = len(body)-ch = 20-7
-	out = m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	m.dock.scroll = 13 // maxScroll = len(body)-ch = 20-7
+	out = m.dock.dockScrollBody(lines, height, anchor, ctrlStart, width)
 	for _, want := range []string{"body-19", "Allow", "Deny"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("max scroll output missing %q:\n%s", want, out)
@@ -1008,8 +1005,8 @@ func TestDockScrollBodyPinsControls(t *testing.T) {
 	}
 
 	// Over-scroll clamps to the bottom (still shows the last body line).
-	m.prompt.scroll = 999
-	out = m.dockScrollBody(lines, height, anchor, ctrlStart, width)
+	m.dock.scroll = 999
+	out = m.dock.dockScrollBody(lines, height, anchor, ctrlStart, width)
 	if !strings.Contains(out, "body-19") || !strings.Contains(out, "Deny") {
 		t.Errorf("over-scroll should clamp to the bottom:\n%s", out)
 	}
@@ -1018,7 +1015,7 @@ func TestDockScrollBodyPinsControls(t *testing.T) {
 	}
 
 	// When everything fits, no scrolling/hint: all lines returned verbatim.
-	out = m.dockScrollBody(lines, 40, anchor, ctrlStart, width)
+	out = m.dock.dockScrollBody(lines, 40, anchor, ctrlStart, width)
 	if out != strings.Join(lines, "\n") {
 		t.Errorf("fitting content should render whole:\n%s", out)
 	}
@@ -1042,7 +1039,7 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 	})
 
 	dockH := func() int { _, h := m.sessionLayout(); return h - 1 }
-	render := func() string { return m.dockBody(dockH()) }
+	render := func() string { return m.dock.dockBody(&ctx{m: &m}, dockH()) }
 
 	out := render()
 	for _, want := range []string{"Allow", "Deny", "MK00"} {
@@ -1056,7 +1053,7 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 
 	// Scroll down until the bottom is revealed.
 	for i := 0; i < 20; i++ {
-		res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+		res, _ := m.runKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 		m = res.(model)
 	}
 	out = render()
@@ -1066,31 +1063,31 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 	if !strings.Contains(out, "Allow") || !strings.Contains(out, "Deny") {
 		t.Errorf("controls must stay pinned while scrolled:\n%s", out)
 	}
-	maxScroll, _ := m.dockScrollGeom(dockH())
+	maxScroll, _ := m.dock.dockScrollGeom(&ctx{m: &m}, dockH())
 	if maxScroll == 0 {
 		t.Fatal("expected the tall body to be scrollable")
 	}
-	if m.prompt.scroll != maxScroll {
-		t.Errorf("scroll = %d, want clamped max %d", m.prompt.scroll, maxScroll)
+	if m.dock.scroll != maxScroll {
+		t.Errorf("scroll = %d, want clamped max %d", m.dock.scroll, maxScroll)
 	}
 
 	// Scroll back up past the top clamps to 0.
 	for i := 0; i < 30; i++ {
-		res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+		res, _ := m.runKey(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 		m = res.(model)
 	}
-	if m.prompt.scroll != 0 {
-		t.Errorf("scroll = %d, want 0 after scrolling up past the top", m.prompt.scroll)
+	if m.dock.scroll != 0 {
+		t.Errorf("scroll = %d, want 0 after scrolling up past the top", m.dock.scroll)
 	}
 
 	// Up/down still moves the decision selection (not the scroll).
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = res.(model)
-	if m.prompt.decisionSel != 1 {
-		t.Errorf("down should select Deny; decisionSel=%d", m.prompt.decisionSel)
+	if m.dock.decisionSel != 1 {
+		t.Errorf("down should select Deny; decisionSel=%d", m.dock.decisionSel)
 	}
-	if m.prompt.scroll != 0 {
-		t.Errorf("selection should not change scroll; scroll=%d", m.prompt.scroll)
+	if m.dock.scroll != 0 {
+		t.Errorf("selection should not change scroll; scroll=%d", m.dock.scroll)
 	}
 }
 
@@ -1108,16 +1105,16 @@ func TestIdleKeyInputAPIRoutesInput(t *testing.T) {
 	m := promptModel(&session.Interaction{Kind: session.InteractionIdle})
 	m.sessions["s1"] = inputAPISession()
 
-	res, _ := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
-	if m.prompt.reply.Value() != "x" {
-		t.Errorf("InputAPI idle: reply = %q, want x", m.prompt.reply.Value())
+	if m.dock.reply.Value() != "x" {
+		t.Errorf("InputAPI idle: reply = %q, want x", m.dock.reply.Value())
 	}
 
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd == nil || m.focus != focusHistory {
-		t.Errorf("InputAPI idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focus)
+	if cmd == nil || m.focused != mainPane {
+		t.Errorf("InputAPI idle Enter: cmd=%v focus=%v (want cmd + history)", cmd, m.focused)
 	}
 }
 
@@ -1130,9 +1127,9 @@ func TestIdleKeyNoInputChannelSwallows(t *testing.T) {
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
 	}
 
-	res, cmd := m.handlePromptKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	res, cmd := m.runKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = res.(model)
-	if m.prompt.reply.Value() != "" || cmd != nil {
-		t.Errorf("no input channel should swallow: reply=%q cmd=%v", m.prompt.reply.Value(), cmd)
+	if m.dock.reply.Value() != "" || cmd != nil {
+		t.Errorf("no input channel should swallow: reply=%q cmd=%v", m.dock.reply.Value(), cmd)
 	}
 }

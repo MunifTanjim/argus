@@ -1,17 +1,12 @@
 package tui
 
 import (
-	"strconv"
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
-
-// --- fetch commands & messages ------------------------------------------------
 
 func (m model) fetchChangedFiles(ws, against string, gen int) tea.Cmd {
 	client := m.client
@@ -68,167 +63,10 @@ func (m model) fetchReadFile(ws, p string) tea.Cmd {
 	}
 }
 
-// syncPane resets the pane's session cursor when the selected workspace changes.
-func (m model) syncPane() (tea.Model, tea.Cmd) {
-	if ws := m.selectedWorkspaceID(); ws != "" && m.projects.dataWS != ws {
-		m.projects.dataWS = ws
-		m.projects.wsCursor = 0
-	}
-	return m, nil
-}
-
-// --- pane key handling --------------------------------------------------------
-
-func (m model) handleProjectsPaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	k := projectsKeys
-	if m.matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup) {
-		m.flash = "manage keys work in the tree · " + m.keyText(projectsKeys.Back) + " to go there"
-		return m, nil
-	}
-	if mm, cmd, ok := m.handleFileViewKey(msg); ok {
-		return mm, cmd
-	}
-	return m.paneSessionsKey(msg)
-}
-
-func (m model) paneSessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	ss := m.paneSessions()
-	switch {
-	case m.matches(msg, projectsKeys.Up):
-		m.projects.wsCursor = cursorUp(m.projects.wsCursor)
-	case m.matches(msg, projectsKeys.Down):
-		m.projects.wsCursor = cursorDown(m.projects.wsCursor, len(ss))
-	case m.matches(msg, projectsKeys.Top):
-		m.projects.wsCursor = 0
-	case m.matches(msg, projectsKeys.Bottom):
-		m.projects.wsCursor = cursorBottom(len(ss))
-	case m.matches(msg, projectsKeys.HalfUp):
-		m.projects.wsCursor = max(0, m.projects.wsCursor-m.cardListPageStep())
-	case m.matches(msg, projectsKeys.HalfDown):
-		m.projects.wsCursor = min(cursorBottom(len(ss)), m.projects.wsCursor+m.cardListPageStep())
-	case m.matches(msg, listKeys.Jump):
-		if m.projects.wsCursor < len(ss) {
-			return m.jumpTo(ss[m.projects.wsCursor])
-		}
-	case m.matches(msg, projectsKeys.Enter):
-		if m.projects.wsCursor < len(ss) {
-			return m.enterSession(ss[m.projects.wsCursor].ID)
-		}
-	case m.matches(msg, listKeys.Kill):
-		if m.projects.wsCursor < len(ss) {
-			s := ss[m.projects.wsCursor]
-			if refusal := killRefusal(s); refusal != "" {
-				m.flash = refusal
-				return m, nil
-			}
-			m.projects.pendingKill = s.ID
-		}
-	}
-	return m, nil
-}
-
-// --- Changes tab --------------------------------------------------------------
-
-// reload drops both lists and closes a drilled-in commit, so the next sync
-// fetches everything again.
-func (c *changesState) reload() { *c = changesState{ws: c.ws, against: c.against, gen: c.gen + 1} }
-
-// refreshChanges fetches both lists, and an open commit's files, again while the
-// old ones stay on screen, so the cursor and the open commit hold. gen drops
-// answers to requests from before.
-func (m *model) refreshChanges() tea.Cmd {
-	c := &m.projects.changes
-	c.gen++
-	c.loading, c.err, c.commitsLoading, c.commitsErr = true, nil, true, nil
-	cmds := []tea.Cmd{m.fetchChangedFiles(c.ws, c.against, c.gen), m.fetchCommits(c.ws, c.gen)}
-	if c.commit != nil {
-		c.commitErr = nil
-		cmds = append(cmds, m.fetchCommitFiles(c.ws, c.commit.SHA))
-	}
-	return tea.Batch(cmds...)
-}
-
-// changesKey handles the sidebar's Changes tab; the lists load in syncSidebar.
-func (m model) changesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	c := &m.projects.changes
-	k := projectsKeys
-	if m.matches(msg, k.Refresh) {
-		return m, m.refreshChanges()
-	}
-	if c.commit != nil {
-		return m.commitFilesKey(msg)
-	}
-	n := len(c.files) + len(c.commits)
-	switch {
-	case m.matches(msg, k.DiffMode):
-		if c.against == "" && m.targetOf(c.ws) == "" {
-			m.flash = "no target branch · " + m.keyTextOn("projects", projectsKeys.Target) + " in the tree sets one"
-			return m, nil
-		}
-		if c.against == "" {
-			c.against = api.AgainstTarget
-		} else {
-			c.against = ""
-		}
-		// The old files stay until the new list arrives, so the cursor keeps its row.
-		c.loading, c.err = true, nil
-		return m, m.fetchChangedFiles(c.ws, c.against, c.gen)
-	case m.matches(msg, k.Up):
-		c.cursor = cursorUp(c.cursor)
-	case m.matches(msg, k.Down):
-		c.cursor = cursorDown(c.cursor, n)
-	case m.matches(msg, k.Top):
-		c.cursor = 0
-	case m.matches(msg, k.Bottom):
-		c.cursor = cursorBottom(n)
-	case m.matches(msg, k.HalfUp):
-		c.cursor = max(0, c.cursor-m.cardListPageStep())
-	case m.matches(msg, k.HalfDown):
-		c.cursor = min(cursorBottom(n), c.cursor+m.cardListPageStep())
-	case m.matches(msg, k.Enter, k.Right):
-		switch {
-		case c.cursor < len(c.files):
-			return m.openDiff(c.files[c.cursor], "")
-		case c.cursor < n:
-			return m.openCommit(c.commits[c.cursor-len(c.files)])
-		}
-	}
-	return m, nil
-}
-
-// commitFilesKey handles a drilled-in commit's file list. esc comes here from
-// handleFilesKey; h goes back too.
-func (m model) commitFilesKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	c := &m.projects.changes
-	k := projectsKeys
-	n := len(c.commitFiles)
-	switch {
-	case m.matches(msg, k.Left):
-		c.commit = nil
-	case m.matches(msg, k.Up):
-		c.commitCursor = cursorUp(c.commitCursor)
-	case m.matches(msg, k.Down):
-		c.commitCursor = cursorDown(c.commitCursor, n)
-	case m.matches(msg, k.Top):
-		c.commitCursor = 0
-	case m.matches(msg, k.Bottom):
-		c.commitCursor = cursorBottom(n)
-	case m.matches(msg, k.HalfUp):
-		c.commitCursor = max(0, c.commitCursor-m.cardListPageStep())
-	case m.matches(msg, k.HalfDown):
-		c.commitCursor = min(cursorBottom(n), c.commitCursor+m.cardListPageStep())
-	case m.matches(msg, k.Enter, k.Right):
-		if c.commitCursor < n {
-			return m.openDiff(c.commitFiles[c.commitCursor], c.commit.SHA)
-		}
-	}
-	return m, nil
-}
-
 // stepDiff opens the file d places from the open diff, in the list it came from.
 func (m model) stepDiff(d int) (tea.Model, tea.Cmd) {
-	f := m.projects.fileView
-	c := &m.projects.changes
+	f, _ := m.openFile()
+	c := &m.right.changes
 	switch {
 	case !f.diff:
 	case f.rev != "" && c.commit != nil && c.commit.SHA == f.rev:
@@ -246,26 +84,21 @@ func (m model) stepDiff(d int) (tea.Model, tea.Cmd) {
 }
 
 func (m model) openDiff(f api.ChangedFile, rev string) (tea.Model, tea.Cmd) {
-	c := m.projects.changes
-	m.projects.fileView = fileViewState{ws: c.ws, path: f.Path, orig: f.OrigPath, diff: true, against: c.against, rev: rev, loading: true}
-	m.projects.focus = focusPane
-	return m, m.fetchWorkspaceDiff(c.ws, f, c.against, rev)
+	c := &ctx{m: &m}
+	cmd := m.right.changes.openDiff(c, f, rev)
+	cmd = tea.Batch(cmd, m.apply(c))
+	return m, cmd
 }
 
-func (m model) openCommit(cm api.Commit) (tea.Model, tea.Cmd) {
-	c := &m.projects.changes
-	c.commit, c.commitFiles, c.commitCursor, c.commitErr = &cm, nil, 0, nil
-	return m, m.fetchCommitFiles(c.ws, cm.SHA)
+func (m model) paneHeadStyle() lipgloss.Style {
+	if m.focused == mainPane {
+		return StyleAccentBold
+	}
+	return StylePrimaryBold
 }
-
-// --- views --------------------------------------------------------------------
 
 func (m model) wsHeader(r projectsRow) string {
-	title := StylePrimaryBold
-	if m.projects.focus == focusPane {
-		title = StyleAccentBold
-	}
-	out := title.Render(r.label)
+	out := m.paneHeadStyle().Render(r.label)
 	if r.branch != "" {
 		out += StyleDim.Render("  " + r.branch)
 	}
@@ -275,121 +108,9 @@ func (m model) wsHeader(r projectsRow) string {
 	return out
 }
 
-// changesHeader names the file list's mode and base, with its size, and marks a
-// reload that still shows the old list.
-func (m model) changesHeader() string {
-	c := m.projects.changes
-	head := "UNCOMMITTED"
-	if c.against == api.AgainstTarget {
-		head = "CHANGES · vs " + m.targetOf(c.ws)
-	}
-	if c.files != nil {
-		head += " · " + strconv.Itoa(len(c.files))
-		if c.loading {
-			head += " · loading…"
-		}
-	}
-	return head
-}
-
 func (m model) targetOf(wsID string) string {
 	w, _ := m.findWorkspace(wsID)
 	return w.TargetBranch
-}
-
-// diffModeKey labels t with the mode it switches to; with no target it only
-// hints, so it is not offered.
-func (m model) diffModeKey() binding {
-	k := projectsKeys.DiffMode
-	c := m.projects.changes
-	switch {
-	case c.against == api.AgainstTarget:
-		return helpAs(k, "uncommitted")
-	case m.targetOf(c.ws) == "":
-		k.SetEnabled(false)
-		return k
-	}
-	return helpAs(k, "vs "+m.targetOf(c.ws))
-}
-
-// changesView is the Changes tab body: the diff mode and the changed files, then
-// the commits since the target, or a drilled-in commit's files.
-func (m model) changesView(w, h int, focused bool) string {
-	c := m.projects.changes
-	if c.commit != nil {
-		return m.commitFilesView(w, h, focused)
-	}
-	gutter := strings.Repeat(" ", screenMargin)
-	tw := max(1, w-screenMargin)
-	note := func(s string) string { return gutter + truncateLine(dimStyle.Render(s), tw) }
-	var lines []string
-	curLine := 0
-	switch {
-	case c.err != nil:
-		lines = append(lines, note("error: "+c.err.Error()))
-	case c.files == nil:
-		lines = append(lines, note("loading…"))
-	case len(c.files) == 0:
-		lines = append(lines, note("no changes"))
-	}
-	for i, f := range c.files {
-		if i == c.cursor {
-			curLine = len(lines)
-		}
-		lines = append(lines, changeRow(f, i == c.cursor, focused, tw))
-	}
-	lines = append(lines, "", note(m.commitsHeader()))
-	switch {
-	case c.commitsErr != nil:
-		lines = append(lines, note("error: "+c.commitsErr.Error()))
-	case c.commits == nil:
-		lines = append(lines, note("loading…"))
-	case len(c.commits) == 0:
-		lines = append(lines, note("no commits"))
-	}
-	for j, cm := range c.commits {
-		sel := len(c.files)+j == c.cursor
-		if sel {
-			curLine = len(lines)
-		}
-		lines = append(lines, commitRow(cm, sel, focused, tw))
-	}
-	return note(m.changesHeader()) + "\n" + strings.Join(windowSpan(lines, curLine, curLine+1, max(1, h-1)), "\n")
-}
-
-// commitFilesView is a drilled-in commit: its sha and subject, then its files.
-func (m model) commitFilesView(w, h int, focused bool) string {
-	c := m.projects.changes
-	gutter := strings.Repeat(" ", screenMargin)
-	tw := max(1, w-screenMargin)
-	head := gutter + truncateLine(StyleSecondary.Render(c.commit.Short)+" "+c.commit.Subject, tw) + "\n"
-	switch {
-	case c.commitErr != nil:
-		return head + gutter + truncateLine(dimStyle.Render("error: "+c.commitErr.Error()), tw)
-	case c.commitFiles == nil:
-		return head + gutter + dimStyle.Render("loading…")
-	case len(c.commitFiles) == 0:
-		return head + gutter + dimStyle.Render("no files")
-	}
-	rows := make([]string, len(c.commitFiles))
-	for i, f := range c.commitFiles {
-		rows[i] = changeRow(f, i == c.commitCursor, focused, tw)
-	}
-	return head + strings.Join(windowSpan(rows, c.commitCursor, c.commitCursor+1, max(1, h-1)), "\n")
-}
-
-// commitsHeader heads the COMMITS section with the target it counts from and
-// the count.
-func (m model) commitsHeader() string {
-	c := m.projects.changes
-	head := "COMMITS"
-	if t := m.targetOf(c.ws); t != "" {
-		head += " · vs " + t
-	}
-	if c.commits != nil {
-		head += " · " + strconv.Itoa(len(c.commits))
-	}
-	return head
 }
 
 func changeRow(f api.ChangedFile, sel, focused bool, tw int) string {

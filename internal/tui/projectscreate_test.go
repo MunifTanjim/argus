@@ -15,9 +15,9 @@ func createTestModel(t *testing.T) model {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m.client = &recordingClient{}
-	m.projects.tree[0].DefaultBranch = "main"
-	m.projects.selectRow("n1:p1")
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'a'})
+	m.left.tree.data[0].DefaultBranch = "main"
+	m = selectRow(m, "n1:p1")
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 'a'})
 	return res.(model)
 }
 
@@ -39,7 +39,7 @@ func execCmd(cmd tea.Cmd) []tea.Msg {
 
 func typeText(m model, s string) model {
 	for _, r := range s {
-		res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		res, _ := m.runKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
 	return m
@@ -47,10 +47,10 @@ func typeText(m model, s string) model {
 
 func TestCreatePickerOpensWithDefaultTarget(t *testing.T) {
 	m := createTestModel(t)
-	if !m.projects.create.active || m.projects.create.projectID != "n1:p1" {
-		t.Fatalf("picker not open for n1:p1: %+v", m.projects.create)
+	if !createOpen(m) || createOf(m).projectID != "n1:p1" {
+		t.Fatalf("picker not open for n1:p1: %+v", createOf(m))
 	}
-	out := ansi.Strip(m.projectsView())
+	out := ansi.Strip(m.View().Content)
 	for _, want := range []string{"New workspace in argus", "target: main", "Branches", "PRs", "Issues"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q", want)
@@ -61,9 +61,9 @@ func TestCreatePickerOpensWithDefaultTarget(t *testing.T) {
 func TestCreateNewTabSubmitsNewSource(t *testing.T) {
 	m := createTestModel(t)
 	m = typeText(m, "feat-x")
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if !m.projects.create.creating || cmd == nil {
+	if !createOf(m).creating || cmd == nil {
 		t.Fatal("enter should start the create call")
 	}
 	var done *createDoneMsg
@@ -81,92 +81,92 @@ func TestCreateNewTabSubmitsNewSource(t *testing.T) {
 
 func TestCreateTabsLoadListsAndFilter(t *testing.T) {
 	m := createTestModel(t)
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = res.(model)
-	if m.projects.create.tab != ctBranches || cmd == nil {
-		t.Fatalf("tab should move to Branches and load: tab=%v", m.projects.create.tab)
+	if createOf(m).tab != ctBranches || cmd == nil {
+		t.Fatalf("tab should move to Branches and load: tab=%v", createOf(m).tab)
 	}
 	res, _ = m.Update(branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{
 		{Name: "main", Local: true, CheckedOut: true}, {Name: "fix-a", Local: true}, {Name: "other", Remote: true},
 	}})
 	m = res.(model)
 	m = typeText(m, "jk") // j/k are filter text here, not movement
-	if got := m.projects.create.branches.filter.Value(); got != "jk" {
+	if got := createOf(m).branches.filter.Value(); got != "jk" {
 		t.Errorf("filter = %q, want jk typed as text", got)
 	}
-	m.projects.create.branches.filter.SetValue("")
+	m = withCreate(m, func(p *createComp) { p.branches.filter.SetValue("") })
 	m = typeText(m, "fix")
-	if got := m.projects.create.branches.matches(); len(got) != 1 || got[0].Name != "fix-a" {
+	if got := createOf(m).branches.matches(); len(got) != 1 || got[0].Name != "fix-a" {
 		t.Errorf("filtered = %+v", got)
 	}
 }
 
 func TestCreateRefusesInUseBranch(t *testing.T) {
 	m := createTestModel(t)
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = res.(model)
 	res, _ = m.Update(branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main", Local: true, CheckedOut: true}}})
 	m = res.(model)
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if cmd != nil || m.projects.create.creating || m.projects.create.err == "" {
-		t.Errorf("an in-use branch must not create: creating=%v err=%q", m.projects.create.creating, m.projects.create.err)
+	if cmd != nil || createOf(m).creating || createOf(m).err == "" {
+		t.Errorf("an in-use branch must not create: creating=%v err=%q", createOf(m).creating, createOf(m).err)
 	}
 }
 
 func TestCreatePRTabLocksTarget(t *testing.T) {
 	m := createTestModel(t)
 	for i := 0; i < 2; i++ {
-		res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = res.(model)
 	}
-	if m.projects.create.tab != ctPRs {
-		t.Fatalf("tab = %v, want PRs", m.projects.create.tab)
+	if createOf(m).tab != ctPRs {
+		t.Fatalf("tab = %v, want PRs", createOf(m).tab)
 	}
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	m = res.(model)
-	if m.projects.create.picking {
+	if createOf(m).picking {
 		t.Error("ctrl+t must do nothing on the PRs tab")
 	}
-	if !strings.Contains(ansi.Strip(m.projectsView()), "from PR base") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "from PR base") {
 		t.Error("PR tab should show the target as from PR base")
 	}
 }
 
 func TestCreateTargetPickerSetsTarget(t *testing.T) {
 	m := createTestModel(t)
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	m = res.(model)
-	if !m.projects.create.picking || cmd == nil {
+	if !createOf(m).picking || cmd == nil {
 		t.Fatal("ctrl+t should open the target picker and load branches")
 	}
 	res, _ = m.Update(branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main", Local: true, CheckedOut: true}, {Name: "dev", Local: true}}})
 	m = res.(model)
 	m = typeText(m, "dev")
-	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.projects.create.picking || m.projects.create.target != "dev" {
-		t.Errorf("target = %q picking=%v, want dev and closed", m.projects.create.target, m.projects.create.picking)
+	if createOf(m).picking || createOf(m).target != "dev" {
+		t.Errorf("target = %q picking=%v, want dev and closed", createOf(m).target, createOf(m).picking)
 	}
 }
 
 func TestCreateDoneSelectsWorkspaceAndCloses(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	res, cmd := m.Update(createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Warning: "fetch failed; branched from local main"}, source: api.SourceNew})
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	res, cmd := m.Update(createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Warning: "fetch failed; branched from local main"}, source: api.SourceNew})
 	m = res.(model)
-	if m.projects.create.active || m.projects.want != "n1:w9" || !strings.Contains(m.flash, "fetch failed") || cmd == nil {
-		t.Errorf("after create: active=%v want=%q flash=%q", m.projects.create.active, m.projects.want, m.flash)
+	if createOpen(m) || m.left.tree.want != "n1:w9" || !strings.Contains(m.flash, "fetch failed") || cmd == nil {
+		t.Errorf("after create: active=%v want=%q flash=%q", createOpen(m), m.left.tree.want, m.flash)
 	}
 }
 
 func TestCreateErrorKeepsPickerOpen(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	res, _ := m.Update(createDoneMsg{seq: m.projects.create.seq, err: errString("boom")})
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	res, _ := m.Update(createDoneMsg{seq: createOf(m).seq, err: errString("boom")})
 	m = res.(model)
-	if !m.projects.create.active || m.projects.create.creating || !strings.Contains(m.projects.create.err, "boom") {
-		t.Errorf("error state: %+v", m.projects.create)
+	if !createOpen(m) || createOf(m).creating || !strings.Contains(createOf(m).err, "boom") {
+		t.Errorf("error state: %+v", createOf(m))
 	}
 }
 
@@ -176,66 +176,65 @@ func (e errString) Error() string { return string(e) }
 
 func TestIssueCreateOffersSpawn(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	res, _ := m.Update(createDoneMsg{seq: m.projects.create.seq,
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	res, _ := m.Update(createDoneMsg{seq: createOf(m).seq,
 		res:    api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/42-fix", Prompt: "Fix\n\nbody"},
 		source: api.SourceIssue,
 	})
 	m = res.(model)
-	if m.projects.offerSpawn == nil || !strings.Contains(m.projectsFooter(), "start an agent") {
-		t.Fatalf("no spawn offer: offer=%v footer=%q", m.projects.offerSpawn, m.projectsFooter())
+	if m.left.tree.offerSpawn == nil || !strings.Contains(m.currentFooter(), "start an agent") {
+		t.Fatalf("no spawn offer: offer=%v footer=%q", m.left.tree.offerSpawn, m.currentFooter())
 	}
 
-	res, _ = m.handleProjectsKey(tea.KeyPressMsg{Code: 'n'}) // decline
-	if mm := res.(model); mm.projects.offerSpawn != nil || mm.spawn.active() || mm.projects.create.active {
+	res, _ = m.runKey(tea.KeyPressMsg{Code: 'n'}) // decline
+	if mm := res.(model); mm.left.tree.offerSpawn != nil || spawnOpen(mm) || createOpen(mm) {
 		t.Error("n should decline without spawning or opening the picker")
 	}
 
-	res, cmd := m.handleProjectsKey(tea.KeyPressMsg{Code: 'y'})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: 'y'})
 	m = res.(model)
-	if !m.spawn.active() || m.spawn.nodeID != "n1" || !m.spawn.fixedCwd || cmd == nil {
-		t.Fatalf("y should start the spawn flow on n1 with a fixed cwd: %+v", m.spawn)
+	if !spawnOpen(m) || spawnOf(m).nodeID != "n1" || !spawnOf(m).fixedCwd || cmd == nil {
+		t.Fatalf("y should start the spawn flow on n1 with a fixed cwd: %+v", spawnOf(m))
 	}
 	res, _ = m.Update(spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
 	m = res.(model)
-	if m.spawn.step != spawnStepPrompt || m.spawn.cwd.Value() != "/repo/.worktrees/42-fix" || m.spawn.prompt.Value() != "Fix\n\nbody" {
-		t.Errorf("spawn should skip the dir step with the issue prompt: step=%v cwd=%q prompt=%q", m.spawn.step, m.spawn.cwd.Value(), m.spawn.prompt.Value())
+	if spawnOf(m).step != spawnStepPrompt || spawnOf(m).cwd.Value() != "/repo/.worktrees/42-fix" || spawnOf(m).prompt.Value() != "Fix\n\nbody" {
+		t.Errorf("spawn should skip the dir step with the issue prompt: step=%v cwd=%q prompt=%q", spawnOf(m).step, spawnOf(m).cwd.Value(), spawnOf(m).prompt.Value())
 	}
-	if !strings.Contains(ansi.Strip(m.projectsView()), "Fix") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "Fix") {
 		t.Error("the projects screen should render the spawn flow")
 	}
 }
 
 func TestHiddenPickerCreateOnlyReports(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide; the call runs on
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	seq := createOf(m).seq
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide; the call runs on
 	m = res.(model)
-	m.projects.selectRow("n1:w1")
-	res, _ = m.Update(createDoneMsg{seq: m.projects.create.seq,
+	m = selectRow(m, "n1:w1")
+	res, _ = m.Update(createDoneMsg{seq: seq,
 		res:    api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Prompt: "Fix"},
 		source: api.SourceIssue,
 	})
 	m = res.(model)
-	if m.projects.offerSpawn != nil || m.projects.want == "n1:w9" || !strings.Contains(m.flash, "created workspace") {
-		t.Errorf("a hidden picker's result should only be flashed: offer=%v want=%q flash=%q", m.projects.offerSpawn, m.projects.want, m.flash)
+	if m.left.tree.offerSpawn != nil || m.left.tree.want == "n1:w9" || !strings.Contains(m.flash, "created workspace") {
+		t.Errorf("a hidden picker's result should only be flashed: offer=%v want=%q flash=%q", m.left.tree.offerSpawn, m.left.tree.want, m.flash)
 	}
 }
 
 func TestTreeLooksUnfocusedUnderPicker(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.focus = focusTree
-	unfocused := m
-	unfocused.projects.create = createState{}
-	unfocused.projects.focus = focusPane
-	if got, want := m.projectsTreePane(30, 20), unfocused.projectsTreePane(30, 20); got != want {
+	unfocused := closePicker(m)
+	unfocused = withFocus(unfocused, mainPane)
+	if got, want := treePane(m, 30, 20), treePane(unfocused, 30, 20); got != want {
 		t.Errorf("the tree should draw unfocused while the picker takes keys:\n got: %q\nwant: %q", got, want)
 	}
 }
 
 func TestPresetSpawnShowsWhereItRuns(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create = createState{}
+	m = closePicker(m)
 	cmd := m.beginPresetSpawn("n1", "/repo/.worktrees/42-fix", "Fix")
 	_ = cmd
 	m, _ = upd(m, spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
@@ -245,7 +244,7 @@ func TestPresetSpawnShowsWhereItRuns(t *testing.T) {
 }
 
 func toPRsTab(m model) model {
-	for m.projects.create.tab != ctPRs {
+	for createOf(m).tab != ctPRs {
 		m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	return m
@@ -282,25 +281,25 @@ func TestPRsTabSaysWhenTruncatedAndSpins(t *testing.T) {
 
 func TestCreateErrorsShowInPickerAndClearOnEdit(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	m, _ = upd(m, createDoneMsg{seq: m.projects.create.seq, err: errString("boom")})
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, err: errString("boom")})
 	m, _ = upd(m, keyMsg("x"))
-	if m.projects.create.err != "" {
-		t.Errorf("editing the name should clear the error: %q", m.projects.create.err)
+	if createOf(m).err != "" {
+		t.Errorf("editing the name should clear the error: %q", createOf(m).err)
 	}
 
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyTab}) // Branches
 	m, _ = upd(m, branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "busy", CheckedOut: true}}})
 	m, _ = upd(m, keyMsg("enter"))
-	if m.flash != "" || !strings.Contains(m.projects.create.err, "busy is checked out in another workspace") {
-		t.Errorf("a busy branch should report in the picker: flash=%q err=%q", m.flash, m.projects.create.err)
+	if m.flash != "" || !strings.Contains(createOf(m).err, "busy is checked out in another workspace") {
+		t.Errorf("a busy branch should report in the picker: flash=%q err=%q", m.flash, createOf(m).err)
 	}
 }
 
 func TestCreateFlashNamesTheWorkspace(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.creating = true
-	m, _ = upd(m, createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/login", Warning: "fetch failed"}, source: api.SourceNew})
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/login", Warning: "fetch failed"}, source: api.SourceNew})
 	if m.flash != "created workspace login · fetch failed" {
 		t.Errorf("flash = %q", m.flash)
 	}
@@ -308,8 +307,8 @@ func TestCreateFlashNamesTheWorkspace(t *testing.T) {
 
 func TestNonIssueCreateDoesNotOfferSpawn(t *testing.T) {
 	m := createTestModel(t)
-	res, _ := m.Update(createDoneMsg{seq: m.projects.create.seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})
-	if res.(model).projects.offerSpawn != nil {
+	res, _ := m.Update(createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})
+	if res.(model).left.tree.offerSpawn != nil {
 		t.Error("only issue workspaces offer a spawn")
 	}
 }
@@ -317,42 +316,41 @@ func TestNonIssueCreateDoesNotOfferSpawn(t *testing.T) {
 func TestCreateKeyClearsStaleFlash(t *testing.T) {
 	m := createTestModel(t)
 	m.flash = "left over"
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = res.(model)
-	if m.flash != "" || !strings.Contains(m.projectsFooter(), "create") {
-		t.Errorf("a picker key should clear the flash and show the hints: flash=%q footer=%q", m.flash, m.projectsFooter())
+	if m.flash != "" || !strings.Contains(m.currentFooter(), "create") {
+		t.Errorf("a picker key should clear the flash and show the hints: flash=%q footer=%q", m.flash, m.currentFooter())
 	}
 }
 
 func TestTargetPickerShowsBranchLoadError(t *testing.T) {
 	m := createTestModel(t)
-	m.projects.create.branches.loaded = true
-	m.projects.create.branches.err = errString("git exploded")
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	m = withCreate(m, func(p *createComp) { p.branches.loaded = true })
+	m = withCreate(m, func(p *createComp) { p.branches.err = errString("git exploded") })
+	res, _ := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	m = res.(model)
-	if !strings.Contains(ansi.Strip(m.projectsView()), "git exploded") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "git exploded") {
 		t.Error("the target picker should show the branch load error, not an empty list")
 	}
 }
 
 func TestLateCreateResultLeavesNewerPickerAlone(t *testing.T) {
 	m := createTestModel(t) // picker A
-	oldSeq := m.projects.create.seq
-	m.projects.create.creating = true
-	res, _ := m.handleProjectsKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide A; its call runs on
+	oldSeq := createOf(m).seq
+	m = withCreate(m, func(p *createComp) { p.creating = true })
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide A; its call runs on
 	m = res.(model)
-	res, _ = m.startCreate("n1:p1") // picker B
-	m = res.(model)
-	m.projects.create.creating = true
+	m = openCreate(m, "n1:p1") // picker B
+	m = withCreate(m, func(p *createComp) { p.creating = true })
 
 	res, _ = m.Update(createDoneMsg{seq: oldSeq, err: errString("A failed")})
 	m = res.(model)
-	if !m.projects.create.creating || m.projects.create.err != "" || !strings.Contains(m.flash, "A failed") {
-		t.Errorf("A's error must not reach B: creating=%v err=%q flash=%q", m.projects.create.creating, m.projects.create.err, m.flash)
+	if !createOf(m).creating || createOf(m).err != "" || !strings.Contains(m.flash, "A failed") {
+		t.Errorf("A's error must not reach B: creating=%v err=%q flash=%q", createOf(m).creating, createOf(m).err, m.flash)
 	}
 	res, _ = m.Update(createDoneMsg{seq: oldSeq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})
 	m = res.(model)
-	if !m.projects.create.active || m.projects.want == "n1:w9" {
-		t.Errorf("A's success must not close B or move the cursor: active=%v want=%q", m.projects.create.active, m.projects.want)
+	if !createOpen(m) || m.left.tree.want == "n1:w9" {
+		t.Errorf("A's success must not close B or move the cursor: active=%v want=%q", createOpen(m), m.left.tree.want)
 	}
 }

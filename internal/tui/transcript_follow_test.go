@@ -26,30 +26,29 @@ func TestOpenSessionStartsAtBottom(t *testing.T) {
 	m.width, m.height = 80, 10
 	sid := "s1"
 	m.order = []string{sid}
-	m.cursor = 0
 	m.sessions = map[string]session.Session{sid: {ID: sid}}
 	m.transcriptCache = map[string]cachedTranscript{sid: {chunks: userChunks(20)}}
 
-	res, _ := m.actListOpen(tea.KeyPressMsg{})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 
-	if m.maxScroll() == 0 {
+	if tvOf(&m).maxScroll() == 0 {
 		t.Fatal("setup: cached chunks should overflow the viewport")
 	}
-	if m.transcript.scroll != m.maxScroll() {
-		t.Errorf("open should pin to bottom: scroll=%d, maxScroll=%d", m.transcript.scroll, m.maxScroll())
+	if trOf(m).transcript.scroll != tvOf(&m).maxScroll() {
+		t.Errorf("open should pin to bottom: scroll=%d, maxScroll=%d", trOf(m).transcript.scroll, tvOf(&m).maxScroll())
 	}
 }
 
-// deltaModel returns a session-mode model holding chunks, with an active parent
+// deltaModel returns a live transcript holding chunks, with an active parent
 // subscription matching subID "x".
 func deltaModel() model {
 	m := testModel()
 	m.width, m.height = 80, 10
-	m.mode = modeSession
-	m.activeSub = subRef{subID: "x", sessionID: "s1"}
+	m = withLive(m, "s1")
+	m = withTr(m, func(t *transcriptComp) { t.activeSub = subRef{subID: "x", sessionID: "s1"} })
 	m.transcriptCache = map[string]cachedTranscript{}
-	m.transcript.chunks = userChunks(20)
+	m = withTr(m, func(t *transcriptComp) { t.transcript.chunks = userChunks(20) })
 	return m
 }
 
@@ -63,31 +62,31 @@ func appendDelta() transcriptDeltaMsg {
 // A delta arriving while pinned to the bottom keeps following the newest content.
 func TestDeltaFollowsWhenAtBottom(t *testing.T) {
 	m := deltaModel()
-	m.transcript.scroll = m.maxScroll() // at bottom
+	m = withTr(m, func(t *transcriptComp) { t.transcript.scroll = tvOf(&m).maxScroll() }) // at bottom
 
 	res, _ := m.Update(appendDelta())
 	m = res.(model)
 
-	if got := len(m.transcript.chunks); got != 21 {
+	if got := len(trOf(m).transcript.chunks); got != 21 {
 		t.Fatalf("delta should append a chunk, len=%d", got)
 	}
-	if m.transcript.scroll != m.maxScroll() {
-		t.Errorf("should tail to bottom: scroll=%d, maxScroll=%d", m.transcript.scroll, m.maxScroll())
+	if trOf(m).transcript.scroll != tvOf(&m).maxScroll() {
+		t.Errorf("should tail to bottom: scroll=%d, maxScroll=%d", trOf(m).transcript.scroll, tvOf(&m).maxScroll())
 	}
 }
 
 // A delta arriving while scrolled up must not yank the viewport to the bottom.
 func TestDeltaDoesNotFollowWhenScrolledUp(t *testing.T) {
 	m := deltaModel()
-	m.transcript.scroll = 0 // scrolled to top
-	if m.maxScroll() == 0 {
+	m = withTr(m, func(t *transcriptComp) { t.transcript.scroll = 0 }) // scrolled to top
+	if tvOf(&m).maxScroll() == 0 {
 		t.Fatal("setup: chunks should overflow so 'scrolled up' is meaningful")
 	}
 
 	res, _ := m.Update(appendDelta())
 	m = res.(model)
 
-	if m.transcript.scroll != 0 {
-		t.Errorf("scrolled-up view should stay put, scroll=%d", m.transcript.scroll)
+	if trOf(m).transcript.scroll != 0 {
+		t.Errorf("scrolled-up view should stay put, scroll=%d", trOf(m).transcript.scroll)
 	}
 }

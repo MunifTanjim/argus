@@ -25,8 +25,9 @@ const (
 )
 
 // containerWidth is the width of the card column, centered within the terminal.
-func (m model) containerWidth() int {
-	w := m.bodyWidth()
+func (m model) containerWidth() int { return containerWidthOf(m.bodyWidth()) }
+
+func containerWidthOf(w int) int {
 	if w > maxContentWidth {
 		w = maxContentWidth
 	}
@@ -53,10 +54,10 @@ func (m model) renderMD(text string, width int) string {
 		width = 10
 	}
 	key := strconv.Itoa(width) + "\x00" + text
-	if v, ok := m.transcript.mdCache[key]; ok {
+	if v, ok := m.render.mdCache[key]; ok {
 		return v
 	}
-	r := m.transcript.mdRenderers[width]
+	r := m.render.mdRenderers[width]
 	if r == nil {
 		nr, err := glamour.NewTermRenderer(
 			glamour.WithStyles(glamourStyleConfig(m.hasDark)),
@@ -65,7 +66,7 @@ func (m model) renderMD(text string, width int) string {
 		if err != nil {
 			return strings.TrimRight(text, "\n")
 		}
-		m.transcript.mdRenderers[width] = nr
+		m.render.mdRenderers[width] = nr
 		r = nr
 	}
 	out, err := r.Render(text)
@@ -73,7 +74,7 @@ func (m model) renderMD(text string, width int) string {
 		out = text
 	}
 	out = strings.Trim(out, "\n")
-	m.transcript.mdCache[key] = out
+	m.render.mdCache[key] = out
 	return out
 }
 
@@ -111,14 +112,14 @@ func (m model) chunkExpandable(c transcript.Chunk) bool {
 	}
 }
 
-func (m model) chunkExpanded(c transcript.Chunk) bool {
+func (m tview) chunkExpanded(c transcript.Chunk) bool {
 	if v, ok := m.transcript.expanded[c.ID]; ok {
 		return v
 	}
 	return false
 }
 
-func (m *model) setExpanded(i int, on bool) {
+func (m tview) setExpanded(i int, on bool) {
 	if i < 0 || i >= len(m.transcript.chunks) {
 		return
 	}
@@ -130,7 +131,7 @@ func (m *model) setExpanded(i int, on bool) {
 }
 
 // currentChunkID returns the id of the selected chunk (for cursor preservation).
-func (m model) currentChunkID() string {
+func (m tview) currentChunkID() string {
 	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.chunks) {
 		return m.transcript.chunks[m.transcript.cursor].ID
 	}
@@ -234,7 +235,7 @@ func hiddenHint(n int) string {
 // renderChunk renders one chunk to a styled multi-line block (no centering). The
 // cursor card keeps its selection indicator regardless of focus but only takes
 // the accent border when the history region is focused.
-func (m model) renderChunk(i int, selected bool) string {
+func (m tview) renderChunk(i int, selected bool) string {
 	c := m.transcript.chunks[i]
 	accent := selected && m.historyFocused()
 	container := m.transcriptWidth()
@@ -252,7 +253,7 @@ func (m model) renderChunk(i int, selected bool) string {
 	}
 }
 
-func (m model) renderAICard(c transcript.Chunk, container int, selected, accent bool) string {
+func (m tview) renderAICard(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -281,11 +282,11 @@ func (m model) renderAICard(c transcript.Chunk, container int, selected, accent 
 	return header + "\n" + indentBlock(card, sel)
 }
 
-// assistantBrand uses m.history.openAgent in history mode because the live
-// session isn't in m.sessions.
-func (m model) assistantBrand() (StyledIcon, string) {
-	agent := m.sessions[m.selectedID].Agent
-	if m.mode == modeHistoryTranscript {
+// assistantBrand uses m.history.openAgent for a history transcript because the
+// past session isn't in m.sessions.
+func (m tview) assistantBrand() (StyledIcon, string) {
+	agent := m.sessions[m.sessionID].Agent
+	if !m.live {
 		agent = m.history.openAgent
 	}
 	name, _ := agentLabel(agent)
@@ -295,7 +296,7 @@ func (m model) assistantBrand() (StyledIcon, string) {
 	return Icon.Claude, name
 }
 
-func (m model) aiHeader(c transcript.Chunk, width int) string {
+func (m tview) aiHeader(c transcript.Chunk, width int) string {
 	chev := ""
 	if m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
@@ -340,7 +341,7 @@ func aiMeta(c transcript.Chunk) string {
 	return strings.Join(parts, "  ")
 }
 
-func (m model) aiBody(c transcript.Chunk, cw int) string {
+func (m tview) aiBody(c transcript.Chunk, cw int) string {
 	if m.chunkExpanded(c) {
 		var rows []string
 		for _, it := range c.Items {
@@ -447,7 +448,7 @@ func userBubbleInner(container int) int {
 	return max(userBubbleWidth(container)-6, 20)
 }
 
-func (m model) renderUserCard(c transcript.Chunk, container int, selected, accent bool) string {
+func (m tview) renderUserCard(c transcript.Chunk, container int, selected, accent bool) string {
 	maxBubble := userBubbleWidth(container)
 	sel := selIndicator(selected)
 	expandable := m.chunkExpandable(c)
@@ -497,7 +498,7 @@ func (m model) renderUserCard(c transcript.Chunk, container int, selected, accen
 	return header + "\n" + indentBlock(aligned, sel)
 }
 
-func (m model) renderSystem(c transcript.Chunk, container int, selected, accent bool) string {
+func (m tview) renderSystem(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -533,7 +534,7 @@ func (m model) renderSystem(c transcript.Chunk, container int, selected, accent 
 	return indentBlock(card, selIndicator(selected))
 }
 
-func (m model) renderShellCard(c transcript.Chunk, container int, selected, accent bool) string {
+func (m tview) renderShellCard(c transcript.Chunk, container int, selected, accent bool) string {
 	fraction := 3 * container / 4
 	if container < maxContentWidth {
 		fraction = 7 * container / 8
@@ -559,7 +560,7 @@ func (m model) renderShellCard(c transcript.Chunk, container int, selected, acce
 	return header + "\n" + indentBlock(card, sel)
 }
 
-func (m model) shellHeader(c transcript.Chunk, width int) string {
+func (m tview) shellHeader(c transcript.Chunk, width int) string {
 	chev := ""
 	if m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
@@ -572,7 +573,7 @@ func (m model) shellHeader(c transcript.Chunk, width int) string {
 	return spaceBetween(left, StyleDim.Render(clockTime(c.Timestamp)), width)
 }
 
-func (m model) shellBody(c transcript.Chunk, iw int) string {
+func (m tview) shellBody(c transcript.Chunk, iw int) string {
 	if !m.chunkExpanded(c) {
 		text, hidden := truncateLines(c.Text, maxCollapsedLines)
 		body := StyleSecondaryBold.Render("$") + " " + text
@@ -630,7 +631,7 @@ type cardEntry struct {
 
 // layoutChunks lays every chunk out as display lines, recording each chunk's
 // first line index (for cursor scrolling). A blank separator precedes each card.
-func (m model) layoutChunks() (lines []string, first []int) {
+func (m tview) layoutChunks() (lines []string, first []int) {
 	bodyW, containerW := m.bodyWidth(), m.containerWidth()
 	focused := m.historyFocused()
 	_, brand := m.assistantBrand()
@@ -653,11 +654,11 @@ func (m model) layoutChunks() (lines []string, first []int) {
 	return lines, first
 }
 
-// viewportHeight is the line count of the scrollable history region. On the
-// session screen it equals the layout's history height so scroll math matches
-// what sessionView renders. NOTE: sessionLayout must not call this (recursion).
-func (m model) viewportHeight() int {
-	if m.mode == modeSession {
+// viewportHeight is the layout's history height for a live transcript so
+// scroll math matches what the frame draws. NOTE: sessionLayout must not call
+// this (recursion).
+func (m tview) viewportHeight() int {
+	if m.live {
 		h, _ := m.sessionLayout()
 		return h
 	}
@@ -675,7 +676,7 @@ func chunkSpan(i int, first []int, total int) (int, int) {
 }
 
 // ensureChunkVisible scrolls so the selected chunk sits within the viewport.
-func (m *model) ensureChunkVisible() {
+func (m tview) ensureChunkVisible() {
 	lines, first := m.layoutChunks()
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return
@@ -694,7 +695,7 @@ func (m *model) ensureChunkVisible() {
 }
 
 // cursorVisible reports whether the selected chunk overlaps the current viewport.
-func (m model) cursorVisible() bool {
+func (m tview) cursorVisible() bool {
 	lines, first := m.layoutChunks()
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return false
@@ -705,7 +706,7 @@ func (m model) cursorVisible() bool {
 
 // keepCursorVisible moves the cursor one card at a time toward the viewport,
 // stopping at the first card not wholly outside it.
-func (m *model) keepCursorVisible() {
+func (m tview) keepCursorVisible() {
 	lines, first := m.layoutChunks()
 	c := &m.transcript.cursor
 	if *c < 0 || *c >= len(first) {
@@ -725,7 +726,7 @@ func (m *model) keepCursorVisible() {
 
 // chunkAtLine returns the index of the chunk whose span contains the given line
 // (the fallback when a single chunk is taller than the viewport).
-func (m model) chunkAtLine(line int) int {
+func (m tview) chunkAtLine(line int) int {
 	_, first := m.layoutChunks()
 	idx := 0
 	for i, s := range first {
@@ -738,7 +739,7 @@ func (m model) chunkAtLine(line int) int {
 
 // firstVisibleChunk/lastVisibleChunk return the first/last chunk starting within
 // the viewport, falling back to chunkAtLine(scroll) when a tall chunk fills it.
-func (m model) firstVisibleChunk() int {
+func (m tview) firstVisibleChunk() int {
 	_, first := m.layoutChunks()
 	h := m.viewportHeight()
 	for i, s := range first {
@@ -749,7 +750,7 @@ func (m model) firstVisibleChunk() int {
 	return m.chunkAtLine(m.transcript.scroll)
 }
 
-func (m model) lastVisibleChunk() int {
+func (m tview) lastVisibleChunk() int {
 	_, first := m.layoutChunks()
 	h := m.viewportHeight()
 	last := -1
@@ -764,7 +765,7 @@ func (m model) lastVisibleChunk() int {
 	return last
 }
 
-func (m *model) clampScroll(total, h int) {
+func (m tview) clampScroll(total, h int) {
 	if maxScroll := max(0, total-h); m.transcript.scroll > maxScroll {
 		m.transcript.scroll = maxScroll
 	}
@@ -774,18 +775,18 @@ func (m *model) clampScroll(total, h int) {
 }
 
 // clampScrollNow clamps the line scroll to the current layout's valid range.
-func (m *model) clampScrollNow() {
+func (m tview) clampScrollNow() {
 	lines, _ := m.layoutChunks()
 	m.clampScroll(len(lines), m.viewportHeight())
 }
 
 // maxScroll returns the largest valid top-line offset for the current layout.
-func (m model) maxScroll() int {
+func (m tview) maxScroll() int {
 	lines, _ := m.layoutChunks()
 	return max(0, len(lines)-m.viewportHeight())
 }
 
-func (m *model) clampCursor() {
+func (m tview) clampCursor() {
 	if m.transcript.cursor >= len(m.transcript.chunks) {
 		m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
 	}
@@ -797,7 +798,7 @@ func (m *model) clampCursor() {
 // restoreChunkCursor re-resolves the cursor to the same chunk id after a refresh
 // without moving the viewport. When follow is true the view pins to the bottom so
 // a live session keeps tailing.
-func (m *model) restoreChunkCursor(id string, follow bool) {
+func (m tview) restoreChunkCursor(id string, follow bool) {
 	m.transcript.cursor = -1
 	if id != "" {
 		for i, c := range m.transcript.chunks {
@@ -817,7 +818,7 @@ func (m *model) restoreChunkCursor(id string, follow bool) {
 }
 
 // transcriptBody renders the transcript pane.
-func (m model) transcriptBody() string {
+func (m tview) transcriptBody() string {
 	var b strings.Builder
 
 	if m.transcript.err != nil {

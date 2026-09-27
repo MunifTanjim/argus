@@ -22,19 +22,19 @@ func TestSmokeRealTranscript(t *testing.T) {
 	}
 	t.Logf("built %d chunks", len(view.Chunks))
 
-	m := testModel()
+	m := bareTv()
 	initTheme(true)
 	initIcons()
 	initStyles()
 	m.hasDark = true
-	m.transcript.jsonHL = newCodeHighlighter(true, "json")
+	m.render.jsonHL = newCodeHighlighter(true, "json")
 	m.transcript.chunks = view.Chunks
 
 	lines, first := m.layoutChunks()
 	t.Logf("collapsed layout: %d lines, %d chunk offsets", len(lines), len(first))
 
 	// Expand-all layout (exercise item rows + last-output bodies).
-	setAllExpanded(&m, true)
+	setAllExpanded(m, true)
 	linesExp, _ := m.layoutChunks()
 	t.Logf("expanded layout: %d lines", len(linesExp))
 
@@ -46,7 +46,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	}
 
 	// Print the top-of-transcript window for eyeballing.
-	setAllExpanded(&m, false)
+	setAllExpanded(m, false)
 	m.transcript.cursor, m.transcript.scroll = 0, 0
 	out := m.transcriptBody()
 	preview := strings.SplitN(out, "\n", 45)

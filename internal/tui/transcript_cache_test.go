@@ -15,7 +15,7 @@ import (
 
 // freshLines renders the transcript without the card cache, as the reference
 // the cached layout must match.
-func freshLines(m model) []string {
+func freshLines(m tview) []string {
 	var lines []string
 	for i := range m.transcript.chunks {
 		if i > 0 {
@@ -27,7 +27,7 @@ func freshLines(m model) []string {
 	return lines
 }
 
-func assertLayoutFresh(t *testing.T, m model, step string) {
+func assertLayoutFresh(t *testing.T, m tview, step string) {
 	t.Helper()
 	got, _ := m.layoutChunks()
 	if want := freshLines(m); !slices.Equal(got, want) {
@@ -52,7 +52,7 @@ func mixedChunks(n int) []transcript.Chunk {
 	return out
 }
 
-func setAllExpanded(m *model, on bool) {
+func setAllExpanded(m tview, on bool) {
 	for i := range m.transcript.chunks {
 		m.setExpanded(i, on)
 	}
@@ -60,9 +60,8 @@ func setAllExpanded(m *model, on bool) {
 
 // The cached layout tracks every input a card renders from.
 func TestLayoutCacheTracksRenderInputs(t *testing.T) {
-	m := testModel()
-	m.mode = modeSession
-	m.focus = focusDock
+	mm := withFocus(withView(testModel(), viewSession), sessionDock)
+	m := tvOf(&mm)
 	m.transcript.chunks = mixedChunks(6)
 	assertLayoutFresh(t, m, "initial")
 
@@ -72,13 +71,13 @@ func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 	m.setExpanded(3, true)
 	assertLayoutFresh(t, m, "card expanded")
 
-	m.focus = focusHistory
+	mm = withFocus(mm, mainPane)
 	assertLayoutFresh(t, m, "history focused")
 
 	m.width = 120
 	assertLayoutFresh(t, m, "width changed")
 
-	setAllExpanded(&m, true)
+	setAllExpanded(m, true)
 	assertLayoutFresh(t, m, "all expanded")
 
 	m.sessions = map[string]session.Session{"": {Agent: "antigravity"}}
@@ -88,41 +87,45 @@ func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 // A delta that rewrites the last chunk in place (same id) shows the new content.
 func TestLayoutCacheDropsChunksReplacedByDelta(t *testing.T) {
 	m := deltaModel()
-	m.layoutChunks()
+	tvOf(&m).layoutChunks()
 
 	upd := transcript.Chunk{ID: "c19", Kind: transcript.ChunkUser, Text: "rewritten"}
 	res, _ := m.Update(transcriptDeltaMsg{
 		ref:   subRef{subID: "x", sessionID: "s1"},
 		delta: api.TranscriptDelta{FromIndex: 19, Chunks: []transcript.Chunk{upd}},
 	})
-	assertLayoutFresh(t, res.(model), "delta")
+	assertLayoutFresh(t, tvIn(res.(model)), "delta")
 }
 
 // A full reload that keeps chunk ids shows the new content.
 func TestLayoutCacheDropsChunksOnFullReload(t *testing.T) {
 	reloaded := userChunks(20)
 	reloaded[0].Text = "reloaded"
+	history := testModel()
+	history.width, history.height = 80, 10
+	history = withChunks(withView(history, viewHistoryTranscript), userChunks(20))
 
 	for _, tc := range []struct {
 		name string
+		m    model
 		msg  tea.Msg
 	}{
-		{"live", transcriptMsg{id: "s1", chunks: reloaded}},
-		{"history", histTranscriptMsg{chunks: reloaded}},
+		{"live", deltaModel(), transcriptMsg{id: "s1", chunks: reloaded}},
+		{"history", history, histTranscriptMsg{addr: trOf(history).history.addr(), chunks: reloaded}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := deltaModel()
-			m.selectedID = "s1"
-			m.layoutChunks()
+			m := tc.m
+			tvOf(&m).layoutChunks()
 			res, _ := m.Update(tc.msg)
-			assertLayoutFresh(t, res.(model), tc.name)
+			assertLayoutFresh(t, tvIn(res.(model)), tc.name)
 		})
 	}
 }
 
 // Rebinding the stream to another transcript shows that transcript's cards.
 func TestLayoutCacheDropsChunksOnRebind(t *testing.T) {
-	m := deltaModel()
+	mm := deltaModel()
+	m := tvOf(&mm)
 	m.layoutChunks()
 
 	other := userChunks(20)
@@ -136,12 +139,14 @@ func TestLayoutCacheDropsChunksOnRebind(t *testing.T) {
 func BenchmarkTranscriptScroll(b *testing.B) {
 	m := testModel()
 	m.width, m.height = 160, 50
-	m.mode = modeSession
-	m.transcript.chunks = mixedChunks(200)
-	m.transcript.cursor = 100
-	m.layoutChunks()
+	m = withView(m, viewSession)
+	v := tvOf(&m)
+	v.transcript.chunks = mixedChunks(200)
+	v.transcript.cursor = 100
+	v.layoutChunks()
 	for b.Loop() {
-		res, _ := m.actCardNext(tea.KeyPressMsg{})
-		_ = res.(model).View()
+		v.actCardNext(tea.KeyPressMsg{})
+		v.put()
+		_ = m.View()
 	}
 }

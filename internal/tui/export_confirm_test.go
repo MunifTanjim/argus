@@ -12,14 +12,16 @@ import (
 )
 
 func TestExportConfirmGate(t *testing.T) {
-	m := model{mode: modeHistoryTranscript, historyView: histTranscript}
-	m.history.openPath = "/x/session.jsonl"
-	m.history.openAgent = "claude"
+	m := withView(model{}, viewHistoryTranscript)
+	m = withTr(m, func(t *transcriptComp) {
+		t.history.openPath = "/x/session.jsonl"
+		t.history.openAgent = "claude"
+	})
 
 	// First press arms the confirmation, makes no RPC.
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'E'})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'E'})
 	m = res.(model)
-	if !m.pendingExport {
+	if !trOf(m).pendingExport {
 		t.Fatal("export key should arm pendingExport")
 	}
 	if cmd != nil {
@@ -27,9 +29,9 @@ func TestExportConfirmGate(t *testing.T) {
 	}
 
 	// A non-y key cancels.
-	res, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'n'})
+	res, cmd = m.baseKey(tea.KeyPressMsg{Code: 'n'})
 	m = res.(model)
-	if m.pendingExport {
+	if trOf(m).pendingExport {
 		t.Fatal("non-y key should clear pendingExport")
 	}
 	if cmd != nil {
@@ -37,10 +39,10 @@ func TestExportConfirmGate(t *testing.T) {
 	}
 
 	// Confirming with y runs the export.
-	m.pendingExport = true
-	res, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y'})
+	m = withTr(m, func(t *transcriptComp) { t.pendingExport = true })
+	res, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y'})
 	m = res.(model)
-	if m.pendingExport {
+	if trOf(m).pendingExport {
 		t.Fatal("y should clear pendingExport")
 	}
 	if cmd == nil {
@@ -49,28 +51,28 @@ func TestExportConfirmGate(t *testing.T) {
 }
 
 func TestExportConfirmGateSessionList(t *testing.T) {
-	m := model{mode: modeHistorySessions}
-	m.history.sessions = []session.HistorySession{{SessionID: "s1", Agent: "claude", TranscriptPath: "/x/s1.jsonl"}}
-	m.history.project = session.HistoryProject{Repo: "argus", Cwd: "/x"}
+	m := withHistorySessions(model{}, session.HistoryProject{Repo: "argus", Cwd: "/x"}, session.HistorySessionPage{
+		Items: []session.HistorySession{{SessionID: "s1", Agent: "claude", TranscriptPath: "/x/s1.jsonl"}},
+	})
 
-	res, cmd := m.handleHistorySessionsKey(tea.KeyPressMsg{Code: 'E'})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'E'})
 	m = res.(model)
-	if !m.pendingExport || cmd != nil {
-		t.Fatalf("export key should arm confirm without a command: pending=%v cmd=%v", m.pendingExport, cmd != nil)
+	if !historyOf(m).pendingExport || cmd != nil {
+		t.Fatalf("export key should arm confirm without a command: pending=%v cmd=%v", historyOf(m).pendingExport, cmd != nil)
 	}
 
-	res, cmd = m.handleHistorySessionsKey(tea.KeyPressMsg{Code: 'y'})
+	res, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y'})
 	m = res.(model)
-	if m.pendingExport || cmd == nil {
-		t.Fatalf("y should clear pending and run export: pending=%v cmd=%v", m.pendingExport, cmd != nil)
+	if historyOf(m).pendingExport || cmd == nil {
+		t.Fatalf("y should clear pending and run export: pending=%v cmd=%v", historyOf(m).pendingExport, cmd != nil)
 	}
 }
 
 func TestExportKeyInertOnViewer(t *testing.T) {
-	m := model{mode: modeHistoryTranscript, historyView: histTranscript, viewer: true}
-	m.history.openPath = "/x/session.jsonl"
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'E'})
-	if res.(model).pendingExport {
+	m := withView(model{viewer: true}, viewHistoryTranscript)
+	m = withTr(m, func(t *transcriptComp) { t.history.openPath = "/x/session.jsonl" })
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'E'})
+	if trOf(res.(model)).pendingExport {
 		t.Fatal("viewer must not arm export")
 	}
 	if cmd != nil {

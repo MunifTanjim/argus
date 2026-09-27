@@ -17,20 +17,24 @@ type exportDoneMsg struct {
 	err  error
 }
 
-// actExportSession exports the transcript currently open (live or history) to a
-// .argus file in the working directory, reporting the path via a flash message.
-func (m model) actExportSession(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// actExportSession writes the open history transcript to a .argus file in the
+// working directory.
+func (m tview) actExportSession(tea.KeyPressMsg) tea.Cmd {
 	if m.viewer {
-		return m, nil
+		return nil
 	}
 	agent, path, nodeID, md, ok := m.exportTarget()
 	if !ok {
-		m.flash = "export: no session open"
-		return m, nil
+		m.c.setFlash("export: no session open")
+		return nil
 	}
+	m.c.setFlash("exporting…")
+	return m.exportCmd(agent, path, nodeID, md)
+}
+
+func (m model) exportCmd(agent, path, nodeID string, md bundle.Metadata) tea.Cmd {
 	client := m.client
-	m.flash = "exporting…"
-	return m, func() tea.Msg {
+	return func() tea.Msg {
 		var res api.ExportBundleResult
 		err := client.Call(api.MethodSessionExport, api.ExportBundleParams{
 			NodeID: nodeID, Agent: agent, TranscriptPath: path, Metadata: md,
@@ -43,28 +47,12 @@ func (m model) actExportSession(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// exportTarget resolves the session to export. Export is History-only: either an
-// open transcript or the cursor row in the session list.
-func (m model) exportTarget() (agent, path, nodeID string, md bundle.Metadata, ok bool) {
-	switch m.mode {
-	case modeHistoryTranscript:
-		if m.history.openPath == "" {
-			return "", "", "", bundle.Metadata{}, false
-		}
-		md = historyExportMetadata(m.history.openSession, m.history.project)
-		return m.history.openAgent, m.history.openPath, m.history.openNodeID, md, true
-	case modeHistorySessions:
-		if m.history.sessCursor >= len(m.history.sessions) {
-			return "", "", "", bundle.Metadata{}, false
-		}
-		s := m.history.sessions[m.history.sessCursor]
-		if s.TranscriptPath == "" {
-			return "", "", "", bundle.Metadata{}, false
-		}
-		md = historyExportMetadata(s, m.history.project)
-		return s.Agent, s.TranscriptPath, m.history.project.NodeID, md, true
+func (m tview) exportTarget() (agent, path, nodeID string, md bundle.Metadata, ok bool) {
+	if m.live || m.history.openPath == "" {
+		return "", "", "", bundle.Metadata{}, false
 	}
-	return "", "", "", bundle.Metadata{}, false
+	md = historyExportMetadata(m.history.openSession, m.history.project)
+	return m.history.openAgent, m.history.openPath, m.history.openNodeID, md, true
 }
 
 func historyExportMetadata(s session.HistorySession, p session.HistoryProject) bundle.Metadata {

@@ -59,7 +59,11 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 	}
 
 	for _, s := range slices.Sorted(maps.Keys(raw)) {
-		if s != "global" && screenBindings[s] == nil {
+		switch {
+		case s == "global" || screenBindings[s] != nil:
+		case oldSections[s] != "":
+			errs = append(errs, fmt.Sprintf("keymap: unknown screen %q (now %s)", s, oldSections[s]))
+		default:
 			errs = append(errs, fmt.Sprintf("keymap: unknown screen %q", s))
 		}
 	}

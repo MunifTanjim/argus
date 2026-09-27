@@ -38,7 +38,7 @@ func TestListViewGroupsByHost(t *testing.T) {
 		nodeSession("beta:%1", "beta", "beta", session.StatusIdle),
 		nodeSession("alpha:%1", "alpha", "alpha", session.StatusIdle),
 	)
-	out := m.listView()
+	out := paneView(m)
 
 	// Both host headers present, alpha before beta (alphabetical, none awaiting).
 	a := indexOf(t, out, "▌ alpha")
@@ -52,7 +52,7 @@ func TestListViewNoHeadersWhenLocal(t *testing.T) {
 	m := modelWith(
 		session.Session{ID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%1"}},
 	)
-	if out := m.listView(); strings.Contains(out, "▌ ") {
+	if out := paneView(m); strings.Contains(out, "▌ ") {
 		t.Fatalf("local (no node label) list should have no host headers:\n%s", out)
 	}
 }
@@ -101,7 +101,7 @@ func TestListViewNeedsYouSection(t *testing.T) {
 		nodeSession("alpha:wait", "alpha", "alpha", session.StatusAwaitingInput),
 		nodeSession("beta:wait", "beta", "beta", session.StatusAwaitingInput),
 	)
-	out := m.listView()
+	out := paneView(m)
 	ny := indexOf(t, out, "Needs you")
 	ha := indexOf(t, out, "▌ alpha")
 	// "Needs you" precedes the per-host group headers.
@@ -124,7 +124,7 @@ func TestOfflineGroupAndCard(t *testing.T) {
 	off.Offline = true
 	off.Repo = "argus"
 	m := modelWith(off)
-	out := m.listView()
+	out := paneView(m)
 
 	if !strings.Contains(out, "▌ home") || !strings.Contains(out, "(offline)") {
 		t.Fatalf("offline node header should be flagged:\n%s", out)

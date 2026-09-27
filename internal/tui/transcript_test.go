@@ -14,21 +14,19 @@ import (
 
 func testModel() model {
 	return model{
-		transcript: transcriptState{
-			expanded:    map[string]bool{},
+		render: renderCache{
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
-			cards:       map[string]cardEntry{},
 		},
-		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
-		replyDrafts: map[string]string{},
-		redact:      redactState{input: newRedactInput()},
-		termKeyCh:   make(chan termKey, termKeyBuf),
-		width:       80,
-		height:      24,
+		dock:      newDock(),
+		termKeyCh: make(chan termKey, termKeyBuf),
+		width:     80,
+		height:    24,
 		// No sidebars: views get the full width under the frame header, so view
 		// tests need not account for the tree or file columns.
-		projects: projectsState{sidebarHidden: true, filesHidden: true},
+		left:  leftSidebarState{hidden: true},
+		right: rightSidebarState{hidden: true},
+		main:  backStack{homeComp{}},
 	}
 }
 
@@ -37,37 +35,34 @@ func TestAssistantBrandResolvesAgent(t *testing.T) {
 
 	// History transcript: brand comes from the opened history session's agent,
 	// not the (absent) live session.
-	m.mode = modeHistoryTranscript
-	m.history.openAgent = "antigravity"
-	if _, name := m.assistantBrand(); name != "Antigravity" {
+	m = withView(m, viewHistoryTranscript)
+	m = withTr(m, func(t *transcriptComp) { t.history.openAgent = "antigravity" })
+	if _, name := tvOf(&m).assistantBrand(); name != "Antigravity" {
 		t.Errorf("history brand = %q, want Antigravity", name)
 	}
 
 	// Live transcript: brand comes from the selected live session's agent.
-	m.mode = modeSession
-	m.selectedID = "s1"
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
-	if _, name := m.assistantBrand(); name != "Codex" {
+	m = openLive(m, "s1")
+	if _, name := tvOf(&m).assistantBrand(); name != "Codex" {
 		t.Errorf("live brand = %q, want Codex", name)
 	}
 }
 
 func TestAssistantBrandOpenCode(t *testing.T) {
 	m := testModel()
-	m.mode = modeSession
-	m.selectedID = "s1"
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "opencode"}}
-	if _, name := m.assistantBrand(); name != "OpenCode" {
+	m = openLive(m, "s1")
+	if _, name := tvOf(&m).assistantBrand(); name != "OpenCode" {
 		t.Errorf("opencode brand = %q, want OpenCode", name)
 	}
 }
 
 func TestAssistantBrandDefaultClaude(t *testing.T) {
 	m := testModel()
-	m.mode = modeSession
-	m.selectedID = "s1"
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: ""}}
-	if _, name := m.assistantBrand(); name != "Claude" {
+	m = openLive(m, "s1")
+	if _, name := tvOf(&m).assistantBrand(); name != "Claude" {
 		t.Errorf("empty-agent brand = %q, want Claude", name)
 	}
 }
@@ -89,16 +84,15 @@ func sampleChunks() []transcript.Chunk {
 
 func loaded() model {
 	m := testModel()
-	m.mode = modeSession
-	m.transcript.chunks = sampleChunks()
-	return m
+	m = withView(m, viewSession)
+	return withChunks(m, sampleChunks())
 }
 
 // TestUserChunkWithSkillItemExpandableAndDrillable verifies that a user chunk
 // carrying an ItemSkill is marked expandable and its item is reachable in the
 // detail drill-down.
 func TestUserChunkWithSkillItemExpandableAndDrillable(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	m.width = 80
 
 	skillItem := transcript.Item{
@@ -217,7 +211,8 @@ func TestUserChunkExpandableByWrappedLines(t *testing.T) {
 }
 
 func TestExpandDefaultsAndToggle(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	ai := m.transcript.chunks[1]
 	if m.chunkExpanded(ai) {
 		t.Errorf("AI chunk should default collapsed")
@@ -233,26 +228,26 @@ func TestExpandDefaultsAndToggle(t *testing.T) {
 }
 
 func TestFoldKeysExpandAndCollapse(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.transcript.cursor = 1 // the expandable AI chunk
 	if m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Fatal("AI chunk should start collapsed")
 	}
 
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if !m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Error("l should expand the selected card")
 	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if m.chunkExpanded(m.transcript.chunks[1]) {
 		t.Error("h should collapse the selected card")
 	}
 }
 
 func TestLayoutChunks(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	lines, first := m.layoutChunks()
 	if len(lines) == 0 {
 		t.Fatal("layout produced no lines")
@@ -269,7 +264,8 @@ func TestLayoutChunks(t *testing.T) {
 }
 
 func TestCursorClamp(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.transcript.cursor = 99
 	m.clampCursor()
 	if m.transcript.cursor != len(m.transcript.chunks)-1 {
@@ -283,7 +279,8 @@ func TestCursorClamp(t *testing.T) {
 }
 
 func TestRestoreChunkCursorByID(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.transcript.cursor = 1
 	id := m.currentChunkID()
 
@@ -297,21 +294,20 @@ func TestRestoreChunkCursorByID(t *testing.T) {
 }
 
 func TestKeyCardNav(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.height = 6 // tiny viewport
 	last := len(m.transcript.chunks) - 1
 
 	// }/{ move the chunk cursor between cards and clamp at the ends.
 	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-		m = res.(model)
+		m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	}
 	if m.transcript.cursor != last {
 		t.Errorf("cursor should clamp at last chunk %d, got %d", last, m.transcript.cursor)
 	}
 	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
-		m = res.(model)
+		m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
 	}
 	if m.transcript.cursor != 0 {
 		t.Errorf("after card-nav up: cursor=%d, want 0", m.transcript.cursor)
@@ -319,7 +315,8 @@ func TestKeyCardNav(t *testing.T) {
 }
 
 func TestKeyCardNavReanchorsToVisible(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.height = 6 // tiny viewport so the cursor can scroll out of view
 	m.transcript.cursor = 0
 
@@ -335,8 +332,7 @@ func TestKeyCardNavReanchorsToVisible(t *testing.T) {
 
 	// } with an off-screen cursor selects the first visible card without moving
 	// the viewport (instead of yanking back up to cursor+1).
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	if m.transcript.cursor != wantFirst {
 		t.Errorf("} off-screen: tcursor=%d, want first-visible %d", m.transcript.cursor, wantFirst)
 	}
@@ -347,17 +343,16 @@ func TestKeyCardNavReanchorsToVisible(t *testing.T) {
 	// With the cursor now visible, } advances by one as before.
 	if m.cursorVisible() {
 		prev := m.transcript.cursor
-		res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-		m = res.(model)
+		m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 		if m.transcript.cursor != min(prev+1, len(m.transcript.chunks)-1) {
 			t.Errorf("} visible: tcursor=%d, want %d", m.transcript.cursor, min(prev+1, len(m.transcript.chunks)-1))
 		}
 	}
 }
 
-func scrollTestView(height int, texts ...string) model {
-	m := testModel()
-	m.mode = modeSession
+func scrollTestView(height int, texts ...string) tview {
+	mm := withView(testModel(), viewSession)
+	m := tvOf(&mm)
 	m.height = height
 	for i, text := range texts {
 		m.transcript.chunks = append(m.transcript.chunks,
@@ -366,12 +361,12 @@ func scrollTestView(height int, texts ...string) model {
 	return m
 }
 
-func pressScrollKey(m model, code rune) model {
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: code, Text: string(code)})
-	return res.(model)
+func pressScrollKey(m tview, code rune) tview {
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: code, Text: string(code)})
+	return m
 }
 
-func lineScrollTestView() model {
+func lineScrollTestView() tview {
 	m := scrollTestView(14, "a", "b", "c", "d", "e", "f", "g")
 	m.transcript.chunks[3] = transcript.Chunk{ID: "a3", Kind: transcript.ChunkAI, Text: strings.Repeat("line\n\n", 20)}
 	return m
@@ -482,53 +477,50 @@ func TestLineScrollInsideLongCardKeepsSelection(t *testing.T) {
 }
 
 func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.height = 200 // every card fits: nothing to scroll
 	m.transcript.cursor = 0
 	last := len(m.transcript.chunks) - 1
-	press := func(k tea.KeyPressMsg) {
-		res, _ := m.handleTranscriptKey(k)
-		m = res.(model)
-	}
 
 	for i := 1; i <= last; i++ {
-		press(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 		if m.transcript.cursor != i || m.transcript.scroll != 0 {
 			t.Fatalf("j #%d: cursor=%d scroll=%d, want cursor=%d scroll=0", i, m.transcript.cursor, m.transcript.scroll, i)
 		}
 	}
-	press(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if m.transcript.cursor != last {
 		t.Fatalf("j at the last card should stay put, cursor=%d", m.transcript.cursor)
 	}
-	press(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.transcript.cursor != last-1 {
 		t.Fatalf("up should select the previous card, cursor=%d", m.transcript.cursor)
 	}
 }
 
 func TestCardNavWhenCardFits(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.height = 40 // tall viewport: every card fits
 	m.transcript.cursor = 0
 
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	if m.transcript.cursor != 1 {
 		t.Errorf("} should select the next card, cursor=%d", m.transcript.cursor)
 	}
 	if m.transcript.scroll != 0 {
 		t.Errorf("} should not scroll when the card fits, scroll=%d", m.transcript.scroll)
 	}
-	res, _ = m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
 	if m.transcript.cursor != 0 {
 		t.Errorf("{ should select the previous card, cursor=%d", m.transcript.cursor)
 	}
 }
 
 func TestCardNavSkipsOversizedCard(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	m.height = 6 // tiny viewport so the selected card overflows it
 	m.transcript.cursor = 0
 
@@ -537,8 +529,7 @@ func TestCardNavSkipsOversizedCard(t *testing.T) {
 		t.Fatal("setup: selected card should overflow the viewport")
 	}
 
-	res, _ := m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	m = res.(model)
+	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
 	if m.transcript.cursor != 1 {
 		t.Errorf("} should jump past an oversized card, cursor=%d", m.transcript.cursor)
 	}
@@ -548,7 +539,8 @@ func TestCardNavSkipsOversizedCard(t *testing.T) {
 }
 
 func TestTranscriptViewRenders(t *testing.T) {
-	m := loaded()
+	mm := loaded()
+	m := tvOf(&mm)
 	out := m.transcriptBody()
 	if !strings.Contains(out, "hello") {
 		t.Errorf("expected user text in output, got:\n%s", out)
@@ -559,9 +551,10 @@ func TestTranscriptViewRenders(t *testing.T) {
 }
 
 func TestTranscriptBrandFromTool(t *testing.T) {
-	m := loaded()
-	m.selectedID = "s1"
-	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
+	mm := testModel()
+	mm.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
+	mm = withChunks(openLive(mm, "s1"), sampleChunks())
+	m := tvOf(&mm)
 	out := m.transcriptBody()
 	if !strings.Contains(out, "Codex") {
 		t.Errorf("expected Codex header for a codex session, got:\n%s", out)
@@ -572,7 +565,7 @@ func TestTranscriptBrandFromTool(t *testing.T) {
 }
 
 func TestRenderShellCard(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	c := transcript.Chunk{
 		ID: "sh1", Kind: transcript.ChunkShell,
 		Text:   "echo hi",
@@ -610,7 +603,7 @@ func TestRenderShellCard(t *testing.T) {
 }
 
 func TestRenderShellCardError(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	c := transcript.Chunk{
 		ID: "sh1", Kind: transcript.ChunkShell,
 		Text: "false", Detail: "Exit code: 1\nOutput:\n", IsError: true,

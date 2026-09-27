@@ -22,11 +22,11 @@ func TestScreenAttachDrainsEmulatorReplies(t *testing.T) {
 	m := testModel()
 	m.client = c
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Tmux: session.TmuxLocation{PaneID: "%0"}}}
-	m.mode = modeList
+	m = withView(m, viewHome)
 	m2, _ := m.enterScreen("s1") // starts the drain goroutine
 
 	data := base64.StdEncoding.EncodeToString([]byte("hi\x1b[c\x1b[>c\x1b[6n more"))
-	params, _ := json.Marshal(api.TerminalOutput{TermID: m2.termID, Data: data})
+	params, _ := json.Marshal(api.TerminalOutput{TermID: scr(m2).termID, Data: data})
 	done := make(chan struct{})
 	go func() {
 		m2.applyEvent(api.Notification{Method: api.MethodTerminalOutput, Params: params})
@@ -37,27 +37,27 @@ func TestScreenAttachDrainsEmulatorReplies(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("applyEvent hung on a device-attributes query: emulator reply pipe not drained")
 	}
-	if !strings.Contains(m2.term.Render(), "hi") {
-		t.Errorf("render missing written text; got %q", m2.term.Render())
+	if !strings.Contains(scr(m2).term.Render(), "hi") {
+		t.Errorf("render missing written text; got %q", scr(m2).term.Render())
 	}
-	_, _ = m2.leaveScreen() // ends the drain goroutine
+	_, _ = leaveScreen(m2) // ends the drain goroutine
 }
 
 func TestTerminalExitedLeavesScreen(t *testing.T) {
-	m, _ := screenModel() // attached: mode=screen, termID="s1", origin=list
+	m, _ := screenModel() // attached: view=screen, termID="s1", origin=list
 
 	// exited for another term is ignored.
 	other, _ := json.Marshal(api.TerminalExited{TermID: "other"})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalExited, Params: other})
-	if m.mode != modeScreen {
-		t.Fatalf("exited(other): mode=%v want screen (ignored)", m.mode)
+	if viewOf(m) != viewScreen {
+		t.Fatalf("exited(other): view=%v want screen (ignored)", viewOf(m))
 	}
 
 	// exited for the active term leaves the dead attach and flashes.
-	params, _ := json.Marshal(api.TerminalExited{TermID: m.termID})
+	params, _ := json.Marshal(api.TerminalExited{TermID: scr(m).termID})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalExited, Params: params})
-	if m.mode != modeList || m.term != nil || m.termID != "" {
-		t.Fatalf("exited: mode=%v term=%v id=%q want list + cleared", m.mode, m.term, m.termID)
+	if viewOf(m) != viewHome || scr(m).term != nil || scr(m).termID != "" {
+		t.Fatalf("exited: view=%v term=%v id=%q want list + cleared", viewOf(m), scr(m).term, scr(m).termID)
 	}
 	if m.flash != "terminal exited" {
 		t.Errorf("exited: flash=%q want %q", m.flash, "terminal exited")
@@ -166,14 +166,13 @@ func TestWindowResizeWhileAttached(t *testing.T) {
 	c := &recordingClient{}
 	m := testModel()
 	m.client = c
-	m.mode = modeScreen
-	m.termID = "s1"
-	m.term = vt.NewEmulator(80, 24)
+	m = withView(m, viewScreen)
+	m = withTerm(m, "s1", vt.NewEmulator(80, 24))
 
 	res, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = res.(model)
-	if cols, _ := m.termDims(); m.term.Width() != cols {
-		t.Errorf("emulator width=%d want %d", m.term.Width(), cols)
+	if cols, _ := m.termDims(); scr(m).term.Width() != cols {
+		t.Errorf("emulator width=%d want %d", scr(m).term.Width(), cols)
 	}
 	runCmd(cmd)
 	if !slices.Contains(c.calledMethods(), api.MethodTerminalResize) {
@@ -183,38 +182,36 @@ func TestWindowResizeWhileAttached(t *testing.T) {
 
 func TestDisconnectLeavesScreen(t *testing.T) {
 	m := testModel()
-	m.mode = modeScreen
-	m.screenReturn = modeList
-	m.termID = "s1"
-	m.term = vt.NewEmulator(80, 24)
+	m = withViews(m, viewHome, viewScreen)
+	m = withTerm(m, "s1", vt.NewEmulator(80, 24))
 
 	res, _ := m.Update(connStateMsg{connected: false})
 	m = res.(model)
-	if m.mode != modeList {
-		t.Errorf("disconnect: mode=%v want list", m.mode)
+	if viewOf(m) != viewHome {
+		t.Errorf("disconnect: view=%v want list", viewOf(m))
 	}
-	if m.term != nil || m.termID != "" {
-		t.Errorf("disconnect: term not cleared (term=%v id=%q)", m.term, m.termID)
+	if scr(m).term != nil || scr(m).termID != "" {
+		t.Errorf("disconnect: term not cleared (term=%v id=%q)", scr(m).term, scr(m).termID)
 	}
 }
 
 func TestApplyEventWritesTerminalOutput(t *testing.T) {
 	m := testModel()
-	m.termID = "s1"
-	m.term = vt.NewEmulator(80, 24)
+	m = withView(m, viewScreen)
+	m = withTerm(m, "s1", vt.NewEmulator(80, 24))
 
 	data := base64.StdEncoding.EncodeToString([]byte("hello"))
 	params, _ := json.Marshal(api.TerminalOutput{TermID: "s1", Data: data})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalOutput, Params: params})
 
-	if !strings.Contains(m.term.Render(), "hello") {
-		t.Errorf("render=%q want to contain hello", m.term.Render())
+	if !strings.Contains(scr(m).term.Render(), "hello") {
+		t.Errorf("render=%q want to contain hello", scr(m).term.Render())
 	}
 
 	// Output for a different term id is ignored.
 	other, _ := json.Marshal(api.TerminalOutput{TermID: "other", Data: base64.StdEncoding.EncodeToString([]byte("zzz"))})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalOutput, Params: other})
-	if strings.Contains(m.term.Render(), "zzz") {
-		t.Errorf("render=%q must not contain output for another term", m.term.Render())
+	if strings.Contains(scr(m).term.Render(), "zzz") {
+		t.Errorf("render=%q must not contain output for another term", scr(m).term.Render())
 	}
 }

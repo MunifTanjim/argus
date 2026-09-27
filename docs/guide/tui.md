@@ -23,14 +23,16 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
 
 ## Projects and workspaces
 
-The TUI opens on the projects screen. The screen has three columns:
+The TUI opens on the projects screen. The screen has three columns and a dock:
 
-- **Tree** (left): Home, then each project and its workspaces. A project is a git
+- **Left sidebar**: Home, then each project and its workspaces. A project is a git
   repository or a plain directory. A workspace is one git worktree.
-- **Pane** (center): the Home tabs, the sessions of the selected workspace, or an
+- **Main pane**: the Home tabs, the sessions of the selected workspace, or an
   open session, file, or diff.
 - **Right sidebar**: the **Files** tree and the **Changes** list of the current
   workspace.
+- **Session dock**: under the main pane, while an open session waits for input.
+  It holds the reply, the question, or the permission prompt.
 
 Argus adds a project when a session starts in it. Press `g?` to see every key. The
 main keys are:
@@ -38,7 +40,7 @@ main keys are:
 | Key | Action |
 |---|---|
 | `<C-w>h` / `<C-w>l` | Move focus left or right |
-| `<C-w>j` | In a session, move focus to the prompt dock |
+| `<C-w>j` | In a session, move focus to the session dock |
 | `<C-w>w` / `<C-w>W` | Cycle focus forward or backward |
 | `s` | Start a session in the selected workspace |
 | `a` | Create a workspace from a new branch, a branch, a PR, or an issue |
@@ -46,7 +48,7 @@ main keys are:
 | `T` | Change the target branch of a workspace |
 | `r` / `H` / `P` | Rename, hide, or pin a project |
 | `F` | Forget a project. Its files stay. |
-| `<Leader>o` / `<Leader>e` | Show or hide the tree, or the right sidebar |
+| `<Leader>o` / `<Leader>e` | Show or hide the left sidebar, or the right sidebar |
 | `S` | Run the workspace's setup script again |
 | `L` | Show the output of the workspace's last setup run |
 

@@ -9,17 +9,21 @@ import (
 )
 
 func commandTable() string {
-	type row struct{ screens, keys []string }
+	type row struct{ sections, keys []string }
 	rows := map[string]*row{}
-	for screen, bs := range screenBindings {
+	for section, bs := range screenBindings {
 		for _, b := range bs {
 			r := rows[b.name]
 			if r == nil {
 				r = &row{}
 				rows[b.name] = r
 			}
-			if !slices.Contains(r.screens, screen) {
-				r.screens = append(r.screens, screen)
+			label := section
+			if o := sectionOffers[section]; o.where != "" && offersKey(o.keys, b) {
+				label += " (" + o.where + ")"
+			}
+			if !slices.Contains(r.sections, label) {
+				r.sections = append(r.sections, label)
 			}
 			for _, tok := range strings.Fields(b.defaults) {
 				if v := "`" + tok + "`"; !slices.Contains(r.keys, v) {
@@ -29,12 +33,12 @@ func commandTable() string {
 		}
 	}
 	var b strings.Builder
-	b.WriteString("| Command | Screens | Default keys |\n|---|---|---|\n")
+	b.WriteString("| Command | Sections | Default keys |\n|---|---|---|\n")
 	for _, name := range slices.Sorted(maps.Keys(rows)) {
 		r := rows[name]
-		slices.Sort(r.screens)
+		slices.Sort(r.sections)
 		slices.Sort(r.keys)
-		b.WriteString("| `" + name + "` | " + strings.Join(r.screens, ", ") + " | " + strings.Join(r.keys, " ") + " |\n")
+		b.WriteString("| `" + name + "` | " + strings.Join(r.sections, ", ") + " | " + strings.Join(r.keys, " ") + " |\n")
 	}
 	return b.String()
 }

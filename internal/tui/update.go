@@ -2,11 +2,8 @@ package tui
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -18,20 +15,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
-	"github.com/MunifTanjim/argus/internal/wsscript"
 )
 
 func (m model) Init() tea.Cmd {
-	if m.viewer {
-		return tea.Batch(m.fetchHistTranscript(m.history.openNodeID, m.history.openPath, m.history.openAgent), m.kittyCheckCmd())
+	if t, ok := m.baseComp().(transcriptComp); ok && m.viewer {
+		return tea.Batch(m.fetchHistTranscript(t.history.addr()), m.kittyCheckCmd())
 	}
-	return tea.Batch(m.refreshCmd(), m.fetchProjects(), spinResumeCmd(), m.kittyCheckCmd())
-}
-
-// spinResumeCmd re-arms the list spinner on a timer, so it resumes even when no
-// registry event arrives.
-func spinResumeCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return spinResumeMsg{} })
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.kittyCheckCmd())
 }
 
 // refreshCmd asks the node to rescan; results stream back as registry events.
@@ -56,57 +46,35 @@ func (m model) resyncCmd() tea.Cmd {
 	}
 }
 
-// Update runs the message, then keeps the file tree on the current workspace.
+// Update runs the message, then repairs focus, keeps the dock's draft and the
+// right sidebar on the current session and workspace, and starts the spinner
+// when a shown component needs it.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	res, cmd := m.update(msg)
 	next, ok := res.(model)
 	if !ok {
 		return res, cmd
 	}
+	next, repair := next.repairFocus()
+	next = next.syncDock()
 	next, sync := next.syncSidebar()
-	return next, tea.Batch(cmd, sync)
+	spin := next.maybeSpin()
+	return next, tea.Batch(cmd, repair, sync, spin)
 }
 
-// syncSidebar resets the tree and the changes when the current workspace
-// changes, loads what the shown tab needs, and takes focus off a hidden sidebar.
 func (m model) syncSidebar() (model, tea.Cmd) {
-	if m.projects.focus == focusFiles && (!m.filesVisible() || m.currentWorkspace() == "") {
-		m.projects.focus = focusPane
-		if m.filesVisible() && m.mode == modeProjects && m.sidebarVisible() {
-			m.projects.focus = focusTree // the cursor left the workspaces; the tree is where it moved
-		}
-	}
 	ws := m.currentWorkspace()
-	if ws != m.projects.ftree.ws {
-		m.projects.ftree = newFileTree(ws)
-		if m.projects.fileView.ws != "" && m.projects.fileView.ws != ws {
-			m.projects.fileView = fileViewState{}
-		}
+	var drop tea.Cmd
+	if f, ok := m.openFile(); ok && ws != m.right.fileTree.ws && f.ws != ws {
+		c := &ctx{m: &m}
+		c.closeFile()
+		drop = m.apply(c)
 	}
-	if ws != m.projects.changes.ws {
-		m.projects.changes = changesState{ws: ws, gen: m.projects.changes.gen}
-	}
-	if ws == "" || !m.filesVisible() {
-		return m, nil
-	}
-	if m.projects.sideTab == sideChanges {
-		c := &m.projects.changes
-		var cmds []tea.Cmd
-		if c.files == nil && !c.loading && c.err == nil {
-			c.loading = true
-			cmds = append(cmds, m.fetchChangedFiles(ws, c.against, c.gen))
-		}
-		if c.commits == nil && !c.commitsLoading && c.commitsErr == nil {
-			c.commitsLoading = true
-			cmds = append(cmds, m.fetchCommits(ws, c.gen))
-		}
-		return m, tea.Batch(cmds...)
-	}
-	if _, ok := m.projects.ftree.dirs[""]; ok {
-		return m, nil
-	}
-	m.projects.ftree.dirs[""] = &treeDir{loading: true}
-	return m, m.fetchListDir(ws, "")
+	c := &ctx{m: &m}
+	var cmd tea.Cmd
+	m.right, cmd = m.right.show(c, ws)
+	cmd = tea.Batch(drop, cmd, m.apply(c))
+	return m, cmd
 }
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -114,17 +82,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// Markdown wrap width changed; drop cached renderers/output.
-		m.transcript.mdRenderers = make(map[int]*glamour.TermRenderer)
-		m.transcript.mdCache = make(map[string]string)
+		m.render.mdRenderers = make(map[int]*glamour.TermRenderer)
+		m.render.mdCache = make(map[string]string)
 		if m.idleComposerActive() {
 			m.sizeIdleReply()
 		}
-		if m.mode == modeScreen && m.term != nil {
-			cols, rows := m.termDims()
-			m.term.Resize(cols, rows)
-			return m, m.termResizeCmd(m.termID, cols, rows)
-		}
-		return m.leaveHiddenTree()
+		return m.updateScreen(m.topScreen(), msg)
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case keyTimeoutMsg:
@@ -137,285 +100,83 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":
-		case m.redact.inputActive:
-			var cmd tea.Cmd
-			m.redact.input, cmd = m.redact.input.Update(msg)
-			return m, cmd
-		case m.mode == modeScreen:
-			m.sendTermKey(m.termID, []byte(msg.Content))
-			return m, nil
-		case m.spawn.active():
-			m.pasteSpawn(msg.Content)
-			return m, nil
-		case m.idleComposerActive():
-			var cmd tea.Cmd
-			m.prompt.reply, cmd = m.prompt.reply.Update(msg)
-			m.sizeIdleReply()
-			return m, cmd
-		case m.questionCustomActive():
-			tab := m.prompt.tab
-			var cmd tea.Cmd
-			m.prompt.text[tab], cmd = m.prompt.text[tab].Update(msg)
-			return m, cmd
-		case m.denyReasonActive():
-			var cmd tea.Cmd
-			m.prompt.reason, cmd = m.prompt.reason.Update(msg)
-			return m, cmd
+		case m.redactTyping():
+			return m.updateTranscript(msg, isHistory)
+		case m.topScreen() >= 0:
+			return m.updateScreen(m.topScreen(), msg)
+		case m.topSpawn() >= 0:
+			return m.updateSpawn(m.topSpawn(), msg)
+		case m.dockFocused():
+			return m.pasteDock(msg)
 		}
 	case notificationMsg:
-		return m, m.applyEvent(api.Notification(msg))
+		cmd := m.applyEvent(api.Notification(msg))
+		return m, cmd
 	case connStateMsg:
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
-			if m.mode == modeSession && m.activeSub.subID != "" {
-				ref := m.activeSub
+			cmd := tea.Batch(m.resyncCmd(), m.loadProjects())
+			if t, ok := m.baseComp().(transcriptComp); ok && t.live && t.activeSub.subID != "" {
+				ref := t.activeSub
 				have := len(m.transcriptCache[ref.key()].chunks)
-				return m, tea.Batch(m.resyncCmd(), m.subscribeCmd(ref, have))
+				cmd = tea.Batch(cmd, m.subscribeCmd(ref, have))
 			}
-			return m, m.resyncCmd()
+			return m, cmd
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
-		if m.mode == modeScreen {
-			m = m.detachScreen()
-			m.flash = "terminal detached"
-		}
+		return m.updateScreens(msg)
 	case sessionsReplacedMsg:
 		m.sessions = make(map[string]session.Session, len(msg))
 		for _, s := range msg {
 			m.sessions[s.ID] = s
 		}
-		m.pruneReplyDrafts()
+		m.dock.pruneReplyDrafts(m.sessions)
 		m.reorder()
-		return m, m.maybeSpin()
+		return m, nil
 	case transcriptMsg:
-		if msg.id == m.selectedID {
-			prevID := m.currentChunkID()
-			// Tail-follow only if the view was already pinned to the bottom.
-			atBottom := m.transcript.scroll >= m.maxScroll()
-			m.setChunks(msg.chunks)
-			m.transcript.err = msg.err
-			m.restoreChunkCursor(prevID, atBottom)
-		}
-	case histProjectsMsg:
-		m.history.projects, m.history.err = groupProjectsByNode(msg.projects), msg.err
-		if m.history.projCursor >= len(m.history.projects) {
-			m.history.projCursor = max(0, len(m.history.projects)-1)
-		}
+		return m.updateTranscript(msg, func(t transcriptComp) bool { return t.live && t.sessionID == msg.id })
+	case histProjectsMsg, histSessionsMsg:
+		return m.updateHistory(msg)
 	case projectsTreeMsg:
-		var follow tea.Cmd
-		// Only the reply to the last fetch, with no refetch after it, can show
-		// that a wanted row is not there.
-		final := msg.seq == m.projects.fetchSeq && !m.projects.refetch
-		if msg.seq == m.projects.fetchSeq {
-			m.projects.loading = false
-			if m.projects.refetch {
-				m.projects.refetch = false
-				follow = m.loadProjects()
-			}
-		}
-		m.projects.tree, m.projects.err = msg.tree, msg.err
-		if msg.tree == nil {
-			m.projects.tree = []api.ProjectNode{}
-		}
-		m.projects.rebuild()
-		if m.projects.want != "" {
-			// Only jump the tree cursor while the tree screen is what shows; the
-			// Home pane keeps the cursor on Home.
-			if m.mode == modeProjects {
-				m.projects.reveal(m.projects.want)
-				if m.projects.cursorRowID() != m.projects.want {
-					m.projects.selectRow(m.projects.want) // a project or node row
-				}
-			}
-			if final || m.projects.cursorRowID() == m.projects.want {
-				m.projects.want = ""
-			}
-		}
-		mm, cmd := m.syncPane()
-		m = mm.(model)
-		return m, tea.Batch(cmd, follow, m.maybeSpin())
+		res, cmd := m.updateTree(msg)
+		res, file := res.(model).updateFile(msg)
+		return res, tea.Batch(cmd, file)
 	case projectsActionMsg:
-		delete(m.projects.removing, msg.removed)
-		if msg.err != nil {
-			m.flash = msg.verb + ": " + msg.err.Error()
-			return m, nil
+		if msg.reloadChanges && msg.err == nil {
+			m.right.changes.reload()
 		}
-		m.flash = msg.ok
-		if m.flash == "" {
-			m.flash = msg.verb + " done"
-		}
-		// After a remove, move only a cursor that still sits on the removed row.
-		if msg.removed == "" || m.projects.cursorRowID() == msg.removed {
-			m.projects.want = msg.selectID
-		}
-		if msg.reloadChanges {
-			m.projects.changes.reload()
-		}
-		return m, m.loadProjects() // refresh the tree after a mutation
-	case branchesMsg:
-		c := &m.projects.create
-		if c.active && msg.projectID == c.projectID {
-			c.branches.branches, c.branches.loaded, c.branches.err = msg.branches, true, msg.err
-			if c.picking {
-				c.targetPick.branches, c.targetPick.loaded, c.targetPick.err = msg.branches, true, msg.err
-			}
-		}
-		if rt := m.projects.retarget; rt != nil && msg.projectID == rt.projectID {
-			rt.pick.load(msg.branches, msg.err)
-		}
-	case prsMsg:
-		c := &m.projects.create
-		if c.active && msg.projectID == c.projectID {
-			c.prs, c.prsLoaded, c.prsErr, c.prsTruncated = msg.prs, true, msg.err, msg.truncated
-		}
-	case issuesMsg:
-		c := &m.projects.create
-		if c.active && msg.projectID == c.projectID {
-			c.issues, c.issuesLoaded, c.issuesErr, c.issuesTruncated = msg.issues, true, msg.err, msg.truncated
-		}
+		return m.updateTree(msg)
+	case branchesMsg, prsMsg, issuesMsg:
+		return m.updatePicker(msg)
 	case createDoneMsg:
-		if msg.seq != m.projects.create.seq || !m.projects.create.active {
-			// A hidden picker's call finished: report it without touching a newer
-			// picker, the cursor, or the keys the user pressed since.
-			if msg.seq == m.projects.create.seq {
-				m.projects.create = createState{}
-			}
-			if msg.err != nil {
-				m.flash = "create workspace: " + msg.err.Error()
-				return m, nil
-			}
-			m.flash = createdFlash(msg.res)
-			return m, m.loadProjects()
-		}
-		if msg.err != nil {
-			m.projects.create.creating = false
-			m.projects.create.err = msg.err.Error()
-			return m, nil
-		}
-		m.projects.create = createState{}
-		m.projects.want = msg.res.WorkspaceID
-		m.flash = createdFlash(msg.res)
-		if msg.source == api.SourceIssue && msg.res.Prompt != "" {
-			nodeID, _, _ := session.SplitCompositeID(msg.res.WorkspaceID)
-			m.projects.offerSpawn = &spawnOffer{nodeID: nodeID, cwd: msg.res.Dir, prompt: msg.res.Prompt}
-		}
-		return m, m.loadProjects()
-	case changedFilesMsg:
-		if c := &m.projects.changes; msg.ws == c.ws && msg.against == c.against && msg.gen == c.gen {
-			prev := len(c.files)
-			c.loading, c.err, c.files = false, msg.err, msg.files
-			if c.files == nil {
-				c.files = []api.ChangedFile{}
-			}
-			// The commits follow the files in the cursor's index, so a cursor on a
-			// commit moves with the file count.
-			if c.cursor >= prev && len(c.commits) > 0 {
-				c.cursor += len(c.files) - prev
-			} else {
-				c.cursor = min(c.cursor, cursorBottom(len(c.files)))
-			}
-		}
-	case wsDiffMsg:
-		if f := &m.projects.fileView; f.diff && msg.ws == f.ws && msg.path == f.path && msg.against == f.against && msg.rev == f.rev {
-			f.lines, f.notShown, f.err, f.loading = viewLines(m.highlightDiff(msg.diff)), msg.notShown, msg.err, false
-		}
-	case commitsMsg:
-		if c := &m.projects.changes; msg.ws == c.ws && msg.gen == c.gen {
-			c.commitsLoading, c.commitsErr, c.commits = false, msg.err, msg.commits
-			if c.commits == nil {
-				c.commits = []api.Commit{}
-			}
-			c.cursor = min(c.cursor, cursorBottom(len(c.files)+len(c.commits)))
-		}
-	case commitFilesMsg:
-		if c := &m.projects.changes; msg.ws == c.ws && c.commit != nil && msg.sha == c.commit.SHA {
-			c.commitErr, c.commitFiles = msg.err, msg.files
-			if c.commitFiles == nil {
-				c.commitFiles = []api.ChangedFile{}
-			}
-			c.commitCursor = min(c.commitCursor, cursorBottom(len(c.commitFiles)))
-		}
-	case listDirMsg:
-		if msg.ws == m.projects.ftree.ws {
-			m.projects.ftree.setDir(msg.dir, msg.entries, msg.err)
-		}
-	case readFileMsg:
-		if f := &m.projects.fileView; !f.diff && msg.ws == f.ws && msg.path == f.path {
-			f.lines, f.notShown, f.err, f.loading = viewLines(m.highlightFile(msg.path, msg.content)), msg.notShown, msg.err, false
-		}
-	case setupLogMsg:
-		if f := &m.projects.fileView; f.log && f.ws == msg.ws {
-			f.lines, f.err, f.loading = viewLines(wsscript.CleanOutput(msg.output)), msg.err, false
-		}
-	case histSessionsMsg:
-		m.history.loading = false
-		if msg.err != nil {
-			m.history.err = msg.err
-			break
-		}
-		m.history.err = nil
-		if msg.offset == 0 {
-			m.history.sessions = msg.page.Items
-		} else {
-			m.history.sessions = append(m.history.sessions, msg.page.Items...)
-		}
-		m.history.hasMore = msg.page.HasMore
-		if m.history.sessCursor >= len(m.history.sessions) {
-			m.history.sessCursor = max(0, len(m.history.sessions)-1)
-		}
+		return m.createDone(msg)
+	case changedFilesMsg, commitsMsg, commitFilesMsg, listDirMsg:
+		c := &ctx{m: &m}
+		var cmd tea.Cmd
+		m.right, cmd = m.right.update(c, msg)
+		cmd = tea.Batch(cmd, m.apply(c))
+		return m, cmd
+	case wsDiffMsg, readFileMsg, setupLogMsg, setupLogTickMsg:
+		return m.updateFile(msg)
 	case histTranscriptMsg:
-		m.setChunks(msg.chunks)
-		m.transcript.err = msg.err
-		m.transcript.cursor, m.transcript.scroll = 0, 0
+		return m.updateTranscript(msg, reads(msg.addr))
 	case histSubagentMsg:
-		// Match by agentID, not topFrame(): the user may have drilled into a leaf above this frame.
-		if msg.err == nil {
-			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
-				if m.transcript.detailStack[i].agentID == msg.agentID {
-					m.transcript.detailStack[i].items = flattenTrace(msg.chunks)
-					m.transcript.detailStack[i].expandOutputs()
-					break
-				}
-			}
-		}
+		return m.updateTranscript(msg, reads(msg.addr))
 	case toolDetailMsg:
-		// On error, file a done entry with empty body so the placeholder clears and we don't retry.
-		e := toolBodyEntry{done: true}
-		if msg.err == nil {
-			e.toolInput, e.result, e.resultIsError = msg.detail.ToolInput, msg.detail.Result, msg.detail.ResultIsError
-		}
-		m.toolBodies[msg.toolID] = e
+		return m.updateTranscript(msg, func(t transcriptComp) bool {
+			return t.owner() == msg.owner && t.toolBodies[msg.toolID].loading
+		})
 	case transcriptDeltaMsg:
-		if msg.ref.subID != m.activeSub.subID {
-			break // stale subscription (view changed)
-		}
-		if msg.ref.agentID != "" {
-			// Subagent delta: update the cache and fold into the owning frame. Match
-			// by subID, not topFrame() (the user may have drilled into a leaf above it).
-			m.transcriptCache[msg.ref.key()] = cachedTranscript{chunks: applyDelta(m.transcriptCache[msg.ref.key()].chunks, msg.delta)}
-			for i := range m.transcript.detailStack {
-				if m.transcript.detailStack[i].subID == msg.delta.SubID {
-					m.transcript.detailStack[i].items = flattenTrace(m.transcriptCache[msg.ref.key()].chunks)
-					m.transcript.detailStack[i].expandOutputs()
-					break
-				}
-			}
-			break
-		}
-		prevID := m.currentChunkID()
-		atBottom := m.transcript.scroll >= m.maxScroll()
-		m.applyChunkDelta(msg.delta)
-		m.transcriptCache[msg.ref.key()] = cachedTranscript{chunks: m.transcript.chunks}
-		m.restoreChunkCursor(prevID, atBottom)
+		return m.updateDelta(msg)
 	case spawnNodesMsg:
 		nodes := msg.nodes
 		if msg.err != nil { // no gateway node list (plain local node); nodeID stays empty
 			nodes = nil
 		}
-		return m, m.beginSpawn(nodes, msg.projects, msg.cwd)
+		return m.beginSpawn(nodes, msg.projects, msg.cwd)
 	case spawnAgentsMsg:
-		return m, m.applySpawnAgents(msg)
+		return m.updateSpawn(m.spawnAt(), msg)
 	case spawnResultMsg:
 		if msg.err != nil {
 			m.flash = "spawn failed: " + msg.err.Error()
@@ -439,38 +200,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "exported: " + msg.path
 		}
 		return m, nil
-	case redactPreparedMsg:
-		if msg.err != nil {
-			m.flash = "redact failed: " + msg.err.Error()
-			return m, nil
-		}
-		r := msg.report
-		m.redact.report = &r
-		m.redact.tempPath = msg.tempPath
-		m.redact.outPath = msg.outPath
-		m.redact.pendingSave = true
-		m.redact.warnConfirm = len(r.Warnings) > 0 // extra ack when content can't be scrubbed
-		return m, nil
-	case redactDoneMsg:
-		switch {
-		case msg.err != nil:
-			m.flash = "redact failed: " + msg.err.Error()
-		case msg.sidecar != "":
-			m.flash = fmt.Sprintf("redacted with %d warning(s) (secrets remain); see %s",
-				len(msg.warnings), filepath.Base(msg.sidecar))
-		case len(msg.warnings) > 0:
-			m.flash = fmt.Sprintf("redacted with %d warning(s) (secrets remain): %s", len(msg.warnings), msg.path)
-		default:
-			m.flash = "redacted: " + msg.path
-		}
-		m.redact.report = nil
-		m.redact.warnConfirm = false
-		m.redact.tempPath = ""
-		return m, nil
+	case redactPreparedMsg, redactDoneMsg:
+		return m.updateTranscript(msg, isHistory)
 	case termOpenedMsg:
-		if msg.termID == m.termID && msg.err != nil {
-			m.termErr = msg.err
-		}
+		return m.updateScreen(m.screenAt(msg.termID), msg)
 	case logTickMsg:
 		// Returning re-renders, which re-reads the log buffer.
 		return m, nil
@@ -479,29 +212,19 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.flash = "jump failed: " + msg.err.Error()
 		}
-	case spinResumeMsg:
-		return m, tea.Batch(spinResumeCmd(), m.maybeSpin())
 	case spinTickMsg:
 		m.spinning = false
 		m.spin++
-		return m, m.maybeSpin()
+		return m, nil
 	}
 	return m, nil
 }
 
-// typing reports whether a text input owns the keyboard, so editing keys like
-// ctrl+b stay with it.
-func (m model) typing() bool {
-	return (m.mode == modeSession && m.focus == focusDock) || m.redact.inputActive
-}
-
-// idleComposerActive reports whether the idle free-text composer is focused, so
-// pastes route into it the same way handlePromptKey routes keystrokes.
 func (m model) idleComposerActive() bool {
-	if m.mode != modeSession || m.focus != focusDock {
+	if !m.dockFocused() {
 		return false
 	}
-	s, ok := m.sessions[m.selectedID]
+	s, ok := m.sessions[m.liveSessionID()]
 	return ok && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle
 }
 
@@ -520,16 +243,13 @@ func (m model) anyWorking() bool {
 	return false
 }
 
-// maybeSpin starts the list spinner tick when the list shows a working session and
-// none is scheduled. The tick self-stops (see spinTickMsg) and is re-armed by
-// spinResumeCmd and registry events.
+// maybeSpin re-arms the spinner tick, which stops itself (see spinTickMsg).
 func (m *model) maybeSpin() tea.Cmd {
-	busy := m.anyWorking() || m.projects.create.creating || (m.projects.create.active && m.projects.create.listLoading()) || m.anySetupRunning()
-	if (m.mode == modeList || m.mode == modeProjects || m.embedded()) && !m.spinning && busy {
-		m.spinning = true
-		return spinTickCmd()
+	if m.spinning || !m.spinShown() {
+		return nil
 	}
-	return nil
+	m.spinning = true
+	return spinTickCmd()
 }
 
 func (m model) sendInputCmd(id, text string) tea.Cmd {
@@ -578,6 +298,11 @@ func (m model) fetchSpawnAgents(nodeID string) tea.Cmd {
 	}
 }
 
+func (m model) newSessionCmd() tea.Cmd {
+	cwd, _ := os.Getwd()
+	return m.fetchSpawnNodes(cwd)
+}
+
 // fetchSpawnNodes asks server.info which nodes can be spawn targets (gateway →
 // every node; plain local → just itself). A call error yields no nodes, leaving
 // node_id empty for an immediate local spawn.
@@ -609,38 +334,30 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		if json.Unmarshal(n.Params, &o) != nil {
 			return nil
 		}
-		if o.TermID != m.termID || m.term == nil {
-			return nil
-		}
-		if raw, err := base64.StdEncoding.DecodeString(o.Data); err == nil {
-			_, _ = m.term.Write(raw)
-		}
-		return nil
+		var cmd tea.Cmd
+		*m, cmd = m.updateScreen(m.screenAt(o.TermID), o)
+		return cmd
 	}
 	if n.Method == api.MethodTerminalExited {
 		var o api.TerminalExited
 		if json.Unmarshal(n.Params, &o) != nil {
 			return nil
 		}
-		if o.TermID == m.termID && m.mode == modeScreen {
-			*m = m.detachScreen() // attach is gone node-side; leave it
-			if o.Reason == api.TermExitedEvicted {
-				m.flash = "terminal opened elsewhere"
-			} else {
-				m.flash = "terminal exited"
-			}
-		}
-		return nil
+		var cmd tea.Cmd
+		*m, cmd = m.updateScreen(m.screenAt(o.TermID), o)
+		return cmd
 	}
 	if n.Method == api.MethodTranscriptDelta {
 		var d api.TranscriptDelta
 		if json.Unmarshal(n.Params, &d) != nil {
 			return nil
 		}
-		if d.SubID != m.activeSub.subID { // only the active subscription
+		i := m.transcriptAt(streams(d.SubID)) // only an open live transcript's stream
+		if i < 0 {
 			return nil
 		}
-		return func() tea.Msg { return transcriptDeltaMsg{ref: m.activeSub, delta: d} }
+		ref := m.main[i].(transcriptComp).activeSub
+		return func() tea.Msg { return transcriptDeltaMsg{ref: ref, delta: d} }
 	}
 	if n.Method != api.MethodSessionEvent {
 		return nil
@@ -661,14 +378,14 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		m.sessions[ev.Session.ID] = ev.Session
 		// A session in a workspace the tree lacks means a new repo or worktree.
 		if ws := ev.Session.WorkspaceID; ws != "" {
-			if _, ok := m.findWorkspace(ws); !ok {
-				cmd = tea.Batch(cmd, m.loadProjects())
-			}
+			cmd = tea.Batch(cmd, m.left.tree.loadMissing(m.client, ws))
 		}
 		// An agent that stops working has likely changed files in its workspace.
 		if existed && prev.Status == session.StatusWorking && ev.Session.Status != session.StatusWorking &&
-			ev.Session.WorkspaceID != "" && ev.Session.WorkspaceID == m.projects.changes.ws && m.projects.changes.files != nil {
-			cmd = tea.Batch(cmd, m.refreshChanges())
+			ev.Session.WorkspaceID != "" && ev.Session.WorkspaceID == m.right.changes.ws && m.right.changes.files != nil {
+			var refresh tea.Cmd
+			m.right.changes, refresh = m.right.changes.refresh(&ctx{m: m})
+			cmd = tea.Batch(cmd, refresh)
 		}
 		// /clear swaps the open session's transcript in place; re-subscribe so the
 		// stale (pre-clear) stream is dropped and the new file streams from the start.
@@ -677,11 +394,11 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		}
 	case registry.EventRemoved:
 		delete(m.sessions, ev.Session.ID)
-		delete(m.replyDrafts, ev.Session.ID)
+		delete(m.dock.drafts, ev.Session.ID)
 	}
 	m.syncPromptDraft() // reset a stale draft if the open session's prompt changed
 	m.reorder()
-	return tea.Batch(cmd, m.maybeSpin())
+	return cmd
 }
 
 // bellCmd rings the terminal bell via BEL on stderr (outside the alt-screen frame,
@@ -712,213 +429,35 @@ func (m *model) reorder() {
 		}
 		return a.ID < b.ID
 	})
-	if m.cursor >= len(m.order) {
-		m.cursor = max(0, len(m.order)-1)
+	m.keepPanes()
+	if m.keptHome.cursor >= len(m.order) {
+		m.keptHome.cursor = max(0, len(m.order)-1)
 	}
-	m.projects.wsCursor = min(m.projects.wsCursor, cursorBottom(len(m.paneSessions())))
-}
-
-func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Screen view is a live passthrough (ctrl+c → Claude SIGINT, ctrl+] leaves).
-	// Route it before the global quit so ctrl+c reaches Claude.
-	if m.mode == modeScreen {
-		return m.handleScreenKey(msg)
-	}
-	if msg.String() == "ctrl+c" {
-		return m.quit()
-	}
-	if !m.keysRaw() {
-		return m.resolveKey(msg)
-	}
-	if len(m.keyBuf) > 0 {
-		m.clearKeys()
-	}
-	return m.runKey(msg)
-}
-
-func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.mode == modeScreen {
-		return m.handleScreenKey(msg)
-	}
-	// Kill confirmation gate (list view).
-	if m.pendingKill {
-		m.pendingKill = false
-		if msg.String() == "y" && m.cursor < len(m.order) {
-			return m, m.killCmd(m.order[m.cursor])
-		}
-		return m, nil
-	}
-	// Spawn flow gate (list view).
-	if m.spawn.active() {
-		return m.handleSpawnKey(msg)
-	}
-
-	if !m.keysRaw() {
-		if mm, cmd, ok := m.handlePaneKey(msg); ok {
-			return mm, cmd
-		}
-	}
-
-	// The sidebar toggles work from every framed view; while typing their keys
-	// stay text.
-	if m.mode != modeProjects && !m.viewer && !m.typing() && m.matches(msg, projectsKeys.ToggleSidebar) {
-		m.toggleSidebar()
-		return m, nil
-	}
-
-	if m.mode != modeProjects && !m.viewer && !m.typing() && m.matches(msg, projectsKeys.ToggleFiles) {
-		m.toggleFiles()
-		return m, nil
-	}
-	if m.projects.showHelp && m.mode != modeProjects {
-		m.projects.showHelp = false
-		return m, nil
-	}
-	if (m.mode == modeList || m.mode == modeHistoryProjects || m.mode == modeLogs) && m.matches(msg, projectsKeys.Help) {
-		m.projects.showHelp = true
-		return m, nil
-	}
-	if m.mode == modeSession && m.projects.focus == focusFiles {
-		m.flash = ""
-		return m.handleFilesKey(msg)
-	}
-
-	// The composite session screen owns its own navigation/fold/compose keys.
-	if m.mode == modeSession {
-		return m.handleSessionKey(msg)
-	}
-	// History modes (read-only browsing) own their own keys.
-	switch m.mode {
-	case modeHistoryProjects:
-		return m.handleHistoryProjectsKey(msg)
-	case modeHistorySessions:
-		return m.handleHistorySessionsKey(msg)
-	case modeHistoryTranscript:
-		return m.handleHistoryTranscriptKey(msg)
-	case modeLogs:
-		return m.handleLogsKey(msg)
-	case modeProjects:
-		return m.handleProjectsKey(msg)
-	}
-
-	// modeList: any key dismisses a transient flash before dispatching (the jump
-	// action re-sets it afterwards, so it survives to the next keypress).
-	m.flash = ""
-	if mm, cmd, ok := m.dispatch(msg, listTable); ok {
-		return mm, cmd
-	}
-	return m, nil
-}
-
-// listTable maps the session-list bindings to their actions (see keys.go).
-var listTable = []keyTableEntry{
-	{listKeys.Up, model.actListUp},
-	{listKeys.Down, model.actListDown},
-	{listKeys.Top, model.actListTop},
-	{listKeys.Bottom, model.actListBottom},
-	{listKeys.HalfUp, model.actListHalfUp},
-	{listKeys.HalfDown, model.actListHalfDown},
-	{listKeys.Open, model.actListOpen},
-	{listKeys.Jump, model.actListJump},
-	{listKeys.TabNext, model.actListHistory}, // next tab → History tab
-	{listKeys.TabPrev, model.actOpenLogs},    // prev tab → Logs tab (when spawned)
-	{listKeys.New, model.actListNew},
-	{listKeys.Kill, model.actListKill},
-	{listKeys.Refresh, model.actListRefresh},
-	{listKeys.Back, model.actListBack},
-	{listKeys.Quit, model.actQuit},
-}
-
-func (m model) actListUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = cursorUp(m.cursor)
-	return m, nil
-}
-
-func (m model) actListTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = 0
-	return m, nil
-}
-
-func (m model) actListBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = cursorBottom(len(m.order))
-	return m, nil
-}
-
-func (m model) actListHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = max(0, m.cursor-m.cardListPageStep())
-	return m, nil
-}
-
-func (m model) actListHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = min(cursorBottom(len(m.order)), m.cursor+m.cardListPageStep())
-	return m, nil
-}
-
-// cardListPageStep is how many cards a half-page jump moves, estimated from the
-// viewport height and a card's nominal line count (~5). Shared by all card lists.
-func (m model) cardListPageStep() int {
-	const cardLines = 5
-	return max(1, max(1, m.bodyHeight()-4)/cardLines/2)
-}
-
-func (m model) actListDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.cursor = cursorDown(m.cursor, len(m.order))
-	return m, nil
-}
-
-func (m model) actListOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.cursor >= len(m.order) {
-		return m, nil
-	}
-	return m.enterSession(m.order[m.cursor])
+	m.keptPane.cursor = min(m.keptPane.cursor, cursorBottom(len(m.paneSessions())))
+	m.showKept()
 }
 
 // enterSession opens a session's transcript view. It subscribes by session id, so
 // a just-resumed session works before discovery adds it to the local list.
+// A session already open is replaced, and its streams close.
 func (m model) enterSession(id string) (model, tea.Cmd) {
-	m.saveReplyDraft()
-	m.selectedID = id
-	if m.mode != modeSession {
-		m.sessionReturn = m.mode // return here on exit
+	t := newLiveTranscript(id)
+	var cmd tea.Cmd
+	if m.inSession() {
+		c := &ctx{m: &m}
+		c.replaceBase(t)
+		cmd = m.apply(c)
+	} else {
+		m.enterMain(t)
 	}
-	m.mode = modeSession
-	m.focus, m.historyView = focusHistory, histTranscript
-	if m.projects.focus == focusFiles {
-		m.projects.focus = focusPane
-	}
-	m.transcript.err = nil
-	m.transcript.detailStack = nil
-	m.transcript.expanded = make(map[string]bool)
-	m.toolBodies = make(map[string]toolBodyEntry) // per-session tool-body cache
-	m.resetPromptState()
-	m.loadReplyDraft(id)
-	m.prompt.key = interactionKey(m.sessions[id].Interaction)
+	m.focused = mainPane
+	m.dock = m.dock.follow(&ctx{m: &m}, id)
 	ref := subRef{subID: newSubID(), sessionID: id, cacheKey: m.cacheKeyFor(id)}
-	return m, m.bindStream(ref)
+	bind := m.editTranscript(m.baseTop()-1, func(v tview) tea.Cmd { return v.bindStream(ref) })
+	return m, tea.Batch(cmd, bind)
 }
 
-// actListJump jumps the user's tmux client to the selected session's window, or
-// sets a flash explaining why the jump was refused (see planJump).
-func (m model) actListJump(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.cursor >= len(m.order) {
-		return m, nil
-	}
-	return m.jumpTo(m.sessions[m.order[m.cursor]])
-}
-
-// jumpTo reveals s's tmux pane in the terminal argus runs in.
-func (m model) jumpTo(s session.Session) (tea.Model, tea.Cmd) {
-	host, _ := os.Hostname()
-	paneID, reason := planJump(s, host, os.Getenv("TMUX"))
-	if reason != "" {
-		m.flash = reason
-		return m, nil
-	}
-	return m, jumpCmd(paneID)
-}
-
-// planJump is the pure decision behind actListJump: returns the pane to reveal, or
-// an empty pane and a human-readable reason the jump was refused.
+// planJump is the pure decision behind jump.
 func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason string) {
 	switch {
 	case tmuxEnv == "":
@@ -980,29 +519,6 @@ func jumpCmd(paneID string) tea.Cmd {
 	}
 }
 
-func (m model) actListHistory(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.mode = modeHistoryProjects
-	m.history.projects, m.history.err, m.history.projCursor = nil, nil, 0
-	return m, m.fetchHistProjects()
-}
-
-func (m model) actListNew(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	cwd, _ := os.Getwd()
-	return m, m.fetchSpawnNodes(cwd)
-}
-
-func (m model) actListKill(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.cursor >= len(m.order) {
-		return m, nil
-	}
-	if refusal := killRefusal(m.sessions[m.order[m.cursor]]); refusal != "" {
-		m.flash = refusal
-		return m, nil
-	}
-	m.pendingKill = true
-	return m, nil
-}
-
 // killRefusal is "" when kill can remove s: kill its pane, or dismiss a
 // paneless presence card.
 func killRefusal(s session.Session) string {
@@ -1043,47 +559,14 @@ func dismissable(s session.Session) bool {
 	return s.Agent == "opencode" && !s.Controllable()
 }
 
-func (m model) actListRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// While disconnected, "refresh" means "reconnect now" rather than an RPC over a dead connection.
-	if m.reconnecting {
-		m.client.Reconnect()
-		return m, nil
-	}
-	return m, m.refreshCmd()
-}
-
-// quit leaves argus, closing an open transcript subscription first.
+// quit's batch gives no order, so the program may exit before a close command
+// finishes.
 func (m model) quit() (tea.Model, tea.Cmd) {
-	if m.activeSub.subID != "" {
-		subID := m.activeSub.subID
-		m.activeSub = subRef{}
-		return m, tea.Batch(m.unsubscribeCmd(subID), tea.Quit)
+	c := &ctx{m: &m}
+	cmds := make([]tea.Cmd, 0, len(m.main)+2)
+	for _, comp := range m.main {
+		cmds = append(cmds, comp.close(c))
 	}
-	return m, tea.Quit
-}
-
-// actListBack returns from the Home pane to the tree on the Home row, when the
-// tree is visible.
-func (m model) actListBack(tea.KeyPressMsg) (tea.Model, tea.Cmd) { return m.openTree() }
-
-func (m model) actQuit(tea.KeyPressMsg) (tea.Model, tea.Cmd) { return m.quit() }
-
-func (m model) handleScreenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if isScreenLeave(msg) {
-		return m.leaveScreen()
-	}
-	if b := ptyBytesFor(msg); b != nil {
-		m.sendTermKey(m.termID, b)
-	}
-	return m, nil
-}
-
-// isScreenLeave matches ctrl+] independent of how the terminal reports it.
-// msg.String() is unreliable (it prioritizes Text), so match on Code+Mod and the
-// raw 0x1d control byte instead.
-func isScreenLeave(msg tea.KeyPressMsg) bool {
-	if msg.Code == ']' && msg.Mod&tea.ModCtrl != 0 {
-		return true
-	}
-	return msg.Code == 0x1d // GS: ctrl+] as a raw control byte
+	cmds = append(cmds, m.apply(c), tea.Quit)
+	return m, tea.Batch(cmds...)
 }
