@@ -20,7 +20,7 @@ type exportDoneMsg struct {
 // actExportSession writes the open history transcript to a .argus file in the
 // working directory.
 func (m tview) actExportSession(tea.KeyPressMsg) tea.Cmd {
-	if m.viewer {
+	if m.c.m.viewer {
 		return nil
 	}
 	agent, path, nodeID, md, ok := m.exportTarget()
@@ -29,7 +29,7 @@ func (m tview) actExportSession(tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	m.c.setFlash("exporting…")
-	return m.exportCmd(agent, path, nodeID, md)
+	return m.c.m.exportCmd(agent, path, nodeID, md)
 }
 
 func (m model) exportCmd(agent, path, nodeID string, md bundle.Metadata) tea.Cmd {

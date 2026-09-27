@@ -51,7 +51,7 @@ func (f fileComp) commands(c *ctx) []binding {
 		out = slices.Concat(out, treeKeys, manageKeys, leftSidebarKeys)
 	}
 	if c.m.inSession() && c.m.sessionInteraction() != nil {
-		out = append(out, sessionKeys.Focus)
+		out = append(out, sessionKeys.FocusPrompt)
 	}
 	return bindingsOf(out...)
 }
@@ -121,7 +121,7 @@ func (f fileComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		c.stepDiff(1)
 	case m.matches(msg, fk.PrevFile):
 		c.stepDiff(-1)
-	case m.inSession() && m.matches(msg, sessionKeys.Focus):
+	case m.inSession() && m.matches(msg, sessionKeys.FocusPrompt):
 		return f, nil, false
 	}
 	// Any other key would act on the content hidden behind the file.
@@ -267,9 +267,9 @@ func (f fileComp) content(c *ctx, w, h int) string {
 func (f fileComp) footerText(c *ctx) string {
 	m := c.m
 	if offersKey(f.offers(c), projectsKeys.Help) {
-		return m.treeScreenFooter(append(f.footer(c), projectsKeys.Help)...)
+		return m.footer(append(f.footer(c), projectsKeys.Help)...)
 	}
-	return m.sessionHint(append(f.footer(c), m.sideKey(paneKeys.Right))...)
+	return m.footer(append(f.footer(c), m.sideKey(paneKeys.Right))...)
 }
 
 func (f fileComp) footer(*ctx) []binding {

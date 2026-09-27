@@ -140,9 +140,9 @@ func (r rightSidebarState) footerText(c *ctx) string {
 	m, k := c.m, projectsKeys
 	keys := r.current().footer(c)
 	if offersKey(r.current().offers(c), k.Help) {
-		return m.treeScreenFooter(append(keys, m.sideKey(k.ToggleFiles), k.Help)...)
+		return m.footer(append(keys, m.sideKey(k.ToggleFiles), k.Help)...)
 	}
-	return m.sessionHint(append(keys, k.Refresh)...)
+	return m.footer(append(keys, k.Refresh)...)
 }
 
 // sidebarEscDesc names where back goes from the top level of a tab.

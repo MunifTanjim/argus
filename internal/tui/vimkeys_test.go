@@ -173,11 +173,11 @@ func TestVimDetailCollapseExpand(t *testing.T) {
 	v := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{
 		{Kind: transcript.ItemText, Text: "hi"}, {Kind: transcript.ItemTool, ToolName: "Read", ToolID: "t1"},
 	}})
-	v.width, v.height = 80, 30
+	v.c.m.width, v.c.m.height = 80, 30
 	v.toolBodies = map[string]toolBodyEntry{}
 	v.topFrame().cursor = 1
 	v.put()
-	m, cmd := upd(*v.model, keyMsg("l"))
+	m, cmd := upd(*v.c.m, keyMsg("l"))
 	if !tvOf(&m).topFrame().isExpanded(1) || cmd == nil {
 		t.Errorf("l should expand the selected node and fetch its body: fetch = %v", cmd != nil)
 	}

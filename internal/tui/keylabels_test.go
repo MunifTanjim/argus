@@ -70,19 +70,19 @@ func TestRedactFootersShowEffectiveKeys(t *testing.T) {
 		"<C-r>": "redaction add", "<C-l>": "redaction list", "<C-w>": "redaction save",
 		"<C-x>": "redaction remove", "gz": "goto bottom",
 	}})
-	if f := ansi.Strip(tvOf(&m).redactFooter("BASE")); !strings.Contains(f, "redact: ^r add secret") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "redact: ^r add secret") {
 		t.Errorf("idle footer: %q", f)
 	}
 	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"a"} })
-	if f := ansi.Strip(tvOf(&m).redactFooter("BASE")); !strings.Contains(f, "^r add · ^l list · ^w save") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "^r add · ^l list · ^w save") {
 		t.Errorf("queued footer: %q", f)
 	}
 	m = withTr(m, func(t *transcriptComp) { t.redact.listActive = true })
-	if f := ansi.Strip(tvOf(&m).redactFooter("BASE")); !strings.Contains(f, "↑/↓ move · ^x delete · esc close") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "↑/↓ move · ^x delete · esc close") {
 		t.Errorf("list footer: %q", f)
 	}
 	m.keyBuf = []tea.KeyPressMsg{keyMsg("g")}
-	if f := ansi.Strip(tvOf(&m).redactFooter("BASE")); !strings.Contains(f, "g…") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "g…") {
 		t.Errorf("the list footer should show the pending keys: %q", f)
 	}
 }

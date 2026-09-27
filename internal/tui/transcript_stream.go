@@ -39,10 +39,10 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 // delta keeps tailing (see restoreChunkCursor), and returns the subscribe command.
 func (m tview) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
-	m.setChunks(m.transcriptCache[ref.key()].chunks)
+	m.setChunks(m.c.m.transcriptCache[ref.key()].chunks)
 	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
 	m.transcript.scroll = m.maxScroll()
-	return m.subscribeCmd(ref, len(m.transcript.chunks))
+	return m.c.m.subscribeCmd(ref, len(m.transcript.chunks))
 }
 
 func (m model) cacheKeyFor(sessionID string) string {

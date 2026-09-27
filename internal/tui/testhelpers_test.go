@@ -334,8 +334,8 @@ func bareTv() tview {
 }
 
 func (m tview) put() {
-	m.model.main = m.model.main.replaceAt(m.model.baseTop()-1, *m.transcriptComp)
-	m.model.apply(m.c)
+	m.c.m.main = m.c.m.main.replaceAt(m.c.m.baseTop()-1, *m.transcriptComp)
+	m.c.m.apply(m.c)
 }
 
 func onTr(m model, f func(v tview) tea.Cmd) (model, tea.Cmd) {

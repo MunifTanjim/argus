@@ -7,32 +7,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// treeScreenFooter is the footer of a component on the tree screen: bs, unless
-// a pending key sequence, the flash, or the open help takes their place.
-func (m model) treeScreenFooter(bs ...binding) string {
-	switch {
-	case len(m.keyBuf) > 0:
-		return asstStyle.Render(m.keyHint())
-	case m.flash != "":
-		return asstStyle.Render(firstLine(m.flash))
-	case m.showHelp:
-		return m.footer(hint("any key", "close"))
-	}
-	return m.footer(bs...)
-}
-
-// sessionHint is a footer of bs, unless a pending key sequence or the flash
-// takes their place.
-func (m model) sessionHint(bs ...binding) string {
-	switch {
-	case len(m.keyBuf) > 0:
-		return asstStyle.Render(m.keyHint())
-	case m.flash != "":
-		return asstStyle.Render(firstLine(m.flash))
-	}
-	return m.footer(bs...)
-}
-
 // commitBackKeys names the keys that leave an open commit: back, and collapse
 // while it still has a key in the Changes tab.
 func (m model) commitBackKeys() string {

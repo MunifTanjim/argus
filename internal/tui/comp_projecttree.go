@@ -295,7 +295,7 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	return t, nil
 }
 
-func (t projectTreeComp) footerText(c *ctx) string {
+func (t projectTreeComp) footerPrompt(c *ctx) string {
 	m := c.m
 	switch {
 	case t.inputMode == pmRename:
@@ -310,7 +310,7 @@ func (t projectTreeComp) footerText(c *ctx) string {
 	case t.offerSpawn != nil:
 		return asstStyle.Render("start an agent with this issue? y/n")
 	}
-	return m.treeScreenFooter(t.footer(c)...)
+	return ""
 }
 
 func (t projectTreeComp) footer(c *ctx) []binding {

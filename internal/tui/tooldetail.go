@@ -22,7 +22,7 @@ func (m tview) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 		return nil
 	}
 	m.toolBodies[it.ToolID] = toolBodyEntry{loading: true}
-	client := m.client
+	client := m.c.m.client
 	toolID, owner := it.ToolID, m.owner()
 	if !m.live {
 		nodeID, path, agent := m.history.openNodeID, m.history.openPath, m.history.openAgent

@@ -198,12 +198,7 @@ func (h historyComp) footer(c *ctx) []binding {
 	return append(binds, historySessionsKeys.Back)
 }
 
-func (h historyComp) footerText(c *ctx) string {
-	if h.inProject {
-		return c.m.exportOrFlashFooter(h.pendingExport, c.m.footer(h.footer(c)...))
-	}
-	return c.m.sessionHint(h.footer(c)...)
-}
+func (h historyComp) footerPrompt(*ctx) string { return exportPrompt(h.pendingExport) }
 
 func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	m := c.m

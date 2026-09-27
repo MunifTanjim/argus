@@ -183,8 +183,13 @@ func (m model) waitingCount() int {
 	return n
 }
 
-// footerTexter is a component whose footer line has more than its bindings: a
-// prompt, a pending key sequence, or the flash.
+// footerPrompter is a component that can ask a question or take text in the
+// footer; its prompt, when not "", takes the whole footer.
+type footerPrompter interface {
+	footerPrompt(c *ctx) string
+}
+
+// footerTexter is a component whose footer draws more than its bindings.
 type footerTexter interface {
 	footerText(c *ctx) string
 }
@@ -192,6 +197,19 @@ type footerTexter interface {
 func (m model) currentFooter() string {
 	c := &ctx{m: &m}
 	comp := m.focusedComp()
+	if p, ok := comp.(footerPrompter); ok {
+		if s := p.footerPrompt(c); s != "" {
+			return s
+		}
+	}
+	switch {
+	case len(m.keyBuf) > 0:
+		return asstStyle.Render(m.keyHint())
+	case m.flash != "":
+		return asstStyle.Render(firstLine(m.flash))
+	case m.showHelp:
+		return m.footer(hint("any key", "close"))
+	}
 	if f, ok := comp.(footerTexter); ok {
 		return f.footerText(c)
 	}

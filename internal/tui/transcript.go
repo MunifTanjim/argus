@@ -124,7 +124,7 @@ func (m tview) setExpanded(i int, on bool) {
 		return
 	}
 	c := m.transcript.chunks[i]
-	if !m.chunkExpandable(c) {
+	if !m.c.m.chunkExpandable(c) {
 		return
 	}
 	m.transcript.expanded[c.ID] = on
@@ -237,8 +237,8 @@ func hiddenHint(n int) string {
 // the accent border when the history region is focused.
 func (m tview) renderChunk(i int, selected bool) string {
 	c := m.transcript.chunks[i]
-	accent := selected && m.historyFocused()
-	container := m.transcriptWidth()
+	accent := selected && m.c.m.historyFocused()
+	container := m.c.m.transcriptWidth()
 	switch c.Kind {
 	case transcript.ChunkAI:
 		return m.renderAICard(c, container, selected, accent)
@@ -285,7 +285,7 @@ func (m tview) renderAICard(c transcript.Chunk, container int, selected, accent 
 // assistantBrand uses m.history.openAgent for a history transcript because the
 // past session isn't in m.sessions.
 func (m tview) assistantBrand() (StyledIcon, string) {
-	agent := m.sessions[m.sessionID].Agent
+	agent := m.c.m.sessions[m.sessionID].Agent
 	if !m.live {
 		agent = m.history.openAgent
 	}
@@ -298,7 +298,7 @@ func (m tview) assistantBrand() (StyledIcon, string) {
 
 func (m tview) aiHeader(c transcript.Chunk, width int) string {
 	chev := ""
-	if m.chunkExpandable(c) {
+	if m.c.m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
 	}
 	icon, name := m.assistantBrand()
@@ -348,7 +348,7 @@ func (m tview) aiBody(c transcript.Chunk, cw int) string {
 			rows = append(rows, itemRow(it))
 		}
 		if lo, ok := c.LastOutput(); ok && lo.Kind == transcript.ItemText {
-			rows = append(rows, "", m.renderMD(lo.Text, cw)) // expanded: full output
+			rows = append(rows, "", m.c.m.renderMD(lo.Text, cw)) // expanded: full output
 		}
 		return strings.Join(rows, "\n")
 	}
@@ -357,7 +357,7 @@ func (m tview) aiBody(c transcript.Chunk, cw int) string {
 	lo, ok := c.LastOutput()
 	if !ok {
 		text, hidden := truncateLines(c.Text, maxCollapsedLines)
-		out := m.renderMD(text, cw)
+		out := m.c.m.renderMD(text, cw)
 		if hidden > 0 {
 			out += "\n" + hiddenHint(hidden)
 		}
@@ -366,7 +366,7 @@ func (m tview) aiBody(c transcript.Chunk, cw int) string {
 	switch lo.Kind {
 	case transcript.ItemText:
 		text, hidden := truncateLines(lo.Text, maxCollapsedLines)
-		out := m.renderMD(text, cw)
+		out := m.c.m.renderMD(text, cw)
 		if hidden > 0 {
 			out += "\n" + hiddenHint(hidden)
 		}
@@ -451,7 +451,7 @@ func userBubbleInner(container int) int {
 func (m tview) renderUserCard(c transcript.Chunk, container int, selected, accent bool) string {
 	maxBubble := userBubbleWidth(container)
 	sel := selIndicator(selected)
-	expandable := m.chunkExpandable(c)
+	expandable := m.c.m.chunkExpandable(c)
 	expanded := m.chunkExpanded(c)
 
 	chev := ""
@@ -466,7 +466,7 @@ func (m tview) renderUserCard(c transcript.Chunk, container int, selected, accen
 	}
 	header := sel + strings.Repeat(" ", gap) + right
 
-	body := m.renderMD(c.Text, userBubbleInner(container))
+	body := m.c.m.renderMD(c.Text, userBubbleInner(container))
 	if expanded {
 		for _, it := range c.Items {
 			row := itemRow(it)
@@ -562,7 +562,7 @@ func (m tview) renderShellCard(c transcript.Chunk, container int, selected, acce
 
 func (m tview) shellHeader(c transcript.Chunk, width int) string {
 	chev := ""
-	if m.chunkExpandable(c) {
+	if m.c.m.chunkExpandable(c) {
 		chev = chevron(m.chunkExpanded(c)) + " "
 	}
 	label := StylePrimaryBold.Render("Shell")
@@ -591,7 +591,7 @@ func (m tview) shellBody(c transcript.Chunk, iw int) string {
 			label = "Error"
 		}
 		sb.WriteString("\n" + sectionLabel(label, c.IsError) + "\n")
-		sb.WriteString(m.execCommandResultBody(c.Detail, iw))
+		sb.WriteString(m.c.m.execCommandResultBody(c.Detail, iw))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -632,8 +632,8 @@ type cardEntry struct {
 // layoutChunks lays every chunk out as display lines, recording each chunk's
 // first line index (for cursor scrolling). A blank separator precedes each card.
 func (m tview) layoutChunks() (lines []string, first []int) {
-	bodyW, containerW := m.bodyWidth(), m.containerWidth()
-	focused := m.historyFocused()
+	bodyW, containerW := m.c.m.bodyWidth(), m.c.m.containerWidth()
+	focused := m.c.m.historyFocused()
 	_, brand := m.assistantBrand()
 	first = make([]int, len(m.transcript.chunks))
 	for i, c := range m.transcript.chunks {
@@ -659,10 +659,10 @@ func (m tview) layoutChunks() (lines []string, first []int) {
 // this (recursion).
 func (m tview) viewportHeight() int {
 	if m.live {
-		h, _ := m.sessionLayout()
+		h, _ := m.c.m.sessionLayout()
 		return h
 	}
-	return max(1, m.bodyHeight()-5)
+	return max(1, m.c.m.bodyHeight()-5)
 }
 
 // chunkSpan returns the [start,end) line range of chunk i within first/total.

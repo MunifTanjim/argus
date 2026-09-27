@@ -395,3 +395,39 @@ func TestSpaceSelectsAndUnselectsAnOption(t *testing.T) {
 		t.Error("a key mapped to option select only must not unselect")
 	}
 }
+
+func TestTabMovesFocusBothWays(t *testing.T) {
+	m := waitingSession()
+	m, _ = upd(m, keyMsg("tab"))
+	if m.focused != sessionDock {
+		t.Fatalf("<Tab> in the transcript must focus the prompt: focus=%v", m.focused)
+	}
+	m, _ = upd(m, keyMsg("tab"))
+	if m.focused != mainPane {
+		t.Fatalf("<Tab> in the dock must focus the transcript: focus=%v", m.focused)
+	}
+
+	m = withKeymap(waitingSession(), map[string]map[string]string{"transcript": {"<Tab>": "", "<C-a>": "focus prompt"}})
+	m, _ = upd(m, ctrlKey('a'))
+	if m.focused != sessionDock {
+		t.Fatalf("<C-a> must focus the prompt: focus=%v", m.focused)
+	}
+	m, _ = upd(m, keyMsg("tab"))
+	if m.focused != mainPane {
+		t.Errorf("a remap in transcript must not change <Tab> in the dock: focus=%v", m.focused)
+	}
+}
+
+func TestFocusCommandsStayInTheirSections(t *testing.T) {
+	_, errs := buildKeymap(map[string]map[string]string{
+		"transcript":   {"a": "focus transcript"},
+		"session-dock": {"b": "focus prompt"},
+	}, time.Second, "")
+	want := []string{
+		`keymap: session-dock "b": unknown command "focus prompt"`,
+		`keymap: transcript "a": unknown command "focus transcript"`,
+	}
+	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
+	}
+}

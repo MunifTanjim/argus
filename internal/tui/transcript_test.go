@@ -93,7 +93,7 @@ func loaded() model {
 // detail drill-down.
 func TestUserChunkWithSkillItemExpandableAndDrillable(t *testing.T) {
 	m := bareTv()
-	m.width = 80
+	m.c.m.width = 80
 
 	skillItem := transcript.Item{
 		Kind:         transcript.ItemSkill,
@@ -109,7 +109,7 @@ func TestUserChunkWithSkillItemExpandableAndDrillable(t *testing.T) {
 	}
 
 	// The chunk must be expandable even though the text is short.
-	if !m.chunkExpandable(c) {
+	if !m.c.m.chunkExpandable(c) {
 		t.Error("user chunk with skill item should be expandable")
 	}
 
@@ -217,7 +217,7 @@ func TestExpandDefaultsAndToggle(t *testing.T) {
 	if m.chunkExpanded(ai) {
 		t.Errorf("AI chunk should default collapsed")
 	}
-	if !m.chunkExpandable(ai) {
+	if !m.c.m.chunkExpandable(ai) {
 		t.Errorf("AI chunk with items should be expandable")
 	}
 	m.transcript.cursor = 1
@@ -296,7 +296,7 @@ func TestRestoreChunkCursorByID(t *testing.T) {
 func TestKeyCardNav(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.height = 6 // tiny viewport
+	m.c.m.height = 6
 	last := len(m.transcript.chunks) - 1
 
 	// }/{ move the chunk cursor between cards and clamp at the ends.
@@ -317,7 +317,7 @@ func TestKeyCardNav(t *testing.T) {
 func TestKeyCardNavReanchorsToVisible(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.height = 6 // tiny viewport so the cursor can scroll out of view
+	m.c.m.height = 6 // tiny viewport so the cursor can scroll out of view
 	m.transcript.cursor = 0
 
 	// Scroll down so chunk 0 (the cursor) leaves the top of the viewport.
@@ -353,7 +353,7 @@ func TestKeyCardNavReanchorsToVisible(t *testing.T) {
 func scrollTestView(height int, texts ...string) tview {
 	mm := withView(testModel(), viewSession)
 	m := tvOf(&mm)
-	m.height = height
+	m.c.m.height = height
 	for i, text := range texts {
 		m.transcript.chunks = append(m.transcript.chunks,
 			transcript.Chunk{ID: fmt.Sprintf("u%d", i), Kind: transcript.ChunkUser, Text: text})
@@ -479,7 +479,7 @@ func TestLineScrollInsideLongCardKeepsSelection(t *testing.T) {
 func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.height = 200 // every card fits: nothing to scroll
+	m.c.m.height = 200 // every card fits: nothing to scroll
 	m.transcript.cursor = 0
 	last := len(m.transcript.chunks) - 1
 
@@ -502,7 +502,7 @@ func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
 func TestCardNavWhenCardFits(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.height = 40 // tall viewport: every card fits
+	m.c.m.height = 40 // tall viewport: every card fits
 	m.transcript.cursor = 0
 
 	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
@@ -521,7 +521,7 @@ func TestCardNavWhenCardFits(t *testing.T) {
 func TestCardNavSkipsOversizedCard(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.height = 6 // tiny viewport so the selected card overflows it
+	m.c.m.height = 6 // tiny viewport so the selected card overflows it
 	m.transcript.cursor = 0
 
 	lines, first := m.layoutChunks()

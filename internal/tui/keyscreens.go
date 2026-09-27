@@ -102,7 +102,7 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("workspace"),
 	},
 	"file": {
-		own:   bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys, []any{fileViewKeys, sessionKeys.Focus})...),
+		own:   bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys, []any{fileViewKeys, sessionKeys.FocusPrompt})...),
 		focus: focusFor("file"),
 	},
 	"file-tree": {
@@ -130,13 +130,13 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("logs"),
 	},
 	"transcript": {
-		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys, redactListKeys,
-			transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave,
+		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw,
+			redactListKeys, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave,
 			transcriptKeys.Export, transcriptKeys.Resume})...),
 		focus: focusFor("transcript"),
 	},
 	"session-dock": {
-		own: bindingsOf(promptKeys, sessionKeys),
+		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw),
 	},
 }
 

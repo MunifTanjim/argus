@@ -176,17 +176,12 @@ func (h homeComp) footer(c *ctx) []binding {
 	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
 }
 
-func (h homeComp) footerText(c *ctx) string {
+func (h homeComp) footerPrompt(c *ctx) string {
 	m := c.m
-	switch {
-	case h.killID != "":
+	if h.killID != "" {
 		return asstStyle.Render(killPrompt(m.sessions[h.killID]))
-	case len(m.keyBuf) > 0:
-		return asstStyle.Render(m.keyHint())
-	case m.flash != "":
-		return asstStyle.Render(firstLine(m.flash))
 	}
-	return m.footer(h.footer(c)...)
+	return ""
 }
 
 // jump reveals s's tmux pane in the terminal argus runs in.
