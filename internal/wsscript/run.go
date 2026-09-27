@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -82,8 +83,10 @@ func (r *Runner) changed() {
 	}
 }
 
-// StartSetup runs command for wsID in the background.
-func (r *Runner) StartSetup(wsID, command string, env Env) error {
+// StartSetup runs prepare (may be nil) and then command (may be empty) for
+// wsID in the background. prepare writes to the run's output and returns false
+// to mark the run failed; command runs either way.
+func (r *Runner) StartSetup(wsID, command string, env Env, prepare func(context.Context, io.Writer) bool) error {
 	r.mu.Lock()
 	if cur := r.runs[wsID]; cur != nil && cur.run.State == Running {
 		r.mu.Unlock()
@@ -99,7 +102,12 @@ func (r *Runner) StartSetup(wsID, command string, env Env) error {
 		defer r.wg.Done()
 		defer close(sr.done)
 		defer cancel()
-		code, err := execScript(ctx, command, env, sr.out)
+		prepared := prepare == nil || prepare(ctx, sr.out)
+		var code int
+		var err error
+		if command != "" && ctx.Err() == nil {
+			code, err = execScript(ctx, command, env, sr.out)
+		}
 		r.mu.Lock()
 		sr.run.Ended = time.Now()
 		sr.run.ExitCode = code
@@ -114,6 +122,8 @@ func (r *Runner) StartSetup(wsID, command string, env Env) error {
 			if err != nil && code == -1 {
 				fmt.Fprintf(sr.out, "\n%s\n", err)
 			}
+			sr.run.State = Failed
+		case !prepared:
 			sr.run.State = Failed
 		default:
 			sr.run.State = OK

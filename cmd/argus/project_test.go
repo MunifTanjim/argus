@@ -318,3 +318,13 @@ func TestWaitReportsASetupWithNoExitCode(t *testing.T) {
 		}
 	})
 }
+
+func TestWaitReportsAFailedCopyWithoutExitCode(t *testing.T) {
+	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("failed", 0, ".worktreeinclude: copied 1 of 2 files")}}
+	f.calls = []string{"seed"}
+	captureStdout(t, func() {
+		if err := waitSetup(f.call, "wwwwww333333ffff"); err == nil || err.Error() != "setup failed" {
+			t.Errorf("a failed copy has no exit code to show: %v", err)
+		}
+	})
+}

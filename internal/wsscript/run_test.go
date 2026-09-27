@@ -2,6 +2,8 @@ package wsscript
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +36,7 @@ func TestSetupRunsInWorkspaceWithEnv(t *testing.T) {
 	defer r.Close()
 	env := testEnv(t)
 	cmd := `pwd; echo "$ARGUS_WORKSPACE_PATH|$ARGUS_ROOT_PATH|$ARGUS_WORKSPACE_NAME|$ARGUS_TARGET_BRANCH"`
-	if err := r.StartSetup("w1", cmd, env); err != nil {
+	if err := r.StartSetup("w1", cmd, env, nil); err != nil {
 		t.Fatal(err)
 	}
 	run := waitDone(t, r, "w1")
@@ -52,7 +54,7 @@ func TestSetupRunsInWorkspaceWithEnv(t *testing.T) {
 func TestSetupFailureRecordsExitCode(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", "echo boom; exit 3", testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", "echo boom; exit 3", testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if run := waitDone(t, r, "w1"); run.State != Failed || run.ExitCode != 3 || !strings.Contains(r.Output("w1"), "boom") {
@@ -64,10 +66,10 @@ func TestSecondSetupRefusedWhileRunning(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
 	env := testEnv(t)
-	if err := r.StartSetup("w1", "sleep 5", env); err != nil {
+	if err := r.StartSetup("w1", "sleep 5", env, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.StartSetup("w1", "true", env); err != ErrRunning {
+	if err := r.StartSetup("w1", "true", env, nil); err != ErrRunning {
 		t.Errorf("second start = %v, want ErrRunning", err)
 	}
 	r.StopSetup("w1", 2*time.Second)
@@ -85,7 +87,7 @@ func TestSetupTimeoutKillsTheGroup(t *testing.T) {
 	env := testEnv(t)
 	marker := filepath.Join(env.WorkspacePath, "child-alive")
 	// The child outlives the shell unless the whole group is killed.
-	if err := r.StartSetup("w1", `(sleep 1; touch child-alive) & sleep 30`, env); err != nil {
+	if err := r.StartSetup("w1", `(sleep 1; touch child-alive) & sleep 30`, env, nil); err != nil {
 		t.Fatal(err)
 	}
 	run := waitDone(t, r, "w1")
@@ -101,7 +103,7 @@ func TestSetupTimeoutKillsTheGroup(t *testing.T) {
 func TestOutputKeepsTheLast64KB(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", `i=0; while [ $i -lt 3000 ]; do echo "line $i ................................"; i=$((i+1)); done`, testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", `i=0; while [ $i -lt 3000 ]; do echo "line $i ................................"; i=$((i+1)); done`, testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	waitDone(t, r, "w1")
@@ -124,7 +126,7 @@ func TestBackgroundChildDoesNotHoldRun(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
 	start := time.Now()
-	if err := r.StartSetup("w1", `sleep 5 & echo started`, testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", `sleep 5 & echo started`, testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if run := waitDone(t, r, "w1"); run.State != OK || time.Since(start) > 4500*time.Millisecond {
@@ -135,7 +137,7 @@ func TestBackgroundChildDoesNotHoldRun(t *testing.T) {
 func TestScriptStdinIsEmpty(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", `read x; echo "got:$x"`, testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", `read x; echo "got:$x"`, testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if run := waitDone(t, r, "w1"); !strings.Contains(r.Output("w1"), "got:") {
@@ -170,7 +172,7 @@ func TestStartFailureIsReported(t *testing.T) {
 	}
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", "true", testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", "true", testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if run := waitDone(t, r, "w1"); run.State != Failed || !strings.Contains(r.Output("w1"), "nonexistent") {
@@ -217,7 +219,7 @@ func TestCloseKillsRunningSetup(t *testing.T) {
 	r := NewRunner(nil)
 	env := testEnv(t)
 	marker := filepath.Join(env.WorkspacePath, "child-alive")
-	if err := r.StartSetup("w1", `(sleep 1; touch child-alive) & sleep 30`, env); err != nil {
+	if err := r.StartSetup("w1", `(sleep 1; touch child-alive) & sleep 30`, env, nil); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -230,7 +232,7 @@ func TestCloseKillsRunningSetup(t *testing.T) {
 func TestStoppedSetupSaysStopped(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", "echo begin; sleep 30", testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", "echo begin; sleep 30", testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -244,7 +246,7 @@ func TestStoppedSetupSaysStopped(t *testing.T) {
 func TestFailDoesNotReplaceARunningSetup(t *testing.T) {
 	r := NewRunner(nil)
 	defer r.Close()
-	if err := r.StartSetup("w1", "sleep 30", testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", "sleep 30", testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	r.Fail("w1", "", "bad settings")
@@ -273,7 +275,7 @@ func TestTeardownLastLineIsPlain(t *testing.T) {
 func TestCloseWaitsForAForgottenSetup(t *testing.T) {
 	var changes atomic.Int32
 	r := NewRunner(func() { changes.Add(1) })
-	if err := r.StartSetup("w1", "sleep 30", testEnv(t)); err != nil {
+	if err := r.StartSetup("w1", "sleep 30", testEnv(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	r.Forget("w1")
@@ -290,6 +292,51 @@ func TestRingKeepsTheLastMaxBytes(t *testing.T) {
 		want := []string{"ab", "bcde", "ghij", "hijk"}[i]
 		if got := b.String(); got != want {
 			t.Errorf("after write %d: got %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestSetupRunsPrepareBeforeCommand(t *testing.T) {
+	r := NewRunner(nil)
+	defer r.Close()
+	prepare := func(_ context.Context, out io.Writer) bool {
+		fmt.Fprintln(out, "prepared")
+		return true
+	}
+	if err := r.StartSetup("w1", "echo script", testEnv(t), prepare); err != nil {
+		t.Fatal(err)
+	}
+	if run := waitDone(t, r, "w1"); run.State != OK || r.Output("w1") != "prepared\nscript\n" {
+		t.Errorf("run=%+v output=%q", run, r.Output("w1"))
+	}
+}
+
+func TestSetupFailedPrepareStillRunsCommand(t *testing.T) {
+	r := NewRunner(nil)
+	defer r.Close()
+	prepare := func(context.Context, io.Writer) bool { return false }
+	if err := r.StartSetup("w1", "echo script", testEnv(t), prepare); err != nil {
+		t.Fatal(err)
+	}
+	if run := waitDone(t, r, "w1"); run.State != Failed || run.ExitCode != 0 || r.Output("w1") != "script\n" {
+		t.Errorf("run=%+v output=%q", run, r.Output("w1"))
+	}
+}
+
+func TestSetupWithoutCommandRunsPrepareOnly(t *testing.T) {
+	r := NewRunner(nil)
+	defer r.Close()
+	for _, ok := range []bool{true, false} {
+		prepare := func(_ context.Context, out io.Writer) bool {
+			fmt.Fprint(out, "copied")
+			return ok
+		}
+		if err := r.StartSetup("w1", "", testEnv(t), prepare); err != nil {
+			t.Fatal(err)
+		}
+		want := map[bool]State{true: OK, false: Failed}[ok]
+		if run := waitDone(t, r, "w1"); run.State != want || run.Command != "" || r.Output("w1") != "copied" {
+			t.Errorf("ok=%v: run=%+v output=%q", ok, run, r.Output("w1"))
 		}
 	}
 }

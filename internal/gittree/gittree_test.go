@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"testing"
 )
 
@@ -389,5 +391,52 @@ func TestRepoNameFromFiles(t *testing.T) {
 	}
 	if got := RepoName(wt); got != "myrepo" {
 		t.Errorf("RepoName(worktree) = %q, want the main repo myrepo", got)
+	}
+}
+
+func TestIncludedFiles(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	run(t, root, "git", "init", "-b", "main")
+	files := map[string]string{
+		".gitignore":       ".env\n*.local\nsecrets/\nbuild/\n",
+		".worktreeinclude": ".env\n*.local\nsecrets/\ntracked.txt\nplain.txt\n",
+		"tracked.txt":      "x",
+		".env":             "x",
+		"a/b/conf.local":   "x",
+		"secrets/key.pem":  "x",
+		"build/out.bin":    "x",
+		"plain.txt":        "x",
+		"has space.local":  "x",
+	}
+	for name, body := range files {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(t, root, "git", "add", ".gitignore", ".worktreeinclude", "tracked.txt")
+	run(t, root, "git", "commit", "-m", "init")
+	run(t, filepath.Join(root, "secrets"), "git", "init", "-b", "main", "nested")
+
+	got, err := IncludedFiles(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(got)
+	want := []string{".env", "a/b/conf.local", "has space.local", "secrets/key.pem"}
+	if !slices.Equal(got, want) {
+		t.Errorf("IncludedFiles = %q, want %q", got, want)
+	}
+}
+
+func TestIncludedFilesWithoutIncludeFile(t *testing.T) {
+	root, _ := initRepo(t)
+	got, err := IncludedFiles(context.Background(), root)
+	if err != nil || len(got) != 0 {
+		t.Errorf("IncludedFiles = %q, %v; want none", got, err)
 	}
 }

@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,7 +81,7 @@ func TestSettingsParseErrorFailsSetupButKeepsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a bad settings file must not fail the create: %v", err)
 	}
-	if run, ok := d.scripts.Status(res.WorkspaceID); !ok || run.State != wsscript.Failed || !strings.Contains(d.scripts.Output(res.WorkspaceID), "settings.toml") {
+	if run := waitSetup(t, d, res.WorkspaceID); run.State != wsscript.Failed || !strings.Contains(d.scripts.Output(res.WorkspaceID), "settings.toml") {
 		t.Errorf("setup should be failed with the parse error: %+v %q", run, d.scripts.Output(res.WorkspaceID))
 	}
 }
@@ -301,8 +302,8 @@ func TestBareRepoProjectHasNoScripts(t *testing.T) {
 	if _, err := d.handleWorkspaceRunSetup(context.Background(), raw); err == nil || err.Error() != "no setup script" {
 		t.Errorf("runSetup in a bare-repo project: %v", err)
 	}
-	if got := d.startSetup(context.Background(), wsID, ""); got != "" {
-		t.Errorf("startSetup with no main tree = %q", got)
+	if got, err := d.startSetup(context.Background(), wsID, ""); got != "" || !errors.Is(err, errNoSetup) {
+		t.Errorf("startSetup with no main tree = %q, %v", got, err)
 	}
 	if _, ok := d.scripts.Status(wsID); ok {
 		t.Error("a bare-repo project should record no setup run")
