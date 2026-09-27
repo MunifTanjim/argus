@@ -25,7 +25,7 @@ func commandTable() string {
 			if !slices.Contains(r.sections, label) {
 				r.sections = append(r.sections, label)
 			}
-			for _, tok := range strings.Fields(b.defaults) {
+			for _, tok := range strings.Fields(b.defaults + " " + b.quiet) {
 				if v := "`" + tok + "`"; !slices.Contains(r.keys, v) {
 					r.keys = append(r.keys, v)
 				}

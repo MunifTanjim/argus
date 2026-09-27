@@ -74,23 +74,28 @@ func (m model) firstKey(sk *screenKeys, b binding, name string) string {
 	return ""
 }
 
-// When name matches b itself, b's effective keys are used; otherwise the screen
-// bindings are searched for name.
 func cmdKeys(sk *screenKeys, screen string, b binding, name string) []string {
-	if b.name == name {
-		return sk.keys(b)
-	}
-	for _, sb := range screenBindings[screen] {
-		if sb.name == name {
-			return sk.keys(sb)
-		}
+	if cb, ok := cmdBinding(screen, b, name); ok {
+		return sk.keys(cb)
 	}
 	return nil
 }
 
-// helpKeys returns the key column text for the help table: for each command in
-// b's pair (or b alone), all effective keys in section joined by a space; the
-// commands joined by "/".
+// cmdBinding is b when b runs name, else the screen's binding for name (b's
+// label partner).
+func cmdBinding(screen string, b binding, name string) (binding, bool) {
+	if b.name == name {
+		return b, true
+	}
+	for _, sb := range screenBindings[screen] {
+		if sb.name == name {
+			return sb, true
+		}
+	}
+	return binding{}, false
+}
+
+// helpKeys is the help table's key column for b and its label partner.
 func (m model) helpKeys(section string, b binding) string {
 	sk := m.keymap().screenKeys(section)
 	names := []string{b.name}
@@ -99,13 +104,16 @@ func (m model) helpKeys(section string, b binding) string {
 	}
 	cmds := make([]string, 0, len(names))
 	for _, n := range names {
-		ids := cmdKeys(sk, section, b, n)
-		if len(ids) == 0 {
+		cb, ok := cmdBinding(section, b, n)
+		if !ok {
 			continue
 		}
-		labels := make([]string, len(ids))
-		for i, id := range ids {
-			labels[i] = keyLabel(id)
+		var labels []string
+		for _, id := range sk.listedKeys(cb) {
+			labels = append(labels, keyLabel(id))
+		}
+		if len(labels) == 0 {
+			continue
 		}
 		cmds = append(cmds, strings.Join(labels, " "))
 	}

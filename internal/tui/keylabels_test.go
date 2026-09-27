@@ -111,6 +111,16 @@ func TestFooterBuildsLabelsFromEffectiveKeys(t *testing.T) {
 	}
 }
 
+func TestHelpKeysSkipQuietDefaultsUnlessMapped(t *testing.T) {
+	if got := projectsTestModel().helpKeys("workspace", paneKeys.Left); got != "^wh" {
+		t.Errorf("helpKeys focus left = %q, want %q", got, "^wh")
+	}
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-w><C-h>": "focus left"}})
+	if got := m.helpKeys("workspace", paneKeys.Left); got != "^w^h ^wh" {
+		t.Errorf("helpKeys with <C-w><C-h> mapped = %q, want %q", got, "^w^h ^wh")
+	}
+}
+
 func TestHelpKeysShowsAllEffectiveKeys(t *testing.T) {
 	m := projectsTestModel()
 	got := m.helpKeys("project-tree", projectsKeys.Up)

@@ -93,6 +93,23 @@ func TestPaneCycleOnProjects(t *testing.T) {
 	}
 }
 
+// Typing fast, ctrl is often still held for the second key.
+func TestPaneKeysWithCtrlHeld(t *testing.T) {
+	m := wideWorkspace()
+	for _, step := range []struct {
+		r    rune
+		want container
+	}{{'l', mainPane}, {'l', rightSidebar}, {'h', mainPane}, {'w', rightSidebar}, {'w', leftSidebar}} {
+		if m = pressKeys(m, ctrlKey('w'), ctrlKey(step.r)); m.focused != step.want {
+			t.Fatalf("<C-w><C-%c>: focus = %v, want %v", step.r, m.focused, step.want)
+		}
+	}
+	m = pressKeys(sessionModel(&session.Interaction{Kind: session.InteractionPermission}), ctrlKey('w'), ctrlKey('j'))
+	if m.focused != sessionDock {
+		t.Errorf("<C-w><C-j> with a prompt: focus = %v, want the dock", m.focused)
+	}
+}
+
 func TestPaneSessionFilesAndBack(t *testing.T) {
 	m := pressKeys(workspaceSession(nil), cw('l')...)
 	if m.focused != rightSidebar || viewOf(m) != viewSession {

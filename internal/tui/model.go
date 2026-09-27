@@ -85,7 +85,9 @@ type model struct {
 	spin     int  // animation frame for the list's working-session spinner
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)
 
-	showHelp bool // the key help covers the screen
+	showHelp   bool       // the key help covers the screen
+	cmdHistory []string   // the command line's history for this run
+	popups     popupStack // the open popups; the last one takes the keys
 
 	keys      *keymap // resolved keymaps; nil in models built without withKeymaps
 	kittyKeys bool    // the terminal reported the Kitty keyboard protocol

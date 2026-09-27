@@ -159,6 +159,7 @@ tui:
 - `projects`, `session`, and `detail` are not section names. Argus skips them and shows a hint at startup. Use `project-tree`, `workspace`, `file`, `file-tree`, or `changes` for `projects`. Use `transcript` or `session-dock` for `session`. Use `transcript` for `detail`.
 - In a text input, sequences do not work. Single keys of text input commands, for example `workspace pick-target` and `answer submit`, use the keymaps.
 - y/n prompts and the live screen do not use keymaps.
+- `:` opens the command line. A mapping cannot start with `:`.
 - Environment variables cannot set keymaps. `key-timeout` has `ARGUS_TUI_KEY_TIMEOUT`.
 
 ### Leader
@@ -225,6 +226,7 @@ A bad entry is skipped. The other entries still load. A bad entry is one of thes
 - bad notation
 - a shell command
 - a sequence for a command that works only in a text input (for example `workspace pick-target`)
+- a mapping that starts with `:`
 
 At startup, the footer shows the first error and a count:
 
@@ -240,13 +242,13 @@ The `g?` sequence shows the command name next to each key.
 | `answer submit` | session-dock | `<CR>` |
 | `back` | changes, file, file-tree, history, home, logs, project-tree, session-dock, transcript, workspace | `<Esc>` |
 | `filter-projects` | file, project-tree, workspace | `/` |
-| `focus down` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>j` |
-| `focus left` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>h` |
-| `focus next` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>w` |
+| `focus down` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
+| `focus left` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
+| `focus next` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
 | `focus prev` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>W` |
 | `focus prompt` | file, session-dock, transcript | `<Tab>` |
-| `focus right` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>l` |
-| `focus up` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>k` |
+| `focus right` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-l>` `<C-w>l` |
+| `focus up` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-k>` `<C-w>k` |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |
 | `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `G` |
@@ -268,6 +270,8 @@ The `g?` sequence shows the command name next to each key.
 | `project hide` | file, project-tree, workspace | `H` |
 | `project pin` | file, project-tree, workspace | `P` |
 | `project rename` | file, project-tree, workspace | `r` |
+| `project unhide` | file, project-tree, workspace | `H` |
+| `project unpin` | file, project-tree, workspace | `P` |
 | `quit` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), home, project-tree, workspace | `Q` |
 | `redaction add` | transcript | `d` |
 | `redaction list` | transcript | `D` |

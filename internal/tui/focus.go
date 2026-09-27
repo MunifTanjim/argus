@@ -6,11 +6,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// The focus manager: m.focused says which container gets the keys, and
-// repairFocus keeps it off a container that is hidden or empty. A key goes to
-// exactly one handler, in this order: the live screen, a raw focused
-// component, the open help, the focus manager's keys, the focused container's
-// keys, and the focused component.
+// A key goes to exactly one handler, in this order: the live screen, the front
+// popup, a raw focused component, the open help, the focus manager's keys, the
+// focused container's keys, and the focused component. A colon opens the
+// command line when none of the first four takes it, no sequence is pending,
+// and the component has commands.
 
 func (m model) focusedComp() component {
 	if s, ok := m.liveScreen(); ok {
@@ -36,6 +36,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m.quit()
 	}
+	if m.opensCmdLine(msg) {
+		return m.openCmdLine()
+	}
 	if !m.keysRaw() {
 		return m.resolveKey(msg)
 	}
@@ -48,6 +51,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.topScreen() >= 0 {
 		return m.handleScreenKey(msg)
+	}
+	if p := m.popups.front(); p != nil {
+		return m.popupKey(p, msg)
 	}
 	if m.focusedComp().raw(&ctx{m: &m}) {
 		return m.componentKey(msg)

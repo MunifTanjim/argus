@@ -100,6 +100,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":
+		case len(m.popups) > 0:
+			return m.updatePopup(msg)
 		case m.redactTyping():
 			return m.updateTranscript(msg, isHistory)
 		case m.topScreen() >= 0:
@@ -148,7 +150,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateTree(msg)
 	case branchesMsg, prsMsg, issuesMsg:
-		return m.updatePicker(msg)
+		return m.updatePopup(msg)
 	case createDoneMsg:
 		return m.createDone(msg)
 	case changedFilesMsg, commitsMsg, commitFilesMsg, listDirMsg:

@@ -55,10 +55,10 @@ func TestViewMap(t *testing.T) {
 		}, onWorkspace("n1:w1"), mainPane, viewTree},
 		{"create picker over a project row", func() model {
 			return typeKeys(typeKeys(onTree(homeTestModel()), "j"), "a")
-		}, onWorkspace(""), mainPane, viewTree},
+		}, onWorkspace(""), leftSidebar, viewTree},
 		{"create picker when the tree empties", func() model {
 			return treeEmptied(typeKeys(typeKeys(onTree(homeTestModel()), "j"), "a"))
-		}, isHome, mainPane, viewHome},
+		}, isHome, leftSidebar, viewTree},
 		{"tree from History lands on the Home row", func() model {
 			return onTree(typeKeys(homeTestModel(), "gt"))
 		}, isHome, leftSidebar, viewTree},

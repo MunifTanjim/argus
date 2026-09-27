@@ -20,8 +20,8 @@ func (m model) treeScreenFooter(bs ...binding) string {
 	return m.footer(bs...)
 }
 
-// sessionHint is the footer of a component over a live transcript: bs, unless
-// a pending key sequence or the flash takes their place.
+// sessionHint is a footer of bs, unless a pending key sequence or the flash
+// takes their place.
 func (m model) sessionHint(bs ...binding) string {
 	switch {
 	case len(m.keyBuf) > 0:
@@ -91,8 +91,8 @@ func (m model) projectsHelpView() string {
 			tree(k.ForceRemove, "force remove"),
 			tree(k.Rename, "rename project"),
 			tree(k.Forget, "forget project (files stay)"),
-			tree(k.Pin, "pin project"),
-			tree(k.Hide, "hide project"),
+			tree(k.Pin, "pin / unpin project"),
+			tree(k.Hide, "hide / unhide project"),
 			tree(k.ShowHidden, "show hidden"),
 			tree(k.ShowGone, "show gone"),
 			tree(k.Target, "change target branch"),

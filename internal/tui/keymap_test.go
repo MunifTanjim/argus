@@ -232,16 +232,17 @@ func TestDockFollowsMappedKeys(t *testing.T) {
 func TestLiteralKeyFootersIgnoreProjectsRemaps(t *testing.T) {
 	raw := map[string]map[string]string{"project-tree": {"<C-x>": "back", "<C-a>": "open", "<C-p>": "prev", "<C-n>": "focus next"}}
 	m := withKeymap(createTestModel(t), raw)
-	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "enter create") || !strings.Contains(f, "tab next tab") || !strings.Contains(f, "esc cancel") {
+	if f := ansi.Strip(m.View().Content); !strings.Contains(f, "enter create") || !strings.Contains(f, "tab next tab") || !strings.Contains(f, "esc cancel") {
 		t.Errorf("the create footer names the keys its handler reads:\n%s", f)
 	}
-	m = withCreate(m, func(p *createComp) { p.picking = true })
-	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "↑/↓ move") || !strings.Contains(f, "enter select") || !strings.Contains(f, "esc back") {
+	m = withCreate(m, func(p *createPicker) { p.picking = true })
+	if f := ansi.Strip(m.View().Content); !strings.Contains(f, "↑/↓ move") || !strings.Contains(f, "enter select") || !strings.Contains(f, "esc back") {
 		t.Errorf("the target picker footer names the keys its handler reads:\n%s", f)
 	}
 	r := withKeymap(projectsTestModel(), raw)
-	r = withPicker(r, retargetComp{pick: newBranchPicker()})
-	if f := ansi.Strip(r.currentFooter()); !strings.Contains(f, "↑/↓ move") || !strings.Contains(f, "enter select") || !strings.Contains(f, "esc cancel") {
+	r.width, r.height = 120, 30
+	r = withPopup(r, retargetPicker{pick: newBranchPicker()})
+	if f := ansi.Strip(r.View().Content); !strings.Contains(f, "↑/↓ move") || !strings.Contains(f, "enter select") || !strings.Contains(f, "esc cancel") {
 		t.Errorf("the retarget footer names the keys its handler reads:\n%s", f)
 	}
 }
@@ -325,6 +326,50 @@ func TestNoDefaultKeyWaits(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestKeymapRejectsColonFirst(t *testing.T) {
+	_, errs := buildKeymap(map[string]map[string]string{
+		"project-tree": {":": "quit", ":x": "quit", "g:": "quit"},
+	}, time.Second, "")
+	want := []string{
+		`keymap: project-tree ":": ":" opens the command line`,
+		`keymap: project-tree ":x": ":" opens the command line`,
+	}
+	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestBuildKeymapExplainsBadCommandNames(t *testing.T) {
+	_, errs := buildKeymap(map[string]map[string]string{"project-tree": {
+		"a": "fokus left",
+		"b": "sidebar",
+		"c": "sidebar wide",
+		"d": "workspace",
+		"e": "workspace rm",
+		"f": "toggle-left-sidebar",
+		"g": "  goto   top ",
+	}}, time.Second, "")
+	want := []string{
+		`keymap: project-tree "a": unknown command "fokus left"`,
+		`keymap: project-tree "b": sidebar needs an argument (narrower, wider)`,
+		`keymap: project-tree "c": unknown argument "wide" for sidebar (narrower, wider)`,
+		`keymap: project-tree "d": workspace needs an action (change-target, force-remove, new, pick-target, remove, rerun-setup)`,
+		`keymap: project-tree "e": unknown action "rm" for workspace (change-target, force-remove, new, pick-target, remove, rerun-setup)`,
+		`keymap: project-tree "f": unknown command "toggle-left-sidebar"`,
+	}
+	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestExtraSpacesInAMappingAreIgnored(t *testing.T) {
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"<C-g>": "  goto   bottom "}})
+	m, _ = upd(m, ctrlKey('g'))
+	if m.left.tree.cursor != len(m.left.tree.rows)-1 {
+		t.Errorf("<C-g> must run goto bottom: cursor %d of %d rows", m.left.tree.cursor, len(m.left.tree.rows))
 	}
 }
 

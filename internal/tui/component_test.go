@@ -84,8 +84,6 @@ func contractComponents(m model) []component {
 		newTranscript(),
 		screenComp{sessionID: "n1:s1"},
 		spawnComp{},
-		createOf(openCreate(m, "n1:p1")),
-		retargetComp{pick: newBranchPicker()},
 		newDock(),
 	}
 }

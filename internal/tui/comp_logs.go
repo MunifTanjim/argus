@@ -36,6 +36,7 @@ func (l logsComp) fullScreen(c *ctx) fullLevel {
 
 func (l logsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m, k := c.m, logsKeys
+	c.setFlash("")
 	switch {
 	case m.matches(msg, k.Up):
 		l = l.scrollBy(c, -1)
@@ -123,12 +124,7 @@ func (l logsComp) footer(c *ctx) []binding {
 	return []binding{listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, c.m.treeKey(), projectsKeys.Help}
 }
 
-func (l logsComp) footerText(c *ctx) string {
-	if len(c.m.keyBuf) > 0 {
-		return asstStyle.Render(c.m.keyHint())
-	}
-	return c.m.footer(l.footer(c)...)
-}
+func (l logsComp) footerText(c *ctx) string { return c.m.sessionHint(l.footer(c)...) }
 
 // The Logs tab exists only with an embedded node.
 func openLogs(c *ctx) {

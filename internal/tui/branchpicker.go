@@ -68,6 +68,13 @@ func (b *branchPicker) key(msg tea.KeyPressMsg) (*api.BranchInfo, tea.Cmd) {
 	return nil, cmd
 }
 
+func (b *branchPicker) paste(msg tea.PasteMsg) tea.Cmd {
+	var cmd tea.Cmd
+	b.filter, cmd = b.filter.Update(msg)
+	b.cursor = min(b.cursor, cursorBottom(len(b.matches())))
+	return cmd
+}
+
 // dimInUse marks branches that a worktree already has checked out.
 func (b branchPicker) view(w, h int, dimInUse bool) string {
 	head := dimStyle.Render("filter: ") + b.filter.View()

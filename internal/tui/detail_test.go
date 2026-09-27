@@ -523,3 +523,17 @@ func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
 		t.Fatal("expected a fetch command for history nested drill")
 	}
 }
+
+func TestOpenByNameDrillsInTheCardDetail(t *testing.T) {
+	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
+			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
+	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
+		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
+	m.c.m.width, m.c.m.height = 80, 30
+	m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
+	m.handleDetailKey(cmdMsg("open"))
+	if len(m.transcript.detailStack) != 2 || m.topFrame().label != "explorer" {
+		t.Fatalf("open in the card detail must drill in: frames=%d", len(m.transcript.detailStack))
+	}
+}

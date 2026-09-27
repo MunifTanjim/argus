@@ -202,10 +202,7 @@ func (h historyComp) footerText(c *ctx) string {
 	if h.inProject {
 		return c.m.exportOrFlashFooter(h.pendingExport, c.m.footer(h.footer(c)...))
 	}
-	if len(c.m.keyBuf) > 0 {
-		return asstStyle.Render(c.m.keyHint())
-	}
-	return c.m.footer(h.footer(c)...)
+	return c.m.sessionHint(h.footer(c)...)
 }
 
 func (h historyComp) projectsView(c *ctx, w, ht int) string {

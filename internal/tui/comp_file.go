@@ -78,7 +78,7 @@ func (f fileComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	_, passTree := m.underFile().(treeKeyer)
 	switch {
 	case passTree && m.matches(msg, k.Filter, k.Spawn, k.SetupLog, k.ShowHidden, k.ShowGone, k.Widen, k.Narrow,
-		k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
+		k.New, k.Rename, k.Hide, k.Unhide, k.Pin, k.Unpin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
 		return f, nil, false
 	case m.matches(msg, fk.Back):
 		f.leave(c)
@@ -263,8 +263,8 @@ func (f fileComp) footer(*ctx) []binding {
 	return append(b, fk.Wrap, helpAs(fk.Refresh, "reload"), helpAs(fk.Back, "close"))
 }
 
-// openFile is the file open over the main pane's component, under a picker,
-// the spawn flow, or the live screen, or not.
+// openFile is the file open over the main pane's component, under the spawn
+// flow or the live screen, or not.
 func (m model) openFile() (fileComp, bool) {
 	if i := m.fileAt(); i >= 0 {
 		return m.main[i].(fileComp), true
