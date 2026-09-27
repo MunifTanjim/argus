@@ -77,6 +77,31 @@ Workspaces from a PR or an issue need these:
 - The GitHub CLI (`gh`), logged in with `gh auth login`.
 - An `origin` remote on `github.com`.
 
+## Copy ignored files into workspaces
+
+A new worktree does not have the ignored files of the main worktree, for
+example `.env`. To copy them, put a `.worktreeinclude` file at the root of the
+repository. It uses `.gitignore` syntax:
+
+```gitignore
+# .worktreeinclude
+.env
+config/*.local.json
+.venv/
+```
+
+When argus creates a workspace, it copies each file from the main worktree
+that matches a pattern and that git ignores. A directory pattern, for example
+`.venv/`, copies each file in it. Symlinks are copied as symlinks, and file modes
+are kept. Tracked files are never copied.
+If a file already exists in the new worktree, argus keeps it.
+
+The copy is the first step of setup. It runs in the background after the
+workspace exists, and the setup script starts after it. If a file does not
+copy, the workspace stays, the script still runs, and setup fails. The setup
+log names each file that did not copy. Press `S` in the TUI or run
+`argus workspace setup <workspace>` to copy the missing files again.
+
 ## Workspace scripts
 
 A project can run a script after argus creates a workspace (`setup`) and

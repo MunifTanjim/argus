@@ -93,8 +93,8 @@ func waitSetup(call caller, wsID string) error {
 			if run.OutputTail != "" {
 				shell.StdOutF("%s\n", run.OutputTail)
 			}
-			if run.ExitCode < 0 {
-				return errors.New("setup failed") // it never exited: a settings error, a timeout, or a stop
+			if run.ExitCode <= 0 {
+				return errors.New("setup failed") // no failed exit: a settings error, a file copy, a timeout, or a stop
 			}
 			return fmt.Errorf("setup failed (exit %d)", run.ExitCode)
 		}

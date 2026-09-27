@@ -193,10 +193,12 @@ func (m model) setupBlock(ws string, w int) string {
 	cmd := commandLine(run.Command)
 	var head string
 	switch {
+	case run.State == "failed" && run.ExitCode > 0:
+		head = StyleErrorBold.Render(fmt.Sprintf("setup failed (exit %d) · %s", run.ExitCode, cmd))
 	case run.State == "failed" && cmd == "":
 		head = StyleErrorBold.Render("setup failed")
 	case run.State == "failed":
-		head = StyleErrorBold.Render(fmt.Sprintf("setup failed (exit %d) · %s", run.ExitCode, cmd))
+		head = StyleErrorBold.Render("setup failed · " + cmd)
 	case cmd == "":
 		head = StyleSecondaryBold.Render("setup running")
 	default:

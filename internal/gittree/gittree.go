@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -179,12 +180,16 @@ func DefaultBranch(ctx context.Context, repoDir string) string {
 func runGit(ctx context.Context, what string, args ...string) error {
 	cmd := shell.NewCommandContext(ctx, "git", args...)
 	if err := cmd.Run(); err != nil {
-		if msg := gitMessage(cmd.StdErr().String()); msg != "" {
-			return fmt.Errorf("%s: %s", what, msg)
-		}
-		return fmt.Errorf("%s: %w", what, err)
+		return gitErr(what, cmd, err)
 	}
 	return nil
+}
+
+func gitErr(what string, cmd *shell.Command, err error) error {
+	if msg := gitMessage(cmd.StdErr().String()); msg != "" {
+		return fmt.Errorf("%s: %s", what, msg)
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }
 
 // gitMessage reduces git's stderr to the failure: its fatal: and error: lines
@@ -371,4 +376,38 @@ func worktreeCommonDir(gitFile string) string {
 		common = filepath.Join(gitdir, common)
 	}
 	return filepath.Clean(common)
+}
+
+// IncludedFiles lists the files, relative to the worktree at dir, that match
+// dir's .worktreeinclude and that git ignores. Tracked files never match.
+// It is empty when dir has no .worktreeinclude.
+func IncludedFiles(ctx context.Context, dir string) ([]string, error) {
+	include := filepath.Join(dir, ".worktreeinclude")
+	if _, err := os.Stat(include); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	ls := shell.NewCommandContext(ctx, "git", "-C", dir, "ls-files", "-z", "--others", "--ignored", "--exclude-from="+include)
+	if err := ls.Run(); err != nil {
+		return nil, gitErr("ls-files", ls, err)
+	}
+	matched := ls.StdOut().String()
+	if matched == "" {
+		return nil, nil
+	}
+	ci := shell.NewCommandContext(ctx, "git", "-C", dir, "check-ignore", "-z", "--stdin").WithStdIn(strings.NewReader(matched))
+	if err := ci.Run(); err != nil {
+		// Exit 1: none of the paths is ignored.
+		if exitErr, ok := shell.IsExitError(err); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, gitErr("check-ignore", ci, err)
+	}
+	var files []string
+	for _, f := range strings.FieldsFunc(ci.StdOut().String(), func(r rune) bool { return r == 0 }) {
+		// A nested repository is listed as one "dir/" entry.
+		if !strings.HasSuffix(f, "/") {
+			files = append(files, f)
+		}
+	}
+	return files, nil
 }

@@ -66,7 +66,7 @@ Press `g?` to see every key. The main keys are:
 | `r` / `H` / `P` | Rename, hide, or pin a project |
 | `F` | Forget a project. Its files stay. |
 | `<Leader>o` / `<Leader>e` | Show or hide the left sidebar, or the right sidebar |
-| `S` | Run the workspace's setup script again |
+| `S` | Run the workspace's setup again: copy the `.worktreeinclude` files, then run the setup script |
 | `L` | Show the output of the workspace's last setup run |
 
 The `<C-w>` keys also work if you hold Ctrl for the second key, as in Vim. For example, `<C-w><C-h>` is the same as `<C-w>h`. The help does not list these keys.
@@ -75,9 +75,9 @@ The `<C-w>` keys also work if you hold Ctrl for the second key, as in Vim. For e
 
 A workspace with live sessions cannot be removed. Kill its sessions first.
 
-While a setup script runs, the workspace row shows "setting up…". If it
-fails, the row shows "setup failed", and the workspace pane shows the last
-lines of its output. See
+While setup runs, the workspace row shows "setting up…". Setup copies the
+`.worktreeinclude` files and runs the setup script. If it fails, the row shows
+"setup failed", and the workspace pane shows the last lines of its output. See
 [Configuration](/getting-started/configuration#workspace-scripts).
 
 The **Changes** list shows the uncommitted changes. Press `t` to show all changes

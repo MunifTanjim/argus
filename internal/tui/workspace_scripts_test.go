@@ -356,3 +356,14 @@ func TestForceRemovePromptNamesTeardown(t *testing.T) {
 		t.Errorf("force-remove prompt = %q", f)
 	}
 }
+
+func TestSetupBlockFailedWithoutExitCode(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m = withSetup(m, 1, &api.ScriptRun{State: "failed", Command: "pnpm install", OutputTail: ".worktreeinclude: copied 1 of 2 files"})
+	m = selectRow(m, "n1:w2")
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "setup failed · pnpm install") || strings.Contains(out, "exit 0") || !strings.Contains(out, "copied 1 of 2 files") {
+		t.Errorf("a failed setup whose script passed shows no exit code:\n%s", out)
+	}
+}

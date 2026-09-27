@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,7 +121,11 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	}
 	res := api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path, Warning: warning, Prompt: plan.prompt}
 	// Setup outlives this request, whose context ends with the reply.
-	res.Setup = d.startSetup(context.WithoutCancel(ctx), wsID, mainDir)
+	if cmd, err := d.startSetup(context.WithoutCancel(ctx), wsID, mainDir); err == nil {
+		res.Setup = cmd
+	} else if !errors.Is(err, errNoSetup) {
+		d.scripts.Fail(wsID, cmd, err.Error())
+	}
 	d.notifyProjectsChanged()
 	return res, nil
 }

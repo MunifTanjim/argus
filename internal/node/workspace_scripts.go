@@ -3,7 +3,9 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,35 +25,43 @@ func (d *Node) scriptEnv(ctx context.Context, wsID, dir, mainDir string) (wsscri
 	return wsscript.Env{WorkspacePath: dir, RootPath: mainDir, WorkspaceName: filepath.Base(dir), TargetBranch: target}, nil
 }
 
-// startSetup starts wsID's setup script if the project has one and returns the
-// command that started. A settings parse error is recorded as a failed setup.
-// A project with no main working tree has no scripts.
-func (d *Node) startSetup(ctx context.Context, wsID, mainDir string) string {
+var errNoSetup = errors.New("no setup script")
+
+// startSetup starts wsID's setup: it copies the .worktreeinclude files and then
+// runs the setup script, and returns the script command. A settings parse
+// error fails the run. A project with neither a script nor a .worktreeinclude,
+// or with no main working tree, has no setup (errNoSetup).
+func (d *Node) startSetup(ctx context.Context, wsID, mainDir string) (string, error) {
 	if mainDir == "" {
-		return ""
+		return "", errNoSetup
 	}
-	s, err := wsscript.Load(mainDir)
-	if err != nil {
-		d.scripts.Fail(wsID, "", err.Error())
-		return ""
-	}
-	if s.Setup == "" {
-		return ""
+	s, loadErr := wsscript.Load(mainDir)
+	include := fileExists(filepath.Join(mainDir, ".worktreeinclude"))
+	if loadErr == nil && s.Setup == "" && !include {
+		return "", errNoSetup
 	}
 	dir, _, _, _, err := d.projreg.WorkspaceInfo(ctx, wsID)
 	if err != nil {
-		d.scripts.Fail(wsID, s.Setup, err.Error())
-		return ""
+		return s.Setup, err
 	}
 	env, err := d.scriptEnv(ctx, wsID, dir, mainDir)
 	if err != nil {
-		d.scripts.Fail(wsID, s.Setup, err.Error())
-		return ""
+		return s.Setup, err
 	}
-	if err := d.scripts.StartSetup(wsID, s.Setup, env); err != nil {
-		return ""
+	prepare := func(ctx context.Context, out io.Writer) bool {
+		ok := loadErr == nil
+		if !ok {
+			fmt.Fprintln(out, loadErr)
+		}
+		if include {
+			ok = copyIncluded(ctx, mainDir, dir, out) && ok
+		}
+		return ok
 	}
-	return s.Setup
+	if err := d.scripts.StartSetup(wsID, s.Setup, env, prepare); err != nil {
+		return s.Setup, err
+	}
+	return s.Setup, nil
 }
 
 func (d *Node) handleWorkspaceRunSetup(ctx context.Context, params json.RawMessage) (any, error) {
@@ -62,7 +72,7 @@ func (d *Node) handleWorkspaceRunSetup(ctx context.Context, params json.RawMessa
 	if d.projreg == nil {
 		return nil, invalid("project registry disabled")
 	}
-	dir, _, projID, ok, err := d.projreg.WorkspaceInfo(ctx, p.WorkspaceID)
+	_, _, projID, ok, err := d.projreg.WorkspaceInfo(ctx, p.WorkspaceID)
 	if err != nil || !ok {
 		return nil, invalid("unknown workspace: %s", p.WorkspaceID)
 	}
@@ -74,21 +84,10 @@ func (d *Node) handleWorkspaceRunSetup(ctx context.Context, params json.RawMessa
 	if err != nil {
 		return nil, invalid("%s", err)
 	}
-	if kind != "git" || mainDir == "" {
-		return nil, invalid("no setup script")
+	if kind != "git" {
+		return nil, invalid("%s", errNoSetup)
 	}
-	s, err := wsscript.Load(mainDir)
-	if err != nil {
-		return nil, invalid("%s", err)
-	}
-	if s.Setup == "" {
-		return nil, invalid("no setup script")
-	}
-	env, err := d.scriptEnv(ctx, p.WorkspaceID, dir, mainDir)
-	if err != nil {
-		return nil, invalid("%s", err)
-	}
-	if err := d.scripts.StartSetup(p.WorkspaceID, s.Setup, env); err != nil {
+	if _, err := d.startSetup(ctx, p.WorkspaceID, mainDir); err != nil {
 		return nil, invalid("%s", err)
 	}
 	return nil, nil
@@ -100,6 +99,11 @@ func (d *Node) handleWorkspaceSetupLog(_ context.Context, params json.RawMessage
 		return nil, err
 	}
 	return api.SetupLogResult{Output: d.scripts.Output(p.WorkspaceID)}, nil
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func dirExists(p string) bool {
