@@ -69,7 +69,7 @@ func (f *detailFrame) expandOutputs() {
 	}
 }
 
-func (m model) topFrame() *detailFrame {
+func (m tview) topFrame() *detailFrame {
 	if len(m.transcript.detailStack) == 0 {
 		return nil
 	}
@@ -120,7 +120,7 @@ func drillLabel(it transcript.Item) string {
 }
 
 // enterDetail builds the root frame for the selected transcript chunk.
-func (m *model) enterDetail() {
+func (m tview) enterDetail() {
 	m.transcript.detailStack = nil
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.chunks) {
 		return
@@ -150,7 +150,7 @@ func (m *model) enterDetail() {
 
 // drillDetail pushes a frame for the selected item: a subagent's trace, or the
 // item focused on its own.
-func (m *model) drillDetail() {
+func (m tview) drillDetail() {
 	f := m.topFrame()
 	if f == nil || len(f.items) == 0 || f.cursor < 0 || f.cursor >= len(f.items) {
 		return
@@ -180,7 +180,7 @@ func (m *model) drillDetail() {
 }
 
 // popDetail removes the deepest frame; returns true when the stack is now empty.
-func (m *model) popDetail() bool {
+func (m tview) popDetail() bool {
 	if len(m.transcript.detailStack) > 0 {
 		m.transcript.detailStack = m.transcript.detailStack[:len(m.transcript.detailStack)-1]
 	}
@@ -198,40 +198,38 @@ func (m model) detailable(c transcript.Chunk) bool {
 	}
 }
 
-func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.topFrame() == nil {
-		return m, nil
+		return nil
 	}
-	if mm, cmd, ok := m.dispatch(msg, detailTable); ok {
-		return mm, cmd
-	}
-	return m, nil
+	cmd, _ := m.dispatch(msg, detailTable)
+	return cmd
 }
 
 // detailTable maps detail-view bindings to actions. Each action mutates the top
 // frame (a pointer into the shared detailStack backing).
 var detailTable = []keyTableEntry{
-	{detailKeys.Down, model.actDetailDown},
-	{detailKeys.Up, model.actDetailUp},
-	{detailKeys.Collapse, model.actDetailCollapse},
-	{detailKeys.Expand, model.actDetailExpand},
-	{detailKeys.Drill, model.actDetailDrill},
-	{detailKeys.HalfDown, model.actDetailHalfDown},
-	{detailKeys.HalfUp, model.actDetailHalfUp},
-	{detailKeys.Top, model.actDetailTop},
-	{detailKeys.Bottom, model.actDetailBottom},
+	{detailKeys.Down, tview.actDetailDown},
+	{detailKeys.Up, tview.actDetailUp},
+	{detailKeys.Collapse, tview.actDetailCollapse},
+	{detailKeys.Expand, tview.actDetailExpand},
+	{detailKeys.Drill, tview.actDetailDrill},
+	{detailKeys.HalfDown, tview.actDetailHalfDown},
+	{detailKeys.HalfUp, tview.actDetailHalfUp},
+	{detailKeys.Top, tview.actDetailTop},
+	{detailKeys.Bottom, tview.actDetailBottom},
 }
 
-func (m model) actDetailDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items == nil {
 		f.scroll++
 		m.clampDetailScroll()
-		return m, nil
+		return nil
 	}
 	if !m.detailCursorVisible(f) {
 		f.cursor = m.firstVisibleItem(f) // re-anchor to viewport; don't jump from the off-screen cursor
-		return m, nil
+		return nil
 	}
 	// Scroll within a cursor item taller than the viewport before advancing.
 	if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
@@ -241,20 +239,20 @@ func (m model) actDetailDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.cursor++
 		m.ensureDetailVisible()
 	}
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailUp(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items == nil {
 		if f.scroll > 0 {
 			f.scroll--
 		}
-		return m, nil
+		return nil
 	}
 	if !m.detailCursorVisible(f) {
 		f.cursor = m.lastVisibleItem(f) // re-anchor to viewport
-		return m, nil
+		return nil
 	}
 	if _, start, _, ok := m.cursorOverflow(f); ok && f.scroll > start {
 		f.scroll--
@@ -262,35 +260,35 @@ func (m model) actDetailUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.cursor--
 		m.ensureDetailVisible()
 	}
-	return m, nil
+	return nil
 }
 
 // cursorOverflow reports whether the cursor item is taller than the visible
 // height h, returning h and the item's [start,end) line range. h matches
 // detailBody's content area so it agrees with ensureDetailVisible.
-func (m model) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
+func (m tview) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
 	_, start, end = m.frameLines(f, m.transcriptWidth())
 	h = max(1, m.viewportHeight()-3)
 	return h, start, end, end-start > h
 }
 
-func (m model) actDetailCollapse(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailCollapse(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && f.isExpanded(f.cursor) {
 		f.toggle(f.cursor)
 		m.ensureDetailVisible()
 	}
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailExpand(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailExpand(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && !f.isExpanded(f.cursor) {
 		f.toggle(f.cursor)
 		m.ensureDetailVisible()
-		return m, m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
+		return m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
 	}
-	return m, nil
+	return nil
 }
 
 func subagentLabel(it transcript.Item) string {
@@ -335,26 +333,26 @@ func subagentHeaderLines(agentType, nickname, status, input string, iw int) []st
 	return lines
 }
 
-func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailDrill(msg tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
-		return m, nil
+		return nil
 	}
 	it := f.items[f.cursor]
 	if s, ok := soleSubagent(it); ok && s.HasTrace && len(s.Trace) == 0 && s.ID != "" {
-		if m.mode == modeHistoryTranscript {
+		if !m.live {
 			// Past session: one-shot fetch (no live subscription).
 			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 				label: subagentLabel(it), agentID: s.ID, expanded: map[int]bool{},
 				subagentType: s.Type, subagentName: s.Name,
 				subagentStatus: s.Status, subagentInput: s.Desc,
 			})
-			return m, m.fetchHistSubagent(m.history.openNodeID, m.history.openPath, m.history.openAgent, s.ID)
+			return m.fetchHistSubagent(m.history.addr(), s.ID)
 		}
 		// Live session: stream the subagent trace into a new frame. Stash the
 		// session subRef so pop can restore it without a leak.
 		m.sessionSub = m.activeSub
-		ref := subRef{subID: newSubID(), sessionID: m.selectedID, agentID: s.ID, cacheKey: m.cacheKeyFor(m.selectedID)}
+		ref := subRef{subID: newSubID(), sessionID: m.sessionID, agentID: s.ID, cacheKey: m.cacheKeyFor(m.sessionID)}
 		m.activeSub = ref // subagent stream is active while drilled in
 		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},
@@ -362,49 +360,49 @@ func (m model) actDetailDrill(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			subagentStatus: s.Status, subagentInput: s.Desc,
 		})
 		have := len(m.transcriptCache[ref.key()].chunks)
-		return m, m.subscribeCmd(ref, have)
+		return m.subscribeCmd(ref, have)
 	}
 	m.drillDetail() // inline (history) or focus a leaf item
 	// Focusing a tool leaf shows its body expanded; fetch on demand.
 	if nf := m.topFrame(); nf != nil && nf.focused && len(nf.items) == 1 {
-		return m, m.fetchToolBodyCmd(nf.items[0], nf.agentID)
+		return m.fetchToolBodyCmd(nf.items[0], nf.agentID)
 	}
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailHalfDown(tea.KeyPressMsg) tea.Cmd {
 	m.topFrame().scroll += max(1, m.viewportHeight()/2)
 	m.clampDetailScroll()
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailHalfUp(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	f.scroll = max(0, f.scroll-max(1, m.viewportHeight()/2))
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailTop(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	f.scroll = 0
 	if f.items != nil {
 		f.cursor = 0
 	}
-	return m, nil
+	return nil
 }
 
-func (m model) actDetailBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m tview) actDetailBottom(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items != nil {
 		f.cursor = max(0, len(f.items)-1)
 	}
 	f.scroll = m.frameMaxScroll(f) // true bottom; works for body frames and tall items too
-	return m, nil
+	return nil
 }
 
 // frameLines renders all of a frame's items to display lines and returns the
 // [start,end) line range of the cursor item (0,0 for a non-AI body frame).
-func (m model) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
+func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
 	if f.items == nil {
 		// Flat body (non-AI chunk) has no accent gutter; indent to align with the
 		// breadcrumb/header and the padded session header.
@@ -426,7 +424,7 @@ func (m model) frameLines(f *detailFrame, width int) (lines []string, curStart, 
 }
 
 // detailBreadcrumb renders the drill path (e.g. "opus4.8 › explorer › Read").
-func (m model) detailBreadcrumb() string {
+func (m tview) detailBreadcrumb() string {
 	var labels []string
 	for i := range m.transcript.detailStack {
 		labels = append(labels, m.transcript.detailStack[i].label)
@@ -441,7 +439,7 @@ func (f *detailFrame) detailHeaderText(width int) string {
 	return strings.Join(subagentHeaderLines(f.subagentType, f.subagentName, f.subagentStatus, f.subagentInput, width), "\n")
 }
 
-func (m model) detailBodyHeight(f *detailFrame) int {
+func (m tview) detailBodyHeight(f *detailFrame) int {
 	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
 	if header := f.detailHeaderText(m.transcriptWidth() - detailGutter); header != "" {
 		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
@@ -449,7 +447,7 @@ func (m model) detailBodyHeight(f *detailFrame) int {
 	return h
 }
 
-func (m model) frameItemStarts(f *detailFrame, width int) (first []int, total int) {
+func (m tview) frameItemStarts(f *detailFrame, width int) (first []int, total int) {
 	first = make([]int, len(f.items))
 	for i, it := range f.items {
 		if i > 0 {
@@ -471,7 +469,7 @@ func itemSpan(i int, first []int, total int) (int, int) {
 	return start, end
 }
 
-func (m model) itemAtLine(f *detailFrame, line int) int {
+func (m tview) itemAtLine(f *detailFrame, line int) int {
 	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	idx := 0
 	for i, s := range first {
@@ -482,7 +480,7 @@ func (m model) itemAtLine(f *detailFrame, line int) int {
 	return idx
 }
 
-func (m model) detailCursorVisible(f *detailFrame) bool {
+func (m tview) detailCursorVisible(f *detailFrame) bool {
 	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
 		return false
 	}
@@ -491,7 +489,7 @@ func (m model) detailCursorVisible(f *detailFrame) bool {
 	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
 }
 
-func (m model) firstVisibleItem(f *detailFrame) int {
+func (m tview) firstVisibleItem(f *detailFrame) int {
 	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	for i, s := range first {
@@ -502,7 +500,7 @@ func (m model) firstVisibleItem(f *detailFrame) int {
 	return m.itemAtLine(f, f.scroll)
 }
 
-func (m model) lastVisibleItem(f *detailFrame) int {
+func (m tview) lastVisibleItem(f *detailFrame) int {
 	first, _ := m.frameItemStarts(f, m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	last := -1
@@ -517,7 +515,7 @@ func (m model) lastVisibleItem(f *detailFrame) int {
 	return last
 }
 
-func (m *model) ensureDetailVisible() {
+func (m tview) ensureDetailVisible() {
 	f := m.topFrame()
 	if f == nil || f.items == nil {
 		return
@@ -540,7 +538,7 @@ func (m *model) ensureDetailVisible() {
 	}
 }
 
-func (m model) frameMaxScroll(f *detailFrame) int {
+func (m tview) frameMaxScroll(f *detailFrame) int {
 	lines, _, _ := m.frameLines(f, m.transcriptWidth())
 	bodyH := m.viewportHeight()
 	if crumb := truncateLine(m.detailBreadcrumb(), m.transcriptWidth()); crumb != "" {
@@ -555,7 +553,7 @@ func (m model) frameMaxScroll(f *detailFrame) int {
 	return max(0, len(lines)-max(1, bodyH-1)) // bodyH-1: a row is reserved for the scroll hint
 }
 
-func (m *model) clampDetailScroll() {
+func (m tview) clampDetailScroll() {
 	f := m.topFrame()
 	if f == nil {
 		return
@@ -583,7 +581,7 @@ func scrollHint(above, below, width int) string {
 
 // detailBody renders the active frame: breadcrumb + item list sliced to the
 // viewport (a row reserved for the scroll indicator on overflow), centered.
-func (m model) detailBody() string {
+func (m tview) detailBody() string {
 	cw := m.transcriptWidth()
 	f := m.topFrame()
 	if f == nil {
@@ -663,7 +661,7 @@ func (m model) renderDetail(c transcript.Chunk) string {
 	}
 }
 
-func (m model) detailRowBlock(it transcript.Item, expanded, selected bool, width int) string {
+func (m tview) detailRowBlock(it transcript.Item, expanded, selected bool, width int) string {
 	c := itemAccentColor(it)
 	bar := GlyphAccentBar
 	if selected {
@@ -686,7 +684,7 @@ func truncateLine(s string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(s)
 }
 
-func (m model) detailItemBody(it transcript.Item, c color.Color, bar string, width int) string {
+func (m tview) detailItemBody(it transcript.Item, c color.Color, bar string, width int) string {
 	iw := max(width-2, 10)
 	switch it.Kind {
 	case transcript.ItemThinking:
@@ -748,11 +746,16 @@ func joinItem(head, body string) string {
 
 // toolBody renders a tool's input/result via a per-tool renderer or a generic
 // layout. Heavy bodies are fetched on demand; show a placeholder while outstanding.
-func (m model) toolBody(it transcript.Item, width int) string {
+func (m tview) toolBody(it transcript.Item, width int) string {
 	it, fetched := m.filledTool(it)
 	if !fetched && it.ToolID != "" {
 		return StyleDim.Render("loading…")
 	}
+	return m.renderToolBody(it, width)
+}
+
+// renderToolBody needs the tool's input and result already fetched.
+func (m model) renderToolBody(it transcript.Item, width int) string {
 	if body, ok := m.toolDetailBody(it, width); ok {
 		return body
 	}
@@ -761,7 +764,7 @@ func (m model) toolBody(it transcript.Item, width int) string {
 
 // filledTool populates on-demand body fields from the cache. Items with no ToolID
 // are treated as already-resolved.
-func (m model) filledTool(it transcript.Item) (transcript.Item, bool) {
+func (m tview) filledTool(it transcript.Item) (transcript.Item, bool) {
 	if it.ToolID == "" {
 		return it, true
 	}

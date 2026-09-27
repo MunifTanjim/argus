@@ -87,12 +87,11 @@ func sessionModel(ix *session.Interaction) model {
 	m.sessions = map[string]session.Session{
 		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix, Tmux: session.TmuxLocation{PaneID: "%0"}},
 	}
-	m.selectedID = "s1"
-	m.mode = modeSession
-	m.focus, m.historyView = focusHistory, histTranscript
-	m.transcript.chunks = sampleChunks()
+	m = withLive(m, "s1")
+	m = withFocus(m, mainPane)
+	m = withChunks(m, sampleChunks())
 	if ix != nil && ix.Kind == session.InteractionQuestion {
-		m.ensurePromptState(len(ix.Questions))
+		m.dock.ensurePromptState(len(ix.Questions))
 	}
 	return m
 }
@@ -100,14 +99,14 @@ func sessionModel(ix *session.Interaction) model {
 func TestResumeEntersTranscriptNotScreen(t *testing.T) {
 	m := testModel()
 	m.sessions = map[string]session.Session{"s1": {ID: "s1"}}
-	m.mode = modeList
+	m = withView(m, viewHome)
 	res, _ := m.Update(resumeResultMsg{sessionID: "s1"})
 	m = res.(model)
-	if m.mode != modeSession {
-		t.Fatalf("resume mode = %v, want modeSession (transcript)", m.mode)
+	if viewOf(m) != viewSession {
+		t.Fatalf("resume view = %v, want viewSession (transcript)", viewOf(m))
 	}
-	if m.selectedID != "s1" {
-		t.Fatalf("selectedID = %q, want s1", m.selectedID)
+	if m.liveSessionID() != "s1" {
+		t.Fatalf("liveSessionID = %q, want s1", m.liveSessionID())
 	}
 }
 
@@ -118,11 +117,11 @@ func TestSessionRawKeyPanelessViewableOpensTerminal(t *testing.T) {
 	m.sessions = map[string]session.Session{
 		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true, Frontend: session.FrontendExternal},
 	}
-	m.selectedID = "oc"
-	m.mode = modeSession
-	m.focus, m.historyView = focusHistory, histTranscript
+	m = withLive(m, "oc")
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histTranscript })
+	m = withFocus(m, mainPane)
 
-	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	_, cmd := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("viewable paneless session should trigger a command on ctrl+t")
 	}
@@ -146,11 +145,11 @@ func TestSessionRawKeyControllableOpensTerminal(t *testing.T) {
 		"oc": {ID: "oc", Agent: "opencode", Status: session.StatusAwaitingInput, CanOpenTerminal: true,
 			Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%3"}},
 	}
-	m.selectedID = "oc"
-	m.mode = modeSession
-	m.focus, m.historyView = focusHistory, histTranscript
+	m = withLive(m, "oc")
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histTranscript })
+	m = withFocus(m, mainPane)
 
-	_, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	_, cmd := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("controllable session should trigger a command")
 	}
@@ -173,11 +172,11 @@ func TestSessionRawKeyPanelessNonPromptableRefuses(t *testing.T) {
 	m.sessions = map[string]session.Session{
 		"ext": {ID: "ext", Status: session.StatusAwaitingInput, Frontend: session.FrontendVSCode},
 	}
-	m.selectedID = "ext"
-	m.mode = modeSession
-	m.focus, m.historyView = focusHistory, histTranscript
+	m = withLive(m, "ext")
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histTranscript })
+	m = withFocus(m, mainPane)
 
-	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatal("non-promptable paneless session should not trigger a command")
 	}
@@ -193,7 +192,7 @@ func TestSessionHeaderShowsBranch(t *testing.T) {
 	s.Branch = "feat/session-git-branch"
 	m.sessions["s1"] = s
 
-	out := ansi.Strip(m.sessionView())
+	out := ansi.Strip(paneView(m))
 	if !strings.Contains(out, "feat/session-git-branch") {
 		t.Errorf("header missing branch name:\n%s", out)
 	}
@@ -204,72 +203,71 @@ func TestSessionHeaderShowsBranch(t *testing.T) {
 	// No branch → no branch glyph in the header.
 	s.Branch = ""
 	m.sessions["s1"] = s
-	if strings.Contains(ansi.Strip(m.sessionView()), Icon.Branch.Glyph) {
+	if strings.Contains(ansi.Strip(paneView(m)), Icon.Branch.Glyph) {
 		t.Error("branch glyph shown when branch is empty")
 	}
 }
 
 func TestSessionTabTogglesFocusOnlyWhenPending(t *testing.T) {
 	m := sessionModel(nil)
-	res, _ := m.handleSessionKey(tea.KeyPressMsg{Code: '\t'})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: '\t'})
 	m = res.(model)
-	if m.focus != focusHistory {
-		t.Fatalf("no pending: focus=%v want history", m.focus)
+	if m.focused != mainPane {
+		t.Fatalf("no pending: focus=%v want history", m.focused)
 	}
 	m = sessionModel(&session.Interaction{Kind: session.InteractionPermission})
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: '\t'})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: '\t'})
 	m = res.(model)
-	if m.focus != focusDock {
-		t.Fatalf("pending: focus=%v want dock", m.focus)
+	if m.focused != sessionDock {
+		t.Fatalf("pending: focus=%v want dock", m.focused)
 	}
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: '\t'})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: '\t'})
 	m = res.(model)
-	if m.focus != focusHistory {
-		t.Fatalf("toggle back: focus=%v want history", m.focus)
+	if m.focused != mainPane {
+		t.Fatalf("toggle back: focus=%v want history", m.focused)
 	}
 }
 
 func TestSessionEscIsContextual(t *testing.T) {
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission})
-	m.historyView = histDetail
-	res, _ := m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
-	if m.historyView != histTranscript || m.mode != modeSession {
-		t.Fatalf("detail esc: view=%v mode=%v", m.historyView, m.mode)
+	if trOf(m).historyView != histTranscript || viewOf(m) != viewSession {
+		t.Fatalf("detail esc: view=%v view=%v", trOf(m).historyView, viewOf(m))
 	}
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
-	if m.mode != modeList {
-		t.Fatalf("transcript esc: mode=%v want list", m.mode)
+	if viewOf(m) != viewHome {
+		t.Fatalf("transcript esc: view=%v want list", viewOf(m))
 	}
 	m = sessionModel(&session.Interaction{Kind: session.InteractionPermission})
-	m.focus = focusDock
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = withFocus(m, sessionDock)
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = res.(model)
-	if m.focus != focusHistory || m.mode != modeSession {
-		t.Fatalf("dock tab: focus=%v mode=%v", m.focus, m.mode)
+	if m.focused != mainPane || viewOf(m) != viewSession {
+		t.Fatalf("dock tab: focus=%v view=%v", m.focused, viewOf(m))
 	}
 }
 
 func TestSessionDockFocusResetsWhenNotPending(t *testing.T) {
 	m := sessionModel(nil)
-	m.focus = focusDock
-	res, _ := m.handleSessionKey(tea.KeyPressMsg{Code: 'j'})
-	m = res.(model)
-	if m.focus != focusHistory {
-		t.Fatalf("focus not reset: %v", m.focus)
+	m = withFocus(m, sessionDock)
+	m, _ = upd(m, tea.KeyPressMsg{Code: 'j'})
+	if m.focused != mainPane {
+		t.Fatalf("focus not reset: %v", m.focused)
 	}
 }
 
 func TestSessionDockShownWhenPending(t *testing.T) {
 	// Unfocused, the dock collapses to a one-line summary ("Allow <tool>?").
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"})
-	out := ansi.Strip(m.sessionView())
+	out := ansi.Strip(paneView(m))
 	if !strings.Contains(out, "Allow Bash?") {
 		t.Errorf("collapsed dock not rendered:\n%s", out)
 	}
 	m = sessionModel(nil)
-	if strings.Contains(ansi.Strip(m.sessionView()), "Allow Bash?") {
+	if strings.Contains(ansi.Strip(paneView(m)), "Allow Bash?") {
 		t.Error("dock shown without a pending interaction")
 	}
 }
@@ -282,24 +280,24 @@ func TestSessionSubmitReturnsFocusToHistory(t *testing.T) {
 			{Label: "Deny", Value: "deny", Reject: true},
 		},
 	})
-	m.focus = focusDock
-	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = withFocus(m, sessionDock)
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.focus != focusHistory || cmd == nil {
-		t.Errorf("after submit: focus=%v cmd=%v", m.focus, cmd)
+	if m.focused != mainPane || cmd == nil {
+		t.Errorf("after submit: focus=%v cmd=%v", m.focused, cmd)
 	}
 }
 
 func TestSessionFooterReflectsFocus(t *testing.T) {
 	// Footers render via the help bubble (per-token ANSI, truncated to width); use a
 	// wide viewport and strip ANSI so the hint words are assertable.
-	foot := func(m model) string { m.width = 120; return ansi.Strip(m.sessionFooter()) }
+	foot := func(m model) string { m.width = 120; return ansi.Strip(m.currentFooter()) }
 
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission})
 	if !strings.Contains(foot(m), "answer") {
 		t.Errorf("history footer should hint answering: %q", foot(m))
 	}
-	m.focus = focusDock
+	m = withFocus(m, sessionDock)
 	if !strings.Contains(foot(m), "submit") {
 		t.Errorf("dock footer should hint submit: %q", foot(m))
 	}
@@ -337,9 +335,9 @@ func TestSessionViewFitsViewport(t *testing.T) {
 	} {
 		m := sessionModel(ix)
 		m.height, m.width = 24, 80
-		got := strings.Count(m.sessionView(), "\n") + 1
+		got := strings.Count(paneView(m), "\n") + 1
 		if got > m.height {
-			t.Errorf("sessionView rendered %d lines > height %d (ix=%v)", got, m.height, ix)
+			t.Errorf("the session pane rendered %d lines > height %d (ix=%v)", got, m.height, ix)
 		}
 	}
 }
@@ -358,10 +356,10 @@ func TestTallDockKeepsSelectedControlVisible(t *testing.T) {
 		}},
 	})
 	m.height, m.width = 24, 80
-	m.focus = focusDock
-	m.prompt.sel[0] = 4 // "Echo", the last real option
+	m = withFocus(m, sessionDock)
+	m.dock.sel[0] = 4 // "Echo", the last real option
 
-	out := m.sessionView()
+	out := paneView(m)
 	if !strings.Contains(out, "Echo") {
 		t.Errorf("selected option clipped out of tall dock:\n%s", out)
 	}
@@ -383,11 +381,11 @@ func TestOptionPreviewRendersSideBySide(t *testing.T) {
 	}
 	m := sessionModel(q)
 	m.height, m.width = 30, 100
-	m.focus = focusDock
+	m = withFocus(m, sessionDock)
 
 	// Focused option has a preview → it renders, and the view still fits.
-	m.prompt.sel[0] = 0
-	out := m.sessionView()
+	m.dock.sel[0] = 0
+	out := paneView(m)
 	if !strings.Contains(out, "SIDEBAR_MOCKUP") {
 		t.Errorf("focused preview not rendered:\n%s", out)
 	}
@@ -399,8 +397,8 @@ func TestOptionPreviewRendersSideBySide(t *testing.T) {
 	}
 
 	// Moving to an option without a preview drops the preview pane.
-	m.prompt.sel[0] = 1
-	if strings.Contains(m.sessionView(), "SIDEBAR_MOCKUP") {
+	m.dock.sel[0] = 1
+	if strings.Contains(paneView(m), "SIDEBAR_MOCKUP") {
 		t.Error("preview should vanish when the focused option has none")
 	}
 
@@ -413,8 +411,8 @@ func TestOptionPreviewRendersSideBySide(t *testing.T) {
 	}}}
 	m = sessionModel(mq)
 	m.height, m.width = 30, 100
-	m.prompt.sel[0] = 0
-	if strings.Contains(m.sessionView(), "SIDEBAR_MOCKUP") {
+	m.dock.sel[0] = 0
+	if strings.Contains(paneView(m), "SIDEBAR_MOCKUP") {
 		t.Error("multi-select should not show previews")
 	}
 }
@@ -427,7 +425,7 @@ func TestDockRuleSpansContentWidth(t *testing.T) {
 	want := m.containerWidth()
 
 	var ruleWidth int
-	for _, line := range strings.Split(m.sessionView(), "\n") {
+	for _, line := range strings.Split(paneView(m), "\n") {
 		if n := strings.Count(line, "─"); n > ruleWidth {
 			ruleWidth = n
 		}
@@ -467,10 +465,10 @@ func TestFocusedDockExpandsToShowSubmitTab(t *testing.T) {
 	}}
 	m := sessionModel(ix)
 	m.height, m.width = 24, 80
-	m.focus = focusDock
-	m.prompt.tab = m.numQuestions() // Submit tab
+	m = withFocus(m, sessionDock)
+	m.dock.tab = m.numQuestions() // Submit tab
 
-	out := m.sessionView()
+	out := paneView(m)
 	if !strings.Contains(out, "Submit") || !strings.Contains(out, "Cancel") {
 		t.Errorf("focused submit tab should show both actions:\n%s", out)
 	}
@@ -481,7 +479,7 @@ func TestFocusedDockExpandsToShowSubmitTab(t *testing.T) {
 	// The dock is larger when focused than when reading (compact cap).
 	_, dockFocused := m.sessionLayout()
 	reading := m
-	reading.focus = focusHistory
+	reading = withFocus(reading, mainPane)
 	if _, dockReading := reading.sessionLayout(); dockReading >= dockFocused {
 		t.Errorf("dock should be smaller when reading (%d) than focused (%d)", dockReading, dockFocused)
 	}
@@ -492,25 +490,27 @@ func TestDetailEscPopsThenLeaves(t *testing.T) {
 		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
 			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
 	m := sessionModel(nil)
-	m.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI,
+	v := tvOf(&m)
+	v.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI,
 		Items: []transcript.Item{sub}}}
-	m.transcript.cursor = 0
-	m.historyView = histDetail
-	m.enterDetail()
-	m.topFrame().cursor = 0
-	m.drillDetail() // now 2 frames deep (inline history trace → subagent frame)
+	v.transcript.cursor = 0
+	v.historyView = histDetail
+	v.enterDetail()
+	v.topFrame().cursor = 0
+	v.drillDetail() // now 2 frames deep (inline history trace → subagent frame)
+	v.put()
 
 	// First esc pops to the root frame, staying in detail.
-	res, _ := m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
-	if m.historyView != histDetail || len(m.transcript.detailStack) != 1 {
-		t.Fatalf("first esc: view=%v frames=%d", m.historyView, len(m.transcript.detailStack))
+	if trOf(m).historyView != histDetail || len(trOf(m).transcript.detailStack) != 1 {
+		t.Fatalf("first esc: view=%v frames=%d", trOf(m).historyView, len(trOf(m).transcript.detailStack))
 	}
 	// Second esc leaves detail for the transcript.
-	res, _ = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
-	if m.historyView != histTranscript {
-		t.Fatalf("second esc: view=%v want transcript", m.historyView)
+	if trOf(m).historyView != histTranscript {
+		t.Fatalf("second esc: view=%v want transcript", trOf(m).historyView)
 	}
 }
 
@@ -523,36 +523,36 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 
 	m := sessionModel(nil)
 	m.client = rc
-	m.selectedID = "s1"
 	m.sessions = map[string]session.Session{
 		"s1": {ID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%0"}},
 	}
 	m.transcriptCache = map[string]cachedTranscript{}
+	m = withLive(m, "s1")
+	m = withFocus(m, mainPane)
+	v := tvOf(&m)
 
 	// A live subagent item with no inlined trace: it will be streamed.
 	agentItem := transcript.Item{
 		Kind:      transcript.ItemSubagent,
 		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}},
 	}
-	m.transcript.chunks = []transcript.Chunk{
+	v.transcript.chunks = []transcript.Chunk{
 		{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{agentItem}},
 	}
-	m.transcript.cursor = 0
-	m.historyView = histDetail
-	m.mode = modeSession
-	m.focus = focusHistory
-	m.enterDetail()
+	v.transcript.cursor = 0
+	v.historyView = histDetail
+	v.enterDetail()
 
 	// Stash a session subRef (as if we had opened the session stream).
 	sessSubID := "sess-sub-1"
-	m.activeSub = subRef{subID: sessSubID, sessionID: "s1"}
+	v.activeSub = subRef{subID: sessSubID, sessionID: "s1"}
 
 	// Simulate drilling into the live subagent: actDetailDrill stashes sessionSub,
 	// sets activeSub to the new subagent ref, and pushes a frame with subID set.
 	subAgentSubID := "sub-agent-sub-1"
-	m.sessionSub = m.activeSub
-	m.activeSub = subRef{subID: subAgentSubID, sessionID: "s1", agentID: "agent42"}
-	m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
+	v.sessionSub = v.activeSub
+	v.activeSub = subRef{subID: subAgentSubID, sessionID: "s1", agentID: "agent42"}
+	v.transcript.detailStack = append(v.transcript.detailStack, detailFrame{
 		label:    "explorer",
 		subID:    subAgentSubID, // this is what Finding 1 requires to be set
 		expanded: map[int]bool{},
@@ -561,35 +561,36 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 		},
 	})
 	// Stack is now 2 deep: root + subagent.
-	if len(m.transcript.detailStack) != 2 {
-		t.Fatalf("setup: want 2 frames, got %d", len(m.transcript.detailStack))
+	if len(v.transcript.detailStack) != 2 {
+		t.Fatalf("setup: want 2 frames, got %d", len(v.transcript.detailStack))
 	}
 
 	// Drill into a leaf item inside the subagent frame (drillDetail pushes a focus frame).
-	m.drillDetail()
-	if len(m.transcript.detailStack) != 3 {
-		t.Fatalf("after leaf drill: want 3 frames, got %d", len(m.transcript.detailStack))
+	v.drillDetail()
+	if len(v.transcript.detailStack) != 3 {
+		t.Fatalf("after leaf drill: want 3 frames, got %d", len(v.transcript.detailStack))
 	}
-	if m.topFrame().subID != "" {
-		t.Fatalf("leaf frame should have empty subID, got %q", m.topFrame().subID)
+	if v.topFrame().subID != "" {
+		t.Fatalf("leaf frame should have empty subID, got %q", v.topFrame().subID)
 	}
+	v.put()
 
 	// === First Back (from the leaf) ===
 	// Must pop only the leaf. The subagent subscription must NOT be torn down.
-	res, cmd := m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
 	runCmd(cmd)
 
-	if len(m.transcript.detailStack) != 2 {
-		t.Fatalf("first Back: want 2 frames, got %d", len(m.transcript.detailStack))
+	if len(trOf(m).transcript.detailStack) != 2 {
+		t.Fatalf("first Back: want 2 frames, got %d", len(trOf(m).transcript.detailStack))
 	}
-	if m.topFrame().subID != subAgentSubID {
+	if tvOf(&m).topFrame().subID != subAgentSubID {
 		t.Fatalf("first Back: subagent frame subID should still be %q, got %q",
-			subAgentSubID, m.topFrame().subID)
+			subAgentSubID, tvOf(&m).topFrame().subID)
 	}
-	if m.activeSub.subID != subAgentSubID {
+	if trOf(m).activeSub.subID != subAgentSubID {
 		t.Fatalf("first Back: activeSub should still be the subagent %q, got %q",
-			subAgentSubID, m.activeSub.subID)
+			subAgentSubID, trOf(m).activeSub.subID)
 	}
 	// No unsubscribe or subscribe calls should have been made yet.
 	for _, method := range rc.calledMethods() {
@@ -601,19 +602,19 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 
 	// === Second Back (from the subagent frame) ===
 	// Must unsubscribe the subagent and re-subscribe the session.
-	res, cmd = m.handleSessionKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = res.(model)
 	runCmd(cmd)
 
-	if len(m.transcript.detailStack) != 1 {
-		t.Fatalf("second Back: want 1 frame, got %d", len(m.transcript.detailStack))
+	if len(trOf(m).transcript.detailStack) != 1 {
+		t.Fatalf("second Back: want 1 frame, got %d", len(trOf(m).transcript.detailStack))
 	}
-	if m.activeSub.subID != sessSubID {
+	if trOf(m).activeSub.subID != sessSubID {
 		t.Fatalf("second Back: activeSub should be restored to session %q, got %q",
-			sessSubID, m.activeSub.subID)
+			sessSubID, trOf(m).activeSub.subID)
 	}
-	if m.sessionSub.subID != "" {
-		t.Fatalf("second Back: sessionSub stash should be cleared, got %q", m.sessionSub.subID)
+	if trOf(m).sessionSub.subID != "" {
+		t.Fatalf("second Back: sessionSub stash should be cleared, got %q", trOf(m).sessionSub.subID)
 	}
 
 	// The second Back must issue both an unsubscribe and a re-subscribe.
@@ -640,12 +641,10 @@ func TestScreenViewHasBorderAndFits(t *testing.T) {
 	m.sessions = map[string]session.Session{
 		"s1": {ID: "s1", Status: session.StatusWorking, Tmux: session.TmuxLocation{PaneID: "%0", SessionName: "demo"}},
 	}
-	m.selectedID = "s1"
-	m.mode = modeScreen
+	m = withScreenOf(withView(m, viewScreen), "s1")
 	m.width, m.height = 80, 24
 	cols, rows := m.termDims()
-	m.term = vt.NewEmulator(cols, rows)
-	m.termID = "s1"
+	m = withTerm(m, "s1", vt.NewEmulator(cols, rows))
 	// Fill every row to the full interior width; if the box interior is narrower
 	// than the emulator, rows wrap and the output overflows the viewport height.
 	fullRow := strings.Repeat("X", cols)
@@ -656,9 +655,9 @@ func TestScreenViewHasBorderAndFits(t *testing.T) {
 		}
 		content.WriteString(fullRow)
 	}
-	m.term.Write([]byte(content.String()))
+	scr(m).term.Write([]byte(content.String()))
 
-	out := m.screenView()
+	out := screenView(m)
 	if !strings.Contains(out, "╮") || !strings.Contains(out, "╰") {
 		t.Errorf("screen view should be framed by a rounded border:\n%s", out)
 	}
@@ -692,14 +691,14 @@ func TestDockSummary(t *testing.T) {
 func TestSessionLayoutCollapsesWhenUnfocused(t *testing.T) {
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission, ToolName: "Read"})
 
-	// Unfocused (focusHistory): dock collapses to rule + one line.
+	// Unfocused (mainPane): dock collapses to rule + one line.
 	uh, ud := m.sessionLayout()
 	if ud != 2 {
 		t.Fatalf("unfocused dockH = %d, want 2", ud)
 	}
 
 	// Focused: dock expands to the full panel.
-	m.focus = focusDock
+	m = withFocus(m, sessionDock)
 	fh, fd := m.sessionLayout()
 	if fd <= 2 {
 		t.Fatalf("focused dockH = %d, want > 2 (full panel)", fd)
@@ -752,7 +751,7 @@ func TestSessionCardAgentLabelGated(t *testing.T) {
 }
 
 func TestSessionFooterIncludesRawHintWhenStarting(t *testing.T) {
-	foot := func(m model) string { m.width = 120; return ansi.Strip(m.sessionFooter()) }
+	foot := func(m model) string { m.width = 120; return ansi.Strip(m.currentFooter()) }
 
 	m := sessionModel(nil)
 	s := m.sessions["s1"]
@@ -777,7 +776,7 @@ func TestSessionViewStartingShowsNotice(t *testing.T) {
 	s.Status = session.StatusStarting
 	m.sessions["s1"] = s
 
-	out := ansi.Strip(m.sessionView())
+	out := ansi.Strip(paneView(m))
 	if !strings.Contains(out, "startup prompt") {
 		t.Errorf("starting session should show the startup notice:\n%s", out)
 	}

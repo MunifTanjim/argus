@@ -16,11 +16,8 @@ func screenModel() (model, *recordingClient) {
 	m := testModel()
 	m.client = c
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Tmux: session.TmuxLocation{PaneID: "%0"}}}
-	m.selectedID = "s1"
-	m.mode = modeScreen
-	m.screenReturn = modeList
-	m.termID = "s1"
-	m.term = vt.NewEmulator(80, 24)
+	m = withScreenOf(withViews(m, viewHome, viewScreen), "s1")
+	m = withTerm(m, "s1", vt.NewEmulator(80, 24))
 	return m, c
 }
 
@@ -28,11 +25,11 @@ func TestHandleScreenKeySendsInputAndLeaves(t *testing.T) {
 	m, c := screenModel()
 
 	// A normal key is enqueued for the ordered sender (not a per-key command) and
-	// the mode stays in screen view.
+	// the live screen stays on top.
 	res, cmd := m.handleScreenKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = res.(model)
-	if m.mode != modeScreen {
-		t.Fatalf("key: mode=%v want screen", m.mode)
+	if viewOf(m) != viewScreen {
+		t.Fatalf("key: view=%v want screen", viewOf(m))
 	}
 	if cmd != nil {
 		t.Error("key: unexpected command; input must go through the ordered queue")
@@ -49,11 +46,11 @@ func TestHandleScreenKeySendsInputAndLeaves(t *testing.T) {
 	// ctrl+] leaves to the origin (list here) and closes the attach.
 	res, cmd = m.handleScreenKey(tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl})
 	m = res.(model)
-	if m.mode != modeList {
-		t.Errorf("ctrl+]: mode=%v want list", m.mode)
+	if viewOf(m) != viewHome {
+		t.Errorf("ctrl+]: view=%v want list", viewOf(m))
 	}
-	if m.term != nil || m.termID != "" {
-		t.Errorf("ctrl+]: term not cleared (term=%v id=%q)", m.term, m.termID)
+	if scr(m).term != nil || scr(m).termID != "" {
+		t.Errorf("ctrl+]: term not cleared (term=%v id=%q)", scr(m).term, scr(m).termID)
 	}
 	runCmd(cmd)
 	if !slices.Contains(c.calledMethods(), api.MethodTerminalClose) {
@@ -63,11 +60,11 @@ func TestHandleScreenKeySendsInputAndLeaves(t *testing.T) {
 
 func TestHandleScreenKeyReturnsToOrigin(t *testing.T) {
 	m, _ := screenModel()
-	m.screenReturn = modeSession
+	m = withViews(m, viewSession, viewScreen)
 	res, _ := m.handleScreenKey(tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl})
 	m = res.(model)
-	if m.mode != modeSession {
-		t.Errorf("ctrl+]: mode=%v want session", m.mode)
+	if viewOf(m) != viewSession {
+		t.Errorf("ctrl+]: view=%v want session", viewOf(m))
 	}
 }
 
@@ -83,15 +80,15 @@ func TestHandleScreenKeyLeavesForAllCtrlBracketForms(t *testing.T) {
 	for _, msg := range forms {
 		m, _ := screenModel()
 		res, _ := m.handleScreenKey(msg)
-		if got := res.(model); got.mode != modeList || got.term != nil {
-			t.Errorf("form %+v: mode=%v term=%v, want list + nil term", msg, got.mode, got.term)
+		if got := res.(model); viewOf(got) != viewHome || scr(got).term != nil {
+			t.Errorf("form %+v: view=%v term=%v, want list + nil term", msg, viewOf(got), scr(got).term)
 		}
 	}
-	// A plain key is NOT a leave: it streams to the PTY and stays in screen mode.
+	// A plain key is NOT a leave: it streams to the PTY and stays on the live screen.
 	m, _ := screenModel()
 	res, _ := m.handleScreenKey(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if got := res.(model); got.mode != modeScreen {
-		t.Errorf("plain ]: mode=%v want screen", got.mode)
+	if got := res.(model); viewOf(got) != viewScreen {
+		t.Errorf("plain ]: view=%v want screen", viewOf(got))
 	}
 }
 
@@ -109,7 +106,7 @@ func TestCtrlCPassesThroughInScreenView(t *testing.T) {
 			t.Errorf("ctrl+c queued %q, want ETX (0x03)", string(k.data))
 		}
 	default:
-		t.Error("ctrl+c was not enqueued for the PTY (must not quit in screen view)")
+		t.Error("ctrl+c was not enqueued for the PTY (must not quit on the live screen)")
 	}
 }
 
@@ -118,13 +115,13 @@ func TestEnterScreenOpensAttach(t *testing.T) {
 	m := testModel()
 	m.client = c
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", Tmux: session.TmuxLocation{PaneID: "%0"}}}
-	m.mode = modeList
+	m = withView(m, viewHome)
 	m2, cmd := m.enterScreen("s1")
-	if m2.mode != modeScreen || m2.selectedID != "s1" || m2.termID == "" || m2.term == nil {
-		t.Fatalf("enterScreen: mode=%v sel=%q id=%q term=%v", m2.mode, m2.selectedID, m2.termID, m2.term)
+	if viewOf(m2) != viewScreen || scr(m2).sessionID != "s1" || scr(m2).termID == "" || scr(m2).term == nil {
+		t.Fatalf("enterScreen: view=%v sel=%q id=%q term=%v", viewOf(m2), scr(m2).sessionID, scr(m2).termID, scr(m2).term)
 	}
-	if m2.screenReturn != modeList {
-		t.Errorf("screenReturn=%v want list", m2.screenReturn)
+	if returnView(m2) != viewHome {
+		t.Errorf("screenReturn=%v want list", returnView(m2))
 	}
 	runCmd(cmd)
 	if !slices.Contains(c.calledMethods(), api.MethodTerminalOpen) {

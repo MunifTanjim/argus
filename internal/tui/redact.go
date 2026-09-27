@@ -31,7 +31,7 @@ type redactDoneMsg struct {
 // redactPrepareCmd redacts into a temp tree and stages the bundle as a hidden
 // sibling of the destination; redactCommitCmd creates the final -redacted name
 // only on confirm, so an unacknowledged leak never lands under a clean name.
-func (m model) redactPrepareCmd() tea.Cmd {
+func (m tview) redactPrepareCmd() tea.Cmd {
 	srcDir, out := m.redactSrcDir, redactOutputPath(m.bundlePath)
 	lits := append([]string(nil), m.redact.literals...)
 	return func() tea.Msg {
@@ -65,7 +65,7 @@ func (m model) redactPrepareCmd() tea.Cmd {
 
 // redactCommitCmd renames the staged bundle to its final name and, when content
 // couldn't be scrubbed, writes a sidecar listing the files that still hold secrets.
-func (m model) redactCommitCmd() tea.Cmd {
+func (m tview) redactCommitCmd() tea.Cmd {
 	tmpPath, out := m.redact.tempPath, m.redact.outPath
 	warnings := append([]string(nil), m.redact.report.Warnings...)
 	return func() tea.Msg {
@@ -114,13 +114,13 @@ func redactOutputPath(srcPath string) string {
 }
 
 // redactListActive reports whether the queued-redactions list is open.
-func (m model) redactListActive() bool {
+func (m tview) redactListActive() bool {
 	return m.redactActive() && m.redact.listActive
 }
 
 // redactListBody renders the queued redactions with the delete cursor. Literals
 // are shown in full so they can be told apart and managed.
-func (m model) redactListBody() string {
+func (m tview) redactListBody() string {
 	if len(m.redact.literals) == 0 {
 		return dimStyle.Render("no redactions queued — press " + m.keyText(transcriptKeys.Redact) + " to add a secret")
 	}
@@ -150,7 +150,7 @@ func newRedactInput() textinput.Model {
 	return ti
 }
 
-func (m model) redactFooter(base string) string {
+func (m tview) redactFooter(base string) string {
 	switch {
 	case m.redact.pendingSave && m.redact.warnConfirm && m.redact.report != nil:
 		// Danger first, so it can't be truncated behind a y/n prompt.
@@ -190,60 +190,60 @@ func (m model) redactFooter(base string) string {
 // takePendingRedactSave consumes an armed save confirmation; non-"y" cancels. With
 // warnConfirm, the first "y" only acknowledges the warning and a second saves, so a
 // single reflexive keypress can't blow past "secrets will remain".
-func (m model) takePendingRedactSave(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
+func (m tview) takePendingRedactSave(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !m.redact.pendingSave {
-		return m, nil, false
+		return nil, false
 	}
 	if msg.String() != "y" {
 		tmp := m.redact.tempPath
 		m.redact.pendingSave, m.redact.warnConfirm, m.redact.tempPath = false, false, ""
-		return m, redactAbortCmd(tmp), true
+		return redactAbortCmd(tmp), true
 	}
 	if m.redact.warnConfirm {
 		m.redact.warnConfirm = false // acknowledged; next y saves
-		return m, nil, true
+		return nil, true
 	}
 	m.redact.pendingSave = false
 	cmd := m.redactCommitCmd()
 	m.redact.tempPath = ""
-	return m, cmd, true
+	return cmd, true
 }
 
 // redactActive reports whether redaction keys are live. Queued literals are
 // bundle-wide, so redaction stays available in both the transcript and detail views.
-func (m model) redactActive() bool {
-	return m.redactMode && m.mode == modeHistoryTranscript
+func (m tview) redactActive() bool {
+	return m.redactMode && !m.live
 }
 
 // handleRedactKey processes redaction keys and input. ok reports the key was consumed.
-func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
+func (m tview) handleRedactKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !m.redactActive() {
-		return m, nil, false
+		return nil, false
 	}
 	if m.redact.listActive {
 		switch {
 		case m.matches(msg, transcriptKeys.Back):
 			m.redact.listActive = false
-			return m, nil, true
+			return nil, true
 		case m.matches(msg, redactListKeys.Down):
 			m.redact.listCursor = min(m.redact.listCursor+1, max(0, len(m.redact.literals)-1))
-			return m, nil, true
+			return nil, true
 		case m.matches(msg, redactListKeys.Up):
 			m.redact.listCursor = max(0, m.redact.listCursor-1)
-			return m, nil, true
+			return nil, true
 		case m.matches(msg, redactListKeys.Remove):
 			if i := m.redact.listCursor; i < len(m.redact.literals) {
 				m.redact.literals = append(m.redact.literals[:i], m.redact.literals[i+1:]...)
 				m.redact.listCursor = max(0, min(i, len(m.redact.literals)-1))
 			}
-			return m, nil, true
+			return nil, true
 		case m.matches(msg, transcriptKeys.Redact): // d: add another, then return here
 			m.redact.listActive, m.redact.listReturn = false, true
 			m.redact.inputActive = true
 			m.redact.input = newRedactInput()
-			return m, m.redact.input.Focus(), true
+			return m.redact.input.Focus(), true
 		}
-		return m, nil, true
+		return nil, true
 	}
 	if m.redact.inputActive {
 		return m.handleRedactInput(msg)
@@ -252,47 +252,47 @@ func (m model) handleRedactKey(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	case m.matches(msg, transcriptKeys.Redact):
 		m.redact.inputActive = true
 		m.redact.input = newRedactInput()
-		return m, m.redact.input.Focus(), true
+		return m.redact.input.Focus(), true
 	case m.matches(msg, transcriptKeys.RedactList):
 		m.redact.listActive = true
 		m.redact.listCursor = 0
-		return m, nil, true
+		return nil, true
 	case m.matches(msg, transcriptKeys.RedactSave):
 		if len(m.redact.literals) == 0 {
-			m.flash = "no redactions queued"
-			return m, nil, true
+			m.c.setFlash("no redactions queued")
+			return nil, true
 		}
-		return m, m.redactPrepareCmd(), true
+		return m.redactPrepareCmd(), true
 	}
-	return m, nil, false
+	return nil, false
 }
 
-func (m model) handleRedactInput(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
+func (m tview) handleRedactInput(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.Code {
 	case tea.KeyEnter:
 		if s := m.redact.input.Value(); s != "" {
 			m.redact.literals = append(m.redact.literals, s)
-			m.flash = "redaction queued"
+			m.c.setFlash("redaction queued")
 		}
 		m.closeRedactInput()
 		if m.redact.listReturn { // came from the list — reopen it on the new entry
 			m.redact.listActive, m.redact.listReturn = true, false
 			m.redact.listCursor = max(0, len(m.redact.literals)-1)
 		}
-		return m, nil, true
+		return nil, true
 	case tea.KeyEscape:
 		m.closeRedactInput()
 		if m.redact.listReturn {
 			m.redact.listActive, m.redact.listReturn = true, false
 		}
-		return m, nil, true
+		return nil, true
 	}
 	var cmd tea.Cmd
 	m.redact.input, cmd = m.redact.input.Update(msg)
-	return m, cmd, true
+	return cmd, true
 }
 
-func (m *model) closeRedactInput() {
+func (m tview) closeRedactInput() {
 	m.redact.inputActive = false
 	m.redact.input.SetValue("")
 	m.redact.input.Blur()

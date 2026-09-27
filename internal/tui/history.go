@@ -38,19 +38,19 @@ func (m model) fetchHistSessions(nodeID, projectDir string, offset int) tea.Cmd 
 	}
 }
 
-func (m model) fetchHistTranscript(nodeID, path, agent string) tea.Cmd {
+func (m model) fetchHistTranscript(addr histAddr) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
-			NodeID: nodeID, TranscriptPath: path, Agent: agent,
+			NodeID: addr.nodeID, TranscriptPath: addr.path, Agent: addr.agent,
 		}, &view)
-		return histTranscriptMsg{chunks: view.Chunks, err: err}
+		return histTranscriptMsg{addr: addr, chunks: view.Chunks, err: err}
 	}
 }
 
-// histSubagentMsg carries a fetched nested subagent transcript for history mode.
 type histSubagentMsg struct {
+	addr    histAddr
 	agentID string
 	chunks  []transcript.Chunk
 	err     error
@@ -58,110 +58,46 @@ type histSubagentMsg struct {
 
 // fetchHistSubagent one-shot fetches a subagent transcript (history has no live
 // subscription).
-func (m model) fetchHistSubagent(nodeID, path, agent, agentID string) tea.Cmd {
+func (m model) fetchHistSubagent(addr histAddr, agentID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var view transcript.TranscriptView
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
-			NodeID: nodeID, TranscriptPath: path, Agent: agent, AgentID: agentID,
+			NodeID: addr.nodeID, TranscriptPath: addr.path, Agent: addr.agent, AgentID: agentID,
 		}, &view)
-		return histSubagentMsg{agentID: agentID, chunks: view.Chunks, err: err}
+		return histSubagentMsg{addr: addr, agentID: agentID, chunks: view.Chunks, err: err}
 	}
+}
+
+type histAddr struct{ nodeID, path, agent string }
+
+func (h historyState) addr() histAddr {
+	return histAddr{nodeID: h.openNodeID, path: h.openPath, agent: h.openAgent}
+}
+
+func reads(addr histAddr) func(transcriptComp) bool {
+	return func(t transcriptComp) bool { return !t.live && t.history.addr() == addr }
 }
 
 // --- key handling -------------------------------------------------------------
 
-func (m model) handleHistoryProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if mm, cmd, ok := m.dispatch(msg, historyProjectsTable); ok {
-		return mm, cmd
-	}
-	return m, nil
-}
-
-var historyProjectsTable = []keyTableEntry{
-	{historyProjectsKeys.Up, model.actHistProjUp},
-	{historyProjectsKeys.Down, model.actHistProjDown},
-	{historyProjectsKeys.Top, model.actHistProjTop},
-	{historyProjectsKeys.Bottom, model.actHistProjBottom},
-	{historyProjectsKeys.HalfUp, model.actHistProjHalfUp},
-	{historyProjectsKeys.HalfDown, model.actHistProjHalfDown},
-	{historyProjectsKeys.Open, model.actHistProjOpen},
-	{historyProjectsKeys.Refresh, model.actHistProjRefresh},
-	{listKeys.TabPrev, model.actHistProjBack}, // prev tab → Sessions tab
-	{listKeys.TabNext, model.actOpenLogs},     // next tab → Logs tab (when spawned)
-	{historyProjectsKeys.Back, model.actHistProjBack},
-}
-
-func (m model) actHistProjUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = cursorUp(m.history.projCursor)
-	return m, nil
-}
-
-func (m model) actHistProjDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = cursorDown(m.history.projCursor, len(m.history.projects))
-	return m, nil
-}
-
-func (m model) actHistProjTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = 0
-	return m, nil
-}
-
-func (m model) actHistProjBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = cursorBottom(len(m.history.projects))
-	return m, nil
-}
-
-func (m model) actHistProjHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = max(0, m.history.projCursor-m.cardListPageStep())
-	return m, nil
-}
-
-func (m model) actHistProjHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projCursor = min(cursorBottom(len(m.history.projects)), m.history.projCursor+m.cardListPageStep())
-	return m, nil
-}
-
-func (m model) actHistProjRefresh(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.projects, m.history.err = nil, nil
-	return m, m.fetchHistProjects()
-}
-
-func (m model) actHistProjBack(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.mode = modeList
-	return m, nil
-}
-
-func (m model) actHistProjOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.history.projCursor >= len(m.history.projects) {
-		return m, nil
-	}
-	p := m.history.projects[m.history.projCursor]
-	m.history.project = p
-	m.history.sessions, m.history.sessCursor, m.history.hasMore = nil, 0, false
-	m.history.err, m.history.loading = nil, true
-	m.mode = modeHistorySessions
-	return m, m.fetchHistSessions(p.NodeID, p.ProjectDir, 0)
-}
-
 // takePendingExport consumes an armed export confirmation: "y" runs the export,
 // any other key cancels. ok reports that the key was handled here.
-func (m model) takePendingExport(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+func (m tview) takePendingExport(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !m.pendingExport {
-		return m, nil, false
+		return nil, false
 	}
 	m.pendingExport = false
 	if msg.String() == "y" {
-		mm, cmd := m.actExportSession(msg)
-		return mm, cmd, true
+		return m.actExportSession(msg), true
 	}
-	return m, nil, true
+	return nil, true
 }
 
 // exportOrFlashFooter overrides footer with the export prompt or a transient flash.
-func (m model) exportOrFlashFooter(footer string) string {
+func (m model) exportOrFlashFooter(pendingExport bool, footer string) string {
 	switch {
-	case m.pendingExport:
+	case pendingExport:
 		return asstStyle.Render("export this session? y/n")
 	case len(m.keyBuf) > 0:
 		return asstStyle.Render(m.keyHint())
@@ -171,237 +107,22 @@ func (m model) exportOrFlashFooter(footer string) string {
 	return footer
 }
 
-func (m model) handleHistorySessionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.flash = "" // any key dismisses a transient flash; the action may re-set it
-	if mm, cmd, ok := m.takePendingExport(msg); ok {
-		return mm, cmd
-	}
-	if mm, cmd, ok := m.dispatch(msg, historySessionsTable); ok {
-		return mm, cmd
-	}
-	return m, nil
-}
-
-var historySessionsTable = []keyTableEntry{
-	{historySessionsKeys.Up, model.actHistSessUp},
-	{historySessionsKeys.Down, model.actHistSessDown},
-	{historySessionsKeys.Top, model.actHistSessTop},
-	{historySessionsKeys.Bottom, model.actHistSessBottom},
-	{historySessionsKeys.HalfUp, model.actHistSessHalfUp},
-	{historySessionsKeys.HalfDown, model.actHistSessHalfDown},
-	{historySessionsKeys.Open, model.actHistSessOpen},
-	{historySessionsKeys.Resume, model.actHistSessResume},
-	{transcriptKeys.Export, model.actHistSessExport},
-	{historySessionsKeys.More, model.actHistSessMore},
-	{historySessionsKeys.Back, model.actHistSessBack},
-}
-
-func (m model) actHistSessExport(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.history.sessCursor >= len(m.history.sessions) {
-		return m, nil
-	}
-	m.pendingExport = true
-	return m, nil
-}
-
-func (m model) actHistSessUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = cursorUp(m.history.sessCursor)
-	return m, nil
-}
-
-func (m model) actHistSessDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = cursorDown(m.history.sessCursor, len(m.history.sessions))
-	return m, nil
-}
-
-func (m model) actHistSessTop(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = 0
-	return m, nil
-}
-
-func (m model) actHistSessBottom(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = cursorBottom(len(m.history.sessions))
-	return m, nil
-}
-
-func (m model) actHistSessHalfUp(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = max(0, m.history.sessCursor-m.cardListPageStep())
-	return m, nil
-}
-
-func (m model) actHistSessHalfDown(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.history.sessCursor = min(cursorBottom(len(m.history.sessions)), m.history.sessCursor+m.cardListPageStep())
-	return m, nil
-}
-
-func (m model) actHistSessBack(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.mode = modeHistoryProjects
-	return m, nil
-}
-
-func (m model) actHistSessMore(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.history.hasMore && !m.history.loading {
-		m.history.loading = true
-		return m, m.fetchHistSessions(m.history.project.NodeID, m.history.project.ProjectDir, len(m.history.sessions))
-	}
-	return m, nil
-}
-
-func (m model) actHistSessResume(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.history.sessCursor >= len(m.history.sessions) {
-		return m, nil
-	}
-	s := m.history.sessions[m.history.sessCursor]
-	return m.startHistoryResume(s.Resumable, m.history.project.NodeID, s.Agent, s.SessionID)
-}
-
-// startHistoryResume gates a resume on the session's resumability and a known
-// working directory, flashing the reason when it can't proceed.
-func (m model) startHistoryResume(resumable bool, nodeID, agent, sessionID string) (tea.Model, tea.Cmd) {
+func historyResume(c *ctx, resumable bool, nodeID, agent, sessionID, cwd string) tea.Cmd {
 	if !resumable {
-		m.flash = "resume not supported for this session"
-		return m, nil
+		c.setFlash("resume not supported for this session")
+		return nil
 	}
-	if m.history.project.Cwd == "" {
-		m.flash = "resume unavailable: unknown working directory"
-		return m, nil
+	if cwd == "" {
+		c.setFlash("resume unavailable: unknown working directory")
+		return nil
 	}
-	return m, m.resumeCmd(nodeID, agent, sessionID, m.history.project.Cwd)
-}
-
-func (m model) actHistSessOpen(tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.history.sessCursor >= len(m.history.sessions) {
-		return m, nil
-	}
-	s := m.history.sessions[m.history.sessCursor]
-	m.history.title = historySessionTitle(s)
-	m.history.openSession = s
-	// Address for follow-up per-tool detail fetches on this transcript.
-	m.history.openNodeID, m.history.openPath, m.history.openAgent = m.history.project.NodeID, s.TranscriptPath, s.Agent
-	m.history.openSessionID, m.history.openResumable = s.SessionID, s.Resumable
-	m.setChunks(nil)
-	m.transcript.err = nil
-	m.transcript.cursor, m.transcript.scroll = 0, 0
-	m.transcript.detailStack = nil
-	m.historyView = histTranscript
-	m.transcript.expanded = make(map[string]bool)
-	m.toolBodies = make(map[string]toolBodyEntry) // per-transcript tool-body cache
-	m.mode = modeHistoryTranscript
-	// Transcript lives on the project's node (session items carry no id).
-	return m, m.fetchHistTranscript(m.history.project.NodeID, s.TranscriptPath, s.Agent)
-}
-
-func (m model) handleHistoryTranscriptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.flash = "" // any key dismisses a transient flash; the action may re-set it
-	if mm, cmd, ok := m.takePendingExport(msg); ok {
-		return mm, cmd
-	}
-	if mm, cmd, ok := m.takePendingRedactSave(msg); ok {
-		return mm, cmd
-	}
-	if mm, cmd, ok := m.handleRedactKey(msg); ok {
-		return mm, cmd
-	}
-	if m.matches(msg, transcriptKeys.Back) {
-		if m.historyView == histDetail {
-			if m.popDetail() { // root frame → back to transcript
-				m.historyView = histTranscript
-			}
-			return m, nil
-		}
-		if m.viewer {
-			return m, tea.Quit
-		}
-		m.mode = modeHistorySessions
-		return m, nil
-	}
-	if m.matches(msg, transcriptKeys.Resume) && m.historyView == histTranscript && !m.viewer {
-		return m.startHistoryResume(m.history.openResumable, m.history.openNodeID, m.history.openAgent, m.history.openSessionID)
-	}
-	if m.historyView == histDetail {
-		return m.handleDetailKey(msg)
-	}
-	if m.matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
-		if m.viewer {
-			return m, nil
-		}
-		m.pendingExport = true
-		return m, nil
-	}
-	return m.handleTranscriptKey(msg)
+	return c.m.resumeCmd(nodeID, agent, sessionID, cwd)
 }
 
 // --- views --------------------------------------------------------------------
 
-func (m model) historyProjectsView() string {
-	title := m.homeBrand() + m.homeTabs(modeHistoryProjects)
-	cardW := historyWidth(m)
-	backHint := m.keyText(historyProjectsKeys.Back) + " back"
-	if m.history.err != nil {
-		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW)
-	}
-	if m.history.projects == nil {
-		return m.center(title+"\n\n"+dimStyle.Render("loading projects…"), cardW)
-	}
-	if len(m.history.projects) == 0 {
-		return m.center(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render(backHint), cardW)
-	}
-	cards := make([]string, len(m.history.projects))
-	prevNode := ""
-	for i, p := range m.history.projects {
-		card := historyProjectRow(p, i == m.history.projCursor, cardW)
-		if i == 0 || p.NodeID != prevNode {
-			card = historyNodeHeader(p) + "\n" + card
-		}
-		prevNode = p.NodeID
-		cards[i] = card
-	}
-	body := renderCardList(cards, m.history.projCursor, max(1, m.bodyHeight()-4))
-	return m.pin(m.center(title+"\n\n"+body, cardW), m.historyProjectsFooter())
-}
-
-func (m model) historyProjectsFooter() string {
-	if len(m.keyBuf) > 0 {
-		return asstStyle.Render(m.keyHint())
-	}
-	return m.footer(listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
-		historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back, m.treeKey(), projectsKeys.Help)
-}
-
-func (m model) historySessionsView() string {
-	title := headerStyle.Render(m.withBrand("history · "+m.history.project.Label)) + dimStyle.Render("  "+truncate(m.history.project.Cwd, 50))
-	cardW := historyWidth(m)
-	backHint := m.keyText(historySessionsKeys.Back) + " back"
-	if m.history.err != nil {
-		return m.center(title+"\n\n"+dimStyle.Render("error: "+m.history.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW)
-	}
-	if len(m.history.sessions) == 0 {
-		msg := "loading sessions…"
-		if !m.history.loading {
-			msg = "no sessions in this project"
-		}
-		return m.center(title+"\n\n"+dimStyle.Render(msg)+"\n\n"+dimStyle.Render(backHint), cardW)
-	}
-	showAgent := historyMultiAgent(m.history.sessions)
-	cards := make([]string, len(m.history.sessions))
-	for i, s := range m.history.sessions {
-		cards[i] = historySessionRow(s, i == m.history.sessCursor, cardW, showAgent)
-	}
-	body := renderCardList(cards, m.history.sessCursor, max(1, m.bodyHeight()-4))
-	return m.pin(m.center(title+"\n\n"+body, cardW), m.historySessionsFooter())
-}
-
-func (m model) historySessionsFooter() string {
-	binds := []binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
-	if m.history.hasMore {
-		binds = append(binds, historySessionsKeys.More)
-	}
-	binds = append(binds, historySessionsKeys.Back)
-	return m.exportOrFlashFooter(m.footer(binds...))
-}
-
 // renderCardList lays out blank-line-separated cards, windowed to avail height
-// with the cursor card kept fully visible (mirrors listView).
+// with the cursor card kept fully visible (mirrors the Home pane).
 func renderCardList(cards []string, cursor, avail int) string {
 	var lines []string
 	curStart, curEnd := 0, 0
@@ -418,28 +139,31 @@ func renderCardList(cards []string, cursor, avail int) string {
 	return strings.Join(windowSpan(lines, curStart, curEnd, avail), "\n")
 }
 
-func (m model) historyTranscriptView() string {
+func (m tview) historyTranscriptView() string {
 	header := m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth())
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	if m.redactListActive() {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
 		body = m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth())
 	}
-	return m.pin(header+"\n\n"+body, m.historyTranscriptFooter())
+	return header + "\n\n" + body
 }
 
-func (m model) historyTranscriptFooter() string {
+func (m tview) historyTranscriptBinds() []binding {
 	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if !m.viewer {
 		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
 	}
-	binds = append(binds, transcriptKeys.Back)
-	return m.redactFooter(m.exportOrFlashFooter(m.footer(binds...)))
+	return append(binds, transcriptKeys.Back)
+}
+
+func (m tview) historyTranscriptFooter() string {
+	return m.redactFooter(m.exportOrFlashFooter(m.pendingExport, m.model.footer(m.historyTranscriptBinds()...)))
 }
 
 // historyTranscriptHeader renders the open-transcript header: a manifest-driven
 // summary offline (no live node/history breadcrumb), else the history breadcrumb.
-func (m model) historyTranscriptHeader() string {
+func (m tview) historyTranscriptHeader() string {
 	if m.viewer {
 		s := m.history.openSession
 		title := s.Title
@@ -450,7 +174,7 @@ func (m model) historyTranscriptHeader() string {
 		if label == "" {
 			label = "session"
 		}
-		header := headerStyle.Render(m.withBrand(label))
+		header := headerStyle.Render("argus · " + label)
 		if title != "" {
 			header += dimStyle.Render("  " + truncate(title, 50))
 		}
@@ -460,9 +184,6 @@ func (m model) historyTranscriptHeader() string {
 		return header
 	}
 	parts := []string{"history"}
-	if !m.embedded() {
-		parts = append([]string{"argus"}, parts...)
-	}
 	if lbl := m.history.project.Label; lbl != "" {
 		parts = append(parts, lbl)
 	}
@@ -475,12 +196,8 @@ func (m model) historyTranscriptHeader() string {
 
 // --- row rendering ------------------------------------------------------------
 
-func historyWidth(m model) int {
-	w := min(m.containerWidth(), 78)
-	if w < 30 {
-		w = 30
-	}
-	return w
+func historyWidth(w int) int {
+	return max(30, min(containerWidthOf(w), 78))
 }
 
 // historyCardChrome returns a history card's border color and glyphs (heavy bright

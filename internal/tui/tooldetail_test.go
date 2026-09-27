@@ -70,7 +70,7 @@ func TestToolColorLookup(t *testing.T) {
 }
 
 func TestGenericToolBodyReadableResult(t *testing.T) {
-	m := testModel() // jsonHL is nil → non-JSON path
+	m := bareTv() // jsonHL is nil → non-JSON path
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "UnknownTool",
 		ToolInput: `{"x":1}`, Result: "plain non-json result line",
@@ -88,7 +88,7 @@ func TestGenericToolBodyReadableResult(t *testing.T) {
 }
 
 func TestGenericToolBodyError(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "UnknownTool",
 		Result: "boom", ResultIsError: true,
@@ -100,7 +100,7 @@ func TestGenericToolBodyError(t *testing.T) {
 }
 
 func TestEditToolDetailShowsDiff(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "Edit",
 		ToolInput: `{"file_path":"a.go","old_string":"foo","new_string":"bar"}`,
@@ -113,7 +113,7 @@ func TestEditToolDetailShowsDiff(t *testing.T) {
 }
 
 func TestBashDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "Bash",
 		ToolInput: `{"command":"ls -la","description":"list files"}`,
@@ -132,7 +132,7 @@ func TestBashDetail(t *testing.T) {
 }
 
 func TestExecCommandDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"pwd","workdir":"/repo","yield_time_ms":1000,"max_output_tokens":2000}`,
@@ -150,7 +150,7 @@ func TestExecCommandDetail(t *testing.T) {
 }
 
 func TestExecCommandDetailOutputColonNotSplit(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"foo --help"}`,
@@ -166,7 +166,7 @@ func TestExecCommandDetailOutputColonNotSplit(t *testing.T) {
 }
 
 func TestExecCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "exec_command",
 		ToolInput: `{"session_id":"s1","chars":"y\n"}`,
@@ -180,7 +180,7 @@ func TestExecCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 }
 
 func TestExecCommandDetailNonZeroExit(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "exec_command", ResultIsError: true,
 		ToolInput: `{"cmd":"false"}`,
@@ -196,7 +196,7 @@ func TestExecCommandDetailNonZeroExit(t *testing.T) {
 }
 
 func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"echo hi"}`,
@@ -212,7 +212,7 @@ func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
 }
 
 func TestRunCommandDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"git status","Cwd":"/repo","WaitMsBeforeAsync":5000,"toolSummary":"Check status"}`,
@@ -234,7 +234,7 @@ func TestRunCommandDetail(t *testing.T) {
 }
 
 func TestRunCommandDetailOutputColonNotSplit(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"foo --help","Cwd":"/repo"}`,
@@ -249,7 +249,7 @@ func TestRunCommandDetailOutputColonNotSplit(t *testing.T) {
 }
 
 func TestRunCommandDetailBackgroundTaskNoOutput(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"agy --print hi"}`,
@@ -264,7 +264,7 @@ func TestRunCommandDetailBackgroundTaskNoOutput(t *testing.T) {
 }
 
 func TestRunCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "run_command",
 		ToolInput: `{"Cwd":"/repo","WaitMsBeforeAsync":5000}`,
@@ -278,7 +278,7 @@ func TestRunCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 }
 
 func TestRunCommandDetailNonZeroExit(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "run_command", ResultIsError: true,
 		ToolInput: `{"CommandLine":"false"}`,
@@ -294,7 +294,7 @@ func TestRunCommandDetailNonZeroExit(t *testing.T) {
 }
 
 func TestReadDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "Read",
 		ToolInput: `{"file_path":"/repo/main.go"}`,
@@ -310,7 +310,7 @@ func TestReadDetail(t *testing.T) {
 }
 
 func TestTodoWriteDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
@@ -335,7 +335,7 @@ func TestTodoWriteDetail(t *testing.T) {
 }
 
 func TestTodoWriteAllGlyphs(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
@@ -353,7 +353,7 @@ func TestTodoWriteAllGlyphs(t *testing.T) {
 }
 
 func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[]}`, Result: "updated",
@@ -365,7 +365,7 @@ func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 }
 
 func TestUpdatePlanDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "update_plan",
 		ToolInput: `{"plan":[
@@ -388,7 +388,7 @@ func TestUpdatePlanDetail(t *testing.T) {
 }
 
 func TestUpdatePlanEmptyFallsBackToGeneric(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "update_plan",
 		ToolInput: `{"plan":[]}`, Result: "Plan updated",
@@ -400,7 +400,7 @@ func TestUpdatePlanEmptyFallsBackToGeneric(t *testing.T) {
 }
 
 func TestBashOutputUsesGeneric(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "BashOutput",
 		ToolInput: `{"bash_id":"123"}`, Result: "streamed output",
@@ -416,7 +416,7 @@ func TestBashOutputUsesGeneric(t *testing.T) {
 }
 
 func TestGrepDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "Grep",
 		ToolInput: `{"pattern":"handler","glob":"*.go","path":"internal"}`,
@@ -435,7 +435,7 @@ func TestGrepDetail(t *testing.T) {
 }
 
 func TestGlobDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "Glob",
 		ToolInput: `{"pattern":"**/*.go"}`,
@@ -466,7 +466,7 @@ func TestParseAnsweredAnswers(t *testing.T) {
 }
 
 func TestAskUserQuestionDetailSingle(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
@@ -491,7 +491,7 @@ func TestAskUserQuestionDetailSingle(t *testing.T) {
 }
 
 func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Toppings","question":"Choose toppings",
@@ -510,7 +510,7 @@ func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
 }
 
 func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
@@ -524,7 +524,7 @@ func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 }
 
 func TestQuestionDetailOpenCode(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "question",
 		ToolInput: `{"questions":[{"header":"Storage","question":"Where should it be stored?",
@@ -549,7 +549,7 @@ func TestQuestionDetailOpenCode(t *testing.T) {
 }
 
 func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[]}`, Result: "updated",
@@ -561,7 +561,7 @@ func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 }
 
 func TestWebDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	fetch := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "WebFetch",
 		ToolInput: `{"url":"https://example.com","prompt":"summarize"}`,
@@ -590,7 +590,7 @@ func TestWebDetail(t *testing.T) {
 }
 
 func TestOpenCodeEditDetailShowsDiff(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "edit",
 		ToolInput: `{"path":"a.go","oldString":"foo","newString":"bar"}`,
@@ -606,7 +606,7 @@ func TestOpenCodeEditDetailShowsDiff(t *testing.T) {
 }
 
 func TestOpenCodeWriteDetailShowsAddedContent(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "write",
 		ToolInput: `{"filePath":"/x.go","content":"package x\nfunc f(){}"}`,
@@ -619,7 +619,7 @@ func TestOpenCodeWriteDetailShowsAddedContent(t *testing.T) {
 }
 
 func TestOpenCodeReadDetailUsesPath(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "read",
 		ToolInput: `{"path":"/repo/main.go"}`,
@@ -632,7 +632,7 @@ func TestOpenCodeReadDetailUsesPath(t *testing.T) {
 }
 
 func TestOpenCodeBashAndShellDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	for _, name := range []string{"bash", "shell"} {
 		it := transcript.Item{
 			Kind: transcript.ItemTool, ToolName: name,
@@ -647,7 +647,7 @@ func TestOpenCodeBashAndShellDetail(t *testing.T) {
 }
 
 func TestOpenCodeGrepDetailUsesInclude(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "grep",
 		ToolInput: `{"pattern":"handler","include":"*.go"}`,
@@ -663,7 +663,7 @@ func TestOpenCodeGrepDetailUsesInclude(t *testing.T) {
 }
 
 func TestOpenCodeTodoWriteDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "todowrite",
 		ToolInput: `{"todos":[
@@ -678,7 +678,7 @@ func TestOpenCodeTodoWriteDetail(t *testing.T) {
 }
 
 func TestOpenCodeExecuteDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "execute",
 		ToolInput: `{"code":"print(1+1)"}`,
@@ -694,7 +694,7 @@ func TestOpenCodeExecuteDetail(t *testing.T) {
 }
 
 func TestOpenCodeWebDetail(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	fetch := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "webfetch",
 		ToolInput: `{"url":"https://example.com","format":"markdown"}`, Result: "page body",
@@ -712,7 +712,7 @@ func TestOpenCodeWebDetail(t *testing.T) {
 }
 
 func TestOpenCodeSkillDetailShowsIDNotXML(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "skill",
 		ToolInput: `{"id":"my-skill"}`,
@@ -728,7 +728,7 @@ func TestOpenCodeSkillDetailShowsIDNotXML(t *testing.T) {
 }
 
 func TestOpenCodeTaskDetailShowsDescriptor(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	for _, in := range []string{
 		`{"subagent_type":"researcher","description":"find X","prompt":"do the thing"}`,
 		`{"agent":"researcher","description":"find X","prompt":"do the thing"}`,
@@ -744,7 +744,7 @@ func TestOpenCodeTaskDetailShowsDescriptor(t *testing.T) {
 }
 
 func TestWaitAgentDetailShowsNicknameAndStatus(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "wait_agent",
 		ToolInput: `{"targets":["019f278e-50a5-7f83-91f2-c30e8ac18e19"],"timeout_ms":30000}`,
@@ -772,7 +772,7 @@ func TestWaitAgentDetailShowsNicknameAndStatus(t *testing.T) {
 }
 
 func TestWaitAgentDetailFallsBackToRawIDWithoutNickname(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "wait_agent",
 		ToolInput: `{"targets":["agent-xyz"]}`,
@@ -785,7 +785,7 @@ func TestWaitAgentDetailFallsBackToRawIDWithoutNickname(t *testing.T) {
 }
 
 func TestCloseAgentDetailShowsNicknameAndStatus(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemTool, ToolName: "close_agent",
 		ToolInput: `{"target":"019f278e-50a5-7f83-91f2-c30e8ac18e19"}`,

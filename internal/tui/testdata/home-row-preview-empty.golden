@@ -1,0 +1,30 @@
+  󱙺 argus
+
+  Projects                           │  Sessions   History
+                                     │
+▌ 󰋜 Home                             │
+  ▾ argus                            │
+    ★ repo  main                     │
+    • repo-feat  feature             │
+                                     │
+                                     │                                 ╭──────────────╮
+                                     │                                 │    █████╗    │
+                                     │                                 │   ██╔══██╗   │
+                                     │                                 │   ███████║   │
+                                     │                                 │   ██╔══██║   │
+                                     │                                 │   ██║  ██║   │
+                                     │                                 │   ╚═╝  ╚═╝   │
+                                     │                                 ╰──────────────╯
+                                     │
+                                     │                                       Argus
+                                     │                      Watch and control all your AI agents.
+                                     │
+                                     │                No sessions yet. Start an AI agent in a tmux pane,
+                                     │                       or press s to spawn one right here.
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+
+                ↑/↓ move · enter open · ^ww/^wW pane · s spawn · / filter · Q quit · ␣e files · g? help

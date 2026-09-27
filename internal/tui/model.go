@@ -6,39 +6,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/x/vt"
 
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
-)
-
-type viewMode int
-
-const (
-	modeList    viewMode = iota
-	modeSession          // composite: history region + conditional prompt dock
-	modeScreen
-	modeHistoryProjects   // read-only: list of past projects
-	modeHistorySessions   // read-only: a project's past sessions
-	modeHistoryTranscript // read-only: a past session's transcript (reuses the transcript region)
-	modeLogs              // embedded-node log tail (only when the TUI spawned the node)
-	modeProjects          // two-pane workspace sidebar: tree + a workspace's sessions
-)
-
-type focusArea int
-
-const (
-	focusHistory focusArea = iota
-	focusDock
-)
-
-type historyKind int
-
-const (
-	histTranscript historyKind = iota
-	histDetail
 )
 
 type cachedTranscript struct {
@@ -81,53 +53,39 @@ type model struct {
 	client       Client
 	sessions     map[string]session.Session
 	order        []string // session IDs, sorted for stable display
-	cursor       int
 	width        int
 	height       int
 	reconnecting bool // connection dropped; the client is retrying
 	hasDark      bool // terminal background; drives glamour/highlight styling
 	viewer       bool // offline viewer mode: opens directly in transcript view
 
-	redactMode   bool        // --redact: interactive redaction affordance in the viewer
-	bundlePath   string      // source .argus path (for the -redacted output name)
-	redactSrcDir string      // extracted cache dir to redact from
-	redact       redactState // queued literals + input/confirm state
+	redactMode   bool   // --redact: interactive redaction affordance in the viewer
+	bundlePath   string // source .argus path (for the -redacted output name)
+	redactSrcDir string // extracted cache dir to redact from
 
-	mode          viewMode
-	screenReturn  viewMode // mode to restore when leaving the live screen (ctrl+])
-	sessionReturn viewMode // mode to restore when leaving a session view
-	selectedID    string
+	main    backStack // the main pane's components; the last one shows
+	focused container
+	left    leftSidebarState
+	right   rightSidebarState
 
-	focus       focusArea   // session screen: which pane has focus
-	historyView historyKind // session screen: transcript or detail
+	// keptHome and keptPane hold the Home and workspace panes while another
+	// component stands at the root, so each comes back with its cursor.
+	keptHome homeComp
+	keptPane workspaceComp
 
-	transcript      transcriptState             // transcript viewer state (shared by live + history)
 	transcriptCache map[string]cachedTranscript // cacheKey -> last-known chunks (per TUI run)
-	activeSub       subRef                      // the subscription backing the open transcript view
-	sessionSub      subRef                      // stashed session subRef while drilled into a subagent
-	toolBodies      map[string]toolBodyEntry    // tool_use id -> on-demand-fetched body (cleared per open)
+	render          renderCache
 
-	term      *vt.Emulator  // live terminal attach (nil when not attached)
-	termID    string        // active attach id (unique per attach; gateway/node key on it)
-	termStop  chan struct{} // closed to stop the emulator drain goroutine on detach
-	termErr   error         // terminal.open failure, shown in the box
-	termKeyCh chan termKey  // ordered keystroke queue drained by sendTermKeyLoop
+	termKeyCh chan termKey // ordered keystroke queue drained by sendTermKeyLoop
 
-	prompt      promptState       // compose-then-submit draft for the prompt dock
-	replyDrafts map[string]string // unsent idle-reply drafts, keyed by session id
+	dock dockComp
 
-	pendingKill   bool   // awaiting kill confirmation in list view
-	pendingExport bool   // awaiting export confirmation in history transcript view
-	flash         string // transient list-view status (e.g. why a jump was refused)
-
-	spawn spawnState // staged "new session" flow (node → dir → name → command)
+	flash string // transient list-view status (e.g. why a jump was refused)
 
 	spin     int  // animation frame for the list's working-session spinner
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)
 
-	history historyState // read-only browsing of past sessions on disk
-
-	projects projectsState // two-pane workspace sidebar (tree + sessions)
+	showHelp bool // the key help covers the screen
 
 	keys      *keymap // resolved keymaps; nil in models built without withKeymaps
 	kittyKeys bool    // the terminal reported the Kitty keyboard protocol
@@ -137,42 +95,42 @@ type model struct {
 	keyMatchN int               // keys of keyBuf that keyMatch covers
 	keyGen    int               // bumped on every wait; a keyTimeoutMsg from an older wait is stale
 
-	// Logs tab: present only with an embedded node (logs != nil). logsScroll is the
-	// absolute top-line offset when paused; logsFollow pins to the newest line and
-	// ignores logsScroll. Gotcha: at ring capacity a paused offset addresses
-	// shifting content as old lines evict — acceptable drift for a tail view.
-	logs       *logbuf.Buffer
-	logsScroll int
-	logsFollow bool
+	logs *logbuf.Buffer // the embedded node's log lines; nil without one
 }
 
 // transcriptState is the transcript viewer: parsed chunks plus scroll/cursor/fold/
-// drill-down state and render caches. Reused by the live and history views.
+// drill-down state and the rendered cards.
 type transcriptState struct {
 	chunks      []transcript.Chunk
 	err         error
-	cursor      int                           // selected chunk index
-	scroll      int                           // top line offset into the rendered transcript
-	detailStack []detailFrame                 // detail drill-down frame stack (deepest = active)
-	expanded    map[string]bool               // chunk id -> expanded (override default)
+	cursor      int                  // selected chunk index
+	scroll      int                  // top line offset into the rendered transcript
+	detailStack []detailFrame        // detail drill-down frame stack (deepest = active)
+	expanded    map[string]bool      // chunk id -> expanded (override default)
+	cards       map[string]cardEntry // rendered card lines, keyed by chunk id
+}
+
+// renderCache is what the transcript and the dock draw markdown and code with.
+type renderCache struct {
 	mdRenderers map[int]*glamour.TermRenderer // markdown renderers, keyed by wrap width
 	mdCache     map[string]string             // markdown cache, keyed by width+content
-	cards       map[string]cardEntry          // rendered card lines, keyed by chunk id
 	jsonHL      *codeHighlighter              // JSON syntax highlighter for tool bodies
 	jsHL        *codeHighlighter              // JavaScript highlighter for opencode execute
 }
 
-// historyState holds the read-only History view: the project list, a project's
-// paginated session list, and the open transcript's title.
+func newRenderCache(hasDark bool) renderCache {
+	return renderCache{
+		mdRenderers: make(map[int]*glamour.TermRenderer),
+		mdCache:     make(map[string]string),
+		jsonHL:      newCodeHighlighter(hasDark, "json"),
+		jsHL:        newCodeHighlighter(hasDark, "javascript"),
+	}
+}
+
+// historyState is the open past-session transcript: its project and the
+// address its reads go to.
 type historyState struct {
-	projects    []session.HistoryProject
-	projCursor  int
-	err         error
-	project     session.HistoryProject // the project being drilled into
-	sessions    []session.HistorySession
-	sessCursor  int
-	hasMore     bool
-	loading     bool
+	project     session.HistoryProject
 	title       string                 // header for the open historical transcript
 	openSession session.HistorySession // retained for export metadata
 	// openNodeID/openPath/openAgent route per-tool detail fetches to the right adapter.
@@ -185,36 +143,31 @@ type historyState struct {
 
 func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 	return model{
+		main:            backStack{homeComp{}},
 		client:          client,
 		hasDark:         hasDark,
 		logs:            logs,
-		logsFollow:      true,
 		termKeyCh:       make(chan termKey, termKeyBuf),
 		sessions:        make(map[string]session.Session),
 		transcriptCache: make(map[string]cachedTranscript),
-		toolBodies:      make(map[string]toolBodyEntry),
-		transcript: transcriptState{
-			expanded:    make(map[string]bool),
-			mdRenderers: make(map[int]*glamour.TermRenderer),
-			mdCache:     make(map[string]string),
-			cards:       make(map[string]cardEntry),
-			jsonHL:      newCodeHighlighter(hasDark, "json"),
-			jsHL:        newCodeHighlighter(hasDark, "javascript"),
-		},
-		redact:      redactState{input: newRedactInput()},
-		prompt:      promptState{reason: newDenyReasonInput(), reply: newIdleReplyArea()},
-		replyDrafts: map[string]string{},
-		projects: projectsState{
-			collapsed: make(map[string]bool),
-			focus:     focusPane,
-			loading:   true,
-			rows:      []projectsRow{homeRow()},
-		},
+		render:          newRenderCache(hasDark),
+		dock:            newDock(),
+		left:            leftSidebarState{tree: newProjectTree()},
 	}
 }
 
 func (m model) sessionInteraction() *session.Interaction {
-	return m.sessions[m.selectedID].Interaction
+	return m.sessions[m.liveSessionID()].Interaction
+}
+
+// liveSessionID is the session of the topmost live transcript on the main pane:
+// the one the header, the dock, the right sidebar, and the attach act on. It is
+// derived, not stored, so every pop restores it.
+func (m model) liveSessionID() string {
+	if i := m.transcriptAt(isLive); i >= 0 {
+		return m.main[i].(transcriptComp).sessionID
+	}
+	return ""
 }
 
 // interactionKey is a stable identity for a pending interaction: changes for a
@@ -225,17 +178,6 @@ func interactionKey(ix *session.Interaction) string {
 	}
 	b, _ := json.Marshal(ix) // content hash: same prompt → same key
 	return string(b)
-}
-
-// syncPromptDraft resets the compose draft when the pending interaction changes
-// identity (new or cleared) so a stale draft never carries over. A re-publish of
-// the same interaction keeps the in-progress draft.
-func (m *model) syncPromptDraft() {
-	k := interactionKey(m.sessions[m.selectedID].Interaction)
-	if k != m.prompt.key {
-		m.resetPromptState()
-		m.prompt.key = k
-	}
 }
 
 // redactState holds queued secrets plus input/confirm state for interactive redaction.

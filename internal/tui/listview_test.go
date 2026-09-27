@@ -33,14 +33,14 @@ func TestListViewEmptyStateIsFriendly(t *testing.T) {
 // Both home tabs render their labels on the Sessions list and the History view.
 func TestHomeTabsRendered(t *testing.T) {
 	m := testModel()
-	out := ansi.Strip(m.listView())
+	out := ansi.Strip(paneView(m))
 	for _, want := range []string{"Sessions", "History"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Sessions list should show the %q tab:\n%s", want, out)
 		}
 	}
-	m.mode = modeHistoryProjects
-	hout := ansi.Strip(m.historyProjectsView())
+	m = withView(m, viewHistoryProjects)
+	hout := ansi.Strip(mainView(m))
 	for _, want := range []string{"Sessions", "History"} {
 		if !strings.Contains(hout, want) {
 			t.Errorf("History view should show the %q tab:\n%s", want, hout)
@@ -56,7 +56,7 @@ func TestListViewPopulatedHidesTagline(t *testing.T) {
 		}},
 	}
 	m.order = []string{"s1"}
-	out := m.listView()
+	out := paneView(m)
 
 	if !strings.Contains(out, "work") {
 		t.Errorf("populated list should show the session row:\n%s", out)

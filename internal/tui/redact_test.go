@@ -12,38 +12,37 @@ import (
 )
 
 func newRedactModel() model {
-	m := model{mode: modeHistoryTranscript, historyView: histTranscript, viewer: true, redactMode: true}
-	m.history.openPath = "/x/s.jsonl"
-	return m
+	m := withView(model{viewer: true, redactMode: true}, viewHistoryTranscript)
+	return withTr(m, func(t *transcriptComp) { t.history.openPath = "/x/s.jsonl" })
 }
 
 func TestRedactInputQueuesLiteral(t *testing.T) {
 	m := newRedactModel()
 
 	// 'd' opens the input.
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = res.(model)
-	if !m.redact.inputActive {
+	if !trOf(m).redact.inputActive {
 		t.Fatal("d should open the redact input")
 	}
 
 	// Type "sk".
 	for _, r := range "sk" {
-		res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		res, _ = m.baseKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
-	if m.redact.input.Value() != "sk" {
-		t.Fatalf("input buffer = %q, want sk", m.redact.input.Value())
+	if trOf(m).redact.input.Value() != "sk" {
+		t.Fatalf("input buffer = %q, want sk", trOf(m).redact.input.Value())
 	}
 
 	// Enter commits.
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
-	if m.redact.inputActive {
+	if trOf(m).redact.inputActive {
 		t.Fatal("enter should close the input")
 	}
-	if len(m.redact.literals) != 1 || m.redact.literals[0] != "sk" {
-		t.Fatalf("literals = %v, want [sk]", m.redact.literals)
+	if len(trOf(m).redact.literals) != 1 || trOf(m).redact.literals[0] != "sk" {
+		t.Fatalf("literals = %v, want [sk]", trOf(m).redact.literals)
 	}
 }
 
@@ -51,19 +50,19 @@ func TestRedactInputWorksInDetailView(t *testing.T) {
 	// Queued literals apply bundle-wide, so redaction keys must stay live after
 	// drilling into the detail view, not just on the transcript page.
 	m := newRedactModel()
-	m.historyView = histDetail
+	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = res.(model)
-	if !m.redact.inputActive {
+	if !trOf(m).redact.inputActive {
 		t.Fatal("d should open the redact input in the detail view")
 	}
 
 	// A drill-down navigation key must still reach the detail handler when the
 	// redact input isn't capturing (i.e. redaction doesn't swallow detail nav).
-	m.redact.inputActive = false
-	if m.redactActive() && func() bool {
-		_, _, ok := m.handleRedactKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = withTr(m, func(t *transcriptComp) { t.redact.inputActive = false })
+	if tvOf(&m).redactActive() && func() bool {
+		_, ok := tvOf(&m).handleRedactKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 		return ok
 	}() {
 		t.Fatal("j must fall through to detail navigation, not be consumed by redaction")
@@ -72,11 +71,11 @@ func TestRedactInputWorksInDetailView(t *testing.T) {
 
 func TestRedactInputEscCancels(t *testing.T) {
 	m := newRedactModel()
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = res.(model)
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = res.(model)
-	if m.redact.inputActive || len(m.redact.literals) != 0 {
+	if trOf(m).redact.inputActive || len(trOf(m).redact.literals) != 0 {
 		t.Fatal("esc should cancel input without queuing")
 	}
 }
@@ -84,8 +83,8 @@ func TestRedactInputEscCancels(t *testing.T) {
 func TestRedactKeysInertWithoutFlag(t *testing.T) {
 	m := newRedactModel()
 	m.redactMode = false
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	if res.(model).redact.inputActive {
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if trOf(res.(model)).redact.inputActive {
 		t.Fatal("d must not open redact input when --redact is off")
 	}
 }
@@ -112,9 +111,9 @@ func TestRedactSaveWritesSiblingBundle(t *testing.T) {
 	m := newRedactModel()
 	m.redactSrcDir = src
 	m.bundlePath = filepath.Join(t.TempDir(), "session.argus")
-	m.redact.literals = []string{"sk-secret"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"sk-secret"} })
 
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'W', Text: "W"})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'W', Text: "W"})
 	m = res.(model)
 	if cmd == nil {
 		t.Fatal("W with queued literals should run a prepare command")
@@ -122,7 +121,7 @@ func TestRedactSaveWritesSiblingBundle(t *testing.T) {
 	msg := cmd()
 	res, _ = m.Update(msg)
 	m = res.(model)
-	if !m.redact.pendingSave {
+	if !trOf(m).redact.pendingSave {
 		t.Fatal("prepare result should arm pendingSave")
 	}
 
@@ -132,14 +131,14 @@ func TestRedactSaveWritesSiblingBundle(t *testing.T) {
 	if _, err := os.Stat(wantPath); !os.IsNotExist(err) {
 		t.Fatalf("final bundle must not exist before confirmation, stat err = %v", err)
 	}
-	if m.redact.tempPath == "" {
+	if trOf(m).redact.tempPath == "" {
 		t.Fatal("prepare should stage a temp bundle path")
 	}
-	if _, err := os.Stat(m.redact.tempPath); err != nil {
+	if _, err := os.Stat(trOf(m).redact.tempPath); err != nil {
 		t.Fatalf("staged temp bundle should exist: %v", err)
 	}
 
-	res, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	res, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(model)
 	if cmd == nil {
 		t.Fatal("y should run the save command")
@@ -185,24 +184,24 @@ func TestRedactSaveWritesWarningsSidecar(t *testing.T) {
 	m := newRedactModel()
 	m.redactSrcDir = src
 	m.bundlePath = filepath.Join(t.TempDir(), "session.argus")
-	m.redact.literals = []string{"sk-secret"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"sk-secret"} })
 
 	// Prepare: RedactTree finds the un-scrubbable binary secret and arms warnConfirm.
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'W', Text: "W"})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'W', Text: "W"})
 	m = res.(model)
 	res, _ = m.Update(cmd())
 	m = res.(model)
-	if !m.redact.pendingSave || !m.redact.warnConfirm {
-		t.Fatalf("prepare should arm warnConfirm for the binary secret, got %+v", m.redact)
+	if !trOf(m).redact.pendingSave || !trOf(m).redact.warnConfirm {
+		t.Fatalf("prepare should arm warnConfirm for the binary secret, got %+v", trOf(m).redact)
 	}
 
 	// First y acknowledges the warning, second y commits.
-	res, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	res, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(model)
 	if cmd != nil {
 		t.Fatal("first y should only acknowledge, not save")
 	}
-	_, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd == nil {
 		t.Fatal("second y should run the save")
 	}
@@ -226,25 +225,29 @@ func TestRedactFooterStates(t *testing.T) {
 	m := newRedactModel()
 
 	// Idle with a queued literal: shows count + key hint.
-	m.redact.literals = []string{"a"}
-	if got := m.redactFooter("BASE"); got == "BASE" {
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"a"} })
+	if got := tvOf(&m).redactFooter("BASE"); got == "BASE" {
 		t.Fatal("expected redact hint, got base footer")
 	}
 
 	// Input active: shows the masked buffer, never the plaintext secret.
-	m.redact.inputActive = true
-	m.redact.input = newRedactInput()
-	m.redact.input.SetValue("sk-x")
-	if got := m.redactFooter("BASE"); !contains(got, "redact (paste secret):") || contains(got, "sk-x") {
+	m = withTr(m, func(t *transcriptComp) { t.redact.inputActive = true })
+	m = withTr(m, func(t *transcriptComp) {
+		t.redact.input = newRedactInput()
+		t.redact.input.SetValue("sk-x")
+	})
+	if got := tvOf(&m).redactFooter("BASE"); !contains(got, "redact (paste secret):") || contains(got, "sk-x") {
 		t.Fatalf("input footer should mask the secret, got %q", got)
 	}
-	m.redact.inputActive = false
+	m = withTr(m, func(t *transcriptComp) { t.redact.inputActive = false })
 
 	// Pending save: shows confirm.
 	rep := bundle.Report{Counts: map[string]int{"a": 2}}
-	m.redact.report = &rep
-	m.redact.pendingSave = true
-	if got := m.redactFooter("BASE"); !contains(got, "y/n") {
+	m = withTr(m, func(t *transcriptComp) {
+		t.redact.report = &rep
+		t.redact.pendingSave = true
+	})
+	if got := tvOf(&m).redactFooter("BASE"); !contains(got, "y/n") {
 		t.Fatalf("confirm footer should ask y/n, got %q", got)
 	}
 }
@@ -253,19 +256,21 @@ func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestRedactFooterFlashSurfaces(t *testing.T) {
 	m := newRedactModel()
-	m.redact.literals = []string{"a"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"a"} })
 	m.flash = "redacted: /tmp/x-redacted.argus"
 
 	// Flash must win over the queued-count hint.
-	if got := m.redactFooter("SENTINEL_BASE"); got != "SENTINEL_BASE" {
+	if got := tvOf(&m).redactFooter("SENTINEL_BASE"); got != "SENTINEL_BASE" {
 		t.Fatalf("flash should surface via base, got %q", got)
 	}
 
 	// Pending-save modal must still win over flash.
 	rep := bundle.Report{Counts: map[string]int{"a": 1}}
-	m.redact.report = &rep
-	m.redact.pendingSave = true
-	if got := m.redactFooter("SENTINEL_BASE"); !contains(got, "y/n") {
+	m = withTr(m, func(t *transcriptComp) {
+		t.redact.report = &rep
+		t.redact.pendingSave = true
+	})
+	if got := tvOf(&m).redactFooter("SENTINEL_BASE"); !contains(got, "y/n") {
 		t.Fatalf("confirm modal must beat flash, got %q", got)
 	}
 }
@@ -273,7 +278,7 @@ func TestRedactFooterFlashSurfaces(t *testing.T) {
 func TestRedactWarnConfirmTwoStep(t *testing.T) {
 	m := newRedactModel()
 	m.bundlePath = filepath.Join(t.TempDir(), "s.argus")
-	m.redact.literals = []string{"sk-secret"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"sk-secret"} })
 	rep := bundle.Report{
 		Counts:   map[string]int{"sk-secret": 1},
 		Warnings: []string{"secret in binary file root/blob.bin (cannot redact)"},
@@ -281,22 +286,22 @@ func TestRedactWarnConfirmTwoStep(t *testing.T) {
 
 	res, _ := m.Update(redactPreparedMsg{report: rep, outPath: m.bundlePath + ".tmp"})
 	m = res.(model)
-	if !m.redact.pendingSave || !m.redact.warnConfirm {
-		t.Fatalf("prepare with warnings should arm pendingSave+warnConfirm, got %+v", m.redact)
+	if !trOf(m).redact.pendingSave || !trOf(m).redact.warnConfirm {
+		t.Fatalf("prepare with warnings should arm pendingSave+warnConfirm, got %+v", trOf(m).redact)
 	}
 
 	// First 'y' only acknowledges the warning — no save command yet.
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(model)
 	if cmd != nil {
 		t.Fatal("first y should acknowledge the warning, not save")
 	}
-	if m.redact.warnConfirm || !m.redact.pendingSave {
-		t.Fatalf("first y should clear warnConfirm but keep pendingSave, got %+v", m.redact)
+	if trOf(m).redact.warnConfirm || !trOf(m).redact.pendingSave {
+		t.Fatalf("first y should clear warnConfirm but keep pendingSave, got %+v", trOf(m).redact)
 	}
 
 	// Second 'y' performs the save.
-	_, cmd = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.baseKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd == nil {
 		t.Fatal("second y should run the save command")
 	}
@@ -305,7 +310,7 @@ func TestRedactWarnConfirmTwoStep(t *testing.T) {
 func TestRedactWarnConfirmCancels(t *testing.T) {
 	m := newRedactModel()
 	m.bundlePath = filepath.Join(t.TempDir(), "s.argus")
-	m.redact.literals = []string{"sk-secret"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"sk-secret"} })
 
 	// A real staged temp file stands in for the prepared bundle; cancelling must
 	// delete it so a partially-redacted copy isn't left behind.
@@ -318,10 +323,10 @@ func TestRedactWarnConfirmCancels(t *testing.T) {
 	m = res.(model)
 
 	// Any non-y key cancels the whole flow at the warning stage.
-	res, cmd := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	res, cmd := m.baseKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = res.(model)
-	if m.redact.pendingSave || m.redact.warnConfirm {
-		t.Fatalf("n should cancel both flags, got %+v", m.redact)
+	if trOf(m).redact.pendingSave || trOf(m).redact.warnConfirm {
+		t.Fatalf("n should cancel both flags, got %+v", trOf(m).redact)
 	}
 	if cmd == nil {
 		t.Fatal("cancel should return a cleanup command")
@@ -337,11 +342,13 @@ func TestRedactWarnConfirmCancels(t *testing.T) {
 func TestRedactFooterWarnConfirm(t *testing.T) {
 	m := newRedactModel()
 	rep := bundle.Report{Counts: map[string]int{"a": 1}, Warnings: []string{"w1", "w2"}}
-	m.redact.report = &rep
-	m.redact.pendingSave = true
-	m.redact.warnConfirm = true
+	m = withTr(m, func(t *transcriptComp) {
+		t.redact.report = &rep
+		t.redact.pendingSave = true
+		t.redact.warnConfirm = true
+	})
 
-	got := m.redactFooter("BASE")
+	got := tvOf(&m).redactFooter("BASE")
 	if contains(got, "y/n") {
 		t.Fatalf("warn stage must not show the plain y/n confirm, got %q", got)
 	}
@@ -361,16 +368,16 @@ func TestRedactDoneSurfacesWarnings(t *testing.T) {
 
 func TestRedactListBodyRendersQueuedLiterals(t *testing.T) {
 	m := newRedactModel()
-	m.redact.literals = []string{"sk-supersecret", "ghp-token"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"sk-supersecret", "ghp-token"} })
 
 	// Opening the list (D) must actually show the queued secrets, not just a count.
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	m = res.(model)
-	if !m.redactListActive() {
+	if !tvOf(&m).redactListActive() {
 		t.Fatal("D should activate the redaction list")
 	}
 
-	body := m.redactListBody()
+	body := tvOf(&m).redactListBody()
 	if !contains(body, "queued redactions (2)") {
 		t.Fatalf("list body should show a heading with the count, got:\n%s", body)
 	}
@@ -385,9 +392,9 @@ func TestRedactListBodyRendersQueuedLiterals(t *testing.T) {
 
 func TestRedactListBodyEmptyState(t *testing.T) {
 	m := newRedactModel()
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	m = res.(model)
-	if got := m.redactListBody(); !contains(got, "no redactions queued") {
+	if got := tvOf(&m).redactListBody(); !contains(got, "no redactions queued") {
 		t.Fatalf("empty list should explain how to add, got %q", got)
 	}
 }
@@ -396,56 +403,56 @@ func TestRedactAddFromListReturnsToList(t *testing.T) {
 	m := newRedactModel()
 
 	// Open the (empty) list, then press d to add — the empty-state hint promises this.
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	m = res.(model)
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = res.(model)
-	if !m.redact.inputActive || m.redact.listActive {
-		t.Fatalf("d on the list should open the input and hide the list, got %+v", m.redact)
+	if !trOf(m).redact.inputActive || trOf(m).redact.listActive {
+		t.Fatalf("d on the list should open the input and hide the list, got %+v", trOf(m).redact)
 	}
 
 	for _, r := range "sk-x" {
-		res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		res, _ = m.baseKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = res.(model)
 
-	if len(m.redact.literals) != 1 || m.redact.literals[0] != "sk-x" {
-		t.Fatalf("literal not queued: %v", m.redact.literals)
+	if len(trOf(m).redact.literals) != 1 || trOf(m).redact.literals[0] != "sk-x" {
+		t.Fatalf("literal not queued: %v", trOf(m).redact.literals)
 	}
-	if !m.redact.listActive || m.redact.inputActive {
-		t.Fatalf("after adding, should return to the list, got %+v", m.redact)
+	if !trOf(m).redact.listActive || trOf(m).redact.inputActive {
+		t.Fatalf("after adding, should return to the list, got %+v", trOf(m).redact)
 	}
-	if m.redact.listCursor != 0 {
-		t.Fatalf("cursor should land on the new entry, got %d", m.redact.listCursor)
+	if trOf(m).redact.listCursor != 0 {
+		t.Fatalf("cursor should land on the new entry, got %d", trOf(m).redact.listCursor)
 	}
 }
 
 func TestRedactListDelete(t *testing.T) {
 	m := newRedactModel()
-	m.redact.literals = []string{"aaa", "bbb", "ccc"}
+	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"aaa", "bbb", "ccc"} })
 
 	// Open the list.
-	res, _ := m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
+	res, _ := m.baseKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	m = res.(model)
-	if !m.redact.listActive {
+	if !trOf(m).redact.listActive {
 		t.Fatal("D should open the redaction list")
 	}
 
 	// Move to index 1 and delete.
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = res.(model)
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	m = res.(model)
-	if len(m.redact.literals) != 2 || m.redact.literals[1] != "ccc" {
-		t.Fatalf("delete failed: %v", m.redact.literals)
+	if len(trOf(m).redact.literals) != 2 || trOf(m).redact.literals[1] != "ccc" {
+		t.Fatalf("delete failed: %v", trOf(m).redact.literals)
 	}
 
 	// Esc closes.
-	res, _ = m.handleHistoryTranscriptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	res, _ = m.baseKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = res.(model)
-	if m.redact.listActive {
+	if trOf(m).redact.listActive {
 		t.Fatal("esc should close the list")
 	}
 }

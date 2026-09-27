@@ -89,18 +89,17 @@ func cmdKeys(sk *screenKeys, screen string, b binding, name string) []string {
 }
 
 // helpKeys returns the key column text for the help table: for each command in
-// b's pair (or b alone), all effective keys joined by a space; the commands
-// joined by "/". Keys are always resolved against the projects screen so that
-// pair partners are found even when the help is shown from another mode.
-func (m model) helpKeys(b binding) string {
-	sk := m.keymap().screenKeys("projects")
+// b's pair (or b alone), all effective keys in section joined by a space; the
+// commands joined by "/".
+func (m model) helpKeys(section string, b binding) string {
+	sk := m.keymap().screenKeys(section)
 	names := []string{b.name}
 	if p, ok := labelPairs[b.name]; ok {
 		names = p[:]
 	}
 	cmds := make([]string, 0, len(names))
 	for _, n := range names {
-		ids := cmdKeys(sk, "projects", b, n)
+		ids := cmdKeys(sk, section, b, n)
 		if len(ids) == 0 {
 			continue
 		}

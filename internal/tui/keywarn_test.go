@@ -12,9 +12,9 @@ import (
 
 func TestWithKeymapsShowsTheFirstErrorAndACount(t *testing.T) {
 	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{
-		"projects": {"a": "nope", "b": "nope2", "c": "nope3"},
+		"project-tree": {"a": "nope", "b": "nope2", "c": "nope3"},
 	}})
-	if m.flash != `keymap: projects "a": unknown command "nope" (+2 more)` {
+	if m.flash != `keymap: project-tree "a": unknown command "nope" (+2 more)` {
 		t.Errorf("flash = %q", m.flash)
 	}
 	if m.keys == nil || m.keys.timeout <= 0 {
@@ -28,7 +28,7 @@ func TestNoKeymapsKeepsTheDefaults(t *testing.T) {
 		t.Errorf("no keymaps must not produce a flash: %q", m.flash)
 	}
 	m = typeKeys(m, "z.")
-	if !m.projects.showHidden {
+	if !m.left.tree.showHidden {
 		t.Error("z. still toggles hidden projects with an empty keymap config")
 	}
 }

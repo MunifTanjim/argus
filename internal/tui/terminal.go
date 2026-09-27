@@ -135,32 +135,41 @@ type termOpenedMsg struct {
 	err    error
 }
 
-// termDims maps the screen box geometry to the attach's cols/rows.
 func (m model) termDims() (cols, rows int) {
-	return max(10, m.bodyWidth()-2), max(1, m.bodyHeight()-6)
+	l := m.layout()
+	return termDimsFor(l.w, l.h)
 }
 
-// enterScreen opens a live attach for id and switches to the screen view. It must
-// be called while m.mode still holds the origin mode (captured into screenReturn).
-func (m model) enterScreen(id string) (model, tea.Cmd) {
+func termDimsFor(w, h int) (cols, rows int) {
+	return max(10, w-2), max(1, h-6)
+}
+
+func attachScreen(c *ctx, id string) tea.Cmd {
+	m := c.m
 	cols, rows := m.termDims()
-	termID := newTermID()
-	m.selectedID = id
-	m.screenReturn = m.mode
-	m.mode = modeScreen
-	m.termID = termID
-	m.termErr = nil
-	m.term = vt.NewEmulator(cols, rows)
-	m.termStop = make(chan struct{})
-	go drainEmulator(m.term, m.termStop)
+	s := screenComp{sessionID: id, termID: newTermID(), term: vt.NewEmulator(cols, rows), stop: make(chan struct{})}
+	go drainEmulator(s.term, s.stop)
+	c.open(s)
 	host, _ := os.Hostname()
 	clientPane := clientPaneFor(m.sessions[id], host, os.Getenv("TMUX"), os.Getenv("TMUX_PANE"))
-	return m, m.termOpenCmd(id, termID, cols, rows, clientPane)
+	return m.termOpenCmd(id, s.termID, cols, rows, clientPane)
+}
+
+// terminal.open spawns and adopts a pane on demand for a live paneless session
+// (OpenCode).
+func openLiveScreen(c *ctx) tea.Cmd {
+	id := c.m.liveSessionID()
+	s := c.m.sessions[id]
+	if !s.CanOpenTerminal {
+		c.setFlash(string(s.Frontend) + " session: terminal control unavailable")
+		return nil
+	}
+	return attachScreen(c, id)
 }
 
 // drainEmulator discards the emulator's auto-generated query replies (DA/DSR/
 // in-band resize); undrained, it deadlocks a Write on the first query. Also owns
-// Close (vt's closed flag isn't goroutine-safe), so detachScreen pokes InputPipe.
+// Close (vt's closed flag isn't goroutine-safe), so screenComp.close pokes InputPipe.
 func drainEmulator(e *vt.Emulator, stop <-chan struct{}) {
 	buf := make([]byte, 4096)
 	for {
@@ -174,24 +183,6 @@ func drainEmulator(e *vt.Emulator, stop <-chan struct{}) {
 		default:
 		}
 	}
-}
-
-// detachScreen resets local attach state and stops the drain goroutine. It does
-// not touch the node.
-func (m model) detachScreen() model {
-	if m.termStop != nil {
-		close(m.termStop)
-		_, _ = m.term.InputPipe().Write([]byte{0}) // wake drainEmulator's Read so it observes stop
-	}
-	m.mode = m.screenReturn
-	m.term, m.termID, m.termStop, m.termErr = nil, "", nil, nil
-	return m
-}
-
-// leaveScreen tears down the attach and closes the terminal on the node.
-func (m model) leaveScreen() (model, tea.Cmd) {
-	termID := m.termID
-	return m.detachScreen(), m.termCloseCmd(termID)
 }
 
 func (m model) termOpenCmd(id, termID string, cols, rows int, clientPane string) tea.Cmd {

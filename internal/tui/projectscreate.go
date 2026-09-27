@@ -22,9 +22,8 @@ const (
 
 var createTabNames = []string{"New", "Branches", "PRs", "Issues"}
 
-// createState is the "new workspace" picker on the projects screen.
-type createState struct {
-	active          bool
+// createComp is the workspace new picker, open over the main pane.
+type createComp struct {
 	projectID       string
 	project         string
 	defaultTarget   string
@@ -46,24 +45,21 @@ type createState struct {
 	targetPick      branchPicker
 	creating        bool
 	err             string
-	seq             int // tags this picker's create call; see projectsState.createSeq
+	seq             int // tags this picker's create call; see projectTreeComp.createSeq
 }
 
-func (m model) startCreate(projectID string) (tea.Model, tea.Cmd) {
-	p, _ := m.findProject(projectID)
-	m.projects.createSeq++
+func newCreateComp(projectID, project, defaultTarget string, seq int) createComp {
 	name := textinput.New()
 	name.Prompt = ""
 	filter := textinput.New()
 	filter.Prompt = ""
-	m.projects.create = createState{
-		active: true, projectID: projectID, project: p.Name, defaultTarget: p.DefaultBranch,
-		name: name, filter: filter, branches: newBranchPicker(), seq: m.projects.createSeq,
+	return createComp{
+		projectID: projectID, project: project, defaultTarget: defaultTarget,
+		name: name, filter: filter, branches: newBranchPicker(), seq: seq,
 	}
-	return m, m.projects.create.name.Focus()
 }
 
-func (c createState) targetLabel() string {
+func (c createComp) targetLabel() string {
 	switch {
 	case c.tab == ctPRs:
 		return "from PR base"
@@ -121,154 +117,183 @@ func truncateEachLine(s string, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) createCmd(p api.WorkspaceCreateParams) tea.Cmd {
-	client, seq := m.client, m.projects.create.seq
+func (p createComp) createCmd(c *ctx, params api.WorkspaceCreateParams) tea.Cmd {
+	client, seq := c.m.client, p.seq
 	return func() tea.Msg {
 		var r api.WorkspaceCreateResult
-		err := client.Call(api.MethodWorkspaceCreate, p, &r)
-		return createDoneMsg{res: r, source: p.Source, seq: seq, err: err}
+		err := client.Call(api.MethodWorkspaceCreate, params, &r)
+		return createDoneMsg{res: r, source: params.Source, seq: seq, err: err}
 	}
 }
 
-// retryFailedTab clears the current tab's load error so ensureCreateData
-// fetches it again.
-func (c *createState) retryFailedTab() {
+// retryFailedTab clears the current tab's load error so ensureData fetches it
+// again.
+func (p *createComp) retryFailedTab() {
 	switch {
-	case c.tab == ctBranches && c.branches.err != nil:
-		c.branches.loaded, c.branches.err = false, nil
-	case c.tab == ctPRs && c.prsErr != nil:
-		c.prsLoaded, c.prsErr = false, nil
-	case c.tab == ctIssues && c.issuesErr != nil:
-		c.issuesLoaded, c.issuesErr = false, nil
+	case p.tab == ctBranches && p.branches.err != nil:
+		p.branches.loaded, p.branches.err = false, nil
+	case p.tab == ctPRs && p.prsErr != nil:
+		p.prsLoaded, p.prsErr = false, nil
+	case p.tab == ctIssues && p.issuesErr != nil:
+		p.issuesLoaded, p.issuesErr = false, nil
 	}
 }
 
-func (c createState) listLoading() bool {
-	switch c.tab {
+func (p createComp) listLoading() bool {
+	switch p.tab {
 	case ctBranches:
-		return !c.branches.loaded
+		return !p.branches.loaded
 	case ctPRs:
-		return !c.prsLoaded
+		return !p.prsLoaded
 	case ctIssues:
-		return !c.issuesLoaded
+		return !p.issuesLoaded
 	}
 	return false
 }
 
-// ensureCreateData loads the current tab's list the first time it is shown.
-func (m model) ensureCreateData() tea.Cmd {
-	c := m.projects.create
+func (p createComp) ensureData(c *ctx) tea.Cmd {
 	switch {
-	case c.tab == ctBranches && !c.branches.loaded:
-		return m.fetchBranchesCmd(c.projectID)
-	case c.tab == ctPRs && !c.prsLoaded:
-		return m.fetchPRsCmd(c.projectID)
-	case c.tab == ctIssues && !c.issuesLoaded:
-		return m.fetchIssuesCmd(c.projectID)
+	case p.tab == ctBranches && !p.branches.loaded:
+		return c.m.fetchBranchesCmd(p.projectID)
+	case p.tab == ctPRs && !p.prsLoaded:
+		return c.m.fetchPRsCmd(p.projectID)
+	case p.tab == ctIssues && !p.issuesLoaded:
+		return c.m.fetchIssuesCmd(p.projectID)
 	}
 	return nil
 }
 
-func (m model) handleCreateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.flash = ""
-	c := &m.projects.create
-	if c.creating {
+func (p createComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
+	c.setFlash("")
+	if p.creating {
 		if msg.String() == "esc" {
-			c.active = false // the call still finishes; createDoneMsg selects the result
+			leavePicker(c) // the call still finishes; its reply only reports
 		}
-		return m, nil
+		return p, nil, true
 	}
-	if c.picking {
-		return m.handleTargetPickKey(msg)
+	if p.picking {
+		var cmd tea.Cmd
+		p, cmd = p.targetPickKey(msg)
+		return p, cmd, true
 	}
-	if m.matches(msg, createKeys.Target) {
-		if c.tab == ctPRs {
-			return m, nil
+	if c.m.matches(msg, createKeys.Target) {
+		if p.tab == ctPRs {
+			return p, nil, true
 		}
-		c.picking = true
-		c.targetPick = newBranchPicker()
-		if c.branches.loaded {
-			c.targetPick.branches, c.targetPick.loaded, c.targetPick.err = c.branches.branches, true, c.branches.err
-			return m, nil
+		p.picking = true
+		p.targetPick = newBranchPicker()
+		if p.branches.loaded {
+			p.targetPick.branches, p.targetPick.loaded, p.targetPick.err = p.branches.branches, true, p.branches.err
+			return p, nil, true
 		}
-		return m, m.fetchBranchesCmd(c.projectID)
+		return p, c.m.fetchBranchesCmd(p.projectID), true
 	}
 	switch msg.String() {
 	case "esc":
-		m.projects.create = createState{}
-		return m, nil
+		leavePicker(c)
+		return p, nil, true
 	case "tab", "shift+tab":
 		d := 1
 		if msg.String() == "shift+tab" {
 			d = -1
 		}
-		c.tab = createTab((int(c.tab) + d + len(createTabNames)) % len(createTabNames))
-		c.cursor, c.err = 0, ""
-		c.retryFailedTab()
-		c.filter.SetValue("")
-		c.branches.filter.SetValue("")
-		c.branches.cursor = 0
+		p.tab = createTab((int(p.tab) + d + len(createTabNames)) % len(createTabNames))
+		p.cursor, p.err = 0, ""
+		p.retryFailedTab()
+		p.filter.SetValue("")
+		p.branches.filter.SetValue("")
+		p.branches.cursor = 0
 		var focus tea.Cmd
-		if c.tab == ctNew {
-			focus = c.name.Focus()
+		if p.tab == ctNew {
+			focus = p.name.Focus()
 		} else {
-			c.name.Blur()
-			focus = c.filter.Focus()
+			p.name.Blur()
+			focus = p.filter.Focus()
 		}
-		return m, tea.Batch(focus, m.ensureCreateData(), m.maybeSpin())
+		return p, tea.Batch(focus, p.ensureData(c)), true
 	case "enter":
-		return m.submitCreate()
+		var cmd tea.Cmd
+		p, cmd = p.submit(c)
+		return p, cmd, true
 	}
-	c.err = "" // an edit answers the last error
+	p.err = "" // an edit answers the last error
 	var cmd tea.Cmd
-	switch c.tab {
+	switch p.tab {
 	case ctNew:
-		c.name, cmd = c.name.Update(msg)
+		p.name, cmd = p.name.Update(msg)
 	case ctBranches:
-		_, cmd = c.branches.key(msg)
+		_, cmd = p.branches.key(msg)
 	default:
 		switch msg.String() {
 		case "up":
-			c.cursor = cursorUp(c.cursor)
+			p.cursor = cursorUp(p.cursor)
 		case "down":
-			c.cursor = cursorDown(c.cursor, m.createListLen())
+			p.cursor = cursorDown(p.cursor, p.listLen())
 		default:
-			c.filter, cmd = c.filter.Update(msg)
-			c.cursor = min(c.cursor, cursorBottom(m.createListLen()))
+			p.filter, cmd = p.filter.Update(msg)
+			p.cursor = min(p.cursor, cursorBottom(p.listLen()))
 		}
 	}
-	return m, cmd
+	return p, cmd, true
 }
 
-func (m model) handleTargetPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	c := &m.projects.create
+func (p createComp) targetPickKey(msg tea.KeyPressMsg) (createComp, tea.Cmd) {
 	if msg.String() == "esc" {
-		c.picking = false
-		return m, nil
+		p.picking = false
+		return p, nil
 	}
-	picked, cmd := c.targetPick.key(msg)
+	picked, cmd := p.targetPick.key(msg)
 	if picked != nil {
-		c.target, c.picking = picked.Name, false
+		p.target, p.picking = picked.Name, false
 	}
-	return m, cmd
+	return p, cmd
 }
 
-func (m model) filteredPRs() []api.PRInfo {
-	q := strings.ToLower(strings.TrimSpace(m.projects.create.filter.Value()))
+func (p createComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
+	switch msg := msg.(type) {
+	case branchesMsg:
+		if msg.projectID == p.projectID {
+			p.branches.branches, p.branches.loaded, p.branches.err = msg.branches, true, msg.err
+			if p.picking {
+				p.targetPick.branches, p.targetPick.loaded, p.targetPick.err = msg.branches, true, msg.err
+			}
+		}
+	case prsMsg:
+		if msg.projectID == p.projectID {
+			p.prs, p.prsLoaded, p.prsErr, p.prsTruncated = msg.prs, true, msg.err, msg.truncated
+		}
+	case issuesMsg:
+		if msg.projectID == p.projectID {
+			p.issues, p.issuesLoaded, p.issuesErr, p.issuesTruncated = msg.issues, true, msg.err, msg.truncated
+		}
+	case createDoneMsg:
+		switch {
+		case msg.seq != p.seq:
+		case msg.err != nil:
+			p.creating, p.err = false, msg.err.Error()
+		default:
+			leavePicker(c)
+		}
+	}
+	return p, nil
+}
+
+func (p createComp) filteredPRs() []api.PRInfo {
+	q := strings.ToLower(strings.TrimSpace(p.filter.Value()))
 	var out []api.PRInfo
-	for _, p := range m.projects.create.prs {
-		hay := strings.ToLower(strconv.Itoa(p.Number) + " " + p.Title + " " + p.Author + " " + p.HeadBranch + " " + p.BaseBranch)
+	for _, pr := range p.prs {
+		hay := strings.ToLower(strconv.Itoa(pr.Number) + " " + pr.Title + " " + pr.Author + " " + pr.HeadBranch + " " + pr.BaseBranch)
 		if q == "" || strings.Contains(hay, q) {
-			out = append(out, p)
+			out = append(out, pr)
 		}
 	}
 	return out
 }
 
-func (m model) filteredIssues() []api.IssueInfo {
-	q := strings.ToLower(strings.TrimSpace(m.projects.create.filter.Value()))
+func (p createComp) filteredIssues() []api.IssueInfo {
+	q := strings.ToLower(strings.TrimSpace(p.filter.Value()))
 	var out []api.IssueInfo
-	for _, is := range m.projects.create.issues {
+	for _, is := range p.issues {
 		hay := strings.ToLower(strconv.Itoa(is.Number) + " " + is.Title + " " + is.Author)
 		if q == "" || strings.Contains(hay, q) {
 			out = append(out, is)
@@ -277,64 +302,67 @@ func (m model) filteredIssues() []api.IssueInfo {
 	return out
 }
 
-func (m model) createListLen() int {
-	if m.projects.create.tab == ctPRs {
-		return len(m.filteredPRs())
+func (p createComp) listLen() int {
+	if p.tab == ctPRs {
+		return len(p.filteredPRs())
 	}
-	return len(m.filteredIssues())
+	return len(p.filteredIssues())
 }
 
-func (m model) submitCreate() (tea.Model, tea.Cmd) {
-	c := &m.projects.create
-	p := api.WorkspaceCreateParams{ProjectID: c.projectID, TargetBranch: c.target}
-	switch c.tab {
+func (p createComp) submit(c *ctx) (createComp, tea.Cmd) {
+	params := api.WorkspaceCreateParams{ProjectID: p.projectID, TargetBranch: p.target}
+	switch p.tab {
 	case ctNew:
-		p.Source, p.Branch = api.SourceNew, strings.TrimSpace(c.name.Value())
-		if p.Branch == "" {
-			return m, nil
+		params.Source, params.Branch = api.SourceNew, strings.TrimSpace(p.name.Value())
+		if params.Branch == "" {
+			return p, nil
 		}
 	case ctBranches:
-		ms := c.branches.matches()
-		if c.branches.cursor >= len(ms) {
-			return m, nil
+		ms := p.branches.matches()
+		if p.branches.cursor >= len(ms) {
+			return p, nil
 		}
-		br := ms[c.branches.cursor]
+		br := ms[p.branches.cursor]
 		if br.CheckedOut {
-			c.err = br.Name + " is checked out in another workspace"
-			return m, nil
+			p.err = br.Name + " is checked out in another workspace"
+			return p, nil
 		}
-		p.Source, p.Branch = api.SourceBranch, br.Name
+		params.Source, params.Branch = api.SourceBranch, br.Name
 	case ctPRs:
-		prs := m.filteredPRs()
-		if c.cursor >= len(prs) {
-			return m, nil
+		prs := p.filteredPRs()
+		if p.cursor >= len(prs) {
+			return p, nil
 		}
-		p.Source, p.Number, p.TargetBranch = api.SourcePR, prs[c.cursor].Number, ""
+		params.Source, params.Number, params.TargetBranch = api.SourcePR, prs[p.cursor].Number, ""
 	case ctIssues:
-		is := m.filteredIssues()
-		if c.cursor >= len(is) {
-			return m, nil
+		is := p.filteredIssues()
+		if p.cursor >= len(is) {
+			return p, nil
 		}
-		p.Source, p.Number = api.SourceIssue, is[c.cursor].Number
+		params.Source, params.Number = api.SourceIssue, is[p.cursor].Number
 	}
-	c.creating, c.err = true, ""
-	return m, tea.Batch(m.createCmd(p), m.maybeSpin())
+	p.creating, p.err = true, ""
+	return p, p.createCmd(c, params)
 }
 
 // --- view ---------------------------------------------------------------------
 
-func (m model) createView(w, h int) string {
-	c := m.projects.create
-	head := StylePrimaryBold.Render("New workspace in "+c.project) + dimStyle.Render("   target: "+c.targetLabel())
-	if c.tab != ctPRs {
+func (p createComp) view(c *ctx, w, h int) string {
+	return pickerView(w, h, func(w, h int) string { return p.column(c, w, h) })
+}
+
+func (p createComp) column(c *ctx, w, h int) string {
+	m := c.m
+	head := StylePrimaryBold.Render("New workspace in "+p.project) + dimStyle.Render("   target: "+p.targetLabel())
+	if p.tab != ctPRs {
 		head += dimStyle.Render("  (" + m.keyText(createKeys.Target) + ")")
 	}
-	if p, ok := m.findProject(c.projectID); ok && p.Scripts != nil && p.Scripts.Setup != "" {
-		head += "\n" + dimStyle.Render("setup: "+commandLine(p.Scripts.Setup))
+	if pr, ok := m.findProject(p.projectID); ok && pr.Scripts != nil && pr.Scripts.Setup != "" {
+		head += "\n" + dimStyle.Render("setup: "+commandLine(pr.Scripts.Setup))
 	}
 	var tabs []string
 	for i, n := range createTabNames {
-		if createTab(i) == c.tab {
+		if createTab(i) == p.tab {
 			tabs = append(tabs, StyleAccentBold.Render(n))
 		} else {
 			tabs = append(tabs, StyleDim.Render(n))
@@ -343,38 +371,37 @@ func (m model) createView(w, h int) string {
 	top := truncateEachLine(head, w) + "\n\n" + strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
 	bodyH := max(1, h-4-strings.Count(head, "\n"))
 	switch {
-	case c.creating:
-		return top + spinnerFrame(m) + " creating…"
-	case c.picking:
-		return top + dimStyle.Render("select target branch") + "\n" + c.targetPick.view(w, bodyH-1, false)
+	case p.creating:
+		return top + spinnerFrame(*m) + " creating…"
+	case p.picking:
+		return top + dimStyle.Render("select target branch") + "\n" + p.targetPick.view(w, bodyH-1, false)
 	}
 	var body string
-	switch c.tab {
+	switch p.tab {
 	case ctNew:
-		body = dimStyle.Render("branch: ") + c.name.View()
+		body = dimStyle.Render("branch: ") + p.name.View()
 	case ctBranches:
-		body = c.branches.view(w, bodyH, true)
+		body = p.branches.view(w, bodyH, true)
 	case ctPRs:
-		prs := m.filteredPRs()
-		body = m.createListView(w, bodyH, c.prsLoaded, c.prsErr, c.prsTruncated, len(c.prs), len(prs), func(i int) string {
-			p := prs[i]
-			return "#" + strconv.Itoa(p.Number) + "  " + p.Title + dimStyle.Render("  "+p.Author+"  "+p.HeadBranch+" → "+p.BaseBranch)
+		prs := p.filteredPRs()
+		body = p.listView(c, w, bodyH, p.prsLoaded, p.prsErr, p.prsTruncated, len(p.prs), len(prs), func(i int) string {
+			pr := prs[i]
+			return "#" + strconv.Itoa(pr.Number) + "  " + pr.Title + dimStyle.Render("  "+pr.Author+"  "+pr.HeadBranch+" → "+pr.BaseBranch)
 		})
 	case ctIssues:
-		is := m.filteredIssues()
-		body = m.createListView(w, bodyH, c.issuesLoaded, c.issuesErr, c.issuesTruncated, len(c.issues), len(is), func(i int) string {
+		is := p.filteredIssues()
+		body = p.listView(c, w, bodyH, p.issuesLoaded, p.issuesErr, p.issuesTruncated, len(p.issues), len(is), func(i int) string {
 			return "#" + strconv.Itoa(is[i].Number) + "  " + is[i].Title + dimStyle.Render("  "+is[i].Author)
 		})
 	}
-	if c.err != "" {
-		body += "\n\n" + StyleErrorBold.Render(truncateLine(c.err, w))
+	if p.err != "" {
+		body += "\n\n" + StyleErrorBold.Render(truncateLine(p.err, w))
 	}
 	return top + body
 }
 
-func (m model) createListView(w, h int, loaded bool, err error, truncated bool, total, n int, line func(int) string) string {
-	c := m.projects.create
-	head := dimStyle.Render("filter: ") + c.filter.View()
+func (p createComp) listView(c *ctx, w, h int, loaded bool, err error, truncated bool, total, n int, line func(int) string) string {
+	head := dimStyle.Render("filter: ") + p.filter.View()
 	if truncated {
 		head += dimStyle.Render("  (first " + strconv.Itoa(total) + "; filter searches only these)")
 	}
@@ -382,7 +409,7 @@ func (m model) createListView(w, h int, loaded bool, err error, truncated bool, 
 	case err != nil:
 		return head + "\n\n" + dimStyle.Render("error: "+firstLine(err.Error()))
 	case !loaded:
-		return head + "\n\n" + dimStyle.Render(spinnerFrame(m)+" loading…")
+		return head + "\n\n" + dimStyle.Render(spinnerFrame(*c.m)+" loading…")
 	case total == 0:
 		return head + "\n\n" + dimStyle.Render("none open")
 	case n == 0:
@@ -390,26 +417,25 @@ func (m model) createListView(w, h int, loaded bool, err error, truncated bool, 
 	}
 	lines := make([]string, n)
 	for i := range n {
-		lines[i] = truncateLine(cursorLine(line(i), i == c.cursor, true), w)
+		lines[i] = truncateLine(cursorLine(line(i), i == p.cursor, true), w)
 	}
-	return head + "\n\n" + strings.Join(windowSpan(lines, c.cursor, c.cursor+1, max(1, h-2)), "\n")
+	return head + "\n\n" + strings.Join(windowSpan(lines, p.cursor, p.cursor+1, max(1, h-2)), "\n")
 }
 
 func spinnerFrame(m model) string {
 	return SpinnerFrames[m.spin%len(SpinnerFrames)]
 }
 
-func (m model) createFooter() string {
-	c := m.projects.create
+func (p createComp) footer(*ctx) []binding {
 	switch {
-	case c.creating:
-		return m.footer(hint("esc", "hide"))
-	case c.picking:
-		return m.footer(hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "back"))
+	case p.creating:
+		return []binding{hint("esc", "hide")}
+	case p.picking:
+		return []binding{hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "back")}
 	}
 	b := []binding{hint("enter", "create"), hint("tab", "next tab")}
-	if c.tab != ctPRs {
+	if p.tab != ctPRs {
 		b = append(b, createKeys.Target)
 	}
-	return m.footer(append(b, hint("esc", "cancel"))...)
+	return append(b, hint("esc", "cancel"))
 }

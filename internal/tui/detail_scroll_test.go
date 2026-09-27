@@ -32,20 +32,18 @@ func TestDetailLineScrollThroughTallItem(t *testing.T) {
 	}
 
 	k := tea.KeyPressMsg{}
-	mm, _ := m.actDetailDown(k)
-	m = mm.(model)
+	m.actDetailDown(k)
 	if got := m.topFrame().scroll; got != 1 {
 		t.Fatalf("Down should scroll a tall item one line, scroll=%d", got)
 	}
-	mm, _ = m.actDetailUp(k)
-	m = mm.(model)
+	m.actDetailUp(k)
 	if got := m.topFrame().scroll; got != 0 {
 		t.Fatalf("Up should scroll back up, scroll=%d", got)
 	}
 }
 
 // tallFocusedDetailModel drills into a lone item taller than the viewport.
-func tallFocusedDetailModel(t *testing.T) model {
+func tallFocusedDetailModel(t *testing.T) tview {
 	t.Helper()
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
@@ -72,8 +70,7 @@ func TestDetailDownAtBottomStaysPut(t *testing.T) {
 	maxS := m.frameMaxScroll(m.topFrame())
 	m.topFrame().scroll = maxS
 
-	mm, _ := m.actDetailDown(tea.KeyPressMsg{})
-	m = mm.(model)
+	m.actDetailDown(tea.KeyPressMsg{})
 	if got := m.topFrame().scroll; got != maxS {
 		t.Fatalf("Down at bottom should stay at %d, got %d", maxS, got)
 	}
@@ -85,8 +82,7 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 
 	// Tall focused item.
 	m := tallFocusedDetailModel(t)
-	mm, _ := m.actDetailBottom(k)
-	m = mm.(model)
+	m.actDetailBottom(k)
 	if want := m.frameMaxScroll(m.topFrame()); m.topFrame().scroll != want || want == 0 {
 		t.Fatalf("G on tall item: scroll=%d, want %d (>0)", m.topFrame().scroll, want)
 	}
@@ -99,8 +95,7 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 	if m.topFrame().items != nil {
 		t.Fatal("system chunk should render as a body frame")
 	}
-	mm, _ = m.actDetailBottom(k)
-	m = mm.(model)
+	m.actDetailBottom(k)
 	if want := m.frameMaxScroll(m.topFrame()); m.topFrame().scroll != want || want == 0 {
 		t.Fatalf("G on body frame: scroll=%d, want %d (>0)", m.topFrame().scroll, want)
 	}
@@ -108,7 +103,7 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 
 // manyItemDetailModel builds a detail frame whose collapsed item list is far
 // taller than the viewport, so scrolling can push the cursor item off-screen.
-func manyItemDetailModel(t *testing.T) model {
+func manyItemDetailModel(t *testing.T) tview {
 	t.Helper()
 	var items []transcript.Item
 	for i := 0; i < 30; i++ {
@@ -123,7 +118,7 @@ func manyItemDetailModel(t *testing.T) model {
 	return m
 }
 
-func (m model) cursorLineStart() int {
+func (m tview) cursorLineStart() int {
 	_, start, _ := m.frameLines(m.topFrame(), m.containerWidth())
 	return start
 }
@@ -135,16 +130,14 @@ func TestDetailDownReanchorsToViewport(t *testing.T) {
 	m := manyItemDetailModel(t)
 	k := tea.KeyPressMsg{}
 	for i := 0; i < 3; i++ { // scroll item 0 well off the top
-		mm, _ := m.actDetailHalfDown(k)
-		m = mm.(model)
+		m.actDetailHalfDown(k)
 	}
 	s0 := m.topFrame().scroll
 	if s0 == 0 || m.cursorLineStart() >= s0 {
 		t.Fatalf("setup: cursor should be scrolled off-screen (scroll=%d, cursorStart=%d)", s0, m.cursorLineStart())
 	}
 
-	mm, _ := m.actDetailDown(k)
-	m = mm.(model)
+	m.actDetailDown(k)
 
 	if got := m.topFrame().scroll; got != s0 {
 		t.Fatalf("Down should not move the viewport when re-anchoring: scroll %d -> %d", s0, got)
@@ -161,8 +154,7 @@ func TestDetailUpReanchorsToViewport(t *testing.T) {
 	m.topFrame().cursor = 29 // last item, far below the top
 	m.topFrame().scroll = 0
 
-	mm, _ := m.actDetailUp(tea.KeyPressMsg{})
-	m = mm.(model)
+	m.actDetailUp(tea.KeyPressMsg{})
 
 	if got := m.topFrame().scroll; got != 0 {
 		t.Fatalf("Up should not move the viewport when re-anchoring: scroll 0 -> %d", got)
@@ -178,15 +170,13 @@ func TestDetailHalfDownClampsScroll(t *testing.T) {
 	k := tea.KeyPressMsg{}
 	for prev := -1; m.topFrame().scroll != prev; {
 		prev = m.topFrame().scroll
-		mm, _ := m.actDetailHalfDown(k)
-		m = mm.(model)
+		m.actDetailHalfDown(k)
 	}
 	maxS := m.frameMaxScroll(m.topFrame())
 	if got := m.topFrame().scroll; got != maxS {
 		t.Fatalf("half-down should clamp to %d, got %d", maxS, got)
 	}
-	mm, _ := m.actDetailHalfUp(k)
-	m = mm.(model)
+	m.actDetailHalfUp(k)
 	if got := m.topFrame().scroll; got >= maxS {
 		t.Fatalf("half-up after clamped half-down should move up immediately: %d -> %d", maxS, got)
 	}

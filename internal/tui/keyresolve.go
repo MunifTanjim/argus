@@ -10,13 +10,10 @@ import (
 
 type keyTimeoutMsg struct{ gen int }
 
-// keysRaw reports whether keys go to the handlers as typed: text inputs, y/n
-// confirmations, the open help, and the live screen have no keymaps.
+// keysRaw reports whether keys go to the handlers as typed: the live screen, a
+// raw focused component, and the open help have no keymaps.
 func (m model) keysRaw() bool {
-	return m.mode == modeScreen || m.typing() || m.pendingKill || m.spawn.active() ||
-		m.inputActive() || m.projects.pendingRemove != "" || m.projects.pendingForget != "" ||
-		m.projects.pendingKill != "" || m.projects.offerSpawn != nil || m.projects.create.active ||
-		m.projects.retarget != nil || m.projects.showHelp || m.pendingExport || m.redact.pendingSave
+	return m.topScreen() >= 0 || m.focusedComp().raw(&ctx{m: &m}) || m.showHelp
 }
 
 // resolveKey follows Vim: a key that is both a mapping and the start of a
@@ -87,26 +84,26 @@ func (m *model) clearKeys() {
 // that opens a text input go to the input as typed, not through the resolver.
 func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{cmd}
-	for _, k := range matched {
+	run := func(k tea.KeyPressMsg) {
 		mm, c := m.runKey(k)
-		m = mm.(model)
-		cmds = append(cmds, c)
+		var repair tea.Cmd
+		m, repair = mm.(model).repairFocus()
+		cmds = append(cmds, c, repair)
+	}
+	for _, k := range matched {
+		run(k)
 	}
 	for len(toFeed) > 0 {
 		next := toFeed[0]
 		toFeed = toFeed[1:]
 		if m.keysRaw() {
-			mm, c := m.runKey(next)
-			m = mm.(model)
-			cmds = append(cmds, c)
+			run(next)
 			continue
 		}
 		newMatched, newToFeed, timerCmd := m.feedKey(next)
 		cmds = append(cmds, timerCmd)
 		for _, k := range newMatched {
-			mm, c := m.runKey(k)
-			m = mm.(model)
-			cmds = append(cmds, c)
+			run(k)
 		}
 		toFeed = append(newToFeed, toFeed...)
 	}

@@ -43,8 +43,8 @@ func TestSidebarTabKeysSwitchTabs(t *testing.T) {
 	m := filesFocused()
 	m.client = &recordingClient{}
 	m, cmd := typeKeysCmd(m, "gt")
-	if m.projects.sideTab != sideChanges || cmd == nil {
-		t.Fatalf("gt should switch to Changes and fetch its list: tab=%v", m.projects.sideTab)
+	if m.right.tab != sideChanges || cmd == nil {
+		t.Fatalf("gt should switch to Changes and fetch its list: tab=%v", m.right.tab)
 	}
 	runCmd(cmd)
 	if p, _ := paramsFor(m, api.MethodWorkspaceChangedFiles).(api.WorkspaceRef); p.WorkspaceID != "n1:w1" {
@@ -54,13 +54,13 @@ func TestSidebarTabKeysSwitchTabs(t *testing.T) {
 		t.Errorf("the sidebar header should be the tab strip:\n%s", out)
 	}
 	m = typeKeys(m, "gt")
-	if m.projects.sideTab != sideFiles {
-		t.Errorf("two tabs: gt twice should wrap to Files, got %v", m.projects.sideTab)
+	if m.right.tab != sideFiles {
+		t.Errorf("two tabs: gt twice should wrap to Files, got %v", m.right.tab)
 	}
 	m = typeKeys(m, "gT")
 	m = pressKeys(m, cw('w')...)
-	if m.projects.sideTab != sideChanges || m.projects.focus == focusFiles {
-		t.Errorf("the tab should stay when focus leaves the sidebar: tab=%v focus=%v", m.projects.sideTab, m.projects.focus)
+	if m.right.tab != sideChanges || m.focused == rightSidebar {
+		t.Errorf("the tab should stay when focus leaves the sidebar: tab=%v focus=%v", m.right.tab, m.focused)
 	}
 }
 
@@ -78,13 +78,13 @@ func TestChangesListRendersInSidebar(t *testing.T) {
 
 func TestChangesFollowWorkspace(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "old.go"})
-	m.projects.focus = focusTree
+	m = withFocus(m, leftSidebar)
 	m, cmd := upd(m, keyMsg("j")) // to n1:w2
-	if m.projects.changes.ws != "n1:w2" || m.projects.changes.files != nil || cmd == nil {
-		t.Fatalf("moving to n1:w2 should drop w1's changes and fetch w2's: ws=%q files=%v", m.projects.changes.ws, m.projects.changes.files)
+	if m.right.changes.ws != "n1:w2" || m.right.changes.files != nil || cmd == nil {
+		t.Fatalf("moving to n1:w2 should drop w1's changes and fetch w2's: ws=%q files=%v", m.right.changes.ws, m.right.changes.files)
 	}
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "stale.go"}}})
-	if m.projects.changes.files != nil {
+	if m.right.changes.files != nil {
 		t.Error("a list for the old workspace must be ignored")
 	}
 }
@@ -92,8 +92,8 @@ func TestChangesFollowWorkspace(t *testing.T) {
 func TestChangesTabInSessionUsesSessionWorkspace(t *testing.T) {
 	m := wideWorkspace()
 	m.client = &recordingClient{}
-	m.projects.sideTab = sideChanges
-	m.projects.focus = focusPane
+	m.right.tab = sideChanges
+	m = withFocus(m, mainPane)
 	mm, _ := m.enterSession("n1:s1") // session in n1:w1
 	m, cmd := mm.syncSidebar()
 	if cmd == nil {
@@ -106,13 +106,13 @@ func TestChangesTabInSessionUsesSessionWorkspace(t *testing.T) {
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go", Change: "modified"}}})
 	wide := m
 	wide.width = 200
-	if f := ansi.Strip(wide.sessionFooter()); !strings.Contains(f, "^wl changes") {
+	if f := ansi.Strip(wide.currentFooter()); !strings.Contains(f, "^wl changes") {
 		t.Errorf("session footer should offer ^wl changes: %q", f)
 	}
 	m = pressKeys(m, cw('l')...)
 	m, _ = upd(m, keyMsg("enter"))
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "a.go", diff: "@@ -1 +1 @@\n-a\n+bb"})
-	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "+bb") || m.mode != modeSession {
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "+bb") || viewOf(m) != viewSession {
 		t.Errorf("the diff should replace the transcript:\n%s", out)
 	}
 }
@@ -120,19 +120,19 @@ func TestChangesTabInSessionUsesSessionWorkspace(t *testing.T) {
 func TestChangesEnterOpensDiffInPane(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "b.go", OrigPath: "a.go", Change: "renamed"})
 	m, cmd := upd(m, keyMsg("enter"))
-	f := m.projects.fileView
-	if !f.open() || !f.diff || f.path != "b.go" || cmd == nil {
+	f := fileOf(m)
+	if !m.hasOpenFile() || !f.diff || f.path != "b.go" || cmd == nil {
 		t.Fatalf("enter should open the diff in the pane and fetch it: %+v", f)
 	}
-	if m.projects.focus != focusPane {
-		t.Errorf("focus should move to the opened diff: focus=%v", m.projects.focus)
+	if m.focused != mainPane {
+		t.Errorf("focus should move to the opened diff: focus=%v", m.focused)
 	}
 	cmd()
 	if p := lastParams(m).(api.WorkspaceFileParams); p.OrigPath != "a.go" || p.Path != "b.go" {
 		t.Errorf("diff params = %+v, want the rename source a.go", p)
 	}
 	m, _ = upd(m, readFileMsg{ws: "n1:w1", path: "b.go", content: "file body"})
-	if len(m.projects.fileView.lines) != 0 {
+	if len(fileOf(m).lines) != 0 {
 		t.Error("a file read must not fill an open diff")
 	}
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", diff: "@@ -1 +1 @@\n-a\n+bb"})
@@ -142,13 +142,13 @@ func TestChangesEnterOpensDiffInPane(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		m, _ = upd(m, keyMsg("j"))
 	}
-	if s := m.projects.fileView.scroll; s != 0 {
+	if s := fileOf(m).scroll; s != 0 {
 		t.Errorf("a diff that fits should not scroll: %d", s)
 	}
 	m, _ = upd(m, keyMsg("esc"))
-	if m.projects.fileView.open() || m.projects.focus != focusFiles || m.projects.sideTab != sideChanges {
+	if m.hasOpenFile() || m.focused != rightSidebar || m.right.tab != sideChanges {
 		t.Errorf("esc should close the diff and return to the Changes tab: open=%v focus=%v tab=%v",
-			m.projects.fileView.open(), m.projects.focus, m.projects.sideTab)
+			m.hasOpenFile(), m.focused, m.right.tab)
 	}
 }
 
@@ -163,15 +163,15 @@ func TestEmptyDiffSaysNoChanges(t *testing.T) {
 
 func TestChangesDiffModeToggle(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.tree[0].Workspaces[0].TargetBranch = "main"
-	m.projects.rebuild()
-	m.projects.focus = focusFiles
+	m.left.tree.data[0].Workspaces[0].TargetBranch = "main"
+	m.left.tree.rebuild()
+	m = withFocus(m, rightSidebar)
 	m.client = &recordingClient{}
 	m = typeKeys(m, "gt")
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{}})
 	m, cmd := upd(m, keyMsg("t"))
-	if m.projects.changes.against != api.AgainstTarget || cmd == nil {
-		t.Fatalf("t should switch to target mode and reload: against=%q", m.projects.changes.against)
+	if m.right.changes.against != api.AgainstTarget || cmd == nil {
+		t.Fatalf("t should switch to target mode and reload: against=%q", m.right.changes.against)
 	}
 	cmd()
 	if p := lastParams(m).(api.WorkspaceRef); p.Against != api.AgainstTarget {
@@ -181,7 +181,7 @@ func TestChangesDiffModeToggle(t *testing.T) {
 		t.Error("the Changes tab should show the diff mode")
 	}
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", against: "", files: []api.ChangedFile{{Path: "stale"}}})
-	if n := len(m.projects.changes.files); n != 0 {
+	if n := len(m.right.changes.files); n != 0 {
 		t.Errorf("a result for the other mode must be dropped, got %d files", n)
 	}
 }
@@ -189,16 +189,16 @@ func TestChangesDiffModeToggle(t *testing.T) {
 func TestChangesRefreshRefetches(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "a.go"})
 	m, cmd := typeKeysCmd(m, "gr")
-	if len(m.projects.changes.files) != 1 || !m.projects.changes.loading || cmd == nil {
-		t.Errorf("gr on the Changes tab should reload the list and keep the old one meanwhile: %+v", m.projects.changes)
+	if len(m.right.changes.files) != 1 || !m.right.changes.loading || cmd == nil {
+		t.Errorf("gr on the Changes tab should reload the list and keep the old one meanwhile: %+v", m.right.changes)
 	}
 }
 
 func TestSetTargetReloadsChanges(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "old-target.go"})
-	m.projects.changes.against = api.AgainstTarget
+	m.right.changes.against = api.AgainstTarget
 	res, _ := m.Update(m.setTargetCmd("n1:w1", "dev")())
-	c := res.(model).projects.changes
+	c := res.(model).right.changes
 	if c.files != nil || c.against != api.AgainstTarget {
 		t.Errorf("after set target: files=%v against=%q, want files cleared and mode kept", c.files, c.against)
 	}
@@ -207,33 +207,33 @@ func TestSetTargetReloadsChanges(t *testing.T) {
 func TestSidebarFootersListTabKeys(t *testing.T) {
 	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
 	m.width = 200
-	f := ansi.Strip(m.projectsFooter())
+	f := ansi.Strip(m.currentFooter())
 	for _, want := range []string{"gT/gt tabs", "enter diff", "t vs main", "␣e changes"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("Changes footer missing %q: %q", want, f)
 		}
 	}
 	m = typeKeys(m, "gT")
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "gT/gt tabs") || strings.Contains(f, "vs target") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "gT/gt tabs") || strings.Contains(f, "vs target") {
 		t.Errorf("Files footer = %q", f)
 	}
 }
 
 func TestWorkspacePaneHasNoTabs(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	out := ansi.Strip(m.View().Content)
 	if strings.Contains(out, "Sessions  Changes") || !strings.Contains(out, "repo  main") {
 		t.Errorf("the pane header should be the workspace, with no tab strip:\n%s", out)
 	}
-	if f := ansi.Strip(m.projectsFooter()); strings.Contains(f, "tabs") || strings.Contains(f, "vs target") {
+	if f := ansi.Strip(m.currentFooter()); strings.Contains(f, "tabs") || strings.Contains(f, "vs target") {
 		t.Errorf("pane footer should not list tab or Changes keys: %q", f)
 	}
 }
 
 func withTarget(m model, target string) model {
-	m.projects.tree[0].Workspaces[0].TargetBranch = target
-	m.projects.rebuild()
+	m.left.tree.data[0].Workspaces[0].TargetBranch = target
+	m.left.tree.rebuild()
 	return m
 }
 
@@ -251,7 +251,7 @@ func TestChangesHeaderStaysPinned(t *testing.T) {
 
 func TestDiffModeShowsLoadingAndTarget(t *testing.T) {
 	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "main")
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t vs main") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "t vs main") {
 		t.Errorf("t should name the mode it switches to: %q", f)
 	}
 	m, _ = upd(m, keyMsg("t"))
@@ -259,7 +259,7 @@ func TestDiffModeShowsLoadingAndTarget(t *testing.T) {
 	if !strings.Contains(out, "CHANGES · vs main · 1 · loading…") {
 		t.Errorf("after t the header should show the new mode loading:\n%s", out)
 	}
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t uncommitted") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "t uncommitted") {
 		t.Errorf("t should name the mode it switches back to: %q", f)
 	}
 }
@@ -267,30 +267,30 @@ func TestDiffModeShowsLoadingAndTarget(t *testing.T) {
 func TestDiffModeWithoutTargetHints(t *testing.T) {
 	m := withTarget(changesFocused(api.ChangedFile{Path: "a.go"}), "")
 	m, cmd := upd(m, keyMsg("t"))
-	if cmd != nil || m.projects.changes.against != "" || !strings.Contains(m.flash, "no target branch · T in the tree sets one") {
-		t.Errorf("t with no target: against=%q flash=%q", m.projects.changes.against, m.flash)
+	if cmd != nil || m.right.changes.against != "" || !strings.Contains(m.flash, "no target branch · T in the tree sets one") {
+		t.Errorf("t with no target: against=%q flash=%q", m.right.changes.against, m.flash)
 	}
 }
 
 func TestSessionDiffModeHintNamesTheTreeKey(t *testing.T) {
-	m := withKeymap(withTarget(wideWorkspace(), ""), map[string]map[string]string{"projects": {"<C-g>": "workspace change-target"}})
+	m := withKeymap(withTarget(wideWorkspace(), ""), map[string]map[string]string{"project-tree": {"<C-g>": "workspace change-target"}})
 	m.client = &recordingClient{}
-	m.projects.sideTab = sideChanges
-	m.projects.focus = focusPane
+	m.right.tab = sideChanges
+	m = withFocus(m, mainPane)
 	mm, _ := m.enterSession("n1:s1")
 	m, _ = mm.syncSidebar()
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go", Change: "modified"}}})
 	m = pressKeys(m, cw('l')...)
 	m, _ = upd(m, keyMsg("t"))
-	if m.mode != modeSession || !strings.Contains(m.flash, "no target branch · ^g in the tree sets one") {
-		t.Errorf("the hint names the tree's key: mode=%v flash=%q", m.mode, m.flash)
+	if viewOf(m) != viewSession || !strings.Contains(m.flash, "no target branch · ^g in the tree sets one") {
+		t.Errorf("the hint names the tree's key: view=%v flash=%q", viewOf(m), m.flash)
 	}
 }
 
 func TestCommitRowFooterOffersDiffMode(t *testing.T) {
 	m := withTarget(changesFocused(), "main")
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "t vs main") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "t vs main") {
 		t.Errorf("t works on a commit row, so the footer should offer it: %q", f)
 	}
 }
@@ -336,15 +336,15 @@ func TestDiffFileKeysStepThroughTheDiffList(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "a.go"}, api.ChangedFile{Path: "b.go"})
 	m, _ = upd(m, keyMsg("enter"))
 	m, cmd := typeKeysCmd(m, "]f")
-	if f := m.projects.fileView; f.path != "b.go" || cmd == nil || m.projects.changes.cursor != 1 || m.projects.focus != focusPane {
-		t.Fatalf("]f should open the next file: path=%q cursor=%d focus=%v", f.path, m.projects.changes.cursor, m.projects.focus)
+	if f := fileOf(m); f.path != "b.go" || cmd == nil || m.right.changes.cursor != 1 || m.focused != mainPane {
+		t.Fatalf("]f should open the next file: path=%q cursor=%d focus=%v", f.path, m.right.changes.cursor, m.focused)
 	}
 	m = typeKeys(m, "]f")
-	if m.projects.fileView.path != "b.go" {
+	if fileOf(m).path != "b.go" {
 		t.Error("]f on the last file should stay")
 	}
 	m = typeKeys(m, "[f")
-	if m.projects.fileView.path != "a.go" || m.projects.changes.cursor != 0 {
-		t.Errorf("[f should open the previous file: path=%q", m.projects.fileView.path)
+	if fileOf(m).path != "a.go" || m.right.changes.cursor != 0 {
+		t.Errorf("[f should open the previous file: path=%q", fileOf(m).path)
 	}
 }

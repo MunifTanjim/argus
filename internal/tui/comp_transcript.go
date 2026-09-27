@@ -1,0 +1,415 @@
+package tui
+
+import (
+	"fmt"
+	"path/filepath"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/MunifTanjim/argus/internal/session"
+)
+
+// historyKind is a transcript's inner view: the cards, or the card detail.
+type historyKind int
+
+const (
+	histTranscript historyKind = iota
+	histDetail
+)
+
+// transcriptComp is live, streamed from an open session, or a past session read
+// from history. A live transcript owns its streams and closes them when it
+// leaves the main pane.
+type transcriptComp struct {
+	live        bool
+	sessionID   string // live only: the session it streams
+	transcript  transcriptState
+	historyView historyKind
+	activeSub   subRef // the stream on screen: the session's, or a subagent's while drilled in
+	sessionSub  subRef // the session's stream while drilled into a subagent
+	toolBodies  map[string]toolBodyEntry
+
+	history       historyState // history only
+	pendingExport bool
+	redact        redactState
+}
+
+func newTranscript() transcriptComp {
+	return transcriptComp{
+		transcript: transcriptState{expanded: map[string]bool{}, cards: map[string]cardEntry{}},
+		toolBodies: map[string]toolBodyEntry{},
+		redact:     redactState{input: newRedactInput()},
+	}
+}
+
+func newLiveTranscript(sessionID string) transcriptComp {
+	t := newTranscript()
+	t.live, t.sessionID = true, sessionID
+	return t
+}
+
+func newHistoryTranscript(p session.HistoryProject, s session.HistorySession) transcriptComp {
+	t := newTranscript()
+	t.history = historyState{
+		project:       p,
+		title:         historySessionTitle(s),
+		openSession:   s,
+		openNodeID:    p.NodeID,
+		openPath:      s.TranscriptPath,
+		openAgent:     s.Agent,
+		openSessionID: s.SessionID,
+		openResumable: s.Resumable,
+	}
+	return t
+}
+
+func (t transcriptComp) section() string       { return "transcript" }
+func (t transcriptComp) spins(*ctx) bool       { return false }
+func (t transcriptComp) offers(*ctx) []binding { return nil }
+func (t transcriptComp) pageStep(c *ctx) int   { return c.m.listPageStep() }
+func (t transcriptComp) layer() layer          { return baseLayer }
+
+func (t transcriptComp) raw(*ctx) bool {
+	return t.pendingExport || t.redact.pendingSave || t.redact.inputActive
+}
+
+func (t transcriptComp) fullScreen(c *ctx) fullLevel {
+	if !t.live && c.m.viewer {
+		return fullTerminal
+	}
+	return notFull
+}
+
+func (t transcriptComp) close(c *ctx) tea.Cmd { return t.bind(c).closeStreams() }
+
+func (t transcriptComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
+	v := t.bind(c)
+	var cmd tea.Cmd
+	if t.live {
+		cmd = v.liveKey(msg)
+	} else {
+		cmd = v.historyKey(msg)
+	}
+	return t, cmd, true
+}
+
+func (t transcriptComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
+	cmd := t.bind(c).updateMsg(msg)
+	return t, cmd
+}
+
+// view ignores h: the cards and the scroll math read the frame's layout, which
+// holds the same size.
+func (t transcriptComp) view(c *ctx, w, _ int) string {
+	v := t.bind(c)
+	if !t.live {
+		return v.historyTranscriptView()
+	}
+	head := t.fileHeader(c, w)
+	if c.m.sessions[t.sessionID].Status == session.StatusStarting {
+		return head + "\n\n" + startingNotice(*c.m)
+	}
+	return head + "\n\n" + v.historyBody()
+}
+
+// fileHeader stays over a file opened on the transcript.
+func (t transcriptComp) fileHeader(c *ctx, w int) string {
+	if !t.live {
+		return ""
+	}
+	return sessionHeader(c.m.sessions[t.sessionID], w, c.m.paneHeadStyle())
+}
+
+func (t transcriptComp) footerText(c *ctx) string {
+	if !t.live {
+		return t.bind(c).historyTranscriptFooter()
+	}
+	return c.m.sessionHint(t.footer(c)...)
+}
+
+func (t transcriptComp) footer(c *ctx) []binding {
+	v := t.bind(c)
+	if !t.live {
+		return v.historyTranscriptBinds()
+	}
+	if t.historyView == histDetail {
+		return []binding{detailKeys.Up, detailKeys.Collapse, detailKeys.Drill, detailKeys.Back, sessionKeys.Raw}
+	}
+	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse,
+		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back}
+	if v.sessionInteraction() != nil {
+		binds = append(binds, transcriptKeys.Answer)
+	}
+	if v.sessions[t.sessionID].Status == session.StatusStarting {
+		binds = append(binds, sessionKeys.Raw)
+	}
+	if v.filesVisible() && v.currentWorkspace() != "" {
+		binds = append(binds, v.sideKey(paneKeys.Right))
+	}
+	return binds
+}
+
+// tview is a transcript with the model it lives in. Its methods read the
+// model's global state and read and change the transcript's own state; they ask
+// for model changes through c.
+type tview struct {
+	*transcriptComp
+	*model
+	c *ctx
+}
+
+func (t *transcriptComp) bind(c *ctx) tview { return tview{t, c.m, c} }
+
+func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
+	m.c.setFlash("")
+	switch {
+	case m.matches(msg, sessionKeys.Focus):
+		if m.sessionInteraction() != nil {
+			m.c.focusOn(sessionDock)
+		}
+		return nil
+	case m.matches(msg, sessionKeys.Raw):
+		return openLiveScreen(m.c)
+	}
+	if m.matches(msg, transcriptKeys.Back) {
+		if m.historyView == histDetail {
+			// A leaf frame above a subagent frame has no subID and pops normally, so
+			// the subagent subscription lives until its own frame pops.
+			if f := m.topFrame(); f != nil && f.subID != "" {
+				cmd := m.unsubscribeCmd(f.subID)
+				m.activeSub = m.sessionSub
+				m.sessionSub = subRef{}
+				// Re-subscribe to catch deltas missed while drilled in.
+				have := len(m.transcriptCache[m.activeSub.key()].chunks)
+				m.popDetail()
+				return tea.Batch(cmd, m.subscribeCmd(m.activeSub, have))
+			}
+			if m.popDetail() { // popped the root → back to the card list
+				m.historyView = histTranscript
+			}
+			return nil
+		}
+		m.c.back()
+		return nil
+	}
+	if m.historyView == histDetail {
+		return m.handleDetailKey(msg)
+	}
+	return m.handleTranscriptKey(msg)
+}
+
+func (m tview) historyKey(msg tea.KeyPressMsg) tea.Cmd {
+	m.c.setFlash("") // any key dismisses a transient flash; the action may re-set it
+	if cmd, ok := m.takePendingExport(msg); ok {
+		return cmd
+	}
+	if cmd, ok := m.takePendingRedactSave(msg); ok {
+		return cmd
+	}
+	if cmd, ok := m.handleRedactKey(msg); ok {
+		return cmd
+	}
+	if m.matches(msg, transcriptKeys.Back) {
+		if m.historyView == histDetail {
+			if m.popDetail() { // root frame → back to transcript
+				m.historyView = histTranscript
+			}
+			return nil
+		}
+		if m.viewer {
+			return tea.Quit
+		}
+		m.c.back()
+		return nil
+	}
+	if m.historyView == histTranscript && !m.viewer && m.matches(msg, transcriptKeys.Resume) {
+		h := m.history
+		return historyResume(m.c, h.openResumable, h.openNodeID, h.openAgent, h.openSessionID, h.project.Cwd)
+	}
+	if m.historyView == histDetail {
+		return m.handleDetailKey(msg)
+	}
+	if m.matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
+		if !m.viewer {
+			m.pendingExport = true
+		}
+		return nil
+	}
+	return m.handleTranscriptKey(msg)
+}
+
+func (m tview) closeStreams() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, s := range []subRef{m.activeSub, m.sessionSub} {
+		if s.subID != "" {
+			cmds = append(cmds, m.unsubscribeCmd(s.subID))
+		}
+	}
+	m.activeSub, m.sessionSub = subRef{}, subRef{}
+	return tea.Batch(cmds...)
+}
+
+func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case transcriptMsg:
+		prevID := m.currentChunkID()
+		// Tail-follow only if the view was already pinned to the bottom.
+		atBottom := m.transcript.scroll >= m.maxScroll()
+		m.setChunks(msg.chunks)
+		m.transcript.err = msg.err
+		m.restoreChunkCursor(prevID, atBottom)
+	case transcriptDeltaMsg:
+		if msg.ref.agentID != "" {
+			// Match by subID, not topFrame(): the user may have drilled into a leaf above it.
+			for i := range m.transcript.detailStack {
+				if m.transcript.detailStack[i].subID == msg.delta.SubID {
+					m.transcript.detailStack[i].items = flattenTrace(m.transcriptCache[msg.ref.key()].chunks)
+					m.transcript.detailStack[i].expandOutputs()
+					break
+				}
+			}
+			return nil
+		}
+		prevID := m.currentChunkID()
+		atBottom := m.transcript.scroll >= m.maxScroll()
+		m.applyChunkDelta(msg.delta)
+		m.restoreChunkCursor(prevID, atBottom)
+	case histTranscriptMsg:
+		m.setChunks(msg.chunks)
+		m.transcript.err = msg.err
+		m.transcript.cursor, m.transcript.scroll = 0, 0
+	case histSubagentMsg:
+		// Match by agentID, not topFrame(): the user may have drilled into a leaf above this frame.
+		if msg.err == nil {
+			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
+				if m.transcript.detailStack[i].agentID == msg.agentID {
+					m.transcript.detailStack[i].items = flattenTrace(msg.chunks)
+					m.transcript.detailStack[i].expandOutputs()
+					break
+				}
+			}
+		}
+	case toolDetailMsg:
+		// On error, file a done entry with empty body so the placeholder clears and we don't retry.
+		e := toolBodyEntry{done: true}
+		if msg.err == nil {
+			e.toolInput, e.result, e.resultIsError = msg.detail.ToolInput, msg.detail.Result, msg.detail.ResultIsError
+		}
+		m.toolBodies[msg.toolID] = e
+	case tea.PasteMsg:
+		var cmd tea.Cmd
+		m.redact.input, cmd = m.redact.input.Update(msg)
+		return cmd
+	case redactPreparedMsg:
+		if msg.err != nil {
+			m.c.setFlash("redact failed: " + msg.err.Error())
+			return nil
+		}
+		r := msg.report
+		m.redact.report = &r
+		m.redact.tempPath = msg.tempPath
+		m.redact.outPath = msg.outPath
+		m.redact.pendingSave = true
+		m.redact.warnConfirm = len(r.Warnings) > 0 // extra ack when content can't be scrubbed
+	case redactDoneMsg:
+		switch {
+		case msg.err != nil:
+			m.c.setFlash("redact failed: " + msg.err.Error())
+		case msg.sidecar != "":
+			m.c.setFlash(fmt.Sprintf("redacted with %d warning(s) (secrets remain); see %s",
+				len(msg.warnings), filepath.Base(msg.sidecar)))
+		case len(msg.warnings) > 0:
+			m.c.setFlash(fmt.Sprintf("redacted with %d warning(s) (secrets remain): %s", len(msg.warnings), msg.path))
+		default:
+			m.c.setFlash("redacted: " + msg.path)
+		}
+		m.redact.report = nil
+		m.redact.warnConfirm = false
+		m.redact.tempPath = ""
+	}
+	return nil
+}
+
+func isHistory(t transcriptComp) bool { return !t.live }
+func isLive(t transcriptComp) bool    { return t.live }
+
+// transcriptOwner names the transcript a reply belongs to: a live session, or
+// the address a past session's reads go to.
+type transcriptOwner struct {
+	live      bool
+	sessionID string
+	addr      histAddr
+}
+
+func (t transcriptComp) owner() transcriptOwner {
+	if t.live {
+		return transcriptOwner{live: true, sessionID: t.sessionID}
+	}
+	return transcriptOwner{addr: t.history.addr()}
+}
+
+func streams(subID string) func(transcriptComp) bool {
+	return func(t transcriptComp) bool { return t.live && t.activeSub.subID == subID }
+}
+
+func (m model) transcriptAt(match func(transcriptComp) bool) int {
+	for i := len(m.main) - 1; i >= 0; i-- {
+		if t, ok := m.main[i].(transcriptComp); ok && match(t) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m model) updateTranscript(msg tea.Msg, match func(transcriptComp) bool) (tea.Model, tea.Cmd) {
+	i := m.transcriptAt(match)
+	if i < 0 {
+		return m, nil
+	}
+	c := &ctx{m: &m}
+	comp, cmd := m.main[i].update(c, msg)
+	m.main = m.main.replaceAt(i, comp)
+	cmd = tea.Batch(cmd, m.apply(c))
+	return m, cmd
+}
+
+func (m model) updateDelta(msg transcriptDeltaMsg) (tea.Model, tea.Cmd) {
+	i := m.transcriptAt(streams(msg.ref.subID))
+	if i < 0 {
+		return m, nil
+	}
+	key := msg.ref.key()
+	if msg.ref.agentID != "" {
+		m.transcriptCache[key] = cachedTranscript{chunks: applyDelta(m.transcriptCache[key].chunks, msg.delta)}
+		return m.updateTranscript(msg, streams(msg.ref.subID))
+	}
+	res, cmd := m.updateTranscript(msg, streams(msg.ref.subID))
+	m = res.(model)
+	m.transcriptCache[key] = cachedTranscript{chunks: m.main[i].(transcriptComp).transcript.chunks}
+	return m, cmd
+}
+
+func (m *model) editTranscript(i int, f func(v tview) tea.Cmd) tea.Cmd {
+	t, ok := m.main[i].(transcriptComp)
+	if !ok {
+		return nil
+	}
+	c := &ctx{m: m}
+	cmd := f(t.bind(c))
+	m.main = m.main.replaceAt(i, t)
+	return tea.Batch(cmd, m.apply(c))
+}
+
+// redactTyping reports whether the main pane's transcript takes a secret as
+// typed.
+func (m model) redactTyping() bool {
+	t, ok := m.baseComp().(transcriptComp)
+	return ok && t.redact.inputActive
+}
+
+func (t transcriptComp) workspace(c *ctx) string {
+	if !t.live {
+		return ""
+	}
+	return c.m.sessions[t.sessionID].WorkspaceID
+}

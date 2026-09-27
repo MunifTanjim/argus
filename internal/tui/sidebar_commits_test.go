@@ -30,8 +30,8 @@ func TestChangesTabFetchesFilesAndCommits(t *testing.T) {
 	m := filesFocused()
 	m.client = &recordingClient{}
 	m, cmd := typeKeysCmd(m, "gt")
-	if !m.projects.changes.loading || !m.projects.changes.commitsLoading {
-		t.Fatalf("both lists should start loading: %+v", m.projects.changes)
+	if !m.right.changes.loading || !m.right.changes.commitsLoading {
+		t.Fatalf("both lists should start loading: %+v", m.right.changes)
 	}
 	runCmd(cmd)
 	if p, _ := paramsFor(m, api.MethodWorkspaceChangedFiles).(api.WorkspaceRef); p.WorkspaceID != "n1:w1" {
@@ -41,11 +41,11 @@ func TestChangesTabFetchesFilesAndCommits(t *testing.T) {
 		t.Errorf("commits params = %+v", p)
 	}
 	m, _ = upd(m, commitsMsg{ws: "n1:w2", commits: []api.Commit{{SHA: "stale"}}})
-	if m.projects.changes.commits != nil {
+	if m.right.changes.commits != nil {
 		t.Error("commits for another workspace must be dropped")
 	}
 	m, _ = upd(m, commitsMsg{ws: "n1:w1"})
-	if c := m.projects.changes; c.commits == nil || len(c.commits) != 0 || c.commitsLoading {
+	if c := m.right.changes; c.commits == nil || len(c.commits) != 0 || c.commitsLoading {
 		t.Errorf("an empty answer should mark the list loaded: %+v", c)
 	}
 }
@@ -60,7 +60,7 @@ func TestDiffModeReloadsOnlyFiles(t *testing.T) {
 	if paramsFor(m, api.MethodWorkspaceChangedFiles) == nil || paramsFor(m, api.MethodWorkspaceCommits) != nil {
 		t.Errorf("t should reload only the changed files: calls = %v", rc.calls)
 	}
-	if len(m.projects.changes.commits) != 1 {
+	if len(m.right.changes.commits) != 1 {
 		t.Error("t must keep the commits")
 	}
 }
@@ -68,18 +68,17 @@ func TestDiffModeReloadsOnlyFiles(t *testing.T) {
 func TestCommitFilesAnswerMatchesOpenCommit(t *testing.T) {
 	m := changesFocused()
 	cm := api.Commit{SHA: "abc1234", Short: "abc1234", Subject: "s"}
-	mm, cmd := m.openCommit(cm)
-	m = mm.(model)
+	m, cmd := openCommit(m, cm)
 	runCmd(cmd)
 	if p, _ := paramsFor(m, api.MethodWorkspaceCommitFiles).(api.WorkspaceCommitParams); p.WorkspaceID != "n1:w1" || p.SHA != "abc1234" {
 		t.Fatalf("commitFiles params = %+v", p)
 	}
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: "other", files: []api.ChangedFile{{Path: "x"}}})
-	if m.projects.changes.commitFiles != nil {
+	if m.right.changes.commitFiles != nil {
 		t.Error("files for another commit must be dropped")
 	}
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: "abc1234", files: []api.ChangedFile{{Path: "c.go"}}})
-	if f := m.projects.changes.commitFiles; len(f) != 1 || f[0].Path != "c.go" {
+	if f := m.right.changes.commitFiles; len(f) != 1 || f[0].Path != "c.go" {
 		t.Errorf("commit files = %+v", f)
 	}
 }
@@ -93,7 +92,7 @@ func TestCommitDiffUsesRevAndDropsStale(t *testing.T) {
 		t.Fatalf("diff params = %+v, want rev abc1234 and the rename source", p)
 	}
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", diff: "@@\n+working tree"})
-	if len(m.projects.fileView.lines) != 0 {
+	if len(fileOf(m).lines) != 0 {
 		t.Error("a working-tree diff must not fill a commit diff")
 	}
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "b.go", rev: "abc1234", diff: "@@ -1 +1 @@\n-a\n+commit side"})
@@ -115,9 +114,9 @@ func commitN(i int) api.Commit {
 
 func TestCommitsSectionRendersUnderChanges(t *testing.T) {
 	m := wideWorkspace()
-	m.projects.tree[0].Workspaces[0].TargetBranch = "main"
-	m.projects.rebuild()
-	m.projects.focus = focusFiles
+	m.left.tree.data[0].Workspaces[0].TargetBranch = "main"
+	m.left.tree.rebuild()
+	m = withFocus(m, rightSidebar)
 	m.client = &recordingClient{}
 	m = typeKeys(m, "gt")
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go", Change: "modified"}}})
@@ -141,15 +140,15 @@ func TestCommitsSectionRendersUnderChanges(t *testing.T) {
 func TestCursorMovesAcrossFilesAndCommits(t *testing.T) {
 	m := withCommits(changesFocused(api.ChangedFile{Path: "a.go"}), commitN(1), commitN(2))
 	m, _ = upd(m, keyMsg("j"))
-	if m.projects.changes.cursor != 1 {
-		t.Fatalf("j from the last file should reach the first commit: cursor=%d", m.projects.changes.cursor)
+	if m.right.changes.cursor != 1 {
+		t.Fatalf("j from the last file should reach the first commit: cursor=%d", m.right.changes.cursor)
 	}
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "enter files") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "enter files") {
 		t.Errorf("footer on a commit = %q", f)
 	}
 	m, _ = upd(m, keyMsg("G"))
-	if m.projects.changes.cursor != 2 {
-		t.Errorf("G should reach the last commit: cursor=%d", m.projects.changes.cursor)
+	if m.right.changes.cursor != 2 {
+		t.Errorf("G should reach the last commit: cursor=%d", m.right.changes.cursor)
 	}
 }
 
@@ -159,10 +158,10 @@ func TestEnterOnCommitDrillsInAndBack(t *testing.T) {
 	m, _ = upd(m, keyMsg("G"))
 	m, cmd := upd(m, keyMsg("enter"))
 	runCmd(cmd)
-	if c := m.projects.changes.commit; c == nil || c.SHA != "abc0002" {
+	if c := m.right.changes.commit; c == nil || c.SHA != "abc0002" {
 		t.Fatalf("enter on a commit should open it: %+v", c)
 	}
-	if m.projects.focus != focusFiles {
+	if m.focused != rightSidebar {
 		t.Error("opening a commit keeps focus in the sidebar")
 	}
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: "abc0002", files: []api.ChangedFile{{Path: "internal/c.go", Change: "added"}}})
@@ -170,16 +169,16 @@ func TestEnterOnCommitDrillsInAndBack(t *testing.T) {
 	if !strings.Contains(out, "abc0002 commit 2") || !strings.Contains(out, "A internal/c.go") || strings.Contains(out, "COMMITS") {
 		t.Errorf("the drill-in should show the commit and its files only:\n%s", out)
 	}
-	if f := ansi.Strip(m.projectsFooter()); !strings.Contains(f, "enter diff") || !strings.Contains(f, "esc back") || strings.Contains(f, "esc pane") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "enter diff") || !strings.Contains(f, "esc back") || strings.Contains(f, "esc pane") {
 		t.Errorf("drill-in footer = %q", f)
 	}
 	m, _ = upd(m, keyMsg("esc"))
-	if m.projects.changes.commit != nil || m.projects.changes.cursor != 2 || m.projects.focus != focusFiles {
-		t.Errorf("esc should go back to the same commit in the list: %+v focus=%v", m.projects.changes, m.projects.focus)
+	if m.right.changes.commit != nil || m.right.changes.cursor != 2 || m.focused != rightSidebar {
+		t.Errorf("esc should go back to the same commit in the list: %+v focus=%v", m.right.changes, m.focused)
 	}
 	m, _ = upd(m, keyMsg("enter"))
 	m, _ = upd(m, keyMsg("h"))
-	if m.projects.changes.commit != nil {
+	if m.right.changes.commit != nil {
 		t.Error("h should also go back to the list")
 	}
 }
@@ -194,26 +193,26 @@ func TestCommitFileDiffCarriesRev(t *testing.T) {
 	if p, _ := paramsFor(m, api.MethodWorkspaceDiff).(api.WorkspaceFileParams); p.Rev != "abc0001" || p.OrigPath != "a.go" || p.Path != "b.go" {
 		t.Fatalf("diff params = %+v", p)
 	}
-	if m.projects.focus != focusPane {
-		t.Errorf("focus should move to the diff: focus=%v", m.projects.focus)
+	if m.focused != mainPane {
+		t.Errorf("focus should move to the diff: focus=%v", m.focused)
 	}
 	m, _ = upd(m, keyMsg("esc"))
-	if m.projects.fileView.open() || m.projects.focus != focusFiles || m.projects.changes.commit == nil {
+	if m.hasOpenFile() || m.focused != rightSidebar || m.right.changes.commit == nil {
 		t.Errorf("esc should close the diff and return to the drilled-in commit: open=%v focus=%v commit=%v",
-			m.projects.fileView.open(), m.projects.focus, m.projects.changes.commit)
+			m.hasOpenFile(), m.focused, m.right.changes.commit)
 	}
 }
 
 func TestRefreshKeepsCommitAndRefetches(t *testing.T) {
 	m := withCommits(changesFocused(), commitN(1))
 	m, _ = upd(m, keyMsg("enter"))
-	if m.projects.changes.commit == nil {
+	if m.right.changes.commit == nil {
 		t.Fatal("setup: enter should open the commit")
 	}
 	m.client = &recordingClient{}
 	m, cmd := typeKeysCmd(m, "gr")
 	runCmd(cmd)
-	if c := m.projects.changes; c.commit == nil || len(c.commits) != 1 {
+	if c := m.right.changes; c.commit == nil || len(c.commits) != 1 {
 		t.Fatalf("gr should keep the open commit and the lists: %+v", c)
 	}
 	if paramsFor(m, api.MethodWorkspaceChangedFiles) == nil || paramsFor(m, api.MethodWorkspaceCommits) == nil || paramsFor(m, api.MethodWorkspaceCommitFiles) == nil {
@@ -245,7 +244,7 @@ func TestCommitCursorStaysVisible(t *testing.T) {
 		t.Errorf("the last commit should be on screen after G:\n%s", out)
 	}
 	m, _ = upd(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	if m.projects.changes.cursor >= 299 {
+	if m.right.changes.cursor >= 299 {
 		t.Error("^u should move the cursor up a page")
 	}
 }
@@ -257,29 +256,29 @@ func TestCursorStaysOnCommitWhenFilesArrive(t *testing.T) {
 	m = withCommits(m, commitN(1), commitN(2))
 	m, _ = upd(m, keyMsg("G")) // the files are still loading
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}})
-	if c := m.projects.changes; c.cursor != 4 {
+	if c := m.right.changes; c.cursor != 4 {
 		t.Fatalf("late files should not move the cursor off commit 2: cursor=%d", c.cursor)
 	}
 	m, _ = upd(m, keyMsg("t"))
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", against: api.AgainstTarget, files: []api.ChangedFile{{Path: "x.go"}}})
-	if c := m.projects.changes; c.cursor != 2 {
+	if c := m.right.changes; c.cursor != 2 {
 		t.Errorf("t should keep commit 2 selected: cursor=%d", c.cursor)
 	}
 	m = typeKeys(m, "gg")
 	m, _ = upd(m, keyMsg("t"))
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go"}, {Path: "b.go"}}})
-	if c := m.projects.changes; c.cursor != 0 {
+	if c := m.right.changes; c.cursor != 0 {
 		t.Errorf("t on a file should stay on the files: cursor=%d", c.cursor)
 	}
 }
 
 func TestRefreshDropsAnswersFromBefore(t *testing.T) {
 	m := changesFocused()
-	before := m.projects.changes.gen
+	before := m.right.changes.gen
 	m = typeKeys(m, "gr")
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", gen: before, commits: []api.Commit{commitN(9)}})
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", gen: before, files: []api.ChangedFile{{Path: "old.go"}}})
-	if c := m.projects.changes; len(c.commits) != 0 || len(c.files) != 0 {
+	if c := m.right.changes; len(c.commits) != 0 || len(c.files) != 0 {
 		t.Errorf("answers requested before gr must be dropped: commits=%v files=%v", c.commits, c.files)
 	}
 }
@@ -290,12 +289,12 @@ func TestLOpensLikeEnterInChanges(t *testing.T) {
 	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
 	m, _ = upd(m, keyMsg("j")) // the commit row
 	m, _ = upd(m, keyMsg("l"))
-	if m.projects.changes.commit == nil {
+	if m.right.changes.commit == nil {
 		t.Fatal("l on a commit row should open the commit")
 	}
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: "abc1234", files: []api.ChangedFile{{Path: "b.go"}}})
 	m, _ = upd(m, keyMsg("l"))
-	if f := m.projects.fileView; !f.open() || f.path != "b.go" {
+	if f := fileOf(m); !m.hasOpenFile() || f.path != "b.go" {
 		t.Errorf("l on a commit's file should open its diff: %+v", f)
 	}
 }
@@ -305,14 +304,14 @@ func TestRefreshKeepsChangesPlace(t *testing.T) {
 	m = withCommits(m, commitN(1))
 	m, _ = upd(m, keyMsg("j"))
 	m, cmd := typeKeysCmd(m, "gr")
-	if c := m.projects.changes; cmd == nil || c.cursor != 1 || len(c.files) != 2 || !c.loading {
+	if c := m.right.changes; cmd == nil || c.cursor != 1 || len(c.files) != 2 || !c.loading {
 		t.Fatalf("gr should refetch and keep the list and cursor: cursor=%d files=%d loading=%v", c.cursor, len(c.files), c.loading)
 	}
 	m, _ = upd(m, keyMsg("G"))
 	m, _ = upd(m, keyMsg("enter")) // open the commit
 	m, _ = upd(m, commitFilesMsg{ws: "n1:w1", sha: commitN(1).SHA, files: []api.ChangedFile{{Path: "c.go"}}})
 	m, cmd = typeKeysCmd(m, "gr")
-	if c := m.projects.changes; cmd == nil || c.commit == nil || c.cursor != 2 {
+	if c := m.right.changes; cmd == nil || c.commit == nil || c.cursor != 2 {
 		t.Errorf("gr should keep an open commit: commit=%v cursor=%d", c.commit, c.cursor)
 	}
 }
@@ -328,7 +327,7 @@ func TestRefreshReloadsOpenDiff(t *testing.T) {
 	if p, ok := paramsFor(m, api.MethodWorkspaceDiff).(api.WorkspaceFileParams); !ok || p.OrigPath != "a.go" {
 		t.Errorf("gr in the diff should refetch it with its rename source: %v", rc.calls)
 	}
-	if !m.projects.fileView.open() || len(m.projects.fileView.lines) == 0 {
+	if !m.hasOpenFile() || len(fileOf(m).lines) == 0 {
 		t.Error("the old diff should stay on screen while it reloads")
 	}
 }
@@ -337,7 +336,18 @@ func TestIdleSessionRefreshesChanges(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "a.go"})
 	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusWorking}
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusIdle}})
-	if cmd := m.applyEvent(api.Notification{Method: api.MethodSessionEvent, Params: params}); cmd == nil || !m.projects.changes.loading {
+	if cmd := m.applyEvent(api.Notification{Method: api.MethodSessionEvent, Params: params}); cmd == nil || !m.right.changes.loading {
 		t.Error("a session in the workspace going idle should refresh the changes")
+	}
+}
+
+func TestCommitsBeforeFilesKeepTheCursorOnTheFirstFile(t *testing.T) {
+	m := filesFocused()
+	m.client = &recordingClient{}
+	m = typeKeys(m, "gt")
+	m, _ = upd(m, commitsMsg{ws: "n1:w1", commits: []api.Commit{{SHA: "abc1234", Short: "abc1234", Subject: "s"}}})
+	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go"}, {Path: "b.go"}}})
+	if c := m.right.changes.cursor; c != 0 {
+		t.Errorf("cursor = %d, want 0 on the first file when the commits answer first", c)
 	}
 }

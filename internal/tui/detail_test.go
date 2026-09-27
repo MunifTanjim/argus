@@ -13,7 +13,7 @@ import (
 )
 
 func TestFilledTool(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	m.toolBodies = map[string]toolBodyEntry{
 		"loadingTool": {loading: true},
 		"doneTool":    {done: true, toolInput: `{"x":1}`, result: "out", resultIsError: true},
@@ -41,13 +41,14 @@ func TestFilledTool(t *testing.T) {
 	}
 }
 
-func detailTestModel(c transcript.Chunk) model {
-	m := testModel()
-	m.mode = modeSession
+func detailTestModel(c transcript.Chunk) tview {
+	mm := withView(testModel(), viewSession)
+	m := tvOf(&mm)
 	m.transcript.chunks = []transcript.Chunk{c}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
 	m.enterDetail()
+	m.put()
 	return m
 }
 
@@ -104,7 +105,7 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 	width := 40
 	longCmd := "echo " + strings.Repeat("verylongtokenwithoutspaces", 8)
 	longJSON := `{"k":"` + strings.Repeat("x", 200) + `"}`
-	m := testModel()
+	m := bareTv()
 
 	cases := map[string]transcript.Item{
 		"bash command": {Kind: transcript.ItemTool, ToolName: "Bash",
@@ -124,7 +125,7 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 }
 
 func TestCollapsedRowFitsWidth(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
 		InputPreview: strings.Repeat("a long command preview ", 6)}
 	out := m.detailRowBlock(it, false, false, 40)
@@ -139,7 +140,7 @@ func TestCollapsedRowFitsWidth(t *testing.T) {
 // The focused item uses a heavy gutter bar; an unfocused one uses the thin bar.
 // This is the color-independent focus cue.
 func TestDetailRowBarReflectsFocus(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash", InputPreview: "ls"}
 
 	focused := m.detailRowBlock(it, false, true, 40)
@@ -256,7 +257,7 @@ func TestEnterDrillPopStack(t *testing.T) {
 			}}},
 		}},
 	}
-	m := testModel()
+	m := bareTv()
 	m.transcript.chunks = []transcript.Chunk{{
 		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub},
@@ -284,7 +285,7 @@ func TestEnterDrillPopStack(t *testing.T) {
 }
 
 func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
 		ToolInput: `{"command":"ls"}`, Result: "out"}
 
@@ -380,27 +381,24 @@ func TestDetailKeyNav(t *testing.T) {
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
 	m.width, m.height = 80, 30
 
-	res, _ := m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
-	m = res.(model)
+	m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
 	if m.topFrame().cursor != 1 {
 		t.Fatalf("cursor=%d want 1", m.topFrame().cursor)
 	}
 	// Root items start collapsed, so l expands the selected item.
 	before := m.topFrame().isExpanded(1)
-	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	m = res.(model)
+	m.handleDetailKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if m.topFrame().isExpanded(1) == before {
 		t.Error("l should expand the selected item")
 	}
-	res, _ = m.handleDetailKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = res.(model)
+	m.handleDetailKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.transcript.detailStack) != 2 || m.topFrame().label != "explorer" {
 		t.Fatalf("enter should drill: frames=%d", len(m.transcript.detailStack))
 	}
 }
 
 func TestDetailSubagentShowsNicknameAndInput(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemSubagent,
 		Subagents: []transcript.Subagent{{
@@ -439,7 +437,7 @@ func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
 			}}},
 		}},
 	}
-	m := testModel()
+	m := bareTv()
 	m.transcript.chunks = []transcript.Chunk{{
 		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{sub},
@@ -474,7 +472,7 @@ func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
 // TestSubagentLabelStableAcrossExpand verifies the identity label stays stable
 // across collapse/expand.
 func TestSubagentLabelStableAcrossExpand(t *testing.T) {
-	m := testModel()
+	m := bareTv()
 	it := transcript.Item{
 		Kind: transcript.ItemSubagent,
 		Subagents: []transcript.Subagent{{
@@ -510,15 +508,14 @@ func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
 		// Trace empty => lazy
 		Subagents: []transcript.Subagent{{Type: "Explore", ID: "B", HasTrace: true}},
 	}
-	m := testModel()
-	m.mode = modeHistoryTranscript
+	mm := withView(testModel(), viewHistoryTranscript)
+	m := tvOf(&mm)
 	m.history.openNodeID, m.history.openPath = "n1", "/p/sess.jsonl"
 	m.transcript.detailStack = []detailFrame{{
 		items: []transcript.Item{sub}, cursor: 0, expanded: map[int]bool{},
 	}}
-	mm, cmd := m.actDetailDrill(tea.KeyPressMsg{})
-	got := mm.(model)
-	top := got.topFrame()
+	cmd := m.actDetailDrill(tea.KeyPressMsg{})
+	top := m.topFrame()
 	if top == nil || top.agentID != "B" {
 		t.Fatalf("expected pushed frame with agentID B, got %+v", top)
 	}

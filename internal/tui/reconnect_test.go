@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -26,6 +28,18 @@ func TestConnStateTogglesReconnecting(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("reconnect should trigger a resync command")
+	}
+}
+
+func TestReconnectReloadsTheProjectTree(t *testing.T) {
+	m := projectsTestModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m.reconnecting = true
+	_, cmd := m.Update(connStateMsg{connected: true})
+	runCmd(cmd)
+	if !slices.Contains(rc.calledMethods(), api.MethodProjectList) {
+		t.Errorf("reconnect should reload the project tree: calls=%v", rc.calledMethods())
 	}
 }
 

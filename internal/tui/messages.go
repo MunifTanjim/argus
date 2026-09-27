@@ -88,6 +88,7 @@ type histSessionsMsg struct {
 	err        error
 }
 type histTranscriptMsg struct {
+	addr   histAddr
 	chunks []transcript.Chunk
 	err    error
 }
@@ -120,13 +121,13 @@ type resumeResultMsg struct {
 	sessionID string
 	err       error
 }
-type logTickMsg struct{}    // embedded-node logs changed; wake the render loop
-type spinResumeMsg struct{} // periodic kick that re-arms the list spinner
-type spinTickMsg struct{}   // list spinner animation frame
+type logTickMsg struct{}  // embedded-node logs changed; wake the render loop
+type spinTickMsg struct{} // list spinner animation frame
 
 // toolDetailMsg carries an on-demand tool-body fetch (sessions.toolDetail),
 // keyed by the tool_use id so it can be filed into the toolBodies cache.
 type toolDetailMsg struct {
+	owner  transcriptOwner
 	toolID string
 	detail api.ToolDetail
 	err    error
@@ -162,11 +163,16 @@ type issuesMsg struct {
 type createDoneMsg struct {
 	res    api.WorkspaceCreateResult
 	source string
-	seq    int // createState.seq of the picker that sent it
+	seq    int // createComp.seq of the picker that sent it
 	err    error
 }
 
 type setupLogMsg struct {
 	ws, output string
 	err        error
+}
+
+type setupLogTickMsg struct {
+	ws   string
+	tick int // fileComp.tick when it was set
 }

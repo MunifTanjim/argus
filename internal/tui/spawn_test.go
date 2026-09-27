@@ -68,9 +68,9 @@ func pumpAgents(t *testing.T, m model, cmd tea.Cmd) model {
 func openSpawn(t *testing.T, c *spawnPickClient) model {
 	t.Helper()
 	m := newModel(c, false, nil)
-	_, cmd := m.actListNew(tea.KeyPressMsg{})
+	cmd := m.newSessionCmd()
 	if cmd == nil {
-		t.Fatal("actListNew returned no command")
+		t.Fatal("newSessionCmd returned no command")
 	}
 	mm, agentsCmd := m.Update(cmd())
 	return pumpAgents(t, mm.(model), agentsCmd)
@@ -90,20 +90,20 @@ func TestSpawnMultiNodeRoutesAndPicksDir(t *testing.T) {
 		},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepNode {
-		t.Fatalf("step=%v want node", m.spawn.step)
+	if spawnOf(m).step != spawnStepNode {
+		t.Fatalf("step=%v want node", spawnOf(m).step)
 	}
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // cursor → beta
 	m = mm.(model)
 	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose beta → agent probe
 	m = pumpAgents(t, mm.(model), cmd)                          // 0 agents → dir
-	if m.spawn.step != spawnStepDir || len(m.spawn.dirs) != 1 || m.spawn.dirs[0].Cwd != "/beta/1" {
-		t.Fatalf("dir step not filtered to beta: %+v", m.spawn.dirs)
+	if spawnOf(m).step != spawnStepDir || len(spawnOf(m).dirs) != 1 || spawnOf(m).dirs[0].Cwd != "/beta/1" {
+		t.Fatalf("dir step not filtered to beta: %+v", spawnOf(m).dirs)
 	}
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // pick dir → prompt
 	m = mm.(model)
-	if m.spawn.step != spawnStepPrompt {
-		t.Fatalf("step=%v want prompt", m.spawn.step)
+	if spawnOf(m).step != spawnStepPrompt {
+		t.Fatalf("step=%v want prompt", spawnOf(m).step)
 	}
 	// Empty prompt must NOT spawn (mandatory).
 	mm, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -141,10 +141,10 @@ func TestSpawnPromptShiftEnterInsertsNewline(t *testing.T) {
 		mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = mm.(model)
 	}
-	if m.spawn.prompt.Value() != "line1\nline2" {
-		t.Fatalf("prompt = %q, want \"line1\\nline2\"", m.spawn.prompt.Value())
+	if spawnOf(m).prompt.Value() != "line1\nline2" {
+		t.Fatalf("prompt = %q, want \"line1\\nline2\"", spawnOf(m).prompt.Value())
 	}
-	if m.spawn.step != spawnStepPrompt {
+	if spawnOf(m).step != spawnStepPrompt {
 		t.Fatal("shift+enter must not submit")
 	}
 }
@@ -162,10 +162,10 @@ func TestSpawnPromptCtrlJInsertsNewline(t *testing.T) {
 	m = mm.(model)
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	m = mm.(model)
-	if m.spawn.prompt.Value() != "a\nb" {
-		t.Fatalf("prompt = %q, want \"a\\nb\"", m.spawn.prompt.Value())
+	if spawnOf(m).prompt.Value() != "a\nb" {
+		t.Fatalf("prompt = %q, want \"a\\nb\"", spawnOf(m).prompt.Value())
 	}
-	if m.spawn.step != spawnStepPrompt {
+	if spawnOf(m).step != spawnStepPrompt {
 		t.Fatal("ctrl+j must not submit")
 	}
 }
@@ -181,7 +181,7 @@ func TestSpawnViewPromptFitsHeight(t *testing.T) {
 		mm, _ = m.handleKey(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 		m = mm.(model)
 	}
-	if n := strings.Count(m.spawnView(), "\n") + 1; n > m.height {
+	if n := strings.Count(spawnView(m), "\n") + 1; n > m.height {
 		t.Fatalf("spawn view rendered %d lines, exceeds height %d", n, m.height)
 	}
 }
@@ -195,8 +195,8 @@ func TestSpawnCustomPathThenPrompt(t *testing.T) {
 	}
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // custom → prompt
 	m = mm.(model)
-	if m.spawn.step != spawnStepPrompt {
-		t.Fatalf("step=%v want prompt", m.spawn.step)
+	if spawnOf(m).step != spawnStepPrompt {
+		t.Fatalf("step=%v want prompt", spawnOf(m).step)
 	}
 	for _, r := range "go" {
 		mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -216,11 +216,11 @@ func TestSpawnSingleNodeStartsAtDir(t *testing.T) {
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepDir {
-		t.Fatalf("single node should start at dir, got %v", m.spawn.step)
+	if spawnOf(m).step != spawnStepDir {
+		t.Fatalf("single node should start at dir, got %v", spawnOf(m).step)
 	}
-	if len(m.spawn.dirs) != 1 || m.spawn.cursor != 0 {
-		t.Fatalf("most-recent not pre-selected: dirs=%+v cursor=%d", m.spawn.dirs, m.spawn.cursor)
+	if len(spawnOf(m).dirs) != 1 || spawnOf(m).cursor != 0 {
+		t.Fatalf("most-recent not pre-selected: dirs=%+v cursor=%d", spawnOf(m).dirs, spawnOf(m).cursor)
 	}
 }
 
@@ -235,19 +235,19 @@ func TestSpawnAgentStepSelects(t *testing.T) {
 		},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepAgent || len(m.spawn.agents) != 2 {
-		t.Fatalf("expected agent step with 2 agents, got step=%v agents=%+v", m.spawn.step, m.spawn.agents)
+	if spawnOf(m).step != spawnStepAgent || len(spawnOf(m).agents) != 2 {
+		t.Fatalf("expected agent step with 2 agents, got step=%v agents=%+v", spawnOf(m).step, spawnOf(m).agents)
 	}
 	m.width, m.height = 80, 24
-	if !strings.Contains(m.spawnView(), "Which agent?") {
-		t.Fatalf("agent view missing prompt:\n%s", m.spawnView())
+	if !strings.Contains(spawnView(m), "Which agent?") {
+		t.Fatalf("agent view missing prompt:\n%s", spawnView(m))
 	}
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // cursor → codex
 	m = mm.(model)
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose codex → dir
 	m = mm.(model)
-	if m.spawn.step != spawnStepDir || m.spawn.agent != "codex" {
-		t.Fatalf("agent not chosen: step=%v agent=%q", m.spawn.step, m.spawn.agent)
+	if spawnOf(m).step != spawnStepDir || spawnOf(m).agent != "codex" {
+		t.Fatalf("agent not chosen: step=%v agent=%q", spawnOf(m).step, spawnOf(m).agent)
 	}
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // pick dir → prompt
 	m = mm.(model)
@@ -272,8 +272,8 @@ func TestSpawnSingleAgentSkipsStep(t *testing.T) {
 		},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepDir || m.spawn.agent != "codex" {
-		t.Fatalf("single agent should auto-select and skip to dir: step=%v agent=%q", m.spawn.step, m.spawn.agent)
+	if spawnOf(m).step != spawnStepDir || spawnOf(m).agent != "codex" {
+		t.Fatalf("single agent should auto-select and skip to dir: step=%v agent=%q", spawnOf(m).step, spawnOf(m).agent)
 	}
 }
 
@@ -285,17 +285,17 @@ func TestSpawnSingleNodeNoTmuxStaysDisabled(t *testing.T) {
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepNode {
-		t.Fatalf("non-tmux node should stay on node step, got %v", m.spawn.step)
+	if spawnOf(m).step != spawnStepNode {
+		t.Fatalf("non-tmux node should stay on node step, got %v", spawnOf(m).step)
 	}
 	m.width, m.height = 80, 24
-	if !strings.Contains(m.spawnView(), "no tmux") {
-		t.Fatalf("node view should mark the node as having no tmux:\n%s", m.spawnView())
+	if !strings.Contains(spawnView(m), "no tmux") {
+		t.Fatalf("node view should mark the node as having no tmux:\n%s", spawnView(m))
 	}
 	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // enter on disabled node
 	m = mm.(model)
-	if cmd != nil || m.spawn.step != spawnStepNode {
-		t.Fatalf("enter on a disabled node must be a no-op; step=%v", m.spawn.step)
+	if cmd != nil || spawnOf(m).step != spawnStepNode {
+		t.Fatalf("enter on a disabled node must be a no-op; step=%v", spawnOf(m).step)
 	}
 }
 
@@ -307,13 +307,13 @@ func TestSpawnLocalNodeNoTmuxGated(t *testing.T) {
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepNode {
-		t.Fatalf("non-tmux local node should stay on node step, got %v", m.spawn.step)
+	if spawnOf(m).step != spawnStepNode {
+		t.Fatalf("non-tmux local node should stay on node step, got %v", spawnOf(m).step)
 	}
 	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mm.(model)
-	if cmd != nil || m.spawn.step != spawnStepNode {
-		t.Fatalf("enter on disabled local node must be a no-op; step=%v", m.spawn.step)
+	if cmd != nil || spawnOf(m).step != spawnStepNode {
+		t.Fatalf("enter on disabled local node must be a no-op; step=%v", spawnOf(m).step)
 	}
 }
 
@@ -323,14 +323,14 @@ func TestSpawnLocalNodeWithTmuxSkipsToDir(t *testing.T) {
 		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1"}},
 	}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepDir {
-		t.Fatalf("capable local node should skip to dir, got %v", m.spawn.step)
+	if spawnOf(m).step != spawnStepDir {
+		t.Fatalf("capable local node should skip to dir, got %v", spawnOf(m).step)
 	}
-	if m.spawn.nodeID != "" {
-		t.Fatalf("local node_id must stay empty, got %q", m.spawn.nodeID)
+	if spawnOf(m).nodeID != "" {
+		t.Fatalf("local node_id must stay empty, got %q", spawnOf(m).nodeID)
 	}
-	if len(m.spawn.dirs) != 1 { // project (empty NodeID) not filtered away
-		t.Fatalf("projects should be unfiltered for the local node: %+v", m.spawn.dirs)
+	if len(spawnOf(m).dirs) != 1 { // project (empty NodeID) not filtered away
+		t.Fatalf("projects should be unfiltered for the local node: %+v", spawnOf(m).dirs)
 	}
 }
 
@@ -338,10 +338,10 @@ func TestSpawnLocalNodeWithTmuxSkipsToDir(t *testing.T) {
 func TestSpawnEmptyHistoryGoesToCustom(t *testing.T) {
 	c := &spawnPickClient{}
 	m := openSpawn(t, c)
-	if m.spawn.step != spawnStepDir || !m.spawn.custom {
-		t.Fatalf("empty history → custom; step=%v custom=%v", m.spawn.step, m.spawn.custom)
+	if spawnOf(m).step != spawnStepDir || !spawnOf(m).custom {
+		t.Fatalf("empty history → custom; step=%v custom=%v", spawnOf(m).step, spawnOf(m).custom)
 	}
-	if m.spawn.cwd.Value() == "" {
+	if spawnOf(m).cwd.Value() == "" {
 		t.Fatal("custom cwd should be seeded with the fallback")
 	}
 }
@@ -352,7 +352,7 @@ func TestSpawnEscCancels(t *testing.T) {
 	m := openSpawn(t, c)
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = mm.(model)
-	if m.spawn.active() {
+	if spawnOpen(m) {
 		t.Fatal("esc should cancel the flow")
 	}
 	if c.spawnCalled {
@@ -367,7 +367,7 @@ func TestSpawnViewDirStep(t *testing.T) {
 	}}
 	m := openSpawn(t, c)
 	m.width, m.height = 80, 24
-	out := m.spawnView()
+	out := spawnView(m)
 	if !strings.Contains(out, "argus") || !strings.Contains(out, "Custom path") {
 		t.Fatalf("dir view missing rows:\n%s", out)
 	}
@@ -379,8 +379,8 @@ func TestSpawnViewPromptStep(t *testing.T) {
 	m.width, m.height = 80, 24
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // dir → prompt
 	m = mm.(model)
-	if !strings.Contains(strings.ToLower(m.spawnView()), "initial prompt") {
-		t.Fatalf("prompt view missing label:\n%s", m.spawnView())
+	if !strings.Contains(strings.ToLower(spawnView(m)), "initial prompt") {
+		t.Fatalf("prompt view missing label:\n%s", spawnView(m))
 	}
 }
 
@@ -397,7 +397,7 @@ func TestSpawnViewDirListFitsWidth(t *testing.T) {
 	c := &spawnPickClient{projects: projects}
 	m := openSpawn(t, c)
 	m.width, m.height = 80, 24
-	out := m.spawnView()
+	out := spawnView(m)
 	// No rendered line may exceed the terminal width (the bug: horizontal overflow).
 	for _, ln := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(ln); w > 80 {
@@ -430,14 +430,14 @@ func TestSpawnPromptRuneAwareBackspace(t *testing.T) {
 	r := '🚀'
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 	m = mm.(model)
-	if m.spawn.prompt.Value() != string(r) {
-		t.Fatalf("after typing rune: prompt=%q", m.spawn.prompt.Value())
+	if spawnOf(m).prompt.Value() != string(r) {
+		t.Fatalf("after typing rune: prompt=%q", spawnOf(m).prompt.Value())
 	}
 
 	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = mm.(model)
-	if m.spawn.prompt.Value() != "" {
-		t.Fatalf("after backspace: prompt=%q, want empty", m.spawn.prompt.Value())
+	if spawnOf(m).prompt.Value() != "" {
+		t.Fatalf("after backspace: prompt=%q, want empty", spawnOf(m).prompt.Value())
 	}
 }
 
@@ -478,21 +478,25 @@ func TestSpawnPaste(t *testing.T) {
 	m := openSpawn(t, c)
 
 	// Dir step, custom path row: paste is stripped of CR and LF line breaks.
-	m.spawn.custom = true
-	m.spawn.cwd = newSpawnCwdInput()
+	m = withSpawn(m, func(s *spawnComp, _ *ctx) {
+		s.custom = true
+		s.cwd = newSpawnCwdInput()
+	})
 	mm, _ := m.Update(tea.PasteMsg{Content: "/tmp/x\r\n"})
 	m = mm.(model)
-	if m.spawn.cwd.Value() != "/tmp/x" {
-		t.Fatalf("custom path after paste = %q, want %q", m.spawn.cwd.Value(), "/tmp/x")
+	if spawnOf(m).cwd.Value() != "/tmp/x" {
+		t.Fatalf("custom path after paste = %q, want %q", spawnOf(m).cwd.Value(), "/tmp/x")
 	}
 
 	// Prompt step: paste lands verbatim.
-	m.spawn.custom = false
-	m.enterSpawnPrompt()
+	m = withSpawn(m, func(s *spawnComp, c *ctx) {
+		s.custom = false
+		s.enterPrompt(c)
+	})
 	url := "review https://github.com/o/r/pull/1"
 	mm, _ = m.Update(tea.PasteMsg{Content: url})
 	m = mm.(model)
-	if m.spawn.prompt.Value() != url {
-		t.Fatalf("prompt after paste = %q, want %q", m.spawn.prompt.Value(), url)
+	if spawnOf(m).prompt.Value() != url {
+		t.Fatalf("prompt after paste = %q, want %q", spawnOf(m).prompt.Value(), url)
 	}
 }

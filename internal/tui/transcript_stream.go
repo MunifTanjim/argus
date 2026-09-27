@@ -14,26 +14,30 @@ import (
 // resubscribeOnClear re-subscribes when a /clear changes the open session's
 // AgentSessionID, so pre-clear chunks don't survive into the new transcript.
 func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur session.Session) tea.Cmd {
-	if m.mode != modeSession || cur.ID != m.selectedID {
+	t, ok := m.baseComp().(transcriptComp)
+	if !ok || !t.live || cur.ID != t.sessionID {
 		return nil
 	}
-	if m.activeSub.subID == "" || m.activeSub.agentID != "" {
+	if t.activeSub.subID == "" || t.activeSub.agentID != "" {
 		return nil
 	}
 	if !existed || cur.AgentSessionID == "" || prev.AgentSessionID == cur.AgentSessionID {
 		return nil
 	}
-	old := m.activeSub.subID
-	delete(m.transcriptCache, m.activeSub.key()) // superseded transcript; free its chunks
-	m.transcript.err = nil                       // drop any stale pre-clear error
-	ref := subRef{subID: newSubID(), sessionID: m.selectedID, cacheKey: m.cacheKeyFor(m.selectedID)}
-	return tea.Batch(m.unsubscribeCmd(old), m.bindStream(ref))
+	old := t.activeSub.subID
+	delete(m.transcriptCache, t.activeSub.key()) // superseded transcript; free its chunks
+	ref := subRef{subID: newSubID(), sessionID: t.sessionID, cacheKey: m.cacheKeyFor(t.sessionID)}
+	bind := m.editTranscript(m.baseTop()-1, func(v tview) tea.Cmd {
+		v.transcript.err = nil // drop any stale pre-clear error
+		return v.bindStream(ref)
+	})
+	return tea.Batch(m.unsubscribeCmd(old), bind)
 }
 
 // bindStream points the active subscription at ref, shows its cached chunks
 // immediately (empty for a fresh key), pins the view to the bottom so the catch-up
 // delta keeps tailing (see restoreChunkCursor), and returns the subscribe command.
-func (m *model) bindStream(ref subRef) tea.Cmd {
+func (m tview) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
 	m.setChunks(m.transcriptCache[ref.key()].chunks)
 	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
@@ -71,12 +75,12 @@ func applyDelta(chunks []transcript.Chunk, d api.TranscriptDelta) []transcript.C
 	return out
 }
 
-func (m *model) setChunks(chunks []transcript.Chunk) {
+func (m tview) setChunks(chunks []transcript.Chunk) {
 	m.transcript.chunks = chunks
 	clear(m.transcript.cards)
 }
 
-func (m *model) applyChunkDelta(d api.TranscriptDelta) {
+func (m tview) applyChunkDelta(d api.TranscriptDelta) {
 	for _, c := range m.transcript.chunks[min(d.FromIndex, len(m.transcript.chunks)):] {
 		delete(m.transcript.cards, c.ID)
 	}

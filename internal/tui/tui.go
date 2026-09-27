@@ -87,12 +87,14 @@ func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 func newViewerModel(client *fileClient, hasDark bool) model {
 	m := newModel(client, hasDark, nil)
 	m.viewer = true
-	m.mode = modeHistoryTranscript
-	m.history.openNodeID = ""
-	m.history.openPath = client.entryPath
-	m.history.openAgent = client.manifest.Agent
-	m.history.openSession = client.syntheticSession()
-	m.history.project = client.syntheticProject()
+	t := newTranscript()
+	t.history = historyState{
+		project:     client.syntheticProject(),
+		openSession: client.syntheticSession(),
+		openPath:    client.entryPath,
+		openAgent:   client.manifest.Agent,
+	}
+	m.main = backStack{t}
 	return m
 }
 

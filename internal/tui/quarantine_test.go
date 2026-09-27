@@ -21,7 +21,7 @@ func (c *stubQuarantinedClient) Quarantined() bool               { return c.q }
 
 func quarantinedModel(q bool, sessions ...session.Session) model {
 	m := modelWith(sessions...)
-	m.projects.focus = focusPane
+	m = withFocus(m, mainPane)
 	m.client = &stubQuarantinedClient{q: q}
 	return m
 }
@@ -46,14 +46,14 @@ func TestListViewNoBannerWhenNotQuarantined(t *testing.T) {
 }
 
 func TestEmptyListViewQuarantineBanner(t *testing.T) {
-	out := quarantinedModel(true).listView()
+	out := paneView(quarantinedModel(true))
 	if !strings.Contains(out, "QUARANTINED") {
 		t.Fatalf("quarantined empty list view missing QUARANTINED banner:\n%s", out)
 	}
 }
 
 func TestEmptyListViewNoBannerWhenNotQuarantined(t *testing.T) {
-	out := quarantinedModel(false).listView()
+	out := paneView(quarantinedModel(false))
 	if strings.Contains(out, "QUARANTINED") {
 		t.Fatalf("non-quarantined empty list view must not show QUARANTINED banner:\n%s", out)
 	}
@@ -68,7 +68,7 @@ func TestEmptyListViewQuarantineHeight(t *testing.T) {
 	m := quarantinedModel(true)
 	m.height, m.width = height, width
 
-	out := m.listView()
+	out := paneView(m)
 	lines := strings.Split(out, "\n")
 
 	if len(lines) != m.bodyHeight() {
