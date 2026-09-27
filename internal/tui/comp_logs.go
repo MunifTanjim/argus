@@ -22,6 +22,7 @@ func (l logsComp) raw(*ctx) bool                             { return false }
 func (l logsComp) spins(*ctx) bool                           { return false }
 func (l logsComp) close(*ctx) tea.Cmd                        { return nil }
 func (l logsComp) offers(*ctx) []binding                     { return sectionOffers[l.section()].keys }
+func (l logsComp) commands(*ctx) []binding                   { return sectionLists[l.section()].own }
 func (l logsComp) layer() layer                              { return baseLayer }
 func (l logsComp) pageStep(c *ctx) int                       { return c.m.listPageStep() }
 func (l logsComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return l, nil }

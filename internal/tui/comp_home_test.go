@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -16,6 +18,7 @@ import (
 // root and the focused container.
 func TestViewMap(t *testing.T) {
 	isHome := func(c component) bool { _, ok := c.(homeComp); return ok }
+	isSummary := func(c component) bool { s, ok := c.(summaryComp); return ok && s.kind == rowProject }
 	onWorkspace := func(ws string) func(component) bool {
 		return func(c component) bool { p, ok := c.(workspaceComp); return ok && p.ws == ws }
 	}
@@ -36,9 +39,12 @@ func TestViewMap(t *testing.T) {
 	}{
 		{"Home focused, tree shown", homeTestModel, isHome, mainPane, viewHome},
 		{"Home focused, tree hidden", func() model { return hidden(homeTestModel()) }, isHome, mainPane, viewHome},
-		{"tree on the Home row", func() model { return onTree(homeTestModel()) }, isHome, leftSidebar, viewTree},
-		{"tree on a project row", func() model { return typeKeys(onTree(homeTestModel()), "j") }, onWorkspace(""), leftSidebar, viewTree},
-		{"tree on a workspace row", func() model { return typeKeys(onTree(homeTestModel()), "jj") }, onWorkspace("n1:w1"), leftSidebar, viewTree},
+		{"tree on the Home row", func() model { return onTree(homeTestModel()) }, isHome, leftSidebar, viewHome},
+		{"tree on a project row", func() model { return typeKeys(onTree(homeTestModel()), "j") }, isHome, leftSidebar, viewHome},
+		{"tree on a workspace row", func() model { return typeKeys(onTree(homeTestModel()), "jj") }, isHome, leftSidebar, viewHome},
+		{"summary focused", func() model {
+			return pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))
+		}, isSummary, mainPane, viewTree},
 		{"workspace pane focused", func() model {
 			return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))
 		}, onWorkspace("n1:w1"), mainPane, viewTree},
@@ -49,24 +55,24 @@ func TestViewMap(t *testing.T) {
 		{"right sidebar focused when the tree empties", func() model {
 			m := pressKeys(pressKeys(typeKeys(onTree(wide()), "jj"), keyMsg("enter")), cw('l')...)
 			return treeEmptied(m)
-		}, isHome, leftSidebar, viewTree},
+		}, isHome, mainPane, viewHome},
 		{"setup log over a workspace", func() model {
-			return typeKeys(typeKeys(onTree(homeTestModel()), "jj"), "L")
+			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")), "L")
 		}, onWorkspace("n1:w1"), mainPane, viewTree},
-		{"create picker over a project row", func() model {
-			return typeKeys(typeKeys(onTree(homeTestModel()), "j"), "a")
-		}, onWorkspace(""), leftSidebar, viewTree},
+		{"create picker over a project summary", func() model {
+			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "a")
+		}, isSummary, leftSidebar, viewTree},
 		{"create picker when the tree empties", func() model {
-			return treeEmptied(typeKeys(typeKeys(onTree(homeTestModel()), "j"), "a"))
-		}, isHome, leftSidebar, viewTree},
-		{"tree from History lands on the Home row", func() model {
+			return treeEmptied(typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "a"))
+		}, isHome, leftSidebar, viewHome},
+		{"tree above History", func() model {
 			return onTree(typeKeys(homeTestModel(), "gt"))
-		}, isHome, leftSidebar, viewTree},
-		{"tree from Logs lands on the Home row", func() model {
+		}, func(c component) bool { _, ok := c.(historyComp); return ok }, leftSidebar, viewHistoryProjects},
+		{"tree above Logs", func() model {
 			m := homeTestModel()
 			m.logs = logbuf.New(10)
 			return onTree(typeKeys(m, "gT"))
-		}, isHome, leftSidebar, viewTree},
+		}, func(c component) bool { _, ok := c.(logsComp); return ok }, leftSidebar, viewLogs},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,8 +112,8 @@ func isHomeRoot(m model) bool {
 func TestHomeKillDisarmsUnderAResumedSession(t *testing.T) {
 	m := typeKeys(killableHome(), "jdd")
 	m, _ = upd(m, resumeResultMsg{sessionID: "n1:s1"})
-	if viewOf(m) != viewSession || homeOf(m).pendingKill {
-		t.Fatalf("a resumed session over Home: view=%v kill armed=%v, want the prompt dropped", viewOf(m), homeOf(m).pendingKill)
+	if viewOf(m) != viewSession || homeOf(m).killID != "" {
+		t.Fatalf("a resumed session over Home: view=%v kill=%q, want the prompt dropped", viewOf(m), homeOf(m).killID)
 	}
 	m = pressKeys(m, keyMsg("esc"))
 	if viewOf(m) != viewHome || m.keysRaw() {
@@ -164,17 +170,17 @@ func TestHomeKillConfirmation(t *testing.T) {
 	m := killableHome()
 	m.client = rc
 	m = typeKeys(m, "jdd")
-	if !homeOf(m).pendingKill || paneOf(m).killID != "" {
-		t.Fatalf("dd should ask to kill on Home only: home=%v pane=%q", homeOf(m).pendingKill, paneOf(m).killID)
+	if homeOf(m).killID == "" || paneOf(m).killID != "" {
+		t.Fatalf("dd should ask to kill on Home only: home=%q pane=%q", homeOf(m).killID, paneOf(m).killID)
 	}
 	if !strings.Contains(ansi.Strip(m.View().Content), "kill session repo · %1? y/n") {
 		t.Error("the footer should ask to kill")
 	}
-	if n := typeKeys(m, "n"); homeOf(n).pendingKill {
+	if n := typeKeys(m, "n"); homeOf(n).killID != "" {
 		t.Error("any key but y should cancel")
 	}
 	m, cmd := typeKeysCmd(m, "y")
-	if homeOf(m).pendingKill || cmd == nil {
+	if homeOf(m).killID != "" || cmd == nil {
 		t.Fatal("y should clear the prompt and kill")
 	}
 	cmd()
@@ -183,17 +189,39 @@ func TestHomeKillConfirmation(t *testing.T) {
 	}
 }
 
-func TestHomeRowPreviewHasNoCursorAndTheTreeFooter(t *testing.T) {
+func TestHomeKillTargetsTheSessionAskedAbout(t *testing.T) {
+	rc := &recordingClient{}
+	m := killableHome()
+	m.client = rc
+	m = typeKeys(m, "jdd")
+	s3 := m.sessions["n1:s3"]
+	s3.Status = session.StatusAwaitingInput
+	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: s3})
+	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodSessionEvent, Params: params}))
+	if m.order[homeOf(m).cursor] == "n1:s2" {
+		t.Fatalf("setup: the order should move another session under the cursor: %v", m.order)
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	if cmd == nil {
+		t.Fatal("y should kill")
+	}
+	cmd()
+	if p := rc.params[len(rc.params)-1].(api.SessionRef); p.SessionID != "n1:s2" {
+		t.Errorf("kill sent for %q, want n1:s2, the session the prompt named", p.SessionID)
+	}
+}
+
+func TestTreeAboveHomeKeepsTheHomeCursor(t *testing.T) {
 	m := pressKeys(typeKeys(homeTestModel(), "j"), cw('h')...)
 	out := ansi.Strip(m.View().Content)
-	if strings.Contains(out, "┏") {
-		t.Error("the Home preview must not highlight a card")
+	if !strings.Contains(out, "┏") {
+		t.Error("Home under the tree should draw its cursor card")
 	}
 	if !strings.Contains(out, "enter open · ^ww/^wW pane") {
-		t.Errorf("the Home preview should show the tree's footer:\n%s", out)
+		t.Errorf("the tree's footer should show:\n%s", out)
 	}
 	if homeOf(m).cursor != 1 {
-		t.Errorf("the preview keeps the Home cursor: %d", homeOf(m).cursor)
+		t.Errorf("the tree keeps the Home cursor: %d", homeOf(m).cursor)
 	}
 }
 

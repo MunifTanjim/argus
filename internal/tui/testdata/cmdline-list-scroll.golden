@@ -16,15 +16,15 @@
                                      │                                                                                    │
                                      │                                                                                    │
  ╭────────────────────────────────────╮                                                                                   │
- │ focus down               ^wj       │                                                                                   │
- │ focus left               ^wh       │                                                                                   │
  │ focus next               ^ww       │                                                                                   │
  │ focus prev               ^wW       │                                                                                   │
  │ focus right              ^wl       │                                                                                   │
- │ focus up                 ^wk       │                                                                                   │
  │ fold close               h ← zc    │                                                                                   │
  │ fold open                l → zo    │                                                                                   │
  │ goto bottom              G shift+g │                                                                                   │
  │ goto top                 gg        │                                                                                   │
+ │ help                     g?        │                                                                                   │
+ │ next                     ↓ j       │                                                                                   │
+ │ open                     enter     │                                                                                   │
  ╰────────────────────────────────────╯
-  :goto top 
+  :open 

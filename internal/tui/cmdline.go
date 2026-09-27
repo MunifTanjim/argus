@@ -21,9 +21,9 @@ func cmdMsg(name string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: tea.KeyExtended, Text: cmdMark + name}
 }
 
-// commandSet is the commands the focused component's keys reach: its
-// section's own and container bindings, the focus manager's moves, and the
-// help and quit it offers.
+// commandSet is the commands that act on the focused component now: its own,
+// its container's, the focus manager's moves that go somewhere, and the help
+// and quit it offers.
 func (m model) commandSet() []binding {
 	l := sectionLists[m.screen()]
 	if len(l.focus) == 0 {
@@ -40,9 +40,9 @@ func (m model) commandSet() []binding {
 			out = append(out, b)
 		}
 	}
-	add(l.own...)
+	add(m.focusedComp().commands(&ctx{m: &m})...)
 	add(l.container...)
-	add(focusMoves...)
+	add(m.focusCommands()...)
 	for _, b := range []binding{projectsKeys.Help, listKeys.Quit} {
 		if m.offered(b) {
 			add(b)
@@ -74,6 +74,15 @@ func (m model) applies(b binding) bool {
 		return !p.Hidden
 	}
 	return p.Hidden
+}
+
+// applying is the half of a shared-key pair that applies now, or a when
+// neither does.
+func (m model) applying(a, b binding) binding {
+	if m.applies(b) {
+		return b
+	}
+	return a
 }
 
 var cmdAliases = map[string]string{"q": "quit", "h": "help"}

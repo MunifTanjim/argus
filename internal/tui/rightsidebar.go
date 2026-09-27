@@ -147,7 +147,7 @@ func (r rightSidebarState) footerText(c *ctx) string {
 
 // sidebarEscDesc names where back goes from the top level of a tab.
 func sidebarEscDesc(c *ctx) string {
-	if c.m.onTreeScreen() {
+	if c.m.onRowPane() {
 		return "pane"
 	}
 	return "back"

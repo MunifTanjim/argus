@@ -68,10 +68,7 @@ type model struct {
 	left    leftSidebarState
 	right   rightSidebarState
 
-	// keptHome and keptPane hold the Home and workspace panes while another
-	// component stands at the root, so each comes back with its cursor.
-	keptHome homeComp
-	keptPane workspaceComp
+	memory viewMemory
 
 	transcriptCache map[string]cachedTranscript // cacheKey -> last-known chunks (per TUI run)
 	render          renderCache
@@ -86,6 +83,7 @@ type model struct {
 	spinning bool // whether a spin tick is currently scheduled (avoids double-arming)
 
 	showHelp   bool       // the key help covers the screen
+	helpScroll int        // the help's top row, when it is taller than the screen
 	cmdHistory []string   // the command line's history for this run
 	popups     popupStack // the open popups; the last one takes the keys
 

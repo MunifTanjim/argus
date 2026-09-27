@@ -2,10 +2,10 @@
 
   Projects                           │  repo  main
                                      │
-  󰋜 Home                         ○ 3 │  ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮
-  ▾ argus                            │  │                                                                            │
-▌   ★ repo  main                 ○ 2 │  │ (idle)                                                                     │
-    • repo-feat  feature         ○ 1 │  ╰────────────────────────────────────────────────────────────────────────────╯
+  󰋜 Home                         ○ 3 │  ┏━ · repo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━┓
+  ▾ argus                            │  ┃                                                                            ┃
+▌   ★ repo  main                 ○ 2 │  ┃ (idle)                                                                     ┃
+    • repo-feat  feature         ○ 1 │  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
                                      │
                                      │  ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮
                                      │  │                                                                            │
@@ -27,4 +27,4 @@
                                      │
                                      │
 
-     ↑/↓ move · h/l fold · enter open · ^ww/^wW pane · s spawn · a new · dd remove · / filter · Q quit · ␣e files …
+                 ↑/↓ move · enter open · O jump · s spawn · dd kill · ^ww/^wW tree · g? help · esc tree

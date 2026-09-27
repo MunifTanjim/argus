@@ -25,6 +25,8 @@ type component interface {
 	close(c *ctx) tea.Cmd
 	// offers is the focus manager's help and quit that the component takes now.
 	offers(c *ctx) []binding
+	// commands is the component's own bindings that act in its current state.
+	commands(c *ctx) []binding
 	layer() layer
 	// pageStep is how many cards a half-page jump moves.
 	pageStep(c *ctx) int
@@ -83,9 +85,9 @@ const (
 	actCloseScreen
 	actFocus
 	actFlash
-	actSyncPane
 	actHome
-	actOpenTree
+	actOpenRow
+	actFocusTree
 	actOpenSession
 	actStepDiff
 	actTree
@@ -136,15 +138,15 @@ func (c *ctx) closeScreen(termID string) {
 // top.
 func (c *ctx) closeFile() { c.actions = append(c.actions, action{kind: actCloseFile}) }
 
-// syncPane puts the pane of the tree's cursor row at the main pane's root.
-func (c *ctx) syncPane() { c.actions = append(c.actions, action{kind: actSyncPane}) }
-
-// home moves the tree cursor to the Home row and focus to the Home pane.
+// home moves the tree cursor to the Home row and shows the view that Home
+// remembers.
 func (c *ctx) home() { c.actions = append(c.actions, action{kind: actHome}) }
 
-// openTree leaves the main pane's component for the tree (option A of the
-// directional pane moves).
-func (c *ctx) openTree() { c.actions = append(c.actions, action{kind: actOpenTree}) }
+// openRow shows the view that tree row id remembers and focuses the main pane.
+func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: actOpenRow, id: id}) }
+
+// focusTree moves focus into the tree, with the cursor on the main pane's row.
+func (c *ctx) focusTree() { c.actions = append(c.actions, action{kind: actFocusTree}) }
 
 func (c *ctx) openSession(id string) {
 	c.actions = append(c.actions, action{kind: actOpenSession, id: id})
@@ -203,6 +205,7 @@ func (m *model) apply(c *ctx) tea.Cmd {
 		case actBack:
 			var popped component
 			if m.main, popped = m.main.pop(); popped != nil {
+				m.forgetBack(popped)
 				cmds = append(cmds, popped.close(c))
 			}
 		case actReplaceBase:
@@ -234,15 +237,13 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			}
 		case actFlash:
 			m.flash = a.flash
-		case actSyncPane:
-			cmds = append(cmds, m.syncPane())
 		case actHome:
 			m.left.tree.cursor = 0
-			cmds = append(cmds, m.enterHome())
-		case actOpenTree:
-			res, cmd := m.openTree()
-			*m = res.(model)
-			cmds = append(cmds, cmd)
+			cmds = append(cmds, m.openRow(homeRowID))
+		case actOpenRow:
+			cmds = append(cmds, m.openRow(a.id))
+		case actFocusTree:
+			m.focusTree()
 		case actOpenSession:
 			res, cmd := m.enterSession(a.id)
 			*m = res
@@ -290,7 +291,6 @@ func (m model) baseComp() component {
 // underOverlays keeps an open file across a switch of the component under it,
 // until syncSidebar drops the file for another workspace.
 func (m *model) underOverlays(change func()) {
-	m.keepPanes()
 	i := m.baseTop()
 	over := m.main[i:]
 	m.main = m.main[:i:i]
@@ -318,16 +318,4 @@ func (m *model) enterMain(comp component) {
 func (m model) inSession() bool {
 	t, ok := m.baseComp().(transcriptComp)
 	return ok && t.live
-}
-
-// onTreeScreen reports whether the main pane shows the pane of the tree's
-// cursor row: a workspace pane, or the Home pane while the tree has focus.
-func (m model) onTreeScreen() bool {
-	switch m.baseComp().(type) {
-	case workspaceComp:
-		return true
-	case homeComp:
-		return m.homeOnTree()
-	}
-	return false
 }

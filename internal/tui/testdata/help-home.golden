@@ -5,7 +5,7 @@
   gg/G shift+g       top / bottom · goto bottom    enter      open session · open
   ^u pgup/^d pgdown  page · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
   h ← zc/l → zo      fold / unfold · fold close    esc        close / tree · back
-  enter              open / fold · open            dd         kill session · session kill
+  enter              open; l opens Home/workspace  dd         kill session · session kill
   ^ww/^wW            cycle focus · focus next      L shift+l  workspace setup log · open setup-log
   /                  filter · filter-projects      ^wh/^wl    focus left / right pane · focus left
                                                    ^wj        session: focus the prompt · focus down
@@ -27,4 +27,4 @@
   zg         show gone · toggle show-gone
   T shift+t  change target branch · workspace change-target
 
-                                                     any key close
+                                               ↑/↓ scroll · any key close

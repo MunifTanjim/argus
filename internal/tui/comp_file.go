@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -37,6 +38,23 @@ func (f fileComp) close(*ctx) tea.Cmd        { return nil }
 func (f fileComp) offers(c *ctx) []binding   { return c.m.baseComp().offers(c) }
 func (f fileComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (f fileComp) layer() layer              { return fileLayer }
+
+// commands adds the tree keys where the component under f takes them, and the
+// prompt focus where a live transcript under f has a prompt to focus.
+func (f fileComp) commands(c *ctx) []binding {
+	fk := fileViewKeys
+	out := []any{fk.Up, fk.Down, fk.HalfUp, fk.HalfDown, fk.Top, fk.Bottom, fk.Wrap, fk.Refresh, fk.Back}
+	if f.diff {
+		out = append(out, fk.NextFile, fk.PrevFile)
+	}
+	if _, ok := c.m.underFile().(treeKeyer); ok {
+		out = slices.Concat(out, treeKeys, manageKeys, leftSidebarKeys)
+	}
+	if c.m.inSession() && c.m.sessionInteraction() != nil {
+		out = append(out, sessionKeys.Focus)
+	}
+	return bindingsOf(out...)
+}
 
 func (f fileComp) show(c *ctx) {
 	if _, ok := c.m.openFile(); ok {

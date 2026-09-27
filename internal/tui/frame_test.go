@@ -355,7 +355,7 @@ func TestCardListPageStepMatchesTheBase(t *testing.T) {
 		{"tree focused over History", func() model {
 			return withFocus(withHistoryProjects(homeTestModel(), historyProjects()...), leftSidebar)
 		}, framedStep},
-		{"tree screen", func() model { return onTree(homeTestModel()) }, treeScreen},
+		{"tree over Home", func() model { return onTree(homeTestModel()) }, framedStep},
 		{"workspace pane", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")) }, treeScreen},
 		{"files tab on the tree screen", filesFocused, treeScreen},
 		{"changes tab on the tree screen", func() model { return changesFocused() }, treeScreen},
@@ -448,14 +448,16 @@ func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {
 		{"session-no-dock", idleSession},
 		{"session-card-detail", func() model { return pressKeys(typeKeys(idleSession(), "gg"), keyMsg("enter")) }},
 		{"retarget-picker", func() model {
-			m := typeKeys(onTree(homeTestModel()), "jj")
+			m := onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")))
 			m.client = &recordingClient{}
 			m = typeKeys(m, "T")
 			m, _ = upd(m, branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main"}, {Name: "feature"}}})
 			return m
 		}},
 		{"tree-filter", func() model { return typeKeys(onTree(homeTestModel()), "/fe") }},
-		{"tree-rename", func() model { return typeKeys(onTree(homeTestModel()), "jrx") }},
+		{"tree-rename", func() model {
+			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "rx")
+		}},
 		{"history-export-prompt", func() model {
 			return typeKeys(withHistorySessions(homeTestModel(), histProj, historyPage()), "E")
 		}},

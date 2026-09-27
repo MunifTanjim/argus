@@ -56,6 +56,11 @@ var (
 	}
 )
 
+// summaryKeys are the workspace section's keys that a project or node summary
+// takes: the ones that act on the tree.
+var summaryKeys = bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys,
+	[]any{projectsKeys.Refresh, projectsKeys.Back})...)
+
 // transcriptViewKeys are the transcript keys that both live and history
 // transcripts read.
 var transcriptViewKeys = []any{

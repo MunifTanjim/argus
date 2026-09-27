@@ -82,6 +82,31 @@ func (t transcriptComp) fullScreen(c *ctx) fullLevel {
 
 func (t transcriptComp) close(c *ctx) tea.Cmd { return t.bind(c).closeStreams() }
 
+// commands follows liveKey and historyKey: the redaction list takes every key
+// it does not use, and the card detail reads its own keys.
+func (t transcriptComp) commands(c *ctx) []binding {
+	v := t.bind(c)
+	var out []any
+	switch {
+	case v.redactListActive():
+		return bindingsOf(transcriptKeys.Back, redactListKeys, transcriptKeys.Redact)
+	case v.redactActive():
+		out = append(out, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave)
+	case t.live && c.m.sessionInteraction() != nil:
+		out = append(out, sessionKeys.Raw, sessionKeys.Focus)
+	case t.live:
+		out = append(out, sessionKeys.Raw)
+	}
+	if t.historyView == histDetail {
+		return bindingsOf(append(out, detailKeys)...)
+	}
+	out = append(out, transcriptViewKeys...)
+	if !t.live && !c.m.viewer {
+		out = append(out, transcriptKeys.Resume, transcriptKeys.Export)
+	}
+	return bindingsOf(out...)
+}
+
 func (t transcriptComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	v := t.bind(c)
 	var cmd tea.Cmd

@@ -103,8 +103,8 @@ func TestVimQQuitsFromHomeWithTree(t *testing.T) {
 
 func TestVimEscOnHomeFocusesTree(t *testing.T) {
 	m, _ := upd(homeTestModel(), keyMsg("esc"))
-	if viewOf(m) != viewTree || m.focused != leftSidebar {
-		t.Errorf("<Esc> on Home: view = %v focus = %v, want the tree", viewOf(m), m.focused)
+	if viewOf(m) != viewHome || m.focused != leftSidebar {
+		t.Errorf("<Esc> on Home: view = %v focus = %v, want the tree over Home", viewOf(m), m.focused)
 	}
 }
 

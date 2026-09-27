@@ -151,11 +151,11 @@ func (m model) homeTabs(active homeTab) string {
 	sess, hist, logs := StyleDim, StyleDim, StyleDim
 	switch active {
 	case tabSessions:
-		sess = StyleAccentBold
+		sess = m.paneHeadStyle()
 	case tabHistory:
-		hist = StyleAccentBold
+		hist = m.paneHeadStyle()
 	case tabLogs:
-		logs = StyleAccentBold
+		logs = m.paneHeadStyle()
 	}
 	out := sess.Render("Sessions") + StyleDim.Render("   ") + hist.Render("History")
 	if m.hasLogsTab() {

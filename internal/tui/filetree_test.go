@@ -127,7 +127,8 @@ func upd(m model, msg tea.Msg) (model, tea.Cmd) {
 
 func TestRightSidebarFollowsWorkspaceAndLoadsRoot(t *testing.T) {
 	m := wideWorkspace()
-	m, cmd := upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // to n1:w2
+	m = typeKeys(m, "j") // to n1:w2
+	m, cmd := upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.right.fileTree.ws != "n1:w2" || cmd == nil {
 		t.Fatalf("tree should follow the workspace and load its root: ws=%q", m.right.fileTree.ws)
 	}
@@ -249,7 +250,8 @@ func TestFileClosesWhenWorkspaceChanges(t *testing.T) {
 	m = withFocus(m, rightSidebar)
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = withFocus(m, leftSidebar)
-	m, _ = upd(m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // to n1:w2
+	m = typeKeys(m, "j") // to n1:w2
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.hasOpenFile() {
 		t.Error("changing the workspace should close the open file")
 	}
@@ -363,13 +365,13 @@ func TestCtrlBKeepsFilesFocus(t *testing.T) {
 	}
 }
 
-func TestFilesFocusFallsBackToTreeWithoutWorkspace(t *testing.T) {
+func TestFilesFocusFallsBackToPaneWithoutWorkspace(t *testing.T) {
 	m := filesFocused()
 	m = selectRow(m, "n1:p1") // e.g. a filter moved the cursor
-	m, _ = m.repairFocus()
+	m = m.repairFocus()
 	m, _ = m.syncSidebar()
-	if m.focused != leftSidebar {
-		t.Errorf("no workspace with the left tree visible: focus=%v, want the tree", m.focused)
+	if m.focused != mainPane {
+		t.Errorf("no workspace with the left tree visible: focus=%v, want the pane", m.focused)
 	}
 }
 

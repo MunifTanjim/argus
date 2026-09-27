@@ -126,8 +126,8 @@ func TestHomeTabsCycle(t *testing.T) {
 	pane := homeTestModel()
 	pane.logs = logbuf.New(10)
 	fromTree := pressKeys(pane, cw('h')...)
-	if viewOf(fromTree) != viewTree || !fromTree.treeFocused() || fromTree.left.tree.cursorRowID() != homeRowID {
-		t.Fatalf("<C-w>h should open the tree on Home: view=%v focus=%v", viewOf(fromTree), fromTree.focused)
+	if viewOf(fromTree) != viewHome || !fromTree.treeFocused() || fromTree.left.tree.cursorRowID() != homeRowID {
+		t.Fatalf("<C-w>h should focus the tree on Home: view=%v focus=%v", viewOf(fromTree), fromTree.focused)
 	}
 	fromTree, _ = upd(fromTree, keyMsg("enter"))
 	for name, start := range map[string]model{"pane": pane, "tree": fromTree} {
@@ -146,5 +146,16 @@ func TestHomeTabsCycle(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestActiveHomeTabFollowsFocus(t *testing.T) {
+	m := withFocus(homeTestModel(), mainPane)
+	if tabs := m.homeTabs(tabSessions); !strings.Contains(tabs, StyleAccentBold.Render("Sessions")) {
+		t.Errorf("the active tab should use the focus color when the pane has focus: %q", tabs)
+	}
+	m = withFocus(m, leftSidebar)
+	if tabs := m.homeTabs(tabSessions); strings.Contains(tabs, StyleAccentBold.Render("Sessions")) {
+		t.Errorf("the active tab should not use the focus color without focus: %q", tabs)
 	}
 }

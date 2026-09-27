@@ -192,8 +192,8 @@ func TestLogsKeys(t *testing.T) {
 	if mm, _ := upd(m, keyMsg("esc")); viewOf(mm) != viewHome {
 		t.Errorf("esc on logs: view=%v, want %v", viewOf(mm), viewHome)
 	}
-	if mm := pressKeys(m, cw('h')...); viewOf(mm) != viewTree {
-		t.Errorf("<C-w>h on logs: view=%v, want %v", viewOf(mm), viewTree)
+	if mm := pressKeys(m, cw('h')...); viewOf(mm) != viewLogs || !mm.treeFocused() {
+		t.Errorf("<C-w>h on logs: view=%v focus=%v, want the tree over Logs", viewOf(mm), mm.focused)
 	}
 	hist := m
 	hist = withView(hist, viewHistoryProjects)

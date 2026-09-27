@@ -142,26 +142,26 @@ func TestPaneCycleOnSession(t *testing.T) {
 		t.Errorf("<C-w>w from the files sidebar: focus = %v, want the dock", m.focused)
 	}
 	m = pressKeys(workspaceSession(&session.Interaction{Kind: session.InteractionPermission}), cw('W')...)
-	if m.focused != sessionDock {
-		t.Errorf("<C-w>W from the transcript: focus = %v, want the dock", m.focused)
+	if m.focused != leftSidebar {
+		t.Errorf("<C-w>W from the transcript: focus = %v, want the tree", m.focused)
 	}
 }
 
-func TestPaneLeftFromSessionOpensTheWorkspaceRow(t *testing.T) {
+func TestPaneLeftFromSessionKeepsItAndMovesTheCursorToItsWorkspace(t *testing.T) {
 	m := workspaceSession(nil)
 	rc := &recordingClient{}
 	m.client = rc
 	sub := trOf(m).activeSub
 	m.left.tree.cursor = 0
 	m = paneLeftRun(m)
-	if viewOf(m) != viewTree || m.focused != leftSidebar {
+	if viewOf(m) != viewSession || m.focused != leftSidebar {
 		t.Fatalf("<C-w>h from a session: view = %v focus = %v", viewOf(m), m.focused)
 	}
 	if got := m.left.tree.cursorRowID(); got != "n1:w1" {
 		t.Errorf("<C-w>h from a session: row = %q, want the session's workspace n1:w1", got)
 	}
-	if !slices.Contains(rc.subIDs(api.MethodTranscriptUnsubscribe), sub.subID) {
-		t.Errorf("leaving the session should end its transcript subscription: %+v", sub)
+	if slices.Contains(rc.subIDs(api.MethodTranscriptUnsubscribe), sub.subID) {
+		t.Errorf("the tree over the session must keep its transcript subscription: %+v", sub)
 	}
 }
 
@@ -174,7 +174,7 @@ func paneLeftRun(m model) model {
 	return m
 }
 
-func TestPaneLeftFromDetailOpensTheWorkspaceRow(t *testing.T) {
+func TestPaneLeftFromDetailKeepsTheDetail(t *testing.T) {
 	m := workspaceSession(nil)
 	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 	m, _ = onTr(m, func(v tview) tea.Cmd { v.enterDetail(); return nil })
@@ -183,13 +183,13 @@ func TestPaneLeftFromDetailOpensTheWorkspaceRow(t *testing.T) {
 		t.Fatalf("setup: screen = %q, want the transcript's detail", m.screen())
 	}
 	m = pressKeys(m, cw('h')...)
-	if viewOf(m) != viewTree || !m.treeFocused() || m.left.tree.cursorRowID() != "n1:w1" {
-		t.Errorf("<C-w>h from the detail: view = %v focus = %v row = %q, want the tree on n1:w1",
+	if trOf(m).historyView != histDetail || !m.treeFocused() || m.left.tree.cursorRowID() != "n1:w1" {
+		t.Errorf("<C-w>h from the detail: view = %v focus = %v row = %q, want the tree on n1:w1 over the detail",
 			viewOf(m), m.focused, m.left.tree.cursorRowID())
 	}
 }
 
-func TestPaneLeftFromASubagentEndsBothStreams(t *testing.T) {
+func TestPaneLeftFromASubagentKeepsBothStreams(t *testing.T) {
 	m := workspaceSession(nil)
 	rc := &recordingClient{}
 	m.client = rc
@@ -204,34 +204,34 @@ func TestPaneLeftFromASubagentEndsBothStreams(t *testing.T) {
 	}
 	m = paneLeftRun(m)
 	unsubscribed := rc.subIDs(api.MethodTranscriptUnsubscribe)
-	if viewOf(m) != viewTree || !slices.Contains(unsubscribed, "agent-sub") || !slices.Contains(unsubscribed, "session-sub") {
-		t.Errorf("<C-w>h from a subagent: view = %v unsubscribed = %v, want both streams ended",
+	if viewOf(m) != viewSession || len(unsubscribed) != 0 {
+		t.Errorf("<C-w>h from a subagent: view = %v unsubscribed = %v, want both streams kept",
 			viewOf(m), unsubscribed)
 	}
 }
 
-func TestPaneLeftFromSessionWithHiddenWorkspaceOpensTheHomeRow(t *testing.T) {
+func TestPaneLeftFromSessionWithAWorkspaceOutsideTheTreeKeepsTheCursor(t *testing.T) {
 	m := workspaceSession(nil)
 	s := m.sessions["n1:s1"]
 	s.WorkspaceID = "n1:gone"
 	m.sessions["n1:s1"] = s
-	m = selectRow(m, "n1:w2")
+	m.left.tree.selectRow("n1:w2")
 	m = pressKeys(m, cw('h')...)
-	if viewOf(m) != viewTree || !m.treeFocused() || m.left.tree.cursorRowID() != homeRowID {
-		t.Errorf("<C-w>h from a session outside the tree: view = %v focus = %v row = %q, want the tree on Home",
+	if viewOf(m) != viewSession || !m.treeFocused() || m.left.tree.cursorRowID() != "n1:w2" {
+		t.Errorf("<C-w>h from a session outside the tree: view = %v focus = %v row = %q, want the tree on n1:w2",
 			viewOf(m), m.focused, m.left.tree.cursorRowID())
 	}
 }
 
-func TestPaneLeftFromHomeScreensOpensTheHomeRow(t *testing.T) {
+func TestPaneLeftFromHomeScreensMovesTheCursorToHome(t *testing.T) {
 	for _, view := range []shownView{viewHome, viewHistoryProjects, viewLogs, viewHistoryTranscript} {
 		m := homeTestModel()
 		m = withView(m, view)
 		m.left.tree.rebuild()
 		m.left.tree.cursor = 2
 		m = pressKeys(m, cw('h')...)
-		if viewOf(m) != viewTree || !m.treeFocused() || m.left.tree.cursorRowID() != homeRowID {
-			t.Errorf("view %v: <C-w>h: view = %v focus = %v row = %q, want the tree on Home",
+		if viewOf(m) != view || !m.treeFocused() || m.left.tree.cursorRowID() != homeRowID {
+			t.Errorf("view %v: <C-w>h: view = %v focus = %v row = %q, want the tree on Home over the view",
 				view, viewOf(m), m.focused, m.left.tree.cursorRowID())
 		}
 	}
@@ -265,7 +265,7 @@ func TestPaneLeftFromSessionKeepsTheOpenFile(t *testing.T) {
 	m := workspaceSession(nil)
 	m = withFile(m, fileComp{ws: "n1:w1", path: "a.go"})
 	m = pressKeys(m, cw('h')...)
-	if viewOf(m) != viewTree || !m.hasOpenFile() || fileOf(m).path != "a.go" {
+	if viewOf(m) != viewSession || !m.hasOpenFile() || fileOf(m).path != "a.go" {
 		t.Errorf("<C-w>h keeps what the main pane shows: view = %v file = %+v", viewOf(m), fileOf(m))
 	}
 }

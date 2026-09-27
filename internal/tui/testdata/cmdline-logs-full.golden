@@ -17,14 +17,14 @@ time=12:00:04 level=INFO msg="line 4"                                           
                                                                                   │
  ╭──────────────────────────────────╮                                             │
  │ back                   esc       │                                             │
- │ focus down             ^wj       │                                             │
- │ focus left             ^wh       │                                             │
- │ focus next             ^ww       │                                             │
- │ focus prev             ^wW       │                                             │
- │ focus right            ^wl       │                                             │
- │ focus up               ^wk       │                                             │
  │ goto bottom            G shift+g │                                             │
  │ goto top               gg        │                                             │
  │ help                   g?        │                                             │
+ │ scroll down            ↓ j       │                                             │
+ │ scroll half-page-down  ^d pgdown │                                             │
+ │ scroll half-page-up    ^u pgup   │                                             │
+ │ scroll up              ↑ k       │                                             │
+ │ tab next               gt        │                                             │
+ │ tab prev               gT        │                                             │
  ╰──────────────────────────────────╯
   : 

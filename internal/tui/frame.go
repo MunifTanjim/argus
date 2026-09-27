@@ -98,11 +98,11 @@ func (m model) mainRect() uv.Rectangle {
 	return uv.Rect(x, 2, l.w, h)
 }
 
-// helpShown reports whether the help overlay shows. A spawn flow over the tree
-// screen stays in front of it.
+// A spawn flow opened from the tree or over a row's pane stays in front of the
+// help overlay.
 func (m model) helpShown() bool {
-	_, spawning := m.spawnTop()
-	return m.showHelp && !(spawning && m.onTreeScreen())
+	s, spawning := m.spawnTop()
+	return m.showHelp && !(spawning && (m.onRowPane() || s.back == leftSidebar))
 }
 
 func (m model) mainColumn(c *ctx, l frameLayout) string {

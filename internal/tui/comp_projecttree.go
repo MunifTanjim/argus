@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -44,6 +46,7 @@ type projectTreeComp struct {
 	loading    bool
 	fetchSeq   int  // seq of the newest fetch
 	refetch    bool // a change arrived during a fetch; fetch again after it
+	loaded     bool // a project list arrived without an error
 	rows       []projectsRow
 	cursor     int
 	want       string          // workspace id to reveal and select on the next load
@@ -81,6 +84,7 @@ func (t projectTreeComp) raw(*ctx) bool {
 func (t projectTreeComp) fullScreen(*ctx) fullLevel { return notFull }
 func (t projectTreeComp) close(*ctx) tea.Cmd        { return nil }
 func (t projectTreeComp) offers(*ctx) []binding     { return sectionOffers[t.section()].keys }
+func (t projectTreeComp) commands(*ctx) []binding   { return sectionLists[t.section()].own }
 func (t projectTreeComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (t projectTreeComp) layer() layer              { return baseLayer }
 
@@ -129,22 +133,21 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 	case m.matches(msg, k.Back):
 		if t.filter != "" {
 			t.setFilter("")
-			c.syncPane()
 		}
 	case m.matches(msg, k.Up):
-		t = t.move(c, cursorUp(t.cursor))
+		t = t.move(cursorUp(t.cursor))
 	case m.matches(msg, k.Down):
-		t = t.move(c, cursorDown(t.cursor, n))
+		t = t.move(cursorDown(t.cursor, n))
 	case m.matches(msg, k.Top):
-		t = t.move(c, 0)
+		t = t.move(0)
 	case m.matches(msg, k.Bottom):
-		t = t.move(c, cursorBottom(n))
+		t = t.move(cursorBottom(n))
 	case m.matches(msg, k.HalfUp):
-		t = t.move(c, max(0, t.cursor-m.cardListPageStep()))
+		t = t.move(max(0, t.cursor-m.cardListPageStep()))
 	case m.matches(msg, k.HalfDown):
-		t = t.move(c, min(cursorBottom(n), t.cursor+m.cardListPageStep()))
+		t = t.move(min(cursorBottom(n), t.cursor+m.cardListPageStep()))
 	case m.matches(msg, k.Left):
-		t = t.treeLeft(c)
+		t = t.treeLeft()
 	case m.matches(msg, k.Right):
 		t = t.treeRight(c)
 	case m.matches(msg, k.Enter):
@@ -170,9 +173,10 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 	case m.matches(msg, k.Filter):
 		t, cmd = t.run(c, treeFilter)
 	case m.matches(msg, k.Spawn):
-		cmd = spawnSession(c)
+		r, _ := t.cursorRow()
+		cmd = spawnSession(c, r)
 	case m.matches(msg, k.SetupLog):
-		cmd = openSetupLog(c)
+		cmd = openSetupLog(c, t.selectedWorkspaceID())
 	case m.matches(msg, k.ShowHidden):
 		t, cmd = t.run(c, treeToggleHidden)
 	case m.matches(msg, k.ShowGone):
@@ -200,16 +204,14 @@ func (t projectTreeComp) run(c *ctx, op treeOp) (projectTreeComp, tea.Cmd) {
 	var cmd tea.Cmd
 	switch op {
 	case treeFilter:
-		c.focusOn(leftSidebar)
+		c.focusTree()
 		cmd = t.startInput(pmFilter, "", t.filter)
 	case treeToggleHidden:
 		t.showHidden = !t.showHidden
 		t.rebuild()
-		c.syncPane()
 	case treeToggleGone:
 		t.showGone = !t.showGone
 		t.rebuild()
-		c.syncPane()
 	case treeReload:
 		t.err = nil
 		cmd = t.load(c.m.client)
@@ -231,25 +233,23 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 				follow = t.load(c.m.client)
 			}
 		}
-		t.data, t.err = msg.tree, msg.err
-		if msg.tree == nil {
-			t.data = []api.ProjectNode{}
+		t.err = msg.err
+		if msg.err == nil {
+			t.data, t.loaded = msg.tree, true
+			if t.data == nil {
+				t.data = []api.ProjectNode{}
+			}
 		}
 		t.rebuild()
 		if t.want != "" {
-			// Only jump the cursor while the tree screen is what shows; the Home
-			// pane keeps the cursor on Home.
-			if c.m.onTreeScreen() {
-				t.reveal(t.want)
-				if t.cursorRowID() != t.want {
-					t.selectRow(t.want) // a project or node row
-				}
+			t.reveal(t.want)
+			if t.cursorRowID() != t.want {
+				t.selectRow(t.want) // a project or node row
 			}
 			if final || t.cursorRowID() == t.want {
 				t.want = ""
 			}
 		}
-		c.syncPane()
 		return t, follow
 	case projectsActionMsg:
 		delete(t.removing, msg.removed)
@@ -404,11 +404,6 @@ func (t projectTreeComp) selectedWorkspaceID() string {
 	return ""
 }
 
-func (t projectTreeComp) onHomeRow() bool {
-	r, ok := t.cursorRow()
-	return ok && r.kind == rowHome
-}
-
 func (t projectTreeComp) cursorProjectID() string {
 	c := t.cursor
 	if c < 0 || c >= len(t.rows) {
@@ -486,6 +481,36 @@ func (t *projectTreeComp) reveal(wsID string) {
 	}
 }
 
+// follow unfolds the rows that hold id only if that makes id visible. The
+// cursor stays when the filter or the hidden setting hides the row.
+func (t *projectTreeComp) follow(id string) {
+	for _, p := range t.data {
+		holds := p.ID == id || slices.ContainsFunc(p.Workspaces, func(w api.WorkspaceNode) bool { return w.ID == id })
+		if !holds {
+			continue
+		}
+		cand := maps.Clone(t.collapsed)
+		delete(cand, p.NodeID)
+		if p.ID != id {
+			delete(cand, p.ID)
+		}
+		probe := *t
+		probe.collapsed = cand
+		probe.rebuild()
+		if slices.ContainsFunc(probe.rows, func(r projectsRow) bool { return r.id == id }) {
+			t.collapsed = cand
+			t.rebuild()
+		}
+		break
+	}
+	for i, r := range t.rows {
+		if r.id == id {
+			t.cursor = i
+			return
+		}
+	}
+}
+
 // A filter shows every match.
 func (t projectTreeComp) isFolded(id string) bool {
 	return t.filter == "" && t.collapsed[id]
@@ -514,6 +539,14 @@ func (t *projectTreeComp) setFilter(q string) {
 			return
 		}
 	}
+}
+
+func (t *projectTreeComp) dropFilter(id string) {
+	if t.filter == "" {
+		return
+	}
+	t.filter = ""
+	t.reveal(id)
 }
 
 func (t projectTreeComp) findProject(id string) (api.ProjectNode, bool) {
@@ -581,16 +614,12 @@ func (t *projectTreeComp) loadMissing(client Client, ws string) tea.Cmd {
 	return t.load(client)
 }
 
-// --- keys ---------------------------------------------------------------------
-
-// move moves the cursor; the workspace pane follows it.
-func (t projectTreeComp) move(c *ctx, i int) projectTreeComp {
+func (t projectTreeComp) move(i int) projectTreeComp {
 	t.cursor = min(i, cursorBottom(len(t.rows)))
-	c.syncPane()
 	return t
 }
 
-func (t projectTreeComp) treeLeft(c *ctx) projectTreeComp {
+func (t projectTreeComp) treeLeft() projectTreeComp {
 	r, ok := t.cursorRow()
 	if !ok {
 		return t
@@ -601,61 +630,32 @@ func (t projectTreeComp) treeLeft(c *ctx) projectTreeComp {
 	}
 	for i := t.cursor - 1; i >= 0; i-- {
 		if t.rows[i].depth < r.depth {
-			return t.move(c, i)
+			return t.move(i)
 		}
 	}
 	return t
 }
 
-// treeRight unfolds a folded row, steps into an unfolded one, or focuses a
-// workspace's pane.
 func (t projectTreeComp) treeRight(c *ctx) projectTreeComp {
-	if t.onHomeRow() {
-		c.home()
-		return t
-	}
-	r, ok := t.cursorRow()
-	switch {
-	case !ok || (r.kind != rowWorkspace && !r.hasKids):
-		return t
-	case r.kind == rowWorkspace:
-		t.focusPane(c)
-		return t
-	case t.isFolded(r.id):
-		t.setFolded(r.id, false)
-		return t
-	}
-	return t.move(c, t.cursor+1)
-}
-
-func (t projectTreeComp) enter(c *ctx) projectTreeComp {
-	if t.onHomeRow() {
-		c.home()
-		return t
-	}
 	r, ok := t.cursorRow()
 	switch {
 	case !ok:
-	case r.kind == rowWorkspace:
-		t.focusPane(c)
-	case r.hasKids && t.filter == "":
-		t.setFolded(r.id, !t.collapsed[r.id])
+	case r.kind == rowHome || r.kind == rowWorkspace:
+		c.openRow(r.id)
+	case !r.hasKids:
+	case t.isFolded(r.id):
+		t.setFolded(r.id, false)
+	default:
+		return t.move(t.cursor + 1)
 	}
 	return t
 }
 
-// focusPane moves focus to the pane of the selected row. The Home row's pane is
-// the Home pane itself.
-func (t projectTreeComp) focusPane(c *ctx) {
-	switch {
-	case t.onHomeRow():
-		c.home()
-	case t.selectedWorkspaceID() == "":
-		c.setFlash("select a workspace to open its pane")
-	default:
-		c.focusOn(mainPane)
-		c.syncPane()
+func (t projectTreeComp) enter(c *ctx) projectTreeComp {
+	if id := t.cursorRowID(); id != "" {
+		c.openRow(id)
 	}
+	return t
 }
 
 func newProjectsInput() textinput.Model {
@@ -679,7 +679,6 @@ func (t projectTreeComp) inputKey(c *ctx, msg tea.KeyPressMsg) (projectTreeComp,
 		t.inputMode = pmNone
 		if mode == pmFilter {
 			t.setFilter("")
-			c.syncPane()
 		}
 		return t, nil
 	}
@@ -698,7 +697,6 @@ func (t projectTreeComp) inputKey(c *ctx, msg tea.KeyPressMsg) (projectTreeComp,
 		return t, cmd
 	}
 	t.setFilter(t.input.Value())
-	c.syncPane()
 	return t, cmd
 }
 

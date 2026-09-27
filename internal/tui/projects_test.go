@@ -98,7 +98,7 @@ func TestPaneSessionsFilteredByWorkspace(t *testing.T) {
 	if got := m.selectedWorkspaceID(); got != "n1:w1" {
 		t.Fatalf("selectedWorkspaceID = %q, want n1:w1", got)
 	}
-	ss := m.paneSessions()
+	ss := m.wsSessions(m.selectedWorkspaceID())
 	if len(ss) != 2 { // s1 and s3 are in w1
 		t.Fatalf("got %d sessions for w1, want 2", len(ss))
 	}
@@ -109,7 +109,7 @@ func TestPaneSessionsFilteredByWorkspace(t *testing.T) {
 	}
 
 	m = selectRow(m, "n1:w2")
-	if got := len(m.paneSessions()); got != 1 {
+	if got := len(m.wsSessions(m.selectedWorkspaceID())); got != 1 {
 		t.Errorf("got %d sessions for w2, want 1", got)
 	}
 }
@@ -117,7 +117,7 @@ func TestPaneSessionsFilteredByWorkspace(t *testing.T) {
 func TestProjectsCollapseTogglesRows(t *testing.T) {
 	m := projectsTestModel()
 	m = selectRow(m, "n1:p1")
-	mm, _ := treeKey(m, keyMsg("enter"))
+	mm, _ := treeKey(m, keyMsg("h"))
 	// Collapsing the project hides its two workspaces.
 	if len(mm.left.tree.rows) != 2 {
 		t.Fatalf("after collapse got %d rows, want 2 (Home, project)", len(mm.left.tree.rows))
@@ -180,6 +180,22 @@ func TestToggleSidebar(t *testing.T) {
 	if !mm.sidebarVisible() {
 		t.Error("␣o again should show the sidebar")
 	}
+	if mm.focused != leftSidebar {
+		t.Errorf("showing the sidebar should focus it: focus=%v", mm.focused)
+	}
+}
+
+func TestToggleFilesFocusesTheOpenedSidebar(t *testing.T) {
+	m := wideWorkspace()
+	m = withFocus(m, mainPane)
+	m = typeKeys(m, " e")
+	if m.filesVisible() || m.focused != mainPane {
+		t.Fatalf("␣e should hide the right sidebar: visible=%v focus=%v", m.filesVisible(), m.focused)
+	}
+	m = typeKeys(m, " e")
+	if !m.filesVisible() || m.focused != rightSidebar {
+		t.Errorf("␣e again should show and focus the right sidebar: visible=%v focus=%v", m.filesVisible(), m.focused)
+	}
 }
 
 func TestNarrowingMovesFocusOffTheTree(t *testing.T) {
@@ -201,14 +217,27 @@ func TestNarrowingMovesFocusOffTheTree(t *testing.T) {
 }
 
 func TestHelpFitsCommonTerminal(t *testing.T) {
-	m := projectsTestModel()
-	m.width, m.height = 120, 30
-	m.showHelp = true
-	out := ansi.Strip(m.View().Content)
-	for _, want := range []string{"cycle focus", "kill session", "change target branch", "quit · quit"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("help at 120x30 is missing %q:\n%s", want, out)
+	for _, size := range []struct{ w, h int }{{120, 40}, {250, 20}, {120, 30}, {90, 40}, {80, 24}} {
+		m := projectsTestModel()
+		m.width, m.height = size.w, size.h
+		m = typeKeys(m, "g?")
+		fits := m.helpMaxScroll() == 0
+		seen := ansi.Strip(m.View().Content)
+		for !fits && m.helpScroll < m.helpMaxScroll() {
+			m = typeKeys(m, "j")
+			seen += ansi.Strip(m.View().Content)
 		}
+		if !m.showHelp {
+			t.Fatalf("%dx%d: j should scroll the help, not close it", size.w, size.h)
+		}
+		for _, g := range m.helpGroups() {
+			for _, r := range append([]helpRow{{key: g.title, desc: g.title}}, g.rows...) {
+				if r.key != "" && !strings.Contains(seen, r.label()) {
+					t.Errorf("%dx%d (fits=%v): help never shows %q:\n%s", size.w, size.h, fits, r.label(), seen)
+				}
+			}
+		}
+		assertFits(t, m.View().Content, size.w)
 	}
 }
 
@@ -365,13 +394,13 @@ func TestTreeLeftRight(t *testing.T) {
 	}
 }
 
-func TestFocusPaneNeedsWorkspace(t *testing.T) {
+func TestPaneRightFromAProjectRowFocusesTheSummary(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
-	m = selectRow(m, "n1:p1")
+	m = withFocus(selectRow(m, "n1:p1"), leftSidebar)
 	mm := pressKeys(m, cw('l')...)
-	if mm.focused != leftSidebar || mm.flash == "" {
-		t.Errorf("<C-w>l on a project row: focus=%v flash=%q, want tree focus and a hint", mm.focused, mm.flash)
+	if s, ok := mm.baseComp().(summaryComp); !ok || s.id != "n1:p1" || mm.focused != mainPane {
+		t.Errorf("<C-w>l on a project row: base=%#v focus=%v, want the summary of n1:p1 with focus", mm.baseComp(), mm.focused)
 	}
 }
 
@@ -503,7 +532,7 @@ func TestProjectRowShowsSummary(t *testing.T) {
 
 func TestHelpOverlay(t *testing.T) {
 	m := projectsTestModel()
-	m.width, m.height = 160, 30
+	m.width, m.height = 160, 40
 	res, _ := m.runKey(seqKey("g?"))
 	mm := res.(model)
 	if !mm.showHelp || !strings.Contains(mm.View().Content, "force remove") {
@@ -516,15 +545,15 @@ func TestHelpOverlay(t *testing.T) {
 	}
 }
 
-func TestTreeMoveSyncsPane(t *testing.T) {
+func TestTreeMoveKeepsThePane(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:w1")
-	m = withPane(m, workspaceComp{ws: "n1:w1", cursor: 2})
+	m = withPane(m, workspaceComp{ws: "n1:w1", cursor: 1})
 	res, _ := m.runKey(tea.KeyPressMsg{Code: 'j'})
 	mm := res.(model)
-	if paneOf(mm).ws != "n1:w2" || paneOf(mm).cursor != 0 {
-		t.Errorf("moving to n1:w2 should reset the pane: dataWS=%q wsCursor=%d", paneOf(mm).ws, paneOf(mm).cursor)
+	if paneOf(mm).ws != "n1:w1" || paneOf(mm).cursor != 1 {
+		t.Errorf("moving to n1:w2 must keep the pane: ws=%q cursor=%d, want n1:w1 on card 1", paneOf(mm).ws, paneOf(mm).cursor)
 	}
 }
 
@@ -567,6 +596,34 @@ func TestFilterInputIsLive(t *testing.T) {
 	m = res.(model)
 	if m.left.tree.filter != "" || viewOf(m) != viewTree || len(m.left.tree.rows) != 4 {
 		t.Errorf("esc should clear the filter before leaving: filter=%q view=%v", m.left.tree.filter, viewOf(m))
+	}
+}
+
+func TestOpenWorkspaceClearsFilter(t *testing.T) {
+	filtered := func(id string) model {
+		m := projectsTestModel()
+		m.width, m.height = 120, 30
+		m.left.tree.setFilter("feat")
+		return selectRow(m, id)
+	}
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, keyMsg("l")} {
+		m, _ := upd(filtered("n1:w2"), k)
+		if m.left.tree.filter != "" || m.left.tree.cursorRowID() != "n1:w2" || m.mainRow() != "n1:w2" {
+			t.Errorf("%s on a workspace should clear the filter: filter=%q cursor=%q main=%q",
+				k.String(), m.left.tree.filter, m.left.tree.cursorRowID(), m.mainRow())
+		}
+	}
+
+	m, _ := upd(filtered("n1:p1"), keyMsg("l"))
+	if m.left.tree.filter != "feat" {
+		t.Errorf("l on a project should keep the filter: %q", m.left.tree.filter)
+	}
+
+	m = filtered("n1:w2")
+	m.main = backStack{workspaceComp{ws: "n1:w2"}} // already open
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.left.tree.filter != "" {
+		t.Errorf("enter on the open workspace should clear the filter: %q", m.left.tree.filter)
 	}
 }
 
@@ -1035,27 +1092,34 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 
 func TestProjectHintFollowsMappedKeys(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {
-		"<C-n>": "workspace new", "<C-r>": "project rename", "<C-l>": "fold open",
+		"<C-n>": "workspace new", "<C-r>": "project rename",
 	}})
 	m.width, m.height = 120, 30
-	m.left.tree.setFolded("n1:p1", true)
 	m = selectRow(m, "n1:p1")
-	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "^l unfold · ^n new workspace · ^r rename") {
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "^n new workspace · ^r rename") {
 		t.Errorf("the project hint names the mapped keys:\n%s", out)
 	}
 }
 
-func TestProjectHintOffersUnfoldOnlyWhenFolded(t *testing.T) {
+func TestProjectHintShowsBackAndManageKeys(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:p1")
-	if strings.Contains(ansi.Strip(m.View().Content), "l unfold") {
-		t.Error("an unfolded project should not offer l unfold")
+	out := ansi.Strip(m.View().Content)
+	if strings.Contains(out, "l unfold") {
+		t.Error("project hint must not show l unfold")
+	}
+	if !strings.Contains(out, "esc tree:") {
+		t.Error("project hint should show the back key with tree label")
 	}
 	m.left.tree.setFolded("n1:p1", true)
 	m = selectRow(m, "n1:p1")
-	if !strings.Contains(ansi.Strip(m.View().Content), "l unfold") {
-		t.Error("a folded project should offer l unfold")
+	out = ansi.Strip(m.View().Content)
+	if strings.Contains(out, "l unfold") {
+		t.Error("a folded project hint must not show l unfold")
+	}
+	if !strings.Contains(out, "esc tree:") {
+		t.Error("a folded project hint should still show the back key with tree label")
 	}
 }
 
@@ -1201,6 +1265,13 @@ func TestUnknownWorkspaceRefetchesTree(t *testing.T) {
 	}
 }
 
+func TestPaneOfAMissingWorkspaceSaysSo(t *testing.T) {
+	m := projectsTestModel()
+	if out := ansi.Strip(workspaceComp{ws: "n1:gone"}.column(&ctx{m: &m}, 80, 20)); out != "workspace not found" {
+		t.Errorf("column = %q, want workspace not found", out)
+	}
+}
+
 func TestProjectGitErrorShows(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
@@ -1301,5 +1372,27 @@ func TestRemappedHalfOfAPair(t *testing.T) {
 	runCmd(cmd)
 	if got := flagCalls(rc); len(got) != 0 {
 		t.Errorf("P mapped to pin must not unpin: %v", got)
+	}
+}
+
+func TestHelpRowFollowsTheHalfThatApplies(t *testing.T) {
+	row := func(m model, desc string) helpRow {
+		for _, g := range m.helpGroups() {
+			for _, r := range g.rows {
+				if r.desc == desc {
+					return r
+				}
+			}
+		}
+		t.Fatalf("no help row %q", desc)
+		return helpRow{}
+	}
+	m, _ := projectOnCursor(true, false)
+	m = withKeymap(m, map[string]map[string]string{"project-tree": {"P": "project unpin", "p": "project pin"}})
+	if r := row(m, "pin / unpin project"); r.name != "project unpin" || !strings.HasPrefix(r.key, "P") {
+		t.Errorf("a pinned project's row must show unpin and its key: name %q key %q", r.name, r.key)
+	}
+	if r := row(m, "hide / unhide project"); r.name != "project hide" {
+		t.Errorf("a shown project's row must show hide: name %q", r.name)
 	}
 }

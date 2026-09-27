@@ -31,6 +31,7 @@ func (s screenComp) spins(*ctx) bool           { return false }
 func (s screenComp) fullScreen(*ctx) fullLevel { return notFull }
 func (s screenComp) footer(*ctx) []binding     { return []binding{screenLeave} }
 func (s screenComp) offers(*ctx) []binding     { return nil }
+func (s screenComp) commands(*ctx) []binding   { return nil }
 func (s screenComp) pageStep(c *ctx) int       { return c.m.listPageStep() }
 func (s screenComp) layer() layer              { return screenLayer }
 

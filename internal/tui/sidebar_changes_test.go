@@ -79,7 +79,8 @@ func TestChangesListRendersInSidebar(t *testing.T) {
 func TestChangesFollowWorkspace(t *testing.T) {
 	m := changesFocused(api.ChangedFile{Path: "old.go"})
 	m = withFocus(m, leftSidebar)
-	m, cmd := upd(m, keyMsg("j")) // to n1:w2
+	m = typeKeys(m, "j") // to n1:w2
+	m, cmd := upd(m, keyMsg("enter"))
 	if m.right.changes.ws != "n1:w2" || m.right.changes.files != nil || cmd == nil {
 		t.Fatalf("moving to n1:w2 should drop w1's changes and fetch w2's: ws=%q files=%v", m.right.changes.ws, m.right.changes.files)
 	}

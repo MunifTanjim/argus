@@ -14,6 +14,7 @@ func (t fileTreeComp) spins(*ctx) bool           { return false }
 func (t fileTreeComp) fullScreen(*ctx) fullLevel { return notFull }
 func (t fileTreeComp) close(*ctx) tea.Cmd        { return nil }
 func (t fileTreeComp) offers(c *ctx) []binding   { return c.m.baseComp().offers(c) }
+func (t fileTreeComp) commands(*ctx) []binding   { return sectionLists[t.section()].own }
 func (t fileTreeComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (t fileTreeComp) layer() layer              { return baseLayer }
 

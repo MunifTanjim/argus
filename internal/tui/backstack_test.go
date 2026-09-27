@@ -64,31 +64,31 @@ func TestBackStackResumeKeepsFirstReturn(t *testing.T) {
 	assertView(t, "<Esc>", m, viewTree)
 }
 
-func TestBackStackTreeFromSessionDropsTheWayBack(t *testing.T) {
+func TestBackStackTreeKeepsTheWayBackUntilEnterOpensAnotherRow(t *testing.T) {
 	m := wideWorkspace()
 	m = withFocus(m, mainPane)
 	m = pressKeys(m, keyMsg("enter"))
 	assertView(t, "<CR> on a session", m, viewSession)
 	m = pressKeys(m, cw('h')...)
-	assertView(t, "<C-w>h", m, viewTree)
-	m = pressKeys(m, cw('l')...)
+	assertView(t, "<C-w>h", m, viewSession)
+	m = pressKeys(pressKeys(m, cw('l')...), keyMsg("esc"))
+	assertView(t, "<Esc> after the tree", m, viewTree)
 	m = pressKeys(m, keyMsg("enter"))
-	assertView(t, "<CR> on the workspace's session", m, viewSession)
-	m = pressKeys(m, cw('h')...)
-	assertView(t, "second <C-w>h", m, viewTree)
+	m = pressKeys(pressKeys(m, cw('h')...), keyMsg("j"), keyMsg("enter"))
+	assertView(t, "<CR> on n1:w2", m, viewTree)
 	if len(m.main) != 1 {
 		t.Errorf("stack = %v, want one entry", m.main)
 	}
 }
 
-func TestBackStackHomeSessionTreeIsOnlyProjects(t *testing.T) {
+func TestBackStackHomeSessionTreeKeepsTheStack(t *testing.T) {
 	m := homeTestModel()
 	m = withView(m, viewHome)
 	m = pressKeys(m, keyMsg("enter"))
 	assertView(t, "<CR> on a session", m, viewSession)
 	m = pressKeys(m, cw('h')...)
-	if len(m.main) != 1 || !isWorkspace(m.main.top()) {
-		t.Errorf("stack = %v, want [projects]", m.main)
+	if _, onHome := m.main[0].(homeComp); len(m.main) != 2 || !onHome || trOf(m).sessionID != "n1:s1" {
+		t.Errorf("stack = %T..., len %d, want [Home, n1:s1]", m.main[0], len(m.main))
 	}
 }
 
@@ -119,21 +119,8 @@ func TestBackStackResumeFromHistory(t *testing.T) {
 	assertView(t, "second <Esc>", m, viewHistorySessions)
 }
 
-// keptInSync reports whether the kept copy of the root pane's kind is the root
-// itself.
-func keptInSync(m model) bool {
-	switch r := m.rootComp().(type) {
-	case homeComp:
-		return r == m.keptHome
-	case workspaceComp:
-		return r == m.keptPane
-	}
-	return true
-}
-
-// A route away from a pane and back brings the pane back with its cursor, and
-// each routing step leaves the kept copy equal to the root.
-func TestKeptPanesMatchTheRoot(t *testing.T) {
+// A route away from a pane and back brings the pane back with its cursor.
+func TestPanesKeepTheirCursorOnTheWayBack(t *testing.T) {
 	onTree := func(m model) model { return pressKeys(m, cw('h')...) }
 	homeCursor := func(m model) int { return homeOf(m).cursor }
 	paneCursor := func(m model) int { return paneOf(m).cursor }
@@ -155,7 +142,6 @@ func TestKeptPanesMatchTheRoot(t *testing.T) {
 		{"Home to Logs and back", home, func(m model) model { return typeKeys(m, "gT") }, func(m model) model { return typeKeys(m, "gt") }, homeCursor},
 		{"Home to a session and back", home, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, homeCursor},
 		{"workspace pane to a session and back", pane, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, paneCursor},
-		{"workspace row to the Home row and back", pane, func(m model) model { return typeKeys(pressKeys(m, cw('h')...), "kk") }, func(m model) model { return typeKeys(m, "jj") }, paneCursor},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,12 +150,12 @@ func TestKeptPanesMatchTheRoot(t *testing.T) {
 				t.Fatalf("setup: cursor = %d, want 1", tc.cursor(m))
 			}
 			m = tc.away(m)
-			if tc.cursor(m) != 1 || !keptInSync(m) {
-				t.Fatalf("away: cursor = %d in sync = %v, want the pane kept on 1", tc.cursor(m), keptInSync(m))
+			if tc.cursor(m) != 1 {
+				t.Fatalf("away: cursor = %d, want the pane kept on 1", tc.cursor(m))
 			}
 			m = tc.back(m)
-			if tc.cursor(m) != 1 || !keptInSync(m) || !isPane(m.rootComp()) {
-				t.Errorf("back: root = %T cursor = %d in sync = %v, want the pane back on 1", m.rootComp(), tc.cursor(m), keptInSync(m))
+			if tc.cursor(m) != 1 || !isPane(m.rootComp()) {
+				t.Errorf("back: root = %T cursor = %d, want the pane back on 1", m.rootComp(), tc.cursor(m))
 			}
 		})
 	}
