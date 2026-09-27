@@ -111,18 +111,14 @@ func TestTreeShowsHomeWhileProjectsLoadOrFail(t *testing.T) {
 	}
 }
 
-func TestHomePreviewHasNoSelectedCard(t *testing.T) {
-	m := homeTestModel()
-	m = withView(m, viewTree)
-	m = withFocus(m, leftSidebar)
-	m.left.tree.rebuild()
-	m.left.tree.cursor = 0 // Home
-	preview := m.View().Content
-	if strings.Contains(preview, "┏") { // the selected card uses heavy chrome
-		t.Error("the Home preview must not highlight a card")
+func TestHomeUnderTheTreeHasASelectedCard(t *testing.T) {
+	m := pressKeys(homeTestModel(), cw('h')...)
+	out := m.View().Content
+	if !strings.Contains(out, "┏") { // the selected card uses heavy chrome
+		t.Error("Home under the tree should highlight its cursor card")
 	}
-	if !strings.Contains(ansi.Strip(preview), "repo") {
-		t.Error("the Home preview should show the session list")
+	if !strings.Contains(ansi.Strip(out), "repo") {
+		t.Error("Home under the tree should show the session list")
 	}
 }
 
@@ -152,8 +148,8 @@ func TestHomePaneKeysReturnToTree(t *testing.T) {
 		m.left.tree.cursor = 2 // a workspace, to prove we land on Home
 		res, cmd := m.handleKey(k)
 		mm := res.(model)
-		if viewOf(mm) != viewTree || mm.focused != leftSidebar || mm.left.tree.cursorRowID() != homeRowID {
-			t.Errorf("%q: view=%v focus=%v row=%q, want the tree on Home", k.String(), viewOf(mm), mm.focused, mm.left.tree.cursorRowID())
+		if viewOf(mm) != viewHome || mm.focused != leftSidebar || mm.left.tree.cursorRowID() != homeRowID {
+			t.Errorf("%q: view=%v focus=%v row=%q, want the tree on Home over Home", k.String(), viewOf(mm), mm.focused, mm.left.tree.cursorRowID())
 		}
 		if cmd != nil {
 			if _, quit := cmd().(tea.QuitMsg); quit {
@@ -176,8 +172,8 @@ func TestTreeQQuitsAndEscDoesNothing(t *testing.T) {
 		t.Error("Q on the tree should return tea.Quit")
 	}
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if mm := res.(model); viewOf(mm) != viewTree {
-		t.Errorf("esc on the tree left the screen: view=%v", viewOf(mm))
+	if mm := res.(model); viewOf(mm) != viewOf(m) || mm.focused != leftSidebar {
+		t.Errorf("esc on the tree changed something: view=%v focus=%v", viewOf(mm), mm.focused)
 	}
 }
 
@@ -244,8 +240,8 @@ func TestLeaderOWorksOutsideTheTree(t *testing.T) {
 	}
 	m = typeKeys(m, " o")
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if mm := res.(model); !mm.sidebarVisible() || viewOf(mm) != viewTree {
-		t.Errorf("␣o twice then esc should reach the tree: visible=%v view=%v", mm.sidebarVisible(), viewOf(mm))
+	if mm := res.(model); !mm.sidebarVisible() || !mm.treeFocused() || viewOf(mm) != viewHome {
+		t.Errorf("␣o twice then esc should reach the tree over Home: visible=%v focus=%v view=%v", mm.sidebarVisible(), mm.focused, viewOf(mm))
 	}
 
 	s := homeTestModel()
@@ -300,14 +296,15 @@ func TestTreeStartedSpawnRendersInPane(t *testing.T) {
 	assertFits(t, m.View().Content, 120)
 }
 
-func TestTreeReloadKeepsHomeWhileHomePaneShows(t *testing.T) {
+func TestTreeReloadMovesTheCursorToTheWantedRowAndKeepsHome(t *testing.T) {
 	m := homeTestModel() // Home pane
 	m.left.tree.rebuild()
 	m.left.tree.cursor = 0
 	m.left.tree.want = "n1:w2" // e.g. a workspace create finished meanwhile
 	res, _ := m.Update(projectsTreeMsg{tree: m.left.tree.data})
-	if got := res.(model).left.tree.cursorRowID(); got != homeRowID {
-		t.Errorf("tree reload moved the cursor to %q while the Home pane shows", got)
+	mm := res.(model)
+	if got := mm.left.tree.cursorRowID(); got != "n1:w2" || viewOf(mm) != viewHome {
+		t.Errorf("tree reload: cursor on %q view = %v, want n1:w2 over Home", got, viewOf(mm))
 	}
 }
 
@@ -334,7 +331,7 @@ func TestFilteredTreeFooterStillShowsQuit(t *testing.T) {
 
 func TestListViewSurvivesPendingKillWithNoCursor(t *testing.T) {
 	m := homeTestModel()
-	m = withHome(m, homeComp{cursor: -1, pendingKill: true})
+	m = withHome(m, homeComp{cursor: -1, killID: "n1:s1"})
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("listView panicked: %v", r)
@@ -473,6 +470,9 @@ func TestHiddenSidebarHomeMatchesWorkspace(t *testing.T) {
 func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 	m := homeTestModel()
 	m.order, m.sessions = nil, map[string]session.Session{}
+	if viewOf(m) != viewHome {
+		t.Fatalf("empty Home should show viewHome, got %v", viewOf(m))
+	}
 	if framed(m) || m.bodyWidth() != m.width {
 		t.Fatalf("empty Home should use the whole screen: embedded=%v bodyWidth=%d", framed(m), m.bodyWidth())
 	}
@@ -486,8 +486,8 @@ func TestEmptyHomeSplashIsFullScreen(t *testing.T) {
 
 	res, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	mm := res.(model)
-	if viewOf(mm) != viewTree || !strings.Contains(ansi.Strip(mm.View().Content), "Projects") {
-		t.Errorf("esc from the splash should show the tree: view=%v", viewOf(mm))
+	if !mm.treeFocused() || !strings.Contains(ansi.Strip(mm.View().Content), "Projects") {
+		t.Errorf("esc from the splash should show the tree: focus=%v", mm.focused)
 	}
 
 	m.sessions = map[string]session.Session{"n1:s1": {ID: "n1:s1", WorkspaceID: "n1:w1", Repo: "repo"}}
@@ -515,6 +515,7 @@ func TestHomeSKeyStartsSession(t *testing.T) {
 func TestHelpOpensFromHomeTabs(t *testing.T) {
 	for _, view := range []shownView{viewHome, viewHistoryProjects} {
 		m := homeTestModel()
+		m.height = 40
 		m = withView(m, view)
 		m = typeKeys(m, "g?")
 		if out := ansi.Strip(m.View().Content); !m.showHelp || !strings.Contains(out, "Manage (tree)") || !strings.Contains(out, "any key close") {
@@ -532,8 +533,8 @@ func TestFocusLeftFromHomeTabsReachesTree(t *testing.T) {
 		m := homeTestModel()
 		m = withView(m, view)
 		m = pressKeys(m, cw('h')...)
-		if viewOf(m) != viewTree || !m.treeFocused() {
-			t.Errorf("view %v, <C-w>h: want the tree: view=%v focus=%v", view, viewOf(m), m.focused)
+		if viewOf(m) != view || !m.treeFocused() || m.left.tree.cursorRowID() != homeRowID {
+			t.Errorf("view %v, <C-w>h: want the tree on Home over the view: view=%v focus=%v row=%q", view, viewOf(m), m.focused, m.left.tree.cursorRowID())
 		}
 	}
 }

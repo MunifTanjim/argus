@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,16 @@ func (ch changesComp) close(*ctx) tea.Cmd        { return nil }
 func (ch changesComp) offers(c *ctx) []binding   { return c.m.baseComp().offers(c) }
 func (ch changesComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (ch changesComp) layer() layer              { return baseLayer }
+
+// commands leaves out the diff mode in a commit's files, and collapse, which
+// only leaves a commit, outside them.
+func (ch changesComp) commands(*ctx) []binding {
+	drop := projectsKeys.Left
+	if ch.commit != nil {
+		drop = projectsKeys.DiffMode
+	}
+	return slices.DeleteFunc(slices.Clone(sectionLists[ch.section()].own), func(b binding) bool { return b.name == drop.name })
+}
 
 // The next sync after reload fetches everything again.
 func (ch *changesComp) reload() { *ch = changesComp{ws: ch.ws, against: ch.against, gen: ch.gen + 1} }

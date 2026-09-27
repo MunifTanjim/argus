@@ -40,15 +40,15 @@ func TestFocusTransitions(t *testing.T) {
 		want  container
 		view  shownView
 	}{
-		{"focusPane from the tree", wideWorkspace, keys(keyMsg("enter")), mainPane, viewTree},
+		{"enter from the tree", wideWorkspace, keys(keyMsg("enter")), mainPane, viewTree},
 		{"cycleFocus to the pane", wideWorkspace, keys(cw('w')...), mainPane, viewTree},
 		{"cycleFocus to the files", wideWorkspace, keys(append(cw('w'), cw('w')...)...), rightSidebar, viewTree},
 		{"cycleFocus back to the tree", wideWorkspace, keys(append(cw('w'), append(cw('w'), cw('w')...)...)...), leftSidebar, viewTree},
 		{"cycleFocus backward to the files", wideWorkspace, keys(cw('W')...), rightSidebar, viewTree},
 		{"pane left to the tree", wideWorkspace, keys(append(cw('l'), cw('h')...)...), leftSidebar, viewTree},
-		{"option A from Home", homeTestModel, keys(cw('h')...), leftSidebar, viewTree},
-		{"option A from a session", func() model { return workspaceSession(nil) }, keys(cw('h')...), leftSidebar, viewTree},
-		{"enterHome from the Home row", func() model {
+		{"tree over Home", homeTestModel, keys(cw('h')...), leftSidebar, viewHome},
+		{"tree over a session", func() model { return workspaceSession(nil) }, keys(cw('h')...), leftSidebar, viewSession},
+		{"enter on the Home row", func() model {
 			m := wideWorkspace()
 			m.left.tree.cursor = 0
 			return m
@@ -59,7 +59,7 @@ func TestFocusTransitions(t *testing.T) {
 		{"session esc back to the transcript", func() model { return workspaceSession(permission) }, keys(keyMsg("tab"), keyMsg("esc")), mainPane, viewSession},
 		{"session esc leaves an idle reply", func() model { return workspaceSession(idle) }, keys(keyMsg("tab"), keyMsg("esc")), mainPane, viewSession},
 		{"session pane down to the dock", func() model { return workspaceSession(permission) }, keys(cw('j')...), sessionDock, viewSession},
-		{"session cycle to the dock", func() model { return workspaceSession(permission) }, keys(cw('W')...), sessionDock, viewSession},
+		{"session cycle prev to the tree", func() model { return workspaceSession(permission) }, keys(cw('W')...), leftSidebar, viewSession},
 		{"session files", func() model { return workspaceSession(nil) }, keys(cw('l')...), rightSidebar, viewSession},
 		{"session files back", func() model { return workspaceSession(nil) }, keys(append(cw('l'), cw('h')...)...), mainPane, viewSession},
 		{"dock vanishing", func() model {
@@ -72,7 +72,7 @@ func TestFocusTransitions(t *testing.T) {
 		}, []tea.Msg{resumeResultMsg{sessionID: "n1:s1"}}, mainPane, viewSession},
 		{"enterSession takes focus off the tree", wideWorkspace, []tea.Msg{resumeResultMsg{sessionID: "n1:s1"}}, mainPane, viewSession},
 		{"right sidebar repair to the pane", filesFocused, text(" e"), mainPane, viewTree},
-		{"right sidebar repair to the tree", filesFocused, []tea.Msg{projectsTreeMsg{tree: []api.ProjectNode{}}}, leftSidebar, viewTree},
+		{"right sidebar repair to the pane when the tree empties", filesFocused, []tea.Msg{projectsTreeMsg{tree: []api.ProjectNode{}}}, mainPane, viewHome},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -84,6 +84,43 @@ func TestFocusTransitions(t *testing.T) {
 				t.Errorf("focused = %v view = %v, want %v view %v", m.focused, viewOf(m), c.want, c.view)
 			}
 		})
+	}
+}
+
+func TestPaneCycleOrderIsTheSameOnEveryScreen(t *testing.T) {
+	m := workspaceSession(&session.Interaction{Kind: session.InteractionPermission})
+	// forward: transcript → files → dock (dock is raw; use its own tab key to return)
+	m = pressKeys(m, cw('w')...)
+	if m.focused != rightSidebar {
+		t.Fatalf("<C-w>w #1: focused = %v, want %v", m.focused, rightSidebar)
+	}
+	m = pressKeys(m, cw('w')...)
+	if m.focused != sessionDock {
+		t.Fatalf("<C-w>w #2: focused = %v, want %v", m.focused, sessionDock)
+	}
+	m = pressKeys(m, keyMsg("tab"))
+	if m.focused != mainPane {
+		t.Fatalf("tab from dock: focused = %v, want %v", m.focused, mainPane)
+	}
+	// backward: transcript → tree (the unified order puts tree before the main pane)
+	m = pressKeys(m, cw('W')...)
+	if m.focused != leftSidebar {
+		t.Fatalf("<C-w>W from transcript: focused = %v, want %v", m.focused, leftSidebar)
+	}
+
+	// workspace pane: main → files → tree → main
+	m = withFocus(wideWorkspace(), mainPane)
+	m = pressKeys(m, cw('w')...)
+	if m.focused != rightSidebar {
+		t.Fatalf("workspace <C-w>w #1: focused = %v, want %v", m.focused, rightSidebar)
+	}
+	m = pressKeys(m, cw('w')...)
+	if m.focused != leftSidebar {
+		t.Fatalf("workspace <C-w>w #2: focused = %v, want %v", m.focused, leftSidebar)
+	}
+	m = pressKeys(m, cw('w')...)
+	if m.focused != mainPane {
+		t.Fatalf("workspace <C-w>w #3: focused = %v, want %v", m.focused, mainPane)
 	}
 }
 

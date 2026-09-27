@@ -22,6 +22,7 @@ func (s spawnComp) fullScreen(*ctx) fullLevel { return notFull }
 func (s spawnComp) footer(*ctx) []binding     { return nil }
 func (s spawnComp) close(*ctx) tea.Cmd        { return nil }
 func (s spawnComp) offers(*ctx) []binding     { return nil }
+func (s spawnComp) commands(*ctx) []binding   { return nil }
 func (s spawnComp) pageStep(c *ctx) int       { return c.m.listPageStep() }
 func (s spawnComp) layer() layer              { return overLayer }
 

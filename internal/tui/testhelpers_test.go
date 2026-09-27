@@ -22,8 +22,6 @@ const (
 	viewTree
 )
 
-// viewOf is what the main pane shows: the component under the overlays, and
-// for the Home pane, whether the tree previews it.
 func viewOf(m model) shownView {
 	v, _ := viewFor(m, m.baseComp())
 	return v
@@ -49,11 +47,8 @@ func viewFor(m model, comp component) (shownView, bool) {
 		}
 		return viewHistoryTranscript, true
 	case homeComp:
-		if m.homeOnTree() {
-			return viewTree, true
-		}
 		return viewHome, true
-	case workspaceComp:
+	case workspaceComp, summaryComp:
 		return viewTree, true
 	}
 	return 0, false
@@ -70,13 +65,11 @@ func withView(m model, v shownView) model {
 	case v == viewHistoryTranscript && !m.viewer:
 		return withViews(m, viewHistorySessions, v)
 	}
-	m.keepPanes()
 	m.main = backStack{mainComp(m, v)}
 	return m
 }
 
 func withViews(m model, vs ...shownView) model {
-	m.keepPanes()
 	m.main = nil
 	for _, v := range vs {
 		m.main = m.main.push(mainComp(m, v))
@@ -99,9 +92,20 @@ func mainComp(m model, v shownView) component {
 	case viewScreen:
 		return screenComp{}
 	case viewTree:
-		return m.rowPane()
+		return rowComp(m)
 	}
-	return m.keptHome
+	return m.homePane()
+}
+
+func rowComp(m model) component {
+	r, _ := m.cursorRow()
+	switch r.kind {
+	case rowWorkspace:
+		return workspaceComp{ws: r.id}
+	case rowProject, rowNode:
+		return summaryComp{kind: r.kind, id: r.id}
+	}
+	return m.homePane()
 }
 
 func (m *model) leaveView() { m.underOverlays(func() { m.main, _ = m.main.pop() }) }
@@ -163,9 +167,7 @@ func treeKey(m model, msg tea.KeyPressMsg) (model, tea.Cmd) {
 }
 
 func moveTree(m model, i int) model {
-	c := &ctx{m: &m}
-	m.left.tree = m.left.tree.move(c, i)
-	m.apply(c)
+	m.left.tree = m.left.tree.move(i)
 	return m
 }
 
@@ -257,37 +259,35 @@ func paneView(m model) string {
 // framed reports whether the frame draws its title and sidebars.
 func framed(m model) bool { return !m.layout().bare }
 
-// homeOf is the Home pane, shown or kept.
 func homeOf(m model) homeComp { return m.homePane() }
 
-// paneOf is the workspace pane, shown or kept.
 func paneOf(m model) workspaceComp {
-	if p, ok := m.rootComp().(workspaceComp); ok {
-		return p
-	}
-	return m.keptPane
+	p, _ := m.rootComp().(workspaceComp)
+	return p
 }
 
-// withHome sets the Home pane, shown or kept.
 func withHome(m model, h homeComp) model {
-	m.keepPanes()
-	m.keptHome = h
-	m.showKept()
+	m.memory.home.home = h
+	if _, ok := m.rootComp().(homeComp); ok {
+		m.main = m.main.replaceAt(0, h)
+	}
 	return m
 }
 
-// withPane sets the workspace pane, shown or kept.
 func withPane(m model, p workspaceComp) model {
-	m.keepPanes()
-	m.keptPane = p
-	m.showKept()
+	if _, ok := m.rootComp().(workspaceComp); !ok {
+		panic("withPane: root is not a workspace pane")
+	}
+	m.main = m.main.replaceAt(0, p)
 	return m
 }
 
-// selectRow moves the tree cursor to the row with id, as a tree motion does.
 func selectRow(m model, id string) model {
 	m.left.tree.selectRow(id)
-	m.syncPane()
+	focus := m.focused
+	m.showRow(id)
+	m.focused = focus
+	m, _ = m.syncMemory()
 	return m
 }
 
@@ -447,3 +447,25 @@ func (m *model) beginPresetSpawn(nodeID, cwd, prompt string) tea.Cmd {
 }
 
 func treePane(m model, w, h int) string { return m.left.tree.view(&ctx{m: &m}, w, h) }
+
+func isPane(comp component) bool {
+	switch comp.(type) {
+	case homeComp, workspaceComp, summaryComp:
+		return true
+	}
+	return false
+}
+
+func (m model) onHomeRow() bool {
+	r, ok := m.left.tree.cursorRow()
+	return ok && r.kind == rowHome
+}
+
+func (m model) selectedWorkspaceID() string { return m.left.tree.selectedWorkspaceID() }
+
+func (m model) cursorRow() (projectsRow, bool) { return m.left.tree.cursorRow() }
+
+// A hidden tree never holds focus in effect.
+func (m model) treeFocused() bool {
+	return m.focused == leftSidebar && m.sidebarVisible()
+}

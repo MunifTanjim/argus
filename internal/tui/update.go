@@ -46,20 +46,19 @@ func (m model) resyncCmd() tea.Cmd {
 	}
 }
 
-// Update runs the message, then repairs focus, keeps the dock's draft and the
-// right sidebar on the current session and workspace, and starts the spinner
-// when a shown component needs it.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	res, cmd := m.update(msg)
 	next, ok := res.(model)
 	if !ok {
 		return res, cmd
 	}
-	next, repair := next.repairFocus()
+	next, mem := next.syncMemory()
+	next = next.repairFocus()
+	next = next.leaveTree(m.focused)
 	next = next.syncDock()
 	next, sync := next.syncSidebar()
 	spin := next.maybeSpin()
-	return next, tea.Batch(cmd, repair, sync, spin)
+	return next, tea.Batch(cmd, mem, sync, spin)
 }
 
 func (m model) syncSidebar() (model, tea.Cmd) {
@@ -431,12 +430,22 @@ func (m *model) reorder() {
 		}
 		return a.ID < b.ID
 	})
-	m.keepPanes()
-	if m.keptHome.cursor >= len(m.order) {
-		m.keptHome.cursor = max(0, len(m.order)-1)
+	clamp := func(c int) int { return max(0, min(c, len(m.order)-1)) }
+	present := func(id string) string {
+		if _, ok := m.sessions[id]; ok {
+			return id
+		}
+		return ""
 	}
-	m.keptPane.cursor = min(m.keptPane.cursor, cursorBottom(len(m.paneSessions())))
-	m.showKept()
+	m.memory.home.home.cursor = clamp(m.memory.home.home.cursor)
+	switch p := m.rootComp().(type) {
+	case homeComp:
+		p.cursor, p.killID = clamp(p.cursor), present(p.killID)
+		m.main = m.main.replaceAt(0, p)
+	case workspaceComp:
+		p.cursor, p.killID = min(p.cursor, cursorBottom(len(m.wsSessions(p.ws)))), present(p.killID)
+		m.main = m.main.replaceAt(0, p)
+	}
 }
 
 // enterSession opens a session's transcript view. It subscribes by session id, so

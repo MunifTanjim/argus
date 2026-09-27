@@ -10,7 +10,7 @@ import (
 
 func TestProjectTreeIsTheLeftSidebarComponent(t *testing.T) {
 	m := projectsTestModel()
-	m = withPane(m, workspaceComp{ws: "n1:w1", cursor: 1})
+	m.main = backStack{workspaceComp{ws: "n1:w1", cursor: 1}}
 	var comp component = m.left.tree
 	if comp.section() != "project-tree" || comp.raw(&ctx{m: &m}) {
 		t.Fatalf("section = %q raw = %v, want project-tree and not raw", comp.section(), comp.raw(&ctx{m: &m}))
@@ -31,7 +31,7 @@ func TestTreeKeysReachOnlyTheFocusedTree(t *testing.T) {
 
 	tree := pressKeys(m, keyMsg("j"))
 	if tree.left.tree.cursorRowID() != "n1:w2" || paneOf(tree).cursor != 0 {
-		t.Errorf("j on the tree: row=%q wsCursor=%d, want the tree to move and the pane to follow", tree.left.tree.cursorRowID(), paneOf(tree).cursor)
+		t.Errorf("j on the tree: row=%q wsCursor=%d, want the tree to move and the pane to stay", tree.left.tree.cursorRowID(), paneOf(tree).cursor)
 	}
 
 	pane := pressKeys(withFocus(m, mainPane), keyMsg("j"))

@@ -59,6 +59,9 @@ func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.componentKey(msg)
 	}
 	if m.showHelp {
+		if mm, ok := m.helpKey(msg); ok {
+			return mm, nil
+		}
 		m.showHelp = false
 		return m, nil
 	}
@@ -81,10 +84,10 @@ func (m model) focusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	}
 	switch {
 	case m.offered(projectsKeys.Help) && m.matches(msg, projectsKeys.Help):
-		if m.onTreeScreen() {
+		if m.focused == leftSidebar || m.onRowPane() {
 			m.flash = ""
 		}
-		m.showHelp = true
+		m.showHelp, m.helpScroll = true, 0
 		return m, nil, true
 	case m.offered(listKeys.Quit) && m.matches(msg, listKeys.Quit):
 		mm, cmd := m.quit()
@@ -110,9 +113,13 @@ func (m model) handleSidebarToggle(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 	case m.matches(msg, projectsKeys.ToggleSidebar):
 		m.flash = ""
 		m.toggleSidebar()
+		m.focusTree()
 	case m.matches(msg, projectsKeys.ToggleFiles):
 		m.flash = ""
 		m.toggleFiles()
+		if m.filesReachable() {
+			m = m.focusContainer(rightSidebar)
+		}
 	default:
 		return m, nil, false
 	}
@@ -170,66 +177,103 @@ func (m *model) mainKey(c *ctx, msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// repairFocus moves focus off a container that is hidden or empty. The live
-// screen takes every key, so a dock under it keeps focus for the return.
-func (m model) repairFocus() (model, tea.Cmd) {
+// repairFocus leaves a dock under the live screen focused for the return: the
+// live screen takes every key anyway.
+func (m model) repairFocus() model {
 	_, onScreen := m.liveScreen()
 	switch {
 	case m.focused == sessionDock && !m.dockShown() && !onScreen:
 		m.focused = mainPane
-	case m.focused == rightSidebar && (!m.filesVisible() || m.currentWorkspace() == ""):
-		// The cursor left the workspaces; the tree is where it moved.
-		toTree := m.filesVisible() && isPane(m.baseComp()) && m.sidebarVisible()
+	case m.focused == rightSidebar && !m.filesReachable():
 		m.focused = mainPane
-		if toTree {
-			m.focused = leftSidebar
-		}
 	case m.focused == leftSidebar && !m.sidebarVisible():
-		// With no tree on screen, the Home row's pane is the Home pane itself.
-		if _, onHome := m.baseComp().(homeComp); onHome && m.onHomeRow() {
-			cmd := m.enterHome()
-			return m, cmd
-		}
 		m.focused = mainPane
-		if _, ok := m.baseComp().(workspaceComp); ok {
-			cmd := m.syncPane()
-			return m, cmd
+	}
+	return m
+}
+
+func (m model) treeReachable() bool { return !m.viewer && m.sidebarVisible() }
+
+func (m model) paneLeft() (tea.Model, tea.Cmd) {
+	switch m.focused {
+	case rightSidebar:
+		m = m.focusContainer(mainPane)
+	case mainPane:
+		m.focusTree()
+	}
+	return m, nil
+}
+
+func (m model) paneRight() (tea.Model, tea.Cmd) {
+	switch m.focused {
+	case leftSidebar:
+		m = m.focusContainer(mainPane)
+	case mainPane:
+		if m.filesReachable() {
+			m = m.focusContainer(rightSidebar)
 		}
 	}
 	return m, nil
 }
 
-type pane int
-
-const (
-	paneTree pane = iota
-	paneMain
-	paneFiles
-	paneDock
-)
-
-func (m model) currentPane() pane {
-	switch {
-	case m.onTreeScreen():
-		switch {
-		case m.treeFocused():
-			return paneTree
-		case m.focused == rightSidebar && m.filesVisible():
-			return paneFiles
-		}
-	case m.inSession():
-		switch {
-		case m.focused == rightSidebar:
-			return paneFiles
-		case m.focused == sessionDock:
-			return paneDock
-		}
+func (m model) paneOrder() []container {
+	var order []container
+	if m.treeReachable() {
+		order = append(order, leftSidebar)
 	}
-	return paneMain
+	order = append(order, mainPane)
+	if m.filesReachable() {
+		order = append(order, rightSidebar)
+	}
+	if m.dockShown() {
+		order = append(order, sessionDock)
+	}
+	return order
+}
+
+func (m model) cyclePane(d int) (tea.Model, tea.Cmd) {
+	order := m.paneOrder()
+	i := max(0, slices.Index(order, m.focused))
+	switch next := order[(i+d+len(order))%len(order)]; {
+	case next == leftSidebar:
+		m.focusTree()
+		return m, nil
+	default:
+		return m.focusContainer(next), nil
+	}
+}
+
+func (m model) focusContainer(k container) model {
+	m.focused = k
+	if k == sessionDock && m.idleComposerActive() {
+		m.sizeIdleReply()
+	}
+	return m
 }
 
 func (m model) filesReachable() bool {
 	return m.filesVisible() && m.currentWorkspace() != ""
+}
+
+func (m model) focusCommands() []binding {
+	pk, k := paneKeys, projectsKeys
+	var out []binding
+	if m.focused == rightSidebar || m.focused == mainPane && m.treeReachable() {
+		out = append(out, pk.Left)
+	}
+	if m.focused == leftSidebar || m.focused == mainPane && m.filesReachable() {
+		out = append(out, pk.Right)
+	}
+	if m.focused == mainPane && m.dockShown() {
+		out = append(out, pk.Down)
+	}
+	if len(m.paneOrder()) > 1 {
+		out = append(out, pk.Next, pk.Prev)
+	}
+	if !m.viewer {
+		out = append(out, k.ToggleSidebar, k.ToggleFiles)
+	}
+	return out
 }
 
 // A pane command with no pane in its direction still uses the key.
@@ -246,8 +290,8 @@ func (m model) handlePaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	case m.matches(msg, pk.Right):
 		mm, cmd = m.paneRight()
 	case m.matches(msg, pk.Down):
-		if m.inSession() && m.currentPane() == paneMain && m.sessionInteraction() != nil {
-			mm = m.focusSessionPane(paneDock)
+		if m.focused == mainPane && m.dockShown() {
+			mm = m.focusContainer(sessionDock)
 		}
 	case m.matches(msg, pk.Up):
 	case m.matches(msg, pk.Next):
@@ -258,89 +302,4 @@ func (m model) handlePaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	return mm, cmd, true
-}
-
-func (m model) paneLeft() (tea.Model, tea.Cmd) {
-	switch m.currentPane() {
-	case paneFiles:
-		if m.onTreeScreen() {
-			return m.focusPane()
-		}
-		m.focused = mainPane
-	case paneMain:
-		if m.onTreeScreen() {
-			if m.sidebarVisible() {
-				m.focused = leftSidebar
-			}
-			return m, nil
-		}
-		return m.openTree()
-	}
-	return m, nil
-}
-
-func (m model) paneRight() (tea.Model, tea.Cmd) {
-	switch m.currentPane() {
-	case paneTree:
-		return m.focusPane()
-	case paneMain:
-		if m.filesReachable() {
-			m.focused = rightSidebar
-		}
-	}
-	return m, nil
-}
-
-func (m model) cyclePane(d int) (tea.Model, tea.Cmd) {
-	switch {
-	case m.onTreeScreen():
-		return m.cycleFocus(d)
-	case m.inSession():
-		order := []pane{paneMain}
-		if m.filesReachable() {
-			order = append(order, paneFiles)
-		}
-		if m.sessionInteraction() != nil {
-			order = append(order, paneDock)
-		}
-		cur, i := m.currentPane(), 0
-		for j, p := range order {
-			if p == cur {
-				i = j
-			}
-		}
-		return m.focusSessionPane(order[(i+d+len(order))%len(order)]), nil
-	}
-	return m, nil
-}
-
-func (m model) focusSessionPane(p pane) model {
-	m.focused = mainPane
-	switch p {
-	case paneFiles:
-		m.focused = rightSidebar
-	case paneDock:
-		m.focused = sessionDock
-		if m.idleComposerActive() {
-			m.sizeIdleReply()
-		}
-	}
-	return m
-}
-
-// openTree leaves the main pane's component for the tree screen: on the
-// session's workspace row from a session, else on the Home row. The offline
-// viewer and a hidden sidebar have no tree.
-func (m model) openTree() (tea.Model, tea.Cmd) {
-	if m.viewer || !m.sidebarVisible() {
-		return m, nil
-	}
-	ws := m.currentWorkspace()
-	cmd := m.resetMain(func() component { return m.rowPane() })
-	m.focused = leftSidebar
-	if ws == "" || !m.left.tree.selectRow(ws) {
-		m.left.tree.cursor = 0
-	}
-	sync := m.syncPane()
-	return m, tea.Batch(cmd, sync)
 }

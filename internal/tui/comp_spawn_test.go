@@ -106,6 +106,28 @@ func TestSpawnFromTreeHomeRowReturnsFocusToTheTree(t *testing.T) {
 	assertSpawnClosed(t, "esc", m, n, leftSidebar)
 }
 
+func TestSpawnFromTreeKeepsTheCursorOnItsRow(t *testing.T) {
+	c := &spawnPickClient{}
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	m.client = c
+	m = selectRow(m, "n1:w1")
+	m = withFocus(m, leftSidebar)
+	m = typeKeys(m, "j")
+	if id := m.left.tree.cursorRowID(); id != "n1:w2" || baseWorkspace(m) != "n1:w1" {
+		t.Fatalf("j: cursor on %q base = %#v, want n1:w2 over the pane of n1:w1", id, m.baseComp())
+	}
+	n := len(m.main)
+	m, cmd := upd(m, keyMsg("s"))
+	m = runSpawnReplies(m, cmd)
+	assertSpawnOpen(t, "s on n1:w2", m, n)
+	m = pressKeys(m, keyMsg("esc"))
+	assertSpawnClosed(t, "esc", m, n, leftSidebar)
+	if id := m.left.tree.cursorRowID(); id != "n1:w2" {
+		t.Errorf("esc: cursor on %q, want n1:w2 (the row the spawn started from)", id)
+	}
+}
+
 func TestSpawnFromIssueOfferReturnsFocusToTheTree(t *testing.T) {
 	m := createTestModel(t)
 	m = withCreate(m, func(p *createPicker) { p.creating = true })
@@ -158,11 +180,11 @@ func TestSpawnReplyDropsAnArmedHomeKill(t *testing.T) {
 	m := killableHome()
 	m.client = &spawnPickClient{}
 	m = typeKeys(m, "jdd")
-	if !homeOf(m).pendingKill {
+	if homeOf(m).killID == "" {
 		t.Fatal("dd on Home should arm the kill")
 	}
 	m, _ = upd(m, spawnNodesMsg{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}, cwd: "/x"})
-	if homeOf(m).pendingKill {
+	if homeOf(m).killID != "" {
 		t.Error("the spawn reply should drop the kill hidden under the flow")
 	}
 	m, _ = upd(m, spawnAgentsMsg{})

@@ -26,6 +26,7 @@ func (s stubComp) footer(*ctx) []binding                                      { 
 func (s stubComp) spins(*ctx) bool                                            { return false }
 func (s stubComp) fullScreen(*ctx) fullLevel                                  { return notFull }
 func (s stubComp) offers(*ctx) []binding                                      { return nil }
+func (s stubComp) commands(*ctx) []binding                                    { return nil }
 func (s stubComp) layer() layer                                               { return baseLayer }
 func (s stubComp) pageStep(*ctx) int                                          { return 1 }
 func (s stubComp) close(*ctx) tea.Cmd {
@@ -79,6 +80,7 @@ func contractComponents(m model) []component {
 		historyComp{inProject: true},
 		newLogsComp(),
 		workspaceComp{ws: "n1:w1"},
+		summaryComp{kind: rowProject, id: "n1:p1"},
 		fileComp{ws: "n1:w1", path: "go.mod"},
 		newLiveTranscript("n1:s1"),
 		newTranscript(),

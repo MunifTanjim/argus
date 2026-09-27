@@ -184,9 +184,9 @@ func (m model) setupRunningAt(dir string) bool {
 	return false
 }
 
-// setupBlock heads the workspace pane while its setup runs or after it failed.
-func (m model) setupBlock(w int) string {
-	run := m.workspaceSetup(m.selectedWorkspaceID())
+// setupBlock heads the pane of workspace ws.
+func (m model) setupBlock(ws string, w int) string {
+	run := m.workspaceSetup(ws)
 	if run == nil || run.State == "ok" {
 		return ""
 	}
@@ -274,24 +274,34 @@ func projNodeLabel(p api.ProjectNode) string {
 	return "this machine"
 }
 
-func (m model) cursorRow() (projectsRow, bool) { return m.left.tree.cursorRow() }
-
-func (m model) selectedWorkspaceID() string { return m.left.tree.selectedWorkspaceID() }
-
-// paneSessions are the live sessions in the selected workspace, id-sorted.
-func (m model) paneSessions() []session.Session {
-	wsID := m.selectedWorkspaceID()
-	if wsID == "" {
+func (m model) wsSessions(ws string) []session.Session {
+	if ws == "" {
 		return nil
 	}
 	var out []session.Session
 	for _, s := range m.sessions {
-		if s.WorkspaceID == wsID {
+		if s.WorkspaceID == ws {
 			out = append(out, s)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// wsRow builds the row of workspace ws even when the tree does not show it.
+func (m model) wsRow(ws string) (projectsRow, bool) {
+	for _, p := range m.left.tree.data {
+		for _, w := range p.Workspaces {
+			if w.ID == ws {
+				return projectsRow{
+					kind: rowWorkspace, id: w.ID, label: filepath.Base(w.Dir), branch: w.Branch, plain: p.Kind == "plain",
+					target: w.TargetBranch, ws: []string{w.ID}, isGone: w.IsGone, isMain: w.IsMain,
+					setup: setupState(w.Setup),
+				}, true
+			}
+		}
+	}
+	return projectsRow{}, false
 }
 
 type wsActivity struct{ live, working, waiting int }
@@ -355,60 +365,17 @@ func (m model) badgeFor(a wsActivity) string {
 	return StyleDim.Render(statusGlyph(session.StatusIdle) + " " + n)
 }
 
-// enterHome moves focus into the Home pane (the homepage's session list).
-func (m *model) enterHome() tea.Cmd {
-	m.focused = mainPane
-	return m.resetMain(func() component { return m.keptHome })
-}
-
-func (m model) onHomeRow() bool { return m.left.tree.onHomeRow() }
-
-// focusPane moves focus to the pane of the tree's selected row.
-func (m model) focusPane() (tea.Model, tea.Cmd) {
-	c := &ctx{m: &m}
-	m.left.tree.focusPane(c)
-	cmd := m.apply(c)
-	return m, cmd
-}
-
-// treeFocused reports whether the tree has focus and is on screen; a hidden tree
-// never holds focus in effect.
-func (m model) treeFocused() bool {
-	return m.focused == leftSidebar && m.sidebarVisible()
-}
-
-// cycleFocus moves focus to the next visible, focusable panel: tree, pane,
-// files. The Home row's pane is the Home pane itself.
-func (m model) cycleFocus(d int) (tea.Model, tea.Cmd) {
-	var order []container
-	if m.sidebarVisible() {
-		order = append(order, leftSidebar)
-	}
-	order = append(order, mainPane)
-	if m.filesVisible() && m.currentWorkspace() != "" {
-		order = append(order, rightSidebar)
-	}
-	i := 0
-	for j, f := range order {
-		if f == m.focused {
-			i = j
-		}
-	}
-	next := order[(i+d+len(order))%len(order)]
-	if next == mainPane {
-		return m.focusPane()
-	}
-	m.focused = next
-	return m, nil
-}
-
-// --- view ---------------------------------------------------------------------
-
-// helpScreen draws the key help over the whole frame; any key closes it.
+// Any key but a scroll key closes the help screen.
 func (m model) helpScreen() string {
-	help := indentBlock(m.projectsHelpView(), strings.Repeat(" ", screenMargin))
-	footer := m.footer(hint("any key", "close"))
-	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, max(1, m.height-4), flexPanel(help)), footer, m.width, m.height)
+	lines := strings.Split(m.projectsHelpView(), "\n")
+	rows := m.helpRows()
+	top := min(m.helpScroll, max(0, len(lines)-rows))
+	help := indentBlock(strings.Join(lines[top:min(len(lines), top+rows)], "\n"), strings.Repeat(" ", screenMargin))
+	keys := []binding{hint("any key", "close")}
+	if len(lines) > rows {
+		keys = append([]binding{hint("↑/↓", "scroll")}, keys...)
+	}
+	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, rows, flexPanel(help)), m.footer(keys...), m.width, m.height)
 }
 
 func paneTitle(text string, focused bool) string {

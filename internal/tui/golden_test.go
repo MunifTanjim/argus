@@ -57,14 +57,14 @@ func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 			m.sessions, m.order = map[string]session.Session{}, nil
 			return m
 		}},
-		{"home-row-preview", func() model { return onTree(typeKeys(homeTestModel(), "j")) }},
-		{"home-row-preview-empty", func() model {
+		{"tree-over-home", func() model { return onTree(typeKeys(homeTestModel(), "j")) }},
+		{"tree-over-empty-home", func() model {
 			m := homeTestModel()
 			m.sessions, m.order = map[string]session.Session{}, nil
 			return onTree(m)
 		}},
-		{"project-row", func() model { return typeKeys(onTree(homeTestModel()), "j") }},
-		{"workspace-row", func() model { return typeKeys(onTree(homeTestModel()), "jj") }},
+		{"project-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter")) }},
+		{"workspace-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")) }},
 		{"workspace-pane", func() model {
 			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")), "j")
 		}},

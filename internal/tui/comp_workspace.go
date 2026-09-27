@@ -1,17 +1,11 @@
 package tui
 
 import (
-	"path/filepath"
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
-// workspaceComp is the workspace pane: the sessions of the tree's workspace
-// row, or an overview of its node or project row. ws is the workspace the
-// cursor was last reset for; killID is the session awaiting a kill
-// confirmation.
+// killID is the session awaiting a kill confirmation.
 type workspaceComp struct {
 	ws     string
 	cursor int
@@ -24,9 +18,10 @@ func (p workspaceComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return p, ni
 func (p workspaceComp) fullScreen(*ctx) fullLevel                 { return notFull }
 func (p workspaceComp) close(*ctx) tea.Cmd                        { return nil }
 func (p workspaceComp) offers(*ctx) []binding                     { return sectionOffers[p.section()].keys }
+func (p workspaceComp) commands(*ctx) []binding                   { return sectionLists[p.section()].own }
 func (p workspaceComp) layer() layer                              { return baseLayer }
 func (p workspaceComp) pageStep(c *ctx) int                       { return cardPageStep(c.m.paneRows()) }
-func (p workspaceComp) workspace(c *ctx) string                   { return c.m.selectedWorkspaceID() }
+func (p workspaceComp) workspace(*ctx) string                     { return p.ws }
 func (p workspaceComp) spins(c *ctx) bool                         { return c.m.anyWorking() }
 
 func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
@@ -39,14 +34,14 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		return p, nil, true
 	}
 	c.setFlash("")
-	if cmd, ok := p.treeKey(c, msg); ok {
+	if cmd, ok := paneTreeKey(c, msg, p.row(c)); ok {
 		return p, cmd, true
 	}
 	// A file over the pane passes it only the keys that act on the tree.
 	if _, onTop := m.main.top().(workspaceComp); !onTop {
 		return p, nil, false
 	}
-	ss := m.paneSessions()
+	ss := m.wsSessions(p.ws)
 	var cmd tea.Cmd
 	switch {
 	case m.matches(msg, projectsKeys.Up):
@@ -71,8 +66,8 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		}
 	case m.matches(msg, projectsKeys.Back):
 		if m.sidebarVisible() {
-			c.focusOn(leftSidebar)
-		} else { // no tree to return to: go to the Home pane
+			c.focusTree()
+		} else {
 			c.home()
 		}
 	case m.matches(msg, listKeys.Kill):
@@ -90,9 +85,7 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	return p, cmd, true
 }
 
-// treeKey runs the keys that act on the tree from the pane; the tree's manage
-// keys only say where they work.
-func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+func paneTreeKey(c *ctx, msg tea.KeyPressMsg, r projectsRow) (tea.Cmd, bool) {
 	m, k := c.m, projectsKeys
 	var cmd tea.Cmd
 	switch {
@@ -103,9 +96,13 @@ func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			c.setFlash("the filter needs the tree · " + m.keyText(k.ToggleSidebar) + " shows the tree")
 		}
 	case m.matches(msg, k.Spawn):
-		cmd = spawnSession(c)
+		cmd = spawnSession(c, r)
 	case m.matches(msg, k.SetupLog):
-		cmd = openSetupLog(c)
+		ws := ""
+		if r.kind == rowWorkspace {
+			ws = r.id
+		}
+		cmd = openSetupLog(c, ws)
 	case m.matches(msg, k.ShowHidden):
 		c.onTree(treeToggleHidden)
 	case m.matches(msg, k.ShowGone):
@@ -124,16 +121,24 @@ func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return cmd, true
 }
 
+func (p workspaceComp) row(c *ctx) projectsRow {
+	r, _ := c.m.wsRow(p.ws)
+	return r
+}
+
+func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	return paneTreeKey(c, msg, p.row(c))
+}
+
 func (p workspaceComp) view(c *ctx, w, h int) string {
 	cardW := min(w, maxCardWidth)
 	return centerBlock(p.column(c, cardW, max(1, h-footerRows)), cardW, w)
 }
 
-// fileHeader is the workspace row's header, which stays over a file opened on
-// the pane.
+// fileHeader stays over a file opened on the pane.
 func (p workspaceComp) fileHeader(c *ctx, w int) string {
-	r, ok := c.m.cursorRow()
-	if !ok || r.kind != rowWorkspace {
+	r, ok := c.m.wsRow(p.ws)
+	if !ok {
 		return ""
 	}
 	cardW := min(w, maxCardWidth)
@@ -141,64 +146,18 @@ func (p workspaceComp) fileHeader(c *ctx, w int) string {
 }
 
 func (p workspaceComp) column(c *ctx, w, h int) string {
-	m := c.m
-	r, ok := m.cursorRow()
+	r, ok := c.m.wsRow(p.ws)
 	if !ok {
-		return dimStyle.Render("no projects")
+		return dimStyle.Render("workspace not found")
 	}
-	if r.kind != rowWorkspace {
-		return p.summary(c, r, w)
-	}
-	return truncateLine(m.wsHeader(r), w) + "\n\n" + p.sessions(c, w, max(1, h-2))
-}
-
-// summary is the overview of a node or project row: what the row holds, with
-// the live session count per workspace.
-func (p workspaceComp) summary(c *ctx, r projectsRow, w int) string {
-	m := c.m
-	act := m.workspaceActivity()
-	var b strings.Builder
-	if r.kind == rowNode {
-		b.WriteString(StylePrimaryBold.Render(r.label) + "\n\n")
-		for _, pr := range m.left.tree.data {
-			if pr.NodeID != r.id || (pr.Hidden && !m.left.tree.showHidden) || (pr.IsGone && !m.left.tree.showGone) {
-				continue
-			}
-			pr.Workspaces = visibleWorkspaces(pr.Workspaces, m.left.tree.showGone)
-			line := "  " + projectLabel(pr.Name, pr.Hidden, pr.Pinned) + dimStyle.Render("  "+plural(len(pr.Workspaces), "workspace"))
-			b.WriteString(withBadge(line, m.activityBadge(act, workspaceIDs(pr)), w) + "\n")
-		}
-		return b.String()
-	}
-	pr, _ := m.findProject(r.id)
-	dir := pr.Root
-	if dir == "" {
-		dir = pr.Dir
-	}
-	b.WriteString(truncateLine(StylePrimaryBold.Render(pr.Name)+projectLabel("", pr.Hidden, pr.Pinned)+dimStyle.Render("  "+dir), w) + "\n\n")
-	if pr.Error != "" {
-		b.WriteString(truncateLine(StyleErrorBold.Render("git error: "+pr.Error), w) + "\n\n")
-	}
-	for _, ws := range visibleWorkspaces(pr.Workspaces, m.left.tree.showGone) {
-		row := projectsRow{
-			kind: rowWorkspace, id: ws.ID, label: filepath.Base(ws.Dir), branch: ws.Branch, target: ws.TargetBranch,
-			ws: []string{ws.ID}, isGone: ws.IsGone, isMain: ws.IsMain,
-		}
-		b.WriteString(m.projRowLine(row, false, false, act, w) + "\n")
-	}
-	hint := m.keyText(projectsKeys.New) + " new workspace · " + m.keyText(projectsKeys.Rename) + " rename"
-	if m.left.tree.isFolded(pr.ID) {
-		hint = m.keyText(projectsKeys.Right) + " unfold · " + hint
-	}
-	b.WriteString("\n" + dimStyle.Render(truncateLine(hint, w)))
-	return b.String()
+	return truncateLine(c.m.wsHeader(r), w) + "\n\n" + p.sessions(c, w, max(1, h-2))
 }
 
 func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	m := c.m
-	block := m.setupBlock(min(w, maxCardWidth))
+	block := m.setupBlock(p.ws, min(w, maxCardWidth))
 	avail = max(1, avail-lipgloss.Height(block))
-	ss := m.paneSessions()
+	ss := m.wsSessions(p.ws)
 	if len(ss) == 0 {
 		return block + dimStyle.Render("no sessions in this workspace")
 	}
@@ -231,70 +190,16 @@ func (p workspaceComp) footer(c *ctx) []binding {
 	return append(bindings, k.Help, helpAs(k.Back, "tree"))
 }
 
-// syncPane keeps the root on the tree's cursor row: the Home pane on the Home
-// row, else the workspace pane, whose cursor starts over for another
-// workspace. The pane that does not show is kept for the way back.
-func (m *model) syncPane() tea.Cmd {
-	m.keepPanes()
-	if ws := m.selectedWorkspaceID(); ws != "" && m.keptPane.ws != ws {
-		m.keptPane = workspaceComp{ws: ws}
-	}
-	if root := m.rootComp(); isPane(root) {
-		// A kill prompt must not come back unseen with the pane that leaves.
-		if _, onHome := root.(homeComp); onHome != m.onHomeRow() {
-			m.disarmKept()
-		}
-		m.main = m.main.replaceAt(0, m.rowPane())
-	}
-	return nil
-}
-
-func (m model) rowPane() component {
-	if m.onHomeRow() {
-		return m.keptHome
-	}
-	return m.keptPane
-}
-
-func isPane(comp component) bool {
-	switch comp.(type) {
-	case homeComp, workspaceComp:
-		return true
-	}
-	return false
-}
-
-// keepPanes saves the Home or workspace pane at the root, so that it comes back
-// with its cursor once another component replaces it.
-func (m *model) keepPanes() {
-	switch p := m.rootComp().(type) {
-	case homeComp:
-		m.keptHome = p
-	case workspaceComp:
-		m.keptPane = p
-	}
-}
-
 // disarmRoot drops a kill confirmation on the root pane before a component
 // covers it, so an unseen prompt cannot take a later key.
 func (m *model) disarmRoot() {
-	m.keepPanes()
-	m.disarmKept()
-	m.showKept()
-}
-
-func (m *model) disarmKept() {
-	m.keptHome.pendingKill = false
-	m.keptPane.killID = ""
-}
-
-// showKept puts the kept pane of the root's kind back at the root.
-func (m *model) showKept() {
-	switch m.rootComp().(type) {
+	switch p := m.rootComp().(type) {
 	case homeComp:
-		m.main = m.main.replaceAt(0, m.keptHome)
+		p.killID = ""
+		m.main = m.main.replaceAt(0, p)
 	case workspaceComp:
-		m.main = m.main.replaceAt(0, m.keptPane)
+		p.killID = ""
+		m.main = m.main.replaceAt(0, p)
 	}
 }
 

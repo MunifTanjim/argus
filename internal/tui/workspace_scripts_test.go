@@ -319,7 +319,7 @@ func TestSetupBlockHintIsTruncated(t *testing.T) {
 	m := projectsTestModel()
 	m = withSetup(m, 1, &api.ScriptRun{State: "failed", Command: "x", ExitCode: 1})
 	m = selectRow(m, "n1:w2")
-	for _, l := range strings.Split(m.setupBlock(20), "\n") {
+	for _, l := range strings.Split(m.setupBlock("n1:w2", 20), "\n") {
 		if w := ansi.StringWidth(l); w > 20 {
 			t.Errorf("line %q is %d wide, want at most 20", ansi.Strip(l), w)
 		}

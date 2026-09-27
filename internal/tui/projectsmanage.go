@@ -23,8 +23,7 @@ func (m model) forgetProjectCmd(projectID string) tea.Cmd {
 	}
 }
 
-func openSetupLog(c *ctx) tea.Cmd {
-	wsID := c.m.selectedWorkspaceID()
+func openSetupLog(c *ctx, wsID string) tea.Cmd {
 	if wsID == "" {
 		c.setFlash("select a workspace to see its setup log")
 		return nil
@@ -63,22 +62,20 @@ func (m model) removePrompt() string {
 	return "remove workspace " + name + "? " + teardown + "y/n"
 }
 
-// spawnSession starts a session in the selected workspace, or the selected
-// project's main workspace, with its node and directory fixed. On the Home row
-// it runs the full spawn flow.
-func spawnSession(c *ctx) tea.Cmd {
+// spawnSession fixes the new session's node and directory to row r's workspace.
+func spawnSession(c *ctx, r projectsRow) tea.Cmd {
 	m := c.m
-	wsID := m.selectedWorkspaceID()
-	if r, ok := m.cursorRow(); ok {
-		switch r.kind {
-		case rowHome:
-			return m.newSessionCmd()
-		case rowProject:
-			if p, ok := m.findProject(r.id); ok {
-				for _, w := range p.Workspaces {
-					if w.IsMain {
-						wsID = w.ID
-					}
+	var wsID string
+	switch r.kind {
+	case rowHome:
+		return m.newSessionCmd()
+	case rowWorkspace:
+		wsID = r.id
+	case rowProject:
+		if p, ok := m.findProject(r.id); ok {
+			for _, w := range p.Workspaces {
+				if w.IsMain {
+					wsID = w.ID
 				}
 			}
 		}
@@ -99,8 +96,6 @@ func spawnSession(c *ctx) tea.Cmd {
 func (m model) findWorkspace(id string) (api.WorkspaceNode, bool) {
 	return m.left.tree.findWorkspace(id)
 }
-
-// --- commands -----------------------------------------------------------------
 
 func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
 	client, ok, next := m.client, "removed "+m.workspaceLabel(workspaceID), m.left.tree.removeNeighbor(workspaceID)

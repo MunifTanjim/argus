@@ -184,7 +184,7 @@ func TestBackClosesTheSessionStream(t *testing.T) {
 	assertUnsubscribed(t, rc, sub...)
 }
 
-func TestLeavingForTheTreeClosesBothStreams(t *testing.T) {
+func TestOpeningAnotherRowClosesBothStreams(t *testing.T) {
 	rc := &recordingClient{}
 	m := resumeInto(streamModel(rc), "n1:s1", subagentChunk())
 	m = drillSubagent(t, m)
@@ -192,28 +192,32 @@ func TestLeavingForTheTreeClosesBothStreams(t *testing.T) {
 	if len(subs) != 2 {
 		t.Fatalf("setup: want the session and the subagent streams, got %v", subs)
 	}
-	var cmd tea.Cmd
-	for _, k := range cw('h') {
-		m, cmd = upd(m, k)
+	m = pressKeys(m, cw('h')...)
+	if viewOf(m) != viewSession || m.focused != leftSidebar {
+		t.Fatalf("focus left should keep the session: view=%v focus=%v", viewOf(m), m.focused)
 	}
+	if got := rc.subIDs(api.MethodTranscriptUnsubscribe); len(got) != 0 {
+		t.Fatalf("focus left closed streams %v", got)
+	}
+	m = typeKeys(m, "j")
+	m, cmd := upd(m, keyMsg("enter"))
 	runCmd(cmd)
-	if viewOf(m) != viewTree || m.focused != leftSidebar {
-		t.Fatalf("focus left should leave for the tree: view=%v focus=%v", viewOf(m), m.focused)
+	if viewOf(m) != viewTree {
+		t.Fatalf("<CR> on n1:w2 should open its pane: view=%v", viewOf(m))
 	}
 	assertUnsubscribed(t, rc, subs...)
 }
 
-func TestLeavingForTheTreeUnderAFileClosesTheStream(t *testing.T) {
+func TestOpeningAnotherRowUnderAFileClosesTheStream(t *testing.T) {
 	rc := &recordingClient{}
 	m := resumeInto(streamModel(rc), "n1:s1")
 	m = withFile(m, fileComp{ws: "n1:w1", path: "go.mod"})
 	m = withFocus(m, mainPane)
 	sub := rc.subIDs(api.MethodTranscriptSubscribe)
-	res, cmd := m.openTree()
-	m = res.(model)
+	cmd := m.openRow("n1:w2")
 	runCmd(cmd)
 	if viewOf(m) != viewTree || !m.hasOpenFile() {
-		t.Fatalf("the tree screen should keep the file open: view=%v file=%v", viewOf(m), m.hasOpenFile())
+		t.Fatalf("the new stack should keep the file open: view=%v file=%v", viewOf(m), m.hasOpenFile())
 	}
 	assertUnsubscribed(t, rc, sub...)
 }
@@ -272,7 +276,7 @@ func TestRebuildingTheStackClosesTheStream(t *testing.T) {
 	rc := &recordingClient{}
 	m := resumeInto(streamModel(rc), "n1:s1")
 	sub := rc.subIDs(api.MethodTranscriptSubscribe)
-	cmd := m.enterHome()
+	cmd := m.showHome()
 	runCmd(cmd)
 	if viewOf(m) != viewHome {
 		t.Fatalf("view = %v, want Home", viewOf(m))

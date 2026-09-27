@@ -85,9 +85,8 @@ func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, 
 	cmds := []tea.Cmd{cmd}
 	run := func(k tea.KeyPressMsg) {
 		mm, c := m.runKey(k)
-		var repair tea.Cmd
-		m, repair = mm.(model).repairFocus()
-		cmds = append(cmds, c, repair)
+		m = mm.(model).repairFocus()
+		cmds = append(cmds, c)
 	}
 	for _, k := range matched {
 		run(k)

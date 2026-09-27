@@ -278,6 +278,13 @@ func (m model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (h historyComp) commands(*ctx) []binding {
+	if h.inProject {
+		return bindingsOf(historySessionsKeys, transcriptKeys.Export)
+	}
+	return bindingsOf(historyProjectsKeys, listKeys.TabPrev, listKeys.TabNext)
+}
+
 func (h historyComp) offers(*ctx) []binding {
 	if h.inProject {
 		return nil

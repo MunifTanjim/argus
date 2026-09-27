@@ -132,6 +132,67 @@ func TestCommandSetIsTheFocusedComponents(t *testing.T) {
 	}
 }
 
+func TestCommandSetFollowsTheView(t *testing.T) {
+	redactList := newRedactModel()
+	redactList = withTr(redactList, func(t *transcriptComp) { t.redact.listActive = true })
+	cases := []struct {
+		name       string
+		m          model
+		has, lacks []string
+	}{
+		{"summary", withFocus(selectRow(wideWorkspace(), "n1:p1"), mainPane),
+			[]string{"session spawn", "filter-projects", "back"},
+			[]string{"prev", "next", "open", "session kill", "open tmux-pane"}},
+		{"live transcript", waitingSession(),
+			[]string{"open live-screen", "next card"},
+			[]string{"session resume", "transcript export", "redaction add"}},
+		{"history transcript", historyTranscript(false),
+			[]string{"session resume", "transcript export", "next card"},
+			[]string{"open live-screen", "focus prompt", "prev", "redaction remove"}},
+		{"history card detail", pressKeys(historyTranscript(false), keyMsg("enter")),
+			[]string{"open", "prev", "back"},
+			[]string{"next card", "session resume", "transcript export"}},
+		{"redaction list", redactList,
+			[]string{"prev", "redaction remove", "redaction add"},
+			[]string{"next card", "redaction list", "redaction save"}},
+		{"History project list", withHistoryProjects(homeTestModel(), historyProjects()...),
+			[]string{"refresh", "tab next"},
+			[]string{"session load-more", "session resume", "transcript export"}},
+		{"History sessions", withHistorySessions(homeTestModel(), histProj, historyPage()),
+			[]string{"session load-more", "session resume", "transcript export"},
+			[]string{"refresh", "tab next"}},
+		{"viewer", historyTranscript(true),
+			[]string{"next card", "back"},
+			[]string{"focus left", "focus next", "toggle left-sidebar", "toggle right-sidebar", "session resume"}},
+		{"tree", wideWorkspace(),
+			[]string{"focus right", "toggle left-sidebar"},
+			[]string{"focus left", "focus down", "focus up"}},
+		{"Changes tab", changesFocused(),
+			[]string{"toggle diff-vs-target", "focus left"},
+			[]string{"fold close", "focus right"}},
+	}
+	for _, c := range cases {
+		set := map[string]bool{}
+		for _, b := range c.m.commandSet() {
+			set[b.name] = true
+		}
+		for _, n := range c.has {
+			if !set[n] {
+				t.Errorf("%s: the set lacks %s", c.name, n)
+			}
+		}
+		for _, n := range c.lacks {
+			if set[n] {
+				t.Errorf("%s: the set has %s, which does nothing there", c.name, n)
+			}
+		}
+	}
+	m := pressKeys(typeKeys(withFocus(selectRow(wideWorkspace(), "n1:p1"), mainPane), ":session kill"), keyMsg("enter"))
+	if m.flash != "unknown command: session kill" {
+		t.Errorf("a command outside the set flashed %q", m.flash)
+	}
+}
+
 func TestCommandWithRemovedKeysRunsByName(t *testing.T) {
 	m := withKeymap(wideWorkspace(), map[string]map[string]string{
 		"project-tree": {"z.": ""},

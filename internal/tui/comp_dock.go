@@ -42,6 +42,7 @@ func (d dockComp) spins(*ctx) bool           { return false }
 func (d dockComp) fullScreen(*ctx) fullLevel { return notFull }
 func (d dockComp) close(*ctx) tea.Cmd        { return nil }
 func (d dockComp) offers(*ctx) []binding     { return nil }
+func (d dockComp) commands(*ctx) []binding   { return nil }
 func (d dockComp) pageStep(c *ctx) int       { return c.m.listPageStep() }
 func (d dockComp) layer() layer              { return baseLayer }
 

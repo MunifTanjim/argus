@@ -37,6 +37,13 @@ func TestFooterShowsARemappedPair(t *testing.T) {
 	}
 }
 
+func TestHelpNamesTheMappedExpandKey(t *testing.T) {
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"l": "", "<Right>": "", "zo": "", "o": "fold open"}})
+	if out := ansi.Strip(m.projectsHelpView()); !strings.Contains(out, "open; o opens Home/workspace") {
+		t.Errorf("help should name o, the mapped expand key:\n%s", out)
+	}
+}
+
 func TestHelpShowsCommandNamesAndUserKeys(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-y>": "toggle show-hidden"}})
 	m.width, m.height = 160, 50

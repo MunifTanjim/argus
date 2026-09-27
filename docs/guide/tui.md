@@ -27,21 +27,38 @@ The TUI opens on the projects screen. The screen has three columns and a dock:
 
 - **Left sidebar**: Home, then each project and its workspaces. A project is a git
   repository or a plain directory. A workspace is one git worktree.
-- **Main pane**: the Home tabs, the sessions of the selected workspace, or an
-  open session, file, or diff.
+- **Main pane**: the Home tabs, the sessions of the workspace you opened, a
+  project summary, or an open session, file, or diff.
 - **Right sidebar**: the **Files** tree and the **Changes** list of the current
   workspace.
 - **Session dock**: under the main pane, while an open session waits for input.
   It holds the reply, the question, or the permission prompt.
 
-Argus adds a project when a session starts in it. Press `g?` to see every key. The
-main keys are:
+Argus adds a project when a session starts in it.
+
+Moving the cursor in the tree does not change the main pane. Press `<CR>` to
+open the row under the cursor:
+
+- **Home** or a **workspace** opens the view it showed last. A workspace
+  reopens the session that was open in it, at the end of its transcript. If you
+  closed that session with `<Esc>`, the workspace opens its session list.
+- A **project** or a **node** opens a summary of its workspaces. Use `h` and
+  `l` to fold and unfold it.
+
+On the Home row or a workspace row, `l` does the same as `<CR>`.
+
+`<C-w>h` moves focus to the tree and does not change the main pane. The cursor
+moves to the row of the view in the main pane.
+
+Press `g?` to see every key. The main keys are:
 
 | Key | Action |
 |---|---|
 | `<C-w>h` / `<C-w>l` | Move focus left or right |
 | `<C-w>j` | In a session, move focus to the session dock |
 | `<C-w>w` / `<C-w>W` | Cycle focus forward or backward |
+| `<CR>` | In the tree, open the row under the cursor |
+| `l` | In the tree, open the Home row or a workspace row, or unfold a project or node row |
 | `s` | Start a session in the selected workspace |
 | `a` | Create a workspace from a new branch, a branch, a PR, or an issue |
 | `dd` / `D` | Remove a workspace, or remove it and discard its uncommitted changes |
@@ -75,7 +92,8 @@ Workspaces from a PR or an issue need the GitHub CLI. See
 
 Press `:` to open the command line. Type a command name and press `<CR>` to
 run it. The command runs on the part of the screen that has focus, the same
-as its key. A command works only where its key works.
+as its key. The command line offers only the commands that do something in
+the current view. Another name shows `unknown command`.
 
 | Key | Action |
 |---|---|

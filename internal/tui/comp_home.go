@@ -10,18 +10,18 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// homeComp is the Home pane: every session as a card. pendingKill asks to kill
-// the session under the cursor.
+// killID is the session awaiting a kill confirmation.
 type homeComp struct {
-	cursor      int
-	pendingKill bool
+	cursor int
+	killID string
 }
 
 func (h homeComp) section() string                           { return "home" }
-func (h homeComp) raw(*ctx) bool                             { return h.pendingKill }
+func (h homeComp) raw(*ctx) bool                             { return h.killID != "" }
 func (h homeComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return h, nil }
 func (h homeComp) close(*ctx) tea.Cmd                        { return nil }
 func (h homeComp) offers(*ctx) []binding                     { return sectionOffers[h.section()].keys }
+func (h homeComp) commands(*ctx) []binding                   { return sectionLists[h.section()].own }
 func (h homeComp) layer() layer                              { return baseLayer }
 func (h homeComp) spins(c *ctx) bool                         { return c.m.anyWorking() }
 
@@ -35,10 +35,10 @@ func (h homeComp) fullScreen(c *ctx) fullLevel {
 
 func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m, k, n := c.m, listKeys, len(c.m.order)
-	if h.pendingKill {
-		h.pendingKill = false
-		if msg.String() == "y" && h.cursor < n {
-			return h, m.killCmd(m.order[h.cursor]), true
+	if id := h.killID; id != "" {
+		h.killID = ""
+		if msg.String() == "y" {
+			return h, m.killCmd(id), true
 		}
 		return h, nil, true
 	}
@@ -76,7 +76,7 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			if refusal := killRefusal(m.sessions[m.order[h.cursor]]); refusal != "" {
 				c.setFlash(refusal)
 			} else {
-				h.pendingKill = true
+				h.killID = m.order[h.cursor]
 			}
 		}
 	case m.matches(msg, k.Refresh):
@@ -87,15 +87,13 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			cmd = m.refreshCmd()
 		}
 	case m.matches(msg, k.Back):
-		c.openTree()
+		c.focusTree()
 	default:
 		return h, nil, false
 	}
 	return h, cmd, true
 }
 
-// view draws the cards at w by h. While the tree has focus and previews the
-// Home pane, no card is selected.
 func (h homeComp) view(c *ctx, w, ht int) string {
 	m := c.m
 	// The status bar shows connection and quarantine state when framed; the bare
@@ -120,9 +118,6 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 		return h.welcome(c, title, chrome, w, ht)
 	}
 	sel := h.cursor
-	if m.homeOnTree() {
-		sel = -1
-	}
 	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
 	// On a gateway, a host header precedes each group.
 	grouped := m.grouped()
@@ -184,34 +179,14 @@ func (h homeComp) footer(c *ctx) []binding {
 func (h homeComp) footerText(c *ctx) string {
 	m := c.m
 	switch {
-	case h.pendingKill && h.cursor >= 0 && h.cursor < len(m.order):
-		return asstStyle.Render(killPrompt(m.sessions[m.order[h.cursor]]))
+	case h.killID != "":
+		return asstStyle.Render(killPrompt(m.sessions[h.killID]))
 	case len(m.keyBuf) > 0:
 		return asstStyle.Render(m.keyHint())
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
 	}
 	return m.footer(h.footer(c)...)
-}
-
-// homePane is the Home pane: at the root, or kept while another component
-// stands there.
-func (m model) homePane() homeComp {
-	if h, ok := m.rootComp().(homeComp); ok {
-		return h
-	}
-	return m.keptHome
-}
-
-// homeOnTree reports whether the tree has focus and previews the Home pane.
-// The spawn flow holds focus while open, so the pane under it is read with the
-// focus from before it.
-func (m model) homeOnTree() bool {
-	focus := m.focused
-	if s, ok := m.spawnTop(); ok {
-		focus = s.back
-	}
-	return focus == leftSidebar && m.sidebarVisible()
 }
 
 // jump reveals s's tmux pane in the terminal argus runs in.
@@ -225,18 +200,4 @@ func jump(c *ctx, s session.Session) tea.Cmd {
 	return jumpCmd(paneID)
 }
 
-// pageStep pages the cards from the whole pane while the tree previews Home,
-// as the workspace pane does, and from below the tabs otherwise.
-func (h homeComp) pageStep(c *ctx) int {
-	if c.m.homeOnTree() {
-		return cardPageStep(c.m.paneRows())
-	}
-	return c.m.listPageStep()
-}
-
-func (h homeComp) workspace(c *ctx) string {
-	if c.m.homeOnTree() {
-		return c.m.selectedWorkspaceID()
-	}
-	return ""
-}
+func (h homeComp) pageStep(c *ctx) int { return c.m.listPageStep() }
