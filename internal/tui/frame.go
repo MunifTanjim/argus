@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -68,11 +69,33 @@ func (m model) frame() string {
 	c := &ctx{m: &m}
 	pane := m.mainColumn(c, l)
 	footer := m.currentFooter()
-	if l.bare {
-		return pinFooter(pane, footer, m.width, m.height)
+	if len(m.popups) > 0 {
+		footer = m.popupFooter()
 	}
-	body := m.frameTitle() + "\n\n" + m.framedBody(c, l, pane)
-	return pinFooter(body, footer, m.width, m.height)
+	var out string
+	if l.bare {
+		out = pinFooter(pane, footer, m.width, m.height)
+	} else {
+		out = pinFooter(m.frameTitle()+"\n\n"+m.framedBody(c, l, pane), footer, m.width, m.height)
+	}
+	return m.drawPopups(out)
+}
+
+func (m model) mainRect() uv.Rectangle {
+	l := m.layout()
+	h := max(1, l.h-footerRows)
+	if l.bare {
+		return uv.Rect(0, 0, l.w, h)
+	}
+	x := screenMargin
+	switch {
+	case l.full:
+		x = 0
+	case l.left > 0:
+		x = l.left + screenMargin + dividerWidth
+	}
+	// The body starts below the title row and a blank row.
+	return uv.Rect(x, 2, l.w, h)
 }
 
 // helpShown reports whether the help overlay shows. A spawn flow over the tree
@@ -192,6 +215,9 @@ func (m model) spinShown() bool {
 		return false
 	}
 	c := &ctx{m: &m}
+	if p := m.popups.front(); p != nil && p.spins(c) {
+		return true
+	}
 	l := m.layout()
 	if top := m.main.top(); top != nil && top.spins(c) {
 		return true

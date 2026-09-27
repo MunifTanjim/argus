@@ -52,6 +52,8 @@ main keys are:
 | `S` | Run the workspace's setup script again |
 | `L` | Show the output of the workspace's last setup run |
 
+The `<C-w>` keys also work if you hold Ctrl for the second key, as in Vim. For example, `<C-w><C-h>` is the same as `<C-w>h`. The help does not list these keys.
+
 `<Leader>` is the leader key. The default leader is `<Space>`, so `<Leader>o` is `<Space>o` and `<Leader>e` is `<Space>e`. You can change these keys. See [Keymaps](../getting-started/configuration.md#keymaps).
 
 A workspace with live sessions cannot be removed. Kill its sessions first.
@@ -68,6 +70,28 @@ previous file.
 
 Workspaces from a PR or an issue need the GitHub CLI. See
 [Configuration](/getting-started/configuration#workspaces).
+
+## Command line
+
+Press `:` to open the command line. Type a command name and press `<CR>` to
+run it. The command runs on the part of the screen that has focus, the same
+as its key. A command works only where its key works.
+
+| Key | Action |
+|---|---|
+| `<CR>` | Run the command |
+| `<Esc>` | Close the command line |
+| `<BS>` on an empty line | Close the command line |
+| `<Tab>` / `<S-Tab>` | Select the next or previous match |
+| `<C-n>` / `<C-p>` | Select the next or previous match |
+| `<Up>` / `<Down>` | Show an earlier or later command that starts with the typed text |
+
+- The list above the command line shows the commands that fuzzy-match the
+  typed text, with their keys. The best match comes first, and the matched
+  characters are highlighted. For example, `tls` finds `toggle left-sidebar`.
+- `:q` runs `quit`, and `:h` runs `help`.
+- History lasts until argus quits.
+- The keys of the command line and `:` cannot be changed.
 
 ## Export & View
 

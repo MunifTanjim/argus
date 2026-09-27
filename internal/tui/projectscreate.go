@@ -22,8 +22,7 @@ const (
 
 var createTabNames = []string{"New", "Branches", "PRs", "Issues"}
 
-// createComp is the workspace new picker, open over the main pane.
-type createComp struct {
+type createPicker struct {
 	projectID       string
 	project         string
 	defaultTarget   string
@@ -48,18 +47,18 @@ type createComp struct {
 	seq             int // tags this picker's create call; see projectTreeComp.createSeq
 }
 
-func newCreateComp(projectID, project, defaultTarget string, seq int) createComp {
+func newCreatePicker(projectID, project, defaultTarget string, seq int) createPicker {
 	name := textinput.New()
 	name.Prompt = ""
 	filter := textinput.New()
 	filter.Prompt = ""
-	return createComp{
+	return createPicker{
 		projectID: projectID, project: project, defaultTarget: defaultTarget,
 		name: name, filter: filter, branches: newBranchPicker(), seq: seq,
 	}
 }
 
-func (c createComp) targetLabel() string {
+func (c createPicker) targetLabel() string {
 	switch {
 	case c.tab == ctPRs:
 		return "from PR base"
@@ -117,7 +116,7 @@ func truncateEachLine(s string, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (p createComp) createCmd(c *ctx, params api.WorkspaceCreateParams) tea.Cmd {
+func (p createPicker) createCmd(c *ctx, params api.WorkspaceCreateParams) tea.Cmd {
 	client, seq := c.m.client, p.seq
 	return func() tea.Msg {
 		var r api.WorkspaceCreateResult
@@ -128,7 +127,7 @@ func (p createComp) createCmd(c *ctx, params api.WorkspaceCreateParams) tea.Cmd 
 
 // retryFailedTab clears the current tab's load error so ensureData fetches it
 // again.
-func (p *createComp) retryFailedTab() {
+func (p *createPicker) retryFailedTab() {
 	switch {
 	case p.tab == ctBranches && p.branches.err != nil:
 		p.branches.loaded, p.branches.err = false, nil
@@ -139,7 +138,7 @@ func (p *createComp) retryFailedTab() {
 	}
 }
 
-func (p createComp) listLoading() bool {
+func (p createPicker) listLoading() bool {
 	switch p.tab {
 	case ctBranches:
 		return !p.branches.loaded
@@ -151,7 +150,7 @@ func (p createComp) listLoading() bool {
 	return false
 }
 
-func (p createComp) ensureData(c *ctx) tea.Cmd {
+func (p createPicker) ensureData(c *ctx) tea.Cmd {
 	switch {
 	case p.tab == ctBranches && !p.branches.loaded:
 		return c.m.fetchBranchesCmd(p.projectID)
@@ -163,35 +162,35 @@ func (p createComp) ensureData(c *ctx) tea.Cmd {
 	return nil
 }
 
-func (p createComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
+func (p createPicker) handleKey(c *ctx, msg tea.KeyPressMsg) (popup, tea.Cmd) {
 	c.setFlash("")
 	if p.creating {
 		if msg.String() == "esc" {
-			leavePicker(c) // the call still finishes; its reply only reports
+			c.closePopup() // the call still finishes; its reply only reports
 		}
-		return p, nil, true
+		return p, nil
 	}
 	if p.picking {
 		var cmd tea.Cmd
 		p, cmd = p.targetPickKey(msg)
-		return p, cmd, true
+		return p, cmd
 	}
 	if c.m.matches(msg, createKeys.Target) {
 		if p.tab == ctPRs {
-			return p, nil, true
+			return p, nil
 		}
 		p.picking = true
 		p.targetPick = newBranchPicker()
 		if p.branches.loaded {
 			p.targetPick.branches, p.targetPick.loaded, p.targetPick.err = p.branches.branches, true, p.branches.err
-			return p, nil, true
+			return p, nil
 		}
-		return p, c.m.fetchBranchesCmd(p.projectID), true
+		return p, c.m.fetchBranchesCmd(p.projectID)
 	}
 	switch msg.String() {
 	case "esc":
-		leavePicker(c)
-		return p, nil, true
+		c.closePopup()
+		return p, nil
 	case "tab", "shift+tab":
 		d := 1
 		if msg.String() == "shift+tab" {
@@ -210,11 +209,11 @@ func (p createComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 			p.name.Blur()
 			focus = p.filter.Focus()
 		}
-		return p, tea.Batch(focus, p.ensureData(c)), true
+		return p, tea.Batch(focus, p.ensureData(c))
 	case "enter":
 		var cmd tea.Cmd
 		p, cmd = p.submit(c)
-		return p, cmd, true
+		return p, cmd
 	}
 	p.err = "" // an edit answers the last error
 	var cmd tea.Cmd
@@ -234,10 +233,10 @@ func (p createComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 			p.cursor = min(p.cursor, cursorBottom(p.listLen()))
 		}
 	}
-	return p, cmd, true
+	return p, cmd
 }
 
-func (p createComp) targetPickKey(msg tea.KeyPressMsg) (createComp, tea.Cmd) {
+func (p createPicker) targetPickKey(msg tea.KeyPressMsg) (createPicker, tea.Cmd) {
 	if msg.String() == "esc" {
 		p.picking = false
 		return p, nil
@@ -249,7 +248,7 @@ func (p createComp) targetPickKey(msg tea.KeyPressMsg) (createComp, tea.Cmd) {
 	return p, cmd
 }
 
-func (p createComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
+func (p createPicker) update(c *ctx, msg tea.Msg) (popup, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchesMsg:
 		if msg.projectID == p.projectID {
@@ -266,19 +265,42 @@ func (p createComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		if msg.projectID == p.projectID {
 			p.issues, p.issuesLoaded, p.issuesErr, p.issuesTruncated = msg.issues, true, msg.err, msg.truncated
 		}
+	case tea.PasteMsg:
+		return p.paste(msg)
 	case createDoneMsg:
 		switch {
 		case msg.seq != p.seq:
 		case msg.err != nil:
 			p.creating, p.err = false, msg.err.Error()
 		default:
-			leavePicker(c)
+			c.closePopup()
 		}
 	}
 	return p, nil
 }
 
-func (p createComp) filteredPRs() []api.PRInfo {
+func (p createPicker) paste(msg tea.PasteMsg) (popup, tea.Cmd) {
+	if p.creating {
+		return p, nil
+	}
+	if p.picking {
+		return p, p.targetPick.paste(msg)
+	}
+	p.err = ""
+	var cmd tea.Cmd
+	switch p.tab {
+	case ctNew:
+		p.name, cmd = p.name.Update(msg)
+	case ctBranches:
+		cmd = p.branches.paste(msg)
+	default:
+		p.filter, cmd = p.filter.Update(msg)
+		p.cursor = min(p.cursor, cursorBottom(p.listLen()))
+	}
+	return p, cmd
+}
+
+func (p createPicker) filteredPRs() []api.PRInfo {
 	q := strings.ToLower(strings.TrimSpace(p.filter.Value()))
 	var out []api.PRInfo
 	for _, pr := range p.prs {
@@ -290,7 +312,7 @@ func (p createComp) filteredPRs() []api.PRInfo {
 	return out
 }
 
-func (p createComp) filteredIssues() []api.IssueInfo {
+func (p createPicker) filteredIssues() []api.IssueInfo {
 	q := strings.ToLower(strings.TrimSpace(p.filter.Value()))
 	var out []api.IssueInfo
 	for _, is := range p.issues {
@@ -302,14 +324,14 @@ func (p createComp) filteredIssues() []api.IssueInfo {
 	return out
 }
 
-func (p createComp) listLen() int {
+func (p createPicker) listLen() int {
 	if p.tab == ctPRs {
 		return len(p.filteredPRs())
 	}
 	return len(p.filteredIssues())
 }
 
-func (p createComp) submit(c *ctx) (createComp, tea.Cmd) {
+func (p createPicker) submit(c *ctx) (createPicker, tea.Cmd) {
 	params := api.WorkspaceCreateParams{ProjectID: p.projectID, TargetBranch: p.target}
 	switch p.tab {
 	case ctNew:
@@ -347,18 +369,19 @@ func (p createComp) submit(c *ctx) (createComp, tea.Cmd) {
 
 // --- view ---------------------------------------------------------------------
 
-func (p createComp) view(c *ctx, w, h int) string {
-	return pickerView(w, h, func(w, h int) string { return p.column(c, w, h) })
+func (p createPicker) titleInfo(c *ctx) string {
+	info := dimStyle.Render("target: " + p.targetLabel())
+	if p.tab != ctPRs {
+		info += dimStyle.Render("  (" + c.m.keyText(createKeys.Target) + ")")
+	}
+	return info
 }
 
-func (p createComp) column(c *ctx, w, h int) string {
+func (p createPicker) body(c *ctx, w, h int) string {
 	m := c.m
-	head := StylePrimaryBold.Render("New workspace in "+p.project) + dimStyle.Render("   target: "+p.targetLabel())
-	if p.tab != ctPRs {
-		head += dimStyle.Render("  (" + m.keyText(createKeys.Target) + ")")
-	}
+	var top string
 	if pr, ok := m.findProject(p.projectID); ok && pr.Scripts != nil && pr.Scripts.Setup != "" {
-		head += "\n" + dimStyle.Render("setup: "+commandLine(pr.Scripts.Setup))
+		top = truncateLine(dimStyle.Render("setup: "+commandLine(pr.Scripts.Setup)), w) + "\n\n"
 	}
 	var tabs []string
 	for i, n := range createTabNames {
@@ -368,8 +391,8 @@ func (p createComp) column(c *ctx, w, h int) string {
 			tabs = append(tabs, StyleDim.Render(n))
 		}
 	}
-	top := truncateEachLine(head, w) + "\n\n" + strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
-	bodyH := max(1, h-4-strings.Count(head, "\n"))
+	top += strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
+	bodyH := max(1, h-strings.Count(top, "\n"))
 	switch {
 	case p.creating:
 		return top + spinnerFrame(*m) + " creating…"
@@ -400,7 +423,7 @@ func (p createComp) column(c *ctx, w, h int) string {
 	return top + body
 }
 
-func (p createComp) listView(c *ctx, w, h int, loaded bool, err error, truncated bool, total, n int, line func(int) string) string {
+func (p createPicker) listView(c *ctx, w, h int, loaded bool, err error, truncated bool, total, n int, line func(int) string) string {
 	head := dimStyle.Render("filter: ") + p.filter.View()
 	if truncated {
 		head += dimStyle.Render("  (first " + strconv.Itoa(total) + "; filter searches only these)")
@@ -426,7 +449,7 @@ func spinnerFrame(m model) string {
 	return SpinnerFrames[m.spin%len(SpinnerFrames)]
 }
 
-func (p createComp) footer(*ctx) []binding {
+func (p createPicker) footer(*ctx) []binding {
 	switch {
 	case p.creating:
 		return []binding{hint("esc", "hide")}

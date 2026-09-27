@@ -21,8 +21,8 @@
   D shift+d  force remove · workspace force-remove            ␣e         toggle right sidebar · toggle right-sidebar
   r          rename project · project rename                  ␣o         toggle sidebar · toggle left-sidebar
   F shift+f  forget project (files stay) · project forget     gr         refresh · refresh
-  P shift+p  pin project · project pin                        g?         help · help
-  H shift+h  hide project · project hide                      Q shift+q  quit · quit
+  P shift+p  pin / unpin project · project pin                g?         help · help
+  H shift+h  hide / unhide project · project hide             Q shift+q  quit · quit
   z.         show hidden · toggle show-hidden
   zg         show gone · toggle show-gone
   T shift+t  change target branch · workspace change-target

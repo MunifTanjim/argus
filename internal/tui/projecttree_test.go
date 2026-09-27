@@ -40,7 +40,7 @@ func TestTreeKeysReachOnlyTheFocusedTree(t *testing.T) {
 	}
 }
 
-func TestPickersOpenOverTheMainPaneAndReturnFocusToTheTree(t *testing.T) {
+func TestPickersOpenAsPopupsAndKeepTheTreeFocused(t *testing.T) {
 	branches := branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main"}, {Name: "dev"}}}
 	cases := []struct {
 		name  string
@@ -62,8 +62,8 @@ func TestPickersOpenOverTheMainPaneAndReturnFocusToTheTree(t *testing.T) {
 			under := len(m.main)
 
 			m, _ = upd(m, c.open)
-			if !isPicker(m.main.top()) || len(m.main) != under+1 || m.focused != mainPane {
-				t.Fatalf("the picker should open over the file with the main pane focused: stack=%d focus=%v", len(m.main), m.focused)
+			if !m.pickerOpen() || len(m.main) != under || m.focused != leftSidebar {
+				t.Fatalf("the picker should open as a popup with the tree focused: stack=%d focus=%v", len(m.main), m.focused)
 			}
 			if f, ok := m.openFile(); !ok || f.path != "a.go" || viewOf(m) != viewTree {
 				t.Fatalf("the file and the view stay under the picker: file=%v view=%v", ok, viewOf(m))
@@ -72,7 +72,7 @@ func TestPickersOpenOverTheMainPaneAndReturnFocusToTheTree(t *testing.T) {
 				m, _ = upd(m, msg)
 			}
 			if m.pickerOpen() || len(m.main) != under || m.focused != leftSidebar {
-				t.Errorf("closing the picker should return focus to the tree: open=%v stack=%d focus=%v", m.pickerOpen(), len(m.main), m.focused)
+				t.Errorf("closing the picker should leave focus on the tree: open=%v stack=%d focus=%v", m.pickerOpen(), len(m.main), m.focused)
 			}
 			if f, ok := m.openFile(); !ok || f.path != "a.go" {
 				t.Error("the file should show again once the picker closes")
@@ -83,7 +83,7 @@ func TestPickersOpenOverTheMainPaneAndReturnFocusToTheTree(t *testing.T) {
 
 func TestCreatePickerClosesOnItsCreateReply(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9"}, source: api.SourceNew})
 	if m.pickerOpen() || m.focused != leftSidebar || m.left.tree.want != "n1:w9" {
 		t.Errorf("a create reply should close the picker onto the tree: open=%v focus=%v want=%q", m.pickerOpen(), m.focused, m.left.tree.want)

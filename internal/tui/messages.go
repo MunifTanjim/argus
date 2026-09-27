@@ -163,7 +163,7 @@ type issuesMsg struct {
 type createDoneMsg struct {
 	res    api.WorkspaceCreateResult
 	source string
-	seq    int // createComp.seq of the picker that sent it
+	seq    int // createPicker.seq of the picker that sent it
 	err    error
 }
 

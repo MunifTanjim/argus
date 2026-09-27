@@ -87,22 +87,21 @@ func TestFocusTransitions(t *testing.T) {
 	}
 }
 
-// TestEveryDefaultBindingReachesOneHandler presses every default key of every
-// binding in each component's section. The focus manager takes its own
-// bindings where the component offers them and no others; the container takes
-// only its own bindings; the component gets the rest.
-func TestEveryDefaultBindingReachesOneHandler(t *testing.T) {
+type sectionState struct {
+	name    string
+	section string
+	build   func() model
+}
+
+// sectionStates builds one state per keymap section, the way a user reaches it.
+func sectionStates() []sectionState {
 	overSession := func(m model) model {
 		m.width = 160
 		m.right.hidden = false
 		m, _ = m.syncSidebar()
 		return m
 	}
-	states := []struct {
-		name    string
-		section string
-		build   func() model
-	}{
+	return []sectionState{
 		{"tree", "project-tree", wideWorkspace},
 		{"workspace pane", "workspace", func() model { return withFocus(wideWorkspace(), mainPane) }},
 		{"file over a workspace", "file", func() model { return withFocus(openedFile(wideWorkspace()), mainPane) }},
@@ -120,6 +119,14 @@ func TestEveryDefaultBindingReachesOneHandler(t *testing.T) {
 		{"history transcript", "transcript", func() model { return historyTranscript(false) }},
 		{"session dock", "session-dock", func() model { return withFocus(waitingSession(), sessionDock) }},
 	}
+}
+
+// TestEveryDefaultBindingReachesOneHandler presses every default key of every
+// binding in each component's section. The focus manager takes its own
+// bindings where the component offers them and no others; the container takes
+// only its own bindings; the component gets the rest.
+func TestEveryDefaultBindingReachesOneHandler(t *testing.T) {
+	states := sectionStates()
 	names := func(bs []binding) map[string]bool {
 		out := map[string]bool{}
 		for _, b := range bs {

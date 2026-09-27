@@ -51,8 +51,8 @@ var (
 		projectsKeys.Filter, projectsKeys.Spawn, projectsKeys.SetupLog, projectsKeys.ShowHidden, projectsKeys.ShowGone,
 	}
 	manageKeys = []any{
-		projectsKeys.New, projectsKeys.Rename, projectsKeys.Hide, projectsKeys.Pin, projectsKeys.Target,
-		projectsKeys.ForceRemove, projectsKeys.Forget, projectsKeys.RunSetup,
+		projectsKeys.New, projectsKeys.Rename, projectsKeys.Hide, projectsKeys.Unhide, projectsKeys.Pin,
+		projectsKeys.Unpin, projectsKeys.Target, projectsKeys.ForceRemove, projectsKeys.Forget, projectsKeys.RunSetup,
 	}
 )
 
@@ -167,7 +167,12 @@ var screenNames = func() map[string]map[string]bool {
 
 func screenHas(screen, name string) bool { return screenNames[screen][name] }
 
-func (m model) screen() string { return m.focusedComp().section() }
+func (m model) screen() string {
+	if p := m.popups.front(); p != nil {
+		return p.keySection()
+	}
+	return m.focusedComp().section()
+}
 
 var (
 	strictScreens bool

@@ -94,7 +94,7 @@ func TestCreateTabsLoadListsAndFilter(t *testing.T) {
 	if got := createOf(m).branches.filter.Value(); got != "jk" {
 		t.Errorf("filter = %q, want jk typed as text", got)
 	}
-	m = withCreate(m, func(p *createComp) { p.branches.filter.SetValue("") })
+	m = withCreate(m, func(p *createPicker) { p.branches.filter.SetValue("") })
 	m = typeText(m, "fix")
 	if got := createOf(m).branches.matches(); len(got) != 1 || got[0].Name != "fix-a" {
 		t.Errorf("filtered = %+v", got)
@@ -152,7 +152,7 @@ func TestCreateTargetPickerSetsTarget(t *testing.T) {
 
 func TestCreateDoneSelectsWorkspaceAndCloses(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	res, cmd := m.Update(createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Warning: "fetch failed; branched from local main"}, source: api.SourceNew})
 	m = res.(model)
 	if createOpen(m) || m.left.tree.want != "n1:w9" || !strings.Contains(m.flash, "fetch failed") || cmd == nil {
@@ -162,7 +162,7 @@ func TestCreateDoneSelectsWorkspaceAndCloses(t *testing.T) {
 
 func TestCreateErrorKeepsPickerOpen(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	res, _ := m.Update(createDoneMsg{seq: createOf(m).seq, err: errString("boom")})
 	m = res.(model)
 	if !createOpen(m) || createOf(m).creating || !strings.Contains(createOf(m).err, "boom") {
@@ -176,7 +176,7 @@ func (e errString) Error() string { return string(e) }
 
 func TestIssueCreateOffersSpawn(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	res, _ := m.Update(createDoneMsg{seq: createOf(m).seq,
 		res:    api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/42-fix", Prompt: "Fix\n\nbody"},
 		source: api.SourceIssue,
@@ -208,7 +208,7 @@ func TestIssueCreateOffersSpawn(t *testing.T) {
 
 func TestHiddenPickerCreateOnlyReports(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	seq := createOf(m).seq
 	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide; the call runs on
 	m = res.(model)
@@ -281,7 +281,7 @@ func TestPRsTabSaysWhenTruncatedAndSpins(t *testing.T) {
 
 func TestCreateErrorsShowInPickerAndClearOnEdit(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, err: errString("boom")})
 	m, _ = upd(m, keyMsg("x"))
 	if createOf(m).err != "" {
@@ -298,7 +298,7 @@ func TestCreateErrorsShowInPickerAndClearOnEdit(t *testing.T) {
 
 func TestCreateFlashNamesTheWorkspace(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/login", Warning: "fetch failed"}, source: api.SourceNew})
 	if m.flash != "created workspace login · fetch failed" {
 		t.Errorf("flash = %q", m.flash)
@@ -318,15 +318,15 @@ func TestCreateKeyClearsStaleFlash(t *testing.T) {
 	m.flash = "left over"
 	res, _ := m.runKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = res.(model)
-	if m.flash != "" || !strings.Contains(m.currentFooter(), "create") {
-		t.Errorf("a picker key should clear the flash and show the hints: flash=%q footer=%q", m.flash, m.currentFooter())
+	if out := ansi.Strip(m.View().Content); m.flash != "" || !strings.Contains(out, "enter create") {
+		t.Errorf("a picker key should clear the flash and show the hints: flash=%q view=\n%s", m.flash, out)
 	}
 }
 
 func TestTargetPickerShowsBranchLoadError(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.branches.loaded = true })
-	m = withCreate(m, func(p *createComp) { p.branches.err = errString("git exploded") })
+	m = withCreate(m, func(p *createPicker) { p.branches.loaded = true })
+	m = withCreate(m, func(p *createPicker) { p.branches.err = errString("git exploded") })
 	res, _ := m.runKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	m = res.(model)
 	if !strings.Contains(ansi.Strip(m.View().Content), "git exploded") {
@@ -337,11 +337,11 @@ func TestTargetPickerShowsBranchLoadError(t *testing.T) {
 func TestLateCreateResultLeavesNewerPickerAlone(t *testing.T) {
 	m := createTestModel(t) // picker A
 	oldSeq := createOf(m).seq
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // hide A; its call runs on
 	m = res.(model)
 	m = openCreate(m, "n1:p1") // picker B
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 
 	res, _ = m.Update(createDoneMsg{seq: oldSeq, err: errString("A failed")})
 	m = res.(model)
@@ -352,5 +352,65 @@ func TestLateCreateResultLeavesNewerPickerAlone(t *testing.T) {
 	m = res.(model)
 	if !createOpen(m) || m.left.tree.want == "n1:w9" {
 		t.Errorf("A's success must not close B or move the cursor: active=%v want=%q", createOpen(m), m.left.tree.want)
+	}
+}
+
+func TestPickerOpensWithoutMovingFocus(t *testing.T) {
+	m := createTestModel(t)
+	if !createOpen(m) || m.focused != leftSidebar {
+		t.Errorf("open %v focus %v, want the picker open and focus on the tree", createOpen(m), m.focused)
+	}
+}
+
+func TestPickerDrawnInsideMainPane(t *testing.T) {
+	m := createTestModel(t)
+	row, col := findBlock(t, m, "New workspace in argus")
+	r := m.mainRect()
+	if col < r.Min.X || col >= r.Max.X || row < r.Min.Y || row >= r.Max.Y {
+		t.Errorf("title at row %d column %d, outside the main pane %v", row, col, r)
+	}
+}
+
+func TestPickerHintsInsideTheBox(t *testing.T) {
+	lines := frameLines(createTestModel(t))
+	if strings.Contains(lines[len(lines)-1], "enter create") {
+		t.Errorf("the footer row shows the picker keys: %q", lines[len(lines)-1])
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "enter create") && strings.Contains(l, "│") {
+			return
+		}
+	}
+	t.Error("no line in the box shows the picker keys")
+}
+
+func TestColonTypesIntoThePicker(t *testing.T) {
+	m, _ := upd(createTestModel(t), keyMsg(":"))
+	if _, open := cmdLineOf(m); open || createOf(m).name.Value() != ":" {
+		t.Errorf("command line open %v, name %q; want the : in the name", open, createOf(m).name.Value())
+	}
+}
+
+func TestKeyAfterPickerClosesReachesTheTree(t *testing.T) {
+	m := createTestModel(t)
+	cursor := m.left.tree.cursor
+	m, _ = upd(m, keyMsg("esc"))
+	m, _ = upd(m, keyMsg("j"))
+	if createOpen(m) || m.left.tree.cursor == cursor {
+		t.Errorf("open %v cursor %d→%d: esc must close the picker and j must move the tree", createOpen(m), cursor, m.left.tree.cursor)
+	}
+}
+
+func TestPasteIntoTheCreatePicker(t *testing.T) {
+	m, _ := upd(createTestModel(t), tea.PasteMsg{Content: "feat-x"})
+	if got := createOf(m).name.Value(); got != "feat-x" {
+		t.Errorf("name after a paste = %q", got)
+	}
+}
+
+func TestCreatePickerShowsItsInputInAShortTerminal(t *testing.T) {
+	m, _ := upd(createTestModel(t), tea.WindowSizeMsg{Width: 50, Height: 12})
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "branch:") {
+		t.Errorf("the branch input is cut off at 50x12:\n%s", out)
 	}
 }

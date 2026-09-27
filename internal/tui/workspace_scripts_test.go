@@ -90,7 +90,7 @@ func TestCreatePickerShowsSetup(t *testing.T) {
 	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "setup: pnpm install") {
 		t.Errorf("the create picker should show the setup command:\n%s", out)
 	}
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq, res: api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/login", Setup: "pnpm install"}, source: api.SourceNew})
 	if m.flash != "created workspace login · setting up" {
 		t.Errorf("flash = %q", m.flash)

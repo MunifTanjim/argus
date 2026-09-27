@@ -233,7 +233,7 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 			{"history transcript", historyTranscript(false), "transcript"},
 			{"session dock", withFocus(waitingSession(), sessionDock), "session-dock"},
 			{"create picker", createTestModel(t), "project-tree"},
-			{"retarget picker", withPicker(projectsTestModel(), retargetComp{pick: newBranchPicker()}), ""},
+			{"retarget picker", withPopup(projectsTestModel(), retargetPicker{pick: newBranchPicker()}), ""},
 			{"spawn flow", spawnOverHome(), ""},
 			{"live screen", liveScreenModel(), ""},
 		}

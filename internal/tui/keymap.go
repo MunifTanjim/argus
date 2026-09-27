@@ -10,8 +10,9 @@ import (
 )
 
 type defaultKeys struct {
-	seqs []keySeq
-	ids  []string // a single key lists every form
+	seqs  []keySeq
+	ids   []string // a single key lists every form
+	quiet []string // ids of the keys the help does not list
 }
 
 type keymap struct {
@@ -72,17 +73,21 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 			continue
 		}
 		var dk defaultKeys
-		for _, tok := range strings.Fields(b.defaults) {
+		quiet := strings.Fields(b.quiet)
+		for _, tok := range append(strings.Fields(b.defaults), quiet...) {
 			seq, err := parseKeySeq(tok)
 			if err != nil {
 				panic(fmt.Sprintf("buildKeymap: binding %q token %q: %v", b.name, tok, err))
 			}
 			seq = replaceLeader(seq, leaderStep)
 			dk.seqs = append(dk.seqs, seq)
-			if len(seq) == 1 {
-				dk.ids = append(dk.ids, seq[0]...)
-			} else {
-				dk.ids = append(dk.ids, seq.id())
+			ids := seq[0]
+			if len(seq) > 1 {
+				ids = []string{seq.id()}
+			}
+			dk.ids = append(dk.ids, ids...)
+			if slices.Contains(quiet, tok) {
+				dk.quiet = append(dk.quiet, ids...)
 			}
 		}
 		km.defaults[b.defKey] = dk
@@ -99,6 +104,9 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 			switch {
 			case err != nil:
 				bad("%v", err)
+				continue
+			case seq[0][0] == ":":
+				bad(`":" opens the command line`)
 				continue
 			case cmd != "" && strings.ContainsAny(cmd[:1], "$!&%"):
 				bad("shell commands are not supported yet")
@@ -140,6 +148,10 @@ func parseLeader(leader string, errs *[]string) keyStep {
 	}
 	if len(seq) != 1 || (len(seq[0]) == 1 && seq[0][0] == leaderToken) {
 		*errs = append(*errs, fmt.Sprintf("keymap: tui.leader-key %q: must be one key", leader))
+		return space
+	}
+	if seq[0][0] == ":" {
+		*errs = append(*errs, fmt.Sprintf(`keymap: tui.leader-key %q: ":" opens the command line`, leader))
 		return space
 	}
 	return seq[0]
@@ -210,11 +222,11 @@ func resolveScreen(screen string, own, global []keyEntry, defaults map[string]de
 }
 
 // keys is b's effective keys on the screen: the user's keys first, then the
-// defaults that the user did not remove or give to another command.
+// defaults that the user did not map again, remove, or give to another command.
 func (sk *screenKeys) keys(b binding) []string {
 	out := slices.Clone(sk.addIDs[b.name])
 	for _, k := range sk.defaults[b.defKey].ids {
-		if sk.defaultKept(b, k) {
+		if sk.defaultKept(b, k) && !slices.Contains(sk.addIDs[b.name], k) {
 			out = append(out, k)
 		}
 	}
@@ -225,6 +237,14 @@ func (sk *screenKeys) keys(b binding) []string {
 // building the list, because handlers check many bindings on every key press.
 func (sk *screenKeys) has(b binding, k string) bool {
 	return slices.Contains(sk.addIDs[b.name], k) || slices.Contains(sk.defaults[b.defKey].ids, k) && sk.defaultKept(b, k)
+}
+
+// listedKeys is keys without the quiet defaults that the user did not also map
+// to b: the keys that the help and the command line list.
+func (sk *screenKeys) listedKeys(b binding) []string {
+	return slices.DeleteFunc(sk.keys(b), func(k string) bool {
+		return slices.Contains(sk.defaults[b.defKey].quiet, k) && !slices.Contains(sk.addIDs[b.name], k)
+	})
 }
 
 // defaultKept reports whether b's default key k survives: the user did not

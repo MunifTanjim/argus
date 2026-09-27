@@ -108,7 +108,7 @@ func TestSpawnFromTreeHomeRowReturnsFocusToTheTree(t *testing.T) {
 
 func TestSpawnFromIssueOfferReturnsFocusToTheTree(t *testing.T) {
 	m := createTestModel(t)
-	m = withCreate(m, func(p *createComp) { p.creating = true })
+	m = withCreate(m, func(p *createPicker) { p.creating = true })
 	m, _ = upd(m, createDoneMsg{seq: createOf(m).seq,
 		res:    api.WorkspaceCreateResult{WorkspaceID: "n1:w9", Dir: "/repo/.worktrees/42-fix", Prompt: "Fix"},
 		source: api.SourceIssue,

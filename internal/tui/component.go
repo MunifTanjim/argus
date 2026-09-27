@@ -41,8 +41,8 @@ const (
 	// screenLayer is the live screen: a base of its own, over a file that stays
 	// open.
 	screenLayer
-	// overLayer is a picker or the spawn flow: over the base and an open file,
-	// which stay in place.
+	// overLayer is the spawn flow: over the base and an open file, which stay
+	// in place.
 	overLayer
 )
 
@@ -90,6 +90,9 @@ const (
 	actStepDiff
 	actTree
 	actResizeTree
+	actOpenPopup
+	actClosePopup
+	actRunCommand
 )
 
 type action struct {
@@ -100,19 +103,25 @@ type action struct {
 	id    string
 	step  int
 	op    treeOp
+	pop   popup
 }
 
 func (c *ctx) open(comp component) { c.actions = append(c.actions, action{kind: actOpen, comp: comp}) }
 func (c *ctx) back()               { c.actions = append(c.actions, action{kind: actBack}) }
 func (c *ctx) focusOn(k container) { c.actions = append(c.actions, action{kind: actFocus, focus: k}) }
 func (c *ctx) setFlash(s string)   { c.actions = append(c.actions, action{kind: actFlash, flash: s}) }
+func (c *ctx) openPopup(p popup)   { c.actions = append(c.actions, action{kind: actOpenPopup, pop: p}) }
+func (c *ctx) closePopup()         { c.actions = append(c.actions, action{kind: actClosePopup}) }
+func (c *ctx) runCommand(typed string) {
+	c.actions = append(c.actions, action{kind: actRunCommand, id: typed})
+}
 
 func (c *ctx) replaceBase(comp component) {
 	c.actions = append(c.actions, action{kind: actReplaceBase, comp: comp})
 }
 
-// replaceFile replaces the open file, which a picker, the spawn flow, or the
-// live screen can cover.
+// replaceFile replaces the open file, which the spawn flow or the live screen
+// can cover.
 func (c *ctx) replaceFile(f fileComp) {
 	c.actions = append(c.actions, action{kind: actReplaceFile, comp: f})
 }
@@ -249,6 +258,14 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			cmds = append(cmds, cmd, m.apply(tc))
 		case actResizeTree:
 			m.left = m.left.resize(&ctx{m: m}, a.step)
+		case actOpenPopup:
+			m.popups = m.popups.open(a.pop)
+		case actClosePopup:
+			m.popups = m.popups.closeFront()
+		case actRunCommand:
+			res, cmd := m.runCmdLine(a.id)
+			*m = res.(model)
+			cmds = append(cmds, cmd)
 		}
 	}
 	c.actions = nil

@@ -176,45 +176,40 @@ func openCreate(m model, projectID string) model {
 	return m
 }
 
-// withPicker opens p over the main pane, which takes focus, as opening one
-// from the tree does.
-func withPicker(m model, p component) model {
-	m.main = m.main.push(p)
-	m.focused = mainPane
-	return m
-}
-
-// closePicker closes the open picker, as cancel does.
 func closePicker(m model) model {
-	c := &ctx{m: &m}
-	leavePicker(c)
-	m.apply(c)
+	m.popups = m.popups.closeFront()
 	return m
 }
 
-func createOf(m model) createComp {
-	p, _ := m.createPicker()
+func createOf(m model) createPicker {
+	p, _ := m.frontCreate()
 	return p
 }
 
 func createOpen(m model) bool {
-	_, ok := m.createPicker()
+	_, ok := m.frontCreate()
 	return ok
 }
 
-func withCreate(m model, edit func(*createComp)) model {
-	p, ok := m.createPicker()
+func withCreate(m model, edit func(*createPicker)) model {
+	p, ok := m.frontCreate()
 	if !ok {
 		panic("withCreate: no create picker open")
 	}
 	edit(&p)
-	m.main = m.main.replaceTop(p)
+	m.popups = m.popups.replaceFront(p)
 	return m
 }
 
-func retargetOf(m model) (retargetComp, bool) {
-	p, ok := m.main.top().(retargetComp)
+func retargetOf(m model) (retargetPicker, bool) {
+	p, ok := m.popups.front().(retargetPicker)
 	return p, ok
+}
+
+func (m model) pickerOpen() bool {
+	_, create := m.frontCreate()
+	_, retarget := retargetOf(m)
+	return create || retarget
 }
 
 func (m model) inputActive() bool { return m.left.tree.inputMode != pmNone }
@@ -436,11 +431,6 @@ func (m *model) closeFileView() tea.Cmd {
 	c := &ctx{m: m}
 	f.leave(c)
 	return m.apply(c)
-}
-
-func (m model) pickerOpen() bool {
-	_, ok := m.picker()
-	return ok
 }
 
 func (m model) enterScreen(id string) (model, tea.Cmd) {

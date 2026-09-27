@@ -1,30 +1,29 @@
   󱙺 argus
 
-  Projects                           │  New workspace in argus   target: main  (^t)
+  Projects                           │  argus  /repo/.git
                                      │
-  󰋜 Home                         ○ 3 │  New   Branches   PRs   Issues
-▌ ▾ argus                            │
-    ★ repo  main                 ○ 2 │  branch:  
-    • repo-feat  feature         ○ 1 │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
-                                     │
+  󰋜 Home                         ○ 3 │  ★ repo  main                                                               ○ 2
+▌ ▾ argus                            │  ╭────────────────────────────────────────────────────────────────────────────╮
+    ★ repo  main                 ○ 2 │  │ New workspace in argus target: main  (^t)                                  │
+    • repo-feat  feature         ○ 1 │  │                                                                            │
+                                     │  │ New   Branches   PRs   Issues                                              │
+                                     │  │                                                                            │
+                                     │  │ branch:                                                                    │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │                                                                            │
+                                     │  │ enter create · tab next tab · ^t target · esc cancel                       │
+                                     │  ╰────────────────────────────────────────────────────────────────────────────╯
                                      │
                                      │
                                      │
 
-                                  enter create · tab next tab · ^t target · esc cancel

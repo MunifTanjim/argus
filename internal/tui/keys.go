@@ -2,6 +2,8 @@ package tui
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -19,7 +21,8 @@ type binding struct {
 	key.Binding
 	name     string
 	defaults string
-	defKey   string // name and defaults: bindings with equal defKey have equal default keys
+	quiet    string // default keys that work but that the help does not list
+	defKey   string // name and default keys: bindings with equal defKey have equal default keys
 }
 
 func nb(name, defaults, desc string) binding {
@@ -29,6 +32,12 @@ func nb(name, defaults, desc string) binding {
 		defaults: defaults,
 		defKey:   name + "\x00" + defaults,
 	}
+}
+
+func (b binding) alt(keys string) binding {
+	b.quiet = keys
+	b.defKey = b.name + "\x00" + b.defaults + "\x00" + keys
+	return b
 }
 
 // keyAction applies a matched key to a transcript. Method expressions (e.g.
@@ -60,6 +69,9 @@ func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
 		}
 	}
 	k := msg.String()
+	if name, ok := strings.CutPrefix(k, cmdMark); ok {
+		return slices.ContainsFunc(bs, func(b binding) bool { return b.Enabled() && b.name == name })
+	}
 	for _, b := range bs {
 		if !b.Enabled() {
 			continue
@@ -98,6 +110,7 @@ var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter       binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                        binding
 	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone binding
+	Unhide, Unpin                                                     binding
 	Target, DiffMode, Spawn, ToggleFiles                              binding
 	SideTabPrev, SideTabNext, Refresh, Back                           binding
 	Forget                                                            binding
@@ -120,7 +133,9 @@ var projectsKeys = struct {
 	New:           nb("workspace new", "a", "new"),
 	Rename:        nb("project rename", "r", "rename"),
 	Hide:          nb("project hide", "H", "hide"),
+	Unhide:        nb("project unhide", "H", ""),
 	Pin:           nb("project pin", "P", "pin"),
+	Unpin:         nb("project unpin", "P", ""),
 	Remove:        nb("workspace remove", "dd", "remove"),
 	ForceRemove:   nb("workspace force-remove", "D", ""),
 	ShowHidden:    nb("toggle show-hidden", "z.", "hidden"),
@@ -199,11 +214,11 @@ var sessionKeys = struct {
 var paneKeys = struct {
 	Left, Down, Up, Right, Next, Prev binding
 }{
-	Left:  nb("focus left", "<C-w>h", "tree"),
-	Down:  nb("focus down", "<C-w>j", ""),
-	Up:    nb("focus up", "<C-w>k", ""),
-	Right: nb("focus right", "<C-w>l", "files"),
-	Next:  nb("focus next", "<C-w>w", "pane"),
+	Left:  nb("focus left", "<C-w>h", "tree").alt("<C-w><C-h>"),
+	Down:  nb("focus down", "<C-w>j", "").alt("<C-w><C-j>"),
+	Up:    nb("focus up", "<C-w>k", "").alt("<C-w><C-k>"),
+	Right: nb("focus right", "<C-w>l", "files").alt("<C-w><C-l>"),
+	Next:  nb("focus next", "<C-w>w", "pane").alt("<C-w><C-w>"),
 	Prev:  nb("focus prev", "<C-w>W", ""),
 }
 
@@ -343,16 +358,20 @@ func (m model) keymap() *keymap {
 // skipped). Built per call so it needs no model state and works in tests with a
 // model literal.
 func (m model) footer(bindings ...binding) string {
+	w := m.width - 2*screenMargin
+	if m.width <= 0 {
+		w = 200 // no viewport yet (e.g. tests): don't truncate
+	}
+	return m.hints(w, bindings...)
+}
+
+func (m model) hints(w int, bindings ...binding) string {
 	h := help.New()
 	h.Styles = help.DefaultStyles(m.hasDark)
 	h.Styles.ShortKey = StyleSecondary
 	h.Styles.ShortDesc = StyleDim
 	h.Styles.ShortSeparator = StyleDim
 	h.ShortSeparator = " · "
-	w := m.width - 2*screenMargin // footers span the frame inside the screen margin
-	if m.width <= 0 {
-		w = 200 // no viewport yet (e.g. tests): don't truncate
-	}
 	h.SetWidth(w)
 	kb := make([]key.Binding, len(bindings))
 	for i, b := range bindings {

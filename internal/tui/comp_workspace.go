@@ -116,7 +116,7 @@ func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		c.resizeTree(4)
 	case m.matches(msg, k.Narrow):
 		c.resizeTree(-4)
-	case m.matches(msg, k.New, k.Rename, k.Hide, k.Pin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
+	case m.matches(msg, k.New, k.Rename, k.Hide, k.Unhide, k.Pin, k.Unpin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
 		c.setFlash("manage keys work in the tree · " + m.keyText(k.Back) + " to go there")
 	default:
 		return nil, false

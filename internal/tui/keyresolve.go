@@ -10,10 +10,9 @@ import (
 
 type keyTimeoutMsg struct{ gen int }
 
-// keysRaw reports whether keys go to the handlers as typed: the live screen, a
-// raw focused component, and the open help have no keymaps.
+// keysRaw reports whether keys skip the keymaps and go to the handlers as typed.
 func (m model) keysRaw() bool {
-	return m.topScreen() >= 0 || m.focusedComp().raw(&ctx{m: &m}) || m.showHelp
+	return m.topScreen() >= 0 || len(m.popups) > 0 || m.focusedComp().raw(&ctx{m: &m}) || m.showHelp
 }
 
 // resolveKey follows Vim: a key that is both a mapping and the start of a
@@ -96,6 +95,12 @@ func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, 
 	for len(toFeed) > 0 {
 		next := toFeed[0]
 		toFeed = toFeed[1:]
+		if m.opensCmdLine(next) {
+			mm, c := m.openCmdLine()
+			m = mm.(model)
+			cmds = append(cmds, c)
+			continue
+		}
 		if m.keysRaw() {
 			run(next)
 			continue

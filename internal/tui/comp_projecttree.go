@@ -155,10 +155,10 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 		t, cmd = t.renameProject(c)
 	case m.matches(msg, k.Forget):
 		t = t.forgetProject(c)
-	case m.matches(msg, k.Hide):
-		cmd = t.toggleHidden(c)
-	case m.matches(msg, k.Pin):
-		cmd = t.togglePinned(c)
+	case m.matches(msg, k.Hide, k.Unhide):
+		cmd = t.setHidden(c, m.matches(msg, k.Hide), m.matches(msg, k.Unhide))
+	case m.matches(msg, k.Pin, k.Unpin):
+		cmd = t.setPinned(c, m.matches(msg, k.Pin), m.matches(msg, k.Unpin))
 	case m.matches(msg, k.Remove):
 		t = t.removeWorkspace(c, false)
 	case m.matches(msg, k.ForceRemove):
@@ -269,7 +269,7 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		cmd := t.load(c.m.client)
 		return t, cmd
 	case createDoneMsg:
-		if p, ok := c.m.createPicker(); !ok || p.seq != msg.seq {
+		if p, ok := c.m.frontCreate(); !ok || p.seq != msg.seq {
 			// A closed picker's call finished: report it without touching a newer
 			// picker, the cursor, or the keys the user pressed since.
 			if msg.err != nil {
@@ -338,7 +338,7 @@ func (t projectTreeComp) rowBindings() []binding {
 
 func (t projectTreeComp) view(c *ctx, w, h int) string {
 	m := c.m
-	focused := m.focused == leftSidebar
+	focused := m.focused == leftSidebar && len(m.popups) == 0
 	title := "Projects"
 	if t.showHidden {
 		title += "  +hidden"
@@ -727,10 +727,9 @@ func (t projectTreeComp) newWorkspace(c *ctx) (projectTreeComp, tea.Cmd) {
 func (t projectTreeComp) startCreate(c *ctx, projectID string) (projectTreeComp, tea.Cmd) {
 	p, _ := t.findProject(projectID)
 	t.createSeq++
-	pick := newCreateComp(projectID, p.Name, p.DefaultBranch, t.createSeq)
+	pick := newCreatePicker(projectID, p.Name, p.DefaultBranch, t.createSeq)
 	cmd := pick.name.Focus()
-	c.open(pick)
-	c.focusOn(mainPane)
+	c.openPopup(pick)
 	return t, cmd
 }
 
@@ -769,33 +768,38 @@ func (t projectTreeComp) forgetProject(c *ctx) projectTreeComp {
 	return t
 }
 
-func (t projectTreeComp) toggleHidden(c *ctx) tea.Cmd {
+func (t projectTreeComp) setHidden(c *ctx, hide, unhide bool) tea.Cmd {
 	projID := t.cursorProjectID()
 	if projID == "" {
 		return nil
 	}
 	p, _ := t.findProject(projID)
-	ok := "unhid " + p.Name
-	if !p.Hidden {
-		ok = "hid " + p.Name
+	switch {
+	case p.Hidden && unhide:
+		return c.m.setHiddenCmd(projID, false, "unhid "+p.Name)
+	case !p.Hidden && hide:
+		ok := "hid " + p.Name
 		if !t.showHidden {
 			ok += " · " + c.m.keyText(projectsKeys.ShowHidden) + " shows hidden"
 		}
+		return c.m.setHiddenCmd(projID, true, ok)
 	}
-	return c.m.setHiddenCmd(projID, !p.Hidden, ok)
+	return nil
 }
 
-func (t projectTreeComp) togglePinned(c *ctx) tea.Cmd {
+func (t projectTreeComp) setPinned(c *ctx, pin, unpin bool) tea.Cmd {
 	projID := t.cursorProjectID()
 	if projID == "" {
 		return nil
 	}
 	p, _ := t.findProject(projID)
-	ok := "unpinned " + p.Name
-	if !p.Pinned {
-		ok = "pinned " + p.Name
+	switch {
+	case p.Pinned && unpin:
+		return c.m.setPinnedCmd(projID, false, "unpinned "+p.Name)
+	case !p.Pinned && pin:
+		return c.m.setPinnedCmd(projID, true, "pinned "+p.Name)
 	}
-	return c.m.setPinnedCmd(projID, !p.Pinned, ok)
+	return nil
 }
 
 func (t projectTreeComp) removeWorkspace(c *ctx, force bool) projectTreeComp {
@@ -838,8 +842,7 @@ func (t projectTreeComp) retarget(c *ctx) tea.Cmd {
 	if r, ok := t.cursorRow(); ok {
 		label = r.label
 	}
-	c.open(retargetComp{workspaceID: wsID, projectID: projID, label: label, pick: pick})
-	c.focusOn(mainPane)
+	c.openPopup(retargetPicker{workspaceID: wsID, projectID: projID, label: label, pick: pick})
 	return c.m.fetchBranchesCmd(projID)
 }
 

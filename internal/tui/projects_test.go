@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"strings"
 	"testing"
@@ -1230,5 +1231,75 @@ func TestKillFromWorkspaceNeedsTerminalControl(t *testing.T) {
 	res, _ := m.runKey(seqKey("dd"))
 	if mm := res.(model); paneOf(mm).killID != "" || mm.flash == "" {
 		t.Errorf("a session without terminal control should only show a hint: pending=%q flash=%q", paneOf(mm).killID, mm.flash)
+	}
+}
+
+// projectOnCursor is the tree with the cursor on the argus project row, its
+// pinned and hidden flags set as given, and a client that records calls.
+func projectOnCursor(pinned, hidden bool) (model, *recordingClient) {
+	m := projectsTestModel()
+	m.left.tree.data[0].Pinned, m.left.tree.data[0].Hidden = pinned, hidden
+	m.left.tree.showHidden = true
+	m.left.tree.rebuild()
+	m.left.tree.cursor = 1
+	rc := &recordingClient{}
+	m.client = rc
+	return m, rc
+}
+
+func flagCalls(rc *recordingClient) []string {
+	var out []string
+	for i, method := range rc.calls {
+		if p, ok := rc.params[i].(api.ProjectFlagParams); ok {
+			out = append(out, fmt.Sprintf("%s=%v", method, p.Value))
+		}
+	}
+	return out
+}
+
+func TestSharedKeyRunsTheCommandThatApplies(t *testing.T) {
+	for _, tc := range []struct {
+		pinned, hidden bool
+		key            string
+		want           string
+	}{
+		{false, false, "P", api.MethodProjectSetPinned + "=true"},
+		{true, false, "P", api.MethodProjectSetPinned + "=false"},
+		{false, false, "H", api.MethodProjectSetHidden + "=true"},
+		{false, true, "H", api.MethodProjectSetHidden + "=false"},
+	} {
+		m, rc := projectOnCursor(tc.pinned, tc.hidden)
+		_, cmd := upd(m, keyMsg(tc.key))
+		runCmd(cmd)
+		if got := flagCalls(rc); len(got) != 1 || got[0] != tc.want {
+			t.Errorf("pinned=%v hidden=%v %s: calls %v, want [%s]", tc.pinned, tc.hidden, tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestRemappedHalfOfAPair(t *testing.T) {
+	// "p" is a new key for pin only: P still pins and unpins.
+	m, rc := projectOnCursor(true, false)
+	m = withKeymap(m, map[string]map[string]string{"project-tree": {"p": "project pin"}})
+	_, cmd := upd(m, keyMsg("P"))
+	runCmd(cmd)
+	if got := flagCalls(rc); len(got) != 1 || got[0] != api.MethodProjectSetPinned+"=false" {
+		t.Errorf("P on a pinned project must still unpin: %v", got)
+	}
+	// "p" on a pinned project: pin does not apply, so nothing runs.
+	m, rc = projectOnCursor(true, false)
+	m = withKeymap(m, map[string]map[string]string{"project-tree": {"p": "project pin"}})
+	_, cmd = upd(m, keyMsg("p"))
+	runCmd(cmd)
+	if got := flagCalls(rc); len(got) != 0 {
+		t.Errorf("a command that does not apply must do nothing: %v", got)
+	}
+	// P mapped to pin only: unpin loses P.
+	m, rc = projectOnCursor(true, false)
+	m = withKeymap(m, map[string]map[string]string{"project-tree": {"P": "project pin"}})
+	_, cmd = upd(m, keyMsg("P"))
+	runCmd(cmd)
+	if got := flagCalls(rc); len(got) != 0 {
+		t.Errorf("P mapped to pin must not unpin: %v", got)
 	}
 }
