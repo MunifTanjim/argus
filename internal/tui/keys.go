@@ -54,7 +54,7 @@ type keyTableEntry struct {
 // nothing matched (the caller falls back, e.g. to text input).
 func (m tview) dispatch(msg tea.KeyPressMsg, table []keyTableEntry) (tea.Cmd, bool) {
 	for _, e := range table {
-		if m.matches(msg, e.b) {
+		if m.c.m.matches(msg, e.b) {
 			return e.act(m, msg), true
 		}
 	}
@@ -201,12 +201,13 @@ var detailKeys = struct {
 }
 
 // sessionKeys are the keys a live transcript and the session dock take before
-// their own: the prompt focus toggle and the live screen.
+// their own: the prompt focus moves and the live screen.
 var sessionKeys = struct {
-	Focus, Raw binding
+	FocusPrompt, FocusTranscript, Raw binding
 }{
-	Focus: nb("focus prompt", "<Tab>", "answer"),
-	Raw:   nb("open live-screen", "<C-t>", "raw"),
+	FocusPrompt:     nb("focus prompt", "<Tab>", "answer"),
+	FocusTranscript: nb("focus transcript", "<Tab>", "read"),
+	Raw:             nb("open live-screen", "<C-t>", "raw"),
 }
 
 // paneKeys move focus between the tree, the main pane, the files sidebar, and
@@ -238,7 +239,7 @@ var promptKeys = struct {
 	Next:     nb("answer submit", "<CR>", "next"), // footer label for multi-question advance
 	Select:   nb("option select", "<Space>", "toggle"),
 	Unselect: nb("option unselect", "<Space>", ""),
-	Read:     nb("focus prompt", "<Tab>", "read"),
+	Read:     nb("focus transcript", "<Tab>", "read"),
 	Back:     nb("back", "<Esc>", "back"),
 }
 

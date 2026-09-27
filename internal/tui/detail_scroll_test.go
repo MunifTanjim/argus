@@ -23,7 +23,7 @@ func TestDetailLineScrollThroughTallItem(t *testing.T) {
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
 		},
 	})
-	m.width, m.height = 80, 14 // short viewport
+	m.c.m.width, m.c.m.height = 80, 14 // short viewport
 	m.topFrame().cursor = 0
 	m.drillDetail()
 
@@ -55,7 +55,7 @@ func tallFocusedDetailModel(t *testing.T) tview {
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
 		},
 	})
-	m.width, m.height = 80, 14
+	m.c.m.width, m.c.m.height = 80, 14
 	m.topFrame().cursor = 0
 	m.drillDetail()
 	if m.frameMaxScroll(m.topFrame()) == 0 {
@@ -91,7 +91,7 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 	m = detailTestModel(transcript.Chunk{
 		ID: "s", Kind: transcript.ChunkSystem, Detail: strings.Repeat("detail-line\n", 60),
 	})
-	m.width, m.height = 80, 14
+	m.c.m.width, m.c.m.height = 80, 14
 	if m.topFrame().items != nil {
 		t.Fatal("system chunk should render as a body frame")
 	}
@@ -111,7 +111,7 @@ func manyItemDetailModel(t *testing.T) tview {
 			ToolInput: `{"command":"ls"}`, Result: "out"})
 	}
 	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8", Items: items})
-	m.width, m.height = 80, 14
+	m.c.m.width, m.c.m.height = 80, 14
 	if m.frameMaxScroll(m.topFrame()) == 0 {
 		t.Fatal("fixture not tall enough to overflow")
 	}
@@ -119,7 +119,7 @@ func manyItemDetailModel(t *testing.T) tview {
 }
 
 func (m tview) cursorLineStart() int {
-	_, start, _ := m.frameLines(m.topFrame(), m.containerWidth())
+	_, start, _ := m.frameLines(m.topFrame(), m.c.m.containerWidth())
 	return start
 }
 

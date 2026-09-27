@@ -49,7 +49,7 @@ func (d dockComp) layer() layer              { return baseLayer }
 func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	c.setFlash("")
 	switch {
-	case c.m.matches(msg, sessionKeys.Focus):
+	case c.m.matches(msg, sessionKeys.FocusTranscript):
 		if c.m.sessionInteraction() != nil {
 			c.focusOn(mainPane)
 		}
@@ -119,8 +119,6 @@ func (d dockComp) view(c *ctx, w, h int) string {
 	}
 	return centerBlock(rule+"\n"+indentBlock(body, strings.Repeat(" ", contentPadX)), cw, w)
 }
-
-func (d dockComp) footerText(c *ctx) string { return c.m.sessionHint(d.footer(c)...) }
 
 func (d dockComp) footer(c *ctx) []binding {
 	multi := c.m.isMultiQuestion()

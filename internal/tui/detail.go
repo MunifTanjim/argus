@@ -143,7 +143,7 @@ func (m tview) enterDetail() {
 		f.expandOutputs()
 	} else {
 		f.label = "detail"
-		f.body = m.renderDetail(c)
+		f.body = m.c.m.renderDetail(c)
 	}
 	m.transcript.detailStack = append(m.transcript.detailStack, f)
 }
@@ -267,7 +267,7 @@ func (m tview) actDetailUp(tea.KeyPressMsg) tea.Cmd {
 // height h, returning h and the item's [start,end) line range. h matches
 // detailBody's content area so it agrees with ensureDetailVisible.
 func (m tview) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
-	_, start, end = m.frameLines(f, m.transcriptWidth())
+	_, start, end = m.frameLines(f, m.c.m.transcriptWidth())
 	h = max(1, m.viewportHeight()-3)
 	return h, start, end, end-start > h
 }
@@ -347,20 +347,20 @@ func (m tview) actDetailDrill(msg tea.KeyPressMsg) tea.Cmd {
 				subagentType: s.Type, subagentName: s.Name,
 				subagentStatus: s.Status, subagentInput: s.Desc,
 			})
-			return m.fetchHistSubagent(m.history.addr(), s.ID)
+			return m.c.m.fetchHistSubagent(m.history.addr(), s.ID)
 		}
 		// Live session: stream the subagent trace into a new frame. Stash the
 		// session subRef so pop can restore it without a leak.
 		m.sessionSub = m.activeSub
-		ref := subRef{subID: newSubID(), sessionID: m.sessionID, agentID: s.ID, cacheKey: m.cacheKeyFor(m.sessionID)}
+		ref := subRef{subID: newSubID(), sessionID: m.sessionID, agentID: s.ID, cacheKey: m.c.m.cacheKeyFor(m.sessionID)}
 		m.activeSub = ref // subagent stream is active while drilled in
 		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
 			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},
 			subagentType: s.Type, subagentName: s.Name,
 			subagentStatus: s.Status, subagentInput: s.Desc,
 		})
-		have := len(m.transcriptCache[ref.key()].chunks)
-		return m.subscribeCmd(ref, have)
+		have := len(m.c.m.transcriptCache[ref.key()].chunks)
+		return m.c.m.subscribeCmd(ref, have)
 	}
 	m.drillDetail() // inline (history) or focus a leaf item
 	// Focusing a tool leaf shows its body expanded; fetch on demand.
@@ -441,7 +441,7 @@ func (f *detailFrame) detailHeaderText(width int) string {
 
 func (m tview) detailBodyHeight(f *detailFrame) int {
 	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
-	if header := f.detailHeaderText(m.transcriptWidth() - detailGutter); header != "" {
+	if header := f.detailHeaderText(m.c.m.transcriptWidth() - detailGutter); header != "" {
 		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
 	}
 	return h
@@ -470,7 +470,7 @@ func itemSpan(i int, first []int, total int) (int, int) {
 }
 
 func (m tview) itemAtLine(f *detailFrame, line int) int {
-	first, _ := m.frameItemStarts(f, m.transcriptWidth())
+	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
 	idx := 0
 	for i, s := range first {
 		if s <= line {
@@ -484,13 +484,13 @@ func (m tview) detailCursorVisible(f *detailFrame) bool {
 	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
 		return false
 	}
-	first, total := m.frameItemStarts(f, m.transcriptWidth())
+	first, total := m.frameItemStarts(f, m.c.m.transcriptWidth())
 	start, end := itemSpan(f.cursor, first, total)
 	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
 }
 
 func (m tview) firstVisibleItem(f *detailFrame) int {
-	first, _ := m.frameItemStarts(f, m.transcriptWidth())
+	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	for i, s := range first {
 		if s >= f.scroll && s < f.scroll+h {
@@ -501,7 +501,7 @@ func (m tview) firstVisibleItem(f *detailFrame) int {
 }
 
 func (m tview) lastVisibleItem(f *detailFrame) int {
-	first, _ := m.frameItemStarts(f, m.transcriptWidth())
+	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	last := -1
 	for i, s := range first {
@@ -520,7 +520,7 @@ func (m tview) ensureDetailVisible() {
 	if f == nil || f.items == nil {
 		return
 	}
-	lines, start, end := m.frameLines(f, m.transcriptWidth())
+	lines, start, end := m.frameLines(f, m.c.m.transcriptWidth())
 	h := m.detailBodyHeight(f)
 	if start < f.scroll {
 		f.scroll = start
@@ -539,12 +539,12 @@ func (m tview) ensureDetailVisible() {
 }
 
 func (m tview) frameMaxScroll(f *detailFrame) int {
-	lines, _, _ := m.frameLines(f, m.transcriptWidth())
+	lines, _, _ := m.frameLines(f, m.c.m.transcriptWidth())
 	bodyH := m.viewportHeight()
-	if crumb := truncateLine(m.detailBreadcrumb(), m.transcriptWidth()); crumb != "" {
+	if crumb := truncateLine(m.detailBreadcrumb(), m.c.m.transcriptWidth()); crumb != "" {
 		bodyH = max(1, bodyH-2)
 	}
-	if header := f.detailHeaderText(m.transcriptWidth() - detailGutter); header != "" {
+	if header := f.detailHeaderText(m.c.m.transcriptWidth() - detailGutter); header != "" {
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
 	if len(lines) <= bodyH {
@@ -582,10 +582,10 @@ func scrollHint(above, below, width int) string {
 // detailBody renders the active frame: breadcrumb + item list sliced to the
 // viewport (a row reserved for the scroll indicator on overflow), centered.
 func (m tview) detailBody() string {
-	cw := m.transcriptWidth()
+	cw := m.c.m.transcriptWidth()
 	f := m.topFrame()
 	if f == nil {
-		return m.center(dimStyle.Render("(nothing to show)"), m.containerWidth())
+		return m.c.m.center(dimStyle.Render("(nothing to show)"), m.c.m.containerWidth())
 	}
 	lines, _, _ := m.frameLines(f, cw)
 	// Align the breadcrumb/header with item text, which sits past the accent gutter.
@@ -603,7 +603,7 @@ func (m tview) detailBody() string {
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
 	if len(lines) <= bodyH {
-		return m.center(prefix+strings.Join(lines, "\n"), m.containerWidth())
+		return m.c.m.center(prefix+strings.Join(lines, "\n"), m.c.m.containerWidth())
 	}
 	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
 	scroll := min(f.scroll, len(lines)-ch)
@@ -613,7 +613,7 @@ func (m tview) detailBody() string {
 	end := scroll + ch
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
-	return m.center(prefix+body+"\n"+hint, m.containerWidth())
+	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())
 }
 
 func (m model) renderDetail(c transcript.Chunk) string {
@@ -692,10 +692,10 @@ func (m tview) detailItemBody(it transcript.Item, c color.Color, bar string, wid
 		return accentBlock(head+"\n"+wrapDim(it.Text, iw), c, bar)
 	case transcript.ItemText:
 		head := Icon.Output.Render() + " " + StyleSecondaryBold.Render("Output")
-		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
+		return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
 	case transcript.ItemPrompt:
 		head := Icon.User.Render() + " " + StyleSecondaryBold.Render("Prompt")
-		return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
+		return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
 	case transcript.ItemSubagent:
 		// Teammate: colored identity header + message body (or "is done" marker).
 		if s, ok := soleSubagent(it); ok && s.IsTeammate {
@@ -704,7 +704,7 @@ func (m tview) detailItemBody(it transcript.Item, c color.Color, bar string, wid
 			if s.Idle {
 				return accentBlock(head+" "+StyleSecondary.Render("is done"), c, bar)
 			}
-			return accentBlock(head+"\n"+m.renderMD(it.Text, iw), c, bar)
+			return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
 		}
 		// wait/close operate on existing agents: identity header + status body, no trace.
 		if isAgentRefTool(it.ToolName) {
@@ -751,7 +751,7 @@ func (m tview) toolBody(it transcript.Item, width int) string {
 	if !fetched && it.ToolID != "" {
 		return StyleDim.Render("loading…")
 	}
-	return m.renderToolBody(it, width)
+	return m.c.m.renderToolBody(it, width)
 }
 
 // renderToolBody needs the tool's input and result already fetched.

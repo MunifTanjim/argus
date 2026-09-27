@@ -21,7 +21,7 @@ func freshLines(m tview) []string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		block := centerBlock(m.renderChunk(i, i == m.transcript.cursor), m.containerWidth(), m.bodyWidth())
+		block := centerBlock(m.renderChunk(i, i == m.transcript.cursor), m.c.m.containerWidth(), m.c.m.bodyWidth())
 		lines = append(lines, strings.Split(block, "\n")...)
 	}
 	return lines
@@ -74,13 +74,13 @@ func TestLayoutCacheTracksRenderInputs(t *testing.T) {
 	mm = withFocus(mm, mainPane)
 	assertLayoutFresh(t, m, "history focused")
 
-	m.width = 120
+	m.c.m.width = 120
 	assertLayoutFresh(t, m, "width changed")
 
 	setAllExpanded(m, true)
 	assertLayoutFresh(t, m, "all expanded")
 
-	m.sessions = map[string]session.Session{"": {Agent: "antigravity"}}
+	m.c.m.sessions = map[string]session.Session{"": {Agent: "antigravity"}}
 	assertLayoutFresh(t, m, "agent known")
 }
 
@@ -131,7 +131,7 @@ func TestLayoutCacheDropsChunksOnRebind(t *testing.T) {
 	other := userChunks(20)
 	other[5].Text = "other session"
 	ref := subRef{subID: "y", sessionID: "s2", cacheKey: "s2"}
-	m.transcriptCache[ref.key()] = cachedTranscript{chunks: other}
+	m.c.m.transcriptCache[ref.key()] = cachedTranscript{chunks: other}
 	m.bindStream(ref)
 	assertLayoutFresh(t, m, "rebind")
 }

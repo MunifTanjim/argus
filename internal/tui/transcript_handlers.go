@@ -130,7 +130,7 @@ func (m tview) actExpand(tea.KeyPressMsg) tea.Cmd {
 
 func (m tview) actDrillChunk(tea.KeyPressMsg) tea.Cmd {
 	// Drill into the selected chunk's full detail sub-view.
-	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.chunks) && m.detailable(m.transcript.chunks[m.transcript.cursor]) {
+	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.chunks) && m.c.m.detailable(m.transcript.chunks[m.transcript.cursor]) {
 		m.historyView = histDetail
 		m.enterDetail()
 	}

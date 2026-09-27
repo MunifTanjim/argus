@@ -86,9 +86,9 @@ func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
 		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}},
 	})
-	m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
-	m.height = 40
-	m.viewer = true // centering applies only to the bare full-screen viewer
+	m.c.m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
+	m.c.m.height = 40
+	m.c.m.viewer = true // centering applies only to the bare full-screen viewer
 	out := m.detailBody()
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -178,7 +178,7 @@ func TestDetailScrollHint(t *testing.T) {
 		items = append(items, transcript.Item{Kind: transcript.ItemText, Text: "line of output"})
 	}
 	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: items})
-	m.width, m.height = 80, 12 // viewport 5 under the frame header
+	m.c.m.width, m.c.m.height = 80, 12 // viewport 5 under the frame header
 
 	out := m.detailBody()
 	if !strings.Contains(out, "▼") {
@@ -316,7 +316,7 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 		},
 	})
-	m.width, m.height = 80, 30
+	m.c.m.width, m.c.m.height = 80, 30
 	// Output (text) items start pre-expanded; other root items start collapsed.
 	if !m.topFrame().isExpanded(0) {
 		t.Errorf("Output item should start pre-expanded")
@@ -348,7 +348,7 @@ func TestFocusFrameDoesNotRenest(t *testing.T) {
 			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 		},
 	})
-	m.width, m.height = 80, 30
+	m.c.m.width, m.c.m.height = 80, 30
 
 	m.drillDetail()
 	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
@@ -379,7 +379,7 @@ func TestDetailKeyNav(t *testing.T) {
 			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
 	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
 		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
-	m.width, m.height = 80, 30
+	m.c.m.width, m.c.m.height = 80, 30
 
 	m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
 	if m.topFrame().cursor != 1 {

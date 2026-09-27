@@ -125,8 +125,6 @@ func (l logsComp) footer(c *ctx) []binding {
 	return []binding{listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, c.m.treeKey(), projectsKeys.Help}
 }
 
-func (l logsComp) footerText(c *ctx) string { return c.m.sessionHint(l.footer(c)...) }
-
 // The Logs tab exists only with an embedded node.
 func openLogs(c *ctx) {
 	if c.m.hasLogsTab() {

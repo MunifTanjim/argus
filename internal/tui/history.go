@@ -94,17 +94,11 @@ func (m tview) takePendingExport(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, true
 }
 
-// exportOrFlashFooter overrides footer with the export prompt or a transient flash.
-func (m model) exportOrFlashFooter(pendingExport bool, footer string) string {
-	switch {
-	case pendingExport:
-		return asstStyle.Render("export this session? y/n")
-	case len(m.keyBuf) > 0:
-		return asstStyle.Render(m.keyHint())
-	case m.flash != "":
-		return asstStyle.Render(firstLine(m.flash))
+func exportPrompt(pending bool) string {
+	if !pending {
+		return ""
 	}
-	return footer
+	return asstStyle.Render("export this session? y/n")
 }
 
 func historyResume(c *ctx, resumable bool, nodeID, agent, sessionID, cwd string) tea.Cmd {
@@ -140,31 +134,27 @@ func renderCardList(cards []string, cursor, avail int) string {
 }
 
 func (m tview) historyTranscriptView() string {
-	header := m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.containerWidth())
+	header := m.c.m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
 	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
 	if m.redactListActive() {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
-		body = m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.containerWidth())
+		body = m.c.m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
 	}
 	return header + "\n\n" + body
 }
 
 func (m tview) historyTranscriptBinds() []binding {
 	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
-	if !m.viewer {
+	if !m.c.m.viewer {
 		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
 	}
 	return append(binds, transcriptKeys.Back)
 }
 
-func (m tview) historyTranscriptFooter() string {
-	return m.redactFooter(m.exportOrFlashFooter(m.pendingExport, m.model.footer(m.historyTranscriptBinds()...)))
-}
-
 // historyTranscriptHeader renders the open-transcript header: a manifest-driven
 // summary offline (no live node/history breadcrumb), else the history breadcrumb.
 func (m tview) historyTranscriptHeader() string {
-	if m.viewer {
+	if m.c.m.viewer {
 		s := m.history.openSession
 		title := s.Title
 		if title == "" {

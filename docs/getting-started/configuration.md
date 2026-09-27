@@ -246,8 +246,9 @@ The `g?` sequence shows the command name next to each key.
 | `focus left` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
 | `focus next` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
 | `focus prev` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>W` |
-| `focus prompt` | file, session-dock, transcript | `<Tab>` |
+| `focus prompt` | file, transcript | `<Tab>` |
 | `focus right` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-l>` `<C-w>l` |
+| `focus transcript` | session-dock | `<Tab>` |
 | `focus up` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-k>` `<C-w>k` |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |

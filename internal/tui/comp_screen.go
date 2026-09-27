@@ -135,7 +135,7 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	return b.String()
 }
 
-func (s screenComp) footerText(c *ctx) string {
+func (s screenComp) footerPrompt(c *ctx) string {
 	return dimStyle.Render("keys go to the session · ") + c.m.footer(s.footer(c)...)
 }
 

@@ -174,11 +174,11 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	return block + renderCardList(cards, cursor, avail)
 }
 
-func (p workspaceComp) footerText(c *ctx) string {
+func (p workspaceComp) footerPrompt(c *ctx) string {
 	if p.killID != "" {
 		return asstStyle.Render(killPrompt(c.m.sessions[p.killID]))
 	}
-	return c.m.treeScreenFooter(p.footer(c)...)
+	return ""
 }
 
 func (p workspaceComp) footer(c *ctx) []binding {

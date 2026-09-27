@@ -70,8 +70,6 @@ func (s summaryComp) footer(c *ctx) []binding {
 	return append(bindings, k.Help, helpAs(k.Back, "tree"))
 }
 
-func (s summaryComp) footerText(c *ctx) string { return c.m.treeScreenFooter(s.footer(c)...) }
-
 func rowSummary(c *ctx, r projectsRow, w int) string {
 	m := c.m
 	act := m.workspaceActivity()

@@ -226,8 +226,8 @@ func TestRedactFooterStates(t *testing.T) {
 
 	// Idle with a queued literal: shows count + key hint.
 	m = withTr(m, func(t *transcriptComp) { t.redact.literals = []string{"a"} })
-	if got := tvOf(&m).redactFooter("BASE"); got == "BASE" {
-		t.Fatal("expected redact hint, got base footer")
+	if got := m.currentFooter(); !contains(got, "redaction(s) queued") {
+		t.Fatalf("expected the queued-count hint, got %q", got)
 	}
 
 	// Input active: shows the masked buffer, never the plaintext secret.
@@ -236,7 +236,7 @@ func TestRedactFooterStates(t *testing.T) {
 		t.redact.input = newRedactInput()
 		t.redact.input.SetValue("sk-x")
 	})
-	if got := tvOf(&m).redactFooter("BASE"); !contains(got, "redact (paste secret):") || contains(got, "sk-x") {
+	if got := m.currentFooter(); !contains(got, "redact (paste secret):") || contains(got, "sk-x") {
 		t.Fatalf("input footer should mask the secret, got %q", got)
 	}
 	m = withTr(m, func(t *transcriptComp) { t.redact.inputActive = false })
@@ -247,7 +247,7 @@ func TestRedactFooterStates(t *testing.T) {
 		t.redact.report = &rep
 		t.redact.pendingSave = true
 	})
-	if got := tvOf(&m).redactFooter("BASE"); !contains(got, "y/n") {
+	if got := m.currentFooter(); !contains(got, "y/n") {
 		t.Fatalf("confirm footer should ask y/n, got %q", got)
 	}
 }
@@ -260,8 +260,8 @@ func TestRedactFooterFlashSurfaces(t *testing.T) {
 	m.flash = "redacted: /tmp/x-redacted.argus"
 
 	// Flash must win over the queued-count hint.
-	if got := tvOf(&m).redactFooter("SENTINEL_BASE"); got != "SENTINEL_BASE" {
-		t.Fatalf("flash should surface via base, got %q", got)
+	if got := m.currentFooter(); !contains(got, m.flash) {
+		t.Fatalf("the flash should show, got %q", got)
 	}
 
 	// Pending-save modal must still win over flash.
@@ -270,7 +270,7 @@ func TestRedactFooterFlashSurfaces(t *testing.T) {
 		t.redact.report = &rep
 		t.redact.pendingSave = true
 	})
-	if got := tvOf(&m).redactFooter("SENTINEL_BASE"); !contains(got, "y/n") {
+	if got := m.currentFooter(); !contains(got, "y/n") {
 		t.Fatalf("confirm modal must beat flash, got %q", got)
 	}
 }
@@ -348,7 +348,7 @@ func TestRedactFooterWarnConfirm(t *testing.T) {
 		t.redact.warnConfirm = true
 	})
 
-	got := tvOf(&m).redactFooter("BASE")
+	got := m.currentFooter()
 	if contains(got, "y/n") {
 		t.Fatalf("warn stage must not show the plain y/n confirm, got %q", got)
 	}

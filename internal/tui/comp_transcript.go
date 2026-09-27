@@ -93,7 +93,7 @@ func (t transcriptComp) commands(c *ctx) []binding {
 	case v.redactActive():
 		out = append(out, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave)
 	case t.live && c.m.sessionInteraction() != nil:
-		out = append(out, sessionKeys.Raw, sessionKeys.Focus)
+		out = append(out, sessionKeys.Raw, sessionKeys.FocusPrompt)
 	case t.live:
 		out = append(out, sessionKeys.Raw)
 	}
@@ -145,11 +145,22 @@ func (t transcriptComp) fileHeader(c *ctx, w int) string {
 	return sessionHeader(c.m.sessions[t.sessionID], w, c.m.paneHeadStyle())
 }
 
-func (t transcriptComp) footerText(c *ctx) string {
-	if !t.live {
-		return t.bind(c).historyTranscriptFooter()
+func (t transcriptComp) footerPrompt(c *ctx) string {
+	if t.live {
+		return ""
 	}
-	return c.m.sessionHint(t.footer(c)...)
+	if s := t.bind(c).redactPrompt(); s != "" {
+		return s
+	}
+	return exportPrompt(t.pendingExport)
+}
+
+func (t transcriptComp) footerText(c *ctx) string {
+	base := c.m.footer(t.footer(c)...)
+	if t.live {
+		return base
+	}
+	return t.bind(c).redactFooter(base)
 }
 
 func (t transcriptComp) footer(c *ctx) []binding {
@@ -162,52 +173,49 @@ func (t transcriptComp) footer(c *ctx) []binding {
 	}
 	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse,
 		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back}
-	if v.sessionInteraction() != nil {
+	if v.c.m.sessionInteraction() != nil {
 		binds = append(binds, transcriptKeys.Answer)
 	}
-	if v.sessions[t.sessionID].Status == session.StatusStarting {
+	if v.c.m.sessions[t.sessionID].Status == session.StatusStarting {
 		binds = append(binds, sessionKeys.Raw)
 	}
-	if v.filesVisible() && v.currentWorkspace() != "" {
-		binds = append(binds, v.sideKey(paneKeys.Right))
+	if v.c.m.filesVisible() && v.c.m.currentWorkspace() != "" {
+		binds = append(binds, v.c.m.sideKey(paneKeys.Right))
 	}
 	return binds
 }
 
-// tview is a transcript with the model it lives in. Its methods read the
-// model's global state and read and change the transcript's own state; they ask
-// for model changes through c.
+// tview is a transcript bound to the context of one component call.
 type tview struct {
 	*transcriptComp
-	*model
 	c *ctx
 }
 
-func (t *transcriptComp) bind(c *ctx) tview { return tview{t, c.m, c} }
+func (t *transcriptComp) bind(c *ctx) tview { return tview{t, c} }
 
 func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.c.setFlash("")
 	switch {
-	case m.matches(msg, sessionKeys.Focus):
-		if m.sessionInteraction() != nil {
+	case m.c.m.matches(msg, sessionKeys.FocusPrompt):
+		if m.c.m.sessionInteraction() != nil {
 			m.c.focusOn(sessionDock)
 		}
 		return nil
-	case m.matches(msg, sessionKeys.Raw):
+	case m.c.m.matches(msg, sessionKeys.Raw):
 		return openLiveScreen(m.c)
 	}
-	if m.matches(msg, transcriptKeys.Back) {
+	if m.c.m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			// A leaf frame above a subagent frame has no subID and pops normally, so
 			// the subagent subscription lives until its own frame pops.
 			if f := m.topFrame(); f != nil && f.subID != "" {
-				cmd := m.unsubscribeCmd(f.subID)
+				cmd := m.c.m.unsubscribeCmd(f.subID)
 				m.activeSub = m.sessionSub
 				m.sessionSub = subRef{}
 				// Re-subscribe to catch deltas missed while drilled in.
-				have := len(m.transcriptCache[m.activeSub.key()].chunks)
+				have := len(m.c.m.transcriptCache[m.activeSub.key()].chunks)
 				m.popDetail()
-				return tea.Batch(cmd, m.subscribeCmd(m.activeSub, have))
+				return tea.Batch(cmd, m.c.m.subscribeCmd(m.activeSub, have))
 			}
 			if m.popDetail() { // popped the root → back to the card list
 				m.historyView = histTranscript
@@ -234,28 +242,28 @@ func (m tview) historyKey(msg tea.KeyPressMsg) tea.Cmd {
 	if cmd, ok := m.handleRedactKey(msg); ok {
 		return cmd
 	}
-	if m.matches(msg, transcriptKeys.Back) {
+	if m.c.m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
 			if m.popDetail() { // root frame → back to transcript
 				m.historyView = histTranscript
 			}
 			return nil
 		}
-		if m.viewer {
+		if m.c.m.viewer {
 			return tea.Quit
 		}
 		m.c.back()
 		return nil
 	}
-	if m.historyView == histTranscript && !m.viewer && m.matches(msg, transcriptKeys.Resume) {
+	if m.historyView == histTranscript && !m.c.m.viewer && m.c.m.matches(msg, transcriptKeys.Resume) {
 		h := m.history
 		return historyResume(m.c, h.openResumable, h.openNodeID, h.openAgent, h.openSessionID, h.project.Cwd)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)
 	}
-	if m.matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
-		if !m.viewer {
+	if m.c.m.matches(msg, transcriptKeys.Export) && m.historyView == histTranscript {
+		if !m.c.m.viewer {
 			m.pendingExport = true
 		}
 		return nil
@@ -267,7 +275,7 @@ func (m tview) closeStreams() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, s := range []subRef{m.activeSub, m.sessionSub} {
 		if s.subID != "" {
-			cmds = append(cmds, m.unsubscribeCmd(s.subID))
+			cmds = append(cmds, m.c.m.unsubscribeCmd(s.subID))
 		}
 	}
 	m.activeSub, m.sessionSub = subRef{}, subRef{}
@@ -288,7 +296,7 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 			// Match by subID, not topFrame(): the user may have drilled into a leaf above it.
 			for i := range m.transcript.detailStack {
 				if m.transcript.detailStack[i].subID == msg.delta.SubID {
-					m.transcript.detailStack[i].items = flattenTrace(m.transcriptCache[msg.ref.key()].chunks)
+					m.transcript.detailStack[i].items = flattenTrace(m.c.m.transcriptCache[msg.ref.key()].chunks)
 					m.transcript.detailStack[i].expandOutputs()
 					break
 				}
