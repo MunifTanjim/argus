@@ -16,6 +16,7 @@ import 'transport/connection.dart';
 import 'ui/home_shell.dart';
 import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
+import 'ui/sign_out.dart';
 import 'ui/theme.dart';
 
 Future<void> main(List<String> args) async {
@@ -65,6 +66,7 @@ class ArgusApp extends ConsumerStatefulWidget {
 class _ArgusAppState extends ConsumerState<ArgusApp>
     with WidgetsBindingObserver {
   bool _loaded = false;
+  final _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -108,9 +110,11 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     ref.watch(gatewayProvider);
     // Materialize push: starts a backend, requests permission, wires tap routing.
     ref.watch(pushControllerProvider);
+    popToRootOnSignOut(ref, _navigatorKey);
 
     return MaterialApp(
       title: 'argus',
+      navigatorKey: _navigatorKey,
       theme: buildArgusTheme(),
       navigatorObservers: [appRouteObserver],
       home: !_loaded
