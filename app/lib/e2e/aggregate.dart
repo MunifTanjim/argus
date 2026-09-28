@@ -35,6 +35,13 @@ const Set<String> terminalHandleAddressed = {
   'terminal.input', 'terminal.resize', 'terminal.close',
 };
 
+/// Read methods carrying a composite workspace_id the client splits and routes
+/// to a node.
+const Set<String> workspaceAddressed = {
+  'workspace.changedFiles', 'workspace.diff', 'workspace.listDir',
+  'workspace.readFile', 'workspace.commits', 'workspace.commitFiles',
+};
+
 /// Methods whose result carries a node-local session_id that must be composited.
 const Set<String> compositeResultMethods = {'sessions.spawn', 'sessions.resume'};
 
@@ -57,6 +64,26 @@ Map<String, dynamic> withOriginJson(Map<String, dynamic> s, String nodeId, Strin
     'node_id': nodeId,
     'node_label': label,
     'offline': false,
+  };
+}
+
+/// Stamps a node-local project with its origin and composites its project and
+/// workspace ids, so they match the composited session workspace_id.
+Map<String, dynamic> projectWithOriginJson(
+    Map<String, dynamic> p, String nodeId, String? label) {
+  final ws = p['workspaces'];
+  final id = p['id'];
+  return {
+    ...p,
+    'id': compositeId(nodeId, id is String ? id : ''),
+    'node_id': nodeId,
+    'node_label': label,
+    'workspaces': [
+      if (ws is List)
+        for (final w in ws)
+          if (w is Map<String, dynamic>)
+            {...w, 'id': compositeId(nodeId, w['id'] is String ? w['id'] as String : '')},
+    ],
   };
 }
 

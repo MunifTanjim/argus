@@ -578,6 +578,8 @@ class E2EClient implements GatewayClient {
         return _fanoutSessions(method, params);
       case 'sessions.historyProjects':
         return _fanoutHistoryProjects(params);
+      case 'project.list':
+        return _fanoutProjects(params);
       case 'transcript.unsubscribe':
         return _routeByHandle(
           _subNode,
@@ -588,6 +590,8 @@ class E2EClient implements GatewayClient {
     }
     if (sessionAddressed.contains(method))
       return _routeBySession(method, params);
+    if (workspaceAddressed.contains(method))
+      return _routeByWorkspace(method, params);
     if (nodeAddressed.contains(method)) return _routeByNode(method, params);
     if (terminalHandleAddressed.contains(method)) {
       return _routeByHandle(
@@ -666,6 +670,53 @@ class E2EClient implements GatewayClient {
       ),
     );
     return all;
+  }
+
+  // Unlike the session fan-out, a failure on every node surfaces, so the drawer
+  // can show an error instead of an empty tree. A partial failure lists the
+  // failed nodes, so the caller can keep their last good projects.
+  Future<Map<String, dynamic>> _fanoutProjects(Object? params) async {
+    final entries = _byNodeId.keys.toList();
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, 'project.list', params);
+          final list = r is Map ? r['projects'] : null;
+          return (nodeId, list is List ? list : const <dynamic>[], null as Object?);
+        } catch (e) {
+          return (nodeId, const <dynamic>[], e as Object?);
+        }
+      }),
+    );
+    final errors = [for (final r in results) if (r.$3 != null) r.$3!];
+    if (entries.isNotEmpty && errors.length == entries.length) throw errors.first;
+    final merged = <Map<String, dynamic>>[];
+    for (final (nodeId, list, _) in results) {
+      final label = _roster[nodeId]?.label;
+      for (final p in list) {
+        if (p is Map<String, dynamic>)
+          merged.add(projectWithOriginJson(p, nodeId, label));
+      }
+    }
+    return {
+      'projects': merged,
+      'failed_nodes': [for (final r in results) if (r.$3 != null) r.$1],
+    };
+  }
+
+  Future<Object?> _routeByWorkspace(String method, Object? params) async {
+    final composite = stringField(params, 'workspace_id');
+    if (composite == null) {
+      throw RpcError(-32600, '$method requires workspace_id');
+    }
+    final (nodeId, localId, ok) = splitCompositeId(composite);
+    if (!ok) {
+      throw RpcError(-32600, 'workspace id is not gateway-qualified: $composite');
+    }
+    return _callNodeDecoded(nodeId, method, {
+      ...(params as Map).cast<String, dynamic>(),
+      'workspace_id': localId,
+    });
   }
 
   /// Fans out a push.register/unregister/test call to every connected node channel.
@@ -824,18 +875,20 @@ class E2EClient implements GatewayClient {
     final nodeJson = params['node'];
     if (nodeJson is! Map<String, dynamic>) return;
     final desc = _parseNodeDescriptor(nodeJson);
-    if (evType == 'online' || evType == 'added') {
-      // Off the read loop: adoptNode calls the gateway and awaits msg2, both of
-      // which are answered on this very stream.
-      unawaited(_adoptNode(desc));
-    } else if (evType == 'offline' || evType == 'removed') {
-      _loseNode(desc.id);
-    } else {
-      return;
-    }
     // Surface the roster change to the app so views bound to the node list (e.g.
     // the settings screen) refresh without waiting for a reconnect.
-    _notificationsCtrl?.add(msg);
+    if (evType == 'online' || evType == 'added') {
+      // Off the read loop: adoptNode calls the gateway and awaits msg2, both of
+      // which are answered on this very stream. Surface only once the channel is
+      // open, so a reload on this event already reaches the new node.
+      unawaited(_adoptNode(desc).whenComplete(() {
+        final ctrl = _notificationsCtrl;
+        if (ctrl != null && !ctrl.isClosed) ctrl.add(msg);
+      }));
+    } else if (evType == 'offline' || evType == 'removed') {
+      _loseNode(desc.id);
+      _notificationsCtrl?.add(msg);
+    }
   }
 
   /// Re-reads each connected node's trust-log tip over its authenticated Noise

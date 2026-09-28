@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart';
+import 'package:argus/transport/jsonrpc.dart';
 
 import 'loopback.dart';
 
@@ -170,6 +171,85 @@ void main() {
     a.emitNotification('transcript.delta', _json({'sub_id': 'x', 'chunks': []}));
     final ev = await got.timeout(const Duration(seconds: 2));
     expect((ev.params as Map)['sub_id'], 'x');
+    await client.close();
+  });
+
+  test('project.list merges nodes and composites project and workspace ids',
+      () async {
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json({
+          'projects': [
+            {
+              'id': 'p1',
+              'name': 'argus',
+              'workspaces': [
+                {'id': 'w1', 'dir': '/a'},
+              ],
+            },
+          ],
+        }));
+    final b = LoopbackNode('B', await generateKeyPair(), (m, p) => _json({
+          'projects': [
+            {'id': 'p1', 'name': 'infra', 'workspaces': []},
+          ],
+        }));
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+
+    final r = await client.call('project.list') as Map;
+    final byId = {for (final p in r['projects'] as List) (p as Map)['id']: p};
+    expect(byId.keys.toSet(), {'A:p1', 'B:p1'});
+    expect(byId['A:p1']!['node_id'], 'A');
+    expect(byId['A:p1']!['node_label'], 'A-box');
+    expect(((byId['A:p1']!['workspaces'] as List).single as Map)['id'], 'A:w1');
+    await client.close();
+  });
+
+  test('project.list drops a failing node and throws when all fail', () async {
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json({
+          'projects': [
+            {'id': 'p1', 'name': 'argus', 'workspaces': []},
+          ],
+        }));
+    final b = LoopbackNode(
+        'B', await generateKeyPair(), (m, p) => throw StateError('B down'));
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('project.list') as Map;
+    expect((r['projects'] as List).map((p) => (p as Map)['id']), ['A:p1']);
+    expect(r['failed_nodes'], ['B']);
+    await client.close();
+
+    final c = LoopbackNode(
+        'C', await generateKeyPair(), (m, p) => throw StateError('C down'));
+    final lnk2 = MultiNodeLoopbackLink({'C': c});
+    final client2 =
+        E2EClient(lnk2.incoming, lnk2.send, await generateKeyPair());
+    await client2.connect();
+    await expectLater(client2.call('project.list'), throwsA(anything));
+    await client2.close();
+  });
+
+  test('workspace reads route by the composite id with the local id',
+      () async {
+    String? seenMethod;
+    String? seenId;
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seenMethod = m;
+      seenId = (jsonDecode(utf8.decode(p)) as Map)['workspace_id'] as String?;
+      return _json({'entries': []});
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('workspace.listDir', {'workspace_id': 'A:w:1', 'path': ''});
+    expect(seenMethod, 'workspace.listDir');
+    expect(seenId, 'w:1');
+    await expectLater(
+      client.call('workspace.readFile', {'workspace_id': 'bare', 'path': 'x'}),
+      throwsA(isA<RpcError>().having((e) => e.code, 'code', -32600)),
+    );
     await client.close();
   });
 }
