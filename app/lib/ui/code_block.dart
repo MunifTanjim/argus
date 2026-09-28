@@ -249,7 +249,9 @@ Widget codeView(String body,
     {String? lang,
     bool lineNumberToggle = true,
     bool wrap = false,
-    bool selectable = true}) {
+    bool selectable = true,
+    bool lineNumbers = false,
+    bool prettyJson = true}) {
   // Show the box with a dim marker so an empty block still reads as "a block that
   // was empty" rather than a missing render.
   if (body.trim().isEmpty) {
@@ -262,7 +264,9 @@ Widget codeView(String body,
       lang: lang,
       lineNumberToggle: lineNumberToggle,
       wrap: wrap,
-      selectable: selectable);
+      selectable: selectable,
+      lineNumbers: lineNumbers,
+      prettyJson: prettyJson);
 }
 
 class _CodeBlock extends StatefulWidget {
@@ -271,13 +275,17 @@ class _CodeBlock extends StatefulWidget {
       this.lang,
       this.lineNumberToggle = true,
       this.wrap = false,
-      this.selectable = true});
+      this.selectable = true,
+      required this.lineNumbers,
+      required this.prettyJson});
 
   final String body;
   final String? lang;
   final bool lineNumberToggle;
   final bool wrap;
   final bool selectable;
+  final bool lineNumbers;
+  final bool prettyJson;
 
   @override
   State<_CodeBlock> createState() => _CodeBlockState();
@@ -285,12 +293,12 @@ class _CodeBlock extends StatefulWidget {
 
 class _CodeBlockState extends State<_CodeBlock> {
   late bool _wrap = widget.wrap;
-  bool _lineNumbers = false;
+  late bool _lineNumbers = widget.lineNumbers;
   bool _plain = false;
 
   @override
   Widget build(BuildContext context) {
-    final pretty = _prettyJson(widget.body);
+    final pretty = widget.prettyJson ? _prettyJson(widget.body) : null;
     final source = pretty ?? widget.body;
     // An unknown fence language (or any highlighter hiccup) must not break the
     // block — fall back to plain monospace.

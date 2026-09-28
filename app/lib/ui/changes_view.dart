@@ -15,17 +15,24 @@ const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
 
 /// Git status (grouped Staged / Unstaged / Untracked) above the commit list,
 /// for a session or a workspace. Pull down to refresh.
+///
+/// [filesTitle] shows the files as one flat list under that title; a diff
+/// against a branch has no index, so the staged groups would be meaningless.
 class ChangesView extends ConsumerWidget {
   const ChangesView({
     super.key,
     required this.source,
     this.emptyText = 'No working-tree changes.',
     this.header,
+    this.filesTitle,
+    this.commitsTitle = 'Commits',
   });
 
   final ChangesSource source;
   final String emptyText;
   final Widget? header;
+  final String? filesTitle;
+  final String commitsTitle;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,16 +47,19 @@ class ChangesView extends ConsumerWidget {
     );
   }
 
-  Widget _messageList(String? text) => ListView(
-    children: [
-      ?header,
-      const SizedBox(height: 120),
-      Center(
-        child: text == null
-            ? const CircularProgressIndicator()
-            : Text(text, style: const TextStyle(color: AppColors.dim)),
-      ),
-    ],
+  Widget _messageList(String? text) => CenteredBody(
+    child: ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        ?header,
+        const SizedBox(height: 108),
+        Center(
+          child: text == null
+              ? const CircularProgressIndicator()
+              : Text(text, style: const TextStyle(color: AppColors.dim)),
+        ),
+      ],
+    ),
   );
 
   Widget _body(BuildContext context, WidgetRef ref, List<ChangedFile> files) {
@@ -66,9 +76,13 @@ class ChangesView extends ConsumerWidget {
         padding: const EdgeInsets.all(12),
         children: [
           ?header,
-          ..._fileSection(context, 'Staged', staged),
-          ..._fileSection(context, 'Unstaged', unstaged),
-          ..._fileSection(context, 'Untracked', untracked),
+          if (filesTitle case final title?)
+            ..._fileSection(context, title, files)
+          else ...[
+            ..._fileSection(context, 'Staged', staged),
+            ..._fileSection(context, 'Unstaged', unstaged),
+            ..._fileSection(context, 'Untracked', untracked),
+          ],
           if (files.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -108,14 +122,14 @@ class ChangesView extends ConsumerWidget {
     final async = ref.watch(sourceCommitsProvider(source));
     return async.when(
       loading: () => [
-        _sectionHeader('COMMITS'),
+        _sectionHeader(commitsTitle.toUpperCase()),
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
           child: Center(child: CircularProgressIndicator()),
         ),
       ],
       error: (e, _) => [
-        _sectionHeader('COMMITS'),
+        _sectionHeader(commitsTitle.toUpperCase()),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
@@ -128,7 +142,7 @@ class ChangesView extends ConsumerWidget {
         if (list.commits.isEmpty) return const [];
         return [
           _sectionHeader(
-            '${list.unpushed ? 'UNPUSHED' : 'COMMITS'} (${list.commits.length})',
+            '${list.unpushed ? 'UNPUSHED' : commitsTitle.toUpperCase()} (${list.commits.length})',
           ),
           for (final c in list.commits) _CommitRow(source: source, commit: c),
           const SizedBox(height: 8),
