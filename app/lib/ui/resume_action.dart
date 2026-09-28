@@ -25,7 +25,7 @@ Future<void> resumeSession(
   if (!context.mounted) return;
   switch (result) {
     case Ok(:final value):
-      ref.read(homeTabProvider.notifier).state = homeTabSessions;
+      showHomeSessions(ref);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Resuming session…')),
       );

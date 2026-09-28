@@ -88,7 +88,7 @@ void main() {
     });
   });
 
-  testWidgets('success switches to the Sessions tab', (tester) async {
+  testWidgets('success goes to Home Sessions', (tester) async {
     final container = ProviderContainer(overrides: [
       sessionRepositoryProvider.overrideWithValue(
         FakeSessionRepository(
@@ -97,7 +97,8 @@ void main() {
       ),
     ]);
     addTearDown(container.dispose);
-    container.read(homeTabProvider.notifier).state = 1; // start on History
+    container.read(homeTabProvider.notifier).state = HomeTab.history;
+    container.read(scopeProvider.notifier).state = 'A:w1';
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -119,7 +120,8 @@ void main() {
     await tester.tap(find.text('resume'));
     await tester.pumpAndSettle();
 
-    expect(container.read(homeTabProvider), homeTabSessions);
+    expect(container.read(homeTabProvider), HomeTab.sessions);
+    expect(container.read(scopeProvider), isNull);
   });
 
   testWidgets('failure stays on the page and shows the error', (tester) async {

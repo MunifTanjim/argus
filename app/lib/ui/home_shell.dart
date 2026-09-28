@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/project.dart';
 import '../models/session.dart';
 import '../state/navigation.dart';
+import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import 'history_screen.dart';
+import 'project_drawer.dart';
 import 'session_detail_screen.dart';
 import 'session_list_screen.dart';
-import 'settings_screen.dart';
+import 'shell_drawer.dart';
+import 'workspace_screen.dart';
+
+const double kSidePanelMinWidth = 900;
+const double kSidePanelWidth = 300;
 
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -18,6 +25,8 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
@@ -41,42 +50,99 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
   }
 
+  // A reload that lost the open workspace (removed, gone, or its node went
+  // offline) returns to Home. A failed reload keeps the last list, so it never
+  // lands here.
+  void _onProjects(ProjectsState? prev, ProjectsState next) {
+    final scope = ref.read(scopeProvider);
+    if (scope == null || !next.loaded) return;
+    final hit = lookupWorkspace(next.projects, scope);
+    if (hit != null && !hit.$2.isGone) return;
+    final name = prev == null ? null : lookupWorkspace(prev.projects, scope)?.$2.name;
+    ref.read(scopeProvider.notifier).state = null;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('${name ?? 'The workspace'} is no longer available'),
+    ));
+  }
+
+  void _back() {
+    final scope = ref.read(scopeProvider);
+    if (scope != null) {
+      final path = ref.read(filesPathProvider(scope));
+      if (ref.read(workspaceTabProvider(scope)) == WorkspaceTab.files &&
+          path.isNotEmpty) {
+        ref.read(filesPathProvider(scope).notifier).state = parentPath(path);
+        return;
+      }
+      ref.read(scopeProvider.notifier).state = null;
+      return;
+    }
+    if (ref.read(homeTabProvider) != HomeTab.sessions) {
+      ref.read(homeTabProvider.notifier).state = HomeTab.sessions;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Open on a new tap, and re-check when the session list arrives for a tap
     // that pointed at a not-yet-known session.
     ref.listen<String?>(pendingOpenSessionProvider, (_, __) => _openPending());
     ref.listen<Map<String, Session>>(sessionsProvider, (_, __) => _openPending());
+    ref.listen<ProjectsState>(projectsProvider, _onProjects);
 
-    final tabs = [
-      const SessionListScreen(),
-      const HistoryScreen(),
-      const SettingsScreen(),
-    ];
-    final index = ref.watch(homeTabProvider);
-    // The tabs share one route, so back on a non-first tab would otherwise exit
-    // the app. Intercept it to return to Sessions first; only exit from Sessions.
+    final scope = ref.watch(scopeProvider);
+    final homeTab = ref.watch(homeTabProvider);
+    final projects = ref.watch(projectsProvider).projects;
+    final hit = scope == null ? null : lookupWorkspace(projects, scope);
+    final main = hit == null
+        ? const _HomeBody()
+        : WorkspaceScreen(key: ValueKey(scope), project: hit.$1, workspace: hit.$2);
+    final wide = MediaQuery.sizeOf(context).width >= kSidePanelMinWidth;
+
     return PopScope(
-      canPop: index == homeTabSessions,
+      canPop: scope == null && homeTab == HomeTab.sessions,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && index != homeTabSessions) {
-          ref.read(homeTabProvider.notifier).state = homeTabSessions;
-        }
+        if (!didPop) _back();
       },
-      child: Scaffold(
-        body: IndexedStack(index: index, children: tabs),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: index,
-          onDestinationSelected: (i) =>
-              ref.read(homeTabProvider.notifier).state = i,
-          destinations: const [
-            NavigationDestination(
-                icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
-            NavigationDestination(icon: Icon(Icons.history), label: 'History'),
-            NavigationDestination(
-                icon: Icon(Icons.settings_outlined), label: 'Settings'),
-          ],
+      child: ShellDrawerScope(
+        openDrawer: wide ? null : () => _scaffoldKey.currentState?.openDrawer(),
+        child: Scaffold(
+          key: _scaffoldKey,
+          drawer: wide ? null : const Drawer(child: ProjectDrawer()),
+          body: wide
+              ? Row(
+                  children: [
+                    const SizedBox(width: kSidePanelWidth, child: ProjectDrawer()),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: main),
+                  ],
+                )
+              : main,
         ),
+      ),
+    );
+  }
+}
+
+class _HomeBody extends ConsumerWidget {
+  const _HomeBody();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tab = ref.watch(homeTabProvider);
+    return Scaffold(
+      body: IndexedStack(
+        index: tab.index,
+        children: const [SessionListScreen(), HistoryScreen()],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: tab.index,
+        onDestinationSelected: (i) =>
+            ref.read(homeTabProvider.notifier).state = HomeTab.values[i],
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
+          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+        ],
       ),
     );
   }

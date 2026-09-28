@@ -1,10 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
-/// Selected tab in HomeShell: 0 = Sessions, 1 = History, 2 = Settings.
-final homeTabProvider = StateProvider<int>((ref) => 0);
-
-const homeTabSessions = 0;
+final homeTabProvider = StateProvider<HomeTab>((ref) => HomeTab.sessions);
 
 enum HomeTab { sessions, history }
 
@@ -25,4 +22,9 @@ final changesAgainstProvider =
 String parentPath(String path) {
   final i = path.lastIndexOf('/');
   return i < 0 ? '' : path.substring(0, i);
+}
+
+void showHomeSessions(WidgetRef ref) {
+  ref.read(scopeProvider.notifier).state = null;
+  ref.read(homeTabProvider.notifier).state = HomeTab.sessions;
 }
