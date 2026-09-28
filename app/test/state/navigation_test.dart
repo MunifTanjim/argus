@@ -6,6 +6,7 @@ void main() {
   test('defaults: Home, root path, uncommitted', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
+    expect(c.read(homeTabProvider), HomeTab.sessions);
     expect(c.read(scopeProvider), isNull);
     expect(c.read(workspaceTabProvider('A:w1')), WorkspaceTab.sessions);
     expect(c.read(filesPathProvider('A:w1')), '');

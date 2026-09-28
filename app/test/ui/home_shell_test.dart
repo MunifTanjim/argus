@@ -4,10 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/gateway.dart';
+import 'package:argus/state/navigation.dart';
+import 'package:argus/state/projects.dart';
 import 'package:argus/state/push.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/home_shell.dart';
 import 'package:argus/ui/session_detail_screen.dart';
+import 'package:argus/ui/workspace_screen.dart';
+
+import '../support/fake_gateway_client.dart';
 
 Session _session(String id) => Session(
       id: id,
@@ -23,18 +28,139 @@ Session _session(String id) => Session(
       source: SessionSource.discovered,
     );
 
-void main() {
-  testWidgets('switches to Settings tab and shows Disconnect', (tester) async {
-    await tester.pumpWidget(ProviderScope(
-      overrides: [gatewayProvider.overrideWithValue(null)],
-      child: const MaterialApp(home: HomeShell()),
-    ));
-    await tester.pump();
+Map<String, dynamic> _tree({bool gone = false, bool withW2 = true}) => {
+      'projects': [
+        {
+          'id': 'A:p1',
+          'name': 'argus',
+          'node_id': 'A',
+          'workspaces': [
+            {'id': 'A:w1', 'dir': '/src/argus', 'branch': 'main', 'is_main': true},
+            if (withW2)
+              {
+                'id': 'A:w2',
+                'dir': '/src/argus/.worktrees/registry',
+                'branch': 'feat/registry',
+                'is_gone': gone,
+              },
+          ],
+        },
+      ],
+    };
 
+Future<ProviderContainer> _shell(WidgetTester tester, {double width = 400}) async {
+  tester.view.physicalSize = Size(width, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final c = ProviderContainer(overrides: [gatewayProvider.overrideWithValue(null)]);
+  addTearDown(c.dispose);
+  await c.read(projectsProvider.notifier).load(FakeGatewayClient((m, p) async => _tree()));
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: c,
+    child: const MaterialApp(home: HomeShell()),
+  ));
+  await tester.pump();
+  return c;
+}
+
+Future<void> _back(WidgetTester tester) async {
+  await tester.binding.handlePopRoute();
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets('phone: Home tabs, drawer opens from the menu button', (tester) async {
+    await _shell(tester);
     expect(find.text('Sessions'), findsWidgets);
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Settings'), findsNothing);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    expect(find.text('registry'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
+  });
+
+  testWidgets('a workspace tap shows its screen and closes the drawer', (tester) async {
+    final c = await _shell(tester);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('registry'));
+    await tester.pumpAndSettle();
+    expect(c.read(scopeProvider), 'A:w2');
+    expect(find.byType(WorkspaceScreen), findsOneWidget);
+    expect(find.text('Changes'), findsOneWidget);
+    expect(find.text('Files'), findsOneWidget);
+  });
+
+  testWidgets('wide: the drawer is a side panel with no menu button', (tester) async {
+    await _shell(tester, width: 1000);
+    expect(find.text('registry'), findsOneWidget);
+    expect(find.byIcon(Icons.menu), findsNothing);
+  });
+
+  testWidgets('Settings opens from the drawer footer', (tester) async {
+    await _shell(tester, width: 1000);
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Disconnect'), findsOneWidget);
+  });
+
+  testWidgets('back: files up, then Home, then History to Sessions', (tester) async {
+    final c = await _shell(tester);
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    c.read(workspaceTabProvider('A:w2').notifier).state = WorkspaceTab.files;
+    c.read(filesPathProvider('A:w2').notifier).state = 'lib/ui';
+    await tester.pump();
+
+    await _back(tester);
+    expect(c.read(filesPathProvider('A:w2')), 'lib');
+    await _back(tester);
+    expect(c.read(filesPathProvider('A:w2')), '');
+    await _back(tester);
+    expect(c.read(scopeProvider), isNull);
+
+    c.read(homeTabProvider.notifier).state = HomeTab.history;
+    await tester.pump();
+    await _back(tester);
+    expect(c.read(homeTabProvider), HomeTab.sessions);
+  });
+
+  testWidgets('a removed or gone workspace falls back to Home', (tester) async {
+    final c = await _shell(tester);
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    await tester.pump();
+    await c
+        .read(projectsProvider.notifier)
+        .load(FakeGatewayClient((m, p) async => _tree(gone: true)));
+    await tester.pump();
+    expect(c.read(scopeProvider), isNull);
+    expect(find.text('registry is no longer available'), findsOneWidget);
+  });
+
+  testWidgets('error state does not drop the scope', (tester) async {
+    final c = await _shell(tester);
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    await tester.pump();
+    await c
+        .read(projectsProvider.notifier)
+        .load(FakeGatewayClient((m, p) async => throw StateError('blip')));
+    await tester.pump();
+    expect(c.read(scopeProvider), 'A:w2');
+  });
+
+  testWidgets('a partial failure does not drop the scope', (tester) async {
+    final c = await _shell(tester);
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    await tester.pump();
+    await c.read(projectsProvider.notifier).load(FakeGatewayClient((m, p) async => {
+          'projects': [
+            {'id': 'B:p9', 'name': 'infra', 'node_id': 'B', 'workspaces': []},
+          ],
+          'failed_nodes': ['A'],
+        }));
+    await tester.pump();
+    expect(c.read(scopeProvider), 'A:w2');
+    expect(find.textContaining('no longer available'), findsNothing);
   });
 
   testWidgets('deep-links to a session pending before mount', (tester) async {
