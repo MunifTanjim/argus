@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
+import '../models/workspace_files.dart';
 import '../transport/gateway_client.dart';
 import 'gateway.dart';
+import 'workspace.dart';
 
 /// Wraps the changed-files RPCs. Resolves the client fresh on each call so
 /// reconnects are transparent; a missing client throws (as does a failed RPC),
@@ -76,3 +78,105 @@ final commitFilesProvider = FutureProvider.autoDispose
     return ref.read(changesApiProvider).commitFiles(key.$1, key.$2);
   },
 );
+
+/// Where a Changes view reads from: a live session's working directory, or a
+/// workspace (uncommitted, or against its target branch).
+sealed class ChangesSource {
+  const ChangesSource();
+}
+
+final class SessionChangesSource extends ChangesSource {
+  const SessionChangesSource(this.sessionId);
+  final String sessionId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SessionChangesSource && other.sessionId == sessionId;
+
+  @override
+  int get hashCode => sessionId.hashCode;
+}
+
+final class WorkspaceChangesSource extends ChangesSource {
+  const WorkspaceChangesSource(this.workspaceId, this.against);
+  final String workspaceId;
+  final String against; // '' = uncommitted; 'target' = against the target branch
+
+  @override
+  bool operator ==(Object other) =>
+      other is WorkspaceChangesSource &&
+      other.workspaceId == workspaceId &&
+      other.against == against;
+
+  @override
+  int get hashCode => Object.hash(workspaceId, against);
+}
+
+// The source providers delegate to the per-kind providers, so an invalidation
+// or a test override of those reaches every view.
+final sourceFilesProvider = FutureProvider.autoDispose
+    .family<List<ChangedFile>, ChangesSource>((ref, src) => switch (src) {
+          SessionChangesSource(:final sessionId) =>
+            ref.watch(changedFilesProvider(sessionId).future),
+          WorkspaceChangesSource(:final workspaceId, :final against) => ref
+              .watch(workspaceChangedFilesProvider((workspaceId, against)).future),
+        });
+
+final sourceCommitsProvider = FutureProvider.autoDispose
+    .family<CommitList, ChangesSource>((ref, src) => switch (src) {
+          SessionChangesSource(:final sessionId) =>
+            ref.watch(commitsProvider(sessionId).future),
+          WorkspaceChangesSource(:final workspaceId) =>
+            ref.watch(workspaceCommitsProvider(workspaceId).future),
+        });
+
+final sourceCommitFilesProvider = FutureProvider.autoDispose
+    .family<List<ChangedFile>, (ChangesSource, String)>(
+        (ref, key) => switch (key.$1) {
+              SessionChangesSource(:final sessionId) =>
+                ref.watch(commitFilesProvider((sessionId, key.$2)).future),
+              WorkspaceChangesSource(:final workspaceId) => ref.watch(
+                  workspaceCommitFilesProvider((workspaceId, key.$2)).future),
+            });
+
+void refreshChanges(WidgetRef ref, ChangesSource source) {
+  switch (source) {
+    case SessionChangesSource(:final sessionId):
+      ref.invalidate(changedFilesProvider(sessionId));
+      ref.invalidate(commitsProvider(sessionId));
+    case WorkspaceChangesSource(:final workspaceId, :final against):
+      ref.invalidate(workspaceChangedFilesProvider((workspaceId, against)));
+      ref.invalidate(workspaceCommitsProvider(workspaceId));
+  }
+}
+
+sealed class DiffContent {
+  const DiffContent();
+}
+
+/// Old and new file content; the app computes the diff.
+final class FullDiff extends DiffContent {
+  const FullDiff(this.diff);
+  final FileDiff diff;
+}
+
+/// A unified diff text computed by the node.
+final class UnifiedDiff extends DiffContent {
+  const UnifiedDiff(this.diff);
+  final WorkspaceDiff diff;
+}
+
+Future<DiffContent> fetchDiff(
+  ChangesApi changes,
+  WorkspaceApi workspace,
+  ChangesSource source,
+  ChangedFile file, {
+  String? rev,
+}) async =>
+    switch (source) {
+      SessionChangesSource(:final sessionId) => FullDiff(await changes
+          .fileDiff(sessionId, file.path, origPath: file.origPath, rev: rev)),
+      WorkspaceChangesSource(:final workspaceId, :final against) =>
+        UnifiedDiff(await workspace.diff(workspaceId, file.path,
+            against: against, origPath: file.origPath, rev: rev)),
+    };
