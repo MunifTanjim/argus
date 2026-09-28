@@ -22,6 +22,7 @@ import '../transport/ws_link.dart';
 import 'control.dart';
 import 'device_identity.dart';
 import 'profiles.dart';
+import 'projects.dart';
 import 'push.dart';
 import 'sessions.dart';
 
@@ -204,6 +205,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   // run after async gaps / during disposal, where touching ref throws
   // ("Cannot use Ref after it has been disposed").
   final store = ref.read(sessionsProvider.notifier);
+  final projects = ref.read(projectsProvider.notifier);
   final rosterRevision = ref.read(rosterRevisionProvider.notifier);
   final keyStore = ref.read(sshKeyStoreProvider);
   final hostKeys = ref.read(hostKeyStoreProvider);
@@ -232,9 +234,13 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
           }),
     onConnected: (client) async {
       await loadSessions(client, store);
+      unawaited(projects.load(client));
       client.notifications.listen((m) {
         dispatchEvent(m, store);
         if (m.method == 'node.event') rosterRevision.state++;
+        if (m.method == 'project.changed' || m.method == 'node.event') {
+          unawaited(projects.load(client));
+        }
       });
       // Register this device's push target now the connection is up (re-runs on
       // every reconnect, refreshing the gateway's record).
@@ -268,6 +274,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       equivocation.state = false;
       trustSignature.state = '';
       store.clear();
+      projects.clear();
     });
   });
   manager.start();
