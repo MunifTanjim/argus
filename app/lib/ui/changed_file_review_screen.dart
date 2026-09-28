@@ -6,6 +6,7 @@ import '../state/changes.dart';
 import '../state/workspace.dart';
 import 'edit_diff.dart';
 import 'responsive.dart';
+import 'shell_drawer.dart';
 import 'theme.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
@@ -68,7 +69,7 @@ class _ChangedFileReviewScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_fileName)),
+      appBar: AppBar(title: Text(_fileName), actions: [?shellMenuButton(context)]),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(

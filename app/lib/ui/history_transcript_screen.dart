@@ -7,6 +7,7 @@ import '../models/chunk.dart';
 import '../models/history.dart';
 import '../state/tool_detail.dart';
 import 'resume_action.dart';
+import 'shell_drawer.dart';
 import 'transcript_feed.dart';
 
 class HistoryTranscriptScreen extends ConsumerStatefulWidget {
@@ -76,6 +77,7 @@ class _HistoryTranscriptScreenState
       appBar: AppBar(
         title: Text(widget.session.displayTitle),
         actions: [
+          ?shellMenuButton(context),
           if (canResume)
             IconButton(
               icon: const Icon(Icons.play_arrow),

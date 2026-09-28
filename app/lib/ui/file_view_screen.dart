@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/navigation.dart';
 import '../state/workspace.dart';
 import 'code_block.dart';
+import 'shell_drawer.dart';
 import 'theme.dart';
 
 /// One workspace file, highlighted by its name. Pushed over the workspace tabs.
@@ -34,6 +35,7 @@ class FileViewScreen extends ConsumerWidget {
               ),
           ],
         ),
+        actions: [?shellMenuButton(context)],
       ),
       body: SafeArea(
         top: false,

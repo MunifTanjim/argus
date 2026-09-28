@@ -31,9 +31,7 @@ class SessionSectionsList extends StatelessWidget {
     session: s,
     showNode: section.needsYou && grouped,
     showAgent: multiAgent,
-    onTap: () => Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => SessionDetailScreen(session: s))),
+    onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
   );
 
   @override

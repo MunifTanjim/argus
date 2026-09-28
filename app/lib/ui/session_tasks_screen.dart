@@ -10,6 +10,7 @@ import '../state/tasks.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
 import 'responsive.dart';
+import 'shell_drawer.dart';
 import 'theme.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
@@ -72,6 +73,7 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
       appBar: AppBar(
         title: const Text('Tasks'),
         actions: [
+          ?shellMenuButton(context),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',

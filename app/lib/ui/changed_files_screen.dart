@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/session.dart';
 import '../state/changes.dart';
 import 'changes_view.dart';
+import 'shell_drawer.dart';
 
 /// A live session's git status (grouped Staged / Unstaged / Untracked) above its
 /// branch/unpushed commits.
@@ -19,6 +20,7 @@ class ChangedFilesScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Changes'),
         actions: [
+          ?shellMenuButton(context),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
