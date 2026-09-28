@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../models/chunk.dart';
+import '../util/unified_diff.dart';
 import 'code_block.dart';
 import 'theme.dart';
 
@@ -104,6 +105,55 @@ const _foldThreshold = 4;
 Widget collapsibleDiffView(String oldS, String newS, {String? lang}) =>
     _CollapsibleDiff(_lineDiff(oldS, newS, lang: langFromPath(lang)));
 
+/// A unified diff text (as `git diff` prints it) in the collapsible view, with
+/// hunk header rows and line numbers taken from the hunk headers.
+Widget unifiedDiffView(String diff, {String? lang}) =>
+    _CollapsibleDiff(_unifiedLines(diff, lang: langFromPath(lang)));
+
+List<_DLine> _unifiedLines(String diff, {String? lang}) {
+  final parsed = parseUnifiedDiff(diff);
+  _DKind kindOf(UdKind k) => switch (k) {
+        UdKind.hunk => _DKind.hunk,
+        UdKind.context => _DKind.context,
+        UdKind.add => _DKind.add,
+        UdKind.del => _DKind.del,
+      };
+  // Same cut-off as _lineDiff: highlighting a very large diff janks the UI.
+  if (parsed.length > 2000) {
+    return [
+      for (final l in parsed)
+        l.kind == UdKind.hunk
+            ? _DLine(l.text, _DKind.hunk)
+            : _DLine(l.text, kindOf(l.kind), noEol: l.noEol, newNo: l.newNo),
+    ];
+  }
+  // Highlight each side as one text so multi-line tokens keep their state.
+  final newSide = [
+    for (final l in parsed)
+      if (l.kind == UdKind.context || l.kind == UdKind.add) l.text,
+  ];
+  final oldSide = [
+    for (final l in parsed)
+      if (l.kind == UdKind.del) l.text,
+  ];
+  final newRuns = highlightLines(newSide.join('\n'), lang: lang);
+  final oldRuns = highlightLines(oldSide.join('\n'), lang: lang);
+  List<CodeRun>? runsAt(List<List<CodeRun>> runs, int idx) =>
+      idx >= 0 && idx < runs.length ? runs[idx] : null;
+
+  var ni = 0, oi = 0;
+  return [
+    for (final l in parsed)
+      switch (l.kind) {
+        UdKind.hunk => _DLine(l.text, _DKind.hunk),
+        UdKind.del => _DLine(l.text, _DKind.del,
+            runs: runsAt(oldRuns, oi++), noEol: l.noEol),
+        _ => _DLine(l.text, kindOf(l.kind),
+            runs: runsAt(newRuns, ni++), noEol: l.noEol, newNo: l.newNo),
+      },
+  ];
+}
+
 class _CollapsibleDiff extends StatefulWidget {
   const _CollapsibleDiff(this.lines);
   final List<_DLine> lines;
@@ -176,11 +226,14 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
     super.initState();
     final lines = widget.lines;
     _newNo = List<int>.filled(lines.length, 0);
-    var nn = 0;
+    var nn = 0, maxNo = 0;
     for (var i = 0; i < lines.length; i++) {
-      if (lines[i].kind != _DKind.del) _newNo[i] = ++nn;
+      final l = lines[i];
+      if (l.kind == _DKind.del || l.kind == _DKind.hunk) continue;
+      _newNo[i] = l.newNo ?? ++nn;
+      if (_newNo[i] > maxNo) maxNo = _newNo[i];
     }
-    _gutterWidth = nn.toString().length * 9.0 + 4;
+    _gutterWidth = maxNo.toString().length * 9.0 + 4;
 
     _keep = List<bool>.filled(lines.length, false);
     for (var i = 0; i < lines.length; i++) {
@@ -330,10 +383,10 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
   }
 }
 
-enum _DKind { context, add, del }
+enum _DKind { context, add, del, hunk }
 
 class _DLine {
-  const _DLine(this.text, this.kind, {this.runs, this.noEol = false});
+  const _DLine(this.text, this.kind, {this.runs, this.noEol = false, this.newNo});
   final String text;
   final _DKind kind;
 
@@ -343,6 +396,10 @@ class _DLine {
   /// The line was the last of its side with no trailing newline; the renderer
   /// shows a "\ No newline at end of file" marker beneath it.
   final bool noEol;
+
+  /// The new-side line number from a hunk header; null in full-file diffs,
+  /// where rows are counted from 1.
+  final int? newNo;
 }
 
 const _noEolLabel = r'\ No newline at end of file';
@@ -351,13 +408,14 @@ const _noEolLabel = r'\ No newline at end of file';
       _DKind.add => (prefix: '+ ', color: _green),
       _DKind.del => (prefix: '- ', color: _red),
       _DKind.context => (prefix: '  ', color: AppColors.text),
+      _DKind.hunk => (prefix: '', color: AppColors.link),
     };
 
 /// Faint background tint marking add/removed lines; null for context.
 Color? _diffLineBg(_DKind kind) => switch (kind) {
       _DKind.add => _green.withValues(alpha: 0.10),
       _DKind.del => _red.withValues(alpha: 0.10),
-      _DKind.context => null,
+      _DKind.context || _DKind.hunk => null,
     };
 
 /// Spans for one diff line: the colored `+`/`-`/space prefix, then either
@@ -387,7 +445,8 @@ Widget _diffLineRow(
     children: [
       SizedBox(
         width: gutterWidth,
-        child: Text(l.kind == _DKind.del ? '' : '$newNo',
+        child: Text(
+            l.kind == _DKind.del || l.kind == _DKind.hunk ? '' : '$newNo',
             textAlign: TextAlign.right,
             style: _mono.copyWith(color: AppColors.dim)),
       ),

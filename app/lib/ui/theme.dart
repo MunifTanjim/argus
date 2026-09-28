@@ -15,6 +15,7 @@ class AppColors {
   static const awaitingBorder = Color(0xFF7c5f1e);
   static const error = Color(0xFFfb4934); // gruvbox red — fatal connection state
   static const errorSurface = Color(0xFF3c1f1d);
+  static const link = Color(0xFF83a598); // gruvbox blue — branches, paths, hunk headers
 }
 
 const mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
