@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/project.dart';
 import '../state/changes.dart';
 import '../state/navigation.dart';
+import '../state/projects.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
@@ -21,17 +22,6 @@ class WorkspaceScreen extends ConsumerWidget {
   final ProjectNode project;
   final WorkspaceNode workspace;
 
-  String get _subtitle {
-    final head = workspace.head;
-    final at = workspace.branch.isNotEmpty
-        ? workspace.branch
-        : (head.length > 7 ? head.substring(0, 7) : head);
-    final parts = [project.name, if (at.isNotEmpty) at].join(' · ');
-    return workspace.targetBranch.isEmpty
-        ? parts
-        : '$parts → ${workspace.targetBranch}';
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tab = ref.watch(workspaceTabProvider(workspace.id));
@@ -39,33 +29,10 @@ class WorkspaceScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         automaticallyImplyLeading: false,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(
-              _subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.link, fontSize: 12),
-            ),
-          ],
-        ),
+        title: _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
           if (tab == WorkspaceTab.changes && project.isGit)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Refresh',
-              onPressed: () => refreshChanges(
-                ref,
-                WorkspaceChangesSource(
-                  workspace.id,
-                  workspace.targetBranch.isEmpty
-                      ? ''
-                      : ref.read(changesAgainstProvider(workspace.id)),
-                ),
-              ),
-            ),
+            _RefreshChanges(workspace: workspace),
         ],
       ),
       body: SafeArea(
@@ -115,6 +82,136 @@ class WorkspaceScreen extends ConsumerWidget {
             label: 'Files',
           ),
         ],
+      ),
+    );
+  }
+}
+
+class WorkspaceChangesScreen extends ConsumerWidget {
+  const WorkspaceChangesScreen({super.key, required this.workspaceId});
+
+  final String workspaceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hit = lookupWorkspace(
+      ref.watch(projectsProvider).projects,
+      workspaceId,
+    );
+    if (hit == null) return const _WorkspaceGone();
+    final (project, workspace) = hit;
+    return Scaffold(
+      appBar: AppBar(
+        title: _WorkspaceTitle(project: project, workspace: workspace),
+        actions: [
+          ?shellMenuButton(context),
+          if (project.isGit) _RefreshChanges(workspace: workspace),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: WorkspaceChangesTab(project: project, workspace: workspace),
+      ),
+    );
+  }
+}
+
+/// Back closes it from any folder; the breadcrumb moves between folders.
+class WorkspaceFilesScreen extends ConsumerWidget {
+  const WorkspaceFilesScreen({super.key, required this.workspaceId});
+
+  final String workspaceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hit = lookupWorkspace(
+      ref.watch(projectsProvider).projects,
+      workspaceId,
+    );
+    if (hit == null) return const _WorkspaceGone();
+    final (project, workspace) = hit;
+    return Scaffold(
+      appBar: AppBar(
+        title: _WorkspaceTitle(project: project, workspace: workspace),
+        actions: [?shellMenuButton(context)],
+      ),
+      body: SafeArea(
+        top: false,
+        child: WorkspaceFilesTab(workspace: workspace),
+      ),
+    );
+  }
+}
+
+class _WorkspaceGone extends StatelessWidget {
+  const _WorkspaceGone();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(actions: [?shellMenuButton(context)]),
+      body: const Center(
+        child: Text(
+          'This workspace is no longer available.',
+          style: TextStyle(color: AppColors.dim),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceTitle extends StatelessWidget {
+  const _WorkspaceTitle({required this.project, required this.workspace});
+
+  final ProjectNode project;
+  final WorkspaceNode workspace;
+
+  String get _subtitle {
+    final head = workspace.head;
+    final at = workspace.branch.isNotEmpty
+        ? workspace.branch
+        : (head.length > 7 ? head.substring(0, 7) : head);
+    final parts = [project.name, if (at.isNotEmpty) at].join(' · ');
+    return workspace.targetBranch.isEmpty
+        ? parts
+        : '$parts → ${workspace.targetBranch}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(
+          _subtitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: AppColors.link, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+class _RefreshChanges extends ConsumerWidget {
+  const _RefreshChanges({required this.workspace});
+
+  final WorkspaceNode workspace;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IconButton(
+      icon: const Icon(Icons.refresh),
+      tooltip: 'Refresh',
+      onPressed: () => refreshChanges(
+        ref,
+        WorkspaceChangesSource(
+          workspace.id,
+          workspace.targetBranch.isEmpty
+              ? ''
+              : ref.read(changesAgainstProvider(workspace.id)),
+        ),
       ),
     );
   }

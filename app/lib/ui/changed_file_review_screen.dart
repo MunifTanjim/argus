@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
+import '../models/workspace_files.dart';
 import '../state/changes.dart';
 import '../state/workspace.dart';
 import 'edit_diff.dart';
@@ -20,7 +21,7 @@ class ChangedFileReviewScreen extends ConsumerStatefulWidget {
     this.rev,
   });
 
-  final ChangesSource source;
+  final WorkspaceChangesSource source;
   final ChangedFile file;
   final String? rev;
 
@@ -32,7 +33,7 @@ class ChangedFileReviewScreen extends ConsumerStatefulWidget {
 class _ChangedFileReviewScreenState
     extends ConsumerState<ChangedFileReviewScreen> {
   bool _loading = true;
-  DiffContent? _diff;
+  WorkspaceDiff? _diff;
   Object? _error;
 
   @override
@@ -43,11 +44,11 @@ class _ChangedFileReviewScreenState
 
   Future<void> _fetch() async {
     try {
-      final diff = await fetchDiff(
-        ref.read(changesApiProvider),
-        ref.read(workspaceApiProvider),
-        widget.source,
-        widget.file,
+      final diff = await ref.read(workspaceApiProvider).diff(
+        widget.source.workspaceId,
+        widget.file.path,
+        against: widget.source.against,
+        origPath: widget.file.origPath,
         rev: widget.rev,
       );
       if (!mounted) return;
@@ -105,36 +106,20 @@ class _ChangedFileReviewScreenState
     }
     final d = _diff;
     if (d == null) return blocks;
-    final notShown = switch (d) {
-      FullDiff(:final diff) => diff.notShown,
-      UnifiedDiff(:final diff) => diff.notShown,
-    };
-    if (notShown) {
+    if (d.notShown) {
       blocks.add(Text('Not shown — binary or too large.',
           style: _mono.copyWith(color: AppColors.dim)));
       return blocks;
     }
-    final Widget view;
-    switch (d) {
-      case FullDiff(:final diff):
-        if (diff.oldContent.isEmpty && diff.newContent.isEmpty) {
-          blocks.add(Text('Empty file — no content to show.',
-              style: _mono.copyWith(color: AppColors.dim)));
-          return blocks;
-        }
-        view = collapsibleDiffView(diff.oldContent, diff.newContent,
-            lang: diff.path);
-      case UnifiedDiff(:final diff):
-        if (diff.diff.trim().isEmpty) {
-          blocks.add(Text('No differences to show.',
-              style: _mono.copyWith(color: AppColors.dim)));
-          return blocks;
-        }
-        view = unifiedDiffView(diff.diff, lang: widget.file.path);
+    if (d.diff.trim().isEmpty) {
+      blocks.add(Text('No differences to show.',
+          style: _mono.copyWith(color: AppColors.dim)));
+      return blocks;
     }
     // Flexible (not Expanded) so a short diff stays compact under the path
     // header, while a long one caps at the viewport and scrolls its own content.
-    blocks.add(Flexible(child: view));
+    blocks.add(
+        Flexible(child: unifiedDiffView(d.diff, lang: widget.file.path)));
     return blocks;
   }
 }

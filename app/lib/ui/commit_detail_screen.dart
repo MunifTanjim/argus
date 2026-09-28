@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
 import '../state/changes.dart';
+import '../state/workspace.dart';
 import 'changed_file_review_screen.dart';
 import 'changed_file_row.dart';
 import 'responsive.dart';
@@ -17,12 +18,14 @@ class CommitDetailScreen extends ConsumerWidget {
     required this.commit,
   });
 
-  final ChangesSource source;
+  final WorkspaceChangesSource source;
   final Commit commit;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(sourceCommitFilesProvider((source, commit.sha)));
+    final async = ref.watch(
+      workspaceCommitFilesProvider((source.workspaceId, commit.sha)),
+    );
     return Scaffold(
       appBar: AppBar(
         title: Text('${commit.short}  ${commit.subject}'),

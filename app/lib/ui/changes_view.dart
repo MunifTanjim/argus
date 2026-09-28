@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
 import '../state/changes.dart';
+import '../state/workspace.dart';
 import 'changed_file_review_screen.dart';
 import 'changed_file_row.dart';
 import 'code_block.dart';
@@ -13,8 +14,8 @@ import 'theme.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
 
-/// Git status (grouped Staged / Unstaged / Untracked) above the commit list,
-/// for a session or a workspace. Pull down to refresh.
+/// Git status (grouped Staged / Unstaged / Untracked) above the commit list of
+/// a workspace. Pull down to refresh.
 ///
 /// [filesTitle] shows the files as one flat list under that title; a diff
 /// against a branch has no index, so the staged groups would be meaningless.
@@ -28,7 +29,7 @@ class ChangesView extends ConsumerWidget {
     this.commitsTitle = 'Commits',
   });
 
-  final ChangesSource source;
+  final WorkspaceChangesSource source;
   final String emptyText;
   final Widget? header;
   final String? filesTitle;
@@ -36,7 +37,9 @@ class ChangesView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(sourceFilesProvider(source));
+    final async = ref.watch(
+      workspaceChangedFilesProvider((source.workspaceId, source.against)),
+    );
     return RefreshIndicator(
       onRefresh: () async => refreshChanges(ref, source),
       child: async.when(
@@ -119,7 +122,7 @@ class ChangesView extends ConsumerWidget {
   }
 
   List<Widget> _commitsSection(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(sourceCommitsProvider(source));
+    final async = ref.watch(workspaceCommitsProvider(source.workspaceId));
     return async.when(
       loading: () => [
         _sectionHeader(commitsTitle.toUpperCase()),
@@ -167,7 +170,7 @@ class ChangesView extends ConsumerWidget {
 
 class _CommitRow extends StatelessWidget {
   const _CommitRow({required this.source, required this.commit});
-  final ChangesSource source;
+  final WorkspaceChangesSource source;
   final Commit commit;
 
   @override

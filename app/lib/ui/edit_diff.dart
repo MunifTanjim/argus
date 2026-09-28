@@ -96,17 +96,12 @@ const _ctxLines = 3;
 /// Shortest hidden run worth folding — one or two lines behind a bar just adds taps.
 const _foldThreshold = 4;
 
-/// A collapsible unified diff for full-file review (PR style), unchanged runs
-/// folded behind expand bars.
+/// A `git diff` unified diff in a collapsible view, numbered from its hunk
+/// headers.
 ///
 /// Place it in a bounded-height parent (e.g. a [Flexible]): it sizes to its
 /// content but caps at the granted height, pinning its header and scrolling the
 /// rows on overflow.
-Widget collapsibleDiffView(String oldS, String newS, {String? lang}) =>
-    _CollapsibleDiff(_lineDiff(oldS, newS, lang: langFromPath(lang)));
-
-/// A unified diff text (as `git diff` prints it) in the collapsible view, with
-/// hunk header rows and line numbers taken from the hunk headers.
 Widget unifiedDiffView(String diff, {String? lang}) =>
     _CollapsibleDiff(_unifiedLines(diff, lang: langFromPath(lang)));
 
@@ -168,52 +163,13 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
   bool _wrap = false;
   bool _highlight = true;
 
-  final _AnchoredScrollController _vScroll = _AnchoredScrollController();
-  // Keys per rendered row and on the content column, so an expand can measure a
-  // boundary row's offset before/after and shift the viewport by the real delta.
-  final Map<int, GlobalKey> _rowKeys = {};
-  final GlobalKey _contentKey = GlobalKey();
-
   late final List<int> _newNo; // new-side line number per row (0 for deletions)
   late final List<bool> _keep; // within _ctxLines of a change → never folded
   late final double _gutterWidth;
 
-  @override
-  void dispose() {
-    _vScroll.dispose();
-    super.dispose();
-  }
-
-  GlobalKey _keyFor(int i) => _rowKeys.putIfAbsent(i, () => GlobalKey());
-
-  // A row's top relative to the content column, independent of scroll; null if
-  // not measurable.
-  double? _rowOffsetInContent(int index) {
-    final row = _rowKeys[index]?.currentContext?.findRenderObject();
-    final content = _contentKey.currentContext?.findRenderObject();
-    if (row is RenderBox && row.attached && content is RenderBox &&
-        content.attached) {
-      return row.localToGlobal(Offset.zero, ancestor: content).dy;
-    }
-    return null;
-  }
-
-  /// Reveals a folded run. A leading run (file head, no row above) fills upward,
-  /// so we hold the row below the bar in place by correcting the scroll during
-  /// layout (before paint, no flicker). Middle/trailing runs fill downward — the
-  /// natural insert — and need no correction.
+  // A folded run always has a row above it (the hunk header at least), so the
+  // revealed lines fill downward and the viewport needs no correction.
   void _expandRegion(int start, int end) {
-    if (start == 0 && end < widget.lines.length && _vScroll.hasClients) {
-      final before = _rowOffsetInContent(end);
-      if (before != null) {
-        // Distance from the viewport top to the boundary row, to be preserved.
-        final keep = before - _vScroll.offset;
-        _vScroll.anchorNextLayout(() {
-          final after = _rowOffsetInContent(end);
-          return after == null ? null : after - keep;
-        });
-      }
-    }
     setState(() {
       for (var k = start; k < end; k++) {
         _expanded.add(k);
@@ -226,11 +182,11 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
     super.initState();
     final lines = widget.lines;
     _newNo = List<int>.filled(lines.length, 0);
-    var nn = 0, maxNo = 0;
+    var maxNo = 0;
     for (var i = 0; i < lines.length; i++) {
       final l = lines[i];
       if (l.kind == _DKind.del || l.kind == _DKind.hunk) continue;
-      _newNo[i] = l.newNo ?? ++nn;
+      _newNo[i] = l.newNo!;
       if (_newNo[i] > maxNo) maxNo = _newNo[i];
     }
     _gutterWidth = maxNo.toString().length * 9.0 + 4;
@@ -261,28 +217,24 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
         final count = j - i;
         if (count >= _foldThreshold) {
           final start = i, end = j;
-          rows.add(_expandBar(start, end, count, () => _expandRegion(start, end)));
+          rows.add(_expandBar(end, count, () => _expandRegion(start, end)));
           i = j;
           continue;
         }
       }
-      rows.add(KeyedSubtree(
-        key: _keyFor(i),
-        child: _diffLineRow(lines[i], _newNo[i], _gutterWidth, _wrap, _highlight),
-      ));
+      rows.add(
+          _diffLineRow(lines[i], _newNo[i], _gutterWidth, _wrap, _highlight));
       i++;
     }
 
     final content = Column(
-        key: _contentKey,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: rows);
 
     // Vertical scroll always; horizontal too when not wrapping.
     final Widget scroller = _wrap
-        ? SingleChildScrollView(controller: _vScroll, child: content)
+        ? SingleChildScrollView(child: content)
         : SingleChildScrollView(
-            controller: _vScroll,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: IntrinsicWidth(child: content),
@@ -348,17 +300,12 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
     );
   }
 
-  // Expand bar for the folded run [start, end): the gutter icon points up at the
-  // file's head, down at its tail, both ways for a run between two changes.
-  Widget _expandBar(int start, int end, int count, VoidCallback onTap) {
-    final IconData icon;
-    if (start == 0) {
-      icon = Icons.keyboard_double_arrow_up;
-    } else if (end == widget.lines.length) {
-      icon = Icons.keyboard_double_arrow_down;
-    } else {
-      icon = Icons.height;
-    }
+  // Expand bar for the folded run [start, end): the gutter icon points down at
+  // the file's tail, both ways for a run between two changes.
+  Widget _expandBar(int end, int count, VoidCallback onTap) {
+    final icon = end == widget.lines.length
+        ? Icons.keyboard_double_arrow_down
+        : Icons.height;
     const color = Color(0xFF83a598);
     return InkWell(
       onTap: onTap,
@@ -397,8 +344,8 @@ class _DLine {
   /// shows a "\ No newline at end of file" marker beneath it.
   final bool noEol;
 
-  /// The new-side line number from a hunk header; null in full-file diffs,
-  /// where rows are counted from 1.
+  /// The new-side line number from a hunk header; set on every context and
+  /// added row of a unified diff, null in the edit-tool [diffView].
   final int? newNo;
 }
 
@@ -683,57 +630,4 @@ List<_SrcLine> _split(String s) {
     for (var k = 0; k < parts.length; k++)
       _SrcLine(parts[k], eol: k < parts.length - 1 || hasTrailing),
   ];
-}
-
-/// A scroll controller that applies a one-shot offset correction during the next
-/// layout, before paint — so inserting rows above the viewport keeps the visible
-/// content put without the one-frame flicker a post-frame `jumpTo` would cause.
-class _AnchoredScrollController extends ScrollController {
-  double? Function()? _pending;
-
-  void anchorNextLayout(double? Function() computeTarget) =>
-      _pending = computeTarget;
-
-  double? Function()? _takePending() {
-    final p = _pending;
-    _pending = null;
-    return p;
-  }
-
-  @override
-  ScrollPosition createScrollPosition(ScrollPhysics physics,
-          ScrollContext context, ScrollPosition? oldPosition) =>
-      _AnchoredScrollPosition(
-        physics: physics,
-        context: context,
-        oldPosition: oldPosition,
-        takePending: _takePending,
-      );
-}
-
-class _AnchoredScrollPosition extends ScrollPositionWithSingleContext {
-  _AnchoredScrollPosition({
-    required super.physics,
-    required super.context,
-    super.oldPosition,
-    required this.takePending,
-  });
-
-  final double? Function()? Function() takePending;
-
-  @override
-  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
-    final applied =
-        super.applyContentDimensions(minScrollExtent, maxScrollExtent);
-    final compute = takePending();
-    final target = compute?.call();
-    if (target != null) {
-      final clamped = target.clamp(minScrollExtent, maxScrollExtent);
-      if ((clamped - pixels).abs() > 0.5) {
-        correctPixels(clamped);
-        return false; // re-layout with the corrected offset before painting
-      }
-    }
-    return applied;
-  }
 }

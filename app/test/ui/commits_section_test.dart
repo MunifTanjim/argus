@@ -1,30 +1,13 @@
-import 'dart:convert';
-
 import 'package:argus/models/changes.dart';
-import 'package:argus/models/session.dart';
 import 'package:argus/state/changes.dart';
-import 'package:argus/ui/changed_files_screen.dart';
+import 'package:argus/state/workspace.dart';
+import 'package:argus/ui/changes_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Session _session() => Session.fromJson(
-      jsonDecode(jsonEncode({
-        'id': 'n1:s1',
-        'agent': 'claude',
-        'status': 'active',
-        'source': 'hooked',
-        'repo': 'my-repo',
-        'tmux': {
-          'server': 'argus',
-          'pane_id': '%1',
-          'session_name': 's',
-          'window_index': 0,
-          'current_path': '/p',
-        },
-      })) as Map<String, dynamic>,
-    );
+const _source = WorkspaceChangesSource('A:w1', '');
 
 void main() {
   testWidgets('renders the unpushed commits section and taps into a commit',
@@ -32,9 +15,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          changedFilesProvider(_session().id)
+          workspaceChangedFilesProvider(('A:w1', ''))
               .overrideWith((ref) async => <ChangedFile>[]),
-          commitsProvider(_session().id).overrideWith(
+          workspaceCommitsProvider('A:w1').overrideWith(
             (ref) async => const CommitList(
               unpushed: true,
               commits: [
@@ -48,10 +31,12 @@ void main() {
               ],
             ),
           ),
-          commitFilesProvider((_session().id, 'deadbeef'))
+          workspaceCommitFilesProvider(('A:w1', 'deadbeef'))
               .overrideWith((ref) async => <ChangedFile>[]),
         ],
-        child: MaterialApp(home: ChangedFilesScreen(session: _session())),
+        child: const MaterialApp(
+          home: Scaffold(body: ChangesView(source: _source)),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -83,9 +68,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          changedFilesProvider(_session().id)
+          workspaceChangedFilesProvider(('A:w1', ''))
               .overrideWith((ref) async => <ChangedFile>[]),
-          commitsProvider(_session().id).overrideWith(
+          workspaceCommitsProvider('A:w1').overrideWith(
             (ref) async => const CommitList(
               unpushed: true,
               commits: [
@@ -100,7 +85,9 @@ void main() {
             ),
           ),
         ],
-        child: MaterialApp(home: ChangedFilesScreen(session: _session())),
+        child: const MaterialApp(
+          home: Scaffold(body: ChangesView(source: _source)),
+        ),
       ),
     );
     await tester.pumpAndSettle();

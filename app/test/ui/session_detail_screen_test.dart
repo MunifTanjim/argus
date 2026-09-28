@@ -5,14 +5,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/data/transcript_repository.dart';
+import 'package:argus/models/changes.dart';
 import 'package:argus/models/chunk.dart';
+import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/models/workspace_files.dart';
 import 'package:argus/state/gateway.dart';
+import 'package:argus/state/navigation.dart';
+import 'package:argus/state/projects.dart';
 import 'package:argus/state/sessions.dart';
+import 'package:argus/state/workspace.dart';
+import 'package:argus/transport/connection.dart';
+import 'package:argus/transport/gateway_client.dart';
+import 'package:argus/transport/rpc_client.dart';
 import 'package:argus/state/transcript.dart';
 import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/interaction_bar.dart';
 import 'package:argus/ui/session_detail_screen.dart';
+import 'package:argus/ui/workspace_screen.dart';
+import '../support/fake_gateway_client.dart';
 import '../support/fake_session_repository.dart';
 
 Session _sStarting() => Session.fromJson({
@@ -32,7 +43,12 @@ Session _sStarting() => Session.fromJson({
       'node_label': 'mac',
     });
 
-Session _s({String? agentSessionId, String? name, String? branch}) =>
+Session _s({
+  String? agentSessionId,
+  String? name,
+  String? branch,
+  String? workspaceId,
+}) =>
     Session.fromJson({
       'id': 'mac:%1',
       'agent': 't',
@@ -48,6 +64,7 @@ Session _s({String? agentSessionId, String? name, String? branch}) =>
       },
       'repo': 'argus',
       'branch': ?branch,
+      'workspace_id': ?workspaceId,
       'node_label': 'mac',
       'agent_session_id': ?agentSessionId,
       'name': ?name,
@@ -89,6 +106,63 @@ class _FakeSessionControl extends FakeSessionRepository {
     killedIds.add(sessionId);
     return const Result.ok(null);
   }
+}
+
+const _ws = WorkspaceNode(
+  id: 'A:w2',
+  dir: '/src/argus/.worktrees/registry',
+  branch: 'feat/registry',
+  targetBranch: 'main',
+);
+const _project = ProjectNode(
+  id: 'A:p1',
+  name: 'argus',
+  nodeId: 'A',
+  workspaces: [_ws],
+);
+
+class _Projects extends ProjectsNotifier {
+  @override
+  ProjectsState build() =>
+      const ProjectsState(projects: [_project], loaded: true);
+}
+
+class _Manager extends ConnectionManager {
+  _Manager(this._client)
+      : super(
+          connect: () => throw UnimplementedError(),
+          clientFactory: (incoming, send) =>
+              RpcClient(incoming: incoming, sendFrame: send),
+        );
+  final GatewayClient _client;
+  @override
+  GatewayClient? get client => _client;
+}
+
+List<Override> _workspaceOverrides(FakeGatewayClient client) => [
+      projectsProvider.overrideWith(_Projects.new),
+      workspaceApiProvider.overrideWithValue(WorkspaceApi(() => client)),
+      workspaceChangedFilesProvider(('A:w2', '')).overrideWith(
+        (ref) async => const [ChangedFile(path: 'a.dart', change: 'modified')],
+      ),
+      workspaceCommitsProvider('A:w2')
+          .overrideWith((ref) async => const CommitList()),
+      workspaceDirProvider(('A:w2', '')).overrideWith(
+        (ref) async => const DirListing(
+          entries: [DirEntry(name: 'lib', path: 'lib', isDir: true)],
+        ),
+      ),
+      workspaceDirProvider(('A:w2', 'lib')).overrideWith(
+        (ref) async => const DirListing(
+          path: 'lib',
+          entries: [DirEntry(name: 'app.dart', path: 'lib/app.dart')],
+        ),
+      ),
+    ];
+
+Future<void> _openMenu(WidgetTester tester) async {
+  await tester.tap(find.byType(PopupMenuButton<String>));
+  await tester.pumpAndSettle();
 }
 
 Widget _app(List<Override> overrides, {Session? session}) => ProviderScope(
@@ -160,23 +234,194 @@ void main() {
     expect(find.byIcon(Icons.commit), findsNothing);
   });
 
-  testWidgets('shows Changes item in overflow when branch is set',
+  testWidgets('shows Changes and Files when the workspace is in the tree',
       (tester) async {
-    await tester.pumpWidget(_app(_baseOverrides(),
-        session: _s(branch: 'feat/session-git-branch')));
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      projectsProvider.overrideWith(_Projects.new),
+    ], session: _s(workspaceId: 'A:w2')));
     await tester.pump();
-    await tester.tap(find.byType(PopupMenuButton<String>));
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.difference), findsOneWidget);
+    await _openMenu(tester);
+    expect(find.text('Changes'), findsOneWidget);
+    expect(find.text('Files'), findsOneWidget);
   });
 
-  testWidgets('no Changes item in overflow when branch is absent',
-      (tester) async {
-    await tester.pumpWidget(_app(_baseOverrides()));
+  testWidgets('hides Changes and Files without a workspace id', (tester) async {
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      projectsProvider.overrideWith(_Projects.new),
+    ], session: _s(branch: 'feat/registry')));
     await tester.pump();
-    await tester.tap(find.byType(PopupMenuButton<String>));
+    await _openMenu(tester);
+    expect(find.text('Changes'), findsNothing);
+    expect(find.text('Files'), findsNothing);
+  });
+
+  testWidgets('hides Changes and Files when the workspace is not in the tree',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      projectsProvider.overrideWith(_Projects.new),
+    ], session: _s(workspaceId: 'A:gone')));
+    await tester.pump();
+    await _openMenu(tester);
+    expect(find.text('Changes'), findsNothing);
+    expect(find.text('Files'), findsNothing);
+  });
+
+  testWidgets('Changes opens the workspace changes view', (tester) async {
+    final client = FakeGatewayClient(
+      (m, p) async => switch (m) {
+        'workspace.diff' => {
+            'path': 'a.dart',
+            'diff': '@@ -1 +1 @@\n-old\n+new\n',
+          },
+        _ => null,
+      },
+    );
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      ..._workspaceOverrides(client),
+    ], session: _s(workspaceId: 'A:w2')));
+    await tester.pump();
+    await _openMenu(tester);
+    await tester.tap(find.text('Changes'));
     await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.difference), findsNothing);
+
+    expect(find.byType(WorkspaceChangesScreen), findsOneWidget);
+    expect(find.text('registry'), findsOneWidget);
+    expect(find.text('Uncommitted'), findsOneWidget);
+    expect(find.text('vs main'), findsOneWidget);
+
+    await tester.tap(find.textContaining('a.dart').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('+ new'), findsOneWidget);
+  });
+
+  testWidgets('Files opens the browser; back closes it from any folder',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      ..._workspaceOverrides(FakeGatewayClient((m, p) async => null)),
+    ], session: _s(workspaceId: 'A:w2')));
+    await tester.pump();
+    await _openMenu(tester);
+    await tester.tap(find.text('Files'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(WorkspaceFilesScreen), findsOneWidget);
+    await tester.tap(find.text('lib'));
+    await tester.pumpAndSettle();
+    expect(find.text('app.dart'), findsOneWidget);
+    final c = ProviderScope.containerOf(
+        tester.element(find.byType(WorkspaceFilesScreen)));
+    expect(c.read(filesPathProvider('A:w2')), 'lib');
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkspaceFilesScreen), findsNothing);
+    expect(find.byType(SessionDetailScreen), findsOneWidget);
+    // The folder stays remembered for the workspace Files tab.
+    expect(c.read(filesPathProvider('A:w2')), 'lib');
+  });
+
+  testWidgets('pushed Changes follows the workspace in the tree',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      ..._workspaceOverrides(FakeGatewayClient((m, p) async => null)),
+    ], session: _s(workspaceId: 'A:w2')));
+    await tester.pump();
+    await _openMenu(tester);
+    await tester.tap(find.text('Changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('vs main'), findsOneWidget);
+
+    final c = ProviderScope.containerOf(
+        tester.element(find.byType(WorkspaceChangesScreen)));
+    c.read(projectsProvider.notifier).state = const ProjectsState(
+      projects: [
+        ProjectNode(
+          id: 'A:p1',
+          name: 'argus',
+          nodeId: 'A',
+          workspaces: [
+            WorkspaceNode(
+              id: 'A:w2',
+              dir: '/src/argus/.worktrees/registry',
+              branch: 'feat/registry',
+              targetBranch: 'dev',
+            ),
+          ],
+        ),
+      ],
+      loaded: true,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('vs dev'), findsOneWidget);
+
+    c.read(projectsProvider.notifier).state =
+        const ProjectsState(loaded: true);
+    await tester.pumpAndSettle();
+    expect(find.text('This workspace is no longer available.'), findsOneWidget);
+  });
+
+  group('Tasks item', () {
+    late List<Map<String, dynamic>> tasks;
+    late FakeGatewayClient client;
+
+    setUp(() {
+      tasks = [];
+      client = FakeGatewayClient(
+        (m, p) async => m == 'sessions.tasks' ? {'tasks': tasks} : null,
+      );
+    });
+
+    Widget app() => _app([
+          gatewayProvider.overrideWithValue(_Manager(client)),
+          transcriptProvider('mac:%1')
+              .overrideWith(() => _SeededTranscript(const [])),
+          transcriptRepositoryProvider.overrideWithValue(_RecordingRepo()),
+        ]);
+
+    int taskCalls() =>
+        client.calls.where((c) => c.$1 == 'sessions.tasks').length;
+
+    testWidgets('is hidden when the list is empty', (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await _openMenu(tester);
+      expect(find.text('Tasks'), findsNothing);
+      expect(taskCalls(), 1);
+    });
+
+    testWidgets('is shown when the list is non-empty', (tester) async {
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await _openMenu(tester);
+      expect(find.text('Tasks'), findsOneWidget);
+    });
+
+    testWidgets('appears after tasks.changed fills the list', (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pump();
+
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      client.notify('tasks.changed', {'session_id': 'other'});
+      await tester.pump();
+      expect(taskCalls(), 1);
+      client.notify('tasks.changed', {'session_id': 'mac:%1'});
+      await tester.pumpAndSettle();
+      expect(taskCalls(), 2);
+
+      await _openMenu(tester);
+      expect(find.text('Tasks'), findsOneWidget);
+    });
   });
 
   testWidgets('AppBar has overflow PopupMenuButton', (tester) async {
