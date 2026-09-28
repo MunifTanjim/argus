@@ -505,6 +505,7 @@ Widget codeBarButton({
 void showLinkActions(BuildContext context, String url) {
   showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     builder: (sheetCtx) {
       ListTile action(IconData icon, String label, VoidCallback onTap) =>
           ListTile(

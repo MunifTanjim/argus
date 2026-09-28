@@ -6,6 +6,7 @@ import '../state/changes.dart';
 import 'changed_file_review_screen.dart';
 import 'changed_file_row.dart';
 import 'responsive.dart';
+import 'shell_drawer.dart';
 import 'theme.dart';
 
 /// Lists the files a commit changed; tap one to review its parent-vs-commit diff.
@@ -23,7 +24,10 @@ class CommitDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(sourceCommitFilesProvider((source, commit.sha)));
     return Scaffold(
-      appBar: AppBar(title: Text('${commit.short}  ${commit.subject}')),
+      appBar: AppBar(
+        title: Text('${commit.short}  ${commit.subject}'),
+        actions: [?shellMenuButton(context)],
+      ),
       body: SafeArea(
         top: false,
         child: async.when(

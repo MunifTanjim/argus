@@ -24,6 +24,23 @@ import 'status_style.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
 
+const _routeName = '/session';
+
+// The detail that set the active session. A detail that closes clears only its
+// own claim: a scope change builds the new detail before the old one is
+// disposed, and both can show the same session.
+_SessionDetailScreenState? _claimOwner;
+
+/// Opens [session]'s detail. The home shell finds the live session a scope
+/// shows through [sessionDetailRouteId].
+Route<void> sessionDetailRoute(Session session) => MaterialPageRoute(
+      settings: RouteSettings(name: _routeName, arguments: session.id),
+      builder: (_) => SessionDetailScreen(session: session),
+    );
+
+String? sessionDetailRouteId(Route<dynamic> route) =>
+    route.settings.name == _routeName ? route.settings.arguments as String? : null;
+
 class SessionDetailScreen extends ConsumerStatefulWidget {
   const SessionDetailScreen({super.key, required this.session});
 
@@ -37,6 +54,7 @@ class SessionDetailScreen extends ConsumerStatefulWidget {
 class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     with RouteAware, WidgetsBindingObserver {
   TranscriptSubscription? _sub;
+  RouteObserver<PageRoute<dynamic>>? _observer;
 
   String get _sid => widget.session.id;
 
@@ -58,14 +76,22 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
-    if (route is PageRoute) appRouteObserver.subscribe(this, route);
+    final observer = ShellNavigatorScope.observerOf(context);
+    if (observer != _observer) {
+      _observer?.unsubscribe(this);
+      _observer = observer;
+    }
+    if (route is PageRoute) observer.subscribe(this, route);
   }
+
+  bool get _shown => mounted && (ModalRoute.of(context)?.isCurrent ?? false);
 
   // Mark this session as the one on screen and clear any standing notification
   // for it. Called whenever the view becomes visible: on open, when a route
   // pushed over it is popped, and when the app returns to the foreground (which
   // also dismisses a notification the background isolate raised while away).
   void _claimActive() {
+    _claimOwner = this;
     PushNotifications.instance.setActiveSession(_sid);
     unawaited(PushNotifications.instance.cancelForSession(_sid));
   }
@@ -73,22 +99,24 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   // Stop suppressing this session's notifications, unless something else already
   // became the active session.
   void _releaseActive() {
+    if (_claimOwner != this) return;
+    _claimOwner = null;
     if (PushNotifications.instance.activeSessionId == _sid) {
       PushNotifications.instance.setActiveSession(null);
     }
   }
 
   @override
-  void didPopNext() => _claimActive();
+  void didPopNext() {
+    if (_shown) _claimActive();
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       // Foreground again on this session: re-suppress and dismiss anything that
       // arrived while away.
-      if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
-        _claimActive();
-      }
+      if (_shown) _claimActive();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       // Screen off or backgrounded: you're not actively viewing, so let this
@@ -108,7 +136,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
   @override
   void dispose() {
-    appRouteObserver.unsubscribe(this);
+    _observer?.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _releaseActive();
     _sub?.dispose();

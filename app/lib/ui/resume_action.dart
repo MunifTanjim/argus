@@ -16,25 +16,29 @@ Future<void> resumeSession(
   required String agentSessionId,
   required String cwd,
 }) async {
+  // The user can leave Home while the resume is in flight, which disposes
+  // [context]; the session must still open in Home.
+  final container = ProviderScope.containerOf(context, listen: false);
+  final messenger = ScaffoldMessenger.of(context);
   final result = await ref.read(sessionRepositoryProvider).resume(
         nodeId: nodeId,
         agent: agent,
         agentSessionId: agentSessionId,
         cwd: cwd,
       );
-  if (!context.mounted) return;
   switch (result) {
     case Ok(:final value):
-      showHomeSessions(ref);
-      ScaffoldMessenger.of(context).showSnackBar(
+      showHomeSessions(container);
+      messenger.showSnackBar(
         const SnackBar(content: Text('Resuming session…')),
       );
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst);
       if (value.sessionId.isNotEmpty) {
-        ref.read(pendingOpenSessionProvider.notifier).state = value.sessionId;
+        container.read(pendingOpenSessionProvider.notifier).state =
+            PendingOpen(value.sessionId, inHome: true);
       }
     case Error(:final error):
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Failed to resume: $error')),
       );
   }

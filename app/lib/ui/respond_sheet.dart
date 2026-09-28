@@ -18,6 +18,7 @@ import 'tool_detail.dart';
 Future<void> showRespondSheet(BuildContext context, Session session) {
   return showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     builder: (sheetCtx) => Padding(
       padding: EdgeInsets.only(
