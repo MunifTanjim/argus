@@ -7,14 +7,17 @@ import '../core/result.dart';
 import '../data/session_repository.dart';
 import '../models/enums.dart';
 import '../data/transcript_repository.dart';
+import '../models/project.dart';
 import '../models/session.dart';
 import '../push/notifications.dart';
 import '../state/gateway.dart';
+import '../state/projects.dart';
 import '../state/sessions.dart';
+import '../state/tasks.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
-import 'changed_files_screen.dart';
+import '../transport/jsonrpc.dart';
 import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
 import 'respond_sheet.dart';
@@ -23,6 +26,7 @@ import 'session_tasks_screen.dart';
 import 'status_style.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
+import 'workspace_screen.dart';
 
 const _routeName = '/session';
 
@@ -54,6 +58,7 @@ class SessionDetailScreen extends ConsumerStatefulWidget {
 class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     with RouteAware, WidgetsBindingObserver {
   TranscriptSubscription? _sub;
+  StreamSubscription<RpcMessage>? _tasksSub;
   RouteObserver<PageRoute<dynamic>>? _observer;
 
   String get _sid => widget.session.id;
@@ -69,6 +74,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _claimActive();
+    _bindTasks();
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
@@ -134,12 +140,28 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         );
   }
 
+  // Refetches the task list on each tasks.changed push for this session; the
+  // tasks screen pushed over this one reads the same provider. Each reconnect
+  // builds a new client, so this rebinds on connect.
+  void _bindTasks() {
+    _tasksSub?.cancel();
+    _tasksSub = ref.read(gatewayProvider)?.client?.notifications.listen((m) {
+      final params = m.params;
+      if (m.method == 'tasks.changed' &&
+          params is Map &&
+          params['session_id'] == _sid) {
+        ref.invalidate(tasksProvider(_sid));
+      }
+    });
+  }
+
   @override
   void dispose() {
     _observer?.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _releaseActive();
     _sub?.dispose();
+    _tasksSub?.cancel();
     super.dispose();
   }
 
@@ -149,6 +171,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     ref.listen<ConnState>(connStateProvider, (prev, next) {
       if (next == ConnState.connected && prev != ConnState.connected) {
         _open();
+        _bindTasks();
       }
     });
     // Re-open when the cache key changes (/clear or first hook set).
@@ -169,6 +192,13 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
     final title = live.displayTitle;
+    final tasks = ref.watch(tasksProvider(_sid));
+    final hasTasks = !tasks.hasError && (tasks.value?.isNotEmpty ?? false);
+    final wsId = live.workspaceId;
+    final hasWorkspace = wsId != null &&
+        wsId.isNotEmpty &&
+        ref.watch(projectsProvider
+            .select((p) => lookupWorkspace(p.projects, wsId) != null));
 
     return Scaffold(
       appBar: AppBar(
@@ -239,10 +269,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                     builder: (_) => SessionTasksScreen(session: live),
                   ),
                 );
-              } else if (value == 'changes') {
+              } else if (value == 'changes' && hasWorkspace) {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => ChangedFilesScreen(session: live),
+                    builder: (_) => WorkspaceChangesScreen(workspaceId: wsId),
+                  ),
+                );
+              } else if (value == 'files' && hasWorkspace) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => WorkspaceFilesScreen(workspaceId: wsId),
                   ),
                 );
               } else if (value == 'kill') {
@@ -281,16 +317,17 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem<String>(
-                value: 'tasks',
-                child: ListTile(
-                  leading: Icon(Icons.checklist),
-                  title: Text('Tasks'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              if (live.branch?.isNotEmpty ?? false)
+              if (hasTasks)
                 const PopupMenuItem<String>(
+                  value: 'tasks',
+                  child: ListTile(
+                    leading: Icon(Icons.checklist),
+                    title: Text('Tasks'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              if (hasWorkspace) ...const [
+                PopupMenuItem<String>(
                   value: 'changes',
                   child: ListTile(
                     leading: Icon(Icons.difference),
@@ -298,6 +335,15 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
+                PopupMenuItem<String>(
+                  value: 'files',
+                  child: ListTile(
+                    leading: Icon(Icons.folder_outlined),
+                    title: Text('Files'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
               PopupMenuItem<String>(
                 value: 'kill',
                 enabled: live.canKill,

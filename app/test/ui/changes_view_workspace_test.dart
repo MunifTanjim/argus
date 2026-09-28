@@ -64,6 +64,5 @@ void main() {
       const WorkspaceChangesSource('w', ''),
       isNot(const WorkspaceChangesSource('w', 'target')),
     );
-    expect(const SessionChangesSource('s'), const SessionChangesSource('s'));
   });
 }

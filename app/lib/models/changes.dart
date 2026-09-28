@@ -25,27 +25,6 @@ class ChangedFile {
   }
 }
 
-class FileDiff {
-  const FileDiff({
-    required this.path,
-    this.oldContent = '',
-    this.newContent = '',
-    this.notShown = false,
-  });
-
-  final String path;
-  final String oldContent;
-  final String newContent;
-  final bool notShown;
-
-  factory FileDiff.fromJson(Map<String, dynamic> j) => FileDiff(
-        path: j['path'] as String? ?? '',
-        oldContent: j['old_content'] as String? ?? '',
-        newContent: j['new_content'] as String? ?? '',
-        notShown: j['not_shown'] as bool? ?? false,
-      );
-}
-
 class Commit {
   const Commit({
     required this.sha,

@@ -1,14 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/session.dart';
 import '../models/tasks.dart';
-import '../state/gateway.dart';
 import '../state/tasks.dart';
-import '../transport/connection.dart';
-import '../transport/jsonrpc.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
@@ -16,8 +11,7 @@ import 'theme.dart';
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
 
 /// A live session's Claude Code task list (TaskCreate/TaskUpdate), grouped by
-/// status. Re-pulls the whole list when the server pushes tasks.changed for
-/// this session — detection lives server-side, so the client just refetches.
+/// status. The session detail beneath refetches it on tasks.changed pushes.
 class SessionTasksScreen extends ConsumerStatefulWidget {
   const SessionTasksScreen({super.key, required this.session});
 
@@ -28,39 +22,6 @@ class SessionTasksScreen extends ConsumerStatefulWidget {
 }
 
 class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
-  StreamSubscription<RpcMessage>? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    // The transcript subscription owned by the detail screen below keeps the
-    // node polling this session, so tasks.changed pushes flow while we're open.
-    _bindNotifications();
-    // Each reconnect builds a fresh RpcClient with a new notification stream, so
-    // rebind to it or live pushes stop after the first blip.
-    ref.listenManual(connStateProvider, (_, state) {
-      if (state == ConnState.connected) _bindNotifications();
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  void _bindNotifications() {
-    _sub?.cancel();
-    final client = ref.read(gatewayProvider)?.client;
-    _sub = client?.notifications.listen((m) {
-      if (m.method != 'tasks.changed') return;
-      final params = m.params;
-      if (params is Map && params['session_id'] == widget.session.id) {
-        _refresh();
-      }
-    });
-  }
-
   Future<void> _refresh() {
     ref.invalidate(tasksProvider(widget.session.id));
     return ref.read(tasksProvider(widget.session.id).future);

@@ -31,12 +31,4 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(r'\ No newline at end of file'), findsOneWidget);
   });
-
-  testWidgets('full-file diffs keep counting from line 1', (tester) async {
-    await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: collapsibleDiffView('a\nb\n', 'a\nc\n'))));
-    await tester.pumpAndSettle();
-    expect(find.text('1'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
-  });
 }
