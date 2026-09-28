@@ -12,16 +12,16 @@ import 'theme.dart';
 class CommitDetailScreen extends ConsumerWidget {
   const CommitDetailScreen({
     super.key,
-    required this.sessionId,
+    required this.source,
     required this.commit,
   });
 
-  final String sessionId;
+  final ChangesSource source;
   final Commit commit;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(commitFilesProvider((sessionId, commit.sha)));
+    final async = ref.watch(sourceCommitFilesProvider((source, commit.sha)));
     return Scaffold(
       appBar: AppBar(title: Text('${commit.short}  ${commit.subject}')),
       body: SafeArea(
@@ -46,7 +46,7 @@ class CommitDetailScreen extends ConsumerWidget {
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => ChangedFileReviewScreen(
-                                sessionId: sessionId,
+                                source: source,
                                 file: f,
                                 rev: commit.sha,
                               ),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/changes.dart';
 import '../state/changes.dart';
+import '../state/workspace.dart';
 import 'edit_diff.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -13,12 +14,12 @@ const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 class ChangedFileReviewScreen extends ConsumerStatefulWidget {
   const ChangedFileReviewScreen({
     super.key,
-    required this.sessionId,
+    required this.source,
     required this.file,
     this.rev,
   });
 
-  final String sessionId;
+  final ChangesSource source;
   final ChangedFile file;
   final String? rev;
 
@@ -30,7 +31,7 @@ class ChangedFileReviewScreen extends ConsumerStatefulWidget {
 class _ChangedFileReviewScreenState
     extends ConsumerState<ChangedFileReviewScreen> {
   bool _loading = true;
-  FileDiff? _diff;
+  DiffContent? _diff;
   Object? _error;
 
   @override
@@ -41,12 +42,13 @@ class _ChangedFileReviewScreenState
 
   Future<void> _fetch() async {
     try {
-      final diff = await ref.read(changesApiProvider).fileDiff(
-            widget.sessionId,
-            widget.file.path,
-            origPath: widget.file.origPath,
-            rev: widget.rev,
-          );
+      final diff = await fetchDiff(
+        ref.read(changesApiProvider),
+        ref.read(workspaceApiProvider),
+        widget.source,
+        widget.file,
+        rev: widget.rev,
+      );
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -102,20 +104,36 @@ class _ChangedFileReviewScreenState
     }
     final d = _diff;
     if (d == null) return blocks;
-    if (d.notShown) {
+    final notShown = switch (d) {
+      FullDiff(:final diff) => diff.notShown,
+      UnifiedDiff(:final diff) => diff.notShown,
+    };
+    if (notShown) {
       blocks.add(Text('Not shown — binary or too large.',
           style: _mono.copyWith(color: AppColors.dim)));
       return blocks;
     }
-    if (d.oldContent.isEmpty && d.newContent.isEmpty) {
-      blocks.add(Text('Empty file — no content to show.',
-          style: _mono.copyWith(color: AppColors.dim)));
-      return blocks;
+    final Widget view;
+    switch (d) {
+      case FullDiff(:final diff):
+        if (diff.oldContent.isEmpty && diff.newContent.isEmpty) {
+          blocks.add(Text('Empty file — no content to show.',
+              style: _mono.copyWith(color: AppColors.dim)));
+          return blocks;
+        }
+        view = collapsibleDiffView(diff.oldContent, diff.newContent,
+            lang: diff.path);
+      case UnifiedDiff(:final diff):
+        if (diff.diff.trim().isEmpty) {
+          blocks.add(Text('No differences to show.',
+              style: _mono.copyWith(color: AppColors.dim)));
+          return blocks;
+        }
+        view = unifiedDiffView(diff.diff, lang: widget.file.path);
     }
     // Flexible (not Expanded) so a short diff stays compact under the path
     // header, while a long one caps at the viewport and scrolls its own content.
-    blocks.add(Flexible(
-        child: collapsibleDiffView(d.oldContent, d.newContent, lang: d.path)));
+    blocks.add(Flexible(child: view));
     return blocks;
   }
 }
