@@ -12,7 +12,7 @@ class TreeView {
     this.showGone = false,
   });
 
-  final Set<String> folded;
+  final Set<String> folded; // node and project ids
   final String filter;
   final bool showHidden;
   final bool showGone;
@@ -34,9 +34,9 @@ class TreeViewNotifier extends Notifier<TreeView> {
   @override
   TreeView build() => const TreeView();
 
-  void toggleFold(String projectId) {
+  void toggleFold(String id) {
     final next = {...state.folded};
-    if (!next.remove(projectId)) next.add(projectId);
+    if (!next.remove(id)) next.add(id);
     state = state.copyWith(folded: next);
   }
 
@@ -111,8 +111,9 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
   final byNode = <String, List<ProjectNode>>{};
   final labels = <String, String>{};
   for (var p in projects) {
-    if ((p.hidden && !view.showHidden) || (p.isGone && !view.showGone))
+    if ((p.hidden && !view.showHidden) || (p.isGone && !view.showGone)) {
       continue;
+    }
     if (!view.showGone) {
       p = p.copyWith(
         workspaces: [
@@ -137,7 +138,21 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
   final rows = <TreeRow>[];
   for (final nid in nodeIds) {
     if (nodeIds.length > 1) {
-      rows.add(TreeRow(kind: TreeRowKind.node, id: nid, label: labels[nid]!));
+      final folded = q.isEmpty && view.folded.contains(nid);
+      rows.add(
+        TreeRow(
+          kind: TreeRowKind.node,
+          id: nid,
+          label: labels[nid]!,
+          folded: folded,
+          hasKids: true,
+          workspaceIds: [
+            for (final p in byNode[nid]!)
+              for (final w in p.workspaces) w.id,
+          ],
+        ),
+      );
+      if (folded) continue;
     }
     for (final p in byNode[nid]!) {
       final folded = q.isEmpty && view.folded.contains(p.id);

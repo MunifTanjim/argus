@@ -144,6 +144,26 @@ void main() {
     expect(rows.map((r) => r.pinned), [true, false]);
   });
 
+  test('a folded node hides its projects but keeps their workspace ids', () {
+    final infra = _p(
+      'B:p1',
+      'infra',
+      node: 'B',
+      label: 'devbox',
+      ws: [_w('B:w1', '/infra', branch: 'main')],
+    );
+    final rows = buildTreeRows([argus, infra], const TreeView(folded: {'A'}));
+    final mbp = rows.singleWhere((r) => r.label == 'mbp');
+    expect(mbp.folded, isTrue);
+    expect(mbp.workspaceIds, ['A:w1', 'A:w2']);
+    expect(rows.map((r) => r.label), ['devbox', 'infra', 'infra', 'mbp']);
+    final filtered = buildTreeRows(
+      [argus, infra],
+      const TreeView(folded: {'A'}, filter: 'registry'),
+    );
+    expect(filtered.map((r) => r.label), ['argus', 'registry']);
+  });
+
   test('a folded project hides its workspaces but keeps their ids', () {
     final rows = buildTreeRows([argus], const TreeView(folded: {'A:p1'}));
     expect(rows, hasLength(1));
