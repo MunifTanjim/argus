@@ -8,6 +8,7 @@ import '../transport/connection.dart';
 import 'history_sessions_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
+import 'shell_drawer.dart';
 
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
@@ -24,7 +25,7 @@ class HistoryScreen extends ConsumerWidget {
     final projects = ref.watch(historyProjectsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
+      appBar: AppBar(leading: shellMenuButton(context), title: const Text('History')),
       body: RefreshIndicator(
         onRefresh: () => ref.read(historyProjectsProvider.notifier).reload(),
         child: switch (projects) {
