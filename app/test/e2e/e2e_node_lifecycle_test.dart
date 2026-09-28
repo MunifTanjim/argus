@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -100,6 +101,37 @@ void main() {
       expect(seen, contains('node.event'));
       await sub.cancel();
       await f.client.close();
+    },
+  );
+
+  test(
+    'the online node.event arrives after the new node\'s channel is open',
+    () async {
+      Uint8List projects(String id) => _json({
+            'projects': [
+              {'id': id, 'name': id, 'workspaces': []},
+            ],
+          });
+      final a = LoopbackNode('A', await generateKeyPair(), (m, p) => projects('pa'));
+      final b = LoopbackNode('B', await generateKeyPair(), (m, p) => projects('pb'));
+      final offline = {'B'};
+      final lnk = MultiNodeLoopbackLink({'A': a, 'B': b}, offline: offline);
+      final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+      await client.connect();
+
+      final ids = Completer<Set<Object?>>();
+      final sub = client.notifications.listen((m) async {
+        if (m.method != 'node.event' || ids.isCompleted) return;
+        final r = await client.call('project.list') as Map;
+        ids.complete({for (final p in r['projects'] as List) (p as Map)['id']});
+      });
+
+      offline.remove('B');
+      _pushRoster(lnk, 'online', b, online: true);
+
+      expect(await ids.future.timeout(const Duration(seconds: 3)), {'A:pa', 'B:pb'});
+      await sub.cancel();
+      await client.close();
     },
   );
 
