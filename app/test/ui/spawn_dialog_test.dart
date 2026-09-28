@@ -22,6 +22,8 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
   final List<AgentInfo> agents;
   String? spawnedPrompt;
   String? spawnedAgent;
+  String? spawnedNode;
+  String? spawnedCwd;
   @override
   Future<Result<void>> spawn({
     String? nodeId,
@@ -31,6 +33,8 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
   }) async {
     spawnedPrompt = prompt;
     spawnedAgent = agent;
+    spawnedNode = nodeId;
+    spawnedCwd = cwd;
     return const Result.ok(null);
   }
 
@@ -216,5 +220,37 @@ void main() {
 
     expect(find.textContaining('Failed'), findsOneWidget);
     expect(find.byType(SpawnDialogBody), findsOneWidget);
+  });
+
+  testWidgets('a fixed target hides the pickers and spawns there',
+      (tester) async {
+    final repo = _RecordingSpawnRepo(agents: const [
+      AgentInfo(id: 'claude', name: 'Claude', color: '#d79921', spawnable: true),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        historyProjectsProvider.overrideWith(() => _FakeProjects(const [])),
+        sessionRepositoryProvider.overrideWithValue(repo),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(
+          body: SpawnDialogBody(
+            target: SpawnTarget(
+                nodeId: 'A', cwd: '/src/argus/.worktrees/registry', label: 'argus · registry'),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('In argus · registry'), findsOneWidget);
+    expect(find.text('Working directory'), findsNothing);
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.pumpAndSettle();
+
+    expect(repo.spawnedNode, 'A');
+    expect(repo.spawnedCwd, '/src/argus/.worktrees/registry');
   });
 }

@@ -11,25 +11,40 @@ import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
 import 'theme.dart';
 
-Future<void> showSpawnDialog(BuildContext context, WidgetRef ref) {
+/// A fixed place to spawn in, such as a workspace: the dialog hides its node
+/// and directory pickers.
+class SpawnTarget {
+  const SpawnTarget({required this.nodeId, required this.cwd, required this.label});
+
+  final String nodeId;
+  final String cwd;
+  final String label;
+}
+
+Future<void> showSpawnDialog(BuildContext context, WidgetRef ref,
+    {SpawnTarget? target}) {
   return showDialog(
     context: context,
-    builder: (_) => const SpawnDialog(),
+    builder: (_) => SpawnDialog(target: target),
   );
 }
 
 class SpawnDialog extends StatelessWidget {
-  const SpawnDialog({super.key});
+  const SpawnDialog({super.key, this.target});
+
+  final SpawnTarget? target;
 
   @override
-  Widget build(BuildContext context) => const AlertDialog(
-        title: Text('New session'),
-        content: SpawnDialogBody(),
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('New session'),
+        content: SpawnDialogBody(target: target),
       );
 }
 
 class SpawnDialogBody extends ConsumerStatefulWidget {
-  const SpawnDialogBody({super.key});
+  const SpawnDialogBody({super.key, this.target});
+
+  final SpawnTarget? target;
 
   @override
   ConsumerState<SpawnDialogBody> createState() => _SpawnDialogBodyState();
@@ -57,9 +72,14 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     super.initState();
     _vm = SpawnViewModel(ref.read(sessionRepositoryProvider));
     _vm.spawn.addListener(_onCommand);
-    final nodes = nodesFromSessions(ref.read(sessionsProvider).values);
-    if (nodes.length >= 2) {
-      _nodeId = _defaultNodeId(nodes);
+    final target = widget.target;
+    if (target != null && target.nodeId.isNotEmpty) {
+      _nodeId = target.nodeId;
+    } else {
+      final nodes = nodesFromSessions(ref.read(sessionsProvider).values);
+      if (nodes.length >= 2) {
+        _nodeId = _defaultNodeId(nodes);
+      }
     }
     _loadNodes();
     _loadAgents();
@@ -102,7 +122,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
         final prevNodeId = _nodeId;
         setState(() {
           _remoteNodes = value;
-          if (value.length >= 2 &&
+          if (widget.target == null &&
+              value.length >= 2 &&
               (_nodeId == null || !value.any((n) => n.id == _nodeId))) {
             _nodeId = _defaultNodeId(value);
           }
@@ -126,6 +147,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   }
 
   String? _effectiveCwd() {
+    final target = widget.target;
+    if (target != null) return target.cwd;
     final cwd = _customCwd ? _customPath.trim() : (_selectedCwd ?? '').trim();
     return cwd.isEmpty ? null : cwd;
   }
@@ -199,7 +222,13 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (nodes.length >= 2)
+          if (widget.target != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('In ${widget.target!.label}',
+                  style: const TextStyle(color: AppColors.dim)),
+            ),
+          if (widget.target == null && nodes.length >= 2)
             DropdownButton<String>(
               value: _nodeId,
               isExpanded: true,
@@ -241,26 +270,27 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               ],
               onChanged: (v) => setState(() => _agent = v),
             ),
-          DropdownButton<String>(
-            isExpanded: true,
-            value: _customCwd ? '__custom__' : _selectedCwd,
-            hint: const Text('Working directory'),
-            items: [
-              for (final p in projects)
-                DropdownMenuItem(value: p.cwd, child: Text(p.label)),
-              const DropdownMenuItem(
-                  value: '__custom__', child: Text('Custom path…')),
-            ],
-            onChanged: (v) => setState(() {
-              if (v == '__custom__') {
-                _customCwd = true;
-              } else {
-                _customCwd = false;
-                _selectedCwd = v;
-              }
-            }),
-          ),
-          if (_customCwd)
+          if (widget.target == null)
+            DropdownButton<String>(
+              isExpanded: true,
+              value: _customCwd ? '__custom__' : _selectedCwd,
+              hint: const Text('Working directory'),
+              items: [
+                for (final p in projects)
+                  DropdownMenuItem(value: p.cwd, child: Text(p.label)),
+                const DropdownMenuItem(
+                    value: '__custom__', child: Text('Custom path…')),
+              ],
+              onChanged: (v) => setState(() {
+                if (v == '__custom__') {
+                  _customCwd = true;
+                } else {
+                  _customCwd = false;
+                  _selectedCwd = v;
+                }
+              }),
+            ),
+          if (widget.target == null && _customCwd)
             TextField(
               decoration: const InputDecoration(labelText: 'Custom path'),
               onChanged: (v) => setState(() => _customPath = v),
