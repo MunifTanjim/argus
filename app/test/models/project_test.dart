@@ -44,8 +44,9 @@ void main() {
     expect(p.workspaces.first.isMain, isTrue);
     expect(p.workspaces.first.name, 'argus');
     expect(p.workspaces.last.name, 'registry');
-    expect(p.workspaces.last.setupState, 'running');
-    expect(p.workspaces.first.setupState, isNull);
+    expect(p.workspaces.last.setup?.state, 'running');
+    expect(p.workspaces.last.setup?.command, 'make');
+    expect(p.workspaces.first.setup, isNull);
   });
 
   test('missing fields take defaults', () {
@@ -93,5 +94,60 @@ void main() {
     final d = WorkspaceDiff.fromJson({'path': 'a.go', 'diff': '@@ -1 +1 @@'});
     expect(d.diff, '@@ -1 +1 @@');
     expect(d.notShown, isFalse);
+  });
+
+  test('parses scripts and the full setup run', () {
+    final p = ProjectNode.fromJson({
+      'id': 'A:p1',
+      'name': 'argus',
+      'default_branch': 'dev',
+      'scripts': {'setup': 'make deps', 'teardown': 'make clean'},
+      'workspaces': [
+        {
+          'id': 'A:w1',
+          'dir': '/src/argus',
+          'is_main': true,
+          'setup': {
+            'state': 'failed',
+            'command': 'make deps',
+            'exit_code': 2,
+            'output_tail': 'boom\n',
+          },
+        },
+      ],
+    });
+    expect(p.setupScript, 'make deps');
+    expect(p.defaultBranch, 'dev');
+    expect(p.copyWith().defaultBranch, 'dev');
+    expect(p.teardownScript, 'make clean');
+    final run = p.workspaces.single.setup!;
+    expect(run.state, 'failed');
+    expect(run.exitCode, 2);
+    expect(run.outputTail, 'boom\n');
+    expect(ProjectNode.fromJson({'id': 'x', 'name': 'n'}).setupScript, '');
+    expect(p.copyWith(workspaces: const []).teardownScript, 'make clean');
+  });
+
+  test('lookupProject, mainWorkspace, and baseName', () {
+    const main = WorkspaceNode(id: 'A:w1', dir: '/src/argus', isMain: true);
+    const other = WorkspaceNode(id: 'A:w2', dir: '/src/argus/.wt/x/');
+    const p = ProjectNode(id: 'A:p1', name: 'argus', workspaces: [main, other]);
+    expect(lookupProject(const [p], 'A:p1'), same(p));
+    expect(lookupProject(const [p], 'A:p9'), isNull);
+    expect(mainWorkspace(p), same(main));
+    const goneMain = WorkspaceNode(
+      id: 'A:w1',
+      dir: '/src/argus',
+      isMain: true,
+      isGone: true,
+    );
+    expect(
+      mainWorkspace(
+        const ProjectNode(id: 'p', name: 'n', workspaces: [goneMain]),
+      ),
+      isNull,
+    );
+    expect(baseName('/src/argus/.wt/x/'), 'x');
+    expect(baseName('/'), '/');
   });
 }

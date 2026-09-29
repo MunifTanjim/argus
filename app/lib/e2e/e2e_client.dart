@@ -592,6 +592,8 @@ class E2EClient implements GatewayClient {
       return _routeBySession(method, params);
     if (workspaceAddressed.contains(method))
       return _routeByWorkspace(method, params);
+    if (projectAddressed.contains(method))
+      return _routeByProject(method, params);
     if (nodeAddressed.contains(method)) return _routeByNode(method, params);
     if (terminalHandleAddressed.contains(method)) {
       return _routeByHandle(
@@ -717,6 +719,28 @@ class E2EClient implements GatewayClient {
       ...(params as Map).cast<String, dynamic>(),
       'workspace_id': localId,
     });
+  }
+
+  Future<Object?> _routeByProject(String method, Object? params) async {
+    final composite = stringField(params, 'project_id');
+    if (composite == null) {
+      throw RpcError(-32600, '$method requires project_id');
+    }
+    final (nodeId, localId, ok) = splitCompositeId(composite);
+    if (!ok) {
+      throw RpcError(-32600, 'project id is not gateway-qualified: $composite');
+    }
+    final res = await _callNodeDecoded(nodeId, method, {
+      ...(params as Map).cast<String, dynamic>(),
+      'project_id': localId,
+    });
+    if (method != 'workspace.create' || res is! Map) return res;
+    final ws = res['workspace_id'];
+    if (ws is! String || ws.isEmpty) return res;
+    return {
+      ...res.cast<String, dynamic>(),
+      'workspace_id': compositeId(nodeId, ws),
+    };
   }
 
   /// Fans out a push.register/unregister/test call to every connected node channel.

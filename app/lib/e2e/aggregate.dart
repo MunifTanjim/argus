@@ -35,11 +35,21 @@ const Set<String> terminalHandleAddressed = {
   'terminal.input', 'terminal.resize', 'terminal.close',
 };
 
-/// Read methods carrying a composite workspace_id the client splits and routes
-/// to a node.
+/// Methods carrying a composite workspace_id the client splits and routes to a
+/// node.
 const Set<String> workspaceAddressed = {
   'workspace.changedFiles', 'workspace.diff', 'workspace.listDir',
   'workspace.readFile', 'workspace.commits', 'workspace.commitFiles',
+  'workspace.remove', 'workspace.setTarget', 'workspace.runSetup',
+  'workspace.setupLog',
+};
+
+/// Methods carrying a composite project_id the client splits and routes to a
+/// node.
+const Set<String> projectAddressed = {
+  'workspace.create', 'project.rename', 'project.setHidden',
+  'project.setPinned', 'project.forget', 'project.branches', 'project.prs',
+  'project.issues',
 };
 
 /// Methods whose result carries a node-local session_id that must be composited.

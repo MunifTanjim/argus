@@ -252,4 +252,68 @@ void main() {
     );
     await client.close();
   });
+
+  test('workspace writes route by the composite id with the local id',
+      () async {
+    final seen = <(String, String?)>[];
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seen.add((m, (jsonDecode(utf8.decode(p)) as Map)['workspace_id'] as String?));
+      return _json(null);
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    for (final m in [
+      'workspace.remove',
+      'workspace.setTarget',
+      'workspace.runSetup',
+      'workspace.setupLog',
+    ]) {
+      await client.call(m, {'workspace_id': 'A:w1'});
+    }
+    expect(seen, [
+      ('workspace.remove', 'w1'),
+      ('workspace.setTarget', 'w1'),
+      ('workspace.runSetup', 'w1'),
+      ('workspace.setupLog', 'w1'),
+    ]);
+    await client.close();
+  });
+
+  test('project methods route by the composite project id', () async {
+    String? seenMethod;
+    String? seenId;
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seenMethod = m;
+      seenId = (jsonDecode(utf8.decode(p)) as Map)['project_id'] as String?;
+      return _json({'branches': []});
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('project.branches', {'project_id': 'A:p:1'});
+    expect(seenMethod, 'project.branches');
+    expect(seenId, 'p:1');
+    await expectLater(
+      client.call('project.rename', {'project_id': 'bare', 'name': 'x'}),
+      throwsA(isA<RpcError>().having((e) => e.code, 'code', -32600)),
+    );
+    await expectLater(
+      client.call('project.forget', {}),
+      throwsA(isA<RpcError>().having((e) => e.code, 'code', -32600)),
+    );
+    await client.close();
+  });
+
+  test('workspace.create composites the result workspace id', () async {
+    final a = LoopbackNode('A', await generateKeyPair(),
+        (m, p) => _json({'workspace_id': 'w9', 'dir': '/src/x'}));
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('workspace.create', {'project_id': 'A:p1'}) as Map;
+    expect(r['workspace_id'], 'A:w9');
+    expect(r['dir'], '/src/x');
+    await client.close();
+  });
 }
