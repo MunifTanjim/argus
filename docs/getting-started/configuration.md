@@ -77,6 +77,31 @@ Workspaces from a PR or an issue need these:
 - The GitHub CLI (`gh`), logged in with `gh auth login`.
 - An `origin` remote on `github.com`.
 
+## Automatic project adoption
+
+When a session starts, the node records the project and workspace of its
+directory. `workspace.auto-adopt-dirs` limits this to a list of directories. The
+default is `["~"]`, your home directory.
+
+A directory is adopted if it is inside a listed directory, or is one. For a git
+project, the project root must also be inside a listed directory. A leading `~`
+is your home directory. Other entries must be absolute paths. An empty list
+turns automatic adoption off. Workspaces that you create from argus are always
+recorded.
+
+```yaml
+workspace:
+  auto-adopt-dirs:
+    - ~/Dev
+    - ~/work
+```
+
+The environment variable is `ARGUS_WORKSPACE_AUTO_ADOPT_DIRS`. It takes the
+directories separated by spaces.
+
+If you remove a directory from the list, the projects that argus already
+recorded stay. Remove one with `argus project forget <project>`.
+
 ## Copy ignored files into workspaces
 
 A new worktree does not have the ignored files of the main worktree, for

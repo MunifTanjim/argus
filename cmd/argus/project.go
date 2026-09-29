@@ -15,17 +15,23 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// enableProjectRegistry logs and leaves the registry off on failure, so a
-// database problem never blocks the node from serving sessions.
-func enableProjectRegistry(d *node.Node, log *slog.Logger) {
+// enableProjectRegistry leaves the registry off on a database failure, so it
+// never blocks the node from serving sessions.
+func enableProjectRegistry(d *node.Node, cfg *config.Config, log *slog.Logger) error {
 	sqlDB, err := db.Open(config.GetDataPath("argus.db"))
 	if err != nil {
 		if log != nil {
 			log.Warn("project registry disabled", "err", err)
 		}
-		return
+		return nil
 	}
-	d.SetProjectRegistry(projectreg.New(sqlDB))
+	reg := projectreg.New(sqlDB)
+	if err := reg.SetAutoAdoptDirs(cfg.Workspace.AutoAdoptDirs); err != nil {
+		sqlDB.Close()
+		return fmt.Errorf("workspace.auto-adopt-dirs: %w", err)
+	}
+	d.SetProjectRegistry(reg)
+	return nil
 }
 
 func setWorkspaceTemplates(d *node.Node, cfg *config.Config) error {

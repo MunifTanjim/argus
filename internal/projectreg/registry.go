@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,7 +60,10 @@ type Workspace struct {
 type Registry struct {
 	db *sql.DB
 	q  *gen.Queries
-	mu sync.Mutex
+	// adoptDirs bounds automatic adoption: a session or live worktree outside
+	// all of them is not recorded.
+	adoptDirs []string
+	mu        sync.Mutex
 	// records counts committed records; recordedAt holds a project's count at
 	// its last record, so apply can tell which projects changed after a probe.
 	records    uint64
@@ -67,12 +71,40 @@ type Registry struct {
 }
 
 func New(sqlDB *sql.DB) *Registry {
-	return &Registry{db: sqlDB, q: gen.New(sqlDB), recordedAt: map[string]uint64{}}
+	r := &Registry{db: sqlDB, q: gen.New(sqlDB), recordedAt: map[string]uint64{}}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		r.adoptDirs = []string{cleanDir(home)}
+	}
+	return r
+}
+
+// SetAutoAdoptDirs replaces the directories that bound automatic adoption
+// (default: the home directory). A leading "~" is the home directory; an
+// empty list turns automatic adoption off. Call it before the registry is in
+// use.
+func (r *Registry) SetAutoAdoptDirs(dirs []string) error {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d == "~" || strings.HasPrefix(d, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			d = filepath.Join(home, d[1:])
+		}
+		if !filepath.IsAbs(d) {
+			return fmt.Errorf("%q is not an absolute path", d)
+		}
+		out = append(out, cleanDir(d))
+	}
+	r.adoptDirs = out
+	return nil
 }
 
 // AdoptSession records the Project and Workspace that contain cwd and returns
 // the workspace id. A non-git cwd becomes a plain Project with one workspace.
-// An empty cwd, or a cwd inside a bare repo with no working tree, is a no-op.
+// An empty cwd, a cwd inside a bare repo with no working tree, or a workspace
+// or project outside the auto-adopt directories is a no-op.
 func (r *Registry) AdoptSession(ctx context.Context, cwd string) (string, error) {
 	wsID, _, err := r.adopt(ctx, cwd, nil)
 	return wsID, err
@@ -98,6 +130,24 @@ func (r *Registry) adopt(ctx context.Context, cwd string, target *string) (strin
 	plain := errors.Is(err, gittree.ErrNotRepo)
 	if err != nil && !plain {
 		return "", false, err
+	}
+	dir := cwd
+	if !plain {
+		dir = loc.WorktreeRoot
+	}
+	if target == nil && dir != "" {
+		if !r.autoAdopts(dir) {
+			return "", false, nil
+		}
+		if !plain {
+			root, err := projectRoot(ctx, loc)
+			if err != nil {
+				return "", false, err
+			}
+			if !r.autoAdopts(root) {
+				return "", false, nil
+			}
+		}
 	}
 
 	r.mu.Lock()
@@ -435,6 +485,13 @@ func (r *Registry) reconcile(ctx context.Context, p gen.Project, pr probe, recor
 			continue
 		}
 		res.live[wt.Dir] = wt
+		if !r.autoAdopts(wt.Dir) {
+			if _, err := q.GetWorkspace(ctx, idFor(wt.Dir)); errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return res, err
+			}
+		}
 		if err := q.SyncWorkspace(ctx, gen.SyncWorkspaceParams{ID: idFor(wt.Dir), ProjectID: p.ID, Dir: wt.Dir, IsMain: wt.IsMain}); err != nil {
 			return res, err
 		}
@@ -515,6 +572,32 @@ func buildProject(p gen.Project, wss []gen.Workspace, live map[string]gittree.Wo
 		proj.Workspaces = append(proj.Workspaces, ws)
 	}
 	return proj
+}
+
+// projectRoot is a git project's main worktree, or its git dir for a bare repo.
+func projectRoot(ctx context.Context, loc gittree.Location) (string, error) {
+	if loc.IsMain {
+		return loc.WorktreeRoot, nil
+	}
+	wts, err := gittree.ListWorktrees(ctx, loc.GitDir)
+	if err != nil {
+		return "", err
+	}
+	if len(wts) == 0 || wts[0].Bare {
+		return loc.GitDir, nil
+	}
+	return wts[0].Dir, nil
+}
+
+func (r *Registry) autoAdopts(dir string) bool {
+	dir = cleanDir(dir)
+	for _, root := range r.adoptDirs {
+		rel, err := filepath.Rel(root, dir)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func idFor(dir string) string {
