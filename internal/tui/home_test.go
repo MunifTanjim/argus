@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -747,6 +748,60 @@ func TestSplashKeepsConnectionState(t *testing.T) {
 	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "reconnecting") || !strings.Contains(out, "QUARANTINED") {
 		t.Error("the full-screen splash has no status bar, so it must keep its own indicators")
+	}
+}
+
+func TestActiveOnlyFiltersTheSessionLists(t *testing.T) {
+	za := []tea.KeyPressMsg{keyMsg("z"), keyMsg("a")}
+	statuses := func(m model) model {
+		m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusIdle}
+		m.sessions["n1:s2"] = session.Session{ID: "n1:s2", WorkspaceID: "n1:w2", Status: session.StatusWorking}
+		m.sessions["n1:s3"] = session.Session{ID: "n1:s3", WorkspaceID: "n1:w1", Status: session.StatusAwaitingInput}
+		m.reorder()
+		return m
+	}
+
+	m := statuses(homeTestModel())
+	m.main = m.main.replaceAt(0, homeComp{cursor: slices.Index(m.order, "n1:s2")})
+	m = pressKeys(m, za...)
+	if !m.activeOnly || !slices.Equal(m.order, []string{"n1:s3", "n1:s2"}) {
+		t.Fatalf("za on Home: activeOnly=%v order=%v, want the awaiting and working sessions", m.activeOnly, m.order)
+	}
+	if got := m.rootSessionID(); got != "n1:s2" {
+		t.Errorf("the cursor should stay on its session: %q", got)
+	}
+	if !strings.Contains(m.flash, "active") {
+		t.Errorf("flash = %q", m.flash)
+	}
+	m = pressKeys(m, za...)
+	if m.activeOnly || len(m.order) != 3 || m.rootSessionID() != "n1:s2" {
+		t.Errorf("za again: activeOnly=%v order=%v cursor=%q, want all sessions", m.activeOnly, m.order, m.rootSessionID())
+	}
+
+	m = statuses(homeTestModel())
+	m.main = backStack{workspaceComp{ws: "n1:w1"}}
+	m = pressKeys(m, za...)
+	if ss := m.wsSessions("n1:w1"); len(ss) != 1 || ss[0].ID != "n1:s3" {
+		t.Errorf("za on a workspace: sessions=%v, want only n1:s3", ss)
+	}
+}
+
+func TestActiveOnlyWithNoActiveSessionsKeepsTheList(t *testing.T) {
+	m := homeTestModel()
+	for id, s := range m.sessions {
+		s.Status = session.StatusIdle
+		m.sessions[id] = s
+	}
+	m.activeOnly = true
+	m.reorder()
+	if len(m.order) != 0 {
+		t.Fatalf("order = %v, want empty", m.order)
+	}
+	if got := m.rootComp().fullScreen(&ctx{m: &m}); got != notFull {
+		t.Errorf("an empty filtered list must not show the welcome splash: %v", got)
+	}
+	if out := m.View().Content; !strings.Contains(out, "no active sessions") {
+		t.Errorf("want the filtered empty state, got:\n%s", out)
 	}
 }
 

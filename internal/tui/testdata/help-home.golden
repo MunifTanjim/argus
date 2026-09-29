@@ -6,8 +6,9 @@
   ^u pgup/^d pgdown  page · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
   h ← zc/l → zo      fold / unfold · fold close    esc        close / tree · back
   enter              open; l opens Home/workspace  dd         kill session · session kill
-  ^ww/^wW            cycle focus · focus next      L shift+l  workspace setup log · open setup-log
-  /                  filter · filter-projects      ^wh/^wl    focus left / right pane · focus left
+  ^ww/^wW            cycle focus · focus next      za         active / all sessions · toggle active-only
+  /                  filter · filter-projects      L shift+l  workspace setup log · open setup-log
+                                                   ^wh/^wl    focus left / right pane · focus left
                                                    ^wj        session: focus the prompt · focus down
                                                    gT/gt      right sidebar: Files / Changes · tab next
                                                    t          changes: uncommitted / vs target · toggle diff-vs-target
@@ -25,6 +26,5 @@
   H shift+h  hide / unhide project · project hide             Q shift+q  quit · quit
   z.         show hidden · toggle show-hidden
   zg         show gone · toggle show-gone
-  T shift+t  change target branch · workspace change-target
 
                                                ↑/↓ scroll · any key close
