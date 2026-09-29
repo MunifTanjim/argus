@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/node"
 )
 
 func TestPrintProjectTree(t *testing.T) {
@@ -327,4 +329,16 @@ func TestWaitReportsAFailedCopyWithoutExitCode(t *testing.T) {
 			t.Errorf("a failed copy has no exit code to show: %v", err)
 		}
 	})
+}
+
+func TestEnableProjectRegistryRejectsRelativeAutoAdoptDir(t *testing.T) {
+	orig := config.DataDir
+	config.DataDir = t.TempDir()
+	t.Cleanup(func() { config.DataDir = orig })
+
+	cfg := &config.Config{Workspace: config.WorkspaceConfig{AutoAdoptDirs: []string{"Dev"}}}
+	err := enableProjectRegistry(node.New(), cfg, nil)
+	if err == nil || !strings.Contains(err.Error(), "workspace.auto-adopt-dirs") {
+		t.Fatalf("err = %v, want one naming workspace.auto-adopt-dirs", err)
+	}
 }

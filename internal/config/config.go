@@ -36,6 +36,10 @@ type WorkspaceConfig struct {
 	// IssueBranchTemplate names the branch of a workspace created from an
 	// issue. Vars: {{.Issue.Number}}, {{.Issue.Title}}, {{.Issue.Slug}}.
 	IssueBranchTemplate string
+	// AutoAdoptDirs bounds automatic adoption: a session or worktree outside
+	// every listed directory is not recorded. A leading "~" is the home
+	// directory; an empty list turns automatic adoption off.
+	AutoAdoptDirs []string
 }
 
 type TUIConfig struct {
@@ -150,6 +154,7 @@ var defaults = map[string]any{
 	"lock.genesis":                    "",
 	"workspace.worktree-dir-template": ".worktrees/{{.Branch.Slug}}",
 	"workspace.issue-branch-template": "issue-{{.Issue.Number}}-{{.Issue.Slug}}",
+	"workspace.auto-adopt-dirs":       []string{"~"},
 	"tui.key-timeout":                 "1s",
 	"tui.leader-key":                  "<Space>",
 }
@@ -165,7 +170,12 @@ func Load(v *viper.Viper, configPath string, skipFile bool) error {
 
 	v.SetEnvPrefix("ARGUS")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
-	v.AutomaticEnv()
+	for key := range defaults {
+		// Workspace settings come only from the config file.
+		if !strings.HasPrefix(key, "workspace.") {
+			_ = v.BindEnv(key)
+		}
+	}
 	// Preserve historical env var names where the derived ARGUS_<KEY_PATH> would differ.
 	_ = v.BindEnv("tunnel.cloudflare.token", "ARGUS_CLOUDFLARE_TOKEN")
 	_ = v.BindEnv("tunnel.cloudflare.tunnel-name", "ARGUS_CLOUDFLARE_TUNNEL_NAME")
@@ -271,6 +281,7 @@ func FromViper(v *viper.Viper) Config {
 		Workspace: WorkspaceConfig{
 			WorktreeDirTemplate: v.GetString("workspace.worktree-dir-template"),
 			IssueBranchTemplate: v.GetString("workspace.issue-branch-template"),
+			AutoAdoptDirs:       v.GetStringSlice("workspace.auto-adopt-dirs"),
 		},
 		TUI: TUIConfig{
 			KeyTimeout: v.GetDuration("tui.key-timeout"),

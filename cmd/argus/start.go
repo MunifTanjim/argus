@@ -107,7 +107,9 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		// Standalone node logs to the configured logger (the embedded node, sharing a
 		// TUI's terminal, stays at its discard default).
 		d.SetLogger(logger.Scoped("node").L)
-		enableProjectRegistry(d, logger.Scoped("node").L)
+		if err := enableProjectRegistry(d, cfg, logger.Scoped("node").L); err != nil {
+			return fail(cmd, err)
+		}
 		if err := setWorkspaceTemplates(d, cfg); err != nil {
 			return fail(cmd, err)
 		}

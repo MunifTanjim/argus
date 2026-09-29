@@ -292,6 +292,32 @@ func TestIssueBranchTemplateDefault(t *testing.T) {
 	}
 }
 
+func TestAutoAdoptDirs(t *testing.T) {
+	isolateConfigDir(t)
+	for _, tc := range []struct {
+		name, file, env string
+		want            []string
+	}{
+		{name: "default", want: []string{"~"}},
+		{name: "file", file: "workspace:\n  auto-adopt-dirs: [~/Dev, /srv/src]\n", want: []string{"~/Dev", "/srv/src"}},
+		{name: "empty", file: "workspace:\n  auto-adopt-dirs: []\n", want: []string{}},
+		{name: "env is ignored", env: "/srv/src", want: []string{"~"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := ""
+			if tc.file != "" {
+				path = writeConfig(t, tc.file)
+			}
+			if tc.env != "" {
+				t.Setenv("ARGUS_WORKSPACE_AUTO_ADOPT_DIRS", tc.env)
+			}
+			if got := load(t, path).Workspace.AutoAdoptDirs; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("AutoAdoptDirs = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestKeyTimeoutDefault(t *testing.T) {
 	isolateConfigDir(t)
 	if c := load(t, ""); c.TUI.KeyTimeout != time.Second {

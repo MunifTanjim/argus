@@ -312,7 +312,9 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 	d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 	d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 	d.SetVersion(version)
-	enableProjectRegistry(d, log.With("scope", "node"))
+	if err := enableProjectRegistry(d, cfg, log.With("scope", "node")); err != nil {
+		return nil, nil, err
+	}
 	if err := setWorkspaceTemplates(d, cfg); err != nil {
 		return nil, nil, err
 	}

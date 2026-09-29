@@ -24,6 +24,7 @@ func nodeWithRegistry(t *testing.T) *Node {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB.Close() })
+	t.Setenv("HOME", os.TempDir())
 	d.SetProjectRegistry(projectreg.New(sqlDB))
 	return d
 }

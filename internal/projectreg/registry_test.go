@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ func newRegistry(t *testing.T) *Registry {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB.Close() })
+	t.Setenv("HOME", os.TempDir())
 	return New(sqlDB)
 }
 
@@ -190,6 +192,126 @@ func TestReconcileMarksRemovedWorktreeGone(t *testing.T) {
 	}
 	if gone != 1 || live != 1 {
 		t.Fatalf("want 1 gone + 1 live workspace, got gone=%d live=%d", gone, live)
+	}
+}
+
+func setAutoAdoptDirs(t *testing.T, r *Registry, dirs ...string) {
+	t.Helper()
+	if err := r.SetAutoAdoptDirs(dirs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdoptSkipsWorkspaceOutsideAutoAdoptDirs(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	setAutoAdoptDirs(t, r, t.TempDir())
+	root, _ := repoWithWorktree(t)
+
+	for _, dir := range []string{t.TempDir(), root} {
+		wsID, err := r.AdoptSession(ctx, dir)
+		if err != nil || wsID != "" {
+			t.Fatalf("AdoptSession(%s): id=%q err=%v, want a no-op", dir, wsID, err)
+		}
+	}
+	projects, err := r.Snapshot(ctx)
+	if err != nil || len(projects) != 0 {
+		t.Fatalf("Snapshot: %d projects err=%v, want none", len(projects), err)
+	}
+}
+
+func TestAdoptSkipsProjectOutsideAutoAdoptDirs(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	_, worktree := repoWithWorktree(t)
+	setAutoAdoptDirs(t, r, filepath.Dir(worktree))
+
+	wsID, err := r.AdoptSession(ctx, worktree)
+	if err != nil || wsID != "" {
+		t.Fatalf("AdoptSession: id=%q err=%v, want a no-op", wsID, err)
+	}
+	projects, err := r.Snapshot(ctx)
+	if err != nil || len(projects) != 0 {
+		t.Fatalf("Snapshot: %d projects err=%v, want none", len(projects), err)
+	}
+}
+
+func TestReconcileSkipsLiveWorktreeOutsideAutoAdoptDirs(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	root, worktree := repoWithWorktree(t)
+	setAutoAdoptDirs(t, r, root)
+
+	if _, err := r.AdoptSession(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(projects[0].Workspaces); n != 1 {
+		t.Fatalf("want only the main workspace, got %d", n)
+	}
+
+	if _, err := r.AdoptWorkspace(ctx, worktree, "main"); err != nil {
+		t.Fatal(err)
+	}
+	projects, err = r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range projects[0].Workspaces {
+		if w.IsGone {
+			t.Fatalf("adopted worktree outside auto-adopt dirs marked gone: %s", w.Dir)
+		}
+	}
+	if n := len(projects[0].Workspaces); n != 2 {
+		t.Fatalf("want the adopted worktree kept, got %d workspaces", n)
+	}
+}
+
+func TestAdoptInsideAnyAutoAdoptDir(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	a, b := t.TempDir(), t.TempDir()
+	setAutoAdoptDirs(t, r, a, b)
+
+	for _, dir := range []string{a, filepath.Join(b, "notes")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if wsID, err := r.AdoptSession(ctx, dir); err != nil || wsID == "" {
+			t.Fatalf("AdoptSession(%s): id=%q err=%v, want adopted", dir, wsID, err)
+		}
+	}
+	if wsID, err := r.AdoptSession(ctx, t.TempDir()); err != nil || wsID != "" {
+		t.Fatalf("AdoptSession outside: id=%q err=%v, want a no-op", wsID, err)
+	}
+}
+
+func TestEmptyAutoAdoptDirsAdoptNothing(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	setAutoAdoptDirs(t, r)
+
+	if wsID, err := r.AdoptSession(ctx, t.TempDir()); err != nil || wsID != "" {
+		t.Fatalf("AdoptSession: id=%q err=%v, want a no-op", wsID, err)
+	}
+}
+
+func TestSetAutoAdoptDirs(t *testing.T) {
+	r := newRegistry(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	setAutoAdoptDirs(t, r, "~", "~/Dev")
+	if want := []string{cleanDir(home), cleanDir(filepath.Join(home, "Dev"))}; !slices.Equal(r.adoptDirs, want) {
+		t.Errorf("adoptDirs = %v, want %v", r.adoptDirs, want)
+	}
+	for _, bad := range []string{"Dev", "~user/Dev", ""} {
+		if err := r.SetAutoAdoptDirs([]string{bad}); err == nil {
+			t.Errorf("SetAutoAdoptDirs(%q): want an error", bad)
+		}
 	}
 }
 
@@ -408,6 +530,7 @@ func TestStatePersistsAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "argus.db")
 	dir := t.TempDir()
+	t.Setenv("HOME", os.TempDir())
 
 	sqlDB, err := db.Open(path)
 	if err != nil {
