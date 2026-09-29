@@ -460,6 +460,11 @@ func (c *Client) SetOption(ctx context.Context, target, option, value string) er
 	return err
 }
 
+func (c *Client) BindKey(ctx context.Context, table, key string, command ...string) error {
+	_, err := c.run(ctx, append([]string{"bind-key", "-T", table, key}, command...)...)
+	return err
+}
+
 // attachArgs builds the full argv (argv[0] included) for exec'ing into an
 // attached tmux client on this Client's server. Split out for testability.
 func (c *Client) attachArgs(bin, name string) []string {

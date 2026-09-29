@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -90,6 +91,23 @@ func ptyBytesFor(msg tea.KeyPressMsg) []byte {
 		return []byte(msg.Text)
 	}
 	return nil
+}
+
+// The node's mirror passes the wheel report to a program that asked for the
+// mouse; tmux drops it otherwise, and also with the mouse off.
+func ptyWheelBytes(msg tea.MouseWheelMsg, cols, rows int) []byte {
+	var b ansi.MouseButton
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		b = ansi.MouseWheelUp
+	case tea.MouseWheelDown:
+		b = ansi.MouseWheelDown
+	default:
+		return nil
+	}
+	x := clampWidth(msg.X, 0, cols-1)
+	y := clampWidth(msg.Y, 0, rows-1)
+	return []byte(ansi.MouseSgr(ansi.EncodeMouseButton(b, false, false, false, false), x, y, false))
 }
 
 var fnKeySeqs = map[int]string{

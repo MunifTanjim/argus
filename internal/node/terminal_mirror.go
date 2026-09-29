@@ -9,6 +9,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
+const lockedKeyTable = "argus-locked"
+
 type mirrorState struct {
 	name       string
 	window     string // "<mirror>:<window_index>"
@@ -47,17 +49,26 @@ func (d *Node) setupMirror(ctx context.Context, c *tmux.Client, s session.Sessio
 	}
 	m := &mirrorState{name: name}
 
-	// Lockdown (session-scoped; empty key-table neutralizes custom bind -n).
-	// window-size latest + aggressive-resize make the shared window follow the
-	// attach's PTY size.
+	// Lockdown (session-scoped; a key-table with only the wheel bound neutralizes
+	// custom bind -n). window-size latest + aggressive-resize make the shared
+	// window follow the attach's PTY size.
 	for _, kv := range [][2]string{
-		{"prefix", "None"}, {"prefix2", "None"}, {"mouse", "off"},
-		{"key-table", "argus-locked"}, {"status", "off"},
+		{"prefix", "None"}, {"prefix2", "None"}, {"mouse", "on"},
+		{"key-table", lockedKeyTable}, {"status", "off"},
 		{"window-size", "latest"}, {"aggressive-resize", "on"},
 	} {
 		if err := c.SetOption(ctx, name, kv[0], kv[1]); err != nil {
 			d.restoreMirror(c, m)
 			return nil, fmt.Errorf("set %s: %w", kv[0], err)
+		}
+	}
+
+	// The wheel goes only to a program that asked for the mouse; tmux drops it
+	// otherwise, so the shared pane never enters copy mode.
+	for _, key := range []string{"WheelUpPane", "WheelDownPane"} {
+		if err := c.BindKey(ctx, lockedKeyTable, key, "send-keys", "-M"); err != nil {
+			d.restoreMirror(c, m)
+			return nil, fmt.Errorf("bind %s: %w", key, err)
 		}
 	}
 
