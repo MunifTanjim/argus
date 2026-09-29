@@ -5,6 +5,7 @@ import '../models/project.dart';
 import '../state/changes.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
+import 'session_sections_list.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
@@ -31,6 +32,7 @@ class WorkspaceScreen extends ConsumerWidget {
         automaticallyImplyLeading: false,
         title: _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
+          if (tab == WorkspaceTab.sessions) const ActiveOnlyButton(),
           if (tab == WorkspaceTab.changes && project.isGit)
             _RefreshChanges(workspace: workspace),
         ],

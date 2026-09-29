@@ -69,6 +69,42 @@ void main() {
     expect(find.textContaining('No sessions'), findsOneWidget);
   });
 
+  testWidgets('filter toggles between all and active sessions', (tester) async {
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _s('dev:1', 'dev', 'awaiting_input'),
+            _s('dev:2', 'dev', 'working'),
+            _s('dev:3', 'dev', 'idle'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+    ]));
+    await tester.pump();
+    expect(find.text('dev:3'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show active sessions'));
+    await tester.pump();
+    expect(find.text('dev:1'), findsOneWidget);
+    expect(find.text('dev:2'), findsOneWidget);
+    expect(find.text('dev:3'), findsNothing);
+
+    await tester.tap(find.byTooltip('Show all sessions'));
+    await tester.pump();
+    expect(find.text('dev:3'), findsOneWidget);
+  });
+
+  testWidgets('filtered empty state names the filter', (tester) async {
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _s('dev:1', 'dev', 'idle'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+    ]));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Show active sessions'));
+    await tester.pump();
+    expect(find.text('No active sessions.'), findsOneWidget);
+  });
+
   testWidgets('reconnect banner when not connected', (tester) async {
     await tester.pumpWidget(_app([
       gatewayProvider.overrideWithValue(null),

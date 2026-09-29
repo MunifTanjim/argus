@@ -24,7 +24,11 @@ class SessionListScreen extends ConsumerWidget {
     final connError = ref.watch(connErrorProvider);
 
     return Scaffold(
-      appBar: AppBar(leading: shellMenuButton(context), title: const Text('Sessions')),
+      appBar: AppBar(
+        leading: shellMenuButton(context),
+        title: const Text('Sessions'),
+        actions: const [ActiveOnlyButton()],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showSpawnDialog(context, ref),
         icon: const Icon(Icons.add),

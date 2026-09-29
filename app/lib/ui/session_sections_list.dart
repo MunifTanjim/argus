@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/session.dart';
 import '../state/grouping.dart';
+import '../state/session_filter.dart';
 import '../transport/connection.dart';
 import 'responsive.dart';
 import 'session_card.dart';
@@ -9,7 +11,9 @@ import 'session_detail_screen.dart';
 import 'theme.dart';
 
 /// Sessions grouped into "Needs you" and per-host sections, as session cards.
-class SessionSectionsList extends StatelessWidget {
+/// Under the active-only filter, it shows only active and awaiting-input
+/// sessions.
+class SessionSectionsList extends ConsumerWidget {
   const SessionSectionsList({
     super.key,
     required this.sessions,
@@ -35,8 +39,12 @@ class SessionSectionsList extends StatelessWidget {
   );
 
   @override
-  Widget build(BuildContext context) {
-    final sections = buildSections(sessions);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeOnly = ref.watch(activeOnlyProvider);
+    final shown = activeOnly
+        ? sessions.where(isActiveSession).toList()
+        : sessions;
+    final sections = buildSections(shown);
     // When sessions span nodes, the "Needs you" section mixes hosts under one
     // header, so its cards must name their own node.
     final grouped = nodesFromSessions(sessions).isNotEmpty;
@@ -49,7 +57,9 @@ class SessionSectionsList extends StatelessWidget {
           const SizedBox(height: 120),
           Center(
             child: Text(
-              emptyText,
+              activeOnly && sessions.isNotEmpty
+                  ? 'No active sessions.'
+                  : emptyText,
               style: const TextStyle(color: AppColors.dim),
             ),
           ),
@@ -71,6 +81,22 @@ class SessionSectionsList extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class ActiveOnlyButton extends ConsumerWidget {
+  const ActiveOnlyButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeOnly = ref.watch(activeOnlyProvider);
+    return IconButton(
+      isSelected: activeOnly,
+      icon: const Icon(Icons.filter_list),
+      selectedIcon: const Icon(Icons.filter_list_alt),
+      tooltip: activeOnly ? 'Show all sessions' : 'Show active sessions',
+      onPressed: () => ref.read(activeOnlyProvider.notifier).toggle(),
     );
   }
 }
