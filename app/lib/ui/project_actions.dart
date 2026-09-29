@@ -10,6 +10,7 @@ import '../state/setup_text.dart';
 import '../state/workspace.dart';
 import 'branch_picker_screen.dart';
 import 'new_workspace_screen.dart';
+import 'setup_log_screen.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
 
@@ -186,6 +187,11 @@ Future<void> openNewWorkspace(ActionContext ax, ProjectNode p) =>
       MaterialPageRoute(builder: (_) => NewWorkspaceScreen(project: p)),
     );
 
+Future<void> openSetupLog(ActionContext ax, WorkspaceNode w) =>
+    ax.navigator.push<void>(
+      MaterialPageRoute(builder: (_) => SetupLogScreen(workspaceId: w.id)),
+    );
+
 Future<void> spawnIn(
   ActionContext ax,
   ProjectNode p,
@@ -280,6 +286,7 @@ enum WorkspaceAction {
   newSession,
   changeTarget,
   rerunSetup,
+  setupLog,
   remove,
   forceRemove,
 }
@@ -305,6 +312,7 @@ List<WorkspaceAction> workspaceActionsFor(ProjectNode p, WorkspaceNode w) {
     WorkspaceAction.newSession,
     if (p.isGit) WorkspaceAction.changeTarget,
     if (p.setupScript.isNotEmpty) WorkspaceAction.rerunSetup,
+    if (w.setup != null) WorkspaceAction.setupLog,
     ...removes,
   ];
 }
@@ -322,6 +330,7 @@ String workspaceActionLabel(WorkspaceAction a) => switch (a) {
   WorkspaceAction.newSession => 'New session',
   WorkspaceAction.changeTarget => 'Change target',
   WorkspaceAction.rerunSetup => 'Rerun setup',
+  WorkspaceAction.setupLog => 'Setup log',
   WorkspaceAction.remove => 'Remove',
   WorkspaceAction.forceRemove => 'Force remove',
 };
@@ -339,6 +348,7 @@ Widget _workspaceIcon(WorkspaceAction a) => switch (a) {
   WorkspaceAction.newSession => const Icon(Icons.add),
   WorkspaceAction.changeTarget => const _GitBranchIcon(),
   WorkspaceAction.rerunSetup => const Icon(Icons.replay),
+  WorkspaceAction.setupLog => const Icon(Icons.article_outlined),
   WorkspaceAction.remove => const Icon(Icons.delete_outline),
   WorkspaceAction.forceRemove => const Icon(Icons.delete_forever_outlined),
 };
@@ -405,6 +415,8 @@ Future<void> runWorkspaceAction(
       await changeTarget(ax, p, w);
     case WorkspaceAction.rerunSetup:
       await runSetup(ax, w);
+    case WorkspaceAction.setupLog:
+      await openSetupLog(ax, w);
     case WorkspaceAction.remove:
       await removeWorkspace(ax, p, w);
     case WorkspaceAction.forceRemove:
