@@ -14,11 +14,17 @@ import 'theme.dart';
 /// A fixed place to spawn in, such as a workspace: the dialog hides its node
 /// and directory pickers.
 class SpawnTarget {
-  const SpawnTarget({required this.nodeId, required this.cwd, required this.label});
+  const SpawnTarget({
+    required this.nodeId,
+    required this.cwd,
+    required this.label,
+    this.prompt = '',
+  });
 
   final String nodeId;
   final String cwd;
   final String label;
+  final String prompt;
 }
 
 Future<void> showSpawnDialog(BuildContext context, WidgetRef ref,
@@ -56,7 +62,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   // offered even with zero sessions. Empty until the call returns.
   List<NodeRef> _remoteNodes = const [];
   String? _nodeId;
-  String _prompt = '';
+  late String _prompt = widget.target?.prompt ?? '';
 
   // null while probing; picker shows only when >=2.
   List<AgentInfo>? _agents;
@@ -295,8 +301,9 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               decoration: const InputDecoration(labelText: 'Custom path'),
               onChanged: (v) => setState(() => _customPath = v),
             ),
-          TextField(
+          TextFormField(
             key: const Key('spawn-prompt'),
+            initialValue: _prompt,
             decoration: const InputDecoration(
               labelText: 'Initial prompt',
               hintText: 'What should this session work on?',

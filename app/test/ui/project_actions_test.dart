@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/project.dart';
+import 'package:argus/models/project_sources.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/navigation.dart';
@@ -226,6 +227,30 @@ void main() {
     expect(find.text('renamed to kept'), findsOneWidget);
   });
 
+  testWidgets('change target picks a branch and reports', (tester) async {
+    final (_, client) = await _pump(
+      tester,
+      (ax) => changeTarget(ax, _p, _ws),
+      extra: [
+        projectBranchesProvider('A:p1').overrideWith(
+          (ref) async => const [
+            BranchInfo(name: 'main'),
+            BranchInfo(name: 'dev'),
+          ],
+        ),
+      ],
+    );
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('dev'));
+    await tester.pumpAndSettle();
+    _only(client, 'workspace.setTarget', {
+      'workspace_id': 'A:w2',
+      'target_branch': 'dev',
+    });
+    expect(find.text('target of reg → dev'), findsOneWidget);
+  });
+
   test('project actions by project state', () {
     expect(projectActionsFor(_p), ProjectAction.values);
     const plain = ProjectNode(
@@ -234,7 +259,10 @@ void main() {
       kind: 'plain',
       workspaces: [_main],
     );
-    expect(projectActionsFor(plain), ProjectAction.values);
+    expect(
+      projectActionsFor(plain),
+      isNot(contains(ProjectAction.newWorkspace)),
+    );
     const noMain = ProjectNode(id: 'p', name: 'n', workspaces: [_ws]);
     expect(
       projectActionsFor(noMain),
@@ -265,7 +293,10 @@ void main() {
   });
 
   test('workspace actions by workspace state', () {
-    expect(workspaceActionsFor(_p, _main), [WorkspaceAction.newSession]);
+    expect(workspaceActionsFor(_p, _main), [
+      WorkspaceAction.newSession,
+      WorkspaceAction.changeTarget,
+    ]);
     const withSetup = ProjectNode(
       id: 'p',
       name: 'n',

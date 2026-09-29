@@ -221,14 +221,15 @@ void main() {
     await _pump(tester, _tree());
     await tester.longPress(find.text('registry'));
     await tester.pumpAndSettle();
-    expect(find.text('Remove'), findsOneWidget);
+    expect(find.text('Change target'), findsOneWidget);
     expect(find.text('Force remove'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
-    expect(find.text('Force remove'), findsNothing);
+    expect(find.text('Change target'), findsNothing);
 
     await tester.longPress(find.text('dotfiles'));
     await tester.pumpAndSettle();
+    expect(find.text('New workspace'), findsOneWidget);
     expect(find.text('Rename'), findsOneWidget);
     expect(find.text('Forget'), findsOneWidget);
     expect(find.text('New session'), findsNothing);

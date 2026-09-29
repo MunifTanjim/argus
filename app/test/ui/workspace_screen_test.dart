@@ -340,7 +340,7 @@ void main() {
     await _pump(tester);
     await tester.tap(find.byTooltip('Workspace actions'));
     await tester.pumpAndSettle();
-    expect(find.text('New session'), findsWidgets);
+    expect(find.text('Change target'), findsOneWidget);
     expect(find.text('Remove'), findsOneWidget);
     expect(find.text('Force remove'), findsOneWidget);
   });
