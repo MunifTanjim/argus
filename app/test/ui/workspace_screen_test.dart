@@ -335,4 +335,13 @@ void main() {
     expect(loadingLeft, loadedLeft);
     expect(loadingLeft, greaterThan(0));
   });
+
+  testWidgets('the ⋮ menu lists the workspace actions', (tester) async {
+    await _pump(tester);
+    await tester.tap(find.byTooltip('Workspace actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('New session'), findsWidgets);
+    expect(find.text('Remove'), findsOneWidget);
+    expect(find.text('Force remove'), findsOneWidget);
+  });
 }

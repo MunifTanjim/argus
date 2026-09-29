@@ -252,4 +252,20 @@ void main() {
       expect(sum.live, 2);
     },
   );
+
+  test('rows carry hidden and gone flags', () {
+    final rows = buildTreeRows([
+      _p('A:p1', 'argus', hidden: true, ws: [
+        _w('A:w1', '/src/argus', main: true),
+        _w('A:w2', '/src/argus/.wt/old', gone: true),
+      ]),
+      _p('A:p2', 'old', gone: true),
+    ], const TreeView(showHidden: true, showGone: true));
+    final byId = {for (final r in rows) r.id: r};
+    expect(byId['A:p1']!.hidden, isTrue);
+    expect(byId['A:p1']!.gone, isFalse);
+    expect(byId['A:w1']!.gone, isFalse);
+    expect(byId['A:w2']!.gone, isTrue);
+    expect(byId['A:p2']!.gone, isTrue);
+  });
 }

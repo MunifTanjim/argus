@@ -127,14 +127,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   void _onProjects(ProjectsState? prev, ProjectsState next) {
     if (!next.loaded) return;
     final scope = ref.read(scopeProvider);
+    final expected = ref.read(expectedGoneProvider);
     if (scope != null && !_available(next.projects, scope)) {
       final name = prev == null
           ? null
           : lookupWorkspace(prev.projects, scope)?.$2.name;
       ref.read(scopeProvider.notifier).state = null;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${name ?? 'The workspace'} is no longer available'),
-      ));
+      if (!expected.contains(scope)) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${name ?? 'The workspace'} is no longer available'),
+        ));
+      }
+    }
+    if (expected.isNotEmpty) {
+      ref.read(expectedGoneProvider.notifier).state = {
+        for (final id in expected)
+          if (lookupWorkspace(next.projects, id) != null) id,
+      };
     }
     // After the scope change, which can remember a session of the lost
     // workspace.

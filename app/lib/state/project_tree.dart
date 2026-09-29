@@ -65,6 +65,8 @@ class TreeRow {
     this.hasKids = false,
     this.gitError = '',
     this.setup = SetupMark.none,
+    this.hidden = false,
+    this.gone = false,
     this.workspaceIds = const [],
   });
 
@@ -78,6 +80,8 @@ class TreeRow {
   final bool hasKids;
   final String gitError;
   final SetupMark setup;
+  final bool hidden;
+  final bool gone;
   final List<String> workspaceIds;
 }
 
@@ -165,6 +169,8 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
           folded: folded,
           hasKids: p.workspaces.isNotEmpty,
           gitError: p.error,
+          hidden: p.hidden,
+          gone: p.isGone,
           workspaceIds: [for (final w in p.workspaces) w.id],
         ),
       );
@@ -178,6 +184,7 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
             detail: _detail(p, w),
             isMain: w.isMain,
             setup: _setupMark(w.setup?.state),
+            gone: w.isGone,
             workspaceIds: [w.id],
           ),
         );

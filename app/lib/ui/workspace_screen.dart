@@ -5,6 +5,7 @@ import '../models/project.dart';
 import '../state/changes.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
+import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
@@ -35,6 +36,28 @@ class WorkspaceScreen extends ConsumerWidget {
           if (tab == WorkspaceTab.sessions) const ActiveOnlyButton(),
           if (tab == WorkspaceTab.changes && project.isGit)
             _RefreshChanges(workspace: workspace),
+          if (workspaceActionsFor(project, workspace).isNotEmpty)
+            PopupMenuButton<WorkspaceAction>(
+              tooltip: 'Workspace actions',
+              onSelected: (a) => runWorkspaceAction(
+                ActionContext.of(context),
+                project,
+                workspace,
+                a,
+              ),
+              itemBuilder: (_) => [
+                for (final a in workspaceActionsFor(project, workspace))
+                  PopupMenuItem(
+                    value: a,
+                    child: Text(
+                      workspaceActionLabel(a),
+                      style: a == WorkspaceAction.forceRemove
+                          ? const TextStyle(color: AppColors.error)
+                          : null,
+                    ),
+                  ),
+              ],
+            ),
         ],
       ),
       body: SafeArea(

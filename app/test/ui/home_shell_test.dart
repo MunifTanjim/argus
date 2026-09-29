@@ -824,4 +824,20 @@ void main() {
     await _pumpRoute(tester);
     expect(find.text('terminal detached'), findsNothing);
   });
+
+  testWidgets('losing the scope to an expected removal shows no notice', (
+    tester,
+  ) async {
+    final c = await _shell(tester);
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    c.read(expectedGoneProvider.notifier).state = {'A:w2'};
+    await tester.pump();
+    await c
+        .read(projectsProvider.notifier)
+        .load(FakeGatewayClient((m, p) async => _tree(withW2: false)));
+    await tester.pump();
+    expect(c.read(scopeProvider), isNull);
+    expect(find.text('registry is no longer available'), findsNothing);
+    expect(c.read(expectedGoneProvider), isEmpty);
+  });
 }

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/project.dart';
 import '../state/gateway.dart';
 import '../state/navigation.dart';
 import '../state/project_tree.dart';
 import '../state/projects.dart';
+import '../state/projects_api.dart';
 import '../state/sessions.dart';
+import 'project_actions.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 
@@ -68,6 +71,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     final view = ref.watch(treeViewProvider);
     final sessions = ref.watch(sessionsProvider).values;
     final scope = ref.watch(scopeProvider);
+    final removing = ref.watch(removingProvider);
     final act = workspaceActivity(sessions);
     final rows = buildTreeRows(projects.projects, view);
 
@@ -105,7 +109,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                       ),
                     if (projects.error != null && projects.projects.isEmpty)
                       _errorRow(projects.error!),
-                    for (final r in rows) _treeRow(r, act, scope),
+                    for (final r in rows)
+                      _treeRow(r, act, scope, projects.projects, removing),
                   ],
                 ),
               ),
@@ -221,7 +226,13 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     ),
   );
 
-  Widget _treeRow(TreeRow r, Map<String, Activity> act, String? scope) {
+  Widget _treeRow(
+    TreeRow r,
+    Map<String, Activity> act,
+    String? scope,
+    List<ProjectNode> projects,
+    Set<String> removing,
+  ) {
     switch (r.kind) {
       case TreeRowKind.node:
         return Padding(
@@ -265,6 +276,10 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       case TreeRowKind.project:
         return _row(
           onTap: () => ref.read(treeViewProvider.notifier).toggleFold(r.id),
+          onLongPress: () {
+            final p = lookupProject(projects, r.id);
+            if (p != null) showProjectSheet(context, p);
+          },
           leading: r.hasKids
               ? Icon(
                   r.folded ? Icons.chevron_right : Icons.expand_more,
@@ -272,9 +287,19 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                   color: AppColors.dim,
                 )
               : null,
-          title: r.label,
-          titleStyle: const TextStyle(fontWeight: FontWeight.w600),
+          title: _title(r),
+          titleStyle: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: r.hidden ? AppColors.dim : null,
+          ),
           titleSuffix: [
+            if (r.hidden)
+              const Icon(
+                Icons.visibility_off_outlined,
+                size: 13,
+                color: AppColors.dim,
+                semanticLabel: 'hidden',
+              ),
             if (r.pinned)
               const Icon(Icons.push_pin, size: 13, color: AppColors.dim),
           ],
@@ -301,15 +326,24 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           indent: _col,
           selected: scope == r.id,
           onTap: () => _select(r.id),
+          onLongPress: () {
+            final hit = lookupWorkspace(projects, r.id);
+            if (hit != null) showWorkspaceSheet(context, hit.$1, hit.$2);
+          },
           leading: Icon(
             r.isMain ? Icons.folder_outlined : Icons.call_split,
             size: 16,
             color: AppColors.dim,
             semanticLabel: r.isMain ? 'main worktree' : null,
           ),
-          title: r.label,
+          title: _title(r),
           subtitle: r.detail,
           trailing: _trailing([
+            if (removing.contains(r.id))
+              const Text(
+                'removing…',
+                style: TextStyle(color: AppColors.dim, fontSize: 12),
+              ),
             if (r.setup == SetupMark.running)
               const Icon(
                 Icons.sync,
@@ -330,6 +364,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     }
   }
 
+  static String _title(TreeRow r) => r.gone ? '${r.label} (gone)' : r.label;
+
   Widget? _trailing(List<Widget> children) => children.isEmpty
       ? null
       : Row(mainAxisSize: MainAxisSize.min, children: children);
@@ -344,6 +380,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   Widget _row({
     required String title,
     required VoidCallback onTap,
+    VoidCallback? onLongPress,
     Widget? leading,
     TextStyle? titleStyle,
     List<Widget> titleSuffix = const [],
@@ -359,6 +396,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: subtitle == null ? 40 : 52),
           child: Padding(
