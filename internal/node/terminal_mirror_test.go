@@ -140,8 +140,9 @@ func TestSetupMirror_MultiWindow(t *testing.T) {
 	}
 }
 
-// TestLockdownMirror verifies setupMirror sets prefix=None, mouse=off, and
-// key-table=argus-locked, so a tmux prefix reaches the agent pane as literal input.
+// TestLockdownMirror verifies setupMirror sets prefix=None and
+// key-table=argus-locked, so a tmux prefix reaches the agent pane as literal
+// input, and turns the mouse on with only the wheel bound.
 func TestLockdownMirror(t *testing.T) {
 	c, socket := newTestClientSocket(t)
 	ctx := context.Background()
@@ -167,9 +168,19 @@ func TestLockdownMirror(t *testing.T) {
 		t.Fatalf("show-options: %v: %s", err, out)
 	}
 	opts := string(out)
-	for _, want := range []string{"prefix None", "mouse off", "key-table argus-locked"} {
+	for _, want := range []string{"prefix None", "mouse on", "key-table " + lockedKeyTable} {
 		if !strings.Contains(opts, want) {
 			t.Errorf("mirror session missing lockdown option %q\nshow-options output:\n%s", want, opts)
+		}
+	}
+
+	out, err = exec.Command("tmux", "-L", socket, "list-keys", "-T", lockedKeyTable).CombinedOutput()
+	if err != nil {
+		t.Fatalf("list-keys: %v: %s", err, out)
+	}
+	for _, want := range []string{"WheelUpPane", "WheelDownPane"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("argus-locked table missing %s\nlist-keys output:\n%s", want, out)
 		}
 	}
 }
