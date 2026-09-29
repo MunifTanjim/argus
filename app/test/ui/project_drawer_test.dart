@@ -1,8 +1,10 @@
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
+import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
 import 'package:argus/ui/project_drawer.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -182,5 +184,60 @@ void main() {
     expect(find.text('infra'), findsNothing);
     expect(c.read(treeViewProvider).folded, contains('B'));
     expect(c.read(scopeProvider), isNull);
+  });
+
+  testWidgets('hidden projects are muted with an icon; gone rows say so', (
+    tester,
+  ) async {
+    final c = await _pump(tester, {
+      'projects': [
+        {
+          'id': 'A:p1',
+          'name': 'secret',
+          'hidden': true,
+          'node_id': 'A',
+          'workspaces': [
+            {'id': 'A:w1', 'dir': '/s', 'branch': 'main', 'is_main': true},
+            {
+              'id': 'A:w2',
+              'dir': '/s/.wt/old',
+              'branch': 'old',
+              'is_gone': true,
+            },
+          ],
+        },
+      ],
+    });
+    c.read(treeViewProvider.notifier).toggleHidden();
+    c.read(treeViewProvider.notifier).toggleGone();
+    await tester.pump();
+    expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
+    final name = tester.widget<Text>(find.text('secret'));
+    expect(name.style?.color, AppColors.dim);
+    expect(find.text('old (gone)'), findsOneWidget);
+  });
+
+  testWidgets('long-press opens the row action sheet', (tester) async {
+    await _pump(tester, _tree());
+    await tester.longPress(find.text('registry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove'), findsOneWidget);
+    expect(find.text('Force remove'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(find.text('Force remove'), findsNothing);
+
+    await tester.longPress(find.text('dotfiles'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsOneWidget);
+    expect(find.text('Forget'), findsOneWidget);
+    expect(find.text('New session'), findsNothing);
+  });
+
+  testWidgets('a workspace being removed says so', (tester) async {
+    final c = await _pump(tester, _tree());
+    c.read(removingProvider.notifier).state = {'A:w2'};
+    await tester.pump();
+    expect(find.text('removing…'), findsOneWidget);
   });
 }

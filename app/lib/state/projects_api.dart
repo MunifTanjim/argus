@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import '../models/project_sources.dart';
 import '../models/session.dart';
@@ -98,6 +99,9 @@ String actionError(Object e) => switch (e) {
   StateError(:final message) => message,
   _ => '$e',
 };
+
+/// Workspaces with a remove call in flight, like the TUI removing set.
+final removingProvider = StateProvider<Set<String>>((ref) => const {});
 
 /// The TUI refusal for forget and remove while sessions still run.
 String? liveGuard(

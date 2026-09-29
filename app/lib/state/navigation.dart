@@ -10,6 +10,10 @@ enum WorkspaceTab { sessions, changes, files }
 /// The drawer selection: null is Home, else a composite workspace id.
 final scopeProvider = StateProvider<String?>((ref) => null);
 
+/// Workspaces that a remove or forget is taking away. Losing the scope to one
+/// of them needs no notice: the action reports its own result.
+final expectedGoneProvider = StateProvider<Set<String>>((ref) => const {});
+
 // Per-workspace view memory for the app process (the tab, the Files path, and
 // the Changes base below); never saved to disk.
 final workspaceTabProvider = StateProvider.family<WorkspaceTab, String>(
