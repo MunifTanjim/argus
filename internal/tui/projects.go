@@ -282,7 +282,7 @@ func (m model) wsSessions(ws string) []session.Session {
 	}
 	var out []session.Session
 	for _, s := range m.sessions {
-		if s.WorkspaceID == ws {
+		if s.WorkspaceID == ws && m.shows(s) {
 			out = append(out, s)
 		}
 	}

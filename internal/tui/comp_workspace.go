@@ -70,6 +70,8 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		} else {
 			c.home()
 		}
+	case m.matches(msg, listKeys.ActiveOnly):
+		c.toggleActiveOnly()
 	case m.matches(msg, listKeys.Kill):
 		if p.cursor < len(ss) {
 			s := ss[p.cursor]
@@ -159,6 +161,9 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	avail = max(1, avail-lipgloss.Height(block))
 	ss := m.wsSessions(p.ws)
 	if len(ss) == 0 {
+		if m.activeOnly {
+			return block + dimStyle.Render("no active sessions in this workspace · "+m.showsAllHint())
+		}
 		return block + dimStyle.Render("no sessions in this workspace")
 	}
 	focused := m.focused == mainPane
@@ -183,7 +188,7 @@ func (p workspaceComp) footerPrompt(c *ctx) string {
 
 func (p workspaceComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill}
+	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly}
 	if c.m.sidebarVisible() || c.m.nextFromPane() == "files" {
 		bindings = append(bindings, helpAs(paneKeys.Next, c.m.nextFromPane()))
 	}

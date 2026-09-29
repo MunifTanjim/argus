@@ -95,6 +95,7 @@ const (
 	actOpenPopup
 	actClosePopup
 	actRunCommand
+	actToggleActiveOnly
 )
 
 type action struct {
@@ -144,6 +145,10 @@ func (c *ctx) home() { c.actions = append(c.actions, action{kind: actHome}) }
 
 // openRow shows the view that tree row id remembers and focuses the main pane.
 func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: actOpenRow, id: id}) }
+
+// toggleActiveOnly switches the session lists between all sessions and the
+// active and awaiting-input ones.
+func (c *ctx) toggleActiveOnly() { c.actions = append(c.actions, action{kind: actToggleActiveOnly}) }
 
 // focusTree moves focus into the tree, with the cursor on the main pane's row.
 func (c *ctx) focusTree() { c.actions = append(c.actions, action{kind: actFocusTree}) }
@@ -267,6 +272,8 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			res, cmd := m.runCmdLine(a.id)
 			*m = res.(model)
 			cmds = append(cmds, cmd)
+		case actToggleActiveOnly:
+			m.toggleActiveOnly()
 		}
 	}
 	c.actions = nil

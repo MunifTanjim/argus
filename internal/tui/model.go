@@ -53,6 +53,7 @@ type model struct {
 	client       Client
 	sessions     map[string]session.Session
 	order        []string // session IDs, sorted for stable display
+	activeOnly   bool     // the session lists show only active and awaiting-input sessions
 	width        int
 	height       int
 	reconnecting bool // connection dropped; the client is retrying

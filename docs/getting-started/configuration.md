@@ -316,6 +316,7 @@ The `g?` sequence shows the command name next to each key.
 | `sidebar wider` | changes, file, file-tree, project-tree, workspace | `<C-w>>` |
 | `tab next` | changes, file-tree, history, home, logs, session-dock | `<Right>` `gt` |
 | `tab prev` | changes, file-tree, history, home, logs, session-dock | `<Left>` `gT` |
+| `toggle active-only` | home, workspace | `za` |
 | `toggle diff-vs-target` | changes | `t` |
 | `toggle left-sidebar` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<Leader>o` |
 | `toggle line-wrap` | file | `yow` |

@@ -98,7 +98,7 @@ var sectionLists = map[string]sectionList{
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter,
-			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill})...),
+			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill, listKeys.ActiveOnly})...),
 		focus: focusFor("workspace"),
 	},
 	"file": {
@@ -118,7 +118,7 @@ var sectionLists = map[string]sectionList{
 	"home": {
 		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
 			listKeys.Open, listKeys.Jump, listKeys.TabPrev, listKeys.TabNext, listKeys.New, listKeys.Kill,
-			listKeys.Refresh, listKeys.Back),
+			listKeys.Refresh, listKeys.Back, listKeys.ActiveOnly),
 		focus: focusFor("home"),
 	},
 	"history": {

@@ -27,7 +27,7 @@ func (h homeComp) spins(c *ctx) bool                         { return c.m.anyWor
 
 // fullScreen gives the welcome splash the whole terminal.
 func (h homeComp) fullScreen(c *ctx) fullLevel {
-	if c.m.focused != leftSidebar && len(c.m.order) == 0 {
+	if c.m.focused != leftSidebar && len(c.m.sessions) == 0 {
 		return fullTerminal
 	}
 	return notFull
@@ -88,6 +88,8 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		}
 	case m.matches(msg, k.Back):
 		c.focusTree()
+	case m.matches(msg, k.ActiveOnly):
+		c.toggleActiveOnly()
 	default:
 		return h, nil, false
 	}
@@ -100,6 +102,9 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	// splash has no bar, so it keeps them in its own header.
 	bare := m.layout().bare
 	title := m.homeTabs(tabSessions)
+	if m.activeOnly {
+		title += dimStyle.Render("  active")
+	}
 	if bare {
 		title = brandMark() + title
 		if m.reconnecting {
@@ -114,11 +119,15 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 			dimStyle.Render("  pin this device: argus lock pin")
 		chrome++
 	}
-	if len(m.order) == 0 {
+	if len(m.sessions) == 0 {
 		return h.welcome(c, title, chrome, w, ht)
 	}
-	sel := h.cursor
 	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
+	if len(m.order) == 0 {
+		hint := dimStyle.Render("no active sessions · " + m.showsAllHint())
+		return centerBlock(title+"\n\n"+hint, cardW, w)
+	}
+	sel := h.cursor
 	// On a gateway, a host header precedes each group.
 	grouped := m.grouped()
 	showAgent := m.multiAgent()
@@ -170,10 +179,13 @@ func (h homeComp) welcome(c *ctx, title string, chrome, w, ht int) string {
 
 func (h homeComp) footer(c *ctx) []binding {
 	k := listKeys
-	if len(c.m.order) == 0 {
+	if len(c.m.sessions) == 0 {
 		return []binding{k.TabNext, k.New, k.Refresh, c.m.listBackKey()}
 	}
-	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
+	if len(c.m.order) == 0 {
+		return []binding{k.ActiveOnly, k.TabNext, k.New, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
+	}
+	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.ActiveOnly, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
 }
 
 func (h homeComp) footerPrompt(c *ctx) string {

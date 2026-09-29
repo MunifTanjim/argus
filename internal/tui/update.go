@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -413,8 +414,10 @@ func bellCmd() tea.Cmd {
 
 func (m *model) reorder() {
 	m.order = m.order[:0]
-	for id := range m.sessions {
-		m.order = append(m.order, id)
+	for id, s := range m.sessions {
+		if m.shows(s) {
+			m.order = append(m.order, id)
+		}
 	}
 	sort.Slice(m.order, func(i, j int) bool {
 		a, b := m.sessions[m.order[i]], m.sessions[m.order[j]]
@@ -446,6 +449,73 @@ func (m *model) reorder() {
 		p.cursor, p.killID = min(p.cursor, cursorBottom(len(m.wsSessions(p.ws)))), present(p.killID)
 		m.main = m.main.replaceAt(0, p)
 	}
+}
+
+func activeStatus(s session.Session) bool {
+	switch s.Status {
+	case session.StatusDiscovered, session.StatusStarting, session.StatusWorking, session.StatusAwaitingInput:
+		return true
+	}
+	return false
+}
+
+// shows reports whether the session lists show s under the active-only filter.
+func (m model) shows(s session.Session) bool { return !m.activeOnly || activeStatus(s) }
+
+// toggleActiveOnly flips the session filter. The root list's cursor stays on
+// its session when the filter keeps that session.
+func (m *model) toggleActiveOnly() {
+	sel := m.rootSessionID()
+	m.activeOnly = !m.activeOnly
+	m.reorder()
+	if i := slices.Index(m.rootIDs(), sel); i >= 0 {
+		switch p := m.rootComp().(type) {
+		case homeComp:
+			p.cursor = i
+			m.main = m.main.replaceAt(0, p)
+		case workspaceComp:
+			p.cursor = i
+			m.main = m.main.replaceAt(0, p)
+		}
+	}
+	m.flash = "showing all sessions"
+	if m.activeOnly {
+		m.flash = "showing active sessions · " + m.showsAllHint()
+	}
+}
+
+func (m model) showsAllHint() string {
+	return m.keyText(listKeys.ActiveOnly) + " shows all"
+}
+
+func (m model) rootIDs() []string {
+	switch p := m.rootComp().(type) {
+	case homeComp:
+		return m.order
+	case workspaceComp:
+		ss := m.wsSessions(p.ws)
+		ids := make([]string, len(ss))
+		for i, s := range ss {
+			ids[i] = s.ID
+		}
+		return ids
+	}
+	return nil
+}
+
+func (m model) rootSessionID() string {
+	ids := m.rootIDs()
+	var cursor int
+	switch p := m.rootComp().(type) {
+	case homeComp:
+		cursor = p.cursor
+	case workspaceComp:
+		cursor = p.cursor
+	}
+	if cursor < len(ids) {
+		return ids[cursor]
+	}
+	return ""
 }
 
 // enterSession opens a session's transcript view. It subscribes by session id, so
