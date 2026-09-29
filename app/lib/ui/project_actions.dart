@@ -7,6 +7,9 @@ import '../state/project_tree.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import '../state/setup_text.dart';
+import '../state/workspace.dart';
+import 'branch_picker_screen.dart';
+import 'new_workspace_screen.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
 
@@ -178,17 +181,55 @@ Future<void> runSetup(ActionContext ax, WorkspaceNode w) =>
       return 'running setup';
     });
 
-Future<void> spawnIn(ActionContext ax, ProjectNode p, WorkspaceNode w) =>
-    showDialog<void>(
-      context: ax.navigator.context,
-      builder: (_) => SpawnDialog(
-        target: SpawnTarget(
-          nodeId: p.nodeId,
-          cwd: w.dir,
-          label: '${p.name} · ${w.name}',
-        ),
-      ),
+Future<void> openNewWorkspace(ActionContext ax, ProjectNode p) =>
+    ax.navigator.push<void>(
+      MaterialPageRoute(builder: (_) => NewWorkspaceScreen(project: p)),
     );
+
+Future<void> spawnIn(
+  ActionContext ax,
+  ProjectNode p,
+  WorkspaceNode w, {
+  String prompt = '',
+}) => showDialog<void>(
+  context: ax.navigator.context,
+  builder: (_) => SpawnDialog(
+    target: SpawnTarget(
+      nodeId: p.nodeId,
+      cwd: w.dir,
+      label: '${p.name} · ${w.name}',
+      prompt: prompt,
+    ),
+  ),
+);
+
+Future<void> changeTarget(
+  ActionContext ax,
+  ProjectNode p,
+  WorkspaceNode w,
+) async {
+  final branch = await pickBranch(
+    ax.navigator,
+    projectId: p.id,
+    title: 'Target for ${w.name}',
+    current: w.targetBranch,
+  );
+  if (branch == null) return;
+  final ok = await ax.run('set target', () async {
+    await ax.api.setTarget(w.id, branch);
+    return 'target of ${w.name} → $branch';
+  });
+  if (ok) reloadChanges(ax, w.id);
+}
+
+void reloadChanges(ActionContext ax, String workspaceId) {
+  for (final against in ['', 'target']) {
+    ax.container.invalidate(
+      workspaceChangedFilesProvider((workspaceId, against)),
+    );
+  }
+  ax.container.invalidate(workspaceCommitsProvider(workspaceId));
+}
 
 class _RenameDialog extends StatefulWidget {
   const _RenameDialog({required this.current});
@@ -233,14 +274,21 @@ class _RenameDialogState extends State<_RenameDialog> {
   }
 }
 
-enum ProjectAction { newSession, rename, pin, hide, forget }
+enum ProjectAction { newSession, newWorkspace, rename, pin, hide, forget }
 
-enum WorkspaceAction { newSession, rerunSetup, remove, forceRemove }
+enum WorkspaceAction {
+  newSession,
+  changeTarget,
+  rerunSetup,
+  remove,
+  forceRemove,
+}
 
 List<ProjectAction> projectActionsFor(ProjectNode p) {
   if (p.isGone) return const [ProjectAction.forget];
   return [
     if (mainWorkspace(p) != null) ProjectAction.newSession,
+    if (p.isGit) ProjectAction.newWorkspace,
     ProjectAction.rename,
     ProjectAction.pin,
     ProjectAction.hide,
@@ -255,6 +303,7 @@ List<WorkspaceAction> workspaceActionsFor(ProjectNode p, WorkspaceNode w) {
   if (w.isGone) return removes;
   return [
     WorkspaceAction.newSession,
+    if (p.isGit) WorkspaceAction.changeTarget,
     if (p.setupScript.isNotEmpty) WorkspaceAction.rerunSetup,
     ...removes,
   ];
@@ -262,6 +311,7 @@ List<WorkspaceAction> workspaceActionsFor(ProjectNode p, WorkspaceNode w) {
 
 String projectActionLabel(ProjectNode p, ProjectAction a) => switch (a) {
   ProjectAction.newSession => 'New session',
+  ProjectAction.newWorkspace => 'New workspace',
   ProjectAction.rename => 'Rename',
   ProjectAction.pin => p.pinned ? 'Unpin' : 'Pin',
   ProjectAction.hide => p.hidden ? 'Unhide' : 'Hide',
@@ -270,25 +320,55 @@ String projectActionLabel(ProjectNode p, ProjectAction a) => switch (a) {
 
 String workspaceActionLabel(WorkspaceAction a) => switch (a) {
   WorkspaceAction.newSession => 'New session',
+  WorkspaceAction.changeTarget => 'Change target',
   WorkspaceAction.rerunSetup => 'Rerun setup',
   WorkspaceAction.remove => 'Remove',
   WorkspaceAction.forceRemove => 'Force remove',
 };
 
-IconData _projectIcon(ProjectAction a) => switch (a) {
+Widget _projectIcon(ProjectAction a) => Icon(switch (a) {
   ProjectAction.newSession => Icons.add,
+  ProjectAction.newWorkspace => Icons.call_split,
   ProjectAction.rename => Icons.edit_outlined,
   ProjectAction.pin => Icons.push_pin_outlined,
   ProjectAction.hide => Icons.visibility_off_outlined,
   ProjectAction.forget => Icons.delete_outline,
+});
+
+Widget _workspaceIcon(WorkspaceAction a) => switch (a) {
+  WorkspaceAction.newSession => const Icon(Icons.add),
+  WorkspaceAction.changeTarget => const _GitBranchIcon(),
+  WorkspaceAction.rerunSetup => const Icon(Icons.replay),
+  WorkspaceAction.remove => const Icon(Icons.delete_outline),
+  WorkspaceAction.forceRemove => const Icon(Icons.delete_forever_outlined),
 };
 
-IconData _workspaceIcon(WorkspaceAction a) => switch (a) {
-  WorkspaceAction.newSession => Icons.add,
-  WorkspaceAction.rerunSetup => Icons.replay,
-  WorkspaceAction.remove => Icons.delete_outline,
-  WorkspaceAction.forceRemove => Icons.delete_forever_outlined,
-};
+// Material Icons has no git branch, so this draws the Nerd Font glyph as text.
+// A const IconData on the terminal font would make release icon tree-shaking
+// subset that font down to this one glyph.
+class _GitBranchIcon extends StatelessWidget {
+  const _GitBranchIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = IconTheme.of(context);
+    final size = theme.size ?? 24;
+    return SizedBox.square(
+      dimension: size,
+      child: Center(
+        child: Text(
+          '\uF418',
+          style: TextStyle(
+            fontFamily: 'JetBrainsMonoNerdFontMono',
+            fontSize: size,
+            height: 1,
+            color: theme.color,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 Future<void> runProjectAction(
   ActionContext ax,
@@ -299,6 +379,8 @@ Future<void> runProjectAction(
     case ProjectAction.newSession:
       final main = mainWorkspace(p);
       if (main != null) await spawnIn(ax, p, main);
+    case ProjectAction.newWorkspace:
+      await openNewWorkspace(ax, p);
     case ProjectAction.rename:
       await renameProject(ax, p);
     case ProjectAction.pin:
@@ -319,6 +401,8 @@ Future<void> runWorkspaceAction(
   switch (a) {
     case WorkspaceAction.newSession:
       await spawnIn(ax, p, w);
+    case WorkspaceAction.changeTarget:
+      await changeTarget(ax, p, w);
     case WorkspaceAction.rerunSetup:
       await runSetup(ax, w);
     case WorkspaceAction.remove:
@@ -331,7 +415,7 @@ Future<void> runWorkspaceAction(
 Future<T?> _sheet<T>(
   BuildContext context,
   String title,
-  List<(T, String, IconData, bool)> items,
+  List<(T, String, Widget, bool)> items,
 ) => showModalBottomSheet<T>(
   context: context,
   useRootNavigator: true,
@@ -349,7 +433,10 @@ Future<T?> _sheet<T>(
         ),
         for (final (value, label, icon, danger) in items)
           ListTile(
-            leading: Icon(icon, color: danger ? AppColors.error : null),
+            leading: IconTheme.merge(
+              data: IconThemeData(color: danger ? AppColors.error : null),
+              child: icon,
+            ),
             title: Text(
               label,
               style: danger ? const TextStyle(color: AppColors.error) : null,

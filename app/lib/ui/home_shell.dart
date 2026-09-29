@@ -92,6 +92,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   // details, as the TUI view memory does. Bottom to top, so the one shown wins
   // for its workspace. Deeper screens are not kept.
   void _onScope(String? prev, String? next) {
+    ref.read(pendingScopeProvider.notifier).state = null;
     final nav = _nav;
     if (nav == null || nav.scope != prev) return;
     final ids = nav.stack.sessionIds;
@@ -150,6 +151,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref
         .read(rememberedSessionsProvider.notifier)
         .retain((s, _) => s == null || _available(next.projects, s));
+    final pending = ref.read(pendingScopeProvider);
+    if (pending != null && _available(next.projects, pending)) {
+      ref.read(scopeProvider.notifier).state = pending;
+    }
   }
 
   void _back() {

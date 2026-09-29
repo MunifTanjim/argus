@@ -253,4 +253,34 @@ void main() {
     expect(repo.spawnedNode, 'A');
     expect(repo.spawnedCwd, '/src/argus/.worktrees/registry');
   });
+
+  testWidgets('a target prompt fills the prompt field and is sent',
+      (tester) async {
+    final repo = _RecordingSpawnRepo(agents: const [
+      AgentInfo(id: 'claude', name: 'Claude', color: '#d79921', spawnable: true),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        historyProjectsProvider.overrideWith(() => _FakeProjects(const [])),
+        sessionRepositoryProvider.overrideWithValue(repo),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(
+          body: SpawnDialogBody(
+            target: SpawnTarget(
+              nodeId: 'A',
+              cwd: '/src/x',
+              label: 'argus · x',
+              prompt: 'Fix issue #3',
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Fix issue #3'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.pumpAndSettle();
+    expect(repo.spawnedPrompt, 'Fix issue #3');
+  });
 }

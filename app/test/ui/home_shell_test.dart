@@ -825,6 +825,35 @@ void main() {
     expect(find.text('terminal detached'), findsNothing);
   });
 
+  testWidgets('a pending scope opens when the tree lists it', (tester) async {
+    final c = await _shell(tester);
+    c.read(pendingScopeProvider.notifier).state = 'A:w3';
+    await c
+        .read(projectsProvider.notifier)
+        .load(FakeGatewayClient((m, p) async => _tree()));
+    await tester.pump();
+    expect(c.read(scopeProvider), isNull);
+    expect(c.read(pendingScopeProvider), 'A:w3');
+
+    final tree = _tree();
+    ((tree['projects'] as List).first['workspaces'] as List).add(
+        {'id': 'A:w3', 'dir': '/src/argus/.worktrees/new', 'branch': 'new'});
+    await c
+        .read(projectsProvider.notifier)
+        .load(FakeGatewayClient((m, p) async => tree));
+    await tester.pump();
+    expect(c.read(scopeProvider), 'A:w3');
+    expect(c.read(pendingScopeProvider), isNull);
+  });
+
+  testWidgets('a manual scope change clears the pending scope', (tester) async {
+    final c = await _shell(tester);
+    c.read(pendingScopeProvider.notifier).state = 'A:w3';
+    c.read(scopeProvider.notifier).state = 'A:w2';
+    await tester.pump();
+    expect(c.read(pendingScopeProvider), isNull);
+  });
+
   testWidgets('losing the scope to an expected removal shows no notice', (
     tester,
   ) async {
