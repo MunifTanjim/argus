@@ -70,6 +70,14 @@ func ptyBytesFor(msg tea.KeyPressMsg) []byte {
 	if rest, ok := strings.CutPrefix(s, "alt+"); ok && len(rest) == 1 {
 		return []byte{0x1b, rest[0]}
 	}
+	// Alt on a named key (alt+backspace → ESC DEL): ESC + the bare key.
+	if msg.Mod&tea.ModAlt != 0 {
+		bare := msg
+		bare.Mod &^= tea.ModAlt
+		if b := ptyBytesFor(bare); b != nil {
+			return append([]byte{0x1b}, b...)
+		}
+	}
 	// Function keys f1..f12.
 	if len(s) >= 2 && s[0] == 'f' {
 		if n, err := strconv.Atoi(s[1:]); err == nil {
