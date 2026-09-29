@@ -43,7 +43,7 @@ WorkspaceNode _w(
   head: head,
   isMain: main,
   isGone: gone,
-  setupState: setup,
+  setup: setup == null ? null : SetupRun(state: setup),
 );
 
 Session _s(

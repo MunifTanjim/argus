@@ -177,7 +177,7 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
             label: w.name,
             detail: _detail(p, w),
             isMain: w.isMain,
-            setup: _setupMark(w.setupState),
+            setup: _setupMark(w.setup?.state),
             workspaceIds: [w.id],
           ),
         );
