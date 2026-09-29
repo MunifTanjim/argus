@@ -109,6 +109,10 @@ export default defineConfig({
           { text: "PushPort", link: "/guide/pushport" },
         ],
       },
+      {
+        text: "Reference",
+        items: [{ text: "Protocol", link: "/protocol" }],
+      },
     ],
 
     socialLinks: [
