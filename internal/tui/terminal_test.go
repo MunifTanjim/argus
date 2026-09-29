@@ -108,6 +108,9 @@ func TestPtyBytesFor(t *testing.T) {
 		// A modifier on a non-nav key isn't caught by modifiedNavSeq; ctrl+a still
 		// falls through to the ctrl-chord branch.
 		{"ctrl+a falls through to chord", tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}, []byte{0x01}},
+		{"alt+backspace", tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt}, []byte{0x1b, 0x7f}},
+		{"alt+tab", tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModAlt}, []byte{0x1b, '\t'}},
+		{"alt+b", tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt}, []byte{0x1b, 'b'}},
 	}
 	for _, tc := range cases {
 		got := ptyBytesFor(tc.msg)
