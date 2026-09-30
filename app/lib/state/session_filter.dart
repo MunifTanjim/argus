@@ -25,3 +25,35 @@ class ActiveOnlyController extends Notifier<bool> {
 final activeOnlyProvider = NotifierProvider<ActiveOnlyController, bool>(
   ActiveOnlyController.new,
 );
+
+/// Whether [query], case-insensitively, is in a field that the session card
+/// shows.
+bool matchesSessionQuery(Session s, String query) {
+  if (query.isEmpty) return true;
+  final q = query.toLowerCase();
+  return [
+    s.name,
+    s.summary?.task,
+    s.repo,
+    s.branch,
+    s.nodeLabel,
+  ].any((f) => f != null && f.toLowerCase().contains(q));
+}
+
+/// The session lists' text filter: null while the search field is closed.
+/// Kept in memory, the same as the active-only filter.
+class SessionSearchController extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void open() => state = '';
+
+  void set(String query) => state = query.trim();
+
+  void close() => state = null;
+}
+
+final sessionSearchProvider =
+    NotifierProvider<SessionSearchController, String?>(
+      SessionSearchController.new,
+    );

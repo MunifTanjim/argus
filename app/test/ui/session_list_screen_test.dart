@@ -105,6 +105,32 @@ void main() {
     expect(find.text('No active sessions.'), findsOneWidget);
   });
 
+  testWidgets('search narrows the list as you type', (tester) async {
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _s('dev:alpha', 'dev', 'idle'),
+            _s('dev:beta', 'dev', 'idle'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+    ]));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Filter sessions'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'ALP');
+    await tester.pump();
+    expect(find.text('dev:alpha'), findsOneWidget);
+    expect(find.text('dev:beta'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.pump();
+    expect(find.text('No sessions match.'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Clear filter'));
+    await tester.pump();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('dev:beta'), findsOneWidget);
+  });
+
   testWidgets('reconnect banner when not connected', (tester) async {
     await tester.pumpWidget(_app([
       gatewayProvider.overrideWithValue(null),

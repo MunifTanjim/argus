@@ -31,9 +31,16 @@ class WorkspaceScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         automaticallyImplyLeading: false,
-        title: _WorkspaceTitle(project: project, workspace: workspace),
+        title: tab == WorkspaceTab.sessions
+            ? SessionSearchTitle(
+                child: _WorkspaceTitle(project: project, workspace: workspace),
+              )
+            : _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
-          if (tab == WorkspaceTab.sessions) const ActiveOnlyButton(),
+          if (tab == WorkspaceTab.sessions) ...const [
+            SessionSearchButton(),
+            ActiveOnlyButton(),
+          ],
           if (tab == WorkspaceTab.changes && project.isGit)
             _RefreshChanges(workspace: workspace),
           if (workspaceActionsFor(project, workspace).isNotEmpty)
