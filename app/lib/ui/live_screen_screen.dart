@@ -118,6 +118,13 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     super.initState();
     // Forward viewport resizes to the node so the remote PTY tracks the screen.
     _terminal.onResize = (w, h, pw, ph) => _attach?.resize(w, h);
+    // TerminalView turns a vertical drag over the alt screen (tmux) into wheel
+    // ticks. Send each as an SGR report straight to the PTY, like the TUI.
+    _terminal.mouseHandler = _WheelMouseHandler((up, pos) {
+      if (_pinchStartDist != null) return;
+      _send(ptyWheelBytes(
+          up, pos.x, pos.y, _terminal.viewWidth, _terminal.viewHeight));
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
@@ -213,6 +220,9 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
                   padding: const EdgeInsets.all(_padding),
                   // Input goes through _InputBar (raw PTY bytes), not the grid.
                   readOnly: true,
+                  // Never turn a wheel tick into arrow keys: the remote program
+                  // decides what the wheel does.
+                  simulateScroll: false,
                 ),
               ),
             ),
@@ -227,6 +237,28 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
         ],
       ),
     );
+  }
+}
+
+// Handles wheel ticks itself and returns null, so the local emulator emits no
+// mouse report of its own. Other buttons are dropped.
+class _WheelMouseHandler implements TerminalMouseHandler {
+  const _WheelMouseHandler(this.onWheel);
+
+  final void Function(bool up, CellOffset position) onWheel;
+
+  @override
+  String? call(TerminalMouseEvent event) {
+    if (event.buttonState == TerminalMouseButtonState.down) {
+      switch (event.button) {
+        case TerminalMouseButton.wheelUp:
+          onWheel(true, event.position);
+        case TerminalMouseButton.wheelDown:
+          onWheel(false, event.position);
+        default:
+      }
+    }
+    return null;
   }
 }
 

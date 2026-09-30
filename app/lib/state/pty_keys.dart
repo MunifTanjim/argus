@@ -122,3 +122,12 @@ List<int> ptyTextBytes(String text, {bool ctrl = false, bool alt = false}) {
   final bytes = utf8.encode(text);
   return alt ? [0x1b, ...bytes] : bytes;
 }
+
+/// Raw PTY bytes for one wheel tick at cell ([x], [y]) (0-based, clamped to a
+/// [cols]×[rows] terminal), as an SGR mouse report. Matches the TUI: the node's
+/// mirror passes it to a program that asked for the mouse and drops it otherwise.
+List<int> ptyWheelBytes(bool up, int x, int y, int cols, int rows) {
+  final cx = x.clamp(0, cols > 0 ? cols - 1 : 0);
+  final cy = y.clamp(0, rows > 0 ? rows - 1 : 0);
+  return utf8.encode('\x1b[<${up ? 64 : 65};${cx + 1};${cy + 1}M');
+}
