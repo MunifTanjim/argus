@@ -141,8 +141,8 @@ func TestCommandSetFollowsTheView(t *testing.T) {
 		has, lacks []string
 	}{
 		{"summary", withFocus(selectRow(wideWorkspace(), "n1:p1"), mainPane),
-			[]string{"session spawn", "filter-projects", "back"},
-			[]string{"prev", "next", "open", "session kill", "open tmux-pane"}},
+			[]string{"filter-projects", "toggle show-hidden", "back"},
+			[]string{"prev", "next", "open", "session kill", "open tmux-pane", "session spawn", "open setup-log"}},
 		{"live transcript", waitingSession(),
 			[]string{"open live-screen", "next card"},
 			[]string{"session resume", "transcript export", "redaction add"}},

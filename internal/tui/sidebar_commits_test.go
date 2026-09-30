@@ -169,7 +169,7 @@ func TestEnterOnCommitDrillsInAndBack(t *testing.T) {
 	if !strings.Contains(out, "abc0002 commit 2") || !strings.Contains(out, "A internal/c.go") || strings.Contains(out, "COMMITS") {
 		t.Errorf("the drill-in should show the commit and its files only:\n%s", out)
 	}
-	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "enter diff") || !strings.Contains(f, "esc back") || strings.Contains(f, "esc pane") {
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "enter diff") || strings.Contains(f, "esc") {
 		t.Errorf("drill-in footer = %q", f)
 	}
 	m, _ = upd(m, keyMsg("esc"))

@@ -144,11 +144,11 @@ func (m tview) historyTranscriptView() string {
 }
 
 func (m tview) historyTranscriptBinds() []binding {
-	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
-	if !m.c.m.viewer {
-		binds = append(binds, transcriptKeys.Resume) // resume is meaningless offline
+	binds := []binding{transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
+	if m.c.m.viewer {
+		return append(binds, helpAs(transcriptKeys.Back, "quit"))
 	}
-	return append(binds, transcriptKeys.Back)
+	return append(binds, transcriptKeys.Resume)
 }
 
 // historyTranscriptHeader renders the open-transcript header: a manifest-driven

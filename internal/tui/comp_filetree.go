@@ -85,5 +85,5 @@ func (t fileTreeComp) footerText(c *ctx) string { return c.m.right.footerText(c)
 
 func (t fileTreeComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	return []binding{k.Up, k.SideTabNext, helpAs(k.Left, "fold"), helpAs(k.Enter, "open"), helpAs(k.Back, sidebarEscDesc(c))}
+	return []binding{k.SideTabNext, helpAs(k.Left, "fold")}
 }

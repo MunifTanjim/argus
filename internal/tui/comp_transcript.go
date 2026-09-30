@@ -169,18 +169,14 @@ func (t transcriptComp) footer(c *ctx) []binding {
 		return v.historyTranscriptBinds()
 	}
 	if t.historyView == histDetail {
-		return []binding{detailKeys.Up, detailKeys.Collapse, detailKeys.Drill, detailKeys.Back, sessionKeys.Raw}
+		return []binding{detailKeys.Collapse, detailKeys.Drill, sessionKeys.Raw}
 	}
-	binds := []binding{transcriptKeys.ScrollUp, transcriptKeys.CardNext, transcriptKeys.Collapse,
-		transcriptKeys.Detail, transcriptKeys.Bottom, transcriptKeys.Back}
+	binds := []binding{transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if v.c.m.sessionInteraction() != nil {
 		binds = append(binds, transcriptKeys.Answer)
 	}
 	if v.c.m.sessions[t.sessionID].Status == session.StatusStarting {
 		binds = append(binds, sessionKeys.Raw)
-	}
-	if v.c.m.filesVisible() && v.c.m.currentWorkspace() != "" {
-		binds = append(binds, v.c.m.sideKey(paneKeys.Right))
 	}
 	return binds
 }

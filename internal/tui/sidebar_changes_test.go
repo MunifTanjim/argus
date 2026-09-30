@@ -105,11 +105,6 @@ func TestChangesTabInSessionUsesSessionWorkspace(t *testing.T) {
 		t.Errorf("changedFiles params = %+v, want n1:w1", p)
 	}
 	m, _ = upd(m, changedFilesMsg{ws: "n1:w1", files: []api.ChangedFile{{Path: "a.go", Change: "modified"}}})
-	wide := m
-	wide.width = 200
-	if f := ansi.Strip(wide.currentFooter()); !strings.Contains(f, "^wl changes") {
-		t.Errorf("session footer should offer ^wl changes: %q", f)
-	}
 	m = pressKeys(m, cw('l')...)
 	m, _ = upd(m, keyMsg("enter"))
 	m, _ = upd(m, wsDiffMsg{ws: "n1:w1", path: "a.go", diff: "@@ -1 +1 @@\n-a\n+bb"})

@@ -12,7 +12,13 @@ type summaryComp struct {
 	id   string
 }
 
-func (s summaryComp) section() string                           { return "workspace" }
+func (s summaryComp) section() string {
+	if s.kind == rowNode {
+		return "node"
+	}
+	return "project"
+}
+
 func (s summaryComp) raw(*ctx) bool                             { return false }
 func (s summaryComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return s, nil }
 func (s summaryComp) fullScreen(*ctx) fullLevel                 { return notFull }
@@ -37,9 +43,16 @@ func (s summaryComp) row(c *ctx) (projectsRow, bool) {
 
 func (s summaryComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	c.setFlash("")
-	r, _ := s.row(c)
-	if cmd, ok := paneTreeKey(c, msg, r); ok {
-		return s, cmd, true
+	if c.m.matches(msg, projectsKeys.Filter) {
+		if c.m.sidebarVisible() {
+			c.onTree(treeFilter)
+		} else {
+			c.setFlash("the filter needs the tree · " + c.m.keyText(projectsKeys.ToggleSidebar) + " shows the tree")
+		}
+		return s, nil, true
+	}
+	if paneTreeKey(c, msg) {
+		return s, nil, true
 	}
 	if !c.m.matches(msg, projectsKeys.Back) {
 		return s, nil, false
@@ -61,14 +74,7 @@ func (s summaryComp) view(c *ctx, w, _ int) string {
 	return centerBlock(body, cardW, w)
 }
 
-func (s summaryComp) footer(c *ctx) []binding {
-	k := projectsKeys
-	bindings := []binding{k.Spawn}
-	if c.m.sidebarVisible() || c.m.nextFromPane() == "files" {
-		bindings = append(bindings, helpAs(paneKeys.Next, c.m.nextFromPane()))
-	}
-	return append(bindings, k.Help, helpAs(k.Back, "tree"))
-}
+func (s summaryComp) footer(*ctx) []binding { return []binding{projectsKeys.Help} }
 
 func rowSummary(c *ctx, r projectsRow, w int) string {
 	m := c.m

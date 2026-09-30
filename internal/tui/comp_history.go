@@ -188,14 +188,13 @@ func (h historyComp) view(c *ctx, w, ht int) string {
 
 func (h historyComp) footer(c *ctx) []binding {
 	if !h.inProject {
-		return []binding{listKeys.TabNext, historyProjectsKeys.Up, historyProjectsKeys.Bottom,
-			historyProjectsKeys.Open, historyProjectsKeys.Refresh, historyProjectsKeys.Back, c.m.treeKey(), projectsKeys.Help}
+		return []binding{listKeys.TabNext, historyProjectsKeys.Bottom, historyProjectsKeys.Refresh, projectsKeys.Help}
 	}
-	binds := []binding{historySessionsKeys.Up, historySessionsKeys.Bottom, historySessionsKeys.Open, historySessionsKeys.Resume, transcriptKeys.Export}
+	binds := []binding{historySessionsKeys.Bottom, historySessionsKeys.Resume, transcriptKeys.Export}
 	if h.hasMore {
 		binds = append(binds, historySessionsKeys.More)
 	}
-	return append(binds, historySessionsKeys.Back)
+	return binds
 }
 
 func (h historyComp) footerPrompt(*ctx) string { return exportPrompt(h.pendingExport) }

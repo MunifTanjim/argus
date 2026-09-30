@@ -191,14 +191,11 @@ func (h homeComp) footer(c *ctx) []binding {
 	if len(c.m.sessions) == 0 {
 		return []binding{k.TabNext, k.New, k.Refresh, c.m.listBackKey()}
 	}
-	back := c.m.listBackKey()
-	if c.m.sessionFilter != "" {
-		back = helpAs(k.Back, "clear filter")
-	}
+	clear := clearFilterKey(k.Back, c.m.sessionFilter != "")
 	if len(c.m.order) == 0 {
-		return []binding{k.ActiveOnly, k.Filter, k.TabNext, k.New, k.Refresh, back, projectsKeys.Help}
+		return []binding{k.ActiveOnly, k.Filter, clear, k.TabNext, k.New, k.Refresh, c.m.quitKey(), projectsKeys.Help}
 	}
-	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.ActiveOnly, k.Filter, k.Refresh, back, projectsKeys.Help}
+	return []binding{k.Jump, k.TabNext, k.New, k.Kill, k.ActiveOnly, k.Filter, clear, k.Refresh, c.m.quitKey(), projectsKeys.Help}
 }
 
 func (h homeComp) footerPrompt(c *ctx) string {

@@ -183,13 +183,6 @@ func helpGrid(cols []string, perRow int) string {
 	return strings.Join(rows, "\n\n")
 }
 
-func (m model) nextFromPane() string {
-	if m.filesVisible() && m.currentWorkspace() != "" {
-		return m.sideTabLabel()
-	}
-	return "tree"
-}
-
 func (m model) sideTabLabel() string { return m.right.tabLabel() }
 
 func (m model) sideKey(b binding) binding {

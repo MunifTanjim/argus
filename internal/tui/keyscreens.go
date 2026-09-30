@@ -27,6 +27,8 @@ var sectionOffers = func() map[string]offer {
 	return map[string]offer{
 		"project-tree": {keys: helpQuit},
 		"workspace":    {keys: helpQuit},
+		"project":      {keys: helpQuit},
+		"node":         {keys: helpQuit},
 		"home":         {keys: helpQuit},
 		"logs":         {keys: help},
 		"history":      {keys: help, where: "project list"},
@@ -43,12 +45,11 @@ var (
 	rightSidebarKeys = []any{projectsKeys.Widen, projectsKeys.Narrow, projectsKeys.SideTabPrev, projectsKeys.SideTabNext}
 )
 
-// treeKeys act on the tree from the tree and from a workspace pane, which a
-// file open over it passes them to. From the pane, the tree's manage keys only
-// say where they work.
+// treeKeys act on the tree from the tree and from a workspace pane. manageKeys
+// work only in the tree.
 var (
 	treeKeys = []any{
-		projectsKeys.Filter, projectsKeys.Spawn, projectsKeys.SetupLog, projectsKeys.ShowHidden, projectsKeys.ShowGone,
+		projectsKeys.Spawn, projectsKeys.SetupLog, projectsKeys.ShowHidden, projectsKeys.ShowGone,
 	}
 	manageKeys = []any{
 		projectsKeys.New, projectsKeys.Rename, projectsKeys.Hide, projectsKeys.Unhide, projectsKeys.Pin,
@@ -56,10 +57,10 @@ var (
 	}
 )
 
-// summaryKeys are the workspace section's keys that a project or node summary
-// takes: the ones that act on the tree.
-var summaryKeys = bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys,
-	[]any{projectsKeys.Refresh, projectsKeys.Back})...)
+// summaryKeys are the keys of a project or node summary: the ones that act on
+// the tree.
+var summaryKeys = bindingsOf(slices.Concat(leftSidebarKeys, []any{projectsKeys.ShowHidden, projectsKeys.ShowGone,
+	projectsKeys.Filter, projectsKeys.Refresh, projectsKeys.Back})...)
 
 // transcriptViewKeys are the transcript keys that both live and history
 // transcripts read.
@@ -89,21 +90,23 @@ type sectionList struct {
 // the spawn flow have none.
 var sectionLists = map[string]sectionList{
 	"project-tree": {
-		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
+		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Filter, projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
 			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target})...),
 		container: bindingsOf(leftSidebarKeys...),
 		focus:     focusFor("project-tree"),
 	},
 	"workspace": {
-		own: bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
+		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter,
 			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill, listKeys.ActiveOnly,
 			listKeys.Filter})...),
 		focus: focusFor("workspace"),
 	},
+	"project": {own: summaryKeys, focus: focusFor("project")},
+	"node":    {own: summaryKeys, focus: focusFor("node")},
 	"file": {
-		own:   bindingsOf(slices.Concat(treeKeys, manageKeys, leftSidebarKeys, []any{fileViewKeys, sessionKeys.FocusPrompt})...),
+		own:   bindingsOf(fileViewKeys, sessionKeys.FocusPrompt),
 		focus: focusFor("file"),
 	},
 	"file-tree": {
@@ -144,7 +147,7 @@ var sectionLists = map[string]sectionList{
 // oldSections are the section names that component sections replaced, with
 // the sections that took their commands.
 var oldSections = map[string]string{
-	"projects": "project-tree, workspace, file, file-tree, changes",
+	"projects": "project-tree, workspace, project, node, file, file-tree, changes",
 	"session":  "transcript, session-dock",
 	"detail":   "transcript",
 }

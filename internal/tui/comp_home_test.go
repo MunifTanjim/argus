@@ -217,7 +217,7 @@ func TestTreeAboveHomeKeepsTheHomeCursor(t *testing.T) {
 	if !strings.Contains(out, "┏") {
 		t.Error("Home under the tree should draw its cursor card")
 	}
-	if !strings.Contains(out, "enter open · ^ww/^wW pane") {
+	if !strings.Contains(out, "s spawn · / filter") {
 		t.Errorf("the tree's footer should show:\n%s", out)
 	}
 	if homeOf(m).cursor != 1 {

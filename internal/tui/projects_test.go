@@ -565,7 +565,7 @@ func TestFooterFollowsFocus(t *testing.T) {
 		t.Errorf("tree footer = %q", f)
 	}
 	m = withFocus(m, mainPane)
-	if f := m.currentFooter(); strings.Contains(f, "tabs") || !strings.Contains(f, "tree") {
+	if f := m.currentFooter(); strings.Contains(f, "tabs") || !strings.Contains(f, "jump") {
 		t.Errorf("pane footer = %q", f)
 	}
 	m = withFile(m, fileComp{ws: "n1:w1", path: "a.go", diff: true})
@@ -1045,14 +1045,14 @@ func TestWorkspacePaneListKeys(t *testing.T) {
 	}
 }
 
-func TestManageKeysInPaneHintTheTree(t *testing.T) {
+func TestManageKeysDoNothingInThePane(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:w2")
 	m = withFocus(m, mainPane)
 	for _, k := range []string{"a", "r", "H", "P", "T", "D"} {
 		mm, _ := upd(m, keyMsg(k))
-		if mm.flash != "manage keys work in the tree · esc to go there" || createOpen(mm) || mm.left.tree.pendingRemove != "" {
+		if mm.flash != "" || createOpen(mm) || mm.left.tree.pendingRemove != "" {
 			t.Errorf("%s in the pane: flash=%q", k, mm.flash)
 		}
 	}
@@ -1065,9 +1065,9 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 200, 30
 	for row, want := range map[string]struct{ has, lacks []string }{
-		homeRowID: {has: []string{"enter open", "^ww/^wW pane", "s spawn", "/ filter"}, lacks: []string{"fold", "a new", "dd remove"}},
-		"n1:p1":   {has: []string{"h/l fold", "s spawn", "a new"}, lacks: []string{"^ww/^wW pane", "dd remove"}},
-		"n1:w2":   {has: []string{"h/l fold", "^ww/^wW pane", "s spawn", "a new", "dd remove"}},
+		homeRowID: {has: []string{"s spawn", "/ filter"}, lacks: []string{"enter open", "^ww", "fold", "a new", "dd remove"}},
+		"n1:p1":   {has: []string{"h/l fold", "s spawn", "a new"}, lacks: []string{"^ww", "dd remove"}},
+		"n1:w2":   {has: []string{"h/l fold", "s spawn", "a new", "dd remove"}, lacks: []string{"^ww"}},
 	} {
 		m = selectRow(m, row)
 		f := ansi.Strip(m.currentFooter())

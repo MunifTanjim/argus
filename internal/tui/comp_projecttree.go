@@ -315,10 +315,7 @@ func (t projectTreeComp) footerPrompt(c *ctx) string {
 
 func (t projectTreeComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	bindings := t.rowBindings()
-	if t.filter != "" {
-		bindings = append(bindings, helpAs(k.Back, "clear filter"))
-	}
+	bindings := append(t.rowBindings(), clearFilterKey(k.Back, t.filter != ""))
 	return append(bindings, listKeys.Quit, c.m.sideKey(k.ToggleFiles), k.Help)
 }
 
@@ -327,13 +324,13 @@ func (t projectTreeComp) rowBindings() []binding {
 	r, _ := t.cursorRow()
 	switch r.kind {
 	case rowHome:
-		return []binding{k.Up, k.Enter, paneKeys.Next, k.Spawn, k.Filter}
+		return []binding{k.Spawn, k.Filter}
 	case rowWorkspace:
-		return []binding{k.Up, k.Left, k.Enter, paneKeys.Next, k.Spawn, k.New, k.Remove, k.Filter}
+		return []binding{k.Left, k.Spawn, k.New, k.Remove, k.Filter}
 	case rowProject:
-		return []binding{k.Up, k.Left, k.Enter, k.Spawn, k.New, k.Filter}
+		return []binding{k.Left, k.Spawn, k.New, k.Filter}
 	}
-	return []binding{k.Up, k.Left, k.Enter, k.Filter}
+	return []binding{k.Left, k.Filter}
 }
 
 func (t projectTreeComp) view(c *ctx, w, h int) string {

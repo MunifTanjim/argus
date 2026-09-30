@@ -40,18 +40,18 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		return p, cmd, true
 	}
 	c.setFlash("")
-	// A file over the pane passes it only the keys that act on the tree.
-	_, onTop := m.main.top().(workspaceComp)
-	if onTop && m.matches(msg, listKeys.Filter) {
+	if m.matches(msg, listKeys.Filter) {
 		var cmd tea.Cmd
 		p.filter, cmd = p.filter.start(m.sessionFilter)
 		return p, cmd, true
 	}
-	if cmd, ok := paneTreeKey(c, msg, p.row(c)); ok {
-		return p, cmd, true
-	}
-	if !onTop {
-		return p, nil, false
+	switch {
+	case m.matches(msg, projectsKeys.Spawn):
+		return p, spawnSession(c, p.row(c)), true
+	case m.matches(msg, projectsKeys.SetupLog):
+		return p, openSetupLog(c, p.ws), true
+	case paneTreeKey(c, msg):
+		return p, nil, true
 	}
 	ss := m.wsSessions(p.ws)
 	var cmd tea.Cmd
@@ -102,24 +102,9 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	return p, cmd, true
 }
 
-func paneTreeKey(c *ctx, msg tea.KeyPressMsg, r projectsRow) (tea.Cmd, bool) {
+func paneTreeKey(c *ctx, msg tea.KeyPressMsg) bool {
 	m, k := c.m, projectsKeys
-	var cmd tea.Cmd
 	switch {
-	case m.matches(msg, k.Filter):
-		if m.sidebarVisible() {
-			c.onTree(treeFilter)
-		} else {
-			c.setFlash("the filter needs the tree · " + m.keyText(k.ToggleSidebar) + " shows the tree")
-		}
-	case m.matches(msg, k.Spawn):
-		cmd = spawnSession(c, r)
-	case m.matches(msg, k.SetupLog):
-		ws := ""
-		if r.kind == rowWorkspace {
-			ws = r.id
-		}
-		cmd = openSetupLog(c, ws)
 	case m.matches(msg, k.ShowHidden):
 		c.onTree(treeToggleHidden)
 	case m.matches(msg, k.ShowGone):
@@ -130,21 +115,15 @@ func paneTreeKey(c *ctx, msg tea.KeyPressMsg, r projectsRow) (tea.Cmd, bool) {
 		c.resizeTree(4)
 	case m.matches(msg, k.Narrow):
 		c.resizeTree(-4)
-	case m.matches(msg, k.New, k.Rename, k.Hide, k.Unhide, k.Pin, k.Unpin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
-		c.setFlash("manage keys work in the tree · " + m.keyText(k.Back) + " to go there")
 	default:
-		return nil, false
+		return false
 	}
-	return cmd, true
+	return true
 }
 
 func (p workspaceComp) row(c *ctx) projectsRow {
 	r, _ := c.m.wsRow(p.ws)
 	return r
-}
-
-func (p workspaceComp) treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	return paneTreeKey(c, msg, p.row(c))
 }
 
 func (p workspaceComp) view(c *ctx, w, h int) string {
@@ -206,15 +185,8 @@ func (p workspaceComp) footerPrompt(c *ctx) string {
 
 func (p workspaceComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter}
-	if c.m.sidebarVisible() || c.m.nextFromPane() == "files" {
-		bindings = append(bindings, helpAs(paneKeys.Next, c.m.nextFromPane()))
-	}
-	back := helpAs(k.Back, "tree")
-	if c.m.sessionFilter != "" {
-		back = helpAs(k.Back, "clear filter")
-	}
-	return append(bindings, k.Help, back)
+	return []binding{listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter,
+		clearFilterKey(k.Back, c.m.sessionFilter != ""), k.Help}
 }
 
 // disarmRoot drops a kill confirmation on the root pane before a component
