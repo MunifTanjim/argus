@@ -62,6 +62,7 @@ func (m model) helpGroups() []helpGroup {
 			pane(k.Back, "close / tree"),
 			pane(listKeys.Kill, "kill session"),
 			pane(listKeys.ActiveOnly, "active / all sessions"),
+			pane(listKeys.Filter, "filter sessions"),
 			pane(k.SetupLog, "workspace setup log"),
 			{key: lrKey, desc: "focus left / right pane", name: paneKeys.Left.name},
 			row("transcript", paneKeys.Down, "session: focus the prompt"),

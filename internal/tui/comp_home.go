@@ -14,10 +14,11 @@ import (
 type homeComp struct {
 	cursor int
 	killID string
+	filter filterPrompt
 }
 
 func (h homeComp) section() string                           { return "home" }
-func (h homeComp) raw(*ctx) bool                             { return h.killID != "" }
+func (h homeComp) raw(*ctx) bool                             { return h.killID != "" || h.filter.on }
 func (h homeComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return h, nil }
 func (h homeComp) close(*ctx) tea.Cmd                        { return nil }
 func (h homeComp) offers(*ctx) []binding                     { return sectionOffers[h.section()].keys }
@@ -41,6 +42,11 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			return h, m.killCmd(id), true
 		}
 		return h, nil, true
+	}
+	if h.filter.on {
+		var cmd tea.Cmd
+		h.filter, cmd = h.filter.handleKey(c, msg)
+		return h, cmd, true
 	}
 	c.setFlash("")
 	var cmd tea.Cmd
@@ -87,9 +93,15 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			cmd = m.refreshCmd()
 		}
 	case m.matches(msg, k.Back):
-		c.focusTree()
+		if m.sessionFilter != "" {
+			c.setSessionFilter("")
+		} else {
+			c.focusTree()
+		}
 	case m.matches(msg, k.ActiveOnly):
 		c.toggleActiveOnly()
+	case m.matches(msg, k.Filter):
+		h.filter, cmd = h.filter.start(m.sessionFilter)
 	default:
 		return h, nil, false
 	}
@@ -101,10 +113,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	// The status bar shows connection and quarantine state when framed; the bare
 	// splash has no bar, so it keeps them in its own header.
 	bare := m.layout().bare
-	title := m.homeTabs(tabSessions)
-	if m.activeOnly {
-		title += dimStyle.Render("  active")
-	}
+	title := m.homeTabs(tabSessions) + m.sessionFilterTitle()
 	if bare {
 		title = brandMark() + title
 		if m.reconnecting {
@@ -124,7 +133,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	}
 	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
 	if len(m.order) == 0 {
-		hint := dimStyle.Render("no active sessions · " + m.showsAllHint())
+		hint := dimStyle.Render(m.emptyFilterHint("no active sessions", listKeys.Back))
 		return centerBlock(title+"\n\n"+hint, cardW, w)
 	}
 	sel := h.cursor
@@ -182,16 +191,23 @@ func (h homeComp) footer(c *ctx) []binding {
 	if len(c.m.sessions) == 0 {
 		return []binding{k.TabNext, k.New, k.Refresh, c.m.listBackKey()}
 	}
-	if len(c.m.order) == 0 {
-		return []binding{k.ActiveOnly, k.TabNext, k.New, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
+	back := c.m.listBackKey()
+	if c.m.sessionFilter != "" {
+		back = helpAs(k.Back, "clear filter")
 	}
-	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.ActiveOnly, k.Refresh, c.m.listBackKey(), projectsKeys.Help}
+	if len(c.m.order) == 0 {
+		return []binding{k.ActiveOnly, k.Filter, k.TabNext, k.New, k.Refresh, back, projectsKeys.Help}
+	}
+	return []binding{k.Up, k.Open, k.Jump, k.TabNext, k.New, k.Kill, k.ActiveOnly, k.Filter, k.Refresh, back, projectsKeys.Help}
 }
 
 func (h homeComp) footerPrompt(c *ctx) string {
 	m := c.m
 	if h.killID != "" {
 		return asstStyle.Render(killPrompt(m.sessions[h.killID]))
+	}
+	if h.filter.on {
+		return h.filter.view()
 	}
 	return ""
 }

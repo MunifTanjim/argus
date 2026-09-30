@@ -180,9 +180,9 @@ The default keys follow Vim. The command table lists them. You can change any ke
 
 A command name is one of these:
 
-- A verb and an argument that change the view or the focus, for example `focus left` or `toggle line-wrap`. `open` alone opens the selected item.
-- An entity and an action on the selected entity, for example `project pin` or `session kill`.
-- A single word: `back`, `quit`, `help`, `refresh`, or `filter-projects`.
+- A verb and an argument that change the view or the focus, for example `focus left` or `toggle line-wrap`. `open` alone opens the selected item. `next` and `prev` alone move the selection in a list.
+- An entity and an action on the selected entity, for example `project pin`, `session kill`, or `tab next`.
+- A single word: `back`, `quit`, `help`, `refresh`, `filter-projects`, or `filter-sessions`.
 
 Extra spaces in a command name do not matter.
 
@@ -292,6 +292,7 @@ The `g?` sequence shows the command name next to each key.
 | `answer submit` | session-dock | `<CR>` |
 | `back` | changes, file, file-tree, history, home, logs, project-tree, session-dock, transcript, workspace | `<Esc>` |
 | `filter-projects` | file, project-tree, workspace | `/` |
+| `filter-sessions` | home, workspace | `/` |
 | `focus down` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
 | `focus left` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
 | `focus next` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
