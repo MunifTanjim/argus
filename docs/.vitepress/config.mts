@@ -104,6 +104,7 @@ export default defineConfig({
           { text: "Multi Machine", link: "/guide/multi-machine" },
           { text: "Gateway Tunnel", link: "/guide/gateway-tunnel" },
           { text: "End-to-End Encryption", link: "/guide/e2ee" },
+          { text: "Projects & Workspaces", link: "/guide/projects" },
           { text: "TUI", link: "/guide/tui" },
           { text: "Mobile App", link: "/guide/mobile-app" },
           { text: "PushPort", link: "/guide/pushport" },
