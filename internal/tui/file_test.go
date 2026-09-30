@@ -269,3 +269,13 @@ func TestFilesReloadDropsFoldedListings(t *testing.T) {
 		t.Errorf("unfolding a after gr should fetch it again: calls=%v", rc.calls)
 	}
 }
+
+func TestFilterFromFileOverPaneFiltersTree(t *testing.T) {
+	m := filesFocused()
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = withFocus(m, mainPane)
+	m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.inputActive() || m.focused != leftSidebar {
+		t.Errorf("/ from a file over the pane should filter the tree: input=%v focus=%v", m.inputActive(), m.focused)
+	}
+}

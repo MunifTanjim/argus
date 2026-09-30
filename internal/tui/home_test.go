@@ -805,6 +805,107 @@ func TestActiveOnlyWithNoActiveSessionsKeepsTheList(t *testing.T) {
 	}
 }
 
+func TestSessionMatchesQuery(t *testing.T) {
+	s := session.Session{ID: "n1:s1", Name: "Refactor", Repo: "argus", Branch: "feat/filter", NodeLabel: "mini",
+		Cwd: "/src/hidden", Summary: &session.Summary{Task: "Fix the Parser"}}
+	for q, want := range map[string]bool{
+		"":       true,
+		"refac":  true,
+		"parser": true,
+		"ARGUS":  true,
+		"filter": true,
+		"mini":   true,
+		"hidden": false,
+		"nope":   false,
+	} {
+		if got := sessionMatches(s, q); got != want {
+			t.Errorf("sessionMatches(%q) = %v, want %v", q, got, want)
+		}
+	}
+}
+
+func filterTestModel() model {
+	m := homeTestModel()
+	m.sessions = map[string]session.Session{
+		"n1:s1": {ID: "n1:s1", Name: "alpha", WorkspaceID: "n1:w1", Status: session.StatusIdle},
+		"n1:s2": {ID: "n1:s2", Name: "beta", WorkspaceID: "n1:w1", Status: session.StatusIdle},
+		"n1:s3": {ID: "n1:s3", Name: "alphabet", WorkspaceID: "n1:w2", Status: session.StatusIdle},
+	}
+	m.reorder()
+	return m
+}
+
+func TestFilterNarrowsHomeAsYouType(t *testing.T) {
+	m := filterTestModel()
+	m.main = m.main.replaceAt(0, homeComp{cursor: slices.Index(m.order, "n1:s3")})
+	m = typeKeys(m, "/alp")
+	if m.sessionFilter != "alp" || !slices.Equal(m.order, []string{"n1:s1", "n1:s3"}) {
+		t.Fatalf("filter=%q order=%v, want alpha and alphabet", m.sessionFilter, m.order)
+	}
+	if got := m.rootSessionID(); got != "n1:s3" {
+		t.Errorf("the cursor should stay on its session: %q", got)
+	}
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "filter: alp") {
+		t.Errorf("want the filter prompt, got:\n%s", out)
+	}
+	m = pressKeys(m, keyMsg("enter"))
+	if m.sessionFilter != "alp" || m.rootComp().raw(&ctx{m: &m}) {
+		t.Fatalf("enter should keep the filter and close the prompt: filter=%q", m.sessionFilter)
+	}
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "/alp") {
+		t.Errorf("the title should show the filter, got:\n%s", out)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if m.sessionFilter != "" || len(m.order) != 3 || m.focused != mainPane {
+		t.Errorf("esc on a filtered list should clear the filter first: filter=%q order=%v focus=%v",
+			m.sessionFilter, m.order, m.focused)
+	}
+	if got := m.rootSessionID(); got != "n1:s3" {
+		t.Errorf("clearing the filter should keep the cursor on its session: %q", got)
+	}
+}
+
+func TestFilterEscInPromptClears(t *testing.T) {
+	m := filterTestModel()
+	m = pressKeys(m, keyMsg("/"), keyMsg("b"), keyMsg("esc"))
+	if m.sessionFilter != "" || len(m.order) != 3 || m.rootComp().raw(&ctx{m: &m}) {
+		t.Errorf("esc in the prompt should clear the filter: filter=%q order=%v", m.sessionFilter, m.order)
+	}
+}
+
+func TestFilterWithNoMatchKeepsTheList(t *testing.T) {
+	m := filterTestModel()
+	m.sessionFilter = "zzz"
+	m.reorder()
+	if got := m.rootComp().fullScreen(&ctx{m: &m}); got != notFull {
+		t.Errorf("an empty filtered list must not show the welcome splash: %v", got)
+	}
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "no sessions match /zzz") {
+		t.Errorf("want the filtered empty state, got:\n%s", out)
+	}
+}
+
+func TestFilterInWorkspace(t *testing.T) {
+	m := filterTestModel()
+	m.main = backStack{workspaceComp{ws: "n1:w1"}}
+	m = pressKeys(m, keyMsg("/"), keyMsg("b"), keyMsg("enter"))
+	if ss := m.wsSessions("n1:w1"); len(ss) != 1 || ss[0].ID != "n1:s2" {
+		t.Errorf("/ on a workspace pane: sessions=%v, want only n1:s2", ss)
+	}
+	if m.left.tree.filter != "" {
+		t.Errorf("/ on the pane must not filter the tree: %q", m.left.tree.filter)
+	}
+
+	m = filterTestModel()
+	m.main = backStack{workspaceComp{ws: "n1:w1"}}
+	m = withFocus(m, leftSidebar)
+	m = pressKeys(m, keyMsg("/"), keyMsg("b"), keyMsg("enter"))
+	if m.sessionFilter != "" || m.left.tree.filter != "b" {
+		t.Errorf("/ on the tree should filter the tree: session filter=%q tree filter=%q",
+			m.sessionFilter, m.left.tree.filter)
+	}
+}
+
 func TestPaneHeadStyleShowsFocus(t *testing.T) {
 	m := homeTestModel()
 	m, _ = m.enterSession("n1:s1")

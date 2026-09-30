@@ -96,6 +96,7 @@ const (
 	actClosePopup
 	actRunCommand
 	actToggleActiveOnly
+	actSetSessionFilter
 )
 
 type action struct {
@@ -149,6 +150,10 @@ func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: ac
 // toggleActiveOnly switches the session lists between all sessions and the
 // active and awaiting-input ones.
 func (c *ctx) toggleActiveOnly() { c.actions = append(c.actions, action{kind: actToggleActiveOnly}) }
+
+func (c *ctx) setSessionFilter(q string) {
+	c.actions = append(c.actions, action{kind: actSetSessionFilter, id: q})
+}
 
 // focusTree moves focus into the tree, with the cursor on the main pane's row.
 func (c *ctx) focusTree() { c.actions = append(c.actions, action{kind: actFocusTree}) }
@@ -274,6 +279,8 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			cmds = append(cmds, cmd)
 		case actToggleActiveOnly:
 			m.toggleActiveOnly()
+		case actSetSessionFilter:
+			m.setSessionFilter(a.id)
 		}
 	}
 	c.actions = nil

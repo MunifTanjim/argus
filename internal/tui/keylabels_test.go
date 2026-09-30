@@ -163,7 +163,7 @@ func TestHelpKeysResolveOnProjectsScreen(t *testing.T) {
 
 func TestFlashNamesEffectiveKey(t *testing.T) {
 	m := projectsTestModel()
-	m = selectRow(m, "n1:w1")
+	m = selectRow(m, "n1:p1")
 	m = withKeymap(m, map[string]map[string]string{"workspace": {"<C-y>": "toggle left-sidebar"}})
 	m = typeKeys(m, " o")
 	m, _ = upd(m, keyMsg("/"))

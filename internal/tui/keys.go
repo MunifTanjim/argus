@@ -88,7 +88,7 @@ func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
 var listKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown                      binding
 	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit binding
-	ActiveOnly                                                   binding
+	ActiveOnly, Filter                                           binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
@@ -107,6 +107,7 @@ var listKeys = struct {
 	Quit:     nb("quit", "Q", "quit"),
 
 	ActiveOnly: nb("toggle active-only", "za", "active"),
+	Filter:     nb("filter-sessions", "/", "filter"),
 }
 
 var projectsKeys = struct {

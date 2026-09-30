@@ -662,23 +662,17 @@ func TestBlankFilterKeepsFolding(t *testing.T) {
 	}
 }
 
-func TestFilterFromPaneFocusesTree(t *testing.T) {
-	m := projectsTestModel()
-	m.width, m.height = 120, 30
-	m = selectRow(m, "n1:w1")
-	m = withFocus(m, mainPane)
-	m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
-	if !m.inputActive() || m.focused != leftSidebar {
-		t.Errorf("/ from the pane should filter in the tree: input=%v focus=%v", m.inputActive(), m.focused)
-	}
-
-	m = projectsTestModel()
-	m.width, m.height = 70, 30 // tree collapsed
-	m = selectRow(m, "n1:w1")
-	m = withFocus(m, mainPane)
-	m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
-	if m.inputActive() || !strings.Contains(m.flash, "shows the tree") {
-		t.Errorf("/ with no tree on screen should only hint: input=%v flash=%q", m.inputActive(), m.flash)
+func TestFilterFromPaneFiltersSessions(t *testing.T) {
+	for _, width := range []int{120, 70} { // 70 collapses the tree
+		m := projectsTestModel()
+		m.width, m.height = width, 30
+		m = selectRow(m, "n1:w1")
+		m = withFocus(m, mainPane)
+		m, _ = upd(m, tea.KeyPressMsg{Code: '/', Text: "/"})
+		if m.inputActive() || m.focused != mainPane || !m.rootComp().raw(&ctx{m: &m}) {
+			t.Errorf("width %d: / from the pane should open the session filter: tree input=%v focus=%v",
+				width, m.inputActive(), m.focused)
+		}
 	}
 }
 

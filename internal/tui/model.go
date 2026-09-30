@@ -50,15 +50,16 @@ func (r subRef) key() string {
 }
 
 type model struct {
-	client       Client
-	sessions     map[string]session.Session
-	order        []string // session IDs, sorted for stable display
-	activeOnly   bool     // the session lists show only active and awaiting-input sessions
-	width        int
-	height       int
-	reconnecting bool // connection dropped; the client is retrying
-	hasDark      bool // terminal background; drives glamour/highlight styling
-	viewer       bool // offline viewer mode: opens directly in transcript view
+	client        Client
+	sessions      map[string]session.Session
+	order         []string // session IDs, sorted for stable display
+	activeOnly    bool     // the session lists show only active and awaiting-input sessions
+	sessionFilter string   // the session lists show only the sessions that match it
+	width         int
+	height        int
+	reconnecting  bool // connection dropped; the client is retrying
+	hasDark       bool // terminal background; drives glamour/highlight styling
+	viewer        bool // offline viewer mode: opens directly in transcript view
 
 	redactMode   bool   // --redact: interactive redaction affordance in the viewer
 	bundlePath   string // source .argus path (for the -redacted output name)

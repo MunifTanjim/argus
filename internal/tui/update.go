@@ -464,14 +464,21 @@ func activeStatus(s session.Session) bool {
 	return false
 }
 
-// shows reports whether the session lists show s under the active-only filter.
-func (m model) shows(s session.Session) bool { return !m.activeOnly || activeStatus(s) }
+func (m model) shows(s session.Session) bool {
+	return (!m.activeOnly || activeStatus(s)) && sessionMatches(s, m.sessionFilter)
+}
 
-// toggleActiveOnly flips the session filter. The root list's cursor stays on
-// its session when the filter keeps that session.
 func (m *model) toggleActiveOnly() {
 	sel := m.rootSessionID()
 	m.activeOnly = !m.activeOnly
+	m.refilter(sel)
+	m.flash = "showing all sessions"
+	if m.activeOnly {
+		m.flash = "showing active sessions · " + m.showsAllHint()
+	}
+}
+
+func (m *model) refilter(sel string) {
 	m.reorder()
 	if i := slices.Index(m.rootIDs(), sel); i >= 0 {
 		switch p := m.rootComp().(type) {
@@ -482,10 +489,6 @@ func (m *model) toggleActiveOnly() {
 			p.cursor = i
 			m.main = m.main.replaceAt(0, p)
 		}
-	}
-	m.flash = "showing all sessions"
-	if m.activeOnly {
-		m.flash = "showing active sessions · " + m.showsAllHint()
 	}
 }
 

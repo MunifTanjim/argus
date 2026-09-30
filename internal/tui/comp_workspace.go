@@ -10,10 +10,11 @@ type workspaceComp struct {
 	ws     string
 	cursor int
 	killID string
+	filter filterPrompt
 }
 
 func (p workspaceComp) section() string                           { return "workspace" }
-func (p workspaceComp) raw(*ctx) bool                             { return p.killID != "" }
+func (p workspaceComp) raw(*ctx) bool                             { return p.killID != "" || p.filter.on }
 func (p workspaceComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return p, nil }
 func (p workspaceComp) fullScreen(*ctx) fullLevel                 { return notFull }
 func (p workspaceComp) close(*ctx) tea.Cmd                        { return nil }
@@ -33,12 +34,23 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		}
 		return p, nil, true
 	}
+	if p.filter.on {
+		var cmd tea.Cmd
+		p.filter, cmd = p.filter.handleKey(c, msg)
+		return p, cmd, true
+	}
 	c.setFlash("")
+	// A file over the pane passes it only the keys that act on the tree.
+	_, onTop := m.main.top().(workspaceComp)
+	if onTop && m.matches(msg, listKeys.Filter) {
+		var cmd tea.Cmd
+		p.filter, cmd = p.filter.start(m.sessionFilter)
+		return p, cmd, true
+	}
 	if cmd, ok := paneTreeKey(c, msg, p.row(c)); ok {
 		return p, cmd, true
 	}
-	// A file over the pane passes it only the keys that act on the tree.
-	if _, onTop := m.main.top().(workspaceComp); !onTop {
+	if !onTop {
 		return p, nil, false
 	}
 	ss := m.wsSessions(p.ws)
@@ -65,9 +77,12 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 			c.openSession(ss[p.cursor].ID)
 		}
 	case m.matches(msg, projectsKeys.Back):
-		if m.sidebarVisible() {
+		switch {
+		case m.sessionFilter != "":
+			c.setSessionFilter("")
+		case m.sidebarVisible():
 			c.focusTree()
-		} else {
+		default:
 			c.home()
 		}
 	case m.matches(msg, listKeys.ActiveOnly):
@@ -152,7 +167,7 @@ func (p workspaceComp) column(c *ctx, w, h int) string {
 	if !ok {
 		return dimStyle.Render("workspace not found")
 	}
-	return truncateLine(c.m.wsHeader(r), w) + "\n\n" + p.sessions(c, w, max(1, h-2))
+	return truncateLine(c.m.wsHeader(r)+c.m.sessionFilterTitle(), w) + "\n\n" + p.sessions(c, w, max(1, h-2))
 }
 
 func (p workspaceComp) sessions(c *ctx, w, avail int) string {
@@ -161,8 +176,8 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	avail = max(1, avail-lipgloss.Height(block))
 	ss := m.wsSessions(p.ws)
 	if len(ss) == 0 {
-		if m.activeOnly {
-			return block + dimStyle.Render("no active sessions in this workspace · "+m.showsAllHint())
+		if m.activeOnly || m.sessionFilter != "" {
+			return block + dimStyle.Render(m.emptyFilterHint("no active sessions in this workspace", projectsKeys.Back))
 		}
 		return block + dimStyle.Render("no sessions in this workspace")
 	}
@@ -183,16 +198,23 @@ func (p workspaceComp) footerPrompt(c *ctx) string {
 	if p.killID != "" {
 		return asstStyle.Render(killPrompt(c.m.sessions[p.killID]))
 	}
+	if p.filter.on {
+		return p.filter.view()
+	}
 	return ""
 }
 
 func (p workspaceComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly}
+	bindings := []binding{k.Up, k.Enter, listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter}
 	if c.m.sidebarVisible() || c.m.nextFromPane() == "files" {
 		bindings = append(bindings, helpAs(paneKeys.Next, c.m.nextFromPane()))
 	}
-	return append(bindings, k.Help, helpAs(k.Back, "tree"))
+	back := helpAs(k.Back, "tree")
+	if c.m.sessionFilter != "" {
+		back = helpAs(k.Back, "clear filter")
+	}
+	return append(bindings, k.Help, back)
 }
 
 // disarmRoot drops a kill confirmation on the root pane before a component
