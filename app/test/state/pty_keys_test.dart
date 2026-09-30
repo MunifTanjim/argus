@@ -85,4 +85,11 @@ void main() {
     // A char with no Ctrl form is sent unmodified (Ctrl dropped).
     test('ctrl+digit falls through', () => expect(ptyTextBytes('5', ctrl: true), [53]));
   });
+
+  group('ptyWheelBytes', () {
+    // SGR coordinates are 1-based.
+    test('wheel up', () => expect(String.fromCharCodes(ptyWheelBytes(true, 0, 0, 80, 24)), '\x1b[<64;1;1M'));
+    test('wheel down', () => expect(String.fromCharCodes(ptyWheelBytes(false, 9, 4, 80, 24)), '\x1b[<65;10;5M'));
+    test('clamps to the grid', () => expect(String.fromCharCodes(ptyWheelBytes(true, 200, -3, 80, 24)), '\x1b[<64;80;1M'));
+  });
 }
