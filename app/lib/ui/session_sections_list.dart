@@ -11,8 +11,6 @@ import 'session_detail_screen.dart';
 import 'theme.dart';
 
 /// Sessions grouped into "Needs you" and per-host sections, as session cards.
-/// Under the active-only filter, it shows only active and awaiting-input
-/// sessions.
 class SessionSectionsList extends ConsumerWidget {
   const SessionSectionsList({
     super.key,
@@ -41,9 +39,11 @@ class SessionSectionsList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeOnly = ref.watch(activeOnlyProvider);
-    final shown = activeOnly
-        ? sessions.where(isActiveSession).toList()
-        : sessions;
+    final query = ref.watch(sessionSearchProvider) ?? '';
+    final shown = sessions
+        .where((s) => !activeOnly || isActiveSession(s))
+        .where((s) => matchesSessionQuery(s, query))
+        .toList();
     final sections = buildSections(shown);
     // When sessions span nodes, the "Needs you" section mixes hosts under one
     // header, so its cards must name their own node.
@@ -56,12 +56,11 @@ class SessionSectionsList extends ConsumerWidget {
         children: [
           const SizedBox(height: 120),
           Center(
-            child: Text(
-              activeOnly && sessions.isNotEmpty
-                  ? 'No active sessions.'
-                  : emptyText,
-              style: const TextStyle(color: AppColors.dim),
-            ),
+            child: Text(switch (sessions.isNotEmpty) {
+              true when query.isNotEmpty => 'No sessions match.',
+              true when activeOnly => 'No active sessions.',
+              _ => emptyText,
+            }, style: const TextStyle(color: AppColors.dim)),
           ),
         ],
       );
@@ -97,6 +96,66 @@ class ActiveOnlyButton extends ConsumerWidget {
       selectedIcon: const Icon(Icons.filter_list_alt),
       tooltip: activeOnly ? 'Show all sessions' : 'Show active sessions',
       onPressed: () => ref.read(activeOnlyProvider.notifier).toggle(),
+    );
+  }
+}
+
+class SessionSearchButton extends ConsumerWidget {
+  const SessionSearchButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(sessionSearchProvider) != null) {
+      return const SizedBox.shrink();
+    }
+    return IconButton(
+      icon: const Icon(Icons.search),
+      tooltip: 'Filter sessions',
+      onPressed: () => ref.read(sessionSearchProvider.notifier).open(),
+    );
+  }
+}
+
+/// An app bar title that the session search field replaces while it is open.
+class SessionSearchTitle extends ConsumerStatefulWidget {
+  const SessionSearchTitle({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<SessionSearchTitle> createState() => _SessionSearchTitleState();
+}
+
+class _SessionSearchTitleState extends ConsumerState<SessionSearchTitle> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = ref.watch(sessionSearchProvider);
+    if (query == null) {
+      _controller.clear();
+      return widget.child;
+    }
+    final search = ref.read(sessionSearchProvider.notifier);
+    return TextField(
+      controller: _controller,
+      autofocus: true,
+      decoration: InputDecoration(
+        hintText: 'Filter sessions',
+        border: InputBorder.none,
+        suffixIcon: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Clear filter',
+          onPressed: search.close,
+        ),
+      ),
+      onChanged: search.set,
     );
   }
 }

@@ -26,8 +26,8 @@ class SessionListScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         leading: shellMenuButton(context),
-        title: const Text('Sessions'),
-        actions: const [ActiveOnlyButton()],
+        title: const SessionSearchTitle(child: Text('Sessions')),
+        actions: const [SessionSearchButton(), ActiveOnlyButton()],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showSpawnDialog(context, ref),
