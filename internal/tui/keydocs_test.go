@@ -44,7 +44,7 @@ func commandTable() string {
 }
 
 func TestDocsListEveryCommand(t *testing.T) {
-	data, err := os.ReadFile("../../docs/getting-started/configuration.md")
+	data, err := os.ReadFile("../../docs/guide/tui.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +52,10 @@ func TestDocsListEveryCommand(t *testing.T) {
 	start := strings.Index(doc, "<!-- keymap-commands:start -->\n")
 	end := strings.Index(doc, "<!-- keymap-commands:end -->")
 	if start < 0 || end < 0 {
-		t.Fatal("configuration.md has no keymap-commands markers")
+		t.Fatal("tui.md has no keymap-commands markers")
 	}
 	got := doc[start+len("<!-- keymap-commands:start -->\n") : end]
 	if want := commandTable(); got != want {
-		t.Errorf("the command table in configuration.md is out of date; replace it with:\n%s", want)
+		t.Errorf("the command table in tui.md is out of date; replace it with:\n%s", want)
 	}
 }
