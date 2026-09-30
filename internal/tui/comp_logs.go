@@ -122,7 +122,7 @@ func (l logsComp) view(c *ctx, w, h int) string {
 }
 
 func (l logsComp) footer(c *ctx) []binding {
-	return []binding{listKeys.TabNext, logsKeys.Up, logsKeys.Bottom, logsKeys.Back, c.m.treeKey(), projectsKeys.Help}
+	return []binding{listKeys.TabNext, logsKeys.Bottom, projectsKeys.Help}
 }
 
 // The Logs tab exists only with an embedded node.

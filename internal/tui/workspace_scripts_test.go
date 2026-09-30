@@ -109,9 +109,11 @@ func TestRunSetupKey(t *testing.T) {
 		t.Errorf("S should run setup on n1:w2: calls=%v flash=%q", rc.calls, m.flash)
 	}
 	m = withFocus(m, mainPane)
-	m, _ = upd(m, keyMsg("S"))
-	if m.flash != "manage keys work in the tree · esc to go there" {
-		t.Errorf("S in the pane should hint the tree: %q", m.flash)
+	rc.calls, rc.params = nil, nil
+	m, cmd = upd(m, keyMsg("S"))
+	runCmd(cmd)
+	if len(rc.calls) != 0 || m.flash != "" {
+		t.Errorf("S in the pane should do nothing: calls=%v flash=%q", rc.calls, m.flash)
 	}
 }
 

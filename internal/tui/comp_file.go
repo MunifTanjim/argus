@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"slices"
 	"strings"
 	"time"
 
@@ -39,16 +38,11 @@ func (f fileComp) offers(c *ctx) []binding   { return c.m.baseComp().offers(c) }
 func (f fileComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (f fileComp) layer() layer              { return fileLayer }
 
-// commands adds the tree keys where the component under f takes them, and the
-// prompt focus where a live transcript under f has a prompt to focus.
 func (f fileComp) commands(c *ctx) []binding {
 	fk := fileViewKeys
 	out := []any{fk.Up, fk.Down, fk.HalfUp, fk.HalfDown, fk.Top, fk.Bottom, fk.Wrap, fk.Refresh, fk.Back}
 	if f.diff {
 		out = append(out, fk.NextFile, fk.PrevFile)
-	}
-	if _, ok := c.m.underFile().(treeKeyer); ok {
-		out = slices.Concat(out, treeKeys, manageKeys, leftSidebarKeys)
 	}
 	if c.m.inSession() && c.m.sessionInteraction() != nil {
 		out = append(out, sessionKeys.FocusPrompt)
@@ -82,22 +76,12 @@ func (f fileComp) reload(c *ctx) tea.Cmd {
 	return c.m.fetchReadFile(f.ws, f.path)
 }
 
-// treeKeyer is a component that takes the tree keys a file over it leaves.
-type treeKeyer interface {
-	treeKey(c *ctx, msg tea.KeyPressMsg) (tea.Cmd, bool)
-}
-
-// handleKey leaves the tree keys to a component under f that takes them, and
-// the prompt focus key to a live transcript.
+// handleKey leaves the prompt focus key to a live transcript.
 func (f fileComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m := c.m
-	fk, k := fileViewKeys, projectsKeys
+	fk := fileViewKeys
 	c.setFlash("")
-	_, passTree := m.underFile().(treeKeyer)
 	switch {
-	case passTree && m.matches(msg, k.Filter, k.Spawn, k.SetupLog, k.ShowHidden, k.ShowGone, k.Widen, k.Narrow,
-		k.New, k.Rename, k.Hide, k.Unhide, k.Pin, k.Unpin, k.Target, k.ForceRemove, k.Forget, k.RunSetup):
-		return f, nil, false
 	case m.matches(msg, fk.Back):
 		f.leave(c)
 	case m.matches(msg, fk.Refresh):
@@ -269,7 +253,7 @@ func (f fileComp) footerText(c *ctx) string {
 	if offersKey(f.offers(c), projectsKeys.Help) {
 		return m.footer(append(f.footer(c), projectsKeys.Help)...)
 	}
-	return m.footer(append(f.footer(c), m.sideKey(paneKeys.Right))...)
+	return m.footer(f.footer(c)...)
 }
 
 func (f fileComp) footer(*ctx) []binding {

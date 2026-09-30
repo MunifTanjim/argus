@@ -79,6 +79,17 @@ func TestHistoryTabPrevReturnsToSessions(t *testing.T) {
 	}
 }
 
+func TestSummarySectionFollowsTheRow(t *testing.T) {
+	for kind, want := range map[projRowKind]string{rowProject: "project", rowNode: "node"} {
+		if got := (summaryComp{kind: kind}).section(); got != want {
+			t.Errorf("summary of row kind %d: section %q, want %q", kind, got, want)
+		}
+	}
+	if got := (workspaceComp{}).section(); got != "workspace" {
+		t.Errorf("workspace pane: section %q, want workspace", got)
+	}
+}
+
 func TestScreenNames(t *testing.T) {
 	cases := []struct {
 		view   shownView
@@ -86,7 +97,7 @@ func TestScreenNames(t *testing.T) {
 		want   string
 	}{
 		{viewHome, false, "home"},
-		{viewTree, false, "workspace"},
+		{viewTree, false, "node"},
 		{viewSession, false, "transcript"},
 		{viewSession, true, "transcript"},
 		{viewHistoryTranscript, false, "transcript"},

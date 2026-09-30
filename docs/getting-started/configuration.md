@@ -199,14 +199,14 @@ tui:
       "gg": ""
 ```
 
-- A section names a part of the screen: `project-tree`, `file-tree`, `changes`, `home`, `history`, `logs`, `workspace`, `file`, `transcript` (with its card detail), `session-dock`, or `global`.
+- A section names a part of the screen: `project-tree`, `file-tree`, `changes`, `home`, `history`, `logs`, `workspace`, `project`, `node`, `file`, `transcript` (with its card detail), `session-dock`, or `global`.
 - Priority, from highest to lowest: the section, then `global`, then the defaults.
 - A mapping adds a key to the command. The default keys stay, unless you remove a key with `""` or map it to a different command.
 - A mapping in `global` applies only in sections that have its command.
 - Some pairs of commands share a default key: `P` for `project pin` and `project unpin`, `H` for `project hide` and `project unhide`, `<Space>` for `option select` and `option unselect`, and `<Tab>` for `focus prompt` and `focus transcript`. The key runs the command that applies. For example, `P` unpins a pinned project. If you map the shared key to one command of a pair, the other command loses that key. To move the key, map both commands.
 - A command that does not apply does nothing. For example, a key mapped only to `project unpin` does nothing on a project that is not pinned.
 - `transcript` also covers the card detail and the redaction list, so a key that you map there leaves its default command in all three views. For example, `"k": prev card` also removes `k` from `prev` in the card detail and the redaction list.
-- `projects`, `session`, and `detail` are not section names. Argus skips them and shows a hint at startup. Use `project-tree`, `workspace`, `file`, `file-tree`, or `changes` for `projects`. Use `transcript` or `session-dock` for `session`. Use `transcript` for `detail`.
+- `projects`, `session`, and `detail` are not section names. Argus skips them and shows a hint at startup. Use `project-tree`, `workspace`, `project`, `node`, `file`, `file-tree`, or `changes` for `projects`. Use `transcript` or `session-dock` for `session`. Use `transcript` for `detail`.
 - In a text input, sequences do not work. Single keys of text input commands, for example `workspace pick-target` and `answer submit`, use the keymaps.
 - y/n prompts and the live screen do not use keymaps.
 - `:` opens the command line. A mapping cannot start with `:`.
@@ -290,46 +290,46 @@ The `g?` sequence shows the command name next to each key.
 | Command | Sections | Default keys |
 |---|---|---|
 | `answer submit` | session-dock | `<CR>` |
-| `back` | changes, file, file-tree, history, home, logs, project-tree, session-dock, transcript, workspace | `<Esc>` |
-| `filter-projects` | file, project-tree, workspace | `/` |
+| `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, transcript, workspace | `<Esc>` |
+| `filter-projects` | node, project, project-tree | `/` |
 | `filter-sessions` | home, workspace | `/` |
-| `focus down` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
-| `focus left` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
-| `focus next` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
-| `focus prev` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w>W` |
+| `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
+| `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
+| `focus next` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
+| `focus prev` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w>W` |
 | `focus prompt` | file, transcript | `<Tab>` |
-| `focus right` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-l>` `<C-w>l` |
+| `focus right` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w><C-l>` `<C-w>l` |
 | `focus transcript` | session-dock | `<Tab>` |
-| `focus up` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<C-w><C-k>` `<C-w>k` |
+| `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-w><C-k>` `<C-w>k` |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |
 | `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `G` |
 | `goto top` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `gg` |
-| `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, project-tree, workspace | `g?` |
+| `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, workspace | `g?` |
 | `next` | changes, file-tree, history, home, project-tree, session-dock, transcript, workspace | `<Down>` `j` |
 | `next card` | transcript | `}` |
 | `next diff-file` | file | `]f` |
 | `open` | changes, file-tree, history, home, project-tree, transcript, workspace | `<CR>` |
 | `open live-screen` | session-dock, transcript | `<C-t>` |
-| `open setup-log` | file, project-tree, workspace | `L` |
+| `open setup-log` | project-tree, workspace | `L` |
 | `open tmux-pane` | home, workspace | `O` |
 | `option select` | session-dock | `<Space>` |
 | `option unselect` | session-dock | `<Space>` |
 | `prev` | changes, file-tree, history, home, project-tree, session-dock, transcript, workspace | `<Up>` `k` |
 | `prev card` | transcript | `{` |
 | `prev diff-file` | file | `[f` |
-| `project forget` | file, project-tree, workspace | `F` |
-| `project hide` | file, project-tree, workspace | `H` |
-| `project pin` | file, project-tree, workspace | `P` |
-| `project rename` | file, project-tree, workspace | `r` |
-| `project unhide` | file, project-tree, workspace | `H` |
-| `project unpin` | file, project-tree, workspace | `P` |
-| `quit` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), home, project-tree, workspace | `Q` |
+| `project forget` | project-tree | `F` |
+| `project hide` | project-tree | `H` |
+| `project pin` | project-tree | `P` |
+| `project rename` | project-tree | `r` |
+| `project unhide` | project-tree | `H` |
+| `project unpin` | project-tree | `P` |
+| `quit` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), home, node, project, project-tree, workspace | `Q` |
 | `redaction add` | transcript | `d` |
 | `redaction list` | transcript | `D` |
 | `redaction remove` | transcript | `u` |
 | `redaction save` | transcript | `W` |
-| `refresh` | changes, file, file-tree, history, home, project-tree, workspace | `gr` |
+| `refresh` | changes, file, file-tree, history, home, node, project, project-tree, workspace | `gr` |
 | `scroll down` | file, logs, transcript | `<Down>` `j` |
 | `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, transcript, workspace | `<C-d>` `<PageDown>` |
 | `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, transcript, workspace | `<C-u>` `<PageUp>` |
@@ -337,25 +337,25 @@ The `g?` sequence shows the command name next to each key.
 | `session kill` | home, workspace | `dd` |
 | `session load-more` | history | `m` |
 | `session resume` | history, transcript | `R` |
-| `session spawn` | file, home, project-tree, workspace | `s` |
-| `sidebar narrower` | changes, file, file-tree, project-tree, workspace | `<C-w><lt>` |
-| `sidebar wider` | changes, file, file-tree, project-tree, workspace | `<C-w>>` |
+| `session spawn` | home, project-tree, workspace | `s` |
+| `sidebar narrower` | changes, file-tree, node, project, project-tree, workspace | `<C-w><lt>` |
+| `sidebar wider` | changes, file-tree, node, project, project-tree, workspace | `<C-w>>` |
 | `tab next` | changes, file-tree, history, home, logs, session-dock | `<Right>` `gt` |
 | `tab prev` | changes, file-tree, history, home, logs, session-dock | `<Left>` `gT` |
 | `toggle active-only` | home, workspace | `za` |
 | `toggle diff-vs-target` | changes | `t` |
-| `toggle left-sidebar` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<Leader>o` |
+| `toggle left-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<Leader>o` |
 | `toggle line-wrap` | file | `yow` |
-| `toggle right-sidebar` | changes, file, file-tree, history, home, logs, project-tree, transcript, workspace | `<Leader>e` |
-| `toggle show-gone` | file, project-tree, workspace | `zg` |
-| `toggle show-hidden` | file, project-tree, workspace | `z.` |
+| `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<Leader>e` |
+| `toggle show-gone` | node, project, project-tree, workspace | `zg` |
+| `toggle show-hidden` | node, project, project-tree, workspace | `z.` |
 | `transcript export` | history, transcript | `E` |
-| `workspace change-target` | file, project-tree, workspace | `T` |
-| `workspace force-remove` | file, project-tree, workspace | `D` |
-| `workspace new` | file, project-tree, workspace | `a` |
+| `workspace change-target` | project-tree | `T` |
+| `workspace force-remove` | project-tree | `D` |
+| `workspace new` | project-tree | `a` |
 | `workspace pick-target` | project-tree | `<C-t>` |
 | `workspace remove` | project-tree | `dd` |
-| `workspace rerun-setup` | file, project-tree, workspace | `S` |
+| `workspace rerun-setup` | project-tree | `S` |
 <!-- keymap-commands:end -->
 
 ## End-to-End Encryption

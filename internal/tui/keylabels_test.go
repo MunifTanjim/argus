@@ -113,8 +113,8 @@ func TestFooterBuildsLabelsFromEffectiveKeys(t *testing.T) {
 	m2 = selectRow(m2, "n1:w1")
 	m2 = withFocus(m2, mainPane)
 	f2 := ansi.Strip(m2.currentFooter())
-	if !strings.Contains(f2, "^ww/^wW") {
-		t.Errorf("pane footer should show ^ww/^wW from effective keys: %q", f2)
+	if !strings.Contains(f2, "dd kill") {
+		t.Errorf("pane footer should show dd from effective keys: %q", f2)
 	}
 }
 
@@ -164,7 +164,7 @@ func TestHelpKeysResolveOnProjectsScreen(t *testing.T) {
 func TestFlashNamesEffectiveKey(t *testing.T) {
 	m := projectsTestModel()
 	m = selectRow(m, "n1:p1")
-	m = withKeymap(m, map[string]map[string]string{"workspace": {"<C-y>": "toggle left-sidebar"}})
+	m = withKeymap(m, map[string]map[string]string{"project": {"<C-y>": "toggle left-sidebar"}})
 	m = typeKeys(m, " o")
 	m, _ = upd(m, keyMsg("/"))
 	if !strings.Contains(m.flash, "^y shows the tree") {

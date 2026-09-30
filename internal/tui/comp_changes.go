@@ -222,14 +222,13 @@ func (ch changesComp) footerText(c *ctx) string { return c.m.right.footerText(c)
 
 func (ch changesComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	esc := helpAs(k.Back, sidebarEscDesc(c))
 	switch {
 	case ch.commit != nil:
-		return []binding{k.Up, helpAs(k.Enter, "diff"), helpAs(k.Back, "back")}
+		return []binding{helpAs(k.Enter, "diff")}
 	case ch.cursor >= len(ch.files) && ch.cursor < len(ch.files)+len(ch.commits):
-		return []binding{k.Up, k.SideTabNext, helpAs(k.Enter, "files"), ch.diffModeKey(c), esc}
+		return []binding{k.SideTabNext, helpAs(k.Enter, "files"), ch.diffModeKey(c)}
 	}
-	return []binding{k.Up, k.SideTabNext, helpAs(k.Enter, "diff"), ch.diffModeKey(c), esc}
+	return []binding{k.SideTabNext, helpAs(k.Enter, "diff"), ch.diffModeKey(c)}
 }
 
 // diffModeKey labels the diff-mode key with the mode it switches to; with no

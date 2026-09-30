@@ -228,17 +228,24 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-// treeKey is the History and Logs hint for focus left, shown only when the
-// tree is.
-func (m model) treeKey() binding {
-	b := paneKeys.Left
-	b.SetEnabled(m.sidebarVisible())
-	return b
-}
-
+// listBackKey is the splash hint for leaving Home: the splash hides the tree.
 func (m model) listBackKey() binding {
 	if m.sidebarVisible() {
 		return listKeys.Back
 	}
 	return listKeys.Quit
+}
+
+// quitKey is the Home hint for quit, shown only when no tree offers a way out.
+func (m model) quitKey() binding {
+	b := listKeys.Quit
+	b.SetEnabled(!m.sidebarVisible())
+	return b
+}
+
+// clearFilterKey is the hint for back, shown only while a filter is on.
+func clearFilterKey(back binding, on bool) binding {
+	b := helpAs(back, "clear filter")
+	b.SetEnabled(on)
+	return b
 }

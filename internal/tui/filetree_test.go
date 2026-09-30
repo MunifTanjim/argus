@@ -393,45 +393,26 @@ func openedFile(m model) model {
 
 // A file open over a workspace pane passes the keys that act on the tree to the
 // pane, which runs each once; the pane's own list keys stay with the file.
-func TestFileOverAWorkspacePassesTheTreeKeysToThePane(t *testing.T) {
+func TestFileOverAWorkspaceLeavesTheTreeKeys(t *testing.T) {
 	base := func() model {
 		m := withFocus(openedFile(wideWorkspace()), mainPane)
 		m.client = &recordingClient{}
 		return m
 	}
-	manage := func(m model) bool { return strings.Contains(m.flash, "manage keys work in the tree") }
-	cases := []struct {
-		name string
-		keys []tea.KeyPressMsg
-		ok   func(m model) bool
-	}{
-		{"/", []tea.KeyPressMsg{keyMsg("/")}, func(m model) bool { return m.focused == leftSidebar && m.left.tree.inputMode == pmFilter }},
-		{"s", []tea.KeyPressMsg{keyMsg("s")}, spawnOpen},
-		{"L", []tea.KeyPressMsg{keyMsg("L")}, func(m model) bool { return fileOf(m).log }},
-		{"z.", []tea.KeyPressMsg{keyMsg("z"), keyMsg(".")}, func(m model) bool { return m.left.tree.showHidden && !m.left.tree.showGone }},
-		{"zg", []tea.KeyPressMsg{keyMsg("z"), keyMsg("g")}, func(m model) bool { return m.left.tree.showGone && !m.left.tree.showHidden }},
-		{"<C-w>>", cw('>'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()+4 }},
-		{"<C-w><lt>", cw('<'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()-4 }},
+	keys := [][]tea.KeyPressMsg{
+		{keyMsg("/")}, {keyMsg("s")}, {keyMsg("L")}, {keyMsg("z"), keyMsg(".")}, {keyMsg("z"), keyMsg("g")},
+		cw('>'), cw('<'), {keyMsg("O")}, {keyMsg("enter")}, {keyMsg("d"), keyMsg("d")},
 	}
 	for _, k := range []string{"a", "r", "H", "P", "T", "D", "F", "S"} {
-		cases = append(cases, struct {
-			name string
-			keys []tea.KeyPressMsg
-			ok   func(m model) bool
-		}{k, []tea.KeyPressMsg{keyMsg(k)}, manage})
+		keys = append(keys, []tea.KeyPressMsg{keyMsg(k)})
 	}
-	for _, c := range cases {
-		m := pressKeys(base(), c.keys...)
-		if !m.hasOpenFile() || !c.ok(m) || paneOf(m).cursor != 0 || paneOf(m).killID != "" {
-			t.Errorf("%s over the file: file open=%v result=%v pane cursor=%d kill=%q flash=%q",
-				c.name, m.hasOpenFile(), c.ok(m), paneOf(m).cursor, paneOf(m).killID, m.flash)
-		}
-	}
-	for _, keys := range [][]tea.KeyPressMsg{{keyMsg("O")}, {keyMsg("enter")}, {keyMsg("d"), keyMsg("d")}} {
-		m := pressKeys(base(), keys...)
-		if !m.hasOpenFile() || viewOf(m) != viewTree || paneOf(m).killID != "" || m.flash != "" {
-			t.Errorf("%q over the file acted on the pane: file open=%v view=%v kill=%q flash=%q",
-				keyTexts(keys), m.hasOpenFile(), viewOf(m), paneOf(m).killID, m.flash)
+	for _, ks := range keys {
+		m := pressKeys(base(), ks...)
+		tree := m.left.tree
+		if !m.hasOpenFile() || fileOf(m).log || spawnOpen(m) || m.focused != mainPane || tree.inputMode != pmNone ||
+			tree.showHidden || tree.showGone || m.projectsLeftW() != base().projectsLeftW() ||
+			viewOf(m) != viewTree || paneOf(m).killID != "" || m.flash != "" {
+			t.Errorf("%q over the file acted: file open=%v focus=%v flash=%q", keyTexts(ks), m.hasOpenFile(), m.focused, m.flash)
 		}
 	}
 }
@@ -459,9 +440,6 @@ func TestViewerAndSessionFilesFooters(t *testing.T) {
 	ss, _ := s.enterSession("n1:s1")
 	s, _ = ss.syncSidebar()
 	s = withTreeLoaded(s, "n1:w1")
-	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "^wl files") {
-		t.Errorf("session footer should offer ^wl files: %q", f)
-	}
 	s = pressKeys(s, cw('l')...)
 	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "h/l fold") {
 		t.Errorf("session footer with the file tree focused = %q", f)
@@ -469,18 +447,6 @@ func TestViewerAndSessionFilesFooters(t *testing.T) {
 	s, _ = upd(s, tea.KeyPressMsg{Code: tea.KeyEnter}) // focus moves to the file
 	if f := ansi.Strip(s.currentFooter()); !strings.Contains(f, "close") {
 		t.Errorf("session footer with a file open = %q", f)
-	}
-}
-
-func TestPaneFooterNamesNextFocus(t *testing.T) {
-	m := wideWorkspace()
-	m = withFocus(m, mainPane)
-	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "^ww/^wW files") {
-		t.Errorf("with files visible, <C-w>w goes to files: %q", f)
-	}
-	m.right.hidden = true
-	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "^ww/^wW tree") {
-		t.Errorf("with files hidden, <C-w>w goes to the tree: %q", f)
 	}
 }
 
