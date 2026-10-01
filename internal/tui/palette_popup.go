@@ -22,10 +22,23 @@ const (
 func paletteModes() []paletteMode {
 	return []paletteMode{{
 		title:       "Go to",
-		placeholder: "Search sessions, workspaces, projects",
+		placeholder: "Search sessions, workspaces, projects · > for commands",
 		sources:     []paletteSource{sessionsSource{}, placesSource{}},
 		scoped:      true,
+	}, {
+		prefix:  ">",
+		title:   "Commands",
+		sources: []paletteSource{commandsSource{}},
 	}}
+}
+
+// underPalette is m as the sources read it: without the open palette, so
+// that m.screen() is the section under it.
+func underPalette(m model) model {
+	if _, ok := m.popups.front().(palettePopup); ok {
+		m.popups = m.popups.closeFront()
+	}
+	return m
 }
 
 // palettePopup is the open palette. snaps holds the snapshot of each mode
@@ -100,7 +113,7 @@ func (p *palettePopup) refresh(m model) {
 	mode, q := modeFor(p.modes, p.input.Value())
 	p.mode = mode
 	if _, ok := p.snaps[mode]; !ok {
-		p.snaps[mode] = takeSnapshot(m, p.modes[mode])
+		p.snaps[mode] = takeSnapshot(underPalette(m), p.modes[mode])
 	}
 	items := p.snap().items
 	if p.scoped() {
@@ -202,7 +215,11 @@ func (p palettePopup) draw(c *ctx, scr uv.Screen, area uv.Rectangle) {
 }
 
 func (p palettePopup) footer() []binding {
-	out := []binding{hint("↑/↓", "choose"), hint("enter", "open")}
+	act := "open"
+	if p.cursor < len(p.matches) && len(p.matches[p.cursor].actions) > 0 {
+		act = p.matches[p.cursor].actions[0].name
+	}
+	out := []binding{hint("↑/↓", "choose"), hint("enter", act)}
 	if p.canNarrow() {
 		out = append(out, hint("tab", "narrow"))
 	}
@@ -256,7 +273,11 @@ func (p palettePopup) listRows(w, n int) []string {
 		}
 		label := xansi.Truncate(highlightName(pm.label, pm.labelHits, base), labelW, "…")
 		label += base.Render(strings.Repeat(" ", max(0, labelW-lipgloss.Width(label))))
-		row := xansi.Truncate(pm.marker+" "+label+base.Render("  ")+highlightName(pm.detail, pm.detailHits, dim), w, "…")
+		row := pm.marker + " " + label + base.Render("  ") + highlightName(pm.detail, pm.detailHits, dim)
+		if pm.hint != "" {
+			row += base.Render("  ") + dim.Render(pm.hint)
+		}
+		row = xansi.Truncate(row, w, "…")
 		if i == p.cursor {
 			row += base.Render(strings.Repeat(" ", max(0, w-lipgloss.Width(row))))
 		}
