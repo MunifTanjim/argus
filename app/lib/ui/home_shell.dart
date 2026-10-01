@@ -31,7 +31,7 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _drawerKey = GlobalKey<ModalShellDrawerState>();
   // Only the current scope (null is Home) has a navigator; entering a scope
   // builds a new one from its remembered session.
   _ScopeNavigator? _nav;
@@ -158,9 +158,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   void _back() {
-    final drawer = _scaffoldKey.currentState;
-    if (drawer != null && drawer.isDrawerOpen) {
-      drawer.closeDrawer();
+    final drawer = _drawerKey.currentState;
+    if (drawer != null && drawer.isOpen) {
+      drawer.close();
       return;
     }
     final scope = ref.read(scopeProvider);
@@ -242,15 +242,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         if (!didPop) _back();
       },
       child: ShellDrawerScope(
-        openDrawer: wide ? null : () => _scaffoldKey.currentState?.openDrawer(),
+        openDrawer: wide ? null : () => _drawerKey.currentState?.open(),
+        closeDrawer: wide ? null : () => _drawerKey.currentState?.close(),
         child: Scaffold(
-          key: _scaffoldKey,
-          drawer: wide
-              ? null
-              : Drawer(
-                  width: min(screenWidth - 56, kDrawerMaxWidth),
-                  child: const ProjectDrawer(),
-                ),
           body: wide
               ? Row(
                   children: [
@@ -259,7 +253,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     Expanded(child: main),
                   ],
                 )
-              : main,
+              : ModalShellDrawer(
+                  key: _drawerKey,
+                  width: min(screenWidth - 56, kDrawerMaxWidth),
+                  drawer: const ProjectDrawer(),
+                  child: main,
+                ),
         ),
       ),
     );

@@ -10,6 +10,7 @@ import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import 'project_actions.dart';
 import 'settings_screen.dart';
+import 'shell_drawer.dart';
 import 'theme.dart';
 
 const _amber = Color(0xFFd79921);
@@ -37,7 +38,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       .read(projectsProvider.notifier)
       .load(ref.read(gatewayProvider)?.client);
 
-  void _close() => Scaffold.maybeOf(context)?.closeDrawer();
+  void _close() => ShellDrawerScope.closeDrawerOf(context)?.call();
 
   void _select(String? workspaceId) {
     ref.read(scopeProvider.notifier).state = workspaceId;

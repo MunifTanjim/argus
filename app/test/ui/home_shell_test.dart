@@ -121,8 +121,11 @@ Future<void> _pumpRoute(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 1));
 }
 
-Future<void> _swipeOpenDrawer(WidgetTester tester) async {
-  await tester.dragFrom(const Offset(5, 300), const Offset(300, 0));
+Future<void> _holdOpenDrawer(WidgetTester tester) async {
+  final gesture = await tester.startGesture(const Offset(5, 300));
+  await tester.pump(const Duration(milliseconds: 350));
+  await gesture.moveBy(const Offset(300, 0));
+  await gesture.up();
   await _pumpRoute(tester);
 }
 
@@ -316,7 +319,7 @@ void main() {
     expect(find.byType(BackButton), findsOneWidget);
     expect(find.byIcon(Icons.menu), findsNothing);
 
-    await _swipeOpenDrawer(tester);
+    await _holdOpenDrawer(tester);
     await _pumpRoute(tester);
     expect(find.text('Settings'), findsOneWidget);
     await tester.tap(find.text('registry'));
@@ -611,7 +614,7 @@ void main() {
   testWidgets('back closes an open drawer before popping', (tester) async {
     final c = await _shell(tester);
     await _openSessionIn(tester, c, 'A:w2');
-    await _swipeOpenDrawer(tester);
+    await _holdOpenDrawer(tester);
     await _pumpRoute(tester);
     expect(find.text('Settings'), findsOneWidget);
 
@@ -620,6 +623,93 @@ void main() {
     expect(find.text('Settings'), findsNothing);
     expect(find.byType(SessionDetailScreen), findsOneWidget);
     expect(c.read(scopeProvider), 'A:w2');
+  });
+
+  testWidgets('back at Home closes an open drawer and stays in the app', (tester) async {
+    await _shell(tester);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
+
+    expect(await tester.binding.handlePopRoute(), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.byType(Drawer), findsNothing);
+    expect(find.byType(HomeShell), findsOneWidget);
+  });
+
+  group('edge hold', () {
+    Future<TestGesture> hold(WidgetTester tester) async {
+      final gesture = await tester.startGesture(const Offset(5, 300));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      return gesture;
+    }
+
+    double drawerRight(WidgetTester tester) =>
+        tester.getTopRight(find.byType(Drawer)).dx;
+
+    testWidgets('a quick edge swipe leaves the drawer closed', (tester) async {
+      await _shell(tester);
+      await tester.dragFrom(const Offset(5, 300), const Offset(300, 0));
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+    });
+
+    testWidgets('a hold peeks the drawer, a pull drags it open', (tester) async {
+      await _shell(tester);
+      final gesture = await hold(tester);
+      expect(drawerRight(tester), 20);
+
+      await gesture.moveBy(const Offset(100, 0));
+      await tester.pump();
+      expect(drawerRight(tester), 120);
+      await gesture.moveBy(const Offset(150, 0));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsOneWidget);
+      expect(tester.getTopLeft(find.byType(Drawer)).dx, 0);
+    });
+
+    testWidgets('the peek covers the system gesture inset', (tester) async {
+      await _shell(tester);
+      tester.view.systemGestureInsets = const FakeViewPadding(left: 30);
+      await tester.pump();
+      await hold(tester);
+      expect(drawerRight(tester), 30);
+    });
+
+    testWidgets(
+      'iOS: a quick edge swipe on a pushed screen goes back',
+      (tester) async {
+        final c = await _shell(tester);
+        await _openSessionIn(tester, c, 'A:w1');
+        await tester.dragFrom(const Offset(5, 300), const Offset(300, 0));
+        await _pumpRoute(tester);
+        expect(_detailInShell, findsNothing);
+        expect(find.byType(Drawer), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
+
+    testWidgets('releasing a peek closes the drawer', (tester) async {
+      await _shell(tester);
+      final gesture = await hold(tester);
+      expect(find.byType(Drawer), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+    });
+
+    testWidgets('a tap at the edge still reaches the content', (tester) async {
+      final c = await _shell(tester);
+      c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+      await tester.pump();
+      final card = tester.getRect(find.byType(SessionCard));
+      expect(card.left + 2, lessThan(20));
+      await tester.tapAt(Offset(card.left + 2, card.center.dy));
+      await _pumpRoute(tester);
+      expect(_detailInShell, findsOneWidget);
+    });
   });
 
   testWidgets('a vanished workspace drops its stack', (tester) async {
