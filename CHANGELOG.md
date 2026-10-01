@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.1.0](https://github.com/MunifTanjim/argus/compare/0.0.17...0.1.0) (2026-10-01)
+
+
+### Features
+
+* add project and workspace registry ([912c252](https://github.com/MunifTanjim/argus/commit/912c252bcb3ab66fe0b95e40403d416af8a45393))
+* add projects screen to manage projects and workspaces ([66a86b3](https://github.com/MunifTanjim/argus/commit/66a86b36b957bc41922e7dbdbfe23f3d19090de7))
+* **cli:** add project and workspace commands ([b643195](https://github.com/MunifTanjim/argus/commit/b643195aebbf8807e84721cef7fc17bbc6514fa6))
+* configure tui keymaps in vim notation ([728cdb5](https://github.com/MunifTanjim/argus/commit/728cdb53a942d9eddcaf9503dfc29b95de5d10e8))
+* create workspaces from a branch, pr, or issue ([93ef296](https://github.com/MunifTanjim/argus/commit/93ef2967f761f037f8965017aab817b1c433ff62))
+* forget a project ([87149cf](https://github.com/MunifTanjim/argus/commit/87149cf4b0eb578e1bb4306d3324eabead78e370))
+* **node:** bound automatic adoption with workspace.auto-adopt-dirs ([7ae7741](https://github.com/MunifTanjim/argus/commit/7ae77415a1e20ec2eed0afd84727f037820f9100))
+* **node:** copy .worktreeinclude files into new workspaces ([fb44c3e](https://github.com/MunifTanjim/argus/commit/fb44c3ecbfac56c502062e5aee42e1cf00a3fb6b))
+* refuse to remove a busy workspace ([b78a948](https://github.com/MunifTanjim/argus/commit/b78a94804c25e4a3a02611efa10229c45742a50a))
+* run workspace setup and teardown scripts ([9337ab3](https://github.com/MunifTanjim/argus/commit/9337ab3c1586da6c0aea1be96053b61ab2c6c4b8))
+* show workspace target and spawn location ([8b330ca](https://github.com/MunifTanjim/argus/commit/8b330cadde60f19efe3aa422c61d8fd963a41f43))
+* **tui:** add a command line ([f1c25af](https://github.com/MunifTanjim/argus/commit/f1c25afb74c8d0d487ee4fcc01034080bb403e2c))
+* **tui:** add a command palette ([2d61882](https://github.com/MunifTanjim/argus/commit/2d618829dc7d5af3b72232993716e29e88c8ff0f))
+* **tui:** add workspace sidebar with files, changes, and commits ([54f5484](https://github.com/MunifTanjim/argus/commit/54f54849baddcc1d549b014db5c3df067bbad936))
+* **tui:** filter the session lists ([3fee2a9](https://github.com/MunifTanjim/argus/commit/3fee2a97a1dda203a02dc073255282040d1e4a8d))
+* **tui:** make the projects tree the root screen ([ee3a98d](https://github.com/MunifTanjim/argus/commit/ee3a98dc575aa132763e71ac0ff52ec814c5877a))
+* **tui:** pass mouse wheel to programs in the live terminal ([11d64fb](https://github.com/MunifTanjim/argus/commit/11d64fb384e3034fbe43355c0d18ae8a8ebd712e))
+* **tui:** refresh the changes view in place ([5235d6c](https://github.com/MunifTanjim/argus/commit/5235d6c097f29eaf86cfca556867a73f246b98fd))
+* **tui:** remember the view per workspace ([2f77c2d](https://github.com/MunifTanjim/argus/commit/2f77c2db1400af233898baa1ed7c62b9b6c09370))
+* **tui:** search commands in the palette ([00453b8](https://github.com/MunifTanjim/argus/commit/00453b8126e27d40a41745a39a8ba8e15ac74032))
+* **tui:** spawn sessions from home and project rows ([48e821d](https://github.com/MunifTanjim/argus/commit/48e821d3a883821519497587c017e2608809aebb))
+* **tui:** toggle session lists to active sessions ([1a83a10](https://github.com/MunifTanjim/argus/commit/1a83a10a4c708f11e5d3aba8e24ce8f0e100140b))
+* **tui:** trim footer hints ([d3adbd5](https://github.com/MunifTanjim/argus/commit/d3adbd54aaf993b06141fbcf2372407c2d416e62))
+* **tui:** unify tree and spawn keys ([dfffb96](https://github.com/MunifTanjim/argus/commit/dfffb961b935ae5809a290145b049f5bcdf2e53d))
+
+
+### Bug Fixes
+
+* explain git and gh failures ([35fa7d1](https://github.com/MunifTanjim/argus/commit/35fa7d160640ad9613e4fe89b22c9ed2b3b23e4e))
+* keep projects whose git probe fails ([3398c7c](https://github.com/MunifTanjim/argus/commit/3398c7c3e99e330fca98eb151f490b7b8f25f8b1))
+* **tui:** flash a failed kill ([baf54d1](https://github.com/MunifTanjim/argus/commit/baf54d1db9b745eb5af7884207898ffca90f51af))
+* **tui:** send alt with named keys to the live terminal ([5603c0b](https://github.com/MunifTanjim/argus/commit/5603c0b3c82c1ffe23c621dc0a9683281c1cdc98))
+
+
+### Performance Improvements
+
+* **tui:** cache rendered transcript cards ([4f0a919](https://github.com/MunifTanjim/argus/commit/4f0a9194008a583c1b5d7d83ba199a4ca969bcdf))
+
 ## [0.0.17](https://github.com/MunifTanjim/argus/compare/0.0.16...0.0.17) (2026-09-21)
 
 
