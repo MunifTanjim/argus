@@ -16,6 +16,7 @@ const (
 	paletteWorkspace
 	paletteProject
 	paletteNode
+	paletteCommand
 )
 
 // paletteItem is one row of the palette. parent is the id of the item it is
@@ -26,6 +27,7 @@ type paletteItem struct {
 	marker  string // styled glyph that starts the row
 	label   string
 	detail  string
+	hint    string // dim text after the detail that matching ignores
 	parent  string
 	actions []paletteAction
 }

@@ -41,6 +41,10 @@ sessions of that workspace. If the query is empty, press `<BS>` to search one
 level wider. Press `<Tab>` on a project, a node, or a workspace to search only
 in it.
 
+Type `>` at the start of the query to search commands instead. The palette
+lists the same commands as the command line, and `<CR>` runs the selected
+command.
+
 ## Keymaps
 
 To change a key, add a mapping under `tui.keymap` in the

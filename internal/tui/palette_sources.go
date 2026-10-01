@@ -158,3 +158,30 @@ func treeNodeCount(t projectTreeComp) int {
 	}
 	return len(nodes)
 }
+
+type commandsSource struct{}
+
+// items are the commands that the command line offers in the section under
+// the palette, by name, with their keys as hints. Each runs the way the
+// command line runs it.
+func (commandsSource) items(m model) []paletteItem {
+	set := slices.SortedFunc(slices.Values(m.commandSet()), func(a, b binding) int { return strings.Compare(a.name, b.name) })
+	sk := m.keymap().screenKeys(m.screen())
+	out := make([]paletteItem, 0, len(set))
+	for _, b := range set {
+		var keys []string
+		for _, id := range sk.listedKeys(b) {
+			keys = append(keys, keyLabel(id))
+		}
+		name := b.name
+		out = append(out, paletteItem{
+			id:      "command:" + name,
+			kind:    paletteCommand,
+			marker:  StyleDim.Render(">"),
+			label:   name,
+			hint:    strings.Join(keys, " "),
+			actions: []paletteAction{{name: "run", run: func(c *ctx) { c.runCommand(name) }}},
+		})
+	}
+	return out
+}

@@ -122,3 +122,11 @@ func TestMatchPaletteKeepsOrder(t *testing.T) {
 		t.Errorf("no match = %v", matchIDs(got))
 	}
 }
+
+func TestMatchPaletteIgnoresTheHint(t *testing.T) {
+	it := pi("command:x", paletteCommand, "abc", "", "")
+	it.hint = "zz"
+	if got := matchPalette([]paletteItem{it}, "zz"); len(got) != 0 {
+		t.Errorf("the hint matched: %v", matchIDs(got))
+	}
+}
