@@ -32,6 +32,15 @@ run it. The list above the command line shows the matching commands and their
 keys. The command line offers only the commands that do something in the
 current view.
 
+### Palette
+
+Press `<C-k>` to open the palette. The palette searches sessions, workspaces,
+projects, and nodes. Press `<CR>` to open the selected item. The palette starts
+in the place that you are in. For example, in a workspace it lists only the
+sessions of that workspace. If the query is empty, press `<BS>` to search one
+level wider. Press `<Tab>` on a project, a node, or a workspace to search only
+in it.
+
 ## Keymaps
 
 To change a key, add a mapping under `tui.keymap` in the
@@ -159,6 +168,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `next diff-file` | file | `]f` |
 | `open` | changes, file-tree, history, home, project-tree, transcript, workspace | `<CR>` |
 | `open live-screen` | session-dock, transcript | `<C-t>` |
+| `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<C-k>` |
 | `open setup-log` | project-tree, workspace | `L` |
 | `open tmux-pane` | home, workspace | `O` |
 | `option select` | session-dock | `<Space>` |

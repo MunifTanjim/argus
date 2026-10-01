@@ -18,13 +18,13 @@
                                                    yow        open file: wrap long lines · toggle line-wrap
 
   Manage (tree)                                               Screen
-  a          new workspace (branch/PR/issue) · workspace new  s          spawn in the selected workspace · session spawn
-  dd         remove workspace · workspace remove              ^w</^w>    resize focused sidebar · sidebar wider
-  D shift+d  force remove · workspace force-remove            ␣e         toggle right sidebar · toggle right-sidebar
-  r          rename project · project rename                  ␣o         toggle sidebar · toggle left-sidebar
-  F shift+f  forget project (files stay) · project forget     gr         refresh · refresh
-  P shift+p  pin / unpin project · project pin                g?         help · help
-  H shift+h  hide / unhide project · project hide             Q shift+q  quit · quit
-  z.         show hidden · toggle show-hidden
+  a          new workspace (branch/PR/issue) · workspace new  ^k         go to a session or a place · open palette
+  dd         remove workspace · workspace remove              s          spawn in the selected workspace · session spawn
+  D shift+d  force remove · workspace force-remove            ^w</^w>    resize focused sidebar · sidebar wider
+  r          rename project · project rename                  ␣e         toggle right sidebar · toggle right-sidebar
+  F shift+f  forget project (files stay) · project forget     ␣o         toggle sidebar · toggle left-sidebar
+  P shift+p  pin / unpin project · project pin                gr         refresh · refresh
+  H shift+h  hide / unhide project · project hide             g?         help · help
+  z.         show hidden · toggle show-hidden                 Q shift+q  quit · quit
 
                                                ↑/↓ scroll · any key close

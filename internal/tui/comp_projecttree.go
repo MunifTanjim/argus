@@ -478,6 +478,22 @@ func (t *projectTreeComp) reveal(wsID string) {
 	}
 }
 
+// revealRow drops the filter and unfolds the rows above row id, so that the
+// row shows, and selects it.
+func (t *projectTreeComp) revealRow(id string) bool {
+	for _, p := range t.data {
+		if p.ID == id || slices.ContainsFunc(p.Workspaces, func(w api.WorkspaceNode) bool { return w.ID == id }) {
+			delete(t.collapsed, p.NodeID)
+			if p.ID != id {
+				delete(t.collapsed, p.ID)
+			}
+		}
+	}
+	t.filter = ""
+	t.rows = t.flatten()
+	return t.selectRow(id)
+}
+
 // follow unfolds the rows that hold id only if that makes id visible. The
 // cursor stays when the filter or the hidden setting hides the row.
 func (t *projectTreeComp) follow(id string) {
