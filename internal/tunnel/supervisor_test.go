@@ -110,12 +110,14 @@ func TestSupervisorClassifiesLineLevels(t *testing.T) {
 	sup := Supervisor{Logger: slog.New(cap), MinBackoff: time.Millisecond, MaxBackoff: time.Millisecond, KillGrace: time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	var runErr error
 	go func() {
-		_ = sup.Run(ctx, classifyingProvider{bin: bin}, "http://127.0.0.1:8443", func(string) {})
+		runErr = sup.Run(ctx, classifyingProvider{bin: bin}, "http://127.0.0.1:8443", func(string) {})
 		close(done)
 	}()
 
-	// Wait until both lines have been logged (or time out).
+	// Wait until both lines have been logged (or time out). A supervisor that
+	// stops first, such as on a failed start, reports its error.
 	deadline := time.After(3 * time.Second)
 	for {
 		_, gotInfo := cap.levelFor("INF info line")
@@ -124,6 +126,8 @@ func TestSupervisorClassifiesLineLevels(t *testing.T) {
 			break
 		}
 		select {
+		case <-done:
+			t.Fatalf("the supervisor stopped before both lines were logged: %v", runErr)
 		case <-deadline:
 			cancel()
 			<-done
