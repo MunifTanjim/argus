@@ -57,6 +57,7 @@ ThemeData buildArgusTheme() {
     brightness: Brightness.dark,
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.canvas,
+    appBarTheme: const AppBarTheme(centerTitle: false),
     textTheme: Typography.whiteMountainView.apply(
       bodyColor: AppColors.text,
       displayColor: AppColors.text,
