@@ -6,8 +6,8 @@ import '../state/voice.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
-/// Settings for dictation: the user's own OpenRouter key and the speech-to-text
-/// model it pays for.
+/// Settings for dictation: the transcription provider, then that provider's
+/// settings (for OpenRouter, the user's own key and the model it pays for).
 class VoiceScreen extends ConsumerStatefulWidget {
   const VoiceScreen({super.key});
 
@@ -66,6 +66,61 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _header('Provider'),
+            RadioGroup<VoiceProvider>(
+              groupValue: prefs.provider,
+              onChanged: (v) {
+                if (v != null) {
+                  ref.read(voicePrefsProvider.notifier).setProvider(v);
+                }
+              },
+              child: Column(
+                children: [
+                  for (final p in VoiceProvider.values)
+                    RadioListTile<VoiceProvider>(
+                      key: Key('voice-provider-${p.name}'),
+                      contentPadding: EdgeInsets.zero,
+                      value: p,
+                      title: Text(p.label),
+                    ),
+                ],
+              ),
+            ),
+            if (prefs.provider == VoiceProvider.openrouter) ...[
+              const SizedBox(height: 24),
+              _header('OpenRouter'),
+              ..._openRouterBody(prefs, dirty),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              switch (prefs) {
+                VoicePrefs(enabled: true) => 'The mic button appears next to '
+                    'the reply and new-session prompt fields.',
+                VoicePrefs(provider: VoiceProvider.off) =>
+                  'Pick a provider to turn on the mic button.',
+                _ => 'Add a key to turn on the mic button.',
+              },
+              style: const TextStyle(color: AppColors.dim, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _header(String title) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: AppColors.accent,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+
+  List<Widget> _openRouterBody(VoicePrefs prefs, bool dirty) => [
             TextField(
               key: const Key('openrouter-api-key'),
               controller: _key,
@@ -129,19 +184,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               'cost depends on how much you say.',
               style: TextStyle(color: AppColors.dim, fontSize: 12),
             ),
-            const SizedBox(height: 16),
-            Text(
-              prefs.enabled
-                  ? 'The mic button appears next to the reply and new-session '
-                      'prompt fields.'
-                  : 'Add a key to turn on the mic button.',
-              style: const TextStyle(color: AppColors.dim, fontSize: 12),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+          ];
 
   /// What the line beside the Save button says. Names the destructive case
   /// outright, because an emptied field saves as "forget the key".

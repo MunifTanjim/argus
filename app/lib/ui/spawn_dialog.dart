@@ -10,7 +10,7 @@ import '../state/history_view_model.dart';
 import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
 import 'theme.dart';
-import 'voice_input_bar.dart';
+import 'voice_input_field.dart';
 
 /// A fixed place to spawn in, such as a workspace: the dialog hides its node
 /// and directory pickers.
@@ -306,22 +306,23 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               decoration: const InputDecoration(labelText: 'Custom path'),
               onChanged: (v) => setState(() => _customPath = v),
             ),
-          TextField(
-            key: const Key('spawn-prompt'),
+          VoiceInputField(
             controller: _promptCtl,
-            decoration: const InputDecoration(
-              labelText: 'Initial prompt',
-              hintText: 'What should this session work on?',
+            onChanged: (v) => setState(() => _prompt = v),
+            statusBelow: true,
+            field: (suffixIcon) => TextField(
+              key: const Key('spawn-prompt'),
+              controller: _promptCtl,
+              decoration: InputDecoration(
+                labelText: 'Initial prompt',
+                hintText: 'What should this session work on?',
+                suffixIcon: suffixIcon,
+              ),
+              minLines: 3,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              onChanged: (v) => setState(() => _prompt = v),
             ),
-            minLines: 3,
-            maxLines: null,
-            keyboardType: TextInputType.multiline,
-            onChanged: (v) => setState(() => _prompt = v),
-          ),
-          ?voiceInputBar(
-            ref,
-            _promptCtl,
-            onChanged: (v) => setState(() => _prompt = v),
           ),
           if (!spawnable)
             Padding(

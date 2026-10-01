@@ -32,11 +32,67 @@ Widget _app(VoiceStore store, {List<TranscriptionModel>? models}) =>
 
 const _field = Key('openrouter-api-key');
 const _saveButton = Key('save-api-key');
+const _off = Key('voice-provider-off');
+const _openrouter = Key('voice-provider-openrouter');
+
+Future<VoiceStore> _openRouter(SecureKv kv) async {
+  final store = VoiceStore(kv);
+  await store.setProvider(VoiceProvider.openrouter);
+  return store;
+}
 
 void main() {
-  testWidgets('typing alone does not persist; Save does', (tester) async {
+  testWidgets('with no provider, only the provider choice shows',
+      (tester) async {
+    await tester.pumpWidget(_app(VoiceStore(_MemKv())));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(_off), findsOneWidget);
+    expect(find.byKey(_openrouter), findsOneWidget);
+    expect(find.byKey(_field), findsNothing);
+    expect(find.byKey(const Key('transcription-model')), findsNothing);
+    expect(find.text('Pick a provider to turn on the mic button.'),
+        findsOneWidget);
+  });
+
+  testWidgets('picking OpenRouter persists it and shows its settings',
+      (tester) async {
     final kv = _MemKv();
     await tester.pumpWidget(_app(VoiceStore(kv)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(_openrouter));
+    await tester.pumpAndSettle();
+
+    expect(await kv.read('voice.provider'), 'openrouter');
+    expect(find.byKey(_field), findsOneWidget);
+    expect(find.byKey(const Key('transcription-model')), findsOneWidget);
+    expect(find.text('Add a key to turn on the mic button.'), findsOneWidget);
+  });
+
+  testWidgets('turning the provider off hides its settings and keeps the key',
+      (tester) async {
+    final kv = _MemKv();
+    final store = await _openRouter(kv);
+    await store.setApiKey('sk-or-v1-abc');
+    await tester.pumpWidget(_app(store));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(_field), findsOneWidget);
+
+    await tester.tap(find.byKey(_off));
+    await tester.pumpAndSettle();
+
+    expect(await kv.read('voice.provider'), 'off');
+    expect(await kv.read('voice.openrouterApiKey'), 'sk-or-v1-abc');
+    expect(find.byKey(_field), findsNothing);
+    expect(find.text('Pick a provider to turn on the mic button.'),
+        findsOneWidget);
+  });
+
+  testWidgets('typing alone does not persist; Save does', (tester) async {
+    final kv = _MemKv();
+    await tester.pumpWidget(_app(await _openRouter(kv)));
     await tester.pumpAndSettle();
 
     expect(find.text('No key saved'), findsOneWidget);
@@ -59,7 +115,7 @@ void main() {
   testWidgets('Save is disabled until the field differs from what is stored',
       (tester) async {
     final kv = _MemKv();
-    final store = VoiceStore(kv);
+    final store = await _openRouter(kv);
     await store.setApiKey('sk-or-v1-abc');
     await tester.pumpWidget(_app(store));
     await tester.pumpAndSettle();
@@ -75,7 +131,7 @@ void main() {
 
   testWidgets('a pasted key is trimmed before it is stored', (tester) async {
     final kv = _MemKv();
-    await tester.pumpWidget(_app(VoiceStore(kv)));
+    await tester.pumpWidget(_app(await _openRouter(kv)));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(_field), '  sk-or-v1-abc\n');
@@ -94,7 +150,7 @@ void main() {
         TranscriptionModel('vendor/model-$i', 'Model $i',
             perAudioSecond: i * 0.000001),
     ];
-    await tester.pumpWidget(_app(VoiceStore(_MemKv()), models: many));
+    await tester.pumpWidget(_app(await _openRouter(_MemKv()), models: many));
     await tester.pumpAndSettle();
 
     final menu = tester.widget<DropdownButton<String>>(
@@ -108,7 +164,7 @@ void main() {
   testWidgets('clearing the field and saving removes the stored key',
       (tester) async {
     final kv = _MemKv();
-    final store = VoiceStore(kv);
+    final store = await _openRouter(kv);
     await store.setApiKey('sk-or-v1-abc');
     await tester.pumpWidget(_app(store));
     await tester.pumpAndSettle();

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:record/record.dart';
 
 import '../data/openrouter.dart';
 import '../pairing/gateway_store.dart';
@@ -6,19 +7,45 @@ import '../pairing/gateway_store.dart';
 /// Fast, cheap and widely available. The user can pick another in settings.
 const defaultTranscriptionModel = 'openai/whisper-large-v3-turbo';
 
-/// Persisted voice-input settings: the user's own OpenRouter key and the
-/// speech-to-text model to spend it on.
-class VoicePrefs {
-  const VoicePrefs({this.apiKey = '', this.model = defaultTranscriptionModel});
+enum VoiceProvider {
+  off('Off'),
+  openrouter('OpenRouter');
 
+  const VoiceProvider(this.label);
+  final String label;
+
+  static VoiceProvider parse(String? name) => values.firstWhere(
+        (p) => p.name == name,
+        orElse: () => VoiceProvider.off,
+      );
+}
+
+/// Persisted voice-input settings: the transcription provider, plus the
+/// user's own OpenRouter key and the speech-to-text model to spend it on.
+class VoicePrefs {
+  const VoicePrefs({
+    this.provider = VoiceProvider.off,
+    this.apiKey = '',
+    this.model = defaultTranscriptionModel,
+  });
+
+  final VoiceProvider provider;
   final String apiKey;
   final String model;
 
-  /// The mic button stays hidden until there is a key to spend.
-  bool get enabled => apiKey.isNotEmpty;
+  /// The mic button stays hidden until a provider is picked and has a key.
+  bool get enabled => provider == VoiceProvider.openrouter && apiKey.isNotEmpty;
 
-  VoicePrefs copyWith({String? apiKey, String? model}) =>
-      VoicePrefs(apiKey: apiKey ?? this.apiKey, model: model ?? this.model);
+  VoicePrefs copyWith({
+    VoiceProvider? provider,
+    String? apiKey,
+    String? model,
+  }) =>
+      VoicePrefs(
+        provider: provider ?? this.provider,
+        apiKey: apiKey ?? this.apiKey,
+        model: model ?? this.model,
+      );
 }
 
 /// Reads/writes voice prefs through the app's secure KV. The key is a
@@ -28,17 +55,22 @@ class VoiceStore {
   VoiceStore([this._kv = const FlutterSecureKv()]);
   final SecureKv _kv;
 
+  static const _providerKey = 'voice.provider';
   static const _apiKeyKey = 'voice.openrouterApiKey';
   static const _modelKey = 'voice.model';
 
   Future<VoicePrefs> load() async {
+    final provider = await _kv.read(_providerKey);
     final apiKey = await _kv.read(_apiKeyKey);
     final model = await _kv.read(_modelKey);
     return VoicePrefs(
+      provider: VoiceProvider.parse(provider),
       apiKey: apiKey ?? '',
       model: (model == null || model.isEmpty) ? defaultTranscriptionModel : model,
     );
   }
+
+  Future<void> setProvider(VoiceProvider v) => _kv.write(_providerKey, v.name);
 
   /// Deletes the record for an empty key so clearing it leaves nothing behind.
   Future<void> setApiKey(String v) =>
@@ -51,6 +83,9 @@ final voiceStoreProvider = Provider<VoiceStore>((ref) => VoiceStore());
 
 final openRouterClientProvider =
     Provider<OpenRouterClient>((ref) => OpenRouterClient());
+
+final audioRecorderProvider =
+    Provider<AudioRecorder Function()>((ref) => AudioRecorder.new);
 
 /// The speech-to-text catalog for the settings picker. Needs no key, so it
 /// loads even before the user pastes one.
@@ -73,6 +108,15 @@ class VoiceController extends Notifier<VoicePrefs> {
       state = await ref.read(voiceStoreProvider).load();
     } catch (_) {
       // Keep the default on read failure (e.g. secure storage unavailable).
+    }
+  }
+
+  Future<void> setProvider(VoiceProvider v) async {
+    state = state.copyWith(provider: v);
+    try {
+      await ref.read(voiceStoreProvider).setProvider(v);
+    } catch (_) {
+      // Persist failure is non-fatal.
     }
   }
 
