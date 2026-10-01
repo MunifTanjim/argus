@@ -83,6 +83,9 @@ func (m model) focusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return mm, cmd, true
 	}
 	switch {
+	case m.matches(msg, projectsKeys.Palette):
+		mm, cmd := m.openPalette()
+		return mm, cmd, true
 	case m.offered(projectsKeys.Help) && m.matches(msg, projectsKeys.Help):
 		if m.focused == leftSidebar || m.onRowPane() {
 			m.flash = ""
@@ -273,6 +276,7 @@ func (m model) focusCommands() []binding {
 	if !m.viewer {
 		out = append(out, k.ToggleSidebar, k.ToggleFiles)
 	}
+	out = append(out, k.Palette)
 	return out
 }
 

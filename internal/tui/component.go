@@ -97,6 +97,7 @@ const (
 	actRunCommand
 	actToggleActiveOnly
 	actSetSessionFilter
+	actGoToRow
 )
 
 type action struct {
@@ -146,6 +147,10 @@ func (c *ctx) home() { c.actions = append(c.actions, action{kind: actHome}) }
 
 // openRow shows the view that tree row id remembers and focuses the main pane.
 func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: actOpenRow, id: id}) }
+
+// goToRow shows tree row id from anywhere: the tree drops its filter and
+// unfolds the rows above id, then the main pane opens the row.
+func (c *ctx) goToRow(id string) { c.actions = append(c.actions, action{kind: actGoToRow, id: id}) }
 
 // toggleActiveOnly switches the session lists between all sessions and the
 // active and awaiting-input ones.
@@ -251,6 +256,9 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			m.left.tree.cursor = 0
 			cmds = append(cmds, m.openRow(homeRowID))
 		case actOpenRow:
+			cmds = append(cmds, m.openRow(a.id))
+		case actGoToRow:
+			m.left.tree.revealRow(a.id)
 			cmds = append(cmds, m.openRow(a.id))
 		case actFocusTree:
 			m.focusTree()

@@ -86,6 +86,7 @@ func (m model) helpGroups() []helpGroup {
 			tree(k.RunSetup, "run setup again"),
 		}},
 		{"Screen", []helpRow{
+			tree(k.Palette, "go to a session or a place"),
 			tree(k.Spawn, "spawn in the selected workspace"),
 			tree(k.Widen, "resize focused sidebar"),
 			tree(k.ToggleFiles, "toggle right sidebar"),
