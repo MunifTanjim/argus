@@ -13,17 +13,10 @@ import '../state/respond_view_model.dart';
 import 'code_block.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
-import 'voice_input_bar.dart';
+import 'voice_input_field.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
-///
-/// [startRecording] begins dictation as soon as the sheet is laid out, for the
-/// mic on the interaction bar: one tap from the conversation view to talking.
-Future<void> showRespondSheet(
-  BuildContext context,
-  Session session, {
-  bool startRecording = false,
-}) {
+Future<void> showRespondSheet(BuildContext context, Session session) {
   return showModalBottomSheet<void>(
     context: context,
     useRootNavigator: true,
@@ -32,19 +25,14 @@ Future<void> showRespondSheet(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
       ),
-      child: RespondSheet(session: session, startRecording: startRecording),
+      child: RespondSheet(session: session),
     ),
   );
 }
 
 class RespondSheet extends ConsumerStatefulWidget {
-  const RespondSheet({
-    super.key,
-    required this.session,
-    this.startRecording = false,
-  });
+  const RespondSheet({super.key, required this.session});
   final Session session;
-  final bool startRecording;
 
   @override
   ConsumerState<RespondSheet> createState() => _RespondSheetState();
@@ -280,22 +268,21 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   }
 
   List<Widget> _idle() => [
-    TextField(
+    VoiceInputField(
       controller: _text,
-      autofocus: true,
-      minLines: 1,
-      maxLines: 6,
       onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
-      decoration: const InputDecoration(
-        labelText: 'Reply',
-        border: OutlineInputBorder(),
+      field: (suffixIcon) => TextField(
+        controller: _text,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 6,
+        onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
+        decoration: InputDecoration(
+          labelText: 'Reply',
+          border: const OutlineInputBorder(),
+          suffixIcon: suffixIcon,
+        ),
       ),
-    ),
-    ?voiceInputBar(
-      ref,
-      _text,
-      onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
-      autoStart: widget.startRecording,
     ),
     const SizedBox(height: 12),
     FilledButton(

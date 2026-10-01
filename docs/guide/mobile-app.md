@@ -86,25 +86,10 @@ in the published app. Source builds must embed a PushPort app id.
 
 ## Voice Input
 
-Dictate a prompt instead of typing it. Off by default — it needs your own
-[OpenRouter](https://openrouter.ai) key.
+Dictate prompts with your own [OpenRouter](https://openrouter.ai) key. In
+**Settings → Voice Input**, pick **OpenRouter**, save the key, and pick a model.
+A mic then appears in the reply field and the new-session prompt field.
 
-Paste the key in **Settings → Voice Input** and press **Save**. Then pick a
-speech-to-text model. The list is fetched from OpenRouter, cheapest first, with
-the price per minute of audio beside each name. The default is Whisper Large v3
-Turbo.
+Audio goes straight from the device to OpenRouter, never through the gateway,
+and is billed to your account.
 
-A mic button then appears in three places:
-
-- the reply field in the respond sheet,
-- the initial prompt field when you start a session,
-- the interaction bar at the bottom of a conversation, when the session is
-  waiting on a free-text reply. Tapping that one opens the reply sheet and
-  starts recording straight away.
-
-Tap to record, tap again to stop. The transcript lands in the field for you
-to edit, and you send it yourself — nothing is sent automatically.
-
-The recording goes straight from your device to `openrouter.ai`. It does not
-pass through the gateway, and it is deleted from the device as soon as it is
-uploaded. Transcription is billed to your OpenRouter account.

@@ -68,7 +68,7 @@ class SettingsScreen extends ConsumerWidget {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.mic_none),
                       title: const Text('Voice Input'),
-                      subtitle: const Text('OpenRouter key and model'),
+                      subtitle: const Text('Transcription provider and model'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const VoiceScreen()),
