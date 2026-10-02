@@ -162,6 +162,9 @@ class E2EClient implements GatewayClient {
 
   final _byNodeId = <String, NodeChannel>{};
   final _opening = <String, Future<void>>{};
+  // Completes once connect has loaded the trust log. Before that a TOFU store
+  // holds no chain and reads as an open network, so adoption must wait.
+  final _trustLoaded = Completer<void>();
   final _roster = <String, NodeDescriptor>{};
   final _subNode = <String, String>{};
   final _termNode = <String, String>{};
@@ -282,6 +285,7 @@ class E2EClient implements GatewayClient {
         /* keep prior/seeded state (fail-closed) */
       }
     }
+    if (!_trustLoaded.isCompleted) _trustLoaded.complete();
     await _openEligible(nodes);
     final interval = trustResyncInterval;
     if (_trust != null && interval != null && !_closed) {
@@ -366,7 +370,8 @@ class E2EClient implements GatewayClient {
   /// e2e mode) and skips a node that is already connected. Mirrors Go
   /// E2EClient.adoptNode.
   Future<void> _adoptNode(NodeDescriptor desc) async {
-    if (!_eligible(desc)) return;
+    await _trustLoaded.future;
+    if (_closed || !_eligible(desc)) return;
     await _openNode(desc);
   }
 
@@ -1175,6 +1180,7 @@ class E2EClient implements GatewayClient {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    if (!_trustLoaded.isCompleted) _trustLoaded.complete();
     _resyncTimer?.cancel();
     await _sub.cancel();
     await _gatewayNotifSub?.cancel();
