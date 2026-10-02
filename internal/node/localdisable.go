@@ -23,6 +23,11 @@ func (d *Node) LocalDisable() error {
 		return err
 	}
 	d.localDisabledFlag.Store(true)
+	// The gateway reads lock_disabled from node.identify only on connect; the
+	// uplink loop redials and re-announces it.
+	if p := d.activeUplink.Load(); p != nil {
+		p.Close()
+	}
 	return nil
 }
 

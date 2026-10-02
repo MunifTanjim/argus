@@ -1,9 +1,14 @@
 package node
 
 import (
+	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 func TestLocalDisableOverridesQuarantine(t *testing.T) {
@@ -129,5 +134,43 @@ func TestDropPinClearsPersistedPin(t *testing.T) {
 	pinPath := genesisHashPath(path)
 	if _, err := os.Stat(pinPath); !os.IsNotExist(err) {
 		t.Fatal("DropPin must remove the persisted genesis pin file")
+	}
+}
+
+func TestIdentifyReportsLockDisabled(t *testing.T) {
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+
+	res, _ := d.handleNodeIdentify(context.Background(), nil)
+	if res.(api.IdentifyResult).LockDisabled {
+		t.Fatal("identify must not report lock_disabled before local-disable")
+	}
+	if err := d.LocalDisable(); err != nil {
+		t.Fatalf("LocalDisable: %v", err)
+	}
+	res, _ = d.handleNodeIdentify(context.Background(), nil)
+	if !res.(api.IdentifyResult).LockDisabled {
+		t.Fatal("identify must report lock_disabled after local-disable")
+	}
+}
+
+// The gateway reads identify only when the uplink connects, so local-disable must
+// drop the uplink for the roster to pick up the change.
+func TestLocalDisableDropsUplink(t *testing.T) {
+	d := New()
+	d.SetTrustChainPath(filepath.Join(t.TempDir(), "trustlog-chain"))
+
+	conn, other := net.Pipe()
+	defer other.Close()
+	peer := api.NewPeer(conn, api.PeerOptions{})
+	d.activeUplink.Store(peer)
+
+	if err := d.LocalDisable(); err != nil {
+		t.Fatalf("LocalDisable: %v", err)
+	}
+	select {
+	case <-peer.Done():
+	case <-time.After(time.Second):
+		t.Fatal("local-disable must close the gateway uplink")
 	}
 }

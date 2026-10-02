@@ -21,6 +21,8 @@ type Source interface {
 	IdentityPubKey() string
 	// SignerPubKey is the node's Ed25519 signer public key (base64). Empty when unset.
 	SignerPubKey() string
+	// LockDisabled reports that the node turned off locked-mode enforcement for itself.
+	LockDisabled() bool
 	// Done is closed when the source disconnects.
 	Done() <-chan struct{}
 }
