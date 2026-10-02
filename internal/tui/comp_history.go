@@ -79,6 +79,13 @@ func (h historyComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
 	return h, nil
 }
 
+func (h historyComp) menu(*ctx) []binding {
+	if !h.inProject || h.sessCursor >= len(h.sessions) {
+		return nil
+	}
+	return []binding{historySessionsKeys.Resume, transcriptKeys.Export}
+}
+
 func (h historyComp) projectsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m, k, n := c.m, historyProjectsKeys, len(h.projects)
 	var cmd tea.Cmd

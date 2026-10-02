@@ -215,6 +215,19 @@ func (t projectTreeComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
 	return t.move(cursorBy(t.cursor, d, len(t.rows))), nil
 }
 
+func (t projectTreeComp) menu(*ctx) []binding {
+	k := projectsKeys
+	r, ok := t.cursorRow()
+	switch {
+	case !ok:
+	case r.kind == rowProject:
+		return []binding{k.Spawn, k.New, k.Rename, k.Pin, k.Unpin, k.Hide, k.Unhide, k.Forget}
+	case r.kind == rowWorkspace:
+		return []binding{k.Spawn, k.Target, k.RunSetup, k.SetupLog, k.Remove}
+	}
+	return nil
+}
+
 // treeOp is a change to the tree that its own keys and a workspace pane's keys
 // make.
 type treeOp int

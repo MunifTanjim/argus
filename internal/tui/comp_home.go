@@ -185,6 +185,13 @@ func (h homeComp) wheel(c *ctx, d int) (component, tea.Cmd) {
 	return h, nil
 }
 
+func (h homeComp) menu(c *ctx) []binding {
+	if h.cursor >= len(c.m.order) {
+		return nil
+	}
+	return []binding{listKeys.Jump, listKeys.Kill}
+}
+
 func switchHomeTab(c *ctx, t homeTab) tea.Cmd {
 	switch t {
 	case tabSessions:
