@@ -51,6 +51,7 @@ Future<GatewayClient> buildE2EClient(
   ClientIdentityStore identityStore,
   TrustChainStore chainStore, {
   ChainLoader loadChain = loadChainInBackground,
+  void Function(GatewayClient client)? onTrustAdvance,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -69,7 +70,8 @@ Future<GatewayClient> buildE2EClient(
       throw TrustAnchorTampered(); // do NOT re-TOFU a rejected anchor
     }
   }
-  final client = E2EClient(
+  late final E2EClient client;
+  client = E2EClient(
     incoming,
     send,
     identity,
@@ -77,7 +79,10 @@ Future<GatewayClient> buildE2EClient(
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
-    onTrustChainAdvance: chainStore.save,
+    onTrustChainAdvance: (chain) async {
+      await chainStore.save(chain);
+      onTrustAdvance?.call(client);
+    },
   );
   await client.connect();
   final head = client.trustChainBytes;
@@ -221,7 +226,16 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
     clientFactory: (incoming, send) => creds.e2eEnabled
-        ? buildE2EClient(incoming, send, identityStore, chainStore)
+        ? buildE2EClient(
+            incoming,
+            send,
+            identityStore,
+            chainStore,
+            // Refresh the trust status now, not on the next poll, so the home
+            // banner clears when the device's channels open.
+            onTrustAdvance: (client) => trustSignature.state =
+                trustSignatureOf(trustSummaryOf(client)),
+          )
         : Future(() async {
             final client = E2EClient(
               incoming,

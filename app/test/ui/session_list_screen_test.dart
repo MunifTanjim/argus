@@ -1,12 +1,16 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:argus/e2e/e2e.dart' show KeyPair;
 import 'package:argus/models/session.dart';
+import 'package:argus/state/device_identity.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/transport/connection.dart';
+import 'package:argus/ui/device_identity_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 
 Session _s(String id, String host, String status) =>
@@ -138,6 +142,53 @@ void main() {
     ]));
     await tester.pump();
     expect(find.textContaining('Reconnecting'), findsOneWidget);
+  });
+
+  group('unauthorized device', () {
+    const awaiting = TrustSummary(
+      connected: true,
+      isLocked: true,
+      isAuthorized: false,
+      isDisabled: false,
+      tip: null,
+    );
+    const authorized = TrustSummary(
+      connected: true,
+      isLocked: true,
+      isAuthorized: true,
+      isDisabled: false,
+      tip: null,
+    );
+    List<Override> trust(TrustSummary summary) => [
+          gatewayProvider.overrideWithValue(null),
+          connStateProvider.overrideWith((ref) => ConnState.connected),
+          trustSummaryProvider.overrideWith((_) => summary),
+          deviceIdentityProvider
+              .overrideWith((_) async => KeyPair(Uint8List(32), Uint8List(32))),
+        ];
+
+    testWidgets('banner and empty text explain the empty home', (tester) async {
+      await tester.pumpWidget(_app(trust(awaiting)));
+      await tester.pump();
+      expect(find.text('Device not authorized'), findsOneWidget);
+      expect(find.text('Sessions appear after this device is authorized.'),
+          findsOneWidget);
+    });
+
+    testWidgets('no banner once authorized', (tester) async {
+      await tester.pumpWidget(_app(trust(authorized)));
+      await tester.pump();
+      expect(find.text('Device not authorized'), findsNothing);
+      expect(find.text('No sessions.'), findsOneWidget);
+    });
+
+    testWidgets('tapping the banner opens Device Trust', (tester) async {
+      await tester.pumpWidget(_app(trust(awaiting)));
+      await tester.pump();
+      await tester.tap(find.text('Device not authorized'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DeviceIdentityScreen), findsOneWidget);
+    });
   });
 }
 
