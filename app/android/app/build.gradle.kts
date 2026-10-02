@@ -9,6 +9,11 @@ plugins {
 // Optional FCM support: only applied when google-services.json is present.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+    // google-services.json has no client for the ".debug" package; debug builds
+    // skip FCM and main.dart tolerates the Firebase init failure.
+    tasks.matching { it.name == "processDebugGoogleServices" }.configureEach {
+        enabled = false
+    }
 }
 
 // Release signing config, read from android/key.properties (gitignored). Absent
@@ -40,6 +45,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "Argus"
     }
 
     signingConfigs {
@@ -55,6 +61,12 @@ android {
     }
 
     buildTypes {
+        // Separate package so a debug build installs beside the release app
+        // instead of replacing it (different signing key forces an uninstall).
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "Argus Debug"
+        }
         release {
             // Use the upload key when key.properties is present (Play uploads),
             // else fall back to debug keys so `flutter run --release` still works.
