@@ -29,7 +29,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing QR code shown by `argus pair`.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Dictate a prompt instead of typing it. Audio is sent to OpenRouter with your own API key.</string>
+	<string>Dictate a prompt instead of typing it. With the OpenRouter provider, audio is sent to OpenRouter with your own API key.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turn your speech into prompt text with the System voice provider. Recognition runs on this device when it can, otherwise Apple processes the audio.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

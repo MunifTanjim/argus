@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Android 13+ runtime permission for showing push notifications. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Voice input: record a prompt and transcribe it via OpenRouter. -->
+    <!-- Voice input: record a prompt for OpenRouter or the system recognizer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
         android:label="${appLabel}"
@@ -67,6 +67,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Android 11+ hides the speech recognizer used by System voice input. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
 </manifest>

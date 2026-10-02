@@ -5,9 +5,11 @@ import '../data/openrouter.dart';
 import '../state/voice.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'voice_input_field.dart';
 
 /// Settings for dictation: the transcription provider, then that provider's
-/// settings (for OpenRouter, the user's own key and the model it pays for).
+/// settings (for OpenRouter, the user's own key and the model it pays for; for
+/// System, the recognizer's language).
 class VoiceScreen extends ConsumerStatefulWidget {
   const VoiceScreen({super.key});
 
@@ -17,6 +19,8 @@ class VoiceScreen extends ConsumerStatefulWidget {
 
 class _VoiceScreenState extends ConsumerState<VoiceScreen> {
   late final TextEditingController _key;
+  final _tryIt = TextEditingController();
+  late final AppLifecycleListener _lifecycle;
   bool _reveal = false;
 
   @override
@@ -24,6 +28,10 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
     super.initState();
     _key = TextEditingController(text: ref.read(voicePrefsProvider).apiKey)
       ..addListener(_onEdit);
+    // A pack download finishes in the background, so check again on return.
+    _lifecycle = AppLifecycleListener(
+      onResume: () => ref.invalidate(speechPackInstalledProvider),
+    );
   }
 
   // Rebuild so the Save button and the status line follow what is typed.
@@ -31,8 +39,10 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _key.removeListener(_onEdit);
     _key.dispose();
+    _tryIt.dispose();
     super.dispose();
   }
 
@@ -91,17 +101,24 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               _header('OpenRouter'),
               ..._openRouterBody(prefs, dirty),
             ],
-            const SizedBox(height: 16),
-            Text(
-              switch (prefs) {
-                VoicePrefs(enabled: true) => 'The mic button appears next to '
-                    'the reply and new-session prompt fields.',
-                VoicePrefs(provider: VoiceProvider.off) =>
-                  'Pick a provider to turn on the mic button.',
-                _ => 'Add a key to turn on the mic button.',
-              },
-              style: const TextStyle(color: AppColors.dim, fontSize: 12),
-            ),
+            if (prefs.provider == VoiceProvider.system) ...[
+              const SizedBox(height: 24),
+              _header('System'),
+              ..._systemBody(prefs),
+            ],
+            if (!prefs.enabled) ...[
+              const SizedBox(height: 16),
+              Text(
+                prefs.provider == VoiceProvider.off
+                    ? 'Pick a provider to turn on the mic button.'
+                    : 'Add a key to turn on the mic button.',
+                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+              ),
+            ],
+            if (prefs.enabled) ...[
+              const SizedBox(height: 24),
+              ..._tryItBody(prefs),
+            ],
           ],
         ),
       ),
@@ -185,6 +202,144 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               style: TextStyle(color: AppColors.dim, fontSize: 12),
             ),
           ];
+
+  List<Widget> _systemBody(VoicePrefs prefs) => [
+        const Text(
+          'Language',
+          style: TextStyle(color: AppColors.dim, fontSize: 12),
+        ),
+        ref.watch(systemLanguagesProvider).when(
+              data: (languages) => _languagePicker(languages, prefs.language),
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: LinearProgressIndicator(),
+              ),
+              error: (e, _) => _languagesError(e),
+            ),
+        switch (ref.watch(speechPackInstalledProvider(prefs.language))) {
+          AsyncData(value: true) => const Padding(
+              key: Key('speech-pack-installed'),
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.check, size: 18, color: AppColors.dim),
+                  SizedBox(width: 8),
+                  Text(
+                    'Speech pack installed',
+                    style: TextStyle(color: AppColors.dim),
+                  ),
+                ],
+              ),
+            ),
+          AsyncData(value: false) => Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('download-speech-pack'),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text('Download speech pack'),
+                onPressed: () => _downloadPack(prefs.language),
+              ),
+            ),
+          _ => const SizedBox.shrink(),
+        },
+        const SizedBox(height: 8),
+        Text(
+          Theme.of(context).platform == TargetPlatform.iOS
+              ? 'Recognition runs on this device when it can. Otherwise '
+                  'Apple processes the audio.'
+              : 'Recognition runs on this device when it can. Otherwise '
+                  'the system speech service processes the audio.',
+          style: const TextStyle(color: AppColors.dim, fontSize: 12),
+        ),
+      ];
+
+  Future<void> _downloadPack(String selected) async {
+    final packs = ref.read(speechPacksProvider);
+    final result = await packs.download(await packs.resolve(selected));
+    if (!mounted) return;
+    ref.invalidate(speechPackInstalledProvider(selected));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(packDownloadMessage(result))),
+    );
+  }
+
+  List<Widget> _tryItBody(VoicePrefs prefs) => [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _header('Try it')),
+            TextButton(
+              key: const Key('voice-try-clear'),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _tryIt.clear,
+              child: const Text('Clear'),
+            ),
+          ],
+        ),
+        VoiceInputField(
+          controller: _tryIt,
+          statusBelow: true,
+          field: (suffixIcon) => TextField(
+            key: const Key('voice-try-field'),
+            controller: _tryIt,
+            minLines: 3,
+            maxLines: 6,
+            decoration: InputDecoration(
+              hintText: 'Hold the mic and speak',
+              border: const OutlineInputBorder(),
+              suffixIcon: suffixIcon,
+            ),
+          ),
+        ),
+        if (prefs.provider == VoiceProvider.openrouter) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'A test dictation is billed like a real one.',
+            style: TextStyle(color: AppColors.dim, fontSize: 12),
+          ),
+        ],
+      ];
+
+  Widget _languagePicker(List<String> languages, String selected) {
+    // Like the model picker: keep a stored language the recognizer no longer
+    // lists, so the dropdown has a matching value.
+    final items = selected.isEmpty || languages.contains(selected)
+        ? languages
+        : [...languages, selected];
+    return DropdownButton<String>(
+      key: const Key('system-language'),
+      value: selected,
+      isExpanded: true,
+      menuMaxHeight: 336,
+      items: [
+        const DropdownMenuItem(value: '', child: Text('Device language')),
+        for (final l in items) DropdownMenuItem(value: l, child: Text(l)),
+      ],
+      onChanged: (v) {
+        if (v != null) ref.read(voicePrefsProvider.notifier).setLanguage(v);
+      },
+    );
+  }
+
+  Widget _languagesError(Object e) => Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Could not load the language list: $e',
+              style: const TextStyle(color: AppColors.dim, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () => ref.invalidate(systemLanguagesProvider),
+            child: const Text('Retry'),
+          ),
+        ],
+      );
 
   /// What the line beside the Save button says. Names the destructive case
   /// outright, because an emptied field saves as "forget the key".

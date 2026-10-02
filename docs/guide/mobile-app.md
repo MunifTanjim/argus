@@ -86,10 +86,12 @@ in the published app. Source builds must embed a PushPort app id.
 
 ## Voice Input
 
-Dictate prompts with your own [OpenRouter](https://openrouter.ai) key. In
-**Settings → Voice Input**, pick **OpenRouter**, save the key, and pick a model.
-A mic then appears in the reply field and the new-session prompt field.
+To dictate prompts, pick a provider in **Settings → Voice Input**:
 
-Audio goes straight from the device to OpenRouter, never through the gateway,
-and is billed to your account.
+- **System** uses the device's speech recognizer. Recognition runs on the
+  device when it can. Otherwise Apple or the Android speech service processes
+  the audio.
+- **OpenRouter** uses your own [OpenRouter](https://openrouter.ai) key. Save the
+  key and pick a model. Audio goes straight from the device to OpenRouter,
+  never through the gateway, and is billed to your account.
 

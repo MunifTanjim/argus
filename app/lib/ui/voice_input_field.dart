@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:record/record.dart';
-
+import '../data/dictation_engine.dart';
 import '../state/voice.dart';
 import 'theme.dart';
 
@@ -51,9 +50,10 @@ class VoiceInputField extends ConsumerWidget {
 
 enum _Phase { idle, recording, transcribing, message }
 
-/// Records, transcribes through OpenRouter, and drops the text into the field
-/// at the cursor. It never sends: the user reads and edits the transcript, then
-/// presses the field's own send button.
+/// Dictates into the field at the cursor. A live engine updates the text while
+/// the user speaks, and OpenRouter drops it in once transcribed. It never
+/// sends: the user reads and edits the transcript, then presses the field's own
+/// send button.
 class _Dictation extends ConsumerStatefulWidget {
   const _Dictation({
     required this.controller,
@@ -86,10 +86,12 @@ class _DictationState extends ConsumerState<_Dictation> {
   static const _lockDistance = 80.0;
   static const _lockHintHeight = 44.0;
 
-  AudioRecorder? _recorder;
+  DictationEngine? _engine;
+  StreamSubscription<DictationEvent>? _events;
   _Phase _phase = _Phase.idle;
   String _message = '';
   bool _messageIsError = true;
+  ({String label, VoidCallback onPressed})? _messageAction;
 
   /// The pointer holding the mic, or null when no finger is on it. Cleared on
   /// lock, so the locking finger's later moves and release are ignored.
@@ -108,20 +110,23 @@ class _DictationState extends ConsumerState<_Dictation> {
   int? _stopPointer;
   bool _heldLongEnough = false;
   Timer? _minHoldTimer;
-  String? _path;
 
-  /// Bumped whenever a run is claimed, cancelled or superseded. A transcription
-  /// compares the generation it started under against this before it touches
-  /// the field, so a discarded or restarted run cannot land late.
-  int _generation = 0;
+  /// The field before the run's first text, and the field as the run last
+  /// wrote it. Each new text is spliced into [_base], so a live engine's
+  /// revisions replace each other instead of piling up.
+  TextEditingValue? _base;
+  TextEditingValue? _written;
 
   final _clock = Stopwatch();
   Timer? _ticker;
-  StreamSubscription<Amplitude>? _amplitudes;
+  StreamSubscription<double>? _levelSub;
+  bool _metered = false;
   final _levels = <double>[]; // rolling window, newest last
   Duration _clipLength = Duration.zero; // kept for the transcribing label
 
   final _stack = GlobalKey();
+  final _row = GlobalKey();
+  bool _rowShown = false;
 
   /// The mic's offset from the field's bottom edge that centers it on the last
   /// text line. The field's bottom padding depends on its border style, so it
@@ -129,13 +134,30 @@ class _DictationState extends ConsumerState<_Dictation> {
   double _micBottom = 0;
 
   @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onFieldChanged);
+  }
+
+  @override
+  void didUpdateWidget(_Dictation old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      old.controller.removeListener(_onFieldChanged);
+      widget.controller.addListener(_onFieldChanged);
+    }
+  }
+
+  @override
   void dispose() {
-    _stopMeters();
-    // Also stops an in-flight recording, so leaving the sheet mid-dictation
-    // does not leave the mic hot.
-    _recorder?.dispose();
+    widget.controller.removeListener(_onFieldChanged);
+    // Also stops an in-flight run, so leaving the sheet mid-dictation does not
+    // leave the mic hot.
+    _endRun();
     super.dispose();
   }
+
+  bool get _live => _engine?.live ?? false;
 
   void _stopMeters() {
     _clock.stop();
@@ -143,31 +165,29 @@ class _DictationState extends ConsumerState<_Dictation> {
     _minHoldTimer = null;
     _ticker?.cancel();
     _ticker = null;
-    _amplitudes?.cancel();
-    _amplitudes = null;
+    _levelSub?.cancel();
+    _levelSub = null;
+  }
+
+  void _endRun() {
+    _stopMeters();
+    _events?.cancel();
+    _events = null;
+    _engine?.dispose();
+    _engine = null;
+    _base = null;
+    _written = null;
   }
 
   /// [held] is true when a finger on the mic started this run, and false for
   /// a screen reader tap, which has no release to end it.
   Future<void> _start({required bool held}) async {
+    _endRun();
+    final engine = _engine = ref.read(dictationEngineProvider)();
+    _events = engine.events.listen(_onEvent);
     try {
-      // Built on first press, not in initState: constructing a recorder reaches
-      // for the platform channel, and most builds of this widget never record.
-      final recorder = _recorder ??= ref.read(audioRecorderProvider)();
-      if (!await recorder.hasPermission()) {
-        _showMessage('Microphone permission denied');
-        return;
-      }
-      // systemTemp keeps this off the path_provider dependency. The file is
-      // deleted as soon as it is uploaded — it holds the user's voice.
-      _path = '${Directory.systemTemp.path}/argus_voice_'
-          '${DateTime.now().microsecondsSinceEpoch}.wav';
-      // wav: the one format every OpenRouter transcription provider accepts,
-      // and the record package encodes it on every platform without a codec.
-      await recorder.start(
-        const RecordConfig(encoder: AudioEncoder.wav),
-        path: _path!,
-      );
+      await engine.start();
+      if (!identical(engine, _engine)) return;
       _levels.clear();
       _clock
         ..reset()
@@ -177,104 +197,144 @@ class _DictationState extends ConsumerState<_Dictation> {
       });
       // Amplitude is best effort. If the platform withholds it the meter stays
       // flat, but the clock still proves the recording is live.
-      _amplitudes = recorder
-          .onAmplitudeChanged(_tick)
-          .listen(_onAmplitude, onError: (_) {});
+      _levelSub = engine.levels(_tick)?.listen(_onLevel, onError: (_) {});
+      _metered = _levelSub != null;
       _heldLongEnough = false;
       _minHoldTimer = Timer(_minHold, () => _heldLongEnough = true);
       if (mounted) setState(() => _phase = _Phase.recording);
-      // The finger lifted while the recorder was starting, for example during
+      // The finger lifted while the engine was starting, for example during
       // the first-use permission prompt.
       if (held && _holdPointer == null && !_locked) _release();
+    } on DictationDenied catch (e) {
+      if (!identical(engine, _engine)) return;
+      _endRun();
+      _showMessage(e.message);
     } catch (e) {
-      // Another app holding the mic, or no recorder on this platform. Stay
+      if (!identical(engine, _engine)) return;
+      // Another app holding the mic, or no recognizer on this platform. Stay
       // idle so the next press can retry.
-      _stopMeters();
-      _showMessage('Could not start recording: $e');
+      _endRun();
+      _showMessage(e is PlatformException ? e.message ?? e.code : '$e');
     }
   }
 
-  void _onAmplitude(Amplitude a) {
-    _levels.add(meterLevel(a.current));
+  void _onLevel(double level) {
+    _levels.add(level);
     if (_levels.length > _maxLevels) _levels.removeAt(0);
   }
 
-  /// Throws the recording away. Nothing is uploaded, so nothing is billed.
-  Future<void> _cancelRecording() async {
-    _stopMeters();
-    _generation++;
-    setState(() => _phase = _Phase.idle);
-    try {
-      // cancel() stops the recorder and deletes the file, unlike stop().
-      await _recorder?.cancel();
-    } catch (_) {
-      // Nothing to recover: the file is temporary either way.
+  void _onEvent(DictationEvent e) {
+    if (_phase != _Phase.recording && _phase != _Phase.transcribing) return;
+    switch (e) {
+      case DictationText(:final text):
+        _write(text.trim());
+      case DictationDone():
+        final heard = _written != null && _written!.text != _base!.text;
+        _endRun();
+        if (heard) {
+          setState(() => _phase = _Phase.idle);
+        } else {
+          _showMessage('No speech detected');
+        }
+      case DictationFailed(:final error):
+        _endRun();
+        final packs = ref.read(speechPacksProvider);
+        _showMessage(
+          '$error',
+          action: error is SpeechPackMissing && packs.available
+              ? (
+                  label: 'Download',
+                  onPressed: () => _downloadPack(error.language),
+                )
+              : null,
+        );
     }
-    _path = null;
   }
 
-  /// Drops a transcription that is already in flight.
-  ///
-  /// The request has been sent and OpenRouter will bill it. This only stops the
-  /// text from landing in the field and frees the mic for another take.
-  void _discardTranscription() {
-    _generation++;
+  /// The base is taken at the first text, not at the start, so typing during
+  /// an OpenRouter recording is kept.
+  void _write(String text) {
+    final base = _base ??= widget.controller.value;
+    final value = text.isEmpty ? base : insertAtCursor(base, text);
+    _written = value;
+    widget.controller.value = value;
+    widget.onChanged?.call(value.text);
+  }
+
+  /// Typing over a live run would be overwritten by its next text, so an edit
+  /// ends the run and keeps what the field holds.
+  void _onFieldChanged() {
+    final written = _written;
+    if (written == null || widget.controller.text == written.text) return;
+    _endRun();
     setState(() => _phase = _Phase.idle);
   }
 
-  Future<void> _stopAndTranscribe() async {
-    final gen = ++_generation;
+  /// Ends the run and takes its text back out of the field. A transcription in
+  /// flight is already billed; this only stops its text from landing.
+  void _discard() {
+    final base = _base;
+    final written = _written;
+    _endRun();
+    setState(() => _phase = _Phase.idle);
+    if (base != null &&
+        written != null &&
+        widget.controller.text == written.text) {
+      widget.controller.value = base;
+      widget.onChanged?.call(base.text);
+    }
+  }
+
+  Future<void> _stop() async {
+    final engine = _engine;
+    if (engine == null) return;
     _clipLength = _clock.elapsed;
     _stopMeters();
     setState(() => _phase = _Phase.transcribing);
-    final path = await _recorder?.stop() ?? _path;
-    final file = path == null ? null : File(path);
     try {
-      if (file == null || !file.existsSync()) {
-        _showMessage('Recording failed');
-        return;
-      }
-      final prefs = ref.read(voicePrefsProvider);
-      final text = await ref.read(openRouterClientProvider).transcribe(
-            apiKey: prefs.apiKey,
-            model: prefs.model,
-            audio: await file.readAsBytes(),
-          );
-      if (!mounted || gen != _generation) return; // discarded or superseded
-      final trimmed = text.trim();
-      if (trimmed.isEmpty) {
-        _showMessage('No speech detected');
-      } else {
-        widget.controller.value = insertAtCursor(widget.controller.value, trimmed);
-        widget.onChanged?.call(widget.controller.text);
-      }
+      await engine.stop();
     } catch (e) {
-      // Stay quiet about a run the user already walked away from.
-      if (!mounted || gen != _generation) return;
+      if (!mounted || !identical(engine, _engine)) return;
+      _endRun();
       _showMessage('$e');
-    } finally {
-      if (file != null && file.existsSync()) {
-        try {
-          await file.delete();
-        } catch (_) {
-          // Best effort; the OS clears systemTemp anyway.
-        }
-      }
-      if (mounted && gen == _generation && _phase == _Phase.transcribing) {
-        setState(() => _phase = _Phase.idle);
-      }
     }
+  }
+
+  Future<void> _downloadPack(String language) async {
+    _showMessage('Requesting the speech pack…', error: false);
+    final result = await ref.read(speechPacksProvider).download(language);
+    _showMessage(
+      packDownloadMessage(result),
+      error: result != PackDownload.started,
+    );
   }
 
   /// Shown in the status row rather than a snackbar: the hosts are modal, and
   /// the root ScaffoldMessenger shows snackbars on the page beneath them.
-  void _showMessage(String msg, {bool error = true}) {
+  void _showMessage(
+    String msg, {
+    bool error = true,
+    ({String label, VoidCallback onPressed})? action,
+  }) {
     if (!mounted) return;
     setState(() {
       _phase = _Phase.message;
       _message = msg;
       _messageIsError = error;
+      _messageAction = action;
     });
+  }
+
+  void _revealRow() {
+    final row = _row.currentContext;
+    if (row == null) return;
+    Scrollable.ensureVisible(
+      row,
+      duration: const Duration(milliseconds: 150),
+      alignmentPolicy: widget.statusBelow
+          ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd
+          : ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+    );
   }
 
   void _dismissMessage() => setState(() => _phase = _Phase.idle);
@@ -331,7 +391,7 @@ class _DictationState extends ConsumerState<_Dictation> {
   void _onPointerUp(PointerUpEvent e) {
     if (e.pointer == _stopPointer) {
       _stopPointer = null;
-      if (_phase == _Phase.recording) _stopAndTranscribe();
+      if (_phase == _Phase.recording) _stop();
       return;
     }
     if (e.pointer != _holdPointer) return;
@@ -344,17 +404,17 @@ class _DictationState extends ConsumerState<_Dictation> {
     if (e.pointer == _stopPointer) _stopPointer = null;
     if (e.pointer != _holdPointer) return;
     _holdPointer = null;
-    if (_phase == _Phase.recording) _cancelRecording();
+    if (_phase == _Phase.recording) _discard();
   }
 
   void _release() {
     if (_cancelArmed) {
-      _cancelRecording();
+      _discard();
     } else if (!_heldLongEnough) {
-      _cancelRecording();
+      _discard();
       _showMessage('Hold to record', error: false);
     } else {
-      _stopAndTranscribe();
+      _stop();
     }
   }
 
@@ -363,7 +423,7 @@ class _DictationState extends ConsumerState<_Dictation> {
       case _Phase.idle || _Phase.message:
         _start(held: false);
       case _Phase.recording:
-        _stopAndTranscribe();
+        _stop();
       case _Phase.transcribing:
         break;
     }
@@ -417,7 +477,7 @@ class _DictationState extends ConsumerState<_Dictation> {
       button: true,
       excludeSemantics: true,
       label: switch (_phase) {
-        _Phase.recording => 'Stop and transcribe',
+        _Phase.recording => _live ? 'Stop' : 'Stop and transcribe',
         _Phase.transcribing => 'Transcribing',
         _ => 'Dictate',
       },
@@ -428,29 +488,44 @@ class _DictationState extends ConsumerState<_Dictation> {
         onPointerMove: _onPointerMove,
         onPointerUp: _onPointerUp,
         onPointerCancel: _onPointerCancel,
-        child: SizedBox(
-          width: _slot,
-          height: _slot,
-          child: Center(
-            child: switch (_phase) {
-              _Phase.idle || _Phase.message => const Icon(Icons.mic_none),
-              _Phase.recording when holding => Transform.translate(
-                  offset: Offset(
-                    0,
-                    (widget.statusBelow ? 1 : -1) * _lockProgress * _iconInset,
+        // Claims the gesture arena at once, so a scrollable around the field
+        // does not take a slide toward the lock as a scroll.
+        child: RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          excludeFromSemantics: true,
+          gestures: {
+            EagerGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+              EagerGestureRecognizer.new,
+              (_) {},
+            ),
+          },
+          child: SizedBox(
+            width: _slot,
+            height: _slot,
+            child: Center(
+              child: switch (_phase) {
+                _Phase.idle || _Phase.message => const Icon(Icons.mic_none),
+                _Phase.recording when holding => Transform.translate(
+                    offset: Offset(
+                      0,
+                      (widget.statusBelow ? 1 : -1) *
+                          _lockProgress *
+                          _iconInset,
+                    ),
+                    child: Icon(
+                      Icons.mic,
+                      color: _cancelArmed ? AppColors.dim : error,
+                    ),
                   ),
-                  child: Icon(
-                    Icons.mic,
-                    color: _cancelArmed ? AppColors.dim : error,
+                _Phase.recording => Icon(Icons.stop_circle, color: error),
+                _Phase.transcribing => const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                ),
-              _Phase.recording => Icon(Icons.stop_circle, color: error),
-              _Phase.transcribing => const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-            },
+              },
+            ),
           ),
         ),
       ),
@@ -466,7 +541,9 @@ class _DictationState extends ConsumerState<_Dictation> {
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
             const SizedBox(width: 10),
-            Expanded(child: LevelMeter(levels: _levels)),
+            Expanded(
+              child: _metered ? LevelMeter(levels: _levels) : const SizedBox(),
+            ),
             if (holding) ...[
               const SizedBox(width: 10),
               if (_cancelArmed)
@@ -484,24 +561,51 @@ class _DictationState extends ConsumerState<_Dictation> {
           ],
         ),
       _Phase.transcribing => Text(
-          'Transcribing ${formatClock(_clipLength)} of audio…',
+          _live
+              ? 'Finishing…'
+              : 'Transcribing ${formatClock(_clipLength)} of audio…',
           key: const Key('voice-status'),
           style: dim,
         ),
-      _Phase.message => Text(
-          _message,
-          key: const Key('voice-message'),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: _messageIsError
-              ? TextStyle(color: error, fontSize: 12)
-              : dim,
+      _Phase.message => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                _message,
+                key: const Key('voice-message'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _messageIsError
+                    ? TextStyle(color: error, fontSize: 12)
+                    : dim,
+              ),
+            ),
+            if (_messageAction case final action?)
+              TextButton(
+                key: const Key('voice-message-action'),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, _rowHeight),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+                onPressed: action.onPressed,
+                child: Text(action.label),
+              ),
+          ],
         ),
     };
 
+    // A field near the keyboard leaves no room for the row to appear in view.
+    if (status != null && !_rowShown) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealRow());
+    }
+    _rowShown = status != null;
     final row = status == null
         ? const SizedBox.shrink()
         : Padding(
+            key: _row,
             padding: widget.statusBelow
                 ? const EdgeInsets.only(top: _rowGap)
                 : const EdgeInsets.only(bottom: _rowGap),
@@ -540,11 +644,8 @@ class _DictationState extends ConsumerState<_Dictation> {
                         _Phase.message => 'Dismiss',
                         _ => 'Discard transcript',
                       },
-                      onPressed: switch (_phase) {
-                        _Phase.recording => _cancelRecording,
-                        _Phase.message => _dismissMessage,
-                        _ => _discardTranscription,
-                      },
+                      onPressed:
+                          _phase == _Phase.message ? _dismissMessage : _discard,
                     ),
                 ],
               ),
@@ -582,6 +683,14 @@ class _DictationState extends ConsumerState<_Dictation> {
     );
   }
 }
+
+String packDownloadMessage(PackDownload result) => switch (result) {
+      PackDownload.started =>
+        'Downloading the speech pack. Try again when it finishes.',
+      PackDownload.unsupported =>
+        'This device cannot download speech packs.',
+      PackDownload.failed => 'The speech pack download failed.',
+    };
 
 /// Points the way to lock: an arrow leading from the mic to a padlock, up or
 /// [down]. Fills from the mic's side as [progress] runs from 0 to 1.
@@ -673,14 +782,6 @@ class _SlideHint extends StatelessWidget {
 /// `m:ss`, the readout on the recording clock.
 String formatClock(Duration d) =>
     '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
-
-/// Maps a dBFS reading to a 0..1 bar height. A phone mic floors around -45 dB
-/// in a quiet room, so anchor silence there rather than at the -160 the
-/// platform reports for digital zero.
-double meterLevel(double dbfs) {
-  if (!dbfs.isFinite) return 0;
-  return ((dbfs + 45) / 45).clamp(0.0, 1.0);
-}
 
 /// The recent level history as a row of bars, newest on the right. Shows as
 /// many bars as fit the width it is given.

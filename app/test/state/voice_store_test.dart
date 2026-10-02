@@ -57,6 +57,23 @@ void main() {
     expect(prefs.apiKey, 'sk-or-v1-abc');
   });
 
+  test('System needs no key', () async {
+    final kv = _FakeKv();
+    await VoiceStore(kv).setProvider(VoiceProvider.system);
+    expect((await VoiceStore(kv).load()).enabled, isTrue);
+  });
+
+  test('persists the language, and the device language deletes it', () async {
+    final kv = _FakeKv();
+    expect((await VoiceStore(kv).load()).language, isEmpty);
+
+    await VoiceStore(kv).setLanguage('bn-BD');
+    expect((await VoiceStore(kv).load()).language, 'bn-BD');
+
+    await VoiceStore(kv).setLanguage('');
+    expect(await kv.read('voice.language'), isNull);
+  });
+
   test('an unknown stored provider falls back to off', () async {
     final kv = _FakeKv();
     await kv.write('voice.provider', 'nope');

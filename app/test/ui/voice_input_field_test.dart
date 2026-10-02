@@ -1,10 +1,13 @@
+import 'dart:async';
+
+import 'package:argus/data/dictation_engine.dart';
 import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/voice.dart';
 import 'package:argus/ui/voice_input_field.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:record/record.dart';
 
 class _MemKv implements SecureKv {
   final _m = <String, String>{};
@@ -16,63 +19,125 @@ class _MemKv implements SecureKv {
   Future<void> delete(String key) async => _m.remove(key);
 }
 
-class _FakeRecorder extends Fake implements AudioRecorder {
-  _FakeRecorder({this.permitted = true});
+/// Records the calls of every engine it builds, one engine per run.
+class _Engines {
+  _Engines({
+    this.live = false,
+    this.denied = false,
+    this.startError,
+    this.transcript = '',
+  });
 
-  final bool permitted;
+  final bool live;
+  final bool denied;
+  final Object? startError;
+
+  /// What the engine reports on stop.
+  final String transcript;
   final calls = <String>[];
+  _FakeEngine? last;
+
+  _FakeEngine build() => last = _FakeEngine(this);
+}
+
+class _FakeEngine implements DictationEngine {
+  _FakeEngine(this._owner);
+
+  final _Engines _owner;
+  final _events = StreamController<DictationEvent>();
+
+  void emit(DictationEvent e) => _events.add(e);
 
   @override
-  Future<bool> hasPermission({bool request = true}) async => permitted;
+  bool get live => _owner.live;
   @override
-  Future<void> start(RecordConfig config, {required String path}) async =>
-      calls.add('start');
+  Stream<DictationEvent> get events => _events.stream;
   @override
-  Future<String?> stop() async {
-    calls.add('stop');
-    return null;
+  Stream<double>? levels(Duration interval) =>
+      live ? null : const Stream.empty();
+  @override
+  Future<void> start() async {
+    if (_owner.denied) {
+      throw const DictationDenied('Microphone permission denied');
+    }
+    if (_owner.startError case final e?) throw e;
+    _owner.calls.add('start');
   }
 
   @override
-  Future<void> cancel() async => calls.add('cancel');
+  Future<void> stop() async {
+    _owner.calls.add('stop');
+    emit(DictationText(_owner.transcript));
+    emit(const DictationDone());
+  }
+
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async {
+    _owner.calls.add('dispose');
+    await _events.close();
+  }
+}
+
+class _FakePacks extends Fake implements SpeechPacks {
+  _FakePacks({this.available = true});
+
   @override
-  Stream<Amplitude> onAmplitudeChanged(Duration interval) =>
-      const Stream.empty();
+  final bool available;
+  final downloads = <String>[];
+
+  @override
+  Future<PackDownload> download(String language) async {
+    downloads.add(language);
+    return PackDownload.started;
+  }
 }
 
 /// Renders the field the way the reply sheet does.
 Widget _host(
   VoiceStore store,
   TextEditingController c, {
-  AudioRecorder? recorder,
+  _Engines? engines,
+  _FakePacks? packs,
   bool statusBelow = false,
-}) =>
-    ProviderScope(
+  ScrollController? scroll,
+  double scrollTop = 300,
+}) {
+  final field = VoiceInputField(
+    controller: c,
+    statusBelow: statusBelow,
+    field: (suffixIcon) => TextField(
+      key: _field,
+      controller: c,
+      minLines: 1,
+      maxLines: 6,
+      decoration: InputDecoration(
+        border: const OutlineInputBorder(),
+        suffixIcon: suffixIcon,
+      ),
+    ),
+  );
+  return ProviderScope(
       overrides: [
         voiceStoreProvider.overrideWithValue(store),
-        audioRecorderProvider.overrideWithValue(() => recorder ?? _FakeRecorder()),
+        dictationEngineProvider.overrideWithValue((engines ?? _Engines()).build),
+        speechPacksProvider.overrideWithValue(packs ?? _FakePacks()),
       ],
       child: MaterialApp(
         home: Scaffold(
-          body: VoiceInputField(
-            controller: c,
-            statusBelow: statusBelow,
-            field: (suffixIcon) => TextField(
-              key: _field,
-              controller: c,
-              minLines: 1,
-              maxLines: 6,
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                suffixIcon: suffixIcon,
-              ),
-            ),
-          ),
+          body: scroll == null
+              ? field
+              : ListView(
+                  controller: scroll,
+                  children: [
+                    SizedBox(height: scrollTop),
+                    field,
+                    const SizedBox(height: 2000),
+                  ],
+                ),
         ),
       ),
     );
+}
 
 const _field = Key('field');
 const _mic = Key('voice-input');
@@ -153,6 +218,17 @@ void main() {
       );
     });
 
+    testWidgets('the System provider needs no key', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      final store = VoiceStore(_MemKv());
+      await store.setProvider(VoiceProvider.system);
+      await tester.pumpWidget(_host(store, c));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(_mic), findsOneWidget);
+    });
+
     testWidgets('idle shows only the mic, in the bottom-right corner',
         (tester) async {
       final c = TextEditingController(text: 'one\ntwo\nthree');
@@ -196,29 +272,29 @@ void main() {
   });
 
   group('hold to record', () {
-    Future<_FakeRecorder> pumpHost(
+    Future<_Engines> pumpHost(
       WidgetTester tester, {
       bool statusBelow = false,
     }) async {
-      final recorder = _FakeRecorder();
+      final engines = _Engines();
       final c = TextEditingController();
       addTearDown(c.dispose);
       await tester.pumpWidget(_host(
         await _enabled(),
         c,
-        recorder: recorder,
+        engines: engines,
         statusBelow: statusBelow,
       ));
       await tester.pumpAndSettle();
-      return recorder;
+      return engines;
     }
 
     testWidgets('a hold of at least a second sends the clip', (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump();
-      expect(recorder.calls, ['start']);
+      expect(engines.calls, ['start']);
       expect(find.text('Slide to cancel'), findsOneWidget);
       expect(find.byIcon(Icons.arrow_back), findsOneWidget);
       // Swipe replaces the trash can while a finger is on the mic.
@@ -228,23 +304,23 @@ void main() {
       await hold.up();
       await tester.pumpAndSettle();
 
-      expect(recorder.calls, ['start', 'stop']);
+      expect(engines.calls, ['start', 'stop', 'dispose']);
     });
 
     testWidgets('a shorter hold discards the clip and says to hold',
         (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       await tester.tap(find.byKey(_mic));
       await tester.pumpAndSettle();
 
-      expect(recorder.calls, ['start', 'cancel']);
+      expect(engines.calls, ['start', 'dispose']);
       expect(find.text('Hold to record'), findsOneWidget);
     });
 
     testWidgets('sliding left past the threshold discards on release',
         (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump(const Duration(milliseconds: 1100));
@@ -267,12 +343,12 @@ void main() {
       await hold.up();
       await tester.pumpAndSettle();
 
-      expect(recorder.calls, ['start', 'cancel']);
+      expect(engines.calls, ['start', 'dispose']);
       expect(find.byKey(const Key('voice-cancel')), findsNothing);
     });
 
     testWidgets('sliding back before release keeps the clip', (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump(const Duration(milliseconds: 1100));
@@ -285,12 +361,12 @@ void main() {
       await hold.up();
       await tester.pumpAndSettle();
 
-      expect(recorder.calls, ['start', 'stop']);
+      expect(engines.calls, ['start', 'stop', 'dispose']);
     });
 
     testWidgets('sliding up locks, and a tap on stop sends the clip',
         (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump();
@@ -317,16 +393,70 @@ void main() {
       // the one-second minimum does not apply.
       await hold.up();
       await tester.pump();
-      expect(recorder.calls, ['start']);
+      expect(engines.calls, ['start']);
 
       await tester.tap(find.byKey(_mic));
       await tester.pumpAndSettle();
-      expect(recorder.calls, ['start', 'stop']);
+      expect(engines.calls, ['start', 'stop', 'dispose']);
+    });
+
+    testWidgets('sliding to lock inside a scrollable does not scroll it',
+        (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      final engines = _Engines();
+      await tester.pumpWidget(
+        _host(await _enabled(), c, engines: engines, scroll: scroll),
+      );
+      await tester.pumpAndSettle();
+
+      final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await hold.moveBy(const Offset(0, -10));
+        await tester.pump();
+      }
+
+      expect(scroll.offset, 0);
+      expect(find.byIcon(Icons.stop_circle), findsOneWidget);
+      await hold.up();
+      await tester.pump();
+      expect(engines.calls, ['start']);
+    });
+
+    testWidgets('a status row below the visible area scrolls into view',
+        (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(
+        await _enabled(),
+        c,
+        statusBelow: true,
+        scroll: scroll,
+        scrollTop: 540,
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.byKey(_field)).bottom, lessThan(600));
+
+      final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(
+        tester.getRect(find.text('Slide to cancel')).bottom,
+        lessThanOrEqualTo(600),
+      );
+      await hold.up();
     });
 
     testWidgets('with the status row below, the lock is below too',
         (tester) async {
-      final recorder = await pumpHost(tester, statusBelow: true);
+      final engines = await pumpHost(tester, statusBelow: true);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump();
@@ -346,12 +476,12 @@ void main() {
 
       await hold.up();
       await tester.pump();
-      expect(recorder.calls, ['start']);
+      expect(engines.calls, ['start']);
     });
 
     testWidgets('once cancel is armed, sliding up does not lock',
         (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
 
       final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
       await tester.pump();
@@ -363,23 +493,190 @@ void main() {
 
       await hold.up();
       await tester.pumpAndSettle();
-      expect(recorder.calls, ['start', 'cancel']);
+      expect(engines.calls, ['start', 'dispose']);
     });
 
     testWidgets('a screen reader tap toggles recording', (tester) async {
-      final recorder = await pumpHost(tester);
+      final engines = await pumpHost(tester);
       void semanticTap() =>
           tester.widget<Semantics>(find.byKey(_mic)).properties.onTap!();
 
       semanticTap();
       await tester.pumpAndSettle();
-      expect(recorder.calls, ['start']);
+      expect(engines.calls, ['start']);
       // No finger to slide, so the trash can stays available.
       expect(find.byKey(const Key('voice-cancel')), findsOneWidget);
 
       semanticTap();
       await tester.pumpAndSettle();
-      expect(recorder.calls, ['start', 'stop']);
+      expect(engines.calls, ['start', 'stop', 'dispose']);
+    });
+  });
+
+  group('text', () {
+    Future<(_Engines, TextEditingController)> pumpHost(
+      WidgetTester tester, {
+      bool live = false,
+      String transcript = '',
+      String text = '',
+      _FakePacks? packs,
+    }) async {
+      final engines = _Engines(live: live, transcript: transcript);
+      final c = TextEditingController(text: text);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        _host(await _enabled(), c, engines: engines, packs: packs),
+      );
+      await tester.pumpAndSettle();
+      return (engines, c);
+    }
+
+    Future<TestGesture> holdMic(WidgetTester tester) async {
+      final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
+      await tester.pump(const Duration(milliseconds: 1100));
+      return hold;
+    }
+
+    testWidgets('a transcript lands at the cursor after stop', (tester) async {
+      final (_, c) = await pumpHost(tester, transcript: 'two', text: 'one');
+
+      final hold = await holdMic(tester);
+      await hold.up();
+      await tester.pumpAndSettle();
+
+      expect(c.text, 'one two');
+      expect(find.byKey(const Key('voice-message')), findsNothing);
+    });
+
+    testWidgets('an empty transcript says no speech was heard',
+        (tester) async {
+      final (_, c) = await pumpHost(tester, text: 'one');
+
+      final hold = await holdMic(tester);
+      await hold.up();
+      await tester.pumpAndSettle();
+
+      expect(c.text, 'one');
+      expect(find.text('No speech detected'), findsOneWidget);
+    });
+
+    testWidgets('live text replaces itself, and a pause ends the run',
+        (tester) async {
+      final (engines, c) = await pumpHost(tester, live: true, text: 'one');
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationText('two'));
+      await tester.pump();
+      expect(c.text, 'one two');
+      engines.last!.emit(const DictationText('two three'));
+      await tester.pump();
+      expect(c.text, 'one two three');
+      // No meter for a live engine: the field shows the progress.
+      expect(find.byType(LevelMeter), findsNothing);
+
+      engines.last!.emit(const DictationDone());
+      await tester.pumpAndSettle();
+      expect(c.text, 'one two three');
+      expect(find.byKey(const Key('voice-clock')), findsNothing);
+
+      // The finger lifting after the run ended does nothing more.
+      await hold.up();
+      await tester.pumpAndSettle();
+      expect(engines.calls, ['start', 'dispose']);
+      expect(c.text, 'one two three');
+    });
+
+    testWidgets('sliding to cancel takes the live text back out',
+        (tester) async {
+      final (engines, c) = await pumpHost(tester, live: true, text: 'one');
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationText('two'));
+      await tester.pump();
+      expect(c.text, 'one two');
+
+      await hold.moveBy(const Offset(-100, 0));
+      await tester.pump();
+      await hold.up();
+      await tester.pumpAndSettle();
+
+      expect(c.text, 'one');
+      expect(engines.calls, ['start', 'dispose']);
+    });
+
+    testWidgets('typing during a live run ends it and keeps the typing',
+        (tester) async {
+      final (engines, c) = await pumpHost(tester, live: true);
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationText('two'));
+      await tester.pump();
+      c.text = 'two!';
+      await tester.pump();
+      expect(engines.calls, ['start', 'dispose']);
+
+      await hold.up();
+      await tester.pumpAndSettle();
+      expect(c.text, 'two!');
+    });
+
+    testWidgets('a failed run shows its error', (tester) async {
+      final (engines, _) = await pumpHost(tester, live: true);
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationFailed('recognizer busy'));
+      await tester.pumpAndSettle();
+      await hold.up();
+      await tester.pumpAndSettle();
+
+      expect(find.text('recognizer busy'), findsOneWidget);
+      expect(find.byKey(const Key('voice-message-action')), findsNothing);
+    });
+
+    testWidgets('a missing speech pack offers its download', (tester) async {
+      final packs = _FakePacks();
+      final (engines, _) = await pumpHost(tester, live: true, packs: packs);
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationFailed(SpeechPackMissing('bn-BD')));
+      await tester.pumpAndSettle();
+      await hold.up();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Speech pack for bn-BD is not installed'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('voice-message-action')));
+      await tester.pumpAndSettle();
+
+      expect(packs.downloads, ['bn-BD']);
+      expect(
+        find.text('Downloading the speech pack. Try again when it finishes.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('voice-message-action')), findsNothing);
+    });
+
+    testWidgets('no download is offered where packs cannot be installed',
+        (tester) async {
+      final (engines, _) = await pumpHost(
+        tester,
+        live: true,
+        packs: _FakePacks(available: false),
+      );
+
+      final hold = await holdMic(tester);
+      engines.last!.emit(const DictationFailed(SpeechPackMissing('bn-BD')));
+      await tester.pumpAndSettle();
+      await hold.up();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Speech pack for bn-BD is not installed'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('voice-message-action')), findsNothing);
     });
   });
 
@@ -388,12 +685,31 @@ void main() {
       final c = TextEditingController();
       addTearDown(c.dispose);
       await tester.pumpWidget(
-        _host(await _enabled(), c, recorder: _FakeRecorder(permitted: false)),
+        _host(await _enabled(), c, engines: _Engines(denied: true)),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(_mic));
       await tester.pumpAndSettle();
     }
+
+    testWidgets('a platform start error shows its message', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(
+        await _enabled(),
+        c,
+        engines: _Engines(
+          startError: PlatformException(
+              code: 'stt', message: 'Recognizer is not available.'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(_mic));
+      await tester.pumpAndSettle();
+
+      final error = tester.widget<Text>(find.byKey(const Key('voice-message')));
+      expect(error.data, 'Recognizer is not available.');
+    });
 
     testWidgets('show in the status row, not in a snackbar', (tester) async {
       await pumpDenied(tester);
