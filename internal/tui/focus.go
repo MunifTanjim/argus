@@ -83,6 +83,13 @@ func (m model) focusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return mm, cmd, true
 	}
 	switch {
+	case m.matches(msg, projectsKeys.ToggleMouse):
+		m.mouse = !m.mouse
+		m.flash = "mouse off"
+		if m.mouse {
+			m.flash = "mouse on"
+		}
+		return m, nil, true
 	case m.matches(msg, projectsKeys.Palette):
 		mm, cmd := m.openPalette()
 		return mm, cmd, true
@@ -276,7 +283,7 @@ func (m model) focusCommands() []binding {
 	if !m.viewer {
 		out = append(out, k.ToggleSidebar, k.ToggleFiles)
 	}
-	out = append(out, k.Palette)
+	out = append(out, k.Palette, k.ToggleMouse)
 	return out
 }
 

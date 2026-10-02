@@ -48,9 +48,19 @@ type TUIConfig struct {
 	KeyTimeout time.Duration
 	// LeaderKey is the key that `<Leader>` stands for in keymaps.
 	LeaderKey string
+	// Mouse captures the mouse on every screen when on. When off, the terminal
+	// keeps text selection, and only the live screen takes the wheel.
+	Mouse MouseMode
 	// Keymaps is tui.keymap as written: screen → key sequence → command.
 	Keymaps map[string]map[string]string
 }
+
+type MouseMode string
+
+const (
+	MouseOff MouseMode = "off"
+	MouseOn  MouseMode = "on"
+)
 
 type GatewayConfig struct {
 	URL        string
@@ -157,6 +167,7 @@ var defaults = map[string]any{
 	"workspace.auto-adopt-dirs":       []string{"~"},
 	"tui.key-timeout":                 "1s",
 	"tui.leader-key":                  "<Space>",
+	"tui.mouse":                       "on",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -220,6 +231,9 @@ func (c Config) Validate() error {
 		if strings.ContainsAny(a.val, ":.") {
 			return fmt.Errorf("%s %q must not contain ':' or '.' (tmux session name constraint)", a.name, a.val)
 		}
+	}
+	if m := c.TUI.Mouse; m != MouseOn && m != MouseOff {
+		return fmt.Errorf("tui.mouse %q must be %q or %q", m, MouseOn, MouseOff)
 	}
 	return nil
 }
@@ -286,6 +300,7 @@ func FromViper(v *viper.Viper) Config {
 		TUI: TUIConfig{
 			KeyTimeout: v.GetDuration("tui.key-timeout"),
 			LeaderKey:  v.GetString("tui.leader-key"),
+			Mouse:      MouseMode(v.GetString("tui.mouse")),
 		},
 	}
 }

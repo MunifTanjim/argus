@@ -58,9 +58,8 @@ const footerRows = 2
 func (m model) View() tea.View {
 	v := tea.NewView(m.frame())
 	v.AltScreen = true
-	// Only the live screen takes the mouse, for the wheel; elsewhere the
-	// terminal keeps it for text selection.
-	if _, ok := m.liveScreen(); ok {
+	// The live screen takes the wheel for its program even with the mouse off.
+	if _, live := m.liveScreen(); live || m.mouse {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v

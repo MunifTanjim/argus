@@ -32,6 +32,10 @@ run it. The list above the command line shows the matching commands and their
 keys. The command line offers only the commands that do something in the
 current view.
 
+The TUI captures the mouse. To select text, hold `Shift` (in most terminals)
+while you drag. To give the mouse back to the terminal, set `tui.mouse` to
+`off`, or run the `toggle mouse` command for the current session.
+
 ### Palette
 
 Press `<C-k>` to open the palette. The palette searches sessions, workspaces,
@@ -55,6 +59,7 @@ same keymaps.
 tui:
   leader-key: "<Space>"
   key-timeout: 1s
+  mouse: on
   keymap:
     global:
       "<C-q>": quit
@@ -208,6 +213,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle diff-vs-target` | changes | `t` |
 | `toggle left-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<Leader>o` |
 | `toggle line-wrap` | file | `yow` |
+| `toggle mouse` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace |  |
 | `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, transcript, workspace | `<Leader>e` |
 | `toggle show-gone` | node, project, project-tree, workspace | `zg` |
 | `toggle show-hidden` | node, project, project-tree, workspace | `z.` |

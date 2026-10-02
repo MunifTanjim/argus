@@ -225,7 +225,7 @@ func TestTmuxMirrorSessionAffixDefaults(t *testing.T) {
 
 func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 	// Defaults are valid.
-	valid := config.Config{Tmux: config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}}
+	valid := config.Config{Tmux: config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}, TUI: config.TUIConfig{Mouse: config.MouseOff}}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid affixes should pass: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestValidateRejectsTmuxHostileAffixes(t *testing.T) {
 		{MirrorSessionPrefix: "_", MirrorSessionSuffix: "x:y"},
 	}
 	for _, tc := range bad {
-		if err := (config.Config{Tmux: tc}).Validate(); err == nil {
+		if err := (config.Config{Tmux: tc, TUI: config.TUIConfig{Mouse: config.MouseOff}}).Validate(); err == nil {
 			t.Errorf("affix %+v should be rejected", tc)
 		}
 	}
@@ -329,6 +329,34 @@ func TestLeaderDefault(t *testing.T) {
 	isolateConfigDir(t)
 	if c := load(t, ""); c.TUI.LeaderKey != "<Space>" {
 		t.Errorf("tui.leader-key = %q, want <Space>", c.TUI.LeaderKey)
+	}
+}
+
+func TestMouseDefaultOn(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.TUI.Mouse != config.MouseOn {
+		t.Errorf("tui.mouse = %q, want on", c.TUI.Mouse)
+	}
+}
+
+func TestMouseOffFromFile(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, writeConfig(t, "tui:\n  mouse: off\n")); c.TUI.Mouse != config.MouseOff {
+		t.Errorf("tui.mouse = %q, want off", c.TUI.Mouse)
+	}
+}
+
+func TestValidateRejectsUnknownMouse(t *testing.T) {
+	tmux := config.TmuxConfig{MirrorSessionPrefix: "_", MirrorSessionSuffix: "_"}
+	for _, mode := range []config.MouseMode{config.MouseOn, config.MouseOff} {
+		if err := (config.Config{Tmux: tmux, TUI: config.TUIConfig{Mouse: mode}}).Validate(); err != nil {
+			t.Errorf("tui.mouse %q should pass: %v", mode, err)
+		}
+	}
+	for _, mode := range []config.MouseMode{"true", "yes", ""} {
+		if err := (config.Config{Tmux: tmux, TUI: config.TUIConfig{Mouse: mode}}).Validate(); err == nil {
+			t.Errorf("tui.mouse %q should be rejected", mode)
+		}
 	}
 }
 
