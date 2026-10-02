@@ -49,8 +49,9 @@ Future<GatewayClient> buildE2EClient(
   Stream<RpcMessage> incoming,
   void Function(String) send,
   ClientIdentityStore identityStore,
-  TrustChainStore chainStore,
-) async {
+  TrustChainStore chainStore, {
+  ChainLoader loadChain = loadChainInBackground,
+}) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
   try {
@@ -60,10 +61,10 @@ Future<GatewayClient> buildE2EClient(
     // (do NOT re-TOFU onto whatever the gateway serves).
     throw TrustAnchorTampered();
   }
+  final trust = TrustStore.tofu(loadChain: loadChain);
   if (seed != null) {
-    final probe = TrustStore.tofu();
     try {
-      await probe.ingest(seed);
+      await trust.ingest(seed);
     } catch (_) {
       throw TrustAnchorTampered(); // do NOT re-TOFU a rejected anchor
     }
@@ -72,8 +73,7 @@ Future<GatewayClient> buildE2EClient(
     incoming,
     send,
     identity,
-    tofu: true,
-    initialTrustChain: seed,
+    trustStore: trust,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
