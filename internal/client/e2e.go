@@ -262,13 +262,7 @@ func (m *E2EClient) Connect() error {
 	} else {
 		m.detectUnpinnedChain()
 	}
-	for _, nd := range roster.Nodes {
-		if err := m.openIfEligible(nd); err != nil {
-			// One unreachable node must not abort the whole session; skip it and keep
-			// aggregating the rest (a later reconnect/refresh retries it).
-			log.Printf("client: skipping node %s: open channel failed: %v", nd.ID, err)
-		}
-	}
+	m.openNodes(roster.Nodes)
 	if m.trust != nil {
 		go m.trustSyncLoop()
 	} else {
@@ -301,6 +295,9 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 		}
 		if m.trust != nil && !m.trust.Disabled() && !m.trust.DeviceAuthorized(pub) {
 			return nil // unauthorized node: silent exclusion (fail-closed)
+		}
+		if m.selfUnauthorized() && !nd.LockDisabled {
+			return nil // the node would drop our handshake
 		}
 	}
 	// A node is registered in byNode only once its handshake finishes, so the
@@ -1133,10 +1130,19 @@ func (m *E2EClient) detectSupersedingChain(chains [][]byte) {
 // rolled-back or tampered branches are silently skipped). After a successful pull it
 // refreshes each connected node's tip over its authenticated channel and cross-checks
 // those tips against the resolved chain.
-func (m *E2EClient) syncTrustLog() {
+// selfUnauthorized reports whether locked-mode nodes will reject this device's
+// channels, as the trust log does not authorize its identity key.
+func (m *E2EClient) selfUnauthorized() bool {
+	return m.trust != nil && !m.trust.Disabled() && !m.trust.DeviceAuthorized(m.static.Public)
+}
+
+// syncTrustLog returns whether this device became authorized, so the caller can
+// open the channels Connect skipped.
+func (m *E2EClient) syncTrustLog() (selfAuthorized bool) {
+	wasUnauthorized := m.selfUnauthorized()
 	chains, ok := m.syncTrustChains()
 	if !ok {
-		return
+		return false
 	}
 	anyChanged := false
 	for _, chain := range chains {
@@ -1157,6 +1163,27 @@ func (m *E2EClient) syncTrustLog() {
 	}
 	m.refreshAuthTips()
 	m.checkTipConsistency()
+	return wasUnauthorized && !m.selfUnauthorized()
+}
+
+// openRoster opens a channel to every eligible node in the gateway roster.
+func (m *E2EClient) openRoster() {
+	var roster api.NodesListResult
+	if err := m.peer.Call(api.MethodNodesList, nil, &roster); err != nil {
+		log.Printf("client: nodes.list: %v", err)
+		return
+	}
+	m.openNodes(roster.Nodes)
+}
+
+func (m *E2EClient) openNodes(nodes []api.NodeDescriptor) {
+	for _, nd := range nodes {
+		if err := m.openIfEligible(nd); err != nil {
+			// One unreachable node must not abort the whole session; skip it and keep
+			// aggregating the rest (a later reconnect/refresh retries it).
+			log.Printf("client: skipping node %s: open channel failed: %v", nd.ID, err)
+		}
+	}
 }
 
 // refreshAuthTips re-reads each connected node's trust-log tip over its authenticated
@@ -1202,9 +1229,10 @@ func (m *E2EClient) trustSyncLoop() {
 		case <-m.peer.Done():
 			return
 		case <-t.C:
-			m.syncTrustLog()
 		case <-m.kick:
-			m.syncTrustLog()
+		}
+		if m.syncTrustLog() {
+			m.openRoster()
 		}
 	}
 }
