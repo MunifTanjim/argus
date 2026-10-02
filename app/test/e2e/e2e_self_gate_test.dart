@@ -79,4 +79,23 @@ void main() {
     expect(link.relayOpenCalls, ['A']);
     await client.close();
   });
+
+  test('a roster event before the first trust sync does not bypass the gate', () async {
+    final link = MultiNodeLoopbackLink({'A': await _nodeA()},
+        trustChain: _b('enforcement_chain'));
+    final pub = base64.encode((await keyPairFromSeed(_b('enforcement_node_a_seed'))).publicKey);
+    link.beforeTrustSync = () {
+      link.beforeTrustSync = null;
+      link.pushNotification('node.event', {
+        'type': 'online',
+        'node': {'id': 'A', 'identity_pubkey': pub, 'online': true},
+      });
+    };
+    final client = E2EClient(link.incoming, link.send, await generateKeyPair(), tofu: true);
+    await client.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(link.relayOpenCalls, isEmpty,
+        reason: 'an unadopted TOFU store must not read as an open network');
+    await client.close();
+  });
 }

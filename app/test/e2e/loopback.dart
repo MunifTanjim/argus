@@ -216,6 +216,9 @@ class MultiNodeLoopbackLink implements RpcLink {
   /// Runs after relay.open is answered, while the client waits for the handshake.
   void Function(String nodeId)? onRelayOpen;
 
+  /// Runs before trustlog.sync is answered, while the client waits for the chain.
+  void Function()? beforeTrustSync;
+
   /// The gateway's entry store, populated when [trustChain] is set. Used to
   /// answer trustlog.sync with the correct delta for the caller's heads.
   final EntryStore _entryStore = EntryStore();
@@ -310,6 +313,7 @@ class MultiNodeLoopbackLink implements RpcLink {
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':
         trustSyncCount++;
+        beforeTrustSync?.call();
         // 'known' lists every entry hash the caller holds; the gateway computes
         // the delta by set subtraction (mirrors Go gateway.Delta).
         // A truncated offer under-reports by construction and can look disjoint
