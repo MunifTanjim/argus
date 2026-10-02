@@ -101,4 +101,20 @@ void main() {
     expect(loads, 1, reason: 'the gateway serves the stored chain, so one check is enough');
     await c.close();
   });
+
+  test('a trust advance during a resync calls onTrustAdvance', () async {
+    final v = _tl();
+    final node = LoopbackNode('A', await generateKeyPair(), (m, p) => Uint8List.fromList(utf8.encode('null')));
+    final link = MultiNodeLoopbackLink({'A': node},
+        trustChain: Uint8List.fromList(base64.decode(v['chain'] as String)));
+    final kv = _MemKv();
+    var advances = 0;
+    final c = await buildE2EClient(link.incoming, link.send, ClientIdentityStore(kv), TrustChainStore(kv),
+        onTrustAdvance: (_) => advances++);
+    expect(advances, 0);
+    link.trustChain = Uint8List.fromList(base64.decode(v['disabled_chain'] as String));
+    await (c as E2EClient).resyncNow();
+    expect(advances, 1);
+    await c.close();
+  });
 }

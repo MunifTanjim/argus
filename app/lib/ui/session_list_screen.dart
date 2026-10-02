@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/device_identity.dart';
 import '../state/gateway.dart';
 import '../state/sessions.dart';
 import '../transport/connection.dart';
+import 'device_identity_screen.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
@@ -22,6 +24,9 @@ class SessionListScreen extends ConsumerWidget {
     final sessions = ref.watch(sessionsProvider).values;
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
+    final unauthorized =
+        trustStatusOf(ref.watch(trustSummaryProvider)) ==
+        TrustStatus.awaitingAuthorization;
 
     return Scaffold(
       appBar: AppBar(
@@ -38,10 +43,21 @@ class SessionListScreen extends ConsumerWidget {
         children: [
           if (conn != ConnState.connected)
             ReconnectBanner(state: conn, message: connError),
+          if (unauthorized)
+            UnauthorizedBanner(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DeviceIdentityScreen()),
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () => _refresh(ref),
-              child: SessionSectionsList(sessions: sessions),
+              child: SessionSectionsList(
+                sessions: sessions,
+                emptyText: unauthorized
+                    ? 'Sessions appear after this device is authorized.'
+                    : 'No sessions.',
+              ),
             ),
           ),
         ],

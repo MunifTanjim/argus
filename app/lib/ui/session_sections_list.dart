@@ -216,3 +216,32 @@ class ReconnectBanner extends StatelessWidget {
     );
   }
 }
+
+class UnauthorizedBanner extends StatelessWidget {
+  const UnauthorizedBanner({super.key, required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.errorSurface,
+      child: InkWell(
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Device not authorized',
+                  style: TextStyle(color: AppColors.error, fontSize: 12),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 16, color: AppColors.error),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
