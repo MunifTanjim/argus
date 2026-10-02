@@ -91,6 +91,7 @@ type model struct {
 
 	keys      *keymap // resolved keymaps; nil in models built without withKeymaps
 	kittyKeys bool    // the terminal reported the Kitty keyboard protocol
+	mouse     bool    // the mouse is captured on every screen
 
 	keyBuf    []tea.KeyPressMsg // keys of a pending sequence
 	keyMatch  string            // id of the complete match inside keyBuf, "" when none

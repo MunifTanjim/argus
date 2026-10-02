@@ -8,11 +8,11 @@
     • repo│                                                                                                  │───────╯
           │ >toggle                                                                                          │
           │                                                                                                  │cs ·  ─╮
+          │ > toggle mouse                                                                                   │       │
           │ > toggle show-gone        zg                                                                     │       │
-          │ > toggle show-hidden      z.                                                                     │       │
-          │ > toggle left-sidebar     ␣o                                                                     │───────╯
+          │ > toggle show-hidden      z.                                                                     │───────╯
+          │ > toggle left-sidebar     ␣o                                                                     │
           │ > toggle right-sidebar    ␣e                                                                     │
-          │                                                                                                  │
           │                                                                                                  │
           │                                                                                                  │
           │                                                                                                  │
