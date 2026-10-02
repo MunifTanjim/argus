@@ -57,7 +57,7 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		return s, c.m.termResizeCmd(s.termID, cols, rows)
 	case tea.PasteMsg:
 		c.m.sendTermKey(s.termID, []byte(msg.Content))
-	case tea.MouseWheelMsg:
+	case wheelMsg:
 		if s.term != nil {
 			if b := ptyWheelBytes(msg, s.term.Width(), s.term.Height()); b != nil {
 				c.m.sendTermKey(s.termID, b)

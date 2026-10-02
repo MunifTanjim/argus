@@ -54,7 +54,9 @@ func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 	m := newModel(client, hasDark, logs).withKeymaps(cfg)
 	m.mouse = cfg.Mouse == config.MouseOn
 	go sendTermKeyLoop(client, m.termKeyCh) // single ordered sender for live-terminal input
-	p := tea.NewProgram(m)
+	f := newInputFilter()
+	p := tea.NewProgram(m, tea.WithFilter(f.filter))
+	f.send = p.Send
 	go func() {
 		events, states := client.Events(), client.States()
 		for {
@@ -255,7 +257,9 @@ func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TU
 	m.redactMode = redact
 	m.bundlePath = bundlePath
 	m.redactSrcDir = client.destDir
-	p := tea.NewProgram(m)
+	f := newInputFilter()
+	p := tea.NewProgram(m, tea.WithFilter(f.filter))
+	f.send = p.Send
 	_, err := p.Run()
 	cerr := client.Close()
 	if err != nil {
