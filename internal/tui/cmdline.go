@@ -317,6 +317,14 @@ func (p cmdLinePopup) draw(c *ctx, scr uv.Screen, area uv.Rectangle) {
 	uv.NewStyledString(box).Draw(scr, bottomLeftRect(above, bw, bh))
 }
 
+func keyLabels(sk *screenKeys, b binding) string {
+	var labels []string
+	for _, id := range sk.listedKeys(b) {
+		labels = append(labels, keyLabel(id))
+	}
+	return strings.Join(labels, " ")
+}
+
 // The width fits every match, not only the shown ones, so it stays while
 // scrolling.
 func (p cmdLinePopup) listBox(c *ctx, maxW int) string {
@@ -330,11 +338,7 @@ func (p cmdLinePopup) listBox(c *ctx, maxW int) string {
 	keys := make([]string, len(p.matches))
 	nameW, keysW := 0, 0
 	for i, b := range p.matches {
-		var labels []string
-		for _, id := range sk.listedKeys(b.binding) {
-			labels = append(labels, keyLabel(id))
-		}
-		keys[i] = strings.Join(labels, " ")
+		keys[i] = keyLabels(sk, b.binding)
 		nameW, keysW = max(nameW, len(b.name)), max(keysW, lipgloss.Width(keys[i]))
 	}
 	f := popupFrame{width: min(maxW, nameW+2+keysW+popupFrameW)}

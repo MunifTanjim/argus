@@ -62,6 +62,9 @@ func (m model) View() tea.View {
 	if _, live := m.liveScreen(); live || m.mouse {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
+	if _, hovers := m.popups.front().(popupHoverer); hovers && m.mouse {
+		v.MouseMode = tea.MouseModeAllMotion
+	}
 	return v
 }
 

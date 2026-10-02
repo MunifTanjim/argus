@@ -101,6 +101,7 @@ const (
 	actToggleActiveOnly
 	actSetSessionFilter
 	actGoToRow
+	actRunNamed
 )
 
 type action struct {
@@ -122,6 +123,12 @@ func (c *ctx) openPopup(p popup)   { c.actions = append(c.actions, action{kind: 
 func (c *ctx) closePopup()         { c.actions = append(c.actions, action{kind: actClosePopup}) }
 func (c *ctx) runCommand(typed string) {
 	c.actions = append(c.actions, action{kind: actRunCommand, id: typed})
+}
+
+// runNamed runs command name the way the command line does, without its
+// history.
+func (c *ctx) runNamed(name string) {
+	c.actions = append(c.actions, action{kind: actRunNamed, id: name})
 }
 
 func (c *ctx) replaceBase(comp component) {
@@ -286,6 +293,10 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			m.popups = m.popups.closeFront()
 		case actRunCommand:
 			res, cmd := m.runCmdLine(a.id)
+			*m = res.(model)
+			cmds = append(cmds, cmd)
+		case actRunNamed:
+			res, cmd := m.runSequence([]tea.KeyPressMsg{cmdMsg(a.id)}, nil, nil)
 			*m = res.(model)
 			cmds = append(cmds, cmd)
 		case actToggleActiveOnly:

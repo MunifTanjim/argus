@@ -121,6 +121,13 @@ func (p workspaceComp) wheel(c *ctx, d int) (component, tea.Cmd) {
 	return p, nil
 }
 
+func (p workspaceComp) menu(c *ctx) []binding {
+	if p.cursor >= len(c.m.wsSessions(p.ws)) {
+		return nil
+	}
+	return []binding{listKeys.Jump, listKeys.Kill}
+}
+
 func paneTreeKey(c *ctx, msg tea.KeyPressMsg) bool {
 	m, k := c.m, projectsKeys
 	switch {

@@ -209,13 +209,15 @@ type fileHost interface {
 // column, up to maxContentWidth.
 func (f fileComp) view(c *ctx, w, h int) string {
 	fw := fileViewWidth(w)
-	body := centerBlock(f.content(c, fw, fileViewHeight(h)), fw, w)
+	out := centerBlock(f.content(c, fw, fileViewHeight(h)), fw, w)
 	if host, ok := c.m.underFile().(fileHost); ok {
 		if head := host.fileHeader(c, w); head != "" {
-			return head + "\n\n" + body
+			out = head + "\n\n" + out
 		}
 	}
-	return body
+	// One row covers the view, so that a right-click anywhere opens its menu.
+	c.hitRows(rowSpan{index: 0, top: 0, bottom: strings.Count(out, "\n") + 1})
+	return out
 }
 
 func (f fileComp) content(c *ctx, w, h int) string {
@@ -311,4 +313,11 @@ func (m model) updateFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (f fileComp) wheel(c *ctx, d int) (component, tea.Cmd) {
 	f.scroll = max(0, min(f.scroll+d, f.maxScroll(c)))
 	return f, nil
+}
+
+func (f fileComp) menu(*ctx) []binding {
+	if f.diff {
+		return []binding{fileViewKeys.Wrap, fileViewKeys.NextFile, fileViewKeys.PrevFile}
+	}
+	return []binding{fileViewKeys.Wrap}
 }
