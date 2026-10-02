@@ -88,18 +88,19 @@ Future<bool> _forkChoice(List<Entry> cur, List<Entry> cand) async {
 /// Revocation is therefore not rollback-safe until a future persistence layer
 /// re-runs genesis-pinned ingest on the chain seeded from disk.
 class TrustStore {
-  TrustStore(Uint8List genesisHash)
+  TrustStore(Uint8List genesisHash, {this._loadChain = loadChainInBackground})
       : _genesisHash = Uint8List.fromList(genesisHash),
         _tofu = false;
 
   /// A genesis-unpinned store (Trust-On-First-Use): the first ingest adopts a
   /// fully-verified chain and pins its genesis hash; later ingests are pinned.
-  TrustStore.tofu()
+  TrustStore.tofu({this._loadChain = loadChainInBackground})
       : _genesisHash = null,
         _tofu = true;
 
   Uint8List? _genesisHash; // set on the first TOFU adopt
   final bool _tofu;
+  final ChainLoader _loadChain;
   TrustLog? _log;
   List<Entry>? _entries;
   Uint8List? _chainBytes;
@@ -135,7 +136,7 @@ class TrustStore {
     if (entries.isEmpty) throw const FormatException('trustlog: empty chain');
     if (_genesisHash == null) {
       // TOFU first adopt: verify the chain internally (Load), then pin its genesis hash.
-      final cand = await TrustLog.load(entries);
+      final cand = await _loadChain(entries);
       final gh = Uint8List.fromList(hashEntry(entries.first));
       _log = cand;
       _entries = entries;
@@ -148,7 +149,7 @@ class TrustStore {
     if (!bytesEqual(hashEntry(entries.first), _genesisHash!)) {
       throw const FormatException('trustlog: candidate genesis does not match pinned hash');
     }
-    final cand = await TrustLog.load(entries); // verifies sigs, links, signer trust
+    final cand = await _loadChain(entries); // verifies sigs, links, signer trust
     final cur = _entries;
     if (cur != null) {
       // Disablement dominance (mirrors Go store.Ingest): a Load-verified disabled
@@ -182,7 +183,7 @@ class TrustStore {
   Future<bool> reanchor(Uint8List chainBytes) async {
     final entries = unmarshalChain(chainBytes);
     if (entries.isEmpty) throw const FormatException('trustlog: empty chain');
-    final cand = await TrustLog.load(entries);
+    final cand = await _loadChain(entries);
     _log = cand;
     _entries = entries;
     _genesisHash = Uint8List.fromList(hashEntry(entries.first));
