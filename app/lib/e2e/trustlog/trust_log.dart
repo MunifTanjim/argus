@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../bytes.dart' show bytesEqual, compareBytes, hexDecode, hexEncode;
@@ -24,6 +25,14 @@ Future<bool> _verifySig(Entry e) async {
   if (signer == null || sig == null) return false;
   return ed25519Verify(signer, sigBytes(e), sig);
 }
+
+/// Verifies and folds a chain into a [TrustLog].
+typedef ChainLoader = Future<TrustLog> Function(List<Entry> entries);
+
+/// [TrustLog.load] on a background isolate. The pure-Dart Ed25519 checks take
+/// seconds on a phone in a debug build and would block the UI isolate.
+Future<TrustLog> loadChainInBackground(List<Entry> entries) =>
+    Isolate.run(() => TrustLog.load(entries));
 
 /// A verified, folded trust-log chain. Load rejects tampering, reordering,
 /// rollback onto a bad link, and edits by an untrusted signer. The caller must
