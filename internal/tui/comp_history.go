@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -39,6 +40,43 @@ func (h historyComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 		return h.sessionsKey(c, msg)
 	}
 	return h.projectsKey(c, msg)
+}
+
+func (h historyComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
+	if t.kind == hitTab {
+		if homeTab(t.index) == tabHistory {
+			return h, nil
+		}
+		return h, switchHomeTab(c, homeTab(t.index))
+	}
+	if h.inProject {
+		switch {
+		case t.index >= len(h.sessions):
+		case focused && t.index == h.sessCursor:
+			return h, h.openSession(c)
+		default:
+			h.sessCursor = t.index
+		}
+		return h, nil
+	}
+	switch {
+	case t.index >= len(h.projects):
+	case focused && t.index == h.projCursor:
+		h, cmd := h.openProject(c)
+		return h, cmd
+	default:
+		h.projCursor = t.index
+	}
+	return h, nil
+}
+
+func (h historyComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
+	if h.inProject {
+		h.sessCursor = cursorBy(h.sessCursor, d, len(h.sessions))
+	} else {
+		h.projCursor = cursorBy(h.projCursor, d, len(h.projects))
+	}
+	return h, nil
 }
 
 func (h historyComp) projectsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
@@ -203,6 +241,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	m := c.m
 	title := m.homeTabs(tabHistory)
 	cardW := historyWidth(w)
+	m.hitHomeTabs(c, centerGutter(cardW, w))
 	backHint := m.keyText(historyProjectsKeys.Back) + " back"
 	if h.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+h.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW, w)
@@ -223,7 +262,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 		prevNode = p.NodeID
 		cards[i] = card
 	}
-	body := renderCardList(cards, h.projCursor, max(1, ht-4))
+	body := renderCardList(c.below(2), cards, h.projCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
@@ -247,7 +286,7 @@ func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	for i, s := range h.sessions {
 		cards[i] = historySessionRow(s, i == h.sessCursor, cardW, showAgent)
 	}
-	body := renderCardList(cards, h.sessCursor, max(1, ht-4))
+	body := renderCardList(c.below(lipgloss.Height(title)+1), cards, h.sessCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 

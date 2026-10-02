@@ -186,3 +186,12 @@ func (m *model) syncPromptDraft() {
 		m.dock.key = k
 	}
 }
+
+func (d dockComp) wheel(c *ctx, delta int) (component, tea.Cmd) {
+	if c.m.focused != sessionDock {
+		return d, nil
+	}
+	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
+	d.scroll = max(0, min(min(d.scroll, maxScroll)+delta, maxScroll))
+	return d, nil
+}

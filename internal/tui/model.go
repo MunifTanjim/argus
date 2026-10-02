@@ -89,9 +89,11 @@ type model struct {
 	cmdHistory []string   // the command line's history for this run
 	popups     popupStack // the open popups; the last one takes the keys
 
-	keys      *keymap // resolved keymaps; nil in models built without withKeymaps
-	kittyKeys bool    // the terminal reported the Kitty keyboard protocol
-	mouse     bool    // the mouse is captured on every screen
+	keys      *keymap    // resolved keymaps; nil in models built without withKeymaps
+	kittyKeys bool       // the terminal reported the Kitty keyboard protocol
+	mouse     bool       // the mouse is captured on every screen
+	hits      *hitMap    // what the last frame drew that takes the mouse
+	drag      dragTarget // the divider that the mouse drags
 
 	keyBuf    []tea.KeyPressMsg // keys of a pending sequence
 	keyMatch  string            // id of the complete match inside keyBuf, "" when none
@@ -147,6 +149,7 @@ type historyState struct {
 func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 	return model{
 		main:            backStack{homeComp{}},
+		hits:            &hitMap{},
 		client:          client,
 		hasDark:         hasDark,
 		logs:            logs,

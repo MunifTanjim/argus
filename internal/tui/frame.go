@@ -66,6 +66,7 @@ func (m model) View() tea.View {
 }
 
 func (m model) frame() string {
+	m.hits.reset()
 	if m.helpShown() {
 		return m.helpScreen()
 	}
@@ -111,9 +112,16 @@ func (m model) helpShown() bool {
 
 func (m model) mainColumn(c *ctx, l frameLayout) string {
 	dockH := m.dockRows()
-	pane := m.main.top().view(c, l.w, l.h-dockH)
+	r := m.mainRect()
+	mc := &ctx{m: c.m, area: m.hits.add(regMain, r)}
+	pane := m.main.top().view(mc, l.w, l.h-dockH)
 	if dockH > 0 {
-		pane += "\n" + m.dock.view(c, l.w, dockH)
+		paneH := lipgloss.Height(pane)
+		if mc.area != nil {
+			mc.area.rect.Max.Y = r.Min.Y + paneH
+		}
+		dc := &ctx{m: c.m, area: m.hits.add(regDock, uv.Rect(r.Min.X, r.Min.Y+paneH, r.Dx(), dockH))}
+		pane += "\n" + m.dock.view(dc, l.w, dockH)
 	}
 	return pane
 }
@@ -147,10 +155,15 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 	case l.left == 0:
 		panels = append(panels, flexPanel(indentBlock(pane, strings.Repeat(" ", screenMargin))))
 	default:
-		panels = append(panels, fixedPanel(m.left.tree.view(c, l.left, h), l.left+screenMargin), flexPanel(pane))
+		tc := &ctx{m: c.m, area: m.hits.add(regTree, uv.Rect(0, 2, l.left+screenMargin, h))}
+		m.hits.add(regTreeDivider, uv.Rect(l.left+screenMargin, 2, dividerWidth, h))
+		panels = append(panels, fixedPanel(m.left.tree.view(tc, l.left, h), l.left+screenMargin), flexPanel(pane))
 	}
 	if l.right > 0 {
-		panels = append(panels, fixedPanel(m.right.view(c, l.right, h), l.right+screenMargin))
+		x := m.width - l.right - screenMargin
+		rc := &ctx{m: c.m, area: m.hits.add(regRight, uv.Rect(x, 2, l.right+screenMargin, h))}
+		m.hits.add(regFilesDivider, uv.Rect(x-dividerWidth, 2, dividerWidth, h))
+		panels = append(panels, fixedPanel(m.right.view(rc, l.right, h), l.right+screenMargin))
 	}
 	return composeH(m.width, h, panels...)
 }

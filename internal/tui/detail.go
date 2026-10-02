@@ -602,7 +602,9 @@ func (m tview) detailBody() string {
 		prefix += indentBlock(header, gutter) + "\n\n"
 		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
 	}
+	rows := strings.Count(prefix, "\n")
 	if len(lines) <= bodyH {
+		m.hitItems(f, cw, rows, 0, len(lines))
 		return m.c.m.center(prefix+strings.Join(lines, "\n"), m.c.m.containerWidth())
 	}
 	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
@@ -611,9 +613,47 @@ func (m tview) detailBody() string {
 		scroll = 0
 	}
 	end := scroll + ch
+	m.hitItems(f, cw, rows, scroll, end)
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
 	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())
+}
+
+func (m tview) hitItems(f *detailFrame, cw, rows, scroll, end int) {
+	if f.items == nil || !m.c.recording() {
+		return
+	}
+	first, total := m.frameItemStarts(f, cw)
+	hitStarts(m.c.below(rows), first, total, scroll, end)
+}
+
+func (m tview) clickItem(i int, focused bool) tea.Cmd {
+	f := m.topFrame()
+	if f == nil || f.items == nil || i < 0 || i >= len(f.items) {
+		return nil
+	}
+	if focused && i == f.cursor {
+		return m.actDetailDrill(tea.KeyPressMsg{})
+	}
+	f.cursor = i
+	return nil
+}
+
+func (m tview) wheelDetail(d int) {
+	f := m.topFrame()
+	if f == nil {
+		return
+	}
+	f.scroll += d
+	m.clampDetailScroll()
+	if f.items == nil || m.detailCursorVisible(f) {
+		return
+	}
+	if d > 0 {
+		f.cursor = m.firstVisibleItem(f)
+	} else {
+		f.cursor = m.lastVisibleItem(f)
+	}
 }
 
 func (m model) renderDetail(c transcript.Chunk) string {

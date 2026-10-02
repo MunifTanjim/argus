@@ -72,6 +72,9 @@ const (
 type ctx struct {
 	m       *model
 	actions []action
+	// area is the hit map area that a view draws into; nil outside a render.
+	area   *hitArea
+	dx, dy int
 }
 
 type actionKind int

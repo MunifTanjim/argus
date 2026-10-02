@@ -201,6 +201,34 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 	return s, cmd, true
 }
 
+func (s spawnComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
+	if focused && t.index == s.cursor {
+		comp, cmd, _ := s.handleKey(c, enterKey)
+		return comp, cmd
+	}
+	s.cursor = t.index
+	return s, nil
+}
+
+func (s spawnComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
+	if n := s.choices(); n > 0 {
+		s.cursor = cursorBy(s.cursor, d, n)
+	}
+	return s, nil
+}
+
+func (s spawnComp) choices() int {
+	switch {
+	case s.step == spawnStepNode:
+		return len(s.nodes)
+	case s.step == spawnStepAgent:
+		return len(s.agents)
+	case s.step == spawnStepDir && !s.custom:
+		return s.dirCursorMax()
+	}
+	return 0
+}
+
 func (s spawnComp) view(c *ctx, w, h int) string {
 	m := c.m
 	cardW := historyWidth(w)
@@ -218,7 +246,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 			cards[i] = spawnChoiceRow(nodeName(n.Label, n.ID), sub, i == s.cursor, cardW)
 		}
 		body = StyleSecondaryBold.Render("Spawn on which node?") + "\n\n" +
-			renderCardList(cards, s.cursor, max(1, avail-2))
+			renderCardList(c.below(4), cards, s.cursor, max(1, avail-2))
 	case spawnStepAgent:
 		if s.agents == nil {
 			body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
@@ -230,7 +258,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 			cards[i] = spawnChoiceRow(a.Name, "", i == s.cursor, cardW)
 		}
 		body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
-			renderCardList(cards, s.cursor, max(1, avail-2))
+			renderCardList(c.below(4), cards, s.cursor, max(1, avail-2))
 	case spawnStepDir:
 		if s.custom {
 			ci := s.cwd
@@ -245,7 +273,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 		}
 		cards = append(cards, spawnChoiceRow("Custom path…", "", s.cursor == len(s.dirs), cardW))
 		body = StyleSecondaryBold.Render("Choose a directory") + "\n\n" +
-			renderCardList(cards, s.cursor, max(1, avail-2))
+			renderCardList(c.below(4), cards, s.cursor, max(1, avail-2))
 	case spawnStepPrompt:
 		head := StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)")
 		rows := avail - 2

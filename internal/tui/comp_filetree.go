@@ -31,16 +31,42 @@ func (t fileTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd
 	is := func(bs ...binding) bool { return c.m.matches(msg, bs...) }
 	used := is(k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown, k.Left, k.Right, k.Enter)
 	req := t.key(is, c.m.cardListPageStep())
+	if req.loadDir != nil || req.openFile != nil {
+		return t, t.run(c, req), true
+	}
+	return t, nil, used
+}
+
+func (t fileTreeComp) run(c *ctx, req treeRequest) tea.Cmd {
 	switch {
 	case req.loadDir != nil:
-		return t, c.m.fetchListDir(t.ws, *req.loadDir), true
+		return c.m.fetchListDir(t.ws, *req.loadDir)
 	case req.openFile != nil:
 		p := *req.openFile
 		fileComp{ws: t.ws, path: p, loading: true}.show(c)
 		c.focusOn(mainPane)
-		return t, c.m.fetchReadFile(t.ws, p), true
+		return c.m.fetchReadFile(t.ws, p)
 	}
-	return t, nil, used
+	return nil
+}
+
+func (t fileTreeComp) click(c *ctx, h hitTarget, focused bool) (component, tea.Cmd) {
+	if h.kind == hitFold {
+		t.cursor = h.index
+		cmd := t.run(c, t.toggle(t.rows()))
+		return t, cmd
+	}
+	if focused && h.index == t.cursor {
+		cmd := t.run(c, t.enter(t.rows()))
+		return t, cmd
+	}
+	t.cursor = h.index
+	return t, nil
+}
+
+func (t fileTreeComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
+	t.cursor = cursorBy(t.cursor, d, len(t.rows()))
+	return t, nil
 }
 
 // reload keeps the old listings until the answers replace them, so the tree
@@ -78,7 +104,7 @@ func (t fileTreeComp) update(_ *ctx, msg tea.Msg) (component, tea.Cmd) {
 }
 
 func (t fileTreeComp) view(c *ctx, w, h int) string {
-	return t.fileTree.view(w, h, c.m.focused == rightSidebar)
+	return t.fileTree.view(c, w, h, c.m.focused == rightSidebar)
 }
 
 func (t fileTreeComp) footerText(c *ctx) string { return c.m.right.footerText(c) }

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -35,9 +36,13 @@ func (l leftSidebarState) handleKey(c *ctx, msg tea.KeyPressMsg) (leftSidebarSta
 	return l, false
 }
 
-func (l leftSidebarState) resize(c *ctx, d int) leftSidebarState {
-	l.width = clampWidth(c.m.projectsLeftW()+d, 20, c.m.leftMaxW())
+func (l leftSidebarState) setWidth(c *ctx, w int) leftSidebarState {
+	l.width = clampWidth(w, 20, c.m.leftMaxW())
 	return l
+}
+
+func (l leftSidebarState) resize(c *ctx, d int) leftSidebarState {
+	return l.setWidth(c, c.m.projectsLeftW()+d)
 }
 
 type projectTreeComp struct {
@@ -187,6 +192,27 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 		return t, nil, false
 	}
 	return t, cmd, true
+}
+
+func (t projectTreeComp) click(c *ctx, h hitTarget, focused bool) (component, tea.Cmd) {
+	if h.index >= len(t.rows) {
+		return t, nil
+	}
+	switch {
+	case h.kind == hitFold:
+		t = t.move(h.index)
+		r := t.rows[h.index]
+		t.setFolded(r.id, !t.isFolded(r.id))
+	case focused && h.index == t.cursor:
+		t = t.enter(c)
+	default:
+		t = t.move(h.index)
+	}
+	return t, nil
+}
+
+func (t projectTreeComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
+	return t.move(cursorBy(t.cursor, d, len(t.rows))), nil
 }
 
 // treeOp is a change to the tree that its own keys and a workspace pane's keys
@@ -353,21 +379,31 @@ func (t projectTreeComp) view(c *ctx, w, h int) string {
 	margin := strings.Repeat(" ", screenMargin)
 	head = margin + truncateLine(head, w) + "\n\n"
 	act := m.workspaceActivity()
-	lines := make([]string, len(t.rows))
+	var l itemLines
 	for i, r := range t.rows {
-		lines[i] = treeMarker(i == t.cursor, focused) + m.projRowLine(r, i == t.cursor, focused, act, w)
+		l.add(i, treeMarker(i == t.cursor, focused)+m.projRowLine(r, i == t.cursor, focused, act, w))
 	}
 	switch {
 	case t.err != nil:
-		lines = append(lines, margin+truncateLine(dimStyle.Render("error: "+t.err.Error()), w))
+		l.text(margin + truncateLine(dimStyle.Render("error: "+t.err.Error()), w))
 	case t.data == nil:
-		lines = append(lines, margin+dimStyle.Render("loading projects…"))
+		l.text(margin + dimStyle.Render("loading projects…"))
 	case len(t.rows) == 1 && t.filter != "":
-		lines = append(lines, margin+dimStyle.Render("no matches"))
+		l.text(margin + dimStyle.Render("no matches"))
 	case len(t.rows) == 1:
-		lines = append(lines, margin+dimStyle.Render("no projects"))
+		l.text(margin + dimStyle.Render("no projects"))
 	}
-	return head + strings.Join(windowSpan(lines, t.cursor, t.cursor+1, max(1, h-2)), "\n")
+	avail := max(1, h-2)
+	rc := c.below(2)
+	if t.filter == "" {
+		scroll := l.scroll(t.cursor, avail)
+		for i, r := range t.rows {
+			if y := i - scroll; r.hasKids && y >= 0 && y < avail {
+				rc.hitZone(uv.Rect(screenMargin+2*r.depth, y, 2, 1), hitTarget{kind: hitFold, index: i})
+			}
+		}
+	}
+	return head + strings.Join(l.window(rc, t.cursor, avail), "\n")
 }
 
 func (t projectTreeComp) flatten() []projectsRow {

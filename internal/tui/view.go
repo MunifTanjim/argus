@@ -164,6 +164,14 @@ func (m model) homeTabs(active homeTab) string {
 	return out
 }
 
+func (m model) hitHomeTabs(c *ctx, x int) {
+	labels := []string{"Sessions", "History"}
+	if m.hasLogsTab() {
+		labels = append(labels, "Logs")
+	}
+	c.hitTabs(x, 0, 3, labels...)
+}
+
 func (m model) quarantined() bool {
 	return m.client != nil && m.client.Quarantined()
 }

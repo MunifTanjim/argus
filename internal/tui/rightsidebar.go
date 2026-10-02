@@ -71,10 +71,13 @@ func (r rightSidebarState) handleKey(c *ctx, msg tea.KeyPressMsg) (rightSidebarS
 	return r, false
 }
 
-func (r rightSidebarState) resize(c *ctx, d int) rightSidebarState {
-	maxW := c.m.filesMaxW()
-	r.width = clampWidth(clampWidth(r.rawWidth(), 20, maxW)+d, 20, maxW)
+func (r rightSidebarState) setWidth(c *ctx, w int) rightSidebarState {
+	r.width = clampWidth(w, 20, c.m.filesMaxW())
 	return r
+}
+
+func (r rightSidebarState) resize(c *ctx, d int) rightSidebarState {
+	return r.setWidth(c, clampWidth(r.rawWidth(), 20, c.m.filesMaxW())+d)
 }
 
 // Each component drops a reply that no longer matches its workspace or request.
@@ -116,10 +119,11 @@ func (r rightSidebarState) view(c *ctx, w, h int) string {
 	gutter := strings.Repeat(" ", screenMargin)
 	focused := c.m.focused == rightSidebar
 	head := gutter + truncateLine(r.tabStrip(focused), max(1, w-screenMargin)) + "\n\n"
+	c.hitTabs(screenMargin, 0, 2, sideTabNames...)
 	if r.ws == "" {
 		return head + gutter + dimStyle.Render("select a workspace")
 	}
-	return head + r.current().view(c, w, max(1, h-2))
+	return head + r.current().view(c.below(2), w, max(1, h-2))
 }
 
 func (r rightSidebarState) tabStrip(focused bool) string {

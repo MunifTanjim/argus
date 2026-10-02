@@ -136,3 +136,20 @@ func (m tview) actDrillChunk(tea.KeyPressMsg) tea.Cmd {
 	}
 	return nil
 }
+
+func (m tview) clickChunk(i int, focused bool) tea.Cmd {
+	if i < 0 || i >= len(m.transcript.chunks) {
+		return nil
+	}
+	if focused && i == m.transcript.cursor {
+		return m.actDrillChunk(tea.KeyPressMsg{})
+	}
+	m.transcript.cursor = i
+	return nil
+}
+
+func (m tview) wheelLines(d int) {
+	m.transcript.scroll += d
+	m.clampScrollNow()
+	m.keepCursorVisible()
+}

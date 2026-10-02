@@ -61,6 +61,15 @@ func (l logsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	return l, nil, true
 }
 
+func (l logsComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
+	if t.kind != hitTab || homeTab(t.index) == tabLogs {
+		return l, nil
+	}
+	return l, switchHomeTab(c, homeTab(t.index))
+}
+
+func (l logsComp) wheel(c *ctx, d int) (component, tea.Cmd) { return l.scrollBy(c, d), nil }
+
 func (l logsComp) scrollBy(c *ctx, delta int) logsComp {
 	l = l.unfollow(c)
 	bottom := c.m.logsBottom()
@@ -92,6 +101,7 @@ func (l logsComp) view(c *ctx, w, h int) string {
 	if l.fullScreen(c) == fullWidth {
 		gutter = strings.Repeat(" ", screenMargin+max(0, (m.frameWidth()-cardW)/2))
 	}
+	m.hitHomeTabs(c, len(gutter))
 	var body string
 	if m.logs.Len() == 0 {
 		body = dimStyle.Render("no logs yet")

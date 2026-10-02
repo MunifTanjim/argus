@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -118,6 +119,30 @@ func (t transcriptComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.C
 	return t, cmd, true
 }
 
+func (t transcriptComp) click(c *ctx, h hitTarget, focused bool) (component, tea.Cmd) {
+	v := t.bind(c)
+	var cmd tea.Cmd
+	if t.historyView == histDetail {
+		cmd = v.clickItem(h.index, focused)
+	} else {
+		cmd = v.clickChunk(h.index, focused)
+	}
+	return t, cmd
+}
+
+func (t transcriptComp) wheel(c *ctx, d int) (component, tea.Cmd) {
+	v := t.bind(c)
+	if v.redactListActive() {
+		return t, nil
+	}
+	if t.historyView == histDetail {
+		v.wheelDetail(d)
+	} else {
+		v.wheelLines(d)
+	}
+	return t, nil
+}
+
 func (t transcriptComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	cmd := t.bind(c).updateMsg(msg)
 	return t, cmd
@@ -126,15 +151,14 @@ func (t transcriptComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 // view ignores h: the cards and the scroll math read the frame's layout, which
 // holds the same size.
 func (t transcriptComp) view(c *ctx, w, _ int) string {
-	v := t.bind(c)
 	if !t.live {
-		return v.historyTranscriptView()
+		return t.bind(c).historyTranscriptView()
 	}
 	head := t.fileHeader(c, w)
 	if c.m.sessions[t.sessionID].Status == session.StatusStarting {
 		return head + "\n\n" + startingNotice(*c.m)
 	}
-	return head + "\n\n" + v.historyBody()
+	return head + "\n\n" + t.bind(c.below(lipgloss.Height(head)+1)).historyBody()
 }
 
 // fileHeader stays over a file opened on the transcript.

@@ -12,6 +12,16 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
+// The interior of the screen box is below the 2 header rows and inside the
+// 1-cell border.
+const (
+	screenBodyX = 1
+	screenBodyY = 3
+)
+
+// screenWheelMsg is the wheel at (x, y) in the main pane.
+type screenWheelMsg struct{ x, y, delta int }
+
 // screenComp is the live screen. It takes every key as typed; only the leave
 // key pops it.
 type screenComp struct {
@@ -57,11 +67,13 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		return s, c.m.termResizeCmd(s.termID, cols, rows)
 	case tea.PasteMsg:
 		c.m.sendTermKey(s.termID, []byte(msg.Content))
-	case wheelMsg:
-		if s.term != nil {
-			if b := ptyWheelBytes(msg, s.term.Width(), s.term.Height()); b != nil {
-				c.m.sendTermKey(s.termID, b)
-			}
+	case screenWheelMsg:
+		if s.term == nil {
+			break
+		}
+		b := ptyWheelBytes(msg.delta < 0, msg.x-screenBodyX, msg.y-screenBodyY, s.term.Width(), s.term.Height())
+		for range max(msg.delta, -msg.delta) {
+			c.m.sendTermKey(s.termID, b)
 		}
 	case termOpenedMsg:
 		if msg.err != nil {

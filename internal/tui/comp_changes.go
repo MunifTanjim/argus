@@ -125,13 +125,8 @@ func (ch changesComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd
 	case m.matches(msg, k.HalfDown):
 		ch.cursor = min(cursorBottom(n), ch.cursor+m.cardListPageStep())
 	case m.matches(msg, k.Enter, k.Right):
-		switch {
-		case ch.cursor < len(ch.files):
-			return ch, ch.openDiff(c, ch.files[ch.cursor], ""), true
-		case ch.cursor < n:
-			ch, cmd := ch.openCommit(c, ch.commits[ch.cursor-len(ch.files)])
-			return ch, cmd, true
-		}
+		ch, cmd := ch.enter(c)
+		return ch, cmd, true
 	default:
 		return ch, nil, false
 	}
@@ -160,13 +155,53 @@ func (ch changesComp) commitFilesKey(c *ctx, msg tea.KeyPressMsg) (component, te
 	case m.matches(msg, k.HalfDown):
 		ch.commitCursor = min(cursorBottom(n), ch.commitCursor+m.cardListPageStep())
 	case m.matches(msg, k.Enter, k.Right):
-		if ch.commitCursor < n {
-			return ch, ch.openDiff(c, ch.commitFiles[ch.commitCursor], ch.commit.SHA), true
-		}
+		return ch, ch.enterCommitFile(c), true
 	default:
 		return ch, nil, false
 	}
 	return ch, nil, true
+}
+
+func (ch changesComp) enter(c *ctx) (changesComp, tea.Cmd) {
+	switch {
+	case ch.cursor < len(ch.files):
+		return ch, ch.openDiff(c, ch.files[ch.cursor], "")
+	case ch.cursor < len(ch.files)+len(ch.commits):
+		return ch.openCommit(c, ch.commits[ch.cursor-len(ch.files)])
+	}
+	return ch, nil
+}
+
+func (ch changesComp) enterCommitFile(c *ctx) tea.Cmd {
+	if ch.commitCursor < len(ch.commitFiles) {
+		return ch.openDiff(c, ch.commitFiles[ch.commitCursor], ch.commit.SHA)
+	}
+	return nil
+}
+
+func (ch changesComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
+	if ch.commit != nil {
+		if focused && t.index == ch.commitCursor {
+			return ch, ch.enterCommitFile(c)
+		}
+		ch.commitCursor = t.index
+		return ch, nil
+	}
+	if focused && t.index == ch.cursor {
+		ch, cmd := ch.enter(c)
+		return ch, cmd
+	}
+	ch.cursor = t.index
+	return ch, nil
+}
+
+func (ch changesComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
+	if ch.commit != nil {
+		ch.commitCursor = cursorBy(ch.commitCursor, d, len(ch.commitFiles))
+	} else {
+		ch.cursor = cursorBy(ch.cursor, d, len(ch.files)+len(ch.commits))
+	}
+	return ch, nil
 }
 
 func (ch changesComp) openDiff(c *ctx, f api.ChangedFile, rev string) tea.Cmd {
@@ -248,47 +283,40 @@ func (ch changesComp) diffModeKey(c *ctx) binding {
 func (ch changesComp) view(c *ctx, w, h int) string {
 	focused := c.m.focused == rightSidebar
 	if ch.commit != nil {
-		return ch.commitFilesView(w, h, focused)
+		return ch.commitFilesView(c, w, h, focused)
 	}
 	gutter := strings.Repeat(" ", screenMargin)
 	tw := max(1, w-screenMargin)
 	note := func(s string) string { return gutter + truncateLine(dimStyle.Render(s), tw) }
-	var lines []string
-	curLine := 0
+	var l itemLines
 	switch {
 	case ch.err != nil:
-		lines = append(lines, note("error: "+ch.err.Error()))
+		l.text(note("error: " + ch.err.Error()))
 	case ch.files == nil:
-		lines = append(lines, note("loading…"))
+		l.text(note("loading…"))
 	case len(ch.files) == 0:
-		lines = append(lines, note("no changes"))
+		l.text(note("no changes"))
 	}
 	for i, f := range ch.files {
-		if i == ch.cursor {
-			curLine = len(lines)
-		}
-		lines = append(lines, changeRow(f, i == ch.cursor, focused, tw))
+		l.add(i, changeRow(f, i == ch.cursor, focused, tw))
 	}
-	lines = append(lines, "", note(ch.commitsHeader(c)))
+	l.text("")
+	l.text(note(ch.commitsHeader(c)))
 	switch {
 	case ch.commitsErr != nil:
-		lines = append(lines, note("error: "+ch.commitsErr.Error()))
+		l.text(note("error: " + ch.commitsErr.Error()))
 	case ch.commits == nil:
-		lines = append(lines, note("loading…"))
+		l.text(note("loading…"))
 	case len(ch.commits) == 0:
-		lines = append(lines, note("no commits"))
+		l.text(note("no commits"))
 	}
 	for j, cm := range ch.commits {
-		sel := len(ch.files)+j == ch.cursor
-		if sel {
-			curLine = len(lines)
-		}
-		lines = append(lines, commitRow(cm, sel, focused, tw))
+		l.add(len(ch.files)+j, commitRow(cm, len(ch.files)+j == ch.cursor, focused, tw))
 	}
-	return note(ch.header(c)) + "\n" + strings.Join(windowSpan(lines, curLine, curLine+1, max(1, h-1)), "\n")
+	return note(ch.header(c)) + "\n" + strings.Join(l.window(c.below(1), ch.cursor, max(1, h-1)), "\n")
 }
 
-func (ch changesComp) commitFilesView(w, h int, focused bool) string {
+func (ch changesComp) commitFilesView(c *ctx, w, h int, focused bool) string {
 	gutter := strings.Repeat(" ", screenMargin)
 	tw := max(1, w-screenMargin)
 	head := gutter + truncateLine(StyleSecondary.Render(ch.commit.Short)+" "+ch.commit.Subject, tw) + "\n"
@@ -300,11 +328,11 @@ func (ch changesComp) commitFilesView(w, h int, focused bool) string {
 	case len(ch.commitFiles) == 0:
 		return head + gutter + dimStyle.Render("no files")
 	}
-	rows := make([]string, len(ch.commitFiles))
+	var l itemLines
 	for i, f := range ch.commitFiles {
-		rows[i] = changeRow(f, i == ch.commitCursor, focused, tw)
+		l.add(i, changeRow(f, i == ch.commitCursor, focused, tw))
 	}
-	return head + strings.Join(windowSpan(rows, ch.commitCursor, ch.commitCursor+1, max(1, h-1)), "\n")
+	return head + strings.Join(l.window(c.below(1), ch.commitCursor, max(1, h-1)), "\n")
 }
 
 func (ch changesComp) header(c *ctx) string {

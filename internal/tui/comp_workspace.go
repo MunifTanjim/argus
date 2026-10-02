@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -102,6 +104,23 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	return p, cmd, true
 }
 
+func (p workspaceComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
+	ss := c.m.wsSessions(p.ws)
+	switch {
+	case t.index >= len(ss):
+	case focused && t.index == p.cursor:
+		c.openSession(ss[t.index].ID)
+	default:
+		p.cursor = t.index
+	}
+	return p, nil
+}
+
+func (p workspaceComp) wheel(c *ctx, d int) (component, tea.Cmd) {
+	p.cursor = cursorBy(p.cursor, d, len(c.m.wsSessions(p.ws)))
+	return p, nil
+}
+
 func paneTreeKey(c *ctx, msg tea.KeyPressMsg) bool {
 	m, k := c.m, projectsKeys
 	switch {
@@ -146,7 +165,7 @@ func (p workspaceComp) column(c *ctx, w, h int) string {
 	if !ok {
 		return dimStyle.Render("workspace not found")
 	}
-	return truncateLine(c.m.wsHeader(r)+c.m.sessionFilterTitle(), w) + "\n\n" + p.sessions(c, w, max(1, h-2))
+	return truncateLine(c.m.wsHeader(r)+c.m.sessionFilterTitle(), w) + "\n\n" + p.sessions(c.below(2), w, max(1, h-2))
 }
 
 func (p workspaceComp) sessions(c *ctx, w, avail int) string {
@@ -170,7 +189,7 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	if focused {
 		cursor = p.cursor
 	}
-	return block + renderCardList(cards, cursor, avail)
+	return block + renderCardList(c.below(strings.Count(block, "\n")), cards, cursor, avail)
 }
 
 func (p workspaceComp) footerPrompt(c *ctx) string {

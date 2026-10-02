@@ -97,7 +97,7 @@ func TestFileTreeEnterOpensFile(t *testing.T) {
 func TestFileTreeViewFitsAndMarksCursor(t *testing.T) {
 	ft := loadedTree()
 	ft.setDir("", []api.DirEntry{{Name: strings.Repeat("n", 90), Path: strings.Repeat("n", 90)}}, nil)
-	out := ft.view(30, 10, true)
+	out := ft.view(&ctx{}, 30, 10, true)
 	for _, ln := range strings.Split(ansi.Strip(out), "\n") {
 		if w := len([]rune(ln)); w > 30 {
 			t.Errorf("row wider than the sidebar (%d): %q", w, ln)
@@ -600,7 +600,7 @@ func TestFileViewPaneBindingsUseFileViewKeys(t *testing.T) {
 func TestTreeShowsSymlinkTargets(t *testing.T) {
 	ft := newFileTree("n1:w1")
 	ft.setDir("", []api.DirEntry{{Name: "docs", Path: "docs", IsDir: true, Symlink: true, Target: "site/docs"}, {Name: "cfg", Path: "cfg", Symlink: true, Target: "/etc/cfg"}}, nil)
-	out := ansi.Strip(ft.view(60, 10, true))
+	out := ansi.Strip(ft.view(&ctx{}, 60, 10, true))
 	if !strings.Contains(out, "▸ docs → site/docs") || !strings.Contains(out, "cfg → /etc/cfg") {
 		t.Errorf("symlink rows should show their targets:\n%s", out)
 	}
