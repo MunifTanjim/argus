@@ -72,12 +72,15 @@ class E2EClient implements GatewayClient {
     Uint8List? genesisHash,
     this._initialTrustChain,
     bool tofu = false,
+    TrustStore? trustStore,
     this.trustResyncInterval,
     this.onTrustChainAdvance,
     bool plaintext = false,
-  }) : _trust = tofu
-           ? TrustStore.tofu()
-           : (genesisHash != null ? TrustStore(genesisHash) : null),
+  }) : _trust =
+           trustStore ??
+           (tofu
+               ? TrustStore.tofu()
+               : (genesisHash != null ? TrustStore(genesisHash) : null)),
        _plaintext = plaintext {
     _sub = _incoming.listen(_onMessage, onDone: _onDone, cancelOnError: false);
     _gateway = RpcClient(incoming: _gatewayCtrl.stream, sendFrame: _send);

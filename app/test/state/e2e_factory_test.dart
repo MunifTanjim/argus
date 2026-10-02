@@ -83,4 +83,22 @@ void main() {
     expect(stored, equals(longChain));
     await c.close();
   });
+
+  test('a stored chain is checked once per connect', () async {
+    final v = _tl();
+    final aKp = await keyPairFromSeed(base64.decode(v['enforcement_node_a_seed'] as String));
+    final node = LoopbackNode('A', aKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+    final chain = Uint8List.fromList(base64.decode(v['enforcement_chain'] as String));
+    final link = MultiNodeLoopbackLink({'A': node}, trustChain: chain);
+    final kv = _MemKv();
+    await TrustChainStore(kv).save(chain);
+    var loads = 0;
+    final c = await buildE2EClient(link.incoming, link.send, ClientIdentityStore(kv), TrustChainStore(kv),
+        loadChain: (entries) {
+      loads++;
+      return TrustLog.load(entries);
+    });
+    expect(loads, 1, reason: 'the gateway serves the stored chain, so one check is enough');
+    await c.close();
+  });
 }
