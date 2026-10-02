@@ -132,13 +132,12 @@ func TestEnterScreenOpensAttach(t *testing.T) {
 func TestPtyWheelBytes(t *testing.T) {
 	cases := []struct {
 		name string
-		msg  tea.MouseWheelMsg
+		msg  wheelMsg
 		want string
 	}{
-		{"up", tea.MouseWheelMsg{X: 3, Y: 4, Button: tea.MouseWheelUp}, "\x1b[<64;4;5M"},
-		{"down", tea.MouseWheelMsg{X: 3, Y: 4, Button: tea.MouseWheelDown}, "\x1b[<65;4;5M"},
-		{"clamped to the terminal", tea.MouseWheelMsg{X: 500, Y: 500, Button: tea.MouseWheelUp}, "\x1b[<64;80;24M"},
-		{"sideways is dropped", tea.MouseWheelMsg{Button: tea.MouseWheelLeft}, ""},
+		{"up", wheelMsg{Mouse: tea.Mouse{X: 3, Y: 4}, delta: -1}, "\x1b[<64;4;5M"},
+		{"down", wheelMsg{Mouse: tea.Mouse{X: 3, Y: 4}, delta: 1}, "\x1b[<65;4;5M"},
+		{"clamped to the terminal", wheelMsg{Mouse: tea.Mouse{X: 500, Y: 500}, delta: -1}, "\x1b[<64;80;24M"},
 	}
 	for _, tc := range cases {
 		if got := string(ptyWheelBytes(tc.msg, 80, 24)); got != tc.want {
@@ -152,7 +151,7 @@ func TestLiveScreenForwardsWheelAndCapturesMouse(t *testing.T) {
 	if m.View().MouseMode != tea.MouseModeCellMotion {
 		t.Error("the live screen should capture the mouse")
 	}
-	m, _ = upd(m, tea.MouseWheelMsg{X: 1, Y: 1, Button: tea.MouseWheelUp})
+	m, _ = upd(m, wheelMsg{Mouse: tea.Mouse{X: 1, Y: 1}, delta: -1})
 	select {
 	case k := <-m.termKeyCh:
 		if string(k.data) != "\x1b[<64;2;2M" {
