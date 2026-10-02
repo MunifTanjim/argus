@@ -76,7 +76,7 @@ func (b *branchPicker) paste(msg tea.PasteMsg) tea.Cmd {
 }
 
 // dimInUse marks branches that a worktree already has checked out.
-func (b branchPicker) view(w, h int, dimInUse bool) string {
+func (b branchPicker) view(c *ctx, w, h int, dimInUse bool) string {
 	head := dimStyle.Render("filter: ") + b.filter.View()
 	switch {
 	case b.err != nil:
@@ -88,7 +88,7 @@ func (b branchPicker) view(w, h int, dimInUse bool) string {
 	if len(ms) == 0 {
 		return head + "\n\n" + dimStyle.Render("no matches")
 	}
-	lines := make([]string, len(ms))
+	var l itemLines
 	for i, br := range ms {
 		text := br.Name
 		if br.Remote && !br.Local {
@@ -100,7 +100,7 @@ func (b branchPicker) view(w, h int, dimInUse bool) string {
 		if br.Name == b.current {
 			text += dimStyle.Render("  (current)")
 		}
-		lines[i] = truncateLine(cursorLine(text, i == b.cursor, true), w)
+		l.add(i, truncateLine(cursorLine(text, i == b.cursor, true), w))
 	}
-	return head + "\n\n" + strings.Join(windowSpan(lines, b.cursor, b.cursor+1, max(1, h-2)), "\n")
+	return head + "\n\n" + strings.Join(l.window(c.below(2), b.cursor, max(1, h-2)), "\n")
 }

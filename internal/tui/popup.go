@@ -88,8 +88,12 @@ func (m model) drawPopups(frame string) string {
 	scr := uv.NewScreenBuffer(m.width, m.height)
 	uv.NewStyledString(frame).Draw(scr, scr.Bounds())
 	c := &ctx{m: &m}
-	for _, p := range m.popups {
-		p.draw(c, scr, scr.Bounds())
+	for i, p := range m.popups {
+		pc := c
+		if i == len(m.popups)-1 {
+			pc = &ctx{m: &m, area: m.hits.add(regPopup, uv.Rectangle{})}
+		}
+		p.draw(pc, scr, scr.Bounds())
 	}
 	return scr.Render()
 }
@@ -102,9 +106,11 @@ func bottomLeftRect(area uv.Rectangle, w, h int) uv.Rectangle {
 	return uv.Rect(area.Min.X, area.Max.Y-h, w, h)
 }
 
-func drawCenter(scr uv.Screen, area uv.Rectangle, view string) {
+func drawCenter(scr uv.Screen, area uv.Rectangle, view string) uv.Rectangle {
 	w, h := lipgloss.Size(view)
-	uv.NewStyledString(view).Draw(scr, centerRect(area, min(w, area.Dx()), min(h, area.Dy())))
+	r := centerRect(area, min(w, area.Dx()), min(h, area.Dy()))
+	uv.NewStyledString(view).Draw(scr, r)
+	return r
 }
 
 // popupFrameW and popupFrameH are the columns and rows a popupFrame's border
@@ -141,6 +147,19 @@ func (f popupFrame) lines() int {
 // spaced reports whether a blank row follows the title and precedes the help.
 func (f popupFrame) spaced() bool {
 	return f.height == 0 || f.height-popupFrameH-2*f.lines() >= popupMinBody
+}
+
+// bodyCtx is c with its hit origin on the first body cell, inside the border,
+// the padding, and the title.
+func (f popupFrame) bodyCtx(c *ctx) *ctx {
+	y := 1
+	if f.title != "" {
+		y++
+		if f.spaced() {
+			y++
+		}
+	}
+	return c.below(y).right(popupFrameW / 2)
 }
 
 func (f popupFrame) bodyHeight() int {

@@ -116,29 +116,26 @@ func historyResume(c *ctx, resumable bool, nodeID, agent, sessionID, cwd string)
 // --- views --------------------------------------------------------------------
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
-// with the cursor card kept fully visible (mirrors the Home pane).
-func renderCardList(cards []string, cursor, avail int) string {
-	var lines []string
-	curStart, curEnd := 0, 0
-	for i, c := range cards {
+// with the cursor card kept fully visible.
+func renderCardList(c *ctx, cards []string, cursor, avail int) string {
+	var l itemLines
+	for i, card := range cards {
 		if i > 0 {
-			lines = append(lines, "") // blank separator between cards
+			l.text("")
 		}
-		start := len(lines)
-		lines = append(lines, strings.Split(c, "\n")...)
-		if i == cursor {
-			curStart, curEnd = start, len(lines)
-		}
+		l.add(i, card)
 	}
-	return strings.Join(windowSpan(lines, curStart, curEnd, avail), "\n")
+	return strings.Join(l.window(c, cursor, avail), "\n")
 }
 
 func (m tview) historyTranscriptView() string {
 	header := m.c.m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
-	body := m.historyBody() // reuses live transcript/detail renderers (read-only)
+	var body string
 	if m.redactListActive() {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
 		body = m.c.m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
+	} else {
+		body = m.transcriptComp.bind(m.c.below(lipgloss.Height(header) + 1)).historyBody()
 	}
 	return header + "\n\n" + body
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
@@ -109,21 +110,32 @@ func (t *fileTree) key(is func(...binding) bool, page int) treeRequest {
 	case is(k.Right) && t.cursor < n && rows[t.cursor].entry.IsDir:
 		return t.unfold(rows)
 	case is(k.Enter, k.Right):
-		if t.cursor >= n || rows[t.cursor].note != "" {
-			return treeRequest{}
-		}
-		e := rows[t.cursor].entry
-		if !e.IsDir {
-			p := e.Path
-			return treeRequest{openFile: &p}
-		}
-		if t.expanded[e.Path] {
-			delete(t.expanded, e.Path)
-			return treeRequest{}
-		}
-		return t.unfold(rows)
+		return t.enter(rows)
 	}
 	return treeRequest{}
+}
+
+func (t *fileTree) enter(rows []treeRow) treeRequest {
+	if t.cursor >= len(rows) || rows[t.cursor].note != "" {
+		return treeRequest{}
+	}
+	e := rows[t.cursor].entry
+	if !e.IsDir {
+		p := e.Path
+		return treeRequest{openFile: &p}
+	}
+	return t.toggle(rows)
+}
+
+func (t *fileTree) toggle(rows []treeRow) treeRequest {
+	if t.cursor >= len(rows) || rows[t.cursor].note != "" || !rows[t.cursor].entry.IsDir {
+		return treeRequest{}
+	}
+	if p := rows[t.cursor].entry.Path; t.expanded[p] {
+		delete(t.expanded, p)
+		return treeRequest{}
+	}
+	return t.unfold(rows)
 }
 
 func (t *fileTree) unfold(rows []treeRow) treeRequest {
@@ -158,9 +170,9 @@ func (t *fileTree) left(rows []treeRow) {
 
 // Each row has a 2-cell gutter for the cursor bar so names line up under the
 // sidebar's tab strip.
-func (t fileTree) view(w, h int, focused bool) string {
+func (t fileTree) view(c *ctx, w, h int, focused bool) string {
 	rows := t.rows()
-	lines := make([]string, len(rows))
+	var l itemLines
 	for i, r := range rows {
 		indent := strings.Repeat("  ", r.depth)
 		var text string
@@ -181,9 +193,15 @@ func (t fileTree) view(w, h int, focused bool) string {
 		if sel && focused {
 			text = cursorStyle.Render(text)
 		}
-		lines[i] = sideMarker(sel, focused) + truncateLine(text, max(1, w-screenMargin))
+		l.add(i, sideMarker(sel, focused)+truncateLine(text, max(1, w-screenMargin)))
 	}
-	return strings.Join(windowSpan(lines, t.cursor, t.cursor+1, h), "\n")
+	scroll := l.scroll(t.cursor, h)
+	for i, r := range rows {
+		if y := i - scroll; r.note == "" && r.entry.IsDir && y >= 0 && y < h {
+			c.hitZone(uv.Rect(screenMargin+2*r.depth, y, 2, 1), hitTarget{kind: hitFold, index: i})
+		}
+	}
+	return strings.Join(l.window(c, t.cursor, h), "\n")
 }
 
 // sideMarker is the right sidebar's 2-cell cursor gutter.

@@ -210,8 +210,8 @@ func (p palettePopup) draw(c *ctx, scr uv.Screen, area uv.Rectangle) {
 		head = append(head, p.scopeLine(iw))
 	}
 	head = append(head, p.inputLine(iw), "")
-	f.parts = append(head, p.listRows(iw, max(1, f.bodyHeight()-len(head)))...)
-	drawCenter(scr, area, f.render())
+	f.parts = append(head, p.listRows(f.bodyCtx(c).below(len(head)), iw, max(1, f.bodyHeight()-len(head)))...)
+	c.hitRect(drawCenter(scr, area, f.render()))
 }
 
 func (p palettePopup) footer() []binding {
@@ -255,7 +255,7 @@ func (p palettePopup) inputLine(w int) string {
 // listRows are the matches, scrolled to keep the cursor in n rows. The label
 // width fits every match, not only the shown ones, so it stays while
 // scrolling.
-func (p palettePopup) listRows(w, n int) []string {
+func (p palettePopup) listRows(c *ctx, w, n int) []string {
 	if len(p.matches) == 0 {
 		return []string{StyleDim.Render("no matches")}
 	}
@@ -264,7 +264,7 @@ func (p palettePopup) listRows(w, n int) []string {
 		labelW = max(labelW, lipgloss.Width(pm.label))
 	}
 	labelW = min(labelW, w*3/5)
-	rows := make([]string, len(p.matches))
+	var l itemLines
 	for i, pm := range p.matches {
 		base, dim := lipgloss.NewStyle(), StyleDim
 		if i == p.cursor {
@@ -281,7 +281,20 @@ func (p palettePopup) listRows(w, n int) []string {
 		if i == p.cursor {
 			row += base.Render(strings.Repeat(" ", max(0, w-lipgloss.Width(row))))
 		}
-		rows[i] = row
+		l.add(i, row)
 	}
-	return windowSpan(rows, p.cursor, p.cursor+1, n)
+	return l.window(c, p.cursor, n)
+}
+
+func (p palettePopup) click(c *ctx, t hitTarget) (popup, tea.Cmd) {
+	if t.index == p.cursor {
+		return p.handleKey(c, enterKey)
+	}
+	p.cursor = t.index
+	return p, nil
+}
+
+func (p palettePopup) wheel(_ *ctx, d int) (popup, tea.Cmd) {
+	p.cursor = cursorBy(p.cursor, d, len(p.matches))
+	return p, nil
 }

@@ -98,10 +98,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case kittyCheckMsg:
 		return m.kittyCheck(), nil
 	case wheelMsg:
-		if i := m.topScreen(); len(m.popups) == 0 && i >= 0 {
-			return m.updateScreen(i, msg)
-		}
-		return m, nil
+		return m.mouseWheel(msg)
+	case tea.MouseClickMsg:
+		return m.mouseClick(msg.Mouse())
+	case tea.MouseMotionMsg:
+		return m.mouseMotion(msg.Mouse())
+	case tea.MouseReleaseMsg:
+		return m.mouseRelease(msg.Mouse())
 	case tea.PasteMsg:
 		switch {
 		case msg.Content == "":

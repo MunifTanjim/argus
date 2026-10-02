@@ -196,20 +196,7 @@ func (p createPicker) handleKey(c *ctx, msg tea.KeyPressMsg) (popup, tea.Cmd) {
 		if msg.String() == "shift+tab" {
 			d = -1
 		}
-		p.tab = createTab((int(p.tab) + d + len(createTabNames)) % len(createTabNames))
-		p.cursor, p.err = 0, ""
-		p.retryFailedTab()
-		p.filter.SetValue("")
-		p.branches.filter.SetValue("")
-		p.branches.cursor = 0
-		var focus tea.Cmd
-		if p.tab == ctNew {
-			focus = p.name.Focus()
-		} else {
-			p.name.Blur()
-			focus = p.filter.Focus()
-		}
-		return p, tea.Batch(focus, p.ensureData(c))
+		return p.switchTab(c, createTab((int(p.tab)+d+len(createTabNames))%len(createTabNames)))
 	case "enter":
 		var cmd tea.Cmd
 		p, cmd = p.submit(c)
@@ -369,6 +356,23 @@ func (p createPicker) submit(c *ctx) (createPicker, tea.Cmd) {
 
 // --- view ---------------------------------------------------------------------
 
+func (p createPicker) switchTab(c *ctx, t createTab) (createPicker, tea.Cmd) {
+	p.tab = t
+	p.cursor, p.err = 0, ""
+	p.retryFailedTab()
+	p.filter.SetValue("")
+	p.branches.filter.SetValue("")
+	p.branches.cursor = 0
+	var focus tea.Cmd
+	if p.tab == ctNew {
+		focus = p.name.Focus()
+	} else {
+		p.name.Blur()
+		focus = p.filter.Focus()
+	}
+	return p, tea.Batch(focus, p.ensureData(c))
+}
+
 func (p createPicker) titleInfo(c *ctx) string {
 	info := dimStyle.Render("target: " + p.targetLabel())
 	if p.tab != ctPRs {
@@ -383,6 +387,7 @@ func (p createPicker) body(c *ctx, w, h int) string {
 	if pr, ok := m.findProject(p.projectID); ok && pr.Scripts != nil && pr.Scripts.Setup != "" {
 		top = truncateLine(dimStyle.Render("setup: "+commandLine(pr.Scripts.Setup)), w) + "\n\n"
 	}
+	c.hitTabs(0, strings.Count(top, "\n"), 3, createTabNames...)
 	var tabs []string
 	for i, n := range createTabNames {
 		if createTab(i) == p.tab {
@@ -392,28 +397,29 @@ func (p createPicker) body(c *ctx, w, h int) string {
 		}
 	}
 	top += strings.Join(tabs, StyleDim.Render("   ")) + "\n\n"
+	bc := c.below(strings.Count(top, "\n"))
 	bodyH := max(1, h-strings.Count(top, "\n"))
 	switch {
 	case p.creating:
 		return top + spinnerFrame(*m) + " creating…"
 	case p.picking:
-		return top + dimStyle.Render("select target branch") + "\n" + p.targetPick.view(w, bodyH-1, false)
+		return top + dimStyle.Render("select target branch") + "\n" + p.targetPick.view(bc.below(1), w, bodyH-1, false)
 	}
 	var body string
 	switch p.tab {
 	case ctNew:
 		body = dimStyle.Render("branch: ") + p.name.View()
 	case ctBranches:
-		body = p.branches.view(w, bodyH, true)
+		body = p.branches.view(bc, w, bodyH, true)
 	case ctPRs:
 		prs := p.filteredPRs()
-		body = p.listView(c, w, bodyH, p.prsLoaded, p.prsErr, p.prsTruncated, len(p.prs), len(prs), func(i int) string {
+		body = p.listView(bc, w, bodyH, p.prsLoaded, p.prsErr, p.prsTruncated, len(p.prs), len(prs), func(i int) string {
 			pr := prs[i]
 			return "#" + strconv.Itoa(pr.Number) + "  " + pr.Title + dimStyle.Render("  "+pr.Author+"  "+pr.HeadBranch+" → "+pr.BaseBranch)
 		})
 	case ctIssues:
 		is := p.filteredIssues()
-		body = p.listView(c, w, bodyH, p.issuesLoaded, p.issuesErr, p.issuesTruncated, len(p.issues), len(is), func(i int) string {
+		body = p.listView(bc, w, bodyH, p.issuesLoaded, p.issuesErr, p.issuesTruncated, len(p.issues), len(is), func(i int) string {
 			return "#" + strconv.Itoa(is[i].Number) + "  " + is[i].Title + dimStyle.Render("  "+is[i].Author)
 		})
 	}
@@ -438,11 +444,11 @@ func (p createPicker) listView(c *ctx, w, h int, loaded bool, err error, truncat
 	case n == 0:
 		return head + "\n\n" + dimStyle.Render("no matches")
 	}
-	lines := make([]string, n)
+	var l itemLines
 	for i := range n {
-		lines[i] = truncateLine(cursorLine(line(i), i == p.cursor, true), w)
+		l.add(i, truncateLine(cursorLine(line(i), i == p.cursor, true), w))
 	}
-	return head + "\n\n" + strings.Join(windowSpan(lines, p.cursor, p.cursor+1, max(1, h-2)), "\n")
+	return head + "\n\n" + strings.Join(l.window(c.below(2), p.cursor, max(1, h-2)), "\n")
 }
 
 func spinnerFrame(m model) string {
@@ -461,4 +467,48 @@ func (p createPicker) footer(*ctx) []binding {
 		b = append(b, createKeys.Target)
 	}
 	return append(b, hint("esc", "cancel"))
+}
+
+func (p createPicker) click(c *ctx, t hitTarget) (popup, tea.Cmd) {
+	switch {
+	case p.creating:
+	case t.kind == hitTab:
+		if !p.picking && createTab(t.index) != p.tab {
+			return p.switchTab(c, createTab(t.index))
+		}
+	case t.index == *p.listCursor():
+		return p.handleKey(c, enterKey)
+	default:
+		*p.listCursor() = t.index
+	}
+	return p, nil
+}
+
+func (p createPicker) wheel(_ *ctx, d int) (popup, tea.Cmd) {
+	var n int
+	switch {
+	case p.creating:
+		return p, nil
+	case p.picking:
+		n = len(p.targetPick.matches())
+	case p.tab == ctBranches:
+		n = len(p.branches.matches())
+	case p.tab == ctNew:
+		return p, nil
+	default:
+		n = p.listLen()
+	}
+	cur := p.listCursor()
+	*cur = cursorBy(*cur, d, n)
+	return p, nil
+}
+
+func (p *createPicker) listCursor() *int {
+	switch {
+	case p.picking:
+		return &p.targetPick.cursor
+	case p.tab == ctBranches:
+		return &p.branches.cursor
+	}
+	return &p.cursor
 }

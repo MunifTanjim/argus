@@ -178,11 +178,13 @@ func (m model) center(content string, contentWidth int) string {
 	return centerBlock(content, contentWidth, m.bodyWidth())
 }
 
+func centerGutter(contentWidth, termWidth int) int { return max(0, (termWidth-contentWidth)/2) }
+
 // centerBlock left-pads each line so a contentWidth-wide block sits centered in
 // termWidth. No-op when content already fills the terminal.
 func centerBlock(content string, contentWidth, termWidth int) string {
-	gutter := (termWidth - contentWidth) / 2
-	if gutter <= 0 {
+	gutter := centerGutter(contentWidth, termWidth)
+	if gutter == 0 {
 		return content
 	}
 	pad := strings.Repeat(" ", gutter)
@@ -830,13 +832,14 @@ func (m tview) transcriptBody() string {
 		return b.String()
 	}
 
-	lines, _ := m.layoutChunks()
+	lines, first := m.layoutChunks()
 	h := m.viewportHeight()
 	scroll := m.transcript.scroll
 	if maxScroll := max(0, len(lines)-h); scroll > maxScroll {
 		scroll = maxScroll
 	}
 	end := min(len(lines), scroll+h)
+	hitStarts(m.c, first, len(lines), scroll, end)
 	b.WriteString(strings.Join(lines[scroll:end], "\n"))
 	return b.String()
 }

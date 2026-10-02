@@ -307,3 +307,8 @@ func (m model) updateFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.apply(c))
 	return m, cmd
 }
+
+func (f fileComp) wheel(c *ctx, d int) (component, tea.Cmd) {
+	f.scroll = max(0, min(f.scroll+d, f.maxScroll(c)))
+	return f, nil
+}

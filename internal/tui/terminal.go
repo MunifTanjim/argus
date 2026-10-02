@@ -95,13 +95,12 @@ func ptyBytesFor(msg tea.KeyPressMsg) []byte {
 
 // The node's mirror passes the wheel report to a program that asked for the
 // mouse; tmux drops it otherwise, and also with the mouse off.
-func ptyWheelBytes(msg wheelMsg, cols, rows int) []byte {
+func ptyWheelBytes(up bool, x, y, cols, rows int) []byte {
 	b := ansi.MouseWheelDown
-	if msg.delta < 0 {
+	if up {
 		b = ansi.MouseWheelUp
 	}
-	x := clampWidth(msg.X, 0, cols-1)
-	y := clampWidth(msg.Y, 0, rows-1)
+	x, y = clampWidth(x, 0, cols-1), clampWidth(y, 0, rows-1)
 	return []byte(ansi.MouseSgr(ansi.EncodeMouseButton(b, false, false, false, false), x, y, false))
 }
 

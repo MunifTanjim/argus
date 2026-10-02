@@ -22,8 +22,8 @@ func (p createPicker) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
 	f.title = "New workspace in " + p.project
 	f.titleInfo = p.titleInfo(c)
 	f.help = c.m.hints(f.innerWidth(), p.footer(c)...)
-	f.parts = []string{p.body(c, f.innerWidth(), f.bodyHeight())}
-	drawCenter(scr, area, f.render())
+	f.parts = []string{p.body(f.bodyCtx(c), f.innerWidth(), f.bodyHeight())}
+	c.hitRect(drawCenter(scr, area, f.render()))
 }
 
 type retargetPicker struct {
@@ -70,8 +70,21 @@ func (r retargetPicker) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
 		f.titleInfo = dimStyle.Render("· now " + r.pick.current)
 	}
 	f.help = c.m.hints(f.innerWidth(), r.footer()...)
-	f.parts = []string{r.pick.view(f.innerWidth(), f.bodyHeight(), false)}
-	drawCenter(scr, area, f.render())
+	f.parts = []string{r.pick.view(f.bodyCtx(c), f.innerWidth(), f.bodyHeight(), false)}
+	c.hitRect(drawCenter(scr, area, f.render()))
+}
+
+func (r retargetPicker) click(c *ctx, t hitTarget) (popup, tea.Cmd) {
+	if t.index == r.pick.cursor {
+		return r.handleKey(c, enterKey)
+	}
+	r.pick.cursor = t.index
+	return r, nil
+}
+
+func (r retargetPicker) wheel(_ *ctx, d int) (popup, tea.Cmd) {
+	r.pick.cursor = cursorBy(r.pick.cursor, d, len(r.pick.matches()))
+	return r, nil
 }
 
 func (r retargetPicker) footer() []binding {

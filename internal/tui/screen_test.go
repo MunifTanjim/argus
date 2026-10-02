@@ -132,15 +132,17 @@ func TestEnterScreenOpensAttach(t *testing.T) {
 func TestPtyWheelBytes(t *testing.T) {
 	cases := []struct {
 		name string
-		msg  wheelMsg
+		up   bool
+		x, y int
 		want string
 	}{
-		{"up", wheelMsg{Mouse: tea.Mouse{X: 3, Y: 4}, delta: -1}, "\x1b[<64;4;5M"},
-		{"down", wheelMsg{Mouse: tea.Mouse{X: 3, Y: 4}, delta: 1}, "\x1b[<65;4;5M"},
-		{"clamped to the terminal", wheelMsg{Mouse: tea.Mouse{X: 500, Y: 500}, delta: -1}, "\x1b[<64;80;24M"},
+		{"up", true, 3, 4, "\x1b[<64;4;5M"},
+		{"down", false, 3, 4, "\x1b[<65;4;5M"},
+		{"clamped to the terminal", true, 500, 500, "\x1b[<64;80;24M"},
+		{"clamped at the origin", true, -2, -1, "\x1b[<64;1;1M"},
 	}
 	for _, tc := range cases {
-		if got := string(ptyWheelBytes(tc.msg, 80, 24)); got != tc.want {
+		if got := string(ptyWheelBytes(tc.up, tc.x, tc.y, 80, 24)); got != tc.want {
 			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
 		}
 	}
@@ -148,20 +150,36 @@ func TestPtyWheelBytes(t *testing.T) {
 
 func TestLiveScreenForwardsWheelAndCapturesMouse(t *testing.T) {
 	m, _ := screenModel()
+	m.hits = &hitMap{}
 	if m.View().MouseMode != tea.MouseModeCellMotion {
 		t.Error("the live screen should capture the mouse")
 	}
-	m, _ = upd(m, wheelMsg{Mouse: tea.Mouse{X: 1, Y: 1}, delta: -1})
-	select {
-	case k := <-m.termKeyCh:
-		if string(k.data) != "\x1b[<64;2;2M" {
-			t.Errorf("queued wheel = %q", k.data)
+	r := m.mainRect()
+	m, _ = wheelAt(m, r.Min.X+screenBodyX+3, r.Min.Y+screenBodyY+4, -2)
+	for range 2 {
+		select {
+		case k := <-m.termKeyCh:
+			if string(k.data) != "\x1b[<64;4;5M" {
+				t.Errorf("queued wheel = %q", k.data)
+			}
+		default:
+			t.Fatal("each wheel step must reach the terminal")
 		}
-	default:
-		t.Error("the wheel was not sent to the terminal")
 	}
-
 	if homeTestModel().View().MouseMode != tea.MouseModeNone {
-		t.Error("outside the live screen the mouse must stay with the terminal")
+		t.Error("with the mouse off, Home must leave the mouse to the terminal")
+	}
+}
+
+func TestLiveScreenTakesWheelWithMouseOff(t *testing.T) {
+	m, _ := screenModel()
+	m.hits = &hitMap{}
+	m.mouse = false
+	r := m.mainRect()
+	m, _ = wheelAt(m, r.Min.X+2, r.Min.Y+4, 1)
+	select {
+	case <-m.termKeyCh:
+	default:
+		t.Error("the live screen must take the wheel with the mouse off")
 	}
 }

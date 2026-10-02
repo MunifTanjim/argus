@@ -128,10 +128,15 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 			dimStyle.Render("  pin this device: argus lock pin")
 		chrome++
 	}
+	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
+	tabX := centerGutter(cardW, w)
+	if bare {
+		tabX += lipgloss.Width(brandMark())
+	}
+	m.hitHomeTabs(c, tabX)
 	if len(m.sessions) == 0 {
 		return h.welcome(c, title, chrome, w, ht)
 	}
-	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
 	if len(m.order) == 0 {
 		hint := dimStyle.Render(m.emptyFilterHint("no active sessions", listKeys.Back))
 		return centerBlock(title+"\n\n"+hint, cardW, w)
@@ -140,29 +145,56 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	// On a gateway, a host header precedes each group.
 	grouped := m.grouped()
 	showAgent := m.multiAgent()
-	var lines []string
-	curStart, curEnd := 0, 0
+	var l itemLines
 	for i, id := range m.order {
 		s := m.sessions[id]
 		if i > 0 {
-			lines = append(lines, "")
+			l.text("")
 		}
 		if i == 0 || sectionKey(s) != sectionKey(m.sessions[m.order[i-1]]) {
 			switch {
 			case s.Status == session.StatusAwaitingInput:
-				lines = append(lines, m.needsYouHeader())
+				l.text(m.needsYouHeader())
 			case grouped:
-				lines = append(lines, m.groupHeader(s.NodeLabel))
+				l.text(m.groupHeader(s.NodeLabel))
 			}
 		}
-		start := len(lines)
-		lines = append(lines, strings.Split(m.sessionCard(s, i == sel, cardW, showAgent), "\n")...)
-		if i == sel {
-			curStart, curEnd = start, len(lines)
-		}
+		l.add(i, m.sessionCard(s, i == sel, cardW, showAgent))
 	}
-	lines = windowSpan(lines, curStart, curEnd, max(1, ht-chrome))
+	lines := l.window(c.below(lipgloss.Height(title)+1), sel, max(1, ht-chrome))
 	return centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, w)
+}
+
+func (h homeComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
+	switch {
+	case t.kind == hitTab:
+		if homeTab(t.index) != tabSessions {
+			return h, switchHomeTab(c, homeTab(t.index))
+		}
+	case t.index >= len(c.m.order):
+	case focused && t.index == h.cursor:
+		c.openSession(c.m.order[t.index])
+	default:
+		h.cursor = t.index
+	}
+	return h, nil
+}
+
+func (h homeComp) wheel(c *ctx, d int) (component, tea.Cmd) {
+	h.cursor = cursorBy(h.cursor, d, len(c.m.order))
+	return h, nil
+}
+
+func switchHomeTab(c *ctx, t homeTab) tea.Cmd {
+	switch t {
+	case tabSessions:
+		c.replaceBase(c.m.homePane())
+	case tabHistory:
+		return openHistory(c)
+	case tabLogs:
+		openLogs(c)
+	}
+	return nil
 }
 
 func (h homeComp) welcome(c *ctx, title string, chrome, w, ht int) string {
