@@ -286,10 +286,12 @@ func TestLockCLIRecovery(t *testing.T) {
 		}
 		defer c.Close()
 
+		// local-disable drops the node's uplink so the roster re-reads lock_disabled;
+		// the channel opens once the node is back online.
 		var agents api.AgentsListResult
-		if err := c.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "lcr-dis"}, &agents); err != nil {
-			t.Fatalf("local-disable escape hatch: agents.list to quarantine-gated node failed: %v", err)
-		}
+		waitFor(t, "agents.list to quarantine-gated node after local-disable", func() bool {
+			return c.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "lcr-dis"}, &agents) == nil
+		})
 	})
 
 	t.Run("local-only", func(t *testing.T) {

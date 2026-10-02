@@ -608,7 +608,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		return
 	}
 
-	s.agg.AddSource(NewRemoteSource(id.ID, id.Label, id.Version, id.IdentityPubKey, id.SignerPubKey, id.Capabilities, peer))
+	s.agg.AddSource(NewRemoteSource(id, peer))
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
 	<-peer.Done()

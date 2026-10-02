@@ -47,6 +47,7 @@ func (f *fakeSource) Subscribe() (<-chan registry.Event, func()) { return f.even
 func (f *fakeSource) Done() <-chan struct{}                      { return f.done }
 func (f *fakeSource) IdentityPubKey() string                     { return "" }
 func (f *fakeSource) SignerPubKey() string                       { return "" }
+func (f *fakeSource) LockDisabled() bool                         { return false }
 
 func (f *fakeSource) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()

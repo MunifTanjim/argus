@@ -296,3 +296,40 @@ func TestTrustLogPushSyncAndChanged(t *testing.T) {
 		t.Fatalf("trustlog.sync: got %d entries, want %d", len(syncResult.Entries), len(entries))
 	}
 }
+
+func TestNodesListCarriesLockDisabled(t *testing.T) {
+	a := New(0)
+	srv := NewServer(a, nil, nil)
+
+	gwNodeConn, nodeConn := net.Pipe()
+	defer gwNodeConn.Close()
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			if method == api.MethodNodeIdentify {
+				return api.IdentifyResult{ID: "n1", Label: "n1-box", LockDisabled: true}, nil
+			}
+			return nil, nil
+		},
+	})
+	defer nodePeer.Close()
+	go srv.serveNode(gwNodeConn)
+	eventually(t, func() bool {
+		srv.relayMu.Lock()
+		defer srv.relayMu.Unlock()
+		return srv.nodePeers["n1"] != nil
+	})
+
+	gwClientConn, appConn := net.Pipe()
+	defer gwClientConn.Close()
+	go srv.clientSrv.ServeConnContext(context.Background(), gwClientConn)
+	app := api.NewPeer(appConn, api.PeerOptions{})
+	defer app.Close()
+
+	var res api.NodesListResult
+	if err := app.Call(api.MethodNodesList, nil, &res); err != nil {
+		t.Fatalf("nodes.list: %v", err)
+	}
+	if len(res.Nodes) != 1 || !res.Nodes[0].LockDisabled {
+		t.Fatalf("nodes.list must carry the node's lock_disabled, got %+v", res.Nodes)
+	}
+}

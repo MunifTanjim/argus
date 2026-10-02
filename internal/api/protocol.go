@@ -558,6 +558,7 @@ type IdentifyResult struct {
 	IdentityPubKey string           `json:"identity_pubkey,omitempty"` // base64 Curve25519 static public (E2E)
 	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
 	Tip            []byte           `json:"tip,omitempty"`             // resolved trust-log tip (nil when locked mode is off)
+	LockDisabled   bool             `json:"lock_disabled,omitempty"`   // see NodeDescriptor.LockDisabled
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -933,6 +934,10 @@ type NodeDescriptor struct {
 	// authenticated node.identify reply, never from this roster copy.
 	SignerPubKey string `json:"signer_pubkey,omitempty"`
 	Online       bool   `json:"online"`
+	// LockDisabled reports that the node turned off locked-mode enforcement for
+	// itself (`argus lock local-disable`), so it accepts channels from any device.
+	// Gateway-forgeable: a hint for which nodes to try, never a trust decision.
+	LockDisabled bool `json:"lock_disabled,omitempty"`
 }
 
 type NodesListResult struct {

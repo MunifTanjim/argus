@@ -204,6 +204,7 @@ func descriptor(id string, st *srcState) api.NodeDescriptor {
 		Capabilities:   st.src.Capabilities(),
 		IdentityPubKey: st.src.IdentityPubKey(),
 		SignerPubKey:   st.src.SignerPubKey(),
+		LockDisabled:   st.src.LockDisabled(),
 		Online:         st.online,
 	}
 }
