@@ -241,6 +241,11 @@ func TestGenerateVectors(t *testing.T) {
 	must(t, err)
 	enfGenesisHash := enfLog.Tip()
 	must(t, enfLog.AuthorizeDevice(enfNodeAPub, enfSigner))
+	enfChainPreClient := trustlog.MarshalChain(enfLog.Entries())
+	// Nodes reject an unauthorized client, so the client is authorized too.
+	enfClientSeed := bytesFill(0xE3)
+	enfClientPub := fixedKeypair(suite, enfClientSeed).Public
+	must(t, enfLog.AuthorizeDevice(enfClientPub, enfSigner))
 	enfChain := trustlog.MarshalChain(enfLog.Entries())
 
 	// Mid-session re-evaluation vectors: a chain authorizing BOTH node A and node B
@@ -250,6 +255,7 @@ func TestGenerateVectors(t *testing.T) {
 	must(t, err)
 	must(t, reevLog.AuthorizeDevice(enfNodeAPub, enfSigner))
 	must(t, reevLog.AuthorizeDevice(reevNodeBPub, enfSigner))
+	must(t, reevLog.AuthorizeDevice(enfClientPub, enfSigner))
 	reevInitialChain := trustlog.MarshalChain(reevLog.Entries())
 	must(t, reevLog.RevokeDevice(reevNodeBPub, enfSigner))
 	reevRevokeBChain := trustlog.MarshalChain(reevLog.Entries())
@@ -446,14 +452,16 @@ func TestGenerateVectors(t *testing.T) {
 			"device_a": b64(tlDeviceA), "device_b": b64(tlDeviceB),
 			"secret": b64(tlSecret), "commitment": b64(tlCommit),
 			"disabled_chain": b64(tlDisabledChain), "disabled_head": b64(tlDisabledHead),
-			"wrong_genesis_chain":      b64(tlWrongChain),
-			"fork_chain":               b64(tlForkChain),
-			"enforcement_genesis_head": b64(enfGenesisHash),
-			"enforcement_chain":        b64(enfChain),
-			"enforcement_node_a_seed":  b64(enfNodeASeed),
-			"enforcement_node_b_seed":  b64(enfNodeBSeed),
-			"reeval_initial_chain":     b64(reevInitialChain),
-			"reeval_revoke_b_chain":    b64(reevRevokeBChain),
+			"wrong_genesis_chain":          b64(tlWrongChain),
+			"fork_chain":                   b64(tlForkChain),
+			"enforcement_genesis_head":     b64(enfGenesisHash),
+			"enforcement_chain":            b64(enfChain),
+			"enforcement_node_a_seed":      b64(enfNodeASeed),
+			"enforcement_node_b_seed":      b64(enfNodeBSeed),
+			"enforcement_client_seed":      b64(enfClientSeed),
+			"enforcement_chain_pre_client": b64(enfChainPreClient),
+			"reeval_initial_chain":         b64(reevInitialChain),
+			"reeval_revoke_b_chain":        b64(reevRevokeBChain),
 		},
 		"signer_removal": map[string]any{
 			"chain": b64(srChain),

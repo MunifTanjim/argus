@@ -57,6 +57,11 @@ argus lock log
 without `--confirm` first to preview the signer set and the devices it would
 authorize.
 
+A device that is not authorized yet stays connected to the gateway but opens no
+node channels. It opens them as soon as `lock sign` authorizes it, with no restart.
+A node with `argus lock local-disable` accepts any device, so an unauthorized
+device still reaches that node.
+
 ### Key Formats
 
 Every value you copy between machines is 32 bytes with a prefix that names its kind:

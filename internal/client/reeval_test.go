@@ -14,9 +14,11 @@ func TestReevaluateChannelsDropsRevoked(t *testing.T) {
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	head := lg.Tip()
 
+	self := mustKP(t)
 	nodeA := &fakeNode{id: "nodeA", key: mustKP(t)}
 	nodeB := &fakeNode{id: "nodeB", key: mustKP(t)}
 
+	_ = lg.AuthorizeDevice(self.Public, signer)
 	_ = lg.AuthorizeDevice(nodeA.key.Public, signer)
 	_ = lg.AuthorizeDevice(nodeB.key.Public, signer)
 	chain := trustlog.MarshalChain(lg.Entries())
@@ -31,7 +33,7 @@ func TestReevaluateChannelsDropsRevoked(t *testing.T) {
 	gw.chain = chain
 	defer gw.peer.Close()
 
-	c, err := NewE2EClientWithGenesis(clientConn, head)
+	c, err := NewE2EClientWithIdentity(clientConn, self, head, "")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}

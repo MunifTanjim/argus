@@ -292,6 +292,21 @@ func TestLockCLIRecovery(t *testing.T) {
 		waitFor(t, "agents.list to quarantine-gated node after local-disable", func() bool {
 			return c.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "lcr-dis"}, &agents) == nil
 		})
+
+		// A device the chain does not authorize opens no locked-mode channels, but
+		// still reaches a node that advertises lock_disabled.
+		strangerKP, err := e2e.GenerateKeyPair()
+		if err != nil {
+			t.Fatalf("strangerKP: %v", err)
+		}
+		stranger, err := client.NewReconnectingE2EClientLocked(ctx, gwDial, genesisHash, strangerKP, filepath.Join(t.TempDir(), "stranger-chain"))
+		if err != nil {
+			t.Fatalf("NewReconnectingE2EClientLocked(stranger): %v", err)
+		}
+		defer stranger.Close()
+		waitFor(t, "unauthorized device reaching the lock-disabled node", func() bool {
+			return stranger.Call(api.MethodAgentsList, api.AgentsListParams{NodeID: "lcr-dis"}, &agents) == nil
+		})
 	})
 
 	t.Run("local-only", func(t *testing.T) {

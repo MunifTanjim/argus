@@ -28,7 +28,7 @@ void main() {
     final client = E2EClient(
       link.incoming,
       link.send,
-      await generateKeyPair(),
+      await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
       tofu: true,
       onTrustChainAdvance: (c) async => advanced = c,
     );
@@ -53,7 +53,7 @@ void main() {
         trustChain: _b(v, 'reeval_initial_chain'));
 
     var advances = 0;
-    final client = E2EClient(link.incoming, link.send, await generateKeyPair(),
+    final client = E2EClient(link.incoming, link.send, await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
         tofu: true, onTrustChainAdvance: (c) async => advances++);
     await client.connect();
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});

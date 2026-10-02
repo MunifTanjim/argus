@@ -184,8 +184,10 @@ class MultiNodeLoopbackLink implements RpcLink {
     Uint8List? trustChain,
     Set<String>? offline,
     Set<String>? failRelayOpen,
+    Set<String>? lockDisabled,
   }) : _offline = offline ?? const {},
-       _failRelayOpen = failRelayOpen ?? const {} {
+       _failRelayOpen = failRelayOpen ?? const {},
+       _lockDisabled = lockDisabled ?? const {} {
     for (final n in _nodes.values) {
       n.sendToClient = _push;
     }
@@ -204,9 +206,15 @@ class MultiNodeLoopbackLink implements RpcLink {
   /// node that dropped between the roster snapshot and the open.
   final Set<String> _failRelayOpen;
 
+  /// Node ids reported `lock_disabled: true` in nodes.list.
+  final Set<String> _lockDisabled;
+
   /// Every node id passed to relay.open, in order. Lets a test assert that an
   /// offline node is skipped before any open is attempted.
   final relayOpenCalls = <String>[];
+
+  /// Runs after relay.open is answered, while the client waits for the handshake.
+  void Function(String nodeId)? onRelayOpen;
 
   /// The gateway's entry store, populated when [trustChain] is set. Used to
   /// answer trustlog.sync with the correct delta for the caller's heads.
@@ -265,6 +273,7 @@ class MultiNodeLoopbackLink implements RpcLink {
                   e.value.advertisedIdentity ??
                   base64.encode(e.value.keyPair.publicKey),
               'online': !_offline.contains(e.key),
+              if (_lockDisabled.contains(e.key)) 'lock_disabled': true,
             },
         ];
         _push(
@@ -296,6 +305,7 @@ class MultiNodeLoopbackLink implements RpcLink {
             'result': {'chan_id': chanId},
           }),
         );
+        onRelayOpen?.call(nodeId);
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'trustlog.sync':

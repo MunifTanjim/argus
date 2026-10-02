@@ -28,11 +28,16 @@ class NodeDescriptor {
     this.label,
     required this.identityPubKey,
     this.online = true,
+    this.lockDisabled = false,
   });
   final String id;
   final String? label;
   final String identityPubKey;
   final bool online;
+
+  /// The node turned off locked-mode enforcement for itself, so it accepts any
+  /// device. Gateway-forgeable: a hint for which nodes to try, never trust.
+  final bool lockDisabled;
 }
 
 /// Tracks consecutive unreconciled ticks for a single node's tip.
@@ -156,6 +161,7 @@ class E2EClient implements GatewayClient {
   bool _closed = false;
 
   final _byNodeId = <String, NodeChannel>{};
+  final _opening = <String, Future<void>>{};
   final _roster = <String, NodeDescriptor>{};
   final _subNode = <String, String>{};
   final _termNode = <String, String>{};
@@ -276,37 +282,54 @@ class E2EClient implements GatewayClient {
         /* keep prior/seeded state (fail-closed) */
       }
     }
-    final toOpen = <NodeDescriptor>[];
-    for (final n in nodes) {
-      if (n is! Map) continue;
-      final desc = _parseNodeDescriptor(n as Map<String, dynamic>);
-      // An offline node (within grace, no live relay peer) has no channel to
-      // open: relay.open would fail. Skip it; it attaches on a later roster
-      // update once it reconnects.
-      if (!desc.online) continue;
-      if (!_plaintext) {
-        if (desc.identityPubKey.isEmpty) continue;
-        final pub = base64.decode(desc.identityPubKey);
-        if (_trust != null &&
-            _trust.locked &&
-            !_trust.disabled &&
-            !_trust.deviceAuthorized(pub))
-          continue;
-      }
-      toOpen.add(desc);
-    }
-    await Future.wait(toOpen.map(_openNode));
+    await _openEligible(nodes);
     final interval = trustResyncInterval;
     if (_trust != null && interval != null && !_closed) {
       _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
     }
   }
 
+  Future<void> _openEligible(List<Object?> nodes) => Future.wait([
+    for (final n in nodes)
+      if (n is Map<String, dynamic>) _parseNodeDescriptor(n),
+  ].where(_eligible).map(_openNode));
+
+  bool get _enforcing {
+    final trust = _trust;
+    return trust != null && trust.locked && !trust.disabled;
+  }
+
+  /// Whether locked-mode nodes will reject this device's channels, as the trust
+  /// log does not authorize its identity key.
+  bool get _selfUnauthorized =>
+      _enforcing && !_trust!.deviceAuthorized(_static.publicKey);
+
+  /// The connect/adopt gate. An offline node (within grace, no live relay peer)
+  /// is skipped: relay.open would fail, and it attaches on a later roster update.
+  bool _eligible(NodeDescriptor desc) {
+    if (!desc.online) return false;
+    if (_plaintext) return true;
+    if (desc.identityPubKey.isEmpty) return false;
+    if (_enforcing &&
+        !_trust!.deviceAuthorized(base64.decode(desc.identityPubKey)))
+      return false;
+    return !_selfUnauthorized || desc.lockDisabled;
+  }
+
+  /// Opens a channel to [desc] unless one is open or opening; a second caller
+  /// waits for the in-flight open, since a node is registered only once its
+  /// handshake finishes. Mirrors Go openIfEligible.
+  Future<void> _openNode(NodeDescriptor desc) {
+    if (_closed || _byNodeId.containsKey(desc.id)) return Future.value();
+    return _opening[desc.id] ??= _doOpenNode(desc).whenComplete(() {
+      _opening.remove(desc.id);
+    });
+  }
+
   /// Opens a channel to [desc], records it in the roster, and reads its
   /// authenticated tip. A failed open is logged and swallowed so one unreachable
-  /// node does not abort the caller (mirrors the Go client). Shared by [connect]
-  /// and [_adoptNode].
-  Future<void> _openNode(NodeDescriptor desc) async {
+  /// node does not abort the caller (mirrors the Go client).
+  Future<void> _doOpenNode(NodeDescriptor desc) async {
     try {
       final nc = await openChannel(desc);
       _byNodeId[desc.id] = nc;
@@ -343,17 +366,7 @@ class E2EClient implements GatewayClient {
   /// e2e mode) and skips a node that is already connected. Mirrors Go
   /// E2EClient.adoptNode.
   Future<void> _adoptNode(NodeDescriptor desc) async {
-    if (_closed || _byNodeId.containsKey(desc.id) || !desc.online) return;
-    if (!_plaintext) {
-      if (desc.identityPubKey.isEmpty) return;
-      final pub = base64.decode(desc.identityPubKey);
-      final trust = _trust;
-      if (trust != null &&
-          trust.locked &&
-          !trust.disabled &&
-          !trust.deviceAuthorized(pub))
-        return;
-    }
+    if (!_eligible(desc)) return;
     await _openNode(desc);
   }
 
@@ -380,6 +393,7 @@ class E2EClient implements GatewayClient {
   Future<void> resyncNow() async {
     final trust = _trust;
     if (trust == null || _closed) return;
+    final wasUnauthorized = _selfUnauthorized;
     final before = trust.chainBytes;
     try {
       await _syncTrustLog(trust);
@@ -392,6 +406,21 @@ class E2EClient implements GatewayClient {
     if (changed) {
       await onTrustChainAdvance?.call(after);
       _reevaluateChannels();
+    }
+    // Connect skipped every node while this device was unauthorized.
+    if (wasUnauthorized && !_selfUnauthorized && !_closed) {
+      try {
+        final res = await _gateway.call('nodes.list');
+        await _openEligible(
+          (res is Map ? res['nodes'] : null) as List? ?? const [],
+        );
+      } catch (e) {
+        developer.log(
+          'nodes.list after authorization failed: $e',
+          name: 'e2e',
+          level: 900,
+        );
+      }
     }
     // Re-read each node's tip over its authenticated channel, then cross-check
     // those tips against the resolved chain on every successful pull — regardless
@@ -865,6 +894,7 @@ class E2EClient implements GatewayClient {
       label: n['label'] as String?,
       identityPubKey: n['identity_pubkey'] as String? ?? '',
       online: n['online'] as bool? ?? true,
+      lockDisabled: n['lock_disabled'] as bool? ?? false,
     );
   }
 

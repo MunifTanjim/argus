@@ -115,6 +115,8 @@ type fakeNode struct {
 	plaintext bool
 	// tip is returned by node.identify over the authenticated channel.
 	tip []byte
+	// lockDisabled is advertised in the roster as LockDisabled.
+	lockDisabled bool
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -203,6 +205,7 @@ func (g *fakeMultiGateway) nodeDescriptor(n *fakeNode) api.NodeDescriptor {
 	return api.NodeDescriptor{
 		ID: n.id, Label: n.id + "-box", Online: true,
 		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
+		LockDisabled:   n.lockDisabled,
 	}
 }
 
@@ -625,10 +628,12 @@ func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	lg, _ := trustlog.NewGenesis([][]byte{signer.Public}, signer, nil)
 	head := lg.Tip()
 
+	self := mustKP(t)
 	authNode := &fakeNode{id: "nodeAuth", key: mustKP(t)}
 	unauthNode := &fakeNode{id: "nodeUnauth", key: mustKP(t)}
 
-	// Only nodeAuth's Noise public key is authorized in the chain.
+	// Only this client and nodeAuth are authorized in the chain.
+	_ = lg.AuthorizeDevice(self.Public, signer)
 	_ = lg.AuthorizeDevice(authNode.key.Public, signer)
 	chain := trustlog.MarshalChain(lg.Entries())
 
@@ -642,7 +647,7 @@ func TestClientSkipsUnauthorizedNode(t *testing.T) {
 	gw.chain = chain
 	defer gw.peer.Close()
 
-	c, err := NewE2EClientWithGenesis(clientConn, head)
+	c, err := NewE2EClientWithIdentity(clientConn, self, head, "")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1033,6 +1038,7 @@ func TestTipConsistencyOverChannel(t *testing.T) {
 	clientTrustSyncInterval.Store(int64(10 * time.Minute)) // no background tick races the manual drives
 	t.Cleanup(func() { clientTrustSyncInterval.Store(int64(5 * time.Minute)) })
 
+	self := mustKP(t)
 	build := func(t *testing.T) (nodeA, nodeB *fakeNode, chain, genesis, chainHead []byte) {
 		t.Helper()
 		signer, _ := trustlog.GenerateSigner()
@@ -1040,6 +1046,7 @@ func TestTipConsistencyOverChannel(t *testing.T) {
 		genesis = lg.Tip()
 		nodeA = &fakeNode{id: "na", key: mustKP(t)}
 		nodeB = &fakeNode{id: "nb", key: mustKP(t)}
+		_ = lg.AuthorizeDevice(self.Public, signer)
 		_ = lg.AuthorizeDevice(nodeA.key.Public, signer)
 		_ = lg.AuthorizeDevice(nodeB.key.Public, signer)
 		entries := lg.Entries()
@@ -1058,7 +1065,7 @@ func TestTipConsistencyOverChannel(t *testing.T) {
 		gw, clientConn := newFakeMultiGateway(t, nodeA, nodeB)
 		gw.chain = chain
 		t.Cleanup(func() { gw.peer.Close() })
-		c, err := NewE2EClientWithGenesis(clientConn, genesis)
+		c, err := NewE2EClientWithIdentity(clientConn, self, genesis, "")
 		if err != nil {
 			t.Fatalf("new: %v", err)
 		}

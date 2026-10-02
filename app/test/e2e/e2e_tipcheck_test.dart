@@ -35,7 +35,7 @@ void main() {
     final client = E2EClient(
       link.incoming,
       link.send,
-      await generateKeyPair(),
+      await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
       tofu: true,
     );
     await client.connect();
@@ -66,7 +66,7 @@ void main() {
     final client = E2EClient(
       link.incoming,
       link.send,
-      await generateKeyPair(),
+      await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
       tofu: true,
     );
     await client.connect();
@@ -92,7 +92,7 @@ void main() {
     final client = E2EClient(
       link.incoming,
       link.send,
-      await generateKeyPair(),
+      await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
       tofu: true,
     );
     await client.connect();
