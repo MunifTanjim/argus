@@ -90,22 +90,17 @@ func buildProjectRows(st projectTreeComp) []projectsRow {
 		}
 		return order[i] < order[j]
 	})
-	// A single node adds a tree level with nothing to choose between.
-	single := len(order) == 1
 	var rows []projectsRow
 	for _, nid := range order {
-		depth := 0
-		if !single {
-			var ws []string
-			for _, p := range byNode[nid] {
-				ws = append(ws, workspaceIDs(p)...)
-			}
-			rows = append(rows, projectsRow{kind: rowNode, id: nid, label: label[nid], ws: ws, hasKids: true})
-			if folded(nid) {
-				continue
-			}
-			depth = 1
+		var ws []string
+		for _, p := range byNode[nid] {
+			ws = append(ws, workspaceIDs(p)...)
 		}
+		rows = append(rows, projectsRow{kind: rowNode, id: nid, label: label[nid], ws: ws, hasKids: true})
+		if folded(nid) {
+			continue
+		}
+		depth := 1
 		for _, p := range byNode[nid] {
 			rows = append(rows, projectsRow{
 				kind: rowProject, depth: depth, id: p.ID, label: p.Name, ws: workspaceIDs(p),

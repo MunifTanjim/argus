@@ -40,15 +40,19 @@ func projectsTestModel() model {
 
 func TestBuildProjectRows(t *testing.T) {
 	m := projectsTestModel()
-	// A single node shows no node row: project, then its two workspaces.
-	if len(m.left.tree.rows) != 4 {
-		t.Fatalf("got %d rows, want 4 (Home first): %+v", len(m.left.tree.rows), m.left.tree.rows)
+	// A single node still heads the tree.
+	rows := m.left.tree.rows
+	if len(rows) != 5 {
+		t.Fatalf("got %d rows, want 5 (Home first): %+v", len(rows), rows)
 	}
-	if m.left.tree.rows[1].kind != rowProject || m.left.tree.rows[1].depth != 0 {
-		t.Fatalf("unexpected first row: %+v", m.left.tree.rows[1])
+	if rows[1].kind != rowNode || rows[1].id != "n1" {
+		t.Fatalf("node row missing: %+v", rows[1])
 	}
-	if m.left.tree.rows[2].kind != rowWorkspace || m.left.tree.rows[3].kind != rowWorkspace {
-		t.Fatalf("workspaces missing: %+v", m.left.tree.rows)
+	if rows[2].kind != rowProject || rows[2].depth != 1 {
+		t.Fatalf("unexpected project row: %+v", rows[2])
+	}
+	if rows[3].kind != rowWorkspace || rows[4].kind != rowWorkspace || rows[3].depth != 2 {
+		t.Fatalf("workspaces missing: %+v", rows)
 	}
 }
 
@@ -81,10 +85,10 @@ func TestFilterRows(t *testing.T) {
 	m := projectsTestModel()
 	rows := buildProjectRows(projectTreeComp{data: m.left.tree.data, collapsed: map[string]bool{"n1:p1": true}, filter: "FEAT"})
 	// The branch match shows its project and only that workspace, even when folded.
-	if len(rows) != 2 || rows[1].id != "n1:w2" {
-		t.Fatalf("filter rows = %+v, want project + n1:w2", rows)
+	if len(rows) != 3 || rows[2].id != "n1:w2" {
+		t.Fatalf("filter rows = %+v, want node + project + n1:w2", rows)
 	}
-	if rows := buildProjectRows(projectTreeComp{data: m.left.tree.data, filter: "argus"}); len(rows) != 3 {
+	if rows := buildProjectRows(projectTreeComp{data: m.left.tree.data, filter: "argus"}); len(rows) != 4 {
 		t.Errorf("a project-name match should keep all workspaces, got %d rows", len(rows))
 	}
 	if rows := buildProjectRows(projectTreeComp{data: m.left.tree.data, filter: "zzz"}); len(rows) != 0 {
@@ -119,8 +123,8 @@ func TestProjectsCollapseTogglesRows(t *testing.T) {
 	m = selectRow(m, "n1:p1")
 	mm, _ := treeKey(m, keyMsg("h"))
 	// Collapsing the project hides its two workspaces.
-	if len(mm.left.tree.rows) != 2 {
-		t.Fatalf("after collapse got %d rows, want 2 (Home, project)", len(mm.left.tree.rows))
+	if len(mm.left.tree.rows) != 3 {
+		t.Fatalf("after collapse got %d rows, want 3 (Home, node, project)", len(mm.left.tree.rows))
 	}
 }
 
@@ -377,11 +381,11 @@ func TestTreeLeftRight(t *testing.T) {
 		t.Fatalf("h on a workspace: cursor on %q, want n1:p1", got)
 	}
 	m = press(m, 'h') // unfolded project: fold
-	if !m.left.tree.collapsed["n1:p1"] || len(m.left.tree.rows) != 2 {
+	if !m.left.tree.collapsed["n1:p1"] || len(m.left.tree.rows) != 3 {
 		t.Fatalf("h on an unfolded project should fold it: %+v", m.left.tree.rows)
 	}
 	m = press(m, 'l') // folded project: unfold
-	if m.left.tree.collapsed["n1:p1"] || len(m.left.tree.rows) != 4 {
+	if m.left.tree.collapsed["n1:p1"] || len(m.left.tree.rows) != 5 {
 		t.Fatalf("l on a folded project should unfold it: %+v", m.left.tree.rows)
 	}
 	m = press(m, 'l') // unfolded project: step into the first workspace
@@ -502,15 +506,15 @@ func TestWorkspaceRowBadge(t *testing.T) {
 	if a := act["n1:w1"]; a.live != 2 || a.waiting != 1 {
 		t.Fatalf("w1 activity = %+v, want 2 live (dead excluded), 1 waiting", a)
 	}
-	line := ansi.Strip(m.projRowLine(m.left.tree.rows[2], false, true, act, 40))
+	line := ansi.Strip(m.projRowLine(m.left.tree.rows[3], false, true, act, 40))
 	if !strings.HasSuffix(line, "◆ 2") {
 		t.Errorf("waiting workspace row = %q, want a ◆ 2 badge", line)
 	}
-	if line := m.projRowLine(m.left.tree.rows[1], false, true, act, 40); strings.Contains(line, "◆") {
+	if line := m.projRowLine(m.left.tree.rows[2], false, true, act, 40); strings.Contains(line, "◆") {
 		t.Errorf("unfolded project row should not repeat the badge: %q", line)
 	}
 	m.left.tree.setFolded("n1:p1", true)
-	if line := ansi.Strip(m.projRowLine(m.left.tree.rows[1], false, true, act, 40)); !strings.HasSuffix(line, "◆ 3") {
+	if line := ansi.Strip(m.projRowLine(m.left.tree.rows[2], false, true, act, 40)); !strings.HasSuffix(line, "◆ 3") {
 		t.Errorf("folded project row = %q, want the summed ◆ 3 badge", line)
 	}
 }
@@ -584,7 +588,7 @@ func TestFilterInputIsLive(t *testing.T) {
 		res, _ = m.runKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = res.(model)
 	}
-	if m.left.tree.filter != "feat" || len(m.left.tree.rows) != 3 || m.left.tree.cursorRowID() != "n1:w2" {
+	if m.left.tree.filter != "feat" || len(m.left.tree.rows) != 4 || m.left.tree.cursorRowID() != "n1:w2" {
 		t.Fatalf("live filter: filter=%q rows=%+v cursor=%q", m.left.tree.filter, m.left.tree.rows, m.left.tree.cursorRowID())
 	}
 	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -594,7 +598,7 @@ func TestFilterInputIsLive(t *testing.T) {
 	}
 	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = res.(model)
-	if m.left.tree.filter != "" || viewOf(m) != viewTree || len(m.left.tree.rows) != 4 {
+	if m.left.tree.filter != "" || viewOf(m) != viewTree || len(m.left.tree.rows) != 5 {
 		t.Errorf("esc should clear the filter before leaving: filter=%q view=%v", m.left.tree.filter, viewOf(m))
 	}
 }
@@ -693,7 +697,7 @@ func TestHiddenAndPinnedProjectsAreMarked(t *testing.T) {
 	m.left.tree.data[0].Hidden, m.left.tree.data[0].Pinned = true, true
 	m.left.tree.showHidden = true
 	m.left.tree.rebuild()
-	r := m.left.tree.rows[1]
+	r := m.left.tree.rows[2]
 	if !r.hidden || !r.pinned {
 		t.Fatalf("project row flags = hidden:%v pinned:%v, want both", r.hidden, r.pinned)
 	}
@@ -739,16 +743,16 @@ func TestGoneRowsNeedTheirOwnToggle(t *testing.T) {
 	m.left.tree.data[0].Workspaces[1].IsGone = true
 	m.left.tree.data = append(m.left.tree.data, api.ProjectNode{ID: "n1:p2", Name: "old", NodeID: "n1", IsGone: true})
 	m.left.tree.rebuild()
-	if len(m.left.tree.rows) != 3 {
+	if len(m.left.tree.rows) != 4 {
 		t.Fatalf("gone rows should be hidden by default: %+v", m.left.tree.rows)
 	}
 	res, _ := m.runKey(seqKey("z."))
-	if got := len(res.(model).left.tree.rows); got != 3 {
+	if got := len(res.(model).left.tree.rows); got != 4 {
 		t.Errorf("z. (hidden) should not reveal gone rows, got %d rows", got)
 	}
 	res, _ = m.runKey(seqKey("zg"))
 	mm := res.(model)
-	if len(mm.left.tree.rows) != 5 {
+	if len(mm.left.tree.rows) != 6 {
 		t.Fatalf("zg should reveal the gone workspace and project: %+v", mm.left.tree.rows)
 	}
 	if !strings.Contains(ansi.Strip(treePane(mm, 40, 20)), "+gone") {
@@ -977,6 +981,7 @@ func TestRemovePromptNamesWorkspace(t *testing.T) {
 func TestRemoveInFlightShowsAndBlocksRepeat(t *testing.T) {
 	m := projectsTestModel()
 	m.width, m.height = 120, 30
+	m.left.width = 44
 	m.client = &recordingClient{}
 	delete(m.sessions, "n1:s2")
 	m = selectRow(m, "n1:w2")
@@ -1306,7 +1311,7 @@ func projectOnCursor(pinned, hidden bool) (model, *recordingClient) {
 	m.left.tree.data[0].Pinned, m.left.tree.data[0].Hidden = pinned, hidden
 	m.left.tree.showHidden = true
 	m.left.tree.rebuild()
-	m.left.tree.cursor = 1
+	m.left.tree.cursor = 2
 	rc := &recordingClient{}
 	m.client = rc
 	return m, rc

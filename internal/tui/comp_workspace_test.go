@@ -17,12 +17,12 @@ import (
 // workspacePane is the workspace pane of n1:w1 (sessions n1:s1 and n1:s3),
 // reached from Home through the tree.
 func workspacePane(m model) model {
-	return pressKeys(typeKeys(pressKeys(m, cw('h')...), "jj"), keyMsg("enter"))
+	return pressKeys(typeKeys(pressKeys(m, cw('h')...), "jjj"), keyMsg("enter"))
 }
 
 func TestWorkspacePaneStartsOverAfterATripToHome(t *testing.T) {
 	m := typeKeys(workspacePane(homeTestModel()), "j")
-	m = typeKeys(pressKeys(m, keyMsg("esc")), "kk")
+	m = typeKeys(pressKeys(m, keyMsg("esc")), "kkk")
 	if p, ok := m.main[0].(workspaceComp); !ok || p.ws != "n1:w1" || p.cursor != 1 {
 		t.Fatalf("cursor moves must keep the pane of n1:w1 on card 1: root=%#v", m.main[0])
 	}
@@ -30,7 +30,7 @@ func TestWorkspacePaneStartsOverAfterATripToHome(t *testing.T) {
 	if viewOf(m) != viewHome {
 		t.Fatalf("<CR> on the Home row: view = %v, want Home", viewOf(m))
 	}
-	m = pressKeys(typeKeys(pressKeys(m, keyMsg("esc")), "jj"), keyMsg("enter"))
+	m = pressKeys(typeKeys(pressKeys(m, keyMsg("esc")), "jjj"), keyMsg("enter"))
 	if p := paneOf(m); m.focused != mainPane || p.ws != "n1:w1" || p.cursor != 0 {
 		t.Errorf("back on n1:w1: focus=%v ws=%q cursor=%d, want the pane on card 0", m.focused, p.ws, p.cursor)
 	}

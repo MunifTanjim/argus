@@ -130,7 +130,7 @@ func TestPanesKeepTheirCursorOnTheWayBack(t *testing.T) {
 		return typeKeys(m, "j")
 	}
 	pane := func() model {
-		return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")), "j")
+		return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")), "j")
 	}
 	cases := []struct {
 		name       string

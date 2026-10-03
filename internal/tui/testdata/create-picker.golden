@@ -3,10 +3,10 @@
   Projects                           │  argus  /repo/.git
                                      │
   󰋜 Home                         ○ 3 │  󰉋 repo  main                                                               ○ 2
-▌ ▾ argus                            │  ╭────────────────────────────────────────────────────────────────────────────╮
-    󰉋 repo  main                 ○ 2 │  │ New workspace in argus target: main  (^t)                                  │
-     repo-feat  feature         ○ 1 │  │                                                                            │
-                                     │  │ New   Branches   PRs   Issues                                              │
+  ▾  home                           │  ╭────────────────────────────────────────────────────────────────────────────╮
+▌   ▾ argus                          │  │ New workspace in argus target: main  (^t)                                  │
+      󰉋 repo  main               ○ 2 │  │                                                                            │
+       repo-feat  feature       ○ 1 │  │ New   Branches   PRs   Issues                                              │
                                      │  │                                                                            │
                                      │  │ branch:                                                                    │
                                      │  │                                                                            │

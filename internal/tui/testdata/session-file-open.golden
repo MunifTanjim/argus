@@ -3,10 +3,10 @@
   Projects                           │   repo · fix-login ·  main  [%1] awaiting_input                                   │  Files  Changes
                                      │                                                                                    │
 ▌ 󰋜 Home                         ◆ 3 │ go.mod                                                                             │▌   go.mod
-  ▾ argus                            │ module argus                                                                       │
-    󰉋 repo  main                 ◆ 2 │ ────────────────────────────────────────────────────────────────────────────────── │
-     repo-feat  feature         ○ 1 │    Allow Bash?                                                  ⇥ Tab to answer   │
-                                     │                                                                                    │
+  ▾  home                           │ module argus                                                                       │
+    ▾ argus                          │ ────────────────────────────────────────────────────────────────────────────────── │
+      󰉋 repo  main               ◆ 2 │    Allow Bash?                                                  ⇥ Tab to answer   │
+       repo-feat  feature       ○ 1 │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │

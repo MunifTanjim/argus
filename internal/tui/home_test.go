@@ -652,11 +652,11 @@ func TestTreeRowsAlignWithTitle(t *testing.T) {
 	m = withView(m, viewTree)
 	m = withFocus(m, leftSidebar)
 	m.left.tree.rebuild()
-	m = selectRow(m, "n1:p1") // cursor on the project row
+	m = selectRow(m, "n1") // cursor on the node row
 	out := m.View().Content
 	title := columnOf(out, "Projects")
-	if row := columnOf(out, "▾ argus"); row != title {
-		t.Errorf("project row starts at column %d, the Projects title at %d", row, title)
+	if row := columnOf(out, "▾"); row != title {
+		t.Errorf("node row starts at column %d, the Projects title at %d", row, title)
 	}
 	if bar := columnOf(out, "▌"); bar != title-screenMargin {
 		t.Errorf("cursor bar at column %d, want it in the margin at %d", bar, title-screenMargin)

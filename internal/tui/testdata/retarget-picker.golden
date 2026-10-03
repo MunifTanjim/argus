@@ -3,10 +3,10 @@
   Projects                           │  repo  main
                                      │
   󰋜 Home                         ○ 3 │  ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮
-  ▾ argus                            │  ╭────────────────────────────────────────────────────────────────────────────╮
-▌   󰉋 repo  main                 ○ 2 │  │ Target for repo                                                            │
-     repo-feat  feature         ○ 1 │  │                                                                            │
-                                     │  │ filter:                                                                    │
+  ▾  home                           │  ╭────────────────────────────────────────────────────────────────────────────╮
+    ▾ argus                          │  │ Target for repo                                                            │
+▌     󰉋 repo  main               ○ 2 │  │                                                                            │
+       repo-feat  feature       ○ 1 │  │ filter:                                                                    │
                                      │  │                                                                            │
                                      │  │ ▌ main                                                                     │
                                      │  │   feature                                                                  │

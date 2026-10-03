@@ -72,9 +72,9 @@ func TestPaletteFirstScope(t *testing.T) {
 		m, _ = m.enterSession(id)
 		return withFocus(m, mainPane)
 	}
-	oneNode := projectsTestModel()
-	oneNode.main = backStack{summaryComp{kind: rowNode, id: "n1"}}
-	oneNode = withFocus(oneNode, mainPane)
+	missingNode := projectsTestModel()
+	missingNode.main = backStack{summaryComp{kind: rowNode, id: "n9"}}
+	missingNode = withFocus(missingNode, mainPane)
 	twoNodes := func(base component) model {
 		m := projectsTestModel()
 		m.left.tree.data = append(m.left.tree.data, api.ProjectNode{
@@ -98,7 +98,7 @@ func TestPaletteFirstScope(t *testing.T) {
 		{"project summary", onPane("n1:p1"), "project:n1:p1"},
 		{"session in a workspace", inSession("n1:s1", "n1:w1"), "ws:n1:w1"},
 		{"session without a workspace", inSession("n1:s3", ""), ""},
-		{"node that the snapshot lacks", oneNode, ""},
+		{"node that the snapshot lacks", missingNode, ""},
 		{"node summary", twoNodes(summaryComp{kind: rowNode, id: "n2"}), "node:n2"},
 		{"node terminals", twoNodes(terminalsComp{nodeID: "n2"}), "node:n2"},
 		{"home terminals", twoNodes(terminalsComp{}), ""},
@@ -137,6 +137,10 @@ func TestPaletteTabNarrowsAndBackspaceWidens(t *testing.T) {
 	want := []string{"session:n1:s1", "session:n1:s2", "session:n1:s3", "ws:n1:w1", "ws:n1:w2"}
 	if got := paletteShows(m); !slices.Equal(got, want) {
 		t.Errorf("project scope shows %v, want %v", got, want)
+	}
+	m, _ = upd(m, backspaceKey)
+	if p, _ := paletteOf(m); p.scope != "node:n1" {
+		t.Errorf("backspace: scope = %q, want the node", p.scope)
 	}
 	m, _ = upd(m, backspaceKey)
 	if p, _ := paletteOf(m); p.scope != "" {
