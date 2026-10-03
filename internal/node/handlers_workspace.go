@@ -16,6 +16,9 @@ import (
 )
 
 func (d *Node) workspaceDir(ctx context.Context, id string) (string, error) {
+	if dir, ok := d.demoWorkspaceDirs[id]; d.demo && ok {
+		return dir, nil
+	}
 	if d.projreg == nil {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "project registry disabled"}
 	}

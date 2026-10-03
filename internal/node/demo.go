@@ -286,6 +286,7 @@ func BuildDemoNodes(dd *DemoData, version string) ([]*Node, error) {
 
 		d.demo = true
 		d.demoHistory = dn.History
+		d.demoWorkspaceDirs = dn.WorkspaceRepos
 		d.reg.Seed(dn.Sessions)
 
 		d.demoTerminals = map[string][]byte{}

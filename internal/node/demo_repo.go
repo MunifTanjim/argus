@@ -45,16 +45,28 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// MaterializeDemoRepos builds a throwaway git repo for each session that has a
-// repo spec, so the real changed-files/diff/commit handlers serve real git
-// output. It rewrites each such session's Cwd to the repo path and returns a
-// cleanup that removes all temp dirs.
+// MaterializeDemoRepos builds a throwaway git repo for each session and
+// workspace that has a repo spec, so the real changed-files/diff/commit handlers
+// serve real git output. It rewrites each such session's Cwd and each
+// WorkspaceRepos entry to the repo path, and returns a cleanup that removes all
+// temp dirs.
 func MaterializeDemoRepos(dd *DemoData) (func(), error) {
 	var dirs []string
 	cleanup := func() {
 		for _, d := range dirs {
 			_ = os.RemoveAll(d)
 		}
+	}
+	build := func(spec, who string) (string, error) {
+		dir, err := os.MkdirTemp("", "argus-demo-repo-")
+		if err != nil {
+			return "", err
+		}
+		dirs = append(dirs, dir)
+		if err := buildRepo(dir, spec); err != nil {
+			return "", fmt.Errorf("repo %s: %w", who, err)
+		}
+		return dir, nil
 	}
 	for ni := range dd.Nodes {
 		n := &dd.Nodes[ni]
@@ -64,17 +76,20 @@ func MaterializeDemoRepos(dd *DemoData) (func(), error) {
 			if !ok {
 				continue
 			}
-			dir, err := os.MkdirTemp("", "argus-demo-repo-")
+			dir, err := build(spec, s.ID)
 			if err != nil {
 				cleanup()
 				return nil, err
 			}
-			dirs = append(dirs, dir)
-			if err := buildRepo(dir, spec); err != nil {
-				cleanup()
-				return nil, fmt.Errorf("repo %s: %w", s.ID, err)
-			}
 			s.Cwd = dir
+		}
+		for wsID, spec := range n.WorkspaceRepos {
+			dir, err := build(spec, wsID)
+			if err != nil {
+				cleanup()
+				return nil, err
+			}
+			n.WorkspaceRepos[wsID] = dir
 		}
 	}
 	return cleanup, nil
