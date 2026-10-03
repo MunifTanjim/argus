@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flterm/flterm.dart' as gt;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,9 +10,11 @@ import 'package:argus/models/session.dart';
 import 'package:argus/models/terminal.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/terminal_controller.dart';
+import 'package:argus/state/terminal_prefs.dart';
 import 'package:argus/state/terminals.dart';
 import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/transport/connection.dart';
+import 'package:argus/ui/live_emulator.dart';
 import 'package:argus/ui/live_screen_screen.dart';
 
 class _FakeSession implements TerminalSession {
@@ -442,6 +445,94 @@ void main() {
     expect(tester.widget<TerminalView>(find.byType(TerminalView)).readOnly, isTrue);
     await tester.pumpWidget(const SizedBox());
   });
+
+  Future<gt.TerminalController> pumpGhostty(WidgetTester tester, _FakeTerminalRepo repo,
+      {required bool terminal}) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        terminalRepositoryProvider.overrideWithValue(repo),
+        terminalPrefsProvider.overrideWith(() => _FixedPrefs(TerminalEmulator.ghostty)),
+      ],
+      child: MaterialApp(
+        home: terminal
+            ? const LiveScreenScreen(terminal: NodeTerminal(id: 'A:@1', command: 'zsh'))
+            : LiveScreenScreen(session: _makeSession()),
+      ),
+    ));
+    await tester.pump();
+    expect(find.byType(TerminalView), findsNothing);
+    return tester.widget<gt.TerminalView>(find.byType(gt.TerminalView)).controller;
+  }
+
+  testWidgets('Ghostty: a terminal takes keys from the keyboard, batched', (tester) async {
+    final repo = _FakeTerminalRepo();
+    final c = await pumpGhostty(tester, repo, terminal: true);
+    expect(find.byType(TextField), findsNothing);
+    c.sendText('l');
+    c.sendText('s');
+    expect(repo.sends, isEmpty);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(repo.sends.map(utf8.decode), ['ls']);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Ghostty: a session keeps the text box and sends no typed keys', (tester) async {
+    final repo = _FakeTerminalRepo();
+    final c = await pumpGhostty(tester, repo, terminal: false);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(tester.widget<gt.TerminalView>(find.byType(gt.TerminalView)).showKeyboard, isFalse);
+    c.sendText('x');
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(repo.sends, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Ghostty: key bar keys go through the emulator on both screens', (tester) async {
+    for (final terminal in [true, false]) {
+      final repo = _FakeTerminalRepo();
+      await pumpGhostty(tester, repo, terminal: terminal);
+      await tester.tap(find.byTooltip('Up'));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(repo.sends.map(utf8.decode), ['\x1b[A'], reason: terminal ? 'terminal' : 'session');
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
+  testWidgets('xterm: the cursor is translucent, so the character under it shows', (tester) async {
+    await _pump(tester, _FakeTerminalRepo());
+    final cursor = tester.widget<TerminalView>(find.byType(TerminalView)).theme.cursor;
+    expect(cursor.a, greaterThan(0));
+    expect(cursor.a, lessThan(1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('both emulators start at the font size from Settings', (tester) async {
+    for (final e in TerminalEmulator.values) {
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          terminalRepositoryProvider.overrideWithValue(_FakeTerminalRepo()),
+          terminalPrefsProvider.overrideWith(() => _FixedPrefs(e, fontSize: 18)),
+        ],
+        child: const MaterialApp(
+          home: LiveScreenScreen(terminal: NodeTerminal(id: 'A:@1', command: 'zsh')),
+        ),
+      ));
+      await tester.pump();
+      final size = e == TerminalEmulator.xterm
+          ? tester.widget<TerminalView>(find.byType(TerminalView)).textStyle.fontSize
+          : tester.widget<gt.TerminalView>(find.byType(gt.TerminalView)).theme!.fontSize;
+      expect(size, 18, reason: e.name);
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+}
+
+class _FixedPrefs extends TerminalPrefsController {
+  _FixedPrefs(this.emulator, {this.fontSize = 12});
+  final TerminalEmulator emulator;
+  final double fontSize;
+  @override
+  TerminalPrefs build() => TerminalPrefs(emulator: emulator, fontSize: fontSize);
 }
 
 class _CountingTerminals extends TerminalsNotifier {
