@@ -574,10 +574,12 @@ The client makes these ids composite:
 - `session_id` in the results of `sessions.spawn` and `sessions.resume`
 - `workspace_id` in the result of `workspace.create`
 - `session_id` in `tasks.changed`
+- `id` of each terminal in `terminal.list` and in the result of
+  `terminal.create`
 
-The client adds `node_id` and `node_label` to sessions, projects, and history
-items. History items are not composite. A node accepts a composite id with its
-own prefix in `sessions.focus`.
+The client adds `node_id` and `node_label` to sessions, projects, terminals,
+and history items. History items are not composite. A node accepts a composite
+id with its own prefix in `sessions.focus`.
 
 ### Routing
 
@@ -585,12 +587,13 @@ The client picks the node for each call:
 
 | Rule | Methods |
 | ---- | ------- |
-| All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list` |
+| All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list`, `terminal.list` |
 | All nodes; success if one node succeeds | `push.register`, `push.unregister`, `push.test`, `push.setPause` |
-| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` |
+| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
+| Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
-| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail` |
+| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
 
@@ -599,7 +602,7 @@ client uses these error texts:
 
 | Error | Cause |
 | ----- | ----- |
-| `-32600 session id is not gateway-qualified: <id>` | The id has no node prefix. The same text exists for `workspace id` and `project id`. |
+| `-32600 session id is not gateway-qualified: <id>` | The id has no node prefix. The same text exists for `workspace id`, `project id`, and `terminal id`. |
 | `-32600 <method> requires node_id` | `node_id` is empty and more than one node is connected. |
 | `-32600 <method> requires a handle id` | `sub_id` or `term_id` is empty. |
 | `-32600 <method>: unknown handle <id>` | The client did not open this `sub_id` or `term_id`. |
@@ -694,7 +697,8 @@ support (today, Claude Code), and never at subscribe time.
 
 ### Terminals
 
-1. The client picks a `term_id` and calls `terminal.open` with the size.
+1. The client picks a `term_id` and calls `terminal.open` with the size and
+   either a `session_id` or a `terminal_id`.
 2. The node sends `terminal.output` notifications.
 3. The client sends keystrokes with `terminal.input`.
 4. The client sends `terminal.resize` when its size changes.
@@ -712,6 +716,8 @@ is no separate snapshot.
   ignores a resize with a size of 0 or less.
 - For a session without a pane, the node first creates a viewer pane.
 - A second `terminal.open` with the same `term_id` replaces the first.
+- Mouse input is SGR mouse reports in `terminal.input`. The node passes button
+  and wheel events only to a program that turned on mouse reporting.
 - `terminal.close` does not send `terminal.exited`.
 
 The node sends `terminal.exited` when the terminal ends:
@@ -726,6 +732,34 @@ session, the node refuses the open.
 
 Errors: `term_id required`, `unknown term_id: <id>`, `bad base64`, and
 `terminal not available for this session`.
+
+#### Persistent terminals
+
+A node with `capabilities.terminal` runs persistent shells. Each shell is one
+window of the tmux session `terminal` on the private `-L argus` server. The
+terminal id is the tmux window id.
+
+- `terminal.create` starts the default shell in the node user's home
+  directory.
+- `terminal.list` returns the terminals in creation order. `cwd` shows the
+  node user's home as `~`. `name` is empty until a rename. A node without
+  `capabilities.terminal` returns an empty list.
+- A shell stays alive after `terminal.close` and after a node restart.
+- `terminal.kill` stops the shell. An open attach then gets
+  `terminal.exited` with `exited`.
+- The node sends `terminal.changed` after a create, kill, or rename, and when
+  an attach to a terminal starts or ends. A shell that exits with no attach
+  stays in the list until the next `terminal.list`.
+- One viewer per terminal, with the same eviction rule as sessions.
+- Over a shell without mouse reporting, a wheel-up enters tmux copy mode,
+  which scrolls the terminal history.
+- For a terminal, the node refuses `client_pane` when that pane is in the
+  terminal's window.
+
+Errors: `terminals not supported on this node`, `unknown terminal: <id>`,
+`name required`, `set session_id or terminal_id, not both`,
+`session_id or terminal_id required`, and
+`this terminal holds your client; use it directly`.
 
 ### Projects and workspaces
 
@@ -1081,7 +1115,7 @@ IdentifyResult {
   id:               string   // stable node id; composite-id prefix
   label:            string
   version:          string
-  capabilities:     { spawn_session: boolean }
+  capabilities:     { spawn_session: boolean, terminal: boolean }
   identity_pubkey?: string   // base64 Curve25519
   signer_pubkey?:   string   // base64 Ed25519 (locked mode)
   tip?:             bytes    // trust-log tip (locked mode)
@@ -1095,7 +1129,7 @@ ServerInfo {
 
 NodeDescriptor {
   id, label, version: string
-  capabilities:     { spawn_session: boolean }
+  capabilities:     { spawn_session: boolean, terminal: boolean }
   identity_pubkey?: string
   signer_pubkey?:   string   // from the gateway; discovery only
   online:           boolean
@@ -1230,14 +1264,33 @@ HistorySessionsParams {
 
 ### Terminals
 
-| Method            | Kind         | Params                                              | Result |
-| ----------------- | ------------ | --------------------------------------------------- | ------ |
-| `terminal.open`   | request      | `{ term_id, session_id, cols, rows, client_pane? }` | `null` |
-| `terminal.input`  | request      | `{ term_id, data }`                                 | `null` |
-| `terminal.resize` | request      | `{ term_id, cols, rows }`                           | `null` |
-| `terminal.close`  | request      | `{ term_id }`                                       | `null` |
-| `terminal.output` | notification | `{ term_id, data }`                                 | —      |
-| `terminal.exited` | notification | `{ term_id, reason? }`                              | —      |
+| Method             | Kind         | Params                                                              | Result                      |
+| ------------------ | ------------ | ------------------------------------------------------------------- | --------------------------- |
+| `terminal.open`    | request      | `{ term_id, session_id?, terminal_id?, cols, rows, client_pane? }` | `null`                      |
+| `terminal.input`   | request      | `{ term_id, data }`                                                 | `null`                      |
+| `terminal.resize`  | request      | `{ term_id, cols, rows }`                                           | `null`                      |
+| `terminal.close`   | request      | `{ term_id }`                                                       | `null`                      |
+| `terminal.output`  | notification | `{ term_id, data }`                                                 | —                           |
+| `terminal.exited`  | notification | `{ term_id, reason? }`                                              | —                           |
+| `terminal.list`    | request      | none                                                                | `{ terminals: Terminal[] }` |
+| `terminal.create`  | request      | `{ node_id? }`                                                      | `Terminal`                  |
+| `terminal.kill`    | request      | `{ terminal_id }`                                                   | `null`                      |
+| `terminal.rename`  | request      | `{ terminal_id, name }`                                             | `null`                      |
+| `terminal.changed` | notification | empty; a gateway client adds `{ node_id }`                          | —                           |
+
+`terminal.open` takes exactly one of `session_id` and `terminal_id`.
+
+```
+Terminal {
+  id:          string
+  name?:       string
+  cwd:         string
+  command:     string
+  attached?:   boolean
+  node_id?:    string
+  node_label?: string
+}
+```
 
 ### Changes and commits
 
