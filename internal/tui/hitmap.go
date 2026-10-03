@@ -17,6 +17,7 @@ const (
 	regRight
 	regFilesDivider
 	regPopup
+	regTitle
 )
 
 func (r region) container() (container, bool) {

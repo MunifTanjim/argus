@@ -100,6 +100,8 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 			m.drag = dragFiles
 		}
 		return m, nil
+	case regTitle:
+		return m.titleClick(a, ms), nil
 	}
 	k, ok := a.region.container()
 	if !ok {
@@ -264,10 +266,25 @@ func (m model) popupMouse(f func(*ctx, popup) (popup, tea.Cmd, bool)) (tea.Model
 	return m, tea.Batch(cmd, m.apply(c))
 }
 
+func (m model) titleClick(a *hitArea, ms tea.Mouse) model {
+	t, hit := a.target(ms.X, ms.Y)
+	switch {
+	case !hit || ms.Button != tea.MouseLeft:
+	case t.index == treeIcon:
+		m = m.toggleTreeFocus()
+	case t.index == filesIcon:
+		m = m.toggleFilesFocus()
+	}
+	return m
+}
+
 // screenMouse hands a button event over the main pane to the live screen; a
 // motion with no button held is not a drag and stays local.
 func (m model) screenMouse(ms tea.Mouse, kind screenMouseKind) (tea.Model, tea.Cmd) {
 	a, ok := m.hits.at(ms.X, ms.Y)
+	if ok && a.region == regTitle && kind == mousePress && m.mouse {
+		return m.titleClick(a, ms), nil
+	}
 	if !ok || a.region != regMain || ms.Button == tea.MouseNone {
 		return m, nil
 	}

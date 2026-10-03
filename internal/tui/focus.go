@@ -121,19 +121,30 @@ func (m model) handleSidebarToggle(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 	}
 	switch {
 	case m.matches(msg, projectsKeys.ToggleSidebar):
-		m.flash = ""
-		m.toggleSidebar()
-		m.focusTree()
+		return m.toggleTreeFocus(), nil, true
 	case m.matches(msg, projectsKeys.ToggleFiles):
-		m.flash = ""
-		m.toggleFiles()
-		if m.filesReachable() {
-			m = m.focusContainer(rightSidebar)
-		}
-	default:
-		return m, nil, false
+		return m.toggleFilesFocus(), nil, true
 	}
-	return m, nil, true
+	return m, nil, false
+}
+
+// The live screen keeps the keys, so a toggle over it leaves the focus there.
+func (m model) toggleTreeFocus() model {
+	m.flash = ""
+	m.toggleSidebar()
+	if m.topScreen() < 0 {
+		m.focusTree()
+	}
+	return m
+}
+
+func (m model) toggleFilesFocus() model {
+	m.flash = ""
+	m.toggleFiles()
+	if m.topScreen() < 0 && m.filesReachable() {
+		m = m.focusContainer(rightSidebar)
+	}
+	return m
 }
 
 // containerKey runs the focused container's keys: the sidebars resize, and the

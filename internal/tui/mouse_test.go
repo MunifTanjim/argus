@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -313,5 +314,88 @@ func TestDividerClickStartsDragAndReleaseEndsIt(t *testing.T) {
 				t.Errorf("drag = %v after release, want none", m.drag)
 			}
 		})
+	}
+}
+
+func titleIconCell(t *testing.T, m model, icon int) (x, y int) {
+	t.Helper()
+	m.View()
+	for _, a := range m.hits.areas {
+		if a.region != regTitle {
+			continue
+		}
+		for _, z := range a.zones {
+			if z.target.index == icon {
+				return a.rect.Min.X + z.rect.Min.X, a.rect.Min.Y + z.rect.Min.Y
+			}
+		}
+	}
+	t.Fatalf("title icon %d is not in the frame", icon)
+	return 0, 0
+}
+
+func TestTitleIconsToggleSidebars(t *testing.T) {
+	m := withFocus(withMouse(wideWorkspace()), mainPane)
+	x, y := titleIconCell(t, m, treeIcon)
+	m, _ = click(m, x, y)
+	if !m.left.hidden || m.focused != mainPane {
+		t.Fatalf("left hidden=%v focused=%v, want the tree hidden", m.left.hidden, m.focused)
+	}
+	x, y = titleIconCell(t, m, treeIcon)
+	m, _ = click(m, x, y)
+	if m.left.hidden || m.focused != leftSidebar {
+		t.Fatalf("left hidden=%v focused=%v, want the tree shown and focused", m.left.hidden, m.focused)
+	}
+	x, y = titleIconCell(t, m, filesIcon)
+	m, _ = click(m, x, y)
+	if !m.right.hidden {
+		t.Fatal("the files icon should hide the right sidebar")
+	}
+	x, y = titleIconCell(t, m, filesIcon)
+	m, _ = click(m, x, y)
+	if m.right.hidden || m.focused != rightSidebar {
+		t.Fatalf("right hidden=%v focused=%v, want the right sidebar shown and focused", m.right.hidden, m.focused)
+	}
+}
+
+func TestTitleIconsShowSidebarState(t *testing.T) {
+	m := wideWorkspace()
+	title := func() string { return strings.Split(ansi.Strip(m.View().Content), "\n")[0] }
+	if got := title(); !strings.HasSuffix(got, glyphSidebarLeft+" "+glyphSidebarRight) {
+		t.Errorf("title = %q, want both sidebars shown", got)
+	}
+	m.left.hidden, m.right.hidden = true, true
+	if got := title(); !strings.HasSuffix(got, glyphSidebarLeftOff+" "+glyphSidebarRightOff) {
+		t.Errorf("title = %q, want both sidebars hidden", got)
+	}
+}
+
+func TestViewerDrawsNoTitleIcons(t *testing.T) {
+	m := withMouse(historyTranscript(true))
+	m.width = 160
+	out := m.View().Content
+	for _, g := range []string{glyphSidebarLeft, glyphSidebarLeftOff, glyphSidebarRight, glyphSidebarRightOff} {
+		if strings.Contains(out, g) {
+			t.Errorf("the viewer should draw no sidebar icon, found %q", g)
+		}
+	}
+	for _, a := range m.hits.areas {
+		if a.region == regTitle {
+			t.Error("the viewer should record no title icons")
+		}
+	}
+}
+
+func TestTitleIconsToggleSidebarsOverTheLiveScreen(t *testing.T) {
+	m := withMouse(liveScreenModelWith(func(m *model) { m.width = 160 }))
+	x, y := titleIconCell(t, m, treeIcon)
+	m, _ = click(m, x, y)
+	if !m.left.hidden {
+		t.Fatal("the tree icon should hide the tree over the live screen")
+	}
+	x, y = titleIconCell(t, m, treeIcon)
+	m, _ = click(m, x, y)
+	if m.left.hidden || m.focused != mainPane || m.topScreen() < 0 {
+		t.Fatalf("left hidden=%v focused=%v, want the tree shown and the live screen kept", m.left.hidden, m.focused)
 	}
 }
