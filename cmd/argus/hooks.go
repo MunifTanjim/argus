@@ -49,6 +49,9 @@ func newHooksInstallCmd() *cobra.Command {
 				if err != nil {
 					return fail(cmd, err)
 				}
+				if path == "" {
+					continue // agent needs no hooks
+				}
 				// Only install for agents the user actually has set up: a missing config
 				// dir means the agent was never run, so don't materialize one for it.
 				if dir := filepath.Dir(path); !dirExists(dir) {
@@ -84,6 +87,10 @@ func newHooksUninstallCmd() *cobra.Command {
 				}
 				if err := a.Uninstall(); err != nil {
 					return fail(cmd, err)
+				}
+				if path == "" {
+					fmt.Printf("removed argus hooks for %s\n", a.Agent())
+					continue
 				}
 				fmt.Printf("removed argus hooks for %s from %s\n", a.Agent(), path)
 			}

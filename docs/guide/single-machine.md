@@ -34,11 +34,12 @@ needed. Start a supported agent inside a tmux session and Argus discovers it:
 ```sh
 tmux new -s work
 cd ~/code/my-project
-claude          # or codex, or agy
+claude          # or agy
 ```
 
-OpenCode sessions do not need tmux. Start `opencode` as usual and Argus discovers
-it.
+OpenCode and Codex sessions do not need tmux. Start `opencode` or `codex` as usual
+and Argus discovers them while they are running. Opening a terminal for a Codex
+session attaches a `codex resume <id>` viewer.
 
 ## Don't use tmux? Let Argus wrap it
 
@@ -49,7 +50,7 @@ hidden, so it feels like running the agent directly:
 
 ```sh
 cd ~/code/my-project
-argus spawn claude          # or: argus spawn codex, argus spawn antigravity
+argus spawn claude          # or: argus spawn antigravity
 ```
 
 You can also set a shell alias:

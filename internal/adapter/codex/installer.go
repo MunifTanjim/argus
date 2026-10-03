@@ -12,35 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/hookset"
 )
 
-// Codex has no Notification/SessionEnd events.
-var DefaultHookEvents = []string{
-	"SessionStart",
-	"UserPromptSubmit",
-	"PreToolUse",
-	"PostToolUse",
-	"PermissionRequest",
-	"Stop",
-}
-
-func hookTimeout(event string) int {
-	if event == "PermissionRequest" {
-		return 1500
-	}
-	return 5
-}
-
-func managedCommand(argusBin, event string) string {
-	return hookset.ManagedCommand(argusBin, Agent, event)
-}
-
-type hookCmd = hookset.Cmd
-type hookGroup = hookset.Group
-
 var predicate = hookset.Spec{Marker: hookset.ManagedMarker}
-
-func isManaged(c hookCmd) bool           { return predicate.IsManaged(c) }
-func hasManaged(groups []hookGroup) bool { return predicate.HasManaged(groups) }
-func anyManaged(hooks hookset.Map) bool  { return predicate.AnyManaged(hooks) }
 
 func codexHome() (string, error) {
 	if dir := os.Getenv("CODEX_HOME"); dir != "" {
@@ -69,14 +41,6 @@ func configTOMLPath() (string, error) {
 	return filepath.Join(dir, "config.toml"), nil
 }
 
-func SettingsPath() (string, error) {
-	s, err := activeStore()
-	if err != nil {
-		return "", err
-	}
-	return s.path, nil
-}
-
 // load returns os.IsNotExist when the file is absent.
 type store struct {
 	path string
@@ -85,26 +49,7 @@ type store struct {
 }
 
 func specFor(s store) hookset.Spec {
-	return hookset.Spec{
-		Marker:        hookset.ManagedMarker,
-		Command:       managedCommand,
-		Timeout:       hookTimeout,
-		DefaultEvents: DefaultHookEvents,
-		Load:          s.load,
-		Save:          s.save,
-	}
-}
-
-// config.toml if it has hooks, else hooks.json.
-func activeStore() (store, error) {
-	has, err := configHasHooks()
-	if err != nil {
-		return store{}, err
-	}
-	if has {
-		return tomlStore()
-	}
-	return jsonStore()
+	return hookset.Spec{Marker: hookset.ManagedMarker, Load: s.load, Save: s.save}
 }
 
 // For operations that span both files.
@@ -120,19 +65,12 @@ func stores() ([]store, error) {
 	return []store{ts, js}, nil
 }
 
-// Idempotent.
-func Install(argusBin string, events []string) error {
-	s, err := activeStore()
-	if err != nil {
-		return err
-	}
-	return specFor(s).Install(argusBin, events)
-}
-
-func ReconcileIfInstalled(argusBin string) (added []string, err error) {
+// removeLegacyHooks strips argus-managed hooks from both stores. removed reports
+// whether any were present.
+func removeLegacyHooks() (removed bool, err error) {
 	all, err := stores()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	for _, s := range all {
 		hooks, err := s.load()
@@ -140,27 +78,23 @@ func ReconcileIfInstalled(argusBin string) (added []string, err error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			return removed, err
 		}
-		if anyManaged(hooks) {
-			return specFor(s).Reconcile(argusBin)
+		if !predicate.AnyManaged(hooks) {
+			continue
 		}
+		if err := specFor(s).Uninstall(); err != nil {
+			return removed, err
+		}
+		removed = true
 	}
-	return nil, nil
+	return removed, nil
 }
 
-// Removes from both stores.
+// Removes from both stores, leaving files without argus hooks untouched.
 func Uninstall() error {
-	all, err := stores()
-	if err != nil {
-		return err
-	}
-	for _, s := range all {
-		if err := specFor(s).Uninstall(); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := removeLegacyHooks()
+	return err
 }
 
 func jsonStore() (store, error) {
@@ -333,22 +267,6 @@ func splitHooksTable(v any) (defs, other map[string]any) {
 	return defs, other
 }
 
-func configHasHooks() (bool, error) {
-	path, err := configTOMLPath()
-	if err != nil {
-		return false, err
-	}
-	top, err := readTOMLTop(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	defs, _ := splitHooksTable(top["hooks"])
-	return len(defs) > 0, nil
-}
-
 func hooksFromAny(v any) (hookset.Map, error) {
 	if v == nil {
 		return hookset.Map{}, nil
@@ -374,13 +292,4 @@ func anyFromHooks(m hookset.Map) (any, error) {
 		return nil, err
 	}
 	return v, nil
-}
-
-// Test seam.
-func loadHooks() (hookset.Map, error) {
-	s, err := jsonStore()
-	if err != nil {
-		return nil, err
-	}
-	return s.load()
 }
