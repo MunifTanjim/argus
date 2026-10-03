@@ -94,6 +94,7 @@ type Node struct {
 	demoProjects         []api.ProjectNode
 	demoTerminalList     []api.Terminal
 	demoSessionTerminals map[string][]byte // session id -> canned live-terminal bytes
+	demoWideTerminals    map[string][]byte // session id -> canned bytes for a wide screen
 	demoNodeTerminals    map[string][]byte // terminal id -> canned terminal bytes
 	demoSetupLogs        map[string]string // workspace id -> setup log
 	demoWorkspaceDirs    map[string]string // workspace id -> materialized repo dir

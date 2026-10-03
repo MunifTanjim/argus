@@ -3,7 +3,10 @@ package node
 import (
 	"context"
 	"encoding/base64"
+	"regexp"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
@@ -11,6 +14,18 @@ import (
 // demoTerminalChunk is the byte window per emitted frame; small enough to look
 // like live output when replayed.
 const demoTerminalChunk = 256
+
+var ansiCSI = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+// terminalWidth is the visible width of the longest line in canned terminal
+// bytes.
+func terminalWidth(b []byte) int {
+	w := 0
+	for _, line := range strings.Split(ansiCSI.ReplaceAllString(string(b), ""), "\n") {
+		w = max(w, utf8.RuneCountInString(strings.TrimRight(line, "\r")))
+	}
+	return w
+}
 
 // demoTerminalOpen replays canned terminal bytes, of a node terminal or else of
 // a session, as terminal.output notifications, then holds without an exit so the
@@ -21,6 +36,9 @@ func (d *Node) demoTerminalOpen(ctx context.Context, p api.TerminalOpenParams) (
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
 	data := d.demoSessionTerminals[p.SessionID]
+	if wide, ok := d.demoWideTerminals[p.SessionID]; ok && p.Cols >= terminalWidth(wide) {
+		data = wide
+	}
 	if p.TerminalID != "" {
 		data = d.demoNodeTerminals[p.TerminalID]
 	}

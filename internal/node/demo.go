@@ -34,10 +34,13 @@ type DemoNode struct {
 	Projects         []api.ProjectNode
 	Terminals        []api.Terminal
 	SessionTerminals map[string]string // session id -> resolved terminal byte file
-	NodeTerminals    map[string]string // terminal id -> resolved terminal byte file
-	Repos            map[string]string // session id -> resolved repo-spec directory
-	WorkspaceRepos   map[string]string // workspace id -> resolved repo-spec directory
-	SetupLogs        map[string]string // workspace id -> setup log text
+	// SessionWideTerminals replaces a session's terminal on a screen wide
+	// enough for its longest line.
+	SessionWideTerminals map[string]string
+	NodeTerminals        map[string]string // terminal id -> resolved terminal byte file
+	Repos                map[string]string // session id -> resolved repo-spec directory
+	WorkspaceRepos       map[string]string // workspace id -> resolved repo-spec directory
+	SetupLogs            map[string]string // workspace id -> setup log text
 }
 
 // DemoData is a parsed --demo-data fixture.
@@ -208,7 +211,7 @@ func LoadDemoData(path string) (*DemoData, error) {
 		seenNodes[rn.ID] = true
 		dn := DemoNode{
 			ID: rn.ID, Label: rn.Label, Spawn: rn.Spawn,
-			SessionTerminals: map[string]string{}, NodeTerminals: map[string]string{},
+			SessionTerminals: map[string]string{}, SessionWideTerminals: map[string]string{}, NodeTerminals: map[string]string{},
 			Repos: map[string]string{}, WorkspaceRepos: map[string]string{}, SetupLogs: map[string]string{},
 		}
 		for _, m := range rn.Sessions {
@@ -238,6 +241,13 @@ func LoadDemoData(path string) (*DemoData, error) {
 					return nil, err
 				}
 				dn.SessionTerminals[s.ID] = rp
+			}
+			if p := strField(m, "terminal_wide_path"); p != "" {
+				rp, err := resolvePath(baseDir, p, s.ID+" wide terminal")
+				if err != nil {
+					return nil, err
+				}
+				dn.SessionWideTerminals[s.ID] = rp
 			}
 			if repoSpec != "" {
 				rp, err := resolvePath(baseDir, repoSpec, s.ID+" repo")
@@ -317,6 +327,9 @@ func BuildDemoNodes(dd *DemoData, version string) ([]*Node, error) {
 
 		var err error
 		if d.demoSessionTerminals, err = readDemoTerminals(dn.ID, dn.SessionTerminals); err != nil {
+			return nil, err
+		}
+		if d.demoWideTerminals, err = readDemoTerminals(dn.ID, dn.SessionWideTerminals); err != nil {
 			return nil, err
 		}
 		if d.demoNodeTerminals, err = readDemoTerminals(dn.ID, dn.NodeTerminals); err != nil {

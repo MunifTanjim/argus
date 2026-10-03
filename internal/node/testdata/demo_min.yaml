@@ -18,6 +18,7 @@ nodes:
         status: idle
         source: hooked
         terminal_path: t.jsonl
+        terminal_wide_path: t.jsonl
         repo_spec: .
     history:
       - repo: argus

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -57,6 +58,9 @@ func TestLoadDemoDataResolvesFixturePaths(t *testing.T) {
 	}
 	if !filepath.IsAbs(term) {
 		t.Fatalf("SessionTerminals[s2] = %q, want absolute path", term)
+	}
+	if n.SessionWideTerminals["s2"] == "" {
+		t.Fatal("SessionWideTerminals[s2] is empty, want resolved path")
 	}
 	repo := n.Repos["s2"]
 	if repo == "" {
@@ -198,13 +202,26 @@ func TestHistoryHandlersServeDemoFixtures(t *testing.T) {
 type captureNotifier struct {
 	mu      sync.Mutex
 	methods []string
+	data    []string
 }
 
-func (c *captureNotifier) Notify(method string, _ any) error {
+func (c *captureNotifier) Notify(method string, params any) error {
 	c.mu.Lock()
 	c.methods = append(c.methods, method)
+	if out, ok := params.(api.TerminalOutput); ok {
+		c.data = append(c.data, out.Data)
+	}
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *captureNotifier) firstData() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.data) == 0 {
+		return ""
+	}
+	return c.data[0]
 }
 func (c *captureNotifier) count() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.methods) }
 
@@ -347,6 +364,32 @@ func TestDemoFleetFixtureLoads(t *testing.T) {
 	for _, n := range dd.Nodes {
 		if len(n.Projects) == 0 || len(n.Terminals) == 0 {
 			t.Errorf("node %s: projects=%d terminals=%d, want both", n.ID, len(n.Projects), len(n.Terminals))
+		}
+	}
+}
+
+func TestDemoTerminalOpenPicksWideVariantWhenItFits(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.demo = true
+	narrow, wide := []byte("narrow\r\n"), []byte("\x1b[92m0123456789\x1b[0m\r\nshort\r\n")
+	d.demoSessionTerminals = map[string][]byte{"s1": narrow}
+	d.demoWideTerminals = map[string][]byte{"s1": wide}
+
+	for _, tc := range []struct {
+		cols int
+		want []byte
+	}{{0, narrow}, {9, narrow}, {10, wide}, {120, wide}} {
+		cn := &captureNotifier{}
+		ctx := api.WithNotifier(context.Background(), cn)
+		if _, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t", SessionID: "s1", Cols: tc.cols})); err != nil {
+			t.Fatalf("handleTerminalOpen: %v", err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for cn.firstData() == "" && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := cn.firstData(); got != base64.StdEncoding.EncodeToString(tc.want) {
+			t.Fatalf("cols=%d: replayed %q, want %q", tc.cols, got, base64.StdEncoding.EncodeToString(tc.want))
 		}
 	}
 }
