@@ -162,6 +162,18 @@ void main() {
     await client.close();
   });
 
+  test('terminal.changed notifications carry the node id', () async {
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json(null));
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final got = client.aggregatedEvents.firstWhere((e) => e.method == 'terminal.changed');
+    a.emitNotification('terminal.changed', _json({}));
+    final ev = await got.timeout(const Duration(seconds: 2));
+    expect(ev.params, {'node_id': 'A'});
+    await client.close();
+  });
+
   test('non-session.event notifications pass through decoded, unstamped', () async {
     final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json(null));
     final lnk = MultiNodeLoopbackLink({'A': a});
@@ -314,6 +326,89 @@ void main() {
     final r = await client.call('workspace.create', {'project_id': 'A:p1'}) as Map;
     expect(r['workspace_id'], 'A:w9');
     expect(r['dir'], '/src/x');
+    await client.close();
+  });
+
+  test('terminal.list merges, composites, sorts, and lists failed nodes', () async {
+    Uint8List list(String n) => _json({
+          'terminals': [
+            {'id': '@1', 'command': 'zsh-$n'},
+            {'id': '@2', 'command': 'vim-$n'},
+          ],
+        });
+    final b = LoopbackNode('B', await generateKeyPair(), (m, p) => list('B'));
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) => list('A'));
+    final c = LoopbackNode('C', await generateKeyPair(), (m, p) => throw StateError('boom'));
+    final lnk = MultiNodeLoopbackLink({'B': b, 'A': a, 'C': c});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('terminal.list') as Map;
+    final ids = [for (final t in r['terminals'] as List) (t as Map)['id']];
+    expect(ids, ['A:@1', 'A:@2', 'B:@1', 'B:@2']);
+    expect(((r['terminals'] as List).first as Map)['node_label'], 'A-box');
+    expect(r['failed_nodes'], ['C']);
+    await client.close();
+  });
+
+  test('terminal.list treats method-not-found as a node without terminals', () async {
+    final a = LoopbackNode('A', await generateKeyPair(),
+        (m, p) => throw const RpcError(-32601, 'method not found: terminal.list'));
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('terminal.list') as Map;
+    expect(r['terminals'], isEmpty);
+    expect(r['failed_nodes'], isEmpty);
+    await client.close();
+  });
+
+  test('terminal.open by terminal_id routes, then input follows the handle', () async {
+    String? openId;
+    var inputNode = '';
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      if (m == 'terminal.open') {
+        openId = (jsonDecode(utf8.decode(p)) as Map)['terminal_id'] as String?;
+      }
+      if (m == 'terminal.input') inputNode = 'A';
+      return _json(null);
+    });
+    final b = LoopbackNode('B', await generateKeyPair(), (m, p) => _json(null));
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('terminal.open', {'term_id': 't1', 'terminal_id': 'A:@3', 'cols': 80, 'rows': 24});
+    await client.call('terminal.input', {'term_id': 't1', 'data': 'eA=='});
+    expect(openId, '@3');
+    expect(inputNode, 'A');
+    await client.close();
+  });
+
+  test('terminal.kill and terminal.rename split the composite id', () async {
+    final seen = <String, String?>{};
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seen[m] = (jsonDecode(utf8.decode(p)) as Map)['terminal_id'] as String?;
+      return _json(null);
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('terminal.kill', {'terminal_id': 'A:@4'});
+    await client.call('terminal.rename', {'terminal_id': 'A:@4', 'name': 'x'});
+    expect(seen['terminal.kill'], '@4');
+    expect(seen['terminal.rename'], '@4');
+    await client.close();
+  });
+
+  test('terminal.create composites the result', () async {
+    final a = LoopbackNode('A', await generateKeyPair(),
+        (m, p) => _json({'id': '@5', 'cwd': '~', 'command': 'zsh'}));
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('terminal.create', {'node_id': 'A'}) as Map;
+    expect(r['id'], 'A:@5');
+    expect(r['node_id'], 'A');
+    expect(r['node_label'], 'A-box');
     await client.close();
   });
 }

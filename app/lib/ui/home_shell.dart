@@ -5,16 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/project.dart';
 import '../models/session.dart';
+import '../state/control.dart';
+import '../state/gateway.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
+import '../state/terminals.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
 import 'session_list_screen.dart';
 import 'shell_drawer.dart';
+import 'terminal_list_screen.dart';
 import 'workspace_screen.dart';
 
 const double kSidePanelMinWidth = 900;
@@ -331,19 +335,39 @@ class _HomeBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(serverInfoProvider).value;
+    final showTerminals = info?.nodes.any((n) => n.terminalSupported) ?? false;
     final tab = ref.watch(homeTabProvider);
+    // A tab that disappears must not stay selected, or back resets it unseen.
+    if (info != null && !showTerminals && tab == HomeTab.terminals) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => ref.read(homeTabProvider.notifier).state = HomeTab.sessions);
+    }
+    final index = !showTerminals && tab == HomeTab.terminals ? 0 : tab.index;
     return Scaffold(
       body: IndexedStack(
-        index: tab.index,
-        children: const [SessionListScreen(), HistoryScreen()],
+        index: index,
+        children: [
+          const SessionListScreen(),
+          const HistoryScreen(),
+          if (showTerminals) const TerminalListScreen(),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: tab.index,
-        onDestinationSelected: (i) =>
-            ref.read(homeTabProvider.notifier).state = HomeTab.values[i],
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+        selectedIndex: index,
+        onDestinationSelected: (i) {
+          ref.read(homeTabProvider.notifier).state = HomeTab.values[i];
+          if (HomeTab.values[i] == HomeTab.terminals) {
+            ref
+                .read(terminalsProvider.notifier)
+                .load(ref.read(gatewayProvider)?.client);
+          }
+        },
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
+          const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+          if (showTerminals)
+            const NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminals'),
         ],
       ),
     );

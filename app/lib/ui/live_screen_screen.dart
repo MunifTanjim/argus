@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
@@ -5,12 +8,16 @@ import 'package:xterm/xterm.dart';
 import '../data/terminal_repository.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../models/terminal.dart';
 import '../state/gateway.dart';
+import '../state/input_batcher.dart';
 import '../state/pty_keys.dart';
 import '../state/terminal_controller.dart';
+import '../state/terminals.dart';
 import '../transport/connection.dart';
 import '../util/utf8_stream.dart';
 import 'ansi_palette.dart';
+import 'patched_terminal.dart';
 
 const _baseFontSize = 12.0;
 const _minFontSize = 6.0;
@@ -59,18 +66,25 @@ const _terminalTheme = TerminalTheme(
 );
 
 class LiveScreenScreen extends ConsumerStatefulWidget {
-  const LiveScreenScreen({super.key, required this.session});
+  const LiveScreenScreen({super.key, this.session, this.terminal})
+      : assert((session == null) != (terminal == null));
 
-  final Session session;
+  final Session? session;
+  final NodeTerminal? terminal;
 
   @override
   ConsumerState<LiveScreenScreen> createState() => _LiveScreenScreenState();
 }
 
 class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
-  final Terminal _terminal = Terminal(maxLines: 4000);
+  final Terminal _terminal = PatchedTerminal(maxLines: 4000);
   final TextEditingController _textController = TextEditingController();
   TerminalSession? _attach;
+  // A terminal takes keys straight from the keyboard; they and the key bar go
+  // out in batches. A session keeps the text box and sends each input at once.
+  late final InputBatcher _batcher = InputBatcher((b) => _attach?.send(b));
+  final _inputBar = GlobalKey<_InputBarState>();
+  bool get _direct => widget.terminal != null;
   // Reassembles UTF-8 codepoints split across output chunks. Reset per attach so
   // a partial sequence from a dead attach can't corrupt the next one's first glyph.
   Utf8StreamDecoder _decoder = Utf8StreamDecoder();
@@ -119,12 +133,24 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     // Forward viewport resizes to the node so the remote PTY tracks the screen.
     _terminal.onResize = (w, h, pw, ph) => _attach?.resize(w, h);
     // TerminalView turns a vertical drag over the alt screen (tmux) into wheel
-    // ticks. Send each as an SGR report straight to the PTY, like the TUI.
-    _terminal.mouseHandler = _WheelMouseHandler((up, pos) {
-      if (_pinchStartDist != null) return;
-      _send(ptyWheelBytes(
-          up, pos.x, pos.y, _terminal.viewWidth, _terminal.viewHeight));
-    });
+    // ticks, and taps into button presses. Send each as an SGR report straight
+    // to the PTY, like the TUI.
+    _terminal.mouseHandler = LiveScreenMouseHandler(
+      onWheel: (up, pos) {
+        if (_pinchStartDist != null) return;
+        _send(ptyWheelBytes(
+            up, pos.x, pos.y, _terminal.viewWidth, _terminal.viewHeight));
+      },
+      onButton: (button, down, pos) {
+        if (_pinchStartDist != null) return;
+        _send(ptyMouseBytes(button, down, pos.x, pos.y,
+            _terminal.viewWidth, _terminal.viewHeight));
+      },
+    );
+    if (_direct) {
+      _terminal.onOutput = (data) =>
+          _send(_inputBar.currentState?.typed(data) ?? utf8.encode(data));
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
@@ -136,7 +162,8 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     _attach?.dispose();
     _decoder = Utf8StreamDecoder();
     _attach = ref.read(terminalRepositoryProvider).open(
-          sessionId: widget.session.id,
+          sessionId: widget.session?.id,
+          terminalId: widget.terminal?.id,
           cols: _terminal.viewWidth,
           rows: _terminal.viewHeight,
           onData: (bytes) {
@@ -147,6 +174,13 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
             // Open failed: don't strand the user on a dead black screen. Surface
             // the error and leave (the attach self-disposes its subscription).
             if (!mounted) return;
+            // A terminal can be gone with no terminal.changed (its shell exited
+            // while no one watched), so the list reloads.
+            if (widget.terminal != null) {
+              unawaited(ref
+                  .read(terminalsProvider.notifier)
+                  .load(ref.read(gatewayProvider)?.client));
+            }
             ScaffoldMessenger.of(context)
                 .showSnackBar(SnackBar(content: Text('attach failed: $e')));
             Navigator.of(context).maybePop();
@@ -174,13 +208,15 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
 
   @override
   void dispose() {
+    _batcher.flush();
     _attach?.dispose();
     _textController.dispose();
     _fontSize.dispose();
     super.dispose();
   }
 
-  void _send(List<int> bytes) => _attach?.send(bytes);
+  void _send(List<int> bytes) =>
+      _direct ? _batcher.add(bytes) : _attach?.send(bytes);
 
   @override
   Widget build(BuildContext context) {
@@ -195,7 +231,10 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
       }
     });
 
-    final title = widget.session.displayTitle;
+    final t = widget.terminal;
+    final title = t != null
+        ? (t.nodeLabel.isEmpty ? t.title : '${t.title} · ${t.nodeLabel}')
+        : widget.session!.displayTitle;
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       backgroundColor: Colors.black,
@@ -218,8 +257,10 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
                     fontFamilyFallback: _fontFamilyFallback,
                   ),
                   padding: const EdgeInsets.all(_padding),
-                  // Input goes through _InputBar (raw PTY bytes), not the grid.
-                  readOnly: true,
+                  // A terminal takes the keyboard directly; a session's input
+                  // goes through _InputBar's text box.
+                  readOnly: !_direct,
+                  deleteDetection: _direct,
                   // Never turn a wheel tick into arrow keys: the remote program
                   // decides what the wheel does.
                   simulateScroll: false,
@@ -228,6 +269,8 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
             ),
           ),
           _InputBar(
+            key: _inputBar,
+            compose: !_direct,
             controller: _textController,
             onInput: _send,
             // Read at press time so cursor keys follow the remote terminal's
@@ -240,23 +283,27 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   }
 }
 
-// Handles wheel ticks itself and returns null, so the local emulator emits no
-// mouse report of its own. Other buttons are dropped.
-class _WheelMouseHandler implements TerminalMouseHandler {
-  const _WheelMouseHandler(this.onWheel);
+/// Hands wheel ticks and button presses and releases to the live screen; the
+/// emulator itself sends nothing.
+class LiveScreenMouseHandler implements TerminalMouseHandler {
+  const LiveScreenMouseHandler({required this.onWheel, required this.onButton});
 
   final void Function(bool up, CellOffset position) onWheel;
+  final void Function(int button, bool down, CellOffset position) onButton;
 
   @override
   String? call(TerminalMouseEvent event) {
-    if (event.buttonState == TerminalMouseButtonState.down) {
-      switch (event.button) {
-        case TerminalMouseButton.wheelUp:
-          onWheel(true, event.position);
-        case TerminalMouseButton.wheelDown:
-          onWheel(false, event.position);
-        default:
-      }
+    final down = event.buttonState == TerminalMouseButtonState.down;
+    switch (event.button) {
+      case TerminalMouseButton.wheelUp when down:
+        onWheel(true, event.position);
+      case TerminalMouseButton.wheelDown when down:
+        onWheel(false, event.position);
+      case TerminalMouseButton.left ||
+            TerminalMouseButton.middle ||
+            TerminalMouseButton.right:
+        onButton(event.button.id, down, event.position);
+      default:
     }
     return null;
   }
@@ -264,11 +311,16 @@ class _WheelMouseHandler implements TerminalMouseHandler {
 
 class _InputBar extends StatefulWidget {
   const _InputBar({
+    super.key,
+    required this.compose,
     required this.controller,
     required this.onInput,
     required this.appCursorMode,
   });
 
+  /// Whether to show the text box and Send button; without them the keyboard
+  /// types into the terminal.
+  final bool compose;
   final TextEditingController controller;
   final void Function(List<int> bytes) onInput;
 
@@ -306,6 +358,15 @@ class _InputBarState extends State<_InputBar> {
     widget.onInput(ptyTextBytes(ch, ctrl: _ctrl, alt: _alt));
     widget.controller.clear();
     _clearMods();
+  }
+
+  /// The bytes for [data] typed on the keyboard, with an armed Ctrl or Alt
+  /// applied to a single character, which also disarms them.
+  List<int> typed(String data) {
+    if (!_hasCharMod || data.runes.length != 1) return utf8.encode(data);
+    final out = ptyTextBytes(data, ctrl: _ctrl, alt: _alt);
+    _clearMods();
+    return out;
   }
 
   void _sendText() {
@@ -365,37 +426,38 @@ class _InputBarState extends State<_InputBar> {
           ),
           // Text input row. While a modifier is armed, the next typed character
           // is sent as a modified key instead of buffered.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: widget.controller,
-                    style: const TextStyle(fontFamily: 'monospace'),
-                    minLines: 1,
-                    maxLines: 3,
-                    onChanged: (v) {
-                      // With Ctrl/Alt armed, apply it to the last rune (not a
-                      // substring, so an emoji isn't split into a lone surrogate).
-                      // Shift is excluded above: it can't modify a character.
-                      if (_hasCharMod && v.isNotEmpty) {
-                        _pressChar(String.fromCharCode(v.runes.last));
-                      }
-                    },
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      border: OutlineInputBorder(),
+          if (widget.compose)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: widget.controller,
+                      style: const TextStyle(fontFamily: 'monospace'),
+                      minLines: 1,
+                      maxLines: 3,
+                      onChanged: (v) {
+                        // With Ctrl/Alt armed, apply it to the last rune (not a
+                        // substring, so an emoji isn't split into a lone surrogate).
+                        // Shift is excluded above: it can't modify a character.
+                        if (_hasCharMod && v.isNotEmpty) {
+                          _pressChar(String.fromCharCode(v.runes.last));
+                        }
+                      },
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(onPressed: _sendText, child: const Text('Send')),
-              ],
+                  const SizedBox(width: 8),
+                  ElevatedButton(onPressed: _sendText, child: const Text('Send')),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

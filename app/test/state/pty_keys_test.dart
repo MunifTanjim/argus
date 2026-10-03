@@ -92,4 +92,10 @@ void main() {
     test('wheel down', () => expect(String.fromCharCodes(ptyWheelBytes(false, 9, 4, 80, 24)), '\x1b[<65;10;5M'));
     test('clamps to the grid', () => expect(String.fromCharCodes(ptyWheelBytes(true, 200, -3, 80, 24)), '\x1b[<64;80;1M'));
   });
+
+  group('ptyMouseBytes', () {
+    test('left press', () => expect(String.fromCharCodes(ptyMouseBytes(0, true, 3, 1, 80, 24)), '\x1b[<0;4;2M'));
+    test('right release', () => expect(String.fromCharCodes(ptyMouseBytes(2, false, 3, 1, 80, 24)), '\x1b[<2;4;2m'));
+    test('clamps to the grid', () => expect(String.fromCharCodes(ptyMouseBytes(0, true, 200, -3, 80, 24)), '\x1b[<0;80;1M'));
+  });
 }

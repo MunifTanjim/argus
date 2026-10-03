@@ -24,19 +24,21 @@ abstract class TerminalSession {
 class TerminalAttach implements TerminalSession {
   TerminalAttach({
     required this.client,
-    required this.sessionId,
+    this.sessionId,
+    this.terminalId,
     required int cols,
     required int rows,
     required this.onData,
     this.onExited,
     this.onError,
-  }) {
+  }) : assert((sessionId == null) != (terminalId == null)) {
     _cols = cols;
     _rows = rows;
   }
 
   final GatewayClient client;
-  final String sessionId;
+  final String? sessionId;
+  final String? terminalId;
 
   /// Raw output bytes from the PTY; the view writes them to the emulator.
   final void Function(List<int> data) onData;
@@ -60,7 +62,8 @@ class TerminalAttach implements TerminalSession {
     _sub = client.notifications.listen(_onNotify);
     client.call('terminal.open', {
       'term_id': termId,
-      'session_id': sessionId,
+      if (sessionId != null) 'session_id': sessionId,
+      if (terminalId != null) 'terminal_id': terminalId,
       'cols': _cols,
       'rows': _rows,
     }).catchError((Object e) {

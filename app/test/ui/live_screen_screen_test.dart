@@ -2,11 +2,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xterm/xterm.dart';
 import 'package:argus/data/terminal_repository.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/models/terminal.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/terminal_controller.dart';
+import 'package:argus/state/terminals.dart';
+import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/ui/live_screen_screen.dart';
 
@@ -28,11 +32,14 @@ class _FakeTerminalRepo implements TerminalRepository {
   final sends = <List<int>>[];
   void Function(List<int>)? onData;
   void Function(TerminalExitReason reason)? onExited;
+  void Function(Object error)? onError;
   int openCount = 0;
+  String? lastSessionId, lastTerminalId;
 
   @override
   TerminalSession? open({
-    required String sessionId,
+    String? sessionId,
+    String? terminalId,
     required int cols,
     required int rows,
     required void Function(List<int> data) onData,
@@ -40,8 +47,11 @@ class _FakeTerminalRepo implements TerminalRepository {
     void Function(Object error)? onError,
   }) {
     openCount++;
+    lastSessionId = sessionId;
+    lastTerminalId = terminalId;
     this.onData = onData;
     this.onExited = onExited;
+    this.onError = onError;
     return returnNull ? null : _FakeSession(sends);
   }
 }
@@ -324,4 +334,118 @@ void main() {
     expect(repo.sends.last, [27, 91, 51, 126]);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('a terminal target opens by terminal id with its title', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [terminalRepositoryProvider.overrideWithValue(repo)],
+      child: MaterialApp(
+        home: LiveScreenScreen(
+          terminal: NodeTerminal.fromJson({
+            'id': 'A:@1', 'name': 'build', 'command': 'make', 'cwd': '~',
+            'node_id': 'A', 'node_label': 'home',
+          }),
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(repo.lastTerminalId, 'A:@1');
+    expect(repo.lastSessionId, isNull);
+    expect(find.text('build · home'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a failed terminal open reloads the terminal list', (tester) async {
+    final repo = _FakeTerminalRepo();
+    final terms = _CountingTerminals();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        terminalRepositoryProvider.overrideWithValue(repo),
+        terminalsProvider.overrideWith(() => terms),
+      ],
+      child: const MaterialApp(
+        home: LiveScreenScreen(terminal: NodeTerminal(id: 'A:@1', command: 'zsh')),
+      ),
+    ));
+    await tester.pump();
+    repo.onError!(StateError('unknown terminal: @1'));
+    await tester.pump();
+    expect(terms.loads, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('the mouse handler forwards wheel and button events', () {
+    final wheels = <bool>[];
+    final buttons = <(int, bool, int, int)>[];
+    final h = LiveScreenMouseHandler(
+      onWheel: (up, pos) => wheels.add(up),
+      onButton: (b, down, pos) => buttons.add((b, down, pos.x, pos.y)),
+    );
+    TerminalMouseEvent ev(TerminalMouseButton b, TerminalMouseButtonState s) => TerminalMouseEvent(
+          button: b,
+          buttonState: s,
+          position: const CellOffset(3, 1),
+          state: Terminal(),
+          platform: TerminalTargetPlatform.android,
+        );
+    h(ev(TerminalMouseButton.wheelUp, TerminalMouseButtonState.down));
+    h(ev(TerminalMouseButton.left, TerminalMouseButtonState.down));
+    h(ev(TerminalMouseButton.left, TerminalMouseButtonState.up));
+    h(ev(TerminalMouseButton.right, TerminalMouseButtonState.down));
+    expect(wheels, [true]);
+    expect(buttons, [(0, true, 3, 1), (0, false, 3, 1), (2, true, 3, 1)]);
+  });
+
+  Future<Terminal> pumpTerminal(WidgetTester tester, _FakeTerminalRepo repo) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [terminalRepositoryProvider.overrideWithValue(repo)],
+      child: const MaterialApp(
+        home: LiveScreenScreen(terminal: NodeTerminal(id: 'A:@1', command: 'zsh')),
+      ),
+    ));
+    await tester.pump();
+    return tester.widget<TerminalView>(find.byType(TerminalView)).terminal;
+  }
+
+  testWidgets('a terminal takes keys from the keyboard, batched', (tester) async {
+    final repo = _FakeTerminalRepo();
+    final term = await pumpTerminal(tester, repo);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Send'), findsNothing);
+    expect(tester.widget<TerminalView>(find.byType(TerminalView)).readOnly, isFalse);
+    term.textInput('l');
+    term.textInput('s');
+    expect(repo.sends, isEmpty);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(repo.sends.map(utf8.decode), ['ls']);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('an armed Ctrl applies to the next key typed on the keyboard', (tester) async {
+    final repo = _FakeTerminalRepo();
+    final term = await pumpTerminal(tester, repo);
+    await tester.tap(find.byTooltip('Ctrl'));
+    await tester.pump();
+    term.textInput('c');
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(repo.sends, [
+      [0x03],
+    ]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a session keeps the text box', (tester) async {
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('Send'), findsOneWidget);
+    expect(tester.widget<TerminalView>(find.byType(TerminalView)).readOnly, isTrue);
+    await tester.pumpWidget(const SizedBox());
+  });
+}
+
+class _CountingTerminals extends TerminalsNotifier {
+  int loads = 0;
+  @override
+  Future<void> load(GatewayClient? client) async => loads++;
 }

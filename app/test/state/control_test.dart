@@ -159,7 +159,7 @@ void main() {
     expect(frames.single, contains('"method":"server.info"'));
     final id = idOf(frames.single);
     incoming.add(RpcMessage.fromJson(jsonDecode(
-        '{"jsonrpc":"2.0","id":"$id","result":{"version":"1.0","nodes":[{"id":"n1","label":"Box One","capabilities":{"spawn_session":false}},{"id":"n2","label":"","capabilities":{"spawn_session":true}}]}}')));
+        '{"jsonrpc":"2.0","id":"$id","result":{"version":"1.0","nodes":[{"id":"n1","label":"Box One","capabilities":{"spawn_session":false}},{"id":"n2","label":"","capabilities":{"spawn_session":true,"terminal":true}}]}}')));
 
     final result = await fut;
     final nodes = (result as Ok<List<NodeRef>>).value;
@@ -172,6 +172,9 @@ void main() {
     expect(nodes[1].id, 'n2');
     expect(nodes[1].label, 'n2');
     expect(nodes[1].spawnSupported, isTrue);
+    // capabilities.terminal is parsed too; a missing key means no terminals.
+    expect(nodes[0].terminalSupported, isFalse);
+    expect(nodes[1].terminalSupported, isTrue);
   });
 
   test('serverInfo emits server.info and parses version + nodes', () async {

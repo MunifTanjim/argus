@@ -95,7 +95,7 @@ Future<bool> _confirm(
 Future<void> renameProject(ActionContext ax, ProjectNode p) async {
   final name = await showDialog<String>(
     context: ax.navigator.context,
-    builder: (_) => _RenameDialog(current: p.name),
+    builder: (_) => RenameDialog(current: p.name),
   );
   if (name == null) return;
   await ax.run('rename', () async {
@@ -237,15 +237,16 @@ void reloadChanges(ActionContext ax, String workspaceId) {
   ax.container.invalidate(workspaceCommitsProvider(workspaceId));
 }
 
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.current});
+class RenameDialog extends StatefulWidget {
+  const RenameDialog({super.key, required this.current, this.title = 'Rename project'});
   final String current;
+  final String title;
 
   @override
-  State<_RenameDialog> createState() => _RenameDialogState();
+  State<RenameDialog> createState() => _RenameDialogState();
 }
 
-class _RenameDialogState extends State<_RenameDialog> {
+class _RenameDialogState extends State<RenameDialog> {
   late final _name = TextEditingController(text: widget.current);
 
   @override
@@ -259,7 +260,7 @@ class _RenameDialogState extends State<_RenameDialog> {
     final name = _name.text.trim();
     final canSave = name.isNotEmpty && name != widget.current;
     return AlertDialog(
-      title: const Text('Rename project'),
+      title: Text(widget.title),
       content: TextField(
         controller: _name,
         autofocus: true,

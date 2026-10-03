@@ -9,13 +9,16 @@ import 'package:argus/models/enums.dart';
 import 'package:argus/models/history.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/push/notifications.dart';
+import 'package:argus/state/control.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/push.dart';
 import 'package:argus/state/sessions.dart';
+import 'package:argus/state/terminals.dart';
 import 'package:argus/transport/connection.dart';
+import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/ui/history_screen.dart';
 import 'package:argus/ui/history_transcript_screen.dart';
 import 'package:argus/ui/home_shell.dart';
@@ -24,6 +27,7 @@ import 'package:argus/ui/resume_action.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
+import 'package:argus/ui/terminal_list_screen.dart';
 import 'package:argus/ui/workspace_screen.dart';
 
 import '../support/fake_gateway_client.dart';
@@ -109,6 +113,39 @@ Future<ProviderContainer> _shell(
   return c;
 }
 
+class _CountingTerminals extends TerminalsNotifier {
+  int loads = 0;
+  @override
+  Future<void> load(GatewayClient? client) async => loads++;
+}
+
+Future<void> _shellWithNodes(
+  WidgetTester tester,
+  List<NodeRef> nodes,
+  _CountingTerminals terms,
+) async {
+  tester.view.physicalSize = const Size(400, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final c = ProviderContainer(overrides: [
+    gatewayProvider.overrideWithValue(null),
+    serverInfoProvider.overrideWith((ref) async => ServerInfo(version: '', nodes: nodes)),
+    terminalsProvider.overrideWith(() => terms),
+  ]);
+  addTearDown(c.dispose);
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: c,
+    child: const MaterialApp(home: HomeShell()),
+  ));
+  await tester.pump();
+  await tester.pump();
+}
+
+Finder get _terminalsTab => find.descendant(
+      of: find.byType(NavigationBar),
+      matching: find.text('Terminals'),
+    );
+
 Future<void> _back(WidgetTester tester) async {
   await tester.binding.handlePopRoute();
   await tester.pumpAndSettle();
@@ -166,6 +203,33 @@ Finder get _detailInShell => find.descendant(
     );
 
 void main() {
+  testWidgets('a terminal-capable node adds the Terminals tab; opening it loads', (tester) async {
+    final terms = _CountingTerminals();
+    await _shellWithNodes(tester, const [NodeRef('A', 'home')], terms);
+    expect(_terminalsTab, findsOneWidget);
+    await tester.tap(_terminalsTab);
+    await tester.pump();
+    expect(terms.loads, 1);
+    expect(find.byType(TerminalListScreen), findsOneWidget);
+  });
+
+  testWidgets('no Terminals tab without a terminal-capable node', (tester) async {
+    final terms = _CountingTerminals();
+    await _shellWithNodes(tester, const [NodeRef('A', 'home', terminalSupported: false)], terms);
+    expect(_terminalsTab, findsNothing);
+    expect(find.text('History'), findsOneWidget);
+  });
+
+  testWidgets('a hidden Terminals tab resets to Sessions', (tester) async {
+    final terms = _CountingTerminals();
+    await _shellWithNodes(tester, const [NodeRef('A', 'home', terminalSupported: false)], terms);
+    final c = ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+    c.read(homeTabProvider.notifier).state = HomeTab.terminals;
+    await tester.pump();
+    await tester.pump();
+    expect(c.read(homeTabProvider), HomeTab.sessions);
+  });
+
   testWidgets('phone: Home tabs, drawer opens from the menu button', (tester) async {
     await _shell(tester);
     expect(find.text('Sessions'), findsWidgets);

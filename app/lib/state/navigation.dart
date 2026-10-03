@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 final homeTabProvider = StateProvider<HomeTab>((ref) => HomeTab.sessions);
 
-enum HomeTab { sessions, history }
+enum HomeTab { sessions, history, terminals }
 
 enum WorkspaceTab { sessions, changes, files }
 

@@ -125,9 +125,18 @@ List<int> ptyTextBytes(String text, {bool ctrl = false, bool alt = false}) {
 
 /// Raw PTY bytes for one wheel tick at cell ([x], [y]) (0-based, clamped to a
 /// [cols]×[rows] terminal), as an SGR mouse report. Matches the TUI: the node's
-/// mirror passes it to a program that asked for the mouse and drops it otherwise.
+/// mirror passes it to a program that asked for the mouse; over a persistent
+/// terminal's shell it scrolls the history.
 List<int> ptyWheelBytes(bool up, int x, int y, int cols, int rows) {
   final cx = x.clamp(0, cols > 0 ? cols - 1 : 0);
   final cy = y.clamp(0, rows > 0 ? rows - 1 : 0);
   return utf8.encode('\x1b[<${up ? 64 : 65};${cx + 1};${cy + 1}M');
+}
+
+/// Raw PTY bytes for a press ([down]) or release of mouse [button] (0 left,
+/// 1 middle, 2 right) at cell ([x], [y]), as an SGR mouse report.
+List<int> ptyMouseBytes(int button, bool down, int x, int y, int cols, int rows) {
+  final cx = x.clamp(0, cols > 0 ? cols - 1 : 0);
+  final cy = y.clamp(0, rows > 0 ? rows - 1 : 0);
+  return utf8.encode('\x1b[<$button;${cx + 1};${cy + 1}${down ? 'M' : 'm'}');
 }

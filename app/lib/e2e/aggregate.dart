@@ -28,12 +28,17 @@ const Set<String> sessionAddressed = {
 const Set<String> nodeAddressed = {
   'sessions.spawn', 'sessions.resume', 'agents.list', 'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
+  'terminal.create',
 };
 
 /// Methods carrying a term_id, routed to the node the terminal was opened on.
 const Set<String> terminalHandleAddressed = {
   'terminal.input', 'terminal.resize', 'terminal.close',
 };
+
+/// Methods carrying a composite terminal_id the client splits and routes to a
+/// node. terminal.open joins them when it names a terminal_id.
+const Set<String> terminalAddressed = {'terminal.kill', 'terminal.rename'};
 
 /// Methods carrying a composite workspace_id the client splits and routes to a
 /// node.
@@ -95,6 +100,27 @@ Map<String, dynamic> projectWithOriginJson(
             {...w, 'id': compositeId(nodeId, w['id'] is String ? w['id'] as String : '')},
     ],
   };
+}
+
+Map<String, dynamic> terminalWithOriginJson(
+    Map<String, dynamic> t, String nodeId, String? label) {
+  final id = t['id'];
+  return {
+    ...t,
+    'id': compositeId(nodeId, id is String ? id : ''),
+    'node_id': nodeId,
+    'node_label': label,
+  };
+}
+
+/// Orders [items] by node [key], keeping each node's own order.
+List<T> sortByNode<T>(List<T> items, String Function(T) key) {
+  final indexed = [for (var i = 0; i < items.length; i++) (i, items[i])];
+  indexed.sort((a, b) {
+    final c = key(a.$2).compareTo(key(b.$2));
+    return c != 0 ? c : a.$1.compareTo(b.$1);
+  });
+  return [for (final e in indexed) e.$2];
 }
 
 Map<String, dynamic> rewriteSessionId(Object? params, String id) {

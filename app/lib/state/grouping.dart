@@ -10,6 +10,10 @@ class NodeRef {
   /// server.info set it explicitly from the reported capability.
   final bool spawnSupported;
 
+  /// Whether this node can run persistent terminals (tmux present). Same
+  /// defaults as [spawnSupported].
+  final bool terminalSupported;
+
   /// The node's binary version (empty when unknown, e.g. session-derived nodes).
   final String version;
 
@@ -17,6 +21,7 @@ class NodeRef {
     this.id,
     this.label, {
     this.spawnSupported = true,
+    this.terminalSupported = true,
     this.version = '',
   });
 }
