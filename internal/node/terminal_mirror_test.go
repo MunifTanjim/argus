@@ -178,10 +178,13 @@ func TestLockdownMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list-keys: %v: %s", err, out)
 	}
-	for _, want := range []string{"WheelUpPane", "WheelDownPane"} {
+	for _, want := range []string{"WheelUpPane", "WheelDownPane", "MouseDown1Pane", "MouseUp1Pane", "MouseDrag1Pane", "MouseDown3Pane"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("argus-locked table missing %s\nlist-keys output:\n%s", want, out)
 		}
+	}
+	if strings.Contains(string(out), "copy-mode") {
+		t.Errorf("the agent mirror's wheel enters copy mode; the shared pane must not\nlist-keys output:\n%s", out)
 	}
 }
 

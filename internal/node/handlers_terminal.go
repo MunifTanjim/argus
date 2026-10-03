@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -49,7 +51,7 @@ type term struct {
 	cancel context.CancelFunc
 
 	// Identity needed to boot this attach from anywhere (single-viewer eviction).
-	sessionID string
+	sessionID string // viewer key: a session id, or termKeyPrefix + a terminal id
 	termID    string
 	notifier  api.Notifier // the connection to notify on eviction
 	ct        *connTerms   // the per-connection registry this term lives in
@@ -122,6 +124,9 @@ func (d *Node) teardownTerm(tm *term) {
 		tm.cancel()
 		_ = tm.pty.Close()
 		d.restoreMirrorFn(tm.client, tm.mirror)
+		if strings.HasPrefix(tm.sessionID, termKeyPrefix) {
+			d.notifyTerminalsChanged()
+		}
 	})
 }
 
@@ -210,6 +215,14 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
+	switch {
+	case p.TerminalID != "" && p.SessionID != "":
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "set session_id or terminal_id, not both"}
+	case p.TerminalID != "":
+		return nil, d.openTerminalWindow(ctx, n, p)
+	case p.SessionID == "":
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session_id or terminal_id required"}
+	}
 	// A live but paneless session (an OpenCode presence card) has no pane to mirror
 	// yet: spawn and adopt a viewer pane first, then resolve and mirror as usual.
 	if pre, ok := d.reg.Get(p.SessionID); ok && !pre.Controllable() {
@@ -261,21 +274,26 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 			return nil, err
 		}
 	}
+	return nil, d.attach(ct, n, s.ID, p.TermID, c, m, cols, rows)
+}
+
+// attach starts the PTY on mirror m and registers it as key's single viewer.
+func (d *Node) attach(ct *connTerms, n api.Notifier, key, termID string, c *tmux.Client, m *mirrorState, cols, rows int) error {
 	// Detach the attach process from the request context; it lives until close.
 	attachCtx, cancel := context.WithCancel(context.Background())
 	f, err := startPTY(c.AttachCommand(attachCtx, m.name), cols, rows)
 	if err != nil {
 		cancel()
 		d.restoreMirror(c, m)
-		return nil, err
+		return err
 	}
 	tm := &term{
 		pty: f, mirror: m, client: c, cancel: cancel,
-		sessionID: s.ID, termID: p.TermID, notifier: n, ct: ct,
+		sessionID: key, termID: termID, notifier: n, ct: ct,
 	}
 	ct.mu.Lock()
-	prior := ct.m[p.TermID]
-	ct.m[p.TermID] = tm
+	prior := ct.m[termID]
+	ct.m[termID] = tm
 	ct.mu.Unlock()
 	if prior != nil {
 		// A pre-existing entry means a reused term_id; tear it down (outside ct.mu,
@@ -283,11 +301,52 @@ func (d *Node) handleTerminalOpen(ctx context.Context, params json.RawMessage) (
 		d.teardownTerm(prior)
 	}
 	d.sessionTermsMu.Lock()
-	d.sessionTerms[s.ID] = tm
+	d.sessionTerms[key] = tm
 	d.sessionTermsMu.Unlock()
 
 	go d.pumpTerm(tm)
-	return nil, nil
+	return nil
+}
+
+func (d *Node) openTerminalWindow(ctx context.Context, n api.Notifier, p api.TerminalOpenParams) error {
+	c, err := d.terminalClient()
+	if err != nil {
+		return err
+	}
+	if _, err := d.terminalWindow(ctx, c, p.TerminalID); err != nil {
+		return err
+	}
+	// A pane on another server fails to resolve; only a match refuses.
+	if p.ClientPane != "" {
+		if w, err := c.PaneWindowID(ctx, p.ClientPane); err == nil && w == p.TerminalID {
+			return &api.RPCError{Code: api.CodeInvalidRequest, Message: "this terminal holds your client; use it directly"}
+		}
+	}
+	cols, rows := clampSize(p.Cols, p.Rows)
+	ct := d.termsFor(ctx, n)
+	d.openMu.Lock()
+	defer d.openMu.Unlock()
+	key := termKeyPrefix + p.TerminalID
+	d.evictSessionTerm(key)
+	m, err := d.setupTerminalMirror(ctx, c, p.TerminalID, p.TermID)
+	if err != nil {
+		return d.terminalGoneOr(ctx, c, p.TerminalID, err)
+	}
+	if err := d.attach(ct, n, key, p.TermID, c, m, cols, rows); err != nil {
+		return err
+	}
+	d.notifyTerminalsChanged()
+	return nil
+}
+
+// terminalGoneOr reports an unknown terminal when its shell exited after the
+// open checked it, else err.
+func (d *Node) terminalGoneOr(ctx context.Context, c *tmux.Client, id string, err error) error {
+	var re *api.RPCError
+	if _, gone := d.terminalWindow(ctx, c, id); errors.As(gone, &re) {
+		return gone
+	}
+	return err
 }
 
 // pumpTerm streams PTY output to the client until EOF, a read error, or a failed

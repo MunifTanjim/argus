@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -55,6 +56,11 @@ const (
 	MethodTerminalResize  = "terminal.resize"  // request: TerminalResizeParams; result: nil
 	MethodTerminalClose   = "terminal.close"   // request: TerminalCloseParams; result: nil
 	MethodTerminalExited  = "terminal.exited"  // notification: TerminalExited (server→client, PTY ended)
+	MethodTerminalList    = "terminal.list"    // request: no params; result: TerminalListResult (node-local)
+	MethodTerminalCreate  = "terminal.create"  // request: TerminalCreateParams; result: Terminal
+	MethodTerminalKill    = "terminal.kill"    // request: TerminalRef; result: nil
+	MethodTerminalRename  = "terminal.rename"  // request: TerminalRenameParams; result: nil
+	MethodTerminalChanged = "terminal.changed" // notification: TerminalChanged (server→client); refetch terminal.list
 	// Client-token management (gateway only, admin/master-token connections).
 	// MethodClientsPairStart mints a temporary token + public URL for a pairing QR.
 	MethodClientsPairStart = "clients.pairStart" // request: no params; result: PairStartResult
@@ -538,6 +544,8 @@ type ClientRemoveParams struct {
 type NodeCapabilities struct {
 	// SpawnSession reports whether the node can spawn sessions (tmux present).
 	SpawnSession bool `json:"spawn_session"`
+	// Terminal reports whether the node can run persistent terminals (tmux present).
+	Terminal bool `json:"terminal"`
 }
 
 // ServerInfo carries server-wide metadata for a connected client: server version
@@ -821,6 +829,8 @@ type TerminalOpenParams struct {
 	// session's server; empty otherwise (e.g. the mobile app). The node uses it to
 	// refuse an open that would share the agent pane's window.
 	ClientPane string `json:"client_pane,omitempty"`
+	// TerminalID names a persistent terminal to attach instead of a session.
+	TerminalID string `json:"terminal_id,omitempty"`
 }
 
 // TerminalOutput is server→client output from a terminal session (base64-encoded data).
@@ -862,6 +872,55 @@ type TerminalResizeParams struct {
 // TerminalCloseParams closes a terminal session.
 type TerminalCloseParams struct {
 	TermID string `json:"term_id"`
+}
+
+// Terminal is a persistent shell on a node: one window of its terminal tmux
+// session. ID is the tmux window id.
+type Terminal struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"` // empty until renamed
+	Cwd      string `json:"cwd"`            // the node user's home shows as ~
+	Command  string `json:"command"`
+	Attached bool   `json:"attached,omitempty"`
+	// Set only by the aggregating client, not the node.
+	NodeID    string `json:"node_id,omitempty"`
+	NodeLabel string `json:"node_label,omitempty"`
+}
+
+// TerminalListResult is one node's terminals (node-local; ids not composited).
+// FailedNodes is set only by a client merge: nodes whose list failed.
+type TerminalListResult struct {
+	Terminals   []Terminal `json:"terminals"`
+	FailedNodes []string   `json:"failed_nodes,omitempty"`
+}
+
+// TerminalChanged is empty from a node; a gateway client sets NodeID.
+type TerminalChanged struct {
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// SortTerminalsByNode orders terminals by node, keeping each node's own order.
+func SortTerminalsByNode(ts []Terminal) {
+	sort.SliceStable(ts, func(i, j int) bool {
+		a, b := ts[i], ts[j]
+		if a.NodeLabel != b.NodeLabel {
+			return a.NodeLabel < b.NodeLabel
+		}
+		return a.NodeID < b.NodeID
+	})
+}
+
+type TerminalCreateParams struct {
+	NodeID string `json:"node_id,omitempty"`
+}
+
+type TerminalRef struct {
+	TerminalID string `json:"terminal_id"`
+}
+
+type TerminalRenameParams struct {
+	TerminalID string `json:"terminal_id"`
+	Name       string `json:"name"`
 }
 
 type RelayOpenParams struct {
