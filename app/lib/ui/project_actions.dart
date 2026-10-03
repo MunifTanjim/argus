@@ -9,6 +9,7 @@ import '../state/sessions.dart';
 import '../state/setup_text.dart';
 import '../state/workspace.dart';
 import 'branch_picker_screen.dart';
+import 'git_branch_icon.dart';
 import 'new_workspace_screen.dart';
 import 'setup_log_screen.dart';
 import 'spawn_dialog.dart';
@@ -347,39 +348,12 @@ Widget _projectIcon(ProjectAction a) => Icon(switch (a) {
 
 Widget _workspaceIcon(WorkspaceAction a) => switch (a) {
   WorkspaceAction.newSession => const Icon(Icons.add),
-  WorkspaceAction.changeTarget => const _GitBranchIcon(),
+  WorkspaceAction.changeTarget => const GitBranchIcon(),
   WorkspaceAction.rerunSetup => const Icon(Icons.replay),
   WorkspaceAction.setupLog => const Icon(Icons.article_outlined),
   WorkspaceAction.remove => const Icon(Icons.delete_outline),
   WorkspaceAction.forceRemove => const Icon(Icons.delete_forever_outlined),
 };
-
-// Material Icons has no git branch, so this draws the Nerd Font glyph as text.
-// A const IconData on the terminal font would make release icon tree-shaking
-// subset that font down to this one glyph.
-class _GitBranchIcon extends StatelessWidget {
-  const _GitBranchIcon();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = IconTheme.of(context);
-    final size = theme.size ?? 24;
-    return SizedBox.square(
-      dimension: size,
-      child: Center(
-        child: Text(
-          '\uF418',
-          style: TextStyle(
-            fontFamily: 'JetBrainsMonoNerdFontMono',
-            fontSize: size,
-            height: 1,
-            color: theme.color,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 Future<void> runProjectAction(
   ActionContext ax,

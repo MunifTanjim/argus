@@ -367,7 +367,7 @@ class _HomeBody extends ConsumerWidget {
           }
         },
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Sessions'),
+          const NavigationDestination(icon: Icon(Icons.forum_outlined), label: 'Sessions'),
           const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           if (showTerminals)
             const NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminals'),

@@ -3,6 +3,7 @@ import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
+import 'package:argus/ui/git_branch_icon.dart';
 import 'package:argus/ui/node_screen.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/ui/theme.dart';
@@ -102,7 +103,7 @@ void main() {
     expect(find.text('registry'), findsOneWidget);
     expect(find.text('feat/registry'), findsOneWidget);
     expect(find.byIcon(Icons.folder_outlined), findsOneWidget); // main worktree
-    expect(find.byIcon(Icons.call_split), findsNWidgets(2));
+    expect(find.byType(GitBranchIcon), findsNWidgets(2));
     expect(find.byIcon(Icons.push_pin), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
   });
