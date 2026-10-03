@@ -261,7 +261,7 @@ func TestTermDimsMatchTheBase(t *testing.T) {
 		{"with both sidebars", func(m *model) {
 			m.width = 160
 			m.right.hidden = false
-		}, 78, 22},
+		}, 80, 22},
 	}
 	for _, tc := range cases {
 		m := liveScreenModelWith(tc.edit)

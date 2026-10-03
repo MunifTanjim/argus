@@ -1,8 +1,8 @@
   󱙺 argus                                                                                                                                                   
 
-  Projects                           │   repo  main                                                                       │   Files  Changes
+  Projects                           │   repo  main                                                                       │  Files  Changes
                                      │                                                                                    │
-  󰋜 Home                         ○ 3 │   ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮   │ ▌   go.mod
+  󰋜 Home                         ○ 3 │   ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮   │▌   go.mod
   ▾ argus                            │   │                                                                            │   │
 ▌   ★ repo  main                 ○ 2 │   │ (idle)                                                                     │   │
     • repo-feat  feature         ○ 1 │   ╰────────────────────────────────────────────────────────────────────────────╯   │

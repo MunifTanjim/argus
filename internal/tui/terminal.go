@@ -164,13 +164,17 @@ type termOpenedMsg struct {
 
 func (m model) termDims() (cols, rows int) {
 	l := m.layout()
-	return termDimsFor(l.w, l.h)
+	return termDimsFor(l.w, l.h, l.right == 0)
 }
 
 // termDimsFor sizes the screen box's interior for a w×h pane: the border takes
-// 2 columns, and the box keeps the frame's left margin on its right too.
-func termDimsFor(w, h int) (cols, rows int) {
-	return max(10, w-2-screenMargin), max(1, h-6)
+// 2 columns. At the terminal edge, the box keeps the frame's left margin on its
+// right too; next to the right sidebar, the divider spaces it.
+func termDimsFor(w, h int, atEdge bool) (cols, rows int) {
+	if atEdge {
+		w -= screenMargin
+	}
+	return max(10, w-2), max(1, h-6)
 }
 
 func attachScreen(c *ctx, id string) tea.Cmd {

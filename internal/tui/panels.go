@@ -15,11 +15,16 @@ import (
 type hpanel struct {
 	content string
 	con     layout.Constraint
+	joined  bool // takes the trailing space of the divider before it
 }
 
-func fixedPanel(content string, w int) hpanel { return hpanel{content, layout.Len(w)} }
+func fixedPanel(content string, w int) hpanel { return hpanel{content: content, con: layout.Len(w)} }
 
-func flexPanel(content string) hpanel { return hpanel{content, layout.Fill(1)} }
+func flexPanel(content string) hpanel { return hpanel{content: content, con: layout.Fill(1)} }
+
+func joinedPanel(content string, w int) hpanel {
+	return hpanel{content: content, con: layout.Len(w), joined: true}
+}
 
 func composeH(width, height int, panels ...hpanel) string {
 	if width < 1 || height < 1 || len(panels) == 0 {
@@ -27,7 +32,11 @@ func composeH(width, height int, panels ...hpanel) string {
 	}
 	cons := make([]layout.Constraint, 0, 2*len(panels)-1)
 	for i, p := range panels {
-		if i > 0 {
+		switch {
+		case i == 0:
+		case p.joined:
+			cons = append(cons, layout.Len(dividerWidth-1))
+		default:
 			cons = append(cons, layout.Len(dividerWidth))
 		}
 		cons = append(cons, p.con)
@@ -46,7 +55,7 @@ func composeH(width, height int, panels ...hpanel) string {
 
 func drawVDivider(scr uv.ScreenBuffer, rect uv.Rectangle) {
 	bar := lipgloss.NewStyle().Foreground(ColorBorder).Render("│")
-	line := " " + bar + " "
+	line := " " + bar + strings.Repeat(" ", rect.Dx()-2)
 	content := strings.TrimRight(strings.Repeat(line+"\n", rect.Dy()), "\n")
 	uv.NewStyledString(content).Draw(scr, rect)
 }

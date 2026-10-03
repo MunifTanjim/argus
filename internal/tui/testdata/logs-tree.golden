@@ -1,8 +1,8 @@
   󱙺 argus                                                                                                           
 
-  Projects                           │ Sessions   History   Terminals   Logs      │   Files  Changes
+  Projects                           │ Sessions   History   Terminals   Logs      │  Files  Changes
                                      │                                            │
-▌ 󰋜 Home                             │ time=12:00:00 level=INFO msg="line 0"      │   select a workspace
+▌ 󰋜 Home                             │ time=12:00:00 level=INFO msg="line 0"      │  select a workspace
   loading projects…                  │ time=12:00:01 level=INFO msg="line 1"      │
                                      │ time=12:00:02 level=INFO msg="line 2"      │
                                      │ time=12:00:03 level=INFO msg="line 3"      │
