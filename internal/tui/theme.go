@@ -58,6 +58,7 @@ var (
 
 	// Git
 	ColorGitBranch color.Color
+	ColorRepo      color.Color
 
 	// Tool category colors (per-category icons in the item rows).
 	ColorToolRead  color.Color
@@ -151,7 +152,8 @@ func initTheme(hasDarkBg bool) {
 	ColorDiffDel = ld(lipgloss.Color("1"), lipgloss.Color("204"))
 
 	// Git
-	ColorGitBranch = ld(lipgloss.Color("5"), lipgloss.Color("135"))
+	ColorGitBranch = ld(lipgloss.Color("2"), lipgloss.Color("114"))
+	ColorRepo = ld(lipgloss.Color("5"), lipgloss.Color("135"))
 
 	// Tool category colors (adaptive light/dark).
 	ColorToolRead = ld(lipgloss.Color("6"), lipgloss.Color("80"))   // cyan

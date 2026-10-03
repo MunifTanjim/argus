@@ -425,11 +425,7 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 			text += StyleErrorBold.Render(" (git error)")
 		}
 	case rowWorkspace:
-		bullet := "• "
-		if r.isMain {
-			bullet = "★ "
-		}
-		text = indent + bullet + r.label
+		text = indent + wsIcon(r) + " " + r.label
 		switch r.setup {
 		case "running":
 			text += dimStyle.Render("  " + spinnerFrame(m) + " setting up…")
@@ -461,6 +457,13 @@ func (m model) projRowLine(r projectsRow, sel, focused bool, act map[string]wsAc
 		text = cursorStyle.Render(text)
 	}
 	return withBadge(text, badge, w)
+}
+
+func wsIcon(r projectsRow) string {
+	if r.isMain || r.plain {
+		return Icon.Folder.Render()
+	}
+	return Icon.Branch.WithColor(ColorTextDim)
 }
 
 func withBadge(line, badge string, w int) string {

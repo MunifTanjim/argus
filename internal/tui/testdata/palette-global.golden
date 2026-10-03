@@ -4,17 +4,17 @@
                                      │
 ▌ 󰋜 Home                         ○ 3 │  ┏━ · repo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fix-login ·  ━┓
   ▾ argus ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮       ┃
-    ★ repo│ Go to                                                                                            │       ┃
-    • repo│                                                                                                  │━━━━━━━┛
+    󰉋 repo│ Go to                                                                                            │       ┃
+     repo│                                                                                                  │━━━━━━━┛
           │ Everywhere                                                                                       │
           │ Search sessions, workspaces, projects · > for commands                                           │ts ·  ─╮
           │                                                                                                  │       │
           │ · fix-login          repo                                                                        │       │
           │ · add-tests          repo                                                                        │───────╯
           │ · docs               repo                                                                        │
-          │  repo main          argus                                                                       │cs ·  ─╮
+          │ 󰉋 repo main          argus                                                                       │cs ·  ─╮
           │  repo-feat feature  argus                                                                       │       │
-          │ ▪ argus                                                                                          │       │
+          │  argus                                                                                          │       │
           │                                                                                                  │───────╯
           │                                                                                                  │
           │                                                                                                  │

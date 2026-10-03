@@ -1390,3 +1390,12 @@ func TestHelpRowFollowsTheHalfThatApplies(t *testing.T) {
 		t.Errorf("a shown project's row must show hide: name %q", r.name)
 	}
 }
+
+func TestWorkspaceRowsShowFolderOrBranch(t *testing.T) {
+	out := ansi.Strip(homeTestModel().View().Content)
+	for _, want := range []string{Icon.Folder.Glyph + " repo", Icon.Branch.Glyph + " repo-feat"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the tree should show %q:\n%s", want, out)
+		}
+	}
+}

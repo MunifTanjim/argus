@@ -388,7 +388,7 @@ func TestPaletteScopeLineAtTheRoot(t *testing.T) {
 // Each scope in the chain shows the marker that its row shows in the list.
 func TestPaletteScopeLineShowsMarkers(t *testing.T) {
 	m := openPaletteIn(withFocus(selectRow(paletteTestModel(), "n1:w1"), leftSidebar))
-	want := "▪ argus › " + Icon.Branch.Glyph + " repo main"
+	want := Icon.Repo.Glyph + " argus › " + Icon.Folder.Glyph + " repo main"
 	if !strings.Contains(ansi.Strip(m.View().Content), want) {
 		t.Errorf("the scope line must read %q", want)
 	}

@@ -94,11 +94,13 @@ type iconSet struct {
 	DrillDown StyledIcon
 	Ellipsis  StyledIcon
 	Expanded  StyledIcon
+	Folder    StyledIcon
 	Help      StyledIcon
 	Memory    StyledIcon
 	Node      StyledIcon
 	Home      StyledIcon
 	Pin       StyledIcon
+	Repo      StyledIcon
 	Hidden    StyledIcon
 	Output    StyledIcon
 	Selected  StyledIcon
@@ -136,26 +138,28 @@ var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // when LLM tools round-trip the file.
 func initIcons() {
 	Icon = iconSet{
-		Branch:    StyledIcon{"\uF418", ColorGitBranch}, // nf-pl-branch
+		Branch:    StyledIcon{"\uF418", ColorGitBranch}, // nf-oct-git_branch
 		Chat:      StyledIcon{"\uF086", ColorTextDim},   // nf-fa-comments
 		Claude:    StyledIcon{glyphRobotSolid, ColorInfo},
-		Clock:     StyledIcon{"\uF017", ColorTextDim},           // nf-fa-clock
-		Collapsed: StyledIcon{"\uF054", ColorTextDim},           // nf-fa-chevron_right
-		Dot:       StyledIcon{"·", ColorTextMuted},              // middle dot
-		DrillDown: StyledIcon{"\uF061", ColorAccent},            // nf-fa-arrow_right
-		Ellipsis:  StyledIcon{"…", ColorTextDim},                // horizontal ellipsis
-		Expanded:  StyledIcon{"\uF078", ColorTextPrimary},       // nf-fa-chevron_down
-		Output:    StyledIcon{"\U000F0182", ColorAccent},        // nf-md-comment_outline
-		Selected:  StyledIcon{"│", ColorAccent},                 // box drawing vertical
-		Help:      StyledIcon{"\U000F02D7", ColorAccent},        // nf-md-help_circle_outline
-		Memory:    StyledIcon{"\U000F01C0", ColorTextDim},       // nf-md-book_open_variant
-		Node:      StyledIcon{"\U000F0429", ColorTextSecondary}, // nf-md-server
-		Home:      StyledIcon{"\U000F02DC", ColorAccent},        // nf-md-home
-		Pin:       StyledIcon{"\U000F0403", ColorAccent},        // nf-md-pin
-		Hidden:    StyledIcon{"\U000F0209", ColorTextMuted},     // nf-md-eye_off
-		Session:   StyledIcon{"\U000F0237", ColorTextDim},       // nf-md-fingerprint
-		Shell:     StyledIcon{"\uF120", ColorToolBash},          // nf-fa-terminal
-		Skill:     StyledIcon{"\uF19D", ColorToolSkill},         // nf-fa-graduation_cap
+		Clock:     StyledIcon{"\uF017", ColorTextDim},       // nf-fa-clock
+		Collapsed: StyledIcon{"\uF054", ColorTextDim},       // nf-fa-chevron_right
+		Dot:       StyledIcon{"·", ColorTextMuted},          // middle dot
+		DrillDown: StyledIcon{"\uF061", ColorAccent},        // nf-fa-arrow_right
+		Ellipsis:  StyledIcon{"…", ColorTextDim},            // horizontal ellipsis
+		Expanded:  StyledIcon{"\uF078", ColorTextPrimary},   // nf-fa-chevron_down
+		Folder:    StyledIcon{"\U000F024B", ColorTextDim},   // nf-md-folder
+		Output:    StyledIcon{"\U000F0182", ColorAccent},    // nf-md-comment_outline
+		Selected:  StyledIcon{"│", ColorAccent},             // box drawing vertical
+		Help:      StyledIcon{"\U000F02D7", ColorAccent},    // nf-md-help_circle_outline
+		Memory:    StyledIcon{"\U000F01C0", ColorTextDim},   // nf-md-book_open_variant
+		Node:      StyledIcon{"\uF233", ColorTextSecondary}, // nf-fa-server
+		Home:      StyledIcon{"\U000F02DC", ColorAccent},    // nf-md-home
+		Pin:       StyledIcon{"\U000F0403", ColorAccent},    // nf-md-pin
+		Repo:      StyledIcon{"\uF401", ColorTextSecondary}, // nf-oct-repo
+		Hidden:    StyledIcon{"\U000F0209", ColorTextMuted}, // nf-md-eye_off
+		Session:   StyledIcon{"\U000F0237", ColorTextDim},   // nf-md-fingerprint
+		Shell:     StyledIcon{"\uF120", ColorToolBash},      // nf-fa-terminal
+		Skill:     StyledIcon{"\uF19D", ColorToolSkill},     // nf-fa-graduation_cap
 		Subagent:  StyledIcon{glyphRobot, ColorAccent},
 		System:    StyledIcon{"\uF120", ColorTextMuted}, // nf-fa-terminal
 		SystemErr: StyledIcon{"\uF06A", ColorError},     // nf-fa-circle_exclamation

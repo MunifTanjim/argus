@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -33,16 +35,20 @@ func indexOf(t *testing.T, hay, needle string) int {
 	return i
 }
 
+// hostHeader is a group header: the node icon starts the line, where a card
+// line starts with its border.
+func hostHeader(node string) string { return "\n" + Icon.Node.Glyph + " " + node }
+
 func TestListViewGroupsByHost(t *testing.T) {
 	m := modelWith(
 		nodeSession("beta:%1", "beta", "beta", session.StatusIdle),
 		nodeSession("alpha:%1", "alpha", "alpha", session.StatusIdle),
 	)
-	out := paneView(m)
+	out := ansi.Strip(paneView(m))
 
 	// Both host headers present, alpha before beta (alphabetical, none awaiting).
-	a := indexOf(t, out, "▌ alpha")
-	b := indexOf(t, out, "▌ beta")
+	a := indexOf(t, out, hostHeader("alpha"))
+	b := indexOf(t, out, hostHeader("beta"))
 	if a >= b {
 		t.Fatalf("alpha group should come before beta:\n%s", out)
 	}
@@ -52,7 +58,7 @@ func TestListViewNoHeadersWhenLocal(t *testing.T) {
 	m := modelWith(
 		session.Session{ID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%1"}},
 	)
-	if out := paneView(m); strings.Contains(out, "▌ ") {
+	if out := ansi.Strip(paneView(m)); strings.Contains(out, "\n"+Icon.Node.Glyph) {
 		t.Fatalf("local (no node label) list should have no host headers:\n%s", out)
 	}
 }
@@ -101,9 +107,9 @@ func TestListViewNeedsYouSection(t *testing.T) {
 		nodeSession("alpha:wait", "alpha", "alpha", session.StatusAwaitingInput),
 		nodeSession("beta:wait", "beta", "beta", session.StatusAwaitingInput),
 	)
-	out := paneView(m)
+	out := ansi.Strip(paneView(m))
 	ny := indexOf(t, out, "Needs you")
-	ha := indexOf(t, out, "▌ alpha")
+	ha := indexOf(t, out, hostHeader("alpha"))
 	// "Needs you" precedes the per-host group headers.
 	if ny >= ha {
 		t.Fatalf("'Needs you' should precede host headers:\n%s", out)
@@ -111,10 +117,10 @@ func TestListViewNeedsYouSection(t *testing.T) {
 	// The two awaiting sessions are NOT split by a host header between them — there
 	// is exactly one host header for alpha (its non-awaiting group), none for beta
 	// (beta has only an awaiting session, which lives under Needs you).
-	if strings.Count(out, "▌ alpha") != 1 {
+	if strings.Count(out, hostHeader("alpha")) != 1 {
 		t.Fatalf("expected exactly one alpha host header:\n%s", out)
 	}
-	if strings.Contains(out, "▌ beta") {
+	if strings.Contains(out, hostHeader("beta")) {
 		t.Fatalf("beta has no non-awaiting session, so no beta host header expected:\n%s", out)
 	}
 }
@@ -124,9 +130,9 @@ func TestOfflineGroupAndCard(t *testing.T) {
 	off.Offline = true
 	off.Repo = "argus"
 	m := modelWith(off)
-	out := paneView(m)
+	out := ansi.Strip(paneView(m))
 
-	if !strings.Contains(out, "▌ home") || !strings.Contains(out, "(offline)") {
+	if !strings.Contains(out, hostHeader("home")) || !strings.Contains(out, "(offline)") {
 		t.Fatalf("offline node header should be flagged:\n%s", out)
 	}
 	if !strings.Contains(out, "(node offline)") {
