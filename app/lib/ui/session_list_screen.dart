@@ -34,10 +34,13 @@ class SessionListScreen extends ConsumerWidget {
         title: const SessionSearchTitle(child: Text('Sessions')),
         actions: const [SessionSearchButton(), ActiveOnlyButton()],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      // The home tabs share one route, so their buttons cannot share the
+      // default hero tag.
+      floatingActionButton: FloatingActionButton(
+        heroTag: null,
+        tooltip: 'New session',
         onPressed: () => showSpawnDialog(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New session'),
+        child: const Icon(Icons.add),
       ),
       body: Column(
         children: [

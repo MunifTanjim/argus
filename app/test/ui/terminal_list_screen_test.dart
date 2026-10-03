@@ -129,5 +129,6 @@ void main() {
     await tester.pump();
     expect(find.text('ALPHA'), findsOneWidget);
     expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
+    expect(find.byTooltip('New terminal'), findsOneWidget);
   });
 }

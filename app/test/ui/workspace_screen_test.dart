@@ -104,7 +104,7 @@ void main() {
     expect(find.text('registry'), findsOneWidget);
     expect(find.text('argus · feat/registry → main'), findsOneWidget);
     expect(find.text('No sessions in this workspace.'), findsOneWidget);
-    expect(find.text('New session'), findsOneWidget);
+    expect(find.byTooltip('New session'), findsOneWidget);
   });
 
   testWidgets('tabs switch and are remembered per workspace', (tester) async {

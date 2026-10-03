@@ -161,10 +161,11 @@ class TerminalListScreen extends ConsumerWidget {
         leading: shellMenuButton(context),
         title: const Text('Terminals'),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
+        heroTag: null,
+        tooltip: 'New terminal',
         onPressed: () => _create(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New terminal'),
+        child: const Icon(Icons.add),
       ),
       body: RefreshIndicator(
         onRefresh: () => _refresh(ref),
