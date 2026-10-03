@@ -142,35 +142,61 @@ type homeTab int
 const (
 	tabSessions homeTab = iota
 	tabHistory
+	tabTerminals
 	tabLogs
 )
 
-// homeTabs renders the Sessions / History (/ Logs) tab bar, highlighting active.
-// The Logs tab shows only with an embedded node (see hasLogsTab).
-func (m model) homeTabs(active homeTab) string {
-	sess, hist, logs := StyleDim, StyleDim, StyleDim
-	switch active {
-	case tabSessions:
-		sess = m.paneHeadStyle()
-	case tabHistory:
-		hist = m.paneHeadStyle()
-	case tabLogs:
-		logs = m.paneHeadStyle()
+var homeTabLabel = [...]string{tabSessions: "Sessions", tabHistory: "History", tabTerminals: "Terminals", tabLogs: "Logs"}
+
+// homeTabList is the Home tabs in order. Terminals hides once server.info shows
+// no node with tmux; Logs shows only with an embedded node (see hasLogsTab).
+func (m model) homeTabList() []homeTab {
+	tabs := []homeTab{tabSessions, tabHistory}
+	if m.hasTerminalsTab() {
+		tabs = append(tabs, tabTerminals)
 	}
-	out := sess.Render("Sessions") + StyleDim.Render("   ") + hist.Render("History")
 	if m.hasLogsTab() {
-		out += StyleDim.Render("   ") + logs.Render("Logs")
+		tabs = append(tabs, tabLogs)
 	}
-	return out
+	return tabs
 }
 
-func (m model) hitHomeTabs(c *ctx, x int) {
-	labels := []string{"Sessions", "History"}
-	if m.hasLogsTab() {
-		labels = append(labels, "Logs")
-	}
-	c.hitTabs(x, 0, 3, labels...)
+func (m model) hasTerminalsTab() bool {
+	return len(m.nodeInfo) == 0 || len(m.terminalNodes()) > 0
 }
+
+func (m model) homeTabLabels() []string {
+	tabs := m.homeTabList()
+	labels := make([]string, len(tabs))
+	for i, t := range tabs {
+		labels[i] = homeTabLabel[t]
+	}
+	return labels
+}
+
+// homeTabAt is the Home tab at index i of the tab bar.
+func (m model) homeTabAt(i int) homeTab {
+	tabs := m.homeTabList()
+	if i < 0 || i >= len(tabs) {
+		return tabSessions
+	}
+	return tabs[i]
+}
+
+func (m model) homeTabs(active homeTab) string {
+	tabs := m.homeTabList()
+	parts := make([]string, len(tabs))
+	for i, t := range tabs {
+		st := StyleDim
+		if t == active {
+			st = m.paneHeadStyle()
+		}
+		parts[i] = st.Render(homeTabLabel[t])
+	}
+	return strings.Join(parts, StyleDim.Render("   "))
+}
+
+func (m model) hitHomeTabs(c *ctx, x int) { c.hitTabs(x, 0, 3, m.homeTabLabels()...) }
 
 func (m model) quarantined() bool {
 	return m.client != nil && m.client.Quarantined()

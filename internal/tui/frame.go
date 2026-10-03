@@ -65,7 +65,20 @@ func (m model) View() tea.View {
 	if _, hovers := m.popups.front().(popupHoverer); hovers && m.mouse {
 		v.MouseMode = tea.MouseModeAllMotion
 	}
+	v.Cursor = m.screenCursor()
 	return v
+}
+
+// screenCursor shows the live screen program's cursor while the screen has the
+// keys.
+func (m model) screenCursor() *tea.Cursor {
+	s, ok := m.liveScreen()
+	if !ok || m.focused != mainPane || len(m.popups) > 0 || m.helpShown() {
+		return nil
+	}
+	l := m.layout()
+	_, rows := termDimsFor(l.w, l.h-m.dockRows())
+	return s.cursor(m.mainRect().Min, rows)
 }
 
 func (m model) frame() string {

@@ -32,6 +32,7 @@ var sectionOffers = func() map[string]offer {
 		"node":         {keys: helpQuit},
 		"home":         {keys: helpQuit},
 		"logs":         {keys: help},
+		"terminals":    {keys: helpQuit},
 		"history":      {keys: help, where: "project list"},
 		"file":         withPane,
 		"file-tree":    withPane,
@@ -105,7 +106,7 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("workspace"),
 	},
 	"project": {own: summaryKeys, focus: focusFor("project")},
-	"node":    {own: summaryKeys, focus: focusFor("node")},
+	"node":    {own: append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext), focus: focusFor("node")},
 	"file": {
 		own:   bindingsOf(fileViewKeys, sessionKeys.FocusPrompt),
 		focus: focusFor("file"),
@@ -129,6 +130,11 @@ var sectionLists = map[string]sectionList{
 	"history": {
 		own:   bindingsOf(historyProjectsKeys, historySessionsKeys, listKeys.TabPrev, listKeys.TabNext, transcriptKeys.Export),
 		focus: focusFor("history"),
+	},
+	"terminals": {
+		own: bindingsOf(terminalKeys, listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp,
+			listKeys.HalfDown, listKeys.Open, listKeys.TabPrev, listKeys.TabNext, listKeys.Refresh, listKeys.Back),
+		focus: focusFor("terminals"),
 	},
 	"logs": {
 		own:   bindingsOf(logsKeys, listKeys.TabPrev, listKeys.TabNext),

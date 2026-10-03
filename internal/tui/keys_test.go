@@ -55,7 +55,7 @@ func TestFileViewAndRedactListHaveTheirOwnKeys(t *testing.T) {
 }
 
 // The home tabs route via the list dispatch table: gt switches to the History
-// tab, while gT (the leftmost tab) stays on Sessions.
+// tab, and gT wraps from Sessions to the last tab.
 func TestListDispatchRoutesToAction(t *testing.T) {
 	m := testModel() // viewHome (Sessions tab) by default
 	got, cmd := typeKeysCmd(m, "gt")
@@ -66,8 +66,8 @@ func TestListDispatchRoutesToAction(t *testing.T) {
 		t.Error("opening history should kick off a fetch command")
 	}
 
-	if got := typeKeys(testModel(), "gT"); viewOf(got) != viewHome {
-		t.Fatalf("gT on Sessions should stay on the list, got view %v", viewOf(got))
+	if got := typeKeys(testModel(), "gT"); viewOf(got) != viewTerminals {
+		t.Fatalf("gT on Sessions should wrap to the Terminals tab, got view %v", viewOf(got))
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -312,4 +313,124 @@ func TestABuriedLiveScreenClosesWhenItsTerminalEnds(t *testing.T) {
 			t.Errorf("%s: <Esc>: top = %#v, want n1:s1's transcript", name, m.main.top())
 		}
 	}
+}
+
+func TestLiveScreenShowsTheProgramCursor(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	out := func(m model, raw string) model {
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+		return m
+	}
+	m = out(m, "ab")
+	c := m.View().Cursor
+	r := m.mainRect()
+	if c == nil || c.X != r.Min.X+screenBodyX+2 || c.Y != r.Min.Y+screenBodyY {
+		t.Fatalf("cursor = %+v, want after \"ab\" at (%d, %d)", c, r.Min.X+screenBodyX+2, r.Min.Y+screenBodyY)
+	}
+	if m = out(m, "\x1b[?25l"); m.View().Cursor != nil {
+		t.Errorf("cursor = %+v after the program hid it, want none", m.View().Cursor)
+	}
+}
+
+func TestLiveScreenFillsThePaneFromTheStart(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte("$ "))})
+	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+	top, bottom := -1, -1
+	for i, l := range frame {
+		if strings.Contains(l, "╭") && top < 0 {
+			top = i
+		}
+		if strings.Contains(l, "╰") {
+			bottom = i
+		}
+	}
+	l := m.layout()
+	_, rows := termDimsFor(l.w, l.h-m.dockRows())
+	if top < 0 || bottom-top-1 != rows {
+		t.Fatalf("box interior = %d rows (top %d, bottom %d), want %d:\n%s", bottom-top-1, top, bottom, rows, strings.Join(frame, "\n"))
+	}
+	if len(frame) > m.height {
+		t.Errorf("frame = %d rows, want at most %d", len(frame), m.height)
+	}
+}
+
+func TestLiveScreenFollowsTheCursorShape(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	out := func(m model, raw string) model {
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+		return m
+	}
+	if c := m.View().Cursor; c == nil || c.Shape != tea.CursorBlock || !c.Blink {
+		t.Fatalf("default cursor = %+v, want a blinking block", c)
+	}
+	for _, tc := range []struct {
+		seq   string
+		shape tea.CursorShape
+		blink bool
+	}{
+		{"\x1b[6 q", tea.CursorBar, false},
+		{"\x1b[3 q", tea.CursorUnderline, true},
+		{"\x1b[2 q", tea.CursorBlock, false},
+	} {
+		m = out(m, tc.seq)
+		if c := m.View().Cursor; c == nil || c.Shape != tc.shape || c.Blink != tc.blink {
+			t.Errorf("after %q: cursor = %+v, want shape %v blink %v", tc.seq, c, tc.shape, tc.blink)
+		}
+	}
+}
+
+func TestLiveScreenForwardsMouseButtons(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	m = withMouse(m)
+	m.mouse = false // the live screen takes the mouse with the setting off, like the wheel
+	r := m.mainRect()
+	x, y := r.Min.X+screenBodyX+3, r.Min.Y+screenBodyY+1
+	queued := func(m model) []string {
+		var got []string
+		for len(m.termKeyCh) > 0 {
+			got = append(got, string((<-m.termKeyCh).data))
+		}
+		return got
+	}
+	m.View()
+	m, _ = upd(m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	m, _ = upd(m, tea.MouseMotionMsg{X: x + 1, Y: y, Button: tea.MouseLeft})
+	m, _ = upd(m, tea.MouseReleaseMsg{X: x + 1, Y: y, Button: tea.MouseLeft})
+	m, _ = upd(m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseRight})
+	want := []string{"\x1b[<0;4;2M", "\x1b[<32;5;2M", "\x1b[<0;5;2m", "\x1b[<2;4;2M"}
+	if got := queued(m); !slices.Equal(got, want) {
+		t.Fatalf("queued %q, want %q", got, want)
+	}
+	m, _ = upd(m, tea.MouseClickMsg{X: x, Y: r.Min.Y, Button: tea.MouseLeft})
+	if got := queued(m); len(got) != 0 {
+		t.Errorf("a click on the header queued %q, want nothing", got)
+	}
+}
+
+func TestLiveScreenBoxHasEvenSideMargins(t *testing.T) {
+	m := liveScreenModelWith(func(m *model) { m.left.hidden, m.right.hidden = true, true })
+	for _, l := range strings.Split(ansi.Strip(m.View().Content), "\n") {
+		i := strings.Index(l, "╭")
+		if i < 0 {
+			continue
+		}
+		left := len([]rune(l[:i]))
+		right := m.width - lipgloss.Width(strings.TrimRight(l, " "))
+		if left != right {
+			t.Fatalf("box margins = %d left, %d right, want equal:\n%q", left, right, l)
+		}
+		return
+	}
+	t.Fatal("no screen box in the frame")
 }

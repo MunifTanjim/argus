@@ -184,7 +184,7 @@ func TestLogsKeys(t *testing.T) {
 		t.Error("␣o and ␣e should toggle the sidebars")
 	}
 	m.left.hidden = false
-	for k, want := range map[string]shownView{"gT": viewHistoryProjects, "gt": viewHome} {
+	for k, want := range map[string]shownView{"gT": viewTerminals, "gt": viewHome} {
 		if mm := typeKeys(m, k); viewOf(mm) != want {
 			t.Errorf("%s on logs: view=%v, want %v", k, viewOf(mm), want)
 		}
@@ -197,8 +197,8 @@ func TestLogsKeys(t *testing.T) {
 	}
 	hist := m
 	hist = withView(hist, viewHistoryProjects)
-	if hist = typeKeys(hist, "gt"); viewOf(hist) != viewLogs {
-		t.Errorf("gt on history: view=%v, want %v", viewOf(hist), viewLogs)
+	if hist = typeKeys(hist, "gt"); viewOf(hist) != viewTerminals {
+		t.Errorf("gt on history: view=%v, want %v", viewOf(hist), viewTerminals)
 	}
 }
 

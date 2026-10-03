@@ -115,6 +115,22 @@ type spawnResultMsg struct{ err error }
 
 type killResultMsg struct{ err error }
 
+// terminalsMsg is one load of every node's terminals and the node list.
+type terminalsMsg struct {
+	list   []api.Terminal
+	failed []string
+	nodes  []api.NodeInfo
+	err    error
+}
+
+// terminalActionMsg is a terminal create, rename, or kill result; created is the
+// new terminal, which opens.
+type terminalActionMsg struct {
+	verb    string
+	created *api.Terminal
+	err     error
+}
+
 // resumeResultMsg carries the result of a resume; on success the resumed
 // session's transcript view is entered.
 type resumeResultMsg struct {

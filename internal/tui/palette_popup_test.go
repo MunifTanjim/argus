@@ -75,6 +75,16 @@ func TestPaletteFirstScope(t *testing.T) {
 	oneNode := projectsTestModel()
 	oneNode.main = backStack{summaryComp{kind: rowNode, id: "n1"}}
 	oneNode = withFocus(oneNode, mainPane)
+	twoNodes := func(base component) model {
+		m := projectsTestModel()
+		m.left.tree.data = append(m.left.tree.data, api.ProjectNode{
+			ID: "n2:p9", Name: "infra", Kind: "git", NodeID: "n2", NodeLabel: "work",
+			Workspaces: []api.WorkspaceNode{{ID: "n2:w9", Dir: "/infra", IsMain: true, Branch: "main"}},
+		})
+		m.left.tree.rebuild()
+		m.main = backStack{base}
+		return withFocus(m, mainPane)
+	}
 	cases := []struct {
 		name string
 		m    model
@@ -89,6 +99,9 @@ func TestPaletteFirstScope(t *testing.T) {
 		{"session in a workspace", inSession("n1:s1", "n1:w1"), "ws:n1:w1"},
 		{"session without a workspace", inSession("n1:s3", ""), ""},
 		{"node that the snapshot lacks", oneNode, ""},
+		{"node summary", twoNodes(summaryComp{kind: rowNode, id: "n2"}), "node:n2"},
+		{"node terminals", twoNodes(terminalsComp{nodeID: "n2"}), "node:n2"},
+		{"home terminals", twoNodes(terminalsComp{}), ""},
 	}
 	for _, c := range cases {
 		p, ok := paletteOf(openPaletteIn(c.m))

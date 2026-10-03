@@ -22,7 +22,7 @@ func (m model) Init() tea.Cmd {
 	if t, ok := m.baseComp().(transcriptComp); ok && m.viewer {
 		return tea.Batch(m.fetchHistTranscript(t.history.addr()), m.kittyCheckCmd())
 	}
-	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.kittyCheckCmd())
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.loadTerminalsCmd(), m.kittyCheckCmd())
 }
 
 // refreshCmd asks the node to rescan; results stream back as registry events.
@@ -100,10 +100,19 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wheelMsg:
 		return m.mouseWheel(msg)
 	case tea.MouseClickMsg:
+		if m.liveScreenTakesWheel() {
+			return m.screenMouse(msg.Mouse(), mousePress)
+		}
 		return m.mouseClick(msg.Mouse())
 	case tea.MouseMotionMsg:
+		if m.liveScreenTakesWheel() {
+			return m.screenMouse(msg.Mouse(), mouseDrag)
+		}
 		return m.mouseMotion(msg.Mouse())
 	case tea.MouseReleaseMsg:
+		if m.liveScreenTakesWheel() {
+			return m.screenMouse(msg.Mouse(), mouseRelease)
+		}
 		return m.mouseRelease(msg.Mouse())
 	case tea.PasteMsg:
 		switch {
@@ -126,7 +135,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
-			cmd := tea.Batch(m.resyncCmd(), m.loadProjects())
+			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadTerminalsCmd())
 			if t, ok := m.baseComp().(transcriptComp); ok && t.live && t.activeSub.subID != "" {
 				ref := t.activeSub
 				have := len(m.transcriptCache[ref.key()].chunks)
@@ -192,6 +201,23 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "spawn failed: " + msg.err.Error()
 		}
 		return m, nil
+	case terminalsMsg:
+		m.terminalsDone = true
+		m.terminalsErr = msg.err
+		if msg.err == nil {
+			m.terminals = mergeTerminals(m.terminals, msg.list, msg.failed)
+		}
+		if msg.nodes != nil {
+			m.nodeInfo = msg.nodes
+		}
+		if t, ok := m.baseComp().(terminalsComp); ok && t.nodeID == "" && !m.hasTerminalsTab() {
+			c := &ctx{m: &m}
+			c.replaceBase(m.homePane())
+			return m, m.apply(c)
+		}
+		return m, nil
+	case terminalActionMsg:
+		return m.updateTerminals(msg)
 	case killResultMsg:
 		if msg.err != nil {
 			m.flash = "kill failed: " + msg.err.Error()
@@ -338,6 +364,9 @@ func (m model) killCmd(id string) tea.Cmd {
 func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	if n.Method == api.MethodProjectChanged {
 		return m.loadProjects()
+	}
+	if n.Method == api.MethodTerminalChanged {
+		return m.loadTerminalsCmd()
 	}
 	if n.Method == api.MethodTerminalOutput {
 		var o api.TerminalOutput
@@ -558,7 +587,7 @@ func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason strin
 		return "", "jump only works from the default tmux server"
 	case s.Tmux.Server != session.TmuxServerDefault:
 		return "", "can't jump: session is on argus's private socket"
-	case !sameMachine(s, hostname):
+	case !sameMachine(s.NodeID, s.NodeLabel, hostname):
 		return "", "can't jump: session is on " + machineLabel(s)
 	case !s.Controllable():
 		return "", "can't jump: " + string(s.Frontend) + " session has no tmux pane"
@@ -567,17 +596,17 @@ func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason strin
 	}
 }
 
-// sameMachine reports whether a session's tmux pane is on this machine. Empty
-// NodeID means a local/embedded node (always this machine).
-func sameMachine(s session.Session, hostname string) bool {
-	return s.NodeID == "" || s.NodeLabel == hostname || s.NodeID == hostname
+// sameMachine reports whether a node runs on this machine. Empty nodeID means a
+// local/embedded node (always this machine).
+func sameMachine(nodeID, nodeLabel, hostname string) bool {
+	return nodeID == "" || nodeLabel == hostname || nodeID == hostname
 }
 
 // clientPaneFor returns this TUI's own tmux pane ($TMUX_PANE) when co-located with
 // the session (same tmux server, same machine), else "" — a pane id is meaningless
 // on another server, so the guard must not apply.
 func clientPaneFor(s session.Session, hostname, tmuxEnv, tmuxPane string) string {
-	coLocated := session.TmuxServer(tmux.SocketBaseFromEnv(tmuxEnv)) == s.Tmux.Server && sameMachine(s, hostname)
+	coLocated := session.TmuxServer(tmux.SocketBaseFromEnv(tmuxEnv)) == s.Tmux.Server && sameMachine(s.NodeID, s.NodeLabel, hostname)
 	if !coLocated {
 		return ""
 	}

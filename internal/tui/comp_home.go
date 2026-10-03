@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -72,9 +73,9 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			cmd = jump(c, m.sessions[m.order[h.cursor]])
 		}
 	case m.matches(msg, k.TabNext):
-		cmd = openHistory(c)
+		cmd = stepHomeTab(c, tabSessions, 1)
 	case m.matches(msg, k.TabPrev):
-		openLogs(c)
+		cmd = stepHomeTab(c, tabSessions, -1)
 	case m.matches(msg, k.New):
 		cmd = m.newSessionCmd()
 	case m.matches(msg, k.Kill):
@@ -168,8 +169,8 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 func (h homeComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	switch {
 	case t.kind == hitTab:
-		if homeTab(t.index) != tabSessions {
-			return h, switchHomeTab(c, homeTab(t.index))
+		if c.m.homeTabAt(t.index) != tabSessions {
+			return h, switchHomeTab(c, c.m.homeTabAt(t.index))
 		}
 	case t.index >= len(c.m.order):
 	case focused && t.index == h.cursor:
@@ -198,10 +199,25 @@ func switchHomeTab(c *ctx, t homeTab) tea.Cmd {
 		c.replaceBase(c.m.homePane())
 	case tabHistory:
 		return openHistory(c)
+	case tabTerminals:
+		return openTerminals(c)
 	case tabLogs:
 		openLogs(c)
 	}
 	return nil
+}
+
+// stepHomeTab shows the Home tab d places from from, wrapping.
+func stepHomeTab(c *ctx, from homeTab, d int) tea.Cmd {
+	tabs := c.m.homeTabList()
+	n := len(tabs)
+	i := max(0, slices.Index(tabs, from))
+	return switchHomeTab(c, tabs[(i+d+n)%n])
+}
+
+func openTerminals(c *ctx) tea.Cmd {
+	c.replaceBase(terminalsComp{})
+	return c.m.loadTerminalsCmd()
 }
 
 func (h homeComp) welcome(c *ctx, title string, chrome, w, ht int) string {

@@ -20,6 +20,7 @@ const (
 	viewHistoryTranscript
 	viewLogs
 	viewTree
+	viewTerminals
 )
 
 func viewOf(m model) shownView {
@@ -36,6 +37,8 @@ func viewFor(m model, comp component) (shownView, bool) {
 		return viewScreen, true
 	case logsComp:
 		return viewLogs, true
+	case terminalsComp:
+		return viewTerminals, true
 	case historyComp:
 		if c.inProject {
 			return viewHistorySessions, true
@@ -85,6 +88,8 @@ func mainComp(m model, v shownView) component {
 		return newTranscript()
 	case viewLogs:
 		return newLogsComp()
+	case viewTerminals:
+		return terminalsComp{}
 	case viewHistoryProjects:
 		return historyComp{}
 	case viewHistorySessions:

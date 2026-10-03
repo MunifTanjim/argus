@@ -264,6 +264,16 @@ func (m model) popupMouse(f func(*ctx, popup) (popup, tea.Cmd, bool)) (tea.Model
 	return m, tea.Batch(cmd, m.apply(c))
 }
 
+// screenMouse hands a button event over the main pane to the live screen; a
+// motion with no button held is not a drag and stays local.
+func (m model) screenMouse(ms tea.Mouse, kind screenMouseKind) (tea.Model, tea.Cmd) {
+	a, ok := m.hits.at(ms.X, ms.Y)
+	if !ok || a.region != regMain || ms.Button == tea.MouseNone {
+		return m, nil
+	}
+	return m.updateScreen(m.topScreen(), screenMouseMsg{x: ms.X - a.rect.Min.X, y: ms.Y - a.rect.Min.Y, button: ms.Button, kind: kind})
+}
+
 // A drag keeps the divider glyph under the pointer: the glyph is the middle
 // column of the divider.
 func (m model) mouseMotion(ms tea.Mouse) (tea.Model, tea.Cmd) {

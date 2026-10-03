@@ -889,12 +889,12 @@ func TestScreenFromPaneSessionUsesPaneSize(t *testing.T) {
 	m.width, m.height = 120, 30
 	m = withViews(m, viewTree, viewSession, viewScreen)
 	cols, _ := m.termDims()
-	if want := m.bodyWidth() - 2; cols != want || m.bodyWidth() == 120 {
+	if want := m.bodyWidth() - 2 - screenMargin; cols != want || m.bodyWidth() == 120 {
 		t.Errorf("screen cols = %d, want pane-based %d", cols, want)
 	}
 	m.left.hidden = true
-	if cols, _ := m.termDims(); cols != m.frameWidth()-2 {
-		t.Errorf("screen with the sidebar hidden: cols = %d, want full-width %d", cols, m.frameWidth()-2)
+	if cols, _ := m.termDims(); cols != m.frameWidth()-2-screenMargin {
+		t.Errorf("screen with the sidebar hidden: cols = %d, want full-width %d", cols, m.frameWidth()-2-screenMargin)
 	}
 }
 
