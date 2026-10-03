@@ -123,3 +123,28 @@ func TestDemoWorkspaceTargetHandlers(t *testing.T) {
 		t.Fatal("handleWorkspaceSetTarget on a demo node must fail")
 	}
 }
+
+func TestBuildRepoBranchCommitsAndStaged(t *testing.T) {
+	spec, err := filepath.Abs("testdata/repo/branchy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := buildRepo(dir, spec); err != nil {
+		t.Fatalf("buildRepo: %v", err)
+	}
+	branch, _ := gitOut(dir, "branch", "--show-current")
+	if strings.TrimSpace(branch) != "feature" {
+		t.Fatalf("branch = %q, want feature", branch)
+	}
+	log, _ := gitOut(dir, "log", "--format=%s", "main..HEAD")
+	if strings.TrimSpace(log) != "add n\nchange a" {
+		t.Fatalf("commits ahead of main = %q, want add n, change a", log)
+	}
+	status, _ := gitOut(dir, "status", "--porcelain")
+	for _, want := range []string{"M  b.txt", " M c.txt", "?? u.txt"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("status missing %q:\n%s", want, status)
+		}
+	}
+}

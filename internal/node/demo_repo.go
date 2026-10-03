@@ -95,6 +95,10 @@ func MaterializeDemoRepos(dd *DemoData) (func(), error) {
 	return cleanup, nil
 }
 
+// buildRepo builds a repo from a spec dir: v1 (and v2, if present) committed on
+// main; then, if a branch file names one, that branch with each commits/NN dir
+// committed in order (message in commits/NN.msg); then staged/ is staged and
+// work/ is left in the working tree.
 func buildRepo(dir, spec string) error {
 	if err := gitRun(dir, "init", "-q", "-b", "main"); err != nil {
 		return err
@@ -120,6 +124,38 @@ func buildRepo(dir, spec string) error {
 			return err
 		}
 		if err := gitRun(dir, "commit", "-q", "-m", "add feature"); err != nil {
+			return err
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(spec, "branch")); err == nil {
+		if err := gitRun(dir, "checkout", "-q", "-b", strings.TrimSpace(string(b))); err != nil {
+			return err
+		}
+	}
+	commits, _ := filepath.Glob(filepath.Join(spec, "commits", "*"))
+	for _, c := range commits {
+		if !dirExists(c) {
+			continue
+		}
+		msg, err := os.ReadFile(c + ".msg")
+		if err != nil {
+			return fmt.Errorf("commit %s: %w", filepath.Base(c), err)
+		}
+		if err := copyTree(c, dir); err != nil {
+			return err
+		}
+		if err := gitRun(dir, "add", "-A"); err != nil {
+			return err
+		}
+		if err := gitRun(dir, "commit", "-q", "-m", strings.TrimSpace(string(msg))); err != nil {
+			return err
+		}
+	}
+	if staged := filepath.Join(spec, "staged"); dirExists(staged) {
+		if err := copyTree(staged, dir); err != nil {
+			return err
+		}
+		if err := gitRun(dir, "add", "-A"); err != nil {
 			return err
 		}
 	}
