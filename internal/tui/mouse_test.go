@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"image"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func withMouse(m model) model {
@@ -397,5 +400,60 @@ func TestTitleIconsToggleSidebarsOverTheLiveScreen(t *testing.T) {
 	m, _ = click(m, x, y)
 	if m.left.hidden || m.focused != mainPane || m.topScreen() < 0 {
 		t.Fatalf("left hidden=%v focused=%v, want the tree shown and the live screen kept", m.left.hidden, m.focused)
+	}
+}
+
+// foldZones are the transcript's chevron zones of the last frame, in screen
+// cells, with the chunk each one folds.
+func foldZones(m model) map[int]image.Point {
+	out := map[int]image.Point{}
+	for _, a := range m.hits.areas {
+		if a.region != regMain {
+			continue
+		}
+		for _, z := range a.zones {
+			if z.target.kind == hitFold {
+				out[z.target.index] = a.rect.Min.Add(z.rect.Min)
+			}
+		}
+	}
+	return out
+}
+
+func TestTranscriptChevronZonesSitOnTheChevrons(t *testing.T) {
+	chunks := sampleChunks()
+	chunks[0].Items = []transcript.Item{{ID: "u1:0", Kind: transcript.ItemSkill, InputPreview: "brainstorming"}}
+	m := withFocus(withMouse(withChunks(waitingSession(), chunks)), mainPane)
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	zones := foldZones(m)
+	if _, user := zones[0]; !user {
+		t.Error("the user card's chevron, on the right, has no zone")
+	}
+	if _, ai := zones[1]; !ai {
+		t.Error("the AI card's chevron, on the left, has no zone")
+	}
+	for i, p := range zones {
+		cell := ansi.Cut(lines[p.Y], p.X, p.X+1)
+		if cell != Icon.Collapsed.Glyph && cell != Icon.Expanded.Glyph {
+			t.Errorf("chunk %d: zone at %v covers %q, want a chevron in %q", i, p, cell, lines[p.Y])
+		}
+	}
+}
+
+func TestClickChevronTogglesTheCard(t *testing.T) {
+	m := withFocus(withMouse(waitingSession()), mainPane)
+	m.View()
+	for i, p := range foldZones(m) {
+		id := tvIn(m).transcript.chunks[i].ID
+		m, _ = click(m, p.X, p.Y)
+		if !tvIn(m).transcript.expanded[id] || tvIn(m).transcript.cursor != i {
+			t.Fatalf("chunk %d: expanded=%v cursor=%d, want it expanded and selected", i, tvIn(m).transcript.expanded[id], tvIn(m).transcript.cursor)
+		}
+		p = foldZones(m)[i]
+		m, _ = click(m, p.X, p.Y)
+		if tvIn(m).transcript.expanded[id] {
+			t.Fatalf("chunk %d: a second click should collapse it", i)
+		}
+		return
 	}
 }

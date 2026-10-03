@@ -40,6 +40,7 @@ const (
 	hitRow hitKind = iota
 	hitTab
 	hitFold
+	hitHeader
 )
 
 type hitTarget struct {
