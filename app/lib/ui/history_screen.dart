@@ -6,6 +6,7 @@ import '../state/gateway.dart';
 import '../state/history_view_model.dart';
 import '../transport/connection.dart';
 import 'history_sessions_screen.dart';
+import 'node_header.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
@@ -130,20 +131,7 @@ class _NodeHeaderTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Row(
-        children: [
-          Icon(Icons.dns_outlined,
-              size: 16, color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.secondary,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ],
-      ),
+      child: NodeHeader(label: label),
     );
   }
 }

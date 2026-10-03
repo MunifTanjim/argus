@@ -127,6 +127,7 @@ void main() {
       nodes: const [NodeRef('A', 'alpha'), NodeRef('B', 'beta')],
     );
     await tester.pump();
-    expect(find.text('alpha'), findsOneWidget);
+    expect(find.text('ALPHA'), findsOneWidget);
+    expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
   });
 }

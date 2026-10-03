@@ -13,6 +13,7 @@ import '../state/projects_api.dart';
 import '../state/terminals.dart';
 import '../state/terminals_api.dart';
 import 'live_screen_screen.dart';
+import 'node_header.dart';
 import 'project_actions.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
@@ -140,10 +141,9 @@ class TerminalListScreen extends ConsumerWidget {
     for (final t in terms) {
       if (grouped && t.nodeId != node) {
         node = t.nodeId;
-        rows.add(ListTile(
-          dense: true,
-          title: Text(t.nodeLabel.isEmpty ? t.nodeId : t.nodeLabel,
-              style: const TextStyle(fontWeight: FontWeight.w600)),
+        rows.add(Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: NodeHeader(label: t.nodeLabel.isEmpty ? t.nodeId : t.nodeLabel),
         ));
       }
       rows.add(ListTile(

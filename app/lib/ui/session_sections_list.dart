@@ -5,6 +5,7 @@ import '../models/session.dart';
 import '../state/grouping.dart';
 import '../state/session_filter.dart';
 import '../transport/connection.dart';
+import 'node_header.dart';
 import 'responsive.dart';
 import 'session_card.dart';
 import 'session_detail_screen.dart';
@@ -166,21 +167,11 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = section.needsYou ? AppColors.accent : AppColors.dim;
-    final label = section.offline
-        ? '${section.title} (offline)'
-        : section.title;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, top: 4),
-      child: Text(
-        '▌ ${label.toUpperCase()}',
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
+      child: section.needsYou
+          ? NeedsYouHeader(label: section.title)
+          : NodeHeader(label: section.title, offline: section.offline),
     );
   }
 }
