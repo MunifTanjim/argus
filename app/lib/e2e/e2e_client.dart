@@ -233,9 +233,9 @@ class E2EClient implements GatewayClient {
     return ctrl.stream;
   }
 
-  /// The per-node notification stream, decoded and (for session.event and
-  /// tasks.changed) stamped with composite node origin — the aggregated view the
-  /// app consumes.
+  /// The per-node notification stream, decoded and (for session.event,
+  /// tasks.changed, and terminal.changed) stamped with node origin — the
+  /// aggregated view the app consumes.
   Stream<({String method, Object? params})> get aggregatedEvents => events.map((
     e,
   ) {
@@ -258,6 +258,8 @@ class E2EClient implements GatewayClient {
       if (sid is String && sid.isNotEmpty) {
         params = {...params, 'session_id': compositeId(e.nodeId, sid)};
       }
+    } else if (e.method == 'terminal.changed') {
+      params = {'node_id': e.nodeId};
     }
     return (method: e.method, params: params);
   });
@@ -617,6 +619,8 @@ class E2EClient implements GatewayClient {
         return _fanoutHistoryProjects(params);
       case 'project.list':
         return _fanoutProjects(params);
+      case 'terminal.list':
+        return _fanoutTerminals(params);
       case 'transcript.unsubscribe':
         return _routeByHandle(
           _subNode,
@@ -624,6 +628,10 @@ class E2EClient implements GatewayClient {
           method,
           params,
         );
+    }
+    if (terminalAddressed.contains(method) ||
+        (method == 'terminal.open' && stringField(params, 'terminal_id') != null)) {
+      return _routeByTerminal(method, params);
     }
     if (sessionAddressed.contains(method))
       return _routeBySession(method, params);
@@ -743,6 +751,57 @@ class E2EClient implements GatewayClient {
     };
   }
 
+  Future<Object?> _routeByTerminal(String method, Object? params) async {
+    final composite = stringField(params, 'terminal_id');
+    if (composite == null) {
+      throw RpcError(-32600, '$method requires terminal_id');
+    }
+    final (nodeId, localId, ok) = splitCompositeId(composite);
+    if (!ok) {
+      throw RpcError(-32600, 'terminal id is not gateway-qualified: $composite');
+    }
+    final result = await _callNodeDecoded(nodeId, method, {
+      ...(params as Map).cast<String, dynamic>(),
+      'terminal_id': localId,
+    });
+    if (method == 'terminal.open') {
+      final term = stringField(params, 'term_id');
+      if (term != null && term.isNotEmpty) _termNode[term] = nodeId;
+    }
+    return result;
+  }
+
+  // Ordered by node so the list does not reshuffle between loads.
+  Future<Map<String, dynamic>> _fanoutTerminals(Object? params) async {
+    final entries = _byNodeId.keys.toList();
+    final results = await Future.wait(
+      entries.map((nodeId) async {
+        try {
+          final r = await _callNodeDecoded(nodeId, 'terminal.list', params);
+          final list = r is Map ? r['terminals'] : null;
+          return (nodeId, list is List ? list : const <dynamic>[], null as Object?);
+        } catch (e) {
+          // A node older than terminals answers method-not-found: it has none.
+          final old = e is RpcError && e.code == -32601;
+          return (nodeId, const <dynamic>[], old ? null : e as Object?);
+        }
+      }),
+    );
+    final errors = [for (final r in results) if (r.$3 != null) r.$3!];
+    if (entries.isNotEmpty && errors.length == entries.length) throw errors.first;
+    final merged = <Map<String, dynamic>>[];
+    for (final (nodeId, list, _) in results) {
+      final label = _roster[nodeId]?.label;
+      for (final t in list) {
+        if (t is Map<String, dynamic>) merged.add(terminalWithOriginJson(t, nodeId, label));
+      }
+    }
+    return {
+      'terminals': sortByNode(merged, (t) => '${t['node_label'] ?? ''}\u0000${t['node_id']}'),
+      'failed_nodes': [for (final r in results) if (r.$3 != null) r.$1],
+    };
+  }
+
   Future<Object?> _routeByWorkspace(String method, Object? params) async {
     final composite = stringField(params, 'workspace_id');
     if (composite == null) {
@@ -852,6 +911,9 @@ class E2EClient implements GatewayClient {
       if (nodeId.isEmpty) throw RpcError(-32600, '$method requires node_id');
     }
     final result = await _callNodeDecoded(nodeId, method, params);
+    if (method == 'terminal.create' && result is Map<String, dynamic>) {
+      return terminalWithOriginJson(result, nodeId, _roster[nodeId]?.label);
+    }
     if (compositeResultMethods.contains(method) &&
         result is Map<String, dynamic>) {
       final local = result['session_id'];

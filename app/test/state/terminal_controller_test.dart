@@ -202,4 +202,17 @@ void main() {
     a.dispose();
     expect(sent.length, before, reason: 'no terminal.close after the term already exited');
   });
+
+  test('start sends terminal_id instead of session_id for a terminal', () {
+    TerminalAttach(
+      client: client,
+      terminalId: 'A:@1',
+      cols: 80,
+      rows: 24,
+      onData: (_) {},
+    ).start();
+    final p = lastReq()['params'] as Map;
+    expect(p['terminal_id'], 'A:@1');
+    expect(p.containsKey('session_id'), isFalse);
+  });
 }

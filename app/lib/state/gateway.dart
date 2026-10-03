@@ -25,6 +25,7 @@ import 'profiles.dart';
 import 'projects.dart';
 import 'push.dart';
 import 'sessions.dart';
+import 'terminals.dart';
 
 class TrustAnchorTampered implements FatalConnectError {
   @override
@@ -211,6 +212,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   // ("Cannot use Ref after it has been disposed").
   final store = ref.read(sessionsProvider.notifier);
   final projects = ref.read(projectsProvider.notifier);
+  final terminals = ref.read(terminalsProvider.notifier);
   final rosterRevision = ref.read(rosterRevisionProvider.notifier);
   final keyStore = ref.read(sshKeyStoreProvider);
   final hostKeys = ref.read(hostKeyStoreProvider);
@@ -249,11 +251,15 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     onConnected: (client) async {
       await loadSessions(client, store);
       unawaited(projects.load(client));
+      unawaited(terminals.load(client));
       client.notifications.listen((m) {
         dispatchEvent(m, store);
         if (m.method == 'node.event') rosterRevision.state++;
         if (m.method == 'project.changed' || m.method == 'node.event') {
           unawaited(projects.load(client));
+        }
+        if (m.method == 'terminal.changed' || m.method == 'node.event') {
+          unawaited(terminals.load(client));
         }
       });
       // Register this device's push target now the connection is up (re-runs on
@@ -289,6 +295,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       trustSignature.state = '';
       store.clear();
       projects.clear();
+      terminals.clear();
     });
   });
   manager.start();

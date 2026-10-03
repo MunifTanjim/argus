@@ -11,7 +11,8 @@ abstract class TerminalRepository {
   /// Opens a live attach. Returns null when there is no connection yet (e.g.
   /// before the first connect); the caller re-opens on reconnect.
   TerminalSession? open({
-    required String sessionId,
+    String? sessionId,
+    String? terminalId,
     required int cols,
     required int rows,
     required void Function(List<int> data) onData,
@@ -28,7 +29,8 @@ class TerminalRepositoryRemote implements TerminalRepository {
 
   @override
   TerminalSession? open({
-    required String sessionId,
+    String? sessionId,
+    String? terminalId,
     required int cols,
     required int rows,
     required void Function(List<int> data) onData,
@@ -40,6 +42,7 @@ class TerminalRepositoryRemote implements TerminalRepository {
     return TerminalAttach(
       client: client,
       sessionId: sessionId,
+      terminalId: terminalId,
       cols: cols,
       rows: rows,
       onData: onData,
