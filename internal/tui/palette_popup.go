@@ -65,9 +65,9 @@ func (m model) openPalette() (model, tea.Cmd) {
 	p.mode, _ = modeFor(p.modes, "")
 	p.input.Placeholder = p.modes[p.mode].placeholder
 	p.refresh(m)
-	// A first scope that the snapshot lacks, such as a node when the tree
-	// shows no node rows, falls back to the root. One with nothing under it,
-	// such as a new workspace, falls back to the nearest scope above it.
+	// A first scope that the snapshot lacks falls back to the root. One with
+	// nothing under it, such as a new workspace, falls back to the nearest scope
+	// above it.
 	scope := m.paletteScope()
 	if _, ok := p.snap().item(scope); !ok || !p.scoped() {
 		scope = ""

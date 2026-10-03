@@ -3,10 +3,10 @@
   Projects                           │  new session
                                      │
 ▌ 󰋜 Home                         ○ 3 │  Initial prompt (required)
-  ▾ argus                            │
-    󰉋 repo  main                 ○ 2 │                                                                                
-     repo-feat  feature         ○ 1 │                                                                                
-                                     │                                                                                
+  ▾  home                           │
+    ▾ argus                          │                                                                                
+      󰉋 repo  main               ○ 2 │                                                                                
+       repo-feat  feature       ○ 1 │                                                                                
                                      │                                                                                
                                      │                                                                                
                                      │                                                                                

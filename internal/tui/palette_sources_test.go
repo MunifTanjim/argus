@@ -99,12 +99,12 @@ func itemByID(items []paletteItem, id string) (paletteItem, bool) {
 
 func TestPlacesSourceWithOneNode(t *testing.T) {
 	items := placesSource{}.items(projectsTestModel())
-	want := []string{"project:n1:p1", "ws:n1:w1", "ws:n1:w2"}
+	want := []string{"node:n1", "project:n1:p1", "ws:n1:w1", "ws:n1:w2"}
 	if got := itemIDs(items); !slices.Equal(got, want) {
-		t.Fatalf("ids = %v, want %v (one node gives no node item)", got, want)
+		t.Fatalf("ids = %v, want %v", got, want)
 	}
 	cases := []struct{ id, label, detail, parent string }{
-		{"project:n1:p1", "argus", "", ""},
+		{"project:n1:p1", "argus", "home", "node:n1"},
 		{"ws:n1:w1", "repo main", "argus", "project:n1:p1"},
 		{"ws:n1:w2", "repo-feat feature", "argus", "project:n1:p1"},
 	}

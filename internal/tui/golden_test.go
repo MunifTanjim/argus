@@ -68,19 +68,19 @@ func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 			m.sessions, m.order = map[string]session.Session{}, nil
 			return onTree(m)
 		}},
-		{"project-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter")) }},
-		{"workspace-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")) }},
+		{"project-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")) }},
+		{"workspace-row", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")) }},
 		{"workspace-pane", func() model {
-			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")), "j")
+			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")), "j")
 		}},
 		{"workspace-kill", func() model {
-			return typeKeys(pressKeys(typeKeys(onTree(killableHome()), "jj"), keyMsg("enter")), "jdd")
+			return typeKeys(pressKeys(typeKeys(onTree(killableHome()), "jjj"), keyMsg("enter")), "jdd")
 		}},
 		{"workspace-files", func() model {
 			m := homeTestModel()
 			m.width, m.height = 160, 30
 			m.right.hidden = false
-			return pressKeys(typeKeys(onTree(m), "jj"), keyMsg("enter"))
+			return pressKeys(typeKeys(onTree(m), "jjj"), keyMsg("enter"))
 		}},
 	}
 	for _, tc := range cases {

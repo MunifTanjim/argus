@@ -23,7 +23,7 @@ func TestTreeClickSelectsThenOpens(t *testing.T) {
 func TestTreeFoldMarkerFolds(t *testing.T) {
 	m := withMouse(homeTestModel())
 	m = withFocus(m, mainPane)
-	y, x := findBlock(t, m, "▾")
+	y, x := findBlock(t, m, "▾ argus")
 	m, _ = click(m, x, y)
 	if !m.left.tree.isFolded("n1:p1") || m.focused != leftSidebar {
 		t.Fatalf("folded=%v focused=%v, want the project folded and the tree focused", m.left.tree.isFolded("n1:p1"), m.focused)
@@ -31,7 +31,7 @@ func TestTreeFoldMarkerFolds(t *testing.T) {
 	if _, ok := m.baseComp().(homeComp); !ok {
 		t.Error("a fold click must not open the row")
 	}
-	y, x = findBlock(t, m, "▸")
+	y, x = findBlock(t, m, "▸ argus")
 	m, _ = click(m, x, y)
 	if m.left.tree.isFolded("n1:p1") {
 		t.Error("a second fold click must unfold")

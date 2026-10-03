@@ -3,10 +3,10 @@
   Projects                           │  new session
                                      │
   󰋜 Home                         ○ 3 │  Which agent?
-  ▾ argus                            │
-▌   󰉋 repo  main                 ○ 2 │  Detecting agents…
-     repo-feat  feature         ○ 1 │
-                                     │
+  ▾  home                           │
+    ▾ argus                          │  Detecting agents…
+▌     󰉋 repo  main               ○ 2 │
+       repo-feat  feature       ○ 1 │
                                      │
                                      │
                                      │

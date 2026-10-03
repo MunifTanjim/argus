@@ -3,10 +3,10 @@
   Projects                           │   repo  main                                                                       │  Files  Changes
                                      │                                                                                    │
   󰋜 Home                         ○ 3 │ go.mod                                                                             │▌   go.mod
-  ▾ argus                            │ module argus                                                                       │
-▌   󰉋 repo  main                 ○ 2 │                                                                                    │
-     repo-feat  feature         ○ 1 │                                                                                    │
-                                     │                                                                                    │
+  ▾  home                           │ module argus                                                                       │
+    ▾ argus                          │                                                                                    │
+▌     󰉋 repo  main               ○ 2 │                                                                                    │
+       repo-feat  feature       ○ 1 │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │

@@ -3,10 +3,10 @@
   Projects                           │   repo · fix-login ·  main  [%1] idle
                                      │
 ▌ 󰋜 Home                         ○ 3 │   detail
-  ▾ argus                            │
-    󰉋 repo  main                 ○ 2 │   You 
-     repo-feat  feature         ○ 1 │
-                                     │   hello
+  ▾  home                           │
+    ▾ argus                          │   You 
+      󰉋 repo  main               ○ 2 │
+       repo-feat  feature       ○ 1 │   hello
                                      │
                                      │
                                      │

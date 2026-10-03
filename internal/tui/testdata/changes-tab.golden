@@ -3,10 +3,10 @@
   Projects                           │   repo  main                                                                       │  Files  Changes
                                      │                                                                                    │
   󰋜 Home                         ○ 3 │   ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮   │  UNCOMMITTED · 2
-  ▾ argus                            │   │                                                                            │   │▌ M main.go
-▌   󰉋 repo  main                 ○ 2 │   │ (idle)                                                                     │   │  A README.md
-     repo-feat  feature         ○ 1 │   ╰────────────────────────────────────────────────────────────────────────────╯   │
-                                     │                                                                                    │  COMMITS
+  ▾  home                           │   │                                                                            │   │▌ M main.go
+    ▾ argus                          │   │ (idle)                                                                     │   │  A README.md
+▌     󰉋 repo  main               ○ 2 │   ╰────────────────────────────────────────────────────────────────────────────╯   │
+       repo-feat  feature       ○ 1 │                                                                                    │  COMMITS
                                      │   ╭─ · repo ────────────────────────────────────────────────────────────────  ─╮   │  loading…
                                      │   │                                                                            │   │
                                      │   │ (idle)                                                                     │   │

@@ -17,8 +17,8 @@ func TestProjectTreeIsTheLeftSidebarComponent(t *testing.T) {
 	}
 	c := &ctx{m: &m}
 	next, _, used := comp.handleKey(c, keyMsg("j"))
-	if !used || next.(projectTreeComp).cursorRowID() != "n1:p1" {
-		t.Fatalf("j through handleKey: used=%v row=%q, want the project row", used, next.(projectTreeComp).cursorRowID())
+	if !used || next.(projectTreeComp).cursorRowID() != "n1" {
+		t.Fatalf("j through handleKey: used=%v row=%q, want the node row", used, next.(projectTreeComp).cursorRowID())
 	}
 	if m.left.tree.cursor != 0 || paneOf(m).cursor != 1 {
 		t.Error("handleKey must only ask for changes, not write the model")

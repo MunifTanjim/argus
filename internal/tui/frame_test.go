@@ -164,7 +164,7 @@ func TestEveryScreenStateFrameUnchanged(t *testing.T) {
 		{"spawn-over-home", spawnOverHome},
 		{"spawn-prompt", func() model { return pressKeys(spawnOverHome(), keyMsg("enter")) }},
 		{"spawn-over-tree", func() model {
-			m := typeKeys(onTree(homeTestModel()), "jj")
+			m := typeKeys(onTree(homeTestModel()), "jjj")
 			m.client = &recordingClient{}
 			m.beginPresetSpawn("n1", "/repo", "")
 			return m
@@ -298,7 +298,7 @@ func TestSpinnerRunsWhileAShownComponentSpins(t *testing.T) {
 		{"home, idle", homeTestModel(), false},
 		{"home, working", working(homeTestModel()), true},
 		{"tree screen, working", working(onTree(homeTestModel())), true},
-		{"workspace pane, working", working(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))), true},
+		{"workspace pane, working", working(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter"))), true},
 		{"session with the tree, working", working(openLive(homeTestModel(), "n1:s2")), true},
 		{"session without the tree, working", working(treeHidden(openLive(homeTestModel(), "n1:s2"))), false},
 		{"session, idle", openLive(homeTestModel(), "n1:s2"), false},
@@ -356,14 +356,14 @@ func TestCardListPageStepMatchesTheBase(t *testing.T) {
 			return withFocus(withHistoryProjects(homeTestModel(), historyProjects()...), leftSidebar)
 		}, framedStep},
 		{"tree over Home", func() model { return onTree(homeTestModel()) }, framedStep},
-		{"workspace pane", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")) }, treeScreen},
+		{"workspace pane", func() model { return pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")) }, treeScreen},
 		{"files tab on the tree screen", filesFocused, treeScreen},
 		{"changes tab on the tree screen", func() model { return changesFocused() }, treeScreen},
 		{"file over a workspace", func() model { return withFocus(openedFile(wideWorkspace()), mainPane) }, treeScreen},
 		{"files tab over a session", func() model { return withFocus(wide(waitingSession()), rightSidebar) }, framedStep},
 		{"file over a session", func() model { return withFocus(openedFile(wide(waitingSession())), mainPane) }, framedStep},
 		{"spawn over the tree screen", func() model {
-			m := typeKeys(onTree(homeTestModel()), "jj")
+			m := typeKeys(onTree(homeTestModel()), "jjj")
 			m.client = &recordingClient{}
 			m.beginPresetSpawn("n1", "/repo", "")
 			return m
@@ -448,7 +448,7 @@ func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {
 		{"session-no-dock", idleSession},
 		{"session-card-detail", func() model { return pressKeys(typeKeys(idleSession(), "gg"), keyMsg("enter")) }},
 		{"retarget-picker", func() model {
-			m := onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")))
+			m := onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")))
 			m.client = &recordingClient{}
 			m = typeKeys(m, "T")
 			m, _ = upd(m, branchesMsg{projectID: "n1:p1", branches: []api.BranchInfo{{Name: "main"}, {Name: "feature"}}})
@@ -456,7 +456,7 @@ func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {
 		}},
 		{"tree-filter", func() model { return typeKeys(onTree(homeTestModel()), "/fe") }},
 		{"tree-rename", func() model {
-			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "rx")
+			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))), "rx")
 		}},
 		{"history-export-prompt", func() model {
 			return typeKeys(withHistorySessions(homeTestModel(), histProj, historyPage()), "E")

@@ -164,11 +164,11 @@ func TestMenuOnHistorySessionCard(t *testing.T) {
 
 func TestMenuOnTreeRows(t *testing.T) {
 	m := withMouse(homeTestModel())
-	x, y := itemCell(t, m, regTree, 1)
+	x, y := itemCell(t, m, regTree, 2)
 	mm, _ := rightClick(m, x, y)
 	wantMenu(t, mm, "session spawn", "workspace new", "project rename", "project pin", "project hide", "project forget")
 
-	x, y = itemCell(t, m, regTree, 3)
+	x, y = itemCell(t, m, regTree, 4)
 	mm, _ = rightClick(m, x, y)
 	wantMenu(t, mm, "session spawn", "workspace change-target", "workspace rerun-setup", "open setup-log", "workspace remove")
 }
@@ -272,7 +272,7 @@ func TestRightClickGates(t *testing.T) {
 func TestNoMenuOnRawPane(t *testing.T) {
 	m := withMouse(homeTestModel())
 	m.left.tree.offerSpawn = &spawnOffer{nodeID: "n1", cwd: "/repo", prompt: "x"}
-	x, y := itemCell(t, m, regTree, 1)
+	x, y := itemCell(t, m, regTree, 2)
 	m, _ = rightClick(m, x, y)
 	if len(m.popups) != 0 {
 		t.Error("a pane that takes every key (a pending answer) opens no menu, as : refuses there")
@@ -322,7 +322,7 @@ func TestMenuOnPinnedProject(t *testing.T) {
 	m := withMouse(homeTestModel())
 	m.left.tree.data[0].Pinned = true
 	m.left.tree.rebuild()
-	x, y := itemCell(t, m, regTree, 1)
+	x, y := itemCell(t, m, regTree, 2)
 	m, _ = rightClick(m, x, y)
 	wantMenu(t, m, "session spawn", "workspace new", "project rename", "project unpin", "project hide", "project forget")
 }

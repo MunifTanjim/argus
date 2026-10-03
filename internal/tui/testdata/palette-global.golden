@@ -3,10 +3,10 @@
   Projects                           │  Sessions   History   Terminals
                                      │
 ▌ 󰋜 Home                         ○ 3 │  ┏━ · repo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fix-login ·  ━┓
-  ▾ argus ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮       ┃
-    󰉋 repo│ Go to                                                                                            │       ┃
-     repo│                                                                                                  │━━━━━━━┛
-          │ Everywhere                                                                                       │
+  ▾  home╭──────────────────────────────────────────────────────────────────────────────────────────────────╮       ┃
+    ▾ argu│ Go to                                                                                            │       ┃
+      󰉋 re│                                                                                                  │━━━━━━━┛
+       re│ Everywhere                                                                                       │
           │ Search sessions, workspaces, projects · > for commands                                           │ts ·  ─╮
           │                                                                                                  │       │
           │ · fix-login          repo                                                                        │       │
@@ -14,8 +14,8 @@
           │ · docs               repo                                                                        │
           │ 󰉋 repo main          argus                                                                       │cs ·  ─╮
           │  repo-feat feature  argus                                                                       │       │
-          │  argus                                                                                          │       │
-          │                                                                                                  │───────╯
+          │  argus              home                                                                        │       │
+          │  home               node                                                                        │───────╯
           │                                                                                                  │
           │                                                                                                  │
           │                                                                                                  │

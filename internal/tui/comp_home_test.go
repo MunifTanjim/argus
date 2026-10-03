@@ -40,30 +40,30 @@ func TestViewMap(t *testing.T) {
 		{"Home focused, tree shown", homeTestModel, isHome, mainPane, viewHome},
 		{"Home focused, tree hidden", func() model { return hidden(homeTestModel()) }, isHome, mainPane, viewHome},
 		{"tree on the Home row", func() model { return onTree(homeTestModel()) }, isHome, leftSidebar, viewHome},
-		{"tree on a project row", func() model { return typeKeys(onTree(homeTestModel()), "j") }, isHome, leftSidebar, viewHome},
-		{"tree on a workspace row", func() model { return typeKeys(onTree(homeTestModel()), "jj") }, isHome, leftSidebar, viewHome},
+		{"tree on a project row", func() model { return typeKeys(onTree(homeTestModel()), "jj") }, isHome, leftSidebar, viewHome},
+		{"tree on a workspace row", func() model { return typeKeys(onTree(homeTestModel()), "jjj") }, isHome, leftSidebar, viewHome},
 		{"summary focused", func() model {
-			return pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))
+			return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))
 		}, isSummary, mainPane, viewTree},
 		{"workspace pane focused", func() model {
-			return pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))
+			return pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter"))
 		}, onWorkspace("n1:w1"), mainPane, viewTree},
 		{"right sidebar focused on a workspace", func() model {
-			return pressKeys(pressKeys(typeKeys(onTree(wide()), "jj"), keyMsg("enter")), cw('l')...)
+			return pressKeys(pressKeys(typeKeys(onTree(wide()), "jjj"), keyMsg("enter")), cw('l')...)
 		}, onWorkspace("n1:w1"), rightSidebar, viewTree},
 		{"tree hidden on the Home row", func() model { return typeKeys(onTree(homeTestModel()), " o") }, isHome, mainPane, viewHome},
 		{"right sidebar focused when the tree empties", func() model {
-			m := pressKeys(pressKeys(typeKeys(onTree(wide()), "jj"), keyMsg("enter")), cw('l')...)
+			m := pressKeys(pressKeys(typeKeys(onTree(wide()), "jjj"), keyMsg("enter")), cw('l')...)
 			return treeEmptied(m)
 		}, isHome, mainPane, viewHome},
 		{"setup log over a workspace", func() model {
-			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter")), "L")
+			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")), "L")
 		}, onWorkspace("n1:w1"), mainPane, viewTree},
 		{"create picker over a project summary", func() model {
-			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "a")
+			return typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))), "a")
 		}, isSummary, leftSidebar, viewTree},
 		{"create picker when the tree empties", func() model {
-			return treeEmptied(typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "j"), keyMsg("enter"))), "a"))
+			return treeEmptied(typeKeys(onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jj"), keyMsg("enter"))), "a"))
 		}, isHome, leftSidebar, viewHome},
 		{"tree above History", func() model {
 			return onTree(typeKeys(homeTestModel(), "gt"))
@@ -95,7 +95,7 @@ func treeEmptied(m model) model {
 func TestCreatePickerOverAnEmptyHomeKeepsTheFramedTitle(t *testing.T) {
 	m := homeTestModel()
 	m.sessions, m.order = map[string]session.Session{}, nil
-	m = treeEmptied(typeKeys(typeKeys(pressKeys(m, cw('h')...), "j"), "a"))
+	m = treeEmptied(typeKeys(typeKeys(pressKeys(m, cw('h')...), "jj"), "a"))
 	if !createOpen(m) || !isHomeRoot(m) || !framed(m) {
 		t.Fatalf("setup: picker open=%v root=%T framed=%v", createOpen(m), m.main[0], framed(m))
 	}

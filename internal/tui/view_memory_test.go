@@ -131,11 +131,11 @@ func TestASessionOpenedFromHomeBelongsToItsWorkspace(t *testing.T) {
 	if id := m.left.tree.cursorRowID(); id != "n1:w1" {
 		t.Fatalf("cursor on %q, want n1:w1", id)
 	}
-	m = pressKeys(typeKeys(m, "kk"), keyMsg("enter"))
+	m = pressKeys(typeKeys(m, "kkk"), keyMsg("enter"))
 	if viewOf(m) != viewHome {
 		t.Fatalf("enter on Home: view = %v, want Home (Home does not remember n1:s1)", viewOf(m))
 	}
-	m = pressKeys(pressKeys(m, cw('h')...), keyMsg("j"), keyMsg("j"), keyMsg("enter"))
+	m = pressKeys(pressKeys(m, cw('h')...), keyMsg("j"), keyMsg("j"), keyMsg("j"), keyMsg("enter"))
 	if trOf(m).sessionID != "n1:s1" {
 		t.Errorf("enter on n1:w1: base = %#v, want n1:s1", m.baseComp())
 	}
@@ -147,12 +147,12 @@ func TestEnterOnAProjectRowOpensItsSummaryAndDoesNotFold(t *testing.T) {
 	if !ok || s.id != "n1:p1" || m.focused != mainPane {
 		t.Fatalf("base = %#v focus = %v, want the summary of n1:p1 with focus", m.baseComp(), m.focused)
 	}
-	if len(m.left.tree.rows) != 4 {
-		t.Errorf("enter folded the project: %d rows, want 4", len(m.left.tree.rows))
+	if len(m.left.tree.rows) != 5 {
+		t.Errorf("enter folded the project: %d rows, want 5", len(m.left.tree.rows))
 	}
 	m = typeKeys(pressKeys(m, cw('h')...), "h")
-	if len(m.left.tree.rows) != 2 {
-		t.Errorf("h on the project should fold it: %d rows, want 2", len(m.left.tree.rows))
+	if len(m.left.tree.rows) != 3 {
+		t.Errorf("h on the project should fold it: %d rows, want 3", len(m.left.tree.rows))
 	}
 }
 

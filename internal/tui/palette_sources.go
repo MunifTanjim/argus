@@ -63,9 +63,8 @@ func placeRows(t projectTreeComp) []projectsRow {
 
 type placesSource struct{}
 
-// items follow the tree: its order, its hidden and gone settings, and its node
-// rows, which show only with more than one node. The tree's filter and folds
-// do not apply.
+// items follow the tree: its order and its hidden and gone settings. The tree's
+// filter and folds do not apply.
 func (placesSource) items(m model) []paletteItem {
 	var out []paletteItem
 	var node, nodeLabel, project, projectName string

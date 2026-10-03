@@ -3,10 +3,10 @@
   Projects                           │  new session
                                      │
 ▌ 󰋜 Home                         ○ 3 │  Choose a directory
-  ▾ argus                            │
-    󰉋 repo  main                 ○ 2 │  ❯ p  /p
-     repo-feat  feature         ○ 1 │
-                                     │    Custom path…
+  ▾  home                           │
+    ▾ argus                          │  ❯ p  /p
+      󰉋 repo  main               ○ 2 │
+       repo-feat  feature       ○ 1 │    Custom path…
                                      │
                                      │
                                      │
