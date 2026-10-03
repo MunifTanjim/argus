@@ -82,13 +82,6 @@ func (s screenComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 
 func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		if s.term == nil {
-			return s, nil
-		}
-		cols, rows := c.m.termDims()
-		s.term.Resize(cols, rows)
-		return s, c.m.termResizeCmd(s.termID, cols, rows)
 	case tea.PasteMsg:
 		c.m.sendTermKey(s.termID, []byte(msg.Content))
 	case screenMouseMsg:
@@ -169,7 +162,7 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	case s.term != nil:
 		body = s.term.Render()
 	}
-	cols, visible := termDimsFor(w, h)
+	cols, visible := termDimsFor(w, h, !c.m.filesVisible())
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	if len(lines) > visible {
 		lines = lines[len(lines)-visible:]
@@ -226,6 +219,21 @@ func (s screenComp) footerPrompt(c *ctx) string {
 func (m model) liveScreen() (screenComp, bool) {
 	s, ok := m.main.top().(screenComp)
 	return s, ok
+}
+
+// syncScreenSize follows every layout change: a resize, a sidebar toggle, or a
+// sidebar drag.
+func (m model) syncScreenSize() tea.Cmd {
+	s, ok := m.liveScreen()
+	if !ok || s.term == nil {
+		return nil
+	}
+	cols, rows := m.termDims()
+	if s.term.Width() == cols && s.term.Height() == rows {
+		return nil
+	}
+	s.term.Resize(cols, rows)
+	return m.termResizeCmd(s.termID, cols, rows)
 }
 
 func (m model) screenAt(termID string) int {

@@ -1,8 +1,8 @@
   󱙺 argus                                                                                                                                                   
 
-                                          Sessions   History   Terminals   Logs                                           │   Files  Changes
+                                          Sessions   History   Terminals   Logs                                           │  Files  Changes
                                                                                                                           │
-time=12:00:00 level=INFO msg="line 0"                                                                                     │   select a workspace
+time=12:00:00 level=INFO msg="line 0"                                                                                     │  select a workspace
 time=12:00:01 level=INFO msg="line 1"                                                                                     │
 time=12:00:02 level=INFO msg="line 2"                                                                                     │
 time=12:00:03 level=INFO msg="line 3"                                                                                     │

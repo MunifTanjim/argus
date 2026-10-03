@@ -77,7 +77,7 @@ func (m model) screenCursor() *tea.Cursor {
 		return nil
 	}
 	l := m.layout()
-	_, rows := termDimsFor(l.w, l.h-m.dockRows())
+	_, rows := termDimsFor(l.w, l.h-m.dockRows(), l.right == 0)
 	return s.cursor(m.mainRect().Min, rows)
 }
 
@@ -176,10 +176,11 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 		panels = append(panels, fixedPanel(m.left.tree.view(tc, l.left, h), l.left+screenMargin), flexPanel(pane))
 	}
 	if l.right > 0 {
-		x := m.width - l.right - screenMargin
-		rc := &ctx{m: c.m, area: m.hits.add(regRight, uv.Rect(x, 2, l.right+screenMargin, h))}
-		m.hits.add(regFilesDivider, uv.Rect(x-dividerWidth, 2, dividerWidth, h))
-		panels = append(panels, fixedPanel(m.right.view(rc, l.right, h), l.right+screenMargin))
+		w := l.right + 1
+		x := m.width - w - screenMargin
+		rc := &ctx{m: c.m, area: m.hits.add(regRight, uv.Rect(x, 2, w+screenMargin, h))}
+		m.hits.add(regFilesDivider, uv.Rect(x-dividerWidth+1, 2, dividerWidth-1, h))
+		panels = append(panels, joinedPanel(m.right.view(rc, w, h), w+screenMargin))
 	}
 	return composeH(m.width, h, panels...)
 }

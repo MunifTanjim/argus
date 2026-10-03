@@ -59,7 +59,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next = next.syncDock()
 	next, sync := next.syncSidebar()
 	spin := next.maybeSpin()
-	return next, tea.Batch(cmd, mem, sync, spin)
+	return next, tea.Batch(cmd, mem, sync, spin, next.syncScreenSize())
 }
 
 func (m model) syncSidebar() (model, tea.Cmd) {
@@ -87,7 +87,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.idleComposerActive() {
 			m.sizeIdleReply()
 		}
-		return m.updateScreen(m.topScreen(), msg)
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case keyTimeoutMsg:

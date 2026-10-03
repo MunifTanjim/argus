@@ -352,7 +352,7 @@ func TestLiveScreenFillsThePaneFromTheStart(t *testing.T) {
 		}
 	}
 	l := m.layout()
-	_, rows := termDimsFor(l.w, l.h-m.dockRows())
+	_, rows := termDimsFor(l.w, l.h-m.dockRows(), l.right == 0)
 	if top < 0 || bottom-top-1 != rows {
 		t.Fatalf("box interior = %d rows (top %d, bottom %d), want %d:\n%s", bottom-top-1, top, bottom, rows, strings.Join(frame, "\n"))
 	}
@@ -429,6 +429,40 @@ func TestLiveScreenBoxHasEvenSideMargins(t *testing.T) {
 		right := m.width - lipgloss.Width(strings.TrimRight(l, " "))
 		if left != right {
 			t.Fatalf("box margins = %d left, %d right, want equal:\n%q", left, right, l)
+		}
+		return
+	}
+	t.Fatal("no screen box in the frame")
+}
+
+func TestLiveScreenFollowsTheLayout(t *testing.T) {
+	m := withMouse(liveScreenModelWith(func(m *model) { m.width = 160 }))
+	s, _ := m.liveScreen()
+	before := s.term.Width()
+	x, y := titleIconCell(t, m, treeIcon)
+	m, cmd := click(m, x, y)
+	cols, rows := m.termDims()
+	if s.term.Width() == before || s.term.Width() != cols || s.term.Height() != rows || cmd == nil {
+		t.Fatalf("screen %dx%d (was %d wide), layout %dx%d, cmd=%v: hiding the tree must resize the screen",
+			s.term.Width(), s.term.Height(), before, cols, rows, cmd != nil)
+	}
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	cols, rows = m.termDims()
+	if s.term.Width() != cols || s.term.Height() != rows {
+		t.Fatalf("screen %dx%d, layout %dx%d: a window resize must resize the screen", s.term.Width(), s.term.Height(), cols, rows)
+	}
+}
+
+func TestLiveScreenBoxHasEvenGapsBetweenSidebars(t *testing.T) {
+	m := liveScreenModelWith(func(m *model) { m.width, m.right.hidden = 160, false })
+	for _, ln := range strings.Split(ansi.Strip(m.View().Content), "\n") {
+		if !strings.Contains(ln, "╭") {
+			continue
+		}
+		before := strings.TrimSuffix(ln[:strings.Index(ln, "╭")], " ")
+		after := strings.TrimPrefix(ln[strings.Index(ln, "╮")+len("╮"):], " ")
+		if !strings.HasSuffix(before, "│") || !strings.HasPrefix(after, "│") {
+			t.Fatalf("the box should sit one space from each divider: %q", ln)
 		}
 		return
 	}
