@@ -24,7 +24,7 @@
  │ goto bottom              G shift+g │                                                                                   │
  │ goto top                 gg        │                                                                                   │
  │ help                     g?        │                                                                                   │
+ │ hover                    K shift+k │                                                                                   │
  │ next                     ↓ j       │                                                                                   │
- │ open                     enter     │                                                                                   │
  ╰────────────────────────────────────╯
-  :open 
+  :next 

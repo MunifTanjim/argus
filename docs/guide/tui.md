@@ -172,6 +172,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, terminals, transcript, workspace | `G` |
 | `goto top` | changes, file, file-tree, history, home, logs, project-tree, terminals, transcript, workspace | `gg` |
 | `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, terminals, workspace | `g?` |
+| `hover` | changes, file-tree, project-tree | `K` |
 | `next` | changes, file-tree, history, home, project-tree, session-dock, terminals, transcript, workspace | `<Down>` `j` |
 | `next card` | transcript | `}` |
 | `next diff-file` | file | `]f` |

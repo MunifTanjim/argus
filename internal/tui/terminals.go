@@ -185,12 +185,17 @@ var nodeTabLabels = []string{"Projects", "Terminals"}
 // nodeHasTerminals is false only for a node that reports no tmux; a node not
 // in the last server.info gets the tab, and its create reports any error.
 func (m model) nodeHasTerminals(nodeID string) bool {
+	n, ok := m.node(nodeID)
+	return !ok || n.Capabilities.Terminal
+}
+
+func (m model) node(id string) (api.NodeInfo, bool) {
 	for _, n := range m.nodeInfo {
-		if n.ID == nodeID {
-			return n.Capabilities.Terminal
+		if n.ID == id {
+			return n, true
 		}
 	}
-	return true
+	return api.NodeInfo{}, false
 }
 
 func (m model) nodeTabs(active nodeTab) string {

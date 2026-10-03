@@ -139,6 +139,19 @@ func clockTime(ts string) string {
 	return ts
 }
 
+func dateTime(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }
+
+// isoDateTime is dateTime for an RFC3339 timestamp; "" for an unparseable one.
+func isoDateTime(iso string) string {
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return ""
+	}
+	return dateTime(t)
+}
+
+func shortSHA(sha string) string { return sha[:min(len(sha), 7)] }
+
 func toolColor(name string) color.Color {
 	if meta, ok := toolRegistry[name]; ok {
 		return categoryColor(meta.category)

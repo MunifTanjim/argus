@@ -132,7 +132,7 @@ var projectsKeys = struct {
 	Target, DiffMode, Spawn, ToggleFiles                              binding
 	SideTabPrev, SideTabNext, Refresh, Back                           binding
 	Forget                                                            binding
-	RunSetup, SetupLog, Palette, ToggleMouse                          binding
+	RunSetup, SetupLog, Palette, ToggleMouse, Hover                   binding
 }{
 	Up:            nb("prev", "<Up> k", "move"),
 	Down:          nb("next", "<Down> j", ""),
@@ -171,6 +171,7 @@ var projectsKeys = struct {
 	SetupLog:      nb("open setup-log", "L", "setup log"),
 	Palette:       nb("open palette", "<C-k>", "palette"),
 	ToggleMouse:   nb("toggle mouse", "", "mouse"),
+	Hover:         nb("hover", "K", "hover"),
 }
 
 var createKeys = struct {

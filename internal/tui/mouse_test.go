@@ -32,18 +32,11 @@ func wheelAt(m model, x, y, d int) (model, tea.Cmd) {
 func itemCell(t *testing.T, m model, r region, i int) (x, y int) {
 	t.Helper()
 	m.View()
-	for _, a := range m.hits.areas {
-		if a.region != r {
-			continue
-		}
-		for _, s := range a.rows {
-			if s.index == i {
-				return a.rect.Min.X + 1, a.rect.Min.Y + s.top
-			}
-		}
+	p, ok := m.hits.rowStart(r, i)
+	if !ok {
+		t.Fatalf("item %d is not in region %d", i, r)
 	}
-	t.Fatalf("item %d is not in region %d", i, r)
-	return 0, 0
+	return p.X + 1, p.Y
 }
 
 func TestMouseModeFollowsTheToggle(t *testing.T) {

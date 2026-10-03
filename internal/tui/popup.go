@@ -81,12 +81,14 @@ func (m model) popupFooter() string {
 	return asstStyle.Render(firstLine(m.flash))
 }
 
-func (m model) drawPopups(frame string) string {
-	if len(m.popups) == 0 || m.width < 1 || m.height < 1 {
+// drawOverlays draws the hover and the popups over the frame.
+func (m model) drawOverlays(frame string) string {
+	if (len(m.popups) == 0 && m.hovered == "") || m.width < 1 || m.height < 1 {
 		return frame
 	}
 	scr := uv.NewScreenBuffer(m.width, m.height)
 	uv.NewStyledString(frame).Draw(scr, scr.Bounds())
+	m.drawHover(scr)
 	c := &ctx{m: &m}
 	for i, p := range m.popups {
 		pc := c
@@ -104,6 +106,16 @@ func centerRect(area uv.Rectangle, w, h int) uv.Rectangle {
 
 func bottomLeftRect(area uv.Rectangle, w, h int) uv.Rectangle {
 	return uv.Rect(area.Min.X, area.Max.Y-h, w, h)
+}
+
+// drawAt draws view with its top-left cell at at, moved to stay inside area.
+func drawAt(scr uv.Screen, area uv.Rectangle, at uv.Position, view string) uv.Rectangle {
+	w, h := lipgloss.Size(view)
+	x := max(area.Min.X, min(at.X, area.Max.X-w))
+	y := max(area.Min.Y, min(at.Y, area.Max.Y-h))
+	r := uv.Rect(x, y, min(w, area.Dx()), min(h, area.Dy()))
+	uv.NewStyledString(view).Draw(scr, r)
+	return r
 }
 
 func drawCenter(scr uv.Screen, area uv.Rectangle, view string) uv.Rectangle {

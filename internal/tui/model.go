@@ -96,6 +96,7 @@ type model struct {
 	helpScroll int        // the help's top row, when it is taller than the screen
 	cmdHistory []string   // the command line's history for this run
 	popups     popupStack // the open popups; the last one takes the keys
+	hovered    string     // the key of the item the hover shows; "" when closed
 
 	keys      *keymap    // resolved keymaps; nil in models built without withKeymaps
 	kittyKeys bool       // the terminal reported the Kitty keyboard protocol

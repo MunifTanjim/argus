@@ -113,3 +113,23 @@ func (t fileTreeComp) footer(c *ctx) []binding {
 	k := projectsKeys
 	return []binding{k.SideTabNext, helpAs(k.Left, "fold")}
 }
+
+func (t fileTreeComp) hoverItem(*ctx) (hoverItem, bool) {
+	rows := t.rows()
+	if t.cursor >= len(rows) || rows[t.cursor].note != "" {
+		return hoverItem{}, false
+	}
+	e := rows[t.cursor].entry
+	it := hoverItem{key: "file:" + t.ws + ":" + e.Path, index: t.cursor, title: e.Name}
+	it.add("Path", e.Path)
+	switch {
+	case e.Symlink:
+		it.add("Type", "symlink")
+		it.add("Target", e.Target)
+	case e.IsDir:
+		it.add("Type", "directory")
+	default:
+		it.add("Type", "file")
+	}
+	return it, true
+}

@@ -47,12 +47,8 @@ func openNodeSummary(c *ctx, nodeID string) tea.Cmd {
 
 // An unknown node has none.
 func (m model) nodeHasWakelock(nodeID string) bool {
-	for _, n := range m.nodeInfo {
-		if n.ID == nodeID {
-			return n.Capabilities.HostWakelock
-		}
-	}
-	return false
+	n, ok := m.node(nodeID)
+	return ok && n.Capabilities.HostWakelock
 }
 
 func (m model) showsNodeSummary(nodeID string) bool {

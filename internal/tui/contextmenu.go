@@ -80,11 +80,5 @@ func (p contextMenu) draw(c *ctx, scr uv.Screen, area uv.Rectangle) {
 		l.add(i, xansi.Truncate(row, f.innerWidth(), "…"))
 	}
 	f.parts = l.window(f.bodyCtx(c), p.cursor, max(1, min(len(p.entries), area.Dy()-popupFrameH)))
-	box := f.render()
-	w, h := lipgloss.Size(box)
-	x := max(area.Min.X, min(p.at.X, area.Max.X-w))
-	y := max(area.Min.Y, min(p.at.Y, area.Max.Y-h))
-	r := uv.Rect(x, y, min(w, area.Dx()), min(h, area.Dy()))
-	uv.NewStyledString(box).Draw(scr, r)
-	c.hitRect(r)
+	c.hitRect(drawAt(scr, area, p.at, f.render()))
 }

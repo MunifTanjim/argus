@@ -58,6 +58,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next = next.leaveTree(m.focused)
 	next = next.syncDock()
 	next, sync := next.syncSidebar()
+	next = next.syncHover()
 	spin := next.maybeSpin()
 	return next, tea.Batch(cmd, mem, sync, spin, next.syncScreenSize())
 }

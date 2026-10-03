@@ -76,7 +76,7 @@ var transcriptViewKeys = []any{
 var sidebarListKeys = []any{
 	projectsKeys.Back, projectsKeys.Refresh, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top,
 	projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
-	projectsKeys.Right, projectsKeys.Enter,
+	projectsKeys.Right, projectsKeys.Enter, projectsKeys.Hover,
 }
 
 // sectionList is what a keymap section lists: the bindings its component
@@ -94,7 +94,8 @@ var sectionLists = map[string]sectionList{
 	"project-tree": {
 		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Filter, projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
-			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target, nodeKeys.Wakelock})...),
+			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target, nodeKeys.Wakelock,
+			projectsKeys.Hover})...),
 		container: bindingsOf(leftSidebarKeys...),
 		focus:     focusFor("project-tree"),
 	},

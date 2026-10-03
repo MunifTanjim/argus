@@ -7,9 +7,11 @@ import (
 )
 
 // A key goes to exactly one handler, in this order: the live screen, the front
-// popup, a raw focused component, the open help, the focus manager's keys, the
-// focused container's keys, and the focused component. A colon opens the
-// command line when none of the first four takes it, no sequence is pending,
+// popup, a raw focused component, the hover's <Esc>, the open help, the focus
+// manager's keys, a hoverer's hover key, the focused container's keys, and the
+// focused component. A colon opens the
+// command line when none of the live screen, the popup, a raw component, and
+// the help takes it, no sequence is pending,
 // and the component has commands.
 
 func (m model) focusedComp() component {
@@ -58,6 +60,10 @@ func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focusedComp().raw(&ctx{m: &m}) {
 		return m.componentKey(msg)
 	}
+	if m.hovered != "" && msg.String() == "esc" {
+		m.hovered = ""
+		return m, nil
+	}
 	if m.showHelp {
 		if mm, ok := m.helpKey(msg); ok {
 			return mm, nil
@@ -67,6 +73,9 @@ func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if mm, cmd, ok := m.focusKey(msg); ok {
 		return mm, cmd
+	}
+	if _, ok := m.focusedComp().(hoverer); ok && m.matches(msg, projectsKeys.Hover) {
+		return m.openHover(), nil
 	}
 	m, cmd, ok := m.containerKey(msg)
 	if ok {

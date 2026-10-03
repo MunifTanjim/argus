@@ -241,7 +241,7 @@ func (f fileComp) content(c *ctx, w, h int) string {
 	case f.log:
 		title = "setup log · " + m.workspaceLabel(f.ws)
 	case f.rev != "":
-		title = f.rev[:min(len(f.rev), 7)] + " · " + title
+		title = shortSHA(f.rev) + " · " + title
 	case f.diff && f.against == api.AgainstTarget:
 		title += " · vs " + m.targetOf(f.ws)
 	case f.diff:

@@ -99,7 +99,7 @@ func (m model) frame() string {
 	} else {
 		out = pinFooter(m.frameTitle()+"\n\n"+m.framedBody(c, l, pane), footer, m.width, m.height)
 	}
-	return m.drawPopups(out)
+	return m.drawOverlays(out)
 }
 
 func (m model) mainRect() uv.Rectangle {

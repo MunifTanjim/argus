@@ -940,3 +940,60 @@ func (m model) updateTree(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.apply(c))
 	return m, cmd
 }
+
+func (t projectTreeComp) hoverItem(c *ctx) (hoverItem, bool) {
+	r, ok := t.cursorRow()
+	if !ok || r.kind == rowHome {
+		return hoverItem{}, false
+	}
+	it := hoverItem{key: "tree:" + r.id, index: t.cursor, title: r.label}
+	switch r.kind {
+	case rowNode:
+		it.add("ID", r.id)
+		if n, ok := c.m.node(r.id); ok {
+			it.add("Version", n.Version)
+		}
+	case rowProject:
+		p, ok := t.findProject(r.id)
+		if !ok {
+			return hoverItem{}, false
+		}
+		it.add("Dir", p.Dir)
+		it.add("Kind", p.Kind)
+		it.add("Default branch", p.DefaultBranch)
+		it.add("Node", p.NodeLabel)
+		var state []string
+		if p.Pinned {
+			state = append(state, "pinned")
+		}
+		if p.Hidden {
+			state = append(state, "hidden")
+		}
+		if p.IsGone {
+			state = append(state, "gone")
+		}
+		it.add("State", strings.Join(state, ", "))
+		it.add("Error", p.Error)
+	case rowWorkspace:
+		w, ok := t.findWorkspace(r.id)
+		if !ok {
+			return hoverItem{}, false
+		}
+		it.add("Dir", w.Dir)
+		if !r.plain {
+			branch := w.Branch
+			if branch == "" {
+				branch = strings.TrimSpace("(detached) " + shortSHA(w.Head))
+			}
+			it.add("Branch", branch)
+			it.add("Target", w.TargetBranch)
+		}
+		if w.IsGone {
+			it.add("State", "gone")
+		}
+		it.add("Setup", r.setup)
+		it.add("Created", isoDateTime(w.CreatedAt))
+		it.add("Last seen", isoDateTime(w.LastSeenAt))
+	}
+	return it, true
+}

@@ -34,6 +34,18 @@ func (r region) container() (container, bool) {
 	return 0, false
 }
 
+func (k container) region() region {
+	switch k {
+	case leftSidebar:
+		return regTree
+	case rightSidebar:
+		return regRight
+	case sessionDock:
+		return regDock
+	}
+	return regMain
+}
+
 type hitKind int
 
 const (
@@ -111,6 +123,24 @@ func (h *hitMap) at(x, y int) (*hitArea, bool) {
 		}
 	}
 	return nil, false
+}
+
+// rowStart is the screen cell where item index of region r starts.
+func (h *hitMap) rowStart(r region, index int) (uv.Position, bool) {
+	if h == nil {
+		return uv.Position{}, false
+	}
+	for _, a := range h.areas {
+		if a.region != r {
+			continue
+		}
+		for _, s := range a.rows {
+			if s.index == index {
+				return uv.Pos(a.rect.Min.X, a.rect.Min.Y+s.top), true
+			}
+		}
+	}
+	return uv.Position{}, false
 }
 
 func (c *ctx) recording() bool { return c.area != nil }

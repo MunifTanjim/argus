@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"path"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -358,4 +360,47 @@ func (ch changesComp) commitsHeader(c *ctx) string {
 		head += " · " + strconv.Itoa(len(ch.commits))
 	}
 	return head
+}
+
+func (ch changesComp) hoverItem(*ctx) (hoverItem, bool) {
+	if ch.commit != nil {
+		if ch.commitCursor >= len(ch.commitFiles) {
+			return hoverItem{}, false
+		}
+		f := ch.commitFiles[ch.commitCursor]
+		return changeHover("commit:"+ch.ws+":"+ch.commit.SHA+":"+f.Path, ch.commitCursor, f), true
+	}
+	if ch.cursor < len(ch.files) {
+		f := ch.files[ch.cursor]
+		return changeHover("change:"+ch.ws+":"+ch.against+":"+f.Path, ch.cursor, f), true
+	}
+	j := ch.cursor - len(ch.files)
+	if j >= len(ch.commits) {
+		return hoverItem{}, false
+	}
+	cm := ch.commits[j]
+	it := hoverItem{key: "commit:" + ch.ws + ":" + cm.SHA, index: ch.cursor, title: cm.Short}
+	it.add("SHA", cm.SHA)
+	it.add("Subject", cm.Subject)
+	it.add("Author", cm.Author)
+	if cm.UnixSec > 0 {
+		it.add("Date", dateTime(time.Unix(cm.UnixSec, 0)))
+	}
+	return it, true
+}
+
+func changeHover(key string, index int, f api.ChangedFile) hoverItem {
+	it := hoverItem{key: key, index: index, title: path.Base(f.Path)}
+	it.add("Path", f.Path)
+	it.add("From", f.OrigPath)
+	it.add("Change", f.Change)
+	var state []string
+	if f.Staged {
+		state = append(state, "staged")
+	}
+	if f.Unstaged {
+		state = append(state, "unstaged")
+	}
+	it.add("State", strings.Join(state, ", "))
+	return it
 }
