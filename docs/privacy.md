@@ -6,14 +6,14 @@ editLink: false
 
 # Privacy Policy
 
-**Effective date:** 2026-09-12
+**Effective date:** 2026-10-03
 
 Argus is a self-hosted tool to watch and control your AI coding sessions. It
 runs on your own machines. There is no Argus account, and there is no tracking.
 
-The app talks only to a gateway you run. Push notifications need
-[external services](#external-services), but they are always end-to-end
-encrypted.
+The app talks only to a gateway you run. Push notifications and voice input need
+[external services](#external-services). Push notifications are always
+end-to-end encrypted.
 
 This policy covers two things:
 
@@ -25,38 +25,51 @@ This policy covers two things:
 **Munif Tanjim** ("the developer") writes and publishes Argus.
 
 You run your own nodes, your own gateway, and the app. You control the data on
-them, and the developer reaches none of it.
+them, and the developer has no access to it.
 
-The developer operates one service: [PushPort](#pushport). The developer
-controls the data that PushPort handles.
+The developer operates one service, [PushPort](#pushport), and controls the
+data that it handles.
 
 ## Data Stored on Your Device
 
-The app keeps its state in the secure storage of the operating system (the
-Keystore on Android, the Keychain on iOS): the settings, credentials, and keys
-that it needs to reach your gateway and to receive notifications.
+The app keeps its state in the secure storage of the operating system: the
+settings, credentials, and keys that it needs to reach your gateway and to
+receive notifications. If you configure voice input, the same storage keeps your
+voice settings and your OpenRouter API key.
 
 The app writes no transcript, session log, or message content to disk. Session
-content stays in memory while the app runs.
+content stays in memory while the app runs. Voice audio for OpenRouter is the
+one exception: the app keeps it on disk only until the upload ends.
 
 ## Camera
 
-The app uses the camera for one purpose: to scan the pairing QR code that
-`argus pair` prints. The scan runs on the device. The app stores no image and
+The app uses the camera for one purpose: to scan the pairing QR code. The scan
+runs on the device. The app stores no image and
 sends no image.
+
+## Microphone and Speech Recognition
+
+The app uses the microphone for one purpose: voice input, which turns your
+speech into text. Voice input is off until you select a provider.
+
+- **System** uses the speech recognizer of your operating system. Recognition
+  runs on the device when it can. Otherwise the speech service of your
+  operating system processes the audio.
+- **OpenRouter** sends the audio from your device to
+  [OpenRouter](https://openrouter.ai) with your own API key. OpenRouter sends
+  the audio to the model provider that you select. The audio and the key never
+  pass through your gateway, and they never reach the developer.
 
 ## Data Stored on Your Machines
 
-`argus` writes its state to files on your own machines, under the configuration,
-cache, state, and runtime directories of your user account. Only your user
-account can read them. Argus sends none of that state to the developer.
+`argus` writes its state to files on your own machines. Only your user account
+can read them. Argus sends none of that state to the developer.
 
 ## Push Notifications
 
 A notification carries a short summary of what needs your attention. Your node
-encrypts it for your device before it leaves your machine, with the Web Push
-standard (RFC 8291). Only your device holds the decryption key, so every relay
-on the delivery path carries an opaque payload.
+encrypts it for your device before it leaves your machine. Only your device can
+decrypt it, so no service on the delivery path can read it.
 
 ### Android
 
@@ -68,31 +81,23 @@ Sunup. [PushPort](#pushport) over FCM is an alternative to UnifiedPush.
 ### iOS
 
 [PushPort](#pushport) over the Apple Push Notification service (APNs) is the
-only push path. A notification extension decrypts the payload on your device
-before the system displays it.
+only push path.
 
 ### PushPort
 
-[PushPort](https://pushport.muniftanjim.dev) is a hosted push relay that the
-developer operates. Nothing reaches PushPort, from the app or from your
-machines, until you register an instance token with `argus pushport register`
-on your gateway.
+[PushPort](https://pushport.muniftanjim.dev) is a push relay that the developer
+operates. It is used only after you register an instance token for your
+gateway, and on Android only if you select it.
 
-After you register the token, the app subscribes on its next connection to that
-gateway. On iOS the subscription needs no further action, because PushPort is
-the only push path. On Android you must also select PushPort in the app
-settings.
+PushPort receives the label of your instance, your device push token, the
+encrypted notifications, and the IP address of each request. It stores only the
+label and the IP address of the registration, until you delete the instance with
+your instance token. It asks for no identity, so no data in PushPort is tied to
+a specific person.
 
-PushPort receives:
-
-- The device push token that APNs or FCM issued for your device.
-- The encrypted payloads, which PushPort hands to APNs or FCM with that token.
-  That push service delivers them to your device.
-
-PushPort stores none of this. It cannot read the content of a notification. The
-endpoint that the app receives carries your push token in sealed form, so
-PushPort keeps no record of your subscription. The endpoint expires unless the
-app renews it.
+The developer processes this data on the basis of a legitimate interest: to
+deliver your notifications and to protect PushPort from abuse. PushPort can run
+on servers outside your country.
 
 ## Analytics and Tracking
 
@@ -103,31 +108,34 @@ or to any third party.
 The platforms report separately from the app. If you turn on sharing in the
 settings of your operating system, the App Store and Google Play give the
 developer aggregate crash reports and usage reports. Argus plays no part in
-this, and you control the sharing in the settings of your device.
+this.
 
 ## External Services
 
 Argus contacts an external service only when you use the feature that needs it:
 
-- **PushPort**, operated by the developer — relays encrypted push
-  payloads. See [PushPort](#pushport).
-- **Apple Push Notification service (APNs)**, operated by Apple — delivers
+- **PushPort**, operated by the developer, relays encrypted push payloads. See
+  [PushPort](#pushport).
+- **Apple Push Notification service (APNs)**, operated by Apple, delivers
   encrypted push payloads to iOS devices.
-- **Firebase Cloud Messaging (FCM)**, operated by Google — delivers encrypted
+- **Firebase Cloud Messaging (FCM)**, operated by Google, delivers encrypted
   push payloads to Android devices.
 - **A [UnifiedPush distributor](https://unifiedpush.org/users/distributors/)**,
-  for example ntfy or Sunup — delivers encrypted push payloads on Android.
-- **A tunnel or proxy**, for example Cloudflare Tunnel — carries traffic to your
+  for example ntfy or Sunup, delivers encrypted push payloads on Android.
+- **A tunnel or proxy**, for example Cloudflare Tunnel, carries traffic to your
   gateway, if you expose the gateway beyond your local network.
+- **OpenRouter** transcribes your voice for the OpenRouter voice provider. See
+  [Microphone and Speech Recognition](#microphone-and-speech-recognition).
+- **The speech service of your operating system** transcribes your voice for
+  the System voice provider.
 
-Push payloads stay encrypted end-to-end on every one of these paths. Some
-tunnels, including Cloudflare Tunnel, terminate TLS at their edge, so the
+Some tunnels, including Cloudflare Tunnel, terminate TLS at their edge, so the
 operator can read the gateway traffic that passes through. To close that gap,
 turn on [end-to-end encryption](/guide/e2ee).
 
-Argus sends no session data to an AI provider. The coding agent that you run,
-for example Claude Code, makes its own network connections. This policy does not
-cover them.
+Other than voice input, Argus sends no session data to an AI provider. The
+coding agent that you run, for example Claude Code, makes its own network
+connections. This policy does not cover them.
 
 The privacy policy of each third party governs the data that the third party
 handles.
@@ -135,38 +143,23 @@ handles.
 ## Data Retention and Deletion
 
 Argus stores your data on machines you control, so you decide what to keep and
-for how long. There is no Argus account, so no account exists to delete. The
-developer holds nothing to delete on your behalf.
+for how long. There is no Argus account, so no account exists to delete.
 
-- To stop a device from reaching your gateway, run `argus unpair`.
-- To delete the push registration of a device, disconnect the gateway in the
-  app.
-- To erase the credentials of a gateway, remove its profile in the app.
+You can revoke a device, delete its push registration, and erase the
+credentials of a gateway at any time.
 
-An uninstall removes the data of the app on Android. On iOS, Keychain items can
-survive an uninstall, and a reinstalled app can read them again. To erase them,
-remove each profile before you uninstall.
+An uninstall removes the data of the app on Android. On iOS, data in the secure
+storage can survive an uninstall, and a reinstalled app can read it again. To
+erase it, delete your gateways and your OpenRouter API key from the app before
+you uninstall.
 
 ## Your Rights
 
-[PushPort](#pushport) is the only place where the developer processes your
-data, and it holds almost nothing. It seals your push token into the endpoint
-and keeps no copy. It counts requests by IP address to limit the rate, and it
-ties that count to no token, no gateway, and no person. The server logs carry
-no IP address.
-
-The developer processes this data for two reasons. Delivery needs your push
-token, because the notification cannot reach you without it. The rate limit
-needs your IP address, because the service needs protection from abuse.
-
-You start the processing with `argus pushport register`. If you remove the
-instance token, the processing stops.
-
 If the GDPR covers you, you have the rights of access, correction, erasure,
-restriction, portability, and objection. The developer stores nothing that
-identifies you, so these requests reach nothing. You can write to the address
-in [Contact](#contact). You can also complain to the data protection authority
-of your country.
+restriction, portability, and objection. To use them, write to the address in
+[Contact](#contact). Because no data is tied to a specific person, the developer
+usually cannot find data that belongs to you. You can also complain
+to the data protection authority of your country.
 
 The developer does not sell your personal information. The developer does not
 share it for cross-context behavioral advertising. The developer makes no
@@ -174,10 +167,8 @@ automated decisions about you and builds no profiles.
 
 ## Legal Disclosure
 
-A legal demand can reach the developer, because the developer operates
-PushPort. [PushPort](#pushport) holds no data at rest about you, so a demand
-for stored data finds nothing. The developer cannot decrypt a notification, so
-a demand for content finds nothing readable.
+If the developer receives a legal demand, the developer has no data to give
+that identifies you or reveals the content of your notifications.
 
 ## Children's Privacy
 
