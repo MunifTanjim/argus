@@ -36,6 +36,11 @@ const (
 	glyphWrench       = "\U000F0BE0" // nf-md-wrench_outline
 	glyphFolderSearch = "\U000F0968" // nf-md-folder_search
 	glyphPenNib       = "\uEE75"     // nf-fa-pen_nib
+
+	glyphSidebarLeft     = "\uEBF3" // nf-cod-layout_sidebar_left
+	glyphSidebarLeftOff  = "\uEC02" // nf-cod-layout_sidebar_left_off
+	glyphSidebarRight    = "\uEBF4" // nf-cod-layout_sidebar_right
+	glyphSidebarRightOff = "\uEC00" // nf-cod-layout_sidebar_right_off
 )
 
 // toolIcons groups per-category icons for the tool item rows.

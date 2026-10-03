@@ -198,12 +198,39 @@ func (m model) frameTitle() string {
 	if m.quarantined() {
 		parts = append(parts, StyleErrorBold.Render("⚠ QUARANTINED")+dimStyle.Render(" · argus lock pin"))
 	}
-	if len(parts) == 0 {
+	right := strings.Join(parts, dimStyle.Render(" · "))
+	if !m.viewer && m.width >= sidebarMinWidth {
+		right += m.sidebarIcons()
+	}
+	if right == "" {
 		return left
 	}
-	right := strings.Join(parts, dimStyle.Render(" · "))
 	gap := max(1, m.width-screenMargin-lipgloss.Width(left)-lipgloss.Width(right))
 	return truncateLeft(left+strings.Repeat(" ", gap)+right, max(1, m.width-screenMargin))
+}
+
+const (
+	treeIcon = iota
+	filesIcon
+)
+
+// sidebarIcons ends the title row, so the zones sit at the frame's right edge.
+func (m model) sidebarIcons() string {
+	icon := func(on bool, shown, hidden string) string {
+		if on {
+			return shown
+		}
+		return dimStyle.Render(hidden)
+	}
+	x := m.width - screenMargin - 3
+	if a := m.hits.add(regTitle, uv.Rect(x, 0, 3, 1)); a != nil {
+		a.zones = []hitZone{
+			{rect: uv.Rect(0, 0, 1, 1), target: hitTarget{kind: hitTab, index: treeIcon}},
+			{rect: uv.Rect(2, 0, 1, 1), target: hitTarget{kind: hitTab, index: filesIcon}},
+		}
+	}
+	return "  " + icon(m.sidebarVisible(), glyphSidebarLeft, glyphSidebarLeftOff) +
+		" " + icon(m.filesVisible(), glyphSidebarRight, glyphSidebarRightOff)
 }
 
 func (m model) waitingCount() int {

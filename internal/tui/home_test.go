@@ -710,7 +710,7 @@ func TestStatusBarShowsGlobalState(t *testing.T) {
 	if strings.Contains(bar, "projects") {
 		t.Errorf("status bar should drop the static label: %q", bar)
 	}
-	if !strings.HasSuffix(strings.TrimRight(bar, " "), "argus lock pin") {
+	if !strings.HasSuffix(bar, "argus lock pin  "+glyphSidebarLeft+" "+glyphSidebarRightOff) {
 		t.Errorf("status should be right-aligned: %q", bar)
 	}
 	assertFits(t, out, m.width)
