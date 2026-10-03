@@ -10,6 +10,7 @@ const (
 	homeHistory
 	homeLogs
 	homeSession
+	homeTerminals
 )
 
 // home and historyCursor keep the Home pane's cursor and the History tab's
@@ -52,7 +53,9 @@ func (m *model) remember() {
 			m.rememberSession(b.sessionID)
 		}
 	case screenComp:
-		m.rememberSession(b.sessionID)
+		if b.terminalID == "" {
+			m.rememberSession(b.sessionID)
+		}
 	case workspaceComp:
 		delete(m.memory.ws, b.ws)
 	case homeComp:
@@ -63,6 +66,10 @@ func (m *model) remember() {
 		m.memory.home.historyCursor = b.projCursor
 	case logsComp:
 		m.memory.home.view, m.memory.home.session = homeLogs, ""
+	case terminalsComp:
+		if b.nodeID == "" {
+			m.memory.home.view, m.memory.home.session = homeTerminals, ""
+		}
 	}
 }
 
@@ -126,11 +133,18 @@ func (m model) mainRow() string {
 		return b.ws
 	case summaryComp:
 		return b.id
+	case terminalsComp:
+		if b.nodeID != "" {
+			return b.nodeID
+		}
 	case transcriptComp:
 		if b.live {
 			return m.sessionRow(b.sessionID)
 		}
 	case screenComp:
+		if b.row != "" {
+			return b.row
+		}
 		return m.sessionRow(b.sessionID)
 	}
 	return homeRowID
@@ -187,6 +201,8 @@ func (m *model) showHome() tea.Cmd {
 		return tea.Batch(cmd, m.fetchHistProjects())
 	case e.view == homeLogs && m.hasLogsTab():
 		return m.resetMain(func() component { return newLogsComp() })
+	case e.view == homeTerminals:
+		return tea.Batch(m.resetMain(func() component { return terminalsComp{} }), m.loadTerminalsCmd())
 	case e.view == homeSession:
 		cmd := m.resetMain(func() component { return e.home })
 		mm, open := m.enterSession(e.session)
@@ -221,9 +237,11 @@ func (m model) homePane() homeComp {
 }
 
 func (m model) onRowPane() bool {
-	switch m.baseComp().(type) {
+	switch b := m.baseComp().(type) {
 	case workspaceComp, summaryComp:
 		return true
+	case terminalsComp:
+		return b.nodeID != ""
 	}
 	return false
 }
@@ -238,6 +256,12 @@ func (m model) rowGone() bool {
 		return !listed[b.ws]
 	case summaryComp:
 		_, ok := b.row(&ctx{m: &m})
+		return !ok
+	case terminalsComp:
+		if b.nodeID == "" {
+			return false
+		}
+		_, ok := m.left.tree.row(b.nodeID)
 		return !ok
 	}
 	return false

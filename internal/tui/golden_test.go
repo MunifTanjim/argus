@@ -52,6 +52,11 @@ func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 	}{
 		{"home", func() model { return typeKeys(homeTestModel(), "j") }},
 		{"home-kill", func() model { return typeKeys(killableHome(), "jdd") }},
+		{"home-terminals", func() model {
+			m := homeTestModel()
+			m, _ = upd(m, terminalsMsg{list: twoTerminals, nodes: capable("n1")})
+			return typeKeys(m, "gtgt")
+		}},
 		{"home-splash", func() model {
 			m := homeTestModel()
 			m.sessions, m.order = map[string]session.Session{}, nil

@@ -79,6 +79,7 @@ func contractComponents(m model) []component {
 		historyComp{},
 		historyComp{inProject: true},
 		newLogsComp(),
+		terminalsComp{},
 		workspaceComp{ws: "n1:w1"},
 		summaryComp{kind: rowProject, id: "n1:p1"},
 		fileComp{ws: "n1:w1", path: "go.mod"},

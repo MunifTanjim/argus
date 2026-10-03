@@ -110,6 +110,14 @@ var listKeys = struct {
 	Filter:     nb("filter-sessions", "/", "filter"),
 }
 
+var terminalKeys = struct {
+	New, Rename, Kill binding
+}{
+	New:    nb("terminal new", "a", "new"),
+	Rename: nb("terminal rename", "r", "rename"),
+	Kill:   nb("terminal kill", "dd", "kill"),
+}
+
 var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter       binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                        binding
@@ -325,7 +333,7 @@ func textInputSets() []any { return []any{createKeys, promptKeys} }
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys}
+		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

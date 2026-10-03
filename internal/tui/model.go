@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -52,9 +53,13 @@ func (r subRef) key() string {
 type model struct {
 	client        Client
 	sessions      map[string]session.Session
-	order         []string // session IDs, sorted for stable display
-	activeOnly    bool     // the session lists show only active and awaiting-input sessions
-	sessionFilter string   // the session lists show only the sessions that match it
+	order         []string       // session IDs, sorted for stable display
+	activeOnly    bool           // the session lists show only active and awaiting-input sessions
+	sessionFilter string         // the session lists show only the sessions that match it
+	terminals     []api.Terminal // every node's terminals, from the last load
+	terminalsErr  error
+	terminalsDone bool           // a terminal load has finished
+	nodeInfo      []api.NodeInfo // nodes and their capabilities, from the last load
 	width         int
 	height        int
 	reconnecting  bool // connection dropped; the client is retrying

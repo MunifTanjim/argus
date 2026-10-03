@@ -1,6 +1,6 @@
   󱙺 argus
 
-            Sessions   History   Logs
+            Sessions   History   Terminals   Logs
 
 time=12:00:00 level=INFO msg="line 0"
 time=12:00:01 level=INFO msg="line 1"

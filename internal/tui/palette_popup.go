@@ -94,8 +94,14 @@ func (m model) paletteScope() string {
 		}
 		return ""
 	}
-	if b, ok := m.baseComp().(summaryComp); ok {
+	switch b := m.baseComp().(type) {
+	case summaryComp:
 		return placeID(b.kind, b.id)
+	case terminalsComp:
+		if b.nodeID == "" {
+			return ""
+		}
+		return placeID(rowNode, b.nodeID)
 	}
 	if id := m.mainRow(); id != "" && id != homeRowID {
 		return placeID(rowWorkspace, id)

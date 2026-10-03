@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -104,6 +105,12 @@ func ptyWheelBytes(up bool, x, y, cols, rows int) []byte {
 	return []byte(ansi.MouseSgr(ansi.EncodeMouseButton(b, false, false, false, false), x, y, false))
 }
 
+// ptyMouseBytes encodes a button event at cell (x, y) as an SGR mouse report.
+func ptyMouseBytes(b tea.MouseButton, kind screenMouseKind, x, y int) []byte {
+	code := ansi.EncodeMouseButton(b, kind == mouseDrag, false, false, false)
+	return []byte(ansi.MouseSgr(code, x, y, kind == mouseRelease))
+}
+
 var fnKeySeqs = map[int]string{
 	1: "\x1bOP", 2: "\x1bOQ", 3: "\x1bOR", 4: "\x1bOS",
 	5: "\x1b[15~", 6: "\x1b[17~", 7: "\x1b[18~", 8: "\x1b[19~",
@@ -160,19 +167,22 @@ func (m model) termDims() (cols, rows int) {
 	return termDimsFor(l.w, l.h)
 }
 
+// termDimsFor sizes the screen box's interior for a w×h pane: the border takes
+// 2 columns, and the box keeps the frame's left margin on its right too.
 func termDimsFor(w, h int) (cols, rows int) {
-	return max(10, w-2), max(1, h-6)
+	return max(10, w-2-screenMargin), max(1, h-6)
 }
 
 func attachScreen(c *ctx, id string) tea.Cmd {
 	m := c.m
 	cols, rows := m.termDims()
-	s := screenComp{sessionID: id, termID: newTermID(), term: vt.NewEmulator(cols, rows), stop: make(chan struct{})}
+	emu, cur := newScreenEmulator(cols, rows)
+	s := screenComp{sessionID: id, termID: newTermID(), term: emu, cursorState: cur, stop: make(chan struct{})}
 	go drainEmulator(s.term, s.stop)
 	c.open(s)
 	host, _ := os.Hostname()
 	clientPane := clientPaneFor(m.sessions[id], host, os.Getenv("TMUX"), os.Getenv("TMUX_PANE"))
-	return m.termOpenCmd(id, s.termID, cols, rows, clientPane)
+	return m.termOpenCmd(api.TerminalOpenParams{TermID: s.termID, SessionID: id, Cols: cols, Rows: rows, ClientPane: clientPane})
 }
 
 // terminal.open spawns and adopts a pane on demand for a live paneless session
@@ -185,6 +195,39 @@ func openLiveScreen(c *ctx) tea.Cmd {
 		return nil
 	}
 	return attachScreen(c, id)
+}
+
+// screenCursor is the cursor that the program on the live screen sets: it can
+// hide it and change its shape and blinking.
+type screenCursor struct {
+	hidden atomic.Bool
+	style  atomic.Int32 // a vt.CursorStyle
+	steady atomic.Bool
+}
+
+func newScreenEmulator(cols, rows int) (*vt.Emulator, *screenCursor) {
+	e := vt.NewEmulator(cols, rows)
+	c := &screenCursor{}
+	e.SetCallbacks(vt.Callbacks{
+		CursorVisibility: func(visible bool) { c.hidden.Store(!visible) },
+		// vt passes "steady" despite the parameter's documented name (blink):
+		// Screen.setCursorStyle calls the callback with !blink.
+		CursorStyle: func(style vt.CursorStyle, steady bool) {
+			c.style.Store(int32(style))
+			c.steady.Store(steady)
+		},
+	})
+	return e, c
+}
+
+func (c *screenCursor) shape() tea.CursorShape {
+	switch vt.CursorStyle(c.style.Load()) {
+	case vt.CursorUnderline:
+		return tea.CursorUnderline
+	case vt.CursorBar:
+		return tea.CursorBar
+	}
+	return tea.CursorBlock
 }
 
 // drainEmulator discards the emulator's auto-generated query replies (DA/DSR/
@@ -205,13 +248,10 @@ func drainEmulator(e *vt.Emulator, stop <-chan struct{}) {
 	}
 }
 
-func (m model) termOpenCmd(id, termID string, cols, rows int, clientPane string) tea.Cmd {
+func (m model) termOpenCmd(p api.TerminalOpenParams) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		err := client.Call(api.MethodTerminalOpen, api.TerminalOpenParams{
-			TermID: termID, SessionID: id, Cols: cols, Rows: rows, ClientPane: clientPane,
-		}, nil)
-		return termOpenedMsg{termID: termID, err: err}
+		return termOpenedMsg{termID: p.TermID, err: client.Call(api.MethodTerminalOpen, p, nil)}
 	}
 }
 

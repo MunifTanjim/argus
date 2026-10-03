@@ -123,6 +123,7 @@ func TestHomeTabsCycle(t *testing.T) {
 	isHome := func(c component) bool { _, ok := c.(homeComp); return ok }
 	isHistory := func(c component) bool { _, ok := c.(historyComp); return ok }
 	isLogs := func(c component) bool { _, ok := c.(logsComp); return ok }
+	isTerminals := func(c component) bool { _, ok := c.(terminalsComp); return ok }
 	pane := homeTestModel()
 	pane.logs = logbuf.New(10)
 	fromTree := pressKeys(pane, cw('h')...)
@@ -135,8 +136,8 @@ func TestHomeTabsCycle(t *testing.T) {
 			t.Fatalf("%s: want Home with the pane focused: view=%v focus=%v", name, viewOf(start), start.focused)
 		}
 		for keys, want := range map[string][]func(component) bool{
-			"gt": {isHistory, isLogs, isHome},
-			"gT": {isLogs, isHistory, isHome},
+			"gt": {isHistory, isTerminals, isLogs, isHome},
+			"gT": {isLogs, isTerminals, isHistory, isHome},
 		} {
 			m := start
 			for i, is := range want {

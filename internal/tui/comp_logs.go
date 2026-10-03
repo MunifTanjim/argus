@@ -52,7 +52,7 @@ func (l logsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	case m.matches(msg, k.Bottom):
 		l.follow = true
 	case m.matches(msg, listKeys.TabPrev):
-		return l, openHistory(c), true
+		return l, stepHomeTab(c, tabLogs, -1), true
 	case m.matches(msg, listKeys.TabNext), m.matches(msg, k.Back):
 		c.replaceBase(c.m.homePane())
 	default:
@@ -62,10 +62,10 @@ func (l logsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 }
 
 func (l logsComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
-	if t.kind != hitTab || homeTab(t.index) == tabLogs {
+	if t.kind != hitTab || c.m.homeTabAt(t.index) == tabLogs {
 		return l, nil
 	}
-	return l, switchHomeTab(c, homeTab(t.index))
+	return l, switchHomeTab(c, c.m.homeTabAt(t.index))
 }
 
 func (l logsComp) wheel(c *ctx, d int) (component, tea.Cmd) { return l.scrollBy(c, d), nil }

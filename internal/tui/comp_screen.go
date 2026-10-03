@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -22,14 +23,37 @@ const (
 // screenWheelMsg is the wheel at (x, y) in the main pane.
 type screenWheelMsg struct{ x, y, delta int }
 
+type screenMouseKind int
+
+const (
+	mousePress screenMouseKind = iota
+	mouseDrag
+	mouseRelease
+)
+
+// screenMouseMsg is a button press, drag, or release at (x, y) in the main
+// pane.
+type screenMouseMsg struct {
+	x, y   int
+	button tea.MouseButton
+	kind   screenMouseKind
+}
+
 // screenComp is the live screen. It takes every key as typed; only the leave
 // key pops it.
 type screenComp struct {
 	sessionID string
-	term      *vt.Emulator
-	termID    string        // unique per attach; the gateway and node key on it
-	stop      chan struct{} // closed to stop the emulator drain goroutine
-	err       error         // terminal.open failure, shown in the box
+	// terminalID, title, and node describe an attach to a node terminal instead
+	// of a session; row is the tree row that the attach belongs to.
+	terminalID  string
+	title       string
+	node        string
+	row         string
+	term        *vt.Emulator
+	cursorState *screenCursor // nil without an attach
+	termID      string        // unique per attach; the gateway and node key on it
+	stop        chan struct{} // closed to stop the emulator drain goroutine
+	err         error         // terminal.open failure, shown in the box
 	// gone marks an attach that already ended on the node, so close does not
 	// ask the node to close it.
 	gone bool
@@ -67,6 +91,15 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		return s, c.m.termResizeCmd(s.termID, cols, rows)
 	case tea.PasteMsg:
 		c.m.sendTermKey(s.termID, []byte(msg.Content))
+	case screenMouseMsg:
+		if s.term == nil {
+			break
+		}
+		x, y := msg.x-screenBodyX, msg.y-screenBodyY
+		if x < 0 || y < 0 || x >= s.term.Width() || y >= s.term.Height() {
+			break
+		}
+		c.m.sendTermKey(s.termID, ptyMouseBytes(msg.button, msg.kind, x, y))
 	case screenWheelMsg:
 		if s.term == nil {
 			break
@@ -78,6 +111,11 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	case termOpenedMsg:
 		if msg.err != nil {
 			s.err = msg.err
+			// The terminal can be gone with no terminal.changed (its shell exited
+			// while no one watched), so the list reloads.
+			if s.terminalID != "" {
+				return s, c.m.loadTerminalsCmd()
+			}
 		}
 	case api.TerminalOutput:
 		if s.term == nil {
@@ -115,10 +153,14 @@ func (s screenComp) close(c *ctx) tea.Cmd {
 
 func (s screenComp) view(c *ctx, w, h int) string {
 	m := c.m
-	ss := m.sessions[s.sessionID]
 	var b strings.Builder
-	b.WriteString(headerStyle.Render(ss.Tmux.SessionName) +
-		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss))) + "\n\n")
+	if s.terminalID != "" {
+		b.WriteString(headerStyle.Render(s.title) + dimStyle.Render("  "+s.node) + "\n\n")
+	} else {
+		ss := m.sessions[s.sessionID]
+		b.WriteString(headerStyle.Render(ss.Tmux.SessionName) +
+			dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss))) + "\n\n")
+	}
 
 	var body string
 	switch {
@@ -131,6 +173,10 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	if len(lines) > visible {
 		lines = lines[len(lines)-visible:]
+	}
+	// The box keeps its full size while the program has drawn only a few rows.
+	for len(lines) < visible {
+		lines = append(lines, "")
 	}
 	// Lines carry SGR escapes; clip to the interior width and reset so colors
 	// don't bleed.
@@ -153,8 +199,28 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	return b.String()
 }
 
+// cursor is the program's cursor on the frame, with the box at origin and rows
+// visible rows, or nil when the program hides it or it is off the box.
+func (s screenComp) cursor(origin uv.Position, rows int) *tea.Cursor {
+	if s.term == nil || s.err != nil || s.cursorState == nil || s.cursorState.hidden.Load() {
+		return nil
+	}
+	p := s.term.CursorPosition()
+	y := p.Y - max(0, s.term.Height()-rows)
+	if y < 0 || y >= rows || p.X >= s.term.Width() {
+		return nil
+	}
+	c := tea.NewCursor(origin.X+screenBodyX+p.X, origin.Y+screenBodyY+y)
+	c.Shape, c.Blink = s.cursorState.shape(), !s.cursorState.steady.Load()
+	return c
+}
+
 func (s screenComp) footerPrompt(c *ctx) string {
-	return dimStyle.Render("keys go to the session · ") + c.m.footer(s.footer(c)...)
+	target := "session"
+	if s.terminalID != "" {
+		target = "terminal"
+	}
+	return dimStyle.Render("keys go to the "+target+" · ") + c.m.footer(s.footer(c)...)
 }
 
 func (m model) liveScreen() (screenComp, bool) {

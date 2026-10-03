@@ -54,6 +54,10 @@ func (s summaryComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 	if paneTreeKey(c, msg) {
 		return s, nil, true
 	}
+	if s.kind == rowNode && c.m.nodeHasTerminals(s.id) &&
+		(c.m.matches(msg, listKeys.TabNext) || c.m.matches(msg, listKeys.TabPrev)) {
+		return s, openNodeTerminals(c, s.id), true
+	}
 	if !c.m.matches(msg, projectsKeys.Back) {
 		return s, nil, false
 	}
@@ -71,7 +75,18 @@ func (s summaryComp) view(c *ctx, w, _ int) string {
 	if r, ok := s.row(c); ok {
 		body = rowSummary(c, r, cardW)
 	}
+	if s.kind == rowNode && c.m.nodeHasTerminals(s.id) {
+		c.m.hitNodeTabs(c, centerGutter(cardW, w))
+		body = c.m.nodeTabs(nodeTabProjects) + "\n\n" + body
+	}
 	return centerBlock(body, cardW, w)
+}
+
+func (s summaryComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
+	if s.kind == rowNode && t.kind == hitTab && nodeTab(t.index) == nodeTabTerminals {
+		return s, openNodeTerminals(c, s.id)
+	}
+	return s, nil
 }
 
 func (s summaryComp) footer(*ctx) []binding { return []binding{projectsKeys.Help} }

@@ -44,10 +44,10 @@ func (h historyComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 
 func (h historyComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	if t.kind == hitTab {
-		if homeTab(t.index) == tabHistory {
+		if c.m.homeTabAt(t.index) == tabHistory {
 			return h, nil
 		}
-		return h, switchHomeTab(c, homeTab(t.index))
+		return h, switchHomeTab(c, c.m.homeTabAt(t.index))
 	}
 	if h.inProject {
 		switch {
@@ -107,10 +107,12 @@ func (h historyComp) projectsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	case m.matches(msg, k.Refresh):
 		h.projects, h.err = nil, nil
 		cmd = m.fetchHistProjects()
-	case m.matches(msg, listKeys.TabPrev), m.matches(msg, k.Back):
+	case m.matches(msg, k.Back):
 		c.replaceBase(c.m.homePane())
+	case m.matches(msg, listKeys.TabPrev):
+		cmd = stepHomeTab(c, tabHistory, -1)
 	case m.matches(msg, listKeys.TabNext):
-		openLogs(c)
+		cmd = stepHomeTab(c, tabHistory, 1)
 	default:
 		return h, nil, false
 	}
