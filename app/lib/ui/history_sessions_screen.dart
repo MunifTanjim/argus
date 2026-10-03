@@ -8,7 +8,6 @@ import 'agent_badge.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
-import 'shell_drawer.dart';
 
 class HistorySessionsScreen extends ConsumerStatefulWidget {
   const HistorySessionsScreen({super.key, required this.project});
@@ -65,10 +64,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.project.label),
-        actions: [?shellMenuButton(context)],
-      ),
+      appBar: AppBar(title: Text(widget.project.label)),
       // top: false — AppBar covers the top; bottom-only clears the nav bar.
       body: SafeArea(top: false, child: _buildBody()),
     );
