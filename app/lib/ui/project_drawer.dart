@@ -8,6 +8,7 @@ import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
+import 'git_branch_icon.dart';
 import 'node_screen.dart';
 import 'project_actions.dart';
 import 'settings_screen.dart';
@@ -355,12 +356,14 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             final hit = lookupWorkspace(projects, r.id);
             if (hit != null) showWorkspaceSheet(context, hit.$1, hit.$2);
           },
-          leading: Icon(
-            r.isMain ? Icons.folder_outlined : Icons.call_split,
-            size: 16,
-            color: AppColors.dim,
-            semanticLabel: r.isMain ? 'main worktree' : null,
-          ),
+          leading: r.isMain
+              ? const Icon(
+                  Icons.folder_outlined,
+                  size: 16,
+                  color: AppColors.dim,
+                  semanticLabel: 'main worktree',
+                )
+              : const GitBranchIcon(size: 16, color: AppColors.dim),
           title: _title(r),
           subtitle: r.detail,
           trailing: _trailing([

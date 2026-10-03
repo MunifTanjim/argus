@@ -102,7 +102,7 @@ class WorkspaceScreen extends ConsumerWidget {
                 WorkspaceTab.values[i],
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
+            icon: Icon(Icons.forum_outlined),
             label: 'Sessions',
           ),
           NavigationDestination(

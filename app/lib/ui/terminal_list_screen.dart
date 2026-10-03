@@ -147,6 +147,7 @@ class TerminalListScreen extends ConsumerWidget {
         ));
       }
       rows.add(ListTile(
+        titleAlignment: ListTileTitleAlignment.titleHeight,
         leading: const Icon(Icons.terminal),
         title: Text(t.title),
         subtitle: Text(t.cwd),
