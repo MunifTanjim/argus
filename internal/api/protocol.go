@@ -135,6 +135,8 @@ const (
 	MethodWorkspaceRunSetup  = "workspace.runSetup"  // request: WorkspaceRef; result: nil
 	MethodWorkspaceSetupLog  = "workspace.setupLog"  // request: WorkspaceRef; result: SetupLogResult
 	MethodProjectChanged     = "project.changed"     // notification: empty params (server→client); refetch project.list
+	MethodHostInfo           = "host.info"           // request: HostInfoParams; result: HostInfo
+	MethodHostSetWakelock    = "host.setWakelock"    // request: HostSetWakelockParams; result: HostWakelock
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -546,6 +548,8 @@ type NodeCapabilities struct {
 	SpawnSession bool `json:"spawn_session"`
 	// Terminal reports whether the node can run persistent terminals (tmux present).
 	Terminal bool `json:"terminal"`
+	// HostWakelock reports whether the node can hold a wakelock (host.setWakelock).
+	HostWakelock bool `json:"host_wakelock"`
 }
 
 // ServerInfo carries server-wide metadata for a connected client: server version
@@ -576,6 +580,36 @@ type NodeInfo struct {
 	Label        string           `json:"label"`
 	Version      string           `json:"version"` // node's binary version
 	Capabilities NodeCapabilities `json:"capabilities"`
+}
+
+// HostWakelockIndefinite is the HostWakelock.Until value for "until turned off".
+// It equals the push pause sentinel, so clients share one value.
+const HostWakelockIndefinite = "9999-12-31T23:59:59Z"
+
+type HostInfoParams struct {
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// HostInfo describes the machine a node runs on.
+type HostInfo struct {
+	OS            string       `json:"os,omitempty"` // e.g. "macOS 26.0.1 (arm64)"
+	UptimeSeconds int64        `json:"uptime_seconds"`
+	Battery       *HostBattery `json:"battery,omitempty"` // nil when the host has no battery
+	Wakelock      HostWakelock `json:"wakelock"`
+}
+
+type HostBattery struct {
+	Percent int    `json:"percent"`
+	State   string `json:"state"` // charging | discharging | full | not_charging | unknown
+}
+
+type HostWakelock struct {
+	Until string `json:"until,omitempty"` // RFC3339; empty = off; HostWakelockIndefinite = until turned off
+}
+
+type HostSetWakelockParams struct {
+	NodeID string `json:"node_id,omitempty"`
+	Until  string `json:"until,omitempty"`
 }
 
 type SpawnParams struct {

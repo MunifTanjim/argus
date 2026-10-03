@@ -64,6 +64,8 @@ var nodeAddressed = map[string]bool{
 	api.MethodSessionsHistoryTranscript: true,
 	api.MethodSessionHistoryToolDetail:  true,
 	api.MethodTerminalCreate:            true,
+	api.MethodHostInfo:                  true,
+	api.MethodHostSetWakelock:           true,
 }
 
 // terminalHandleAddressed methods carry a term_id (not a session_id); the client

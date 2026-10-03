@@ -103,6 +103,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		// Standalone node logs to the configured logger (the embedded node, sharing a
 		// TUI's terminal, stays at its discard default).
