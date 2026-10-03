@@ -522,9 +522,9 @@ func TestAttachEnvGuaranteesTerm(t *testing.T) {
 	if !slices.Contains(got, "TERM="+fallbackTerm) {
 		t.Fatalf("attachEnv with empty TERM = %#v, want a %s entry", got, fallbackTerm)
 	}
-	got = attachEnv([]string{"TERM=screen-256color"})
-	if !slices.Equal(got, []string{"TERM=screen-256color"}) {
-		t.Fatalf("attachEnv overrode an inherited TERM: %#v", got)
+	got = attachEnv([]string{"TERM=tmux-256color", "HOME=/home/argus"})
+	if !slices.Equal(got, []string{"HOME=/home/argus", "TERM=" + fallbackTerm}) {
+		t.Fatalf("attachEnv kept an inherited TERM: %#v, want %s (tmux sends cursor styles only to xterm*)", got, fallbackTerm)
 	}
 }
 
@@ -569,5 +569,157 @@ func TestGroupedMirrorLifecycle(t *testing.T) {
 	}
 	if err := c.KillSession(ctx, "_argus-mirror-t1_"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNewWindowCreatesTheSessionThenAddsWindows(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	if ws, err := c.ListWindows(ctx, "terminal"); err != nil || ws != nil {
+		t.Fatalf("ListWindows with no server = %v, %v; want nil, nil", ws, err)
+	}
+	w1, err := c.NewWindow(ctx, "terminal", dir)
+	if err != nil {
+		t.Fatalf("NewWindow (no session): %v", err)
+	}
+	w2, err := c.NewWindow(ctx, "terminal", dir)
+	if err != nil {
+		t.Fatalf("NewWindow (session exists): %v", err)
+	}
+	ws, err := c.ListWindows(ctx, "terminal")
+	if err != nil {
+		t.Fatalf("ListWindows: %v", err)
+	}
+	if len(ws) != 2 || ws[0].ID != w1 || ws[1].ID != w2 {
+		t.Fatalf("windows = %+v, want [%s %s] in order", ws, w1, w2)
+	}
+	if !ws[0].AutoRename || ws[0].CurrentCommand == "" || !endsWith(ws[0].CurrentPath, baseOf(dir)) {
+		t.Errorf("window = %+v, want auto-rename, a command, and cwd under %s", ws[0], dir)
+	}
+}
+
+func TestListWindowsOfAMissingSessionIsEmpty(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	if _, err := c.NewSession(ctx, NewSessionOpts{Name: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if ws, err := c.ListWindows(ctx, "terminal"); err != nil || ws != nil {
+		t.Fatalf("ListWindows = %v, %v; want nil, nil", ws, err)
+	}
+}
+
+func TestRenameWindowStopsAutoRename(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	w, err := c.NewWindow(ctx, "terminal", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RenameWindow(ctx, w, "-build"); err != nil {
+		t.Fatalf("RenameWindow: %v", err)
+	}
+	ws, _ := c.ListWindows(ctx, "terminal")
+	if len(ws) != 1 || ws[0].Name != "-build" || ws[0].AutoRename {
+		t.Fatalf("windows = %+v, want one named -build with auto-rename off", ws)
+	}
+}
+
+func TestRenameWindowKeepsHashLiteral(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	w, err := c.NewWindow(ctx, "terminal", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const name = "a #S #{session_name} #(echo hi) ##"
+	if err := c.RenameWindow(ctx, w, name); err != nil {
+		t.Fatalf("RenameWindow: %v", err)
+	}
+	// Newer tmux stores '#' in window names as '_'.
+	ws, _ := c.ListWindows(ctx, "terminal")
+	if len(ws) != 1 || (ws[0].Name != name && ws[0].Name != strings.ReplaceAll(name, "#", "_")) {
+		t.Fatalf("windows = %+v, want one named %q", ws, name)
+	}
+}
+
+func TestKillWindow(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	w1, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+	w2, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+	if err := c.KillWindow(ctx, w1); err != nil {
+		t.Fatalf("KillWindow: %v", err)
+	}
+	ws, _ := c.ListWindows(ctx, "terminal")
+	if len(ws) != 1 || ws[0].ID != w2 {
+		t.Fatalf("windows = %+v, want only %s", ws, w2)
+	}
+}
+
+func TestLinkedSingleWindowSession(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	w1, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+	w2, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+
+	first, err := c.NewEmptySession(ctx, "mirror")
+	if err != nil {
+		t.Fatalf("NewEmptySession: %v", err)
+	}
+	if err := c.LinkWindow(ctx, w1, "mirror"); err != nil {
+		t.Fatalf("LinkWindow: %v", err)
+	}
+	if err := c.KillWindow(ctx, first); err != nil {
+		t.Fatalf("KillWindow first: %v", err)
+	}
+	if ws, _ := c.ListWindows(ctx, "mirror"); len(ws) != 1 || ws[0].ID != w1 {
+		t.Fatalf("mirror windows = %+v, want only %s", ws, w1)
+	}
+	if err := c.KillSession(ctx, "mirror"); err != nil {
+		t.Fatal(err)
+	}
+	if ws, _ := c.ListWindows(ctx, "terminal"); len(ws) != 2 || ws[0].ID != w1 || ws[1].ID != w2 {
+		t.Fatalf("terminal windows after mirror kill = %+v, want both kept", ws)
+	}
+}
+
+func TestPaneWindowID(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	pane, err := c.NewSession(ctx, NewSessionOpts{Name: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := c.PaneWindowID(ctx, pane)
+	if err != nil || w == "" || w[0] != '@' {
+		t.Fatalf("PaneWindowID = %q, %v; want @N", w, err)
+	}
+	ws, _ := c.ListWindows(ctx, "agent")
+	if len(ws) != 1 || ws[0].ID != w {
+		t.Fatalf("agent windows = %+v, want %s", ws, w)
+	}
+}
+
+func TestNewWindowConcurrentFirstCreates(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() {
+			_, err := c.NewWindow(ctx, "terminal", dir)
+			errs <- err
+		}()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent NewWindow: %v", err)
+		}
+	}
+	if ws, _ := c.ListWindows(ctx, "terminal"); len(ws) != 4 {
+		t.Fatalf("windows = %d, want 4", len(ws))
 	}
 }

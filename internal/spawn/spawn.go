@@ -11,18 +11,34 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
+// TerminalSession is the tmux session that holds a node's persistent terminals.
+const TerminalSession = "terminal"
+
 // SessionName returns a unique tmux session name for cwd on client's server. The
-// base is cwd's folder name; collisions get a -2, -3, … suffix. A failure to list
-// panes is tolerated: the dedup set is left empty and any real collision surfaces
-// later as a tmux new-session error.
+// base is cwd's folder name; collisions with existing sessions or
+// TerminalSession get a -2, -3, … suffix. A failure to list panes is tolerated:
+// any real collision surfaces later as a tmux new-session error.
 func SessionName(ctx context.Context, client *tmux.Client, cwd string) string {
-	taken := map[string]bool{}
+	return freeName(ctx, client, defaultSessionName(cwd))
+}
+
+// AvoidReserved returns name, or a suffixed free name when name is
+// TerminalSession.
+func AvoidReserved(ctx context.Context, client *tmux.Client, name string) string {
+	if name != TerminalSession {
+		return name
+	}
+	return freeName(ctx, client, name)
+}
+
+func freeName(ctx context.Context, client *tmux.Client, base string) string {
+	taken := map[string]bool{TerminalSession: true}
 	if panes, err := client.ListPanes(ctx); err == nil {
 		for _, p := range panes {
 			taken[p.SessionName] = true
 		}
 	}
-	return uniqueName(defaultSessionName(cwd), taken)
+	return uniqueName(base, taken)
 }
 
 // defaultSessionName derives a tmux session name from cwd's base (e.g. the repo

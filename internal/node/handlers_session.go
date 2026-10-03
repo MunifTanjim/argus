@@ -415,12 +415,14 @@ func spawnEnv(command string) []string {
 }
 
 // launchPane opens a new tmux pane running command in cwd. A blank sessionName
-// gets a node-generated default. Discovery registers the pane shortly; a scan is
-// triggered for immediacy.
+// gets a node-generated default; the terminals' session name gets a suffix.
+// Discovery registers the pane shortly; a scan is triggered for immediacy.
 func (d *Node) launchPane(ctx context.Context, sessionName, command string, args []string, cwd string) (string, error) {
 	c := d.clients[session.TmuxServerArgus]
 	if sessionName == "" {
 		sessionName = spawn.SessionName(ctx, c, cwd)
+	} else {
+		sessionName = spawn.AvoidReserved(ctx, c, sessionName)
 	}
 	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args, Env: spawnEnv(command)})
 	if err != nil {

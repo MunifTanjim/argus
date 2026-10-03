@@ -2,10 +2,13 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +17,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/spawn"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
@@ -529,5 +533,185 @@ func TestClampSize(t *testing.T) {
 					c.cols, c.rows, gotCol, gotRow, c.wantCol, c.wantRow)
 			}
 		})
+	}
+}
+
+func openTerminal(t *testing.T, d *Node, ctx context.Context, termID, terminalID string) error {
+	t.Helper()
+	_, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: termID, TerminalID: terminalID, Cols: 80, Rows: 24}))
+	return err
+}
+
+func TestTerminalOpenByTerminalIDEndsWhenTheShellExits(t *testing.T) {
+	d, c := terminalNode(t)
+	a := createTerminal(t, d)
+	b := createTerminal(t, d)
+	n := newRecordingNotifier()
+	d.registerConn(n)
+	ctx := api.WithNotifier(context.Background(), n)
+
+	if err := openTerminal(t, d, ctx, "t1", a.ID); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	select {
+	case m := <-n.outputs:
+		if m.TermID != "t1" {
+			t.Fatalf("output for %q, want t1", m.TermID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no terminal.output")
+	}
+	if got := listTerminals(t, d); !got[0].Attached || got[1].Attached {
+		t.Errorf("attached = %v/%v, want only %s", got[0].Attached, got[1].Attached, a.ID)
+	}
+
+	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: base64.StdEncoding.EncodeToString([]byte("exit\r"))})); err != nil {
+		t.Fatal(err)
+	}
+	if !waitExited(n, "t1", 10*time.Second) {
+		t.Fatal("the attach did not end when the shell exited")
+	}
+	if ws, _ := c.ListWindows(ctx, spawn.TerminalSession); len(ws) != 1 || ws[0].ID != b.ID {
+		t.Fatalf("terminal windows = %+v, want only %s", ws, b.ID)
+	}
+}
+
+func TestTerminalCloseKeepsTheTerminal(t *testing.T) {
+	d, c := terminalNode(t)
+	n := newRecordingNotifier()
+	d.registerConn(n)
+	a := createTerminal(t, d)
+	ctx := api.WithNotifier(context.Background(), n)
+	if err := openTerminal(t, d, ctx, "t1", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.handleTerminalClose(ctx, mustJSON(api.TerminalCloseParams{TermID: "t1"})); err != nil {
+		t.Fatal(err)
+	}
+	got := listTerminals(t, d)
+	if len(got) != 1 || got[0].ID != a.ID || got[0].Attached {
+		t.Fatalf("list after close = %+v, want %s kept and not attached", got, a.ID)
+	}
+	names, _ := c.ListSessions(ctx)
+	if len(names) != 1 || names[0] != spawn.TerminalSession {
+		t.Errorf("sessions = %v, want only %s (mirror killed)", names, spawn.TerminalSession)
+	}
+	if notesOf(n, api.MethodTerminalChanged) < 2 {
+		t.Error("want terminal.changed for create and for the attach end")
+	}
+}
+
+func TestTerminalOpenValidatesTheTarget(t *testing.T) {
+	d, c := terminalNode(t)
+	ctx := api.WithNotifier(context.Background(), newRecordingNotifier())
+	a := createTerminal(t, d)
+
+	_, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t1", TerminalID: a.ID, SessionID: "s"}))
+	wantErr(t, "open with both ids", err, "set session_id or terminal_id, not both")
+	_, err = d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t1"}))
+	wantErr(t, "open with neither id", err, "session_id or terminal_id required")
+
+	pane, err := c.NewSession(context.Background(), tmux.NewSessionOpts{Name: "agent", Command: "sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentWin, _ := c.PaneWindowID(context.Background(), pane)
+	wantErr(t, "open of an agent window", openTerminal(t, d, ctx, "t2", agentWin), "unknown terminal: "+agentWin)
+	assertNoMirror(t, d, c)
+}
+
+func TestTerminalOpenReportsAShellThatExitedMidOpen(t *testing.T) {
+	d, c := terminalNode(t)
+	ctx := context.Background()
+	a := createTerminal(t, d)
+	b := createTerminal(t, d)
+	if err := c.KillWindow(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	linkErr := errors.New("link terminal: can't find window")
+	wantErr(t, "a terminal gone mid-open", d.terminalGoneOr(ctx, c, a.ID, linkErr), "unknown terminal: "+a.ID)
+	if err := d.terminalGoneOr(ctx, c, b.ID, linkErr); err != linkErr {
+		t.Errorf("a live terminal: err = %v, want the link error", err)
+	}
+}
+
+func assertNoMirror(t *testing.T, d *Node, c *tmux.Client) {
+	t.Helper()
+	names, _ := c.ListSessions(context.Background())
+	for _, n := range names {
+		if d.isMirror(n) {
+			t.Errorf("sessions = %v, want no mirror after a refused open", names)
+		}
+	}
+}
+
+func TestTerminalOpenRefusesTheCallersOwnWindow(t *testing.T) {
+	d, c := terminalNode(t)
+	ctx := api.WithNotifier(context.Background(), newRecordingNotifier())
+	a := createTerminal(t, d)
+	ws, _ := c.ListWindows(ctx, spawn.TerminalSession)
+	if len(ws) != 1 {
+		t.Fatal("want one terminal window")
+	}
+	out, err := exec.Command("tmux", "-L", testSocketOf(t, c), "list-panes", "-t", a.ID, "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane := strings.TrimSpace(string(out))
+	_, err = d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t1", TerminalID: a.ID, ClientPane: pane}))
+	wantErr(t, "open of the caller's own terminal", err, "this terminal holds your client; use it directly")
+	assertNoMirror(t, d, c)
+}
+
+func TestTerminalOpenNotifiesTheAttach(t *testing.T) {
+	d, _ := terminalNode(t)
+	a := createTerminal(t, d)
+	n := newRecordingNotifier()
+	d.registerConn(n)
+	if err := openTerminal(t, d, api.WithNotifier(context.Background(), n), "t1", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := notesOf(n, api.MethodTerminalChanged); got != 1 {
+		t.Errorf("terminal.changed after the open = %d, want 1 (others see it attached)", got)
+	}
+}
+
+func TestTerminalOpenEvictsTheTerminalsViewer(t *testing.T) {
+	d, _ := terminalNode(t)
+	a := createTerminal(t, d)
+	nA, nB := newRecordingNotifier(), newRecordingNotifier()
+	if err := openTerminal(t, d, api.WithNotifier(context.Background(), nA), "tA", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := openTerminal(t, d, api.WithNotifier(context.Background(), nB), "tB", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !waitEvicted(nA, "tA", 10*time.Second) {
+		t.Fatal("the first viewer was not evicted")
+	}
+}
+
+func TestTerminalWheelScrollsTheShellHistory(t *testing.T) {
+	d, c := terminalNode(t)
+	a := createTerminal(t, d)
+	ctx := api.WithNotifier(context.Background(), newRecordingNotifier())
+	if err := openTerminal(t, d, ctx, "t1", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	inMode := func() string {
+		out, _ := exec.Command("tmux", "-L", testSocketOf(t, c), "display-message", "-p", "-t", a.ID, "#{pane_in_mode}").Output()
+		return strings.TrimSpace(string(out))
+	}
+	time.Sleep(300 * time.Millisecond) // let the attach client start reading
+	wheelUp := base64.StdEncoding.EncodeToString([]byte("\x1b[<64;2;2M"))
+	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: wheelUp})); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for inMode() != "1" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := inMode(); got != "1" {
+		t.Fatalf("pane_in_mode = %q after a wheel up over the shell, want 1 (copy mode scrolls its history)", got)
 	}
 }

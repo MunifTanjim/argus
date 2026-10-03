@@ -3,6 +3,7 @@ package spawn
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -51,5 +52,24 @@ func TestSessionName(t *testing.T) {
 	// With the first name taken, the next call must pick a distinct name.
 	if second := SessionName(ctx, c, dir); second == first {
 		t.Fatalf("SessionName returned %q twice; want a deduped name", second)
+	}
+}
+
+func TestSessionNameSkipsReserved(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	ctx := context.Background()
+	c := tmux.New("argus-spawn-reserved-test")
+	t.Cleanup(func() { _ = c.KillServer(ctx) })
+	dir := filepath.Join(t.TempDir(), "terminal")
+	if got := SessionName(ctx, c, dir); got != "terminal-2" {
+		t.Fatalf("SessionName = %q, want terminal-2", got)
+	}
+	if got := AvoidReserved(ctx, c, "terminal"); got != "terminal-2" {
+		t.Fatalf("AvoidReserved(terminal) = %q, want terminal-2", got)
+	}
+	if got := AvoidReserved(ctx, c, "api"); got != "api" {
+		t.Fatalf("AvoidReserved(api) = %q, want it unchanged", got)
 	}
 }

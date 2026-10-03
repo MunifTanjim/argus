@@ -9,7 +9,24 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-const lockedKeyTable = "argus-locked"
+const (
+	lockedKeyTable = "argus-locked"
+	// lockedTermKeyTable is lockedKeyTable for a persistent terminal, whose
+	// wheel scrolls the shell's history.
+	lockedTermKeyTable = "argus-locked-term"
+)
+
+// mouseButtonKeys pass button events to a program that asked for the mouse;
+// tmux drops them otherwise.
+var mouseButtonKeys = func() []string {
+	var keys []string
+	for _, b := range []string{"1", "2", "3"} {
+		for _, ev := range []string{"MouseDown", "MouseUp", "MouseDrag", "MouseDragEnd"} {
+			keys = append(keys, ev+b+"Pane")
+		}
+	}
+	return keys
+}()
 
 type mirrorState struct {
 	name       string
@@ -49,27 +66,8 @@ func (d *Node) setupMirror(ctx context.Context, c *tmux.Client, s session.Sessio
 	}
 	m := &mirrorState{name: name}
 
-	// Lockdown (session-scoped; a key-table with only the wheel bound neutralizes
-	// custom bind -n). window-size latest + aggressive-resize make the shared
-	// window follow the attach's PTY size.
-	for _, kv := range [][2]string{
-		{"prefix", "None"}, {"prefix2", "None"}, {"mouse", "on"},
-		{"key-table", lockedKeyTable}, {"status", "off"},
-		{"window-size", "latest"}, {"aggressive-resize", "on"},
-	} {
-		if err := c.SetOption(ctx, name, kv[0], kv[1]); err != nil {
-			d.restoreMirror(c, m)
-			return nil, fmt.Errorf("set %s: %w", kv[0], err)
-		}
-	}
-
-	// The wheel goes only to a program that asked for the mouse; tmux drops it
-	// otherwise, so the shared pane never enters copy mode.
-	for _, key := range []string{"WheelUpPane", "WheelDownPane"} {
-		if err := c.BindKey(ctx, lockedKeyTable, key, "send-keys", "-M"); err != nil {
-			d.restoreMirror(c, m)
-			return nil, fmt.Errorf("bind %s: %w", key, err)
-		}
+	if err := d.lockdownMirror(ctx, c, m, lockedKeyTable); err != nil {
+		return nil, err
 	}
 
 	// Target the agent pane's own window (grouped sessions share window indices),
@@ -107,6 +105,68 @@ func (d *Node) setupMirror(ctx context.Context, c *tmux.Client, s session.Sessio
 		m.didZoom = true
 	}
 	// No resize-window: it would pin window-size to manual on the shared window.
+	return m, nil
+}
+
+// lockdownMirror removes the mirror on failure.
+func (d *Node) lockdownMirror(ctx context.Context, c *tmux.Client, m *mirrorState, table string) error {
+	// Session-scoped; a key-table with only the mouse bound neutralizes custom
+	// bind -n. window-size latest + aggressive-resize make the shared window
+	// follow the attach's PTY size.
+	for _, kv := range [][2]string{
+		{"prefix", "None"}, {"prefix2", "None"}, {"mouse", "on"},
+		{"key-table", table}, {"status", "off"},
+		{"window-size", "latest"}, {"aggressive-resize", "on"},
+	} {
+		if err := c.SetOption(ctx, m.name, kv[0], kv[1]); err != nil {
+			d.restoreMirror(c, m)
+			return fmt.Errorf("set %s: %w", kv[0], err)
+		}
+	}
+	binds := [][]string{{"WheelDownPane", "send-keys", "-M"}}
+	if table == lockedTermKeyTable {
+		// tmux's own default: a shell's wheel enters copy mode to scroll its
+		// history; a program that asked for the mouse gets the wheel.
+		binds = append(binds, []string{"WheelUpPane", "if-shell", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}", "send-keys -M", "copy-mode -e"})
+	} else {
+		// An agent's wheel goes only to a program that asked for the mouse, so
+		// the shared pane never enters copy mode.
+		binds = append(binds, []string{"WheelUpPane", "send-keys", "-M"})
+	}
+	for _, key := range mouseButtonKeys {
+		binds = append(binds, []string{key, "send-keys", "-M"})
+	}
+	for _, b := range binds {
+		if err := c.BindKey(ctx, table, b[0], b[1:]...); err != nil {
+			d.restoreMirror(c, m)
+			return fmt.Errorf("bind %s: %w", b[0], err)
+		}
+	}
+	return nil
+}
+
+// setupTerminalMirror mirrors one terminal window in a session that holds only
+// that window. A grouped mirror would share every terminal, so after a shell
+// exits it would show another one; with one linked window, tmux removes the
+// mirror when the window dies and the attach ends.
+func (d *Node) setupTerminalMirror(ctx context.Context, c *tmux.Client, windowID, termID string) (*mirrorState, error) {
+	name := d.mirrorName(termID)
+	first, err := c.NewEmptySession(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("create mirror: %w", err)
+	}
+	m := &mirrorState{name: name}
+	if err := c.LinkWindow(ctx, windowID, name); err != nil {
+		d.restoreMirror(c, m)
+		return nil, fmt.Errorf("link terminal: %w", err)
+	}
+	if err := c.KillWindow(ctx, first); err != nil {
+		d.restoreMirror(c, m)
+		return nil, err
+	}
+	if err := d.lockdownMirror(ctx, c, m, lockedTermKeyTable); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 

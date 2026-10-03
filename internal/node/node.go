@@ -417,6 +417,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	if c, ok := clients[session.TmuxServerArgus]; ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		caps.SpawnSession = c.Available(ctx)
+		caps.Terminal = caps.SpawnSession
 		cancel()
 	}
 

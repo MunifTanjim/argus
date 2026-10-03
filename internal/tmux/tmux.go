@@ -589,19 +589,17 @@ func (c *Client) AttachCommand(ctx context.Context, session string) *exec.Cmd {
 	return cmd
 }
 
-// attachEnv guarantees a usable TERM: a node started as a daemon (systemd,
-// container) inherits none, and tmux then refuses to attach at all ("terminal
-// does not support clear"), killing the PTY the instant it opens.
+// attachEnv sets TERM to xterm-256color whatever the node inherited. The PTY's
+// reader is always an xterm-like emulator (the TUI's, the app's), and tmux
+// sends features such as cursor styles only to xterm* clients. A node started
+// as a daemon (systemd, container) inherits no TERM at all, and tmux then
+// refuses to attach ("terminal does not support clear").
 func attachEnv(env []string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
-		if name, val, _ := strings.Cut(kv, "="); name == "TERM" {
-			if val != "" {
-				return env
-			}
-			continue
+		if name, _, _ := strings.Cut(kv, "="); name != "TERM" {
+			out = append(out, kv)
 		}
-		out = append(out, kv)
 	}
 	return append(out, "TERM="+fallbackTerm)
 }
@@ -623,6 +621,122 @@ func (c *Client) ListSessions(ctx context.Context) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// Window is one tmux window and the process in its active pane.
+type Window struct {
+	ID             string // stable "@N" identifier
+	Index          int
+	Name           string
+	AutoRename     bool // tmux names the window after its command
+	CurrentPath    string
+	CurrentCommand string
+}
+
+var windowFormat = strings.Join([]string{
+	"#{window_id}",
+	"#{window_index}",
+	"#{window_name}",
+	"#{automatic-rename}",
+	"#{pane_current_path}",
+	"#{pane_current_command}",
+}, fieldSep)
+
+func duplicateSession(err error) bool {
+	var te *Error
+	return errors.As(err, &te) && strings.Contains(te.Stderr, "duplicate session")
+}
+
+func noSession(err error) bool {
+	var te *Error
+	return errors.As(err, &te) && strings.Contains(te.Stderr, "can't find session")
+}
+
+// ListWindows returns session's windows in index order, or nil and no error
+// when the server or the session does not exist.
+func (c *Client) ListWindows(ctx context.Context, session string) ([]Window, error) {
+	out, err := c.run(ctx, "list-windows", "-t", "="+session, "-F", windowFormat)
+	if err != nil {
+		if noServer(err) || noSession(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var ws []Window
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		w, err := parseWindow(line)
+		if err != nil {
+			return nil, err
+		}
+		ws = append(ws, w)
+	}
+	return ws, nil
+}
+
+func parseWindow(line string) (Window, error) {
+	line = strings.ReplaceAll(line, `\037`, fieldSep)
+	f := strings.Split(line, fieldSep)
+	if len(f) != 6 {
+		return Window{}, fmt.Errorf("tmux: unexpected window format (%d fields): %q", len(f), line)
+	}
+	return Window{
+		ID:             f[0],
+		Index:          atoi(f[1]),
+		Name:           f[2],
+		AutoRename:     f[3] == "1",
+		CurrentPath:    f[4],
+		CurrentCommand: f[5],
+	}, nil
+}
+
+// NewWindow adds a window that runs the default shell in cwd to session,
+// creating the session when it does not exist, and returns the window id.
+func (c *Client) NewWindow(ctx context.Context, session, cwd string) (string, error) {
+	newWindow := func() (string, error) {
+		return c.run(ctx, "new-window", "-t", "="+session+":", "-c", cwd, "-P", "-F", "#{window_id}")
+	}
+	out, err := newWindow()
+	if err != nil && (noServer(err) || noSession(err)) {
+		out, err = c.run(ctx, "new-session", "-d", "-s", session, "-x", "120", "-y", "40", "-c", cwd, "-P", "-F", "#{window_id}")
+		// A concurrent caller created the session first; add a window to it.
+		if duplicateSession(err) {
+			out, err = newWindow()
+		}
+	}
+	return strings.TrimSpace(out), err
+}
+
+// NewEmptySession creates a detached session and returns its first window id,
+// for a caller that replaces that window.
+func (c *Client) NewEmptySession(ctx context.Context, name string) (string, error) {
+	out, err := c.run(ctx, "new-session", "-d", "-s", name, "-P", "-F", "#{window_id}")
+	return strings.TrimSpace(out), err
+}
+
+// LinkWindow links window into session at the session's next free index.
+func (c *Client) LinkWindow(ctx context.Context, window, session string) error {
+	_, err := c.run(ctx, "link-window", "-s", window, "-t", "="+session+":")
+	return err
+}
+
+func (c *Client) KillWindow(ctx context.Context, window string) error {
+	_, err := c.run(ctx, "kill-window", "-t", window)
+	return err
+}
+
+// RenameWindow names window; tmux then stops renaming it after its command.
+// The name is stored literally: tmux would otherwise expand formats in it.
+func (c *Client) RenameWindow(ctx context.Context, window, name string) error {
+	_, err := c.run(ctx, "rename-window", "-t", window, "--", strings.ReplaceAll(name, "#", "##"))
+	return err
+}
+
+func (c *Client) PaneWindowID(ctx context.Context, paneID string) (string, error) {
+	out, err := c.run(ctx, "display-message", "-p", "-t", paneID, "#{window_id}")
+	return strings.TrimSpace(out), err
 }
 
 // KillServer terminates the entire tmux server for this client's socket. Used
