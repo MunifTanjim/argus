@@ -249,6 +249,7 @@ nodes:
             dir: /home/you/dev/web-app-worktrees/checkout-rounding
             branch: fix/checkout-rounding
             target_branch: main
+            repo_spec: repos/checkout
       - id: p-scratch
         name: scratch
         kind: plain

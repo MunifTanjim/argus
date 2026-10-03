@@ -1,0 +1,4 @@
+[
+  {"items": [{"name": "Widget A", "price_cents": 1999, "quantity": 3}], "discount": 15},
+  {"items": [{"name": "Gadget X", "price_cents": 4995, "quantity": 2}], "discount": 0}
+]
