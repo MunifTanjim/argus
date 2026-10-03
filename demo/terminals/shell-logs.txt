@@ -1,0 +1,11 @@
+[92myou@home-desktop[0m [94m~/dev/argus[0m [93m(main)[0m $ tail -f ~/.local/state/argus/gateway.log
+2026-10-03T03:38:02Z INFO  gateway listening addr=127.0.0.1:8443
+2026-10-03T03:38:03Z INFO  node connected id=home label=home-desktop
+2026-10-03T03:38:03Z INFO  node connected id=laptop label=macbook-pro
+2026-10-03T03:38:04Z INFO  node connected id=devbox label=dev-server
+2026-10-03T03:38:11Z INFO  client connected device=iphone
+2026-10-03T03:39:27Z INFO  session status id=argus-main status=working
+2026-10-03T03:40:05Z INFO  session status id=webapp status=awaiting_input
+2026-10-03T03:40:06Z [93mWARN[0m  push retry device=iphone attempt=1
+2026-10-03T03:40:07Z INFO  push delivered device=iphone
+2026-10-03T03:41:12Z INFO  session status id=api-triage status=awaiting_input

@@ -338,3 +338,15 @@ func TestDemoLaunchPaneFails(t *testing.T) {
 		t.Fatal("launchPane on a demo node must fail")
 	}
 }
+
+func TestDemoFleetFixtureLoads(t *testing.T) {
+	dd, err := LoadDemoData("../../demo/fleet.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData(demo/fleet.yaml): %v", err)
+	}
+	for _, n := range dd.Nodes {
+		if len(n.Projects) == 0 || len(n.Terminals) == 0 {
+			t.Errorf("node %s: projects=%d terminals=%d, want both", n.ID, len(n.Projects), len(n.Terminals))
+		}
+	}
+}

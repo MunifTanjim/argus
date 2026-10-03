@@ -10,6 +10,7 @@ nodes:
         cwd: /home/you/dev/argus
         status: working
         source: hooked
+        workspace_id: w-argus-main
         frontend: tmux
         transcript_path: transcripts/claude-argus.jsonl
         terminal_path: terminals/claude-argus.txt
@@ -29,6 +30,7 @@ nodes:
         cwd: /home/you/dotfiles
         status: idle
         source: hooked
+        workspace_id: w-dotfiles
         frontend: tmux
     history:
       - repo: argus
@@ -121,6 +123,59 @@ nodes:
             tokens: 24000
             turn_count: 5
             duration_ms: 180000
+    terminals:
+      - id: "@1"
+        name: gateway logs
+        cwd: ~/dev/argus
+        command: tail
+        attached: true
+        terminal_path: terminals/shell-logs.txt
+      - id: "@2"
+        cwd: ~/dev/argus
+        command: zsh
+      - id: "@3"
+        name: monitor
+        cwd: "~"
+        command: htop
+    projects:
+      - id: p-argus
+        name: argus
+        kind: git
+        dir: /home/you/dev/argus
+        default_branch: main
+        pinned: true
+        workspaces:
+          - id: w-argus-main
+            dir: /home/you/dev/argus
+            is_main: true
+            branch: main
+          - id: w-argus-voice
+            dir: /home/you/dev/argus-worktrees/voice-input
+            branch: feat/voice-input
+            target_branch: main
+            setup:
+              state: failed
+              command: make setup
+              exit_code: 2
+              output_tail: "make: *** [setup] Error 2"
+            setup_log: "go mod download\nflutter pub get\nBecause argus depends on record >=6.0.0 which requires SDK version >=3.9.0, version solving failed.\nmake: *** [setup] Error 2\n"
+          - id: w-argus-drawer
+            dir: /home/you/dev/argus-worktrees/projects-drawer
+            branch: feat/projects-drawer
+            target_branch: main
+            setup:
+              state: running
+              command: make setup
+      - id: p-dotfiles
+        name: dotfiles
+        kind: git
+        dir: /home/you/dotfiles
+        default_branch: main
+        workspaces:
+          - id: w-dotfiles
+            dir: /home/you/dotfiles
+            is_main: true
+            branch: main
   - id: laptop
     label: macbook-pro
     sessions:
@@ -131,6 +186,7 @@ nodes:
         cwd: /home/you/dev/web-app
         status: awaiting_input
         source: hooked
+        workspace_id: w-webapp-main
         frontend: tmux
         transcript_path: transcripts/codex-webapp.jsonl
         repo_spec: repos/webapp
@@ -145,6 +201,7 @@ nodes:
         repo: scratch
         status: dead
         source: discovered
+        workspace_id: w-scratch
         frontend: tmux
     history:
       - repo: web-app
@@ -170,6 +227,36 @@ nodes:
             tokens: 61000
             turn_count: 7
             duration_ms: 420000
+    terminals:
+      - id: "@1"
+        name: dev server
+        cwd: ~/dev/web-app
+        command: node
+    projects:
+      - id: p-webapp
+        name: web-app
+        kind: git
+        dir: /home/you/dev/web-app
+        default_branch: main
+        pinned: true
+        workspaces:
+          - id: w-webapp-main
+            dir: /home/you/dev/web-app
+            is_main: true
+            branch: main
+            repo_spec: repos/webapp
+          - id: w-webapp-checkout
+            dir: /home/you/dev/web-app-worktrees/checkout-rounding
+            branch: fix/checkout-rounding
+            target_branch: main
+      - id: p-scratch
+        name: scratch
+        kind: plain
+        dir: /home/you/scratch
+        workspaces:
+          - id: w-scratch
+            dir: /home/you/scratch
+            is_main: true
   - id: devbox
     label: dev-server
     sessions:
@@ -180,6 +267,7 @@ nodes:
         cwd: /srv/api
         status: awaiting_input
         source: hooked
+        workspace_id: w-api
         frontend: external
         transcript_path: transcripts/claude-argus.jsonl
         summary:
@@ -194,3 +282,20 @@ nodes:
         cwd: /srv/api
         status: working
         source: spawned
+        workspace_id: w-api
+    terminals:
+      - id: "@1"
+        name: api logs
+        cwd: /srv/api
+        command: journalctl
+    projects:
+      - id: p-api
+        name: api
+        kind: git
+        dir: /srv/api
+        default_branch: main
+        workspaces:
+          - id: w-api
+            dir: /srv/api
+            is_main: true
+            branch: main
