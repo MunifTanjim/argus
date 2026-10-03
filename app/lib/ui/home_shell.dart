@@ -11,6 +11,7 @@ import '../state/navigation.dart';
 import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
+import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
@@ -44,6 +45,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void initState() {
     super.initState();
+    // Load the terminal setting now: a live screen reads it once when it opens.
+    ref.read(terminalPrefsProvider);
     // A tap can set the pending session before this mounts (cold launch from a
     // notification); ref.listen only sees later changes, so open it once here.
     WidgetsBinding.instance.addPostFrameCallback((_) => _openPending());

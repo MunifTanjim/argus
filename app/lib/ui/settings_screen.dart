@@ -10,6 +10,7 @@ import 'about_screen.dart';
 import 'appearance_screen.dart';
 import 'device_identity_screen.dart';
 import 'push_settings_screen.dart';
+import 'terminal_settings_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
 import 'voice_screen.dart';
@@ -49,6 +50,18 @@ class SettingsScreen extends ConsumerWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const AppearanceScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.terminal),
+                      title: const Text('Terminal'),
+                      subtitle: const Text('Emulator for live screens'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const TerminalSettingsScreen()),
                       ),
                     ),
                     const SizedBox(height: 24),

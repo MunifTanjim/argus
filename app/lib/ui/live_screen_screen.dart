@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:xterm/xterm.dart';
 
 import '../data/terminal_repository.dart';
 import '../models/enums.dart';
@@ -13,57 +12,11 @@ import '../state/gateway.dart';
 import '../state/input_batcher.dart';
 import '../state/pty_keys.dart';
 import '../state/terminal_controller.dart';
+import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import '../transport/connection.dart';
-import '../util/utf8_stream.dart';
-import 'ansi_palette.dart';
-import 'patched_terminal.dart';
+import 'live_emulator.dart';
 
-const _baseFontSize = 12.0;
-const _minFontSize = 6.0;
-const _maxFontSize = 40.0;
-// Bundled so terminal glyphs match a desktop terminal regardless of device fonts.
-const _fontFamily = 'JetBrainsMonoNerdFontMono';
-// NotoSansSymbols2 first so media-control symbols (⏺ ⏵ ⏸ …) render as text, not
-// color emoji; emoji last as a fallback. The rest cover CJK.
-const _fontFamilyFallback = <String>[
-  'NotoSansSymbols2',
-  'Noto Sans Mono CJK SC',
-  'Noto Sans Mono CJK TC',
-  'Noto Sans Mono CJK KR',
-  'Noto Sans Mono CJK JP',
-  'Noto Sans Mono CJK HK',
-  'monospace',
-  'Noto Color Emoji',
-  'sans-serif',
-];
-const _padding = 8.0;
-
-const _terminalTheme = TerminalTheme(
-  cursor: ansiBrightBlack,
-  selection: Color(0x40FFFFFF),
-  foreground: Color(0xFFCCCCCC),
-  background: ansiBlack,
-  black: ansiBlack,
-  red: ansiRed,
-  green: ansiGreen,
-  yellow: ansiYellow,
-  blue: ansiBlue,
-  magenta: ansiMagenta,
-  cyan: ansiCyan,
-  white: ansiWhite,
-  brightBlack: ansiBrightBlack,
-  brightRed: ansiBrightRed,
-  brightGreen: ansiBrightGreen,
-  brightYellow: ansiBrightYellow,
-  brightBlue: ansiBrightBlue,
-  brightMagenta: ansiBrightMagenta,
-  brightCyan: ansiBrightCyan,
-  brightWhite: ansiBrightWhite,
-  searchHitBackground: ansiYellow,
-  searchHitBackgroundCurrent: ansiBrightYellow,
-  searchHitForeground: ansiBlack,
-);
 
 class LiveScreenScreen extends ConsumerStatefulWidget {
   const LiveScreenScreen({super.key, this.session, this.terminal})
@@ -77,7 +30,6 @@ class LiveScreenScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
-  final Terminal _terminal = PatchedTerminal(maxLines: 4000);
   final TextEditingController _textController = TextEditingController();
   TerminalSession? _attach;
   // A terminal takes keys straight from the keyboard; they and the key bar go
@@ -85,19 +37,27 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   late final InputBatcher _batcher = InputBatcher((b) => _attach?.send(b));
   final _inputBar = GlobalKey<_InputBarState>();
   bool get _direct => widget.terminal != null;
-  // Reassembles UTF-8 codepoints split across output chunks. Reset per attach so
-  // a partial sequence from a dead attach can't corrupt the next one's first glyph.
-  Utf8StreamDecoder _decoder = Utf8StreamDecoder();
+  late final LiveEmulator _emulator = LiveEmulator(
+    ref.read(terminalPrefsProvider).emulator,
+    direct: _direct,
+    sink: LiveSink(
+      send: _send,
+      resize: (cols, rows) => _attach?.resize(cols, rows),
+      typed: (data) => _inputBar.currentState?.typed(data) ?? utf8.encode(data),
+      pinching: () => _pinchStartDist != null,
+    ),
+  );
   // Only TerminalView depends on the font size, so drive it through a notifier
   // and rebuild just that subtree on pinch — not the input bar every frame.
-  final ValueNotifier<double> _fontSize = ValueNotifier(_baseFontSize);
+  late final ValueNotifier<double> _fontSize =
+      ValueNotifier(ref.read(terminalPrefsProvider).fontSize);
 
   // Manual pinch tracking via Listener so it never competes with the terminal
   // for the gesture arena. Zoom adjusts font size (crisp reflow); a smaller font
   // means more cols/rows, which TerminalView forwards to the PTY via onResize.
   final Map<int, Offset> _pointers = {};
   double? _pinchStartDist;
-  double _pinchStartFont = _baseFontSize;
+  double _pinchStartFont = terminalFontSizeDefault;
 
   void _onPointerDown(PointerDownEvent e) {
     _pointers[e.pointer] = e.position;
@@ -113,7 +73,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     final start = _pinchStartDist;
     if (_pointers.length == 2 && start != null && start > 0) {
       _fontSize.value = (_pinchStartFont * _pointerDistance() / start)
-          .clamp(_minFontSize, _maxFontSize);
+          .clamp(terminalFontSizeMin, terminalFontSizeMax);
     }
   }
 
@@ -130,27 +90,9 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   @override
   void initState() {
     super.initState();
-    // Forward viewport resizes to the node so the remote PTY tracks the screen.
-    _terminal.onResize = (w, h, pw, ph) => _attach?.resize(w, h);
-    // TerminalView turns a vertical drag over the alt screen (tmux) into wheel
-    // ticks, and taps into button presses. Send each as an SGR report straight
-    // to the PTY, like the TUI.
-    _terminal.mouseHandler = LiveScreenMouseHandler(
-      onWheel: (up, pos) {
-        if (_pinchStartDist != null) return;
-        _send(ptyWheelBytes(
-            up, pos.x, pos.y, _terminal.viewWidth, _terminal.viewHeight));
-      },
-      onButton: (button, down, pos) {
-        if (_pinchStartDist != null) return;
-        _send(ptyMouseBytes(button, down, pos.x, pos.y,
-            _terminal.viewWidth, _terminal.viewHeight));
-      },
-    );
-    if (_direct) {
-      _terminal.onOutput = (data) =>
-          _send(_inputBar.currentState?.typed(data) ?? utf8.encode(data));
-    }
+    // Read the settings here, not lazily in build, where ref.read is not meant to run.
+    _emulator;
+    _fontSize;
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
@@ -160,14 +102,15 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     // a live attach that dispose() already ran past.
     if (!mounted) return;
     _attach?.dispose();
-    _decoder = Utf8StreamDecoder();
+    // A partial UTF-8 sequence from a dead attach must not corrupt the next one.
+    _emulator.reset();
     _attach = ref.read(terminalRepositoryProvider).open(
           sessionId: widget.session?.id,
           terminalId: widget.terminal?.id,
-          cols: _terminal.viewWidth,
-          rows: _terminal.viewHeight,
+          cols: _emulator.cols,
+          rows: _emulator.rows,
           onData: (bytes) {
-            if (mounted) _terminal.write(_decoder.add(bytes));
+            if (mounted) _emulator.write(bytes);
           },
           onExited: _onExited,
           onError: (e) {
@@ -210,6 +153,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   void dispose() {
     _batcher.flush();
     _attach?.dispose();
+    _emulator.dispose();
     _textController.dispose();
     _fontSize.dispose();
     super.dispose();
@@ -248,23 +192,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
               onPointerCancel: _onPointerUp,
               child: ValueListenableBuilder<double>(
                 valueListenable: _fontSize,
-                builder: (context, fontSize, _) => TerminalView(
-                  _terminal,
-                  theme: _terminalTheme,
-                  textStyle: TerminalStyle(
-                    fontSize: fontSize,
-                    fontFamily: _fontFamily,
-                    fontFamilyFallback: _fontFamilyFallback,
-                  ),
-                  padding: const EdgeInsets.all(_padding),
-                  // A terminal takes the keyboard directly; a session's input
-                  // goes through _InputBar's text box.
-                  readOnly: !_direct,
-                  deleteDetection: _direct,
-                  // Never turn a wheel tick into arrow keys: the remote program
-                  // decides what the wheel does.
-                  simulateScroll: false,
-                ),
+                builder: (context, fontSize, _) => _emulator.view(fontSize),
               ),
             ),
           ),
@@ -273,9 +201,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
             compose: !_direct,
             controller: _textController,
             onInput: _send,
-            // Read at press time so cursor keys follow the remote terminal's
-            // application-cursor-key (DECCKM) state.
-            appCursorMode: () => _terminal.cursorKeysMode,
+            onKey: _emulator.pressKey,
           ),
         ],
       ),
@@ -283,31 +209,6 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   }
 }
 
-/// Hands wheel ticks and button presses and releases to the live screen; the
-/// emulator itself sends nothing.
-class LiveScreenMouseHandler implements TerminalMouseHandler {
-  const LiveScreenMouseHandler({required this.onWheel, required this.onButton});
-
-  final void Function(bool up, CellOffset position) onWheel;
-  final void Function(int button, bool down, CellOffset position) onButton;
-
-  @override
-  String? call(TerminalMouseEvent event) {
-    final down = event.buttonState == TerminalMouseButtonState.down;
-    switch (event.button) {
-      case TerminalMouseButton.wheelUp when down:
-        onWheel(true, event.position);
-      case TerminalMouseButton.wheelDown when down:
-        onWheel(false, event.position);
-      case TerminalMouseButton.left ||
-            TerminalMouseButton.middle ||
-            TerminalMouseButton.right:
-        onButton(event.button.id, down, event.position);
-      default:
-    }
-    return null;
-  }
-}
 
 class _InputBar extends StatefulWidget {
   const _InputBar({
@@ -315,7 +216,7 @@ class _InputBar extends StatefulWidget {
     required this.compose,
     required this.controller,
     required this.onInput,
-    required this.appCursorMode,
+    required this.onKey,
   });
 
   /// Whether to show the text box and Send button; without them the keyboard
@@ -324,9 +225,9 @@ class _InputBar extends StatefulWidget {
   final TextEditingController controller;
   final void Function(List<int> bytes) onInput;
 
-  /// Whether the remote terminal is in application-cursor-key mode (DECCKM),
-  /// evaluated per keypress so cursor keys emit the right escape sequence.
-  final bool Function() appCursorMode;
+  /// Sends a key bar key through the emulator, which encodes it for the
+  /// remote terminal's current modes.
+  final void Function(String name, {bool shift, bool alt, bool ctrl}) onKey;
 
   @override
   State<_InputBar> createState() => _InputBarState();
@@ -349,8 +250,7 @@ class _InputBarState extends State<_InputBar> {
   }
 
   void _pressKey(String name) {
-    widget.onInput(ptyKeyBytes(name,
-        shift: _shift, alt: _alt, ctrl: _ctrl, appCursor: widget.appCursorMode()));
+    widget.onKey(name, shift: _shift, alt: _alt, ctrl: _ctrl);
     _clearMods();
   }
 
