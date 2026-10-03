@@ -14,6 +14,9 @@ class NodeRef {
   /// defaults as [spawnSupported].
   final bool terminalSupported;
 
+  /// Whether this node can hold a wakelock (capability `host_wakelock`).
+  final bool hostWakelockSupported;
+
   /// The node's binary version (empty when unknown, e.g. session-derived nodes).
   final String version;
 
@@ -22,6 +25,7 @@ class NodeRef {
     this.label, {
     this.spawnSupported = true,
     this.terminalSupported = true,
+    this.hostWakelockSupported = false,
     this.version = '',
   });
 }

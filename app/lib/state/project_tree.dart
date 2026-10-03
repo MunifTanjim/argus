@@ -141,23 +141,21 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
     });
   final rows = <TreeRow>[];
   for (final nid in nodeIds) {
-    if (nodeIds.length > 1) {
-      final folded = q.isEmpty && view.folded.contains(nid);
-      rows.add(
-        TreeRow(
-          kind: TreeRowKind.node,
-          id: nid,
-          label: labels[nid]!,
-          folded: folded,
-          hasKids: true,
-          workspaceIds: [
-            for (final p in byNode[nid]!)
-              for (final w in p.workspaces) w.id,
-          ],
-        ),
-      );
-      if (folded) continue;
-    }
+    final folded = q.isEmpty && view.folded.contains(nid);
+    rows.add(
+      TreeRow(
+        kind: TreeRowKind.node,
+        id: nid,
+        label: labels[nid]!,
+        folded: folded,
+        hasKids: true,
+        workspaceIds: [
+          for (final p in byNode[nid]!)
+            for (final w in p.workspaces) w.id,
+        ],
+      ),
+    );
+    if (folded) continue;
     for (final p in byNode[nid]!) {
       final folded = q.isEmpty && view.folded.contains(p.id);
       rows.add(

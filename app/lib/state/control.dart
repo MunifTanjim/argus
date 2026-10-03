@@ -149,6 +149,7 @@ List<NodeRef> _parseNodes(List<dynamic> raw) => raw
         label != null && label.isNotEmpty ? label : id,
         spawnSupported: spawnSupported,
         terminalSupported: caps?['terminal'] as bool? ?? false,
+        hostWakelockSupported: caps?['host_wakelock'] as bool? ?? false,
         version: m['version'] as String? ?? '',
       );
     })
