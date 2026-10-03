@@ -58,8 +58,10 @@ type model struct {
 	sessionFilter string         // the session lists show only the sessions that match it
 	terminals     []api.Terminal // every node's terminals, from the last load
 	terminalsErr  error
-	terminalsDone bool           // a terminal load has finished
-	nodeInfo      []api.NodeInfo // nodes and their capabilities, from the last load
+	terminalsDone bool                 // a terminal load has finished
+	nodeInfo      []api.NodeInfo       // nodes and their capabilities, from the last load
+	hosts         map[string]hostEntry // node id -> last host.info reply
+	hostGen       int
 	width         int
 	height        int
 	reconnecting  bool // connection dropped; the client is retrying
@@ -161,6 +163,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		logs:            logs,
 		termKeyCh:       make(chan termKey, termKeyBuf),
 		sessions:        make(map[string]session.Session),
+		hosts:           make(map[string]hostEntry),
 		transcriptCache: make(map[string]cachedTranscript),
 		render:          newRenderCache(hasDark),
 		dock:            newDock(),

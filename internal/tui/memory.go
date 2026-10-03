@@ -182,7 +182,11 @@ func (m *model) showRow(id string) tea.Cmd {
 	case !ok:
 		return nil
 	case r.kind != rowWorkspace:
-		return m.resetMain(func() component { return summaryComp{kind: r.kind, id: id} })
+		cmd := m.resetMain(func() component { return summaryComp{kind: r.kind, id: id} })
+		if r.kind == rowNode {
+			cmd = tea.Batch(cmd, m.hostInfoCmd(id))
+		}
+		return cmd
 	}
 	cmd := m.resetMain(func() component { return workspaceComp{ws: id} })
 	if s := m.memory.ws[id]; s != "" {

@@ -94,7 +94,7 @@ var sectionLists = map[string]sectionList{
 	"project-tree": {
 		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Filter, projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
-			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target})...),
+			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target, nodeKeys.Wakelock})...),
 		container: bindingsOf(leftSidebarKeys...),
 		focus:     focusFor("project-tree"),
 	},
@@ -106,7 +106,10 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("workspace"),
 	},
 	"project": {own: summaryKeys, focus: focusFor("project")},
-	"node":    {own: append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext), focus: focusFor("node")},
+	"node": {
+		own:   append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext, nodeKeys.Wakelock),
+		focus: focusFor("node"),
+	},
 	"file": {
 		own:   bindingsOf(fileViewKeys, sessionKeys.FocusPrompt),
 		focus: focusFor("file"),

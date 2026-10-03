@@ -135,6 +135,13 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 	m, k, n := c.m, projectsKeys, len(t.rows)
 	var cmd tea.Cmd
 	switch {
+	case m.matches(msg, nodeKeys.Wakelock):
+		r, ok := t.cursorRow()
+		if !ok || r.kind != rowNode {
+			c.setFlash("select a node to change its wakelock")
+			break
+		}
+		cmd = openWakelockPicker(c, r.id, r.label)
 	case m.matches(msg, k.Back):
 		if t.filter != "" {
 			t.setFilter("")
@@ -215,11 +222,13 @@ func (t projectTreeComp) wheel(_ *ctx, d int) (component, tea.Cmd) {
 	return t.move(cursorBy(t.cursor, d, len(t.rows))), nil
 }
 
-func (t projectTreeComp) menu(*ctx) []binding {
+func (t projectTreeComp) menu(c *ctx) []binding {
 	k := projectsKeys
 	r, ok := t.cursorRow()
 	switch {
 	case !ok:
+	case r.kind == rowNode && c.m.nodeHasWakelock(r.id):
+		return []binding{nodeKeys.Wakelock}
 	case r.kind == rowProject:
 		return []binding{k.Spawn, k.New, k.Rename, k.Pin, k.Unpin, k.Hide, k.Unhide, k.Forget}
 	case r.kind == rowWorkspace:
@@ -354,14 +363,18 @@ func (t projectTreeComp) footerPrompt(c *ctx) string {
 
 func (t projectTreeComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	bindings := append(t.rowBindings(), clearFilterKey(k.Back, t.filter != ""))
+	bindings := append(t.rowBindings(c), clearFilterKey(k.Back, t.filter != ""))
 	return append(bindings, listKeys.Quit, c.m.sideKey(k.ToggleFiles), k.Help)
 }
 
-func (t projectTreeComp) rowBindings() []binding {
+func (t projectTreeComp) rowBindings(c *ctx) []binding {
 	k := projectsKeys
 	r, _ := t.cursorRow()
 	switch r.kind {
+	case rowNode:
+		if c.m.nodeHasWakelock(r.id) {
+			return []binding{k.Left, nodeKeys.Wakelock, k.Filter}
+		}
 	case rowHome:
 		return []binding{k.Spawn, k.Filter}
 	case rowWorkspace:

@@ -2,7 +2,9 @@ package tui
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -24,10 +26,16 @@ func (s summaryComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return s, nil 
 func (s summaryComp) fullScreen(*ctx) fullLevel                 { return notFull }
 func (s summaryComp) close(*ctx) tea.Cmd                        { return nil }
 func (s summaryComp) offers(*ctx) []binding                     { return sectionOffers[s.section()].keys }
-func (s summaryComp) commands(*ctx) []binding                   { return summaryKeys }
 func (s summaryComp) layer() layer                              { return baseLayer }
 func (s summaryComp) pageStep(c *ctx) int                       { return cardPageStep(c.m.paneRows()) }
 func (s summaryComp) spins(c *ctx) bool                         { return c.m.anyWorking() }
+
+func (s summaryComp) commands(*ctx) []binding {
+	if s.kind == rowNode {
+		return append(slices.Clone(summaryKeys), nodeKeys.Wakelock)
+	}
+	return summaryKeys
+}
 
 func (s summaryComp) row(c *ctx) (projectsRow, bool) {
 	for _, p := range c.m.left.tree.data {
@@ -57,6 +65,13 @@ func (s summaryComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 	if s.kind == rowNode && c.m.nodeHasTerminals(s.id) &&
 		(c.m.matches(msg, listKeys.TabNext) || c.m.matches(msg, listKeys.TabPrev)) {
 		return s, openNodeTerminals(c, s.id), true
+	}
+	if s.kind == rowNode && c.m.matches(msg, nodeKeys.Wakelock) {
+		label := s.id
+		if r, ok := s.row(c); ok {
+			label = r.label
+		}
+		return s, openWakelockPicker(c, s.id, label), true
 	}
 	if !c.m.matches(msg, projectsKeys.Back) {
 		return s, nil, false
@@ -89,7 +104,12 @@ func (s summaryComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
 	return s, nil
 }
 
-func (s summaryComp) footer(*ctx) []binding { return []binding{projectsKeys.Help} }
+func (s summaryComp) footer(c *ctx) []binding {
+	if s.kind == rowNode && c.m.nodeHasWakelock(s.id) {
+		return []binding{nodeKeys.Wakelock, projectsKeys.Help}
+	}
+	return []binding{projectsKeys.Help}
+}
 
 func rowSummary(c *ctx, r projectsRow, w int) string {
 	m := c.m
@@ -97,6 +117,9 @@ func rowSummary(c *ctx, r projectsRow, w int) string {
 	var b strings.Builder
 	if r.kind == rowNode {
 		b.WriteString(m.paneHeadStyle().Render(r.label) + "\n\n")
+		if e, ok := m.hosts[r.id]; ok {
+			b.WriteString(hostLines(e, m.nodeHasWakelock(r.id), time.Now(), w))
+		}
 		for _, pr := range m.left.tree.data {
 			if pr.NodeID != r.id || (pr.Hidden && !m.left.tree.showHidden) || (pr.IsGone && !m.left.tree.showGone) {
 				continue

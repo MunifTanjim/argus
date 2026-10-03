@@ -60,6 +60,18 @@ func (c *recordingClient) Reconnect()                      {}
 func (c *recordingClient) Close() error                    { return nil }
 func (c *recordingClient) Quarantined() bool               { return false }
 
+func (c *recordingClient) paramsOf(method string) []any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []any
+	for i, m := range c.calls {
+		if m == method {
+			out = append(out, c.params[i])
+		}
+	}
+	return out
+}
+
 func (c *recordingClient) calledMethods() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

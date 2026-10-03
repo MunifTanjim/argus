@@ -38,18 +38,6 @@ func (c *terminalsClient) Call(method string, params, out any) error {
 	return nil
 }
 
-func (c *terminalsClient) paramsOf(method string) []any {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var out []any
-	for i, m := range c.calls {
-		if m == method {
-			out = append(out, c.params[i])
-		}
-	}
-	return out
-}
-
 func capable(ids ...string) []api.NodeInfo {
 	var out []api.NodeInfo
 	for _, id := range ids {
