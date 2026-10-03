@@ -76,4 +76,7 @@ func TestMethodSetsMirrorGateway(t *testing.T) {
 	if !nodeAddressed[api.MethodTerminalCreate] {
 		t.Error("nodeAddressed missing terminal.create")
 	}
+	if !nodeAddressed[api.MethodHostInfo] || !nodeAddressed[api.MethodHostSetWakelock] {
+		t.Error("nodeAddressed missing host.info/host.setWakelock")
+	}
 }

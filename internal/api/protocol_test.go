@@ -53,8 +53,8 @@ func TestTerminalWireShape(t *testing.T) {
 	if string(b) != want {
 		t.Errorf("Terminal = %s\nwant %s", b, want)
 	}
-	b, _ = json.Marshal(NodeCapabilities{SpawnSession: true, Terminal: true})
-	if string(b) != `{"spawn_session":true,"terminal":true}` {
+	b, _ = json.Marshal(NodeCapabilities{SpawnSession: true, Terminal: true, HostWakelock: true})
+	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true}` {
 		t.Errorf("NodeCapabilities = %s", b)
 	}
 	b, _ = json.Marshal(TerminalOpenParams{TermID: "t1", TerminalID: "@1", Cols: 80, Rows: 24})
@@ -64,5 +64,23 @@ func TestTerminalWireShape(t *testing.T) {
 	b, _ = json.Marshal(TerminalRenameParams{TerminalID: "@1", Name: "x"})
 	if string(b) != `{"terminal_id":"@1","name":"x"}` {
 		t.Errorf("TerminalRenameParams = %s", b)
+	}
+}
+
+func TestHostInfoJSON(t *testing.T) {
+	b, err := json.Marshal(HostInfo{UptimeSeconds: 90})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), `{"uptime_seconds":90,"wakelock":{}}`; got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+	var back HostInfo
+	in := `{"os":"macOS 26.0.1 (arm64)","uptime_seconds":5,"battery":{"percent":82,"state":"charging"},"wakelock":{"until":"9999-12-31T23:59:59Z"}}`
+	if err := json.Unmarshal([]byte(in), &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Battery == nil || back.Battery.Percent != 82 || back.Battery.State != "charging" || back.Wakelock.Until != HostWakelockIndefinite || back.OS != "macOS 26.0.1 (arm64)" {
+		t.Fatalf("decoded %+v", back)
 	}
 }

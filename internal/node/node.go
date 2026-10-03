@@ -23,6 +23,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
+	"github.com/MunifTanjim/argus/internal/host"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -83,6 +84,8 @@ type Node struct {
 	mirrorSuffix string
 
 	caps api.NodeCapabilities // what this node supports (e.g. spawn = tmux present)
+
+	wakelock *host.Wakelock
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
@@ -407,9 +410,9 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		discs = append(discs, a.NewDiscoverer(reg, clients))
 	}
 
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "argusd"
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "argusd"
 	}
 	// Probe tmux once so a node without it advertises no spawn support rather than
 	// failing at use. Bounded so a wedged tmux binary can't hang startup.
@@ -421,12 +424,16 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		cancel()
 	}
 
+	wakelock := host.NewWakelock("")
+	caps.HostWakelock = wakelock.Supported()
+
 	d := &Node{
-		reg: reg, clients: clients, id: host, label: host,
+		reg: reg, clients: clients, id: hostname, label: hostname,
 		adapterList:  adapterList,
 		adapters:     adapterByAgent,
 		discs:        discs,
 		caps:         caps,
+		wakelock:     wakelock,
 		log:          slog.New(slog.DiscardHandler),
 		pending:      map[string]*pendingDecision{},
 		forgeFor:     forge.For,
@@ -518,6 +525,8 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	}
 	defer d.scripts.Close()
 	d.log.Info("serving local API", "socket", socketPath)
+	d.wakelock.SetLogger(d.log)
+	d.wakelock.Restore()
 	defer func() {
 		l.Close()
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
