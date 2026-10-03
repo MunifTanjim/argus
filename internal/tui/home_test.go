@@ -352,7 +352,7 @@ func linesContaining(out, sub string) int {
 }
 
 // frameRow identifies the status bar every framed state shares.
-const frameRow = "\U000f167a argus"
+const frameRow = glyphRobotSolid + " Argus"
 
 func TestFramedSessionHeaderInPane(t *testing.T) {
 	m := homeTestModel()

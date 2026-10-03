@@ -211,7 +211,7 @@ func TestHomeSplashTakesTheWholeTerminal(t *testing.T) {
 	if len(lines) != m.height || strings.Contains(out, "Projects") || strings.Contains(out, "Files  Changes") {
 		t.Errorf("the splash should draw no sidebars, %d lines tall:\n%s", m.height, out)
 	}
-	if !strings.Contains(lines[0], "argus") || !strings.Contains(lines[len(lines)-1], "spawn") {
+	if !strings.Contains(lines[0], "Argus") || !strings.Contains(lines[len(lines)-1], "spawn") {
 		t.Errorf("the splash should draw its own title and the footer on the last line:\n%s", out)
 	}
 }
@@ -224,7 +224,7 @@ func TestLogsWithTheTreeHiddenSpanTheFrame(t *testing.T) {
 	}
 	out := ansi.Strip(m.View().Content)
 	lines := strings.Split(out, "\n")
-	if !strings.Contains(lines[0], "argus") || !strings.Contains(out, "Files  Changes") {
+	if !strings.Contains(lines[0], "Argus") || !strings.Contains(out, "Files  Changes") {
 		t.Errorf("logs should keep the frame's title and the right sidebar:\n%s", out)
 	}
 	if !strings.HasPrefix(lines[4], "time=12:00:00") {
@@ -243,7 +243,7 @@ func TestViewerTakesTheWholeTerminal(t *testing.T) {
 	if strings.Contains(out, "Projects") || strings.Contains(out, "Files  Changes") {
 		t.Errorf("the viewer should draw no sidebars:\n%s", out)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(out), "argus · proj") {
+	if !strings.HasPrefix(strings.TrimSpace(out), "Argus · proj") {
 		t.Errorf("the viewer should draw its own title:\n%s", out)
 	}
 }

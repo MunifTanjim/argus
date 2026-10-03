@@ -65,6 +65,7 @@ type model struct {
 	reconnecting  bool // connection dropped; the client is retrying
 	hasDark       bool // terminal background; drives glamour/highlight styling
 	viewer        bool // offline viewer mode: opens directly in transcript view
+	brand         int  // the title icon, an index into brandGlyphs
 
 	redactMode   bool   // --redact: interactive redaction affordance in the viewer
 	bundlePath   string // source .argus path (for the -redacted output name)
