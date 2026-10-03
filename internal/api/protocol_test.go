@@ -84,3 +84,21 @@ func TestHostInfoJSON(t *testing.T) {
 		t.Fatalf("decoded %+v", back)
 	}
 }
+
+func TestNodeCapabilitiesKeepUnknownKeys(t *testing.T) {
+	in := `{"spawn_session":true,"terminal":false,"host_wakelock":true,"future_cap":{"level":2}}`
+	var c NodeCapabilities
+	if err := json.Unmarshal([]byte(in), &c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.SpawnSession || c.Terminal || !c.HostWakelock {
+		t.Fatalf("known fields = %+v", c)
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), `{"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
