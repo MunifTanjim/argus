@@ -1,8 +1,8 @@
 # End-to-End Encryption
 
-End-to-end encryption (E2EE) gives each client-to-node link its own encrypted
-channel. The gateway only relays the sealed traffic and can never read it, so it
-is safe to run one on an untrusted or internet-facing host. E2EE is off by default.
+End-to-end encryption (E2EE) encrypts each client-to-node link separately. The gateway
+only relays the encrypted traffic and cannot read it, so it is safe to run a gateway on
+an untrusted or internet-facing host. E2EE is off by default.
 
 ## Enable
 
@@ -34,8 +34,8 @@ allow-list, covered below.
 
 ## Locked mode
 
-In locked mode, only the devices and nodes you approve can connect. Approvals live
-in a **trust log**: a signed, append-only record that the gateway relays but cannot
+In locked mode, only the devices and nodes you approve can connect. Approvals are
+stored in a **trust log**: a signed, append-only record that the gateway relays but cannot
 read or change.
 
 ### Set up
@@ -111,12 +111,12 @@ A **pin** ties a device to one trust log. Pin every device you rely on.
 
 ### Detect a Bad Gateway
 
-A compromised gateway cannot read or forge your traffic, but it can hide or split
-the trust log.
+A compromised gateway cannot read or forge your traffic, but it can hide the trust
+log or show different nodes different versions of it.
 
-- **No quarantine is not an all-clear.** A gateway can withhold the chain so a device
-  never learns the network is locked. Only a pin you placed yourself proves anything.
-  Pin every device.
+- **No quarantine does not mean the network is safe.** A gateway can withhold the
+  chain so a device never learns the network is locked. Only a pin you placed
+  yourself is reliable. Pin every device.
 - **Split view.** A gateway may show different nodes different branches of the chain.
   Argus reads each node's tip over the authenticated channel and flags a mismatch as
   `⚠ equivocation detected` in `lock status`. You can also compare the `tip:`
@@ -125,7 +125,7 @@ the trust log.
 
 ### Revoke a Signer
 
-If a signer key is compromised, revoke it with a co-signing ceremony that out-votes
+If a signer key is compromised, revoke it with a co-signing ceremony that outvotes
 the compromised signer. This needs at least 3 signers; with fewer, use break-glass
 plus relock instead.
 
@@ -141,7 +141,7 @@ argus lock revoke-signer --finish <blob>
 ```
 
 - The chain forks just before the compromised signer's first action. Every entry
-  after that point is erased and must be recreated, including honest ones.
+  after that point is erased and must be recreated, including legitimate ones.
 - Only signers trusted at the fork point can take part. To include a newer signer,
   pick a later fork point with `--fork-from`; this preserves more of the revoked
   signer's entries.

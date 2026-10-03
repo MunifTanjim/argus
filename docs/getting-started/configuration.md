@@ -1,25 +1,23 @@
 # Configuration
 
-The defaults work out of the box — no config needed to start.
+The defaults work out of the box. You don't need a config to start.
 
-When you do want to tweak something, every setting is available three ways, in
-priority order: a **command-line flag** (e.g. `--token`), an **`ARGUS_*`
-environment variable**, or a key in the **YAML config file** — otherwise the
-built-in default applies. A set flag wins over an env var, which wins over the
-file.
+You can set each option in three ways: a **command-line flag** (e.g.
+`--token`), an **`ARGUS_*` environment variable**, or a key in the **YAML config
+file**. A flag overrides an environment variable, which overrides the file. If
+you set none of them, the built-in default applies.
 
-Run `argus <command> --help` for the settings each command accepts — that's the
+Run `argus <command> --help` to see the settings each command accepts. That is the
 authoritative list.
 
 ## Config file
 
 Argus reads `$XDG_CONFIG_HOME/argus/config.yaml` by default (typically
-`~/.config/argus/config.yaml`). Point at a different file with `--config` or
+`~/.config/argus/config.yaml`). Use a different file with `--config` or
 `$ARGUS_CONFIG`. A missing default file is fine; a missing explicit `--config`
 path is an error.
 
-`argus config dir` prints the config directory path — handy in scripts or when you
-can't remember where it lives:
+`argus config dir` prints the config directory path:
 
 ```sh
 argus config dir
@@ -29,7 +27,7 @@ A minimal example:
 
 ```yaml
 # ~/.config/argus/config.yaml
-token: shared-secret    # gateway token — see Multi Machine
+token: shared-secret    # gateway token, see Multi Machine
 
 push:
   desktop:
@@ -51,18 +49,20 @@ To change the keys of the TUI, see [Keymaps](/guide/tui#keymaps).
 
 ## End-to-End Encryption
 
-`e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport,
-and `lock.genesis` pins the install to a trust log for locked mode. See
+`e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport.
+`lock.genesis` pins the install to a trust log for locked mode. See
 [End-to-End Encryption](/guide/e2ee) for setup and the two modes.
 
 ## Desktop notifications
 
-`push.desktop.enabled` (default `false`) opts this node into native **macOS**
-desktop notifications: when a session starts waiting on you (permission prompt,
-question, plan, or a finished turn), this machine pops a banner, and clicking it
-focuses that session's tmux pane. Other platforms are a no-op.
+`push.desktop.enabled` (default `false`) enables native **macOS** desktop
+notifications on this node. When a session waits for you (permission prompt,
+question, plan, or a finished turn), this machine shows a banner. Clicking the
+banner focuses that session's tmux pane. On other platforms this setting does
+nothing.
 
-It is config-file / env only — there is no command-line flag:
+Set it in the config file or with an environment variable. There is no
+command-line flag:
 
 ```yaml
 push:
@@ -74,43 +74,42 @@ or `ARGUS_PUSH_DESKTOP_ENABLED=true`.
 
 ### Renderers
 
-Argus renders through whichever of three backends it finds, in this order — and
-the experience differs a lot between them, so installing the preferred one is
-worth it:
+Argus uses the first of three backends that it finds, in this order. The
+backends behave differently, so install the preferred one:
 
-1. **[`alerter`](https://github.com/vjeantet/alerter) — preferred, best
-   experience.** A self-contained binary; nothing to configure. You get a
-   clickable banner branded with the Argus icon, and repeat alerts for the same
-   session replace the previous one instead of stacking. Install it on `PATH`:
+1. **[`alerter`](https://github.com/vjeantet/alerter): preferred.** A
+   self-contained binary that needs no configuration. It shows a clickable
+   banner with the Argus icon. A new alert for a session replaces the previous
+   alert for that session. Install it on `PATH`:
 
    ```sh
    brew install vjeantet/tap/alerter
    ```
 
-2. **[Hammerspoon](https://www.hammerspoon.org/) — clickable, extra setup.**
-   Used only if `alerter` is absent. Requires both the `hs` CLI on `PATH` **and
-   the IPC module enabled** — add `require("hs.ipc")` to your
-   `~/.hammerspoon/init.lua` and reload the config. Without IPC loaded, `hs -c`
-   fails (exit 69, "can't access Hammerspoon message port") and argus falls back
-   to the plain banner below.
+2. **[Hammerspoon](https://www.hammerspoon.org/): clickable, needs extra setup.**
+   Argus uses it only if `alerter` is absent. It requires the `hs` CLI on `PATH`
+   **and the IPC module enabled**. Add `require("hs.ipc")` to your
+   `~/.hammerspoon/init.lua` and reload the config. Without IPC, `hs -c` fails
+   (exit 69, "can't access Hammerspoon message port") and Argus falls back to
+   the plain banner below.
 
-3. **`osascript` — always available, not clickable.** The built-in fallback when
-   neither of the above is usable. You still get a notification, but clicking it
-   does nothing (no jump to the session).
+3. **`osascript`: always available, not clickable.** The built-in fallback when
+   neither of the others is usable. You still get a notification, but clicking
+   it does nothing.
 
-So: **install `alerter` for the full click-to-focus experience.** Everything
-degrades gracefully — a missing tool, a failed render, or a non-macOS host never
-breaks anything, it just drops to the next best (or silently no-ops).
+Install `alerter` to get click-to-focus. If a tool is missing, a render fails,
+or the host is not macOS, Argus logs a warning and uses the next backend or shows
+nothing. A notification failure never stops Argus.
 
 Enable it on each machine you sit in front of; leave it off on headless boxes.
 
 ## Mobile notifications
 
-`push.mobile.delay` (default `0s`) sets a grace period before a mobile push
-fires. With the default, mobile pushes are instant — the same moment in-app and
-desktop notifications go out.
+`push.mobile.delay` (default `0s`) sets how long to wait before sending a mobile
+push. With the default, mobile pushes are sent at the same time as in-app and
+desktop notifications.
 
-Set it to a non-zero duration to hold mobile pushes back:
+Set a non-zero duration to delay mobile pushes:
 
 ```yaml
 push:
@@ -118,6 +117,6 @@ push:
     delay: 30s
 ```
 
-When the delay elapses, the push fires only if the session is still awaiting
-input or idle — so answering at your desk within the window keeps the phone
-quiet. Desktop and in-app notifications are always instant.
+After the delay, Argus sends the push only if the session is still awaiting
+input or idle. If you answer at your desk within the delay, your phone gets
+nothing. Desktop and in-app notifications are never delayed.

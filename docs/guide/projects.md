@@ -27,10 +27,10 @@ When a session starts, the node records the project and workspace of its
 directory. `workspace.auto-adopt-dirs` limits this to a list of directories. The
 default is `["~"]`, your home directory.
 
-A directory is adopted if it is inside a listed directory, or is one. For a git
+Argus adopts a directory if it is a listed directory or is inside one. For a git
 project, the project root must also be inside a listed directory. A leading `~`
 is your home directory. Other entries must be absolute paths. An empty list
-turns automatic adoption off. Workspaces that you create from argus are always
+turns automatic adoption off. Workspaces that you create from Argus are always
 recorded.
 
 ```yaml
@@ -40,7 +40,7 @@ workspace:
     - ~/work
 ```
 
-If you remove a directory from the list, the projects that argus already
+If you remove a directory from the list, the projects that Argus already
 recorded stay. Remove one with `argus project forget <project>`.
 
 ## Workspaces
@@ -94,7 +94,7 @@ contains `/`, `.Branch.Name` makes nested directories, and `.Branch.Slug` makes
 one directory.
 
 The node checks both templates when it starts. A template with an unknown
-variable stops the start with an error that names the key.
+variable stops the start and the error names the key.
 
 ```yaml
 workspace:
@@ -128,7 +128,7 @@ argus workspace setup-log <workspace>
 argus workspace setup <workspace>
 ```
 
-Before Argus removes a workspace, the teardown script of the project runs.
+Argus runs the teardown script of the project before it removes a workspace.
 
 ### Copy Ignored Files
 
@@ -143,12 +143,12 @@ config/*.local.json
 .venv/
 ```
 
-Argus copies each file from the main worktree that matches a pattern and that
-git ignores. A directory pattern, for example `.venv/`, copies each file in it.
+Argus copies each file of the main worktree that matches a pattern and that git
+ignores. A directory pattern, for example `.venv/`, copies each file in it.
 Symlinks are copied as symlinks, and file modes are kept. Tracked files are
-never copied. If a file already exists in the new worktree, argus keeps it.
+never copied. If a file already exists in the new worktree, Argus keeps it.
 
-If a file does not copy, the script still runs, and setup fails. The setup log
+If a file does not copy, the script still runs and setup fails. The setup log
 names each file that did not copy. Run setup again to copy the missing files.
 
 ### Scripts
@@ -190,13 +190,13 @@ these environment variables:
 | `ARGUS_TARGET_BRANCH` | The target branch |
 
 The shell is not interactive. It does not read rc files such as `.zshrc` or
-`.bashrc`, and `PATH` starts as the `PATH` of the argus node. The shell still
+`.bashrc`, and `PATH` starts as the `PATH` of the Argus node. The shell still
 reads the files that every shell reads, for example `~/.zshenv` for zsh and
-the file in `$BASH_ENV` for bash. When the node runs as a service, the script
-does not find tools that an rc file adds to `PATH` (for example, nvm or pnpm).
+the file in `$BASH_ENV` for bash. When the node runs as a service, scripts
+cannot find tools that an rc file adds to `PATH` (for example, nvm or pnpm).
 Use full paths, or set `PATH` in the script.
 
-Make both scripts safe to run more than one time.
+Make both scripts safe to run repeatedly.
 
 ## Remove a Workspace
 

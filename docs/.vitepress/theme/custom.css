@@ -228,7 +228,7 @@
   }
 }
 
-/* Homepage "three scales" flow: Local → Fleet → Pocket. */
+/* Homepage "three setups" flow: Local → Multi-machine → Mobile. */
 .scales {
   display: flex;
   align-items: stretch;

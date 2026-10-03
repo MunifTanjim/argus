@@ -5,22 +5,22 @@ script below, or build from source.
 
 ## Prerequisites
 
-These are needed to *run* Argus, however you install it:
+You need these to *run* Argus, however you install it:
 
-- [tmux](https://github.com/tmux/tmux) — Argus discovers agent sessions running in tmux
+- [tmux](https://github.com/tmux/tmux): Argus discovers agent sessions running in tmux
 - At least one supported AI coding agent for Argus to supervise:
-  - [Claude Code](https://www.claude.com/product/claude-code) — run as `claude`
-  - [Codex](https://developers.openai.com/codex/cli) — the OpenAI Codex CLI, run as `codex`
-  - [Antigravity](https://antigravity.google/) — Google's terminal agent, run as `agy`
+  - [Claude Code](https://www.claude.com/product/claude-code): run as `claude`
+  - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
+  - [Antigravity](https://antigravity.google/): Google's terminal agent, run as `agy`
 
-Argus watches whichever of these you have installed — you don't need all three.
+Argus watches the agents you have installed. You don't need all three.
 
 ## Install Pre-built Binary
 
 The script downloads the right binary for your platform from the latest
 [GitHub release](https://github.com/MunifTanjim/argus/releases). It needs only
-`curl` (or `wget`), and uses the [GitHub CLI](https://cli.github.com/) (`gh`)
-instead when it's installed:
+`curl` (or `wget`). If the [GitHub CLI](https://cli.github.com/) (`gh`) is
+installed, the script uses it instead:
 
 ```sh
 curl -fsSL https://argus.muniftanjim.dev/install.sh | bash
@@ -54,12 +54,12 @@ make install
 
 ## Install Hooks
 
-Install Argus's hooks so it can track each session's status live:
+Install the Argus hooks so it can track each session's status in real time:
 
 ```sh
 argus hooks install
 ```
 
-This installs hooks for every supported agent you've set up — Claude Code, Codex,
-and Antigravity — and skips any agent that isn't installed. It's safe to re-run and
-only touches its own entries. Without it, status still works but is less precise.
+This installs hooks for every supported agent you have installed (Claude Code,
+Codex, and Antigravity) and skips the others. It is safe to re-run and changes
+only its own entries. Without the hooks, status still works but is less precise.

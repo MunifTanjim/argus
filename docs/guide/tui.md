@@ -1,10 +1,10 @@
 # TUI
 
-The TUI is Argus's terminal interface — open it with `argus`. It shows a live list
-of your agent sessions — Claude Code, Codex, and Antigravity — and lets you read
+The TUI is the terminal interface of Argus. Open it with `argus`. It shows a live
+list of your agent sessions (Claude Code, Codex, and Antigravity). You can read
 transcripts, watch screens, and control sessions.
 
-<DemoVideo src="/screenshots/demo-tui.mp4" alt="Argus TUI — session list, transcript, and history across a fleet" />
+<DemoVideo src="/screenshots/demo-tui.mp4" alt="Argus TUI: session list, transcript, and history across many machines" />
 
 ```sh
 argus
@@ -16,20 +16,19 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
 
 ## Views
 
-- **Sessions** — the session list, with live status at a glance.
-- **Transcript** — the full conversation, foldable, with tool-call detail.
-- **Live screen** — watch a session's terminal and type into it.
-- **History** — browse past projects and sessions, and resume one to pick it back up.
+- **Sessions**: the session list, with live status.
+- **Transcript**: the full conversation, with foldable sections and tool-call details.
+- **Live screen**: a session's terminal. You can type into it.
+- **History**: past projects and sessions. You can resume a session.
 
 ## Keys
 
-Press `g?` to see every key and its command. The footer shows hints for the
-current view. The keys follow Vim, and you can change them. See
+Press `g?` to see every key and its command. The keys follow Vim, and you can
+change them. See
 [Keymaps](#keymaps).
 
 Press `:` to open the command line. Type a command name and press `<CR>` to
-run it. The list above the command line shows the matching commands and their
-keys. The command line offers only the commands that do something in the
+run it. The command line offers only the commands that do something in the
 current view.
 
 The TUI captures the mouse. To select text, hold `Shift` (in most terminals)
@@ -40,7 +39,7 @@ while you drag. To give the mouse back to the terminal, set `tui.mouse` to
 
 Press `<C-k>` to open the palette. The palette searches sessions, workspaces,
 projects, and nodes. Press `<CR>` to open the selected item. The palette starts
-in the place that you are in. For example, in a workspace it lists only the
+at your current location. For example, in a workspace it lists only the
 sessions of that workspace. If the query is empty, press `<BS>` to search one
 level wider. Press `<Tab>` on a project, a node, or a workspace to search only
 in it.
@@ -130,7 +129,7 @@ a letter with alt: `<M-a>` and `<M-A>` are different keys.
 ### Key sequences
 
 A mapping can be a sequence of keys, for example `gg`. If a key starts a longer
-sequence, the footer shows the keys that can follow. Press `<Esc>` to cancel.
+sequence, press `<Esc>` to cancel.
 
 If a key is a complete mapping and also starts a longer one, the TUI waits for
 the next key. `tui.key-timeout` sets the wait. The default is `1s`.
@@ -233,19 +232,19 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 
 ## Export & View
 
-Any past session can be exported to a self-contained `.argus` bundle and opened
-later with no running node, gateway, or config.
+You can export any past session to a self-contained `.argus` bundle. Open it
+later without a running node, gateway, or config.
 
-A session's transcript can be exported from **History** to a `.argus` file in the
-current working directory.
+Export a session from **History**. The `.argus` file goes in the current working
+directory.
 
-View a exported session bundle:
+View an exported session bundle:
 
 ```sh
 argus view session.argus
 ```
 
-`.argus` files hold the session's raw transcript — full tool input and output.
+`.argus` files hold the session's raw transcript, including full tool input and output.
 Share them only with people you trust. To strip secrets first, view with `--redact`
 and save a scrubbed copy.
 

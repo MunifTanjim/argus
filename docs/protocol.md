@@ -4,9 +4,9 @@ The Go types in `internal/api/protocol.go` are the source of truth for field
 names. Argus has two reference clients: the Go client (`internal/client`, used
 by the TUI and the CLI) and the Flutter app (`app/`).
 
-Timeouts and intervals marked **client default** are values that the Go client
-uses. A new client can pick different values for its use case. All other
-values are fixed by the node or the gateway.
+Timeouts and intervals marked **client default** are the Go client's values.
+A new client can use different ones. The node or the gateway fixes all other
+values.
 
 ## Overview
 
@@ -30,8 +30,8 @@ On the gateway path, the node dials out to the gateway. The gateway never
 dials a node. A gateway that runs with a node reaches that node through a
 loopback `/node` connection.
 
-The gateway is blind. It does not read session data, and it does not merge
-results from several nodes. The client opens one relay channel per node and
+The gateway does not read session data, and it does not merge results from
+several nodes. The client opens one relay channel per node and
 merges the results itself.
 
 ### What a client implements
@@ -175,7 +175,7 @@ Only two links send pings:
 
 - The gateway pings each node every 15 seconds and waits 5 seconds for the
   reply. After two failed pings in a row, it closes the uplink. Any reply
-  counts as a success, also an error reply.
+  counts as a success, including an error reply.
 - The client pings the gateway. The client default is the same as above. The
   app uses a 20-second interval and a 10-second timeout, and closes after one
   failure.
@@ -213,7 +213,7 @@ There are two kinds of token:
   use it on `/node`. A client that uses it on `/client` is an **admin**
   connection. If `--token` is empty, `/node` accepts any token.
 - **Client token.** The gateway issues it during pairing. It is exactly 64
-  lowercase hex characters. It works only on `/client` and never gives admin
+  lowercase hex characters. It works only on `/client` and never grants admin
   rights.
 
 Admin connections can call `clients.*` and `pushport.setToken`. Other
@@ -250,10 +250,10 @@ direct frames.
 `node.event` has the type `added`, `online`, `offline`, `removed`, or
 `trust-changed`:
 
-- A new node gives `added`.
-- A node that reconnects within 30 seconds of a disconnect gives `online`,
+- A new node produces `added`.
+- A node that reconnects within 30 seconds of a disconnect produces `online`,
   not `added`.
-- A node that disconnects gives `offline`. After 30 seconds, the gateway
+- A node that disconnects produces `offline`. After 30 seconds, the gateway
   removes it and sends `removed`.
 - `trust-changed` tells the client to sync the trust log. Its `node` field is
   an empty descriptor.
@@ -430,7 +430,7 @@ channel state when its uplink closes. The client drops a channel when it gets
 a `node.event` of type `offline` or `removed`. It opens a new channel when the
 node is `online` again.
 
-`relay.close` returns `null`, also for a channel that the caller does not own.
+`relay.close` returns `null`, even for a channel that the caller does not own.
 
 ## End-to-end encryption
 
@@ -523,7 +523,7 @@ record = uint16_be(len(ciphertext)) || ciphertext
 - Each record holds at most 65519 bytes of plaintext.
 - The AEAD associated data of each record is 5 bytes: the 0-based record index
   as `uint32_be`, then `0x01` for the last record or `0x00` for the others.
-- An empty message gives one empty final record.
+- An empty message produces one empty final record.
 - A receiver rejects an empty blob and a blob with a missing last record.
 
 The Noise cipher state supplies the nonces. Each side must seal and open
@@ -750,7 +750,7 @@ terminal id is the tmux window id.
 - The node sends `terminal.changed` after a create, kill, or rename, and when
   an attach to a terminal starts or ends. A shell that exits with no attach
   stays in the list until the next `terminal.list`.
-- One viewer per terminal, with the same eviction rule as sessions.
+- A terminal has one viewer at a time, with the same eviction rule as sessions.
 - Over a shell without mouse reporting, a wheel-up enters tmux copy mode,
   which scrolls the terminal history.
 - For a terminal, the node refuses `client_pane` when that pane is in the
@@ -1000,13 +1000,12 @@ A client does not use the protocol in this section.
 
 ### Node uplink
 
-A node connects to `<gateway>/node` with the master token. Then this sequence
-occurs:
+A node connects to `<gateway>/node` with the master token. Then:
 
 1. The gateway sends `node.identify` to the node. The node must answer in 30
    seconds with a non-empty `id`, or the gateway closes the connection.
-2. The gateway adds the node to its roster and tells all clients with a
-   `node.event` notification.
+2. The gateway adds the node to its roster and notifies all clients with a
+   `node.event`.
 3. The link stays open. On this link, the node answers only `node.identify` and
    `ping`. All client traffic arrives in relay frames.
 
@@ -1093,7 +1092,7 @@ always exits with status 0.
 
 ## Method reference
 
-In the tables, **Served by** tells which component handles the method. The
+In the tables, **Served by** shows which component handles the method. The
 type notation uses `?` for a field that can be absent. Byte arrays (`bytes`)
 are standard base64 strings in JSON.
 
