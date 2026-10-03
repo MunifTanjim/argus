@@ -41,6 +41,8 @@ const (
 	glyphSidebarLeftOff  = "\uEC02" // nf-cod-layout_sidebar_left_off
 	glyphSidebarRight    = "\uEBF4" // nf-cod-layout_sidebar_right
 	glyphSidebarRightOff = "\uEC00" // nf-cod-layout_sidebar_right_off
+
+	glyphClose = "\uEA76" // nf-cod-close
 )
 
 // toolIcons groups per-category icons for the tool item rows.

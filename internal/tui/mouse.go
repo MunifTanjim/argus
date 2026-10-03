@@ -288,6 +288,14 @@ func (m model) screenMouse(ms tea.Mouse, kind screenMouseKind) (tea.Model, tea.C
 	if !ok || a.region != regMain || ms.Button == tea.MouseNone {
 		return m, nil
 	}
+	if t, hit := a.target(ms.X, ms.Y); hit && t.kind == hitClose {
+		if kind != mousePress || ms.Button != tea.MouseLeft || !m.mouse {
+			return m, nil
+		}
+		c := &ctx{m: &m}
+		c.back()
+		return m, m.apply(c)
+	}
 	return m.updateScreen(m.topScreen(), screenMouseMsg{x: ms.X - a.rect.Min.X, y: ms.Y - a.rect.Min.Y, button: ms.Button, kind: kind})
 }
 

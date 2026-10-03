@@ -123,6 +123,8 @@ func (t transcriptComp) click(c *ctx, h hitTarget, focused bool) (component, tea
 	v := t.bind(c)
 	var cmd tea.Cmd
 	switch {
+	case h.kind == hitClose:
+		cmd = v.detailBack()
 	case t.historyView == histDetail:
 		cmd = v.clickItem(h.index, focused)
 	case h.kind == hitFold:
@@ -231,21 +233,7 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.c.m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
-			// A leaf frame above a subagent frame has no subID and pops normally, so
-			// the subagent subscription lives until its own frame pops.
-			if f := m.topFrame(); f != nil && f.subID != "" {
-				cmd := m.c.m.unsubscribeCmd(f.subID)
-				m.activeSub = m.sessionSub
-				m.sessionSub = subRef{}
-				// Re-subscribe to catch deltas missed while drilled in.
-				have := len(m.c.m.transcriptCache[m.activeSub.key()].chunks)
-				m.popDetail()
-				return tea.Batch(cmd, m.c.m.subscribeCmd(m.activeSub, have))
-			}
-			if m.popDetail() { // popped the root → back to the card list
-				m.historyView = histTranscript
-			}
-			return nil
+			return m.detailBack()
 		}
 		m.c.back()
 		return nil
@@ -254,6 +242,25 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDetailKey(msg)
 	}
 	return m.handleTranscriptKey(msg)
+}
+
+// detailBack pops one detail frame; popping the root returns to the cards.
+func (m tview) detailBack() tea.Cmd {
+	// A leaf frame above a subagent frame has no subID and pops normally, so
+	// the subagent subscription lives until its own frame pops.
+	if f := m.topFrame(); f != nil && f.subID != "" {
+		cmd := m.c.m.unsubscribeCmd(f.subID)
+		m.activeSub = m.sessionSub
+		m.sessionSub = subRef{}
+		// Re-subscribe to catch deltas missed while drilled in.
+		have := len(m.c.m.transcriptCache[m.activeSub.key()].chunks)
+		m.popDetail()
+		return tea.Batch(cmd, m.c.m.subscribeCmd(m.activeSub, have))
+	}
+	if m.popDetail() {
+		m.historyView = histTranscript
+	}
+	return nil
 }
 
 func (m tview) historyKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -269,10 +276,7 @@ func (m tview) historyKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.c.m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
-			if m.popDetail() { // root frame → back to transcript
-				m.historyView = histTranscript
-			}
-			return nil
+			return m.detailBack()
 		}
 		if m.c.m.viewer {
 			return tea.Quit

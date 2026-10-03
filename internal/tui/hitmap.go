@@ -41,6 +41,7 @@ const (
 	hitTab
 	hitFold
 	hitHeader
+	hitClose
 )
 
 type hitTarget struct {
