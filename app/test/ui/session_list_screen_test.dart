@@ -36,8 +36,10 @@ void main() {
       gatewayProvider.overrideWithValue(null),
     ]));
     await tester.pump();
-    expect(find.text('▌ NEEDS YOU'), findsOneWidget);
-    expect(find.textContaining('dev'), findsWidgets);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
+    expect(find.text('◆'), findsWidgets);
+    expect(find.text('DEV'), findsOneWidget);
+    expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
   });
 
   testWidgets('agent badges appear only when agents are mixed', (tester) async {
