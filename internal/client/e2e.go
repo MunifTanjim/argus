@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -490,6 +491,8 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			m.trackSessionEvent(nc.nodeID, params)
 		} else if f.Method == api.MethodTasksChanged {
 			params = stampTasksChanged(params, nc.nodeID)
+		} else if f.Method == api.MethodTerminalChanged {
+			params, _ = json.Marshal(api.TerminalChanged{NodeID: nc.nodeID})
 		}
 		select {
 		case m.events <- api.Notification{Method: f.Method, Params: params}:
@@ -520,6 +523,10 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.fanoutHistoryProjects(raw, out)
 	case method == api.MethodProjectList:
 		return m.fanoutProjects(raw, out)
+	case method == api.MethodTerminalList:
+		return m.fanoutTerminals(raw, out)
+	case terminalAddressed[method], method == api.MethodTerminalOpen && hasTerminalID(raw):
+		return m.routeByTerminal(method, raw, out)
 	case sessionAddressed[method]:
 		return m.routeBySession(method, raw, out)
 	case workspaceAddressed[method]:
@@ -674,6 +681,49 @@ func (m *E2EClient) fanoutHistoryProjects(raw json.RawMessage, out any) error {
 	return assign(out, all)
 }
 
+// fanoutTerminals merges every node's terminals with composite ids, ordered by
+// node so a list does not reshuffle between loads. It fails only when every
+// node failed.
+func (m *E2EClient) fanoutTerminals(raw json.RawMessage, out any) error {
+	chans := m.channelsSnapshot()
+	results := make([][]api.Terminal, len(chans))
+	errs := make([]error, len(chans))
+	var wg sync.WaitGroup
+	for i, nc := range chans {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var r api.TerminalListResult
+			if err := m.callNode(nc.nodeID, api.MethodTerminalList, raw, &r); err != nil {
+				// A node older than terminals answers method-not-found: it has none.
+				var re *api.RPCError
+				if !errors.As(err, &re) || re.Code != api.CodeMethodNotFound {
+					log.Printf("client: warn: terminal.list on node %s failed: %v", nc.nodeID, err)
+					errs[i] = err
+				}
+				return
+			}
+			for _, t := range r.Terminals {
+				results[i] = append(results[i], withTerminalOrigin(t, nc.nodeID, nc.label))
+			}
+		}()
+	}
+	wg.Wait()
+	merged := []api.Terminal{}
+	var failed []string
+	for i, r := range results {
+		merged = append(merged, r...)
+		if errs[i] != nil {
+			failed = append(failed, chans[i].nodeID)
+		}
+	}
+	if len(chans) > 0 && len(failed) == len(chans) {
+		return errs[0]
+	}
+	api.SortTerminalsByNode(merged)
+	return assign(out, api.TerminalListResult{Terminals: merged, FailedNodes: failed})
+}
+
 // fanoutProjects composites each project and workspace id with the node id so
 // they match the composited session.workspace_id.
 func (m *E2EClient) fanoutProjects(raw json.RawMessage, out any) error {
@@ -804,6 +854,39 @@ func (m *E2EClient) routeBySession(method string, raw json.RawMessage, out any) 
 	return nil
 }
 
+func hasTerminalID(raw json.RawMessage) bool {
+	id, _ := terminalIDFromParams(raw)
+	return id != ""
+}
+
+// routeByTerminal splits the composite terminal_id and routes to its node; an
+// open also records term_id -> node for the attach's later calls.
+func (m *E2EClient) routeByTerminal(method string, raw json.RawMessage, out any) error {
+	composite, err := terminalIDFromParams(raw)
+	if err != nil {
+		return err
+	}
+	nodeID, localID, ok := session.SplitCompositeID(composite)
+	if !ok {
+		return &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal id is not gateway-qualified: " + composite}
+	}
+	local, err := setStringField(raw, "terminal_id", localID)
+	if err != nil {
+		return err
+	}
+	if err := m.callNode(nodeID, method, local, out); err != nil {
+		return err
+	}
+	if method == api.MethodTerminalOpen {
+		if id, _ := termIDFromParams(raw); id != "" {
+			m.mu.Lock()
+			m.termNode[id] = nodeID
+			m.mu.Unlock()
+		}
+	}
+	return nil
+}
+
 func (m *E2EClient) routeByWorkspace(method string, raw json.RawMessage, out any) error {
 	composite, err := workspaceIDFromParams(raw)
 	if err != nil {
@@ -856,6 +939,13 @@ func (m *E2EClient) routeByNode(method string, raw json.RawMessage, out any) err
 		if nodeID = m.soleNode(); nodeID == "" {
 			return &api.RPCError{Code: api.CodeInvalidRequest, Message: method + " requires node_id"}
 		}
+	}
+	if method == api.MethodTerminalCreate {
+		var t api.Terminal
+		if err := m.callNode(nodeID, method, raw, &t); err != nil {
+			return err
+		}
+		return assign(out, withTerminalOrigin(t, nodeID, m.nodeLabel(nodeID)))
 	}
 	if compositeResultMethods[method] {
 		var res json.RawMessage

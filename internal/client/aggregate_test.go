@@ -70,4 +70,10 @@ func TestMethodSetsMirrorGateway(t *testing.T) {
 	if !compositeResultMethods[api.MethodSessionSpawn] || !compositeResultMethods[api.MethodSessionResume] {
 		t.Error("compositeResultMethods missing spawn/resume")
 	}
+	if !terminalAddressed[api.MethodTerminalKill] || !terminalAddressed[api.MethodTerminalRename] {
+		t.Error("terminalAddressed missing kill/rename")
+	}
+	if !nodeAddressed[api.MethodTerminalCreate] {
+		t.Error("nodeAddressed missing terminal.create")
+	}
 }
