@@ -550,6 +550,61 @@ type NodeCapabilities struct {
 	Terminal bool `json:"terminal"`
 	// HostWakelock reports whether the node can hold a wakelock (host.setWakelock).
 	HostWakelock bool `json:"host_wakelock"`
+
+	// unknown keeps the keys this build does not know, so a gateway relays the
+	// capabilities of a newer node unchanged.
+	unknown map[string]json.RawMessage
+}
+
+// knownCapabilities has the fields of NodeCapabilities without its JSON methods.
+type knownCapabilities NodeCapabilities
+
+func (c *NodeCapabilities) UnmarshalJSON(b []byte) error {
+	var known knownCapabilities
+	if err := json.Unmarshal(b, &known); err != nil {
+		return err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(b, &all); err != nil {
+		return err
+	}
+	knownKeys, err := capabilityKeys(known)
+	if err != nil {
+		return err
+	}
+	for k := range knownKeys {
+		delete(all, k)
+	}
+	if len(all) > 0 {
+		known.unknown = all
+	}
+	*c = NodeCapabilities(known)
+	return nil
+}
+
+func (c NodeCapabilities) MarshalJSON() ([]byte, error) {
+	if len(c.unknown) == 0 {
+		return json.Marshal(knownCapabilities(c))
+	}
+	all, err := capabilityKeys(knownCapabilities(c))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range c.unknown {
+		if _, ok := all[k]; !ok {
+			all[k] = v
+		}
+	}
+	return json.Marshal(all)
+}
+
+func capabilityKeys(known knownCapabilities) (map[string]json.RawMessage, error) {
+	b, err := json.Marshal(known)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	return m, json.Unmarshal(b, &m)
 }
 
 // ServerInfo carries server-wide metadata for a connected client: server version
