@@ -105,6 +105,12 @@ type Responder interface {
 	Respond(ctx context.Context, sess session.Session, p api.RespondParams) error
 }
 
+// InteractionOwner is implemented by a Responder that updates the session's
+// interaction itself after Respond; the node then skips ClearInteraction.
+type InteractionOwner interface {
+	OwnsInteraction() bool
+}
+
 // Dismisser removes a session from the live list on the user's request, for
 // adapters whose sessions are presence-tracked rather than pane-bound (opencode).
 type Dismisser interface {

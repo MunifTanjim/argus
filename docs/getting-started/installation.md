@@ -61,8 +61,12 @@ Install the Argus hooks so it can track each session's status in real time:
 argus hooks install
 ```
 
-This installs hooks for every supported agent you have installed (Claude Code,
-Codex, and Antigravity) and skips the others. It is safe to re-run and changes
+This installs hooks for every supported agent you have installed (Claude Code
+and Antigravity) and skips the others. It is safe to re-run and changes
 only its own entries. Without the hooks, status still works but is less precise.
 
 OpenCode needs no hooks.
+
+Codex needs no hooks. Argus connects to Codex's background app-server daemon,
+which `codex` starts automatically. Sessions started with `codex --no-daemon` are
+not visible to Argus.

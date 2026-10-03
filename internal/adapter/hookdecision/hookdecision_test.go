@@ -8,7 +8,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-func TestBuildClarifyMessage(t *testing.T) {
+func TestBuildbuildClarifyMessage(t *testing.T) {
 	toolInput := json.RawMessage(`{"questions":[{"question":"Pick a DB"},{"question":"Region?"}]}`)
 
 	msg := buildClarifyMessage(toolInput, map[string]any{"Pick a DB": "Postgres"})

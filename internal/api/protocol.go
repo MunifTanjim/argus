@@ -810,6 +810,9 @@ type RespondParams struct {
 	// OptionValue echoes a server-built DecisionOption.Value. Node maps it:
 	// "deny" → deny; "allow" → plain allow; any other → allow + setMode <value>.
 	OptionValue string `json:"option_value,omitempty"`
+	// RequestID echoes Interaction.RequestID so the answer reaches the request the
+	// user saw, not one that replaced it.
+	RequestID string `json:"request_id,omitempty"`
 
 	// Keystroke fallback (no parked hook / idle).
 	Kind        string `json:"kind,omitempty"`

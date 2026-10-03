@@ -61,7 +61,9 @@ func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage)
 				d.log.Warn("responder failed", "session", p.SessionID, "err", err)
 				return nil, err
 			}
-			d.reg.ClearInteraction(p.SessionID)
+			if o, ok := r.(adapter.InteractionOwner); !ok || !o.OwnsInteraction() {
+				d.reg.ClearInteraction(p.SessionID)
+			}
 			return nil, nil
 		}
 	}

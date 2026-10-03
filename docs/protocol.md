@@ -566,7 +566,7 @@ Local session ids have these forms:
 | Form                         | Use                                                    |
 | ---------------------------- | ------------------------------------------------------ |
 | `<tmux_server>:<pane_id>`    | sessions in tmux. The servers are `default` and `argus` (sessions that Argus spawned). |
-| `<agent>:<agent_session_id>` | headless agents, for example opencode                  |
+| `<agent>:<agent_session_id>` | headless agents (opencode, codex)                      |
 
 The client makes these ids composite:
 
@@ -654,8 +654,8 @@ the session card.
 - If a `PermissionRequest` hook is held, the node turns the structured fields
   (`behavior`, `reason`, `answers`, `question_action`, `set_mode`,
   `option_value`) into the hook decision.
-- If no hook is held and the agent is opencode, the node passes the answer to
-  the opencode service.
+- If no hook is held and the agent is headless, the node passes the answer to
+  the agent's service (opencode, the codex app-server daemon).
 - In all other cases, the node drops the answer and returns success.
 
 For `option_value`, the node maps `deny` to a deny, `allow` to an allow, and
@@ -1086,7 +1086,7 @@ HookEvent {
 }
 ```
 
-For `PermissionRequest` from Claude Code and Codex, the call blocks if the
+For `PermissionRequest` from Claude Code, the call blocks if the
 session is live. The node holds it until a client answers with
 `sessions.respond`. The node then returns the decision as
 `hookSpecificOutput` JSON in `output`, and the command prints it. The agent
@@ -1171,7 +1171,7 @@ unix socket and on relay channels.
 | `tasks.changed`         | notification | `{ sub_id, session_id }`         | —                            |
 | `sessions.exportBundle` | request      | `ExportBundleParams`             | `{ filename, data: bytes }`  |
 
-For a headless agent (opencode), `pane_id` in the `sessions.spawn` result is
+For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
 an empty string.
 
 ```ts

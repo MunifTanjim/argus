@@ -138,6 +138,15 @@ type Interaction struct {
 	// Options, when set, are server-built decision choices the client renders verbatim;
 	// the chosen Value is sent back unchanged and mapped to allow/deny + permission mode.
 	Options []DecisionOption `json:"options,omitempty"`
+	// CancelInterrupts marks questions the agent cannot decline: cancelling
+	// interrupts the turn, and there is no "chat about this" (Codex).
+	CancelInterrupts bool `json:"cancel_interrupts,omitempty"`
+	// AllowUnanswered marks questions that may be submitted with some or all
+	// left unanswered (Codex).
+	AllowUnanswered bool `json:"allow_unanswered,omitempty"`
+	// RequestID identifies the pending request this interaction shows, for agents
+	// that queue several (Codex). Clients echo it in RespondParams.RequestID.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // Summary is a cached transcript digest for list views, computed node-side on hook

@@ -323,10 +323,11 @@ func TestHandleAgentsList(t *testing.T) {
 		t.Fatalf("spawnable flags = %v, want claude+codex true, antigravity false", got)
 	}
 
-	// No tmux → everything still listed, nothing spawnable.
+	// No tmux → everything still listed; only Spawner (headless) agents such as
+	// codex stay spawnable, since they create sessions over a service API.
 	d.caps.SpawnSession = false
 	for id, sp := range spawnableByID() {
-		if sp {
+		if sp && id != "codex" {
 			t.Fatalf("no-tmux: %s must not be spawnable", id)
 		}
 	}
