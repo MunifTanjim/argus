@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.1.1](https://github.com/MunifTanjim/argus/compare/0.1.0...0.1.1) (2026-10-03)
+
+
+### Features
+
+* **app:** add system voice provider ([6d057cb](https://github.com/MunifTanjim/argus/commit/6d057cb4a6082fad22980de24b9561de44059928))
+* **app:** add voice input using openrouter transcription ([fbbf6cb](https://github.com/MunifTanjim/argus/commit/fbbf6cbea2359919792fc856d05a91a0f8069464))
+* **app:** add voice provider settings and improve recording ux ([276abf5](https://github.com/MunifTanjim/argus/commit/276abf5e4d7fe741a671f3d2f6a56514f37cb187))
+* **e2ee:** advertise node lock_disabled in the roster ([6ee9b79](https://github.com/MunifTanjim/argus/commit/6ee9b79358e6a2383dae246544fbcd9efe0d5b8e))
+* **gateway:** relay unknown node capabilities ([f60851e](https://github.com/MunifTanjim/argus/commit/f60851e15e1ed7eeefe11de847f352f14e3b3c65))
+* **node:** add host info and wakelock ([741f6d2](https://github.com/MunifTanjim/argus/commit/741f6d23d28a287eb423fbc02007378a3520b38b))
+* **node:** add persistent terminals ([ea6557f](https://github.com/MunifTanjim/argus/commit/ea6557fb27634559e76ea4b22a0508c03b32caaa))
+* **tui:** add a right-click menu ([8a07a4b](https://github.com/MunifTanjim/argus/commit/8a07a4b2df3ec47bc2836eebbec5b808c464bb88))
+* **tui:** add close buttons ([15fea07](https://github.com/MunifTanjim/argus/commit/15fea07871a63006c5b519613701e02224dada0d))
+* **tui:** add hover popup ([1cb0e8c](https://github.com/MunifTanjim/argus/commit/1cb0e8ce7e833727b9090a2062e04f068cf075cc))
+* **tui:** add mouse support ([8e95ab1](https://github.com/MunifTanjim/argus/commit/8e95ab1f72cfef55d76eca031acd366ab11d2851))
+* **tui:** add sidebar toggle icons ([90b094f](https://github.com/MunifTanjim/argus/commit/90b094fbd4c41e46749aaf47f49fce7ceab553f2))
+* **tui:** add terminals to Home and the node pane ([8edeb6f](https://github.com/MunifTanjim/argus/commit/8edeb6fa82aed73662195df907515804c8ed495f))
+* **tui:** add tui.mouse and the toggle mouse command ([6e800eb](https://github.com/MunifTanjim/argus/commit/6e800eb7429445cc43d59b48e9309e5936d3f1f7))
+* **tui:** always show the node row ([589effb](https://github.com/MunifTanjim/argus/commit/589effb2b756f84516aa20adfe45d77f568095bb))
+* **tui:** capitalize Argus, cycle title icon ([d2c7e99](https://github.com/MunifTanjim/argus/commit/d2c7e9961be25df112d29c1f4fabcb9457eae6a5))
+* **tui:** coalesce mouse wheel and throttle motion ([b584d43](https://github.com/MunifTanjim/argus/commit/b584d43aadc0d9f3edd7b80845955f01de438c0b))
+* **tui:** rank palette results by kind and exact match ([50624b7](https://github.com/MunifTanjim/argus/commit/50624b7b5cc02907e5f6addebbec6097ec70620f))
+* **tui:** route terminal methods across nodes ([cb8188c](https://github.com/MunifTanjim/argus/commit/cb8188cc70314782d9fe1c4a5abaf696947e26d0))
+* **tui:** show host info and wakelock ([472a516](https://github.com/MunifTanjim/argus/commit/472a51620ccf80ae55e67df2a1e55da1b91533f1))
+* **tui:** toggle cards by chevron click ([2ad5306](https://github.com/MunifTanjim/argus/commit/2ad5306c3f309750ea8277df7403f50577b3b8bb))
+* **tui:** update icons ([8820767](https://github.com/MunifTanjim/argus/commit/8820767b52dc03eaa4b6154900a84a396b31690f))
+
+
+### Bug Fixes
+
+* **e2ee:** open no node channels while this device is unauthorized ([6bc772c](https://github.com/MunifTanjim/argus/commit/6bc772cbda547dc3c1df650fefc44a66c69f7c92))
+* **tui:** fit live screen to layout ([b61b001](https://github.com/MunifTanjim/argus/commit/b61b001a588e8b956537f4d94629ecca2480f95b))
+
 ## [0.1.0](https://github.com/MunifTanjim/argus/compare/0.0.17...0.1.0) (2026-10-01)
 
 
