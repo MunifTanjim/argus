@@ -133,8 +133,7 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 
 func (t terminalsComp) stepTab(c *ctx, d int) tea.Cmd {
 	if t.nodeID != "" {
-		c.replaceBase(summaryComp{kind: rowNode, id: t.nodeID})
-		return nil
+		return openNodeSummary(c, t.nodeID)
 	}
 	return stepHomeTab(c, tabTerminals, d)
 }
@@ -197,7 +196,7 @@ func (t terminalsComp) clickTab(c *ctx, i int) tea.Cmd {
 	switch {
 	case t.nodeID != "":
 		if nodeTab(i) == nodeTabProjects {
-			c.replaceBase(summaryComp{kind: rowNode, id: t.nodeID})
+			return openNodeSummary(c, t.nodeID)
 		}
 		return nil
 	case c.m.homeTabAt(i) == tabTerminals:

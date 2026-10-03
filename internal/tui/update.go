@@ -216,6 +216,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.apply(c)
 		}
 		return m, nil
+	case hostInfoMsg, hostTickMsg, hostWakelockMsg:
+		return m.updateHost(msg)
 	case terminalActionMsg:
 		return m.updateTerminals(msg)
 	case killResultMsg:

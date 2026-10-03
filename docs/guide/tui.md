@@ -175,6 +175,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `next` | changes, file-tree, history, home, project-tree, session-dock, terminals, transcript, workspace | `<Down>` `j` |
 | `next card` | transcript | `}` |
 | `next diff-file` | file | `]f` |
+| `node wakelock` | node, project-tree | `w` |
 | `open` | changes, file-tree, history, home, project-tree, terminals, transcript, workspace | `<CR>` |
 | `open live-screen` | session-dock, transcript | `<C-t>` |
 | `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-k>` |

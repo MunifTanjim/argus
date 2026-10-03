@@ -123,6 +123,23 @@ type terminalsMsg struct {
 	err    error
 }
 
+type hostInfoMsg struct {
+	nodeID string
+	info   api.HostInfo
+	err    error
+}
+
+type hostTickMsg struct {
+	nodeID string
+	gen    int
+}
+
+type hostWakelockMsg struct {
+	nodeID   string
+	wakelock api.HostWakelock
+	err      error
+}
+
 // terminalActionMsg is a terminal create, rename, or kill result; created is the
 // new terminal, which opens.
 type terminalActionMsg struct {

@@ -173,6 +173,18 @@ func TestMenuOnTreeRows(t *testing.T) {
 	wantMenu(t, mm, "session spawn", "workspace change-target", "workspace rerun-setup", "open setup-log", "workspace remove")
 }
 
+func TestMenuOnTreeNodeRow(t *testing.T) {
+	m := withMouse(withWakelockCap(homeTestModel(), true))
+	x, y := itemCell(t, m, regTree, 1)
+	mm, _ := rightClick(m, x, y)
+	wantMenu(t, mm, "node wakelock")
+
+	m = withMouse(withWakelockCap(homeTestModel(), false))
+	if mm, _ := rightClick(m, x, y); len(mm.popups) != 0 {
+		t.Error("a node row without the wakelock capability has no menu")
+	}
+}
+
 func TestMenuOnFileView(t *testing.T) {
 	for _, diff := range []bool{false, true} {
 		m := withMouse(homeTestModel())

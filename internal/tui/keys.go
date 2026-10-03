@@ -118,6 +118,12 @@ var terminalKeys = struct {
 	Kill:   nb("terminal kill", "dd", "kill"),
 }
 
+var nodeKeys = struct {
+	Wakelock binding
+}{
+	Wakelock: nb("node wakelock", "w", "wakelock"),
+}
+
 var projectsKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter       binding
 	Widen, Narrow, ToggleSidebar, Filter, Help                        binding
@@ -333,7 +339,7 @@ func textInputSets() []any { return []any{createKeys, promptKeys} }
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys}
+		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

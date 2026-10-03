@@ -56,6 +56,9 @@ func (m model) commandSet() []binding {
 func (m model) applies(b binding) bool {
 	k := projectsKeys
 	switch b.name {
+	case nodeKeys.Wakelock.name:
+		r, ok := m.left.tree.cursorRow()
+		return ok && r.kind == rowNode
 	case k.Pin.name, k.Unpin.name, k.Hide.name, k.Unhide.name:
 	default:
 		return true
