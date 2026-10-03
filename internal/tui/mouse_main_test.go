@@ -305,3 +305,20 @@ func TestSpawnWheelMovesCursor(t *testing.T) {
 		t.Errorf("cursor = %d, want 1", spawnOf(m).cursor)
 	}
 }
+
+func TestTranscriptBodyClickSelectsWithoutDrilling(t *testing.T) {
+	m := liveWithChunks(3)
+	x, y := itemCell(t, m, regMain, 2)
+	m, _ = click(m, x, y+1)
+	if trOf(m).transcript.cursor != 2 {
+		t.Fatalf("cursor = %d, want 2", trOf(m).transcript.cursor)
+	}
+	m, _ = click(m, x, y+1)
+	if trOf(m).historyView == histDetail {
+		t.Error("a click on the card body must not open the detail")
+	}
+	m, _ = click(m, x, y)
+	if trOf(m).historyView != histDetail {
+		t.Error("a click on the selected card's header must open the detail")
+	}
+}

@@ -138,13 +138,26 @@ func (m tview) actDrillChunk(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) clickChunk(i int, focused bool) tea.Cmd {
-	if i < 0 || i >= len(m.transcript.chunks) {
-		return nil
-	}
 	if focused && i == m.transcript.cursor {
 		return m.actDrillChunk(tea.KeyPressMsg{})
 	}
+	m.selectChunk(i)
+	return nil
+}
+
+func (m tview) selectChunk(i int) {
+	if i >= 0 && i < len(m.transcript.chunks) {
+		m.transcript.cursor = i
+	}
+}
+
+func (m tview) clickFold(i int) tea.Cmd {
+	if i < 0 || i >= len(m.transcript.chunks) {
+		return nil
+	}
 	m.transcript.cursor = i
+	m.setExpanded(i, !m.chunkExpanded(m.transcript.chunks[i]))
+	m.ensureChunkVisible()
 	return nil
 }
 

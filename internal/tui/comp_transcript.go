@@ -122,10 +122,15 @@ func (t transcriptComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.C
 func (t transcriptComp) click(c *ctx, h hitTarget, focused bool) (component, tea.Cmd) {
 	v := t.bind(c)
 	var cmd tea.Cmd
-	if t.historyView == histDetail {
+	switch {
+	case t.historyView == histDetail:
 		cmd = v.clickItem(h.index, focused)
-	} else {
+	case h.kind == hitFold:
+		cmd = v.clickFold(h.index)
+	case h.kind == hitHeader:
 		cmd = v.clickChunk(h.index, focused)
+	default:
+		v.selectChunk(h.index)
 	}
 	return t, cmd
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -840,8 +841,36 @@ func (m tview) transcriptBody() string {
 	}
 	end := min(len(lines), scroll+h)
 	hitStarts(m.c, first, len(lines), scroll, end)
+	m.hitCardHeaders(lines, first, scroll, end)
 	b.WriteString(strings.Join(lines[scroll:end], "\n"))
 	return b.String()
+}
+
+// hitCardHeaders covers each card's header row, then its chevron, which sits on
+// the left or the right depending on the card.
+func (m tview) hitCardHeaders(lines []string, first []int, scroll, end int) {
+	if !m.c.recording() {
+		return
+	}
+	x := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth())
+	for i, top := range first {
+		if top < scroll || top >= end {
+			continue
+		}
+		line := xansi.Strip(lines[top])
+		if w := xansi.StringWidth(strings.TrimRight(line, " ")); w > x {
+			m.c.hitZone(uv.Rect(x, top-scroll, w-x, 1), hitTarget{kind: hitHeader, index: i})
+		}
+		if !m.c.m.chunkExpandable(m.transcript.chunks[i]) {
+			continue
+		}
+		for _, g := range []string{Icon.Collapsed.Glyph, Icon.Expanded.Glyph} {
+			if j := strings.Index(line, g); j >= 0 {
+				m.c.hitZone(uv.Rect(xansi.StringWidth(line[:j]), top-scroll, 2, 1), hitTarget{kind: hitFold, index: i})
+				break
+			}
+		}
+	}
 }
 
 // -- Edit diff rendering (used by the detail drill-down view) ------------------
