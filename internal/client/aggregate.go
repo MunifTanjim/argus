@@ -63,6 +63,7 @@ var nodeAddressed = map[string]bool{
 	api.MethodSessionsHistorySessions:   true,
 	api.MethodSessionsHistoryTranscript: true,
 	api.MethodSessionHistoryToolDetail:  true,
+	api.MethodTerminalCreate:            true,
 }
 
 // terminalHandleAddressed methods carry a term_id (not a session_id); the client
@@ -71,6 +72,14 @@ var terminalHandleAddressed = map[string]bool{
 	api.MethodTerminalInput:  true,
 	api.MethodTerminalResize: true,
 	api.MethodTerminalClose:  true,
+}
+
+// terminalAddressed methods carry a composite terminal_id the client splits to a
+// node-local id and routes to that node. terminal.open joins them when it names
+// a terminal_id instead of a session_id.
+var terminalAddressed = map[string]bool{
+	api.MethodTerminalKill:   true,
+	api.MethodTerminalRename: true,
 }
 
 // pushFanoutMethods are sent to every connected node (each holds its own device
@@ -100,6 +109,13 @@ func withOrigin(s session.Session, nodeID, label string) session.Session {
 	s.NodeLabel = label
 	s.Offline = false
 	return s
+}
+
+func withTerminalOrigin(t api.Terminal, nodeID, label string) api.Terminal {
+	t.ID = session.CompositeID(nodeID, t.ID)
+	t.NodeID = nodeID
+	t.NodeLabel = label
+	return t
 }
 
 func rewriteSessionID(params json.RawMessage, id string) (json.RawMessage, error) {
@@ -157,6 +173,9 @@ func projectIDFromParams(p json.RawMessage) (string, error) { return stringField
 func nodeIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "node_id") }
 func subIDFromParams(p json.RawMessage) (string, error)     { return stringField(p, "sub_id") }
 func termIDFromParams(p json.RawMessage) (string, error)    { return stringField(p, "term_id") }
+func terminalIDFromParams(p json.RawMessage) (string, error) {
+	return stringField(p, "terminal_id")
+}
 
 // stampTasksChanged rewrites a tasks.changed notification's node-local session_id
 // to the composite id, so a client that only knows composite ids can match it.
