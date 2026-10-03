@@ -1,8 +1,8 @@
 # Mobile App
 
 The **mobile app** for iOS and Android (in [`app/`](https://github.com/MunifTanjim/argus/tree/main/app))
-mirrors the TUI: sessions, status, transcripts, live screen, prompts, and history.
-It also adds **Push Notification**. The app notifies you as soon as a session needs
+shows your sessions, status, transcripts, live screen, prompts, and history. It
+also adds **Push Notification**. The app notifies you as soon as a session needs
 you (a prompt, a question, a finished turn), **even when it is in the background or
 killed**.
 
@@ -10,27 +10,16 @@ killed**.
 
 ## Install
 
-### Android
+- **Android:** install **[Argus](https://play.google.com/store/apps/details?id=dev.muniftanjim.argus)**
+  from Google Play.
+- **iOS:** install **[Argus: AI Agents](https://apps.apple.com/app/argus-ai-agents/id6806563653)**
+  from the App Store.
 
-The app is in **Closed Testing** on Google Play. Anyone can join:
+To test new versions before they reach the stores, join the beta:
 
-1. Join the **[argus-android-app-beta](https://groups.google.com/g/argus-android-app-beta)**
-   Google Group with the Google account you use on the device.
-2. Open the **[testing opt-in link](https://play.google.com/apps/testing/dev.muniftanjim.argus)**
-   and tap **Become a tester**.
-3. Follow the link to install **Argus** from the Play Store.
-
-Updates arrive automatically through the Play Store.
-
-### iOS
-
-The app is in **beta** on TestFlight. Anyone can join:
-
-1. Install **[TestFlight](https://apps.apple.com/us/app/testflight/id899247664)**
-   from the App Store if you do not have it.
-2. Open the **[TestFlight beta link](https://testflight.apple.com/join/nVUbHecZ)**
-   on the device and tap **Accept**.
-3. Tap **Install** in TestFlight.
+- **Android:** join **[Open Testing](https://play.google.com/apps/testing/dev.muniftanjim.argus)**
+  on Google Play.
+- **iOS:** join the **[TestFlight Beta](https://testflight.apple.com/join/nVUbHecZ)**.
 
 ## Pairing
 

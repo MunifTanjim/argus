@@ -11,20 +11,20 @@ interrupt, or kill sessions without leaving the TUI.
 You can use Argus in a terminal on one machine, across several machines, or
 from your phone, which gets a push notification when a session needs you.
 
-Argus supports **Claude Code**, **Codex**, and **Antigravity**. It lists their
-sessions together. Support for more agents can come later.
+Argus supports **Claude Code**, **Codex**, **Antigravity**, and **OpenCode**. It
+lists their sessions together. Support for more agents can come later.
 
 ## Highlights
 
-- **Multi-agent:** Claude Code, Codex, and Antigravity in one session list.
-- **Zero-setup discovery:** Finds agent sessions in tmux. No per-session config.
+- **Multi-agent:** Claude Code, Codex, Antigravity, and OpenCode in one session list.
+- **Zero-setup discovery:** Finds agent sessions automatically. No per-session config.
 - **Don't use tmux?** `argus spawn` runs an agent inside tmux for you.
-- **Live status:** working, waiting, idle, or dead, based on each agent's hooks.
+- **Live status:** working, waiting, idle, or dead.
 - **Transcripts:** The full conversation, with foldable sections and tool-call details.
 - **Live screen:** Watch a session's terminal and type into it.
 - **Lifecycle control:** Spawn, interrupt, or kill sessions and answer prompts directly.
 - **Multi-machine:** Collect sessions from several machines and watch them in one TUI.
-- **Mobile app:** An Android app with **push notifications**.
+- **Mobile app:** An Android and iOS app with **push notifications**.
 
 ## How it fits together
 

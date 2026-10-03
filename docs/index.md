@@ -28,7 +28,7 @@ features:
       width: "24"
       height: "24"
     title: Multi-Agent
-    details: Claude Code, Codex, and Antigravity sessions in one list.
+    details: Claude Code, Codex, Antigravity, and OpenCode sessions in one list.
     link: /getting-started/introduction
   - icon:
       src: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23F5B301%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M19.07%204.93A10%2010%200%200%200%206.99%203.34%22%2F%3E%3Cpath%20d%3D%22M4%206h.01%22%2F%3E%3Cpath%20d%3D%22M2.29%209.62A10%2010%200%201%200%2021.31%208.35%22%2F%3E%3Cpath%20d%3D%22M16.24%207.76A6%206%200%201%200%208.23%2016.67%22%2F%3E%3Cpath%20d%3D%22M12%2018h.01%22%2F%3E%3Cpath%20d%3D%22M17.99%2011.66A6%206%200%200%201%2015.77%2016.67%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%222%22%2F%3E%3Cpath%20d%3D%22m13.41%2010.59%205.66-5.66%22%2F%3E%3C%2Fsvg%3E"
@@ -63,7 +63,7 @@ features:
       width: "24"
       height: "24"
     title: Mobile App + Notification
-    details: An Android app that mirrors the TUI, with push notifications when a session needs you.
+    details: Watch and control your sessions from Android or iOS, with push notifications when a session needs you.
     link: /guide/mobile-app
 ---
 
@@ -102,6 +102,6 @@ Prefer Go? `go install github.com/MunifTanjim/argus/cmd/argus@latest`, or follow
 <a class="scale" href="/guide/mobile-app">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
 <h3>Mobile</h3>
-<p>The Android app mirrors the TUI and sends a push notification when a session needs you.</p>
+<p>Watch and control your sessions from your phone, and get a push notification when a session needs you.</p>
 </a>
 </div>

@@ -37,6 +37,9 @@ cd ~/code/my-project
 claude          # or codex, or agy
 ```
 
+OpenCode sessions do not need tmux. Start `opencode` as usual and Argus discovers
+it.
+
 ## Don't use tmux? Let Argus wrap it
 
 Argus can watch the live screen and type into a session only when the agent runs

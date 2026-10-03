@@ -1,7 +1,7 @@
 # TUI
 
 The TUI is the terminal interface of Argus. Open it with `argus`. It shows a live
-list of your agent sessions (Claude Code, Codex, and Antigravity). You can read
+list of your agent sessions (Claude Code, Codex, Antigravity, and OpenCode). You can read
 transcripts, watch screens, and control sessions.
 
 <DemoVideo src="/screenshots/demo-tui.mp4" alt="Argus TUI: session list, transcript, and history across many machines" />

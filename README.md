@@ -7,8 +7,8 @@ machines. Argus pulls them into one view: which are working, which are stuck on 
 prompt, which just finished. Read transcripts, watch and type into a session,
 answer prompts, spawn/interrupt/kill — without leaving the TUI.
 
-Works with **Claude Code**, **Codex**, and **Antigravity** — side by side in one
-view.
+Works with **Claude Code**, **Codex**, **Antigravity**, and **OpenCode** — side by
+side in one view.
 
 Start local in a terminal. Scale to a fleet across machines. Get a push
 notification on your phone when a session needs you.
@@ -19,15 +19,15 @@ notification on your phone when a session needs you.
 
 ## Highlights
 
-- **Multi-agent** — Claude Code, Codex, and Antigravity, in one session list.
-- **Zero-setup discovery** — finds agent sessions in tmux. No per-session config.
+- **Multi-agent** — Claude Code, Codex, Antigravity, and OpenCode, in one session list.
+- **Zero-setup discovery** — finds agent sessions automatically. No per-session config.
 - **Don't use tmux?** — `argus spawn` wraps an agent in tmux for you.
-- **Live status** — working / waiting / idle / dead, from each agent's hooks.
+- **Live status** — working / waiting / idle / dead.
 - **Transcripts** — full conversation, foldable, drill into tool calls.
 - **Live screen** — watch a session's terminal and type into it.
 - **Lifecycle control** — spawn, interrupt, kill, answer prompts in place.
 - **Fleet mode** — aggregate machines, watch them all from one TUI.
-- **Mobile app** — Android companion with **Push Notification**, even when closed.
+- **Mobile app** — Android and iOS companion with **Push Notification**, even when closed.
 
 ## License
 

@@ -12,8 +12,9 @@ You need these to *run* Argus, however you install it:
   - [Claude Code](https://www.claude.com/product/claude-code): run as `claude`
   - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
   - [Antigravity](https://antigravity.google/): Google's terminal agent, run as `agy`
+  - [OpenCode](https://opencode.ai/) 2 or later: run as `opencode`
 
-Argus watches the agents you have installed. You don't need all three.
+Argus watches the agents you have installed. You don't need all four.
 
 ## Install Pre-built Binary
 
@@ -63,3 +64,5 @@ argus hooks install
 This installs hooks for every supported agent you have installed (Claude Code,
 Codex, and Antigravity) and skips the others. It is safe to re-run and changes
 only its own entries. Without the hooks, status still works but is less precise.
+
+OpenCode needs no hooks.
