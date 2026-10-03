@@ -274,6 +274,8 @@ func (m model) titleClick(a *hitArea, ms tea.Mouse) model {
 		m = m.toggleTreeFocus()
 	case t.index == filesIcon:
 		m = m.toggleFilesFocus()
+	case t.index == brandIcon:
+		m.cycleBrand()
 	}
 	return m
 }

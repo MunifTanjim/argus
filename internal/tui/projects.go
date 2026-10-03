@@ -588,4 +588,8 @@ func fileViewRows(lines []string, scroll, avail, w int, wrap bool) string {
 	return strings.Join(out[:min(len(out), avail)], "\n")
 }
 
-func brandMark() string { return Icon.Claude.Render() + " " + headerStyle.Render("argus") + "    " }
+func (m model) brandMark() string { return m.brandIcon() + " " + headerStyle.Render("Argus") + "    " }
+
+func (m model) brandIcon() string { return StyledIcon{brandGlyphs[m.brand], ColorInfo}.Render() }
+
+func (m *model) cycleBrand() { m.brand = (m.brand + 1) % len(brandGlyphs) }

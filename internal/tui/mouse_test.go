@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -456,4 +457,40 @@ func TestClickChevronTogglesTheCard(t *testing.T) {
 		}
 		return
 	}
+}
+
+func TestTitleIconCyclesOnClick(t *testing.T) {
+	m := withMouse(homeTestModel())
+	for i := 1; i <= len(brandGlyphs); i++ {
+		m, _ = click(m, screenMargin, 0)
+		want := i % len(brandGlyphs)
+		title := strings.Split(ansi.Strip(m.View().Content), "\n")[0]
+		if m.brand != want || !strings.HasPrefix(strings.TrimSpace(title), brandGlyphs[want]+" Argus") {
+			t.Fatalf("click %d: brand=%d title=%q, want icon %d", i, m.brand, title, want)
+		}
+	}
+}
+
+func TestSplashIconCyclesOnClick(t *testing.T) {
+	m := withMouse(homeTestModel())
+	m.width = 160
+	m.sessions, m.order = map[string]session.Session{}, nil
+	m.View()
+	for _, a := range m.hits.areas {
+		for _, z := range a.zones {
+			if z.target.kind != hitBrand {
+				continue
+			}
+			p := a.rect.Min.Add(z.rect.Min)
+			if cell := ansi.Cut(strings.Split(ansi.Strip(m.View().Content), "\n")[p.Y], p.X, p.X+1); cell != brandGlyphs[0] {
+				t.Fatalf("the brand zone covers %q, want the icon", cell)
+			}
+			m, _ = click(m, p.X, p.Y)
+			if m.brand != 1 {
+				t.Fatalf("brand = %d, want the next icon", m.brand)
+			}
+			return
+		}
+	}
+	t.Fatal("the splash has no brand zone")
 }

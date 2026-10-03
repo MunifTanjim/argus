@@ -99,8 +99,8 @@ func TestCreatePickerOverAnEmptyHomeKeepsTheFramedTitle(t *testing.T) {
 	if !createOpen(m) || !isHomeRoot(m) || !framed(m) {
 		t.Fatalf("setup: picker open=%v root=%T framed=%v", createOpen(m), m.main[0], framed(m))
 	}
-	if n := strings.Count(ansi.Strip(m.View().Content), ansi.Strip(Icon.Claude.Render())+" argus"); n != 1 {
-		t.Errorf("the frame draws the argus mark once, got %d:\n%s", n, ansi.Strip(m.View().Content))
+	if n := strings.Count(ansi.Strip(m.View().Content), ansi.Strip(Icon.Claude.Render())+" Argus"); n != 1 {
+		t.Errorf("the frame draws the Argus mark once, got %d:\n%s", n, ansi.Strip(m.View().Content))
 	}
 }
 

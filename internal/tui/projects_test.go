@@ -267,7 +267,7 @@ func TestSidebarAutoCollapsesWhenNarrow(t *testing.T) {
 		t.Error("sidebar should auto-collapse on a narrow terminal")
 	}
 	// Renders center-only without panic.
-	if out := m.View().Content; !strings.Contains(out, "argus") {
+	if out := m.View().Content; !strings.Contains(out, "Argus") {
 		t.Error("collapsed projectsView did not render")
 	}
 }

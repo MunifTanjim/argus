@@ -161,7 +161,7 @@ func (m tview) historyTranscriptHeader() string {
 		if label == "" {
 			label = "session"
 		}
-		header := headerStyle.Render("argus · " + label)
+		header := headerStyle.Render("Argus · " + label)
 		if title != "" {
 			header += dimStyle.Render("  " + truncate(title, 50))
 		}

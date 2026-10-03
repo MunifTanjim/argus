@@ -33,6 +33,7 @@ func (s StyledIcon) WithColor(c color.Color) string {
 // corruption by LLM tools.
 const (
 	glyphRobot        = "\U000F167A" // nf-md-robot_outline
+	glyphRobotSolid   = "\U000F06A9" // nf-md-robot
 	glyphWrench       = "\U000F0BE0" // nf-md-wrench_outline
 	glyphFolderSearch = "\U000F0968" // nf-md-folder_search
 	glyphPenNib       = "\uEE75"     // nf-fa-pen_nib
@@ -44,6 +45,18 @@ const (
 
 	glyphClose = "\uEA76" // nf-cod-close
 )
+
+// brandGlyphs are the title icons that a click on the icon cycles through.
+var brandGlyphs = []string{
+	glyphRobotSolid,
+	"\U000F169D", // nf-md-robot_angry
+	"\U000F169F", // nf-md-robot_confused
+	"\U000F16A1", // nf-md-robot_dead
+	"\U000F16A3", // nf-md-robot_excited
+	"\U000F1719", // nf-md-robot_happy
+	"\U000F16A5", // nf-md-robot_love
+	"\U000F16A7", // nf-md-robot_off
+}
 
 // toolIcons groups per-category icons for the tool item rows.
 type toolIcons struct {
@@ -125,7 +138,7 @@ func initIcons() {
 	Icon = iconSet{
 		Branch:    StyledIcon{"\uF418", ColorGitBranch}, // nf-pl-branch
 		Chat:      StyledIcon{"\uF086", ColorTextDim},   // nf-fa-comments
-		Claude:    StyledIcon{glyphRobot, ColorInfo},
+		Claude:    StyledIcon{glyphRobotSolid, ColorInfo},
 		Clock:     StyledIcon{"\uF017", ColorTextDim},           // nf-fa-clock
 		Collapsed: StyledIcon{"\uF054", ColorTextDim},           // nf-fa-chevron_right
 		Dot:       StyledIcon{"·", ColorTextMuted},              // middle dot

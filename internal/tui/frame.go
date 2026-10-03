@@ -187,7 +187,7 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 
 // frameTitle is the status bar.
 func (m model) frameTitle() string {
-	left := strings.Repeat(" ", screenMargin) + Icon.Claude.Render() + " " + headerStyle.Render("argus")
+	left := strings.Repeat(" ", screenMargin) + m.brandIcon() + " " + headerStyle.Render("Argus")
 	var parts []string
 	if n := m.waitingCount(); n > 0 {
 		attn := lipgloss.NewStyle().Foreground(statusColor(session.StatusAwaitingInput))
@@ -207,13 +207,24 @@ func (m model) frameTitle() string {
 		return left
 	}
 	gap := max(1, m.width-screenMargin-lipgloss.Width(left)-lipgloss.Width(right))
-	return truncateLeft(left+strings.Repeat(" ", gap)+right, max(1, m.width-screenMargin))
+	title := left + strings.Repeat(" ", gap) + right
+	if lipgloss.Width(title) <= m.width-screenMargin {
+		m.hitBrandIcon()
+	}
+	return truncateLeft(title, max(1, m.width-screenMargin))
 }
 
 const (
 	treeIcon = iota
 	filesIcon
+	brandIcon
 )
+
+func (m model) hitBrandIcon() {
+	if a := m.hits.add(regTitle, uv.Rect(screenMargin, 0, 1, 1)); a != nil {
+		a.zones = []hitZone{{rect: uv.Rect(0, 0, 1, 1), target: hitTarget{kind: hitTab, index: brandIcon}}}
+	}
+}
 
 // sidebarIcons ends the title row, so the zones sit at the frame's right edge.
 func (m model) sidebarIcons() string {

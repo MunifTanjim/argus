@@ -42,6 +42,7 @@ const (
 	hitFold
 	hitHeader
 	hitClose
+	hitBrand
 )
 
 type hitTarget struct {

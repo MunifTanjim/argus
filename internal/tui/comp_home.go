@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -116,7 +117,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	bare := m.layout().bare
 	title := m.homeTabs(tabSessions) + m.sessionFilterTitle()
 	if bare {
-		title = brandMark() + title
+		title = m.brandMark() + title
 		if m.reconnecting {
 			title += dimStyle.Render("  (reconnecting…)")
 		}
@@ -132,7 +133,8 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	cardW := max(30, min(containerWidthOf(w), maxCardWidth))
 	tabX := centerGutter(cardW, w)
 	if bare {
-		tabX += lipgloss.Width(brandMark())
+		c.hitZone(uv.Rect(tabX, 0, 1, 1), hitTarget{kind: hitBrand})
+		tabX += lipgloss.Width(m.brandMark())
 	}
 	m.hitHomeTabs(c, tabX)
 	if len(m.sessions) == 0 {
@@ -168,6 +170,8 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 
 func (h homeComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	switch {
+	case t.kind == hitBrand:
+		c.m.cycleBrand()
 	case t.kind == hitTab:
 		if c.m.homeTabAt(t.index) != tabSessions {
 			return h, switchHomeTab(c, c.m.homeTabAt(t.index))
