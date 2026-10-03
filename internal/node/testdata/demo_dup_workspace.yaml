@@ -1,0 +1,18 @@
+nodes:
+  - id: n1
+    label: n1
+    projects:
+      - id: p1
+        name: a
+        kind: git
+        dir: /a
+        workspaces:
+          - id: w1
+            dir: /a
+      - id: p2
+        name: b
+        kind: git
+        dir: /b
+        workspaces:
+          - id: w1
+            dir: /b

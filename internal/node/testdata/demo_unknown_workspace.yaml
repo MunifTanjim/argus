@@ -1,0 +1,17 @@
+nodes:
+  - id: n1
+    label: n1
+    sessions:
+      - id: s1
+        agent: claude
+        status: idle
+        source: hooked
+        workspace_id: nope
+    projects:
+      - id: p1
+        name: a
+        kind: git
+        dir: /a
+        workspaces:
+          - id: w1
+            dir: /a

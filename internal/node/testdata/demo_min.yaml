@@ -10,6 +10,7 @@ nodes:
         cwd: /Users/dev/argus
         status: working
         source: hooked
+        workspace_id: w1
         transcript_path: t.jsonl
       - id: s2
         agent: claude
@@ -27,3 +28,39 @@ nodes:
             title: fix flaky test
             last_activity: "2026-09-10T10:00:00Z"
             transcript_path: t.jsonl
+    terminals:
+      - id: "@1"
+        name: logs
+        cwd: ~/dev/argus
+        command: tail
+        attached: true
+        terminal_path: t.jsonl
+      - id: "@2"
+        cwd: "~"
+        command: zsh
+    projects:
+      - id: p1
+        name: argus
+        kind: git
+        dir: /Users/dev/argus
+        default_branch: main
+        workspaces:
+          - id: w1
+            dir: /Users/dev/argus
+            is_main: true
+            branch: main
+          - id: w2
+            dir: /Users/dev/argus-wt/voice
+            branch: feat/voice
+            target_branch: main
+            setup:
+              state: failed
+              command: make setup
+              exit_code: 2
+              output_tail: "make: *** [setup] Error 2"
+            setup_log: "go: downloading modules\nmake: *** [setup] Error 2\n"
+            repo_spec: .
+      - id: p2
+        name: notes
+        kind: plain
+        dir: /Users/dev/notes

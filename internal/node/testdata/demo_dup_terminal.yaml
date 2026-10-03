@@ -1,0 +1,10 @@
+nodes:
+  - id: n1
+    label: n1
+    terminals:
+      - id: "@1"
+        cwd: "~"
+        command: zsh
+      - id: "@1"
+        cwd: "~"
+        command: zsh

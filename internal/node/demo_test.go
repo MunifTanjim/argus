@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,12 +51,12 @@ func TestLoadDemoDataResolvesFixturePaths(t *testing.T) {
 		t.Fatalf("LoadDemoData: %v", err)
 	}
 	n := dd.Nodes[0]
-	term := n.Terminals["s2"]
+	term := n.SessionTerminals["s2"]
 	if term == "" {
-		t.Fatal("Terminals[s2] is empty, want resolved path")
+		t.Fatal("SessionTerminals[s2] is empty, want resolved path")
 	}
 	if !filepath.IsAbs(term) {
-		t.Fatalf("Terminals[s2] = %q, want absolute path", term)
+		t.Fatalf("SessionTerminals[s2] = %q, want absolute path", term)
 	}
 	repo := n.Repos["s2"]
 	if repo == "" {
@@ -63,6 +64,59 @@ func TestLoadDemoDataResolvesFixturePaths(t *testing.T) {
 	}
 	if !filepath.IsAbs(repo) {
 		t.Fatalf("Repos[s2] = %q, want absolute path", repo)
+	}
+}
+
+func TestLoadDemoDataParsesProjectsAndTerminals(t *testing.T) {
+	dd, err := LoadDemoData("testdata/demo_min.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData: %v", err)
+	}
+	n := dd.Nodes[0]
+	if len(n.Projects) != 2 || n.Projects[0].ID != "p1" || len(n.Projects[0].Workspaces) != 2 {
+		t.Fatalf("projects = %+v", n.Projects)
+	}
+	if n.Projects[1].Workspaces == nil {
+		t.Fatal("project without workspaces must have an empty slice, not nil")
+	}
+	if s := n.Projects[0].Workspaces[1].Setup; s == nil || s.State != "failed" || s.ExitCode != 2 {
+		t.Fatalf("w2 setup = %+v", s)
+	}
+	if !strings.Contains(n.SetupLogs["w2"], "Error 2") {
+		t.Fatalf("SetupLogs[w2] = %q", n.SetupLogs["w2"])
+	}
+	if n.WorkspaceRepos["w2"] == "" {
+		t.Fatal("WorkspaceRepos[w2] is empty, want resolved path")
+	}
+	if _, ok := n.WorkspaceRepos["w1"]; ok {
+		t.Fatal("w1 has no repo_spec")
+	}
+	if len(n.Terminals) != 2 || n.Terminals[0].ID != "@1" || !n.Terminals[0].Attached || n.Terminals[0].Name != "logs" {
+		t.Fatalf("terminals = %+v", n.Terminals)
+	}
+	if n.NodeTerminals["@1"] == "" {
+		t.Fatal("NodeTerminals[@1] is empty, want resolved path")
+	}
+	if _, ok := n.NodeTerminals["@2"]; ok {
+		t.Fatal("@2 has no terminal_path")
+	}
+}
+
+func TestLoadDemoDataRejectsDupTerminal(t *testing.T) {
+	if _, err := LoadDemoData("testdata/demo_dup_terminal.yaml"); err == nil {
+		t.Fatal("want error for duplicate terminal id")
+	}
+}
+
+func TestLoadDemoDataRejectsDupWorkspace(t *testing.T) {
+	if _, err := LoadDemoData("testdata/demo_dup_workspace.yaml"); err == nil {
+		t.Fatal("want error for duplicate workspace id")
+	}
+}
+
+func TestLoadDemoDataRejectsUnknownWorkspace(t *testing.T) {
+	if _, err := LoadDemoData("testdata/demo_unknown_workspace.yaml"); err == nil {
+		t.Fatal("want error for session workspace_id with no workspace")
 	}
 }
 
