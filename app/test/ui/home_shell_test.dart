@@ -213,6 +213,17 @@ void main() {
     expect(find.byType(TerminalListScreen), findsOneWidget);
   });
 
+  testWidgets('a page opens over the shell while both tabs have a button', (tester) async {
+    await _shellWithNodes(tester, const [NodeRef('A', 'home')], _CountingTerminals());
+    // The drawer sits above the scope navigator, so it pushes on the root one.
+    Navigator.of(tester.element(find.byType(SessionListScreen)), rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('page'))),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('page'), findsOneWidget);
+  });
+
   testWidgets('no Terminals tab without a terminal-capable node', (tester) async {
     final terms = _CountingTerminals();
     await _shellWithNodes(tester, const [NodeRef('A', 'home', terminalSupported: false)], terms);

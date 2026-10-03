@@ -40,6 +40,7 @@ void main() {
     expect(find.text('◆'), findsWidgets);
     expect(find.text('DEV'), findsOneWidget);
     expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
+    expect(find.byTooltip('New session'), findsOneWidget);
   });
 
   testWidgets('agent badges appear only when agents are mixed', (tester) async {

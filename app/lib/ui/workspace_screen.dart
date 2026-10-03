@@ -81,7 +81,8 @@ class WorkspaceScreen extends ConsumerWidget {
         },
       ),
       floatingActionButton: tab == WorkspaceTab.sessions
-          ? FloatingActionButton.extended(
+          ? FloatingActionButton(
+              tooltip: 'New session',
               onPressed: () => showSpawnDialog(
                 context,
                 ref,
@@ -91,8 +92,7 @@ class WorkspaceScreen extends ConsumerWidget {
                   label: '${project.name} · ${workspace.name}',
                 ),
               ),
-              icon: const Icon(Icons.add),
-              label: const Text('New session'),
+              child: const Icon(Icons.add),
             )
           : null,
       bottomNavigationBar: NavigationBar(
