@@ -28,7 +28,7 @@ const Set<String> sessionAddressed = {
 const Set<String> nodeAddressed = {
   'sessions.spawn', 'sessions.resume', 'agents.list', 'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
-  'terminal.create',
+  'terminal.create', 'host.info', 'host.setWakelock',
 };
 
 /// Methods carrying a term_id, routed to the node the terminal was opened on.

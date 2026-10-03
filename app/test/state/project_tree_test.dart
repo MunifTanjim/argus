@@ -91,21 +91,22 @@ void main() {
     ws: [_w('A:w4', '/src/crush', head: 'abcdef123456')],
   );
 
-  test('single node: no node row, projects then workspaces', () {
+  test('single node: a node row, then projects and workspaces', () {
     final rows = buildTreeRows([argus, crush], _all);
     expect(rows.map((r) => r.kind), [
+      TreeRowKind.node,
       TreeRowKind.project,
       TreeRowKind.workspace,
       TreeRowKind.workspace,
       TreeRowKind.project,
       TreeRowKind.workspace,
     ]);
-    expect(rows[0].pinned, isTrue);
-    expect(rows[1].isMain, isTrue);
-    expect(rows[1].detail, 'main');
-    expect(rows[2].label, 'registry');
-    expect(rows[2].setup, SetupMark.running);
-    expect(rows[4].detail, 'abcdef1'); // detached: short head
+    expect(rows[1].pinned, isTrue);
+    expect(rows[2].isMain, isTrue);
+    expect(rows[2].detail, 'main');
+    expect(rows[3].label, 'registry');
+    expect(rows[3].setup, SetupMark.running);
+    expect(rows[5].detail, 'abcdef1'); // detached: short head
   });
 
   test('multi node: a node row heads each node, sorted by label', () {
@@ -140,8 +141,8 @@ void main() {
     final zeta = _p('A:p7', 'zeta', pinned: true);
     final alpha = _p('A:p8', 'alpha');
     final rows = buildTreeRows([zeta, alpha], _all);
-    expect(rows.map((r) => r.label), ['zeta', 'alpha']);
-    expect(rows.map((r) => r.pinned), [true, false]);
+    expect(rows.map((r) => r.label), ['mbp', 'zeta', 'alpha']);
+    expect(rows.map((r) => r.pinned), [false, true, false]);
   });
 
   test('a folded node hides its projects but keeps their workspace ids', () {
@@ -161,20 +162,21 @@ void main() {
       [argus, infra],
       const TreeView(folded: {'A'}, filter: 'registry'),
     );
-    expect(filtered.map((r) => r.label), ['argus', 'registry']);
+    expect(filtered.map((r) => r.label), ['mbp', 'argus', 'registry']);
   });
 
   test('a folded project hides its workspaces but keeps their ids', () {
     final rows = buildTreeRows([argus], const TreeView(folded: {'A:p1'}));
-    expect(rows, hasLength(1));
-    expect(rows.single.folded, isTrue);
-    expect(rows.single.workspaceIds, ['A:w1', 'A:w2']);
+    expect(rows, hasLength(2));
+    expect(rows.last.folded, isTrue);
+    expect(rows.last.workspaceIds, ['A:w1', 'A:w2']);
   });
 
   test('hidden and gone rows are off by default', () {
     final hidden = _p('A:p3', 'secret', hidden: true, ws: [_w('A:w9', '/s')]);
     final goneP = _p('A:p4', 'vanished', gone: true);
     expect(buildTreeRows([argus, hidden, goneP], _all).map((r) => r.label), [
+      'mbp',
       'argus',
       'argus',
       'registry',
@@ -195,12 +197,12 @@ void main() {
       argus,
       crush,
     ], const TreeView(filter: 'feat/', folded: {'A:p1'}));
-    expect(rows.map((r) => r.label), ['argus', 'registry']);
+    expect(rows.map((r) => r.label), ['mbp', 'argus', 'registry']);
     final byProject = buildTreeRows([
       argus,
       crush,
     ], const TreeView(filter: 'crush'));
-    expect(byProject.map((r) => r.label), ['crush', 'crush']);
+    expect(byProject.map((r) => r.label), ['mbp', 'crush', 'crush']);
   });
 
   test('filter ignores case', () {
@@ -208,7 +210,7 @@ void main() {
       argus,
       crush,
     ], const TreeView(filter: 'REGISTRY'));
-    expect(rows.map((r) => r.label), ['argus', 'registry']);
+    expect(rows.map((r) => r.label), ['mbp', 'argus', 'registry']);
   });
 
   test('blank filter acts as no filter', () {
@@ -227,7 +229,7 @@ void main() {
       ws: [_w('A:w5', '/notes')],
     );
     final rows = buildTreeRows([plain], _all);
-    expect(rows.first.gitError, 'boom');
+    expect(rows[1].gitError, 'boom');
     expect(rows.last.detail, isNull);
   });
 

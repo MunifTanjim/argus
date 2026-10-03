@@ -132,6 +132,26 @@ void main() {
     await two.close();
   });
 
+  test('host.info routes by node_id', () async {
+    final seen = <String>[];
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seen.add('A:$m');
+      return _json({'uptime_seconds': 1});
+    });
+    final b = LoopbackNode('B', await generateKeyPair(), (m, p) {
+      seen.add('B:$m');
+      return _json({'uptime_seconds': 2});
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final r = await client.call('host.info', {'node_id': 'B'}) as Map;
+    expect(r['uptime_seconds'], 2);
+    await client.call('host.setWakelock', {'node_id': 'A', 'until': ''});
+    expect(seen, ['B:host.info', 'A:host.setWakelock']);
+    await client.close();
+  });
+
   test('transcript.subscribe records the handle; unsubscribe routes to that node', () async {
     var unsubNode = '';
     final a = LoopbackNode('A', await generateKeyPair(), (m, p) {

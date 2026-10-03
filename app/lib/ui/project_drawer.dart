@@ -8,6 +8,7 @@ import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
+import 'node_screen.dart';
 import 'project_actions.dart';
 import 'settings_screen.dart';
 import 'shell_drawer.dart';
@@ -50,6 +51,15 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+  }
+
+  void _openNode(String nodeId, String label) {
+    _close();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NodeScreen(nodeId: nodeId, label: label),
+      ),
+    );
   }
 
   void _showError(String name, String error) => showDialog<void>(
@@ -236,6 +246,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   ) {
     switch (r.kind) {
       case TreeRowKind.node:
+        final badges = r.folded ? _badges(sumActivity(act, r.workspaceIds)) : null;
         return Padding(
           padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
           child: InkWell(
@@ -260,8 +271,21 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                         ),
                       ),
                     ),
-                    if (r.folded) ?_badges(sumActivity(act, r.workspaceIds)),
-                    const SizedBox(width: 4),
+                    if (badges != null) ...[badges, const SizedBox(width: 8)],
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _openNode(r.id, r.label),
+                      child: const SizedBox.square(
+                        dimension: 40,
+                        child: Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: AppColors.dim,
+                          semanticLabel: 'Node info',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                     Icon(
                       r.folded ? Icons.expand_more : Icons.expand_less,
                       size: 18,

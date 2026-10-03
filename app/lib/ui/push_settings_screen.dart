@@ -10,6 +10,7 @@ import '../push/push_controller.dart';
 import '../push/pushport_config.dart';
 import '../state/push.dart';
 import '../transport/jsonrpc.dart';
+import 'duration_sheet.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
@@ -251,39 +252,13 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
       await _applyPause(null);
       return;
     }
-    final choice = await _pickPauseDuration();
+    final choice = await pickUntil(
+      context,
+      indefiniteLabel: 'Until I turn it back on',
+      indefinite: pauseIndefinite,
+    );
     if (choice == null) return; // dismissed — leave notifications enabled
     await _applyPause(choice);
-  }
-
-  Future<String?> _pickPauseDuration() {
-    final options = <(String, Duration?)>[
-      ('30 minutes', const Duration(minutes: 30)),
-      ('1 hour', const Duration(hours: 1)),
-      ('4 hours', const Duration(hours: 4)),
-      ('8 hours', const Duration(hours: 8)),
-      ('Until I turn it back on', null),
-    ];
-    return showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final (label, d) in options)
-              ListTile(
-                title: Text(label),
-                onTap: () => Navigator.pop(
-                  ctx,
-                  d == null
-                      ? pauseIndefinite
-                      : DateTime.now().toUtc().add(d).toIso8601String(),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _applyPause(String? pausedUntil) async {

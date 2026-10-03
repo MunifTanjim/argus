@@ -3,6 +3,7 @@ import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
+import 'package:argus/ui/node_screen.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -69,6 +70,29 @@ Future<ProviderContainer> _pump(
 }
 
 void main() {
+  testWidgets('the node row info button opens the node screen', (tester) async {
+    await _pump(tester, _tree());
+    await tester.tap(find.bySemanticsLabel('Node info'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NodeScreen), findsOneWidget);
+  });
+
+  testWidgets('the info button has a 40 px hit area and does not fold the node', (
+    tester,
+  ) async {
+    final c = await _pump(tester, _tree());
+    final button = find.ancestor(
+      of: find.byIcon(Icons.info_outline),
+      matching: find.byType(InkWell),
+    ).first;
+    final size = tester.getSize(button);
+    expect(size.width, greaterThanOrEqualTo(40));
+    expect(size.height, greaterThanOrEqualTo(40));
+    await tester.tap(find.bySemanticsLabel('Node info'));
+    await tester.pumpAndSettle();
+    expect(c.read(treeViewProvider).folded, isNot(contains('A')));
+  });
+
   testWidgets('shows Home, projects, and two-line workspace rows', (
     tester,
   ) async {
