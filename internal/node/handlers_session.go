@@ -418,6 +418,9 @@ func spawnEnv(command string) []string {
 // gets a node-generated default; the terminals' session name gets a suffix.
 // Discovery registers the pane shortly; a scan is triggered for immediacy.
 func (d *Node) launchPane(ctx context.Context, sessionName, command string, args []string, cwd string) (string, error) {
+	if d.demo {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "spawn unavailable on a demo node"}
+	}
 	c := d.clients[session.TmuxServerArgus]
 	if sessionName == "" {
 		sessionName = spawn.SessionName(ctx, c, cwd)

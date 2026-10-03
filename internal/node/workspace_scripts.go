@@ -98,6 +98,9 @@ func (d *Node) handleWorkspaceSetupLog(_ context.Context, params json.RawMessage
 	if err != nil {
 		return nil, err
 	}
+	if d.demo {
+		return api.SetupLogResult{Output: d.demoSetupLogs[p.WorkspaceID]}, nil
+	}
 	return api.SetupLogResult{Output: d.scripts.Output(p.WorkspaceID)}, nil
 }
 

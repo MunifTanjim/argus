@@ -76,6 +76,9 @@ func TestLoadDemoDataParsesProjectsAndTerminals(t *testing.T) {
 	if len(n.Projects) != 2 || n.Projects[0].ID != "p1" || len(n.Projects[0].Workspaces) != 2 {
 		t.Fatalf("projects = %+v", n.Projects)
 	}
+	if got := n.Projects[0].Workspaces[0].TargetBranch; got != "main" {
+		t.Fatalf("w1 target = %q, want project default main", got)
+	}
 	if n.Projects[1].Workspaces == nil {
 		t.Fatal("project without workspaces must have an empty slice, not nil")
 	}
@@ -169,8 +172,11 @@ func TestBuildDemoNodesSeedsRegistry(t *testing.T) {
 	if len(n.demoHistory) != 1 {
 		t.Fatalf("demoHistory = %d, want 1", len(n.demoHistory))
 	}
-	if len(n.demoTerminals) != 1 {
-		t.Fatalf("demoTerminals = %d, want 1", len(n.demoTerminals))
+	if len(n.demoSessionTerminals) != 1 {
+		t.Fatalf("demoSessionTerminals = %d, want 1", len(n.demoSessionTerminals))
+	}
+	if len(n.demoNodeTerminals) != 1 {
+		t.Fatalf("demoNodeTerminals = %d, want 1", len(n.demoNodeTerminals))
 	}
 }
 
@@ -205,7 +211,7 @@ func (c *captureNotifier) count() int { c.mu.Lock(); defer c.mu.Unlock(); return
 func TestDemoTerminalOpenEmitsOutput(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.demo = true
-	d.demoTerminals = map[string][]byte{"s1": []byte("\x1b[32mhello\x1b[0m\n$ ")}
+	d.demoSessionTerminals = map[string][]byte{"s1": []byte("\x1b[32mhello\x1b[0m\n$ ")}
 
 	cn := &captureNotifier{}
 	ctx := api.WithNotifier(context.Background(), cn)
@@ -224,5 +230,111 @@ func TestDemoTerminalOpenEmitsOutput(t *testing.T) {
 	cn.mu.Unlock()
 	if first != api.MethodTerminalOutput {
 		t.Fatalf("first method = %q, want %q", first, api.MethodTerminalOutput)
+	}
+}
+
+func TestBuildDemoNodesSetsCaps(t *testing.T) {
+	dd, err := LoadDemoData("testdata/demo_min.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData: %v", err)
+	}
+	dd.Nodes = append(dd.Nodes, DemoNode{ID: "bare", Label: "bare"})
+	nodes, err := BuildDemoNodes(dd, "test")
+	if err != nil {
+		t.Fatalf("BuildDemoNodes: %v", err)
+	}
+	full, bare := nodes[0].caps, nodes[1].caps
+	if !full.Terminal || !full.SpawnSession || full.HostWakelock {
+		t.Fatalf("macbook caps = %+v, want terminal+spawn, no wakelock", full)
+	}
+	if bare.Terminal || bare.SpawnSession || bare.HostWakelock {
+		t.Fatalf("bare caps = %+v, want none", bare)
+	}
+}
+
+func TestDemoProjectAndTerminalHandlers(t *testing.T) {
+	dd, err := LoadDemoData("testdata/demo_min.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData: %v", err)
+	}
+	dd.Nodes = append(dd.Nodes, DemoNode{ID: "bare", Label: "bare"})
+	nodes, err := BuildDemoNodes(dd, "test")
+	if err != nil {
+		t.Fatalf("BuildDemoNodes: %v", err)
+	}
+	ctx := context.Background()
+
+	res, err := nodes[0].handleProjectList(ctx, nil)
+	if err != nil {
+		t.Fatalf("handleProjectList: %v", err)
+	}
+	if pl := res.(api.ProjectListResult); len(pl.Projects) != 2 || pl.Projects[0].ID != "p1" {
+		t.Fatalf("projects = %+v", pl.Projects)
+	}
+	res, err = nodes[0].handleTerminalList(ctx, nil)
+	if err != nil {
+		t.Fatalf("handleTerminalList: %v", err)
+	}
+	if tl := res.(api.TerminalListResult); len(tl.Terminals) != 2 || tl.Terminals[0].ID != "@1" {
+		t.Fatalf("terminals = %+v", tl.Terminals)
+	}
+	res, err = nodes[0].handleWorkspaceSetupLog(ctx, mustJSON(api.WorkspaceRef{WorkspaceID: "w2"}))
+	if err != nil {
+		t.Fatalf("handleWorkspaceSetupLog: %v", err)
+	}
+	if out := res.(api.SetupLogResult).Output; !strings.Contains(out, "Error 2") {
+		t.Fatalf("setup log = %q", out)
+	}
+
+	res, _ = nodes[1].handleProjectList(ctx, nil)
+	if pl := res.(api.ProjectListResult); pl.Projects == nil || len(pl.Projects) != 0 {
+		t.Fatalf("bare projects = %#v, want empty non-nil", pl.Projects)
+	}
+	res, _ = nodes[1].handleTerminalList(ctx, nil)
+	if tl := res.(api.TerminalListResult); tl.Terminals == nil || len(tl.Terminals) != 0 {
+		t.Fatalf("bare terminals = %#v, want empty non-nil", tl.Terminals)
+	}
+}
+
+func TestDemoTerminalOpenReplaysNodeTerminal(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.demo = true
+	d.demoNodeTerminals = map[string][]byte{"@1": []byte("$ ls\r\n")}
+
+	cn := &captureNotifier{}
+	ctx := api.WithNotifier(context.Background(), cn)
+	if _, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t1", TerminalID: "@1"})); err != nil {
+		t.Fatalf("handleTerminalOpen: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for cn.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cn.count() == 0 {
+		t.Fatal("no terminal.output frames for node terminal")
+	}
+
+	blank := &captureNotifier{}
+	ctx = api.WithNotifier(context.Background(), blank)
+	if _, err := d.handleTerminalOpen(ctx, mustJSON(api.TerminalOpenParams{TermID: "t2", TerminalID: "@9"})); err != nil {
+		t.Fatalf("open terminal with no replay: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if blank.count() != 0 {
+		t.Fatalf("frames for terminal with no replay = %d, want 0", blank.count())
+	}
+}
+
+func TestDemoLaunchPaneFails(t *testing.T) {
+	dd, err := LoadDemoData("testdata/demo_min.yaml")
+	if err != nil {
+		t.Fatalf("LoadDemoData: %v", err)
+	}
+	nodes, err := BuildDemoNodes(dd, "test")
+	if err != nil {
+		t.Fatalf("BuildDemoNodes: %v", err)
+	}
+	if _, err := nodes[0].launchPane(context.Background(), "", "sh", nil, t.TempDir()); err == nil {
+		t.Fatal("launchPane on a demo node must fail")
 	}
 }

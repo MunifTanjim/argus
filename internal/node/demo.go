@@ -115,6 +115,11 @@ func parseDemoProjects(baseDir string, dn *DemoNode, raws []map[string]any) erro
 		if p.Workspaces == nil {
 			p.Workspaces = []api.WorkspaceNode{}
 		}
+		for i := range p.Workspaces {
+			if p.Workspaces[i].TargetBranch == "" {
+				p.Workspaces[i].TargetBranch = p.DefaultBranch
+			}
+		}
 		var extras demoWorkspaceExtras
 		if err := decodeVia(m, &extras); err != nil {
 			return fmt.Errorf("decode project %s workspaces: %w", p.ID, err)
@@ -272,34 +277,65 @@ func LoadDemoData(path string) (*DemoData, error) {
 	return out, nil
 }
 
+func readDemoTerminals(nodeID string, paths map[string]string) (map[string][]byte, error) {
+	out := make(map[string][]byte, len(paths))
+	for id, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("demo node %s terminal %s: %w", nodeID, id, err)
+		}
+		out[id] = b
+	}
+	return out, nil
+}
+
 // BuildDemoNodes constructs one read-only demo node per fixture node: an empty
-// tmux map (no spawn, no tmux), a seeded registry, and demo history and terminal
-// fixtures. The nodes serve over the plaintext relay uplink (no e2ee), matching a
-// gateway profile added without e2ee; the app opens plain channels to them. The
-// nodes are ready to ConnectGateway; they must not Run.
+// tmux map, a seeded registry, and the fixture's history, projects, terminals,
+// and replay bytes. Capabilities follow the fixture (terminals present, spawn),
+// but spawn and resume still fail without tmux, and the wakelock is always off
+// so a demo never holds the host awake. The nodes serve over the plaintext relay
+// uplink (no e2ee), matching a gateway profile added without e2ee; the app opens
+// plain channels to them. The nodes are ready to ConnectGateway; they must not
+// Run.
 func BuildDemoNodes(dd *DemoData, version string) ([]*Node, error) {
 	out := make([]*Node, 0, len(dd.Nodes))
 	for _, dn := range dd.Nodes {
 		d := newNode(map[session.TmuxServer]*tmux.Client{})
 		d.SetIdentity(dn.ID, dn.Label)
 		d.SetVersion(version)
+		d.caps.Terminal = len(dn.Terminals) > 0
+		d.caps.SpawnSession = dn.Spawn
+		d.caps.HostWakelock = false
 
 		d.demo = true
 		d.demoHistory = dn.History
+		d.demoProjects = dn.Projects
+		d.demoTerminalList = dn.Terminals
+		d.demoSetupLogs = dn.SetupLogs
 		d.demoWorkspaceDirs = dn.WorkspaceRepos
 		d.reg.Seed(dn.Sessions)
 
-		d.demoTerminals = map[string][]byte{}
-		for sid, path := range dn.SessionTerminals {
-			b, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("demo node %s terminal %s: %w", dn.ID, sid, err)
-			}
-			d.demoTerminals[sid] = b
+		var err error
+		if d.demoSessionTerminals, err = readDemoTerminals(dn.ID, dn.SessionTerminals); err != nil {
+			return nil, err
+		}
+		if d.demoNodeTerminals, err = readDemoTerminals(dn.ID, dn.NodeTerminals); err != nil {
+			return nil, err
 		}
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+func (d *Node) demoTargetBranch(wsID string) string {
+	for _, p := range d.demoProjects {
+		for _, w := range p.Workspaces {
+			if w.ID == wsID {
+				return w.TargetBranch
+			}
+		}
+	}
+	return ""
 }
 
 func demoHistoryProjects(hist []DemoHistoryProject) []session.HistoryProject {

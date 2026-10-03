@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -85,4 +86,40 @@ func gitOut(dir string, args ...string) (string, error) {
 	cmd.Dir = dir
 	b, err := cmd.CombinedOutput()
 	return string(b), err
+}
+
+func TestDemoWorkspaceTargetHandlers(t *testing.T) {
+	repoSpec, err := filepath.Abs("testdata/repo/webapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dd := &DemoData{Nodes: []DemoNode{{
+		ID:    "n1",
+		Label: "n1",
+		Projects: []api.ProjectNode{{
+			ID: "p1", Name: "web", Kind: "git", DefaultBranch: "main",
+			Workspaces: []api.WorkspaceNode{{ID: "w1", IsMain: true, Branch: "main", TargetBranch: "main"}},
+		}},
+		WorkspaceRepos: map[string]string{"w1": repoSpec},
+	}}}
+	cleanup, err := MaterializeDemoRepos(dd)
+	if err != nil {
+		t.Fatalf("MaterializeDemoRepos: %v", err)
+	}
+	defer cleanup()
+	nodes, err := BuildDemoNodes(dd, "test")
+	if err != nil {
+		t.Fatalf("BuildDemoNodes: %v", err)
+	}
+	d, ctx := nodes[0], context.Background()
+
+	if _, err := d.handleWorkspaceCommits(ctx, mustJSON(api.WorkspaceRef{WorkspaceID: "w1"})); err != nil {
+		t.Fatalf("handleWorkspaceCommits: %v", err)
+	}
+	if _, err := d.handleWorkspaceChangedFiles(ctx, mustJSON(api.WorkspaceRef{WorkspaceID: "w1", Against: api.AgainstTarget})); err != nil {
+		t.Fatalf("handleWorkspaceChangedFiles against target: %v", err)
+	}
+	if _, err := d.handleWorkspaceSetTarget(ctx, mustJSON(api.WorkspaceSetTargetParams{WorkspaceID: "w1", TargetBranch: "dev"})); err == nil {
+		t.Fatal("handleWorkspaceSetTarget on a demo node must fail")
+	}
 }

@@ -70,6 +70,9 @@ func tildeHome(p, home string) string {
 }
 
 func (d *Node) handleTerminalList(ctx context.Context, _ json.RawMessage) (any, error) {
+	if d.demo {
+		return api.TerminalListResult{Terminals: append([]api.Terminal{}, d.demoTerminalList...)}, nil
+	}
 	res := api.TerminalListResult{Terminals: []api.Terminal{}}
 	c, err := d.terminalClient()
 	if err != nil {

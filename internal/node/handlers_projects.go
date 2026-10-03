@@ -17,6 +17,9 @@ import (
 
 // handleProjectList is node-local: ids are not composited.
 func (d *Node) handleProjectList(ctx context.Context, _ json.RawMessage) (any, error) {
+	if d.demo {
+		return api.ProjectListResult{Projects: append([]api.ProjectNode{}, d.demoProjects...)}, nil
+	}
 	if d.projreg == nil {
 		return api.ProjectListResult{Projects: []api.ProjectNode{}}, nil
 	}

@@ -89,10 +89,14 @@ type Node struct {
 
 	log *slog.Logger // operational logging; discards by default (see SetLogger)
 
-	demo              bool                 // demo mode: discovery scans skipped, handlers serve fixtures
-	demoHistory       []DemoHistoryProject // seeded past sessions served by history handlers
-	demoTerminals     map[string][]byte    // session id -> canned live-terminal bytes
-	demoWorkspaceDirs map[string]string    // workspace id -> materialized repo dir
+	demo                 bool                 // demo mode: discovery scans skipped, handlers serve fixtures
+	demoHistory          []DemoHistoryProject // seeded past sessions served by history handlers
+	demoProjects         []api.ProjectNode
+	demoTerminalList     []api.Terminal
+	demoSessionTerminals map[string][]byte // session id -> canned live-terminal bytes
+	demoNodeTerminals    map[string][]byte // terminal id -> canned terminal bytes
+	demoSetupLogs        map[string]string // workspace id -> setup log
+	demoWorkspaceDirs    map[string]string // workspace id -> materialized repo dir
 
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)

@@ -112,7 +112,7 @@ func (d *Node) handleWorkspaceCommits(ctx context.Context, params json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	target, _, err := d.projreg.TargetBranch(ctx, p.WorkspaceID)
+	target, err := d.targetBranch(ctx, p.WorkspaceID)
 	if err != nil {
 		return nil, invalid("%s", err)
 	}
@@ -303,6 +303,9 @@ func (d *Node) handleWorkspaceSetTarget(ctx context.Context, params json.RawMess
 	if err != nil {
 		return nil, err
 	}
+	if d.demo {
+		return nil, invalid("demo nodes are read-only")
+	}
 	if _, err := d.workspaceDir(ctx, p.WorkspaceID); err != nil {
 		return nil, err
 	}
@@ -316,13 +319,21 @@ func (d *Node) handleWorkspaceSetTarget(ctx context.Context, params json.RawMess
 	return nil, nil
 }
 
+func (d *Node) targetBranch(ctx context.Context, wsID string) (string, error) {
+	if d.demo {
+		return d.demoTargetBranch(wsID), nil
+	}
+	target, _, err := d.projreg.TargetBranch(ctx, wsID)
+	return target, err
+}
+
 // diffBase returns "" for the uncommitted view, or the merge base with the
 // workspace's target branch for AgainstTarget.
 func (d *Node) diffBase(ctx context.Context, wsID, dir, against string) (string, error) {
 	if against != api.AgainstTarget {
 		return "", nil
 	}
-	target, _, err := d.projreg.TargetBranch(ctx, wsID)
+	target, err := d.targetBranch(ctx, wsID)
 	if err != nil {
 		return "", invalid("%s", err)
 	}

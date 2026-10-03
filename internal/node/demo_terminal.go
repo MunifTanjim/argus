@@ -12,15 +12,18 @@ import (
 // like live output when replayed.
 const demoTerminalChunk = 256
 
-// demoTerminalOpen replays a session's canned terminal bytes as terminal.output
-// notifications, then holds without an exit so the screen stays populated for a
-// screenshot. Unknown sessions emit nothing.
+// demoTerminalOpen replays canned terminal bytes, of a node terminal or else of
+// a session, as terminal.output notifications, then holds without an exit so the
+// screen stays populated for a screenshot. Unknown ids emit nothing.
 func (d *Node) demoTerminalOpen(ctx context.Context, p api.TerminalOpenParams) (any, error) {
 	n, ok := api.NotifierFrom(ctx)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no connection notifier"}
 	}
-	data := d.demoTerminals[p.SessionID]
+	data := d.demoSessionTerminals[p.SessionID]
+	if p.TerminalID != "" {
+		data = d.demoNodeTerminals[p.TerminalID]
+	}
 	go func() {
 		for off := 0; off < len(data); off += demoTerminalChunk {
 			end := off + demoTerminalChunk
