@@ -58,7 +58,7 @@ func (m model) groupHeader(label string) string {
 	if name == "" {
 		name = "local"
 	}
-	h := StyleSecondary.Render("▌ " + name)
+	h := Icon.Node.Render() + " " + StyleSecondaryBold.Render(name)
 	if m.groupOffline(label) {
 		h += dimStyle.Render("  (offline)")
 	}

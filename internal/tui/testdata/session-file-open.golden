@@ -4,8 +4,8 @@
                                      │                                                                                    │
 ▌ 󰋜 Home                         ◆ 3 │ go.mod                                                                             │▌   go.mod
   ▾ argus                            │ module argus                                                                       │
-    ★ repo  main                 ◆ 2 │ ────────────────────────────────────────────────────────────────────────────────── │
-    • repo-feat  feature         ○ 1 │    Allow Bash?                                                  ⇥ Tab to answer   │
+    󰉋 repo  main                 ◆ 2 │ ────────────────────────────────────────────────────────────────────────────────── │
+     repo-feat  feature         ○ 1 │    Allow Bash?                                                  ⇥ Tab to answer   │
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │

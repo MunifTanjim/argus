@@ -2,10 +2,10 @@
 
   Projects                           │  argus  /repo/.git
                                      │
-  󰋜 Home                         ○ 3 │  ★ repo  main                                                               ○ 2
-▌ ▾ argus                            │  • repo-feat  feature                                                       ○ 1
-    ★ repo  main                 ○ 2 │
-    • repo-feat  feature         ○ 1 │  esc tree: a new workspace · r rename
+  󰋜 Home                         ○ 3 │  󰉋 repo  main                                                               ○ 2
+▌ ▾ argus                            │   repo-feat  feature                                                       ○ 1
+    󰉋 repo  main                 ○ 2 │
+     repo-feat  feature         ○ 1 │  esc tree: a new workspace · r rename
                                      │
                                      │
                                      │

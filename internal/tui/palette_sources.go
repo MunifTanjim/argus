@@ -78,9 +78,9 @@ func (placesSource) items(m model) []paletteItem {
 			it.kind, it.marker, it.detail = paletteNode, Icon.Node.Render(), "node"
 		case rowProject:
 			project, projectName = id, r.label
-			it.kind, it.marker, it.detail, it.parent = paletteProject, StyleSecondary.Render("▪"), nodeLabel, node
+			it.kind, it.marker, it.detail, it.parent = paletteProject, Icon.Repo.Render(), nodeLabel, node
 		case rowWorkspace:
-			it.kind, it.marker, it.detail, it.parent = paletteWorkspace, Icon.Branch.Render(), projectName, project
+			it.kind, it.marker, it.detail, it.parent = paletteWorkspace, wsIcon(r), projectName, project
 			it.name = r.label
 			if !r.isGone && !r.plain && r.branch != "" {
 				it.label += " " + r.branch

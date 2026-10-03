@@ -182,7 +182,7 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgen
 	if s.Repo != "" {
 		repoStyle := StyleDim
 		if selected {
-			repoStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorGitBranch)
+			repoStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorRepo)
 		}
 		titleLeft += " " + repoStyle.Render(truncate(s.Repo, 28))
 	}
