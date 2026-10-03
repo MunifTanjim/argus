@@ -8,7 +8,7 @@ import (
 )
 
 // paletteKind is what a palette item stands for. The empty-query list shows
-// the kinds in this order.
+// the kinds in this order. paletteCommand stays last: boost counts down to it.
 type paletteKind int
 
 const (
@@ -28,11 +28,45 @@ type paletteItem struct {
 	label   string
 	detail  string
 	hint    string // dim text after the detail that matching ignores
+	waiting bool   // a session that waits for input
+	name    string // what an exact query equals; "" means the label
 	parent  string
+	pname   string // the parent's name, set by the snapshot
 	actions []paletteAction
 }
 
 func (it paletteItem) filter() string { return it.label + " " + it.detail }
+
+func (it paletteItem) exactName() string {
+	if it.name != "" {
+		return it.name
+	}
+	return it.label
+}
+
+// exact ranks a query that equals the item's name above one that equals its
+// parent's name, and both above any fuzzy score.
+func (it paletteItem) exact(q string) int {
+	switch {
+	case strings.EqualFold(q, it.exactName()), strings.EqualFold(q, it.label):
+		return 2
+	case it.pname != "" && strings.EqualFold(q, it.pname):
+		return 1
+	}
+	return 0
+}
+
+// boost ranks the kinds: a session that waits for input first, commands last.
+// One step is worth one separator match, so a clearly better match in a lower
+// kind still comes first.
+func (it paletteItem) boost() int {
+	const step = 20
+	b := step * int(paletteCommand-it.kind)
+	if it.waiting {
+		b += step
+	}
+	return b
+}
 
 // run queues its changes on c.
 type paletteAction struct {
@@ -78,12 +112,17 @@ type paletteSnapshot struct {
 
 func newPaletteSnapshot(items []paletteItem) paletteSnapshot {
 	items = slices.Clone(items)
-	slices.SortStableFunc(items, func(a, b paletteItem) int { return int(a.kind) - int(b.kind) })
+	slices.SortStableFunc(items, func(a, b paletteItem) int { return b.boost() - a.boost() })
 	s := paletteSnapshot{items: items, index: map[string]int{}, kids: map[string]bool{}}
 	for i, it := range items {
 		s.index[it.id] = i
 		if it.parent != "" {
 			s.kids[it.parent] = true
+		}
+	}
+	for i, it := range items {
+		if p, ok := s.item(it.parent); ok {
+			items[i].pname = p.exactName()
 		}
 	}
 	return s
@@ -156,8 +195,10 @@ type paletteFilters []paletteItem
 func (f paletteFilters) String(i int) string { return f[i].filter() }
 func (f paletteFilters) Len() int            { return len(f) }
 
-// matchPalette fuzzy-matches items against q, best match first. Equal scores
-// keep the order of items.
+// matchPalette fuzzy-matches items against q: exact matches first, then the
+// best boosted score. An exact parent match shows even when the fuzzy match
+// misses it: a worktree session's detail has the main repository's name, not
+// its workspace's name.
 func matchPalette(items []paletteItem, q string) []paletteMatch {
 	q = strings.TrimSpace(q)
 	if q == "" {
@@ -168,6 +209,22 @@ func matchPalette(items []paletteItem, q string) []paletteMatch {
 		return out
 	}
 	found := fuzzy.FindFrom(q, paletteFilters(items))
+	seen := make(map[int]bool, len(found))
+	for _, f := range found {
+		seen[f.Index] = true
+	}
+	for i, it := range items {
+		if !seen[i] && it.exact(q) > 0 {
+			found = append(found, fuzzy.Match{Index: i})
+		}
+	}
+	slices.SortStableFunc(found, func(a, b fuzzy.Match) int {
+		ia, ib := items[a.Index], items[b.Index]
+		if ea, eb := ia.exact(q), ib.exact(q); ea != eb {
+			return eb - ea
+		}
+		return b.Score + ib.boost() - a.Score - ia.boost()
+	})
 	out := make([]paletteMatch, len(found))
 	for i, f := range found {
 		it := items[f.Index]

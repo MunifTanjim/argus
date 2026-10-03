@@ -81,6 +81,7 @@ func (placesSource) items(m model) []paletteItem {
 			it.kind, it.marker, it.detail, it.parent = paletteProject, StyleSecondary.Render("▪"), nodeLabel, node
 		case rowWorkspace:
 			it.kind, it.marker, it.detail, it.parent = paletteWorkspace, Icon.Branch.Render(), projectName, project
+			it.name = r.label
 			if !r.isGone && !r.plain && r.branch != "" {
 				it.label += " " + r.branch
 			}
@@ -123,6 +124,7 @@ func (sessionsSource) items(m model) []paletteItem {
 			marker:  lipgloss.NewStyle().Foreground(color).Render(glyph),
 			label:   sessionLabel(s),
 			detail:  sessionDetail(s, many),
+			waiting: s.Status == session.StatusAwaitingInput && !s.Offline,
 			actions: []paletteAction{openSessionAction(id)},
 		}
 		if s.WorkspaceID != "" {

@@ -3,6 +3,8 @@ package tui
 import (
 	"slices"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func pi(id string, kind paletteKind, label, detail, parent string) paletteItem {
@@ -128,5 +130,104 @@ func TestMatchPaletteIgnoresTheHint(t *testing.T) {
 	it.hint = "zz"
 	if got := matchPalette([]paletteItem{it}, "zz"); len(got) != 0 {
 		t.Errorf("the hint matched: %v", matchIDs(got))
+	}
+}
+
+func TestPaletteSnapshotPutsWaitingSessionsFirst(t *testing.T) {
+	waiting := pi("session:s2", paletteSession, "deploy", "", "")
+	waiting.waiting = true
+	s := newPaletteSnapshot([]paletteItem{pi("session:s1", paletteSession, "fix-login", "", ""), waiting})
+	if got := itemIDs(s.items); !slices.Equal(got, []string{"session:s2", "session:s1"}) {
+		t.Fatalf("order = %v, want the waiting session first", got)
+	}
+}
+
+func TestMatchPaletteBoostsByKind(t *testing.T) {
+	waiting := pi("session:wait", paletteSession, "fix-login", "repo", "")
+	waiting.waiting = true
+	cases := []struct {
+		name  string
+		items []paletteItem
+		q     string
+		want  []string
+	}{
+		{"a waiting session over a closer session match", []paletteItem{
+			pi("session:idle", paletteSession, "login-page", "repo", ""), waiting,
+		}, "login", []string{"session:wait", "session:idle"}},
+		{"a session over a closer workspace match", []paletteItem{
+			pi("ws:w1", paletteWorkspace, "repo main", "argus", ""),
+			pi("session:s1", paletteSession, "fix-login", "repo · main", ""),
+		}, "repo", []string{"session:s1", "ws:w1"}},
+		{"a much closer workspace match over a session", []paletteItem{
+			pi("session:s1", paletteSession, "lo go in", "", ""),
+			pi("ws:w1", paletteWorkspace, "login", "", ""),
+		}, "login", []string{"ws:w1", "session:s1"}},
+	}
+	for _, c := range cases {
+		if got := matchIDs(matchPalette(c.items, c.q)); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %q = %v, want %v", c.name, c.q, got, c.want)
+		}
+	}
+}
+
+func TestMatchPaletteRanksExactMatchesFirst(t *testing.T) {
+	s := newPaletteSnapshot([]paletteItem{
+		pi("project:p1", paletteProject, "argus", "home", ""),
+		{id: "ws:w1", kind: paletteWorkspace, label: "repo main", name: "repo", detail: "argus", parent: "project:p1"},
+		pi("session:s1", paletteSession, "repo-sync", "repo · main", "ws:w1"),
+		pi("session:s2", paletteSession, "fix-login", "repo · main", "ws:w1"),
+		pi("command:x", paletteCommand, "Repo", "", ""),
+	})
+	cases := []struct {
+		q    string
+		want []string
+	}{
+		{"repo", []string{"ws:w1", "command:x", "session:s1", "session:s2"}},
+		{"ARGUS", []string{"project:p1", "ws:w1"}},
+	}
+	for _, c := range cases {
+		if got := matchIDs(matchPalette(s.items, c.q)); !slices.Equal(got, c.want) {
+			t.Errorf("%q = %v, want %v", c.q, got, c.want)
+		}
+	}
+}
+
+func TestMatchPaletteExactMatchEdgeCases(t *testing.T) {
+	s := newPaletteSnapshot([]paletteItem{
+		pi("project:p1", paletteProject, "argus", "home", ""),
+		{id: "ws:w1", kind: paletteWorkspace, label: "repo main", name: "repo", detail: "argus", parent: "project:p1"},
+		{id: "ws:w2", kind: paletteWorkspace, label: "argus-feat feat", name: "argus-feat", detail: "argus", parent: "project:p1"},
+		pi("session:s1", paletteSession, "fix-login", "repo · main", "ws:w1"),
+		pi("session:wt", paletteSession, "deploy", "argus · feat", "ws:w2"),
+		pi("session:orphan", paletteSession, "loose", "", "ws:gone"),
+	})
+	cases := []struct {
+		name  string
+		items []paletteItem
+		q     string
+		want  []string
+	}{
+		{"a worktree session that the fuzzy match misses", s.items, "argus-feat", []string{"ws:w2", "session:wt"}},
+		{"the full label", s.items, "repo main", []string{"ws:w1", "session:s1"}},
+		{"spaces around the query", s.items, "  ARGUS  ", []string{"project:p1", "ws:w1", "ws:w2", "session:wt"}},
+		{"inside a scope", s.under("ws:w1"), "repo", []string{"session:s1"}},
+		{"a parent missing from the snapshot", s.items, "gone", nil},
+	}
+	for _, c := range cases {
+		if got := matchIDs(matchPalette(c.items, c.q)); !slices.Equal(got, c.want) && !(len(got) == 0 && len(c.want) == 0) {
+			t.Errorf("%s: %q = %v, want %v", c.name, c.q, got, c.want)
+		}
+	}
+}
+
+func TestOfflineSessionIsNotWaiting(t *testing.T) {
+	m := homeTestModel()
+	s := m.sessions["n1:s1"]
+	s.Status, s.Offline = session.StatusAwaitingInput, true
+	m.sessions["n1:s1"] = s
+	for _, it := range (sessionsSource{}).items(m) {
+		if it.id == "session:n1:s1" && it.waiting {
+			t.Error("an offline session must not rank as waiting")
+		}
 	}
 }
