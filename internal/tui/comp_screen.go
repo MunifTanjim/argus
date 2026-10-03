@@ -146,14 +146,21 @@ func (s screenComp) close(c *ctx) tea.Cmd {
 
 func (s screenComp) view(c *ctx, w, h int) string {
 	m := c.m
-	var b strings.Builder
+	cols, visible := termDimsFor(w, h, !m.filesVisible())
+	var header string
 	if s.terminalID != "" {
-		b.WriteString(headerStyle.Render(s.title) + dimStyle.Render("  "+s.node) + "\n\n")
+		header = headerStyle.Render(s.title) + dimStyle.Render("  "+s.node)
 	} else {
 		ss := m.sessions[s.sessionID]
-		b.WriteString(headerStyle.Render(ss.Tmux.SessionName) +
-			dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss))) + "\n\n")
+		header = headerStyle.Render(ss.Tmux.SessionName) +
+			dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss)))
 	}
+	if m.mouse {
+		header = spaceBetween(truncateLine(header, cols), StyleDim.Render(glyphClose), cols+2)
+		c.hitZone(uv.Rect(cols+1, 0, 1, 1), hitTarget{kind: hitClose})
+	}
+	var b strings.Builder
+	b.WriteString(header + "\n\n")
 
 	var body string
 	switch {
@@ -162,7 +169,6 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	case s.term != nil:
 		body = s.term.Render()
 	}
-	cols, visible := termDimsFor(w, h, !c.m.filesVisible())
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	if len(lines) > visible {
 		lines = lines[len(lines)-visible:]

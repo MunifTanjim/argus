@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
@@ -320,5 +321,60 @@ func TestTranscriptBodyClickSelectsWithoutDrilling(t *testing.T) {
 	m, _ = click(m, x, y)
 	if trOf(m).historyView != histDetail {
 		t.Error("a click on the selected card's header must open the detail")
+	}
+}
+
+// nestedDetail is the sample AI turn's detail with its first item drilled into.
+func nestedDetail(mouse bool) model {
+	m := withFocus(waitingSession(), mainPane)
+	m.mouse, m.hits = mouse, &hitMap{}
+	v := tvOf(&m)
+	v.transcript.cursor = 1
+	v.actDrillChunk(tea.KeyPressMsg{})
+	v.actDetailDrill(tea.KeyPressMsg{})
+	v.put()
+	return m
+}
+
+func closeCell(t *testing.T, m model) (x, y int) {
+	t.Helper()
+	m.View()
+	for _, a := range m.hits.areas {
+		for _, z := range a.zones {
+			if a.region == regMain && z.target.kind == hitClose {
+				return a.rect.Min.X + z.rect.Min.X, a.rect.Min.Y + z.rect.Min.Y
+			}
+		}
+	}
+	t.Fatal("no close button in the detail")
+	return 0, 0
+}
+
+func TestDetailCloseButtonShowsOnlyWithTheMouse(t *testing.T) {
+	if strings.Contains(nestedDetail(false).View().Content, glyphClose) {
+		t.Error("with the mouse off, the detail must draw no close button")
+	}
+	m := nestedDetail(true)
+	x, y := closeCell(t, m)
+	line := strings.Split(ansi.Strip(m.View().Content), "\n")[y]
+	if cell := ansi.Cut(line, x, x+1); cell != glyphClose || !strings.Contains(line, "›") {
+		t.Errorf("the zone at %d covers %q, want the close button at the end of the breadcrumb %q", x, cell, line)
+	}
+}
+
+func TestDetailCloseGoesBackOneLevel(t *testing.T) {
+	m := nestedDetail(true)
+	if n := len(trOf(m).transcript.detailStack); n != 2 {
+		t.Fatalf("detail depth = %d, want 2", n)
+	}
+	x, y := closeCell(t, m)
+	m, _ = click(m, x, y)
+	if n := len(trOf(m).transcript.detailStack); n != 1 || trOf(m).historyView != histDetail {
+		t.Fatalf("depth = %d view = %v, want one level up", n, trOf(m).historyView)
+	}
+	x, y = closeCell(t, m)
+	m, _ = click(m, x, y)
+	if trOf(m).historyView != histTranscript {
+		t.Error("closing the root frame must return to the cards")
 	}
 }

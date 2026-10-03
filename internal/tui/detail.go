@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -590,7 +591,7 @@ func (m tview) detailBody() string {
 	lines, _, _ := m.frameLines(f, cw)
 	// Align the breadcrumb/header with item text, which sits past the accent gutter.
 	gutter := strings.Repeat(" ", detailGutter)
-	crumb := truncateLine(m.detailBreadcrumb(), cw-detailGutter)
+	crumb := m.detailCrumbLine(cw - detailGutter)
 	h := m.viewportHeight()
 	bodyH := h
 	prefix := ""
@@ -617,6 +618,16 @@ func (m tview) detailBody() string {
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
 	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())
+}
+
+// detailCrumbLine ends the breadcrumb with a close button when the mouse is on.
+func (m tview) detailCrumbLine(w int) string {
+	if !m.c.m.mouse {
+		return truncateLine(m.detailBreadcrumb(), w)
+	}
+	x := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()) + detailGutter + w - 1
+	m.c.hitZone(uv.Rect(x, 0, 1, 1), hitTarget{kind: hitClose})
+	return spaceBetween(truncateLine(m.detailBreadcrumb(), max(1, w-2)), StyleDim.Render(glyphClose), w)
 }
 
 func (m tview) hitItems(f *detailFrame, cw, rows, scroll, end int) {

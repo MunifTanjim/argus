@@ -468,3 +468,27 @@ func TestLiveScreenBoxHasEvenGapsBetweenSidebars(t *testing.T) {
 	}
 	t.Fatal("no screen box in the frame")
 }
+
+func TestScreenCloseButtonShowsOnlyWithTheMouse(t *testing.T) {
+	if strings.Contains(liveScreenModel().View().Content, glyphClose) {
+		t.Error("with the mouse off, the screen must draw no close button")
+	}
+	m := withMouse(liveScreenModel())
+	x, y := closeCell(t, m)
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	if cell := ansi.Cut(lines[y], x, x+1); cell != glyphClose || !strings.Contains(lines[y], "fix-login") {
+		t.Errorf("the zone at %d covers %q, want the close button on the header %q", x, cell, lines[y])
+	}
+	if corner := ansi.Cut(lines[y+2], x, x+1); corner != "╮" {
+		t.Errorf("the close button should line up with the box's right edge, found %q under it", corner)
+	}
+}
+
+func TestScreenCloseButtonLeavesTheScreen(t *testing.T) {
+	m := withMouse(liveScreenModel())
+	x, y := closeCell(t, m)
+	m, _ = click(m, x, y)
+	if m.topScreen() >= 0 {
+		t.Error("the close button should leave the screen")
+	}
+}
