@@ -26,7 +26,7 @@ import (
 // otherLabel is the synthetic "type your own" option (matches Claude's UI).
 const otherLabel = "✎ type your own…"
 
-func newDenyReasonInput() textinput.Model {
+func newTextInput() textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	return ti
@@ -118,13 +118,23 @@ func (d dockComp) decisionRejecting(ix *session.Interaction) bool {
 	return sel >= 0 && sel < len(ix.Options) && ix.Options[sel].Reject
 }
 
-// questionOptions returns a question's option labels plus the "type your own" entry.
+// questionOptions returns a question's option labels plus the "type your own"
+// entry. A question that takes notes has no such row: its note covers free text.
 func questionOptions(q *session.QuestionSpec) []string {
+	if q.AllowNotes {
+		return append([]string{}, q.Options...)
+	}
 	return append(append([]string{}, q.Options...), otherLabel)
 }
 
-// otherIndex is the index of a question's "type your own" entry.
-func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
+// otherIndex is the index of a question's "type your own" entry, or -1 when the
+// question has none (it takes notes instead).
+func otherIndex(q *session.QuestionSpec) int {
+	if q.AllowNotes {
+		return -1
+	}
+	return len(q.Options)
+}
 
 // -- Per-question draft state -------------------------------------------------
 
@@ -133,10 +143,11 @@ func otherIndex(q *session.QuestionSpec) int { return len(q.Options) }
 // interaction changes (see saveReplyDraft).
 func (d *dockComp) resetPromptState() {
 	d.tab, d.submitSel, d.decisionSel = 0, 0, 0
-	d.reason = newDenyReasonInput()
+	d.confirming = false
+	d.reason = newTextInput()
 	d.reason.Focus()
 	d.scroll = 0
-	d.sel, d.chosen, d.toggles, d.text = nil, nil, nil, nil
+	d.sel, d.chosen, d.toggles, d.text, d.notes = nil, nil, nil, nil, nil
 }
 
 // saveReplyDraft keeps the composer text per session, so it survives a session
@@ -185,6 +196,7 @@ func (d *dockComp) ensurePromptState(n int) {
 		chosen := make([]int, n)
 		tog := make([]map[int]bool, n)
 		txt := make([]textinput.Model, n)
+		notes := make([]textinput.Model, n)
 		for i := 0; i < n; i++ {
 			chosen[i] = -1
 			if i < len(d.sel) {
@@ -203,8 +215,13 @@ func (d *dockComp) ensurePromptState(n int) {
 			} else {
 				txt[i] = newQuestionAnswerInput()
 			}
+			if i < len(d.notes) {
+				notes[i] = d.notes[i]
+			} else {
+				notes[i] = newTextInput()
+			}
 		}
-		d.sel, d.chosen, d.toggles, d.text = sel, chosen, tog, txt
+		d.sel, d.chosen, d.toggles, d.text, d.notes = sel, chosen, tog, txt, notes
 	}
 	maxTab := n - 1
 	if n > 1 {
@@ -238,6 +255,42 @@ func (d dockComp) qText(tab int) string {
 		return d.text[tab].Value()
 	}
 	return ""
+}
+
+func (d dockComp) qNote(tab int) string {
+	if tab >= 0 && tab < len(d.notes) {
+		return d.notes[tab].Value()
+	}
+	return ""
+}
+
+func (d dockComp) qNoteOpen(tab int) bool {
+	return tab >= 0 && tab < len(d.notes) && d.notes[tab].Focused()
+}
+
+// noteEditing reports whether the active question's note editor is open, so it
+// takes typed keys, paste, and esc.
+func (d dockComp) noteEditing(c *ctx) bool {
+	q := d.activeQuestion(c)
+	return q != nil && q.AllowNotes && !d.onSubmitTab(c) && d.qNoteOpen(d.tab)
+}
+
+// questionNotes collects trimmed, non-empty notes keyed by question text for
+// questions that take notes; nil when there are none.
+func (d dockComp) questionNotes(ix *session.Interaction) map[string]string {
+	var notes map[string]string
+	for tab, q := range ix.Questions {
+		if !q.AllowNotes {
+			continue
+		}
+		if n := strings.TrimSpace(d.qNote(tab)); n != "" {
+			if notes == nil {
+				notes = map[string]string{}
+			}
+			notes[q.Question] = n
+		}
+	}
+	return notes
 }
 
 // qChosen returns the committed single-select option index, or -1 (unanswered).
@@ -487,8 +540,14 @@ func (m model) renderOptions(opts []string, sel int, marks optionMarks, otherIdx
 	return strings.TrimRight(b.String(), "\n"), anchor
 }
 
-// chatHint is the footer affordance for the "Chat about this" action.
-func chatHint() string { return StyleDim.Render("c · chat about this") }
+// chatHint is the affordance for "c": "Chat about this", or interrupt for
+// questions the agent cannot decline (Codex has no chat).
+func chatHint(ix *session.Interaction) string {
+	if ix.CancelInterrupts {
+		return "\n\n" + StyleDim.Render("c · interrupt")
+	}
+	return "\n\n" + StyleDim.Render("c · chat about this")
+}
 
 // respondElsewhereLabel points a paneless idle session's user to where it lives.
 func respondElsewhereLabel(f session.Frontend) string {
@@ -506,11 +565,17 @@ func (d dockComp) questionLines(c *ctx, ix *session.Interaction, width int) ([]s
 		b.WriteString(d.promptTabs(c, width) + "\n\n")
 	}
 
+	if d.confirming {
+		body, a, ctrl := d.confirmBody(ix)
+		b.WriteString(body)
+		return splitAnchorCtrl(&b, a, ctrl)
+	}
+
 	if d.onSubmitTab(c) {
 		base := strings.Count(b.String(), "\n")
 		body, a, ctrl := d.submitTabBody(ix, width)
 		b.WriteString(body)
-		b.WriteString("\n\n" + chatHint())
+		b.WriteString(chatHint(ix))
 		return splitAnchorCtrl(&b, base+a, base+ctrl)
 	}
 
@@ -540,7 +605,17 @@ func (d dockComp) questionLines(c *ctx, ix *session.Interaction, width int) ([]s
 	block, a := c.m.renderOptions(opts, d.qSel(tab), marks,
 		otherIndex(q), otherText, d.otherActive(q, tab), q.OptionDescriptions, width)
 	b.WriteString(block)
-	b.WriteString("\n\n" + chatHint())
+	if q.AllowNotes {
+		switch {
+		case d.qNoteOpen(tab) && tab < len(d.notes):
+			ti := d.notes[tab]
+			ti.SetWidth(max(10, width-8))
+			b.WriteString("\n\n" + StyleSecondary.Render("note: ") + ti.View())
+		case d.qNote(tab) != "":
+			b.WriteString("\n\n" + hardWrap(StyleDim.Render("note: "+strings.TrimSpace(d.qNote(tab))), width))
+		}
+	}
+	b.WriteString(chatHint(ix))
 	// Question text (and tab bar) above the options scroll; the option list pins.
 	return splitAnchorCtrl(&b, base+a, base)
 }
@@ -644,20 +719,48 @@ func (d dockComp) submitTabBody(ix *session.Interaction, width int) (string, int
 		}
 		line := StyleSecondaryBold.Render(head) + ": " + d.answerSummary(q, tab)
 		b.WriteString(hardWrap(line, width) + "\n")
+		if note := strings.TrimSpace(d.qNote(tab)); q.AllowNotes && note != "" {
+			b.WriteString(hardWrap("  "+StyleDim.Render("note: "+note), width) + "\n")
+		}
 	}
 	b.WriteString("\n")
 	ctrlStart := strings.Count(b.String(), "\n")
-	for i, act := range []string{"Submit", "Cancel"} {
+	cancel := "Cancel"
+	if ix.CancelInterrupts {
+		cancel = "Interrupt" // Codex has no decline; Cancel interrupts the turn
+	}
+	d.writeControls(&b, "Submit", cancel)
+	out := strings.TrimRight(b.String(), "\n")
+	// Anchor on the last action so windowing keeps the Submit/Cancel pair visible.
+	anchor := strings.Count(out, "\n")
+	return out, anchor, ctrlStart
+}
+
+// confirmBody asks whether to submit with unanswered questions, as Codex does.
+func (d dockComp) confirmBody(ix *session.Interaction) (string, int, int) {
+	n := d.unansweredCount(ix)
+	noun := "questions"
+	if n == 1 {
+		noun = "question"
+	}
+	var b strings.Builder
+	b.WriteString(StyleAccentBold.Render("Submit with unanswered questions?") + "\n")
+	b.WriteString(StyleDim.Render(fmt.Sprintf("%d unanswered %s", n, noun)) + "\n\n")
+	ctrlStart := strings.Count(b.String(), "\n")
+	d.writeControls(&b, "Proceed", "Go back")
+	out := strings.TrimRight(b.String(), "\n")
+	return out, strings.Count(out, "\n"), ctrlStart
+}
+
+// writeControls appends one line per action, marking the one at submitSel.
+func (d dockComp) writeControls(b *strings.Builder, acts ...string) {
+	for i, act := range acts {
 		marker, label := "  ", StyleSecondary.Render(act)
 		if i == d.submitSel {
 			marker, label = cursorStyle.Render("▸ "), StylePrimaryBold.Render(act)
 		}
 		b.WriteString(marker + label + "\n")
 	}
-	out := strings.TrimRight(b.String(), "\n")
-	// Anchor on the last action so windowing keeps the Submit/Cancel pair visible.
-	anchor := strings.Count(out, "\n")
-	return out, anchor, ctrlStart
 }
 
 // answerSummary describes a question's committed answer for the Submit review.

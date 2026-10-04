@@ -205,7 +205,11 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         if (o.reject) {
           setState(() => _denying = true);
         } else {
-          _respond(optionRespond(sessionId: _sid, kind: kind, value: o.value));
+          _respond(optionRespond(
+              sessionId: _sid,
+              kind: kind,
+              value: o.value,
+              requestId: ix.requestId));
         }
       }
 
@@ -254,6 +258,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
                     kind: kind,
                     value: reject.value,
                     reason: _text.text,
+                    requestId: ix.requestId,
                   ),
                 ),
           child: const Text('Send'),
@@ -302,11 +307,39 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       ),
   ];
 
+  /// Asks whether to submit with unanswered questions, as Codex does.
+  Future<bool> _confirmUnanswered(int count) async {
+    final noun = count == 1 ? 'question' : 'questions';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Submit with unanswered questions?'),
+        content: Text('$count unanswered $noun'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Go back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Proceed'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
   List<Widget> _questions(Interaction ix) {
     final qs = ix.questions;
     final drafts = _ensureDrafts(qs.length);
-    final canSubmit =
-        questionRespond(sessionId: _sid, questions: qs, drafts: drafts) != null;
+    final canSubmit = questionRespond(
+          sessionId: _sid,
+          questions: qs,
+          drafts: drafts,
+          allowUnanswered: ix.allowUnanswered,
+        ) !=
+        null;
     return [
       Flexible(
         child: SingleChildScrollView(
@@ -323,25 +356,48 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       FilledButton(
         onPressed: (_busy || !canSubmit)
             ? null
-            : () {
+            : () async {
                 final p = questionRespond(
                   sessionId: _sid,
                   questions: qs,
                   drafts: drafts,
+                  allowUnanswered: ix.allowUnanswered,
+                  requestId: ix.requestId,
                 );
-                if (p != null) _respond(p);
+                if (p == null) return;
+                final unanswered = unansweredCount(qs, drafts);
+                if (ix.allowUnanswered &&
+                    unanswered > 0 &&
+                    !await _confirmUnanswered(unanswered)) {
+                  return;
+                }
+                if (mounted) _respond(p);
               },
         child: const Text('Submit'),
       ),
       const SizedBox(height: 8),
-      OutlinedButton(
-        onPressed: _busy
-            ? null
-            : () => _respond(
-                clarifyRespond(sessionId: _sid, questions: qs, drafts: drafts),
-              ),
-        child: const Text('Chat about this'),
-      ),
+      if (ix.cancelInterrupts)
+        OutlinedButton(
+          onPressed:
+              _busy
+                  ? null
+                  : () => _respond(interruptRespond(
+                      sessionId: _sid, requestId: ix.requestId)),
+          child: const Text('Interrupt'),
+        )
+      else
+        OutlinedButton(
+          onPressed: _busy
+              ? null
+              : () => _respond(
+                  clarifyRespond(
+                      sessionId: _sid,
+                      questions: qs,
+                      drafts: drafts,
+                      requestId: ix.requestId),
+                ),
+          child: const Text('Chat about this'),
+        ),
       if (_busy)
         const Padding(
           padding: EdgeInsets.only(top: 12),
@@ -369,7 +425,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         ),
       );
     }
-    final labels = [...q.options, otherLabel];
+    final labels = q.allowNotes ? [...q.options] : [...q.options, otherLabel];
     // Per-option metadata is valid only for real options; the synthetic
     // otherLabel row carries neither a description nor a preview.
     String? desc(int i) {
@@ -424,7 +480,9 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         ),
       );
     }
-    final showCustom = q.multiSelect ? d.toggles.contains(oi) : d.chosen == oi;
+    // oi is -1 when the question takes notes: there is no custom row to show.
+    final showCustom =
+        oi >= 0 && (q.multiSelect ? d.toggles.contains(oi) : d.chosen == oi);
     if (showCustom) {
       rows.add(
         TextField(
@@ -436,6 +494,42 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
           onChanged: (v) => setState(() => d.custom = v),
         ),
       );
+    }
+    if (q.allowNotes) {
+      if (d.noteOpen) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TextField(
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Note',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  tooltip: 'Remove note',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(() {
+                    d.note = '';
+                    d.noteOpen = false;
+                  }),
+                ),
+              ),
+              onChanged: (v) => setState(() => d.note = v),
+            ),
+          ),
+        );
+      } else {
+        rows.add(
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.edit_note),
+              label: const Text('Add note'),
+              onPressed: () => setState(() => d.noteOpen = true),
+            ),
+          ),
+        );
+      }
     }
     return Card(
       child: Padding(

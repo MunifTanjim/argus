@@ -250,6 +250,7 @@ var promptKeys = struct {
 	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Select, Read binding
 	Unselect                                                                 binding
 	Back                                                                     binding
+	Note                                                                     binding
 }{
 	Up:       nb("prev", "<Up>", "select"),
 	Down:     nb("next", "<Down>", ""),
@@ -263,6 +264,7 @@ var promptKeys = struct {
 	Unselect: nb("option unselect", "<Space>", ""),
 	Read:     nb("focus transcript", "<Tab>", "read"),
 	Back:     nb("back", "<Esc>", "back"),
+	Note:     nb("answer note", "n", "note"),
 }
 
 var historyProjectsKeys = struct {

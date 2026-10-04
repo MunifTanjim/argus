@@ -20,7 +20,9 @@ type dockComp struct {
 	chosen      []int             // committed single-select option per question (-1 = unanswered)
 	toggles     []map[int]bool    // multi-select toggles per question
 	text        []textinput.Model // "type your own" draft per question
-	submitSel   int               // 0=Submit, 1=Cancel on the Submit tab
+	notes       []textinput.Model // note draft per question (questions with AllowNotes)
+	confirming  bool              // asking whether to submit with unanswered questions
+	submitSel   int               // 0=Submit, 1=Cancel on the Submit tab; 0=Proceed, 1=Go back while confirming
 	decisionSel int               // permission/plan option index (Allow/Deny)
 	reason      textinput.Model   // permission/plan deny reason (single-line)
 	reply       textarea.Model    // idle reply composer (multi-line via shift+enter)
@@ -31,7 +33,7 @@ type dockComp struct {
 }
 
 func newDock() dockComp {
-	return dockComp{reason: newDenyReasonInput(), reply: newIdleReplyArea(), drafts: map[string]string{}}
+	return dockComp{reason: newTextInput(), reply: newIdleReplyArea(), drafts: map[string]string{}}
 }
 
 func (d dockComp) section() string { return "session-dock" }
@@ -49,10 +51,17 @@ func (d dockComp) layer() layer              { return baseLayer }
 func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	c.setFlash("")
 	switch {
+	case d.noteEditing(c) && c.m.matches(msg, promptKeys.Back):
+		d.notes[d.tab].Reset()
+		d.notes[d.tab].Blur()
+		return d, nil, true
 	case c.m.matches(msg, sessionKeys.FocusTranscript):
 		if c.m.sessionInteraction() != nil {
 			c.focusOn(mainPane)
 		}
+		return d, nil, true
+	case d.confirming && c.m.matches(msg, promptKeys.Back):
+		d.confirming = false
 		return d, nil, true
 	case c.m.matches(msg, promptKeys.Back):
 		c.focusOn(mainPane)
@@ -96,6 +105,8 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	case ix != nil && ix.Kind == session.InteractionIdle:
 		d.reply, cmd = d.reply.Update(p)
 		d.sizeIdleReply(c)
+	case d.noteEditing(c):
+		d.notes[d.tab], cmd = d.notes[d.tab].Update(p)
 	case d.questionCustomActive(c):
 		d.text[d.tab], cmd = d.text[d.tab].Update(p)
 	case d.denyReasonActive(c):
@@ -127,6 +138,9 @@ func (d dockComp) footer(c *ctx) []binding {
 		binds = append(binds, promptKeys.TabPrev, promptKeys.Next)
 	} else {
 		binds = append(binds, promptKeys.Submit)
+	}
+	if q := d.activeQuestion(c); q != nil && q.AllowNotes && !d.onSubmitTab(c) {
+		binds = append(binds, promptKeys.Note)
 	}
 	if d.dockScrolls(c) {
 		binds = append(binds, promptKeys.HalfUp)

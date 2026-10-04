@@ -113,6 +113,9 @@ type QuestionSpec struct {
 	Options            []string `json:"options,omitempty"`
 	OptionDescriptions []string `json:"option_descriptions,omitempty"`
 	OptionPreviews     []string `json:"option_previews,omitempty"`
+	// AllowNotes marks a question that accepts one free-text note alongside the
+	// selected answer (Codex request_user_input).
+	AllowNotes bool `json:"allow_notes,omitempty"`
 }
 
 // DecisionOption is a server-built choice for a permission/plan decision. The client

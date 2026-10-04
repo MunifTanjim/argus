@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/respond_sheet.dart';
 import '../support/fake_session_repository.dart';
 
@@ -243,6 +244,176 @@ void main() {
             }
           ],
         });
+
+    Session notesSession() => _session({
+          'kind': 'question',
+          'questions': [
+            {
+              'question': 'Pick a size',
+              'allow_notes': true,
+              'options': ['Small', 'Large', 'None of the above'],
+            }
+          ],
+        });
+
+    testWidgets('allow_notes hides type-your-own and sends a note',
+        (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(tester, notesSession(), c);
+      expect(find.text(otherLabel), findsNothing);
+      await tester.tap(find.text('Large'));
+      await tester.pump();
+      await tester.tap(find.text('Add note'));
+      await tester.pump();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Note'), 'extra large');
+      await tester.pump();
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single['answers'], {'Pick a size': 'Large'});
+      expect(c.respondCalls.single['notes'], {'Pick a size': 'extra large'});
+    });
+
+    testWidgets('allow_notes question shows no custom answer field',
+        (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(tester, notesSession(), c);
+      expect(find.widgetWithText(TextField, 'Your answer'), findsNothing);
+    });
+
+    testWidgets('clearing the note removes it', (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(tester, notesSession(), c);
+      await tester.tap(find.text('Small'));
+      await tester.tap(find.text('Add note'));
+      await tester.pump();
+      await tester.enterText(find.widgetWithText(TextField, 'Note'), 'x');
+      await tester.tap(find.byTooltip('Remove note'));
+      await tester.pump();
+      expect(find.widgetWithText(TextField, 'Note'), findsNothing);
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single.containsKey('notes'), isFalse);
+    });
+
+    testWidgets('questions without allow_notes show no note button',
+        (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(tester, questionSession(), c);
+      expect(find.text('Add note'), findsNothing);
+      expect(find.text(otherLabel), findsOneWidget);
+    });
+
+    testWidgets('cancel_interrupts questions offer interrupt instead of chat', (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(tester, questionSession(), c);
+      expect(find.text('Chat about this'), findsOneWidget);
+      await _pumpSheet(
+          tester,
+          _session({
+            'kind': 'question',
+            'cancel_interrupts': true,
+            'questions': [
+              {
+                'question': 'Pick one',
+                'options': ['A', 'B'],
+                'allow_notes': true,
+              }
+            ],
+          }),
+          c);
+      expect(find.text('Chat about this'), findsNothing);
+      await tester.tap(find.text('Interrupt'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single, {
+        'session_id': 'mac:%1',
+        'kind': 'question',
+        'question_action': 'cancel',
+      });
+    });
+
+    testWidgets('allow_unanswered submits after confirmation', (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(
+          tester,
+          _session({
+            'kind': 'question',
+            'allow_unanswered': true,
+            'questions': [
+              {
+                'question': 'Pick one',
+                'options': ['A', 'B'],
+              }
+            ],
+          }),
+          c);
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Submit with unanswered questions?'), findsOneWidget);
+      expect(find.text('1 unanswered question'), findsOneWidget);
+      await tester.tap(find.text('Go back'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls, isEmpty);
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Proceed'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single, {
+        'session_id': 'mac:%1',
+        'kind': 'question',
+        'behavior': 'allow',
+      });
+    });
+
+    testWidgets('responds echo the request_id', (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(
+          tester,
+          _session({
+            'kind': 'question',
+            'request_id': '7',
+            'cancel_interrupts': true,
+            'questions': [
+              {
+                'question': 'Pick one',
+                'options': ['A', 'B'],
+              }
+            ],
+          }),
+          c);
+      await tester.tap(find.text('A'));
+      await tester.pump();
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single['request_id'], '7');
+    });
+
+    testWidgets('partial answers submit without confirmation unless allowed',
+        (tester) async {
+      final c = _RecordingControl();
+      await _pumpSheet(
+          tester,
+          _session({
+            'kind': 'question',
+            'questions': [
+              {
+                'question': 'Pick one',
+                'options': ['A', 'B'],
+              },
+              {
+                'question': 'Pick two',
+                'options': ['C', 'D'],
+              }
+            ],
+          }),
+          c);
+      await tester.tap(find.text('A'));
+      await tester.pump();
+      await tester.tap(find.text('Submit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Submit with unanswered questions?'), findsNothing);
+      expect(c.respondCalls.single['answers'], {'Pick one': 'A'});
+    });
 
     testWidgets('single-select submits chosen label', (tester) async {
       final c = _RecordingControl();

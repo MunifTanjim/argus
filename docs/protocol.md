@@ -662,6 +662,23 @@ For `option_value`, the node maps `deny` to a deny, `allow` to an allow, and
 any other value to an allow that also sets that permission mode. The node
 ignores `kind`, `option_index`, and `text`.
 
+An interaction with a `request_id` is one of several requests the agent may
+have open (codex). Echo it in the respond's `request_id`: the answer then goes
+to that request, and fails if the request was already answered or withdrawn.
+Without it, the answer goes to the oldest open request. The codex service also
+rejects a respond that does not fit its request: one whose `kind` differs from
+the request's, answers or a `question_action` for an approval, an
+`option_value` the request did not offer, or an approval with no decision.
+
+A question with `allow_notes` also accepts a free-text note in `notes`, keyed
+by question text like `answers`. Adapters without note support ignore it.
+
+For a question with `cancel_interrupts`, `question_action: "cancel"` interrupts
+the asking thread's turn, which also ends its other open requests, and
+`question_action: "chat"` is not accepted. A question with `allow_unanswered`
+accepts a respond whose `answers` omits some or all questions; the omitted ones
+get empty answers.
+
 ### Transcripts
 
 1. The client picks a `sub_id` and calls `transcript.subscribe` with the
@@ -1190,9 +1207,11 @@ RespondParams {
   reason?:          string            // deny message
   answers?:         { [question: string]: string | string[] }
   question_action?: "" | "chat" | "cancel"
+  notes?:           { [question: string]: string }  // one note per question; only for allow_notes questions
   set_mode?:        "acceptEdits" | "default" | "auto"
   option_value?:    string            // echo of DecisionOption.value
-  kind?:            string            // ignored by the node
+  request_id?:      string            // echo of Interaction.request_id
+  kind?:            string            // interaction kind; ignored by the node, checked by the codex service
   option_index?:    number            // ignored by the node
   text?:            string            // ignored by the node
 }
@@ -1621,9 +1640,13 @@ Interaction {
     options?:             string[]
     option_descriptions?: string[]    // same order as options
     option_previews?:     string[]    // same order as options
+    allow_notes?:         boolean     // the question accepts one free-text note (Codex)
   }[]
   plan?:       string
   options?:    { label, value: string, reject?: boolean, placeholder?: string }[]
+  cancel_interrupts?: boolean  // questions cannot be declined: cancel interrupts the turn, no "chat" (Codex)
+  allow_unanswered?:  boolean  // questions may be submitted with some or all unanswered (Codex)
+  request_id?:        string   // the pending request this shows; echo it in RespondParams.request_id (Codex)
 }
 ```
 

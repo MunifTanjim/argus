@@ -161,6 +161,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 <!-- keymap-commands:start -->
 | Command | Sections | Default keys |
 |---|---|---|
+| `answer note` | session-dock | `n` |
 | `answer submit` | session-dock | `<CR>` |
 | `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, terminals, transcript, workspace | `<Esc>` |
 | `filter-projects` | node, project, project-tree | `/` |

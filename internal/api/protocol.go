@@ -804,6 +804,9 @@ type RespondParams struct {
 	// "" = normal answer submit; "chat" = reject with a clarify request;
 	// "cancel" = reject the tool the way native Claude Code cancel does.
 	QuestionAction string `json:"question_action,omitempty"`
+	// Notes carries a free-text note per question (question text -> note) for
+	// questions with AllowNotes. Adapters without note support ignore it.
+	Notes map[string]string `json:"notes,omitempty"`
 	// SetMode, on an allow decision (e.g. ExitPlanMode approval), switches the
 	// session's permission mode: "acceptEdits" | "default" | "auto".
 	SetMode string `json:"set_mode,omitempty"`

@@ -157,3 +157,59 @@ func TestReplyFor(t *testing.T) {
 		t.Errorf("nothing answered = %s", b)
 	}
 }
+
+func TestParseUserInputAllowsNotesAndOther(t *testing.T) {
+	pr, ok := parseRequest(inbound{ID: json.RawMessage(`9`), Method: "item/tool/requestUserInput",
+		Params: json.RawMessage(`{"threadId":"t1","isBlocking":true,"questions":[
+			{"id":"size","header":"Size","question":"Pick a size","isOther":true,"options":[{"label":"Small","description":"S"},{"label":"Large","description":"L"}]},
+			{"id":"color","header":"Color","question":"Pick a color","isOther":false,"options":[{"label":"Red","description":"R"}]}]}`)})
+	if !ok || len(pr.interaction.Questions) != 2 {
+		t.Fatalf("parse = %+v ok=%v", pr, ok)
+	}
+	size, color := pr.interaction.Questions[0], pr.interaction.Questions[1]
+	if !size.AllowNotes || !color.AllowNotes {
+		t.Errorf("codex questions must allow notes: %+v %+v", size, color)
+	}
+	if !reflect.DeepEqual(size.Options, []string{"Small", "Large", "None of the above"}) {
+		t.Errorf("isOther must append None of the above: %v", size.Options)
+	}
+	if size.OptionDescriptions[2] != "Optionally, add details in notes" {
+		t.Errorf("None of the above description = %q", size.OptionDescriptions[2])
+	}
+	if !reflect.DeepEqual(color.Options, []string{"Red"}) {
+		t.Errorf("isOther=false must not add an option: %v", color.Options)
+	}
+}
+
+func TestReplyForUserInputNotes(t *testing.T) {
+	ui := &pendingRequest{method: "item/tool/requestUserInput", questions: []userInputQuestion{
+		{ID: "size", Question: "Pick a size"},
+		{ID: "color", Question: "Pick a color"},
+		{ID: "shape", Question: "Pick a shape"},
+		{ID: "mood", Question: "Pick a mood"},
+	}}
+	b, _ := json.Marshal(replyFor(ui, api.RespondParams{
+		Answers: map[string]any{"Pick a size": "Large", "Pick a color": "None of the above", "Pick a mood": "Calm"},
+		Notes:   map[string]string{"Pick a size": "  but extra large please ", "Pick a color": "green actually", "Pick a shape": "round", "Pick a mood": "   "},
+	}))
+	want := `{"answers":{"color":{"answers":["None of the above","user_note: green actually"]},` +
+		`"mood":{"answers":["Calm"]},` +
+		`"shape":{"answers":["user_note: round"]},` +
+		`"size":{"answers":["Large","user_note: but extra large please"]}}}`
+	if string(b) != want {
+		t.Errorf("reply =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// A free-form question (no options, no isOther) keeps argus's type-your-own
+// row: with notes it would have nothing to select.
+func TestParseUserInputWithoutOptionsKeepsFreeText(t *testing.T) {
+	pr, ok := parseRequest(inbound{ID: json.RawMessage(`10`), Method: "item/tool/requestUserInput",
+		Params: json.RawMessage(`{"threadId":"t1","questions":[{"id":"why","header":"Why","question":"Why?","isOther":false,"options":null}]}`)})
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if q := pr.interaction.Questions[0]; q.AllowNotes || len(q.Options) != 0 {
+		t.Errorf("option-less question = %+v, want AllowNotes false and no options", q)
+	}
+}
