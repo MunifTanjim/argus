@@ -58,6 +58,9 @@ func (d dockComp) handleDecisionKey(c *ctx, msg tea.KeyPressMsg, ix *session.Int
 // handleQuestionKey drives the tabbed multi-question panel.
 func (d dockComp) handleQuestionKey(c *ctx, msg tea.KeyPressMsg, ix *session.Interaction) (dockComp, tea.Cmd) {
 	d.ensurePromptState(len(ix.Questions))
+	if d.confirming {
+		return d.handleConfirmKey(c, msg, ix)
+	}
 	if d.onSubmitTab(c) {
 		return d.handleSubmitTabKey(c, msg, ix)
 	}
@@ -70,9 +73,33 @@ func (d dockComp) handleQuestionKey(c *ctx, msg tea.KeyPressMsg, ix *session.Int
 	}
 	accepts := d.otherActive(q, tab)
 
-	// "c" = "Chat about this", unless editing a custom answer (then it types).
+	// An open note takes every key except highlight movement and Enter, which
+	// commits the question and closes the editor (the note text is kept).
+	if q.AllowNotes && d.notes[tab].Focused() {
+		switch {
+		case c.m.matches(msg, promptKeys.Up):
+			d.sel[tab] = max(0, d.sel[tab]-1)
+			return d, nil
+		case c.m.matches(msg, promptKeys.Down):
+			d.sel[tab] = min(len(opts)-1, d.sel[tab]+1)
+			return d, nil
+		case c.m.matches(msg, promptKeys.Submit):
+			d.notes[tab].Blur()
+			return d.commitQuestion(c, ix)
+		}
+		var cmd tea.Cmd
+		d.notes[tab], cmd = d.notes[tab].Update(msg)
+		return d, cmd
+	}
+	if q.AllowNotes && c.m.matches(msg, promptKeys.Note) {
+		d.notes[tab].Focus()
+		return d, nil
+	}
+
+	// "c" = "Chat about this" (interrupt when the agent has no chat), unless
+	// editing a custom answer (then it types).
 	if !accepts && msg.String() == "c" {
-		return d.chatAboutQuestions(c, ix)
+		return d.questionC(c, ix)
 	}
 
 	// While a custom answer is edited, j/k and the question-tab keys go to the
@@ -118,14 +145,33 @@ func (d dockComp) commitQuestion(c *ctx, ix *session.Interaction) (dockComp, tea
 	if !q.MultiSelect {
 		sel := d.sel[tab]
 		if sel == otherIndex(q) && strings.TrimSpace(d.qText(tab)) == "" {
+			if ix.AllowUnanswered && !c.m.isMultiQuestion() {
+				return d.submitChecked(c, ix)
+			}
 			return d, nil // can't select an empty custom answer
 		}
 		d.chosen[tab] = sel
 	}
 	if !c.m.isMultiQuestion() {
-		return d.submitAll(c, ix)
+		return d.submitChecked(c, ix)
 	}
 	d.tab = min(len(ix.Questions), d.tab+1)
+	return d, nil
+}
+
+// handleConfirmKey drives the submit-with-unanswered confirmation.
+func (d dockComp) handleConfirmKey(c *ctx, msg tea.KeyPressMsg, ix *session.Interaction) (dockComp, tea.Cmd) {
+	switch {
+	case c.m.matches(msg, promptKeys.Up) || msg.String() == "k":
+		d.submitSel = 0
+	case c.m.matches(msg, promptKeys.Down) || msg.String() == "j":
+		d.submitSel = 1
+	case c.m.matches(msg, promptKeys.Submit):
+		if d.submitSel == 0 {
+			return d.submitAll(c, ix)
+		}
+		d.confirming = false
+	}
 	return d, nil
 }
 
@@ -140,11 +186,11 @@ func (d dockComp) handleSubmitTabKey(c *ctx, msg tea.KeyPressMsg, ix *session.In
 		d.submitSel = min(1, d.submitSel+1)
 	case c.m.matches(msg, promptKeys.Submit):
 		if d.submitSel == 0 {
-			return d.submitAll(c, ix)
+			return d.submitChecked(c, ix)
 		}
 		return d.cancelQuestions(c, ix)
 	case msg.String() == "c":
-		return d.chatAboutQuestions(c, ix)
+		return d.questionC(c, ix)
 	}
 	return d, nil
 }
@@ -155,7 +201,7 @@ func (d dockComp) cancelQuestions(c *ctx, ix *session.Interaction) (dockComp, te
 	id := c.m.liveSessionID()
 	c.focusOn(mainPane)
 	d.resetPromptState()
-	return d, c.m.respondCmd(id, api.RespondParams{Kind: string(ix.Kind), QuestionAction: "cancel"})
+	return d, c.m.respondCmd(id, api.RespondParams{Kind: string(ix.Kind), RequestID: ix.RequestID, QuestionAction: "cancel"})
 }
 
 // submitDecision sends a permission/plan decision by echoing the chosen option's
@@ -166,7 +212,7 @@ func (d dockComp) submitDecision(c *ctx, ix *session.Interaction) (dockComp, tea
 		return d, nil
 	}
 	o := ix.Options[sel]
-	p := api.RespondParams{Kind: string(ix.Kind), OptionValue: o.Value}
+	p := api.RespondParams{Kind: string(ix.Kind), RequestID: ix.RequestID, OptionValue: o.Value}
 	if o.Reject {
 		p.Reason = strings.TrimSpace(d.reason.Value())
 	}
@@ -176,13 +222,34 @@ func (d dockComp) submitDecision(c *ctx, ix *session.Interaction) (dockComp, tea
 	return d, c.m.respondCmd(id, p)
 }
 
+// submitChecked submits, first asking for confirmation when questions that may
+// be left unanswered are, as Codex does.
+func (d dockComp) submitChecked(c *ctx, ix *session.Interaction) (dockComp, tea.Cmd) {
+	if ix.AllowUnanswered && d.unansweredCount(ix) > 0 {
+		d.confirming, d.submitSel = true, 0
+		return d, nil
+	}
+	return d.submitAll(c, ix)
+}
+
+func (d dockComp) unansweredCount(ix *session.Interaction) int {
+	n := 0
+	for tab := range ix.Questions {
+		if _, ok := d.questionAnswer(&ix.Questions[tab], tab); !ok {
+			n++
+		}
+	}
+	return n
+}
+
 // submitAll sends every answered question's answer; unanswered questions are
 // omitted. A fully-unanswered prompt is a no-op (nothing is sent).
 func (d dockComp) submitAll(c *ctx, ix *session.Interaction) (dockComp, tea.Cmd) {
 	p := d.questionAnswers(ix)
-	if len(p.Answers) == 0 {
+	if len(p.Answers) == 0 && !ix.AllowUnanswered {
 		return d, nil
 	}
+	p.Notes = d.questionNotes(ix)
 	id := c.m.liveSessionID()
 	c.focusOn(mainPane)
 	d.resetPromptState()
@@ -192,13 +259,22 @@ func (d dockComp) submitAll(c *ctx, ix *session.Interaction) (dockComp, tea.Cmd)
 // questionAnswers builds the answers map (keyed by question text) over the
 // answered questions; unanswered ones are omitted.
 func (d dockComp) questionAnswers(ix *session.Interaction) api.RespondParams {
-	p := api.RespondParams{Kind: string(ix.Kind), Behavior: "allow", Answers: map[string]any{}}
+	p := api.RespondParams{Kind: string(ix.Kind), RequestID: ix.RequestID, Behavior: "allow", Answers: map[string]any{}}
 	for tab := range ix.Questions {
 		if v, ok := d.questionAnswer(&ix.Questions[tab], tab); ok {
 			p.Answers[ix.Questions[tab].Question] = v
 		}
 	}
 	return p
+}
+
+// questionC runs the "c" action: chat, or interrupt for questions the agent
+// cannot decline.
+func (d dockComp) questionC(c *ctx, ix *session.Interaction) (dockComp, tea.Cmd) {
+	if ix.CancelInterrupts {
+		return d.cancelQuestions(c, ix)
+	}
+	return d.chatAboutQuestions(c, ix)
 }
 
 // chatAboutQuestions rejects the question prompt with a clarify request,

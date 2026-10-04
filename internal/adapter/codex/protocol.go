@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -46,11 +47,19 @@ type userInputQuestion struct {
 	ID       string `json:"id"`
 	Header   string `json:"header"`
 	Question string `json:"question"`
+	IsOther  bool   `json:"isOther"`
 	Options  []struct {
 		Label       string `json:"label"`
 		Description string `json:"description"`
 	} `json:"options"`
 }
+
+// Codex's TUI adds this option to questions with isOther; picking it, usually
+// with a note, means none of the listed answers fit.
+const (
+	noneOfTheAbove     = "None of the above"
+	noneOfTheAboveDesc = "Optionally, add details in notes"
+)
 
 // pendingRequest is an open server request argus can answer.
 type pendingRequest struct {
@@ -169,6 +178,12 @@ func parseRequest(m inbound) (*pendingRequest, bool) {
 				spec.Options = append(spec.Options, o.Label)
 				spec.OptionDescriptions = append(spec.OptionDescriptions, o.Description)
 			}
+			if q.IsOther {
+				spec.Options = append(spec.Options, noneOfTheAbove)
+				spec.OptionDescriptions = append(spec.OptionDescriptions, noneOfTheAboveDesc)
+			}
+			// A question with nothing to select keeps the type-your-own row instead.
+			spec.AllowNotes = len(spec.Options) > 0
 			ix.Questions = append(ix.Questions, spec)
 		}
 		pr.interaction = ix
@@ -223,6 +238,9 @@ func replyFor(pr *pendingRequest, p api.RespondParams) any {
 						vals = append(vals, s)
 					}
 				}
+			}
+			if note := strings.TrimSpace(p.Notes[q.Question]); note != "" {
+				vals = append(vals, "user_note: "+note)
 			}
 			answers[q.ID] = map[string]any{"answers": vals}
 		}

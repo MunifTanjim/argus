@@ -3,11 +3,14 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -849,6 +852,104 @@ func TestPromptQuestionChatAboutThis(t *testing.T) {
 	}
 }
 
+func TestPromptQuestionCInterruptsWithoutChat(t *testing.T) {
+	// Codex questions have no chat: "c" interrupts the turn instead.
+	ix := question(session.QuestionSpec{Question: "Pick", Options: []string{"A", "B"}, AllowNotes: true})
+	ix.CancelInterrupts = true
+	m := promptModel(ix)
+	body := ansi.Strip(m.dock.promptBody(&ctx{m: &m}))
+	if strings.Contains(body, "chat about this") || !strings.Contains(body, "c · interrupt") {
+		t.Fatalf("hint should offer interrupt, not chat:\n%s", body)
+	}
+	res, cmd := m.runKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	m = res.(model)
+	if m.focused != mainPane || cmd == nil {
+		t.Fatalf("'c' must interrupt: focus=%v cmd=%v", m.focused, cmd)
+	}
+}
+
+func TestSubmitTabInterruptForCancelInterrupts(t *testing.T) {
+	ix := multiQuestion()
+	ix.CancelInterrupts = true
+	m := promptModel(ix)
+	m.dock.tab = m.numQuestions() // Submit tab
+	body := ansi.Strip(m.dock.promptBody(&ctx{m: &m}))
+	if !strings.Contains(body, "Interrupt") || strings.Contains(body, "Cancel") {
+		t.Fatalf("submit tab for a no-chat question should offer Interrupt:\n%s", body)
+	}
+}
+
+func codexQuestion(qs ...session.QuestionSpec) *session.Interaction {
+	return &session.Interaction{Kind: session.InteractionQuestion, Questions: qs, CancelInterrupts: true, AllowUnanswered: true}
+}
+
+func TestEscLeavesCancelInterruptsQuestion(t *testing.T) {
+	// Esc keeps its usual meaning: back, nothing sent.
+	m := promptModel(codexQuestion(session.QuestionSpec{Question: "Pick", Options: []string{"A", "B"}}))
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = res.(model)
+	if cmd != nil || m.focused != mainPane {
+		t.Fatalf("esc: cmd=%v focus=%v (want back, nothing sent)", cmd, m.focused)
+	}
+}
+
+func TestEmptyAnswerConfirmsBeforeSubmit(t *testing.T) {
+	m := promptModel(codexQuestion(session.QuestionSpec{Question: "Share details"}))
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd != nil || !m.dock.confirming {
+		t.Fatalf("empty enter: cmd=%v confirming=%v (want confirmation)", cmd, m.dock.confirming)
+	}
+	if body := ansi.Strip(m.dock.promptBody(&ctx{m: &m})); !strings.Contains(body, "Submit with unanswered questions?") {
+		t.Fatalf("confirmation not shown:\n%s", body)
+	}
+	// Esc goes back to the question instead of interrupting.
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = res.(model)
+	if cmd != nil || m.dock.confirming || m.focused != sessionDock {
+		t.Fatalf("esc in confirmation: cmd=%v confirming=%v focus=%v", cmd, m.dock.confirming, m.focused)
+	}
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Proceed
+	m = res.(model)
+	if cmd == nil || m.focused != mainPane {
+		t.Fatalf("proceed: cmd=%v focus=%v (want empty answers sent)", cmd, m.focused)
+	}
+}
+
+func TestSubmitTabConfirmsUnansweredWhenAllowed(t *testing.T) {
+	ix := multiQuestion()
+	ix.AllowUnanswered = true
+	m := promptModel(ix)
+	m.dock.tab = m.numQuestions() // Submit tab, nothing answered
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd != nil || !m.dock.confirming {
+		t.Fatalf("submit: cmd=%v confirming=%v (want a confirmation first)", cmd, m.dock.confirming)
+	}
+	lines, _, _ := m.dock.questionLines(&ctx{m: &m}, m.interaction(), 80)
+	assertContains(t, ansi.Strip(strings.Join(lines, "\n")), fmt.Sprintf("%d unanswered questions", len(ix.Questions)))
+	res, cmd = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Proceed
+	m = res.(model)
+	if cmd == nil || m.focused != mainPane {
+		t.Fatalf("proceed: cmd=%v focus=%v (want sent with no answers)", cmd, m.focused)
+	}
+}
+
+func TestSubmitTabSendsPartialAnswersWithoutConfirmWhenNotAllowed(t *testing.T) {
+	m := promptModel(multiQuestion())
+	m.dock.tab = 0
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // answer Q1, move on
+	m = res.(model)
+	m.dock.tab = m.numQuestions()
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if cmd == nil || m.dock.confirming {
+		t.Fatalf("submit: cmd=%v confirming=%v (want sent without confirmation)", cmd, m.dock.confirming)
+	}
+}
+
 func TestPromptQuestionCTypesIntoCustomAnswer(t *testing.T) {
 	// While editing a custom answer, "c" must type, not trigger chat.
 	q := session.QuestionSpec{Question: "Pick", Options: []string{"A"}}
@@ -1131,5 +1232,180 @@ func TestIdleKeyNoInputChannelSwallows(t *testing.T) {
 	m = res.(model)
 	if m.dock.reply.Value() != "" || cmd != nil {
 		t.Errorf("no input channel should swallow: reply=%q cmd=%v", m.dock.reply.Value(), cmd)
+	}
+}
+
+func notesQuestion() *session.Interaction {
+	return question(session.QuestionSpec{Question: "Pick a size", Options: []string{"Small", "Large", "None of the above"}, AllowNotes: true})
+}
+
+func typeRunes(m model, s string) model {
+	for _, r := range s {
+		res, _ := m.runKey(tea.KeyPressMsg{Text: string(r), Code: r})
+		m = res.(model)
+	}
+	return m
+}
+
+func TestQuestionNotesHideOtherRow(t *testing.T) {
+	m := promptModel(notesQuestion())
+	q := &m.interaction().Questions[0]
+	if got := questionOptions(q); len(got) != 3 {
+		t.Fatalf("allow_notes options = %v, want no type-your-own row", got)
+	}
+	if strings.Contains(m.dock.promptBody(&ctx{m: &m}), otherLabel) {
+		t.Error("allow_notes question must not render the type-your-own row")
+	}
+}
+
+func TestQuestionNoteTypesLetters(t *testing.T) {
+	m := promptModel(notesQuestion())
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = res.(model)
+	res, _ = m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = res.(model)
+	if !m.dock.qNoteOpen(0) {
+		t.Fatal("n must open the note editor")
+	}
+	m = typeRunes(m, "no jk c")
+	if m.dock.qNote(0) != "no jk c" {
+		t.Fatalf("note = %q, want every key typed", m.dock.qNote(0))
+	}
+	if m.focused != sessionDock || m.dock.qSel(0) != 1 {
+		t.Fatalf("typing must not chat or move: focus=%v sel=%d", m.focused, m.dock.qSel(0))
+	}
+	// Up/Down still move the highlight while the note is open (Codex does the same).
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = res.(model)
+	if m.dock.qSel(0) != 2 {
+		t.Errorf("down with note open: sel=%d want 2", m.dock.qSel(0))
+	}
+	if !strings.Contains(m.dock.promptBody(&ctx{m: &m}), "note:") {
+		t.Error("open note editor must render a note: line")
+	}
+}
+
+func TestQuestionNoteEscClears(t *testing.T) {
+	m := promptModel(notesQuestion())
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = typeRunes(res.(model), "hello")
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = res.(model)
+	if m.dock.qNoteOpen(0) || m.dock.qNote(0) != "" {
+		t.Fatalf("esc must clear and close: open=%v note=%q", m.dock.qNoteOpen(0), m.dock.qNote(0))
+	}
+	if m.focused != sessionDock {
+		t.Fatalf("esc on an open note must stay in the dock, focus=%v", m.focused)
+	}
+}
+
+func TestQuestionNotePaste(t *testing.T) {
+	m := promptModel(notesQuestion())
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = res.(model)
+	c := &ctx{m: &m}
+	comp, _ := m.dock.update(c, tea.PasteMsg{Content: "pasted note"})
+	m.dock = comp.(dockComp)
+	if m.dock.qNote(0) != "pasted note" {
+		t.Fatalf("paste with note open: note=%q", m.dock.qNote(0))
+	}
+}
+
+func TestQuestionNoteSubmitsWithAnswer(t *testing.T) {
+	ix := notesQuestion()
+	m := promptModel(ix)
+	res, _ := m.runKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = res.(model)
+	res, _ = m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = typeRunes(res.(model), "  extra large ")
+	// Snapshot before Enter: a single question submits and resets the draft.
+	if got := m.dock.questionNotes(ix); !reflect.DeepEqual(got, map[string]string{"Pick a size": "extra large"}) {
+		t.Fatalf("questionNotes = %v", got)
+	}
+	m.dock.chosen[0] = 1
+	if p := m.dock.questionAnswers(ix); p.Answers["Pick a size"] != "Large" {
+		t.Fatalf("answers = %v", p.Answers)
+	}
+	res, cmd := m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(model)
+	if m.focused != mainPane || cmd == nil {
+		t.Fatalf("enter with note open must submit: focus=%v cmd=%v", m.focused, cmd)
+	}
+}
+
+func TestQuestionNotesPerTab(t *testing.T) {
+	ix := &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{
+		{Header: "Size", Question: "Pick a size", Options: []string{"S", "L"}, AllowNotes: true},
+		{Header: "Color", Question: "Pick a color", Options: []string{"R", "B"}, AllowNotes: true},
+	}}
+	m := promptModel(ix)
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = typeRunes(res.(model), "big")
+	res, _ = m.runKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit Size, advance to Color
+	m = res.(model)
+	if m.dock.tab != 1 || m.dock.qNoteOpen(1) {
+		t.Fatalf("after commit: tab=%d noteOpen(1)=%v", m.dock.tab, m.dock.qNoteOpen(1))
+	}
+	if got := m.dock.questionNotes(ix); !reflect.DeepEqual(got, map[string]string{"Pick a size": "big"}) {
+		t.Fatalf("notes = %v, want only the first question's note", got)
+	}
+	if m.dock.qNote(0) != "big" || m.dock.qNoteOpen(0) {
+		t.Errorf("committed note kept and closed: note=%q open=%v", m.dock.qNote(0), m.dock.qNoteOpen(0))
+	}
+	// The review tab shows the note.
+	m.dock.tab = 2
+	if out := m.dock.promptBody(&ctx{m: &m}); !strings.Contains(out, "note: big") {
+		t.Errorf("review tab must show the note:\n%s", out)
+	}
+}
+
+func TestQuestionWithoutNotesUnchanged(t *testing.T) {
+	ix := question(session.QuestionSpec{Question: "Pick", Options: []string{"A", "B"}})
+	m := promptModel(ix)
+	if got := questionOptions(&ix.Questions[0]); got[len(got)-1] != otherLabel {
+		t.Fatalf("non-notes question must keep the type-your-own row: %v", got)
+	}
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = res.(model)
+	if m.dock.qNoteOpen(0) {
+		t.Fatal("n must not open a note on a question without allow_notes")
+	}
+	m.dock.chosen[0] = 0
+	if got := m.dock.questionNotes(ix); got != nil {
+		t.Errorf("questionNotes = %v, want nil", got)
+	}
+}
+
+func TestQuestionNoteFooter(t *testing.T) {
+	m := promptModel(notesQuestion())
+	if !slices.ContainsFunc(m.dock.footer(&ctx{m: &m}), func(b binding) bool { return b.name == promptKeys.Note.name }) {
+		t.Error("footer must offer the note key on allow_notes questions")
+	}
+	m = promptModel(question(session.QuestionSpec{Question: "Pick", Options: []string{"A"}}))
+	if slices.ContainsFunc(m.dock.footer(&ctx{m: &m}), func(b binding) bool { return b.name == promptKeys.Note.name }) {
+		t.Error("footer must not offer the note key without allow_notes")
+	}
+}
+
+func TestQuestionClosedNoteWraps(t *testing.T) {
+	m := promptModel(notesQuestion())
+	res, _ := m.runKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	m = typeRunes(res.(model), strings.Repeat("long note ", 40))
+	m.dock.notes[0].Blur() // closed note with text renders as a dimmed line
+	width := 60
+	lines, _, _ := m.dock.questionLines(&ctx{m: &m}, m.interaction(), width)
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > width {
+			t.Fatalf("closed note line width %d exceeds %d: %q", w, width, l)
+		}
+	}
+}
+
+func TestQuestionAnswersEchoRequestID(t *testing.T) {
+	ix := multiQuestion()
+	ix.RequestID = "7"
+	m := promptModel(ix)
+	if got := m.dock.questionAnswers(ix).RequestID; got != "7" {
+		t.Fatalf("request id = %q; want 7", got)
 	}
 }

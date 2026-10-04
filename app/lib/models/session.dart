@@ -64,6 +64,7 @@ class QuestionSpec {
   final List<String> options;
   final List<String> optionDescriptions;
   final List<String> optionPreviews;
+  final bool allowNotes;
 
   const QuestionSpec({
     this.header,
@@ -72,6 +73,7 @@ class QuestionSpec {
     this.options = const [],
     this.optionDescriptions = const [],
     this.optionPreviews = const [],
+    this.allowNotes = false,
   });
 
   factory QuestionSpec.fromJson(Map<String, dynamic> j) => QuestionSpec(
@@ -81,6 +83,7 @@ class QuestionSpec {
         options: _strList(j['options']),
         optionDescriptions: _strList(j['option_descriptions']),
         optionPreviews: _strList(j['option_previews']),
+        allowNotes: j['allow_notes'] as bool? ?? false,
       );
 }
 
@@ -117,6 +120,16 @@ class Interaction {
   final String? plan;
   final List<DecisionOption> options;
 
+  /// Questions the agent cannot decline: cancelling interrupts the turn, and
+  /// there is no "chat about this" (Codex).
+  final bool cancelInterrupts;
+
+  /// Questions that may be submitted with some or all unanswered (Codex).
+  final bool allowUnanswered;
+
+  /// Identifies the pending request this interaction shows; responds echo it.
+  final String? requestId;
+
   const Interaction({
     required this.kind,
     this.message,
@@ -125,6 +138,9 @@ class Interaction {
     this.questions = const [],
     this.plan,
     this.options = const [],
+    this.cancelInterrupts = false,
+    this.allowUnanswered = false,
+    this.requestId,
   });
 
   factory Interaction.fromJson(Map<String, dynamic> j) => Interaction(
@@ -141,6 +157,9 @@ class Interaction {
                 ?.map((e) => DecisionOption.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        cancelInterrupts: j['cancel_interrupts'] as bool? ?? false,
+        allowUnanswered: j['allow_unanswered'] as bool? ?? false,
+        requestId: j['request_id'] as String?,
       );
 }
 
