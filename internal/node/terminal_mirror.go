@@ -60,8 +60,15 @@ func (d *Node) reapMirrors(ctx context.Context) {
 // one window (and size); window-size latest makes it follow the attach, so the
 // shared origin window is resized to the viewer's dimensions — accepted.
 func (d *Node) setupMirror(ctx context.Context, c *tmux.Client, s session.Session, termID string) (*mirrorState, error) {
+	// Group with the session that holds the pane now, by id: the recorded name may
+	// be empty (tmux would group with the newest session) or stale, and either
+	// shows another session's terminal.
+	origin, idx, err := c.PaneLocation(ctx, s.Tmux.PaneID)
+	if err != nil {
+		return nil, err
+	}
 	name := d.mirrorName(termID)
-	if err := c.NewGroupedSession(ctx, name, s.Tmux.SessionName); err != nil {
+	if err := c.NewGroupedSession(ctx, name, origin); err != nil {
 		return nil, fmt.Errorf("create mirror: %w", err)
 	}
 	m := &mirrorState{name: name}
@@ -72,11 +79,6 @@ func (d *Node) setupMirror(ctx context.Context, c *tmux.Client, s session.Sessio
 
 	// Target the agent pane's own window (grouped sessions share window indices),
 	// which is correct even when that window is not the origin's active one.
-	idx, err := c.WindowIndexForPane(ctx, s.Tmux.PaneID)
-	if err != nil {
-		d.restoreMirror(c, m)
-		return nil, err
-	}
 	m.window = fmt.Sprintf("%s:%d", name, idx)
 
 	// Make the agent's window current in the mirror so attached clients see it.

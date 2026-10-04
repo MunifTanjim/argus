@@ -530,13 +530,19 @@ var windowInfoFormat = strings.Join([]string{
 	"#{pane_id}", // active pane (display-message defaults to the active pane of target)
 }, fieldSep)
 
-// WindowIndexForPane returns the window index containing paneID.
-func (c *Client) WindowIndexForPane(ctx context.Context, paneID string) (int, error) {
-	out, err := c.run(ctx, "display-message", "-p", "-t", paneID, "#{window_index}")
+// PaneLocation returns the id ($N) of a session holding paneID and the pane's
+// window index in that session. A grouped window is in several sessions; any of
+// them names the same group.
+func (c *Client) PaneLocation(ctx context.Context, paneID string) (sessionID string, windowIndex int, err error) {
+	out, err := c.run(ctx, "display-message", "-p", "-t", paneID, "#{session_id} #{window_index}")
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
-	return atoi(strings.TrimSpace(out)), nil
+	id, idx, ok := strings.Cut(strings.TrimSpace(out), " ")
+	if !ok || id == "" {
+		return "", 0, fmt.Errorf("tmux: unexpected pane location for %s: %q", paneID, out)
+	}
+	return id, atoi(idx), nil
 }
 
 func (c *Client) WindowInfo(ctx context.Context, target string) (WindowInfo, error) {

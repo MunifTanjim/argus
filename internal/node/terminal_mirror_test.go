@@ -30,7 +30,7 @@ func newTestClientSocket(t *testing.T) (*tmux.Client, string) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
 	}
-	socket := fmt.Sprintf("argus-test-%s-%d", t.Name(), testSocketSeq.Add(1))
+	socket := fmt.Sprintf("argus-test-%s-%d", strings.ReplaceAll(t.Name(), "/", "-"), testSocketSeq.Add(1))
 	c := tmux.New(socket)
 	t.Cleanup(func() {
 		_ = c.KillServer(context.Background())
@@ -63,6 +63,46 @@ func TestSetupAndRestoreMirror(t *testing.T) {
 	}
 }
 
+// TestSetupMirrorUsesThePanesLiveSession verifies the mirror groups with the
+// session that holds the agent pane, not the recorded session name: an empty
+// name makes tmux group with the newest session, and a stale one with whatever
+// now has that name, so the viewer would show another session's terminal.
+func TestSetupMirrorUsesThePanesLiveSession(t *testing.T) {
+	for _, tc := range []struct{ name, recorded string }{
+		{"empty", ""},
+		{"stale", "other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t)
+			ctx := context.Background()
+			pane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "origin", Command: "sh"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherPane, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "other", Command: "sh"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerDefault: c})
+			d.mirrorPrefix, d.mirrorSuffix = "_", "_"
+			s := session.Session{Tmux: session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: pane, SessionName: tc.recorded}}
+
+			m, err := d.setupMirror(ctx, c, s, "t1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.restoreMirror(c, m)
+			info, err := c.WindowInfo(ctx, m.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.ActivePane != pane {
+				t.Fatalf("mirror shows pane %q, want agent pane %q (other session's pane is %q)", info.ActivePane, pane, otherPane)
+			}
+		})
+	}
+}
+
 // TestSetupMirror_MultiWindow verifies that setupMirror targets the agent pane's
 // window (not the origin session's currently active window) in a multi-window session.
 func TestSetupMirror_MultiWindow(t *testing.T) {
@@ -76,9 +116,9 @@ func TestSetupMirror_MultiWindow(t *testing.T) {
 	}
 
 	// Record the first window's index (respects server base-index, e.g. 0 or 1).
-	firstWindowIdx, err := c.WindowIndexForPane(ctx, firstPane)
+	_, firstWindowIdx, err := c.PaneLocation(ctx, firstPane)
 	if err != nil {
-		t.Fatalf("WindowIndexForPane first: %v", err)
+		t.Fatalf("PaneLocation first: %v", err)
 	}
 
 	// Add a second window; the agent pane will live here.
