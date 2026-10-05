@@ -45,7 +45,7 @@ func (m tview) fetchToolBodyCmd(it transcript.Entry, agentID string) tea.Cmd {
 }
 
 func (m model) toolDetailBody(it transcript.Entry, width int) (string, bool) {
-	meta, ok := toolRegistry[it.ToolName]
+	meta, ok := lookupTool(it.ToolName)
 	if !ok || meta.detail == nil {
 		return "", false // unregistered, or registered with the generic body
 	}
@@ -676,31 +676,49 @@ func (m model) opencodeTaskDetail(it transcript.Entry, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// askedQuestion is one question of a questions/options tool input.
+type askedQuestion struct {
+	ID          string `json:"id"`
+	Header      string `json:"header"`
+	Question    string `json:"question"`
+	MultiSelect bool   `json:"multiSelect"`
+	Options     []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+		Preview     string `json:"preview"`
+	} `json:"options"`
+}
+
 // questionDetail renders a questions/options tool (Claude AskUserQuestion, OpenCode
 // question), marking the chosen option. The answered result carries
 // "question"="answer" pairs (see parseAnsweredAnswers).
 func (m model) questionDetail(it transcript.Entry, width int, brand string) string {
 	var in struct {
-		Questions []struct {
-			Header      string `json:"header"`
-			Question    string `json:"question"`
-			MultiSelect bool   `json:"multiSelect"`
-			Options     []struct {
-				Label       string `json:"label"`
-				Description string `json:"description"`
-				Preview     string `json:"preview"`
-			} `json:"options"`
-		} `json:"questions"`
+		Questions []askedQuestion `json:"questions"`
 	}
 	unmarshalInput(it.ToolInput, &in)
-	if len(in.Questions) == 0 {
-		return m.genericToolBody(it, width)
-	}
 	asked := make([]string, len(in.Questions))
 	for i, q := range in.Questions {
 		asked[i] = q.Question
 	}
 	answers := parseAnsweredAnswers(it.Result, asked)
+	// Split so a multi-select answer ("A, B") matches several option labels.
+	return m.renderQuestions(it, width, brand, func(q askedQuestion) ([]string, string) {
+		return strings.Split(answers[q.Question], ", "), ""
+	})
+}
+
+// renderQuestions renders a questions tool's input. answer returns a question's
+// picked labels, where pieces matching no option are custom answers surfaced on
+// a trailing line, and an optional note.
+func (m model) renderQuestions(it transcript.Entry, width int, brand string, answer func(askedQuestion) (picks []string, note string)) string {
+	var in struct {
+		Questions []askedQuestion `json:"questions"`
+	}
+	unmarshalInput(it.ToolInput, &in)
+	if len(in.Questions) == 0 {
+		return m.genericToolBody(it, width)
+	}
 
 	blocks := make([]string, 0, len(in.Questions))
 	for _, q := range in.Questions {
@@ -715,10 +733,9 @@ func (m model) questionDetail(it transcript.Entry, width int, brand string) stri
 			b.WriteString(m.renderMD(q.Question, width-2))
 		}
 
-		// Split so a multi-select answer ("A, B") matches several option labels;
-		// unmatched pieces are custom answers, surfaced on a trailing line.
+		picks, note := answer(q)
 		chosen := map[string]bool{}
-		for _, p := range strings.Split(answers[q.Question], ", ") {
+		for _, p := range picks {
 			if p = strings.TrimSpace(p); p != "" {
 				chosen[p] = true
 			}
@@ -758,17 +775,24 @@ func (m model) questionDetail(it transcript.Entry, width int, brand string) stri
 		}
 
 		// Custom answers (no matching option), in stable order.
-		for _, p := range strings.Split(answers[q.Question], ", ") {
+		for _, p := range picks {
 			p = strings.TrimSpace(p)
 			if p != "" && chosen[p] {
 				b.WriteString("\n" + StyleSecondaryBold.Render("Answer: ") + StyleSecondary.Render(p))
 				delete(chosen, p)
 			}
 		}
+		if note != "" {
+			b.WriteString("\n" + StyleSecondaryBold.Render("Note: ") + StyleSecondary.Render(note))
+		}
 
 		blocks = append(blocks, b.String())
 	}
 
+	if it.ResultIsError && it.Result != "" {
+		// The agent rejected the call (e.g. malformed arguments): say why.
+		blocks = append(blocks, sectionLabel(resultLabelText(it), true)+"\n"+m.renderToolText(it.Result, width))
+	}
 	return strings.Join(blocks, "\n"+sectionRule(width)+"\n")
 }
 
@@ -793,6 +817,34 @@ func (m model) webDetail(it transcript.Entry, width int) string {
 	if it.Result != "" {
 		sb.WriteString("\n" + sectionRule(width) + "\n")
 		sb.WriteString(m.renderToolText(it.Result, width))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// mcpDetail renders an MCP tool call's top-level arguments as key/value lines
+// (nested values as compact JSON) and its result as highlighted JSON or text.
+func (m model) mcpDetail(it transcript.Entry, width int) string {
+	var sb strings.Builder
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(it.ToolInput), &args) == nil && len(args) > 0 {
+		keys := make([]string, 0, len(args))
+		for k := range args {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			v := string(args[k])
+			var s string
+			if json.Unmarshal(args[k], &s) == nil {
+				v = s
+			}
+			sb.WriteString(hardWrap(StyleSecondaryBold.Render(k+":")+" "+v, width) + "\n")
+		}
+	} else if it.ToolInput != "" {
+		sb.WriteString(m.renderToolText(it.ToolInput, width) + "\n")
+	}
+	if it.Result != "" {
+		resultSection(&sb, it, width, m.renderToolText(it.Result, width))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

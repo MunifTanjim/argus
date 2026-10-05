@@ -192,7 +192,7 @@ func initIcons() {
 }
 
 func toolDisplayName(name string) string {
-	if meta, ok := toolRegistry[name]; ok && meta.display != "" {
+	if meta, ok := lookupTool(name); ok && meta.display != "" {
 		return meta.display
 	}
 	return name
@@ -202,7 +202,7 @@ func toolIcon(name string, isError bool) StyledIcon {
 	if isError {
 		return Icon.Tool.Err
 	}
-	if meta, ok := toolRegistry[name]; ok {
+	if meta, ok := lookupTool(name); ok {
 		return categoryIcon(meta.category)
 	}
 	return Icon.Tool.Misc

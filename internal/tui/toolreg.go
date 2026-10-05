@@ -113,14 +113,17 @@ var toolRegistry = map[string]toolMeta{
 	"Skill":           {agentClaude, "", catSkill, nil}, // ItemSubagent: subagent view
 
 	// codex
-	"exec_command": {agentCodex, "Exec Command", catBash, (model).execCommandDetail},
-	"apply_patch":  {agentCodex, "Apply Patch", catEdit, nil},
-	"update_plan":  {agentCodex, "Update Plan", catOther, (model).planDetail},
-	"view_image":   {agentCodex, "View Image", catRead, nil},
-	"web_search":   {agentCodex, "Web Search", catWeb, (model).webDetail},
-	"wait_agent":   {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
-	"close_agent":  {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
-	"spawn_agent":  {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
+	"exec_command":             {agentCodex, "Exec Command", catBash, (model).execCommandDetail},
+	"apply_patch":              {agentCodex, "Apply Patch", catEdit, (model).applyPatchDetail},
+	"update_plan":              {agentCodex, "Update Plan", catOther, (model).planDetail},
+	"view_image":               {agentCodex, "View Image", catRead, (model).viewImageDetail},
+	"exec":                     {agentCodex, "Exec", catBash, (model).codexExecDetail},
+	"request_user_input":       {agentCodex, "Question", catOther, (model).codexQuestionDetail},
+	"request_user_input_async": {agentCodex, "Async Question", catOther, (model).codexAsyncQuestionDetail},
+	"web_search":               {agentCodex, "Web Search", catWeb, (model).webDetail},
+	"wait_agent":               {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
+	"close_agent":              {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
+	"spawn_agent":              {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
 
 	// opencode (lowercase tool names, distinct from the other agents' keys)
 	"read":      {agentOpenCode, "Read", catRead, (model).readDetail},
@@ -138,4 +141,17 @@ var toolRegistry = map[string]toolMeta{
 	"task":      {agentOpenCode, "Task", catTask, (model).opencodeTaskDetail},
 	"subagent":  {agentOpenCode, "Subagent", catTask, (model).opencodeTaskDetail},
 	"question":  {agentOpenCode, "Question", catOther, (model).opencodeQuestionDetail},
+}
+
+// lookupTool resolves a tool's registry entry. MCP tools (mcp__<server>__<tool>),
+// named the same by every agent, share one entry whose display name is
+// "server › tool".
+func lookupTool(name string) (toolMeta, bool) {
+	if meta, ok := toolRegistry[name]; ok {
+		return meta, true
+	}
+	if display, ok := transcript.MCPDisplayName(name); ok {
+		return toolMeta{display: display, category: catOther, detail: (model).mcpDetail}, true
+	}
+	return toolMeta{}, false
 }

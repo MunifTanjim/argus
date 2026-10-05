@@ -349,20 +349,34 @@ Map<String, String> answeredAnswers(String result, List<String> questions) {
 
 Widget _askUserQuestion(Entry it) {
   final qs = (_input(it)['questions'] as List?) ?? const [];
-  if (qs.isEmpty) return _generic(it);
   final answers = answeredAnswers(it.result ?? '', [
     for (final q in qs.whereType<Map<String, dynamic>>())
       toolInputStr(q['question']),
   ]);
+  return questionsDetail(
+      it,
+      (q) => (
+            picks: (answers[toolInputStr(q['question'])] ?? '').split(', '),
+            note: '',
+          ));
+}
+
+/// Renders a questions tool's input. [answer] returns a question's picked
+/// labels, where picks matching no option are shown as custom answers, and an
+/// optional note.
+Widget questionsDetail(
+    Entry it,
+    ({List<String> picks, String note}) Function(Map<String, dynamic> q)
+        answer) {
+  final qs = (_input(it)['questions'] as List?) ?? const [];
+  if (qs.isEmpty) return _generic(it);
   final blocks = <Widget>[];
   for (final q in qs.cast<Map<String, dynamic>>()) {
     final question = toolInputStr(q['question']);
     final multi = (q['multiSelect'] as bool?) ?? false;
-    final chosen = (answers[question] ?? '')
-        .split(', ')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toSet();
+    final a = answer(q);
+    final chosen =
+        a.picks.map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
     final children = <Widget>[];
     if (toolInputStr(q['header']).isNotEmpty) {
       children.add(Text(toolInputStr(q['header']).toUpperCase(),
@@ -405,11 +419,56 @@ Widget _askUserQuestion(Entry it) {
                 color: AppColors.secondary, fontWeight: FontWeight.w700)),
       ));
     }
+    if (a.note.isNotEmpty) {
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text('Note: ${a.note}',
+            style: const TextStyle(
+                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+      ));
+    }
     blocks.add(Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start, children: children),
     ));
   }
+  // The agent rejected the call (e.g. malformed arguments): say why.
+  if (it.resultIsError) blocks.add(_resultSection(it, wrap: true));
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
+}
+
+/// Renders an MCP tool name `mcp__<server>__<tool>` as "server › tool",
+/// splitting at the first `__` after the prefix; null for other names.
+String? mcpDisplayName(String name) {
+  if (!name.startsWith('mcp__')) return null;
+  final rest = name.substring(5);
+  final idx = rest.indexOf('__');
+  if (idx <= 0 || idx + 2 >= rest.length) return null;
+  return '${rest.substring(0, idx)} › ${rest.substring(idx + 2)}';
+}
+
+/// Renders an MCP tool call's top-level arguments as key/value lines.
+Widget mcpDetail(Entry it) {
+  final args = _input(it);
+  final keys = args.keys.toList()..sort();
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (keys.isNotEmpty)
+      for (final k in keys)
+        RichText(
+          text: TextSpan(style: _mono, children: [
+            TextSpan(
+                text: '$k: ',
+                style: _mono.copyWith(
+                    color: AppColors.secondary, fontWeight: FontWeight.w700)),
+            TextSpan(
+                text:
+                    args[k] is String ? args[k] as String : jsonEncode(args[k]),
+                style: _mono.copyWith(color: AppColors.text)),
+          ]),
+        )
+    else if ((it.toolInput ?? '').isNotEmpty)
+      codeBlock(it.toolInput!),
+    _resultSection(it),
+  ]);
 }
