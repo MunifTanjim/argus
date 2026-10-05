@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,15 +24,23 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 	var out []transcript.Entry
 	model := ""
 	nicknames := map[string]string{} // agent id -> nickname, from each spawn seen so far
+	// Open code-mode "exec" calls, in call order. Entries only grow or change in
+	// place (subscribers rely on stable IDs), so a script that calls nothing but
+	// exec_command has its row taken over by its first recorded command.
+	var execOpen []*execCall
 
 	// Footer of the open turn, closed by task_complete or the next user
 	// boundary. Aborted/usage-only turns add no entries and get no footer.
 	var turn transcript.Turn
 	turnLastTS := "" // timestamp of the turn's last entry: the footer's fallback
 	firstCtx := 0
-	calls := map[string]int{} // call id -> index into out
+	calls := map[string]int{}    // call id -> index into out
+	turnSeq := 0                 // sequence of the open (or last opened) turn
+	callTurn := map[string]int{} // call id -> turn that counted it
+	footerAt := map[int]int{}    // turn -> index of its emitted footer in out
 	ensureTurn := func() *transcript.Entry {
 		if turn.Footer == nil {
+			turnSeq++
 			turn.Open(transcript.Entry{Kind: transcript.EntryTurnEnd, ModelName: model, ModelColor: modelColorFor(model)})
 			turnLastTS, firstCtx = "", 0
 		}
@@ -42,14 +51,37 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 			if f.Timestamp == "" {
 				f.Timestamp = turnLastTS // closed by a user boundary, not task_complete
 			}
+			footerAt[turnSeq] = len(out)
 			out = append(out, f)
 		}
 	}
+	// uncount drops a call from the tool count of the turn that counted it,
+	// whether that turn is still open or its footer was already emitted.
+	uncount := func(callID string) {
+		seq, ok := callTurn[callID]
+		if !ok {
+			return
+		}
+		f := turn.Footer
+		if seq != turnSeq || f == nil {
+			f = nil
+			if i, ok := footerAt[seq]; ok {
+				f = &out[i]
+			}
+		}
+		if f != nil && f.ToolCount > 0 {
+			f.ToolCount--
+		}
+	}
 	add := func(e transcript.Entry) {
+		if e.Kind == transcript.EntryTool && e.InputPreview == "" {
+			e.InputPreview = toolPreview(e.ToolName, e.ToolInput)
+		}
 		ensureTurn()
 		turn.Count(e)
 		if e.ToolID != "" {
 			calls[e.ToolID] = len(out)
+			callTurn[e.ToolID] = turnSeq
 		}
 		out = append(out, e)
 		if e.Timestamp != "" {
@@ -82,6 +114,23 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 					t.Timestamp = l.Timestamp
 				}
 				endTurn()
+			case "item_completed":
+				// A command a code-mode script ran; attributed to the latest open exec.
+				if p.Item != nil && p.Item.Type == "CommandExecution" && p.Item.Source == "unified_exec_startup" && len(execOpen) > 0 {
+					x := execOpen[len(execOpen)-1]
+					cmd := nestedCommandEntry(p.Item, l.Timestamp)
+					if x.slot >= 0 {
+						// Take over the exec row in place: same position and count.
+						delete(calls, x.id)
+						calls[cmd.ToolID] = x.slot
+						callTurn[cmd.ToolID] = callTurn[x.id]
+						cmd.ID = out[x.slot].ID
+						out[x.slot] = cmd
+						x.slot, x.replaced = -1, true
+					} else {
+						add(cmd)
+					}
+				}
 			}
 		case "response_item":
 			switch p.Type {
@@ -145,6 +194,9 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 				res := outputText(p.Output)
 				e := call(p.CallID)
 				setResult(e, res)
+				if inlineAcceptedAsyncQuestion(e, res) {
+					uncount(p.CallID)
+				}
 				if id, nick := spawnResult(res); id != "" {
 					setSpawnResult(e, id, nick)
 					if nick != "" {
@@ -152,15 +204,48 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 					}
 				}
 			case "custom_tool_call":
-				add(transcript.Entry{
+				e := transcript.Entry{
 					Kind:      transcript.EntryTool,
 					Timestamp: l.Timestamp,
 					ToolName:  p.Name,
 					ToolID:    p.CallID,
 					ToolInput: p.Input,
-				})
+				}
+				if p.Name != "exec" {
+					add(e)
+					break
+				}
+				preview, only := scanCodeMode(p.Input)
+				e.InputPreview = preview
+				add(e)
+				x := &execCall{id: p.CallID, input: p.Input, slot: -1}
+				if only {
+					x.slot = calls[p.CallID]
+				}
+				execOpen = append(execOpen, x)
 			case "custom_tool_call_output":
-				setResult(call(p.CallID), outputText(p.Output))
+				res := outputText(p.Output)
+				i := slices.IndexFunc(execOpen, func(x *execCall) bool { return x.id == p.CallID })
+				if i < 0 {
+					setResult(call(p.CallID), res)
+					break
+				}
+				x := execOpen[i]
+				execOpen = slices.Delete(execOpen, i, i+1)
+				if !x.replaced {
+					setResult(call(p.CallID), res)
+					break
+				}
+				// The row now shows a command; a failed script gets its own row so
+				// the error stays visible. A successful script's output is dropped,
+				// as in the Codex TUI.
+				if isErr, _ := resultIsError("exec", res); isErr {
+					add(transcript.Entry{
+						Kind: transcript.EntryTool, Timestamp: l.Timestamp,
+						ToolName: "exec", ToolID: x.id, ToolInput: x.input,
+						Result: res, ResultIsError: true,
+					})
+				}
 			case "web_search_call":
 				// No paired output event; web_search_end is ignored as a duplicate.
 				add(transcript.Entry{
@@ -269,8 +354,8 @@ func setResult(e *transcript.Entry, output string) {
 		return
 	}
 	e.Result = output
-	if code, ok := execExitCode(output); ok {
-		e.ResultIsError = code != 0
+	if isErr, ok := resultIsError(e.ToolName, output); ok {
+		e.ResultIsError = isErr
 	}
 }
 

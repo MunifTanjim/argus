@@ -26,6 +26,7 @@ func TestToolRegistryCoversKnownTools(t *testing.T) {
 		// codex
 		"exec_command", "apply_patch", "update_plan", "view_image", "web_search",
 		"wait_agent", "close_agent", "spawn_agent",
+		"exec", "request_user_input", "request_user_input_async",
 		// claude code
 		"Read", "Edit", "MultiEdit", "Write", "Bash", "Grep", "Glob", "LS",
 		"WebFetch", "WebSearch", "AskUserQuestion", "ExitPlanMode", "TodoWrite",
@@ -53,6 +54,7 @@ func TestToolRegistryDetailRenderers(t *testing.T) {
 	withDetail := []string{
 		"run_command", "grep_search", "view_file", "write_to_file",
 		"exec_command", "update_plan", "web_search", "wait_agent", "close_agent",
+		"apply_patch", "view_image", "exec", "request_user_input", "request_user_input_async",
 		"Bash", "Read", "Edit", "Grep", "Glob", "AskUserQuestion",
 		"TodoWrite", "TaskCreate", "TaskUpdate",
 	}

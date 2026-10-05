@@ -669,3 +669,101 @@ func TestFoldRolloutDropsBlankAssistantText(t *testing.T) {
 		t.Fatalf("want only the user entry, got %v", entryKinds(es))
 	}
 }
+
+func TestParseRolloutSetsPreviewAndPatchError(t *testing.T) {
+	dir := t.TempDir()
+	p := dir + "/r.jsonl"
+	content := `{"timestamp":"2026-10-05T10:00:00.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: /r/a.go\n@@\n+x\n*** End Patch\n"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:01.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":"Exit code: 1\nWall time: 0.1 seconds\nOutput:\nverification failed\n"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:02.000Z","type":"response_item","payload":{"type":"function_call","call_id":"c2","name":"view_image","arguments":"{\"path\":\"/tmp/x.png\",\"detail\":\"high\"}"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:03.000Z","type":"response_item","payload":{"type":"web_search_call","id":"ws1","status":"completed","action":{"type":"search","query":"argus","queries":["argus"]}}}` + "\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := parseRollout(p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]transcript.Entry{}
+	for _, e := range entries {
+		got[e.ToolName] = e
+	}
+	if it := got["apply_patch"]; it.InputPreview != "/r/a.go" || !it.ResultIsError {
+		t.Errorf("apply_patch = preview %q err %v, want /r/a.go true", it.InputPreview, it.ResultIsError)
+	}
+	if it := got["view_image"]; it.InputPreview != "/tmp/x.png" {
+		t.Errorf("view_image preview = %q", it.InputPreview)
+	}
+	if it := got["web_search"]; it.InputPreview != "argus" {
+		t.Errorf("web_search preview = %q", it.InputPreview)
+	}
+}
+
+// An accepted async question reads inline as assistant text (as in the Codex
+// TUI); a call Codex rejected for bad arguments is a failed tool call.
+func TestParseRolloutAsyncQuestionInlineAndRejectedCallFails(t *testing.T) {
+	dir := t.TempDir()
+	p := dir + "/r.jsonl"
+	content := `{"timestamp":"2026-10-05T10:00:00.000Z","type":"response_item","payload":{"type":"function_call","call_id":"c1","name":"request_user_input_async","arguments":"{\"questions\":[{\"title\":\"Curiosity\",\"question\":\"What?\",\"options\":[\"A\"]}]}"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:01.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"failed to parse function arguments: unknown field ` + "`question`" + `, expected ` + "`title`" + ` or ` + "`options`" + ` at line 1 column 45"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:02.000Z","type":"response_item","payload":{"type":"function_call","call_id":"c2","name":"request_user_input_async","arguments":"{\"questions\":[{\"title\":\"Pick a color\",\"options\":[\"Red\",\"Blue\"]},{\"title\":\"Pick a size\",\"options\":[\"S\"]}]}"}}` + "\n" +
+		`{"timestamp":"2026-10-05T10:00:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c2","output":"{\"accepted\":true}"}}` + "\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := parseRollout(p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []transcript.Entry
+	var footer transcript.Entry
+	for _, e := range entries {
+		if e.Kind == transcript.EntryTurnEnd {
+			footer = e
+			continue
+		}
+		items = append(items, e)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want 2", items)
+	}
+	if footer.ToolCount != 1 {
+		t.Errorf("turn footer ToolCount = %d, want 1 (the inlined question is text, not a tool call)", footer.ToolCount)
+	}
+	failed, asked := items[0], items[1]
+	if failed.Kind != transcript.EntryTool || !failed.ResultIsError {
+		t.Errorf("rejected call = kind %v err %v, want a failed tool call", failed.Kind, failed.ResultIsError)
+	}
+	want := "**Pick a color**\n\n- Red\n- Blue\n\n**Pick a size**\n\n- S"
+	if asked.Kind != transcript.EntryText || asked.Text != want || asked.ToolName != "" {
+		t.Errorf("accepted async question = kind %v tool %q text %q, want text %q", asked.Kind, asked.ToolName, asked.Text, want)
+	}
+}
+
+// An async question accepted after its turn already ended (a user message came
+// in between) adjusts that turn's footer, not the next one.
+func TestParseRolloutAsyncAcceptedAcrossTurnBoundary(t *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-10-05T10:00:00.000Z","type":"response_item","payload":{"type":"function_call","call_id":"q1","name":"request_user_input_async","arguments":"{\"questions\":[{\"title\":\"Pick\",\"options\":[\"A\"]}]}"}}`,
+		`{"timestamp":"2026-10-05T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}}`,
+		`{"timestamp":"2026-10-05T10:00:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"q1","output":"{\"accepted\":true}"}}`,
+		`{"timestamp":"2026-10-05T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","call_id":"c2","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"}}`,
+	}
+	var rl []rolloutLine
+	for _, l := range lines {
+		var r rolloutLine
+		if err := json.Unmarshal([]byte(l), &r); err != nil {
+			t.Fatal(err)
+		}
+		rl = append(rl, r)
+	}
+	var footers []int
+	for _, e := range foldRollout(rl, nil, true) {
+		if e.Kind == transcript.EntryTurnEnd {
+			footers = append(footers, e.ToolCount)
+		}
+	}
+	if !reflect.DeepEqual(footers, []int{0, 1}) {
+		t.Errorf("footer tool counts = %v, want [0 1]", footers)
+	}
+}

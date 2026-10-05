@@ -144,3 +144,58 @@ Output:
 ```
 
 `previous_status` is a single `{state: message}` object for the closed agent.
+
+## exec — `custom_tool_call` (code mode)
+
+`input` is raw JavaScript that calls Codex tools:
+
+```js
+const r = await tools.exec_command({cmd: "ls", workdir: "/repo", yield_time_ms: 10000});
+text(r.output);
+```
+
+Output is a content-part array whose text joins to
+`Script completed\nWall time 0.2 seconds\nOutput:\n<text>`. A failure reads
+`Script failed\n…\nOutput:\nScript error:\n…`, and an abort is the bare string
+`aborted by user after 1.0s`.
+
+Commands the script runs are recorded between the call and its output as
+`event_msg` `item_completed` items of type `CommandExecution`
+(`command` argv, `cwd` as a `file://` URL, `aggregated_output`, `exit_code`,
+`duration {secs, nanos}`, `source: "unified_exec_startup"`). The parser turns
+each into an `exec_command` row and drops a successful exec row whose script
+calls only `exec_command`. Other tools a script calls are not recorded; their
+exec row stays, summarized by the `tools.<name>(` calls in the script.
+
+## request_user_input — `function_call` (Plan mode only)
+
+```json
+{ "questions": [ { "header": "Size", "id": "size", "question": "Pick a size",
+    "options": [ { "label": "Small", "description": "Choose Small." } ] } ] }
+```
+
+Output keys answers by question `id`. A note is an extra entry prefixed
+`user_note: `:
+
+```json
+{ "answers": { "size": { "answers": ["Large", "user_note: but extra large please"] } } }
+```
+
+## request_user_input_async — `function_call`
+
+```json
+{ "questions": [ { "title": "Pick a color", "options": ["Red", "Blue"] } ] }
+```
+
+Output: `{"accepted":true}`. The user answers in a later message. The parser
+turns an accepted call into assistant text (bold title, bulleted options), the
+way the Codex TUI shows it.
+
+A call whose arguments Codex rejects gets the output
+`failed to parse function arguments: …` (any tool); the parser marks it as an
+error. The model usually retries with fixed arguments.
+
+## MCP tools — `function_call`
+
+Expected as `name: "mcp__<server>__<tool>"` with JSON arguments; not yet seen in a
+real rollout. Renderers display `server › tool`.

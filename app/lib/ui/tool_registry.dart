@@ -4,6 +4,7 @@ import '../models/entry.dart';
 import 'theme.dart';
 import 'tool_detail_antigravity.dart';
 import 'tool_detail_claude.dart';
+import 'tool_detail.dart';
 import 'tool_detail_codex.dart';
 
 const _blue = Color(0xFF83a598);
@@ -100,10 +101,17 @@ final Map<String, ToolMeta> toolRegistry = {
 
   'exec_command': const ToolMeta(
       'Exec Command', ToolCategory.bash, codexExecCommandDetail),
-  'apply_patch': const ToolMeta('Apply Patch', ToolCategory.edit),
+  'apply_patch': const ToolMeta(
+      'Apply Patch', ToolCategory.edit, codexApplyPatchDetail),
   'update_plan': const ToolMeta(
       'Update Plan', ToolCategory.other, codexUpdatePlanDetail),
-  'view_image': const ToolMeta('View Image', ToolCategory.read),
+  'view_image': const ToolMeta(
+      'View Image', ToolCategory.read, codexViewImageDetail),
+  'exec': const ToolMeta('Exec', ToolCategory.bash, codexExecDetail),
+  'request_user_input': const ToolMeta(
+      'Question', ToolCategory.other, codexQuestionDetail),
+  'request_user_input_async': const ToolMeta(
+      'Async Question', ToolCategory.other, codexAsyncQuestionDetail),
   'web_search':
       const ToolMeta('Web Search', ToolCategory.web, codexWebSearchDetail),
   'wait_agent': const ToolMeta(
@@ -164,7 +172,14 @@ final Map<String, ToolMeta> toolRegistry = {
   'question': const ToolMeta('Question', ToolCategory.other),
 };
 
-ToolMeta? toolMeta(String? name) => name == null ? null : toolRegistry[name];
+ToolMeta? toolMeta(String? name) {
+  if (name == null) return null;
+  final meta = toolRegistry[name];
+  if (meta != null) return meta;
+  final display = mcpDisplayName(name);
+  if (display == null) return null;
+  return ToolMeta(display, ToolCategory.other, mcpDetail);
+}
 
 /// Agent-reference ops render a status detail, not a trace.
 bool isAgentRefTool(String? name) =>

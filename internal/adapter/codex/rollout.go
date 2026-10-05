@@ -47,6 +47,8 @@ type rolloutPayload struct {
 	Info *tokenInfo `json:"info"`
 	// event_msg task_complete
 	DurationMs int64 `json:"duration_ms"`
+	// event_msg item_completed
+	Item *rolloutItem `json:"item"`
 	// event_msg agent/user text (unused; response_item is canonical)
 	Message string `json:"message"`
 }

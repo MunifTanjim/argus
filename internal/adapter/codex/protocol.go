@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/codextool"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -240,7 +241,7 @@ func replyFor(pr *pendingRequest, p api.RespondParams) any {
 				}
 			}
 			if note := strings.TrimSpace(p.Notes[q.Question]); note != "" {
-				vals = append(vals, "user_note: "+note)
+				vals = append(vals, codextool.UserNotePrefix+note)
 			}
 			answers[q.ID] = map[string]any{"answers": vals}
 		}
