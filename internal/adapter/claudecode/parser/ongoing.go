@@ -84,6 +84,13 @@ func IsOngoing(chunks []Chunk) bool {
 		return false
 	}
 
+	// Claude Code writes a message's text and its tool_use as separate lines.
+	// Between them the text looks like an ending event, but the message's
+	// stop_reason already says a tool call follows.
+	if last := chunks[len(chunks)-1]; last.Type == AIChunk && last.StopReason == "tool_use" {
+		return true
+	}
+
 	var activities []activity
 	actIdx := 0
 	hasItems := false
