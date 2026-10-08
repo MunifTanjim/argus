@@ -887,12 +887,12 @@ const (
 )
 
 // TranscriptSubscribeParams opens a subscription. AgentID selects a subagent
-// trace. HaveChunks is the client's cached chunk count, for a minimal catch-up.
+// trace. HaveEntries is the client's cached entry count, for a minimal catch-up.
 type TranscriptSubscribeParams struct {
-	SubID      string `json:"sub_id"`
-	SessionID  string `json:"session_id"`
-	AgentID    string `json:"agent_id,omitempty"`
-	HaveChunks int    `json:"have_chunks"`
+	SubID       string `json:"sub_id"`
+	SessionID   string `json:"session_id"`
+	AgentID     string `json:"agent_id,omitempty"`
+	HaveEntries int    `json:"have_entries"`
 }
 
 // TranscriptUnsubscribeParams closes the subscription identified by SubID.
@@ -901,11 +901,11 @@ type TranscriptUnsubscribeParams struct {
 }
 
 // TranscriptDelta is both the subscribe result (initial catch-up) and the push
-// payload. The client truncates its cached chunks to FromIndex, then appends Chunks.
+// payload. The client truncates its cached entries to FromIndex, then appends Entries.
 type TranscriptDelta struct {
 	SubID     string             `json:"sub_id"`
 	FromIndex int                `json:"from_index"`
-	Chunks    []transcript.Chunk `json:"chunks"`
+	Entries   []transcript.Entry `json:"entries"`
 }
 
 // TerminalOpenParams opens a terminal session with the given dimensions.
