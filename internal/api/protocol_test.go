@@ -9,20 +9,20 @@ import (
 )
 
 func TestTranscriptDeltaJSONTags(t *testing.T) {
-	d := TranscriptDelta{SubID: "s1", FromIndex: 2, Chunks: []transcript.Chunk{{ID: "2"}}}
+	d := TranscriptDelta{SubID: "s1", FromIndex: 2, Entries: []transcript.Entry{{ID: "2"}}}
 	b, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
-	want := `{"sub_id":"s1","from_index":2,"chunks":[{"id":"2","kind":""}]}`
+	want := `{"sub_id":"s1","from_index":2,"entries":[{"id":"2","kind":""}]}`
 	if got != want {
 		t.Fatalf("delta json = %s, want %s", got, want)
 	}
 }
 
 func TestTranscriptSubscribeParamsRoundTrip(t *testing.T) {
-	in := TranscriptSubscribeParams{SubID: "s1", SessionID: "d:1", AgentID: "a1", HaveChunks: 3}
+	in := TranscriptSubscribeParams{SubID: "s1", SessionID: "d:1", AgentID: "a1", HaveEntries: 3}
 	b, _ := json.Marshal(in)
 	var out TranscriptSubscribeParams
 	if err := json.Unmarshal(b, &out); err != nil {

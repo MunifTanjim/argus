@@ -79,7 +79,7 @@ type Discoverer interface {
 
 // StreamingTranscript incrementally folds a transcript file. Not safe for concurrent use.
 type StreamingTranscript interface {
-	Refresh() ([]transcript.Chunk, error)
+	Refresh() ([]transcript.Entry, error)
 }
 
 // TaskSource is an optional adapter capability for agents that persist a
@@ -89,12 +89,12 @@ type TaskSource interface {
 	// ReadTasks returns the session's current task list, ordered by id. A
 	// missing task store is empty, not an error.
 	ReadTasks(sessionIDs []string, transcriptPath string) ([]api.Task, error)
-	// TaskActivityCount counts signals in the folded chunks that the task list
+	// TaskActivityCount counts signals in the folded entries that the task list
 	// may have changed. The poller re-reads the transcript each tick anyway, so
 	// this adds no I/O; the count only grows, so a rise means new activity to
 	// push. hasTaskTool reports whether any task-tool call is present, letting
 	// the caller gate teammate-only activity without a disk hit.
-	TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool)
+	TaskActivityCount(entries []transcript.Entry) (count int, hasTaskTool bool)
 }
 
 // Responder answers a pending interaction by an outbound action, for adapters
