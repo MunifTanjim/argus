@@ -291,6 +291,27 @@ void main() {
     expect(find.textContaining('found it'), findsOneWidget);
   });
 
+  testWidgets('long item label truncates instead of overflowing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final long = 'x' * 80;
+    for (final desc in ['map the auth flow', '']) {
+      await _pump(
+        tester,
+        Entry(
+          id: 'sa',
+          kind: EntryKind.subagent,
+          subagents: [Subagent(id: 'a1', name: long, type: 'Explore', desc: desc)],
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      if (desc.isNotEmpty) expect(find.text(desc), findsOneWidget);
+    }
+  });
+
   testWidgets('turn_end shows context % colored by pressure', (tester) async {
     await _pump(
       tester,
