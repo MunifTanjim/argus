@@ -296,20 +296,36 @@ class _TurnEndDivider extends StatelessWidget {
     final parts = <InlineSpan>[];
     // The same fields, in the same order, as the TUI's turn footer.
     void add(String s, {Color? color, IconData? icon, Color? iconColor}) {
-      if (parts.isNotEmpty) parts.add(TextSpan(text: ' · ', style: _monoDim));
-      if (icon != null) {
-        parts.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Icon(icon, size: 12, color: iconColor ?? AppColors.dim),
-          ),
-        );
-        parts.add(TextSpan(text: ' ', style: _monoDim));
+      // The no-break space keeps a separator from starting a line.
+      if (parts.isNotEmpty) {
+        parts.add(TextSpan(text: '\u00A0· ', style: _monoDim));
       }
+      final value = TextSpan(
+        text: s,
+        style: color == null ? _monoDim : _mono.copyWith(color: color),
+      );
+      if (icon == null) {
+        parts.add(value);
+        return;
+      }
+      // One unit, so a line break cannot split the icon from its value.
       parts.add(
-        TextSpan(
-          text: s,
-          style: color == null ? _monoDim : _mono.copyWith(color: color),
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: Text.rich(
+            TextSpan(
+              children: [
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Icon(icon, size: 12, color: iconColor ?? AppColors.dim),
+                ),
+                TextSpan(text: ' ', style: _monoDim),
+                value,
+              ],
+            ),
+            softWrap: false,
+          ),
         ),
       );
     }
@@ -334,8 +350,8 @@ class _TurnEndDivider extends StatelessWidget {
     final time = _clockTime(e.timestamp);
     if (time.isNotEmpty) add(time);
 
-    const rule = Divider(color: AppColors.border, height: 1);
     const lead = 16.0, gap = 8.0;
+    const rule = Divider(color: AppColors.border, height: 1);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: parts.isEmpty
@@ -350,7 +366,10 @@ class _TurnEndDivider extends StatelessWidget {
                     constraints: BoxConstraints(
                       maxWidth: max(0, c.maxWidth - 2 * (lead + gap)),
                     ),
-                    child: Text.rich(TextSpan(children: parts)),
+                    child: Text.rich(
+                      TextSpan(children: parts),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                   const SizedBox(width: gap),
                   const Expanded(child: rule),

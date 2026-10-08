@@ -97,9 +97,9 @@ void main() {
       ),
     );
     final text = tester
-        .widget<Text>(find.textContaining('Opus 4.8'))
-        .textSpan!
-        .toPlainText();
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.textSpan?.toPlainText() ?? t.data)
+        .join(' ');
     // Output tokens, not input + cache: the turn's spend, as the TUI shows.
     expect(text, contains('12.3k'));
     expect(text, isNot(contains('93.2k')));
