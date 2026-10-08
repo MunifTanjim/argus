@@ -57,27 +57,28 @@ func TestReadTranscriptViewStampsModel(t *testing.T) {
 	setupHome(t)
 	convID := "conv-stamp"
 	writeConvDB(t, convID, "gpt-oss-120b-medium")
-	writeBrainTranscript(t, convID, sampleTranscript)
+	// A following USER_INPUT closes the turn so it has a footer to stamp.
+	writeBrainTranscript(t, convID, sampleTranscript+`{"type":"USER_INPUT","content":"next","step_index":9}`+"\n")
 
 	view, err := ReadTranscriptView(transcriptPathFor(convID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ai *transcript.Chunk
-	for i := range view.Chunks {
-		if view.Chunks[i].Kind == transcript.ChunkAI {
-			ai = &view.Chunks[i]
+	var ai *transcript.Entry
+	for i := range view.Entries {
+		if view.Entries[i].Kind == transcript.EntryTurnEnd {
+			ai = &view.Entries[i]
 			break
 		}
 	}
 	if ai == nil {
-		t.Fatal("no AI chunk parsed")
+		t.Fatal("no turn footer parsed")
 	}
 	if ai.ModelName != "gpt-oss-120b-medium" {
-		t.Errorf("AI chunk model = %q, want gpt-oss-120b-medium", ai.ModelName)
+		t.Errorf("turn footer model = %q, want gpt-oss-120b-medium", ai.ModelName)
 	}
 	if ai.ModelColor == "" {
-		t.Error("AI chunk model color should be set")
+		t.Error("turn footer model color should be set")
 	}
 }
 

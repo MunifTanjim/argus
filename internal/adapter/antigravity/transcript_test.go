@@ -106,8 +106,8 @@ func TestStreamingRefreshIncrementalEqualsWholeFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want.Chunks) {
-		t.Fatalf("incremental chunks != whole-file parse\n got: %+v\nwant: %+v", got, want.Chunks)
+	if !reflect.DeepEqual(got, want.Entries) {
+		t.Fatalf("incremental entries != whole-file parse\n got: %+v\nwant: %+v", got, want.Entries)
 	}
 }
 
@@ -139,8 +139,8 @@ func TestStreamingRefreshTruncationReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want.Chunks) {
-		t.Fatalf("after truncation, chunks != whole-file parse\n got: %+v\nwant: %+v", got, want.Chunks)
+	if !reflect.DeepEqual(got, want.Entries) {
+		t.Fatalf("after truncation, entries != whole-file parse\n got: %+v\nwant: %+v", got, want.Entries)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestReadTranscriptView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Chunks) != 2 {
-		t.Fatalf("want 2 chunks, got %d", len(v.Chunks))
+	if len(v.Entries) != 6 {
+		t.Fatalf("want 6 entries, got %d", len(v.Entries))
 	}
 }
 
@@ -158,11 +158,9 @@ func TestFindToolDetail(t *testing.T) {
 	path := writeLines(t, sampleTranscript)
 	v, _ := ReadTranscriptView(path)
 	var id string
-	for _, c := range v.Chunks {
-		for _, it := range c.Items {
-			if it.ToolName == "list_dir" {
-				id = it.ToolID
-			}
+	for _, e := range v.Entries {
+		if e.ToolName == "list_dir" {
+			id = e.ToolID
 		}
 	}
 	d, ok, err := FindToolDetail(path, "", id)
@@ -199,7 +197,29 @@ func TestReadSubagentViewRecursive(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("subagent view: ok=%v err=%v", ok, err)
 	}
-	if len(v.Chunks) != 1 || v.Chunks[0].Kind != transcript.ChunkUser {
-		t.Fatalf("child not parsed: %+v", v.Chunks)
+	if len(v.Entries) != 1 || v.Entries[0].Kind != transcript.EntryUser {
+		t.Fatalf("child not parsed: %+v", v.Entries)
+	}
+}
+
+func TestHistoryReadsCloseTheFinalTurn(t *testing.T) {
+	setupHome(t)
+	convID := "conv-hist"
+	writeBrainTranscript(t, convID, sampleTranscript)
+	child := "child-hist"
+	writeBrainTranscript(t, child, sampleTranscript)
+	last := func(v transcript.TranscriptView) transcript.EntryKind { return v.Entries[len(v.Entries)-1].Kind }
+
+	v, err := ReadHistoryTranscript(transcriptPathFor(convID))
+	if err != nil || last(v) != transcript.EntryTurnEnd {
+		t.Fatalf("history transcript should end with a footer: %+v err=%v", v.Entries, err)
+	}
+	sv, ok, err := ReadHistorySubagentView(transcriptPathFor(convID), child)
+	if err != nil || !ok || last(sv) != transcript.EntryTurnEnd {
+		t.Fatalf("history subagent view should end with a footer: ok=%v %+v err=%v", ok, sv.Entries, err)
+	}
+	lv, err := ReadTranscriptView(transcriptPathFor(convID))
+	if err != nil || last(lv) == transcript.EntryTurnEnd {
+		t.Fatalf("live transcript must leave the open turn without a footer: %+v err=%v", lv.Entries, err)
 	}
 }

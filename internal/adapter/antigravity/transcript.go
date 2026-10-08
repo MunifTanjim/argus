@@ -9,41 +9,44 @@ import (
 )
 
 func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
-	chunks, err := parseTranscript(path)
+	return readTranscriptView(path, false)
+}
+
+func readTranscriptView(path string, finished bool) (transcript.TranscriptView, error) {
+	entries, err := parseTranscript(path, finished)
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
 	home := resolveHome(path)
 	name, color := conversationModelIn(home, convIDFromPath(path))
-	stampChunkModelWith(chunks, name, color)
-	stampSubagentTrace(chunks, home)
-	return transcript.TranscriptView{Chunks: chunks}, nil
+	stampTurnModelWith(entries, name, color)
+	stampSubagentTrace(entries, home)
+	return transcript.TranscriptView{Entries: entries}, nil
 }
 
 // stampSubagentTrace recomputes each subagent's HasTrace against home, correcting
 // linkSubagent's live-home resolution for a bundle extracted under a temp dir.
-func stampSubagentTrace(chunks []transcript.Chunk, home string) {
-	for i := range chunks {
-		for j := range chunks[i].Items {
-			for k := range chunks[i].Items[j].Subagents {
-				sub := &chunks[i].Items[j].Subagents[k]
-				if sub.ID == "" {
-					continue
-				}
-				_, sub.HasTrace = childTranscriptPathIn(home, sub.ID)
+func stampSubagentTrace(entries []transcript.Entry, home string) {
+	for i := range entries {
+		for k := range entries[i].Subagents {
+			sub := &entries[i].Subagents[k]
+			if sub.ID == "" {
+				continue
 			}
+			_, sub.HasTrace = childTranscriptPathIn(home, sub.ID)
 		}
 	}
 }
 
-func stampChunkModelWith(chunks []transcript.Chunk, name, color string) {
+// stampTurnModelWith fills the model on footers the transcript left blank.
+func stampTurnModelWith(entries []transcript.Entry, name, color string) {
 	if name == "" {
 		return
 	}
-	for i := range chunks {
-		if chunks[i].Kind == transcript.ChunkAI && chunks[i].ModelName == "" {
-			chunks[i].ModelName = name
-			chunks[i].ModelColor = color
+	for i := range entries {
+		if entries[i].Kind == transcript.EntryTurnEnd && entries[i].ModelName == "" {
+			entries[i].ModelName = name
+			entries[i].ModelColor = color
 		}
 	}
 }
@@ -53,22 +56,26 @@ func SubagentFilePath(rootPath, agentID string) (string, bool) {
 }
 
 func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error) {
+	return readSubagentView(rootPath, agentID, false)
+}
+
+func readSubagentView(rootPath, agentID string, finished bool) (transcript.TranscriptView, bool, error) {
 	home := resolveHome(rootPath)
 	path, ok := childTranscriptPathIn(home, agentID)
 	if !ok {
 		return transcript.TranscriptView{}, false, nil
 	}
-	chunks, err := parseTranscript(path)
+	entries, err := parseTranscript(path, finished)
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
 	name, color := conversationModelIn(home, agentID)
-	stampChunkModelWith(chunks, name, color)
-	stampSubagentTrace(chunks, home)
-	return transcript.TranscriptView{Chunks: chunks}, true, nil
+	stampTurnModelWith(entries, name, color)
+	stampSubagentTrace(entries, home)
+	return transcript.TranscriptView{Entries: entries}, true, nil
 }
 
-// FindToolDetail returns a tool/subagent item's full input and result.
+// FindToolDetail returns a tool/subagent entry's full input and result.
 // Empty agentID searches path itself.
 func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	if agentID != "" {
@@ -78,18 +85,12 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 		}
 		path = p
 	}
-	chunks, err := parseTranscript(path)
+	entries, err := parseTranscript(path, false)
 	if err != nil {
 		return transcript.ToolDetail{}, false, err
 	}
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent) && it.ToolID == toolID {
-				return transcript.ToolDetail{ToolInput: it.ToolInput, Result: it.Result, ResultIsError: it.ResultIsError}, true, nil
-			}
-		}
-	}
-	return transcript.ToolDetail{}, false, nil
+	d, ok := transcript.FindToolDetail(entries, toolID)
+	return d, ok, nil
 }
 
 // streamingTranscript tails a growing transcript: a byte cursor reads only newly
@@ -103,15 +104,15 @@ type streamingTranscript struct {
 	lines      []line
 	modelName  string
 	modelColor string
-	chunks     []transcript.Chunk
+	entries    []transcript.Entry
 }
 
-func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
+func (s *streamingTranscript) Refresh() ([]transcript.Entry, error) {
 	if fi, err := os.Stat(s.path); err == nil && fi.Size() < s.offset {
 		s.offset = 0 // truncation/rotation: rebuild from the start
 		s.loaded = false
 		s.lines = nil
-		s.chunks = nil
+		s.entries = nil
 	}
 
 	newLines, newOffset, err := scanTranscriptFrom(s.path, s.offset)
@@ -119,7 +120,7 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 		return nil, err
 	}
 	if len(newLines) == 0 && s.loaded {
-		return s.chunks, nil // nothing appended; skip re-fold and its DB work
+		return s.entries, nil // nothing appended; skip re-fold and its DB work
 	}
 	s.loaded = true
 	s.lines = append(s.lines, newLines...)
@@ -129,11 +130,11 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 	if s.modelName == "" {
 		s.modelName, s.modelColor = conversationModelIn(s.home, s.convID)
 	}
-	chunks := foldTranscript(s.lines)
-	stampChunkModelWith(chunks, s.modelName, s.modelColor)
-	stampSubagentTrace(chunks, s.home)
-	s.chunks = chunks
-	return s.chunks, nil
+	entries := foldTranscript(s.lines, false)
+	stampTurnModelWith(entries, s.modelName, s.modelColor)
+	stampSubagentTrace(entries, s.home)
+	s.entries = entries
+	return s.entries, nil
 }
 
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
@@ -155,11 +156,11 @@ func ReadHistoryTranscript(path string) (transcript.TranscriptView, error) {
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	return ReadTranscriptView(clean)
+	return readTranscriptView(clean, true)
 }
 
 func ReadHistorySubagentView(path, agentID string) (transcript.TranscriptView, bool, error) {
-	return ReadSubagentView(path, agentID)
+	return readSubagentView(path, agentID, true)
 }
 
 func FindHistoryToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {

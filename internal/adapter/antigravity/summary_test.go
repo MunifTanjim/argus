@@ -20,8 +20,8 @@ func writeBrainTranscript(t *testing.T, convID, content string) {
 }
 
 func TestSummarizeChunksTaskAndActivity(t *testing.T) {
-	chunks, _ := parseTranscript(writeLines(t, sampleTranscript))
-	s := summarizeChunks(chunks)
+	entries, _ := parseTranscript(writeLines(t, sampleTranscript), false)
+	s := summarizeEntries(entries)
 	if s == nil {
 		t.Fatal("summary should not be nil")
 	}
@@ -34,8 +34,8 @@ func TestSummarizeChunksTaskAndActivity(t *testing.T) {
 }
 
 func TestSummarizeChunksEmpty(t *testing.T) {
-	if s := summarizeChunks(nil); s != nil {
-		t.Fatalf("empty chunks should yield nil, got %+v", s)
+	if s := summarizeEntries(nil); s != nil {
+		t.Fatalf("empty entries should yield nil, got %+v", s)
 	}
 }
 

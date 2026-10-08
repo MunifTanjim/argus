@@ -49,16 +49,16 @@ func childTranscriptPathIn(home, convID string) (string, bool) {
 	return p, true
 }
 
-// linkSubagent converts an invoke_subagent tool item into a drillable subagent item.
-func linkSubagent(it *transcript.Item) {
-	id := subagentChildID(it.Result)
+// linkSubagent converts an invoke_subagent tool entry into a drillable subagent entry.
+func linkSubagent(e *transcript.Entry) {
+	id := subagentChildID(e.Result)
 	if id == "" {
 		return
 	}
-	it.Kind = transcript.ItemSubagent
+	e.Kind = transcript.EntrySubagent
 	_, hasTrace := childTranscriptPath(id)
-	name, typ := subagentNameType(it.ToolInput)
-	it.Subagents = []transcript.Subagent{{ID: id, Name: name, Type: typ, Desc: it.InputPreview, HasTrace: hasTrace}}
+	name, typ := subagentNameType(e.ToolInput)
+	e.Subagents = []transcript.Subagent{{ID: id, Name: name, Type: typ, Desc: e.InputPreview, HasTrace: hasTrace}}
 }
 
 func subagentNameType(toolInput string) (name, typ string) {

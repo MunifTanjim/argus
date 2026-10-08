@@ -7,17 +7,17 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// summarizeChunks distills a list-view card from chunks. Tokens are omitted (agy's
-// transcript carries none). Returns nil when empty.
-func summarizeChunks(chunks []transcript.Chunk) *session.Summary {
+// summarizeEntries omits tokens: agy's transcript carries none. Returns nil
+// when empty.
+func summarizeEntries(entries []transcript.Entry) *session.Summary {
 	s := &session.Summary{}
-	for i := len(chunks) - 1; i >= 0; i-- {
-		c := chunks[i]
-		if s.LastActivity == "" && c.Timestamp != "" {
-			s.LastActivity = c.Timestamp
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if s.LastActivity == "" && e.Timestamp != "" {
+			s.LastActivity = e.Timestamp
 		}
-		if s.Task == "" && c.Kind == transcript.ChunkUser && strings.TrimSpace(c.Text) != "" {
-			s.Task = firstLine(c.Text)
+		if s.Task == "" && e.Kind == transcript.EntryUser && strings.TrimSpace(e.Text) != "" {
+			s.Task = firstLine(e.Text)
 		}
 		if s.Task != "" && s.LastActivity != "" {
 			break
@@ -34,8 +34,8 @@ func summarizeChunks(chunks []transcript.Chunk) *session.Summary {
 func buildSummary(convID, transcriptPath, hookModel string) *session.Summary {
 	var s *session.Summary
 	if transcriptPath != "" {
-		if chunks, err := parseTranscript(transcriptPath); err == nil {
-			s = summarizeChunks(chunks)
+		if entries, err := parseTranscript(transcriptPath, false); err == nil {
+			s = summarizeEntries(entries)
 		}
 	}
 	name, color := conversationModel(convID)
