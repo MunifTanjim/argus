@@ -30,7 +30,6 @@ type DisplayItem struct {
 	ToolResult  string
 	ToolError   bool
 	DurationMs  int64     // tool_use -> tool_result timestamp delta
-	TokenCount  int       // estimated tokens: len(text)/4
 	Timestamp   time.Time // when the item was written (ItemQueuedPrompt only)
 
 	// SessionID is the snake_case session_id of the line this item came from,
@@ -151,7 +150,6 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 						ToolSummary:  name,
 						ToolResult:   body,
 						ToolCategory: CategorizeToolName("Skill"),
-						TokenCount:   len(body) / 4,
 					})
 					chunks = append(chunks, c)
 					i++
