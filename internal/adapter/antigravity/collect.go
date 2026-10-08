@@ -56,16 +56,14 @@ func collectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 		seen[convID] = true
 		add(tpath)
 		add(conversationDBPath(convID))
-		chunks, err := parseTranscript(tpath)
+		entries, err := parseTranscript(tpath, false)
 		if err != nil {
 			return
 		}
-		for _, c := range chunks {
-			for _, it := range c.Items {
-				for _, sub := range it.Subagents {
-					if sub.ID != "" {
-						walk(sub.ID, transcriptPathFor(sub.ID))
-					}
+		for _, e := range entries {
+			for _, sub := range e.Subagents {
+				if sub.ID != "" {
+					walk(sub.ID, transcriptPathFor(sub.ID))
 				}
 			}
 		}

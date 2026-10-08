@@ -35,20 +35,18 @@ func TestParseSubagentItem(t *testing.T) {
 	tr := `{"type":"PLANNER_RESPONSE","source":"MODEL","tool_calls":[{"name":"invoke_subagent","args":{"toolSummary":"Run subagent","Subagents":[{"name":"test_subagent","TypeName":"General"}]}}],"step_index":0}
 {"type":"INVOKE_SUBAGENT","source":"MODEL","content":` + jsonQuote(invokeResult) + `,"step_index":1}
 `
-	chunks, err := parseTranscript(writeLines(t, tr))
+	entries, err := parseTranscript(writeLines(t, tr), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sub transcript.Item
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == transcript.ItemSubagent {
-				sub = it
-			}
+	var sub transcript.Entry
+	for _, e := range entries {
+		if e.Kind == transcript.EntrySubagent {
+			sub = e
 		}
 	}
-	if sub.Kind != transcript.ItemSubagent {
-		t.Fatalf("expected a subagent item, got chunks %+v", chunks)
+	if sub.Kind != transcript.EntrySubagent {
+		t.Fatalf("expected a subagent entry, got entries %+v", entries)
 	}
 	if len(sub.Subagents) != 1 || sub.Subagents[0].ID != "acec302c-335c-46b5-b75a-4d7695c26a3c" {
 		t.Fatalf("subagent link wrong: %+v", sub.Subagents)

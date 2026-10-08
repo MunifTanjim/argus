@@ -8,92 +8,89 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// parseTranscript folds transcript_full.jsonl into display chunks. USER_INPUT starts
-// a turn; MODEL lines until the next USER_INPUT form one AI chunk. A tool_call's
-// result is the adjacent non-PLANNER/non-USER line.
-func parseTranscript(path string) ([]transcript.Chunk, error) {
+// parseTranscript reads transcript_full.jsonl.
+func parseTranscript(path string, finished bool) ([]transcript.Entry, error) {
 	lines, err := scanTranscript(path)
 	if err != nil {
 		return nil, err
 	}
-	return foldTranscript(lines), nil
+	return foldTranscript(lines, finished), nil
 }
 
-// foldTranscript folds a flat transcript line list into display chunks. Pure in its
-// input, so streaming can re-fold an accumulating line slice each Refresh.
-func foldTranscript(lines []line) []transcript.Chunk {
-	var chunks []transcript.Chunk
-	var ai *transcript.Chunk // current assistant turn
-	pendingIdx := -1         // index into ai.Items of a tool item awaiting its result line
+// foldTranscript is pure in its input, so streaming can re-fold an
+// accumulating line slice each Refresh. A tool_call's result is the adjacent
+// non-PLANNER/non-USER line. finished closes the final turn (history reads).
+func foldTranscript(lines []line, finished bool) []transcript.Entry {
+	var out []transcript.Entry
+	var turn transcript.Turn
+	pendingIdx := -1 // index into out of a tool entry awaiting its result line
 	toolSeq := 0
-	itemSeq := 0
 
-	flush := func() {
-		if ai != nil && len(ai.Items) > 0 {
-			chunks = append(chunks, *ai)
-		}
-		ai = nil
-		pendingIdx = -1
+	add := func(e transcript.Entry) {
+		e.ID = "e" + strconv.Itoa(len(out))
+		out = append(out, e)
 	}
-	ensureAI := func(ts string) {
-		if ai == nil {
-			ai = &transcript.Chunk{ID: "c" + strconv.Itoa(len(chunks)), Kind: transcript.ChunkAI, Timestamp: ts}
-			itemSeq = 0
+	addToTurn := func(e transcript.Entry) {
+		turn.Count(e)
+		add(e)
+	}
+	closeTurn := func() {
+		if f, ok := turn.Close(); ok {
+			add(f)
 		}
 	}
-	nextItemID := func() string { itemSeq++; return strconv.Itoa(itemSeq) }
 
 	for _, l := range lines {
 		switch l.Type {
 		case "USER_INPUT":
-			flush()
-			chunks = append(chunks, transcript.Chunk{
-				ID:        "c" + strconv.Itoa(len(chunks)),
-				Kind:      transcript.ChunkUser,
-				Timestamp: l.CreatedAt,
-				Text:      stripUserWrappers(l.Content),
-			})
+			closeTurn()
+			pendingIdx = -1
+			add(transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.CreatedAt, Text: stripUserWrappers(l.Content)})
 		case "PLANNER_RESPONSE":
 			pendingIdx = -1 // a new step: the prior tool_call (if any) got no result
-			ensureAI(l.CreatedAt)
+			if turn.Footer == nil {
+				turn.Open(transcript.Entry{Kind: transcript.EntryTurnEnd})
+			}
+			if l.CreatedAt != "" {
+				turn.Footer.Timestamp = l.CreatedAt
+			}
 			if strings.TrimSpace(l.Thinking) != "" {
-				ai.Items = append(ai.Items, transcript.Item{ID: nextItemID(), Kind: transcript.ItemThinking, Text: l.Thinking})
-				ai.Thinking++
+				addToTurn(transcript.Entry{Kind: transcript.EntryThinking, Timestamp: l.CreatedAt, Text: l.Thinking})
 			}
 			if strings.TrimSpace(l.Content) != "" {
-				ai.Items = append(ai.Items, transcript.Item{ID: nextItemID(), Kind: transcript.ItemText, Text: l.Content})
+				addToTurn(transcript.Entry{Kind: transcript.EntryText, Timestamp: l.CreatedAt, Text: l.Content})
 			}
 			if len(l.ToolCalls) > 0 {
 				tc := l.ToolCalls[0]
-				it := transcript.Item{
-					ID:           nextItemID(),
-					Kind:         transcript.ItemTool,
+				addToTurn(transcript.Entry{
+					Kind:         transcript.EntryTool,
+					Timestamp:    l.CreatedAt,
 					ToolName:     tc.Name,
 					ToolID:       "t" + strconv.Itoa(toolSeq),
 					ToolInput:    string(tc.Args),
 					InputPreview: toolPreview(tc.Args),
-				}
+				})
 				toolSeq++
-				ai.Items = append(ai.Items, it)
-				pendingIdx = len(ai.Items) - 1
-				ai.ToolCount++
+				pendingIdx = len(out) - 1
 			}
 		default:
 			// Any non-role line right after a tool_call is that tool's result;
 			// otherwise it is scaffolding and is skipped.
 			if pendingIdx >= 0 {
-				it := &ai.Items[pendingIdx]
-				it.Result = l.Content
-				it.ResultIsError = l.Type == "ERROR_MESSAGE"
-				if it.ToolName == "invoke_subagent" {
-					linkSubagent(it)
+				e := &out[pendingIdx]
+				e.Result = l.Content
+				e.ResultIsError = l.Type == "ERROR_MESSAGE"
+				if e.ToolName == "invoke_subagent" {
+					linkSubagent(e)
 				}
 				pendingIdx = -1
 			}
 		}
 	}
-	flush()
-	return chunks
+	if finished {
+		closeTurn()
+	}
+	return out
 }
 
 // stripUserWrappers extracts the text from agy's <USER_REQUEST>...</USER_REQUEST>
