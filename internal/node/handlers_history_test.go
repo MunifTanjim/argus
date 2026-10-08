@@ -55,15 +55,13 @@ func writeHistoryNestedFixture(t *testing.T) string {
 	return root
 }
 
-func subagentItemInChunks(chunks []claudecode.Chunk) (claudecode.Item, bool) {
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == claudecode.ItemSubagent {
-				return it, true
-			}
+func subagentEntryIn(entries []claudecode.Entry) (claudecode.Entry, bool) {
+	for _, e := range entries {
+		if e.Kind == claudecode.EntrySubagent {
+			return e, true
 		}
 	}
-	return claudecode.Item{}, false
+	return claudecode.Entry{}, false
 }
 
 func TestHandleHistorySessions_EmptyProjectDirIsUnknownBucket(t *testing.T) {
@@ -92,7 +90,7 @@ func TestHandleHistoryTranscript_NestedByAgentID(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := res.(claudecode.TranscriptView)
-	it, ok := subagentItemInChunks(view.Chunks)
+	it, ok := subagentEntryIn(view.Entries)
 	if !ok || len(it.Subagents) == 0 || it.Subagents[0].ID != "B" {
 		t.Fatalf("nested view should expose child B, got ok=%v subagents=%+v", ok, it.Subagents)
 	}

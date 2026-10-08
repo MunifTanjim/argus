@@ -663,21 +663,23 @@ ignores `kind`, `option_index`, and `text`.
 ### Transcripts
 
 1. The client picks a `sub_id` and calls `transcript.subscribe` with the
-   number of chunks it already holds (`have_chunks`).
+   number of entries it already holds (`have_entries`).
 2. The result is a `TranscriptDelta` that brings the client up to date.
 3. The node reads the transcript every second. If it changed, the node sends
    a `transcript.delta` notification.
 4. The client calls `transcript.unsubscribe` with the `sub_id` to stop.
 
-To apply a delta, the client cuts its chunk list to `from_index`, then appends
-`chunks`. Filter deltas by `sub_id`.
+To apply a delta, the client cuts its entry list to `from_index`, then appends
+`entries`. Filter deltas by `sub_id`.
 
-- The first result starts at `have_chunks - 1`, because the last cached chunk
-  can have grown.
-- The node does not verify the cached chunks of the client. The cache must
+- The first result starts at the first entry of the turn that holds the last
+  cached entry, because entries of an unfinished turn can still change. If the
+  last cached entry ends a turn, the first result starts at that entry
+  (`have_entries - 1`).
+- The node does not verify the cached entries of the client. The cache must
   come from the same session and the same `agent_id`.
 - `from_index` can be less than the length of the client list, because the
-  node can change the last chunks.
+  node can change the last entries.
 - A delta can look identical on the client, because the node compares fields
   that it does not send.
 - A second subscribe with the same `sub_id` replaces the first. All
@@ -687,8 +689,11 @@ To apply a delta, the client cuts its chunk list to `from_index`, then appends
 Errors: `sub_id required`, `unknown session: <id>`,
 `session has no transcript: <id>`, and `unknown subagent: <id>`.
 
-Transcript items do not carry `toolInput` and `result`. To get these fields,
+Transcript entries do not carry `toolInput` and `result`. To get these fields,
 the client calls `sessions.toolDetail`.
+
+The node emits a `turn_end` entry only for a finished turn. Entry ids are
+stable as the transcript grows.
 
 The node sends `tasks.changed` on the same subscription when the task count
 in the transcript goes up. The client then calls `sessions.tasks`. The node
@@ -1228,14 +1233,14 @@ ExportBundleParams {
 
 | Method                       | Kind         | Params                                                      | Result                |
 | ---------------------------- | ------------ | ----------------------------------------------------------- | --------------------- |
-| `sessions.transcriptView`    | request      | `SessionRef`                                                | `{ chunks: Chunk[] }` |
+| `sessions.transcriptView`    | request      | `SessionRef`                                                | `{ entries: Entry[] }` |
 | `sessions.toolDetail`        | request      | `{ session_id, agent_id?, tool_id }`                        | `ToolDetail`          |
 | `transcript.subscribe`       | request      | `TranscriptSubscribeParams`                                 | `TranscriptDelta`     |
 | `transcript.unsubscribe`     | request      | `{ sub_id }`                                                | `null`                |
 | `transcript.delta`           | notification | `TranscriptDelta`                                           | —                     |
 | `sessions.historyProjects`   | request      | none                                                        | `HistoryProject[]`    |
 | `sessions.historySessions`   | request      | `HistorySessionsParams`                                     | `HistorySessionPage`  |
-| `sessions.historyTranscript` | request      | `{ node_id?, agent?, transcript_path, agent_id? }`          | `{ chunks: Chunk[] }` |
+| `sessions.historyTranscript` | request      | `{ node_id?, agent?, transcript_path, agent_id? }`          | `{ entries: Entry[] }` |
 | `sessions.historyToolDetail` | request      | `{ node_id?, agent?, transcript_path, agent_id?, tool_id }` | `ToolDetail`          |
 
 `agent_id` selects a subagent trace. History methods use the transcript path on
@@ -1246,10 +1251,10 @@ TranscriptSubscribeParams {
   sub_id:      string
   session_id:  string
   agent_id?:   string
-  have_chunks: number
+  have_entries: number
 }
 
-TranscriptDelta { sub_id: string, from_index: number, chunks: Chunk[] }
+TranscriptDelta { sub_id: string, from_index: number, entries: Entry[] }
 
 ToolDetail { toolInput?: string, result?: string, resultIsError?: boolean }
 
@@ -1650,43 +1655,38 @@ HistorySessionPage {
 ### Transcript
 
 ```ts
-Chunk {
+Entry {
   id:                  string
-  kind:                "user" | "ai" | "system" | "compact" | "shell"
+  kind:                "user" | "thinking" | "text" | "tool" | "subagent" | "skill"
+                     | "turn_end" | "system" | "compact" | "shell"
   timestamp?, text?:   string
-  modelName?, modelColor?: string
-  items?:              Item[]
-  thinking?, toolCount?: number
-  usage?:              { input?, output?, cacheRead?, cacheCreation?: number }
-  stopReason?:         string
-  durationMs?:         number
-  interrupted?:        boolean
-  hasContext?:         boolean
-  contextPct?, contextFirstPct?: number
-  contextDeltaTokens?: number
-  summary?, label?, detail?: string
-  isError?:            boolean
-  previewItemId?:      string         // the item to show as the chunk preview
-}
-
-Item {
-  id:             string
-  kind:           "thinking" | "text" | "tool" | "subagent" | "skill"
-  text?:          string
-  signature?:     boolean
-  toolName?, toolId?: string
-  inputPreview?:  string
-  resultIsError?: boolean
+  signature?:          boolean
+  toolName?, toolId?:  string
+  inputPreview?:       string
+  resultIsError?:      boolean
   subagents?: {
     id:     string
     name?, type?, desc?, status?, color?: string
     isTeammate?, idle?, hasTrace?: boolean
-    trace?: Chunk[]                   // history only
+    trace?: Entry[]                   // history only
   }[]
+  // turn_end only: emitted once a turn has finished
+  modelName?, modelColor?: string
+  usage?:              { input?, output?, cacheRead?, cacheCreation?: number }
+  stopReason?:         string
+  durationMs?:         number
+  thinking?, toolCount?: number
+  interrupted?:        boolean
+  hasContext?:         boolean
+  contextPct?, contextFirstPct?: number
+  contextDeltaTokens?: number
+  // system / compact / shell
+  summary?, label?, detail?: string
+  isError?:            boolean
 }
 ```
 
-`Item` never carries `toolInput` or `result` on the wire. Use
+`Entry` never carries `toolInput` or `result` on the wire. Use
 `sessions.toolDetail` or `sessions.historyToolDetail` to get them.
 
 ### Bundle metadata

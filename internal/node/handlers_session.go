@@ -130,7 +130,6 @@ func (d *Node) handleSessionsRefresh(ctx context.Context, _ json.RawMessage) (an
 	return d.snapshotWithCaps(), nil
 }
 
-// handleTranscriptView returns the grouped, display-ready chunk view for a session.
 func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.TranscriptParams](params)
 	if err != nil {
@@ -146,8 +145,8 @@ func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (
 	return d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
 }
 
-// handleSessionToolDetail returns one tool item's full input/result by tool_use
-// id; transcript chunks ship without these heavy bodies.
+// handleSessionToolDetail returns one tool entry's full input/result by tool_use
+// id; transcript entries ship without these heavy bodies.
 func (d *Node) handleSessionToolDetail(_ context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.ToolDetailParams](params)
 	if err != nil {
