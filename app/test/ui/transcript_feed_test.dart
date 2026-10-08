@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/transcript_feed.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 List<Entry> _chunks(int n) => [
       for (var i = 0; i < n; i++)
@@ -20,7 +21,7 @@ Widget _feed(List<Entry> chunks) => ProviderScope(
     );
 
 ScrollController _controller(WidgetTester tester) =>
-    tester.widget<ListView>(find.byType(ListView)).controller!;
+    tester.widget<SuperListView>(find.byType(SuperListView)).controller!;
 
 void main() {
   testWidgets('renders chunks', (tester) async {
