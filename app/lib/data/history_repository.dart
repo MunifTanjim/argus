@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../models/history.dart';
 import '../state/history.dart';
 
@@ -19,7 +19,7 @@ abstract class HistoryRepository {
     required int offset,
   });
 
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,
@@ -50,7 +50,7 @@ class HistoryRepositoryRemote implements HistoryRepository {
       );
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,

@@ -2,18 +2,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/tool_detail.dart';
 import 'package:argus/ui/tool_registry.dart';
 
-Widget _wrap(Item i) => MaterialApp(
+Widget _wrap(Entry i) => MaterialApp(
     home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
 
 void main() {
   testWidgets('Bash shows command and result', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Bash',
         toolInput: '{"command":"ls -la","description":"list"}',
         result: 'total 0')));
@@ -22,9 +22,9 @@ void main() {
   });
 
   testWidgets('Bash command renders as a copyable code block', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Bash',
         toolInput: '{"command":"echo one\\necho two"}')));
     expect(find.text('bash'), findsOneWidget); // code block header label
@@ -34,9 +34,9 @@ void main() {
   });
 
   testWidgets('EnterPlanMode result is labelled markdown', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'EnterPlanMode',
         toolInput: '{}',
         result: '## Plan\n\n- step one')));
@@ -45,9 +45,9 @@ void main() {
 
   testWidgets('ExitPlanMode shows plan file, plan and result as markdown',
       (tester) async {
-    await tester.pumpWidget(_wrap(Item(
+    await tester.pumpWidget(_wrap(Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'ExitPlanMode',
         toolInput: jsonEncode({
           'plan': '## Heading\n\n- step one',
@@ -70,9 +70,9 @@ void main() {
   testWidgets('ExitPlanMode collapses a long plan behind a toggle',
       (tester) async {
     final longPlan = List.generate(30, (i) => '- item $i').join('\n');
-    await tester.pumpWidget(_wrap(Item(
+    await tester.pumpWidget(_wrap(Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'ExitPlanMode',
         toolInput: jsonEncode({'plan': longPlan, 'planFilePath': '/p.md'}))));
 
@@ -85,9 +85,9 @@ void main() {
 
   for (final tool in const ['WebFetch', 'WebSearch']) {
     testWidgets('$tool result renders as markdown', (tester) async {
-      await tester.pumpWidget(_wrap(Item(
+      await tester.pumpWidget(_wrap(Entry(
           id: 'i',
-          kind: ItemKind.tool,
+          kind: EntryKind.tool,
           toolName: tool,
           toolInput:
               tool == 'WebFetch' ? '{"url":"https://x.dev"}' : '{"query":"q"}',
@@ -102,9 +102,9 @@ void main() {
   }
 
   testWidgets('Read infers language from the file extension', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Read',
         toolInput: '{"file_path":"/x/foo.py"}',
         result: '     1\tprint("hi")')));
@@ -112,9 +112,9 @@ void main() {
   });
 
   testWidgets('Read result hides the line-number toggle', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Read',
         toolInput: '{"file_path":"/a.dart"}',
         result: '     1\tline one\n     2\tline two')));
@@ -122,9 +122,9 @@ void main() {
   });
 
   testWidgets('Grep shows pattern header', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Grep',
         toolInput: '{"pattern":"foo","path":"lib"}',
         result: 'lib/a.dart:1')));
@@ -133,9 +133,9 @@ void main() {
   });
 
   testWidgets('TodoWrite renders checklist', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'TodoWrite',
         toolInput:
             '{"todos":[{"content":"do a","status":"completed","activeForm":"doing a"},{"content":"do b","status":"in_progress","activeForm":"doing b"}]}')));
@@ -144,9 +144,9 @@ void main() {
   });
 
   testWidgets('generic fallback shows input and result', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'MysteryTool',
         toolInput: '{"x":1}',
         result: 'done')));
@@ -156,9 +156,9 @@ void main() {
   // opencode tool calls: lowercase names and their own input key shapes.
   testWidgets('opencode read uses the path key and infers language',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'read',
         toolInput: '{"path":"/x/foo.py"}',
         result: '10: print("hi")')));
@@ -168,9 +168,9 @@ void main() {
 
   testWidgets('opencode edit renders a diff from oldString/newString',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'edit',
         toolInput:
             '{"path":"/x/a.dart","oldString":"var x = 1;","newString":"var x = 2;"}',
@@ -181,18 +181,18 @@ void main() {
 
   testWidgets('opencode write renders new content as an all-add diff',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'write',
         toolInput: '{"filePath":"/x/new.txt","content":"hello\\nworld"}')));
     expect(find.text('diff'), findsOneWidget);
   });
 
   testWidgets('opencode bash shows the command', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'bash',
         toolInput: '{"command":"go build ./...","description":"build"}',
         result: 'ok')));
@@ -200,9 +200,9 @@ void main() {
   });
 
   testWidgets('opencode execute renders code, not raw JSON', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'execute',
         toolInput: '{"code":"print(2 + 2)"}',
         result: '4')));
@@ -211,9 +211,9 @@ void main() {
   });
 
   testWidgets('opencode grep uses the include key for scope', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'grep',
         toolInput: '{"pattern":"foo","path":"internal","include":"*.go"}',
         result: 'internal/a.go:1')));
@@ -222,9 +222,9 @@ void main() {
   });
 
   testWidgets('opencode skill uses the id key', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'skill',
         toolInput: '{"id":"my-skill"}',
         result: '<skill_content>body</skill_content>')));

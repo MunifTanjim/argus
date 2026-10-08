@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/tool_detail.dart';
 import 'package:argus/ui/tool_detail_antigravity.dart';
 
-Widget _wrap(Item i) => MaterialApp(
+Widget _wrap(Entry i) => MaterialApp(
     home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
 
 void main() {
@@ -83,9 +83,9 @@ void main() {
   group('renderers', () {
     testWidgets('run_command shows cwd, command and split output',
         (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'run_command',
         toolInput: '{"CommandLine":"go test ./...","Cwd":"/repo"}',
         result: 'Created At: x\n\tExit Code: 0\n\tOutput:\n\tok',
@@ -96,9 +96,9 @@ void main() {
     });
 
     testWidgets('write_to_file renders an all-additions diff', (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'write_to_file',
         toolInput:
             '{"TargetFile":"a.txt","CodeContent":"line one\\nline two"}',
@@ -108,9 +108,9 @@ void main() {
     });
 
     testWidgets('ask_question marks the chosen option', (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'ask_question',
         toolInput:
             '{"questions":[{"question":"Pick one","is_multi_select":false,"options":["Alpha","Beta"]}]}',
@@ -121,9 +121,9 @@ void main() {
     });
 
     testWidgets('grep_search renders header and matches', (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'grep_search',
         toolInput: '{"Query":"foo","SearchPath":"lib","IsRegex":true}',
         result:

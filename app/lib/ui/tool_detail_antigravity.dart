@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
@@ -10,7 +10,7 @@ import 'theme.dart';
 const _red = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
-Map<String, dynamic> _input(Item it) {
+Map<String, dynamic> _input(Entry it) {
   try {
     return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
   } catch (_) {
@@ -34,7 +34,7 @@ Widget _header(String text) => Text(text,
 Widget _comment(String text) =>
     Text('# $text', style: _mono.copyWith(color: AppColors.dim));
 
-Widget _withResult(List<Widget> head, Item it, Widget? resultBody) => Column(
+Widget _withResult(List<Widget> head, Entry it, Widget? resultBody) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ...head,
@@ -244,7 +244,7 @@ String agyImageResult(String result) {
       .join('\n');
 }
 
-Widget agyRunCommandDetail(Item it) {
+Widget agyRunCommandDetail(Entry it) {
   final m = _input(it);
   final cmd = toolInputStr(m['CommandLine']);
   final cwd = toolInputStr(m['Cwd']);
@@ -267,7 +267,7 @@ Widget agyRunCommandDetail(Item it) {
   return _withResult(head, it, body);
 }
 
-Widget agyGrepSearchDetail(Item it) {
+Widget agyGrepSearchDetail(Entry it) {
   final m = _input(it);
   final query = toolInputStr(m['Query']);
   final path = toolInputStr(m['SearchPath']);
@@ -298,7 +298,7 @@ Widget agyGrepSearchDetail(Item it) {
       head, it, rows.isEmpty ? null : codeBlock(rows.join('\n')));
 }
 
-Widget agyListDirDetail(Item it) {
+Widget agyListDirDetail(Entry it) {
   final path = toolInputStr(_input(it)['DirectoryPath']);
   final rows = listDirRows(agyResultBody(it.result ?? ''));
   return _withResult(
@@ -308,7 +308,7 @@ Widget agyListDirDetail(Item it) {
   );
 }
 
-Widget agyViewFileDetail(Item it) {
+Widget agyViewFileDetail(Entry it) {
   final path = toolInputStr(_input(it)['AbsolutePath']);
   final (:meta, :content) = splitViewFileResult(it.result ?? '');
   Widget? body;
@@ -331,7 +331,7 @@ Widget agyViewFileDetail(Item it) {
   ]);
 }
 
-Widget agyWriteToFileDetail(Item it) {
+Widget agyWriteToFileDetail(Entry it) {
   final m = _input(it);
   final path = toolInputStr(m['TargetFile']);
   final desc = toolInputStr(m['Description']);
@@ -353,11 +353,11 @@ Widget agyWriteToFileDetail(Item it) {
   return _withResult(head, it, body);
 }
 
-Widget agyReplaceFileContentDetail(Item it) => _replaceDetail(it, multi: false);
-Widget agyMultiReplaceFileContentDetail(Item it) =>
+Widget agyReplaceFileContentDetail(Entry it) => _replaceDetail(it, multi: false);
+Widget agyMultiReplaceFileContentDetail(Entry it) =>
     _replaceDetail(it, multi: true);
 
-Widget _replaceDetail(Item it, {required bool multi}) {
+Widget _replaceDetail(Entry it, {required bool multi}) {
   final m = _input(it);
   final path = toolInputStr(m['TargetFile']);
   final desc = toolInputStr(m['Description']);
@@ -410,7 +410,7 @@ Widget _replaceDetail(Item it, {required bool multi}) {
   );
 }
 
-Widget agySearchWebDetail(Item it) {
+Widget agySearchWebDetail(Entry it) {
   final m = _input(it);
   final query = toolInputStr(m['query']);
   final domain = toolInputStr(m['domain']);
@@ -438,7 +438,7 @@ Widget agySearchWebDetail(Item it) {
   ]);
 }
 
-Widget agyGenerateImageDetail(Item it) {
+Widget agyGenerateImageDetail(Entry it) {
   final m = _input(it);
   final name = toolInputStr(m['ImageName']);
   final ratio = toolInputStr(m['AspectRatio']);
@@ -454,7 +454,7 @@ Widget agyGenerateImageDetail(Item it) {
   return _withResult(head, it, img.isEmpty ? null : codeBlock(img));
 }
 
-Widget agyDefineSubagentDetail(Item it) {
+Widget agyDefineSubagentDetail(Entry it) {
   final m = _input(it);
   final name = toolInputStr(m['name']);
   final desc = toolInputStr(m['description']);
@@ -493,7 +493,7 @@ Widget agyDefineSubagentDetail(Item it) {
   );
 }
 
-Widget agyManageSubagentsDetail(Item it) {
+Widget agyManageSubagentsDetail(Entry it) {
   final action = toolInputStr(_input(it)['Action']);
   final body = agyResultBody(it.result ?? '');
   return _withResult(
@@ -508,7 +508,7 @@ Widget agyManageSubagentsDetail(Item it) {
   );
 }
 
-Widget agyManageTaskDetail(Item it) {
+Widget agyManageTaskDetail(Entry it) {
   final m = _input(it);
   final action = toolInputStr(m['Action']);
   final taskId = toolInputStr(m['TaskId']);
@@ -534,7 +534,7 @@ Widget agyManageTaskDetail(Item it) {
   );
 }
 
-Widget agyAskQuestionDetail(Item it) {
+Widget agyAskQuestionDetail(Entry it) {
   final qs = (_input(it)['questions'] as List?) ?? const [];
   if (qs.isEmpty) return _generic(it);
   final answers = parseAgyAnswers(agyResultBody(it.result ?? ''));
@@ -574,7 +574,7 @@ Widget agyAskQuestionDetail(Item it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
 }
 
-Widget agyAskPermissionDetail(Item it) {
+Widget agyAskPermissionDetail(Entry it) {
   final m = _input(it);
   final action = toolInputStr(m['Action']);
   final target = toolInputStr(m['Target']);
@@ -597,13 +597,13 @@ Widget agyAskPermissionDetail(Item it) {
   );
 }
 
-Widget agyListPermissionsDetail(Item it) {
+Widget agyListPermissionsDetail(Entry it) {
   final body = agyResultBody(it.result ?? '');
   if (body.isEmpty) return _generic(it);
   return codeBlock(body);
 }
 
-Widget agySendMessageDetail(Item it) {
+Widget agySendMessageDetail(Entry it) {
   final m = _input(it);
   final message = toolInputStr(m['Message']);
   final recipient = toolInputStr(m['Recipient']);
@@ -619,7 +619,7 @@ Widget agySendMessageDetail(Item it) {
   ]);
 }
 
-Widget agyScheduleDetail(Item it) {
+Widget agyScheduleDetail(Entry it) {
   final m = _input(it);
   final duration = toolInputStr(m['DurationSeconds']);
   final prompt = toolInputStr(m['Prompt']);
@@ -638,7 +638,7 @@ Widget agyScheduleDetail(Item it) {
   );
 }
 
-Widget _generic(Item it) =>
+Widget _generic(Entry it) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if ((it.toolInput ?? '').isNotEmpty) ...[
         _label('Input'),

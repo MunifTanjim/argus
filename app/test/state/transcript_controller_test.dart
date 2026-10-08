@@ -27,10 +27,10 @@ void main() {
     final sub = (req['params'] as Map)['sub_id'] as String;
 
     incoming.add(RpcMessage.fromJson(jsonDecode(
-        '{"jsonrpc":"2.0","id":"$id","result":{"sub_id":"$sub","from_index":0,"chunks":[$_chunk]}}')));
+        '{"jsonrpc":"2.0","id":"$id","result":{"sub_id":"$sub","from_index":0,"entries":[$_chunk]}}')));
     await fut;
 
-    expect(container.read(transcriptProvider('sess')).chunks.single.id, 'c1');
+    expect(container.read(transcriptProvider('sess')).entries.single.id, 'c1');
   });
 
   test('dispatchDelta applies a matching push, ignores other methods', () {
@@ -41,14 +41,14 @@ void main() {
 
     dispatchDelta(
         RpcMessage.fromJson(jsonDecode(
-            '{"jsonrpc":"2.0","method":"transcript.delta","params":{"sub_id":"sub1","from_index":0,"chunks":[$_chunk]}}')),
+            '{"jsonrpc":"2.0","method":"transcript.delta","params":{"sub_id":"sub1","from_index":0,"entries":[$_chunk]}}')),
         store);
-    expect(container.read(transcriptProvider('sess')).chunks.length, 1);
+    expect(container.read(transcriptProvider('sess')).entries.length, 1);
 
     dispatchDelta(
         RpcMessage.fromJson(jsonDecode(
             '{"jsonrpc":"2.0","method":"session.event","params":{}}')),
         store);
-    expect(container.read(transcriptProvider('sess')).chunks.length, 1);
+    expect(container.read(transcriptProvider('sess')).entries.length, 1);
   });
 }

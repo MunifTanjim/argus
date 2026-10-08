@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../transport/gateway_client.dart';
 import 'gateway.dart';
 

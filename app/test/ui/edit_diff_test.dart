@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/edit_diff.dart';
 
-Widget _wrap(Item i) => MaterialApp(home: Scaffold(body: editDiffView(i)));
+Widget _wrap(Entry i) => MaterialApp(home: Scaffold(body: editDiffView(i)));
 
 Widget _wrapDiff(String oldS, String newS) => MaterialApp(
     home: Scaffold(
@@ -11,9 +11,9 @@ Widget _wrapDiff(String oldS, String newS) => MaterialApp(
 
 void main() {
   testWidgets('Edit shows path, old and new', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a/b.dart","old_string":"foo()","new_string":"bar()"}')));
@@ -23,18 +23,18 @@ void main() {
   });
 
   testWidgets('Write shows only content', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Write',
         toolInput: '{"file_path":"/x.txt","content":"new file body"}')));
     expect(find.textContaining('new file body'), findsOneWidget);
   });
 
   testWidgets('MultiEdit shows each edit', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'MultiEdit',
         toolInput:
             '{"file_path":"/m.dart","edits":[{"old_string":"a1","new_string":"b1"},{"old_string":"a2","new_string":"b2"}]}')));
@@ -43,9 +43,9 @@ void main() {
   });
 
   testWidgets('Edit interleaves changed lines and keeps context', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a.dart","old_string":"keep\\nbefore\\ntail","new_string":"keep\\nafter\\ntail"}')));
@@ -59,9 +59,9 @@ void main() {
 
   testWidgets('diff header wrap toggle switches horizontal scrolling',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a.dart","old_string":"foo()","new_string":"bar()"}')));
@@ -74,9 +74,9 @@ void main() {
 
   testWidgets('diff has a line-number toggle numbering the new side',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a.dart","old_string":"keep\\nbefore\\ntail","new_string":"keep\\nafter\\ntail"}')));
@@ -97,9 +97,9 @@ void main() {
 
   testWidgets('highlighted rows carry a green/red tint by add/del',
       (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a.dart","old_string":"x","new_string":"y"}')));
@@ -111,9 +111,9 @@ void main() {
   });
 
   testWidgets('disabling highlight drops the row tints', (tester) async {
-    await tester.pumpWidget(_wrap(const Item(
+    await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'Edit',
         toolInput:
             '{"file_path":"/a.dart","old_string":"x","new_string":"y"}')));

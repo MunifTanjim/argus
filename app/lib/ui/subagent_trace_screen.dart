@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/result.dart';
 import '../data/history_repository.dart';
 import '../data/transcript_repository.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../state/gateway.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
@@ -20,7 +20,7 @@ class SubagentTraceScreen extends ConsumerStatefulWidget {
   /// The transcript this subagent was spawned from; the trace's tool bodies are
   /// fetched against it scoped to the subagent ([ToolDetailRef.forAgent]).
   final ToolDetailRef parentRef;
-  final Item item;
+  final Entry item;
 
   @override
   ConsumerState<SubagentTraceScreen> createState() =>
@@ -29,7 +29,7 @@ class SubagentTraceScreen extends ConsumerStatefulWidget {
 
 class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
   TranscriptSubscription? _sub;
-  Future<Result<List<Chunk>>>? _histFuture;
+  Future<Result<List<Entry>>>? _histFuture;
 
   bool get _inline => widget.item.soleSubagent?.trace.isNotEmpty ?? false;
   String? get _agentId => widget.item.soleSubagent?.id;
@@ -82,7 +82,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
           top: false, // AppBar insets top; bottom clears the system nav bar.
           child: TranscriptFeed(
               detailRef: _traceRef,
-              chunks: widget.item.soleSubagent?.trace ?? const [],
+              entries: widget.item.soleSubagent?.trace ?? const [],
               stickToBottom: false), // inlined trace is complete; read top-down
         ),
       );
@@ -93,7 +93,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
         appBar: AppBar(title: Text(title), actions: [?shellMenuButton(context)]),
         body: SafeArea(
           top: false, // AppBar insets top; bottom clears the system nav bar.
-          child: FutureBuilder<Result<List<Chunk>>>(
+          child: FutureBuilder<Result<List<Entry>>>(
             future: _histFuture,
             builder: (context, snap) {
               final data = snap.data;
@@ -101,9 +101,9 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
                 return const Center(child: CircularProgressIndicator());
               }
               return switch (data) {
-                Ok(value: final chunks) => TranscriptFeed(
+                Ok(value: final entries) => TranscriptFeed(
                     detailRef: _traceRef,
-                    chunks: chunks,
+                    entries: entries,
                     stickToBottom: false),
                 Error(error: final e) =>
                   Center(child: Text('Failed to load trace: $e')),
@@ -134,7 +134,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
             if (conn != ConnState.connected)
               _Banner(state: conn, message: connError),
             Expanded(
-                child: TranscriptFeed(detailRef: _traceRef, chunks: st.chunks)),
+                child: TranscriptFeed(detailRef: _traceRef, entries: st.entries)),
           ],
         ),
       ),

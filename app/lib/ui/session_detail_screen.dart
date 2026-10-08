@@ -63,7 +63,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
   String get _sid => widget.session.id;
 
-  // Agent session id changes on /clear; pre-clear chunks must not leak into the
+  // Agent session id changes on /clear; pre-clear entries must not leak into the
   // post-clear store. Falls back to argus id before a hook sets one.
   String _keyFor(String? cid) =>
       (cid != null && cid.isNotEmpty) ? cid : _sid;
@@ -373,7 +373,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 _ when !st.loaded && st.error == null =>
                   const Center(child: CircularProgressIndicator()),
                 _ => TranscriptFeed(
-                    detailRef: ToolDetailRef.live(_sid), chunks: st.chunks),
+                    detailRef: ToolDetailRef.live(_sid), entries: st.entries),
               },
             ),
             if (live.interaction != null)

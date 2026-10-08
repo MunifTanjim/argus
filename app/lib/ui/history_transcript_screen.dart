@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
 import '../data/history_repository.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../models/history.dart';
 import '../state/tool_detail.dart';
 import 'resume_action.dart';
@@ -27,7 +27,7 @@ class HistoryTranscriptScreen extends ConsumerStatefulWidget {
 
 class _HistoryTranscriptScreenState
     extends ConsumerState<HistoryTranscriptScreen> {
-  List<Chunk>? _chunks;
+  List<Entry>? _entries;
   Object? _error;
 
   @override
@@ -46,7 +46,7 @@ class _HistoryTranscriptScreenState
     setState(() {
       switch (result) {
         case Ok(:final value):
-          _chunks = value;
+          _entries = value;
         case Error(:final error):
           _error = error;
       }
@@ -97,8 +97,8 @@ class _HistoryTranscriptScreenState
     if (error != null) {
       return Center(child: Text(error.toString()));
     }
-    final chunks = _chunks;
-    if (chunks == null) {
+    final entries = _entries;
+    if (entries == null) {
       return const Center(child: CircularProgressIndicator());
     }
     return TranscriptFeed(
@@ -107,7 +107,7 @@ class _HistoryTranscriptScreenState
         transcriptPath: widget.session.transcriptPath,
         agent: widget.session.agent,
       ),
-      chunks: chunks,
+      entries: entries,
       emptyText: 'Empty transcript.',
       stickToBottom: false, // static history reads top-down
     );

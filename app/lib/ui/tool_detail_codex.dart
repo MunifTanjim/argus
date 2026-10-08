@@ -2,14 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'code_block.dart';
 import 'theme.dart';
 
 const _red = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
-Map<String, dynamic> _input(Item it) {
+Map<String, dynamic> _input(Entry it) {
   try {
     return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
   } catch (_) {
@@ -57,7 +57,7 @@ Widget _kvDump(String s) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-Widget _resultSection(Item it, Widget? body) => body == null
+Widget _resultSection(Entry it, Widget? body) => body == null
     ? const SizedBox.shrink()
     : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
@@ -83,14 +83,14 @@ const _execOutputMarker = 'Output:\n';
   return (state: '${entry.key}', message: '${entry.value}');
 }
 
-String agentName(Item it, String id) {
+String agentName(Entry it, String id) {
   for (final s in it.subagents) {
     if (s.id == id && s.name.isNotEmpty) return s.name;
   }
   return id;
 }
 
-Widget codexExecCommandDetail(Item it) {
+Widget codexExecCommandDetail(Entry it) {
   final m = _input(it);
   final cmd = _str(m['cmd']);
   final workdir = _str(m['workdir']);
@@ -123,7 +123,7 @@ Widget codexExecCommandDetail(Item it) {
   ]);
 }
 
-Widget codexUpdatePlanDetail(Item it) {
+Widget codexUpdatePlanDetail(Entry it) {
   final plan = (_input(it)['plan'] as List?) ?? const [];
   if (plan.isEmpty) return _generic(it);
   final rows = <Widget>[];
@@ -143,7 +143,7 @@ Widget codexUpdatePlanDetail(Item it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-Widget codexWebSearchDetail(Item it) {
+Widget codexWebSearchDetail(Entry it) {
   final m = _input(it);
   final query = _str(m['query']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -155,7 +155,7 @@ Widget codexWebSearchDetail(Item it) {
   ]);
 }
 
-Widget codexWaitAgentDetail(Item it) {
+Widget codexWaitAgentDetail(Entry it) {
   final m = _input(it);
   final targets = ((m['targets'] as List?) ?? const []).map((e) => '$e').toList();
   final timeoutMs = (m['timeout_ms'] as num?)?.toInt() ?? 0;
@@ -194,7 +194,7 @@ Widget codexWaitAgentDetail(Item it) {
   ]);
 }
 
-Widget codexCloseAgentDetail(Item it) {
+Widget codexCloseAgentDetail(Entry it) {
   final target = _str(_input(it)['target']);
   final head = <Widget>[
     if (target.isNotEmpty)
@@ -250,7 +250,7 @@ Object? _resultField(String? result, String key) {
 
 String _str(Object? v) => v is String ? v : '';
 
-Widget _generic(Item it) =>
+Widget _generic(Entry it) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if ((it.toolInput ?? '').isNotEmpty) ...[
         _label('Input'),

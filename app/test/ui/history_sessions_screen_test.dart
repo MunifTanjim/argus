@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/history_repository.dart';
 import 'package:argus/models/history.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/history_sessions_screen.dart';
 
 class _FakeHistoryRepository implements HistoryRepository {
@@ -30,7 +30,7 @@ class _FakeHistoryRepository implements HistoryRepository {
   Future<Result<List<HistoryProject>>> projects() async => const Result.ok([]);
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,
@@ -53,7 +53,7 @@ class _ThrowingHistoryRepository implements HistoryRepository {
   Future<Result<List<HistoryProject>>> projects() async => const Result.ok([]);
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,

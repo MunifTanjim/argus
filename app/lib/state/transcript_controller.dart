@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../transport/jsonrpc.dart';
 import '../transport/gateway_client.dart';
 import 'transcript.dart';
@@ -15,7 +15,7 @@ final transcriptProvider =
         (String _) => TranscriptNotifier());
 
 /// Opens (or re-opens) a subscription and seeds the store with the catch-up
-/// delta. Sends have_chunks = current cached length so the server can send a
+/// delta. Sends have_entries = current cached length so the server can send a
 /// minimal catch-up after a reconnect.
 Future<void> subscribeTranscript(
   GatewayClient client,
@@ -30,7 +30,7 @@ Future<void> subscribeTranscript(
       'sub_id': sub,
       'session_id': sessionId,
       if (agentId != null && agentId.isNotEmpty) 'agent_id': agentId,
-      'have_chunks': store.chunkCount,
+      'have_entries': store.entryCount,
     });
     store.applyDelta(TranscriptDelta.fromJson(result as Map<String, dynamic>));
   } catch (e) {
