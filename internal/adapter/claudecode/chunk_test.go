@@ -1,7 +1,6 @@
 package claudecode
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,14 +50,14 @@ func TestReadTranscriptViewShellChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	var shell *Chunk
-	for i := range view.Chunks {
-		if view.Chunks[i].Kind == ChunkShell {
-			shell = &view.Chunks[i]
+	var shell *Entry
+	for i := range view.Entries {
+		if view.Entries[i].Kind == EntryShell {
+			shell = &view.Entries[i]
 		}
 	}
 	if shell == nil {
-		t.Fatalf("no shell chunk found in %+v", view.Chunks)
+		t.Fatalf("no shell entry found in %+v", view.Entries)
 	}
 	if shell.Text != "echo hi" {
 		t.Errorf("Text = %q, want the command %q", shell.Text, "echo hi")
@@ -81,19 +80,16 @@ func TestReadTranscriptViewSkillChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	if len(view.Chunks) != 1 || view.Chunks[0].Kind != ChunkUser {
-		t.Fatalf("want 1 user chunk, got %+v", view.Chunks)
+	if len(view.Entries) != 2 || view.Entries[0].Kind != EntryUser {
+		t.Fatalf("want user + skill entries, got %+v", view.Entries)
 	}
-	user := view.Chunks[0]
+	user := view.Entries[0]
 	if user.Text != "/superpowers:brainstorming" {
 		t.Errorf("Text = %q, want the user's slash command", user.Text)
 	}
-	if len(user.Items) != 1 {
-		t.Fatalf("want 1 skill item in user chunk, got %d items", len(user.Items))
-	}
-	it := user.Items[0]
-	if it.Kind != ItemSkill {
-		t.Errorf("Kind = %q, want ItemSkill", it.Kind)
+	it := view.Entries[1]
+	if it.Kind != EntrySkill {
+		t.Errorf("Kind = %q, want EntrySkill", it.Kind)
 	}
 	if it.InputPreview != "superpowers:brainstorming" {
 		t.Errorf("InputPreview = %q, want the skill identifier", it.InputPreview)
@@ -109,40 +105,44 @@ func TestReadTranscriptViewGrouping(t *testing.T) {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
 
-	var user, ai *Chunk
-	for i := range view.Chunks {
-		switch view.Chunks[i].Kind {
-		case ChunkUser:
+	var user, end *Entry
+	var lastText *Entry
+	for i := range view.Entries {
+		e := &view.Entries[i]
+		switch e.Kind {
+		case EntryUser:
 			if user == nil {
-				user = &view.Chunks[i]
+				user = e
 			}
-		case ChunkAI:
-			if ai == nil {
-				ai = &view.Chunks[i]
+		case EntryTurnEnd:
+			if end == nil {
+				end = e
 			}
+		case EntryText:
+			lastText = e
 		}
 	}
 	if user == nil || user.Text != "map the code" {
-		t.Fatalf("user chunk = %+v", user)
+		t.Fatalf("user entry = %+v", user)
 	}
-	if ai == nil {
-		t.Fatalf("no AI chunk in %+v", view.Chunks)
+	if end == nil {
+		t.Fatalf("no turn_end entry in %+v", view.Entries)
 	}
-	// a1 + a2 merge into one AI chunk (the tool-result-only turn doesn't split it).
-	if ai.ModelName != "Opus 4.8" {
-		t.Errorf("model = %q", ai.ModelName)
+	// a1 + a2 merge into one turn (the tool-result-only turn doesn't split it).
+	if end.ModelName != "Opus 4.8" {
+		t.Errorf("model = %q", end.ModelName)
 	}
-	if ai.Thinking != 1 || ai.ToolCount != 1 {
-		t.Errorf("stats: thinking=%d toolCount=%d", ai.Thinking, ai.ToolCount)
+	if end.Thinking != 1 || end.ToolCount != 1 {
+		t.Errorf("stats: thinking=%d toolCount=%d", end.Thinking, end.ToolCount)
 	}
-	if ai.Usage.Output == 0 || ai.Usage.Context() == 0 {
-		t.Errorf("usage not mapped: %+v", ai.Usage)
+	if end.Usage.Output == 0 || end.Usage.Context() == 0 {
+		t.Errorf("usage not mapped: %+v", end.Usage)
 	}
-	if !ai.HasContext || ai.ContextPct <= 0 {
-		t.Errorf("context delta not populated: has=%v pct=%v", ai.HasContext, ai.ContextPct)
+	if !end.HasContext || end.ContextPct <= 0 {
+		t.Errorf("context delta not populated: has=%v pct=%v", end.HasContext, end.ContextPct)
 	}
-	if lo, ok := ai.LastOutput(); !ok || lo.Kind != ItemText || lo.Text != "all done" {
-		t.Errorf("last output = %+v (ok=%v)", lo, ok)
+	if lastText == nil || lastText.Text != "all done" {
+		t.Errorf("last text entry = %+v", lastText)
 	}
 }
 
@@ -152,16 +152,14 @@ func TestReadTranscriptViewSubagentTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	var sub *Item
-	for ci := range view.Chunks {
-		for ii := range view.Chunks[ci].Items {
-			if view.Chunks[ci].Items[ii].Kind == ItemSubagent {
-				sub = &view.Chunks[ci].Items[ii]
-			}
+	var sub *Entry
+	for i := range view.Entries {
+		if view.Entries[i].Kind == EntrySubagent {
+			sub = &view.Entries[i]
 		}
 	}
 	if sub == nil {
-		t.Fatalf("no subagent item found in %+v", view.Chunks)
+		t.Fatalf("no subagent entry found in %+v", view.Entries)
 	}
 	if len(sub.Subagents) != 1 {
 		t.Fatalf("want 1 subagent, got %d", len(sub.Subagents))
@@ -173,53 +171,29 @@ func TestReadTranscriptViewSubagentTrace(t *testing.T) {
 	if sa.ID != "abc123" {
 		t.Errorf("agent id = %q, want abc123", sa.ID)
 	}
-	// Lazy contract: the item is drillable but its trace is NOT inlined.
+	// Lazy contract: the entry is drillable but its trace is NOT inlined.
 	if !sa.HasTrace {
 		t.Errorf("subagent item should be drillable (HasTrace)")
 	}
 	if len(sa.Trace) != 0 {
-		t.Errorf("trace should not be inlined, got %d chunks", len(sa.Trace))
+		t.Errorf("trace should not be inlined, got %d entries", len(sa.Trace))
 	}
 	// The trace is fetched on demand via ReadSubagentView.
 	tv, ok, err := ReadSubagentView(session, "abc123")
 	if err != nil || !ok {
 		t.Fatalf("ReadSubagentView(abc123) ok=%v err=%v", ok, err)
 	}
-	if len(tv.Chunks) == 0 {
+	if len(tv.Entries) == 0 {
 		t.Fatalf("fetched subagent trace is empty")
 	}
-	last := tv.Chunks[len(tv.Chunks)-1]
-	if last.Kind != ChunkAI || last.Text == "" {
-		if lo, ok := last.LastOutput(); !ok || lo.Text != "mapped it" {
-			t.Errorf("unexpected trace tail: %+v (lastOutput ok=%v)", last, ok)
+	var lastText string
+	for _, e := range tv.Entries {
+		if e.Kind == EntryText {
+			lastText = e.Text
 		}
 	}
-}
-
-func TestItemMarshalStripsHeavyBodies(t *testing.T) {
-	it := Item{
-		ID: "i1", Kind: ItemTool, ToolName: "Read", ToolID: "T9",
-		ToolInput: `{"file_path":"/big/file"}`, InputPreview: "file", Result: "lots of content", ResultIsError: true,
-	}
-	b, err := json.Marshal(it)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	s := string(b)
-	for _, dropped := range []string{"toolInput", "lots of content", "/big/file"} {
-		if strings.Contains(s, dropped) {
-			t.Errorf("expected %q stripped, got %s", dropped, s)
-		}
-	}
-	// The light fields the timeline needs (and the addressing key) survive.
-	for _, kept := range []string{`"toolId":"T9"`, `"toolName":"Read"`, `"inputPreview":"file"`, `"resultIsError":true`} {
-		if !strings.Contains(s, kept) {
-			t.Errorf("expected %q retained, got %s", kept, s)
-		}
-	}
-	// The in-memory item is untouched (node-side lookups still see the bodies).
-	if it.ToolInput == "" || it.Result == "" {
-		t.Errorf("MarshalJSON mutated the source item: %+v", it)
+	if lastText != "mapped it" {
+		t.Errorf("unexpected trace tail: last text = %q in %+v", lastText, tv.Entries)
 	}
 }
 
@@ -247,37 +221,5 @@ func TestFindToolDetail(t *testing.T) {
 	// Unknown subagent → not found (resolved file doesn't exist).
 	if _, ok, err := FindToolDetail(path, "missing", "T1"); ok || err != nil {
 		t.Errorf("FindToolDetail(agent=missing) ok=%v err=%v, want false/nil", ok, err)
-	}
-}
-
-func TestChunkMarshalStampsPreviewItemID(t *testing.T) {
-	c := Chunk{
-		ID:   "c1",
-		Kind: ChunkAI,
-		Items: []Item{
-			{ID: "i1", Kind: ItemText, Text: "first"},
-			{ID: "i2", Kind: ItemTool, ToolName: "Bash"},
-			{ID: "i3", Kind: ItemText, Text: "final answer"},
-		},
-	}
-	b, err := json.Marshal(c)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var got struct {
-		PreviewItemID string `json:"previewItemId"`
-	}
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got.PreviewItemID != "i3" {
-		t.Fatalf("previewItemId = %q, want i3", got.PreviewItemID)
-	}
-
-	// A chunk with no preview-worthy items omits the field.
-	empty := Chunk{ID: "c2", Kind: ChunkUser, Text: "hi"}
-	b2, _ := json.Marshal(empty)
-	if strings.Contains(string(b2), "previewItemId") {
-		t.Fatalf("expected previewItemId omitted, got %s", b2)
 	}
 }

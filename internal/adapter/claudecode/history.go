@@ -127,7 +127,7 @@ func ReadHistoryTranscript(path string) (TranscriptView, error) {
 	if err != nil {
 		return TranscriptView{}, err
 	}
-	return ReadTranscriptView(clean)
+	return readTranscriptView(clean, true)
 }
 
 // ReadHistorySubagentView is the history counterpart of ReadSubagentView: it
@@ -137,10 +137,10 @@ func ReadHistorySubagentView(path, agentID string) (TranscriptView, bool, error)
 	if err != nil {
 		return TranscriptView{}, false, err
 	}
-	return ReadSubagentView(clean, agentID)
+	return readSubagentView(clean, agentID, true)
 }
 
-// FindHistoryToolDetail returns one tool item's full body (by tool_use id) from a
+// FindHistoryToolDetail returns one tool entry's full body (by tool_use id) from a
 // past session's transcript, after the projects-root path check.
 func FindHistoryToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
 	clean, err := safeProjectsPath(path)

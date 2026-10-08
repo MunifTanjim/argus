@@ -8,7 +8,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 )
 
-func TestFoldItem_SkillToolBecomesItemSkill(t *testing.T) {
+func TestFoldItem_SkillToolBecomesEntrySkill(t *testing.T) {
 	pit := parser.DisplayItem{
 		Type:        parser.ItemToolCall,
 		ToolName:    "Skill",
@@ -17,12 +17,12 @@ func TestFoldItem_SkillToolBecomesItemSkill(t *testing.T) {
 		ToolResult:  "# Systematic Debugging\n\nFind root cause first.",
 	}
 
-	it, ok := foldItem(pit, nil, nil, 0)
+	it, ok := foldItem(pit, nil, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Skill item")
 	}
-	if it.Kind != ItemSkill {
-		t.Errorf("Kind = %q, want ItemSkill (not a subagent or plain tool)", it.Kind)
+	if it.Kind != EntrySkill {
+		t.Errorf("Kind = %q, want EntrySkill (not a subagent or plain tool)", it.Kind)
 	}
 	if it.ToolName != "Skill" {
 		t.Errorf("ToolName = %q, want Skill", it.ToolName)
@@ -46,12 +46,12 @@ func TestFoldItem_TaskToolStaysSubagent(t *testing.T) {
 		SubagentType: "Explore",
 	}
 
-	it, ok := foldItem(pit, nil, nil, 0)
+	it, ok := foldItem(pit, nil, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Task item")
 	}
-	if it.Kind != ItemSubagent {
-		t.Errorf("Kind = %q, want ItemSubagent", it.Kind)
+	if it.Kind != EntrySubagent {
+		t.Errorf("Kind = %q, want EntrySubagent", it.Kind)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestFoldItem_SubagentCarriesSpawnName(t *testing.T) {
 		TeamMemberName: "codex-comments",
 	}
 
-	it, ok := foldItem(pit, nil, nil, 0)
+	it, ok := foldItem(pit, nil, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Agent item")
 	}
@@ -84,12 +84,12 @@ func TestFoldItem_TeammateMessageBecomesTeammateSubagent(t *testing.T) {
 		TeammateColor: "red",
 	}
 
-	it, ok := foldItem(pit, nil, nil, 0)
+	it, ok := foldItem(pit, nil, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the teammate item")
 	}
 	if !it.IsTeammate() {
-		t.Fatalf("Kind=%q Subagents=%+v, want a teammate ItemSubagent", it.Kind, it.Subagents)
+		t.Fatalf("Kind=%q Subagents=%+v, want a teammate EntrySubagent", it.Kind, it.Subagents)
 	}
 	s := it.Subagents[0]
 	if s.Name != "md-docs" || s.Color != "red" {
@@ -111,7 +111,7 @@ func TestFoldItem_TeammateIdleCarriesFlag(t *testing.T) {
 		TeammateIdle:  true,
 	}
 
-	it, ok := foldItem(pit, nil, nil, 0)
+	it, ok := foldItem(pit, nil, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the idle teammate item")
 	}

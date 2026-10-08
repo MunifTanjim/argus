@@ -5,14 +5,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 )
 
 func TestSummarizeChunks(t *testing.T) {
-	chunks := []Chunk{
-		{Kind: ChunkUser, Text: "Revamp the list\nmore detail", Timestamp: "2026-06-14T10:00:00Z"},
-		{Kind: ChunkAI, ModelName: "Opus 4.8", ModelColor: "#d3869b", HasContext: true, ContextPct: 42,
-			Usage: Usage{Input: 100000, CacheRead: 28000}, Timestamp: "2026-06-14T10:00:05Z"},
+	chunks := []parser.Chunk{
+		{Type: parser.UserChunk, UserText: "Revamp the list\nmore detail", Timestamp: time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)},
+		{Type: parser.AIChunk, Model: "claude-opus-4-8", Timestamp: time.Date(2026, 6, 14, 10, 0, 5, 0, time.UTC),
+			Usage: parser.Usage{InputTokens: 100000, CacheReadTokens: 28000},
+			Cycles: []parser.InferenceCycle{{Model: "claude-opus-4-8",
+				Usage: parser.Usage{InputTokens: 100000, CacheReadTokens: 28000}}}},
 	}
+	wantPct := parser.ComputeContextDelta(chunks[1].Cycles).LastUsagePct
 	s := summarizeChunks(chunks)
 	if s == nil {
 		t.Fatal("expected a summary")
@@ -20,7 +26,7 @@ func TestSummarizeChunks(t *testing.T) {
 	if s.ModelName != "Opus 4.8" {
 		t.Errorf("model = %q", s.ModelName)
 	}
-	if !s.HasContext || s.ContextPct != 42 {
+	if !s.HasContext || s.ContextPct != wantPct || wantPct <= 0 {
 		t.Errorf("context = %v/%v", s.HasContext, s.ContextPct)
 	}
 	if s.Tokens != 128000 { // Usage.Context() = input + cacheRead
@@ -38,7 +44,7 @@ func TestSummarizeChunksEmpty(t *testing.T) {
 	if s := summarizeChunks(nil); s != nil {
 		t.Errorf("nil chunks should yield nil summary, got %+v", s)
 	}
-	if s := summarizeChunks([]Chunk{{Kind: ChunkAI}}); s != nil {
+	if s := summarizeChunks([]parser.Chunk{{Type: parser.AIChunk}}); s != nil {
 		t.Errorf("a contentless chunk should yield nil summary, got %+v", s)
 	}
 }
