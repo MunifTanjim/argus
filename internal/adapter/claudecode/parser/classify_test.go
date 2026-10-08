@@ -1162,3 +1162,59 @@ func TestClassify_QueuedNonPromptDropped(t *testing.T) {
 		}
 	}
 }
+
+func withPeer(from, name, body string, handback bool) func(*parser.Entry) {
+	return func(e *parser.Entry) {
+		e.IsMeta = true
+		e.Origin.Kind = "peer"
+		e.Origin.From = from
+		e.Origin.Name = name
+		e.Origin.Body = body
+		e.Origin.Handback = handback
+	}
+}
+
+func TestClassify_PeerHandbackIsTeammateMessage(t *testing.T) {
+	body := "[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n" +
+		"  ## Findings\n  \n  - one\n    - nested"
+	e := makeEntry("user", "u1", "2026-10-07T16:00:00.000Z",
+		json.RawMessage(`"Another Claude session sent a message:\n<agent-message from=\"a1\">..."`),
+		withPeer("a1", "Explore", body, true))
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("peer hand-back should be classified")
+	}
+	tm, is := msg.(parser.TeammateMsg)
+	if !is {
+		t.Fatalf("got %T, want TeammateMsg", msg)
+	}
+	if tm.TeammateID != "Explore" {
+		t.Errorf("TeammateID = %q, want Explore", tm.TeammateID)
+	}
+	if want := "## Findings\n\n- one\n  - nested"; tm.Text != want {
+		t.Errorf("Text = %q, want %q (preamble and indent stripped)", tm.Text, want)
+	}
+}
+
+func TestClassify_PeerMessageWithoutBodyUsesContent(t *testing.T) {
+	e := makeEntry("user", "u1", "2026-10-07T16:00:00.000Z",
+		json.RawMessage(`[{"type":"text","text":"Another Claude session sent a message:\nsay banana\n\n"}]`),
+		withPeer("unknown", "", "", false))
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("peer message should be classified")
+	}
+	tm := msg.(parser.TeammateMsg)
+	if tm.Text != "say banana" || tm.TeammateID != "agent" {
+		t.Errorf("TeammateMsg = %+v, want text 'say banana' from 'agent'", tm)
+	}
+}
+
+func TestClassify_PeerMessageUsesFromWhenNoName(t *testing.T) {
+	e := makeEntry("user", "u1", "2026-10-07T16:00:00.000Z", json.RawMessage(`null`),
+		withPeer("audit-1", "", "PR 1 — 0 findings", false))
+	msg, _ := parser.Classify(e)
+	if tm, ok := msg.(parser.TeammateMsg); !ok || tm.TeammateID != "audit-1" || tm.Text != "PR 1 — 0 findings" {
+		t.Errorf("got %#v", msg)
+	}
+}

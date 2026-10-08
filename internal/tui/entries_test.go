@@ -373,3 +373,24 @@ func TestFoldMarkerClickOnYouTogglesLongPrompt(t *testing.T) {
 		t.Fatalf("second click on You: expanded=%v view=%v, want collapsed in the stream", tr.transcript.expanded["0"], tr.historyView)
 	}
 }
+
+func TestLongAgentMessageFolds(t *testing.T) {
+	long := transcript.Entry{ID: "1.0", Kind: transcript.EntrySubagent, Text: strings.Repeat("- finding\n", 20),
+		Subagents: []transcript.Subagent{{Name: "Explore", IsTeammate: true}}}
+	short := long
+	short.Text = "all good"
+	m := liveWith([]transcript.Entry{long, short})
+	v := tvOf(&m)
+	if !v.entryExpandable(long) || v.entryExpandable(short) {
+		t.Fatalf("expandable: long=%v short=%v, want true/false", v.entryExpandable(long), v.entryExpandable(short))
+	}
+	w := m.transcriptWidth()
+	col := xansi.Strip(v.entryBlock(long, false, false, false, false, w))
+	if !strings.Contains(col, "Explore") || !strings.Contains(col, "lines hidden") || strings.Count(col, "finding") >= 20 {
+		t.Errorf("collapsed agent message:\n%s", col)
+	}
+	exp := xansi.Strip(v.entryBlock(long, true, false, false, false, w))
+	if strings.Count(exp, "finding") != 20 || strings.Contains(exp, "lines hidden") {
+		t.Errorf("expanded agent message:\n%s", exp)
+	}
+}

@@ -101,7 +101,12 @@ func (m tview) entryExpandable(e transcript.Entry) bool {
 	case transcript.EntryTool, transcript.EntrySkill:
 		return true
 	case transcript.EntrySubagent:
-		return !e.IsTeammate()
+		if s, ok := soleSubagent(e); ok && s.IsTeammate {
+			// A long agent message (e.g. a subagent's report) folds like a prompt.
+			body := m.c.m.renderMD(e.Text, teammateWrapWidth(m.c.m.transcriptWidth()))
+			return !s.Idle && strings.TrimSpace(e.Text) != "" && strings.Count(body, "\n")+1 > maxCollapsedLines
+		}
+		return true
 	case transcript.EntryUser:
 		return userLineCount(e.Text, m.c.m.transcriptWidth()) > maxCollapsedLines
 	case transcript.EntrySystem:
@@ -275,7 +280,7 @@ func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) str
 		return renderCompact(e, iw)
 	case transcript.EntrySubagent:
 		if s, ok := soleSubagent(e); ok && s.IsTeammate {
-			return m.teammateRow(e, s, iw)
+			return m.teammateRow(e, s, expanded || full, iw)
 		}
 	}
 	return m.callRow(e, expanded, full, iw)
@@ -441,7 +446,12 @@ func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) string {
 	return out
 }
 
-func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, iw int) string {
+// teammateWrapWidth is the markdown wrap width of an agent message's body at a
+// transcript width: the cursor gutter and the body's 2-col indent come off.
+func teammateWrapWidth(width int) int { return max(width-detailGutter-2, 10) }
+
+// teammateRow renders an agent message: a teammate's, or a subagent's report.
+func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, expanded bool, iw int) string {
 	head := Icon.Teammate.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color)).Render(s.Name)
 	if s.Idle {
 		return head + " " + StyleSecondary.Render("is done")
@@ -449,7 +459,13 @@ func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, iw int) st
 	if strings.TrimSpace(e.Text) == "" {
 		return head
 	}
-	return head + "\n" + indentBlock(m.c.m.renderMD(e.Text, max(iw-2, 10)), "  ")
+	body := m.c.m.renderMD(e.Text, max(iw-2, 10))
+	if !expanded {
+		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
+			body = t + "\n" + hiddenHint(hidden)
+		}
+	}
+	return head + "\n" + indentBlock(body, "  ")
 }
 
 func renderCompact(e transcript.Entry, width int) string {

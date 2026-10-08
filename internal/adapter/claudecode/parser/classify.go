@@ -160,6 +160,15 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 	}
 
+	// A peer agent's message (a subagent's hand-back report, or another session
+	// messaging this one) lands mid-turn like a teammate message.
+	if e.Type == "user" && e.Origin.Kind == "peer" {
+		if text := peerText(e, contentStr); text != "" {
+			return TeammateMsg{Timestamp: ts, Text: text, TeammateID: peerName(e)}, true
+		}
+		return nil, false
+	}
+
 	// User message: type=user, not isMeta, real content, not system output.
 	if e.Type == "user" && !e.IsMeta {
 		trimmed := strings.TrimSpace(contentStr)
@@ -219,4 +228,35 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		IsMeta:    true,
 		Blocks:    blocks,
 	}, true
+}
+
+// peerPreamble is the harness text ahead of a subagent's hand-back report; the
+// report lines after it are indented by two spaces.
+const peerPreamble = "The report follows:\n"
+
+func peerText(e Entry, content string) string {
+	body := e.Origin.Body
+	if body == "" {
+		body = strings.TrimPrefix(strings.TrimSpace(content), "Another Claude session sent a message:")
+	} else if e.Origin.Handback {
+		if i := strings.Index(body, peerPreamble); i >= 0 {
+			lines := strings.Split(body[i+len(peerPreamble):], "\n")
+			for j, l := range lines {
+				lines[j] = strings.TrimPrefix(l, "  ")
+			}
+			body = strings.Join(lines, "\n")
+		}
+	}
+	return strings.TrimSpace(body)
+}
+
+func peerName(e Entry) string {
+	switch {
+	case e.Origin.Name != "":
+		return e.Origin.Name
+	case e.Origin.From != "" && e.Origin.From != "unknown":
+		return e.Origin.From
+	default:
+		return "agent"
+	}
 }
