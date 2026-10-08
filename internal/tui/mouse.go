@@ -108,7 +108,7 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	t, hit := a.target(ms.X, ms.Y)
-	if ms.Button == tea.MouseRight && hit && t.kind != hitRow && t.kind != hitHeader {
+	if ms.Button == tea.MouseRight && hit && t.kind != hitRow {
 		return m, nil
 	}
 	focused := m.focused == k

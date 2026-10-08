@@ -7,8 +7,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func agyItem(name, input, result string) transcript.Item {
-	return transcript.Item{Kind: transcript.ItemTool, ToolName: name, ToolInput: input, Result: result}
+func agyItem(name, input, result string) transcript.Entry {
+	return transcript.Entry{Kind: transcript.EntryTool, ToolName: name, ToolInput: input, Result: result}
 }
 
 func assertContains(t *testing.T, out string, wants ...string) {

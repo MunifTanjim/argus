@@ -125,8 +125,7 @@ var Icon iconSet
 // Plain glyphs -- used as raw strings (never styled via StyledIcon).
 const (
 	GlyphHRule            = "─"      // box drawing horizontal (compact separators)
-	GlyphAccentBar        = "┃"      // detail item gutter (unfocused)
-	GlyphAccentBarFocused = "▌"      // detail item gutter (focused)
+	GlyphAccentBarFocused = "▌"      // cursor gutter
 	GlyphBeadFull         = "\uEABC" // nf-cod-circle (activity indicator bead)
 )
 

@@ -16,16 +16,16 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// Transcript viewer: one card per chunk, chunk-level cursor. Selection/expansion
-// are keyed by stable chunk id so they survive the 1s refresh. Full per-item
-// bodies (diffs, tool results) live in the detail drill-down (detail.go).
+// Transcript viewer: a flat stream of entries with an entry-level cursor.
+// Selection/expansion are keyed by stable entry id so they survive the 1s
+// refresh. Full per-entry bodies live in the detail drill-down (detail.go).
 
 const (
-	maxContentWidth   = 160 // cap card column width on very wide terminals
+	maxContentWidth   = 160 // cap content column width on very wide terminals
 	maxCollapsedLines = 12  // lines shown for a collapsed text preview
 )
 
-// containerWidth is the width of the card column, centered within the terminal.
+// containerWidth is the width of the content column, centered within the terminal.
 func (m model) containerWidth() int { return containerWidthOf(m.bodyWidth()) }
 
 func containerWidthOf(w int) int {
@@ -38,12 +38,12 @@ func containerWidthOf(w int) int {
 	return w
 }
 
-// contentPadX is the right-edge padding for session content (transcript cards and
+// contentPadX is the right-edge padding for session content (transcript entries and
 // the dock body). The left edge carries the cursor-marker column instead, so
 // content reads flush-left with a marker + 1-cell gap.
 const contentPadX = 2
 
-// transcriptWidth is the card column width: the container minus the right padding.
+// transcriptWidth is the content column width: the container minus the right padding.
 // centerBlock renders it against the full container, so on normal terminals the
 // left gutter is 0 (marker at the edge) and the right gutter is contentPadX.
 func (m model) transcriptWidth() int { return max(20, m.containerWidth()-contentPadX) }
@@ -82,7 +82,7 @@ func (m model) renderMD(text string, width int) string {
 // glamourStyleConfig returns the markdown style for the detected background.
 // Nils Document.Color so body text inherits the terminal foreground (the bundled
 // dark style hardcodes a gray invisible on light terminals); zeroes the margin
-// so cards aren't over-indented.
+// so entries aren't over-indented.
 func glamourStyleConfig(hasDark bool) ansi.StyleConfig {
 	cfg := styles.LightStyleConfig
 	if hasDark {
@@ -94,66 +94,54 @@ func glamourStyleConfig(hasDark bool) ansi.StyleConfig {
 	return cfg
 }
 
-func (m model) chunkExpandable(c transcript.Chunk) bool {
-	switch c.Kind {
-	case transcript.ChunkAI:
-		return len(c.Items) > 0
-	case transcript.ChunkUser:
-		if len(c.Items) > 0 {
-			return true
-		}
-		// Count wrapped display lines, not source lines.
-		return len(strings.Split(m.renderMD(c.Text, userBubbleInner(m.transcriptWidth())), "\n")) > maxCollapsedLines
-	case transcript.ChunkSystem:
-		return c.Detail != ""
-	case transcript.ChunkShell:
-		return c.Detail != "" || strings.Count(c.Text, "\n") >= maxCollapsedLines
+func (m tview) entryExpandable(e transcript.Entry) bool {
+	switch e.Kind {
+	case transcript.EntryThinking:
+		return strings.TrimSpace(e.Text) != ""
+	case transcript.EntryTool, transcript.EntrySkill:
+		return true
+	case transcript.EntrySubagent:
+		return !e.IsTeammate()
+	case transcript.EntryUser:
+		return userLineCount(e.Text, m.c.m.transcriptWidth()) > maxCollapsedLines
+	case transcript.EntrySystem:
+		return e.Detail != ""
+	case transcript.EntryShell:
+		return e.Detail != "" || strings.Count(e.Text, "\n") >= maxCollapsedLines
 	default:
 		return false
 	}
 }
 
-func (m tview) chunkExpanded(c transcript.Chunk) bool {
-	if v, ok := m.transcript.expanded[c.ID]; ok {
-		return v
-	}
-	return false
+func (m tview) entryExpanded(e transcript.Entry) bool {
+	return m.transcript.expanded[e.ID]
 }
 
 func (m tview) setExpanded(i int, on bool) {
-	if i < 0 || i >= len(m.transcript.chunks) {
+	if i < 0 || i >= len(m.transcript.entries) {
 		return
 	}
-	c := m.transcript.chunks[i]
-	if !m.c.m.chunkExpandable(c) {
+	e := m.transcript.entries[i]
+	if !m.entryExpandable(e) {
 		return
 	}
-	m.transcript.expanded[c.ID] = on
+	m.transcript.expanded[e.ID] = on
 }
 
-// currentChunkID returns the id of the selected chunk (for cursor preservation).
-func (m tview) currentChunkID() string {
-	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.chunks) {
-		return m.transcript.chunks[m.transcript.cursor].ID
+// currentEntryID returns the id of the selected entry (for cursor preservation).
+// cursorOnLast reports whether the cursor is on the last entry.
+func (m tview) cursorOnLast() bool {
+	return len(m.transcript.entries) > 0 && m.transcript.cursor == len(m.transcript.entries)-1
+}
+
+func (m tview) currentEntryID() string {
+	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.entries) {
+		return m.transcript.entries[m.transcript.cursor].ID
 	}
 	return ""
 }
 
 // -- Rendering helpers --------------------------------------------------------
-
-func chevron(expanded bool) string {
-	if expanded {
-		return Icon.Expanded.Render()
-	}
-	return Icon.Collapsed.Render()
-}
-
-func selIndicator(selected bool) string {
-	if selected {
-		return Icon.Selected.Render() + " "
-	}
-	return "  "
-}
 
 // spaceBetween lays out left and right with gap-fill spacing to span width.
 func spaceBetween(left, right string, width int) string {
@@ -229,430 +217,311 @@ func truncateLines(content string, maxLines int) (string, int) {
 	return strings.Join(lines[:maxLines], "\n"), len(lines) - maxLines
 }
 
-func hiddenHint(n int) string {
-	return StyleDim.Render(fmt.Sprintf("%s (%d lines hidden)", Icon.Ellipsis.Glyph, n))
+func hiddenText(n int) string { return fmt.Sprintf("%s (%d lines hidden)", Icon.Ellipsis.Glyph, n) }
+
+func hiddenHint(n int) string { return StyleDim.Render(hiddenText(n)) }
+
+// -- Entry rendering ----------------------------------------------------------
+
+// gutterBar is the cursor column every entry block starts with: an accent bar
+// on the selected entry (dim when the transcript is not focused), else blank.
+func gutterBar(selected, focused bool) string {
+	if !selected {
+		return strings.Repeat(" ", detailGutter)
+	}
+	c := ColorBorder
+	if focused {
+		c = ColorAccent
+	}
+	return lipgloss.NewStyle().Foreground(c).Render(GlyphAccentBarFocused) + " "
 }
 
-// -- Chunk rendering ----------------------------------------------------------
-
-// renderChunk renders one chunk to a styled multi-line block (no centering). The
-// cursor card keeps its selection indicator regardless of focus but only takes
-// the accent border when the history region is focused.
-func (m tview) renderChunk(i int, selected bool) string {
-	c := m.transcript.chunks[i]
-	accent := selected && m.c.m.historyFocused()
-	container := m.c.m.transcriptWidth()
-	switch c.Kind {
-	case transcript.ChunkAI:
-		return m.renderAICard(c, container, selected, accent)
-	case transcript.ChunkUser:
-		return m.renderUserCard(c, container, selected, accent)
-	case transcript.ChunkShell:
-		return m.renderShellCard(c, container, selected, accent)
-	case transcript.ChunkCompact:
-		return renderCompact(c, container)
-	default:
-		return m.renderSystem(c, container, selected, accent)
-	}
+// renderEntry renders entry i of the main stream (no centering).
+func (m tview) renderEntry(i int, selected bool) string {
+	e := m.transcript.entries[i]
+	return m.entryBlock(e, m.entryExpanded(e), selected, m.c.m.historyFocused(), false, m.c.m.transcriptWidth())
 }
 
-func (m tview) renderAICard(c transcript.Chunk, container int, selected, accent bool) string {
-	fraction := 3 * container / 4
-	if container < maxContentWidth {
-		fraction = 7 * container / 8
+// entryBlock renders one entry, gutter included, at width. full shows a tool's
+// whole body (the focused detail frame) instead of the first lines.
+func (m tview) entryBlock(e transcript.Entry, expanded, selected, focused, full bool, width int) string {
+	iw := max(width-detailGutter, 10)
+	var body string
+	if e.Kind == transcript.EntryUser {
+		body = userBand(e, expanded, iw)
+	} else {
+		body = m.entryContent(e, expanded, full, iw)
 	}
-	cardW := fraction - 4
-	if cardW < 24 {
-		cardW = 24
-	}
-	cw := max(cardW-6, 20)
-
-	sel := selIndicator(selected)
-	header := sel + m.aiHeader(c, cardW)
-	body := m.aiBody(c, cw)
-
-	borderColor := ColorBorder
-	if accent {
-		borderColor = ColorAccent
-	}
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(cardW).
-		Padding(0, 2).
-		Render(body)
-
-	return header + "\n" + indentBlock(card, sel)
+	return indentBlock(body, gutterBar(selected, focused))
 }
 
-// assistantBrand uses m.history.openAgent for a history transcript because the
-// past session isn't in m.sessions.
-func (m tview) assistantBrand() (StyledIcon, string) {
-	agent := m.c.m.sessions[m.sessionID].Agent
-	if !m.live {
-		agent = m.history.openAgent
+func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) string {
+	switch e.Kind {
+	case transcript.EntryText:
+		return hang(Icon.Output.Render(), m.c.m.renderMD(e.Text, max(iw-2, 10)))
+	case transcript.EntryThinking:
+		head := Icon.Thinking.Render() + " " + StyleDim.Render("Thinking…")
+		if !expanded || strings.TrimSpace(e.Text) == "" {
+			return head
+		}
+		return head + "\n" + indentBlock(wrapDim(e.Text, iw-2), "  ")
+	case transcript.EntryTurnEnd:
+		return turnEndLine(e, iw)
+	case transcript.EntrySystem:
+		return systemRow(e, expanded, iw)
+	case transcript.EntryShell:
+		return m.shellRow(e, expanded, iw)
+	case transcript.EntryCompact:
+		return renderCompact(e, iw)
+	case transcript.EntrySubagent:
+		if s, ok := soleSubagent(e); ok && s.IsTeammate {
+			return m.teammateRow(e, s, iw)
+		}
 	}
-	name, _ := agentLabel(agent)
-	if name == "" {
-		name = "Claude"
-	}
-	return Icon.Claude, name
+	return m.callRow(e, expanded, full, iw)
 }
 
-func (m tview) aiHeader(c transcript.Chunk, width int) string {
-	chev := ""
-	if m.c.m.chunkExpandable(c) {
-		chev = chevron(m.chunkExpanded(c)) + " "
+// callRow renders a tool, skill, or subagent op.
+func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) string {
+	row := itemRow(e)
+	if drillable(e) {
+		row += "  " + StyleDim.Render("↵")
 	}
-	icon, name := m.assistantBrand()
-	left := chev + icon.RenderBold() + " " + StylePrimaryBold.Render(name)
-	if c.ModelName != "" {
-		left += " " + lipgloss.NewStyle().Foreground(modelColorOf(c.ModelColor)).Render(c.ModelName)
+	row = truncateLine(row, iw)
+	if !expanded {
+		return row
 	}
-	left += aiStats(c)
-	return spaceBetween(left, aiMeta(c), width)
+	var body string
+	if s, ok := soleSubagent(e); ok && e.Kind == transcript.EntrySubagent && !isAgentRefTool(e.ToolName) {
+		parts := subagentHeaderLines(s.Type, s.Name, s.Status, s.Desc, iw-2)
+		if !s.HasTrace {
+			if b := m.toolBody(e, iw-2); b != "" {
+				parts = append(parts, b)
+			}
+		}
+		body = strings.Join(parts, "\n")
+	} else {
+		body = hardWrap(m.toolBody(e, iw-2), iw-2)
+	}
+	if !full {
+		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
+			body = t + "\n" + hiddenHint(hidden)
+		}
+	}
+	if body == "" {
+		return row
+	}
+	return row + "\n" + indentBlock(body, "  ")
 }
 
-func aiStats(c transcript.Chunk) string {
+// hang prefixes a block's first line with icon and indents the rest under it.
+func hang(icon, block string) string {
+	pad := strings.Repeat(" ", lipgloss.Width(icon)+1)
+	lines := strings.Split(block, "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = icon + " " + lines[i]
+		} else {
+			lines[i] = pad + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// userTextWidth is the wrap width of a user prompt inside its band.
+func userTextWidth(width int) int { return max(width-detailGutter-4, 10) }
+
+func userLineCount(text string, width int) int {
+	return strings.Count(xansi.Wrap(strings.TrimRight(strings.ReplaceAll(text, "\r", ""), "\n"), userTextWidth(width), ""), "\n") + 1
+}
+
+// userBand renders a prompt as a full-width shaded band. Every piece carries
+// the background so inner style resets don't punch holes in the band.
+func userBand(e transcript.Entry, expanded bool, iw int) string {
+	bg := lipgloss.NewStyle().Background(ColorUserBg)
+	textW := max(iw-4, 10)
+	head := bg.Foreground(Icon.User.Color).Render(Icon.User.Glyph) +
+		bg.Bold(true).Foreground(ColorTextPrimary).Render(" You")
+	clock := bg.Foreground(ColorTextDim).Render(clockTime(e.Timestamp))
+	gap := max(1, textW-lipgloss.Width(head)-lipgloss.Width(clock))
+	lines := []string{head + bg.Render(strings.Repeat(" ", gap)) + clock}
+
+	body := xansi.Wrap(strings.TrimRight(strings.ReplaceAll(e.Text, "\r", ""), "\n"), textW, "")
+	if !expanded {
+		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
+			body = t + "\n" + bg.Foreground(ColorTextDim).Render(hiddenText(hidden))
+		}
+	}
+	text := bg.Foreground(ColorTextPrimary)
+	for _, l := range strings.Split(body, "\n") {
+		if !strings.Contains(l, "\x1b[") {
+			l = text.Render(l)
+		}
+		lines = append(lines, l)
+	}
+	for i, l := range lines {
+		pad := max(0, textW-lipgloss.Width(l))
+		lines[i] = bg.Render("  ") + l + bg.Render(strings.Repeat(" ", pad+2))
+	}
+	blank := bg.Render(strings.Repeat(" ", textW+4)) // top and bottom padding
+	return blank + "\n" + strings.Join(lines, "\n") + "\n" + blank
+}
+
+// turnEndLine renders a finished turn's footer as a dim rule carrying its stats.
+func turnEndLine(e transcript.Entry, width int) string {
 	var parts []string
-	if c.Thinking > 0 {
-		parts = append(parts, Icon.Thinking.Render()+" "+StyleSecondary.Render(strconv.Itoa(c.Thinking)))
+	if e.Interrupted {
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorError).Render("interrupted"))
 	}
-	if c.ToolCount > 0 {
-		parts = append(parts, Icon.Tool.Ok.Render()+" "+StyleSecondary.Render(strconv.Itoa(c.ToolCount)))
+	if e.ModelName != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(modelColorOf(e.ModelColor)).Render(e.ModelName))
 	}
-	if len(parts) == 0 {
-		return ""
+	if e.Thinking > 0 {
+		parts = append(parts, Icon.Thinking.Render()+" "+StyleSecondary.Render(strconv.Itoa(e.Thinking)))
 	}
-	return " " + Icon.Dot.Render() + " " + strings.Join(parts, "  ")
-}
-
-func aiMeta(c transcript.Chunk) string {
-	var parts []string
-	if c.Usage.Output > 0 {
-		parts = append(parts, Icon.Token.Render()+" "+StyleSecondary.Render(formatTokens(c.Usage.Output)))
+	if e.ToolCount > 0 {
+		parts = append(parts, Icon.Tool.Ok.Render()+" "+StyleSecondary.Render(strconv.Itoa(e.ToolCount)))
 	}
-	if ctx := formatContext(c); ctx != "" {
+	if e.Usage.Output > 0 {
+		parts = append(parts, Icon.Token.Render()+" "+StyleSecondary.Render(formatTokens(e.Usage.Output)))
+	}
+	if ctx := formatContext(e); ctx != "" {
 		parts = append(parts, ctx)
 	}
-	if c.DurationMs > 0 {
-		parts = append(parts, Icon.Clock.Render()+" "+StyleSecondary.Render(formatDuration(c.DurationMs)))
+	if e.DurationMs > 0 {
+		parts = append(parts, Icon.Clock.Render()+" "+StyleSecondary.Render(formatDuration(e.DurationMs)))
 	}
-	if ts := clockTime(c.Timestamp); ts != "" {
+	if ts := clockTime(e.Timestamp); ts != "" {
 		parts = append(parts, StyleDim.Render(ts))
 	}
-	return strings.Join(parts, "  ")
+	rule := func(n int) string { return StyleMuted.Render(strings.Repeat(GlyphHRule, max(0, n))) }
+	if len(parts) == 0 {
+		return rule(width)
+	}
+	label := strings.Join(parts, StyleDim.Render(" · "))
+	return rule(2) + " " + label + " " + rule(width-lipgloss.Width(label)-4)
 }
 
-func (m tview) aiBody(c transcript.Chunk, cw int) string {
-	if m.chunkExpanded(c) {
-		var rows []string
-		for _, it := range c.Items {
-			rows = append(rows, itemRow(it))
-		}
-		if lo, ok := c.LastOutput(); ok && lo.Kind == transcript.ItemText {
-			rows = append(rows, "", m.c.m.renderMD(lo.Text, cw)) // expanded: full output
-		}
-		return strings.Join(rows, "\n")
+func systemRow(e transcript.Entry, expanded bool, iw int) string {
+	icon, label := Icon.System, StyleSecondary.Render("System")
+	if e.IsError {
+		icon, label = Icon.SystemErr, lipgloss.NewStyle().Foreground(ColorError).Render("System")
 	}
-
-	// Collapsed: preview the last meaningful output.
-	lo, ok := c.LastOutput()
-	if !ok {
-		text, hidden := truncateLines(c.Text, maxCollapsedLines)
-		out := m.c.m.renderMD(text, cw)
-		if hidden > 0 {
-			out += "\n" + hiddenHint(hidden)
-		}
-		return out
+	head := icon.Render() + " " + label + "  " + StyleDim.Render(clockTime(e.Timestamp))
+	if e.Label != "" { // preview after the timestamp (e.g. "Recap")
+		head += "  " + StyleDim.Render(e.Label)
 	}
-	switch lo.Kind {
-	case transcript.ItemText:
-		text, hidden := truncateLines(lo.Text, maxCollapsedLines)
-		out := m.c.m.renderMD(text, cw)
-		if hidden > 0 {
-			out += "\n" + hiddenHint(hidden)
-		}
-		return out
-	default: // tool / subagent
-		return toolPreview(lo)
+	if expanded && e.Detail != "" {
+		head += "\n" + indentBlock(wrapDim(strings.TrimRight(e.Detail, "\n"), iw-2), "  ")
 	}
+	return head
 }
 
-func itemRow(it transcript.Item) string {
-	var indicator, name, summary string
-	padName := true
-	switch it.Kind {
-	case transcript.ItemThinking:
-		indicator, name, summary = Icon.Thinking.Render(), "Thinking", firstLine(it.Text)
-	case transcript.ItemText:
-		indicator, name, summary = Icon.Output.Render(), "Output", firstLine(it.Text)
-	case transcript.ItemPrompt:
-		indicator, name, summary = Icon.User.Render(), "Prompt", firstLine(it.Text)
-	case transcript.ItemSubagent:
-		if s, ok := soleSubagent(it); ok && s.IsTeammate {
-			nameStr := lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color)).Render(s.Name)
-			summary = firstLine(it.Text)
-			if s.Idle {
-				summary = "is done"
-			}
-			if summary == "" {
-				return Icon.Teammate.Render() + " " + nameStr
-			}
-			return Icon.Teammate.Render() + " " + nameStr + " " + StyleSecondary.Render(truncate(summary, 60))
+func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) string {
+	label := StylePrimaryBold.Render("Shell")
+	if e.IsError {
+		label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
+	}
+	out := Icon.Shell.Render() + " " + label + "  " + StyleDim.Render(clockTime(e.Timestamp))
+	cmd, hidden := e.Text, 0
+	if !expanded {
+		cmd, hidden = truncateLines(cmd, maxCollapsedLines)
+	}
+	out += "\n" + indentBlock(StyleSecondaryBold.Render("$")+" "+cmd, "  ")
+	if hidden > 0 {
+		out += "\n" + indentBlock(hiddenHint(hidden), "  ")
+	}
+	if expanded && e.Detail != "" {
+		res := "Result"
+		if e.IsError {
+			res = "Error"
 		}
-		indicator = Icon.Subagent.Render()
+		out += "\n\n" + indentBlock(sectionLabel(res, e.IsError)+"\n"+m.c.m.execCommandResultBody(e.Detail, iw-2), "  ")
+	}
+	return out
+}
+
+func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, iw int) string {
+	head := Icon.Teammate.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color)).Render(s.Name)
+	if s.Idle {
+		return head + " " + StyleSecondary.Render("is done")
+	}
+	if strings.TrimSpace(e.Text) == "" {
+		return head
+	}
+	return head + "\n" + indentBlock(m.c.m.renderMD(e.Text, max(iw-2, 10)), "  ")
+}
+
+func renderCompact(e transcript.Entry, width int) string {
+	text := e.Summary
+	if text == "" {
+		text = "Context compressed"
+	}
+	tw := lipgloss.Width(text) + 2
+	leftPad := max(0, (width-tw)/2)
+	rightPad := max(0, width-leftPad-tw)
+	return StyleMuted.Render(strings.Repeat(GlyphHRule, leftPad) + " " + text + " " + strings.Repeat(GlyphHRule, rightPad))
+}
+
+func itemRow(it transcript.Entry) string {
+	if it.Kind == transcript.EntrySubagent {
+		var name string
 		if isAgentRefTool(it.ToolName) {
 			name = agentToolLabel(it)
 		} else {
 			s, _ := soleSubagent(it)
 			name = spawnAgentLabel(s.Type, s.Name)
 		}
-		padName = false // full identity label, not a short name column
-	default: // tool
-		indicator = toolIcon(it.ToolName, it.ResultIsError).Render()
-		name = toolDisplayName(it.ToolName)
-		summary = it.InputPreview
+		return Icon.Subagent.Render() + " " + StylePrimaryBold.Render(name)
 	}
-	nameFmt := name
-	if padName {
-		nameFmt = fmt.Sprintf("%-12s", name)
+	row := toolIcon(it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(fmt.Sprintf("%-12s", toolDisplayName(it.ToolName)))
+	if it.InputPreview == "" {
+		return row
 	}
-	nameStr := StylePrimaryBold.Render(nameFmt)
-	if summary == "" {
-		return indicator + " " + nameStr
-	}
-	return indicator + " " + nameStr + " " + StyleSecondary.Render(truncate(summary, 60))
-}
-
-func toolPreview(it transcript.Item) string {
-	icon := toolIcon(it.ToolName, it.ResultIsError)
-	res := it.Result
-	if res == "" || it.Kind == transcript.ItemSkill {
-		res = it.InputPreview // skill result is the file body; preview its identifier
-	}
-	res = strings.ReplaceAll(res, "\n", " ")
-	name := toolDisplayName(it.ToolName)
-	if s, ok := soleSubagent(it); ok && s.Type != "" {
-		name = s.Type
-	}
-	out := icon.Render() + " " + StylePrimaryBold.Render(name)
-	if res != "" {
-		out += " " + StyleSecondary.Render(truncate(res, 80))
-	}
-	return out
-}
-
-func userBubbleWidth(container int) int {
-	return max(container*3/4, 20)
-}
-
-func userBubbleInner(container int) int {
-	return max(userBubbleWidth(container)-6, 20)
-}
-
-func (m tview) renderUserCard(c transcript.Chunk, container int, selected, accent bool) string {
-	maxBubble := userBubbleWidth(container)
-	sel := selIndicator(selected)
-	expandable := m.c.m.chunkExpandable(c)
-	expanded := m.chunkExpanded(c)
-
-	chev := ""
-	if expandable {
-		chev = chevron(expanded) + " "
-	}
-	right := StyleDim.Render(clockTime(c.Timestamp)) + "  " + chev +
-		StylePrimaryBold.Render("You") + " " + Icon.User.Render()
-	gap := container - lipgloss.Width(sel) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
-	}
-	header := sel + strings.Repeat(" ", gap) + right
-
-	body := m.c.m.renderMD(c.Text, userBubbleInner(container))
-	if expanded {
-		for _, it := range c.Items {
-			row := itemRow(it)
-			if body == "" {
-				body = row
-			} else {
-				body += "\n" + row
-			}
-		}
-	} else {
-		// Truncate wrapped display lines so long single lines collapse too.
-		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
-			body = t + "\n" + hiddenHint(hidden)
-		}
-	}
-
-	borderColor := ColorTextMuted
-	if accent {
-		borderColor = ColorAccent
-	}
-	bubble := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(maxBubble).
-		Padding(0, 2).
-		Render(body)
-
-	aligned := lipgloss.PlaceHorizontal(container-lipgloss.Width(sel), lipgloss.Right, bubble)
-	return header + "\n" + indentBlock(aligned, sel)
-}
-
-func (m tview) renderSystem(c transcript.Chunk, container int, selected, accent bool) string {
-	fraction := 3 * container / 4
-	if container < maxContentWidth {
-		fraction = 7 * container / 8
-	}
-	cardW := max(fraction-4, 24) // match the AI card's right edge
-
-	icon := Icon.System
-	label := StyleSecondary.Render("System")
-	if c.IsError {
-		icon = Icon.SystemErr
-		label = lipgloss.NewStyle().Foreground(ColorError).Render("System")
-	}
-	body := icon.Render() + " " + label + "  " +
-		Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
-	if c.Label != "" { // preview after the timestamp (e.g. "Recap")
-		body += "  " + StyleDim.Render(c.Label)
-	}
-	if m.chunkExpanded(c) && c.Detail != "" {
-		body += "\n" + indentBlock(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), "  ")
-	}
-
-	borderColor := ColorBorder
-	if accent {
-		borderColor = ColorAccent
-	}
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(cardW).
-		Padding(0, 2).
-		Render(body)
-
-	return indentBlock(card, selIndicator(selected))
-}
-
-func (m tview) renderShellCard(c transcript.Chunk, container int, selected, accent bool) string {
-	fraction := 3 * container / 4
-	if container < maxContentWidth {
-		fraction = 7 * container / 8
-	}
-	cardW := max(fraction-4, 24)
-	iw := max(cardW-4, 10) // card padding(0,2) eats 4 cols
-
-	sel := selIndicator(selected)
-	header := sel + m.shellHeader(c, cardW)
-	body := m.shellBody(c, iw)
-
-	borderColor := ColorBorder
-	if accent {
-		borderColor = ColorAccent
-	}
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(cardW).
-		Padding(0, 2).
-		Render(body)
-
-	return header + "\n" + indentBlock(card, sel)
-}
-
-func (m tview) shellHeader(c transcript.Chunk, width int) string {
-	chev := ""
-	if m.c.m.chunkExpandable(c) {
-		chev = chevron(m.chunkExpanded(c)) + " "
-	}
-	label := StylePrimaryBold.Render("Shell")
-	if c.IsError {
-		label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
-	}
-	left := chev + Icon.Shell.Render() + " " + label
-	return spaceBetween(left, StyleDim.Render(clockTime(c.Timestamp)), width)
-}
-
-func (m tview) shellBody(c transcript.Chunk, iw int) string {
-	if !m.chunkExpanded(c) {
-		text, hidden := truncateLines(c.Text, maxCollapsedLines)
-		body := StyleSecondaryBold.Render("$") + " " + text
-		if hidden > 0 {
-			body += "\n" + hiddenHint(hidden)
-		}
-		return body
-	}
-	var sb strings.Builder
-	sb.WriteString(StyleSecondaryBold.Render("$"))
-	sb.WriteString(" " + c.Text + "\n")
-	if c.Detail != "" {
-		label := "Result"
-		if c.IsError {
-			label = "Error"
-		}
-		sb.WriteString("\n" + sectionLabel(label, c.IsError) + "\n")
-		sb.WriteString(m.c.m.execCommandResultBody(c.Detail, iw))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-func renderCompact(c transcript.Chunk, container int) string {
-	text := c.Summary
-	if text == "" {
-		text = "Context compressed"
-	}
-	tw := lipgloss.Width(text) + 2
-	leftPad := (container - tw) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-	rightPad := container - leftPad - tw
-	if rightPad < 0 {
-		rightPad = 0
-	}
-	return StyleMuted.Render(strings.Repeat(GlyphHRule, leftPad) + " " + text + " " + strings.Repeat(GlyphHRule, rightPad))
+	return row + " " + StyleSecondary.Render(truncate(it.InputPreview, 60))
 }
 
 // -- Layout, view, scrolling --------------------------------------------------
 
-// cardKey holds the inputs besides the chunk itself that a rendered card
-// depends on. Chunk content changes drop the entry instead (setChunks,
-// applyChunkDelta).
-type cardKey struct {
-	width                      int
-	selected, accent, expanded bool
-	brand                      string
+// rowKey holds the inputs besides the entry itself that a rendered block
+// depends on. Entry content changes drop the cached block instead (setEntries,
+// applyEntryDelta).
+type rowKey struct {
+	width                       int
+	selected, focused, expanded bool
 }
 
-type cardEntry struct {
-	key   cardKey
+type rowEntry struct {
+	key   rowKey
 	lines []string
 }
 
-// layoutChunks lays every chunk out as display lines, recording each chunk's
-// first line index (for cursor scrolling). A blank separator precedes each card.
-func (m tview) layoutChunks() (lines []string, first []int) {
+// sepBefore reports whether a blank separator line precedes entry i: every
+// entry after the first, as in the agent TUIs.
+func sepBefore(es []transcript.Entry, i int) bool {
+	return i > 0 && i < len(es)
+}
+
+// layoutEntries lays every entry out as display lines, recording each entry's
+// first line index (for cursor scrolling). See sepBefore for blank separators.
+func (m tview) layoutEntries() (lines []string, first []int) {
 	bodyW, containerW := m.c.m.bodyWidth(), m.c.m.containerWidth()
 	focused := m.c.m.historyFocused()
-	_, brand := m.assistantBrand()
-	first = make([]int, len(m.transcript.chunks))
-	for i, c := range m.transcript.chunks {
-		if i > 0 {
+	first = make([]int, len(m.transcript.entries))
+	for i, e := range m.transcript.entries {
+		if sepBefore(m.transcript.entries, i) {
 			lines = append(lines, "")
 		}
 		first[i] = len(lines)
 		selected := i == m.transcript.cursor
-		key := cardKey{width: bodyW, selected: selected, accent: selected && focused, expanded: m.chunkExpanded(c), brand: brand}
-		e, ok := m.transcript.cards[c.ID]
-		if !ok || e.key != key {
-			block := centerBlock(m.renderChunk(i, selected), containerW, bodyW)
-			e = cardEntry{key: key, lines: strings.Split(block, "\n")}
-			m.transcript.cards[c.ID] = e
+		key := rowKey{width: bodyW, selected: selected, focused: focused, expanded: m.entryExpanded(e)}
+		r, ok := m.transcript.rows[e.ID]
+		if !ok || r.key != key {
+			block := centerBlock(m.renderEntry(i, selected), containerW, bodyW)
+			r = rowEntry{key: key, lines: strings.Split(block, "\n")}
+			m.transcript.rows[e.ID] = r
 		}
-		lines = append(lines, e.lines...)
+		lines = append(lines, r.lines...)
 	}
 	return lines, first
 }
@@ -668,56 +537,59 @@ func (m tview) viewportHeight() int {
 	return max(1, m.c.m.bodyHeight()-5)
 }
 
-// chunkSpan returns the [start,end) line range of chunk i within first/total.
-func chunkSpan(i int, first []int, total int) (int, int) {
+// entrySpan returns the [start,end) line range of entry i within first/total,
+// excluding any blank separator before the next entry.
+func (m tview) entrySpan(i int, first []int, total int) (int, int) {
 	start := first[i]
 	end := total
 	if i+1 < len(first) {
-		end = first[i+1] - 1 // exclude the blank separator before the next chunk
+		end = first[i+1]
+		if sepBefore(m.transcript.entries, i+1) {
+			end--
+		}
 	}
 	return start, end
 }
 
-// ensureChunkVisible scrolls so the selected chunk sits within the viewport.
-func (m tview) ensureChunkVisible() {
-	lines, first := m.layoutChunks()
+func (m tview) ensureEntryVisible() {
+	lines, first := m.layoutEntries()
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return
 	}
 	h := m.viewportHeight()
-	start, end := chunkSpan(m.transcript.cursor, first, len(lines))
+	start, end := m.entrySpan(m.transcript.cursor, first, len(lines))
 	if start < m.transcript.scroll {
 		m.transcript.scroll = start
 	} else if end > m.transcript.scroll+h {
 		m.transcript.scroll = end - h
 		if m.transcript.scroll > start {
-			m.transcript.scroll = start // tall chunk: pin to its top
+			m.transcript.scroll = start // tall entry: pin to its top
 		}
 	}
 	m.clampScroll(len(lines), h)
 }
 
-// cursorVisible reports whether the selected chunk overlaps the current viewport.
+// cursorVisible reports whether the selected entry overlaps the current viewport.
 func (m tview) cursorVisible() bool {
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return false
 	}
-	start, end := chunkSpan(m.transcript.cursor, first, len(lines))
+	start, end := m.entrySpan(m.transcript.cursor, first, len(lines))
 	return start < m.transcript.scroll+m.viewportHeight() && end > m.transcript.scroll
 }
 
-// keepCursorVisible moves the cursor one card at a time toward the viewport,
-// stopping at the first card not wholly outside it.
+// keepCursorVisible moves the cursor one entry at a time toward the viewport,
+// stopping at the first entry not wholly outside it.
 func (m tview) keepCursorVisible() {
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	c := &m.transcript.cursor
 	if *c < 0 || *c >= len(first) {
 		return
 	}
 	top, bottom := m.transcript.scroll, m.transcript.scroll+m.viewportHeight()
 	for *c < len(first)-1 {
-		if _, end := chunkSpan(*c, first, len(lines)); end > top {
+		if _, end := m.entrySpan(*c, first, len(lines)); end > top {
 			break
 		}
 		*c++
@@ -727,10 +599,10 @@ func (m tview) keepCursorVisible() {
 	}
 }
 
-// chunkAtLine returns the index of the chunk whose span contains the given line
-// (the fallback when a single chunk is taller than the viewport).
-func (m tview) chunkAtLine(line int) int {
-	_, first := m.layoutChunks()
+// entryAtLine returns the index of the entry whose span contains the given line
+// (the fallback when a single entry is taller than the viewport).
+func (m tview) entryAtLine(line int) int {
+	_, first := m.layoutEntries()
 	idx := 0
 	for i, s := range first {
 		if s <= line {
@@ -740,21 +612,21 @@ func (m tview) chunkAtLine(line int) int {
 	return idx
 }
 
-// firstVisibleChunk/lastVisibleChunk return the first/last chunk starting within
-// the viewport, falling back to chunkAtLine(scroll) when a tall chunk fills it.
-func (m tview) firstVisibleChunk() int {
-	_, first := m.layoutChunks()
+// firstVisibleEntry/lastVisibleEntry return the first/last entry starting within
+// the viewport, falling back to entryAtLine(scroll) when a tall entry fills it.
+func (m tview) firstVisibleEntry() int {
+	_, first := m.layoutEntries()
 	h := m.viewportHeight()
 	for i, s := range first {
 		if s >= m.transcript.scroll && s < m.transcript.scroll+h {
 			return i
 		}
 	}
-	return m.chunkAtLine(m.transcript.scroll)
+	return m.entryAtLine(m.transcript.scroll)
 }
 
-func (m tview) lastVisibleChunk() int {
-	_, first := m.layoutChunks()
+func (m tview) lastVisibleEntry() int {
+	_, first := m.layoutEntries()
 	h := m.viewportHeight()
 	last := -1
 	for i, s := range first {
@@ -763,7 +635,7 @@ func (m tview) lastVisibleChunk() int {
 		}
 	}
 	if last < 0 {
-		return m.chunkAtLine(m.transcript.scroll)
+		return m.entryAtLine(m.transcript.scroll)
 	}
 	return last
 }
@@ -779,32 +651,35 @@ func (m tview) clampScroll(total, h int) {
 
 // clampScrollNow clamps the line scroll to the current layout's valid range.
 func (m tview) clampScrollNow() {
-	lines, _ := m.layoutChunks()
+	lines, _ := m.layoutEntries()
 	m.clampScroll(len(lines), m.viewportHeight())
 }
 
 // maxScroll returns the largest valid top-line offset for the current layout.
 func (m tview) maxScroll() int {
-	lines, _ := m.layoutChunks()
+	lines, _ := m.layoutEntries()
 	return max(0, len(lines)-m.viewportHeight())
 }
 
 func (m tview) clampCursor() {
-	if m.transcript.cursor >= len(m.transcript.chunks) {
-		m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
+	if m.transcript.cursor >= len(m.transcript.entries) {
+		m.transcript.cursor = max(0, len(m.transcript.entries)-1)
 	}
 	if m.transcript.cursor < 0 {
 		m.transcript.cursor = 0
 	}
 }
 
-// restoreChunkCursor re-resolves the cursor to the same chunk id after a refresh
+// restoreEntryCursor re-resolves the cursor to the same entry id after a refresh
 // without moving the viewport. When follow is true the view pins to the bottom so
-// a live session keeps tailing.
-func (m tview) restoreChunkCursor(id string, follow bool) {
+// a live session keeps tailing, and a cursor that was on the last entry (wasLast)
+// moves to the new last entry.
+func (m tview) restoreEntryCursor(id string, follow, wasLast bool) {
 	m.transcript.cursor = -1
-	if id != "" {
-		for i, c := range m.transcript.chunks {
+	if follow && wasLast && len(m.transcript.entries) > 0 {
+		m.transcript.cursor = len(m.transcript.entries) - 1
+	} else if id != "" {
+		for i, c := range m.transcript.entries {
 			if c.ID == id {
 				m.transcript.cursor = i
 				break
@@ -828,48 +703,51 @@ func (m tview) transcriptBody() string {
 		b.WriteString(dimStyle.Render("transcript unavailable: " + m.transcript.err.Error()))
 		return b.String()
 	}
-	if len(m.transcript.chunks) == 0 {
+	if len(m.transcript.entries) == 0 {
 		b.WriteString(dimStyle.Render("(no transcript yet)"))
 		return b.String()
 	}
 
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	h := m.viewportHeight()
 	scroll := m.transcript.scroll
 	if maxScroll := max(0, len(lines)-h); scroll > maxScroll {
 		scroll = maxScroll
 	}
 	end := min(len(lines), scroll+h)
-	hitStarts(m.c, first, len(lines), scroll, end)
-	m.hitCardHeaders(lines, first, scroll, end)
+	hitStarts(m.c, len(first), func(i int) (int, int) { return m.entrySpan(i, first, len(lines)) }, scroll, end)
+	m.hitFoldMarkers(lines, first, scroll, end)
 	b.WriteString(strings.Join(lines[scroll:end], "\n"))
 	return b.String()
 }
 
-// hitCardHeaders covers each card's header row, then its chevron, which sits on
-// the left or the right depending on the card.
-func (m tview) hitCardHeaders(lines []string, first []int, scroll, end int) {
+// hitFoldMarkers covers the leading icon of each visible expandable entry: the
+// entry's fold marker. It sits past the cursor gutter (and the user band's inner
+// pad) on the entry's first line.
+func (m tview) hitFoldMarkers(lines []string, first []int, scroll, end int) {
 	if !m.c.recording() {
 		return
 	}
-	x := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth())
+	x0 := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()) + detailGutter
 	for i, top := range first {
-		if top < scroll || top >= end {
+		if top < scroll || top >= end || !m.entryExpandable(m.transcript.entries[i]) {
 			continue
 		}
-		line := xansi.Strip(lines[top])
-		if w := xansi.StringWidth(strings.TrimRight(line, " ")); w > x {
-			m.c.hitZone(uv.Rect(x, top-scroll, w-x, 1), hitTarget{kind: hitHeader, index: i})
-		}
-		if !m.c.m.chunkExpandable(m.transcript.chunks[i]) {
-			continue
-		}
-		for _, g := range []string{Icon.Collapsed.Glyph, Icon.Expanded.Glyph} {
-			if j := strings.Index(line, g); j >= 0 {
-				m.c.hitZone(uv.Rect(xansi.StringWidth(line[:j]), top-scroll, 2, 1), hitTarget{kind: hitFold, index: i})
-				break
+		x, y := x0, top
+		if m.transcript.entries[i].Kind == transcript.EntryUser {
+			x += 2 // userBand's inner pad
+			y++    // userBand's top padding line
+			if y >= end {
+				continue
 			}
 		}
+		w := 1
+		if m.transcript.entries[i].Kind == transcript.EntryUser {
+			w = lipgloss.Width(Icon.User.Glyph) + len(" You") // the whole "<icon> You" label
+		} else if cell := []rune(xansi.Cut(xansi.Strip(lines[y]), x, x+2)); len(cell) > 0 {
+			w = max(1, xansi.StringWidth(string(cell[0])))
+		}
+		m.c.hitZone(uv.Rect(x, y-scroll, w, 1), hitTarget{kind: hitFold, index: i})
 	}
 }
 

@@ -27,7 +27,7 @@ func waitingSession() model {
 	s.Interaction = &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash", Message: "Allow Bash?"}
 	m.sessions["n1:s1"] = s
 	m = openLive(m, "n1:s1")
-	return withChunks(m, sampleChunks())
+	return withEntries(m, sampleEntries())
 }
 
 // logsModel is the Logs tab of an embedded node with a few log lines.
@@ -67,7 +67,7 @@ func historyTranscript(viewer bool) model {
 		t.history.title = "first session"
 		t.history.openSession = session.HistorySession{Title: "first session", ModelName: "Opus 4.8"}
 	})
-	return withChunks(m, sampleChunks())
+	return withEntries(m, sampleEntries())
 }
 
 func liveScreenModel() model { return liveScreenModelWith(func(*model) {}) }
@@ -436,7 +436,7 @@ func idleSession() model {
 	s.Tmux = session.TmuxLocation{SessionName: "fix-login", PaneID: "%1"}
 	m.sessions["n1:s1"] = s
 	m = openLive(m, "n1:s1")
-	return withChunks(m, sampleChunks())
+	return withEntries(m, sampleEntries())
 }
 
 func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {

@@ -723,7 +723,7 @@ func interactionBody(m model, ix *session.Interaction, width int) string {
 		if ix.ToolInput != "" {
 			// Reuse the per-tool renderers (Bash → "$ cmd", Edit → diff, …) on a
 			// synthetic item; hardWrap bounds the result here (unlike the detail view).
-			it := transcript.Item{Kind: transcript.ItemTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
+			it := transcript.Entry{Kind: transcript.EntryTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
 			parts = append(parts, hardWrap(m.renderToolBody(it, width-2), width-2))
 		}
 		return strings.Join(parts, "\n")

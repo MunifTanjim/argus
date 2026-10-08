@@ -57,16 +57,16 @@ func contextUsageColor(pct float64) color.Color {
 	}
 }
 
-func formatContext(c transcript.Chunk) string {
-	if !c.HasContext {
+func formatContext(e transcript.Entry) string {
+	if !e.HasContext {
 		return ""
 	}
-	st := lipgloss.NewStyle().Foreground(contextUsageColor(c.ContextPct))
-	if c.ContextDeltaTokens == 0 && c.ContextFirstPct == c.ContextPct {
-		return st.Render(fmt.Sprintf("ctx %.0f%%", c.ContextPct))
+	st := lipgloss.NewStyle().Foreground(contextUsageColor(e.ContextPct))
+	if e.ContextDeltaTokens == 0 && e.ContextFirstPct == e.ContextPct {
+		return st.Render(fmt.Sprintf("ctx %.0f%%", e.ContextPct))
 	}
 	return st.Render(fmt.Sprintf("ctx %.0f%% → %.0f%% (+%s)",
-		c.ContextFirstPct, c.ContextPct, formatTokens(c.ContextDeltaTokens)))
+		e.ContextFirstPct, e.ContextPct, formatTokens(e.ContextDeltaTokens)))
 }
 
 // paneTag is the bracket label shown for a session: its tmux pane id when it has
@@ -151,13 +151,6 @@ func isoDateTime(iso string) string {
 }
 
 func shortSHA(sha string) string { return sha[:min(len(sha), 7)] }
-
-func toolColor(name string) color.Color {
-	if meta, ok := toolRegistry[name]; ok {
-		return categoryColor(meta.category)
-	}
-	return ColorToolOther
-}
 
 func (m model) multiAgent() bool {
 	seen := ""
@@ -347,36 +340,9 @@ func cardBottom(ch cardChrome, bs lipgloss.Style, cardW int, label string, label
 	return bs.Render(ch.bl+strings.Repeat(ch.h, dashN)+" ") + labeled + bs.Render(trail)
 }
 
-// detailGutter is the width accentBlock prepends to each line (bar + space), used
-// to align non-accented detail lines (breadcrumb, header) with item text.
+// detailGutter is the width of the cursor gutter (bar + space) every entry block
+// starts with, used to align detail lines (breadcrumb, header) with entry text.
 const detailGutter = 2
-
-func accentBlock(content string, c color.Color, bar string) string {
-	pre := lipgloss.NewStyle().Foreground(c).Render(bar) + " "
-	lines := strings.Split(content, "\n")
-	for i, l := range lines {
-		lines[i] = pre + l
-	}
-	return strings.Join(lines, "\n")
-}
-
-// itemAccentColor returns the accent-rule color for a detail item. ColorAccent is
-// reserved for the focus highlight, so a focused item always differs from its own color.
-func itemAccentColor(it transcript.Item) color.Color {
-	switch it.Kind {
-	case transcript.ItemThinking:
-		return ColorTextDim
-	case transcript.ItemText, transcript.ItemPrompt:
-		return ColorTextSecondary
-	case transcript.ItemSubagent:
-		if s, ok := soleSubagent(it); ok && s.IsTeammate {
-			return teamColor(s.Color)
-		}
-		return ColorToolTask
-	default:
-		return toolColor(it.ToolName)
-	}
-}
 
 func teamColor(name string) color.Color {
 	switch name {

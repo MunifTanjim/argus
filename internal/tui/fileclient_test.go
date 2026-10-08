@@ -60,8 +60,8 @@ func TestFileClientServesHistory(t *testing.T) {
 	}, &view); err != nil {
 		t.Fatalf("historyTranscript: %v", err)
 	}
-	if len(view.Chunks) == 0 {
-		t.Fatal("expected chunks from fixture")
+	if len(view.Entries) == 0 {
+		t.Fatal("expected entries from fixture")
 	}
 }
 
@@ -119,7 +119,7 @@ func TestFileClientSubagentDrill(t *testing.T) {
 	}, &view); err != nil {
 		t.Fatalf("subagent Call: %v", err)
 	}
-	if len(view.Chunks) == 0 {
-		t.Fatal("expected chunks from subagent fixture")
+	if len(view.Entries) == 0 {
+		t.Fatal("expected entries from subagent fixture")
 	}
 }

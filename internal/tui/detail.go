@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,25 +11,23 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// The detail drill-down: a frame stack (detailStack) over a transcript chunk. The
-// root frame lists an AI turn's items; drilling into a subagent pushes a frame of
-// its trace; drilling into any item focuses it. Non-AI chunks render as a scrolled
-// body.
+// The detail drill-down: a frame stack (detailStack) opened from one entry. A
+// subagent opens a frame listing its trace's entries; any other agent entry opens
+// a focused leaf frame; user/system/shell entries open a pre-rendered body.
 
-// detailFrame is one level of the drill stack: a navigable item list (an AI
-// chunk's items, a subagent's flattened trace, or a single focused item) or a
-// pre-rendered body for non-AI chunks.
+// detailFrame is one level of the drill stack: a navigable entry list (a
+// subagent's trace, or a single focused entry) or a pre-rendered body.
 type detailFrame struct {
-	label           string            // breadcrumb segment
-	subID           string            // subscription backing this frame (streamed subagent frames only)
-	agentID         string            // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
-	items           []transcript.Item // navigable items; nil for a non-AI body frame
-	body            string            // pre-rendered body (non-AI chunks)
-	cursor          int               // selected item index
-	scroll          int               // top line offset
-	defaultExpanded bool              // default item expansion for this frame
-	expanded        map[int]bool      // per-item expand override (by item index)
-	focused         bool              // single-item focus frame: no further drilling
+	label           string             // breadcrumb segment
+	subID           string             // subscription backing this frame (streamed subagent frames only)
+	agentID         string             // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
+	items           []transcript.Entry // nil for a body frame
+	body            string             // pre-rendered body (user/system/shell entries)
+	cursor          int                // selected item index
+	scroll          int                // top line offset
+	defaultExpanded bool               // default item expansion for this frame
+	expanded        map[int]bool       // per-item expand override (by item index)
+	focused         bool               // single-item focus frame: no further drilling
 
 	// Identity header for a subagent's drilled-in trace frame.
 	subagentType   string
@@ -53,23 +50,6 @@ func (f *detailFrame) toggle(i int) {
 	f.expanded[i] = !f.isExpanded(i)
 }
 
-// expandOutputs pre-expands the frame's Prompt and Output items so they show
-// without a manual unfold. Only items without an existing override are touched, so
-// it's safe to re-run as a streamed trace grows (won't re-expand a user-collapsed item).
-func (f *detailFrame) expandOutputs() {
-	if f.expanded == nil {
-		f.expanded = map[int]bool{}
-	}
-	for i, it := range f.items {
-		teammateMsg := it.IsTeammate() && !it.Subagents[0].Idle
-		if it.Kind == transcript.ItemText || it.Kind == transcript.ItemPrompt || teammateMsg {
-			if _, ok := f.expanded[i]; !ok {
-				f.expanded[i] = true
-			}
-		}
-	}
-}
-
 func (m tview) topFrame() *detailFrame {
 	if len(m.transcript.detailStack) == 0 {
 		return nil
@@ -77,107 +57,80 @@ func (m tview) topFrame() *detailFrame {
 	return &m.transcript.detailStack[len(m.transcript.detailStack)-1]
 }
 
-// flattenTrace collects a subagent trace's AI items. Chunk 0 (the user-sent prompt)
-// is surfaced as a leading synthetic ItemPrompt.
-func flattenTrace(chunks []transcript.Chunk) []transcript.Item {
-	var items []transcript.Item
-	if len(chunks) > 0 && chunks[0].Kind == transcript.ChunkUser && strings.TrimSpace(chunks[0].Text) != "" {
-		items = append(items, transcript.Item{Kind: transcript.ItemPrompt, Text: chunks[0].Text})
-	}
-	for _, c := range chunks {
-		if c.Kind == transcript.ChunkAI {
-			items = append(items, c.Items...)
-		}
-	}
-	return items
-}
-
-func soleSubagent(it transcript.Item) (transcript.Subagent, bool) {
-	if it.Kind == transcript.ItemSubagent && len(it.Subagents) == 1 {
+func soleSubagent(it transcript.Entry) (transcript.Subagent, bool) {
+	if it.Kind == transcript.EntrySubagent && len(it.Subagents) == 1 {
 		return it.Subagents[0], true
 	}
 	return transcript.Subagent{}, false
 }
 
 // drillable reports whether entering an item opens a meaningful sub-trace.
-func drillable(it transcript.Item) bool {
+func drillable(it transcript.Entry) bool {
 	s, ok := soleSubagent(it)
 	return ok && s.HasTrace
 }
 
-func drillLabel(it transcript.Item) string {
-	switch it.Kind {
-	case transcript.ItemThinking:
+func drillLabel(e transcript.Entry) string {
+	switch e.Kind {
+	case transcript.EntryThinking:
 		return "Thinking"
-	case transcript.ItemText:
+	case transcript.EntryText:
 		return "Output"
-	case transcript.ItemPrompt:
-		return "Prompt"
-	case transcript.ItemSubagent:
-		return subagentLabel(it)
+	case transcript.EntrySubagent:
+		return subagentLabel(e)
 	default:
-		return toolDisplayName(it.ToolName)
+		return toolDisplayName(e.ToolName)
 	}
 }
 
-// enterDetail builds the root frame for the selected transcript chunk.
-func (m tview) enterDetail() {
+func (m tview) enterDetail() tea.Cmd {
 	m.transcript.detailStack = nil
-	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.chunks) {
-		return
+	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.entries) {
+		return nil
 	}
-	c := m.transcript.chunks[m.transcript.cursor]
-	f := detailFrame{expanded: map[int]bool{}, defaultExpanded: false}
-	if c.Kind == transcript.ChunkAI {
-		_, f.label = m.assistantBrand()
-		if c.ModelName != "" {
-			f.label = c.ModelName
-		}
-		f.items = c.Items
-		f.expandOutputs()
-	} else if c.Kind == transcript.ChunkUser && len(c.Items) > 0 {
-		f.label = "You"
-		if strings.TrimSpace(c.Text) != "" {
-			f.items = append(f.items, transcript.Item{Kind: transcript.ItemPrompt, Text: c.Text})
-		}
-		f.items = append(f.items, c.Items...)
-		f.expandOutputs()
-	} else {
-		f.label = "detail"
-		f.body = m.c.m.renderDetail(c)
-	}
-	m.transcript.detailStack = append(m.transcript.detailStack, f)
+	return m.drillEntry(m.transcript.entries[m.transcript.cursor], "")
 }
 
-// drillDetail pushes a frame for the selected item: a subagent's trace, or the
-// item focused on its own.
-func (m tview) drillDetail() {
-	f := m.topFrame()
-	if f == nil || len(f.items) == 0 || f.cursor < 0 || f.cursor >= len(f.items) {
-		return
+func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
+	if s, ok := soleSubagent(e); ok && s.HasTrace && !s.IsTeammate {
+		return m.drillTrace(e, s)
 	}
-	it := f.items[f.cursor]
-	if !drillable(it) && f.focused {
-		return // already focused on this leaf; nothing deeper to drill
+	switch e.Kind {
+	case transcript.EntryUser, transcript.EntrySystem, transcript.EntryShell:
+		m.transcript.detailStack = append(m.transcript.detailStack,
+			detailFrame{label: "detail", body: m.c.m.renderDetail(e)})
+		return nil
 	}
-	nf := detailFrame{expanded: map[int]bool{}, agentID: f.agentID}
-	if s, ok := soleSubagent(it); ok && s.HasTrace {
-		nf.label = subagentLabel(it)
-		nf.items = flattenTrace(s.Trace)
-		nf.defaultExpanded = false
-		nf.agentID = s.ID
-		nf.subagentType = s.Type
-		nf.subagentName = s.Name
-		nf.subagentStatus = s.Status
-		nf.subagentInput = s.Desc
-		nf.expandOutputs()
-	} else {
-		nf.label = drillLabel(it)
-		nf.items = []transcript.Item{it}
-		nf.defaultExpanded = true
-		nf.focused = true
+	m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
+		label: drillLabel(e), items: []transcript.Entry{e}, agentID: agentID,
+		defaultExpanded: true, focused: true, expanded: map[int]bool{},
+	})
+	return m.fetchToolBodyCmd(e, agentID)
+}
+
+// drillTrace pushes a frame listing a subagent's trace: inline when shipped, a
+// one-shot fetch for a past session, or a live subscription.
+func (m tview) drillTrace(e transcript.Entry, s transcript.Subagent) tea.Cmd {
+	f := detailFrame{
+		label: subagentLabel(e), agentID: s.ID, expanded: map[int]bool{},
+		subagentType: s.Type, subagentName: s.Name, subagentStatus: s.Status, subagentInput: s.Desc,
 	}
-	m.transcript.detailStack = append(m.transcript.detailStack, nf)
+	if len(s.Trace) > 0 || s.ID == "" {
+		f.items = s.Trace
+		m.transcript.detailStack = append(m.transcript.detailStack, f)
+		return nil
+	}
+	if !m.live {
+		m.transcript.detailStack = append(m.transcript.detailStack, f)
+		return m.c.m.fetchHistSubagent(m.history.addr(), s.ID)
+	}
+	// Stash the session subRef so pop can restore it without a leak.
+	m.sessionSub = m.activeSub
+	ref := subRef{subID: newSubID(), sessionID: m.sessionID, agentID: s.ID, cacheKey: m.c.m.cacheKeyFor(m.sessionID)}
+	m.activeSub = ref
+	f.subID = ref.subID
+	m.transcript.detailStack = append(m.transcript.detailStack, f)
+	return m.c.m.subscribeCmd(ref, len(m.c.m.transcriptCache[ref.key()].entries))
 }
 
 // popDetail removes the deepest frame; returns true when the stack is now empty.
@@ -188,14 +141,18 @@ func (m tview) popDetail() bool {
 	return len(m.transcript.detailStack) == 0
 }
 
-func (m model) detailable(c transcript.Chunk) bool {
-	switch c.Kind {
-	case transcript.ChunkAI:
-		return len(c.Items) > 0
-	case transcript.ChunkUser:
-		return c.Text != "" || len(c.Items) > 0
+func (m model) detailable(e transcript.Entry) bool {
+	switch e.Kind {
+	case transcript.EntryThinking, transcript.EntryText:
+		return strings.TrimSpace(e.Text) != ""
+	case transcript.EntryTool, transcript.EntrySkill, transcript.EntrySubagent:
+		return true
+	case transcript.EntryUser:
+		return e.Text != ""
+	case transcript.EntryTurnEnd, transcript.EntryCompact:
+		return false
 	default:
-		return c.Detail != ""
+		return e.Detail != ""
 	}
 }
 
@@ -292,7 +249,7 @@ func (m tview) actDetailExpand(tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func subagentLabel(it transcript.Item) string {
+func subagentLabel(it transcript.Entry) string {
 	s, _ := soleSubagent(it)
 	if s.IsTeammate {
 		if s.Name != "" {
@@ -334,41 +291,13 @@ func subagentHeaderLines(agentType, nickname, status, input string, iw int) []st
 	return lines
 }
 
-func (m tview) actDetailDrill(msg tea.KeyPressMsg) tea.Cmd {
+func (m tview) actDetailDrill(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
-	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
+	if f == nil || f.items == nil || f.focused || f.cursor < 0 || f.cursor >= len(f.items) ||
+		!m.c.m.detailable(f.items[f.cursor]) {
 		return nil
 	}
-	it := f.items[f.cursor]
-	if s, ok := soleSubagent(it); ok && s.HasTrace && len(s.Trace) == 0 && s.ID != "" {
-		if !m.live {
-			// Past session: one-shot fetch (no live subscription).
-			m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
-				label: subagentLabel(it), agentID: s.ID, expanded: map[int]bool{},
-				subagentType: s.Type, subagentName: s.Name,
-				subagentStatus: s.Status, subagentInput: s.Desc,
-			})
-			return m.c.m.fetchHistSubagent(m.history.addr(), s.ID)
-		}
-		// Live session: stream the subagent trace into a new frame. Stash the
-		// session subRef so pop can restore it without a leak.
-		m.sessionSub = m.activeSub
-		ref := subRef{subID: newSubID(), sessionID: m.sessionID, agentID: s.ID, cacheKey: m.c.m.cacheKeyFor(m.sessionID)}
-		m.activeSub = ref // subagent stream is active while drilled in
-		m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
-			label: subagentLabel(it), subID: ref.subID, agentID: ref.agentID, expanded: map[int]bool{},
-			subagentType: s.Type, subagentName: s.Name,
-			subagentStatus: s.Status, subagentInput: s.Desc,
-		})
-		have := len(m.c.m.transcriptCache[ref.key()].chunks)
-		return m.c.m.subscribeCmd(ref, have)
-	}
-	m.drillDetail() // inline (history) or focus a leaf item
-	// Focusing a tool leaf shows its body expanded; fetch on demand.
-	if nf := m.topFrame(); nf != nil && nf.focused && len(nf.items) == 1 {
-		return m.fetchToolBodyCmd(nf.items[0], nf.agentID)
-	}
-	return nil
+	return m.drillEntry(f.items[f.cursor], f.agentID)
 }
 
 func (m tview) actDetailHalfDown(tea.KeyPressMsg) tea.Cmd {
@@ -402,10 +331,10 @@ func (m tview) actDetailBottom(tea.KeyPressMsg) tea.Cmd {
 }
 
 // frameLines renders all of a frame's items to display lines and returns the
-// [start,end) line range of the cursor item (0,0 for a non-AI body frame).
+// [start,end) line range of the cursor item (0,0 for a body frame).
 func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
 	if f.items == nil {
-		// Flat body (non-AI chunk) has no accent gutter; indent to align with the
+		// A body frame has no cursor gutter; indent to align with the
 		// breadcrumb/header and the padded session header.
 		body := indentBlock(f.body, strings.Repeat(" ", detailGutter))
 		return strings.Split(body, "\n"), 0, 0
@@ -415,7 +344,7 @@ func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, 
 			lines = append(lines, "") // blank separator
 		}
 		start := len(lines)
-		block := m.detailRowBlock(it, f.isExpanded(i), i == f.cursor, width)
+		block := m.entryBlock(it, f.isExpanded(i), i == f.cursor, true, f.focused, width)
 		lines = append(lines, strings.Split(block, "\n")...)
 		if i == f.cursor {
 			curStart, curEnd = start, len(lines)
@@ -455,7 +384,7 @@ func (m tview) frameItemStarts(f *detailFrame, width int) (first []int, total in
 			total++ // blank separator
 		}
 		first[i] = total
-		block := m.detailRowBlock(it, f.isExpanded(i), i == f.cursor, width)
+		block := m.entryBlock(it, f.isExpanded(i), i == f.cursor, true, f.focused, width)
 		total += strings.Count(block, "\n") + 1
 	}
 	return first, total
@@ -635,7 +564,7 @@ func (m tview) hitItems(f *detailFrame, cw, rows, scroll, end int) {
 		return
 	}
 	first, total := m.frameItemStarts(f, cw)
-	hitStarts(m.c.below(rows), first, total, scroll, end)
+	hitStarts(m.c.below(rows), len(first), func(i int) (int, int) { return itemSpan(i, first, total) }, scroll, end)
 }
 
 func (m tview) clickItem(i int, focused bool) tea.Cmd {
@@ -667,67 +596,44 @@ func (m tview) wheelDetail(d int) {
 	}
 }
 
-func (m model) renderDetail(c transcript.Chunk) string {
+// renderDetail renders the body frame of a user, system, or shell entry.
+func (m model) renderDetail(e transcript.Entry) string {
 	width := m.transcriptWidth() - detailGutter
-	switch c.Kind {
-	case transcript.ChunkUser:
-		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(c.Timestamp))
-		return head + "\n\n" + m.renderMD(c.Text, width-2)
-	case transcript.ChunkSystem:
+	switch e.Kind {
+	case transcript.EntryUser:
+		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(e.Timestamp))
+		return head + "\n\n" + m.renderMD(e.Text, width-2)
+	case transcript.EntrySystem:
 		icon := Icon.System
 		label := StyleSecondary.Render("System")
-		if c.IsError {
+		if e.IsError {
 			icon = Icon.SystemErr
 			label = lipgloss.NewStyle().Foreground(ColorError).Render("System")
 		}
-		head := icon.Render() + " " + label + "  " + Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(c.Timestamp))
-		if c.Label != "" { // preview after the timestamp (e.g. "Recap")
-			head += "  " + StyleDim.Render(c.Label)
+		head := icon.Render() + " " + label + "  " + Icon.Dot.Glyph + "  " + StyleDim.Render(clockTime(e.Timestamp))
+		if e.Label != "" { // preview after the timestamp (e.g. "Recap")
+			head += "  " + StyleDim.Render(e.Label)
 		}
-		if c.Detail == "" {
+		if e.Detail == "" {
 			return head
 		}
-		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), width-2)
-	case transcript.ChunkShell:
+		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(e.Detail, "\n")), width-2)
+	default:
 		label := StylePrimaryBold.Render("Shell")
-		if c.IsError {
+		if e.IsError {
 			label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
 		}
-		head := Icon.Shell.Render() + " " + label + "  " + StyleDim.Render(clockTime(c.Timestamp))
-		body := StyleSecondaryBold.Render("$") + " " + c.Text
-		if c.Detail != "" {
+		head := Icon.Shell.Render() + " " + label + "  " + StyleDim.Render(clockTime(e.Timestamp))
+		body := StyleSecondaryBold.Render("$") + " " + e.Text
+		if e.Detail != "" {
 			resultLabel := "Result"
-			if c.IsError {
+			if e.IsError {
 				resultLabel = "Error"
 			}
-			body += "\n\n" + sectionLabel(resultLabel, c.IsError) + "\n" + m.execCommandResultBody(c.Detail, width-2)
+			body += "\n\n" + sectionLabel(resultLabel, e.IsError) + "\n" + m.execCommandResultBody(e.Detail, width-2)
 		}
 		return head + "\n\n" + body
-	default:
-		head := Icon.System.Render() + " " + StyleSecondary.Render(c.Summary)
-		if c.Detail == "" {
-			return head
-		}
-		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(c.Detail, "\n")), width-2)
 	}
-}
-
-func (m tview) detailRowBlock(it transcript.Item, expanded, selected bool, width int) string {
-	c := itemAccentColor(it)
-	bar := GlyphAccentBar
-	if selected {
-		c = ColorFocus
-		bar = GlyphAccentBarFocused
-	}
-	if expanded {
-		return m.detailItemBody(it, c, bar, width)
-	}
-	row := itemRow(it)
-	if drillable(it) {
-		row += "  " + StyleDim.Render("↵")
-	}
-	// One line; the gutter eats 2 cols.
-	return accentBlock(truncateLine(row, max(width-2, 10)), c, bar)
 }
 
 // truncateLine caps a styled string to width columns on one line (ANSI-aware).
@@ -735,69 +641,9 @@ func truncateLine(s string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(s)
 }
 
-func (m tview) detailItemBody(it transcript.Item, c color.Color, bar string, width int) string {
-	iw := max(width-2, 10)
-	switch it.Kind {
-	case transcript.ItemThinking:
-		head := Icon.Thinking.Render() + " " + StyleSecondaryBold.Render("Thinking")
-		return accentBlock(head+"\n"+wrapDim(it.Text, iw), c, bar)
-	case transcript.ItemText:
-		head := Icon.Output.Render() + " " + StyleSecondaryBold.Render("Output")
-		return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
-	case transcript.ItemPrompt:
-		head := Icon.User.Render() + " " + StyleSecondaryBold.Render("Prompt")
-		return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
-	case transcript.ItemSubagent:
-		// Teammate: colored identity header + message body (or "is done" marker).
-		if s, ok := soleSubagent(it); ok && s.IsTeammate {
-			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color))
-			head := Icon.Teammate.Render() + " " + nameStyle.Render(s.Name)
-			if s.Idle {
-				return accentBlock(head+" "+StyleSecondary.Render("is done"), c, bar)
-			}
-			return accentBlock(head+"\n"+m.c.m.renderMD(it.Text, iw), c, bar)
-		}
-		// wait/close operate on existing agents: identity header + status body, no trace.
-		if isAgentRefTool(it.ToolName) {
-			head := Icon.Subagent.Render() + " " + StylePrimaryBold.Render(agentToolLabel(it))
-			return accentBlock(hardWrap(joinItem(head, m.toolBody(it, iw)), iw), c, bar)
-		}
-		s, _ := soleSubagent(it)
-		parts := subagentHeaderLines(s.Type, s.Name, s.Status, s.Desc, iw)
-		if n := len(flattenTrace(s.Trace)); n > 0 {
-			noun := "steps"
-			if n == 1 {
-				noun = "step"
-			}
-			parts = append(parts, StyleDim.Render(fmt.Sprintf("↵ drill into %d %s", n, noun)))
-		} else if s.HasTrace {
-			parts = append(parts, StyleDim.Render("↵ drill in (streaming)"))
-		} else if body := m.toolBody(it, iw); body != "" {
-			parts = append(parts, body)
-		}
-		return accentBlock(strings.Join(parts, "\n"), c, bar)
-	default: // tool
-		name := toolDisplayName(it.ToolName)
-		head := toolIcon(it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(name)
-		if it.InputPreview != "" {
-			head += "  " + StyleSecondary.Render(truncate(it.InputPreview, 70))
-		}
-		body := m.toolBody(it, iw)
-		return accentBlock(hardWrap(joinItem(head, body), iw), c, bar)
-	}
-}
-
-// joinItem joins header and body, omitting the separator when body is empty.
-func joinItem(head, body string) string {
-	if body == "" {
-		return head
-	}
-	return head + "\n" + body
-}
-
 // toolBody renders a tool's input/result via a per-tool renderer or a generic
 // layout. Heavy bodies are fetched on demand; show a placeholder while outstanding.
-func (m tview) toolBody(it transcript.Item, width int) string {
+func (m tview) toolBody(it transcript.Entry, width int) string {
 	it, fetched := m.filledTool(it)
 	if !fetched && it.ToolID != "" {
 		return StyleDim.Render("loading…")
@@ -806,7 +652,7 @@ func (m tview) toolBody(it transcript.Item, width int) string {
 }
 
 // renderToolBody needs the tool's input and result already fetched.
-func (m model) renderToolBody(it transcript.Item, width int) string {
+func (m model) renderToolBody(it transcript.Entry, width int) string {
 	if body, ok := m.toolDetailBody(it, width); ok {
 		return body
 	}
@@ -815,7 +661,7 @@ func (m model) renderToolBody(it transcript.Item, width int) string {
 
 // filledTool populates on-demand body fields from the cache. Items with no ToolID
 // are treated as already-resolved.
-func (m tview) filledTool(it transcript.Item) (transcript.Item, bool) {
+func (m tview) filledTool(it transcript.Entry) (transcript.Entry, bool) {
 	if it.ToolID == "" {
 		return it, true
 	}
@@ -829,4 +675,20 @@ func (m tview) filledTool(it transcript.Item) (transcript.Item, bool) {
 
 func wrapDim(text string, width int) string {
 	return lipgloss.NewStyle().Foreground(ColorTextDim).Width(max(width, 10)).Render(text)
+}
+
+// followFrame replaces a streamed frame's entries with the main stream's rule: a
+// view at the bottom stays there, and a cursor on the last entry of such a view
+// moves to the new last entry. A first load tails the trace.
+func (m tview) followFrame(f *detailFrame, entries []transcript.Entry) {
+	first := len(f.items) == 0
+	wasLast := first || f.cursor == len(f.items)-1
+	atBottom := first || f.scroll >= m.frameMaxScroll(f)
+	f.items = entries
+	if atBottom && wasLast && len(entries) > 0 {
+		f.cursor = len(entries) - 1
+	}
+	if atBottom {
+		f.scroll = m.frameMaxScroll(f)
+	}
 }

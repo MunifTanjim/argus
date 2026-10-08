@@ -20,19 +20,19 @@ func TestFilledTool(t *testing.T) {
 	}
 
 	// No ToolID → not addressable → treated as already resolved (renders inline).
-	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolInput: "inline"}); !fetched {
+	if _, fetched := m.filledTool(transcript.Entry{Kind: transcript.EntryTool, ToolInput: "inline"}); !fetched {
 		t.Error("item without ToolID should be reported as fetched")
 	}
 	// Outstanding fetch → not yet fetched (caller shows a placeholder).
-	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "loadingTool"}); fetched {
+	if _, fetched := m.filledTool(transcript.Entry{Kind: transcript.EntryTool, ToolID: "loadingTool"}); fetched {
 		t.Error("loading item should not be reported as fetched")
 	}
 	// Unknown id → not fetched.
-	if _, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "unknown"}); fetched {
+	if _, fetched := m.filledTool(transcript.Entry{Kind: transcript.EntryTool, ToolID: "unknown"}); fetched {
 		t.Error("unknown tool should not be reported as fetched")
 	}
 	// Completed fetch → fields filled from the cache.
-	got, fetched := m.filledTool(transcript.Item{Kind: transcript.ItemTool, ToolID: "doneTool"})
+	got, fetched := m.filledTool(transcript.Entry{Kind: transcript.EntryTool, ToolID: "doneTool"})
 	if !fetched {
 		t.Fatal("done item should be reported as fetched")
 	}
@@ -41,15 +41,22 @@ func TestFilledTool(t *testing.T) {
 	}
 }
 
-func detailTestModel(c transcript.Chunk) tview {
+func detailTestModel(c transcript.Entry) tview {
 	mm := withView(testModel(), viewSession)
 	m := tvOf(&mm)
-	m.transcript.chunks = []transcript.Chunk{c}
+	m.transcript.entries = []transcript.Entry{c}
 	m.transcript.cursor = 0
 	m.historyView = histDetail
 	m.enterDetail()
 	m.put()
 	return m
+}
+
+// traceFixture wraps entries in an inline subagent trace of type typ, so
+// enterDetail opens a navigable frame listing them.
+func traceFixture(typ string, items ...transcript.Entry) transcript.Entry {
+	return transcript.Entry{ID: "a", Kind: transcript.EntrySubagent, ToolName: "Task",
+		Subagents: []transcript.Subagent{{Type: typ, HasTrace: true, Trace: items}}}
 }
 
 // maxLineWidth returns the widest visible line width in s (ANSI-aware).
@@ -63,29 +70,8 @@ func maxLineWidth(s string) int {
 	return w
 }
 
-func TestDetailItemsHaveAccentRule(t *testing.T) {
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{
-			{Kind: transcript.ItemText, Text: "hello output"},
-			{Kind: transcript.ItemTool, ToolName: "Bash",
-				ToolInput: `{"command":"ls"}`, Result: "out"},
-		},
-	})
-	out := m.detailBody()
-	if !strings.Contains(out, "┃") {
-		t.Errorf("detail items should have an accent rule:\n%s", out)
-	}
-	if !strings.Contains(out, "hello output") {
-		t.Errorf("output content lost:\n%s", out)
-	}
-}
-
 func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}},
-	})
+	m := detailTestModel(traceFixture("Opus 4.8", transcript.Entry{Kind: transcript.EntryText, Text: "hi"}))
 	m.c.m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
 	m.c.m.height = 40
 	m.c.m.viewer = true // centering applies only to the bare full-screen viewer
@@ -107,17 +93,17 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 	longJSON := `{"k":"` + strings.Repeat("x", 200) + `"}`
 	m := bareTv()
 
-	cases := map[string]transcript.Item{
-		"bash command": {Kind: transcript.ItemTool, ToolName: "Bash",
+	cases := map[string]transcript.Entry{
+		"bash command": {Kind: transcript.EntryTool, ToolName: "Bash",
 			ToolInput: `{"command":"` + longCmd + `"}`},
-		"json result": {Kind: transcript.ItemTool, ToolName: "UnknownTool",
+		"json result": {Kind: transcript.EntryTool, ToolName: "UnknownTool",
 			Result: longJSON},
-		"edit diff": {Kind: transcript.ItemTool, ToolName: "Edit",
+		"edit diff": {Kind: transcript.EntryTool, ToolName: "Edit",
 			ToolInput: `{"file_path":"a.go","old_string":"short","new_string":"` + strings.Repeat("z", 200) + `"}`},
 	}
 	for name, it := range cases {
 		// Gutter adds 2 columns, so the wrapped body must stay within width.
-		out := m.detailItemBody(it, itemAccentColor(it), GlyphAccentBar, width)
+		out := m.entryBlock(it, true, false, true, true, width)
 		if got := maxLineWidth(out); got > width {
 			t.Errorf("%s: line width %d > %d:\n%s", name, got, width, out)
 		}
@@ -126,33 +112,14 @@ func TestDetailItemsWrapLongContent(t *testing.T) {
 
 func TestCollapsedRowFitsWidth(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
+	it := transcript.Entry{Kind: transcript.EntryTool, ToolName: "Bash",
 		InputPreview: strings.Repeat("a long command preview ", 6)}
-	out := m.detailRowBlock(it, false, false, 40)
+	out := m.entryBlock(it, false, false, true, false, 40)
 	if got := maxLineWidth(out); got > 40 {
 		t.Errorf("collapsed row width %d > 40:\n%s", got, out)
 	}
 	if n := strings.Count(out, "\n") + 1; n != 1 {
 		t.Errorf("collapsed row should be a single line, got %d:\n%s", n, out)
-	}
-}
-
-// The focused item uses a heavy gutter bar; an unfocused one uses the thin bar.
-// This is the color-independent focus cue.
-func TestDetailRowBarReflectsFocus(t *testing.T) {
-	m := bareTv()
-	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash", InputPreview: "ls"}
-
-	focused := m.detailRowBlock(it, false, true, 40)
-	if !strings.Contains(focused, GlyphAccentBarFocused) {
-		t.Errorf("focused row should use the heavy bar %q:\n%s", GlyphAccentBarFocused, focused)
-	}
-	unfocused := m.detailRowBlock(it, false, false, 40)
-	if !strings.Contains(unfocused, GlyphAccentBar) {
-		t.Errorf("unfocused row should use the thin bar %q:\n%s", GlyphAccentBar, unfocused)
-	}
-	if strings.Contains(unfocused, GlyphAccentBarFocused) {
-		t.Errorf("unfocused row should not use the heavy bar:\n%s", unfocused)
 	}
 }
 
@@ -172,12 +139,12 @@ func TestPermissionPromptWrapsLongCommand(t *testing.T) {
 }
 
 func TestDetailScrollHint(t *testing.T) {
-	// Build a chunk whose render far exceeds a tiny viewport.
-	var items []transcript.Item
+	// Build a trace whose render far exceeds a tiny viewport.
+	var items []transcript.Entry
 	for i := 0; i < 40; i++ {
-		items = append(items, transcript.Item{Kind: transcript.ItemText, Text: "line of output"})
+		items = append(items, transcript.Entry{Kind: transcript.EntryText, Text: "line of output"})
 	}
-	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: items})
+	m := detailTestModel(traceFixture("Explore", items...))
 	m.c.m.width, m.c.m.height = 80, 12 // viewport 5 under the frame header
 
 	out := m.detailBody()
@@ -196,85 +163,30 @@ func TestDetailScrollHint(t *testing.T) {
 	}
 }
 
-func TestFlattenTracePrependsPrompt(t *testing.T) {
-	chunks := []transcript.Chunk{
-		{Kind: transcript.ChunkUser, Text: "find the bug"},
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Grep"}}},
-		{Kind: transcript.ChunkUser, Text: "keep going"},
-	}
-	items := flattenTrace(chunks)
-	if len(items) != 2 {
-		t.Fatalf("got %d items, want 2", len(items))
-	}
-	if items[0].Kind != transcript.ItemPrompt || items[0].Text != "find the bug" {
-		t.Errorf("items[0] = %+v, want ItemPrompt %q", items[0], "find the bug")
-	}
-	if items[1].Kind != transcript.ItemTool {
-		t.Errorf("items[1].Kind = %q, want tool", items[1].Kind)
-	}
-}
-
-// Only chunk 0 is the prompt; a later user chunk (team-agent shape) is not hoisted.
-func TestFlattenTraceUserChunkAfterAINotPrompt(t *testing.T) {
-	chunks := []transcript.Chunk{
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
-		{Kind: transcript.ChunkUser, Text: "later message"},
-	}
-	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != transcript.ItemText {
-		t.Fatalf("got %+v, want single text item (no prompt)", items)
-	}
-}
-
-func TestFlattenTraceBlankPromptSkipped(t *testing.T) {
-	chunks := []transcript.Chunk{
-		{Kind: transcript.ChunkUser, Text: "  \n "},
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
-	}
-	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != transcript.ItemText {
-		t.Fatalf("got %+v, want single text item (blank prompt skipped)", items)
-	}
-}
-
-func TestFlattenTraceNoUserChunk(t *testing.T) {
-	chunks := []transcript.Chunk{
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: "out"}}},
-	}
-	items := flattenTrace(chunks)
-	if len(items) != 1 || items[0].Kind != transcript.ItemText {
-		t.Fatalf("got %+v, want single text item", items)
-	}
-}
-
 func TestEnterDrillPopStack(t *testing.T) {
-	sub := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	sub := transcript.Entry{
+		ID: "s", Kind: transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
-			Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-				{Kind: transcript.ItemTool, ToolName: "Read"},
-				{Kind: transcript.ItemTool, ToolName: "Grep"},
-			}}},
+			Trace: []transcript.Entry{
+				{Kind: transcript.EntryTool, ToolName: "Read"},
+				{Kind: transcript.EntryTool, ToolName: "Grep"},
+			},
 		}},
 	}
 	m := bareTv()
-	m.transcript.chunks = []transcript.Chunk{{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub},
-	}}
-	m.transcript.cursor = 0
+	m.transcript.entries = []transcript.Entry{{ID: "t", Kind: transcript.EntryText, Text: "hi"}, sub}
+	m.transcript.cursor = 1
 	m.enterDetail()
-	if len(m.transcript.detailStack) != 1 || len(m.topFrame().items) != 2 {
-		t.Fatalf("root frame: %d frames", len(m.transcript.detailStack))
-	}
-	// Drill into the subagent (cursor on item 1).
-	m.topFrame().cursor = 1
-	m.drillDetail()
-	if len(m.transcript.detailStack) != 2 || len(m.topFrame().items) != 2 || m.topFrame().label != "explorer" {
-		t.Fatalf("drill: frames=%d label=%q", len(m.transcript.detailStack), m.topFrame().label)
+	if len(m.transcript.detailStack) != 1 || len(m.topFrame().items) != 2 || m.topFrame().label != "explorer" {
+		t.Fatalf("trace frame: frames=%d label=%q", len(m.transcript.detailStack), m.topFrame().label)
 	}
 	if m.topFrame().defaultExpanded {
 		t.Error("drilled subagent children should start collapsed")
+	}
+	// Drill into a leaf (cursor on item 0).
+	m.actDetailDrill(tea.KeyPressMsg{})
+	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
+		t.Fatalf("drill: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
 	}
 	if m.popDetail() {
 		t.Error("popping to root should not empty the stack")
@@ -284,45 +196,31 @@ func TestEnterDrillPopStack(t *testing.T) {
 	}
 }
 
-func TestDetailRowBlockCollapsedVsExpanded(t *testing.T) {
+func TestDetailDrillSkipsNonDetailable(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
-		ToolInput: `{"command":"ls"}`, Result: "out"}
-
-	collapsed := m.detailRowBlock(it, false, false, 60)
-	if strings.Contains(collapsed, "out") {
-		t.Errorf("collapsed row should not show the result body:\n%s", collapsed)
-	}
-	if !strings.Contains(collapsed, "Bash") {
-		t.Errorf("collapsed row should name the tool:\n%s", collapsed)
-	}
-	expanded := m.detailRowBlock(it, true, false, 60)
-	if !strings.Contains(expanded, "out") {
-		t.Errorf("expanded row should show the result body:\n%s", expanded)
-	}
-
-	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
-	if !strings.Contains(m.detailRowBlock(sub, false, false, 60), "↵") {
-		t.Errorf("a drillable subagent row should show the drill affordance")
+	m.transcript.entries = []transcript.Entry{traceFixture("explorer",
+		transcript.Entry{Kind: transcript.EntryTurnEnd},
+		transcript.Entry{Kind: transcript.EntryCompact, Summary: "compacted"},
+	)}
+	m.enterDetail()
+	for i := range 2 {
+		m.topFrame().cursor = i
+		m.actDetailDrill(tea.KeyPressMsg{})
+		m.clickItem(i, true)
+		if len(m.transcript.detailStack) != 1 {
+			t.Fatalf("item %d (%s) drilled: frames=%d", i, m.topFrame().items[0].Kind, len(m.transcript.detailStack))
+		}
 	}
 }
 
 func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{
-			{Kind: transcript.ItemText, Text: "hello"},
-			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
-		},
-	})
+	m := detailTestModel(traceFixture("Opus 4.8",
+		transcript.Entry{Kind: transcript.EntryText, Text: "hello"},
+		transcript.Entry{Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
+	))
 	m.c.m.width, m.c.m.height = 80, 30
-	// Output (text) items start pre-expanded; other root items start collapsed.
-	if !m.topFrame().isExpanded(0) {
-		t.Errorf("Output item should start pre-expanded")
-	}
 	if m.topFrame().isExpanded(1) {
-		t.Errorf("non-Output root items should start collapsed")
+		t.Errorf("trace items should start collapsed")
 	}
 	out := m.detailBody()
 	if !strings.Contains(out, "Opus 4.8") {
@@ -333,59 +231,51 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 	}
 	// Drill into a focused item → breadcrumb grows.
 	m.topFrame().cursor = 1
-	m.drillDetail()
+	m.actDetailDrill(tea.KeyPressMsg{})
 	if out := m.detailBody(); !strings.Contains(out, "Opus 4.8 › Bash") {
 		t.Errorf("drilled breadcrumb missing:\n%s", out)
 	}
 }
 
-// A non-drillable item focuses exactly once; further Enter presses on the focus
-// frame must not keep nesting the same item.
+// A non-drillable entry opens a focus frame once; further Enter presses on the
+// focus frame must not keep nesting the same entry.
 func TestFocusFrameDoesNotRenest(t *testing.T) {
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
-		},
-	})
+	m := detailTestModel(transcript.Entry{ID: "a", Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`})
 	m.c.m.width, m.c.m.height = 80, 30
 
-	m.drillDetail()
-	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
-		t.Fatalf("first drill should focus once: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
+	if len(m.transcript.detailStack) != 1 || !m.topFrame().focused {
+		t.Fatalf("drill should focus once: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
 	}
 	for i := 0; i < 3; i++ {
-		m.drillDetail() // re-pressing Enter must be a no-op on a focus frame
+		m.actDetailDrill(tea.KeyPressMsg{}) // re-pressing Enter must be a no-op on a focus frame
 	}
-	if len(m.transcript.detailStack) != 2 {
+	if len(m.transcript.detailStack) != 1 {
 		t.Fatalf("focus frame re-nested: frames=%d", len(m.transcript.detailStack))
 	}
 }
 
 func TestDrillableUsesHasTrace(t *testing.T) {
-	withTrace := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{ID: "a1", HasTrace: true}}}
+	withTrace := transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{{ID: "a1", HasTrace: true}}}
 	if !drillable(withTrace) {
 		t.Error("subagent with HasTrace should be drillable")
 	}
-	plain := transcript.Item{Kind: transcript.ItemTool, ToolName: "Read"}
+	plain := transcript.Entry{Kind: transcript.EntryTool, ToolName: "Read"}
 	if drillable(plain) {
 		t.Error("non-subagent should not be drillable")
 	}
 }
 
 func TestDetailKeyNav(t *testing.T) {
-	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
-	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
-		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
+	sub := transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+		Trace: []transcript.Entry{{Kind: transcript.EntryTool, ToolName: "Read"}}}}}
+	m := detailTestModel(traceFixture("Opus 4.8", transcript.Entry{Kind: transcript.EntryText, Text: "hi"}, sub))
 	m.c.m.width, m.c.m.height = 80, 30
 
 	m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
 	if m.topFrame().cursor != 1 {
 		t.Fatalf("cursor=%d want 1", m.topFrame().cursor)
 	}
-	// Root items start collapsed, so l expands the selected item.
+	// Trace items start collapsed, so l expands the selected item.
 	before := m.topFrame().isExpanded(1)
 	m.handleDetailKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if m.topFrame().isExpanded(1) == before {
@@ -399,8 +289,8 @@ func TestDetailKeyNav(t *testing.T) {
 
 func TestDetailSubagentShowsNicknameAndInput(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	it := transcript.Entry{
+		Kind: transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{
 			Type:   "default",
 			Name:   "Volta",
@@ -408,7 +298,7 @@ func TestDetailSubagentShowsNicknameAndInput(t *testing.T) {
 			Status: "closed",
 		}},
 	}
-	out := m.detailItemBody(it, itemAccentColor(it), GlyphAccentBar, 200)
+	out := m.entryBlock(it, true, false, true, true, 200)
 	if !strings.Contains(out, "Volta") {
 		t.Errorf("expected nickname Volta in output, got:\n%s", out)
 	}
@@ -426,25 +316,21 @@ func TestDetailSubagentShowsNicknameAndInput(t *testing.T) {
 // TestDrillIntoSubagentShowsNicknameAndInput verifies subagent identity and input
 // carry into the drilled-in trace frame.
 func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
-	sub := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	sub := transcript.Entry{
+		Kind: transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{
 			Type: "default", Name: "Volta", Status: "closed",
 			Desc:     "the full task message given to the subagent",
 			HasTrace: true,
-			Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-				{Kind: transcript.ItemTool, ToolName: "Read"},
-			}}},
+			Trace: []transcript.Entry{
+				{Kind: transcript.EntryTool, ToolName: "Read"},
+			},
 		}},
 	}
 	m := bareTv()
-	m.transcript.chunks = []transcript.Chunk{{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{sub},
-	}}
+	m.transcript.entries = []transcript.Entry{sub}
 	m.transcript.cursor = 0
 	m.enterDetail()
-	m.drillDetail()
 
 	f := m.topFrame()
 	if f.label != "default · Volta" {
@@ -473,16 +359,16 @@ func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
 // across collapse/expand.
 func TestSubagentLabelStableAcrossExpand(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	it := transcript.Entry{
+		Kind: transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{
 			Type:   "default",
 			Name:   "Volta",
 			Status: "closed",
 		}},
 	}
-	collapsed := ansi.Strip(m.detailRowBlock(it, false, false, 200))
-	expanded := ansi.Strip(m.detailRowBlock(it, true, false, 200))
+	collapsed := ansi.Strip(m.entryBlock(it, false, false, true, false, 200))
+	expanded := ansi.Strip(m.entryBlock(it, true, false, true, false, 200))
 
 	const label = "Spawn Agent: Volta (default)"
 	collapsedCol := strings.Index(collapsed, label)
@@ -503,8 +389,8 @@ func TestSubagentLabelStableAcrossExpand(t *testing.T) {
 }
 
 func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
-	sub := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	sub := transcript.Entry{
+		Kind: transcript.EntrySubagent,
 		// Trace empty => lazy
 		Subagents: []transcript.Subagent{{Type: "Explore", ID: "B", HasTrace: true}},
 	}
@@ -512,7 +398,7 @@ func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
 	m := tvOf(&mm)
 	m.history.openNodeID, m.history.openPath = "n1", "/p/sess.jsonl"
 	m.transcript.detailStack = []detailFrame{{
-		items: []transcript.Item{sub}, cursor: 0, expanded: map[int]bool{},
+		items: []transcript.Entry{sub}, cursor: 0, expanded: map[int]bool{},
 	}}
 	cmd := m.actDetailDrill(tea.KeyPressMsg{})
 	top := m.topFrame()
@@ -525,11 +411,9 @@ func TestActDetailDrill_HistoryNestedFetch(t *testing.T) {
 }
 
 func TestOpenByNameDrillsInTheCardDetail(t *testing.T) {
-	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
-	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI,
-		Items: []transcript.Item{{Kind: transcript.ItemText, Text: "hi"}, sub}})
+	sub := transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+		Trace: []transcript.Entry{{Kind: transcript.EntryTool, ToolName: "Read"}}}}}
+	m := detailTestModel(traceFixture("Opus 4.8", transcript.Entry{Kind: transcript.EntryText, Text: "hi"}, sub))
 	m.c.m.width, m.c.m.height = 80, 30
 	m.handleDetailKey(tea.KeyPressMsg{Code: 'j'})
 	m.handleDetailKey(cmdMsg("open"))

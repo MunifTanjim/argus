@@ -12,7 +12,7 @@ import (
 )
 
 // resubscribeOnClear re-subscribes when a /clear changes the open session's
-// AgentSessionID, so pre-clear chunks don't survive into the new transcript.
+// AgentSessionID, so pre-clear entries don't survive into the new transcript.
 func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur session.Session) tea.Cmd {
 	t, ok := m.baseComp().(transcriptComp)
 	if !ok || !t.live || cur.ID != t.sessionID {
@@ -25,7 +25,7 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 		return nil
 	}
 	old := t.activeSub.subID
-	delete(m.transcriptCache, t.activeSub.key()) // superseded transcript; free its chunks
+	delete(m.transcriptCache, t.activeSub.key()) // superseded transcript; free its entries
 	ref := subRef{subID: newSubID(), sessionID: t.sessionID, cacheKey: m.cacheKeyFor(t.sessionID)}
 	bind := m.editTranscript(m.baseTop()-1, func(v tview) tea.Cmd {
 		v.transcript.err = nil // drop any stale pre-clear error
@@ -34,15 +34,15 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 	return tea.Batch(m.unsubscribeCmd(old), bind)
 }
 
-// bindStream points the active subscription at ref, shows its cached chunks
-// immediately (empty for a fresh key), pins the view to the bottom so the catch-up
-// delta keeps tailing (see restoreChunkCursor), and returns the subscribe command.
+// bindStream shows ref's cached entries at once (empty for a fresh key) and pins
+// the view to the bottom so the catch-up delta keeps tailing (see
+// restoreEntryCursor).
 func (m tview) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
-	m.setChunks(m.c.m.transcriptCache[ref.key()].chunks)
-	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
+	m.setEntries(m.c.m.transcriptCache[ref.key()].entries)
+	m.transcript.cursor = max(0, len(m.transcript.entries)-1)
 	m.transcript.scroll = m.maxScroll()
-	return m.c.m.subscribeCmd(ref, len(m.transcript.chunks))
+	return m.c.m.subscribeCmd(ref, len(m.transcript.entries))
 }
 
 func (m model) cacheKeyFor(sessionID string) string {
@@ -64,36 +64,77 @@ func randID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func applyDelta(chunks []transcript.Chunk, d api.TranscriptDelta) []transcript.Chunk {
+func applyDelta(entries []transcript.Entry, d api.TranscriptDelta) []transcript.Entry {
 	from := d.FromIndex
-	if from > len(chunks) {
-		from = len(chunks)
+	if from > len(entries) {
+		from = len(entries)
 	}
-	out := make([]transcript.Chunk, 0, from+len(d.Chunks))
-	out = append(out, chunks[:from]...)
-	out = append(out, d.Chunks...)
+	out := make([]transcript.Entry, 0, from+len(d.Entries))
+	out = append(out, entries[:from]...)
+	out = append(out, d.Entries...)
 	return out
 }
 
-func (m tview) setChunks(chunks []transcript.Chunk) {
-	m.transcript.chunks = chunks
-	clear(m.transcript.cards)
+func (m tview) setEntries(entries []transcript.Entry) {
+	m.transcript.entries = entries
+	clear(m.transcript.rows)
 }
 
-func (m tview) applyChunkDelta(d api.TranscriptDelta) {
-	for _, c := range m.transcript.chunks[min(d.FromIndex, len(m.transcript.chunks)):] {
-		delete(m.transcript.cards, c.ID)
+func (m tview) applyEntryDelta(d api.TranscriptDelta) tea.Cmd {
+	for _, e := range m.transcript.entries[min(d.FromIndex, len(m.transcript.entries)):] {
+		delete(m.transcript.rows, e.ID)
 	}
-	m.transcript.chunks = applyDelta(m.transcript.chunks, d)
+	m.transcript.entries = applyDelta(m.transcript.entries, d)
+	return m.refetchStaleToolBodies(d.Entries, "")
+}
+
+// refetchStaleToolBodies drops the cached body of each resent tool call that was
+// fetched while still running (done, empty, not an error), so its result is
+// picked up, and re-fetches the ones on screen: expanded in the main stream, or
+// shown in a detail frame of the same trace (agentID, "" = main transcript).
+func (m tview) refetchStaleToolBodies(resent []transcript.Entry, agentID string) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, e := range resent {
+		if !e.IsToolCall() || e.ToolID == "" {
+			continue
+		}
+		b, ok := m.toolBodies[e.ToolID]
+		if !ok || !b.done || b.result != "" || b.resultIsError {
+			continue
+		}
+		delete(m.toolBodies, e.ToolID)
+		if m.toolOnScreen(e, agentID) {
+			cmds = append(cmds, m.fetchToolBodyCmd(e, agentID))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m tview) toolOnScreen(e transcript.Entry, agentID string) bool {
+	if agentID == "" && m.entryExpanded(e) {
+		return true
+	}
+	for i := range m.transcript.detailStack {
+		f := &m.transcript.detailStack[i]
+		if f.agentID != agentID {
+			continue
+		}
+		for j, it := range f.items {
+			if it.ToolID == e.ToolID && (f.focused || f.isExpanded(j)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // subscribeCmd opens a subscription and delivers the catch-up as a transcriptDeltaMsg.
-func (m model) subscribeCmd(ref subRef, haveChunks int) tea.Cmd {
+func (m model) subscribeCmd(ref subRef, haveEntries int) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var d api.TranscriptDelta
 		err := client.Call(api.MethodTranscriptSubscribe, api.TranscriptSubscribeParams{
-			SubID: ref.subID, SessionID: ref.sessionID, AgentID: ref.agentID, HaveChunks: haveChunks,
+			SubID: ref.subID, SessionID: ref.sessionID, AgentID: ref.agentID, HaveEntries: haveEntries,
 		}, &d)
 		if err != nil {
 			return transcriptMsg{id: ref.sessionID, err: err}

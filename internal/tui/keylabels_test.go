@@ -192,3 +192,24 @@ func TestCommitBackKeys(t *testing.T) {
 		t.Errorf("with collapse remapped: %q, want %q", got, "esc ^h")
 	}
 }
+
+func TestLabelPairsNameRealCommands(t *testing.T) {
+	names := map[string]bool{}
+	for _, bs := range screenBindings {
+		for _, b := range bs {
+			names[b.name] = true
+		}
+	}
+	for n := range labelPairs {
+		if !names[n] {
+			t.Errorf("labelPairs names %q, which no screen binds", n)
+		}
+	}
+}
+
+func TestTranscriptFooterPairsPromptKeys(t *testing.T) {
+	m := resumeInto(streamModel(&recordingClient{}), "n1:s1", userEntry("u", "go"))
+	if got := m.helpBinding(transcriptKeys.PromptNext).Help().Key; got != "}/{" {
+		t.Errorf("prompt label = %q, want }/{", got)
+	}
+}

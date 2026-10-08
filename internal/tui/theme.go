@@ -28,6 +28,7 @@ var (
 
 	// Surfaces
 	ColorBorder color.Color
+	ColorUserBg color.Color // user-prompt band background
 
 	// Assistant accent (brand/selection markers, footers)
 	ColorAssistant color.Color
@@ -123,6 +124,7 @@ func initTheme(hasDarkBg bool) {
 
 	// Surfaces
 	ColorBorder = ld(lipgloss.Color("250"), lipgloss.Color("60"))
+	ColorUserBg = ld(lipgloss.Color("254"), lipgloss.Color("236"))
 
 	// Assistant accent (brand/selection markers, footers)
 	ColorAssistant = ld(lipgloss.Color("1"), lipgloss.Color("204"))

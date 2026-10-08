@@ -9,7 +9,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// TestSmokeRealTranscript exercises parser + chunk builder + viewer against a
+// TestSmokeRealTranscript exercises parser + entry folding + viewer against a
 // real on-disk transcript; runs only when ARGUS_TRANSCRIPT is set.
 func TestSmokeRealTranscript(t *testing.T) {
 	path := os.Getenv("ARGUS_TRANSCRIPT")
@@ -20,7 +20,7 @@ func TestSmokeRealTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	t.Logf("built %d chunks", len(view.Chunks))
+	t.Logf("built %d entries", len(view.Entries))
 
 	m := bareTv()
 	initTheme(true)
@@ -28,21 +28,19 @@ func TestSmokeRealTranscript(t *testing.T) {
 	initStyles()
 	m.c.m.hasDark = true
 	m.c.m.render.jsonHL = newCodeHighlighter(true, "json")
-	m.transcript.chunks = view.Chunks
+	m.transcript.entries = view.Entries
 
-	lines, first := m.layoutChunks()
-	t.Logf("collapsed layout: %d lines, %d chunk offsets", len(lines), len(first))
+	lines, first := m.layoutEntries()
+	t.Logf("collapsed layout: %d lines, %d entry offsets", len(lines), len(first))
 
-	// Expand-all layout (exercise item rows + last-output bodies).
 	setAllExpanded(m, true)
-	linesExp, _ := m.layoutChunks()
+	linesExp, _ := m.layoutEntries()
 	t.Logf("expanded layout: %d lines", len(linesExp))
 
-	// Navigate to the last chunk and ensure scroll stays valid.
-	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
-	m.ensureChunkVisible()
+	m.transcript.cursor = max(0, len(m.transcript.entries)-1)
+	m.ensureEntryVisible()
 	if m.transcript.scroll < 0 {
-		t.Errorf("negative scroll after ensureChunkVisible: %d", m.transcript.scroll)
+		t.Errorf("negative scroll after ensureEntryVisible: %d", m.transcript.scroll)
 	}
 
 	// Print the top-of-transcript window for eyeballing.
@@ -52,33 +50,27 @@ func TestSmokeRealTranscript(t *testing.T) {
 	preview := strings.SplitN(out, "\n", 45)
 	t.Logf("\n%s", strings.Join(preview, "\n"))
 
-	// Dump the first AI card collapsed then expanded for eyeballing.
-	for i, c := range m.transcript.chunks {
-		if c.Kind != transcript.ChunkAI {
+	// Dump the first tool entry collapsed then expanded for eyeballing.
+	for i, e := range m.transcript.entries {
+		if e.Kind != transcript.EntryTool {
 			continue
 		}
 		m.transcript.expanded = map[string]bool{}
-		t.Logf("AI card #%d collapsed:\n%s", i, m.renderChunk(i, true))
-		m.transcript.expanded[c.ID] = true
-		t.Logf("AI card #%d expanded:\n%s", i, m.renderChunk(i, false))
+		t.Logf("tool #%d collapsed:\n%s", i, m.renderEntry(i, true))
+		m.transcript.expanded[e.ID] = true
+		t.Logf("tool #%d expanded:\n%s", i, m.renderEntry(i, false))
 		break
 	}
 
-	// If any chunk contains a linked subagent, dump its detail (trace) view.
-	for i, c := range m.transcript.chunks {
-		hasTrace := false
-		for _, it := range c.Items {
-			if s, ok := soleSubagent(it); ok && len(s.Trace) > 0 {
-				hasTrace = true
-			}
-		}
-		if !hasTrace {
+	// If any entry is a linked subagent, dump its detail (trace) view.
+	for i, e := range m.transcript.entries {
+		if s, ok := soleSubagent(e); !ok || len(s.Trace) == 0 {
 			continue
 		}
 		m.transcript.cursor = i
 		m.enterDetail()
 		detail := strings.SplitN(m.detailBody(), "\n", 60)
-		t.Logf("detail (chunk #%d, with subagent trace):\n%s", i, strings.Join(detail, "\n"))
+		t.Logf("detail (entry #%d, with subagent trace):\n%s", i, strings.Join(detail, "\n"))
 		break
 	}
 }

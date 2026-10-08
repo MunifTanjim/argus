@@ -181,15 +181,15 @@ var createKeys = struct {
 }
 
 var transcriptKeys = struct {
-	ScrollUp, ScrollDown, CardNext, CardPrev, HalfUp, HalfDown binding
-	Top, Bottom, Collapse, Expand, Detail                      binding
-	Answer, Export, Back, Resume                               binding
-	Redact, RedactSave, RedactList                             binding
+	ScrollUp, ScrollDown, PromptNext, PromptPrev, HalfUp, HalfDown binding
+	Top, Bottom, Collapse, Expand, Detail                          binding
+	Answer, Export, Back, Resume                                   binding
+	Redact, RedactSave, RedactList                                 binding
 }{
 	ScrollUp:   nb("scroll up", "<Up> k", "scroll"),
 	ScrollDown: nb("scroll down", "<Down> j", ""),
-	CardNext:   nb("next card", "}", "card"),
-	CardPrev:   nb("prev card", "{", ""),
+	PromptNext: nb("next prompt", "}", "prompt"),
+	PromptPrev: nb("prev prompt", "{", ""),
 	HalfUp:     nb("scroll half-page-up", "<C-u> <PageUp>", ""),
 	HalfDown:   nb("scroll half-page-down", "<C-d> <PageDown>", ""),
 	Top:        nb("goto top", "gg", ""),

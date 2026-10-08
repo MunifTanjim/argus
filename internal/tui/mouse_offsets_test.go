@@ -61,10 +61,10 @@ func TestHistorySessionsClickSelectsThenOpens(t *testing.T) {
 }
 
 func TestDetailClickWithBreadcrumbAndHeader(t *testing.T) {
-	m := liveWithChunks(1)
-	m = withChunks(m, []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{
-		{Kind: transcript.ItemText, Text: "one"}, {Kind: transcript.ItemText, Text: "two"}, {Kind: transcript.ItemText, Text: "three"},
-	}}})
+	m := liveWithEntries(1)
+	m = withEntries(m, []transcript.Entry{traceFixture("Explore",
+		transcript.Entry{Kind: transcript.EntryText, Text: "one"}, transcript.Entry{Kind: transcript.EntryText, Text: "two"}, transcript.Entry{Kind: transcript.EntryText, Text: "three"},
+	)})
 	m, _ = onTr(m, func(v tview) tea.Cmd { v.enterDetail(); return nil })
 	m = withTr(m, func(t *transcriptComp) {
 		t.historyView = histDetail

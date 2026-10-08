@@ -17,15 +17,9 @@ func TestDetailLineScrollThroughTallItem(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		sb.WriteString("output-line-" + string(rune('A'+i%26)) + "\n")
 	}
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
-		},
-	})
+	m := detailTestModel(transcript.Entry{ID: "a", Kind: transcript.EntryTool, ToolName: "Bash",
+		ToolInput: `{"command":"ls -la"}`, Result: sb.String()})
 	m.c.m.width, m.c.m.height = 80, 14 // short viewport
-	m.topFrame().cursor = 0
-	m.drillDetail()
 
 	if _, s, e, ok := m.cursorOverflow(m.topFrame()); !ok {
 		t.Fatalf("fixture not tall enough to overflow: lines=%d", e-s)
@@ -49,15 +43,9 @@ func tallFocusedDetailModel(t *testing.T) tview {
 	for i := 0; i < 40; i++ {
 		sb.WriteString("output-line-" + string(rune('A'+i%26)) + "\n")
 	}
-	m := detailTestModel(transcript.Chunk{
-		ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-		Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Bash", ToolInput: `{"command":"ls -la"}`, Result: sb.String()},
-		},
-	})
+	m := detailTestModel(transcript.Entry{ID: "a", Kind: transcript.EntryTool, ToolName: "Bash",
+		ToolInput: `{"command":"ls -la"}`, Result: sb.String()})
 	m.c.m.width, m.c.m.height = 80, 14
-	m.topFrame().cursor = 0
-	m.drillDetail()
 	if m.frameMaxScroll(m.topFrame()) == 0 {
 		t.Fatal("fixture not tall enough to overflow")
 	}
@@ -87,13 +75,13 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 		t.Fatalf("G on tall item: scroll=%d, want %d (>0)", m.topFrame().scroll, want)
 	}
 
-	// Body frame (non-AI chunk): no items, scrolls the pre-rendered body.
-	m = detailTestModel(transcript.Chunk{
-		ID: "s", Kind: transcript.ChunkSystem, Detail: strings.Repeat("detail-line\n", 60),
+	// Body frame (system entry): no items, scrolls the pre-rendered body.
+	m = detailTestModel(transcript.Entry{
+		ID: "s", Kind: transcript.EntrySystem, Detail: strings.Repeat("detail-line\n", 60),
 	})
 	m.c.m.width, m.c.m.height = 80, 14
 	if m.topFrame().items != nil {
-		t.Fatal("system chunk should render as a body frame")
+		t.Fatal("system entry should render as a body frame")
 	}
 	m.actDetailBottom(k)
 	if want := m.frameMaxScroll(m.topFrame()); m.topFrame().scroll != want || want == 0 {
@@ -105,12 +93,12 @@ func TestDetailBottomReachesTrueBottom(t *testing.T) {
 // taller than the viewport, so scrolling can push the cursor item off-screen.
 func manyItemDetailModel(t *testing.T) tview {
 	t.Helper()
-	var items []transcript.Item
+	var items []transcript.Entry
 	for i := 0; i < 30; i++ {
-		items = append(items, transcript.Item{Kind: transcript.ItemTool, ToolName: "Bash",
+		items = append(items, transcript.Entry{Kind: transcript.EntryTool, ToolName: "Bash",
 			ToolInput: `{"command":"ls"}`, Result: "out"})
 	}
-	m := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, ModelName: "Opus 4.8", Items: items})
+	m := detailTestModel(traceFixture("Opus 4.8", items...))
 	m.c.m.width, m.c.m.height = 80, 14
 	if m.frameMaxScroll(m.topFrame()) == 0 {
 		t.Fatal("fixture not tall enough to overflow")

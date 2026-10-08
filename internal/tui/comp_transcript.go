@@ -10,7 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// historyKind is a transcript's inner view: the cards, or the card detail.
+// historyKind is a transcript's inner view: the entry stream, or the entry detail.
 type historyKind int
 
 const (
@@ -37,7 +37,7 @@ type transcriptComp struct {
 
 func newTranscript() transcriptComp {
 	return transcriptComp{
-		transcript: transcriptState{expanded: map[string]bool{}, cards: map[string]cardEntry{}},
+		transcript: transcriptState{expanded: map[string]bool{}, rows: map[string]rowEntry{}},
 		toolBodies: map[string]toolBodyEntry{},
 		redact:     redactState{input: newRedactInput()},
 	}
@@ -129,10 +129,8 @@ func (t transcriptComp) click(c *ctx, h hitTarget, focused bool) (component, tea
 		cmd = v.clickItem(h.index, focused)
 	case h.kind == hitFold:
 		cmd = v.clickFold(h.index)
-	case h.kind == hitHeader:
-		cmd = v.clickChunk(h.index, focused)
 	default:
-		v.selectChunk(h.index)
+		cmd = v.clickEntry(h.index, focused)
 	}
 	return t, cmd
 }
@@ -202,7 +200,7 @@ func (t transcriptComp) footer(c *ctx) []binding {
 	if t.historyView == histDetail {
 		return []binding{detailKeys.Collapse, detailKeys.Drill, sessionKeys.Raw}
 	}
-	binds := []binding{transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
+	binds := []binding{transcriptKeys.PromptNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if v.c.m.sessionInteraction() != nil {
 		binds = append(binds, transcriptKeys.Answer)
 	}
@@ -244,7 +242,7 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	return m.handleTranscriptKey(msg)
 }
 
-// detailBack pops one detail frame; popping the root returns to the cards.
+// detailBack pops one detail frame; popping the root returns to the stream.
 func (m tview) detailBack() tea.Cmd {
 	// A leaf frame above a subagent frame has no subID and pops normally, so
 	// the subagent subscription lives until its own frame pops.
@@ -253,8 +251,10 @@ func (m tview) detailBack() tea.Cmd {
 		m.activeSub = m.sessionSub
 		m.sessionSub = subRef{}
 		// Re-subscribe to catch deltas missed while drilled in.
-		have := len(m.c.m.transcriptCache[m.activeSub.key()].chunks)
-		m.popDetail()
+		have := len(m.c.m.transcriptCache[m.activeSub.key()].entries)
+		if m.popDetail() {
+			m.historyView = histTranscript // a live subagent drilled from the stream is the root frame
+		}
 		return tea.Batch(cmd, m.c.m.subscribeCmd(m.activeSub, have))
 	}
 	if m.popDetail() {
@@ -314,30 +314,30 @@ func (m tview) closeStreams() tea.Cmd {
 func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case transcriptMsg:
-		prevID := m.currentChunkID()
+		prevID, wasLast := m.currentEntryID(), m.cursorOnLast()
 		// Tail-follow only if the view was already pinned to the bottom.
 		atBottom := m.transcript.scroll >= m.maxScroll()
-		m.setChunks(msg.chunks)
+		m.setEntries(msg.entries)
 		m.transcript.err = msg.err
-		m.restoreChunkCursor(prevID, atBottom)
+		m.restoreEntryCursor(prevID, atBottom, wasLast)
 	case transcriptDeltaMsg:
 		if msg.ref.agentID != "" {
 			// Match by subID, not topFrame(): the user may have drilled into a leaf above it.
 			for i := range m.transcript.detailStack {
-				if m.transcript.detailStack[i].subID == msg.delta.SubID {
-					m.transcript.detailStack[i].items = flattenTrace(m.c.m.transcriptCache[msg.ref.key()].chunks)
-					m.transcript.detailStack[i].expandOutputs()
+				if f := &m.transcript.detailStack[i]; f.subID == msg.delta.SubID {
+					m.followFrame(f, m.c.m.transcriptCache[msg.ref.key()].entries)
 					break
 				}
 			}
-			return nil
+			return m.refetchStaleToolBodies(msg.delta.Entries, msg.ref.agentID)
 		}
-		prevID := m.currentChunkID()
+		prevID, wasLast := m.currentEntryID(), m.cursorOnLast()
 		atBottom := m.transcript.scroll >= m.maxScroll()
-		m.applyChunkDelta(msg.delta)
-		m.restoreChunkCursor(prevID, atBottom)
+		cmd := m.applyEntryDelta(msg.delta)
+		m.restoreEntryCursor(prevID, atBottom, wasLast)
+		return cmd
 	case histTranscriptMsg:
-		m.setChunks(msg.chunks)
+		m.setEntries(msg.entries)
 		m.transcript.err = msg.err
 		m.transcript.cursor, m.transcript.scroll = 0, 0
 	case histSubagentMsg:
@@ -345,8 +345,7 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 		if msg.err == nil {
 			for i := len(m.transcript.detailStack) - 1; i >= 0; i-- {
 				if m.transcript.detailStack[i].agentID == msg.agentID {
-					m.transcript.detailStack[i].items = flattenTrace(msg.chunks)
-					m.transcript.detailStack[i].expandOutputs()
+					m.transcript.detailStack[i].items = msg.entries
 					break
 				}
 			}
@@ -358,6 +357,11 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 			e.toolInput, e.result, e.resultIsError = msg.detail.ToolInput, msg.detail.Result, msg.detail.ResultIsError
 		}
 		m.toolBodies[msg.toolID] = e
+		for _, en := range m.transcript.entries {
+			if en.ToolID == msg.toolID {
+				delete(m.transcript.rows, en.ID)
+			}
+		}
 	case tea.PasteMsg:
 		var cmd tea.Cmd
 		m.redact.input, cmd = m.redact.input.Update(msg)
@@ -442,12 +446,12 @@ func (m model) updateDelta(msg transcriptDeltaMsg) (tea.Model, tea.Cmd) {
 	}
 	key := msg.ref.key()
 	if msg.ref.agentID != "" {
-		m.transcriptCache[key] = cachedTranscript{chunks: applyDelta(m.transcriptCache[key].chunks, msg.delta)}
+		m.transcriptCache[key] = cachedTranscript{entries: applyDelta(m.transcriptCache[key].entries, msg.delta)}
 		return m.updateTranscript(msg, streams(msg.ref.subID))
 	}
 	res, cmd := m.updateTranscript(msg, streams(msg.ref.subID))
 	m = res.(model)
-	m.transcriptCache[key] = cachedTranscript{chunks: m.main[i].(transcriptComp).transcript.chunks}
+	m.transcriptCache[key] = cachedTranscript{entries: m.main[i].(transcriptComp).transcript.entries}
 	return m, cmd
 }
 

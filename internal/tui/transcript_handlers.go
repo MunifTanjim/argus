@@ -2,6 +2,8 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 func (m tview) handleTranscriptKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -11,8 +13,8 @@ func (m tview) handleTranscriptKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // transcriptTable maps transcript-region bindings to their actions (see keys.go).
 var transcriptTable = []keyTableEntry{
-	{transcriptKeys.CardNext, tview.actCardNext},
-	{transcriptKeys.CardPrev, tview.actCardPrev},
+	{transcriptKeys.PromptNext, tview.actPromptNext},
+	{transcriptKeys.PromptPrev, tview.actPromptPrev},
 	{transcriptKeys.ScrollDown, tview.actScrollDown},
 	{transcriptKeys.ScrollUp, tview.actScrollUp},
 	{transcriptKeys.HalfDown, tview.actHalfDown},
@@ -21,29 +23,27 @@ var transcriptTable = []keyTableEntry{
 	{transcriptKeys.Bottom, tview.actBottom},
 	{transcriptKeys.Collapse, tview.actCollapse},
 	{transcriptKeys.Expand, tview.actExpand},
-	{transcriptKeys.Detail, tview.actDrillChunk},
+	{transcriptKeys.Detail, tview.actDrill},
 }
 
-func (m tview) actCardNext(tea.KeyPressMsg) tea.Cmd {
-	if m.cursorVisible() {
-		m.transcript.cursor++
-		m.clampCursor()
-		m.ensureChunkVisible()
-	} else {
-		m.transcript.cursor = m.firstVisibleChunk() // re-anchor; viewport stays put
-		m.clampCursor()
+func (m tview) actPromptNext(tea.KeyPressMsg) tea.Cmd {
+	for i := m.transcript.cursor + 1; i < len(m.transcript.entries); i++ {
+		if m.transcript.entries[i].Kind == transcript.EntryUser {
+			m.transcript.cursor = i
+			m.ensureEntryVisible()
+			break
+		}
 	}
 	return nil
 }
 
-func (m tview) actCardPrev(tea.KeyPressMsg) tea.Cmd {
-	if m.cursorVisible() {
-		m.transcript.cursor--
-		m.clampCursor()
-		m.ensureChunkVisible()
-	} else {
-		m.transcript.cursor = m.lastVisibleChunk() // re-anchor; viewport stays put
-		m.clampCursor()
+func (m tview) actPromptPrev(tea.KeyPressMsg) tea.Cmd {
+	for i := m.transcript.cursor - 1; i >= 0; i-- {
+		if m.transcript.entries[i].Kind == transcript.EntryUser {
+			m.transcript.cursor = i
+			m.ensureEntryVisible()
+			break
+		}
 	}
 	return nil
 }
@@ -55,16 +55,16 @@ func (m tview) actScrollDown(tea.KeyPressMsg) tea.Cmd {
 		m.keepCursorVisible()
 		return nil
 	}
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	h := m.viewportHeight()
-	if _, end := chunkSpan(m.transcript.cursor, first, len(lines)); end > m.transcript.scroll+h {
+	if _, end := m.entrySpan(m.transcript.cursor, first, len(lines)); end > m.transcript.scroll+h {
 		m.transcript.scroll += 3
 		m.clampScrollNow()
 		return nil
 	}
 	if m.transcript.cursor < len(first)-1 {
 		m.transcript.cursor++
-		if start, end := chunkSpan(m.transcript.cursor, first, len(lines)); start >= m.transcript.scroll+h {
+		if start, end := m.entrySpan(m.transcript.cursor, first, len(lines)); start >= m.transcript.scroll+h {
 			m.transcript.scroll = min(end, start+3) - h
 			m.clampScrollNow()
 		}
@@ -77,15 +77,15 @@ func (m tview) actScrollUp(tea.KeyPressMsg) tea.Cmd {
 		m.keepCursorVisible()
 		return nil
 	}
-	lines, first := m.layoutChunks()
-	if start, _ := chunkSpan(m.transcript.cursor, first, len(lines)); start < m.transcript.scroll {
+	lines, first := m.layoutEntries()
+	if start, _ := m.entrySpan(m.transcript.cursor, first, len(lines)); start < m.transcript.scroll {
 		m.transcript.scroll -= 3
 		m.clampScrollNow()
 		return nil
 	}
 	if m.transcript.cursor > 0 {
 		m.transcript.cursor--
-		if start, end := chunkSpan(m.transcript.cursor, first, len(lines)); end <= m.transcript.scroll {
+		if start, end := m.entrySpan(m.transcript.cursor, first, len(lines)); end <= m.transcript.scroll {
 			m.transcript.scroll = max(start, end-3)
 			m.clampScrollNow()
 		}
@@ -111,54 +111,68 @@ func (m tview) actTop(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) actBottom(tea.KeyPressMsg) tea.Cmd {
-	m.transcript.cursor = max(0, len(m.transcript.chunks)-1)
+	m.transcript.cursor = max(0, len(m.transcript.entries)-1)
 	m.transcript.scroll = m.maxScroll()
 	return nil
 }
 
 func (m tview) actCollapse(tea.KeyPressMsg) tea.Cmd {
 	m.setExpanded(m.transcript.cursor, false)
-	m.ensureChunkVisible()
+	m.ensureEntryVisible()
 	return nil
 }
 
 func (m tview) actExpand(tea.KeyPressMsg) tea.Cmd {
-	m.setExpanded(m.transcript.cursor, true)
-	m.ensureChunkVisible()
-	return nil
+	i := m.transcript.cursor
+	m.setExpanded(i, true)
+	m.ensureEntryVisible()
+	return m.fetchIfExpandedTool(i)
 }
 
-func (m tview) actDrillChunk(tea.KeyPressMsg) tea.Cmd {
-	// Drill into the selected chunk's full detail sub-view.
-	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.chunks) && m.c.m.detailable(m.transcript.chunks[m.transcript.cursor]) {
-		m.historyView = histDetail
-		m.enterDetail()
+// fetchIfExpandedTool relies on fetchToolBodyCmd to dedupe repeat requests.
+func (m tview) fetchIfExpandedTool(i int) tea.Cmd {
+	if i < 0 || i >= len(m.transcript.entries) {
+		return nil
 	}
-	return nil
+	e := m.transcript.entries[i]
+	if !e.IsToolCall() || !m.entryExpanded(e) {
+		return nil
+	}
+	return m.fetchToolBodyCmd(e, "")
 }
 
-func (m tview) clickChunk(i int, focused bool) tea.Cmd {
+func (m tview) actDrill(tea.KeyPressMsg) tea.Cmd {
+	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.entries) ||
+		!m.c.m.detailable(m.transcript.entries[m.transcript.cursor]) {
+		return nil
+	}
+	m.historyView = histDetail
+	return m.enterDetail()
+}
+
+func (m tview) clickEntry(i int, focused bool) tea.Cmd {
 	if focused && i == m.transcript.cursor {
-		return m.actDrillChunk(tea.KeyPressMsg{})
+		return m.actDrill(tea.KeyPressMsg{})
 	}
-	m.selectChunk(i)
+	m.selectEntry(i)
 	return nil
 }
 
-func (m tview) selectChunk(i int) {
-	if i >= 0 && i < len(m.transcript.chunks) {
-		m.transcript.cursor = i
-	}
-}
-
+// clickFold selects entry i and toggles its expansion (a click on its fold marker).
 func (m tview) clickFold(i int) tea.Cmd {
-	if i < 0 || i >= len(m.transcript.chunks) {
+	if i < 0 || i >= len(m.transcript.entries) {
 		return nil
 	}
 	m.transcript.cursor = i
-	m.setExpanded(i, !m.chunkExpanded(m.transcript.chunks[i]))
-	m.ensureChunkVisible()
-	return nil
+	m.setExpanded(i, !m.entryExpanded(m.transcript.entries[i]))
+	m.ensureEntryVisible()
+	return m.fetchIfExpandedTool(i)
+}
+
+func (m tview) selectEntry(i int) {
+	if i >= 0 && i < len(m.transcript.entries) {
+		m.transcript.cursor = i
+	}
 }
 
 func (m tview) wheelLines(d int) {
