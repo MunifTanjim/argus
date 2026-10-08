@@ -96,34 +96,46 @@ class ItemRow extends StatelessWidget {
     required Widget leading,
     required String label,
     required Color labelColor,
-    String trailing = '',
     String? labelSemantics,
     String? preview,
   }) {
+    final hasPreview = preview != null && preview.trim().isNotEmpty;
+    final labelText = Text(label,
+        semanticsLabel: labelSemantics,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: _mono.copyWith(color: labelColor, fontWeight: FontWeight.w600));
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 6, top: 1),
-            child: leading,
-          ),
-          Text('$label$trailing',
-              semanticsLabel: labelSemantics,
-              style: _mono.copyWith(
-                  color: labelColor, fontWeight: FontWeight.w600)),
-          if (preview != null && preview.trim().isNotEmpty) ...[
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(preview.trim(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _monoDim),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 6, top: 1),
+              child: leading,
             ),
+            // Cap the label so a long one leaves room for the preview.
+            if (hasPreview)
+              ConstrainedBox(
+                constraints:
+                    BoxConstraints(maxWidth: constraints.maxWidth * 0.6),
+                child: labelText,
+              )
+            else
+              Flexible(child: labelText),
+            if (hasPreview) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(preview.trim(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _monoDim),
+              ),
+            ],
+            if (onTap != null) Text(' ›', style: _monoDim),
           ],
-          if (onTap != null) Text(' ›', style: _monoDim),
-        ],
+        ),
       ),
     );
     if (onTap == null) return row;
