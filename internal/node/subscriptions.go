@@ -196,9 +196,13 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		d.reg.SetBranch(p.SessionID, gitmeta.Branch(cwd))
 	}
 
-	st := a.NewStreamingTranscript(path, root, p.AgentID != "")
+	isSub := p.AgentID != ""
+	st := d.transcripts.acquire(transcriptKey{path: path, isSubagent: isSub}, func() adapter.StreamingTranscript {
+		return a.NewStreamingTranscript(path, root, isSub)
+	})
 	entries, err := st.Refresh()
 	if err != nil {
+		d.transcripts.release(st)
 		return nil, err
 	}
 	from := clampFrom(entries, p.HaveEntries)
@@ -261,7 +265,8 @@ func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
 // prefix plus resent tail), not entries[from:]: diffEntries compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st *sharedTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
+	defer d.transcripts.release(st)
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)
