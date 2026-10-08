@@ -51,6 +51,9 @@ type TUIConfig struct {
 	// Mouse captures the mouse on every screen when on. When off, the terminal
 	// keeps text selection, and only the live screen takes the wheel.
 	Mouse MouseMode
+	// VerboseTranscript shows runs of thinking and tool calls expanded by
+	// default instead of folded into a one-line summary.
+	VerboseTranscript bool
 	// Keymaps is tui.keymap as written: screen → key sequence → command.
 	Keymaps map[string]map[string]string
 }
@@ -168,6 +171,7 @@ var defaults = map[string]any{
 	"tui.key-timeout":                 "1s",
 	"tui.leader-key":                  "<Space>",
 	"tui.mouse":                       "on",
+	"tui.verbose-transcript":          false,
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -298,9 +302,10 @@ func FromViper(v *viper.Viper) Config {
 			AutoAdoptDirs:       v.GetStringSlice("workspace.auto-adopt-dirs"),
 		},
 		TUI: TUIConfig{
-			KeyTimeout: v.GetDuration("tui.key-timeout"),
-			LeaderKey:  v.GetString("tui.leader-key"),
-			Mouse:      MouseMode(v.GetString("tui.mouse")),
+			KeyTimeout:        v.GetDuration("tui.key-timeout"),
+			LeaderKey:         v.GetString("tui.leader-key"),
+			Mouse:             MouseMode(v.GetString("tui.mouse")),
+			VerboseTranscript: v.GetBool("tui.verbose-transcript"),
 		},
 	}
 }

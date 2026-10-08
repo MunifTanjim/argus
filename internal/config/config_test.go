@@ -339,6 +339,20 @@ func TestMouseDefaultOn(t *testing.T) {
 	}
 }
 
+func TestVerboseTranscriptDefaultOff(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.TUI.VerboseTranscript {
+		t.Error("tui.verbose-transcript = true, want false by default")
+	}
+}
+
+func TestVerboseTranscriptFromFile(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, writeConfig(t, "tui:\n  verbose-transcript: true\n")); !c.TUI.VerboseTranscript {
+		t.Error("tui.verbose-transcript: true not honoured")
+	}
+}
+
 func TestMouseOffFromFile(t *testing.T) {
 	isolateConfigDir(t)
 	if c := load(t, writeConfig(t, "tui:\n  mouse: off\n")); c.TUI.Mouse != config.MouseOff {
