@@ -276,7 +276,6 @@ func TestFoldMessagesIdleAfterEmptyTurnAddsNothing(t *testing.T) {
 
 func TestFoldMessagesProviderErrorIsSurfaced(t *testing.T) {
 	failed := ocAssistant("m2", "glm-5.3")
-	failed.Finish = "error"
 	failed.Error = &ocMessageError{Type: "provider.quota", Message: "Go usage limit exceeded", Status: 429}
 	failed.Time.Created = 1791065684003
 	es := foldMessages([]ocMessage{ocUser("m1", "hi"), failed, {Type: "idle", ID: "m3"}}, false)
@@ -292,5 +291,28 @@ func TestFoldMessagesProviderErrorIsSurfaced(t *testing.T) {
 	}
 	if e.Detail != "provider.quota (429)\nGo usage limit exceeded" {
 		t.Errorf("detail = %q", e.Detail)
+	}
+}
+
+func TestFoldMessagesFooterUsageAndDuration(t *testing.T) {
+	a := ocAssistant("m2", "glm", ocPart{Type: "text", ID: "p1", Text: "checking"})
+	a.Time.Created, a.Time.Completed = 1000, 3000
+	a.Tokens = &ocMessageTokens{Input: 500, Output: 100, Reasoning: 50, Cache: ocTokenCache{Read: 200}}
+	b := ocAssistant("m3", "glm", ocPart{Type: "text", ID: "p2", Text: "done"})
+	b.Time.Created, b.Time.Completed = 3500, 9000
+	b.Tokens = &ocMessageTokens{Input: 80, Output: 20, Reasoning: 5, Cache: ocTokenCache{Read: 900, Write: 10}}
+	es := foldMessages([]ocMessage{ocUser("m1", "hi"), a, b}, true)
+	end := es[len(es)-1]
+	if end.Kind != transcript.EntryTurnEnd {
+		t.Fatalf("last = %+v, want the footer", end)
+	}
+	// Output counts what the run generated, reasoning included; input and cache
+	// are the last call's (the current context).
+	want := transcript.Usage{Input: 80, Output: 175, CacheRead: 900, CacheCreation: 10}
+	if end.Usage != want {
+		t.Errorf("usage = %+v, want %+v", end.Usage, want)
+	}
+	if end.DurationMs != 8000 {
+		t.Errorf("duration = %d, want 8000 (first created to last completed)", end.DurationMs)
 	}
 }

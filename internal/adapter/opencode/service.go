@@ -100,10 +100,24 @@ type ocMessage struct {
 	Agent   string     `json:"agent,omitempty"`
 	Model   ocModelRef `json:"model,omitempty"`
 	Time    struct {
-		Created int64 `json:"created"`
+		Created   int64 `json:"created"`
+		Completed int64 `json:"completed,omitempty"` // assistant: when the response finished
 	} `json:"time"`
-	Finish string          `json:"finish,omitempty"` // assistant: tool-calls | stop | error
-	Error  *ocMessageError `json:"error,omitempty"`  // assistant: set when Finish is error
+	Error  *ocMessageError  `json:"error,omitempty"`  // assistant: set when the response failed
+	Tokens *ocMessageTokens `json:"tokens,omitempty"` // assistant: usage of this response
+}
+
+// ocMessageTokens is one assistant response's usage. Output excludes reasoning.
+type ocMessageTokens struct {
+	Input     int          `json:"input"`
+	Output    int          `json:"output"`
+	Reasoning int          `json:"reasoning"`
+	Cache     ocTokenCache `json:"cache"`
+}
+
+type ocTokenCache struct {
+	Read  int `json:"read"`
+	Write int `json:"write"`
 }
 
 // ocMessageError is why an assistant message failed (e.g. provider.quota).
