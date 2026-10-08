@@ -35,7 +35,7 @@ func TestLiveSmoke(t *testing.T) {
 			if err != nil {
 				t.Fatalf("readMessages: %v", err)
 			}
-			_ = foldMessages(msgs)
+			_ = foldMessages(msgs, false)
 			t.Logf("messages in first session: %d", len(msgs))
 		}
 	})

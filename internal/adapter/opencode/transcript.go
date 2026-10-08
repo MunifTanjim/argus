@@ -20,7 +20,7 @@ func serviceClient() (*client, bool) {
 	return newClient(info), true
 }
 
-func readTranscriptView(sessionID string) (transcript.TranscriptView, error) {
+func readTranscriptView(sessionID string, finished bool) (transcript.TranscriptView, error) {
 	c, ok := serviceClient()
 	if !ok {
 		return transcript.TranscriptView{}, nil
@@ -29,7 +29,7 @@ func readTranscriptView(sessionID string) (transcript.TranscriptView, error) {
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	return foldMessages(items), nil
+	return transcript.TranscriptView{Entries: foldMessages(items, finished)}, nil
 }
 
 func findToolDetail(sessionID, agentID, toolID string) (transcript.ToolDetail, bool, error) {
@@ -37,47 +37,38 @@ func findToolDetail(sessionID, agentID, toolID string) (transcript.ToolDetail, b
 	if agentID != "" {
 		sessionID = agentID
 	}
-	view, err := readTranscriptView(sessionID)
+	view, err := readTranscriptView(sessionID, false)
 	if err != nil {
 		return transcript.ToolDetail{}, false, err
 	}
-	for _, ch := range view.Chunks {
-		for _, it := range ch.Items {
-			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent) && it.ToolID == toolID {
-				return transcript.ToolDetail{ToolInput: it.ToolInput, Result: it.Result, ResultIsError: it.ResultIsError}, true, nil
-			}
-		}
-	}
-	return transcript.ToolDetail{}, false, nil
+	d, ok := transcript.FindToolDetail(view.Entries, toolID)
+	return d, ok, nil
 }
 
 func subagentFilePath(_, agentID string) (string, bool) { return agentID, agentID != "" }
 
-func readSubagentView(_, agentID string) (transcript.TranscriptView, bool, error) {
-	view, err := readTranscriptView(agentID)
+func readSubagentView(_, agentID string, finished bool) (transcript.TranscriptView, bool, error) {
+	view, err := readTranscriptView(agentID, finished)
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
-	return view, len(view.Chunks) > 0, nil
+	return view, len(view.Entries) > 0, nil
 }
 
-// transcriptSig returns a monotone signature capturing both message count and
-// intra-message content growth (new items, longer tool results, accumulated text).
+// transcriptSig returns a monotone signature capturing both entry count and
+// intra-entry content growth (longer tool results, accumulated text).
 // It can never return -1, so -1 is safe as the uninitialized sentinel.
-func transcriptSig(chunks []transcript.Chunk) int {
-	n := len(chunks)
-	for _, c := range chunks {
-		n += len(c.Items)
-		for _, it := range c.Items {
-			n += len(it.Text) + len(it.Result) + len(it.ToolInput)
-		}
+func transcriptSig(entries []transcript.Entry) int {
+	n := len(entries)
+	for _, e := range entries {
+		n += len(e.Text) + len(e.Result) + len(e.ToolInput)
 	}
 	return n
 }
 
 type streamingTranscript struct {
 	sessionID string
-	chunks    []transcript.Chunk
+	entries   []transcript.Entry
 	sig       int
 	readView  func(string) (transcript.TranscriptView, error)
 }
@@ -86,20 +77,20 @@ func newStreamingTranscript(path, _ string, _ bool) adapter.StreamingTranscript 
 	return &streamingTranscript{
 		sessionID: path,
 		sig:       -1,
-		readView:  readTranscriptView,
+		readView:  func(id string) (transcript.TranscriptView, error) { return readTranscriptView(id, false) },
 	}
 }
 
-func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
+func (s *streamingTranscript) Refresh() ([]transcript.Entry, error) {
 	view, err := s.readView(s.sessionID)
 	if err != nil {
-		return s.chunks, nil // transient; keep last good
+		return s.entries, nil // transient; keep last good
 	}
-	sig := transcriptSig(view.Chunks)
+	sig := transcriptSig(view.Entries)
 	if sig == s.sig {
-		return s.chunks, nil
+		return s.entries, nil
 	}
 	s.sig = sig
-	s.chunks = view.Chunks
-	return s.chunks, nil
+	s.entries = view.Entries
+	return s.entries, nil
 }

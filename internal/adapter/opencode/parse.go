@@ -2,68 +2,103 @@ package opencode
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func foldMessages(msgs []ocMessage) transcript.TranscriptView {
-	view := transcript.TranscriptView{}
+// foldMessages treats a run of consecutive assistant messages as one turn. Its
+// footer closes on an "idle" message (the service saw the run go idle), on a
+// user message, or at the end when finished (history reads).
+func foldMessages(msgs []ocMessage, finished bool) []transcript.Entry {
+	var out []transcript.Entry
+	var turn *transcript.Entry
+	turnHasEntries := false
 	for _, m := range msgs {
 		switch m.Type {
 		case "user":
-			view.Chunks = append(view.Chunks, userChunk(m))
+			if turn != nil && turnHasEntries {
+				out = append(out, *turn)
+			}
+			turn, turnHasEntries = nil, false
+			out = append(out, transcript.Entry{
+				ID:        m.ID,
+				Kind:      transcript.EntryUser,
+				Timestamp: tsMillis(m.Time.Created),
+				Text:      m.Text,
+			})
+		case "idle":
+			if turn != nil && turnHasEntries {
+				if m.Time.Created != 0 {
+					turn.Timestamp = tsMillis(m.Time.Created)
+				}
+				out = append(out, *turn)
+			}
+			turn, turnHasEntries = nil, false
 		case "assistant":
-			view.Chunks = append(view.Chunks, assistantChunk(m))
+			if turn == nil {
+				turn = &transcript.Entry{Kind: transcript.EntryTurnEnd}
+			}
+			turn.ID = m.ID + ".end"
+			turn.ModelName = m.Model.ID
+			turn.Timestamp = tsMillis(m.Time.Created)
+			es := assistantEntries(m, turn)
+			turnHasEntries = turnHasEntries || len(es) > 0
+			out = append(out, es...)
 		}
 	}
-	return view
+	if finished && turn != nil && turnHasEntries {
+		out = append(out, *turn)
+	}
+	return out
 }
 
-func userChunk(m ocMessage) transcript.Chunk {
-	return transcript.Chunk{
-		ID:        m.ID,
-		Kind:      transcript.ChunkUser,
-		Timestamp: tsMillis(m.Time.Created),
-		Text:      m.Text,
-	}
-}
-
-func assistantChunk(m ocMessage) transcript.Chunk {
-	c := transcript.Chunk{
-		ID:        m.ID,
-		Kind:      transcript.ChunkAI,
-		Timestamp: tsMillis(m.Time.Created),
-		ModelName: m.Model.ID,
-	}
-	for _, p := range m.Content {
+func assistantEntries(m ocMessage, turn *transcript.Entry) []transcript.Entry {
+	ts := tsMillis(m.Time.Created)
+	var out []transcript.Entry
+	for j, p := range m.Content {
+		id := partID(m, j, p)
 		switch p.Type {
 		case "reasoning":
-			c.Items = append(c.Items, transcript.Item{ID: p.ID, Kind: transcript.ItemThinking, Text: p.Text})
-			c.Thinking++
+			out = append(out, transcript.Entry{ID: id, Kind: transcript.EntryThinking, Timestamp: ts, Text: p.Text})
+			turn.Thinking++
 		case "text":
-			c.Items = append(c.Items, transcript.Item{ID: p.ID, Kind: transcript.ItemText, Text: p.Text})
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			out = append(out, transcript.Entry{ID: id, Kind: transcript.EntryText, Timestamp: ts, Text: p.Text})
 		case "tool":
-			it := transcript.Item{ID: p.ID, Kind: transcript.ItemTool, ToolName: p.Name, ToolID: p.ID}
+			e := transcript.Entry{ID: id, Kind: transcript.EntryTool, Timestamp: ts, ToolName: p.Name, ToolID: p.ID}
 			if p.State != nil {
-				it.ToolInput = string(p.State.Input)
-				it.InputPreview = toolPreview(p.Name, p.State.Input)
-				it.Result = toolContentText(p.State.Content)
-				it.ResultIsError = p.State.Status == "error"
-				if it.ResultIsError && p.State.Error != nil && p.State.Error.Message != "" {
-					it.Result = p.State.Error.Message
+				e.ToolInput = string(p.State.Input)
+				e.InputPreview = toolPreview(p.Name, p.State.Input)
+				e.Result = toolContentText(p.State.Content)
+				e.ResultIsError = p.State.Status == "error"
+				if e.ResultIsError && p.State.Error != nil && p.State.Error.Message != "" {
+					e.Result = p.State.Error.Message
 				}
 				if sub, ok := subagentRef(p); ok {
-					it.Kind = transcript.ItemSubagent
-					it.Subagents = []transcript.Subagent{sub}
+					e.Kind = transcript.EntrySubagent
+					e.Subagents = []transcript.Subagent{sub}
 				}
 			}
-			c.Items = append(c.Items, it)
-			c.ToolCount++
+			out = append(out, e)
+			turn.ToolCount++
 		}
 	}
-	return c
+	return out
+}
+
+// partID falls back to the message id plus the part's position for reasoning
+// and text parts, which OpenCode sends without an id. The position stays put as
+// parts are appended.
+func partID(m ocMessage, j int, p ocPart) string {
+	if p.ID != "" {
+		return p.ID
+	}
+	return m.ID + "." + strconv.Itoa(j)
 }
 
 // subagentRef turns a completed task/subagent tool part into a drillable subagent

@@ -62,10 +62,10 @@ func (ocAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFi
 }
 
 func (ocAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {
-	return readTranscriptView(path)
+	return readTranscriptView(path, false)
 }
 func (ocAdapter) ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error) {
-	return readSubagentView(rootPath, agentID)
+	return readSubagentView(rootPath, agentID, false)
 }
 func (ocAdapter) FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	return findToolDetail(path, agentID, toolID)
@@ -84,10 +84,10 @@ func (ocAdapter) ListHistorySessions(projectDir string, limit, offset int) (sess
 	return listHistorySessions(projectDir, limit, offset)
 }
 func (ocAdapter) ReadHistoryTranscript(path string) (transcript.TranscriptView, error) {
-	return readTranscriptView(path)
+	return readTranscriptView(path, true)
 }
 func (ocAdapter) ReadHistorySubagentView(path, agentID string) (transcript.TranscriptView, bool, error) {
-	return readSubagentView(path, agentID)
+	return readSubagentView(path, agentID, true)
 }
 func (ocAdapter) FindHistoryToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	return findToolDetail(path, agentID, toolID)

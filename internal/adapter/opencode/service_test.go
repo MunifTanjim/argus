@@ -101,23 +101,19 @@ func TestReadMessagesPaginatesAscending(t *testing.T) {
 		t.Fatalf("want 4 messages across both pages, got %d", len(msgs))
 	}
 
-	view := foldMessages(msgs)
-	wantIDs := []string{"m1", "m2", "m3", "m4"}
-	if len(view.Chunks) != len(wantIDs) {
-		t.Fatalf("want %d chunks, got %d", len(wantIDs), len(view.Chunks))
+	es := foldMessages(msgs, false)
+	// user, text, footer (closed by the next user), user, text.
+	wantIDs := []string{"m1", "p1", "m2.end", "m3", "p2"}
+	if len(es) != len(wantIDs) {
+		t.Fatalf("want %d entries, got %d: %+v", len(wantIDs), len(es), es)
 	}
 	for i, want := range wantIDs {
-		if view.Chunks[i].ID != want {
-			t.Fatalf("chunk %d = %q, want %q (chronological order)", i, view.Chunks[i].ID, want)
+		if es[i].ID != want {
+			t.Fatalf("entry %d = %q, want %q (chronological order)", i, es[i].ID, want)
 		}
 	}
-	if view.Chunks[0].Kind != transcript.ChunkUser || view.Chunks[1].Kind != transcript.ChunkAI {
-		t.Fatalf("unexpected chunk kinds: %+v", view.Chunks)
-	}
-	for i := 1; i < len(view.Chunks); i++ {
-		if view.Chunks[i-1].Timestamp > view.Chunks[i].Timestamp {
-			t.Fatalf("chunks not ascending: %q then %q", view.Chunks[i-1].Timestamp, view.Chunks[i].Timestamp)
-		}
+	if es[0].Kind != transcript.EntryUser || es[1].Kind != transcript.EntryText || es[2].Kind != transcript.EntryTurnEnd {
+		t.Fatalf("unexpected entry kinds: %+v", es)
 	}
 	if len(gotQueries) != 2 || gotQueries[0] != "order=asc" || gotQueries[1] != "cursor=C2" {
 		t.Fatalf("queries = %v (want oldest-first first page, cursor-only second)", gotQueries)
