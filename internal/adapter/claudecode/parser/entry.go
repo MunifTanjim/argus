@@ -27,6 +27,17 @@ type Entry struct {
 		} `json:"usage"`
 	} `json:"message"`
 
+	// Origin marks who a user-role line came from. Kind "peer" is another agent
+	// (a subagent's hand-back report, or a session messaging this one); Body is
+	// the message text when present.
+	Origin struct {
+		Kind     string `json:"kind"`
+		From     string `json:"from"`
+		Name     string `json:"name"`
+		Body     string `json:"body"`
+		Handback bool   `json:"handback"`
+	} `json:"origin"`
+
 	// SessionID is the snake_case session_id, one candidate key for the on-disk
 	// tasks/ and teams/ dirs. It is usually the root session that owns those dirs,
 	// but it is not guaranteed: it can equal the transcript filename, differ from
