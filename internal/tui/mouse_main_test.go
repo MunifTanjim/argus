@@ -151,14 +151,52 @@ func TestTranscriptClickSelectsThenDrills(t *testing.T) {
 	}
 }
 
-func TestTranscriptWheelScrolls(t *testing.T) {
-	m := liveWithEntries(40)
-	m, _ = wheelAt(m, m.mainRect().Min.X+1, 10, 3)
-	if s := trOf(m).transcript.scroll; s != 3 {
-		t.Fatalf("scroll = %d, want 3", s)
+func TestTranscriptWheelMovesLikeJK(t *testing.T) {
+	// Each notch moves the cursor one entry, scrolling only at the edge, as j/k do.
+	wheel := liveWithEntries(40)
+	keys := liveWithEntries(40)
+	for _, step := range []struct {
+		notches int
+		keys    string
+	}{{30, strings.Repeat("j", 30)}, {-12, strings.Repeat("k", 12)}} {
+		wheel, _ = wheelAt(wheel, wheel.mainRect().Min.X+1, 10, step.notches)
+		keys = typeKeys(keys, step.keys)
+		w, k := trOf(wheel).transcript, trOf(keys).transcript
+		if w.cursor != k.cursor || w.scroll != k.scroll {
+			t.Fatalf("after %d notches: cursor=%d scroll=%d, want %d and %d as with %q",
+				step.notches, w.cursor, w.scroll, k.cursor, k.scroll, step.keys)
+		}
 	}
-	if !tvIn(m).cursorVisible() {
-		t.Error("the cursor must follow into the viewport")
+	if trOf(wheel).transcript.scroll == 0 {
+		t.Error("setup: the wheel should have scrolled at the edge")
+	}
+}
+
+func TestDetailWheelMovesLikeJK(t *testing.T) {
+	build := func() model {
+		items := make([]transcript.Entry, 40)
+		for i := range items {
+			items[i] = transcript.Entry{Kind: transcript.EntryText, Text: fmt.Sprintf("line %d", i)}
+		}
+		m := withEntries(liveWithEntries(1), []transcript.Entry{traceFixture("Explore", items...)})
+		m, _ = onTr(m, func(v tview) tea.Cmd { v.enterDetail(); return nil })
+		return withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
+	}
+	wheel, keys := build(), build()
+	for _, step := range []struct {
+		notches int
+		keys    string
+	}{{30, strings.Repeat("j", 30)}, {-12, strings.Repeat("k", 12)}} {
+		wheel, _ = wheelAt(wheel, wheel.mainRect().Min.X+1, 10, step.notches)
+		keys = typeKeys(keys, step.keys)
+		w, k := tvIn(wheel).topFrame(), tvIn(keys).topFrame()
+		if w.cursor != k.cursor || w.scroll != k.scroll {
+			t.Fatalf("after %d notches: cursor=%d scroll=%d, want %d and %d as with %q",
+				step.notches, w.cursor, w.scroll, k.cursor, k.scroll, step.keys)
+		}
+	}
+	if tvIn(wheel).topFrame().scroll == 0 {
+		t.Error("setup: the wheel should have scrolled at the edge")
 	}
 }
 

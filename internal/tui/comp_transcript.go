@@ -143,7 +143,7 @@ func (t transcriptComp) wheel(c *ctx, d int) (component, tea.Cmd) {
 	if t.historyView == histDetail {
 		v.wheelDetail(d)
 	} else {
-		v.wheelLines(d)
+		v.wheelEntries(d)
 	}
 	return t, nil
 }
