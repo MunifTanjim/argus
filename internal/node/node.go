@@ -107,8 +107,9 @@ type Node struct {
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
 
-	subsMu sync.Mutex
-	conns  map[api.Notifier]*connSubs // per-connection transcript subscriptions
+	subsMu      sync.Mutex
+	conns       map[api.Notifier]*connSubs // per-connection transcript subscriptions
+	transcripts *transcriptCache
 
 	termsMu sync.Mutex
 	terms   map[api.Notifier]*connTerms // per-connection live terminals
@@ -438,6 +439,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		pending:      map[string]*pendingDecision{},
 		forgeFor:     forge.For,
 		conns:        map[api.Notifier]*connSubs{},
+		transcripts:  newTranscriptCache(transcriptCacheMaxIdle, transcriptCacheIdleTTL),
 		terms:        map[api.Notifier]*connTerms{},
 		sessionTerms: map[string]*term{},
 		resuming:     map[string]string{},
