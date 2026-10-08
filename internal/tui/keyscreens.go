@@ -67,7 +67,7 @@ var summaryKeys = bindingsOf(slices.Concat(leftSidebarKeys, []any{projectsKeys.S
 // transcriptViewKeys are the transcript keys that both live and history
 // transcripts read.
 var transcriptViewKeys = []any{
-	transcriptKeys.ScrollUp, transcriptKeys.ScrollDown, transcriptKeys.CardNext, transcriptKeys.CardPrev,
+	transcriptKeys.ScrollUp, transcriptKeys.ScrollDown, transcriptKeys.PromptNext, transcriptKeys.PromptPrev,
 	transcriptKeys.HalfUp, transcriptKeys.HalfDown,
 	transcriptKeys.Top, transcriptKeys.Bottom, transcriptKeys.Collapse, transcriptKeys.Expand,
 	transcriptKeys.Detail, transcriptKeys.Back,

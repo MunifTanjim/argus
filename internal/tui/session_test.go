@@ -101,7 +101,7 @@ func sessionModel(ix *session.Interaction) model {
 	}
 	m = withLive(m, "s1")
 	m = withFocus(m, mainPane)
-	m = withChunks(m, sampleChunks())
+	m = withEntries(m, sampleEntries())
 	if ix != nil && ix.Kind == session.InteractionQuestion {
 		m.dock.ensurePromptState(len(ix.Questions))
 	}
@@ -498,18 +498,16 @@ func TestFocusedDockExpandsToShowSubmitTab(t *testing.T) {
 }
 
 func TestDetailEscPopsThenLeaves(t *testing.T) {
-	sub := transcript.Item{Kind: transcript.ItemSubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
-		Trace: []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"}}}}}}}
+	sub := transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
+		Trace: []transcript.Entry{{Kind: transcript.EntryTool, ToolName: "Read"}}}}}
 	m := sessionModel(nil)
 	v := tvOf(&m)
-	v.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI,
-		Items: []transcript.Item{sub}}}
+	v.transcript.entries = []transcript.Entry{sub}
 	v.transcript.cursor = 0
 	v.historyView = histDetail
 	v.enterDetail()
 	v.topFrame().cursor = 0
-	v.drillDetail() // now 2 frames deep (inline history trace → subagent frame)
+	v.actDetailDrill(tea.KeyPressMsg{}) // now 2 frames deep (inline trace → focused leaf)
 	v.put()
 
 	// First esc pops to the root frame, staying in detail.
@@ -544,13 +542,12 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 	v := tvOf(&m)
 
 	// A live subagent item with no inlined trace: it will be streamed.
-	agentItem := transcript.Item{
-		Kind:      transcript.ItemSubagent,
+	agentItem := transcript.Entry{
+		Kind:      transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}},
 	}
-	v.transcript.chunks = []transcript.Chunk{
-		{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{agentItem}},
-	}
+	// The root frame is an inline (history-shaped) trace holding the live subagent.
+	v.transcript.entries = []transcript.Entry{traceFixture("Explore", agentItem)}
 	v.transcript.cursor = 0
 	v.historyView = histDetail
 	v.enterDetail()
@@ -568,8 +565,8 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 		label:    "explorer",
 		subID:    subAgentSubID, // this is what Finding 1 requires to be set
 		expanded: map[int]bool{},
-		items: []transcript.Item{
-			{Kind: transcript.ItemTool, ToolName: "Read"},
+		items: []transcript.Entry{
+			{Kind: transcript.EntryTool, ToolName: "Read"},
 		},
 	})
 	// Stack is now 2 deep: root + subagent.
@@ -577,8 +574,8 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 		t.Fatalf("setup: want 2 frames, got %d", len(v.transcript.detailStack))
 	}
 
-	// Drill into a leaf item inside the subagent frame (drillDetail pushes a focus frame).
-	v.drillDetail()
+	// Drill into a leaf item inside the subagent frame (pushes a focus frame).
+	v.actDetailDrill(tea.KeyPressMsg{})
 	if len(v.transcript.detailStack) != 3 {
 		t.Fatalf("after leaf drill: want 3 frames, got %d", len(v.transcript.detailStack))
 	}

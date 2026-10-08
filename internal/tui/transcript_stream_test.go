@@ -9,9 +9,9 @@ import (
 )
 
 func TestApplyDelta(t *testing.T) {
-	have := []transcript.Chunk{{ID: "0"}, {ID: "1"}}
+	have := []transcript.Entry{{ID: "0"}, {ID: "1"}}
 	// from_index 1 replaces chunk 1 and appends chunk 2
-	d := api.TranscriptDelta{FromIndex: 1, Chunks: []transcript.Chunk{{ID: "1", Text: "grown"}, {ID: "2"}}}
+	d := api.TranscriptDelta{FromIndex: 1, Entries: []transcript.Entry{{ID: "1", Text: "grown"}, {ID: "2"}}}
 	got := applyDelta(have, d)
 	if len(got) != 3 || got[1].Text != "grown" || got[2].ID != "2" {
 		t.Fatalf("applyDelta = %+v", got)
@@ -19,8 +19,8 @@ func TestApplyDelta(t *testing.T) {
 }
 
 func TestApplyDeltaFromZeroReplacesAll(t *testing.T) {
-	have := []transcript.Chunk{{ID: "0"}, {ID: "1"}}
-	d := api.TranscriptDelta{FromIndex: 0, Chunks: []transcript.Chunk{{ID: "0"}}}
+	have := []transcript.Entry{{ID: "0"}, {ID: "1"}}
+	d := api.TranscriptDelta{FromIndex: 0, Entries: []transcript.Entry{{ID: "0"}}}
 	got := applyDelta(have, d)
 	if len(got) != 1 {
 		t.Fatalf("want full replace to 1 chunk, got %d", len(got))
@@ -48,7 +48,7 @@ func TestCacheKeyForPrefersClaudeID(t *testing.T) {
 }
 
 // A /clear swaps the open session's AgentSessionID: re-subscribe onto the fresh
-// (empty) cache key so no pre-clear chunks survive.
+// (empty) cache key so no pre-clear entries survive.
 func TestResubscribeOnClearResetsToFreshStream(t *testing.T) {
 	m := testModel()
 	m.width, m.height = 80, 10
@@ -57,8 +57,8 @@ func TestResubscribeOnClearResetsToFreshStream(t *testing.T) {
 	cur := session.Session{ID: "s1", AgentSessionID: "c1"}
 	m.sessions = map[string]session.Session{"s1": cur}
 	m = withTr(m, func(t *transcriptComp) { t.activeSub = subRef{subID: "x", sessionID: "s1", cacheKey: "c0"} })
-	m.transcriptCache = map[string]cachedTranscript{"c0": {chunks: userChunks(20)}}
-	m = withTr(m, func(t *transcriptComp) { t.transcript.chunks = userChunks(20) })
+	m.transcriptCache = map[string]cachedTranscript{"c0": {entries: userEntries(20)}}
+	m = withTr(m, func(t *transcriptComp) { t.transcript.entries = userEntries(20) })
 
 	cmd := m.resubscribeOnClear(prev, true, cur)
 	if cmd == nil {
@@ -70,8 +70,8 @@ func TestResubscribeOnClearResetsToFreshStream(t *testing.T) {
 	if trOf(m).activeSub.cacheKey != "c1" {
 		t.Errorf("activeSub cacheKey = %q, want c1", trOf(m).activeSub.cacheKey)
 	}
-	if len(trOf(m).transcript.chunks) != 0 {
-		t.Errorf("stale pre-clear chunks should be dropped, got %d", len(trOf(m).transcript.chunks))
+	if len(trOf(m).transcript.entries) != 0 {
+		t.Errorf("stale pre-clear entries should be dropped, got %d", len(trOf(m).transcript.entries))
 	}
 	if _, ok := m.transcriptCache["c0"]; ok {
 		t.Error("superseded cache entry should be evicted")

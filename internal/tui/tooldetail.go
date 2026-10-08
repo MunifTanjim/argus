@@ -14,7 +14,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func (m tview) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
+func (m tview) fetchToolBodyCmd(it transcript.Entry, agentID string) tea.Cmd {
 	if it.ToolID == "" {
 		return nil
 	}
@@ -44,7 +44,7 @@ func (m tview) fetchToolBodyCmd(it transcript.Item, agentID string) tea.Cmd {
 	}
 }
 
-func (m model) toolDetailBody(it transcript.Item, width int) (string, bool) {
+func (m model) toolDetailBody(it transcript.Entry, width int) (string, bool) {
 	meta, ok := toolRegistry[it.ToolName]
 	if !ok || meta.detail == nil {
 		return "", false // unregistered, or registered with the generic body
@@ -68,7 +68,7 @@ func sectionRule(width int) string {
 	return StyleMuted.Render(strings.Repeat(GlyphHRule, width))
 }
 
-func resultLabelText(it transcript.Item) string {
+func resultLabelText(it transcript.Entry) string {
 	if it.ResultIsError {
 		return "Error"
 	}
@@ -104,7 +104,7 @@ func (m model) renderJS(s string, width int) string {
 	return hardWrap(s, width)
 }
 
-func (m model) genericToolBody(it transcript.Item, width int) string {
+func (m model) genericToolBody(it transcript.Entry, width int) string {
 	var sb strings.Builder
 	if it.ToolInput != "" {
 		sb.WriteString(sectionLabel("Input", false) + "\n")
@@ -120,7 +120,7 @@ func (m model) genericToolBody(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) editToolDetail(it transcript.Item, width int) string {
+func (m model) editToolDetail(it transcript.Entry, width int) string {
 	var sb strings.Builder
 	if diff, ok := editDiff(it.ToolName, it.ToolInput); ok {
 		sb.WriteString(diff)
@@ -142,7 +142,7 @@ func unmarshalInput(raw string, v any) {
 	_ = json.Unmarshal([]byte(raw), v)
 }
 
-func (m model) bashDetail(it transcript.Item, width int) string {
+func (m model) bashDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Command     string `json:"command"`
 		Description string `json:"description"`
@@ -190,7 +190,7 @@ func prettyJSON(s string) string {
 	return buf.String()
 }
 
-func (m model) execCommandDetail(it transcript.Item, width int) string {
+func (m model) execCommandDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Command         string `json:"cmd"`
 		Workdir         string `json:"workdir"`
@@ -247,7 +247,7 @@ func isAgentRefTool(name string) bool {
 	return name == "wait_agent" || name == "close_agent"
 }
 
-func agentDisplayName(it transcript.Item, agentID string) string {
+func agentDisplayName(it transcript.Entry, agentID string) string {
 	for _, s := range it.Subagents {
 		if s.ID == agentID && s.Name != "" {
 			return s.Name
@@ -256,7 +256,7 @@ func agentDisplayName(it transcript.Item, agentID string) string {
 	return agentID
 }
 
-func agentTargetNames(it transcript.Item) []string {
+func agentTargetNames(it transcript.Entry) []string {
 	if len(it.Subagents) == 0 {
 		return nil
 	}
@@ -271,7 +271,7 @@ func agentTargetNames(it transcript.Item) []string {
 	return names
 }
 
-func agentToolLabel(it transcript.Item) string {
+func agentToolLabel(it transcript.Entry) string {
 	prefix := "Wait Agent"
 	if it.ToolName == "close_agent" {
 		prefix = "Close Agent"
@@ -308,7 +308,7 @@ func (m model) agentStatusBlock(name string, raw json.RawMessage, width int) str
 	return head + "\n" + m.renderMD(message, width)
 }
 
-func (m model) waitAgentDetail(it transcript.Item, width int) string {
+func (m model) waitAgentDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Targets   []string `json:"targets"`
 		TimeoutMs int      `json:"timeout_ms"`
@@ -358,7 +358,7 @@ func (m model) waitAgentDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) closeAgentDetail(it transcript.Item, width int) string {
+func (m model) closeAgentDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Target string `json:"target"`
 	}
@@ -388,7 +388,7 @@ func (m model) closeAgentDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) readDetail(it transcript.Item, width int) string {
+func (m model) readDetail(it transcript.Entry, width int) string {
 	var in struct {
 		FilePath string `json:"file_path"` // claude
 		Path     string `json:"path"`      // opencode
@@ -412,7 +412,7 @@ func (m model) readDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) todoDetail(it transcript.Item, width int) string {
+func (m model) todoDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Todos []struct {
 			Content    string `json:"content"`
@@ -442,7 +442,7 @@ func (m model) todoDetail(it transcript.Item, width int) string {
 	return strings.Join(rows, "\n")
 }
 
-func (m model) planDetail(it transcript.Item, width int) string {
+func (m model) planDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Plan []struct {
 			Step   string `json:"step"`
@@ -467,7 +467,7 @@ func (m model) planDetail(it transcript.Item, width int) string {
 	return strings.Join(rows, "\n")
 }
 
-func (m model) grepDetail(it transcript.Item, width int) string {
+func (m model) grepDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`
 		Glob    string `json:"glob"`    // claude
@@ -500,7 +500,7 @@ func (m model) grepDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) globDetail(it transcript.Item, width int) string {
+func (m model) globDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
@@ -523,7 +523,7 @@ func (m model) globDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) taskCreateDetail(it transcript.Item, width int) string {
+func (m model) taskCreateDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Subject     string `json:"subject"`
 		Description string `json:"description"`
@@ -545,7 +545,7 @@ func (m model) taskCreateDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) taskUpdateDetail(it transcript.Item, width int) string {
+func (m model) taskUpdateDetail(it transcript.Entry, width int) string {
 	var in struct {
 		TaskID string `json:"taskId"`
 	}
@@ -578,17 +578,17 @@ func parseAnsweredAnswers(result string) map[string]string {
 // can't dominate the view (previewBox clips the rest).
 const askUserQuestionPreviewCap = 12
 
-func (m model) askUserQuestionDetail(it transcript.Item, width int) string {
+func (m model) askUserQuestionDetail(it transcript.Entry, width int) string {
 	return m.questionDetail(it, width, "Claude")
 }
 
-func (m model) opencodeQuestionDetail(it transcript.Item, width int) string {
+func (m model) opencodeQuestionDetail(it transcript.Entry, width int) string {
 	return m.questionDetail(it, width, "OpenCode")
 }
 
 // opencodeExecuteDetail renders code and result without a "$" prompt, since the
 // input is code, not a shell command (unlike bashDetail).
-func (m model) opencodeExecuteDetail(it transcript.Item, width int) string {
+func (m model) opencodeExecuteDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Code string `json:"code"`
 	}
@@ -612,7 +612,7 @@ func (m model) opencodeExecuteDetail(it transcript.Item, width int) string {
 
 // opencodeSkillDetail shows only the skill id; the result is the full skill XML,
 // which the generic body would otherwise dump.
-func (m model) opencodeSkillDetail(it transcript.Item, width int) string {
+func (m model) opencodeSkillDetail(it transcript.Entry, width int) string {
 	var in struct {
 		ID string `json:"id"`
 	}
@@ -625,7 +625,7 @@ func (m model) opencodeSkillDetail(it transcript.Item, width int) string {
 
 // opencodeTaskDetail previews a dispatched sub-agent. The "task" input shape varies
 // by model, so an unrecognised input falls back to the generic body.
-func (m model) opencodeTaskDetail(it transcript.Item, width int) string {
+func (m model) opencodeTaskDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Agent        string `json:"agent"`
 		SubagentType string `json:"subagent_type"`
@@ -663,7 +663,7 @@ func (m model) opencodeTaskDetail(it transcript.Item, width int) string {
 // questionDetail renders a questions/options tool (Claude AskUserQuestion, OpenCode
 // question), marking the chosen option. The answered result carries
 // "question"="answer" pairs (see parseAnsweredAnswers).
-func (m model) questionDetail(it transcript.Item, width int, brand string) string {
+func (m model) questionDetail(it transcript.Entry, width int, brand string) string {
 	var in struct {
 		Questions []struct {
 			Header      string `json:"header"`
@@ -752,7 +752,7 @@ func (m model) questionDetail(it transcript.Item, width int, brand string) strin
 	return strings.Join(blocks, "\n"+sectionRule(width)+"\n")
 }
 
-func (m model) webDetail(it transcript.Item, width int) string {
+func (m model) webDetail(it transcript.Entry, width int) string {
 	var in struct {
 		URL    string `json:"url"`
 		Prompt string `json:"prompt"`

@@ -72,7 +72,7 @@ func TestSessionTranscriptCardKeys(t *testing.T) {
 	m := testModel()
 	m = withView(m, viewSession)
 	m = withTr(m, func(t *transcriptComp) {
-		t.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkSystem, Text: "note", Detail: "more"}}
+		t.transcript.entries = []transcript.Entry{{ID: "a", Kind: transcript.EntrySystem, Text: "note", Detail: "more"}}
 	})
 	if m, _ = upd(m, keyMsg("enter")); trOf(m).historyView != histDetail {
 		t.Error("enter should open the card detail")
@@ -86,7 +86,7 @@ func TestFileViewKeysInSessionAndDetail(t *testing.T) {
 		m = withFocus(m, mainPane)
 		if detail {
 			m = withTr(m, func(t *transcriptComp) {
-				t.transcript.chunks = []transcript.Chunk{{ID: "a", Kind: transcript.ChunkSystem, Text: "note", Detail: "more"}}
+				t.transcript.entries = []transcript.Entry{{ID: "a", Kind: transcript.EntrySystem, Text: "note", Detail: "more"}}
 			})
 			m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 			m, _ = onTr(m, func(v tview) tea.Cmd { v.enterDetail(); return nil })

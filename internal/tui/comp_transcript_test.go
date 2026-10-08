@@ -17,7 +17,7 @@ import (
 
 type streamClient struct {
 	recordingClient
-	hist map[string][]transcript.Chunk
+	hist map[string][]transcript.Entry
 }
 
 func (c *streamClient) Call(method string, params, result any) error {
@@ -29,7 +29,7 @@ func (c *streamClient) Call(method string, params, result any) error {
 		if p.AgentID != "" {
 			key += "#" + p.AgentID
 		}
-		v.Chunks = c.hist[key]
+		v.Entries = c.hist[key]
 	}
 	return nil
 }
@@ -52,25 +52,25 @@ func (c *recordingClient) subIDs(method string) []string {
 	return out
 }
 
-func userChunk(id, text string) transcript.Chunk {
-	return transcript.Chunk{ID: id, Kind: transcript.ChunkUser, Text: text}
+func userEntry(id, text string) transcript.Entry {
+	return transcript.Entry{ID: id, Kind: transcript.EntryUser, Text: text}
 }
 
-// liveDeltas fills in each catch-up's stream and chunks, as the node answers a
+// liveDeltas fills in each catch-up's stream and entries, as the node answers a
 // subscribe.
-func liveDeltas(m model, cmd tea.Cmd, chunks []transcript.Chunk) model {
+func liveDeltas(m model, cmd tea.Cmd, entries []transcript.Entry) model {
 	for _, msg := range execCmd(cmd) {
 		if d, ok := msg.(transcriptDeltaMsg); ok {
-			d.delta.SubID, d.delta.Chunks = d.ref.subID, chunks
+			d.delta.SubID, d.delta.Entries = d.ref.subID, entries
 			m, _ = upd(m, d)
 		}
 	}
 	return m
 }
 
-func resumeInto(m model, id string, chunks ...transcript.Chunk) model {
+func resumeInto(m model, id string, entries ...transcript.Entry) model {
 	m, cmd := upd(m, resumeResultMsg{sessionID: id})
-	return liveDeltas(m, cmd, chunks)
+	return liveDeltas(m, cmd, entries)
 }
 
 func streamModel(c Client) model {
@@ -81,17 +81,13 @@ func streamModel(c Client) model {
 	return m
 }
 
-func subagentChunk() transcript.Chunk {
-	return transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{{
-		Kind:      transcript.ItemSubagent,
-		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}},
-	}}}
+func subagentEntry() transcript.Entry {
+	return transcript.Entry{ID: "a", Kind: transcript.EntrySubagent,
+		Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true, ID: "agent42"}}}
 }
 
-// drillSubagent opens the card detail and drills into the streamed subagent.
 func drillSubagent(t *testing.T, m model) model {
 	t.Helper()
-	m = pressKeys(m, keyMsg("enter"))
 	m, cmd := upd(m, keyMsg("enter"))
 	runCmd(cmd)
 	return m
@@ -110,7 +106,7 @@ func assertUnsubscribed(t *testing.T, rc *recordingClient, ids ...string) {
 }
 
 func TestLateHistoryReplyLeavesTheLiveTranscript(t *testing.T) {
-	c := &streamClient{hist: map[string][]transcript.Chunk{"/p/old.jsonl": {userChunk("h1", "from history")}}}
+	c := &streamClient{hist: map[string][]transcript.Entry{"/p/old.jsonl": {userEntry("h1", "from history")}}}
 	m := testModel()
 	m.client = c
 	m.transcriptCache = map[string]cachedTranscript{}
@@ -120,9 +116,9 @@ func TestLateHistoryReplyLeavesTheLiveTranscript(t *testing.T) {
 	m = withHistorySessions(m, p, session.HistorySessionPage{Items: []session.HistorySession{s}})
 	m, fetch := upd(m, keyMsg("enter"))
 	m = pressKeys(m, keyMsg("esc"))
-	m = resumeInto(m, "s1", userChunk("l1", "live text"))
+	m = resumeInto(m, "s1", userEntry("l1", "live text"))
 	if !strings.Contains(viewText(m), "live text") {
-		t.Fatalf("the live transcript should show its chunks:\n%s", viewText(m))
+		t.Fatalf("the live transcript should show its entries:\n%s", viewText(m))
 	}
 	for _, msg := range execCmd(fetch) {
 		m, _ = upd(m, msg)
@@ -134,7 +130,7 @@ func TestLateHistoryReplyLeavesTheLiveTranscript(t *testing.T) {
 }
 
 func TestHistoryReplyReachesItsTranscript(t *testing.T) {
-	c := &streamClient{hist: map[string][]transcript.Chunk{"/p/old.jsonl": {userChunk("h1", "from history")}}}
+	c := &streamClient{hist: map[string][]transcript.Entry{"/p/old.jsonl": {userEntry("h1", "from history")}}}
 	m := testModel()
 	m.client = c
 	m.transcriptCache = map[string]cachedTranscript{}
@@ -151,12 +147,12 @@ func TestHistoryReplyReachesItsTranscript(t *testing.T) {
 }
 
 func TestLateLiveReplyLeavesTheHistoryTranscript(t *testing.T) {
-	c := &streamClient{hist: map[string][]transcript.Chunk{"/p/old.jsonl": {userChunk("h1", "from history")}}}
+	c := &streamClient{hist: map[string][]transcript.Entry{"/p/old.jsonl": {userEntry("h1", "from history")}}}
 	m := testModel()
 	m.client = c
 	m.transcriptCache = map[string]cachedTranscript{}
 	m.sessions = map[string]session.Session{"s1": {ID: "s1"}}
-	m = resumeInto(m, "s1", userChunk("l1", "live text"))
+	m = resumeInto(m, "s1", userEntry("l1", "live text"))
 	m = pressKeys(m, keyMsg("esc"))
 	p := session.HistoryProject{NodeID: "n1", ProjectDir: "/p", Label: "proj"}
 	s := session.HistorySession{SessionID: "old", TranscriptPath: "/p/old.jsonl", Agent: "claude"}
@@ -165,7 +161,7 @@ func TestLateLiveReplyLeavesTheHistoryTranscript(t *testing.T) {
 	for _, msg := range execCmd(fetch) {
 		m, _ = upd(m, msg)
 	}
-	m, _ = upd(m, transcriptMsg{id: "s1", chunks: []transcript.Chunk{userChunk("l2", "late live")}})
+	m, _ = upd(m, transcriptMsg{id: "s1", entries: []transcript.Entry{userEntry("l2", "late live")}})
 	out := viewText(m)
 	if !strings.Contains(out, "from history") || strings.Contains(out, "late live") {
 		t.Errorf("a late live reply must leave the history transcript as it was:\n%s", out)
@@ -186,7 +182,7 @@ func TestBackClosesTheSessionStream(t *testing.T) {
 
 func TestOpeningAnotherRowClosesBothStreams(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", subagentChunk())
+	m := resumeInto(streamModel(rc), "n1:s1", subagentEntry())
 	m = drillSubagent(t, m)
 	subs := rc.subIDs(api.MethodTranscriptSubscribe)
 	if len(subs) != 2 {
@@ -243,7 +239,7 @@ func TestResumeWhileOpenClosesTheOldStream(t *testing.T) {
 
 func TestEnterSessionIntoAnotherClosesTheOldStreams(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", subagentChunk())
+	m := resumeInto(streamModel(rc), "n1:s1", subagentEntry())
 	m = drillSubagent(t, m)
 	old := rc.subIDs(api.MethodTranscriptSubscribe)
 	m, cmd := m.enterSession("n1:s9")
@@ -256,7 +252,7 @@ func TestEnterSessionIntoAnotherClosesTheOldStreams(t *testing.T) {
 
 func TestQuitClosesBothStreams(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", subagentChunk())
+	m := resumeInto(streamModel(rc), "n1:s1", subagentEntry())
 	m = drillSubagent(t, m)
 	subs := rc.subIDs(api.MethodTranscriptSubscribe)
 	_, cmd := upd(m, ctrlKey('c'))
@@ -290,11 +286,11 @@ func TestDeltaForAClosedStreamIsDropped(t *testing.T) {
 	var late []transcriptDeltaMsg
 	for _, msg := range execCmd(cmd) {
 		if d, ok := msg.(transcriptDeltaMsg); ok {
-			d.delta.Chunks = []transcript.Chunk{userChunk("l1", "first session")}
+			d.delta.Entries = []transcript.Entry{userEntry("l1", "first session")}
 			late = append(late, d)
 		}
 	}
-	m = resumeInto(m, "n1:s9", userChunk("l9", "second session"))
+	m = resumeInto(m, "n1:s9", userEntry("l9", "second session"))
 	for _, d := range late {
 		m, _ = upd(m, d)
 	}
@@ -310,7 +306,7 @@ func TestLiveScreenKeepsTheStreamOpen(t *testing.T) {
 	s := m.sessions["n1:s1"]
 	s.CanOpenTerminal = true
 	m.sessions["n1:s1"] = s
-	m = resumeInto(m, "n1:s1", userChunk("l1", "live text"))
+	m = resumeInto(m, "n1:s1", userEntry("l1", "live text"))
 	sub := trOf(m).activeSub
 	m, cmd := upd(m, ctrlKey('t'))
 	runCmd(cmd)
@@ -357,22 +353,19 @@ func deliver(m model, cmd tea.Cmd) model {
 	return m
 }
 
-func toolChunk() transcript.Chunk {
-	return transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{
-		{Kind: transcript.ItemTool, ToolName: "Bash", ToolID: "tool1", InputPreview: "ls"},
-	}}
+func toolEntry() transcript.Entry {
+	return transcript.Entry{ID: "a", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool1", InputPreview: "ls"}
 }
 
-// expandTool returns the tool body's fetch without running it.
+// expandTool drills into the tool and returns its body's fetch without running it.
 func expandTool(m model) (model, tea.Cmd) {
-	m = pressKeys(m, keyMsg("enter"))
-	return upd(m, keyMsg("l"))
+	return upd(m, keyMsg("enter"))
 }
 
 func TestLateReplyForAnotherHistoryTranscriptIsDropped(t *testing.T) {
-	c := &streamClient{hist: map[string][]transcript.Chunk{
-		"/p/a.jsonl": {userChunk("a1", "from a")},
-		"/p/b.jsonl": {userChunk("b1", "from b")},
+	c := &streamClient{hist: map[string][]transcript.Entry{
+		"/p/a.jsonl": {userEntry("a1", "from a")},
+		"/p/b.jsonl": {userEntry("b1", "from b")},
 	}}
 	m, fetchA := upd(historyModel(c, "a", "b"), keyMsg("enter"))
 	m = pressKeys(m, keyMsg("esc"), keyMsg("j"))
@@ -387,9 +380,9 @@ func TestLateReplyForAnotherHistoryTranscriptIsDropped(t *testing.T) {
 
 func TestLateReplyForAnotherLiveSessionIsDropped(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", userChunk("l1", "first session"))
-	m = resumeInto(m, "n1:s9", userChunk("l9", "second session"))
-	m, _ = upd(m, transcriptMsg{id: "n1:s1", chunks: []transcript.Chunk{userChunk("x", "late first")}})
+	m := resumeInto(streamModel(rc), "n1:s1", userEntry("l1", "first session"))
+	m = resumeInto(m, "n1:s9", userEntry("l9", "second session"))
+	m, _ = upd(m, transcriptMsg{id: "n1:s1", entries: []transcript.Entry{userEntry("x", "late first")}})
 	out := viewText(m)
 	if !strings.Contains(out, "second session") || strings.Contains(out, "late first") {
 		t.Errorf("a reply for the closed session must leave the open one as it was:\n%s", out)
@@ -397,23 +390,21 @@ func TestLateReplyForAnotherLiveSessionIsDropped(t *testing.T) {
 }
 
 func TestLateSubagentReplyForAnotherHistoryTranscriptIsDropped(t *testing.T) {
-	sub := func(text string) []transcript.Chunk {
-		return []transcript.Chunk{{ID: "x", Kind: transcript.ChunkAI, Items: []transcript.Item{{Kind: transcript.ItemText, Text: text}}}}
+	sub := func(text string) []transcript.Entry {
+		return []transcript.Entry{{ID: "x", Kind: transcript.EntryText, Text: text}}
 	}
-	c := &streamClient{hist: map[string][]transcript.Chunk{
-		"/p/a.jsonl":         {subagentChunk()},
-		"/p/b.jsonl":         {subagentChunk()},
+	c := &streamClient{hist: map[string][]transcript.Entry{
+		"/p/a.jsonl":         {subagentEntry()},
+		"/p/b.jsonl":         {subagentEntry()},
 		"/p/a.jsonl#agent42": sub("from a sub"),
 		"/p/b.jsonl#agent42": sub("from b sub"),
 	}}
 	m, fetch := upd(historyModel(c, "a", "b"), keyMsg("enter"))
 	m = deliver(m, fetch)
-	m = pressKeys(m, keyMsg("enter"))
 	m, lateA := upd(m, keyMsg("enter"))
-	m = pressKeys(m, keyMsg("esc"), keyMsg("esc"), keyMsg("esc"), keyMsg("j"))
+	m = pressKeys(m, keyMsg("esc"), keyMsg("esc"), keyMsg("j"))
 	m, fetch = upd(m, keyMsg("enter"))
 	m = deliver(m, fetch)
-	m = pressKeys(m, keyMsg("enter"))
 	m, subB := upd(m, keyMsg("enter"))
 	m = deliver(m, lateA)
 	if out := viewText(m); strings.Contains(out, "from a sub") {
@@ -426,11 +417,11 @@ func TestLateSubagentReplyForAnotherHistoryTranscriptIsDropped(t *testing.T) {
 }
 
 func TestHistoryToolReplyLeavesTheLiveTranscript(t *testing.T) {
-	c := &streamClient{hist: map[string][]transcript.Chunk{"/p/a.jsonl": {toolChunk()}}}
+	c := &streamClient{hist: map[string][]transcript.Entry{"/p/a.jsonl": {toolEntry()}}}
 	m, fetch := upd(historyModel(c, "a"), keyMsg("enter"))
 	m = deliver(m, fetch)
 	m, histTool := expandTool(m)
-	m = resumeInto(m, "s1", toolChunk())
+	m = resumeInto(m, "s1", toolEntry())
 	m, _ = expandTool(m)
 	m = deliver(m, histTool)
 	if e := trOf(m).toolBodies["tool1"]; !e.loading || e.done {
@@ -447,9 +438,9 @@ func TestHistoryToolReplyLeavesTheLiveTranscript(t *testing.T) {
 
 func TestToolReplyForAnotherLiveSessionIsDropped(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", toolChunk())
+	m := resumeInto(streamModel(rc), "n1:s1", toolEntry())
 	m, late := expandTool(m)
-	m = resumeInto(m, "n1:s9", toolChunk())
+	m = resumeInto(m, "n1:s9", toolEntry())
 	m, _ = expandTool(m)
 	m = deliver(m, late)
 	if e := trOf(m).toolBodies["tool1"]; !e.loading || e.done {
@@ -459,12 +450,9 @@ func TestToolReplyForAnotherLiveSessionIsDropped(t *testing.T) {
 
 func TestSubagentDeltaFillsItsFrameAndBackResubscribes(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", subagentChunk())
-	m = pressKeys(m, keyMsg("enter"))
+	m := resumeInto(streamModel(rc), "n1:s1", subagentEntry())
 	m, cmd := upd(m, keyMsg("enter"))
-	m = liveDeltas(m, cmd, []transcript.Chunk{{ID: "x", Kind: transcript.ChunkAI, Items: []transcript.Item{
-		{Kind: transcript.ItemText, Text: "subagent says hi"},
-	}}})
+	m = liveDeltas(m, cmd, []transcript.Entry{{ID: "x", Kind: transcript.EntryText, Text: "subagent says hi"}})
 	if out := viewText(m); !strings.Contains(out, "subagent says hi") {
 		t.Fatalf("the subagent delta should fill its frame:\n%s", out)
 	}
@@ -489,7 +477,7 @@ func TestClearThroughUpdateMovesTheStream(t *testing.T) {
 	s := m.sessions["n1:s1"]
 	s.AgentSessionID = "c0"
 	m.sessions["n1:s1"] = s
-	m = resumeInto(m, "n1:s1", userChunk("l1", "before clear"))
+	m = resumeInto(m, "n1:s1", userEntry("l1", "before clear"))
 	old := trOf(m).activeSub
 	s.AgentSessionID = "c1"
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: s})
@@ -499,4 +487,85 @@ func TestClearThroughUpdateMovesTheStream(t *testing.T) {
 		t.Fatalf("/clear should move the transcript to a new stream on c1: %+v", sub)
 	}
 	assertUnsubscribed(t, rc, old.subID)
+}
+
+func countCalls(rc *recordingClient, method string) int {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	n := 0
+	for _, c := range rc.calls {
+		if c == method {
+			n++
+		}
+	}
+	return n
+}
+
+// toolResultDelta resends the tool entry, as the node does when its result lands.
+func toolResultDelta(m model) transcriptDeltaMsg {
+	ref := trOf(m).activeSub
+	return transcriptDeltaMsg{ref: ref, delta: api.TranscriptDelta{SubID: ref.subID, FromIndex: 1,
+		Entries: []transcript.Entry{toolEntry()}}}
+}
+
+func TestRunningToolBodyRefetchedWhenResent(t *testing.T) {
+	rc := &recordingClient{}
+	m := resumeInto(streamModel(rc), "n1:s1", userEntry("u", "go"), toolEntry())
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 1 })
+	m, cmd := onTr(m, func(v tview) tea.Cmd { return v.actExpand(tea.KeyPressMsg{}) })
+	m = deliver(m, cmd) // the tool is still running: its body comes back empty
+	if e := trOf(m).toolBodies["tool1"]; !e.done || e.result != "" {
+		t.Fatalf("setup: want an empty done body, got %+v", e)
+	}
+	before := countCalls(rc, api.MethodSessionToolDetail)
+	m, cmd = upd(m, toolResultDelta(m))
+	if e := trOf(m).toolBodies["tool1"]; !e.loading {
+		t.Fatalf("a resent expanded tool with an empty body should be re-fetched: %+v", e)
+	}
+	runCmd(cmd)
+	if got := countCalls(rc, api.MethodSessionToolDetail); got != before+1 {
+		t.Fatalf("tool detail calls = %d, want %d", got, before+1)
+	}
+	if out := ansi.Strip(tvOf(&m).transcriptBody()); !strings.Contains(out, "loading…") {
+		t.Errorf("the re-fetched row should show loading, not the frozen empty body:\n%s", out)
+	}
+	// While the re-fetch is in flight, another resend must not fetch again.
+	_, cmd = upd(m, toolResultDelta(m))
+	runCmd(cmd)
+	if got := countCalls(rc, api.MethodSessionToolDetail); got != before+1 {
+		t.Errorf("re-fetched while loading: calls = %d, want %d", got, before+1)
+	}
+}
+
+func TestRunningToolBodyRefetchedInFocusedFrame(t *testing.T) {
+	rc := &recordingClient{}
+	m := resumeInto(streamModel(rc), "n1:s1", userEntry("u", "go"), toolEntry())
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 1 })
+	m, cmd := expandTool(m)
+	m = deliver(m, cmd)
+	if f := tvOf(&m).topFrame(); f == nil || !f.focused {
+		t.Fatalf("setup: want a focused frame")
+	}
+	before := countCalls(rc, api.MethodSessionToolDetail)
+	m, cmd = upd(m, toolResultDelta(m))
+	runCmd(cmd)
+	if got := countCalls(rc, api.MethodSessionToolDetail); got != before+1 {
+		t.Fatalf("tool detail calls = %d, want %d", got, before+1)
+	}
+}
+
+func TestDoneToolBodyWithResultNotRefetched(t *testing.T) {
+	rc := &recordingClient{}
+	m := resumeInto(streamModel(rc), "n1:s1", userEntry("u", "go"), toolEntry())
+	m = withTr(m, func(t *transcriptComp) {
+		t.transcript.cursor = 1
+		t.toolBodies["tool1"] = toolBodyEntry{done: true, result: "ok"}
+	})
+	m, _ = onTr(m, func(v tview) tea.Cmd { return v.actExpand(tea.KeyPressMsg{}) })
+	before := countCalls(rc, api.MethodSessionToolDetail)
+	_, cmd := upd(m, toolResultDelta(m))
+	runCmd(cmd)
+	if got := countCalls(rc, api.MethodSessionToolDetail); got != before {
+		t.Errorf("a tool with a cached result was re-fetched")
+	}
 }

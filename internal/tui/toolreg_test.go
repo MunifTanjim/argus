@@ -43,14 +43,8 @@ func TestToolRegistryDrivesIconColorName(t *testing.T) {
 	if got := toolDisplayName("run_command"); got != "Run Command" {
 		t.Errorf("display = %q, want Run Command", got)
 	}
-	if toolColor("run_command") != categoryColor(catBash) {
-		t.Error("run_command color should resolve via catBash")
-	}
 	if toolIcon("run_command", false) != categoryIcon(catBash) {
 		t.Error("run_command icon should resolve via catBash")
-	}
-	if toolColor("grep_search") != categoryColor(catGrep) {
-		t.Error("grep_search color should resolve via catGrep")
 	}
 }
 

@@ -15,11 +15,11 @@ import (
 )
 
 type cachedTranscript struct {
-	chunks []transcript.Chunk
+	entries []transcript.Entry
 }
 
 // toolBodyEntry caches one tool's on-demand-fetched body (see sessions.toolDetail).
-// Transcript chunks ship without ToolInput/Result; fetched per tool when visible.
+// Transcript entries ship without ToolInput/Result; fetched per tool when visible.
 // done marks a completed fetch so an empty body isn't retried or shown as loading.
 type toolBodyEntry struct {
 	toolInput     string
@@ -35,7 +35,7 @@ type subRef struct {
 	sessionID string
 	agentID   string // empty = session transcript
 	// cacheKey is the AgentSessionID, which changes on /clear (new transcript file)
-	// so pre-clear chunks aren't reused. Falls back to sessionID before a hook sets it.
+	// so pre-clear entries aren't reused. Falls back to sessionID before a hook sets it.
 	cacheKey string
 }
 
@@ -80,7 +80,7 @@ type model struct {
 
 	memory viewMemory
 
-	transcriptCache map[string]cachedTranscript // cacheKey -> last-known chunks (per TUI run)
+	transcriptCache map[string]cachedTranscript // cacheKey -> last-known entries (per TUI run)
 	render          renderCache
 
 	termKeyCh chan termKey // ordered keystroke queue drained by sendTermKeyLoop
@@ -112,16 +112,14 @@ type model struct {
 	logs *logbuf.Buffer // the embedded node's log lines; nil without one
 }
 
-// transcriptState is the transcript viewer: parsed chunks plus scroll/cursor/fold/
-// drill-down state and the rendered cards.
 type transcriptState struct {
-	chunks      []transcript.Chunk
+	entries     []transcript.Entry
 	err         error
-	cursor      int                  // selected chunk index
-	scroll      int                  // top line offset into the rendered transcript
-	detailStack []detailFrame        // detail drill-down frame stack (deepest = active)
-	expanded    map[string]bool      // chunk id -> expanded (override default)
-	cards       map[string]cardEntry // rendered card lines, keyed by chunk id
+	cursor      int                 // selected entry index
+	scroll      int                 // top line offset into the rendered transcript
+	detailStack []detailFrame       // deepest = active
+	expanded    map[string]bool     // entry id -> expanded
+	rows        map[string]rowEntry // rendered entry lines, keyed by entry id
 }
 
 // renderCache is what the transcript and the dock draw markdown and code with.

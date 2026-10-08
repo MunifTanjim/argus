@@ -73,11 +73,11 @@ func TestLeavingTheTreeMovesTheCursorToTheRowOfTheMainPane(t *testing.T) {
 }
 
 func TestAWorkspaceReopensItsSession(t *testing.T) {
-	var chunks []transcript.Chunk
+	var entries []transcript.Entry
 	for i := range 40 {
-		chunks = append(chunks, userChunk(fmt.Sprintf("u%d", i), "line"))
+		entries = append(entries, userEntry(fmt.Sprintf("u%d", i), "line"))
 	}
-	m, _ := upd(workspaceSession(nil), transcriptMsg{id: "n1:s1", chunks: chunks})
+	m, _ := upd(workspaceSession(nil), transcriptMsg{id: "n1:s1", entries: entries})
 	m = withTr(m, func(tr *transcriptComp) { tr.transcript.scroll = 0 })
 	m = pressKeys(m, cw('h')...)
 	m = pressKeys(typeKeys(m, "j"), keyMsg("enter"))
@@ -90,7 +90,7 @@ func TestAWorkspaceReopensItsSession(t *testing.T) {
 	if !tr.live || tr.sessionID != "n1:s1" || m.focused != mainPane {
 		t.Fatalf("back on n1:w1: session = %q focus = %v, want n1:s1 with focus", tr.sessionID, m.focused)
 	}
-	m, _ = upd(m, transcriptMsg{id: "n1:s1", chunks: chunks})
+	m, _ = upd(m, transcriptMsg{id: "n1:s1", entries: entries})
 	if scroll, end := trOf(m).transcript.scroll, tvIn(m).maxScroll(); end == 0 || scroll != end {
 		t.Errorf("reopened transcript scroll = %d, want its end %d (> 0)", scroll, end)
 	}

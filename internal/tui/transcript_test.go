@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
-	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -30,230 +29,76 @@ func testModel() model {
 	}
 }
 
-func TestAssistantBrandResolvesAgent(t *testing.T) {
-	m := testModel()
-
-	// History transcript: brand comes from the opened history session's agent,
-	// not the (absent) live session.
-	m = withView(m, viewHistoryTranscript)
-	m = withTr(m, func(t *transcriptComp) { t.history.openAgent = "antigravity" })
-	if _, name := tvOf(&m).assistantBrand(); name != "Antigravity" {
-		t.Errorf("history brand = %q, want Antigravity", name)
-	}
-
-	// Live transcript: brand comes from the selected live session's agent.
-	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
-	m = openLive(m, "s1")
-	if _, name := tvOf(&m).assistantBrand(); name != "Codex" {
-		t.Errorf("live brand = %q, want Codex", name)
-	}
-}
-
-func TestAssistantBrandOpenCode(t *testing.T) {
-	m := testModel()
-	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "opencode"}}
-	m = openLive(m, "s1")
-	if _, name := tvOf(&m).assistantBrand(); name != "OpenCode" {
-		t.Errorf("opencode brand = %q, want OpenCode", name)
-	}
-}
-
-func TestAssistantBrandDefaultClaude(t *testing.T) {
-	m := testModel()
-	m.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: ""}}
-	m = openLive(m, "s1")
-	if _, name := tvOf(&m).assistantBrand(); name != "Claude" {
-		t.Errorf("empty-agent brand = %q, want Claude", name)
-	}
-}
-
-func sampleChunks() []transcript.Chunk {
-	return []transcript.Chunk{
-		{ID: "u1", Kind: transcript.ChunkUser, Text: "hello"},
-		{ID: "a1", Kind: transcript.ChunkAI, ModelName: "Opus 4.8",
-			Thinking: 1, ToolCount: 1,
-			Usage: transcript.Usage{Input: 1000, CacheRead: 500, Output: 30},
-			Items: []transcript.Item{
-				{ID: "a1:0", Kind: transcript.ItemThinking, Text: "reasoning"},
-				{ID: "a1:1", Kind: transcript.ItemText, Text: "hi there"},
-				{ID: "a1:2", Kind: transcript.ItemTool, ToolName: "Bash", InputPreview: "ls", Result: "out"},
-			}},
-		{ID: "s1", Kind: transcript.ChunkSystem, Summary: "turn 1.0s"},
-	}
-}
-
 func loaded() model {
 	m := testModel()
 	m = withView(m, viewSession)
-	return withChunks(m, sampleChunks())
+	return withEntries(m, sampleEntries())
 }
 
-// TestUserChunkWithSkillItemExpandableAndDrillable verifies that a user chunk
-// carrying an ItemSkill is marked expandable and its item is reachable in the
-// detail drill-down.
-func TestUserChunkWithSkillItemExpandableAndDrillable(t *testing.T) {
+func TestUserEntryExpandableByWrappedLines(t *testing.T) {
 	m := bareTv()
 	m.c.m.width = 80
 
-	skillItem := transcript.Item{
-		Kind:         transcript.ItemSkill,
-		ToolName:     "Skill",
-		ToolID:       "sk-001",
-		InputPreview: "superpowers:brainstorming",
-	}
-	c := transcript.Chunk{
-		ID:    "u1",
-		Kind:  transcript.ChunkUser,
-		Text:  "one line",
-		Items: []transcript.Item{skillItem},
-	}
-
-	// The chunk must be expandable even though the text is short.
-	if !m.c.m.chunkExpandable(c) {
-		t.Error("user chunk with skill item should be expandable")
-	}
-
-	// When expanded, the rendered card must surface a skill affordance.
-	m.transcript.chunks = []transcript.Chunk{c}
-	m.transcript.expanded[c.ID] = true
-	out := m.renderChunk(0, false)
-	if !strings.Contains(out, "Skill") {
-		t.Errorf("rendered user card should show a Skill affordance:\n%s", out)
-	}
-	if !strings.Contains(out, "superpowers:brainstorming") {
-		t.Errorf("rendered user card should show the skill name:\n%s", out)
-	}
-
-	// The detail frame surfaces the original message as a leading prompt, then the
-	// skill item so it can be drilled by ToolID.
-	dm := detailTestModel(c)
-	f := dm.topFrame()
-	if f == nil || len(f.items) != 2 {
-		t.Fatalf("detail frame should have 2 items, got %d", len(f.items))
-	}
-	if f.items[0].Kind != transcript.ItemPrompt || f.items[0].Text != "one line" {
-		t.Errorf("first detail item should be the original message prompt, got %+v", f.items[0])
-	}
-	if f.items[1].ToolID != "sk-001" {
-		t.Errorf("detail item ToolID = %q, want %q", f.items[1].ToolID, "sk-001")
-	}
-
-	// Drilling into the skill item should focus it (non-drillable leaf).
-	f.cursor = 1
-	dm.drillDetail()
-	if len(dm.transcript.detailStack) != 2 || !dm.topFrame().focused {
-		t.Fatalf("drill should focus the skill item: frames=%d focused=%v",
-			len(dm.transcript.detailStack), dm.topFrame().focused)
-	}
-}
-
-// TestTextlessUserChunkWithSkillItemDrillable verifies that a user chunk carrying an
-// ItemSkill but no Text (codex-style) is detailable and drillable end-to-end.
-func TestTextlessUserChunkWithSkillItemDrillable(t *testing.T) {
-	m := testModel()
-	m.width = 80
-
-	skillItem := transcript.Item{
-		Kind:         transcript.ItemSkill,
-		ToolName:     "Skill",
-		ToolID:       "sk-002",
-		InputPreview: "superpowers:brainstorming",
-	}
-	c := transcript.Chunk{
-		ID:    "u2",
-		Kind:  transcript.ChunkUser,
-		Text:  "", // codex style: no text
-		Items: []transcript.Item{skillItem},
-	}
-
-	// detailable must be true even with empty Text.
-	if !m.detailable(c) {
-		t.Error("text-less user chunk with skill item should be detailable")
-	}
-
-	// The detail frame must expose the item.
-	dm := detailTestModel(c)
-	f := dm.topFrame()
-	if f == nil || len(f.items) != 1 {
-		t.Fatalf("detail frame should have 1 item, got %d", len(f.items))
-	}
-	if f.items[0].ToolID != "sk-002" {
-		t.Errorf("detail item ToolID = %q, want %q", f.items[0].ToolID, "sk-002")
-	}
-
-	// Drilling into the skill item should focus it (non-drillable leaf).
-	dm.drillDetail()
-	if len(dm.transcript.detailStack) != 2 || !dm.topFrame().focused {
-		t.Fatalf("drill should focus the skill item: frames=%d focused=%v",
-			len(dm.transcript.detailStack), dm.topFrame().focused)
-	}
-}
-
-// TestUserChunkExpandableByWrappedLines verifies long-wrapping user chunks are collapsible.
-func TestUserChunkExpandableByWrappedLines(t *testing.T) {
-	m := testModel()
-	m.width = 80
-
-	short := transcript.Chunk{ID: "u1", Kind: transcript.ChunkUser, Text: "one line"}
-	if m.chunkExpandable(short) {
-		t.Error("short user chunk should not be expandable")
+	short := transcript.Entry{ID: "u1", Kind: transcript.EntryUser, Text: "one line"}
+	if m.entryExpandable(short) {
+		t.Error("short user entry should not be expandable")
 	}
 
 	// One newline, but the line is far longer than the bubble width.
-	long := transcript.Chunk{ID: "u2", Kind: transcript.ChunkUser,
+	long := transcript.Entry{ID: "u2", Kind: transcript.EntryUser,
 		Text: strings.Repeat("word ", 400)}
 	if strings.Count(long.Text, "\n") >= maxCollapsedLines {
 		t.Fatal("fixture should have few source newlines")
 	}
-	if !m.chunkExpandable(long) {
-		t.Error("long-wrapping user chunk should be expandable")
+	if !m.entryExpandable(long) {
+		t.Error("long-wrapping user entry should be expandable")
 	}
 }
 
 func TestExpandDefaultsAndToggle(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	ai := m.transcript.chunks[1]
-	if m.chunkExpanded(ai) {
-		t.Errorf("AI chunk should default collapsed")
+	think := m.transcript.entries[1]
+	if m.entryExpanded(think) {
+		t.Errorf("thinking entry should default collapsed")
 	}
-	if !m.c.m.chunkExpandable(ai) {
-		t.Errorf("AI chunk with items should be expandable")
+	if !m.entryExpandable(think) {
+		t.Errorf("thinking entry with text should be expandable")
 	}
 	m.transcript.cursor = 1
 	m.setExpanded(1, true)
-	if !m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Errorf("AI chunk should be expanded after toggle")
+	if !m.entryExpanded(m.transcript.entries[1]) {
+		t.Errorf("thinking entry should be expanded after toggle")
 	}
 }
 
 func TestFoldKeysExpandAndCollapse(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	m.transcript.cursor = 1 // the expandable AI chunk
-	if m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Fatal("AI chunk should start collapsed")
+	m.transcript.cursor = 1 // the expandable thinking entry
+	if m.entryExpanded(m.transcript.entries[1]) {
+		t.Fatal("thinking entry should start collapsed")
 	}
 
 	m.handleTranscriptKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if !m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Error("l should expand the selected card")
+	if !m.entryExpanded(m.transcript.entries[1]) {
+		t.Error("l should expand the selected entry")
 	}
 	m.handleTranscriptKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if m.chunkExpanded(m.transcript.chunks[1]) {
-		t.Error("h should collapse the selected card")
+	if m.entryExpanded(m.transcript.entries[1]) {
+		t.Error("h should collapse the selected entry")
 	}
 }
 
-func TestLayoutChunks(t *testing.T) {
+func TestLayoutEntries(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	if len(lines) == 0 {
 		t.Fatal("layout produced no lines")
 	}
-	if len(first) != len(m.transcript.chunks) {
-		t.Fatalf("first map mismatch: %d vs %d chunks", len(first), len(m.transcript.chunks))
+	if len(first) != len(m.transcript.entries) {
+		t.Fatalf("first map mismatch: %d vs %d entries", len(first), len(m.transcript.entries))
 	}
 	// first offsets must be strictly increasing.
 	for i := 1; i < len(first); i++ {
@@ -268,8 +113,8 @@ func TestCursorClamp(t *testing.T) {
 	m := tvOf(&mm)
 	m.transcript.cursor = 99
 	m.clampCursor()
-	if m.transcript.cursor != len(m.transcript.chunks)-1 {
-		t.Errorf("clampCursor = %d, want %d", m.transcript.cursor, len(m.transcript.chunks)-1)
+	if m.transcript.cursor != len(m.transcript.entries)-1 {
+		t.Errorf("clampCursor = %d, want %d", m.transcript.cursor, len(m.transcript.entries)-1)
 	}
 	m.transcript.cursor = -5
 	m.clampCursor()
@@ -278,75 +123,18 @@ func TestCursorClamp(t *testing.T) {
 	}
 }
 
-func TestRestoreChunkCursorByID(t *testing.T) {
+func TestRestoreEntryCursorByID(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
 	m.transcript.cursor = 1
-	id := m.currentChunkID()
+	id := m.currentEntryID()
 
-	// Simulate a refresh that prepends a chunk, shifting indices.
-	m.transcript.chunks = append([]transcript.Chunk{{ID: "new", Kind: transcript.ChunkSystem, Summary: "new"}}, m.transcript.chunks...)
-	m.restoreChunkCursor(id, false)
+	// Simulate a refresh that prepends an entry, shifting indices.
+	m.transcript.entries = append([]transcript.Entry{{ID: "new", Kind: transcript.EntrySystem, Summary: "new"}}, m.transcript.entries...)
+	m.restoreEntryCursor(id, false, false)
 
-	if m.currentChunkID() != id {
-		t.Errorf("cursor not preserved by id: want %q, got %q", id, m.currentChunkID())
-	}
-}
-
-func TestKeyCardNav(t *testing.T) {
-	mm := loaded()
-	m := tvOf(&mm)
-	m.c.m.height = 6
-	last := len(m.transcript.chunks) - 1
-
-	// }/{ move the chunk cursor between cards and clamp at the ends.
-	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	}
-	if m.transcript.cursor != last {
-		t.Errorf("cursor should clamp at last chunk %d, got %d", last, m.transcript.cursor)
-	}
-	for i := 0; i < len(m.transcript.chunks)+3; i++ {
-		m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
-	}
-	if m.transcript.cursor != 0 {
-		t.Errorf("after card-nav up: cursor=%d, want 0", m.transcript.cursor)
-	}
-}
-
-func TestKeyCardNavReanchorsToVisible(t *testing.T) {
-	mm := loaded()
-	m := tvOf(&mm)
-	m.c.m.height = 6 // tiny viewport so the cursor can scroll out of view
-	m.transcript.cursor = 0
-
-	// Scroll down so chunk 0 (the cursor) leaves the top of the viewport.
-	_, first := m.layoutChunks()
-	m.transcript.scroll = first[len(first)-1]
-	m.clampScrollNow()
-	if m.cursorVisible() {
-		t.Fatal("setup: cursor should be off-screen after scrolling")
-	}
-	wantFirst := m.firstVisibleChunk()
-	scrollBefore := m.transcript.scroll
-
-	// } with an off-screen cursor selects the first visible card without moving
-	// the viewport (instead of yanking back up to cursor+1).
-	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	if m.transcript.cursor != wantFirst {
-		t.Errorf("} off-screen: tcursor=%d, want first-visible %d", m.transcript.cursor, wantFirst)
-	}
-	if m.transcript.scroll != scrollBefore {
-		t.Errorf("} off-screen should not move the viewport: %d -> %d", scrollBefore, m.transcript.scroll)
-	}
-
-	// With the cursor now visible, } advances by one as before.
-	if m.cursorVisible() {
-		prev := m.transcript.cursor
-		m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-		if m.transcript.cursor != min(prev+1, len(m.transcript.chunks)-1) {
-			t.Errorf("} visible: tcursor=%d, want %d", m.transcript.cursor, min(prev+1, len(m.transcript.chunks)-1))
-		}
+	if m.currentEntryID() != id {
+		t.Errorf("cursor not preserved by id: want %q, got %q", id, m.currentEntryID())
 	}
 }
 
@@ -355,8 +143,8 @@ func scrollTestView(height int, texts ...string) tview {
 	m := tvOf(&mm)
 	m.c.m.height = height
 	for i, text := range texts {
-		m.transcript.chunks = append(m.transcript.chunks,
-			transcript.Chunk{ID: fmt.Sprintf("u%d", i), Kind: transcript.ChunkUser, Text: text})
+		m.transcript.entries = append(m.transcript.entries,
+			transcript.Entry{ID: fmt.Sprintf("u%d", i), Kind: transcript.EntryUser, Text: text})
 	}
 	return m
 }
@@ -368,17 +156,17 @@ func pressScrollKey(m tview, code rune) tview {
 
 func lineScrollTestView() tview {
 	m := scrollTestView(14, "a", "b", "c", "d", "e", "f", "g")
-	m.transcript.chunks[3] = transcript.Chunk{ID: "a3", Kind: transcript.ChunkAI, Text: strings.Repeat("line\n\n", 20)}
+	m.transcript.entries[3] = transcript.Entry{ID: "a3", Kind: transcript.EntryText, Text: strings.Repeat("line\n\n", 20)}
 	return m
 }
 
 func TestLineScrollDownNeverSkipsACard(t *testing.T) {
 	m := lineScrollTestView()
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	last := len(first) - 1
 	for range 200 {
 		cursor, scroll := m.transcript.cursor, m.transcript.scroll
-		_, end := chunkSpan(cursor, first, len(lines))
+		_, end := m.entrySpan(cursor, first, len(lines))
 		bottomHidden := end > scroll+m.viewportHeight()
 		m = pressScrollKey(m, 'j')
 		switch {
@@ -405,12 +193,12 @@ func TestLineScrollDownNeverSkipsACard(t *testing.T) {
 
 func TestLineScrollUpNeverSkipsACard(t *testing.T) {
 	m := lineScrollTestView()
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	m.transcript.cursor = len(first) - 1
 	m.transcript.scroll = m.maxScroll()
 	for range 200 {
 		cursor, scroll := m.transcript.cursor, m.transcript.scroll
-		start, _ := chunkSpan(cursor, first, len(lines))
+		start, _ := m.entrySpan(cursor, first, len(lines))
 		topHidden := start < scroll
 		m = pressScrollKey(m, 'k')
 		switch {
@@ -437,10 +225,10 @@ func TestLineScrollUpNeverSkipsACard(t *testing.T) {
 
 func TestLineScrollRevealsNextCardBelowViewport(t *testing.T) {
 	m := scrollTestView(14, "a", "b", "c", "d", "e", "f", "g", "h")
-	lines, first := m.layoutChunks()
+	lines, first := m.layoutEntries()
 	h := m.viewportHeight()
-	cursor := 1
-	_, end := chunkSpan(cursor, first, len(lines))
+	cursor := 3
+	_, end := m.entrySpan(cursor, first, len(lines))
 	m.transcript.cursor, m.transcript.scroll = cursor, end-h
 	if m.transcript.scroll <= 0 || first[cursor+1] < end {
 		t.Fatalf("setup: card %d should end at the bottom of a scrolled viewport (h=%d, first=%v)", cursor, h, first)
@@ -457,9 +245,9 @@ func TestLineScrollRevealsNextCardBelowViewport(t *testing.T) {
 
 func TestLineScrollInsideLongCardKeepsSelection(t *testing.T) {
 	m := scrollTestView(14, "a", "b", "c")
-	m.transcript.chunks[1] = transcript.Chunk{ID: "a1", Kind: transcript.ChunkAI, Text: strings.Repeat("line\n\n", 40)}
-	lines, first := m.layoutChunks()
-	if start, end := chunkSpan(1, first, len(lines)); end-start < m.viewportHeight()+6 {
+	m.transcript.entries[1] = transcript.Entry{ID: "a1", Kind: transcript.EntryText, Text: strings.Repeat("line\n\n", 40)}
+	lines, first := m.layoutEntries()
+	if start, end := m.entrySpan(1, first, len(lines)); end-start < m.viewportHeight()+6 {
 		t.Fatalf("setup: card 1 should be taller than the viewport plus two scroll steps (span=%d, h=%d)", end-start, m.viewportHeight())
 	}
 	m.transcript.cursor = 1
@@ -481,7 +269,7 @@ func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
 	m := tvOf(&mm)
 	m.c.m.height = 200 // every card fits: nothing to scroll
 	m.transcript.cursor = 0
-	last := len(m.transcript.chunks) - 1
+	last := len(m.transcript.entries) - 1
 
 	for i := 1; i <= last; i++ {
 		m.handleTranscriptKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
@@ -499,126 +287,22 @@ func TestLineScrollAtEdgeMovesCursor(t *testing.T) {
 	}
 }
 
-func TestCardNavWhenCardFits(t *testing.T) {
-	mm := loaded()
-	m := tvOf(&mm)
-	m.c.m.height = 40 // tall viewport: every card fits
-	m.transcript.cursor = 0
-
-	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	if m.transcript.cursor != 1 {
-		t.Errorf("} should select the next card, cursor=%d", m.transcript.cursor)
-	}
-	if m.transcript.scroll != 0 {
-		t.Errorf("} should not scroll when the card fits, scroll=%d", m.transcript.scroll)
-	}
-	m.handleTranscriptKey(tea.KeyPressMsg{Code: '{', Text: "{"})
-	if m.transcript.cursor != 0 {
-		t.Errorf("{ should select the previous card, cursor=%d", m.transcript.cursor)
-	}
-}
-
-func TestCardNavSkipsOversizedCard(t *testing.T) {
-	mm := loaded()
-	m := tvOf(&mm)
-	m.c.m.height = 6 // tiny viewport so the selected card overflows it
-	m.transcript.cursor = 0
-
-	lines, first := m.layoutChunks()
-	if start, end := chunkSpan(0, first, len(lines)); end-start <= m.viewportHeight() {
-		t.Fatal("setup: selected card should overflow the viewport")
-	}
-
-	m.handleTranscriptKey(tea.KeyPressMsg{Code: '}', Text: "}"})
-	if m.transcript.cursor != 1 {
-		t.Errorf("} should jump past an oversized card, cursor=%d", m.transcript.cursor)
-	}
-	if start, _ := chunkSpan(1, first, len(lines)); m.transcript.scroll != start {
-		t.Errorf("} should pin the next card to the top, scroll=%d, want %d", m.transcript.scroll, start)
-	}
-}
-
 func TestTranscriptViewRenders(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
 	out := m.transcriptBody()
-	if !strings.Contains(out, "hello") {
+	if !strings.Contains(out, "fix the bug") {
 		t.Errorf("expected user text in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Claude") {
-		t.Errorf("expected Claude header in output, got:\n%s", out)
-	}
-}
-
-func TestTranscriptBrandFromTool(t *testing.T) {
-	mm := testModel()
-	mm.sessions = map[string]session.Session{"s1": {ID: "s1", Agent: "codex"}}
-	mm = withChunks(openLive(mm, "s1"), sampleChunks())
-	m := tvOf(&mm)
-	out := m.transcriptBody()
-	if !strings.Contains(out, "Codex") {
-		t.Errorf("expected Codex header for a codex session, got:\n%s", out)
-	}
-	if strings.Contains(out, "Claude") {
-		t.Errorf("codex session should not render Claude brand, got:\n%s", out)
-	}
-}
-
-func TestRenderShellCard(t *testing.T) {
-	m := bareTv()
-	c := transcript.Chunk{
-		ID: "sh1", Kind: transcript.ChunkShell,
-		Text:   "echo hi",
-		Detail: "Exit code: 0\nDuration: 0.0417 seconds\nOutput:\nworld\n",
-	}
-	m.transcript.chunks = []transcript.Chunk{c}
-	m.transcript.expanded = map[string]bool{}
-
-	// AI-card style: the "Shell" header sits outside/above the card border; the
-	// command lives inside the card.
-	out := m.renderChunk(0, false)
-	headerIdx := strings.Index(out, "Shell")
-	borderIdx := strings.Index(out, "╭")
-	if headerIdx < 0 || borderIdx < 0 || headerIdx > borderIdx {
-		t.Fatalf("Shell header should sit above the card border:\n%s", out)
-	}
-	if !strings.Contains(out, "echo hi") {
-		t.Fatalf("collapsed card should show the command:\n%s", out)
-	}
-	if strings.Contains(out, "world") {
-		t.Fatalf("collapsed should not show the output:\n%s", out)
-	}
-
-	m.transcript.expanded["sh1"] = true
-	out = m.renderChunk(0, false)
-	if !strings.Contains(out, "echo hi") {
-		t.Fatalf("expanded should still show the command:\n%s", out)
-	}
-	if !strings.Contains(out, "world") {
-		t.Fatalf("expanded render missing output:\n%s", out)
-	}
-	if !strings.Contains(out, "Result") {
-		t.Fatalf("expanded render missing Result label:\n%s", out)
-	}
-}
-
-func TestRenderShellCardError(t *testing.T) {
-	m := bareTv()
-	c := transcript.Chunk{
-		ID: "sh1", Kind: transcript.ChunkShell,
-		Text: "false", Detail: "Exit code: 1\nOutput:\n", IsError: true,
-	}
-	m.transcript.chunks = []transcript.Chunk{c}
-	m.transcript.expanded = map[string]bool{"sh1": true}
-	if out := m.renderChunk(0, false); !strings.Contains(out, "Error") {
-		t.Fatalf("expected Error label for nonzero exit, got:\n%s", out)
+	if !strings.Contains(out, "Opus 4.8") {
+		t.Errorf("expected the turn footer's model in output, got:\n%s", out)
 	}
 }
 
 func TestRenderDetailShell(t *testing.T) {
 	m := testModel()
-	c := transcript.Chunk{
-		ID: "sh1", Kind: transcript.ChunkShell,
+	c := transcript.Entry{
+		ID: "sh1", Kind: transcript.EntryShell,
 		Text:   "echo hi",
 		Detail: "Exit code: 0\nOutput:\nworld\n",
 	}
@@ -635,8 +319,8 @@ func TestRenderDetailShell(t *testing.T) {
 }
 
 func TestItemRowSubagentLabelHidesStatusAndDesc(t *testing.T) {
-	it := transcript.Item{
-		Kind: transcript.ItemSubagent,
+	it := transcript.Entry{
+		Kind: transcript.EntrySubagent,
 		Subagents: []transcript.Subagent{{
 			Type:   "default",
 			Name:   "Volta",
@@ -657,15 +341,15 @@ func TestItemRowSubagentLabelHidesStatusAndDesc(t *testing.T) {
 }
 
 func TestItemRowAgentToolLabel(t *testing.T) {
-	wait := transcript.Item{
-		Kind: transcript.ItemSubagent, ToolName: "wait_agent",
+	wait := transcript.Entry{
+		Kind: transcript.EntrySubagent, ToolName: "wait_agent",
 		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
 	}
 	if got := itemRow(wait); !strings.Contains(got, "Wait Agent: Volta") {
 		t.Errorf("wait_agent row = %q, want label 'Wait Agent: Volta'", got)
 	}
-	closeIt := transcript.Item{
-		Kind: transcript.ItemSubagent, ToolName: "close_agent",
+	closeIt := transcript.Entry{
+		Kind: transcript.EntrySubagent, ToolName: "close_agent",
 		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
 	}
 	if got := itemRow(closeIt); !strings.Contains(got, "Close Agent: Volta") {

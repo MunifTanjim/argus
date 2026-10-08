@@ -45,14 +45,14 @@ func (m model) fetchHistTranscript(addr histAddr) tea.Cmd {
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
 			NodeID: addr.nodeID, TranscriptPath: addr.path, Agent: addr.agent,
 		}, &view)
-		return histTranscriptMsg{addr: addr, chunks: view.Chunks, err: err}
+		return histTranscriptMsg{addr: addr, entries: view.Entries, err: err}
 	}
 }
 
 type histSubagentMsg struct {
 	addr    histAddr
 	agentID string
-	chunks  []transcript.Chunk
+	entries []transcript.Entry
 	err     error
 }
 
@@ -65,7 +65,7 @@ func (m model) fetchHistSubagent(addr histAddr, agentID string) tea.Cmd {
 		err := client.Call(api.MethodSessionsHistoryTranscript, api.HistoryTranscriptParams{
 			NodeID: addr.nodeID, TranscriptPath: addr.path, Agent: addr.agent, AgentID: agentID,
 		}, &view)
-		return histSubagentMsg{addr: addr, agentID: agentID, chunks: view.Chunks, err: err}
+		return histSubagentMsg{addr: addr, agentID: agentID, entries: view.Entries, err: err}
 	}
 }
 
@@ -141,7 +141,7 @@ func (m tview) historyTranscriptView() string {
 }
 
 func (m tview) historyTranscriptBinds() []binding {
-	binds := []binding{transcriptKeys.CardNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
+	binds := []binding{transcriptKeys.PromptNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
 	if m.c.m.viewer {
 		return append(binds, helpAs(transcriptKeys.Back, "quit"))
 	}

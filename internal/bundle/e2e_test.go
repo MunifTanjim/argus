@@ -45,8 +45,8 @@ func TestExportViewFidelity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView (orig): %v", err)
 	}
-	if len(orig.Chunks) == 0 {
-		t.Fatal("fixture produced zero chunks; pick a richer fixture")
+	if len(orig.Entries) == 0 {
+		t.Fatal("fixture produced zero entries; pick a richer fixture")
 	}
 
 	files, err := a.CollectSessionFiles(mainPath)
@@ -89,7 +89,7 @@ func TestExportViewFidelity(t *testing.T) {
 		t.Fatalf("ReadTranscriptView (extracted): %v", err)
 	}
 
-	if !reflect.DeepEqual(orig.Chunks, got.Chunks) {
-		t.Fatalf("fidelity mismatch: orig=%d chunks, got=%d chunks", len(orig.Chunks), len(got.Chunks))
+	if !reflect.DeepEqual(orig.Entries, got.Entries) {
+		t.Fatalf("fidelity mismatch: orig=%d entries, got=%d entries", len(orig.Entries), len(got.Entries))
 	}
 }

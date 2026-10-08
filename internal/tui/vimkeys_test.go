@@ -127,19 +127,25 @@ func TestVimLeaderToggles(t *testing.T) {
 	}
 }
 
-func TestVimTranscriptCardKeys(t *testing.T) {
-	m := loaded()
+func TestVimTranscriptPromptKeys(t *testing.T) {
+	m := liveWith(twoTurns())
 	m.height = 40
-	if m = typeKeys(m, "}"); trOf(m).transcript.cursor != 1 {
-		t.Errorf("}: cursor = %d, want 1", trOf(m).transcript.cursor)
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 0 })
+	if m = typeKeys(m, "}"); trOf(m).transcript.cursor != 3 {
+		t.Errorf("}: cursor = %d, want 3", trOf(m).transcript.cursor)
 	}
 	if m = typeKeys(m, "{"); trOf(m).transcript.cursor != 0 {
 		t.Errorf("{: cursor = %d, want 0", trOf(m).transcript.cursor)
+	}
+	// Brackets stay unbound in the transcript.
+	if m = typeKeys(m, "]"); trOf(m).transcript.cursor != 0 {
+		t.Errorf("]: cursor = %d, want 0 (unbound)", trOf(m).transcript.cursor)
 	}
 }
 
 func TestVimTranscriptJScrolls(t *testing.T) {
 	m := loaded()
+	m = withTr(m, func(t *transcriptComp) { t.transcript.entries[0].Text = strings.Repeat("line\n", 10) })
 	m.height = 6
 	m = typeKeys(m, "j")
 	if trOf(m).transcript.scroll == 0 || trOf(m).transcript.cursor != 0 {
@@ -155,7 +161,7 @@ func TestVimTranscriptCollapseExpand(t *testing.T) {
 	for _, keys := range [][2]string{{"h", "l"}, {"zc", "zo"}} {
 		m := loaded()
 		m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 1 })
-		open := func() bool { return tvOf(&m).chunkExpanded(trOf(m).transcript.chunks[1]) }
+		open := func() bool { return tvOf(&m).entryExpanded(trOf(m).transcript.entries[1]) }
 		for range 2 {
 			if m = typeKeys(m, keys[1]); !open() {
 				t.Errorf("%s should expand the selected card", keys[1])
@@ -170,9 +176,9 @@ func TestVimTranscriptCollapseExpand(t *testing.T) {
 }
 
 func TestVimDetailCollapseExpand(t *testing.T) {
-	v := detailTestModel(transcript.Chunk{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{
-		{Kind: transcript.ItemText, Text: "hi"}, {Kind: transcript.ItemTool, ToolName: "Read", ToolID: "t1"},
-	}})
+	v := detailTestModel(traceFixture("Explore",
+		transcript.Entry{Kind: transcript.EntryText, Text: "hi"}, transcript.Entry{Kind: transcript.EntryTool, ToolName: "Read", ToolID: "t1"},
+	))
 	v.c.m.width, v.c.m.height = 80, 30
 	v.toolBodies = map[string]toolBodyEntry{}
 	v.topFrame().cursor = 1

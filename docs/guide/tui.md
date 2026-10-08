@@ -86,7 +86,7 @@ tui:
 | `home` | The Home sessions |
 | `history` | History |
 | `logs` | Logs |
-| `transcript` | A session transcript, its card detail, and its redaction list |
+| `transcript` | A session transcript, its entry detail, and its redaction list |
 | `session-dock` | The reply, question, or permission prompt of a session |
 | `file` | An open file or diff |
 | `file-tree` | The Files tab |
@@ -173,8 +173,8 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, terminals, workspace | `g?` |
 | `hover` | changes, file-tree, project-tree | `K` |
 | `next` | changes, file-tree, history, home, project-tree, session-dock, terminals, transcript, workspace | `<Down>` `j` |
-| `next card` | transcript | `}` |
 | `next diff-file` | file | `]f` |
+| `next prompt` | transcript | `}` |
 | `node wakelock` | node, project-tree | `w` |
 | `open` | changes, file-tree, history, home, project-tree, terminals, transcript, workspace | `<CR>` |
 | `open live-screen` | session-dock, transcript | `<C-t>` |
@@ -184,8 +184,8 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `option select` | session-dock | `<Space>` |
 | `option unselect` | session-dock | `<Space>` |
 | `prev` | changes, file-tree, history, home, project-tree, session-dock, terminals, transcript, workspace | `<Up>` `k` |
-| `prev card` | transcript | `{` |
 | `prev diff-file` | file | `[f` |
+| `prev prompt` | transcript | `{` |
 | `project forget` | project-tree | `F` |
 | `project hide` | project-tree | `H` |
 | `project pin` | project-tree | `P` |

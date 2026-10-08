@@ -139,7 +139,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadTerminalsCmd())
 			if t, ok := m.baseComp().(transcriptComp); ok && t.live && t.activeSub.subID != "" {
 				ref := t.activeSub
-				have := len(m.transcriptCache[ref.key()].chunks)
+				have := len(m.transcriptCache[ref.key()].entries)
 				cmd = tea.Batch(cmd, m.subscribeCmd(ref, have))
 			}
 			return m, cmd

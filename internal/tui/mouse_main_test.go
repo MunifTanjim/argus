@@ -123,23 +123,23 @@ func TestLogsWheelScrolls(t *testing.T) {
 	}
 }
 
-func chunks(n int) []transcript.Chunk {
-	out := make([]transcript.Chunk, n)
+func noteEntries(n int) []transcript.Entry {
+	out := make([]transcript.Entry, n)
 	for i := range out {
-		out[i] = transcript.Chunk{ID: string(rune('a' + i)), Kind: transcript.ChunkSystem, Text: "note", Detail: "more"}
+		out[i] = transcript.Entry{ID: string(rune('a' + i)), Kind: transcript.EntrySystem, Text: "note", Detail: "more"}
 	}
 	return out
 }
 
-func liveWithChunks(n int) model {
+func liveWithEntries(n int) model {
 	m := withMouse(testModel())
 	m = withView(m, viewSession)
 	m = withFocus(m, mainPane)
-	return withChunks(m, chunks(n))
+	return withEntries(m, noteEntries(n))
 }
 
 func TestTranscriptClickSelectsThenDrills(t *testing.T) {
-	m := liveWithChunks(3)
+	m := liveWithEntries(3)
 	x, y := itemCell(t, m, regMain, 2)
 	m, _ = click(m, x, y)
 	if trOf(m).transcript.cursor != 2 {
@@ -152,7 +152,7 @@ func TestTranscriptClickSelectsThenDrills(t *testing.T) {
 }
 
 func TestTranscriptWheelScrolls(t *testing.T) {
-	m := liveWithChunks(40)
+	m := liveWithEntries(40)
 	m, _ = wheelAt(m, m.mainRect().Min.X+1, 10, 3)
 	if s := trOf(m).transcript.scroll; s != 3 {
 		t.Fatalf("scroll = %d, want 3", s)
@@ -186,10 +186,10 @@ func TestHelpWheelScrolls(t *testing.T) {
 }
 
 func TestDetailClickSelectsItem(t *testing.T) {
-	m := liveWithChunks(1)
-	m = withChunks(m, []transcript.Chunk{{ID: "a", Kind: transcript.ChunkAI, Items: []transcript.Item{
-		{Kind: transcript.ItemText, Text: "one"}, {Kind: transcript.ItemText, Text: "two"},
-	}}})
+	m := liveWithEntries(1)
+	m = withEntries(m, []transcript.Entry{traceFixture("Explore",
+		transcript.Entry{Kind: transcript.EntryText, Text: "one"}, transcript.Entry{Kind: transcript.EntryText, Text: "two"},
+	)})
 	m, _ = onTr(m, func(v tview) tea.Cmd { v.enterDetail(); return nil })
 	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 	x, y := itemCell(t, m, regMain, 1)
@@ -251,7 +251,7 @@ func TestDockWheelKeepsFocusWhenCollapsed(t *testing.T) {
 func TestTranscriptWheelIgnoredUnderRedactList(t *testing.T) {
 	m := withMouse(withView(model{viewer: true, redactMode: true, width: 120, height: 40}, viewHistoryTranscript))
 	m = withFocus(m, mainPane)
-	m = withChunks(m, chunks(40))
+	m = withEntries(m, noteEntries(40))
 	m = withTr(m, func(t *transcriptComp) { t.redact.listActive = true })
 	if !tvIn(m).redactListActive() {
 		t.Fatal("the redact list must be active")
@@ -307,30 +307,15 @@ func TestSpawnWheelMovesCursor(t *testing.T) {
 	}
 }
 
-func TestTranscriptBodyClickSelectsWithoutDrilling(t *testing.T) {
-	m := liveWithChunks(3)
-	x, y := itemCell(t, m, regMain, 2)
-	m, _ = click(m, x, y+1)
-	if trOf(m).transcript.cursor != 2 {
-		t.Fatalf("cursor = %d, want 2", trOf(m).transcript.cursor)
-	}
-	m, _ = click(m, x, y+1)
-	if trOf(m).historyView == histDetail {
-		t.Error("a click on the card body must not open the detail")
-	}
-	m, _ = click(m, x, y)
-	if trOf(m).historyView != histDetail {
-		t.Error("a click on the selected card's header must open the detail")
-	}
-}
-
-// nestedDetail is the sample AI turn's detail with its first item drilled into.
+// nestedDetail is a subagent's trace frame with its first entry drilled into.
 func nestedDetail(mouse bool) model {
 	m := withFocus(waitingSession(), mainPane)
 	m.mouse, m.hits = mouse, &hitMap{}
 	v := tvOf(&m)
-	v.transcript.cursor = 1
-	v.actDrillChunk(tea.KeyPressMsg{})
+	v.transcript.entries = append(v.transcript.entries, traceFixture("Explore",
+		transcript.Entry{Kind: transcript.EntryTool, ToolName: "Read", InputPreview: "a.go"}))
+	v.transcript.cursor = len(v.transcript.entries) - 1
+	v.actDrill(tea.KeyPressMsg{})
 	v.actDetailDrill(tea.KeyPressMsg{})
 	v.put()
 	return m
@@ -375,6 +360,6 @@ func TestDetailCloseGoesBackOneLevel(t *testing.T) {
 	x, y = closeCell(t, m)
 	m, _ = click(m, x, y)
 	if trOf(m).historyView != histTranscript {
-		t.Error("closing the root frame must return to the cards")
+		t.Error("closing the root frame must return to the stream")
 	}
 }

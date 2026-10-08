@@ -49,30 +49,10 @@ func TestToolCategoryColorsActive(t *testing.T) {
 	}
 }
 
-func TestToolColorLookup(t *testing.T) {
-	cases := map[string]interface{}{
-		"Bash":       ColorToolBash,
-		"Read":       ColorToolRead,
-		"Edit":       ColorToolEdit,
-		"MultiEdit":  ColorToolEdit,
-		"Write":      ColorToolWrite,
-		"Grep":       ColorToolGrep,
-		"Glob":       ColorToolGlob,
-		"Task":       ColorToolTask,
-		"WebFetch":   ColorToolWeb,
-		"Frobnicate": ColorToolOther,
-	}
-	for name, want := range cases {
-		if got := toolColor(name); got != want {
-			t.Errorf("toolColor(%q) = %v, want %v", name, got, want)
-		}
-	}
-}
-
 func TestGenericToolBodyReadableResult(t *testing.T) {
 	m := bareTv() // jsonHL is nil → non-JSON path
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "UnknownTool",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "UnknownTool",
 		ToolInput: `{"x":1}`, Result: "plain non-json result line",
 	}
 	out := m.toolBody(it, 60)
@@ -89,8 +69,8 @@ func TestGenericToolBodyReadableResult(t *testing.T) {
 
 func TestGenericToolBodyError(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "UnknownTool",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "UnknownTool",
 		Result: "boom", ResultIsError: true,
 	}
 	out := m.toolBody(it, 60)
@@ -101,8 +81,8 @@ func TestGenericToolBodyError(t *testing.T) {
 
 func TestEditToolDetailShowsDiff(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "Edit",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "Edit",
 		ToolInput: `{"file_path":"a.go","old_string":"foo","new_string":"bar"}`,
 		Result:    "ok",
 	}
@@ -114,8 +94,8 @@ func TestEditToolDetailShowsDiff(t *testing.T) {
 
 func TestBashDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "Bash",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "Bash",
 		ToolInput: `{"command":"ls -la","description":"list files"}`,
 		Result:    "total 5\nfile.go",
 	}
@@ -133,8 +113,8 @@ func TestBashDetail(t *testing.T) {
 
 func TestExecCommandDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "exec_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"pwd","workdir":"/repo","yield_time_ms":1000,"max_output_tokens":2000}`,
 		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\n/repo\n",
 	}
@@ -151,8 +131,8 @@ func TestExecCommandDetail(t *testing.T) {
 
 func TestExecCommandDetailOutputColonNotSplit(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "exec_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"foo --help"}`,
 		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\nusage: foo [-h]\nnote: see docs\n",
 	}
@@ -167,8 +147,8 @@ func TestExecCommandDetailOutputColonNotSplit(t *testing.T) {
 
 func TestExecCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "exec_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "exec_command",
 		ToolInput: `{"session_id":"s1","chars":"y\n"}`,
 	}
 	out := m.toolBody(it, 60)
@@ -181,8 +161,8 @@ func TestExecCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 
 func TestExecCommandDetailNonZeroExit(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "exec_command", ResultIsError: true,
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "exec_command", ResultIsError: true,
 		ToolInput: `{"cmd":"false"}`,
 		Result:    "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 1\nOriginal token count: 0\nOutput:\n",
 	}
@@ -197,8 +177,8 @@ func TestExecCommandDetailNonZeroExit(t *testing.T) {
 
 func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "exec_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "exec_command",
 		ToolInput: `{"cmd":"echo hi"}`,
 		Result:    "hi",
 	}
@@ -213,8 +193,8 @@ func TestExecCommandDetailNoWorkdirOrLimits(t *testing.T) {
 
 func TestRunCommandDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "run_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"git status","Cwd":"/repo","WaitMsBeforeAsync":5000,"toolSummary":"Check status"}`,
 		Result:    "Created At: 2026-07-04T22:06:13+06:00\nCompleted At: 2026-07-04T22:06:16+06:00\n\n\t\t\t\tThe command completed successfully.\n\t\t\t\tOutput:\n\t\t\t\tOn branch main\nnothing to commit\n\n",
 	}
@@ -235,8 +215,8 @@ func TestRunCommandDetail(t *testing.T) {
 
 func TestRunCommandDetailOutputColonNotSplit(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "run_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"foo --help","Cwd":"/repo"}`,
 		Result:    "Created At: x\n\n\t\t\t\tThe command completed successfully.\n\t\t\t\tOutput:\n\t\t\t\tusage: foo [-h]\nnote: see docs\n",
 	}
@@ -250,8 +230,8 @@ func TestRunCommandDetailOutputColonNotSplit(t *testing.T) {
 
 func TestRunCommandDetailBackgroundTaskNoOutput(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "run_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "run_command",
 		ToolInput: `{"CommandLine":"agy --print hi"}`,
 		Result:    "Created At: x\nTool is running as a background task with task id: t-1\nTask Description: agy --print hi\n",
 	}
@@ -265,8 +245,8 @@ func TestRunCommandDetailBackgroundTaskNoOutput(t *testing.T) {
 
 func TestRunCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "run_command",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "run_command",
 		ToolInput: `{"Cwd":"/repo","WaitMsBeforeAsync":5000}`,
 	}
 	out := m.toolBody(it, 60)
@@ -279,8 +259,8 @@ func TestRunCommandDetailInputMissingCommandFallsBackToDump(t *testing.T) {
 
 func TestRunCommandDetailNonZeroExit(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "run_command", ResultIsError: true,
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "run_command", ResultIsError: true,
 		ToolInput: `{"CommandLine":"false"}`,
 		Result:    "Created At: x\n\n\t\t\t\tThe command failed with exit code: 2\n\t\t\t\tOutput:\n\t\t\t\tboom\n",
 	}
@@ -295,8 +275,8 @@ func TestRunCommandDetailNonZeroExit(t *testing.T) {
 
 func TestReadDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "Read",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "Read",
 		ToolInput: `{"file_path":"/repo/main.go"}`,
 		Result:    "     1\tpackage main\n     2\tfunc main(){}",
 	}
@@ -311,8 +291,8 @@ func TestReadDetail(t *testing.T) {
 
 func TestTodoWriteDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
 			{"content":"do A","status":"completed","activeForm":"doing A"},
 			{"content":"do B","status":"in_progress","activeForm":"doing B"},
@@ -336,8 +316,8 @@ func TestTodoWriteDetail(t *testing.T) {
 
 func TestTodoWriteAllGlyphs(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[
 			{"content":"a","status":"completed"},
 			{"content":"b","status":"in_progress","activeForm":"doing b"},
@@ -354,8 +334,8 @@ func TestTodoWriteAllGlyphs(t *testing.T) {
 
 func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "TodoWrite",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "TodoWrite",
 		ToolInput: `{"todos":[]}`, Result: "updated",
 	}
 	out := m.toolBody(it, 60)
@@ -366,8 +346,8 @@ func TestTodoWriteEmptyFallsBackToGeneric(t *testing.T) {
 
 func TestUpdatePlanDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "update_plan",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "update_plan",
 		ToolInput: `{"plan":[
 			{"step":"do A","status":"completed"},
 			{"step":"do B","status":"in_progress"},
@@ -389,8 +369,8 @@ func TestUpdatePlanDetail(t *testing.T) {
 
 func TestUpdatePlanEmptyFallsBackToGeneric(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "update_plan",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "update_plan",
 		ToolInput: `{"plan":[]}`, Result: "Plan updated",
 	}
 	out := m.toolBody(it, 60)
@@ -401,8 +381,8 @@ func TestUpdatePlanEmptyFallsBackToGeneric(t *testing.T) {
 
 func TestBashOutputUsesGeneric(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "BashOutput",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "BashOutput",
 		ToolInput: `{"bash_id":"123"}`, Result: "streamed output",
 	}
 	out := m.toolBody(it, 60)
@@ -417,8 +397,8 @@ func TestBashOutputUsesGeneric(t *testing.T) {
 
 func TestGrepDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "Grep",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "Grep",
 		ToolInput: `{"pattern":"handler","glob":"*.go","path":"internal"}`,
 		Result:    "internal/x.go:10:func handler()",
 	}
@@ -436,8 +416,8 @@ func TestGrepDetail(t *testing.T) {
 
 func TestGlobDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "Glob",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "Glob",
 		ToolInput: `{"pattern":"**/*.go"}`,
 		Result:    "a.go\nb.go",
 	}
@@ -467,8 +447,8 @@ func TestParseAnsweredAnswers(t *testing.T) {
 
 func TestAskUserQuestionDetailSingle(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
 			"multiSelect":false,"options":[
 				{"label":"Red","description":"warm hue"},
@@ -492,8 +472,8 @@ func TestAskUserQuestionDetailSingle(t *testing.T) {
 
 func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Toppings","question":"Choose toppings",
 			"multiSelect":true,"options":[
 				{"label":"Cheese"},{"label":"Olives"},{"label":"Onions"}
@@ -511,8 +491,8 @@ func TestAskUserQuestionDetailMultiSelect(t *testing.T) {
 
 func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[{"header":"Color","question":"Pick a color",
 			"multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]}]}`,
 		Result: `Your questions have been answered: "Pick a color"="Chartreuse". Continue.`,
@@ -525,8 +505,8 @@ func TestAskUserQuestionDetailCustomAnswer(t *testing.T) {
 
 func TestQuestionDetailOpenCode(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "question",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "question",
 		ToolInput: `{"questions":[{"header":"Storage","question":"Where should it be stored?",
 			"options":[
 				{"label":"In the sealed token","description":"cleaner migration"},
@@ -550,8 +530,8 @@ func TestQuestionDetailOpenCode(t *testing.T) {
 
 func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "AskUserQuestion",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "AskUserQuestion",
 		ToolInput: `{"questions":[]}`, Result: "updated",
 	}
 	out := m.toolBody(it, 60)
@@ -562,8 +542,8 @@ func TestAskUserQuestionDetailEmptyFallsBackToGeneric(t *testing.T) {
 
 func TestWebDetail(t *testing.T) {
 	m := bareTv()
-	fetch := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "WebFetch",
+	fetch := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "WebFetch",
 		ToolInput: `{"url":"https://example.com","prompt":"summarize"}`,
 		Result:    "the page says hi",
 	}
@@ -578,8 +558,8 @@ func TestWebDetail(t *testing.T) {
 		t.Errorf("should not show raw JSON input:\n%s", out)
 	}
 
-	search := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "WebSearch",
+	search := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "WebSearch",
 		ToolInput: `{"query":"golang lipgloss"}`,
 		Result:    "result list",
 	}
@@ -591,8 +571,8 @@ func TestWebDetail(t *testing.T) {
 
 func TestOpenCodeEditDetailShowsDiff(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "edit",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "edit",
 		ToolInput: `{"path":"a.go","oldString":"foo","newString":"bar"}`,
 		Result:    "Edited a.go (1 replacement)",
 	}
@@ -607,8 +587,8 @@ func TestOpenCodeEditDetailShowsDiff(t *testing.T) {
 
 func TestOpenCodeWriteDetailShowsAddedContent(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "write",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "write",
 		ToolInput: `{"filePath":"/x.go","content":"package x\nfunc f(){}"}`,
 		Result:    "Wrote file successfully.",
 	}
@@ -620,8 +600,8 @@ func TestOpenCodeWriteDetailShowsAddedContent(t *testing.T) {
 
 func TestOpenCodeReadDetailUsesPath(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "read",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "read",
 		ToolInput: `{"path":"/repo/main.go"}`,
 		Result:    "package main",
 	}
@@ -634,8 +614,8 @@ func TestOpenCodeReadDetailUsesPath(t *testing.T) {
 func TestOpenCodeBashAndShellDetail(t *testing.T) {
 	m := bareTv()
 	for _, name := range []string{"bash", "shell"} {
-		it := transcript.Item{
-			Kind: transcript.ItemTool, ToolName: name,
+		it := transcript.Entry{
+			Kind: transcript.EntryTool, ToolName: name,
 			ToolInput: `{"command":"ls -la","description":"list"}`,
 			Result:    "file.go",
 		}
@@ -648,8 +628,8 @@ func TestOpenCodeBashAndShellDetail(t *testing.T) {
 
 func TestOpenCodeGrepDetailUsesInclude(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "grep",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "grep",
 		ToolInput: `{"pattern":"handler","include":"*.go"}`,
 		Result:    "x.go:1:func handler()",
 	}
@@ -664,8 +644,8 @@ func TestOpenCodeGrepDetailUsesInclude(t *testing.T) {
 
 func TestOpenCodeTodoWriteDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "todowrite",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "todowrite",
 		ToolInput: `{"todos":[
 			{"content":"do A","status":"completed","priority":"high"},
 			{"content":"do B","status":"pending","priority":"low"}
@@ -679,8 +659,8 @@ func TestOpenCodeTodoWriteDetail(t *testing.T) {
 
 func TestOpenCodeExecuteDetail(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "execute",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "execute",
 		ToolInput: `{"code":"print(1+1)"}`,
 		Result:    "2",
 	}
@@ -695,15 +675,15 @@ func TestOpenCodeExecuteDetail(t *testing.T) {
 
 func TestOpenCodeWebDetail(t *testing.T) {
 	m := bareTv()
-	fetch := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "webfetch",
+	fetch := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "webfetch",
 		ToolInput: `{"url":"https://example.com","format":"markdown"}`, Result: "page body",
 	}
 	if out := m.toolBody(fetch, 60); !strings.Contains(out, "https://example.com") || !strings.Contains(out, "page body") {
 		t.Errorf("opencode webfetch should show url and result:\n%s", out)
 	}
-	search := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "websearch",
+	search := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "websearch",
 		ToolInput: `{"query":"golang lipgloss"}`, Result: "result list",
 	}
 	if out := m.toolBody(search, 60); !strings.Contains(out, "golang lipgloss") {
@@ -713,8 +693,8 @@ func TestOpenCodeWebDetail(t *testing.T) {
 
 func TestOpenCodeSkillDetailShowsIDNotXML(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "skill",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "skill",
 		ToolInput: `{"id":"my-skill"}`,
 		Result:    "<skill_content>a huge blob of xml</skill_content>",
 	}
@@ -733,7 +713,7 @@ func TestOpenCodeTaskDetailShowsDescriptor(t *testing.T) {
 		`{"subagent_type":"researcher","description":"find X","prompt":"do the thing"}`,
 		`{"agent":"researcher","description":"find X","prompt":"do the thing"}`,
 	} {
-		it := transcript.Item{Kind: transcript.ItemTool, ToolName: "task", ToolInput: in}
+		it := transcript.Entry{Kind: transcript.EntryTool, ToolName: "task", ToolInput: in}
 		out := m.toolBody(it, 60)
 		for _, want := range []string{"researcher", "find X", "do the thing"} {
 			if !strings.Contains(out, want) {
@@ -745,8 +725,8 @@ func TestOpenCodeTaskDetailShowsDescriptor(t *testing.T) {
 
 func TestWaitAgentDetailShowsNicknameAndStatus(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "wait_agent",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "wait_agent",
 		ToolInput: `{"targets":["019f278e-50a5-7f83-91f2-c30e8ac18e19"],"timeout_ms":30000}`,
 		Result:    `{"status":{"019f278e-50a5-7f83-91f2-c30e8ac18e19":{"completed":"role=subagent, result=ok"}}}`,
 		Subagents: []transcript.Subagent{
@@ -773,8 +753,8 @@ func TestWaitAgentDetailShowsNicknameAndStatus(t *testing.T) {
 
 func TestWaitAgentDetailFallsBackToRawIDWithoutNickname(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "wait_agent",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "wait_agent",
 		ToolInput: `{"targets":["agent-xyz"]}`,
 		Result:    `{"status":{"agent-xyz":{"running":"still working"}}}`,
 	}
@@ -786,8 +766,8 @@ func TestWaitAgentDetailFallsBackToRawIDWithoutNickname(t *testing.T) {
 
 func TestCloseAgentDetailShowsNicknameAndStatus(t *testing.T) {
 	m := bareTv()
-	it := transcript.Item{
-		Kind: transcript.ItemTool, ToolName: "close_agent",
+	it := transcript.Entry{
+		Kind: transcript.EntryTool, ToolName: "close_agent",
 		ToolInput: `{"target":"019f278e-50a5-7f83-91f2-c30e8ac18e19"}`,
 		Result:    `{"previous_status":{"completed":"all done here"}}`,
 		Subagents: []transcript.Subagent{

@@ -52,7 +52,6 @@ const (
 	hitRow hitKind = iota
 	hitTab
 	hitFold
-	hitHeader
 	hitClose
 	hitBrand
 )
@@ -179,11 +178,11 @@ func (c *ctx) hitRect(r uv.Rectangle) {
 	}
 }
 
-// hitStarts records the rows of items that start at first[i] in total lines,
-// of which lines [scroll, end) show.
-func hitStarts(c *ctx, first []int, total, scroll, end int) {
-	for i := range first {
-		s, e := chunkSpan(i, first, total)
+// hitStarts records the rows of n items, item i spanning lines span(i), of
+// which lines [scroll, end) show.
+func hitStarts(c *ctx, n int, span func(i int) (int, int), scroll, end int) {
+	for i := range n {
+		s, e := span(i)
 		if top, bottom := max(s, scroll), min(e, end); top < bottom {
 			c.hitRows(rowSpan{index: i, top: top - scroll, bottom: bottom - scroll})
 		}

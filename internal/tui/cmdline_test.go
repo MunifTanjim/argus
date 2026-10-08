@@ -110,8 +110,8 @@ func TestCommandSetIsTheFocusedComponents(t *testing.T) {
 		return false
 	}
 	tr := waitingSession()
-	if !has(tr, transcriptKeys.CardNext.name) {
-		t.Error("the transcript's set lacks next card")
+	if !has(tr, transcriptKeys.PromptNext.name) {
+		t.Error("the transcript's set lacks next prompt")
 	}
 	if has(tr, projectsKeys.ShowHidden.name) {
 		t.Error("the transcript's set has a tree command")
@@ -144,17 +144,17 @@ func TestCommandSetFollowsTheView(t *testing.T) {
 			[]string{"filter-projects", "toggle show-hidden", "back"},
 			[]string{"prev", "next", "open", "session kill", "open tmux-pane", "session spawn", "open setup-log"}},
 		{"live transcript", waitingSession(),
-			[]string{"open live-screen", "next card"},
+			[]string{"open live-screen", "next prompt"},
 			[]string{"session resume", "transcript export", "redaction add"}},
 		{"history transcript", historyTranscript(false),
-			[]string{"session resume", "transcript export", "next card"},
+			[]string{"session resume", "transcript export", "next prompt"},
 			[]string{"open live-screen", "focus prompt", "prev", "redaction remove"}},
 		{"history card detail", pressKeys(historyTranscript(false), keyMsg("enter")),
 			[]string{"open", "prev", "back"},
-			[]string{"next card", "session resume", "transcript export"}},
+			[]string{"next prompt", "session resume", "transcript export"}},
 		{"redaction list", redactList,
 			[]string{"prev", "redaction remove", "redaction add"},
-			[]string{"next card", "redaction list", "redaction save"}},
+			[]string{"next prompt", "redaction list", "redaction save"}},
 		{"History project list", withHistoryProjects(homeTestModel(), historyProjects()...),
 			[]string{"refresh", "tab next"},
 			[]string{"session load-more", "session resume", "transcript export"}},
@@ -162,7 +162,7 @@ func TestCommandSetFollowsTheView(t *testing.T) {
 			[]string{"session load-more", "session resume", "transcript export"},
 			[]string{"refresh", "tab next"}},
 		{"viewer", historyTranscript(true),
-			[]string{"next card", "back"},
+			[]string{"next prompt", "back"},
 			[]string{"focus left", "focus next", "toggle left-sidebar", "toggle right-sidebar", "session resume"}},
 		{"tree", wideWorkspace(),
 			[]string{"focus right", "toggle left-sidebar"},

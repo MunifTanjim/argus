@@ -14,9 +14,9 @@ type connStateMsg struct{ connected bool }
 // sessionsReplacedMsg carries an authoritative session list for a post-reconnect resync.
 type sessionsReplacedMsg []session.Session
 type transcriptMsg struct {
-	id     string
-	chunks []transcript.Chunk
-	err    error
+	id      string
+	entries []transcript.Entry
+	err     error
 }
 type histProjectsMsg struct {
 	projects []session.HistoryProject
@@ -88,9 +88,9 @@ type histSessionsMsg struct {
 	err        error
 }
 type histTranscriptMsg struct {
-	addr   histAddr
-	chunks []transcript.Chunk
-	err    error
+	addr    histAddr
+	entries []transcript.Entry
+	err     error
 }
 
 // spawnNodesMsg carries the server.info reply for a pending "new session" action.

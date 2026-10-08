@@ -14,7 +14,7 @@ var labelPairs = func() map[string][2]string {
 		{"prev", "next"}, {"scroll up", "scroll down"}, {"goto top", "goto bottom"},
 		{"scroll half-page-up", "scroll half-page-down"}, {"tab prev", "tab next"},
 		{"fold close", "fold open"}, {"sidebar narrower", "sidebar wider"}, {"next diff-file", "prev diff-file"},
-		{"next card", "prev card"},
+		{"next prompt", "prev prompt"},
 		{"focus next", "focus prev"},
 	} {
 		out[p[0]], out[p[1]] = p, p

@@ -46,7 +46,7 @@ func stripAgyReminder(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func appendResult(sb *strings.Builder, it transcript.Item, width int, body string) {
+func appendResult(sb *strings.Builder, it transcript.Entry, width int, body string) {
 	if strings.TrimSpace(body) == "" {
 		return
 	}
@@ -68,7 +68,7 @@ func formatBytes(n int) string {
 	}
 }
 
-func (m model) runCommandDetail(it transcript.Item, width int) string {
+func (m model) runCommandDetail(it transcript.Entry, width int) string {
 	var in struct {
 		CommandLine string `json:"CommandLine"`
 		Cwd         string `json:"Cwd"`
@@ -135,7 +135,7 @@ func stripLinePrefix(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) grepSearchDetail(it transcript.Item, width int) string {
+func (m model) grepSearchDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Query           string `json:"Query"`
 		SearchPath      string `json:"SearchPath"`
@@ -194,7 +194,7 @@ func (m model) grepSearchResult(result string, width int) string {
 	return hardWrap(strings.Join(rows, "\n"), width)
 }
 
-func (m model) listDirDetail(it transcript.Item, width int) string {
+func (m model) listDirDetail(it transcript.Entry, width int) string {
 	var in struct {
 		DirectoryPath string `json:"DirectoryPath"`
 	}
@@ -241,7 +241,7 @@ func (m model) listDirResult(result string, width int) string {
 	return hardWrap(strings.Join(rows, "\n"), width)
 }
 
-func (m model) viewFileDetail(it transcript.Item, width int) string {
+func (m model) viewFileDetail(it transcript.Entry, width int) string {
 	var in struct {
 		AbsolutePath string `json:"AbsolutePath"`
 	}
@@ -296,7 +296,7 @@ func splitViewFileResult(result string) (meta, content string) {
 	return strings.Join(metaParts, " · "), content
 }
 
-func (m model) writeToFileDetail(it transcript.Item, width int) string {
+func (m model) writeToFileDetail(it transcript.Entry, width int) string {
 	var in struct {
 		TargetFile  string `json:"TargetFile"`
 		Description string `json:"Description"`
@@ -326,7 +326,7 @@ func (m model) writeToFileDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) replaceFileContentDetail(it transcript.Item, width int) string {
+func (m model) replaceFileContentDetail(it transcript.Entry, width int) string {
 	var in struct {
 		TargetFile         string `json:"TargetFile"`
 		Description        string `json:"Description"`
@@ -360,7 +360,7 @@ func (m model) replaceFileContentDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) multiReplaceFileContentDetail(it transcript.Item, width int) string {
+func (m model) multiReplaceFileContentDetail(it transcript.Entry, width int) string {
 	var in struct {
 		TargetFile        string `json:"TargetFile"`
 		Description       string `json:"Description"`
@@ -399,7 +399,7 @@ func (m model) multiReplaceFileContentDetail(it transcript.Item, width int) stri
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) searchWebDetail(it transcript.Item, width int) string {
+func (m model) searchWebDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Query  string `json:"query"`
 		Domain string `json:"domain"`
@@ -426,7 +426,7 @@ func (m model) searchWebDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) generateImageDetail(it transcript.Item, width int) string {
+func (m model) generateImageDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Prompt      string `json:"Prompt"`
 		ImageName   string `json:"ImageName"`
@@ -462,7 +462,7 @@ func agyImageResult(result string) string {
 	return strings.Join(keep, "\n")
 }
 
-func (m model) defineSubagentDetail(it transcript.Item, width int) string {
+func (m model) defineSubagentDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Name                string `json:"name"`
 		Description         string `json:"description"`
@@ -506,7 +506,7 @@ func (m model) defineSubagentDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) manageSubagentsDetail(it transcript.Item, width int) string {
+func (m model) manageSubagentsDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Action string `json:"Action"`
 	}
@@ -525,7 +525,7 @@ func (m model) manageSubagentsDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) manageTaskDetail(it transcript.Item, width int) string {
+func (m model) manageTaskDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Action string `json:"Action"`
 		TaskID string `json:"TaskId"`
@@ -549,7 +549,7 @@ func (m model) manageTaskDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) askQuestionDetail(it transcript.Item, width int) string {
+func (m model) askQuestionDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Questions []struct {
 			Question    string   `json:"question"`
@@ -616,7 +616,7 @@ func parseAgyAnswers(result string) map[int]string {
 	return out
 }
 
-func (m model) askPermissionDetail(it transcript.Item, width int) string {
+func (m model) askPermissionDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Action string `json:"Action"`
 		Target string `json:"Target"`
@@ -639,7 +639,7 @@ func (m model) askPermissionDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) listPermissionsDetail(it transcript.Item, width int) string {
+func (m model) listPermissionsDetail(it transcript.Entry, width int) string {
 	body := agyResultBody(it.Result)
 	if body == "" {
 		return m.genericToolBody(it, width)
@@ -647,7 +647,7 @@ func (m model) listPermissionsDetail(it transcript.Item, width int) string {
 	return m.renderToolText(body, width)
 }
 
-func (m model) sendMessageDetail(it transcript.Item, width int) string {
+func (m model) sendMessageDetail(it transcript.Entry, width int) string {
 	var in struct {
 		Message   string `json:"Message"`
 		Recipient string `json:"Recipient"`
@@ -666,7 +666,7 @@ func (m model) sendMessageDetail(it transcript.Item, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (m model) scheduleDetail(it transcript.Item, width int) string {
+func (m model) scheduleDetail(it transcript.Entry, width int) string {
 	var in struct {
 		DurationSeconds string `json:"DurationSeconds"`
 		Prompt          string `json:"Prompt"`

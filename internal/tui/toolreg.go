@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"image/color"
-
-	"github.com/MunifTanjim/argus/internal/transcript"
-)
+import "github.com/MunifTanjim/argus/internal/transcript"
 
 const (
 	agentClaude      = "claude"
@@ -56,38 +52,11 @@ func categoryIcon(c toolCategory) StyledIcon {
 	}
 }
 
-func categoryColor(c toolCategory) color.Color {
-	switch c {
-	case catRead:
-		return ColorToolRead
-	case catEdit:
-		return ColorToolEdit
-	case catWrite:
-		return ColorToolWrite
-	case catBash:
-		return ColorToolBash
-	case catGrep:
-		return ColorToolGrep
-	case catGlob:
-		return ColorToolGlob
-	case catTask:
-		return ColorToolTask
-	case catTodo:
-		return ColorToolEdit
-	case catSkill:
-		return ColorToolSkill
-	case catWeb:
-		return ColorToolWeb
-	default:
-		return ColorToolOther
-	}
-}
-
 type toolMeta struct {
 	agent    string
 	display  string
 	category toolCategory
-	detail   func(m model, it transcript.Item, width int) string
+	detail   func(m model, it transcript.Entry, width int) string
 }
 
 // Unregistered tools fall back to the generic body and misc icon.

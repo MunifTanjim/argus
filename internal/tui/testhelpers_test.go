@@ -319,8 +319,8 @@ func withTr(m model, edit func(t *transcriptComp)) model {
 	return m
 }
 
-func withChunks(m model, chunks []transcript.Chunk) model {
-	return withTr(m, func(t *transcriptComp) { t.transcript.chunks = chunks })
+func withEntries(m model, entries []transcript.Entry) model {
+	return withTr(m, func(t *transcriptComp) { t.transcript.entries = entries })
 }
 
 // tvOf's changes stay in the view until put stores them in m.
