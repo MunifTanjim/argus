@@ -98,7 +98,7 @@ func (m model) findWorkspace(id string) (api.WorkspaceNode, bool) {
 }
 
 func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
-	client, ok, next := m.client, "removed "+m.workspaceLabel(workspaceID), m.left.tree.removeNeighbor(workspaceID)
+	client, ok := m.client, "removed "+m.workspaceLabel(workspaceID)
 	return func() tea.Msg {
 		var res api.WorkspaceRemoveResult
 		err := client.Call(api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: workspaceID, Force: force}, &res)
@@ -106,7 +106,7 @@ func (m model) removeWorkspaceCmd(workspaceID string, force bool) tea.Cmd {
 		if res.Warning != "" {
 			done += " · " + res.Warning
 		}
-		return projectsActionMsg{verb: "remove workspace", ok: done, selectID: next, removed: workspaceID, err: err}
+		return projectsActionMsg{verb: "remove workspace", ok: done, removed: workspaceID, err: err}
 	}
 }
 

@@ -419,22 +419,26 @@ func TestTreeReloadKeepsSelectionByID(t *testing.T) {
 	}
 }
 
-func TestCreateSelectsNewWorkspace(t *testing.T) {
+func TestWantedRowIsSelectedAfterReload(t *testing.T) {
 	m := projectsTestModel()
 	m = selectRow(m, "n1:p1")
-	res, _ := m.Update(projectsActionMsg{verb: "create workspace", selectID: "n1:w3"})
-	m = res.(model)
+	m = wantAfterFetch(m, "n1:w3")
 	tree := []api.ProjectNode{m.left.tree.data[0]}
 	tree[0].Workspaces = append(append([]api.WorkspaceNode{}, tree[0].Workspaces...), api.WorkspaceNode{ID: "n1:w3", Dir: "/repo-new", Branch: "new"})
 	m.left.tree.collapsed["n1:p1"] = true
-	res, _ = m.Update(projectsTreeMsg{tree: tree})
-	mm := res.(model)
+	mm, _ := upd(m, projectsTreeMsg{tree: tree})
 	if got := mm.left.tree.cursorRowID(); got != "n1:w3" {
-		t.Errorf("after create cursor on %q, want n1:w3", got)
+		t.Errorf("after reload cursor on %q, want n1:w3", got)
 	}
 	if mm.left.tree.want != "" {
 		t.Errorf("want not cleared: %q", mm.left.tree.want)
 	}
+}
+
+func wantAfterFetch(m model, id string) model {
+	m.left.tree.want = id
+	m.loadProjects()
+	return m
 }
 
 func withNewWorkspace(tree []api.ProjectNode) []api.ProjectNode {
@@ -443,29 +447,29 @@ func withNewWorkspace(tree []api.ProjectNode) []api.ProjectNode {
 	return out
 }
 
-func TestStaleTreeReplyKeepsTheCreatedWorkspaceWanted(t *testing.T) {
+func TestStaleTreeReplyKeepsTheRowWanted(t *testing.T) {
 	m := projectsTestModel()
 	m = selectRow(m, "n1:p1")
 	old := m.left.tree.data
-	m, _ = upd(m, projectsActionMsg{verb: "create workspace", selectID: "n1:w3"})
+	m = wantAfterFetch(m, "n1:w3")
 	m, _ = upd(m, projectsTreeMsg{seq: m.left.tree.fetchSeq - 1, tree: old})
 	m, _ = upd(m, projectsTreeMsg{seq: m.left.tree.fetchSeq, tree: withNewWorkspace(old)})
 	if got := m.left.tree.cursorRowID(); got != "n1:w3" {
-		t.Errorf("a reply from before the create must not drop the jump: cursor on %q", got)
+		t.Errorf("a stale reply must not drop the jump: cursor on %q", got)
 	}
 }
 
-func TestReplyBeforeARefetchKeepsTheCreatedWorkspaceWanted(t *testing.T) {
+func TestReplyBeforeARefetchKeepsTheRowWanted(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &recordingClient{}
 	m = selectRow(m, "n1:p1")
 	old := m.left.tree.data
 	m.left.tree.loading = true
-	m, _ = upd(m, projectsActionMsg{verb: "create workspace", selectID: "n1:w3"})
+	m = wantAfterFetch(m, "n1:w3")
 	m, _ = upd(m, projectsTreeMsg{seq: m.left.tree.fetchSeq, tree: old})
 	m, _ = upd(m, projectsTreeMsg{seq: m.left.tree.fetchSeq, tree: withNewWorkspace(old)})
 	if got := m.left.tree.cursorRowID(); got != "n1:w3" {
-		t.Errorf("the fetch in flight during the create predates it: cursor on %q", got)
+		t.Errorf("the fetch in flight when the row was wanted predates it: cursor on %q", got)
 	}
 }
 
@@ -1237,6 +1241,90 @@ func TestRemoveSelectsANeighbor(t *testing.T) {
 	m, _ = upd(m, projectsTreeMsg{tree: tree})
 	if got := m.left.tree.cursorRowID(); got != "n1:w1" {
 		t.Errorf("after the remove the cursor should go to the workspace above: %q", got)
+	}
+}
+
+func TestRemoveSelectsANeighborWhenTheTreeArrivesFirst(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m.left.tree.data = append(m.left.tree.data, api.ProjectNode{
+		ID: "n1:p2", Name: "zeta", Kind: "git", NodeID: "n1",
+		Workspaces: []api.WorkspaceNode{{ID: "n1:w3", Dir: "/zeta", IsMain: true, Branch: "main"}},
+	})
+	m.left.tree.rebuild()
+	delete(m.sessions, "n1:s2")
+	m = selectRow(m, "n1:w2")
+	m = typeKeys(m, "dd")
+	m, cmd := upd(m, keyMsg("y"))
+	reply := cmd()
+	tree := []api.ProjectNode{m.left.tree.data[0], m.left.tree.data[1]}
+	tree[0].Workspaces = tree[0].Workspaces[:1]
+	m, _ = upd(m, projectsTreeMsg{tree: tree})
+	m, _ = upd(m, reply)
+	if got := m.left.tree.cursorRowID(); got != "n1:w1" {
+		t.Errorf("a tree that drops the workspace before the reply should still select the neighbor: %q", got)
+	}
+	if len(m.left.tree.removing) != 0 || len(m.left.tree.neighbors) != 0 {
+		t.Errorf("the remove should be settled: removing=%v neighbors=%v", m.left.tree.removing, m.left.tree.neighbors)
+	}
+}
+
+func removeW2WithZetaBelow(t *testing.T) (model, tea.Msg) {
+	t.Helper()
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m.left.tree.data = append(m.left.tree.data, api.ProjectNode{
+		ID: "n1:p2", Name: "zeta", Kind: "git", NodeID: "n1",
+		Workspaces: []api.WorkspaceNode{{ID: "n1:w3", Dir: "/zeta", IsMain: true, Branch: "main"}},
+	})
+	m.left.tree.rebuild()
+	delete(m.sessions, "n1:s2")
+	m = selectRow(m, "n1:w2")
+	m = typeKeys(m, "dd")
+	m, cmd := upd(m, keyMsg("y"))
+	return m, cmd()
+}
+
+func withoutW2(m model) []api.ProjectNode {
+	tree := []api.ProjectNode{m.left.tree.data[0], m.left.tree.data[1]}
+	tree[0].Workspaces = tree[0].Workspaces[:1]
+	return tree
+}
+
+func TestFailedRemoveForgetsTheNeighbor(t *testing.T) {
+	m, _ := removeW2WithZetaBelow(t)
+	m, _ = upd(m, projectsActionMsg{verb: "remove workspace", removed: "n1:w2", err: errString("dirty")})
+	if len(m.left.tree.neighbors) != 0 {
+		t.Fatalf("a failed remove should drop its neighbor: %v", m.left.tree.neighbors)
+	}
+	m, _ = upd(m, projectsTreeMsg{tree: withoutW2(m)})
+	if got := m.left.tree.cursorRowID(); got == "n1:w1" {
+		t.Errorf("a later tree without the workspace should not jump to the old neighbor")
+	}
+}
+
+func TestRemoveLeavesAMovedCursor(t *testing.T) {
+	m, reply := removeW2WithZetaBelow(t)
+	m, _ = upd(m, reply)
+	m = selectRow(m, "n1:w3")
+	m, _ = upd(m, projectsTreeMsg{tree: withoutW2(m)})
+	if got := m.left.tree.cursorRowID(); got != "n1:w3" {
+		t.Errorf("a cursor moved off the removed row should stay: %q", got)
+	}
+	if len(m.left.tree.neighbors) != 0 {
+		t.Errorf("the remove should be settled: %v", m.left.tree.neighbors)
+	}
+}
+
+func TestActionLeavesTheReloadToProjectChanged(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m, cmd := upd(m, projectsActionMsg{verb: "rename", ok: "renamed to x"})
+	if n := len(projectReplies(cmd)); n != 0 || m.left.tree.loading {
+		t.Errorf("an action should not fetch the tree itself: %d fetches, loading=%v", n, m.left.tree.loading)
+	}
+	if m.flash != "renamed to x" {
+		t.Errorf("flash = %q", m.flash)
 	}
 }
 

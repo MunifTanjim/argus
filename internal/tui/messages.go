@@ -32,12 +32,11 @@ type projectsTreeMsg struct {
 // projectsActionMsg is a management action's result; verb labels it on the
 // flash line.
 type projectsActionMsg struct {
-	verb     string
-	ok       string // flash on success; defaults to "<verb> done"
-	selectID string // row to select once the tree reloads
-	removed  string // workspace whose remove finished, ok or not
+	verb    string
+	ok      string // flash on success; defaults to "<verb> done"
+	removed string // workspace whose remove finished, ok or not
 	// reloadChanges drops the Changes list so it re-fetches against the new
-	// target after the tree reloads (set target).
+	// target (set target).
 	reloadChanges bool
 	err           error
 }

@@ -65,9 +65,10 @@ type projectTreeComp struct {
 	inputTarget        string // project id the input acts on
 	pendingRemove      string // workspace id awaiting a remove confirmation
 	pendingRemoveForce bool
-	pendingForget      string          // project id awaiting a forget confirmation
-	removing           map[string]bool // workspaces with a remove in flight
-	offerSpawn         *spawnOffer     // pending "start an agent with this issue?" answer
+	pendingForget      string            // project id awaiting a forget confirmation
+	removing           map[string]bool   // workspaces with a remove in flight
+	neighbors          map[string]string // removed workspace → row to select once it leaves the tree
+	offerSpawn         *spawnOffer       // pending "start an agent with this issue?" answer
 
 	createSeq int // last create picker's seq, so a closed picker's late result can be told apart
 
@@ -287,6 +288,7 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			if t.data == nil {
 				t.data = []api.ProjectNode{}
 			}
+			t.settleRemoved()
 		}
 		t.rebuild()
 		if t.want != "" {
@@ -302,6 +304,7 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	case projectsActionMsg:
 		delete(t.removing, msg.removed)
 		if msg.err != nil {
+			delete(t.neighbors, msg.removed)
 			c.setFlash(msg.verb + ": " + msg.err.Error())
 			return t, nil
 		}
@@ -310,12 +313,7 @@ func (t projectTreeComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			flash = msg.verb + " done"
 		}
 		c.setFlash(flash)
-		// After a remove, move only a cursor that still sits on the removed row.
-		if msg.removed == "" || t.cursorRowID() == msg.removed {
-			t.want = msg.selectID
-		}
-		cmd := t.load(c.m.client)
-		return t, cmd
+		return t, nil
 	case createDoneMsg:
 		if p, ok := c.m.frontCreate(); !ok || p.seq != msg.seq {
 			// A closed picker's call finished: report it without touching a newer
@@ -490,6 +488,22 @@ func (t *projectTreeComp) selectRow(id string) bool {
 	}
 	t.cursor = min(t.cursor, cursorBottom(len(t.rows)))
 	return false
+}
+
+// settleRemoved moves a cursor that sat on a workspace which left t.data to
+// that workspace's neighbor. The tree can arrive before or after the remove's
+// reply.
+func (t *projectTreeComp) settleRemoved() {
+	sel := t.cursorRowID()
+	for id, next := range t.neighbors {
+		if _, ok := t.findWorkspace(id); ok {
+			continue
+		}
+		if sel == id {
+			t.want = next
+		}
+		delete(t.neighbors, id)
+	}
 }
 
 // removeNeighbor is the row to select once workspace id leaves the tree.
@@ -784,7 +798,11 @@ func (t projectTreeComp) removeConfirm(c *ctx, msg tea.KeyPressMsg) (projectTree
 	if t.removing == nil {
 		t.removing = map[string]bool{}
 	}
+	if t.neighbors == nil {
+		t.neighbors = map[string]string{}
+	}
 	t.removing[wsID] = true
+	t.neighbors[wsID] = t.removeNeighbor(wsID)
 	return t, c.m.removeWorkspaceCmd(wsID, force)
 }
 

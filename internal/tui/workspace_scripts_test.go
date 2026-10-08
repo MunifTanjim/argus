@@ -242,12 +242,11 @@ func TestProjectChangedDuringAFetchRefetchesOnceAfterIt(t *testing.T) {
 func TestEveryProjectFetchSharesTheGate(t *testing.T) {
 	m := projectsTestModel()
 	m.client = &recordingClient{}
-	m, cmd := upd(m, projectsActionMsg{verb: "rename"})
-	replies := projectReplies(cmd)
+	replies := projectReplies(m.applyEvent(api.Notification{Method: api.MethodProjectChanged}))
 	if len(replies) != 1 || !m.left.tree.loading {
-		t.Fatalf("an action should fetch the tree and mark it loading: %d, loading=%v", len(replies), m.left.tree.loading)
+		t.Fatalf("project.changed should fetch the tree and mark it loading: %d, loading=%v", len(replies), m.left.tree.loading)
 	}
-	m, cmd = upd(m, createDoneMsg{seq: createOf(m).seq + 1, res: api.WorkspaceCreateResult{Dir: "/repo/.worktrees/x"}})
+	m, cmd := upd(m, createDoneMsg{seq: createOf(m).seq + 1, res: api.WorkspaceCreateResult{Dir: "/repo/.worktrees/x"}})
 	if n := len(projectReplies(cmd)); n != 0 {
 		t.Fatalf("a create during a fetch should wait for it, got %d fetches", n)
 	}
