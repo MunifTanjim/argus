@@ -6,6 +6,7 @@ import 'package:argus/ui/transcript_feed.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 class _FakeKv implements SecureKv {
   _FakeKv(this._m);
@@ -119,14 +120,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Show less'), findsOneWidget);
 
-    final pos = tester
-        .state<ScrollableState>(find.byType(Scrollable).first)
-        .position;
-    pos.jumpTo(pos.maxScrollExtent);
+    final list = tester.widget<SuperListView>(find.byType(SuperListView));
+    list.listController!.jumpToItem(
+      index: entries.length - 1,
+      scrollController: list.controller!,
+      alignment: 1,
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('u')), findsNothing, reason: 'unmounted');
 
-    pos.jumpTo(0);
+    list.listController!.jumpToItem(
+      index: 0,
+      scrollController: list.controller!,
+      alignment: 0,
+    );
     await tester.pumpAndSettle();
     expect(find.text('Show less'), findsOneWidget);
   });

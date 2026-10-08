@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 import '../models/entry.dart';
 import '../state/appearance.dart';
 import '../state/tool_detail.dart';
 import 'entry_row.dart';
+import 'prompt_scrollbar.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
@@ -82,6 +84,7 @@ class TranscriptFeed extends ConsumerStatefulWidget {
 
 class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   final ScrollController _sc = ScrollController();
+  final ListController _lc = ListController();
 
   // Group keys the user has expanded.
   final Set<String> _revealed = {};
@@ -133,6 +136,7 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   @override
   void dispose() {
     _sc.dispose();
+    _lc.dispose();
     super.dispose();
   }
 
@@ -160,22 +164,31 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     );
     final rows = groupEntries(widget.entries, collapseTools: collapse);
     return CenteredBody(
-      child: ListView.builder(
-        controller: controller,
-        padding: const EdgeInsets.all(12),
-        itemCount: rows.length,
-        itemBuilder: (_, i) => switch (rows[i]) {
-          EntryFeedRow(:final entry) => EntryRow(
-            key: ValueKey(entry.id),
-            detailRef: widget.detailRef,
-            entry: entry,
-            expanded: _expanded.contains(entry.id),
-            onToggle: () => setState(() {
-              if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
-            }),
-          ),
-          ToolGroupFeedRow(:final key, :final tools) => _toolGroup(key, tools),
-        },
+      child: PromptScrollbar(
+        rows: rows,
+        listController: _lc,
+        scrollController: _sc,
+        child: SuperListView.builder(
+          controller: _sc,
+          listController: _lc,
+          padding: const EdgeInsets.all(12),
+          itemCount: rows.length,
+          itemBuilder: (_, i) => switch (rows[i]) {
+            EntryFeedRow(:final entry) => EntryRow(
+              key: ValueKey(entry.id),
+              detailRef: widget.detailRef,
+              entry: entry,
+              expanded: _expanded.contains(entry.id),
+              onToggle: () => setState(() {
+                if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
+              }),
+            ),
+            ToolGroupFeedRow(:final key, :final tools) => _toolGroup(
+              key,
+              tools,
+            ),
+          },
+        ),
       ),
     );
   }
