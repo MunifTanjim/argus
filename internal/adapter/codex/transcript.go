@@ -9,32 +9,34 @@ import (
 )
 
 func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
-	chunks, err := parseRollout(path)
+	return readTranscriptView(path, false)
+}
+
+func readTranscriptView(path string, finished bool) (transcript.TranscriptView, error) {
+	entries, err := parseRollout(path, finished)
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	stampSubagents(chunks, sessionsRootFrom(path))
-	return transcript.TranscriptView{Chunks: chunks}, nil
+	stampSubagents(entries, sessionsRootFrom(path))
+	return transcript.TranscriptView{Entries: entries}, nil
 }
 
-func stampSubagents(chunks []transcript.Chunk, sessionsRoot string) {
+func stampSubagents(entries []transcript.Entry, sessionsRoot string) {
 	var edges map[string]string
 	if p, err := stateDBPath(); err == nil {
 		edges = loadSpawnEdges(p)
 	}
-	for i := range chunks {
-		for j := range chunks[i].Items {
-			it := &chunks[i].Items[j]
-			if it.ToolName != "spawn_agent" || len(it.Subagents) == 0 {
-				continue
-			}
-			sub := &it.Subagents[0]
-			if sub.ID == "" {
-				continue
-			}
-			sub.Status = edges[sub.ID]
-			sub.HasTrace = findRolloutPathIn(sessionsRoot, sub.ID) != ""
+	for i := range entries {
+		e := &entries[i]
+		if e.ToolName != "spawn_agent" || len(e.Subagents) == 0 {
+			continue
 		}
+		sub := &e.Subagents[0]
+		if sub.ID == "" {
+			continue
+		}
+		sub.Status = edges[sub.ID]
+		sub.HasTrace = findRolloutPathIn(sessionsRoot, sub.ID) != ""
 	}
 }
 
@@ -44,12 +46,12 @@ func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool
 	if path == "" {
 		return transcript.TranscriptView{}, false, nil
 	}
-	chunks, err := parseRollout(path)
+	entries, err := parseRollout(path, false)
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
-	stampSubagents(chunks, sessionsRoot) // nested spawns link one level deeper
-	return transcript.TranscriptView{Chunks: chunks}, true, nil
+	stampSubagents(entries, sessionsRoot) // nested spawns link one level deeper
+	return transcript.TranscriptView{Entries: entries}, true, nil
 }
 
 func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
@@ -60,18 +62,12 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 			return transcript.ToolDetail{}, false, nil
 		}
 	}
-	chunks, err := parseRollout(path)
+	entries, err := parseRollout(path, false)
 	if err != nil {
 		return transcript.ToolDetail{}, false, err
 	}
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if (it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent || it.Kind == transcript.ItemSkill) && it.ToolID == toolID {
-				return transcript.ToolDetail{ToolInput: it.ToolInput, Result: it.Result}, true, nil
-			}
-		}
-	}
-	return transcript.ToolDetail{}, false, nil
+	d, ok := transcript.FindToolDetail(entries, toolID)
+	return d, ok, nil
 }
 
 func SubagentFilePath(rootPath, agentID string) (string, bool) {
@@ -90,15 +86,15 @@ type streamingTranscript struct {
 	loaded       bool
 	lines        []rolloutLine
 	models       map[string]string
-	chunks       []transcript.Chunk
+	entries      []transcript.Entry
 }
 
-func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
+func (s *streamingTranscript) Refresh() ([]transcript.Entry, error) {
 	if fi, err := os.Stat(s.path); err == nil && fi.Size() < s.offset {
 		s.offset = 0 // truncation/rotation: rebuild from the start
 		s.loaded = false
 		s.lines = nil
-		s.chunks = nil
+		s.entries = nil
 	}
 
 	newLines, newOffset, err := scanRolloutFrom(s.path, s.offset)
@@ -106,7 +102,7 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 		return nil, err
 	}
 	if len(newLines) == 0 && s.loaded {
-		return s.chunks, nil // nothing appended; skip re-fold and its DB/glob work
+		return s.entries, nil // nothing appended; skip re-fold and its DB/glob work
 	}
 	s.loaded = true
 	s.lines = append(s.lines, newLines...)
@@ -116,10 +112,10 @@ func (s *streamingTranscript) Refresh() ([]transcript.Chunk, error) {
 	if s.models == nil {
 		s.models = loadModelNames()
 	}
-	chunks := foldRollout(s.lines, s.models)
-	stampSubagents(chunks, s.sessionsRoot)
-	s.chunks = chunks
-	return s.chunks, nil
+	entries := foldRollout(s.lines, s.models, false)
+	stampSubagents(entries, s.sessionsRoot)
+	s.entries = entries
+	return s.entries, nil
 }
 
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
@@ -141,7 +137,7 @@ func ReadHistoryTranscript(path string) (transcript.TranscriptView, error) {
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	return ReadTranscriptView(clean)
+	return readTranscriptView(clean, true)
 }
 
 func ReadHistorySubagentView(string, string) (transcript.TranscriptView, bool, error) {

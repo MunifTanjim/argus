@@ -49,16 +49,14 @@ func collectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 		if bf, ok := adapter.RootedFile(home, path); ok {
 			out = append(out, bf)
 		}
-		chunks, err := parseRollout(path)
+		entries, err := parseRollout(path, false)
 		if err != nil {
 			return
 		}
-		for _, c := range chunks {
-			for _, it := range c.Items {
-				for _, sub := range it.Subagents {
-					if sub.ID != "" {
-						walk(findRolloutPathIn(sessionsRoot, sub.ID))
-					}
+		for _, e := range entries {
+			for _, sub := range e.Subagents {
+				if sub.ID != "" {
+					walk(findRolloutPathIn(sessionsRoot, sub.ID))
 				}
 			}
 		}

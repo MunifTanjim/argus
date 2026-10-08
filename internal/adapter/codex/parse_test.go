@@ -32,34 +32,32 @@ func TestExecExitCode(t *testing.T) {
 }
 
 func TestParseRolloutExecCommandResultIsError(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.ToolName == "exec_command" && it.Result != "" && it.ResultIsError {
-				t.Errorf("exit-0 exec_command marked as error: %+v", it)
-			}
+	for _, it := range entries {
+		if it.ToolName == "exec_command" && it.Result != "" && it.ResultIsError {
+			t.Errorf("exit-0 exec_command marked as error: %+v", it)
 		}
 	}
 }
 
 func TestParseRolloutMessages(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-child.jsonl")
+	entries, err := parseRollout("testdata/rollout-child.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
 	// child = 1 real user message + 1 assistant turn; environment_context filtered.
 	var user, ai int
-	for _, c := range chunks {
-		switch c.Kind {
-		case transcript.ChunkUser:
+	for _, e := range entries {
+		switch e.Kind {
+		case transcript.EntryUser:
 			user++
-			if wantPrefix := "This is a reference-session subagent task"; !hasPrefix(c.Text, wantPrefix) {
-				t.Fatalf("user text = %q, want prefix %q", c.Text, wantPrefix)
+			if wantPrefix := "This is a reference-session subagent task"; !hasPrefix(e.Text, wantPrefix) {
+				t.Fatalf("user text = %q, want prefix %q", e.Text, wantPrefix)
 			}
-		case transcript.ChunkAI:
+		case transcript.EntryTurnEnd:
 			ai++
 		}
 	}
@@ -69,31 +67,29 @@ func TestParseRolloutMessages(t *testing.T) {
 }
 
 func TestParseRolloutFiltersScaffolding(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	for _, c := range chunks {
-		if c.Kind != transcript.ChunkUser {
+	for _, e := range entries {
+		if e.Kind != transcript.EntryUser {
 			continue
 		}
-		if hasPrefix(c.Text, "<environment_context>") || hasPrefix(c.Text, "<subagent_notification>") {
-			t.Fatalf("scaffolding user message leaked: %q", c.Text[:40])
+		if hasPrefix(e.Text, "<environment_context>") || hasPrefix(e.Text, "<subagent_notification>") {
+			t.Fatalf("scaffolding user message leaked: %q", e.Text[:40])
 		}
 	}
 }
 
 func TestParseRolloutTools(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	byID := map[string]transcript.Item{}
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == transcript.ItemTool {
-				byID[it.ToolID] = it
-			}
+	byID := map[string]transcript.Entry{}
+	for _, it := range entries {
+		if it.Kind == transcript.EntryTool {
+			byID[it.ToolID] = it
 		}
 	}
 	var sawExec, sawResult bool
@@ -123,37 +119,29 @@ func TestParseRolloutTools(t *testing.T) {
 }
 
 func TestParseRolloutReasoningEncryptedShown(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	thinking := 0
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == transcript.ItemThinking {
-				thinking++
-				if it.Text != "" {
-					t.Errorf("encrypted reasoning should have empty text, got %q", it.Text)
-				}
+	thinking, turnThinking := 0, 0
+	for _, it := range entries {
+		if it.Kind == transcript.EntryThinking {
+			thinking++
+			turnThinking++
+			if it.Text != "" {
+				t.Errorf("encrypted reasoning should have empty text, got %q", it.Text)
 			}
 		}
-		if c.Kind == transcript.ChunkAI && c.Thinking != countThinking(c.Items) {
-			t.Errorf("Thinking count %d != thinking items %d", c.Thinking, countThinking(c.Items))
+		if it.Kind == transcript.EntryTurnEnd {
+			if it.Thinking != turnThinking {
+				t.Errorf("Thinking count %d != thinking entries %d", it.Thinking, turnThinking)
+			}
+			turnThinking = 0
 		}
 	}
 	if thinking == 0 {
 		t.Fatal("expected thinking items from encrypted reasoning steps")
 	}
-}
-
-func countThinking(items []transcript.Item) int {
-	n := 0
-	for _, it := range items {
-		if it.Kind == transcript.ItemThinking {
-			n++
-		}
-	}
-	return n
 }
 
 func TestParseRolloutReasoningSummary(t *testing.T) {
@@ -165,16 +153,14 @@ func TestParseRolloutReasoningSummary(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
 	var think string
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == transcript.ItemThinking {
-				think = it.Text
-			}
+	for _, it := range entries {
+		if it.Kind == transcript.EntryThinking {
+			think = it.Text
 		}
 	}
 	if think != "planning the fix" {
@@ -183,13 +169,13 @@ func TestParseRolloutReasoningSummary(t *testing.T) {
 }
 
 func TestParseRolloutUsageAndContext(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
 	var withCtx, withDur, withUsage int
-	for _, c := range chunks {
-		if c.Kind != transcript.ChunkAI {
+	for _, c := range entries {
+		if c.Kind != transcript.EntryTurnEnd {
 			continue
 		}
 		if c.HasContext {
@@ -211,17 +197,15 @@ func TestParseRolloutUsageAndContext(t *testing.T) {
 }
 
 func TestParseRolloutSubagentLink(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	var sub transcript.Item
+	var sub transcript.Entry
 	var found bool
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.ToolName == "spawn_agent" {
-				sub, found = it, true
-			}
+	for _, it := range entries {
+		if it.ToolName == "spawn_agent" {
+			sub, found = it, true
 		}
 	}
 	if !found {
@@ -243,20 +227,18 @@ func TestParseRolloutSubagentLink(t *testing.T) {
 }
 
 func TestParseRolloutManagementCallsAreSubagents(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	names := map[string]transcript.ItemKind{}
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			names[it.ToolName] = it.Kind
-		}
+	names := map[string]transcript.EntryKind{}
+	for _, it := range entries {
+		names[it.ToolName] = it.Kind
 	}
-	if names["wait_agent"] != transcript.ItemSubagent {
+	if names["wait_agent"] != transcript.EntrySubagent {
 		t.Fatalf("wait_agent kind = %v, want subagent", names["wait_agent"])
 	}
-	if names["close_agent"] != transcript.ItemSubagent {
+	if names["close_agent"] != transcript.EntrySubagent {
 		t.Fatalf("close_agent kind = %v, want subagent", names["close_agent"])
 	}
 }
@@ -270,23 +252,21 @@ func TestParseRolloutApplyPatch(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	var it transcript.Item
+	var it transcript.Entry
 	var found bool
-	for _, c := range chunks {
-		for _, i := range c.Items {
-			if i.ToolName == "apply_patch" {
-				it, found = i, true
-			}
+	for _, i := range entries {
+		if i.ToolName == "apply_patch" {
+			it, found = i, true
 		}
 	}
 	if !found {
 		t.Fatal("no apply_patch tool item found")
 	}
-	if it.Kind != transcript.ItemTool {
+	if it.Kind != transcript.EntryTool {
 		t.Fatalf("apply_patch kind = %v, want tool", it.Kind)
 	}
 	if !hasPrefix(it.ToolInput, "*** Begin Patch") {
@@ -305,17 +285,15 @@ func TestParseRolloutViewImage(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	var it transcript.Item
+	var it transcript.Entry
 	var found bool
-	for _, c := range chunks {
-		for _, i := range c.Items {
-			if i.ToolName == "view_image" {
-				it, found = i, true
-			}
+	for _, i := range entries {
+		if i.ToolName == "view_image" {
+			it, found = i, true
 		}
 	}
 	if !found {
@@ -350,16 +328,16 @@ func TestParseRolloutUserShellCommand(t *testing.T) {
 	if err := os.WriteFile(p, append(line, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	if len(chunks) != 1 {
-		t.Fatalf("chunks = %d, want 1", len(chunks))
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	c := chunks[0]
-	if c.Kind != transcript.ChunkShell {
-		t.Fatalf("kind = %v, want ChunkShell", c.Kind)
+	c := entries[0]
+	if c.Kind != transcript.EntryShell {
+		t.Fatalf("kind = %v, want EntryShell", c.Kind)
 	}
 	if c.Text != "echo yo" {
 		t.Fatalf("Text = %q, want %q", c.Text, "echo yo")
@@ -373,16 +351,16 @@ func TestParseRolloutUserShellCommand(t *testing.T) {
 }
 
 func TestParseRolloutUserShellCommandNonZeroExit(t *testing.T) {
-	chunks, err := parseRolloutFromText(t, "<user_shell_command>\n<command>\nfalse\n</command>\n<result>\nExit code: 1\nDuration: 0.01 seconds\nOutput:\n\n</result>\n</user_shell_command>")
+	entries, err := parseRolloutFromText(t, "<user_shell_command>\n<command>\nfalse\n</command>\n<result>\nExit code: 1\nDuration: 0.01 seconds\nOutput:\n\n</result>\n</user_shell_command>")
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	if len(chunks) != 1 || !chunks[0].IsError {
-		t.Fatalf("chunks = %+v, want 1 chunk with IsError=true", chunks)
+	if len(entries) != 1 || !entries[0].IsError {
+		t.Fatalf("entries = %+v, want 1 entry with IsError=true", entries)
 	}
 }
 
-func parseRolloutFromText(t *testing.T, text string) ([]transcript.Chunk, error) {
+func parseRolloutFromText(t *testing.T, text string) ([]transcript.Entry, error) {
 	t.Helper()
 	dir := t.TempDir()
 	p := dir + "/r.jsonl"
@@ -402,27 +380,20 @@ func parseRolloutFromText(t *testing.T, text string) ([]transcript.Chunk, error)
 	if err := os.WriteFile(p, append(line, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return parseRollout(p)
+	return parseRollout(p, false)
 }
 
 func TestParseRolloutSkillLoad(t *testing.T) {
 	text := "<skill>\n<name>superpowers:brainstorming</name>\n<path>/Users/muniftanjim/.codex/plugins/cache/openai-curated/superpowers/3fdeeb49/skills/brainstorming/SKILL.md</path>\n---\nname: brainstorming\ndescription: \"You MUST use this before any creative work.\"\n---\n\n# Brainstorming Ideas Into Designs\n\nHelp turn ideas into fully formed designs and specs through natural collaborative dialogue.\n</skill>"
-	chunks, err := parseRolloutFromText(t, text)
+	entries, err := parseRolloutFromText(t, text)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	if len(chunks) != 1 {
-		t.Fatalf("chunks = %d, want 1", len(chunks))
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	c := chunks[0]
-	if c.Kind != transcript.ChunkUser {
-		t.Fatalf("kind = %v, want ChunkUser", c.Kind)
-	}
-	if len(c.Items) != 1 {
-		t.Fatalf("items = %d, want 1", len(c.Items))
-	}
-	it := c.Items[0]
-	if it.Kind != transcript.ItemSkill {
+	it := entries[0]
+	if it.Kind != transcript.EntrySkill {
 		t.Fatalf("item kind = %v, want ItemSkill", it.Kind)
 	}
 	if it.ToolName != "Skill" {
@@ -453,23 +424,21 @@ func TestParseRolloutWebSearch(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	var it transcript.Item
+	var it transcript.Entry
 	var found int
-	for _, c := range chunks {
-		for _, i := range c.Items {
-			if i.ToolName == "web_search" {
-				it, found = i, found+1
-			}
+	for _, i := range entries {
+		if i.ToolName == "web_search" {
+			it, found = i, found+1
 		}
 	}
 	if found != 1 {
 		t.Fatalf("web_search tool items = %d, want 1 (web_search_end duplicate should be ignored)", found)
 	}
-	if it.Kind != transcript.ItemTool {
+	if it.Kind != transcript.EntryTool {
 		t.Fatalf("web_search kind = %v, want tool", it.Kind)
 	}
 	if !strings.Contains(it.ToolInput, `"query":"argus"`) {
@@ -478,20 +447,18 @@ func TestParseRolloutWebSearch(t *testing.T) {
 }
 
 func TestParseRolloutWaitCloseResolveNickname(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
 	const childID = "019f278e-50a5-7f83-91f2-c30e8ac18e19"
-	var wait, closeIt transcript.Item
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			switch it.ToolName {
-			case "wait_agent":
-				wait = it
-			case "close_agent":
-				closeIt = it
-			}
+	var wait, closeIt transcript.Entry
+	for _, it := range entries {
+		switch it.ToolName {
+		case "wait_agent":
+			wait = it
+		case "close_agent":
+			closeIt = it
 		}
 	}
 	wantSubs := []transcript.Subagent{{ID: childID, Name: "Volta"}}
@@ -509,18 +476,19 @@ func TestParseRolloutAccumulatesOutputTokens(t *testing.T) {
 	content := `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}` + "\n" +
 		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}` + "\n" +
 		`{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":100000,"last_token_usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":10},"total_token_usage":{"input_tokens":50}}}}` + "\n" +
-		`{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":100000,"last_token_usage":{"input_tokens":60,"cached_input_tokens":0,"output_tokens":20},"total_token_usage":{"input_tokens":60}}}}` + "\n"
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":100000,"last_token_usage":{"input_tokens":60,"cached_input_tokens":0,"output_tokens":20},"total_token_usage":{"input_tokens":60}}}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"task_complete"}}` + "\n"
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
 	var got int
-	for _, c := range chunks {
-		if c.Kind == transcript.ChunkAI {
-			got = c.Usage.Output
+	for _, e := range entries {
+		if e.Kind == transcript.EntryTurnEnd {
+			got = e.Usage.Output
 		}
 	}
 	if got != 30 {
@@ -528,7 +496,7 @@ func TestParseRolloutAccumulatesOutputTokens(t *testing.T) {
 	}
 }
 
-func TestParseRolloutDropsEmptyAIChunk(t *testing.T) {
+func TestParseRolloutNoFooterForUsageOnlyTurn(t *testing.T) {
 	dir := t.TempDir()
 	p := dir + "/r.jsonl"
 	content := `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}` + "\n" +
@@ -536,29 +504,27 @@ func TestParseRolloutDropsEmptyAIChunk(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := parseRollout(p)
+	entries, err := parseRollout(p, false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	for _, c := range chunks {
-		if c.Kind == transcript.ChunkAI {
-			t.Fatalf("unexpected ChunkAI with no items emitted")
+	for _, e := range entries {
+		if e.Kind == transcript.EntryTurnEnd {
+			t.Fatalf("unexpected EntryTurnEnd for a usage-only turn")
 		}
 	}
 }
 
 func TestParseRolloutSpawnNickname(t *testing.T) {
-	chunks, err := parseRollout("testdata/rollout-parent.jsonl")
+	entries, err := parseRollout("testdata/rollout-parent.jsonl", false)
 	if err != nil {
 		t.Fatalf("parseRollout: %v", err)
 	}
-	var sub transcript.Item
+	var sub transcript.Entry
 	var found bool
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.ToolName == "spawn_agent" {
-				sub, found = it, true
-			}
+	for _, it := range entries {
+		if it.ToolName == "spawn_agent" {
+			sub, found = it, true
 		}
 	}
 	if !found {
@@ -574,86 +540,132 @@ func TestParseRolloutSpawnNickname(t *testing.T) {
 
 func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
 
-func passthrough(turnID string) *msgPassthrough {
-	if turnID == "" {
-		return nil
-	}
-	return &msgPassthrough{TurnID: turnID}
-}
-
-func skillUserLine(name, path, body, turnID string) rolloutLine {
+func skillUserLine(name, path, body string) rolloutLine {
 	text := "<skill>\n<name>" + name + "</name>\n<path>" + path + "</path>\n" + body + "\n</skill>"
 	return rolloutLine{
 		Timestamp: "2026-07-12T00:00:00.000Z",
 		Type:      "response_item",
 		Payload: rolloutPayload{
-			Type:        "message",
-			Role:        "user",
-			Content:     []rolloutContent{{Type: "input_text", Text: text}},
-			Passthrough: passthrough(turnID),
+			Type:    "message",
+			Role:    "user",
+			Content: []rolloutContent{{Type: "input_text", Text: text}},
 		},
 	}
 }
 
-func userMessageLine(text, turnID string) rolloutLine {
+func userMessageLine(text string) rolloutLine {
 	return rolloutLine{
 		Timestamp: "2026-07-12T00:00:00.000Z",
 		Type:      "response_item",
 		Payload: rolloutPayload{
-			Type:        "message",
-			Role:        "user",
-			Content:     []rolloutContent{{Type: "input_text", Text: text}},
-			Passthrough: passthrough(turnID),
+			Type:    "message",
+			Role:    "user",
+			Content: []rolloutContent{{Type: "input_text", Text: text}},
 		},
 	}
 }
 
-func TestFoldRollout_SkillFoldsIntoUserChunkItem(t *testing.T) {
-	lines := []rolloutLine{skillUserLine("reviewing", "/p", "# Body", "")}
-	chunks := foldRollout(lines, nil)
-	u := chunks[0]
-	if u.Kind != transcript.ChunkUser || len(u.Items) != 1 {
-		t.Fatalf("want user chunk w/1 item, got %v/%d", u.Kind, len(u.Items))
+func assistantLine(text string) rolloutLine {
+	return rolloutLine{Timestamp: "2026-07-12T00:00:01.000Z", Type: "response_item",
+		Payload: rolloutPayload{Type: "message", Role: "assistant",
+			Content: []rolloutContent{{Type: "output_text", Text: text}}}}
+}
+
+func taskCompleteLine(ms int64) rolloutLine {
+	return rolloutLine{Timestamp: "2026-07-12T00:01:00.000Z", Type: "event_msg",
+		Payload: rolloutPayload{Type: "task_complete", DurationMs: ms}}
+}
+
+func entryKinds(es []transcript.Entry) []transcript.EntryKind {
+	out := make([]transcript.EntryKind, len(es))
+	for i, e := range es {
+		out[i] = e.Kind
 	}
-	it := u.Items[0]
-	if it.Kind != transcript.ItemSkill || it.ToolName != "Skill" ||
-		it.ToolID == "" || it.Result == "" || it.ToolInput == "" {
-		t.Fatalf("bad skill item: %+v", it)
+	return out
+}
+
+func TestFoldRolloutFinishedClosesDeadTurn(t *testing.T) {
+	// A history session that died before task_complete.
+	died := []rolloutLine{userMessageLine("hi"), assistantLine("hello")}
+	es := foldRollout(died, nil, true)
+	last := es[len(es)-1]
+	if last.Kind != transcript.EntryTurnEnd {
+		t.Fatalf("finished read has no final footer: %v", entryKinds(es))
+	}
+	if last.Timestamp == "" {
+		t.Error("footer has no timestamp; want the turn's last entry time")
 	}
 }
 
-func TestFoldRollout_SkillMergesIntoInvokingUserChunk(t *testing.T) {
-	lines := []rolloutLine{
-		userMessageLine("$superpowers:brainstorming Hello", "t1"),
-		skillUserLine("superpowers:brainstorming", "/p", "# Body", "t1"),
+func TestFoldRolloutFooterOnTaskComplete(t *testing.T) {
+	open := []rolloutLine{userMessageLine("hi"), assistantLine("hello")}
+	if got := entryKinds(foldRollout(open, nil, false)); !reflect.DeepEqual(got,
+		[]transcript.EntryKind{transcript.EntryUser, transcript.EntryText}) {
+		t.Fatalf("open turn kinds = %v", got)
 	}
-	chunks := foldRollout(lines, nil)
-	if len(chunks) != 1 {
-		t.Fatalf("want 1 merged chunk, got %d", len(chunks))
+	done := append(open, taskCompleteLine(4200))
+	es := foldRollout(done, nil, false)
+	last := es[len(es)-1]
+	if last.Kind != transcript.EntryTurnEnd || last.DurationMs != 4200 {
+		t.Fatalf("last = %+v, want footer with duration", last)
 	}
-	u := chunks[0]
-	if u.Kind != transcript.ChunkUser || u.Text != "$superpowers:brainstorming Hello" {
-		t.Fatalf("want user chunk carrying invoking text, got %v/%q", u.Kind, u.Text)
-	}
-	if len(u.Items) != 1 || u.Items[0].Kind != transcript.ItemSkill {
-		t.Fatalf("want 1 skill item folded in, got %+v", u.Items)
+	if last.Timestamp != "2026-07-12T00:01:00.000Z" {
+		t.Errorf("footer timestamp = %q", last.Timestamp)
 	}
 }
 
-func TestFoldRollout_SkillDoesNotMergeOnTurnMismatch(t *testing.T) {
-	lines := []rolloutLine{
-		userMessageLine("earlier message", "t1"),
-		skillUserLine("superpowers:brainstorming", "/p", "# Body", "t2"),
+func TestFoldRolloutUserBoundaryFinishesTurn(t *testing.T) {
+	es := foldRollout([]rolloutLine{
+		userMessageLine("one"), assistantLine("a"),
+		userMessageLine("two"), assistantLine("b"),
+	}, nil, false)
+	want := []transcript.EntryKind{transcript.EntryUser, transcript.EntryText, transcript.EntryTurnEnd,
+		transcript.EntryUser, transcript.EntryText}
+	if got := entryKinds(es); !reflect.DeepEqual(got, want) {
+		t.Fatalf("kinds = %v, want %v", got, want)
 	}
-	chunks := foldRollout(lines, nil)
-	if len(chunks) != 2 {
-		t.Fatalf("want 2 chunks (turn mismatch blocks fold), got %d", len(chunks))
+}
+
+func TestFoldRolloutUserBoundaryFooterTimestamp(t *testing.T) {
+	es := foldRollout([]rolloutLine{
+		userMessageLine("one"), assistantLine("a"),
+		userMessageLine("two"),
+	}, nil, false)
+	end := es[2]
+	if end.Kind != transcript.EntryTurnEnd || end.Timestamp != "2026-07-12T00:00:01.000Z" {
+		t.Fatalf("footer = %+v, want the turn's last entry timestamp", end)
 	}
-	if len(chunks[0].Items) != 0 {
-		t.Fatalf("invoking chunk should keep no items, got %+v", chunks[0].Items)
+}
+
+func TestFoldRolloutSkillFollowsUserEntry(t *testing.T) {
+	es := foldRollout([]rolloutLine{
+		userMessageLine("$superpowers:brainstorming Hello"),
+		skillUserLine("superpowers:brainstorming", "/p", "# Body"),
+	}, nil, false)
+	if got := entryKinds(es); !reflect.DeepEqual(got,
+		[]transcript.EntryKind{transcript.EntryUser, transcript.EntrySkill}) {
+		t.Fatalf("kinds = %v", got)
 	}
-	if chunks[1].Kind != transcript.ChunkUser || len(chunks[1].Items) != 1 ||
-		chunks[1].Items[0].Kind != transcript.ItemSkill {
-		t.Fatalf("skill should stand alone, got %+v", chunks[1])
+	sk := es[1]
+	if sk.ToolName != "Skill" || sk.ToolID == "" || sk.Result == "" || sk.ToolInput == "" {
+		t.Fatalf("bad skill entry: %+v", sk)
+	}
+}
+
+func TestFoldRolloutStableIDs(t *testing.T) {
+	short := []rolloutLine{userMessageLine("one"), assistantLine("a")}
+	long := append(append([]rolloutLine{}, short...), taskCompleteLine(1), userMessageLine("two"))
+	a, b := foldRollout(short, nil, false), foldRollout(long, nil, false)
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].Kind != b[i].Kind {
+			t.Fatalf("entry %d changed: %+v vs %+v", i, a[i], b[i])
+		}
+	}
+}
+
+func TestFoldRolloutDropsBlankAssistantText(t *testing.T) {
+	es := foldRollout([]rolloutLine{userMessageLine("hi"), assistantLine("  ")}, nil, false)
+	if len(es) != 1 {
+		t.Fatalf("want only the user entry, got %v", entryKinds(es))
 	}
 }

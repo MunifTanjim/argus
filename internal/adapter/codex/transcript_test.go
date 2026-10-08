@@ -105,8 +105,8 @@ func TestStreamingRefreshIncrementalEqualsWholeFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want.Chunks) {
-		t.Fatalf("incremental chunks != whole-file parse\n got: %+v\nwant: %+v", got, want.Chunks)
+	if !reflect.DeepEqual(got, want.Entries) {
+		t.Fatalf("incremental entries != whole-file parse\n got: %+v\nwant: %+v", got, want.Entries)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestStreamingRefreshTruncationReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want.Chunks) {
-		t.Fatalf("after truncation, chunks != whole-file parse\n got: %+v\nwant: %+v", got, want.Chunks)
+	if !reflect.DeepEqual(got, want.Entries) {
+		t.Fatalf("after truncation, entries != whole-file parse\n got: %+v\nwant: %+v", got, want.Entries)
 	}
 }
 
@@ -148,12 +148,10 @@ func TestReadTranscriptViewStampsSubagent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
-	var sub *transcript.Item
-	for i := range view.Chunks {
-		for j := range view.Chunks[i].Items {
-			if view.Chunks[i].Items[j].ToolName == "spawn_agent" {
-				sub = &view.Chunks[i].Items[j]
-			}
+	var sub *transcript.Entry
+	for i := range view.Entries {
+		if view.Entries[i].ToolName == "spawn_agent" {
+			sub = &view.Entries[i]
 		}
 	}
 	if sub == nil {
@@ -177,21 +175,21 @@ func TestStreamingRefreshReturnsFullList(t *testing.T) {
 
 	st := NewStreamingTranscript(path, "", false)
 
-	chunks1, err := st.Refresh()
+	entries1, err := st.Refresh()
 	if err != nil {
 		t.Fatalf("first Refresh: %v", err)
 	}
-	if len(chunks1) == 0 {
-		t.Fatal("first Refresh returned no chunks")
+	if len(entries1) == 0 {
+		t.Fatal("first Refresh returned no entries")
 	}
 
 	// Second call with no file change must return the full list, not a delta.
-	chunks2, err := st.Refresh()
+	entries2, err := st.Refresh()
 	if err != nil {
 		t.Fatalf("second Refresh: %v", err)
 	}
-	if len(chunks2) != len(chunks1) {
-		t.Fatalf("second Refresh returned %d chunks, want %d (full list)", len(chunks2), len(chunks1))
+	if len(entries2) != len(entries1) {
+		t.Fatalf("second Refresh returned %d entries, want %d (full list)", len(entries2), len(entries1))
 	}
 }
 
@@ -201,11 +199,9 @@ func TestFindToolDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 	var toolID string
-	for _, c := range view.Chunks {
-		for _, it := range c.Items {
-			if it.ToolName == "update_plan" {
-				toolID = it.ToolID
-			}
+	for _, it := range view.Entries {
+		if it.ToolName == "update_plan" {
+			toolID = it.ToolID
 		}
 	}
 	if toolID == "" {
@@ -245,11 +241,9 @@ func TestFindToolDetailSkill(t *testing.T) {
 		t.Fatalf("ReadTranscriptView: %v", err)
 	}
 	var toolID string
-	for _, c := range view.Chunks {
-		for _, it := range c.Items {
-			if it.Kind == transcript.ItemSkill {
-				toolID = it.ToolID
-			}
+	for _, it := range view.Entries {
+		if it.Kind == transcript.EntrySkill {
+			toolID = it.ToolID
 		}
 	}
 	if toolID == "" {
