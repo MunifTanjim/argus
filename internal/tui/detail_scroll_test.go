@@ -108,7 +108,9 @@ func manyItemDetailModel(t *testing.T) tview {
 }
 
 func (m tview) cursorLineStart() int {
-	_, start, _ := m.frameLines(m.topFrame(), m.c.m.containerWidth())
+	f := m.topFrame()
+	lines, first := m.frameLines(f, m.c.m.containerWidth())
+	start, _ := f.cursorSpan(first, len(lines))
 	return start
 }
 

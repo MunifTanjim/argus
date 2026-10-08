@@ -197,7 +197,7 @@ func TestSeparatorBetweenEntries(t *testing.T) {
 	}
 	prevEnd := 0
 	for i := range first {
-		start, end := v.entrySpan(i, first, len(lines))
+		start, end := itemSpan(i, first, len(lines))
 		w := prevEnd
 		if i > 0 {
 			w++ // the separator

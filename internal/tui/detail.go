@@ -92,15 +92,17 @@ func (m tview) toggleFrameRun(f *detailFrame, r displayRow) tea.Cmd {
 	if i := runRowIndex(rows, r.run.key); i >= 0 {
 		f.cursor = i
 	}
-	m.ensureDetailVisible()
+	lines, first := m.frameLines(f, m.c.m.transcriptWidth())
+	total, h := len(lines), m.detailBodyHeight(f)
+	start, end := f.cursorSpan(first, total)
+	f.scroll = windowScroll(total, start, end, h, f.scroll)
 	if !on {
 		return nil
 	}
 	if head, foot, ok := runEdges(rows, r.run.key); ok {
-		first, total := m.frameItemStarts(f, m.c.m.transcriptWidth())
 		start, _ := itemSpan(head, first, total)
 		_, end := itemSpan(foot, first, total)
-		f.scroll = revealScroll(f.scroll, start, end, m.detailBodyHeight(f))
+		f.scroll = windowScroll(total, start, end, h, f.scroll)
 		m.clampDetailScroll()
 	}
 	var cmds []tea.Cmd
@@ -288,7 +290,8 @@ func (m tview) actDetailUp(tea.KeyPressMsg) tea.Cmd {
 // height h, returning h and the item's [start,end) line range. h matches
 // detailBody's content area so it agrees with ensureDetailVisible.
 func (m tview) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
-	_, start, end = m.frameLines(f, m.c.m.transcriptWidth())
+	lines, first := m.frameLines(f, m.c.m.transcriptWidth())
+	start, end = f.cursorSpan(first, len(lines))
 	h = max(1, m.viewportHeight()-3)
 	return h, start, end, end-start > h
 }
@@ -419,20 +422,25 @@ func (m tview) actDetailBottom(tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// frameLines renders all of a frame's rows to display lines and returns the
-// [start,end) line range of the cursor row (0,0 for a body frame).
-func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
+// frameLines renders all of a frame's rows to display lines, with each row's
+// first line (nil for a body frame).
+func (m tview) frameLines(f *detailFrame, width int) (lines []string, first []int) {
 	if f.items == nil {
 		// A body frame has no cursor gutter; indent to align with the
 		// breadcrumb/header and the padded session header.
 		body := indentBlock(f.body, strings.Repeat(" ", detailGutter))
-		return strings.Split(body, "\n"), 0, 0
+		return strings.Split(body, "\n"), nil
 	}
-	lines, first := m.frameLayout(f, width)
-	if f.cursor >= 0 && f.cursor < len(first) {
-		curStart, curEnd = itemSpan(f.cursor, first, len(lines))
+	return m.frameLayout(f, width)
+}
+
+// cursorSpan is the [start,end) line range of the cursor row (0,0 when there
+// is none).
+func (f *detailFrame) cursorSpan(first []int, total int) (int, int) {
+	if f.cursor < 0 || f.cursor >= len(first) {
+		return 0, 0
 	}
-	return lines, curStart, curEnd
+	return itemSpan(f.cursor, first, total)
 }
 
 func (m tview) frameLayout(f *detailFrame, width int) (lines []string, first []int) {
@@ -546,26 +554,13 @@ func (m tview) ensureDetailVisible() {
 	if f == nil || f.items == nil {
 		return
 	}
-	lines, start, end := m.frameLines(f, m.c.m.transcriptWidth())
-	h := m.detailBodyHeight(f)
-	if start < f.scroll {
-		f.scroll = start
-	} else if end > f.scroll+h {
-		f.scroll = end - h
-		if f.scroll > start {
-			f.scroll = start // tall item: pin to its top
-		}
-	}
-	if maxScroll := max(0, len(lines)-h); f.scroll > maxScroll {
-		f.scroll = maxScroll
-	}
-	if f.scroll < 0 {
-		f.scroll = 0
-	}
+	lines, first := m.frameLines(f, m.c.m.transcriptWidth())
+	start, end := f.cursorSpan(first, len(lines))
+	f.scroll = windowScroll(len(lines), start, end, m.detailBodyHeight(f), f.scroll)
 }
 
 func (m tview) frameMaxScroll(f *detailFrame) int {
-	lines, _, _ := m.frameLines(f, m.c.m.transcriptWidth())
+	lines, _ := m.frameLines(f, m.c.m.transcriptWidth())
 	bodyH := m.viewportHeight()
 	if crumb := truncateLine(m.detailBreadcrumb(), m.c.m.transcriptWidth()); crumb != "" {
 		bodyH = max(1, bodyH-2)
@@ -613,7 +608,7 @@ func (m tview) detailBody() string {
 	if f == nil {
 		return m.c.m.center(dimStyle.Render("(nothing to show)"), m.c.m.containerWidth())
 	}
-	lines, _, _ := m.frameLines(f, cw)
+	lines, first := m.frameLines(f, cw)
 	// Align the breadcrumb/header with item text, which sits past the accent gutter.
 	gutter := strings.Repeat(" ", detailGutter)
 	crumb := m.detailCrumbLine(cw - detailGutter)
@@ -630,7 +625,7 @@ func (m tview) detailBody() string {
 	}
 	rows := strings.Count(prefix, "\n")
 	if len(lines) <= bodyH {
-		m.hitItems(f, cw, rows, 0, len(lines))
+		m.hitItems(f, first, len(lines), rows, 0, len(lines))
 		return m.c.m.center(prefix+strings.Join(lines, "\n"), m.c.m.containerWidth())
 	}
 	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
@@ -639,7 +634,7 @@ func (m tview) detailBody() string {
 		scroll = 0
 	}
 	end := scroll + ch
-	m.hitItems(f, cw, rows, scroll, end)
+	m.hitItems(f, first, len(lines), rows, scroll, end)
 	body := strings.Join(lines[scroll:end], "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
 	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())
@@ -655,11 +650,10 @@ func (m tview) detailCrumbLine(w int) string {
 	return spaceBetween(truncateLine(m.detailBreadcrumb(), max(1, w-2)), StyleDim.Render(glyphClose), w)
 }
 
-func (m tview) hitItems(f *detailFrame, cw, rows, scroll, end int) {
+func (m tview) hitItems(f *detailFrame, first []int, total, rows, scroll, end int) {
 	if f.items == nil || !m.c.recording() {
 		return
 	}
-	first, total := m.frameItemStarts(f, cw)
 	hitStarts(m.c.below(rows), len(first), func(i int) (int, int) { return itemSpan(i, first, total) }, scroll, end)
 }
 

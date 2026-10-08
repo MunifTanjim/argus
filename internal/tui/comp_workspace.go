@@ -196,7 +196,7 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	if focused {
 		cursor = p.cursor
 	}
-	return block + renderCardList(c.below(strings.Count(block, "\n")), cards, cursor, avail)
+	return block + renderCardList(c.below(strings.Count(block, "\n")), "workspace:"+p.ws, cards, cursor, avail)
 }
 
 func (p workspaceComp) footerPrompt(c *ctx) string {

@@ -238,7 +238,7 @@ func (p wakelockPicker) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
 	f := pickerFrame(area)
 	f.title = "Keep " + p.label + " awake"
 	f.help = c.m.hints(f.innerWidth(), hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "cancel"))
-	var l itemLines
+	l := itemLines{key: "wakelock-picker"}
 	for i, ch := range p.choices {
 		l.add(i, spawnChoiceRow(ch.label, "", i == p.cursor, f.innerWidth()))
 	}

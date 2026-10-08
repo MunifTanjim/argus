@@ -63,14 +63,14 @@ func (m tview) actScrollDown(tea.KeyPressMsg) tea.Cmd {
 	}
 	lines, first := m.layoutEntries()
 	h := m.viewportHeight()
-	if _, end := m.entrySpan(m.transcript.cursor, first, len(lines)); end > m.transcript.scroll+h {
+	if _, end := itemSpan(m.transcript.cursor, first, len(lines)); end > m.transcript.scroll+h {
 		m.transcript.scroll += 3
 		m.clampScrollNow()
 		return nil
 	}
 	if m.transcript.cursor < len(first)-1 {
 		m.transcript.cursor++
-		if start, end := m.entrySpan(m.transcript.cursor, first, len(lines)); start >= m.transcript.scroll+h {
+		if start, end := itemSpan(m.transcript.cursor, first, len(lines)); start >= m.transcript.scroll+h {
 			m.transcript.scroll = min(end, start+3) - h
 			m.clampScrollNow()
 		}
@@ -84,14 +84,14 @@ func (m tview) actScrollUp(tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	lines, first := m.layoutEntries()
-	if start, _ := m.entrySpan(m.transcript.cursor, first, len(lines)); start < m.transcript.scroll {
+	if start, _ := itemSpan(m.transcript.cursor, first, len(lines)); start < m.transcript.scroll {
 		m.transcript.scroll -= 3
 		m.clampScrollNow()
 		return nil
 	}
 	if m.transcript.cursor > 0 {
 		m.transcript.cursor--
-		if start, end := m.entrySpan(m.transcript.cursor, first, len(lines)); end <= m.transcript.scroll {
+		if start, end := itemSpan(m.transcript.cursor, first, len(lines)); end <= m.transcript.scroll {
 			m.transcript.scroll = max(start, end-3)
 			m.clampScrollNow()
 		}

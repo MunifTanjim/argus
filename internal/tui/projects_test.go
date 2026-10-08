@@ -1404,3 +1404,24 @@ func TestWorkspaceRowsShowFolderOrBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestTreeCursorMovesBeforeTheViewScrolls(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 120, 30
+	for i := range 60 {
+		m.left.tree.data = append(m.left.tree.data, api.ProjectNode{
+			ID: fmt.Sprintf("n1:q%d", i), Name: fmt.Sprintf("proj-%02d", i), NodeID: "n1", NodeLabel: "home"})
+	}
+	m.left.tree.rebuild()
+	m = typeKeys(m, "G")
+	last := m.left.tree.rows[len(m.left.tree.rows)-1].label
+	if !strings.Contains(ansi.Strip(m.View().Content), last) {
+		t.Fatalf("setup: G should show the last row %q", last)
+	}
+	// Like j/k in the transcript: k moves the cursor up inside the view; the view
+	// scrolls only once the cursor reaches the top edge.
+	m = typeKeys(m, "k")
+	if !strings.Contains(ansi.Strip(m.View().Content), last) {
+		t.Errorf("k from the bottom scrolled the view; %q should stay visible", last)
+	}
+}

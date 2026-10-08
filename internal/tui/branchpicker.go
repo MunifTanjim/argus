@@ -88,7 +88,7 @@ func (b branchPicker) view(c *ctx, w, h int, dimInUse bool) string {
 	if len(ms) == 0 {
 		return head + "\n\n" + dimStyle.Render("no matches")
 	}
-	var l itemLines
+	l := itemLines{key: "branch-picker"}
 	for i, br := range ms {
 		text := br.Name
 		if br.Remote && !br.Local {

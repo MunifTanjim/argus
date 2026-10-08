@@ -148,7 +148,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	// On a gateway, a host header precedes each group.
 	grouped := m.grouped()
 	showAgent := m.multiAgent()
-	var l itemLines
+	l := itemLines{key: "home"}
 	for i, id := range m.order {
 		s := m.sessions[id]
 		if i > 0 {

@@ -172,7 +172,7 @@ func (t *fileTree) left(rows []treeRow) {
 // sidebar's tab strip.
 func (t fileTree) view(c *ctx, w, h int, focused bool) string {
 	rows := t.rows()
-	var l itemLines
+	l := itemLines{key: "file-tree:" + t.ws}
 	for i, r := range rows {
 		indent := strings.Repeat("  ", r.depth)
 		var text string
@@ -195,7 +195,7 @@ func (t fileTree) view(c *ctx, w, h int, focused bool) string {
 		}
 		l.add(i, sideMarker(sel, focused)+truncateLine(text, max(1, w-screenMargin)))
 	}
-	scroll := l.scroll(t.cursor, h)
+	scroll := l.scroll(c, t.cursor, h)
 	for i, r := range rows {
 		if y := i - scroll; r.note == "" && r.entry.IsDir && y >= 0 && y < h {
 			c.hitZone(uv.Rect(screenMargin+2*r.depth, y, 2, 1), hitTarget{kind: hitFold, index: i})

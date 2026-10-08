@@ -231,7 +231,7 @@ func (t terminalsComp) rows(c *ctx, list []api.Terminal, w, avail int) string {
 	}
 	grouped := t.nodeID == "" && max(len(nodes), len(c.m.terminalNodes())) > 1
 	cursor := min(t.cursor, len(list)-1)
-	var l itemLines
+	l := itemLines{key: "terminals"}
 	prev := ""
 	for i, x := range list {
 		if grouped && (i == 0 || x.NodeID != prev) {

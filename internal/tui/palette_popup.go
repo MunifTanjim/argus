@@ -270,7 +270,7 @@ func (p palettePopup) listRows(c *ctx, w, n int) []string {
 		labelW = max(labelW, lipgloss.Width(pm.label))
 	}
 	labelW = min(labelW, w*3/5)
-	var l itemLines
+	l := itemLines{key: "palette"}
 	for i, pm := range p.matches {
 		base, dim := lipgloss.NewStyle(), StyleDim
 		if i == p.cursor {
