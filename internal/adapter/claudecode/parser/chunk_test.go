@@ -1478,3 +1478,27 @@ func TestBuildChunks_QueuedPromptFoldsIntoAITurn(t *testing.T) {
 		t.Errorf("queued item timestamp = %v, want the attachment's", chunks[0].Items[1].Timestamp)
 	}
 }
+
+func TestBuildChunks_OutputTokensSumTheTurnOncePerMessage(t *testing.T) {
+	// Claude Code splits one API message across lines (text, then tool_use),
+	// repeating its usage on each; a turn spans several messages.
+	t0 := time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC)
+	u := func(out int) parser.Usage { return parser.Usage{InputTokens: 100, OutputTokens: out} }
+	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
+		parser.AIMsg{Timestamp: t0, MessageID: "msg_a", Usage: u(40), StopReason: "tool_use",
+			Blocks: []parser.ContentBlock{{Type: "text", Text: "let me check"}}},
+		parser.AIMsg{Timestamp: t0, MessageID: "msg_a", Usage: u(40), StopReason: "tool_use",
+			Blocks: []parser.ContentBlock{{Type: "tool_use", ToolID: "tu1", ToolName: "Bash"}}},
+		parser.AIMsg{Timestamp: t0.Add(time.Second), MessageID: "msg_b", Usage: parser.Usage{InputTokens: 300, OutputTokens: 7},
+			StopReason: "end_turn", Blocks: []parser.ContentBlock{{Type: "text", Text: "done"}}},
+	})
+	if len(chunks) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(chunks))
+	}
+	if got := chunks[0].OutputTokens; got != 47 {
+		t.Errorf("OutputTokens = %d, want 47 (msg_a once + msg_b)", got)
+	}
+	if got := chunks[0].Usage.InputTokens; got != 300 {
+		t.Errorf("Usage.InputTokens = %d, want the last call's 300", got)
+	}
+}

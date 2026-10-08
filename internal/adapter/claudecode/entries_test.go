@@ -22,7 +22,7 @@ func doneTurn() []parser.Chunk {
 	return []parser.Chunk{
 		{Type: parser.UserChunk, Timestamp: t0, UserText: "map the code"},
 		{Type: parser.AIChunk, Timestamp: t0.Add(time.Second), Model: "claude-opus-4-8", DurationMs: 61000,
-			ThinkingCount: 1, Usage: parser.Usage{InputTokens: 1000, OutputTokens: 30},
+			ThinkingCount: 1, Usage: parser.Usage{InputTokens: 1000, OutputTokens: 30}, OutputTokens: 45,
 			Items: []parser.DisplayItem{
 				{Type: parser.ItemThinking, Text: "hmm"},
 				{Type: parser.ItemToolCall, ToolName: "Read", ToolID: "tu1", ToolSummary: "a.go", ToolResult: "x"},
@@ -43,7 +43,7 @@ func TestFoldEntriesFlatSequence(t *testing.T) {
 		t.Errorf("ids = %v, want %v", ids, want)
 	}
 	end := es[4]
-	if end.ModelName == "" || end.Usage.Output != 30 || end.DurationMs != 61000 {
+	if end.ModelName == "" || end.Usage.Output != 45 || end.Usage.Input != 1000 || end.DurationMs != 61000 {
 		t.Errorf("footer stats = %+v", end)
 	}
 	if end.Thinking != 1 || end.ToolCount != 1 {

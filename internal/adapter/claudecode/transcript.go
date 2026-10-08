@@ -151,7 +151,7 @@ func turnEnd(pc parser.Chunk, items []Entry, id string, interrupted bool) Entry 
 		StopReason:  pc.StopReason,
 		DurationMs:  pc.DurationMs,
 		Thinking:    pc.ThinkingCount,
-		Usage:       transformUsage(pc.Usage),
+		Usage:       turnUsage(pc),
 		Interrupted: interrupted,
 	}
 	if !pc.Timestamp.IsZero() {
@@ -239,6 +239,12 @@ func fillTool(e *Entry, pit parser.DisplayItem) {
 	e.InputPreview = pit.ToolSummary
 	e.Result = pit.ToolResult
 	e.ResultIsError = pit.ToolError
+}
+
+func turnUsage(pc parser.Chunk) Usage {
+	u := transformUsage(pc.Usage)
+	u.Output = pc.OutputTokens
+	return u
 }
 
 func transformUsage(u parser.Usage) Usage {
