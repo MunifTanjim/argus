@@ -45,7 +45,8 @@ func detailTestModel(c transcript.Entry) tview {
 	mm := withView(testModel(), viewSession)
 	m := tvOf(&mm)
 	m.transcript.entries = []transcript.Entry{c}
-	m.transcript.cursor = 0
+	m.transcript.runs[c.ID] = true // a lone tool or thinking entry is a run
+	m.transcript.cursor = rowIndexOf(m.transcript.entries, m.displayRows(), rowRef{id: c.ID})
 	m.historyView = histDetail
 	m.enterDetail()
 	m.put()
@@ -174,6 +175,7 @@ func TestEnterDrillPopStack(t *testing.T) {
 		}},
 	}
 	m := bareTv()
+	m.c.m.verboseTranscript = true // list each tool, not the run's summary
 	m.transcript.entries = []transcript.Entry{{ID: "t", Kind: transcript.EntryText, Text: "hi"}, sub}
 	m.transcript.cursor = 1
 	m.enterDetail()
@@ -183,7 +185,8 @@ func TestEnterDrillPopStack(t *testing.T) {
 	if m.topFrame().defaultExpanded {
 		t.Error("drilled subagent children should start collapsed")
 	}
-	// Drill into a leaf (cursor on item 0).
+	// Drill into a leaf (item 0, past the run's head row).
+	m.topFrame().cursor = 1
 	m.actDetailDrill(tea.KeyPressMsg{})
 	if len(m.transcript.detailStack) != 2 || !m.topFrame().focused {
 		t.Fatalf("drill: frames=%d focused=%v", len(m.transcript.detailStack), m.topFrame().focused)
@@ -219,6 +222,7 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 		transcript.Entry{Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`},
 	))
 	m.c.m.width, m.c.m.height = 80, 30
+	m.c.m.verboseTranscript = true // list the tool, not its run's summary
 	if m.topFrame().isExpanded(1) {
 		t.Errorf("trace items should start collapsed")
 	}
@@ -230,7 +234,7 @@ func TestDetailBodyShowsBreadcrumbAndRows(t *testing.T) {
 		t.Errorf("frame rows missing:\n%s", out)
 	}
 	// Drill into a focused item → breadcrumb grows.
-	m.topFrame().cursor = 1
+	m.topFrame().cursor = 2 // the tool, inside its run
 	m.actDetailDrill(tea.KeyPressMsg{})
 	if out := m.detailBody(); !strings.Contains(out, "Opus 4.8 › Bash") {
 		t.Errorf("drilled breadcrumb missing:\n%s", out)
@@ -328,6 +332,7 @@ func TestDrillIntoSubagentShowsNicknameAndInput(t *testing.T) {
 		}},
 	}
 	m := bareTv()
+	m.c.m.verboseTranscript = true // list the trace's tools, not the run's summary
 	m.transcript.entries = []transcript.Entry{sub}
 	m.transcript.cursor = 0
 	m.enterDetail()

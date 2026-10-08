@@ -357,8 +357,13 @@ func toolEntry() transcript.Entry {
 	return transcript.Entry{ID: "a", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool1", InputPreview: "ls"}
 }
 
-// expandTool drills into the tool and returns its body's fetch without running it.
+// expandTool drills into the tool and returns its body's fetch without running
+// it. The lone tool is a run, so the runs show expanded to reach its row.
 func expandTool(m model) (model, tea.Cmd) {
+	m.verboseTranscript = true
+	m = withTr(m, func(t *transcriptComp) {
+		t.transcript.cursor = rowIndexOf(t.transcript.entries, tvOver(&m, *t).displayRows(), rowRef{id: toolEntry().ID})
+	})
 	return upd(m, keyMsg("enter"))
 }
 
@@ -510,8 +515,8 @@ func toolResultDelta(m model) transcriptDeltaMsg {
 
 func TestRunningToolBodyRefetchedWhenResent(t *testing.T) {
 	rc := &recordingClient{}
-	m := resumeInto(streamModel(rc), "n1:s1", userEntry("u", "go"), toolEntry())
-	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 1 })
+	m := withVerbose(resumeInto(streamModel(rc), "n1:s1", userEntry("u", "go"), toolEntry()))
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 2 }) // the tool, inside its run
 	m, cmd := onTr(m, func(v tview) tea.Cmd { return v.actExpand(tea.KeyPressMsg{}) })
 	m = deliver(m, cmd) // the tool is still running: its body comes back empty
 	if e := trOf(m).toolBodies["tool1"]; !e.done || e.result != "" {

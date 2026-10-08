@@ -16,11 +16,11 @@ import (
 // the cached layout must match.
 func freshLines(m tview) []string {
 	var lines []string
-	for i := range m.transcript.entries {
-		if sepBefore(m.transcript.entries, i) {
+	for i, r := range m.displayRows() {
+		if i > 0 {
 			lines = append(lines, "")
 		}
-		block := centerBlock(m.renderEntry(i, i == m.transcript.cursor), m.c.m.containerWidth(), m.c.m.bodyWidth())
+		block := centerBlock(m.renderRow(r, i == m.transcript.cursor), m.c.m.containerWidth(), m.c.m.bodyWidth())
 		lines = append(lines, strings.Split(block, "\n")...)
 	}
 	return lines
@@ -151,7 +151,7 @@ func BenchmarkTranscriptScroll(b *testing.B) {
 
 // An expanded tool's cached row refreshes when its fetched body arrives.
 func TestLayoutCacheRefreshesOnToolBody(t *testing.T) {
-	m := deltaModel()
+	m := withVerbose(deltaModel())
 	m = withTr(m, func(t *transcriptComp) {
 		t.transcript.entries = []transcript.Entry{{ID: "1.0", Kind: transcript.EntryTool, ToolName: "UnknownTool", ToolID: "tu1", InputPreview: "x"}}
 		t.transcript.cursor = 0

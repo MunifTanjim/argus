@@ -104,6 +104,8 @@ type model struct {
 	hits      *hitMap    // what the last frame drew that takes the mouse
 	drag      dragTarget // the divider that the mouse drags
 
+	verboseTranscript bool // transcript runs of thinking/tool calls start expanded
+
 	keyBuf    []tea.KeyPressMsg // keys of a pending sequence
 	keyMatch  string            // id of the complete match inside keyBuf, "" when none
 	keyMatchN int               // keys of keyBuf that keyMatch covers
@@ -115,11 +117,12 @@ type model struct {
 type transcriptState struct {
 	entries     []transcript.Entry
 	err         error
-	cursor      int                 // selected entry index
+	cursor      int                 // selected display row index (see buildRows)
 	scroll      int                 // top line offset into the rendered transcript
 	detailStack []detailFrame       // deepest = active
 	expanded    map[string]bool     // entry id -> expanded
-	rows        map[string]rowEntry // rendered entry lines, keyed by entry id
+	rows        map[rowRef]rowEntry // rendered row lines
+	runs        map[string]bool     // run key -> expanded, overriding verboseTranscript
 }
 
 // renderCache is what the transcript and the dock draw markdown and code with.

@@ -40,7 +40,7 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 func (m tview) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
 	m.setEntries(m.c.m.transcriptCache[ref.key()].entries)
-	m.transcript.cursor = max(0, len(m.transcript.entries)-1)
+	m.transcript.cursor = max(0, len(m.displayRows())-1)
 	m.transcript.scroll = m.maxScroll()
 	return m.c.m.subscribeCmd(ref, len(m.transcript.entries))
 }
@@ -82,7 +82,7 @@ func (m tview) setEntries(entries []transcript.Entry) {
 
 func (m tview) applyEntryDelta(d api.TranscriptDelta) tea.Cmd {
 	for _, e := range m.transcript.entries[min(d.FromIndex, len(m.transcript.entries)):] {
-		delete(m.transcript.rows, e.ID)
+		delete(m.transcript.rows, rowRef{id: e.ID})
 	}
 	m.transcript.entries = applyDelta(m.transcript.entries, d)
 	return m.refetchStaleToolBodies(d.Entries, "")

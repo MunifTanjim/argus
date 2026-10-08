@@ -35,6 +35,12 @@ The TUI captures the mouse. To select text, hold `Shift` (in most terminals)
 while you drag. To give the mouse back to the terminal, set `tui.mouse` to
 `off`, or run the `toggle mouse` command for the current session.
 
+In a transcript, each run of thinking and tool calls is folded. Press `l` or
+`<CR>` on a folded run, or click it, to expand it. Press `h` or `<CR>` on
+either end of an expanded run to fold it again. To show runs expanded by
+default, set `tui.verbose-transcript` to `true`, or run the
+`toggle verbose-transcript` command for the current session.
+
 ### Palette
 
 Press `<C-k>` to open the palette. The palette searches sessions, workspaces,
@@ -59,6 +65,7 @@ tui:
   leader-key: "<Space>"
   key-timeout: 1s
   mouse: on
+  verbose-transcript: false
   keymap:
     global:
       "<C-q>": quit
@@ -221,6 +228,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<Leader>e` |
 | `toggle show-gone` | node, project, project-tree, workspace | `zg` |
 | `toggle show-hidden` | node, project, project-tree, workspace | `z.` |
+| `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace |  |
 | `transcript export` | history, transcript | `E` |
 | `workspace change-target` | project-tree | `T` |
 | `workspace force-remove` | project-tree | `D` |

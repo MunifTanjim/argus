@@ -159,8 +159,8 @@ func TestVimTranscriptJScrolls(t *testing.T) {
 
 func TestVimTranscriptCollapseExpand(t *testing.T) {
 	for _, keys := range [][2]string{{"h", "l"}, {"zc", "zo"}} {
-		m := loaded()
-		m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 1 })
+		m := withVerbose(loaded())
+		m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 2 }) // the thinking entry, inside its run
 		open := func() bool { return tvOf(&m).entryExpanded(trOf(m).transcript.entries[1]) }
 		for range 2 {
 			if m = typeKeys(m, keys[1]); !open() {
@@ -180,8 +180,9 @@ func TestVimDetailCollapseExpand(t *testing.T) {
 		transcript.Entry{Kind: transcript.EntryText, Text: "hi"}, transcript.Entry{Kind: transcript.EntryTool, ToolName: "Read", ToolID: "t1"},
 	))
 	v.c.m.width, v.c.m.height = 80, 30
+	v.c.m.verboseTranscript = true // list the tool, not its run's summary
 	v.toolBodies = map[string]toolBodyEntry{}
-	v.topFrame().cursor = 1
+	v.topFrame().cursor = 2 // the tool, inside its run
 	v.put()
 	m, cmd := upd(*v.c.m, keyMsg("l"))
 	if !tvOf(&m).topFrame().isExpanded(1) || cmd == nil {

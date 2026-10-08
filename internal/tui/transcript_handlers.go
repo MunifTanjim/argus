@@ -26,9 +26,14 @@ var transcriptTable = []keyTableEntry{
 	{transcriptKeys.Detail, tview.actDrill},
 }
 
+func (m tview) isPromptRow(r displayRow) bool {
+	return r.kind == entryRow && m.transcript.entries[r.entry].Kind == transcript.EntryUser
+}
+
 func (m tview) actPromptNext(tea.KeyPressMsg) tea.Cmd {
-	for i := m.transcript.cursor + 1; i < len(m.transcript.entries); i++ {
-		if m.transcript.entries[i].Kind == transcript.EntryUser {
+	rows := m.displayRows()
+	for i := m.transcript.cursor + 1; i < len(rows); i++ {
+		if m.isPromptRow(rows[i]) {
 			m.transcript.cursor = i
 			m.ensureEntryVisible()
 			break
@@ -38,8 +43,9 @@ func (m tview) actPromptNext(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) actPromptPrev(tea.KeyPressMsg) tea.Cmd {
-	for i := m.transcript.cursor - 1; i >= 0; i-- {
-		if m.transcript.entries[i].Kind == transcript.EntryUser {
+	rows := m.displayRows()
+	for i := min(m.transcript.cursor, len(rows)) - 1; i >= 0; i-- {
+		if m.isPromptRow(rows[i]) {
 			m.transcript.cursor = i
 			m.ensureEntryVisible()
 			break
@@ -111,22 +117,38 @@ func (m tview) actTop(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) actBottom(tea.KeyPressMsg) tea.Cmd {
-	m.transcript.cursor = max(0, len(m.transcript.entries)-1)
+	m.transcript.cursor = max(0, len(m.displayRows())-1)
 	m.transcript.scroll = m.maxScroll()
 	return nil
 }
 
 func (m tview) actCollapse(tea.KeyPressMsg) tea.Cmd {
-	m.setExpanded(m.transcript.cursor, false)
+	r, ok := m.cursorRow()
+	switch {
+	case !ok || r.kind == runSummary:
+		return nil
+	case r.isControl():
+		return m.toggleRunRow(r)
+	}
+	m.setExpanded(r.entry, false)
 	m.ensureEntryVisible()
 	return nil
 }
 
 func (m tview) actExpand(tea.KeyPressMsg) tea.Cmd {
-	i := m.transcript.cursor
-	m.setExpanded(i, true)
+	r, ok := m.cursorRow()
+	if !ok {
+		return nil
+	}
+	if r.isControl() {
+		if r.kind != runSummary {
+			return nil
+		}
+		return m.toggleRunRow(r)
+	}
+	m.setExpanded(r.entry, true)
 	m.ensureEntryVisible()
-	return m.fetchIfExpandedTool(i)
+	return m.fetchIfExpandedTool(r.entry)
 }
 
 // fetchIfExpandedTool relies on fetchToolBodyCmd to dedupe repeat requests.
@@ -142,8 +164,14 @@ func (m tview) fetchIfExpandedTool(i int) tea.Cmd {
 }
 
 func (m tview) actDrill(tea.KeyPressMsg) tea.Cmd {
-	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.entries) ||
-		!m.c.m.detailable(m.transcript.entries[m.transcript.cursor]) {
+	r, ok := m.cursorRow()
+	if !ok {
+		return nil
+	}
+	if r.isControl() {
+		return m.toggleRunRow(r)
+	}
+	if !m.c.m.detailable(m.transcript.entries[r.entry]) {
 		return nil
 	}
 	m.historyView = histDetail
@@ -151,6 +179,14 @@ func (m tview) actDrill(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) clickEntry(i int, focused bool) tea.Cmd {
+	rows := m.displayRows()
+	if i < 0 || i >= len(rows) {
+		return nil
+	}
+	if rows[i].isControl() {
+		m.transcript.cursor = i
+		return m.toggleRunRow(rows[i])
+	}
 	if focused && i == m.transcript.cursor {
 		return m.actDrill(tea.KeyPressMsg{})
 	}
@@ -158,19 +194,24 @@ func (m tview) clickEntry(i int, focused bool) tea.Cmd {
 	return nil
 }
 
-// clickFold selects entry i and toggles its expansion (a click on its fold marker).
+// clickFold selects row i and toggles its expansion (a click on its fold marker).
 func (m tview) clickFold(i int) tea.Cmd {
-	if i < 0 || i >= len(m.transcript.entries) {
+	rows := m.displayRows()
+	if i < 0 || i >= len(rows) {
 		return nil
 	}
 	m.transcript.cursor = i
-	m.setExpanded(i, !m.entryExpanded(m.transcript.entries[i]))
+	if rows[i].isControl() {
+		return m.toggleRunRow(rows[i])
+	}
+	e := rows[i].entry
+	m.setExpanded(e, !m.entryExpanded(m.transcript.entries[e]))
 	m.ensureEntryVisible()
-	return m.fetchIfExpandedTool(i)
+	return m.fetchIfExpandedTool(e)
 }
 
 func (m tview) selectEntry(i int) {
-	if i >= 0 && i < len(m.transcript.entries) {
+	if i >= 0 && i < len(m.displayRows()) {
 		m.transcript.cursor = i
 	}
 }

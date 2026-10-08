@@ -501,12 +501,13 @@ func TestDetailEscPopsThenLeaves(t *testing.T) {
 	sub := transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{{Type: "explorer", HasTrace: true,
 		Trace: []transcript.Entry{{Kind: transcript.EntryTool, ToolName: "Read"}}}}}
 	m := sessionModel(nil)
+	m.verboseTranscript = true // the trace lists its tool, not the run's summary
 	v := tvOf(&m)
 	v.transcript.entries = []transcript.Entry{sub}
 	v.transcript.cursor = 0
 	v.historyView = histDetail
 	v.enterDetail()
-	v.topFrame().cursor = 0
+	v.topFrame().cursor = 1             // the tool, past the run's head row
 	v.actDetailDrill(tea.KeyPressMsg{}) // now 2 frames deep (inline trace → focused leaf)
 	v.put()
 
@@ -539,6 +540,7 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 	m.transcriptCache = map[string]cachedTranscript{}
 	m = withLive(m, "s1")
 	m = withFocus(m, mainPane)
+	m.verboseTranscript = true // the subagent frame lists its tool, not the run's summary
 	v := tvOf(&m)
 
 	// A live subagent item with no inlined trace: it will be streamed.
@@ -565,6 +567,7 @@ func TestSubagentLeafBackDoesNotTearDownSubscription(t *testing.T) {
 		label:    "explorer",
 		subID:    subAgentSubID, // this is what Finding 1 requires to be set
 		expanded: map[int]bool{},
+		cursor:   1, // the tool, past the run's head row
 		items: []transcript.Entry{
 			{Kind: transcript.EntryTool, ToolName: "Read"},
 		},

@@ -19,12 +19,12 @@
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
-                                     │                                                                                    │
- ╭──────────────────────────╮        │                                                                                    │
- │ toggle mouse             │        │                                                                                    │
- │ toggle show-gone      zg │        │                                                                                    │
- │ toggle show-hidden    z. │        │                                                                                    │
- │ toggle left-sidebar   ␣o │        │                                                                                    │
- │ toggle right-sidebar  ␣e │        │                                                                                    │
- ╰──────────────────────────╯
+ ╭───────────────────────────────╮   │                                                                                    │
+ │ toggle mouse                  │   │                                                                                    │
+ │ toggle show-gone           zg │   │                                                                                    │
+ │ toggle show-hidden         z. │   │                                                                                    │
+ │ toggle left-sidebar        ␣o │   │                                                                                    │
+ │ toggle right-sidebar       ␣e │   │                                                                                    │
+ │ toggle verbose-transcript     │   │                                                                                    │
+ ╰───────────────────────────────╯
   :toggle 

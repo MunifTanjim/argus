@@ -37,7 +37,7 @@ type transcriptComp struct {
 
 func newTranscript() transcriptComp {
 	return transcriptComp{
-		transcript: transcriptState{expanded: map[string]bool{}, rows: map[string]rowEntry{}},
+		transcript: transcriptState{expanded: map[string]bool{}, rows: map[rowRef]rowEntry{}, runs: map[string]bool{}},
 		toolBodies: map[string]toolBodyEntry{},
 		redact:     redactState{input: newRedactInput()},
 	}
@@ -314,7 +314,7 @@ func (m tview) closeStreams() tea.Cmd {
 func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case transcriptMsg:
-		prevID, wasLast := m.currentEntryID(), m.cursorOnLast()
+		prevID, wasLast := m.currentRowID()
 		// Tail-follow only if the view was already pinned to the bottom.
 		atBottom := m.transcript.scroll >= m.maxScroll()
 		m.setEntries(msg.entries)
@@ -331,7 +331,7 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 			}
 			return m.refetchStaleToolBodies(msg.delta.Entries, msg.ref.agentID)
 		}
-		prevID, wasLast := m.currentEntryID(), m.cursorOnLast()
+		prevID, wasLast := m.currentRowID()
 		atBottom := m.transcript.scroll >= m.maxScroll()
 		cmd := m.applyEntryDelta(msg.delta)
 		m.restoreEntryCursor(prevID, atBottom, wasLast)
@@ -359,7 +359,7 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 		m.toolBodies[msg.toolID] = e
 		for _, en := range m.transcript.entries {
 			if en.ToolID == msg.toolID {
-				delete(m.transcript.rows, en.ID)
+				delete(m.transcript.rows, rowRef{id: en.ID})
 			}
 		}
 	case tea.PasteMsg:
@@ -464,6 +464,56 @@ func (m *model) editTranscript(i int, f func(v tview) tea.Cmd) tea.Cmd {
 	cmd := f(t.bind(c))
 	m.main = m.main.replaceAt(i, t)
 	return tea.Batch(cmd, m.apply(c))
+}
+
+// toggleVerboseTranscript flips the default run expansion, keeping each cursor
+// (stream and frames) on the same row.
+func (m *model) toggleVerboseTranscript() tea.Cmd {
+	type cursors struct {
+		stream rowRef
+		frames []rowRef
+	}
+	var saved []cursors
+	for i := range m.main {
+		if t, ok := m.main[i].(transcriptComp); ok {
+			v := t.bind(&ctx{m: m})
+			ref, _ := v.currentRowID()
+			c := cursors{stream: ref}
+			for j := range t.transcript.detailStack {
+				c.frames = append(c.frames, v.frameRowID(&t.transcript.detailStack[j]))
+			}
+			saved = append(saved, c)
+		}
+	}
+	m.verboseTranscript = !m.verboseTranscript
+	m.flash = "verbose transcript off"
+	if m.verboseTranscript {
+		m.flash = "verbose transcript on"
+	}
+	var cmds []tea.Cmd
+	n := 0
+	for i := range m.main {
+		if _, ok := m.main[i].(transcriptComp); !ok {
+			continue
+		}
+		c := saved[n]
+		n++
+		cmds = append(cmds, m.editTranscript(i, func(v tview) tea.Cmd {
+			clear(v.transcript.rows)
+			v.transcript.cursor = restoreRowCursor(v.transcript.entries, v.displayRows(), c.stream, 0, false)
+			for j := range v.transcript.detailStack {
+				f := &v.transcript.detailStack[j]
+				f.cursor = restoreRowCursor(f.items, v.frameRows(f), c.frames[j], f.cursor, false)
+			}
+			if v.historyView == histDetail {
+				v.ensureDetailVisible()
+			} else {
+				v.ensureEntryVisible()
+			}
+			return nil
+		}))
+	}
+	return tea.Batch(cmds...)
 }
 
 // redactTyping reports whether the main pane's transcript takes a secret as

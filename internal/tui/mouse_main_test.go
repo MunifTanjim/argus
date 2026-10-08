@@ -311,11 +311,13 @@ func TestSpawnWheelMovesCursor(t *testing.T) {
 func nestedDetail(mouse bool) model {
 	m := withFocus(waitingSession(), mainPane)
 	m.mouse, m.hits = mouse, &hitMap{}
+	m.verboseTranscript = true // the trace lists its tool, not the run's summary
 	v := tvOf(&m)
 	v.transcript.entries = append(v.transcript.entries, traceFixture("Explore",
 		transcript.Entry{Kind: transcript.EntryTool, ToolName: "Read", InputPreview: "a.go"}))
-	v.transcript.cursor = len(v.transcript.entries) - 1
+	v.transcript.cursor = len(v.displayRows()) - 1
 	v.actDrill(tea.KeyPressMsg{})
+	v.topFrame().cursor = 1 // the tool, past the run's head row
 	v.actDetailDrill(tea.KeyPressMsg{})
 	v.put()
 	return m

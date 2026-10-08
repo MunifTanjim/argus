@@ -7,11 +7,11 @@
     ▾ argus                          │ ▌   fix the bug                                                                
       󰉋 repo  main               ○ 2 │ ▌                                                                              
        repo-feat  feature       ○ 1 │
-                                     │    Thinking…
+                                     │      1
                                      │
                                      │   󰆂 I'll check the handler.
                                      │
-                                     │   󰯠 Bash         go test ./...
+                                     │     󰯠 1
                                      │
                                      │   ── Opus 4.8 ·  12.3k ·  1m 2s ─────────────────────────────────────────────
                                      │

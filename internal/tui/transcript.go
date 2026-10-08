@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
@@ -16,8 +17,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// Transcript viewer: a flat stream of entries with an entry-level cursor.
-// Selection/expansion are keyed by stable entry id so they survive the 1s
+// Transcript viewer: a flat stream of display rows (entries, with runs of
+// thinking/tool calls folded; see buildRows) and a row-level cursor.
+// Expansion is keyed by stable entry id or run key so it survives the 1s
 // refresh. Full per-entry bodies live in the detail drill-down (detail.go).
 
 const (
@@ -133,17 +135,91 @@ func (m tview) setExpanded(i int, on bool) {
 	m.transcript.expanded[e.ID] = on
 }
 
-// currentEntryID returns the id of the selected entry (for cursor preservation).
-// cursorOnLast reports whether the cursor is on the last entry.
-func (m tview) cursorOnLast() bool {
-	return len(m.transcript.entries) > 0 && m.transcript.cursor == len(m.transcript.entries)-1
+func (m tview) displayRows() []displayRow {
+	return buildRows(m.transcript.entries, m.c.m.verboseTranscript, m.transcript.runs)
 }
 
-func (m tview) currentEntryID() string {
-	if m.transcript.cursor >= 0 && m.transcript.cursor < len(m.transcript.entries) {
-		return m.transcript.entries[m.transcript.cursor].ID
+func (m tview) cursorRow() (displayRow, bool) {
+	rows := m.displayRows()
+	if m.transcript.cursor < 0 || m.transcript.cursor >= len(rows) {
+		return displayRow{}, false
 	}
-	return ""
+	return rows[m.transcript.cursor], true
+}
+
+// currentRowID returns the cursor row's identity and whether it is the last row.
+func (m tview) currentRowID() (ref rowRef, last bool) {
+	rows, c := m.displayRows(), m.transcript.cursor
+	if c < 0 || c >= len(rows) {
+		return rowRef{}, false
+	}
+	return rowID(m.transcript.entries, rows[c]), c == len(rows)-1
+}
+
+// setRun expands or collapses run key, keeping the cursor on the run's summary
+// or head row, and fetches the bodies of expanded tools it reveals.
+func (m tview) setRun(key string, on bool) tea.Cmd {
+	m.transcript.runs[key] = on
+	rows := m.displayRows()
+	if i := runRowIndex(rows, key); i >= 0 {
+		m.transcript.cursor = i
+	}
+	m.ensureEntryVisible()
+	if !on {
+		return nil
+	}
+	m.revealRun(key)
+	var cmds []tea.Cmd
+	for _, r := range rows {
+		if r.kind == entryRow && r.run.key == key {
+			cmds = append(cmds, m.fetchIfExpandedTool(r.entry))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func runEdges(rows []displayRow, key string) (head, foot int, ok bool) {
+	head, foot = -1, -1
+	for i, r := range rows {
+		if r.run.key != key {
+			continue
+		}
+		switch r.kind {
+		case runHead:
+			head = i
+		case runFoot:
+			foot = i
+		}
+	}
+	return head, foot, head >= 0 && foot >= 0
+}
+
+// revealScroll is the scroll that brings lines [start,end) into an h-line
+// viewport at scroll: down just enough to show end, but never past start.
+func revealScroll(scroll, start, end, h int) int {
+	if end > scroll+h {
+		return min(start, end-h)
+	}
+	return scroll
+}
+
+// revealRun scrolls a just-expanded run into view: as much of it as fits, from
+// its head down.
+func (m tview) revealRun(key string) {
+	head, foot, ok := runEdges(m.displayRows(), key)
+	if !ok {
+		return
+	}
+	lines, first := m.layoutEntries()
+	start, _ := m.entrySpan(head, first, len(lines))
+	_, end := m.entrySpan(foot, first, len(lines))
+	h := m.viewportHeight()
+	m.transcript.scroll = revealScroll(m.transcript.scroll, start, end, h)
+	m.clampScroll(len(lines), h)
+}
+
+func (m tview) toggleRunRow(r displayRow) tea.Cmd {
+	return m.setRun(r.run.key, r.kind == runSummary)
 }
 
 // -- Rendering helpers --------------------------------------------------------
@@ -241,6 +317,14 @@ func gutterBar(selected, focused bool) string {
 	return lipgloss.NewStyle().Foreground(c).Render(GlyphAccentBarFocused) + " "
 }
 
+// renderRow renders a display row of the main stream (no centering).
+func (m tview) renderRow(r displayRow, selected bool) string {
+	if r.isControl() {
+		return controlBlock(r, selected, m.c.m.historyFocused(), m.c.m.transcriptWidth())
+	}
+	return m.renderEntry(r.entry, selected)
+}
+
 // renderEntry renders entry i of the main stream (no centering).
 func (m tview) renderEntry(i int, selected bool) string {
 	e := m.transcript.entries[i]
@@ -298,7 +382,12 @@ func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) string {
 	}
 	var body string
 	if s, ok := soleSubagent(e); ok && e.Kind == transcript.EntrySubagent && !isAgentRefTool(e.ToolName) {
-		parts := subagentHeaderLines(s.Type, s.Name, s.Status, s.Desc, iw-2)
+		// The row above already names the agent; under it go only the status
+		// and the Input section from the spawn's header block.
+		parts := subagentHeaderLines(s.Type, s.Name, "", s.Desc, iw-2)[1:]
+		if s.Status != "" {
+			parts = append([]string{StyleSecondary.Render("[" + s.Status + "]")}, parts...)
+		}
 		if !s.HasTrace {
 			if b := m.toolBody(e, iw-2); b != "" {
 				parts = append(parts, b)
@@ -501,10 +590,11 @@ func itemRow(it transcript.Entry) string {
 
 // rowKey holds the inputs besides the entry itself that a rendered block
 // depends on. Entry content changes drop the cached block instead (setEntries,
-// applyEntryDelta).
+// applyEntryDelta). A control row's counts are its content.
 type rowKey struct {
 	width                       int
 	selected, focused, expanded bool
+	thinking, tools             int
 }
 
 type rowEntry struct {
@@ -512,30 +602,30 @@ type rowEntry struct {
 	lines []string
 }
 
-// sepBefore reports whether a blank separator line precedes entry i: every
-// entry after the first, as in the agent TUIs.
-func sepBefore(es []transcript.Entry, i int) bool {
-	return i > 0 && i < len(es)
-}
-
-// layoutEntries lays every entry out as display lines, recording each entry's
-// first line index (for cursor scrolling). See sepBefore for blank separators.
+// layoutEntries separates rows with a blank line, as in the agent TUIs.
 func (m tview) layoutEntries() (lines []string, first []int) {
 	bodyW, containerW := m.c.m.bodyWidth(), m.c.m.containerWidth()
 	focused := m.c.m.historyFocused()
-	first = make([]int, len(m.transcript.entries))
-	for i, e := range m.transcript.entries {
-		if sepBefore(m.transcript.entries, i) {
+	rows := m.displayRows()
+	first = make([]int, len(rows))
+	for i, dr := range rows {
+		if i > 0 {
 			lines = append(lines, "")
 		}
 		first[i] = len(lines)
 		selected := i == m.transcript.cursor
-		key := rowKey{width: bodyW, selected: selected, focused: focused, expanded: m.entryExpanded(e)}
-		r, ok := m.transcript.rows[e.ID]
+		key := rowKey{width: bodyW, selected: selected, focused: focused}
+		if dr.isControl() {
+			key.thinking, key.tools = dr.run.thinking, dr.run.tools
+		} else {
+			key.expanded = m.entryExpanded(m.transcript.entries[dr.entry])
+		}
+		id := rowID(m.transcript.entries, dr)
+		r, ok := m.transcript.rows[id]
 		if !ok || r.key != key {
-			block := centerBlock(m.renderEntry(i, selected), containerW, bodyW)
+			block := centerBlock(m.renderRow(dr, selected), containerW, bodyW)
 			r = rowEntry{key: key, lines: strings.Split(block, "\n")}
-			m.transcript.rows[e.ID] = r
+			m.transcript.rows[id] = r
 		}
 		lines = append(lines, r.lines...)
 	}
@@ -553,18 +643,10 @@ func (m tview) viewportHeight() int {
 	return max(1, m.c.m.bodyHeight()-5)
 }
 
-// entrySpan returns the [start,end) line range of entry i within first/total,
-// excluding any blank separator before the next entry.
+// entrySpan returns the [start,end) line range of row i within first/total,
+// excluding the blank separator before the next row.
 func (m tview) entrySpan(i int, first []int, total int) (int, int) {
-	start := first[i]
-	end := total
-	if i+1 < len(first) {
-		end = first[i+1]
-		if sepBefore(m.transcript.entries, i+1) {
-			end--
-		}
-	}
-	return start, end
+	return itemSpan(i, first, total)
 }
 
 func (m tview) ensureEntryVisible() {
@@ -678,37 +760,25 @@ func (m tview) maxScroll() int {
 }
 
 func (m tview) clampCursor() {
-	if m.transcript.cursor >= len(m.transcript.entries) {
-		m.transcript.cursor = max(0, len(m.transcript.entries)-1)
+	if n := len(m.displayRows()); m.transcript.cursor >= n {
+		m.transcript.cursor = max(0, n-1)
 	}
 	if m.transcript.cursor < 0 {
 		m.transcript.cursor = 0
 	}
 }
 
-// restoreEntryCursor re-resolves the cursor to the same entry id after a refresh
-// without moving the viewport. When follow is true the view pins to the bottom so
-// a live session keeps tailing, and a cursor that was on the last entry (wasLast)
-// moves to the new last entry.
-func (m tview) restoreEntryCursor(id string, follow, wasLast bool) {
-	m.transcript.cursor = -1
-	if follow && wasLast && len(m.transcript.entries) > 0 {
-		m.transcript.cursor = len(m.transcript.entries) - 1
-	} else if id != "" {
-		for i, c := range m.transcript.entries {
-			if c.ID == id {
-				m.transcript.cursor = i
-				break
-			}
-		}
-	}
-	if m.transcript.cursor < 0 {
-		m.clampCursor()
-	}
+// restoreEntryCursor re-resolves the cursor to the same row identity (see
+// rowID) after a refresh without moving the viewport. When follow is true the
+// view pins to the bottom so a live session keeps tailing, and a cursor that was
+// on the last row (wasLast) moves to the new last row.
+func (m tview) restoreEntryCursor(ref rowRef, follow, wasLast bool) {
+	m.transcript.cursor = restoreRowCursor(m.transcript.entries, m.displayRows(), ref, 0, follow && wasLast)
+	maxScroll := m.maxScroll()
 	if follow {
-		m.transcript.scroll = m.maxScroll()
+		m.transcript.scroll = maxScroll
 	}
-	m.clampScrollNow()
+	m.transcript.scroll = max(0, min(m.transcript.scroll, maxScroll))
 }
 
 // transcriptBody renders the transcript pane.
@@ -732,25 +802,33 @@ func (m tview) transcriptBody() string {
 	}
 	end := min(len(lines), scroll+h)
 	hitStarts(m.c, len(first), func(i int) (int, int) { return m.entrySpan(i, first, len(lines)) }, scroll, end)
-	m.hitFoldMarkers(lines, first, scroll, end)
+	m.hitFoldMarkers(lines, m.displayRows(), first, scroll, end)
 	b.WriteString(strings.Join(lines[scroll:end], "\n"))
 	return b.String()
 }
 
-// hitFoldMarkers covers the leading icon of each visible expandable entry: the
-// entry's fold marker. It sits past the cursor gutter (and the user band's inner
-// pad) on the entry's first line.
-func (m tview) hitFoldMarkers(lines []string, first []int, scroll, end int) {
+// hitFoldMarkers covers the leading icon of each visible expandable entry (the
+// entry's fold marker) and the arrow of each control row. It sits past the
+// cursor gutter (and the user band's inner pad) on the row's first line.
+func (m tview) hitFoldMarkers(lines []string, rows []displayRow, first []int, scroll, end int) {
 	if !m.c.recording() {
 		return
 	}
 	x0 := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()) + detailGutter
 	for i, top := range first {
-		if top < scroll || top >= end || !m.entryExpandable(m.transcript.entries[i]) {
+		if top < scroll || top >= end {
+			continue
+		}
+		if rows[i].isControl() {
+			m.c.hitZone(uv.Rect(x0, top-scroll, 1, 1), hitTarget{kind: hitFold, index: i})
+			continue
+		}
+		e := m.transcript.entries[rows[i].entry]
+		if !m.entryExpandable(e) {
 			continue
 		}
 		x, y := x0, top
-		if m.transcript.entries[i].Kind == transcript.EntryUser {
+		if e.Kind == transcript.EntryUser {
 			x += 2 // userBand's inner pad
 			y++    // userBand's top padding line
 			if y >= end {
@@ -758,7 +836,7 @@ func (m tview) hitFoldMarkers(lines []string, first []int, scroll, end int) {
 			}
 		}
 		w := 1
-		if m.transcript.entries[i].Kind == transcript.EntryUser {
+		if e.Kind == transcript.EntryUser {
 			w = lipgloss.Width(Icon.User.Glyph) + len(" You") // the whole "<icon> You" label
 		} else if cell := []rune(xansi.Cut(xansi.Strip(lines[y]), x, x+2)); len(cell) > 0 {
 			w = max(1, xansi.StringWidth(string(cell[0])))
