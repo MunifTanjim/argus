@@ -58,12 +58,13 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		return nil, false
 	}
 
-	contentStr := ExtractText(e.Message.Content)
+	content := decodeContent(e.Message.Content)
+	contentStr := content.text()
 
 	// The interruption marker folds into the AI turn as a flag (never rendered) so
 	// IsOngoing can see a turn that ended by interrupt; the raw marker text is
 	// otherwise dropped as noise.
-	if e.Type == "user" && isInterruptMarker(e.Message.Content, strings.TrimSpace(contentStr)) {
+	if e.Type == "user" && isInterruptMarker(content, strings.TrimSpace(contentStr)) {
 		return AIMsg{Timestamp: ts, SessionID: e.SessionID, IsMeta: true, Interrupted: true}, true
 	}
 
@@ -181,7 +182,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 			}
 		}
 
-		if !excluded && hasUserContent(e.Message.Content, contentStr) {
+		if !excluded && hasUserContent(content, contentStr) {
 			return UserMsg{
 				Timestamp:      ts,
 				SessionID:      e.SessionID,
@@ -194,7 +195,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 
 	// AI message: assistant responses.
 	if e.Type == "assistant" {
-		thinking, toolCalls, blocks := extractAssistantDetails(e.Message.Content)
+		thinking, toolCalls, blocks := extractAssistantDetails(content)
 		stopReason := ""
 		if e.Message.StopReason != nil {
 			stopReason = *e.Message.StopReason
@@ -203,7 +204,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 			Timestamp:     ts,
 			SessionID:     e.SessionID,
 			Model:         e.Message.Model,
-			Text:          SanitizeContent(ExtractText(e.Message.Content)),
+			Text:          SanitizeContent(contentStr),
 			ThinkingCount: thinking,
 			ToolCalls:     toolCalls,
 			Blocks:        blocks,
@@ -221,7 +222,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 	// Fallback for remaining user entries (isMeta slash commands, and
 	// tool_result entries where isMeta is null). extractMetaBlocks returns
 	// tool_result blocks if present, else a text fallback mergeAIBuffer ignores.
-	blocks := extractMetaBlocks(e.Message.Content, contentStr)
+	blocks := extractMetaBlocks(content, contentStr)
 	return AIMsg{
 		Timestamp: ts,
 		SessionID: e.SessionID,

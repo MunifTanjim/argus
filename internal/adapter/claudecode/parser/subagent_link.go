@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 )
@@ -152,6 +153,10 @@ type agentLinkData struct {
 // paired with the spawning Task's tool_use_id (sourceToolUseID, falling back to
 // the first tool_result block's id). ok is false when there's no agent link.
 func agentLinkFromEntry(e Entry) (agentID, toolUseID string, ok bool) {
+	// Most results are large tool outputs with no agent id; skip decoding those.
+	if !bytes.Contains(e.ToolUseResult, []byte(`"agentId"`)) && !bytes.Contains(e.ToolUseResult, []byte(`"agent_id"`)) {
+		return "", "", false
+	}
 	resultMap := e.ToolUseResultMap()
 	if resultMap == nil {
 		return "", "", false
