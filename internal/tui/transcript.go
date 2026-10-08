@@ -194,15 +194,6 @@ func runEdges(rows []displayRow, key string) (head, foot int, ok bool) {
 	return head, foot, head >= 0 && foot >= 0
 }
 
-// revealScroll is the scroll that brings lines [start,end) into an h-line
-// viewport at scroll: down just enough to show end, but never past start.
-func revealScroll(scroll, start, end, h int) int {
-	if end > scroll+h {
-		return min(start, end-h)
-	}
-	return scroll
-}
-
 // revealRun scrolls a just-expanded run into view: as much of it as fits, from
 // its head down.
 func (m tview) revealRun(key string) {
@@ -211,11 +202,9 @@ func (m tview) revealRun(key string) {
 		return
 	}
 	lines, first := m.layoutEntries()
-	start, _ := m.entrySpan(head, first, len(lines))
-	_, end := m.entrySpan(foot, first, len(lines))
-	h := m.viewportHeight()
-	m.transcript.scroll = revealScroll(m.transcript.scroll, start, end, h)
-	m.clampScroll(len(lines), h)
+	start, _ := itemSpan(head, first, len(lines))
+	_, end := itemSpan(foot, first, len(lines))
+	m.transcript.scroll = windowScroll(len(lines), start, end, m.viewportHeight(), m.transcript.scroll)
 }
 
 func (m tview) toggleRunRow(r displayRow) tea.Cmd {
@@ -643,28 +632,13 @@ func (m tview) viewportHeight() int {
 	return max(1, m.c.m.bodyHeight()-5)
 }
 
-// entrySpan returns the [start,end) line range of row i within first/total,
-// excluding the blank separator before the next row.
-func (m tview) entrySpan(i int, first []int, total int) (int, int) {
-	return itemSpan(i, first, total)
-}
-
 func (m tview) ensureEntryVisible() {
 	lines, first := m.layoutEntries()
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return
 	}
-	h := m.viewportHeight()
-	start, end := m.entrySpan(m.transcript.cursor, first, len(lines))
-	if start < m.transcript.scroll {
-		m.transcript.scroll = start
-	} else if end > m.transcript.scroll+h {
-		m.transcript.scroll = end - h
-		if m.transcript.scroll > start {
-			m.transcript.scroll = start // tall entry: pin to its top
-		}
-	}
-	m.clampScroll(len(lines), h)
+	start, end := itemSpan(m.transcript.cursor, first, len(lines))
+	m.transcript.scroll = windowScroll(len(lines), start, end, m.viewportHeight(), m.transcript.scroll)
 }
 
 // cursorVisible reports whether the selected entry overlaps the current viewport.
@@ -673,7 +647,7 @@ func (m tview) cursorVisible() bool {
 	if m.transcript.cursor < 0 || m.transcript.cursor >= len(first) {
 		return false
 	}
-	start, end := m.entrySpan(m.transcript.cursor, first, len(lines))
+	start, end := itemSpan(m.transcript.cursor, first, len(lines))
 	return start < m.transcript.scroll+m.viewportHeight() && end > m.transcript.scroll
 }
 
@@ -687,7 +661,7 @@ func (m tview) keepCursorVisible() {
 	}
 	top, bottom := m.transcript.scroll, m.transcript.scroll+m.viewportHeight()
 	for *c < len(first)-1 {
-		if _, end := m.entrySpan(*c, first, len(lines)); end > top {
+		if _, end := itemSpan(*c, first, len(lines)); end > top {
 			break
 		}
 		*c++
@@ -738,19 +712,9 @@ func (m tview) lastVisibleEntry() int {
 	return last
 }
 
-func (m tview) clampScroll(total, h int) {
-	if maxScroll := max(0, total-h); m.transcript.scroll > maxScroll {
-		m.transcript.scroll = maxScroll
-	}
-	if m.transcript.scroll < 0 {
-		m.transcript.scroll = 0
-	}
-}
-
 // clampScrollNow clamps the line scroll to the current layout's valid range.
 func (m tview) clampScrollNow() {
-	lines, _ := m.layoutEntries()
-	m.clampScroll(len(lines), m.viewportHeight())
+	m.transcript.scroll = max(0, min(m.transcript.scroll, m.maxScroll()))
 }
 
 // maxScroll returns the largest valid top-line offset for the current layout.
@@ -801,7 +765,7 @@ func (m tview) transcriptBody() string {
 		scroll = maxScroll
 	}
 	end := min(len(lines), scroll+h)
-	hitStarts(m.c, len(first), func(i int) (int, int) { return m.entrySpan(i, first, len(lines)) }, scroll, end)
+	hitStarts(m.c, len(first), func(i int) (int, int) { return itemSpan(i, first, len(lines)) }, scroll, end)
 	m.hitFoldMarkers(lines, m.displayRows(), first, scroll, end)
 	b.WriteString(strings.Join(lines[scroll:end], "\n"))
 	return b.String()

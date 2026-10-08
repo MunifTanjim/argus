@@ -165,7 +165,7 @@ func (p terminalNodePicker) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
 	f := pickerFrame(area)
 	f.title = "New terminal on which node?"
 	f.help = c.m.hints(f.innerWidth(), hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "cancel"))
-	var l itemLines
+	l := itemLines{key: "terminal-node-picker"}
 	for i, n := range p.nodes {
 		l.add(i, spawnChoiceRow(nodeName(n.Label, n.ID), "", i == p.cursor, f.innerWidth()))
 	}

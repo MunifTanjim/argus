@@ -116,9 +116,9 @@ func historyResume(c *ctx, resumable bool, nodeID, agent, sessionID, cwd string)
 // --- views --------------------------------------------------------------------
 
 // renderCardList lays out blank-line-separated cards, windowed to avail height
-// with the cursor card kept fully visible.
-func renderCardList(c *ctx, cards []string, cursor, avail int) string {
-	var l itemLines
+// with the cursor card kept fully visible. key names the list's saved scroll.
+func renderCardList(c *ctx, key string, cards []string, cursor, avail int) string {
+	l := itemLines{key: key}
 	for i, card := range cards {
 		if i > 0 {
 			l.text("")

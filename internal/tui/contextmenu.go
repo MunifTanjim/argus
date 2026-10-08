@@ -70,7 +70,7 @@ func (p contextMenu) draw(c *ctx, scr uv.Screen, area uv.Rectangle) {
 		nameW, keysW = max(nameW, len(b.name)), max(keysW, lipgloss.Width(keys[i]))
 	}
 	f := popupFrame{width: min(area.Dx(), nameW+2+keysW+popupFrameW)}
-	var l itemLines
+	l := itemLines{key: "context-menu"}
 	for i, b := range p.entries {
 		base := lipgloss.NewStyle()
 		if i == p.cursor {

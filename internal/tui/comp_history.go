@@ -271,7 +271,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 		prevNode = p.NodeID
 		cards[i] = card
 	}
-	body := renderCardList(c.below(2), cards, h.projCursor, max(1, ht-4))
+	body := renderCardList(c.below(2), "history-projects", cards, h.projCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
@@ -295,7 +295,7 @@ func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	for i, s := range h.sessions {
 		cards[i] = historySessionRow(s, i == h.sessCursor, cardW, showAgent)
 	}
-	body := renderCardList(c.below(lipgloss.Height(title)+1), cards, h.sessCursor, max(1, ht-4))
+	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-sessions", cards, h.sessCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 

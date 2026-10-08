@@ -405,7 +405,7 @@ func (t projectTreeComp) view(c *ctx, w, h int) string {
 	margin := strings.Repeat(" ", screenMargin)
 	head = margin + truncateLine(head, w) + "\n\n"
 	act := m.workspaceActivity()
-	var l itemLines
+	l := itemLines{key: "project-tree"}
 	for i, r := range t.rows {
 		l.add(i, treeMarker(i == t.cursor, focused)+m.projRowLine(r, i == t.cursor, focused, act, w))
 	}
@@ -422,7 +422,7 @@ func (t projectTreeComp) view(c *ctx, w, h int) string {
 	avail := max(1, h-2)
 	rc := c.below(2)
 	if t.filter == "" {
-		scroll := l.scroll(t.cursor, avail)
+		scroll := l.scroll(c, t.cursor, avail)
 		for i, r := range t.rows {
 			if y := i - scroll; r.hasKids && y >= 0 && y < avail {
 				rc.hitZone(uv.Rect(screenMargin+2*r.depth, y, 2, 1), hitTarget{kind: hitFold, index: i})

@@ -81,6 +81,7 @@ type model struct {
 	memory viewMemory
 
 	transcriptCache map[string]cachedTranscript // cacheKey -> last-known entries (per TUI run)
+	listScroll      map[string]int              // list key -> first line shown (see itemLines.scroll)
 	render          renderCache
 
 	termKeyCh chan termKey // ordered keystroke queue drained by sendTermKeyLoop
@@ -167,6 +168,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		sessions:        make(map[string]session.Session),
 		hosts:           make(map[string]hostEntry),
 		transcriptCache: make(map[string]cachedTranscript),
+		listScroll:      make(map[string]int),
 		render:          newRenderCache(hasDark),
 		dock:            newDock(),
 		left:            leftSidebarState{tree: newProjectTree()},

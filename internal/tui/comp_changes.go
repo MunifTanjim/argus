@@ -290,7 +290,7 @@ func (ch changesComp) view(c *ctx, w, h int) string {
 	gutter := strings.Repeat(" ", screenMargin)
 	tw := max(1, w-screenMargin)
 	note := func(s string) string { return gutter + truncateLine(dimStyle.Render(s), tw) }
-	var l itemLines
+	l := itemLines{key: "changes:" + ch.ws}
 	switch {
 	case ch.err != nil:
 		l.text(note("error: " + ch.err.Error()))
@@ -330,7 +330,7 @@ func (ch changesComp) commitFilesView(c *ctx, w, h int, focused bool) string {
 	case len(ch.commitFiles) == 0:
 		return head + gutter + dimStyle.Render("no files")
 	}
-	var l itemLines
+	l := itemLines{key: "changes-commit:" + ch.ws}
 	for i, f := range ch.commitFiles {
 		l.add(i, changeRow(f, i == ch.commitCursor, focused, tw))
 	}

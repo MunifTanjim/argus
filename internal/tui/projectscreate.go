@@ -444,7 +444,7 @@ func (p createPicker) listView(c *ctx, w, h int, loaded bool, err error, truncat
 	case n == 0:
 		return head + "\n\n" + dimStyle.Render("no matches")
 	}
-	var l itemLines
+	l := itemLines{key: "project-create"}
 	for i := range n {
 		l.add(i, truncateLine(cursorLine(line(i), i == p.cursor, true), w))
 	}

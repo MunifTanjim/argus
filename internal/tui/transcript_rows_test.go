@@ -422,7 +422,7 @@ func runFrameModel() tview {
 }
 
 func frameText(m tview) string {
-	lines, _, _ := m.frameLines(m.topFrame(), m.c.m.transcriptWidth())
+	lines, _ := m.frameLines(m.topFrame(), m.c.m.transcriptWidth())
 	return ansi.Strip(strings.Join(lines, "\n"))
 }
 
@@ -574,8 +574,8 @@ func TestExpandRevealsRun(t *testing.T) {
 		t.Fatal("run did not expand")
 	}
 	lines, first := v.layoutEntries()
-	_, end := v.entrySpan(foot, first, len(lines))
-	start, _ := v.entrySpan(head, first, len(lines))
+	_, end := itemSpan(foot, first, len(lines))
+	start, _ := itemSpan(head, first, len(lines))
 	scroll, h := trOf(m).transcript.scroll, v.viewportHeight()
 	if end > scroll+h || start < scroll {
 		t.Errorf("run lines [%d,%d) not within viewport [%d,%d)", start, end, scroll, scroll+h)

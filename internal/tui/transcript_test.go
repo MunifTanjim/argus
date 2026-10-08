@@ -17,10 +17,11 @@ func testModel() model {
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
 		},
-		dock:      newDock(),
-		termKeyCh: make(chan termKey, termKeyBuf),
-		width:     80,
-		height:    24,
+		dock:       newDock(),
+		termKeyCh:  make(chan termKey, termKeyBuf),
+		listScroll: map[string]int{},
+		width:      80,
+		height:     24,
 		// No sidebars: views get the full width under the frame header, so view
 		// tests need not account for the tree or file columns.
 		left:  leftSidebarState{hidden: true},
@@ -166,7 +167,7 @@ func TestLineScrollDownNeverSkipsACard(t *testing.T) {
 	last := len(first) - 1
 	for range 200 {
 		cursor, scroll := m.transcript.cursor, m.transcript.scroll
-		_, end := m.entrySpan(cursor, first, len(lines))
+		_, end := itemSpan(cursor, first, len(lines))
 		bottomHidden := end > scroll+m.viewportHeight()
 		m = pressScrollKey(m, 'j')
 		switch {
@@ -198,7 +199,7 @@ func TestLineScrollUpNeverSkipsACard(t *testing.T) {
 	m.transcript.scroll = m.maxScroll()
 	for range 200 {
 		cursor, scroll := m.transcript.cursor, m.transcript.scroll
-		start, _ := m.entrySpan(cursor, first, len(lines))
+		start, _ := itemSpan(cursor, first, len(lines))
 		topHidden := start < scroll
 		m = pressScrollKey(m, 'k')
 		switch {
@@ -228,7 +229,7 @@ func TestLineScrollRevealsNextCardBelowViewport(t *testing.T) {
 	lines, first := m.layoutEntries()
 	h := m.viewportHeight()
 	cursor := 3
-	_, end := m.entrySpan(cursor, first, len(lines))
+	_, end := itemSpan(cursor, first, len(lines))
 	m.transcript.cursor, m.transcript.scroll = cursor, end-h
 	if m.transcript.scroll <= 0 || first[cursor+1] < end {
 		t.Fatalf("setup: card %d should end at the bottom of a scrolled viewport (h=%d, first=%v)", cursor, h, first)
@@ -247,7 +248,7 @@ func TestLineScrollInsideLongCardKeepsSelection(t *testing.T) {
 	m := scrollTestView(14, "a", "b", "c")
 	m.transcript.entries[1] = transcript.Entry{ID: "a1", Kind: transcript.EntryText, Text: strings.Repeat("line\n\n", 40)}
 	lines, first := m.layoutEntries()
-	if start, end := m.entrySpan(1, first, len(lines)); end-start < m.viewportHeight()+6 {
+	if start, end := itemSpan(1, first, len(lines)); end-start < m.viewportHeight()+6 {
 		t.Fatalf("setup: card 1 should be taller than the viewport plus two scroll steps (span=%d, h=%d)", end-start, m.viewportHeight())
 	}
 	m.transcript.cursor = 1
