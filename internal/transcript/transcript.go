@@ -5,9 +5,9 @@ package transcript
 
 import "encoding/json"
 
-// Usage is a per-call context-window snapshot. The API reports input_tokens as
-// the full prompt size per call, so Context() (input + cache) is the per-turn
-// context metric, not a sum across round trips.
+// Usage is a turn's token count. Input and cache come from the turn's last API
+// call, so Context() is the context size at the end of the turn. Output is
+// summed across every call in the turn.
 type Usage struct {
 	Input         int `json:"input,omitempty"`
 	Output        int `json:"output,omitempty"`

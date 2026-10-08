@@ -47,6 +47,7 @@ type AIMsg struct {
 	ToolCalls     []ToolCall
 	Blocks        []ContentBlock // ordered content blocks, nil until populated
 	Usage         Usage
+	MessageID     string // API message id: the lines of one split message share it, and its usage
 	StopReason    string
 	IsMeta        bool // internal user message (tool results)
 	Interrupted   bool // the turn ended here by a user interrupt (fires no Stop hook)

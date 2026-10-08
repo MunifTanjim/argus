@@ -15,6 +15,7 @@ type Entry struct {
 	// away_summary); distinct from Message.Content on user/assistant entries.
 	Content json.RawMessage `json:"content"`
 	Message struct {
+		ID         string          `json:"id"` // API message id; repeated on each line of a split message
 		Role       string          `json:"role"`
 		Content    json.RawMessage `json:"content"`
 		Model      string          `json:"model"`

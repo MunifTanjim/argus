@@ -213,6 +213,7 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 				CacheReadTokens:     e.Message.Usage.CacheReadInputTokens,
 				CacheCreationTokens: e.Message.Usage.CacheCreationInputTokens,
 			},
+			MessageID:  e.Message.ID,
 			StopReason: stopReason,
 		}, true
 	}
