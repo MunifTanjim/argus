@@ -46,18 +46,50 @@ func parseTimestamp(s string) time.Time {
 	return time.Time{}
 }
 
+// msgContent is message content decoded once: a JSON string or an array of
+// content blocks. Both are zero for absent, null, or undecodable content.
+type msgContent struct {
+	str      string
+	isString bool
+	blocks   []contentBlockJSON
+}
+
+func decodeContent(raw json.RawMessage) msgContent {
+	var c msgContent
+	if len(raw) == 0 {
+		return c
+	}
+	if raw[0] == '[' {
+		if json.Unmarshal(raw, &c.blocks) != nil {
+			c.blocks = nil
+		}
+		return c
+	}
+	c.isString = raw[0] == '"' && json.Unmarshal(raw, &c.str) == nil
+	return c
+}
+
+// text returns the string content, or the array's text blocks joined with newlines.
+func (c msgContent) text() string {
+	if c.isString {
+		return c.str
+	}
+	var parts []string
+	for _, b := range c.blocks {
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // extractAssistantDetails returns the thinking count, tool calls, and content
 // blocks from an assistant message's content array.
-func extractAssistantDetails(raw json.RawMessage) (int, []ToolCall, []ContentBlock) {
-	var blocks []contentBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return 0, nil, nil
-	}
-
+func extractAssistantDetails(c msgContent) (int, []ToolCall, []ContentBlock) {
 	thinking := 0
 	var calls []ToolCall
 	var contentBlocks []ContentBlock
-	for _, b := range blocks {
+	for _, b := range c.blocks {
 		switch b.Type {
 		case "thinking":
 			thinking++
@@ -93,16 +125,10 @@ func extractAssistantDetails(raw json.RawMessage) (int, []ToolCall, []ContentBlo
 
 // extractMetaBlocks parses isMeta user content (tool results) into ContentBlocks.
 // Falls back to a single text block if content isn't a JSON array of tool_result blocks.
-func extractMetaBlocks(raw json.RawMessage, textFallback string) []ContentBlock {
-	var blocks []contentBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		// String content or unparseable: single text block.
-		return []ContentBlock{{Type: "text", Text: textFallback}}
-	}
-
+func extractMetaBlocks(c msgContent, textFallback string) []ContentBlock {
 	// Require actual tool_result blocks, not just any array.
 	hasToolResult := false
-	for _, b := range blocks {
+	for _, b := range c.blocks {
 		if b.Type == "tool_result" {
 			hasToolResult = true
 			break
@@ -113,7 +139,7 @@ func extractMetaBlocks(raw json.RawMessage, textFallback string) []ContentBlock 
 	}
 
 	var contentBlocks []ContentBlock
-	for _, b := range blocks {
+	for _, b := range c.blocks {
 		if b.Type != "tool_result" {
 			continue
 		}
@@ -134,22 +160,22 @@ func stringifyContent(raw json.RawMessage) string {
 		return ""
 	}
 
-	// Try string first.
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-
-	// Try array of text blocks.
-	var blocks []textBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err == nil {
-		var parts []string
-		for _, b := range blocks {
-			if b.Text != "" {
-				parts = append(parts, b.Text)
+	if raw[0] == '[' {
+		var blocks []textBlockJSON
+		if err := json.Unmarshal(raw, &blocks); err == nil {
+			var parts []string
+			for _, b := range blocks {
+				if b.Text != "" {
+					parts = append(parts, b.Text)
+				}
 			}
+			return strings.Join(parts, "\n")
 		}
-		return strings.Join(parts, "\n")
+	} else {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
 	}
 
 	// Last resort: raw JSON string.

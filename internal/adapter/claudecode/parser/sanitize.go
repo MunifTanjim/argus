@@ -68,28 +68,7 @@ func extractCommandDisplay(s string) string {
 // ExtractText pulls display text from content that is either a JSON string or
 // an array of content blocks (text blocks joined with newlines).
 func ExtractText(content json.RawMessage) string {
-	if len(content) == 0 {
-		return ""
-	}
-
-	// String is the common case for user messages.
-	var s string
-	if err := json.Unmarshal(content, &s); err == nil {
-		return s
-	}
-
-	var blocks []textBlockJSON
-	if err := json.Unmarshal(content, &blocks); err != nil {
-		return ""
-	}
-
-	var parts []string
-	for _, b := range blocks {
-		if b.Type == "text" && b.Text != "" {
-			parts = append(parts, b.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
+	return decodeContent(content).text()
 }
 
 // ExtractCommandOutput returns the inner text from <local-command-stdout> or

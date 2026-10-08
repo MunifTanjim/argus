@@ -252,7 +252,8 @@ func isUserChunkForTurnCount(e *metadataScanEntry) bool {
 		return false
 	}
 
-	text := ExtractText(e.Message.Content)
+	content := decodeContent(e.Message.Content)
+	text := content.text()
 	trimmed := strings.TrimSpace(text)
 
 	// Teammate messages.
@@ -268,5 +269,5 @@ func isUserChunkForTurnCount(e *metadataScanEntry) bool {
 	}
 
 	// Must have actual content (text or image blocks for array content).
-	return hasUserContent(e.Message.Content, text)
+	return hasUserContent(content, text)
 }

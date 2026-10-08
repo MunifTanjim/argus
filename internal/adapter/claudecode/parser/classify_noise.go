@@ -40,18 +40,13 @@ var systemOutputTags = []string{
 var emptyStdout = "<local-command-stdout></local-command-stdout>"
 var emptyStderr = "<local-command-stderr></local-command-stderr>"
 
-// hasUserContent reports whether raw content has real user text or images.
-func hasUserContent(raw json.RawMessage, strContent string) bool {
+// hasUserContent reports whether content has real user text or images.
+func hasUserContent(c msgContent, strContent string) bool {
 	// JSON string content is already system-tag-checked, so non-empty means real.
-	if len(raw) > 0 && raw[0] == '"' {
+	if c.isString {
 		return strings.TrimSpace(strContent) != ""
 	}
-
-	var blocks []textBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return false
-	}
-	for _, b := range blocks {
+	for _, b := range c.blocks {
 		if b.Type == "text" || b.Type == "image" {
 			return true
 		}
@@ -82,11 +77,11 @@ func isUserNoise(contentStr string) bool {
 // isInterruptMarker reports whether a user entry is the interruption marker
 // Claude Code writes when the user interrupts a turn: string content or an array
 // with a single text block. trimmed is the space-trimmed string content.
-func isInterruptMarker(raw json.RawMessage, trimmed string) bool {
+func isInterruptMarker(c msgContent, trimmed string) bool {
 	if strings.HasPrefix(trimmed, interruptedMarkerPrefix) {
 		return true
 	}
-	return isArrayInterruption(raw)
+	return len(c.blocks) == 1 && c.blocks[0].Type == "text" && strings.HasPrefix(c.blocks[0].Text, interruptedMarkerPrefix)
 }
 
 // extractToolSearchMatches returns the loaded tool names from a ToolSearch
@@ -107,15 +102,3 @@ func extractToolSearchMatches(raw json.RawMessage) []string {
 // interruptedMarkerPrefix is the text Claude Code writes when the user interrupts
 // a turn. It appears as string content or a single text block.
 const interruptedMarkerPrefix = "[Request interrupted by user"
-
-// isArrayInterruption reports whether content is a single interruption-marker text block.
-func isArrayInterruption(raw json.RawMessage) bool {
-	var blocks []textBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return false
-	}
-	if len(blocks) == 1 && blocks[0].Type == "text" && strings.HasPrefix(blocks[0].Text, interruptedMarkerPrefix) {
-		return true
-	}
-	return false
-}
