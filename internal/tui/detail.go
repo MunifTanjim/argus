@@ -683,20 +683,16 @@ func (m tview) clickItem(i int, focused bool) tea.Cmd {
 	return nil
 }
 
+// wheelDetail moves like j/k, one step per notch (see wheelEntries).
 func (m tview) wheelDetail(d int) {
-	f := m.topFrame()
-	if f == nil {
+	if m.topFrame() == nil {
 		return
 	}
-	f.scroll += d
-	m.clampDetailScroll()
-	if f.items == nil || m.detailCursorVisible(f) {
-		return
+	for ; d > 0; d-- {
+		m.actDetailDown(tea.KeyPressMsg{})
 	}
-	if d > 0 {
-		f.cursor = m.firstVisibleItem(f)
-	} else {
-		f.cursor = m.lastVisibleItem(f)
+	for ; d < 0; d++ {
+		m.actDetailUp(tea.KeyPressMsg{})
 	}
 }
 

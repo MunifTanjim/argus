@@ -216,8 +216,13 @@ func (m tview) selectEntry(i int) {
 	}
 }
 
-func (m tview) wheelLines(d int) {
-	m.transcript.scroll += d
-	m.clampScrollNow()
-	m.keepCursorVisible()
+// wheelEntries moves like j/k, one step per notch: the cursor moves first, and
+// the view scrolls only at the edge or through a tall entry.
+func (m tview) wheelEntries(d int) {
+	for ; d > 0; d-- {
+		m.actScrollDown(tea.KeyPressMsg{})
+	}
+	for ; d < 0; d++ {
+		m.actScrollUp(tea.KeyPressMsg{})
+	}
 }
