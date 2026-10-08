@@ -1689,6 +1689,17 @@ Entry {
 `Entry` never carries `toolInput` or `result` on the wire. Use
 `sessions.toolDetail` or `sessions.historyToolDetail` to get them.
 
+The numbers on `turn_end` come from the agent's own logs; the node does not
+count tokens.
+
+- `usage.output` is the output the turn generated, summed over its API calls,
+  reasoning included.
+- `usage.input`, `usage.cacheRead`, and `usage.cacheCreation` are from the
+  turn's last API call, so they describe the current context.
+- `durationMs` is how long the turn ran.
+- A field the agent does not record is omitted. Antigravity records no usage
+  or duration.
+
 ### Bundle metadata
 
 ```ts
