@@ -16,20 +16,28 @@ class _FakeKv implements SecureKv {
 void main() {
   test('defaults to false when nothing is stored', () async {
     final prefs = await AppearanceStore(_FakeKv()).load();
-    expect(prefs.collapseToolCalls, isFalse);
+    expect(prefs.verboseTranscript, isFalse);
   });
 
-  test('persists and reloads collapseToolCalls', () async {
+  test('persists and reloads verboseTranscript', () async {
     final kv = _FakeKv();
-    await AppearanceStore(kv).setCollapseToolCalls(true);
+    await AppearanceStore(kv).setVerboseTranscript(true);
+    expect(await kv.read('appearance.verboseTranscript'), 'true');
     final prefs = await AppearanceStore(kv).load();
-    expect(prefs.collapseToolCalls, isTrue);
+    expect(prefs.verboseTranscript, isTrue);
   });
 
   test('malformed stored value parses to false', () async {
     final kv = _FakeKv();
-    await kv.write('appearance.collapseToolCalls', 'yes');
+    await kv.write('appearance.verboseTranscript', 'yes');
     final prefs = await AppearanceStore(kv).load();
-    expect(prefs.collapseToolCalls, isFalse);
+    expect(prefs.verboseTranscript, isFalse);
+  });
+
+  test('the old collapseToolCalls key is ignored', () async {
+    final kv = _FakeKv();
+    await kv.write('appearance.collapseToolCalls', 'true');
+    final prefs = await AppearanceStore(kv).load();
+    expect(prefs.verboseTranscript, isFalse);
   });
 }
