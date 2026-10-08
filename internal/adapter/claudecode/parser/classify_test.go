@@ -863,13 +863,6 @@ func TestClassify_ToolPipelineEndToEnd(t *testing.T) {
 	if item.DurationMs != 1500 {
 		t.Errorf("DurationMs = %d, want 1500", item.DurationMs)
 	}
-	resultText := "On branch main\nnothing to commit, working tree clean"
-	inputJSON := `{"command":"git status","description":"Check git status"}`
-	wantTokens := len(inputJSON)/4 + len(resultText)/4
-	if item.TokenCount != wantTokens {
-		t.Errorf("TokenCount = %d, want %d (input %d + result %d)",
-			item.TokenCount, wantTokens, len(inputJSON)/4, len(resultText)/4)
-	}
 }
 
 func TestClassify_SummaryEmptyContent(t *testing.T) {

@@ -109,18 +109,15 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 				switch b.Type {
 				case "thinking":
 					items = append(items, DisplayItem{
-						Type:       ItemThinking,
-						Text:       b.Text,
-						TokenCount: len(b.Text) / 4,
+						Type: ItemThinking,
+						Text: b.Text,
 					})
 				case "text":
 					items = append(items, DisplayItem{
-						Type:       ItemOutput,
-						Text:       b.Text,
-						TokenCount: len(b.Text) / 4,
+						Type: ItemOutput,
+						Text: b.Text,
 					})
 				case "tool_use":
-					inputLen := len(b.ToolInput)
 					if b.ToolName == "Task" || b.ToolName == "Agent" {
 						info := extractSubagentInfo(b.ToolInput)
 						items = append(items, DisplayItem{
@@ -133,7 +130,6 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 							SubagentType:   info.Type,
 							SubagentDesc:   info.Description,
 							TeamMemberName: info.MemberName,
-							TokenCount:     inputLen / 4,
 							SessionID:      m.SessionID,
 						})
 					} else {
@@ -144,7 +140,6 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 							ToolInput:    b.ToolInput,
 							ToolSummary:  ToolSummary(b.ToolName, b.ToolInput),
 							ToolCategory: CategorizeToolName(b.ToolName),
-							TokenCount:   inputLen / 4,
 							SessionID:    m.SessionID,
 						})
 					}
@@ -165,14 +160,12 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						if !p.timestamp.IsZero() && !m.Timestamp.IsZero() {
 							items[p.index].DurationMs = m.Timestamp.Sub(p.timestamp).Milliseconds()
 						}
-						items[p.index].TokenCount += len(b.Content) / 4
 						delete(pending, b.ToolID)
 					} else {
 						// Unmatched tool_result -> output item.
 						items = append(items, DisplayItem{
-							Type:       ItemOutput,
-							Text:       b.Content,
-							TokenCount: len(b.Content) / 4,
+							Type: ItemOutput,
+							Text: b.Content,
 						})
 					}
 				case "teammate":
@@ -182,7 +175,6 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						TeammateID:    b.TeammateID,
 						TeammateColor: b.TeammateColor,
 						TeammateIdle:  b.TeammateIdle,
-						TokenCount:    len(b.Text) / 4,
 					})
 				case "memory_load":
 					items = append(items, DisplayItem{
@@ -201,7 +193,6 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						for j := len(items) - 1; j >= 0; j-- {
 							if items[j].Type == ItemToolCall && items[j].ToolName == "Skill" {
 								items[j].ToolResult = body
-								items[j].TokenCount += len(body) / 4
 								break
 							}
 						}

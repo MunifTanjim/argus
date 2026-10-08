@@ -276,9 +276,6 @@ func TestBuildChunks_Items_ThinkingTextToolUse(t *testing.T) {
 	if items[0].Text != "Let me think..." {
 		t.Errorf("Items[0].Text = %q", items[0].Text)
 	}
-	if items[0].TokenCount != len("Let me think...")/4 {
-		t.Errorf("Items[0].TokenCount = %d, want %d", items[0].TokenCount, len("Let me think...")/4)
-	}
 
 	// Item 1: text output
 	if items[1].Type != parser.ItemOutput {
@@ -348,12 +345,6 @@ func TestBuildChunks_Items_ToolUseLinkedToResult(t *testing.T) {
 	}
 	if item.DurationMs != 2000 {
 		t.Errorf("DurationMs = %d, want 2000", item.DurationMs)
-	}
-	// Token count should include result tokens
-	resultTokens := len("file1.go\nfile2.go") / 4
-	inputTokens := len(`{"command":"ls"}`) / 4
-	if item.TokenCount != inputTokens+resultTokens {
-		t.Errorf("TokenCount = %d, want %d", item.TokenCount, inputTokens+resultTokens)
 	}
 }
 
@@ -1165,54 +1156,6 @@ func TestBuildChunks_UsageSingleMessage(t *testing.T) {
 	}
 	if c.Usage.OutputTokens != 30 {
 		t.Errorf("OutputTokens = %d, want 30", c.Usage.OutputTokens)
-	}
-}
-
-func TestBuildChunks_ItemTokenCountMultipleTools(t *testing.T) {
-	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
-	bashInput := `{"command":"ls"}`
-	readInput := `{"file_path":"main.go"}`
-	bashResult := "file1.go\nfile2.go"
-	readResult := "package main\n\nfunc main() {}"
-
-	msgs := []parser.ClassifiedMsg{
-		parser.AIMsg{
-			Timestamp: t0,
-			Model:     "claude-opus-4-6",
-			Blocks: []parser.ContentBlock{
-				{Type: "tool_use", ToolID: "c1", ToolName: "Bash", ToolInput: json.RawMessage(bashInput)},
-				{Type: "tool_use", ToolID: "c2", ToolName: "Read", ToolInput: json.RawMessage(readInput)},
-			},
-		},
-		parser.AIMsg{
-			Timestamp: t0.Add(1 * time.Second),
-			IsMeta:    true,
-			Blocks: []parser.ContentBlock{
-				{Type: "tool_result", ToolID: "c1", Content: bashResult},
-			},
-		},
-		parser.AIMsg{
-			Timestamp: t0.Add(2 * time.Second),
-			IsMeta:    true,
-			Blocks: []parser.ContentBlock{
-				{Type: "tool_result", ToolID: "c2", Content: readResult},
-			},
-		},
-	}
-	chunks := parser.BuildChunks(msgs)
-	items := chunks[0].Items
-	if len(items) != 2 {
-		t.Fatalf("len(Items) = %d, want 2", len(items))
-	}
-
-	// Each tool's TokenCount = input estimate + result estimate
-	wantBash := len(bashInput)/4 + len(bashResult)/4
-	if items[0].TokenCount != wantBash {
-		t.Errorf("Bash TokenCount = %d, want %d (input+result)", items[0].TokenCount, wantBash)
-	}
-	wantRead := len(readInput)/4 + len(readResult)/4
-	if items[1].TokenCount != wantRead {
-		t.Errorf("Read TokenCount = %d, want %d (input+result)", items[1].TokenCount, wantRead)
 	}
 }
 
