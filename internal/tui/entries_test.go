@@ -71,6 +71,25 @@ func TestTurnEndInterrupted(t *testing.T) {
 	}
 }
 
+func TestTurnEndShowsTheSameStatsAsTheApp(t *testing.T) {
+	// The same fixture as the app's "turn_end shows the same stats as the TUI".
+	m := liveWith(nil)
+	v := tvOf(&m)
+	e := transcript.Entry{Kind: transcript.EntryTurnEnd, ModelName: "Opus 4.8", Thinking: 2, ToolCount: 5,
+		Usage:      transcript.Usage{Input: 900, Output: 12300, CacheRead: 80000},
+		HasContext: true, ContextFirstPct: 40, ContextPct: 45, ContextDeltaTokens: 3100,
+		DurationMs: 62000, Timestamp: "2026-10-08T14:32:05Z"}
+	out := xansi.Strip(v.entryBlock(e, false, false, false, false, 120))
+	for _, want := range []string{"Opus 4.8", "2", "5", "12.3k", "ctx 40% → 45% (+3.1k)", "1m 2s", clockTime(e.Timestamp)} {
+		if !strings.Contains(out, want) {
+			t.Errorf("footer %q lacks %q", out, want)
+		}
+	}
+	if strings.Contains(out, "93.2k") {
+		t.Errorf("footer %q shows input + cache, want output only", out)
+	}
+}
+
 func TestCursorGutterOnlyOnSelected(t *testing.T) {
 	m := liveWith(sampleEntries())
 	v := tvOf(&m)
