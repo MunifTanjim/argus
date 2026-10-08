@@ -8,44 +8,59 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-func parseRollout(path string) ([]transcript.Chunk, error) {
+func parseRollout(path string, finished bool) ([]transcript.Entry, error) {
 	lines, err := scanRollout(path)
 	if err != nil {
 		return nil, err
 	}
-	return foldRollout(lines, loadModelNames()), nil
+	return foldRollout(lines, loadModelNames(), finished), nil
 }
 
-// foldRollout folds a flat rollout line list into display chunks. Pure in its inputs,
-// so streaming can re-fold an accumulating line slice each Refresh.
-func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chunk {
-	var out []transcript.Chunk
-	var ai *transcript.Chunk // open AI chunk for the current turn
+// foldRollout is pure in its inputs, so streaming can re-fold an accumulating
+// line slice each Refresh. finished closes the final turn even if it never
+// completed (history reads).
+func foldRollout(lines []rolloutLine, models map[string]string, finished bool) []transcript.Entry {
+	var out []transcript.Entry
 	model := ""
-	firstCtxTokens := map[*transcript.Chunk]int{}
 	nicknames := map[string]string{} // agent id -> nickname, from each spawn seen so far
-	lastUserTurnID := ""             // turn_id of the trailing user chunk, for skill folding
 
-	flush := func() {
-		if ai != nil {
-			if len(ai.Items) == 0 {
-				ai = nil // aborted/usage-only turn: nothing to display
-				return
+	// Footer of the open turn, closed by task_complete or the next user
+	// boundary. Aborted/usage-only turns add no entries and get no footer.
+	var turn transcript.Turn
+	turnLastTS := "" // timestamp of the turn's last entry: the footer's fallback
+	firstCtx := 0
+	calls := map[string]int{} // call id -> index into out
+	ensureTurn := func() *transcript.Entry {
+		if turn.Footer == nil {
+			turn.Open(transcript.Entry{Kind: transcript.EntryTurnEnd, ModelName: model, ModelColor: modelColorFor(model)})
+			turnLastTS, firstCtx = "", 0
+		}
+		return turn.Footer
+	}
+	endTurn := func() {
+		if f, ok := turn.Close(); ok {
+			if f.Timestamp == "" {
+				f.Timestamp = turnLastTS // closed by a user boundary, not task_complete
 			}
-			for _, it := range ai.Items {
-				if it.Kind == transcript.ItemTool || it.Kind == transcript.ItemSubagent {
-					ai.ToolCount++
-				}
-			}
-			out = append(out, *ai)
-			ai = nil
+			out = append(out, f)
 		}
 	}
-	ensureAI := func(ts string) *transcript.Chunk {
-		if ai == nil {
-			ai = &transcript.Chunk{Kind: transcript.ChunkAI, Timestamp: ts, ModelName: model, ModelColor: modelColorFor(model)}
+	add := func(e transcript.Entry) {
+		ensureTurn()
+		turn.Count(e)
+		if e.ToolID != "" {
+			calls[e.ToolID] = len(out)
 		}
-		return ai
+		out = append(out, e)
+		if e.Timestamp != "" {
+			turnLastTS = e.Timestamp
+		}
+	}
+	call := func(callID string) *transcript.Entry {
+		if i, ok := calls[callID]; ok {
+			return &out[i]
+		}
+		return nil
 	}
 
 	for _, l := range lines {
@@ -57,12 +72,16 @@ func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chu
 			switch p.Type {
 			case "token_count":
 				if p.Info != nil {
-					applyTokenCount(ensureAI(l.Timestamp), p.Info, firstCtxTokens)
+					applyTokenCount(ensureTurn(), p.Info, &firstCtx)
 				}
 			case "task_complete":
-				if ai != nil && p.DurationMs > 0 {
-					ai.DurationMs = p.DurationMs
+				if t := turn.Footer; t != nil {
+					if p.DurationMs > 0 {
+						t.DurationMs = p.DurationMs
+					}
+					t.Timestamp = l.Timestamp
 				}
+				endTurn()
 			}
 		case "response_item":
 			switch p.Type {
@@ -73,100 +92,90 @@ func foldRollout(lines []rolloutLine, models map[string]string) []transcript.Chu
 					if isScaffolding(text) {
 						continue
 					}
-					flush()
+					endTurn()
 					if cmd, result, ok := userShellCommand(text); ok {
 						code, _ := exitCodeAfter(result, "Exit code: ")
-						out = append(out, transcript.Chunk{
-							Kind: transcript.ChunkShell, Timestamp: l.Timestamp,
+						out = append(out, transcript.Entry{
+							Kind: transcript.EntryShell, Timestamp: l.Timestamp,
 							Text: cmd, Detail: result, IsError: code != 0,
 						})
 						continue
 					}
 					if name, _, body, ok := skillLoad(text); ok {
 						input, _ := json.Marshal(map[string]string{"skill": name})
-						item := transcript.Item{
-							Kind:         transcript.ItemSkill,
+						out = append(out, transcript.Entry{
+							Kind:         transcript.EntrySkill,
+							Timestamp:    l.Timestamp,
 							ToolName:     "Skill",
 							ToolID:       p.ID,
 							ToolInput:    string(input),
 							InputPreview: name,
 							Result:       body,
-						}
-						// The skill load is a follow-up to the user's invoking message; fold it in
-						// when the trailing chunk is that same-turn user message.
-						turn := p.turnID()
-						if n := len(out); n > 0 && out[n-1].Kind == transcript.ChunkUser && turnsMatch(lastUserTurnID, turn) {
-							out[n-1].Items = append(out[n-1].Items, item)
-						} else {
-							out = append(out, transcript.Chunk{
-								Kind: transcript.ChunkUser, Timestamp: l.Timestamp,
-								Items: []transcript.Item{item},
-							})
-						}
-						lastUserTurnID = turn
+						})
 						continue
 					}
-					lastUserTurnID = p.turnID()
-					out = append(out, transcript.Chunk{Kind: transcript.ChunkUser, Timestamp: l.Timestamp, Text: text})
+					out = append(out, transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: text})
 				case "assistant":
-					c := ensureAI(l.Timestamp)
-					c.Items = append(c.Items, transcript.Item{Kind: transcript.ItemText, Text: contentText(p.Content)})
+					if text := contentText(p.Content); strings.TrimSpace(text) != "" {
+						add(transcript.Entry{Kind: transcript.EntryText, Timestamp: l.Timestamp, Text: text})
+					}
 				}
 			case "reasoning":
-				// Show a thinking item even when summary is empty (encrypted reasoning).
-				c := ensureAI(l.Timestamp)
-				c.Items = append(c.Items, transcript.Item{Kind: transcript.ItemThinking, Text: summaryText(p.Summary)})
-				c.Thinking++
+				// Show a thinking entry even when summary is empty (encrypted reasoning).
+				add(transcript.Entry{Kind: transcript.EntryThinking, Timestamp: l.Timestamp, Text: summaryText(p.Summary)})
 			case "function_call":
-				c := ensureAI(l.Timestamp)
-				it := transcript.Item{
+				e := transcript.Entry{
+					Kind:      transcript.EntryTool,
+					Timestamp: l.Timestamp,
 					ToolName:  p.Name,
 					ToolID:    p.CallID,
 					ToolInput: argString(p.Arguments),
-					Kind:      transcript.ItemTool,
 				}
 				switch p.Name {
 				case "spawn_agent":
-					it.Kind = transcript.ItemSubagent
+					e.Kind = transcript.EntrySubagent
 					typ, desc := spawnArgs(p.Arguments)
-					it.Subagents = []transcript.Subagent{{Type: typ, Desc: desc}}
+					e.Subagents = []transcript.Subagent{{Type: typ, Desc: desc}}
 				case "wait_agent", "close_agent":
-					it.Kind = transcript.ItemSubagent
-					it.Subagents = buildSubagents(waitCloseTargets(p.Name, p.Arguments), nicknames)
+					e.Kind = transcript.EntrySubagent
+					e.Subagents = buildSubagents(waitCloseTargets(p.Name, p.Arguments), nicknames)
 				}
-				c.Items = append(c.Items, it)
+				add(e)
 			case "function_call_output":
-				out := outputText(p.Output)
-				setResult(ai, p.CallID, out)
-				if id, nick := spawnResult(out); id != "" {
-					setSpawnResult(ai, p.CallID, id, nick)
+				res := outputText(p.Output)
+				e := call(p.CallID)
+				setResult(e, res)
+				if id, nick := spawnResult(res); id != "" {
+					setSpawnResult(e, id, nick)
 					if nick != "" {
 						nicknames[id] = nick
 					}
 				}
 			case "custom_tool_call":
-				c := ensureAI(l.Timestamp)
-				c.Items = append(c.Items, transcript.Item{
+				add(transcript.Entry{
+					Kind:      transcript.EntryTool,
+					Timestamp: l.Timestamp,
 					ToolName:  p.Name,
 					ToolID:    p.CallID,
 					ToolInput: p.Input,
-					Kind:      transcript.ItemTool,
 				})
 			case "custom_tool_call_output":
-				setResult(ai, p.CallID, outputText(p.Output))
+				setResult(call(p.CallID), outputText(p.Output))
 			case "web_search_call":
 				// No paired output event; web_search_end is ignored as a duplicate.
-				c := ensureAI(l.Timestamp)
-				c.Items = append(c.Items, transcript.Item{
+				add(transcript.Entry{
+					Kind:      transcript.EntryTool,
+					Timestamp: l.Timestamp,
 					ToolName:  "web_search",
 					ToolID:    p.ID,
 					ToolInput: string(p.Action),
-					Kind:      transcript.ItemTool,
 				})
 			}
 		}
 	}
-	flush()
+	if finished {
+		endTurn()
+	}
 	stampIDs(out)
 	return out
 }
@@ -200,13 +209,6 @@ func tagContent(s, tag string) string {
 		return ""
 	}
 	return strings.TrimSpace(s[i : i+j])
-}
-
-// turnsMatch reports whether two turn ids are compatible for folding a skill load
-// into the preceding user chunk: a positive mismatch blocks it, a missing id on
-// either side falls back to positional adjacency.
-func turnsMatch(a, b string) bool {
-	return a == "" || b == "" || a == b
 }
 
 func skillLoad(text string) (name, path, body string, ok bool) {
@@ -262,18 +264,13 @@ func modelColorFor(name string) string {
 	return modelBrandColor
 }
 
-func setResult(ai *transcript.Chunk, callID, output string) {
-	if ai == nil {
+func setResult(e *transcript.Entry, output string) {
+	if e == nil {
 		return
 	}
-	for i := range ai.Items {
-		if ai.Items[i].ToolID == callID {
-			ai.Items[i].Result = output
-			if code, ok := execExitCode(output); ok {
-				ai.Items[i].ResultIsError = code != 0
-			}
-			return
-		}
+	e.Result = output
+	if code, ok := execExitCode(output); ok {
+		e.ResultIsError = code != 0
 	}
 }
 
@@ -317,20 +314,15 @@ func spawnResult(output string) (agentID, nickname string) {
 	return o.AgentID, o.Nickname
 }
 
-func setSpawnResult(ai *transcript.Chunk, callID, agentID, nickname string) {
-	if ai == nil {
+func setSpawnResult(e *transcript.Entry, agentID, nickname string) {
+	if e == nil {
 		return
 	}
-	for i := range ai.Items {
-		if ai.Items[i].ToolID == callID {
-			if len(ai.Items[i].Subagents) == 0 {
-				ai.Items[i].Subagents = []transcript.Subagent{{}}
-			}
-			ai.Items[i].Subagents[0].ID = agentID
-			ai.Items[i].Subagents[0].Name = nickname
-			return
-		}
+	if len(e.Subagents) == 0 {
+		e.Subagents = []transcript.Subagent{{}}
 	}
+	e.Subagents[0].ID = agentID
+	e.Subagents[0].Name = nickname
 }
 
 func waitCloseTargets(name string, raw json.RawMessage) []string {
@@ -423,35 +415,32 @@ func summaryText(raw json.RawMessage) string {
 	return strings.TrimSpace(b.String())
 }
 
-func applyTokenCount(c *transcript.Chunk, info *tokenInfo, firstCtx map[*transcript.Chunk]int) {
+func applyTokenCount(e *transcript.Entry, info *tokenInfo, firstCtx *int) {
 	last := info.Last
-	// A Codex AI chunk spans a whole turn (many round-trips); accumulate per-round
-	// output, but take input/cache from the latest snapshot (current context).
-	c.Usage.Input = last.InputTokens - last.CachedInputTokens
-	c.Usage.CacheRead = last.CachedInputTokens
-	c.Usage.Output += last.OutputTokens
+	// A Codex turn spans many round-trips; accumulate per-round output, but take
+	// input/cache from the latest snapshot (current context).
+	e.Usage.Input = last.InputTokens - last.CachedInputTokens
+	e.Usage.CacheRead = last.CachedInputTokens
+	e.Usage.Output += last.OutputTokens
 	if info.ModelContextWindow > 0 {
 		pct := float64(info.Total.InputTokens) / float64(info.ModelContextWindow) * 100
-		if !c.HasContext {
-			c.HasContext = true
-			c.ContextFirstPct = pct
-			firstCtx[c] = info.Total.InputTokens
+		if !e.HasContext {
+			e.HasContext = true
+			e.ContextFirstPct = pct
+			*firstCtx = info.Total.InputTokens
 		}
-		c.ContextPct = pct
-		if d := info.Total.InputTokens - firstCtx[c]; d > 0 {
-			c.ContextDeltaTokens = d
+		e.ContextPct = pct
+		if d := info.Total.InputTokens - *firstCtx; d > 0 {
+			e.ContextDeltaTokens = d
 		}
 	}
 }
 
-func stampIDs(chunks []transcript.Chunk) {
-	for i := range chunks {
-		chunks[i].ID = strconv.Itoa(i)
-		for j := range chunks[i].Items {
-			chunks[i].Items[j].ID = strconv.Itoa(j)
-			if chunks[i].Items[j].Kind == transcript.ItemSkill && chunks[i].Items[j].ToolID == "" {
-				chunks[i].Items[j].ToolID = "skill:" + strconv.Itoa(i) + ":" + strconv.Itoa(j)
-			}
+func stampIDs(out []transcript.Entry) {
+	for i := range out {
+		out[i].ID = strconv.Itoa(i)
+		if out[i].Kind == transcript.EntrySkill && out[i].ToolID == "" {
+			out[i].ToolID = "skill:" + strconv.Itoa(i)
 		}
 	}
 }
