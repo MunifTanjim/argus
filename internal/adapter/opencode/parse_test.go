@@ -273,3 +273,24 @@ func TestFoldMessagesIdleAfterEmptyTurnAddsNothing(t *testing.T) {
 		t.Fatalf("want only the user entry, got %+v", es)
 	}
 }
+
+func TestFoldMessagesProviderErrorIsSurfaced(t *testing.T) {
+	failed := ocAssistant("m2", "glm-5.3")
+	failed.Finish = "error"
+	failed.Error = &ocMessageError{Type: "provider.quota", Message: "Go usage limit exceeded", Status: 429}
+	failed.Time.Created = 1791065684003
+	es := foldMessages([]ocMessage{ocUser("m1", "hi"), failed, {Type: "idle", ID: "m3"}}, false)
+	if len(es) != 2 {
+		t.Fatalf("want user and error entries, got %+v", es)
+	}
+	e := es[1]
+	if e.Kind != transcript.EntrySystem || !e.IsError || e.ID != "m2.error" {
+		t.Fatalf("error entry = %+v", e)
+	}
+	if e.Label != "Go usage limit exceeded" || e.Timestamp != tsMillis(failed.Time.Created) {
+		t.Errorf("error entry = %+v, want the message as its label", e)
+	}
+	if e.Detail != "provider.quota (429)\nGo usage limit exceeded" {
+		t.Errorf("detail = %q", e.Detail)
+	}
+}

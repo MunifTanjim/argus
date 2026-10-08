@@ -102,6 +102,15 @@ type ocMessage struct {
 	Time    struct {
 		Created int64 `json:"created"`
 	} `json:"time"`
+	Finish string          `json:"finish,omitempty"` // assistant: tool-calls | stop | error
+	Error  *ocMessageError `json:"error,omitempty"`  // assistant: set when Finish is error
+}
+
+// ocMessageError is why an assistant message failed (e.g. provider.quota).
+type ocMessageError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Status  int    `json:"status,omitempty"`
 }
 
 type ocPart struct {

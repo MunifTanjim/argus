@@ -47,6 +47,9 @@ func foldMessages(msgs []ocMessage, finished bool) []transcript.Entry {
 			es := assistantEntries(m, turn)
 			turnHasEntries = turnHasEntries || len(es) > 0
 			out = append(out, es...)
+			if m.Error != nil {
+				out = append(out, errorEntry(m))
+			}
 		}
 	}
 	if finished && turn != nil && turnHasEntries {
@@ -89,6 +92,24 @@ func assistantEntries(m ocMessage, turn *transcript.Entry) []transcript.Entry {
 		}
 	}
 	return out
+}
+
+// errorEntry surfaces a failed assistant message (quota, rate limit, bad
+// provider output). Such a message usually has no parts, so without it the
+// failure would leave no trace.
+func errorEntry(m ocMessage) transcript.Entry {
+	detail := m.Error.Type
+	if m.Error.Status != 0 {
+		detail += " (" + strconv.Itoa(m.Error.Status) + ")"
+	}
+	return transcript.Entry{
+		ID:        m.ID + ".error",
+		Kind:      transcript.EntrySystem,
+		Timestamp: tsMillis(m.Time.Created),
+		Label:     firstLine(m.Error.Message),
+		Detail:    detail + "\n" + m.Error.Message,
+		IsError:   true,
+	}
 }
 
 // partID falls back to the message id plus the part's position for reasoning

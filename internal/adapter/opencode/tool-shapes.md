@@ -24,6 +24,35 @@ Each message:
 
 `content` holds mixed part types: `text`, `reasoning`, `step-start`, `step-finish`, `tool`, etc.
 
+An assistant message also carries `finish`: `tool-calls`, `stop`, or `error`. On `error` it has an
+`error` object and usually no `content`:
+
+```json
+{ "finish": "error", "error": { "type": "provider.quota", "message": "…", "status": 429 } }
+```
+
+Seen error types: `provider.quota`, `provider.rate-limit`, `provider.invalid-output`,
+`provider.internal`. After a `provider.internal` error OpenCode can retry within the same run: a
+`synthetic` message, then another assistant message.
+
+## Message types
+
+`type` is one of:
+
+| type | fields | meaning |
+| --- | --- | --- |
+| `user` | `text`, `files`, `agents` | a prompt |
+| `assistant` | `agent`, `model`, `content`, `finish`, `error` | one model response |
+| `idle` | `outcome` | the run went idle; `outcome` is `succeeded` or `failed` |
+| `synthetic` | `text` | injected context, e.g. a plan-mode reminder |
+| `system` | `text`, `description` | updated instructions, e.g. the current date |
+| `agent-switched` | `agent` | the user switched agents |
+| `model-switched` | `model` | the user switched models |
+
+`idle` with `outcome: "failed"` follows an assistant message with `finish: "error"`. In the
+sessions sampled, every `failed` came from a provider error, not a user abort. Two `idle` messages
+can arrive a few milliseconds apart (`failed` then `succeeded`).
+
 ## Tool part envelope
 
 ```json
