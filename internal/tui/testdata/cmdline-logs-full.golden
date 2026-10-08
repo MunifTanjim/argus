@@ -15,16 +15,16 @@ time=12:00:04 level=INFO msg="line 4"                                           
                                                                                   │
                                                                                   │
                                                                                   │
- ╭──────────────────────────────────╮                                             │
- │ back                   esc       │                                             │
- │ goto bottom            G shift+g │                                             │
- │ goto top               gg        │                                             │
- │ help                   g?        │                                             │
- │ open palette           ^k        │                                             │
- │ scroll down            ↓ j       │                                             │
- │ scroll half-page-down  ^d pgdown │                                             │
- │ scroll half-page-up    ^u pgup   │                                             │
- │ scroll up              ↑ k       │                                             │
- │ tab next               gt        │                                             │
- ╰──────────────────────────────────╯
+ ╭──────────────────────────────────────╮                                         │
+ │ back                       esc       │                                         │
+ │ goto bottom                G shift+g │                                         │
+ │ goto top                   gg        │                                         │
+ │ help                       g?        │                                         │
+ │ open palette               ^k        │                                         │
+ │ scroll down                ↓ j       │                                         │
+ │ scroll half-page-down      ^d pgdown │                                         │
+ │ scroll half-page-up        ^u pgup   │                                         │
+ │ scroll up                  ↑ k       │                                         │
+ │ tab next                   gt        │                                         │
+ ╰──────────────────────────────────────╯
   : 

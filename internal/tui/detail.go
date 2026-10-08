@@ -23,11 +23,12 @@ type detailFrame struct {
 	agentID         string             // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
 	items           []transcript.Entry // nil for a body frame
 	body            string             // pre-rendered body (user/system/shell entries)
-	cursor          int                // selected item index
+	cursor          int                // selected display row index (see frameRows)
 	scroll          int                // top line offset
-	defaultExpanded bool               // default item expansion for this frame
-	expanded        map[int]bool       // per-item expand override (by item index)
-	focused         bool               // single-item focus frame: no further drilling
+	defaultExpanded bool
+	expanded        map[int]bool    // by item index, not display row
+	runs            map[string]bool // run key -> expanded, overriding verboseTranscript
+	focused         bool            // single-item focus frame: no further drilling
 
 	// Identity header for a subagent's drilled-in trace frame.
 	subagentType   string
@@ -48,6 +49,67 @@ func (f *detailFrame) toggle(i int) {
 		f.expanded = map[int]bool{}
 	}
 	f.expanded[i] = !f.isExpanded(i)
+}
+
+// frameRows folds a trace frame's items into display rows, as the main stream
+// does; a focused leaf or a body frame shows its items as they are.
+func (m tview) frameRows(f *detailFrame) []displayRow {
+	if f.focused || f.items == nil {
+		rows := make([]displayRow, len(f.items))
+		for i := range rows {
+			rows[i] = displayRow{kind: entryRow, entry: i}
+		}
+		return rows
+	}
+	return buildRows(f.items, m.c.m.verboseTranscript, f.runs)
+}
+
+func (m tview) frameCursorRow(f *detailFrame) (displayRow, bool) {
+	rows := m.frameRows(f)
+	if f.cursor < 0 || f.cursor >= len(rows) {
+		return displayRow{}, false
+	}
+	return rows[f.cursor], true
+}
+
+func (m tview) frameRowID(f *detailFrame) rowRef {
+	if r, ok := m.frameCursorRow(f); ok {
+		return rowID(f.items, r)
+	}
+	return rowRef{}
+}
+
+// toggleFrameRun acts on a control row of the top frame: a summary expands its
+// run, a head or a foot collapses it, keeping the cursor on the run's summary
+// or head row. It fetches the bodies of expanded tools it reveals.
+func (m tview) toggleFrameRun(f *detailFrame, r displayRow) tea.Cmd {
+	on := r.kind == runSummary
+	if f.runs == nil {
+		f.runs = map[string]bool{}
+	}
+	f.runs[r.run.key] = on
+	rows := m.frameRows(f)
+	if i := runRowIndex(rows, r.run.key); i >= 0 {
+		f.cursor = i
+	}
+	m.ensureDetailVisible()
+	if !on {
+		return nil
+	}
+	if head, foot, ok := runEdges(rows, r.run.key); ok {
+		first, total := m.frameItemStarts(f, m.c.m.transcriptWidth())
+		start, _ := itemSpan(head, first, total)
+		_, end := itemSpan(foot, first, total)
+		f.scroll = revealScroll(f.scroll, start, end, m.detailBodyHeight(f))
+		m.clampDetailScroll()
+	}
+	var cmds []tea.Cmd
+	for _, dr := range rows {
+		if dr.kind == entryRow && dr.run.key == r.run.key && f.isExpanded(dr.entry) {
+			cmds = append(cmds, m.fetchToolBodyCmd(f.items[dr.entry], f.agentID))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m tview) topFrame() *detailFrame {
@@ -85,10 +147,11 @@ func drillLabel(e transcript.Entry) string {
 
 func (m tview) enterDetail() tea.Cmd {
 	m.transcript.detailStack = nil
-	if m.transcript.cursor < 0 || m.transcript.cursor >= len(m.transcript.entries) {
+	r, ok := m.cursorRow()
+	if !ok || r.isControl() {
 		return nil
 	}
-	return m.drillEntry(m.transcript.entries[m.transcript.cursor], "")
+	return m.drillEntry(m.transcript.entries[r.entry], "")
 }
 
 func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
@@ -193,7 +256,7 @@ func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {
 	if h, _, end, ok := m.cursorOverflow(f); ok && f.scroll < end-h {
 		f.scroll++
 		m.clampDetailScroll()
-	} else if f.cursor < len(f.items)-1 {
+	} else if f.cursor < len(m.frameRows(f))-1 {
 		f.cursor++
 		m.ensureDetailVisible()
 	}
@@ -232,8 +295,15 @@ func (m tview) cursorOverflow(f *detailFrame) (h, start, end int, ok bool) {
 
 func (m tview) actDetailCollapse(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
-	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && f.isExpanded(f.cursor) {
-		f.toggle(f.cursor)
+	r, ok := m.frameCursorRow(f)
+	switch {
+	case !ok || r.kind == runSummary:
+		return nil
+	case r.isControl():
+		return m.toggleFrameRun(f, r)
+	}
+	if f.isExpanded(r.entry) {
+		f.toggle(r.entry)
 		m.ensureDetailVisible()
 	}
 	return nil
@@ -241,10 +311,20 @@ func (m tview) actDetailCollapse(tea.KeyPressMsg) tea.Cmd {
 
 func (m tview) actDetailExpand(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
-	if f.items != nil && f.cursor >= 0 && f.cursor < len(f.items) && !f.isExpanded(f.cursor) {
-		f.toggle(f.cursor)
+	r, ok := m.frameCursorRow(f)
+	if !ok {
+		return nil
+	}
+	if r.isControl() {
+		if r.kind != runSummary {
+			return nil
+		}
+		return m.toggleFrameRun(f, r)
+	}
+	if !f.isExpanded(r.entry) {
+		f.toggle(r.entry)
 		m.ensureDetailVisible()
-		return m.fetchToolBodyCmd(f.items[f.cursor], f.agentID)
+		return m.fetchToolBodyCmd(f.items[r.entry], f.agentID)
 	}
 	return nil
 }
@@ -293,11 +373,20 @@ func subagentHeaderLines(agentType, nickname, status, input string, iw int) []st
 
 func (m tview) actDetailDrill(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
-	if f == nil || f.items == nil || f.focused || f.cursor < 0 || f.cursor >= len(f.items) ||
-		!m.c.m.detailable(f.items[f.cursor]) {
+	if f == nil || f.items == nil || f.focused {
 		return nil
 	}
-	return m.drillEntry(f.items[f.cursor], f.agentID)
+	r, ok := m.frameCursorRow(f)
+	if !ok {
+		return nil
+	}
+	if r.isControl() {
+		return m.toggleFrameRun(f, r)
+	}
+	if !m.c.m.detailable(f.items[r.entry]) {
+		return nil
+	}
+	return m.drillEntry(f.items[r.entry], f.agentID)
 }
 
 func (m tview) actDetailHalfDown(tea.KeyPressMsg) tea.Cmd {
@@ -324,14 +413,14 @@ func (m tview) actDetailTop(tea.KeyPressMsg) tea.Cmd {
 func (m tview) actDetailBottom(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	if f.items != nil {
-		f.cursor = max(0, len(f.items)-1)
+		f.cursor = max(0, len(m.frameRows(f))-1)
 	}
 	f.scroll = m.frameMaxScroll(f) // true bottom; works for body frames and tall items too
 	return nil
 }
 
-// frameLines renders all of a frame's items to display lines and returns the
-// [start,end) line range of the cursor item (0,0 for a body frame).
+// frameLines renders all of a frame's rows to display lines and returns the
+// [start,end) line range of the cursor row (0,0 for a body frame).
 func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, curEnd int) {
 	if f.items == nil {
 		// A body frame has no cursor gutter; indent to align with the
@@ -339,18 +428,30 @@ func (m tview) frameLines(f *detailFrame, width int) (lines []string, curStart, 
 		body := indentBlock(f.body, strings.Repeat(" ", detailGutter))
 		return strings.Split(body, "\n"), 0, 0
 	}
-	for i, it := range f.items {
-		if i > 0 {
-			lines = append(lines, "") // blank separator
-		}
-		start := len(lines)
-		block := m.entryBlock(it, f.isExpanded(i), i == f.cursor, true, f.focused, width)
-		lines = append(lines, strings.Split(block, "\n")...)
-		if i == f.cursor {
-			curStart, curEnd = start, len(lines)
-		}
+	lines, first := m.frameLayout(f, width)
+	if f.cursor >= 0 && f.cursor < len(first) {
+		curStart, curEnd = itemSpan(f.cursor, first, len(lines))
 	}
 	return lines, curStart, curEnd
+}
+
+func (m tview) frameLayout(f *detailFrame, width int) (lines []string, first []int) {
+	rows := m.frameRows(f)
+	first = make([]int, len(rows))
+	for i, r := range rows {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		first[i] = len(lines)
+		var block string
+		if r.isControl() {
+			block = controlBlock(r, i == f.cursor, true, width)
+		} else {
+			block = m.entryBlock(f.items[r.entry], f.isExpanded(r.entry), i == f.cursor, true, f.focused, width)
+		}
+		lines = append(lines, strings.Split(block, "\n")...)
+	}
+	return lines, first
 }
 
 // detailBreadcrumb renders the drill path (e.g. "opus4.8 › explorer › Read").
@@ -378,16 +479,8 @@ func (m tview) detailBodyHeight(f *detailFrame) int {
 }
 
 func (m tview) frameItemStarts(f *detailFrame, width int) (first []int, total int) {
-	first = make([]int, len(f.items))
-	for i, it := range f.items {
-		if i > 0 {
-			total++ // blank separator
-		}
-		first[i] = total
-		block := m.entryBlock(it, f.isExpanded(i), i == f.cursor, true, f.focused, width)
-		total += strings.Count(block, "\n") + 1
-	}
-	return first, total
+	lines, first := m.frameLayout(f, width)
+	return first, len(lines)
 }
 
 func itemSpan(i int, first []int, total int) (int, int) {
@@ -411,10 +504,13 @@ func (m tview) itemAtLine(f *detailFrame, line int) int {
 }
 
 func (m tview) detailCursorVisible(f *detailFrame) bool {
-	if f == nil || f.items == nil || f.cursor < 0 || f.cursor >= len(f.items) {
+	if f == nil || f.items == nil || f.cursor < 0 {
 		return false
 	}
 	first, total := m.frameItemStarts(f, m.c.m.transcriptWidth())
+	if f.cursor >= len(first) {
+		return false
+	}
 	start, end := itemSpan(f.cursor, first, total)
 	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
 }
@@ -569,8 +665,16 @@ func (m tview) hitItems(f *detailFrame, cw, rows, scroll, end int) {
 
 func (m tview) clickItem(i int, focused bool) tea.Cmd {
 	f := m.topFrame()
-	if f == nil || f.items == nil || i < 0 || i >= len(f.items) {
+	if f == nil || f.items == nil {
 		return nil
+	}
+	rows := m.frameRows(f)
+	if i < 0 || i >= len(rows) {
+		return nil
+	}
+	if rows[i].isControl() {
+		f.cursor = i
+		return m.toggleFrameRun(f, rows[i])
 	}
 	if focused && i == f.cursor {
 		return m.actDetailDrill(tea.KeyPressMsg{})
@@ -678,16 +782,16 @@ func wrapDim(text string, width int) string {
 }
 
 // followFrame replaces a streamed frame's entries with the main stream's rule: a
-// view at the bottom stays there, and a cursor on the last entry of such a view
-// moves to the new last entry. A first load tails the trace.
+// view at the bottom stays there, and a cursor on the last row of such a view
+// moves to the new last row; otherwise the cursor keeps its row (see rowID). A
+// first load tails the trace.
 func (m tview) followFrame(f *detailFrame, entries []transcript.Entry) {
 	first := len(f.items) == 0
-	wasLast := first || f.cursor == len(f.items)-1
+	wasLast := first || f.cursor == len(m.frameRows(f))-1
 	atBottom := first || f.scroll >= m.frameMaxScroll(f)
+	ref := m.frameRowID(f)
 	f.items = entries
-	if atBottom && wasLast && len(entries) > 0 {
-		f.cursor = len(entries) - 1
-	}
+	f.cursor = restoreRowCursor(f.items, m.frameRows(f), ref, f.cursor, atBottom && wasLast)
 	if atBottom {
 		f.scroll = m.frameMaxScroll(f)
 	}

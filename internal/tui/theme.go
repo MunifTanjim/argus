@@ -36,6 +36,10 @@ var (
 	// Token highlight
 	ColorTokenHigh color.Color
 
+	// Run summary icons (thinking / tool counts on a collapsed run)
+	ColorRunThinking color.Color
+	ColorRunTool     color.Color
+
 	// Ongoing indicator
 	ColorOngoing color.Color
 
@@ -131,6 +135,10 @@ func initTheme(hasDarkBg bool) {
 
 	// Token highlight
 	ColorTokenHigh = ld(lipgloss.Color("3"), lipgloss.Color("208"))
+
+	// Run summary icons
+	ColorRunThinking = ld(lipgloss.Color("136"), lipgloss.Color("179")) // muted gold
+	ColorRunTool = ld(lipgloss.Color("66"), lipgloss.Color("109"))      // muted teal
 
 	// Ongoing indicator
 	ColorOngoing = ld(lipgloss.Color("2"), lipgloss.Color("76"))

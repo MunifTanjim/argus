@@ -100,6 +100,7 @@ func manyItemDetailModel(t *testing.T) tview {
 	}
 	m := detailTestModel(traceFixture("Opus 4.8", items...))
 	m.c.m.width, m.c.m.height = 80, 14
+	m.c.m.verboseTranscript = true // list each tool, not the run's summary
 	if m.frameMaxScroll(m.topFrame()) == 0 {
 		t.Fatal("fixture not tall enough to overflow")
 	}

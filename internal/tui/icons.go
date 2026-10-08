@@ -94,6 +94,7 @@ type iconSet struct {
 	DrillDown StyledIcon
 	Ellipsis  StyledIcon
 	Expanded  StyledIcon
+	Collapse  StyledIcon // folds an expanded run back up (its bottom edge)
 	Folder    StyledIcon
 	Help      StyledIcon
 	Memory    StyledIcon
@@ -146,6 +147,7 @@ func initIcons() {
 		DrillDown: StyledIcon{"\uF061", ColorAccent},        // nf-fa-arrow_right
 		Ellipsis:  StyledIcon{"…", ColorTextDim},            // horizontal ellipsis
 		Expanded:  StyledIcon{"\uF078", ColorTextPrimary},   // nf-fa-chevron_down
+		Collapse:  StyledIcon{"\uF077", ColorTextPrimary},   // nf-fa-chevron_up
 		Folder:    StyledIcon{"\U000F024B", ColorTextDim},   // nf-md-folder
 		Output:    StyledIcon{"\U000F0182", ColorAccent},    // nf-md-comment_outline
 		Selected:  StyledIcon{"│", ColorAccent},             // box drawing vertical

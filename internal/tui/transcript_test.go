@@ -73,9 +73,9 @@ func TestExpandDefaultsAndToggle(t *testing.T) {
 }
 
 func TestFoldKeysExpandAndCollapse(t *testing.T) {
-	mm := loaded()
+	mm := withVerbose(loaded())
 	m := tvOf(&mm)
-	m.transcript.cursor = 1 // the expandable thinking entry
+	m.transcript.cursor = 2 // the expandable thinking entry, inside its run
 	if m.entryExpanded(m.transcript.entries[1]) {
 		t.Fatal("thinking entry should start collapsed")
 	}
@@ -127,14 +127,14 @@ func TestRestoreEntryCursorByID(t *testing.T) {
 	mm := loaded()
 	m := tvOf(&mm)
 	m.transcript.cursor = 1
-	id := m.currentEntryID()
+	id, _ := m.currentRowID()
 
 	// Simulate a refresh that prepends an entry, shifting indices.
 	m.transcript.entries = append([]transcript.Entry{{ID: "new", Kind: transcript.EntrySystem, Summary: "new"}}, m.transcript.entries...)
 	m.restoreEntryCursor(id, false, false)
 
-	if m.currentEntryID() != id {
-		t.Errorf("cursor not preserved by id: want %q, got %q", id, m.currentEntryID())
+	if got, _ := m.currentRowID(); got != id {
+		t.Errorf("cursor not preserved by id: want %v, got %v", id, got)
 	}
 }
 

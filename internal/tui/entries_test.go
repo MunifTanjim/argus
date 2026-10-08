@@ -29,8 +29,16 @@ func liveWith(es []transcript.Entry) model {
 	return withEntries(m, es)
 }
 
+// withVerbose shows runs of thinking/tool entries expanded, for tests about
+// per-entry behaviour.
+func withVerbose(m model) model {
+	m.verboseTranscript = true
+	return m
+}
+
 func TestFlatStreamRendersEachEntry(t *testing.T) {
-	m := liveWith(sampleEntries())
+	m := withVerbose(liveWith(sampleEntries()))
+	m.height = 40
 	out := xansi.Strip(tvOf(&m).transcriptBody())
 	for _, want := range []string{"You", "fix the bug", "Thinking…", "I'll check the handler.", "go test ./...", "Opus 4.8", "1m"} {
 		if !strings.Contains(out, want) {
@@ -102,8 +110,8 @@ func TestEntryCursorMovesPerEntry(t *testing.T) {
 }
 
 func TestDrillToolOpensFocusedLeaf(t *testing.T) {
-	m := liveWith(sampleEntries())
-	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 3 })
+	m := withVerbose(liveWith(sampleEntries()))
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 6 }) // the tool, inside its run
 	m, _ = onTr(m, func(v tview) tea.Cmd { return v.actDrill(tea.KeyPressMsg{}) })
 	tr := trOf(m)
 	if tr.historyView != histDetail || len(tr.transcript.detailStack) != 1 {
@@ -221,12 +229,13 @@ func foldZoneCells(m model) map[int][2]int {
 }
 
 // An entry's leading icon is its fold marker: clicking it selects and toggles
-// the entry. Entries that can't expand get no marker zone.
+// the entry. Entries that can't expand get no marker zone. Rows (verbose): 0
+// user, 1 head, 2 thinking, 3 foot, 4 text, 5 head, 6 tool, 7 foot, 8 turn end.
 func TestFoldMarkerClickTogglesEntry(t *testing.T) {
-	m := withFocus(withMouse(liveWith(sampleEntries())), mainPane)
+	m := withFocus(withMouse(withVerbose(liveWith(sampleEntries()))), mainPane)
 	lines := strings.Split(xansi.Strip(m.View().Content), "\n")
 	zones := foldZoneCells(m)
-	for _, i := range []int{1, 3} {
+	for _, i := range []int{1, 2, 3, 5, 6, 7} {
 		p, ok := zones[i]
 		if !ok {
 			t.Fatalf("expandable entry %d has no fold zone (zones %v)", i, zones)
@@ -235,19 +244,19 @@ func TestFoldMarkerClickTogglesEntry(t *testing.T) {
 			t.Errorf("entry %d: fold zone covers %q, want its icon in %q", i, cell, lines[p[1]])
 		}
 	}
-	for _, i := range []int{0, 2, 4} {
+	for _, i := range []int{0, 4, 8} {
 		if _, ok := zones[i]; ok {
 			t.Errorf("non-expandable entry %d has a fold zone", i)
 		}
 	}
-	p := zones[1]
+	p := zones[2]
 	id := sampleEntries()[1].ID
 	m, _ = click(m, p[0], p[1])
-	if tr := trOf(m); !tr.transcript.expanded[id] || tr.transcript.cursor != 1 {
+	if tr := trOf(m); !tr.transcript.expanded[id] || tr.transcript.cursor != 2 {
 		t.Fatalf("after click: expanded=%v cursor=%d, want expanded and selected", tr.transcript.expanded[id], tr.transcript.cursor)
 	}
 	m.View()
-	p = foldZoneCells(m)[1]
+	p = foldZoneCells(m)[2]
 	m, _ = click(m, p[0], p[1])
 	if trOf(m).transcript.expanded[id] {
 		t.Error("a second click on the fold marker should collapse the entry")
@@ -291,8 +300,8 @@ func TestPromptJumps(t *testing.T) {
 }
 
 func TestExpandToolFetchesOnce(t *testing.T) {
-	m := liveWith(twoTurns())
-	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 4 })
+	m := withVerbose(liveWith(twoTurns()))
+	m = withTr(m, func(t *transcriptComp) { t.transcript.cursor = 5 }) // the tool, inside its run
 	m, cmd := onTr(m, func(v tview) tea.Cmd { return v.actExpand(tea.KeyPressMsg{}) })
 	if cmd == nil {
 		t.Fatal("expanding a tool should fetch its body")
@@ -314,15 +323,15 @@ func TestExpandToolFetchesOnce(t *testing.T) {
 }
 
 func TestClickFoldFetchesToolBody(t *testing.T) {
-	m := liveWith(twoTurns())
-	m, cmd := onTr(m, func(v tview) tea.Cmd { return v.clickFold(4) })
+	m := withVerbose(liveWith(twoTurns()))
+	m, cmd := onTr(m, func(v tview) tea.Cmd { return v.clickFold(5) })
 	if cmd == nil {
 		t.Fatal("clicking a tool's fold marker should fetch its body")
 	}
 	if !trOf(m).transcript.expanded["3.0"] {
 		t.Fatal("tool not expanded")
 	}
-	_, cmd = onTr(m, func(v tview) tea.Cmd { return v.clickFold(4) })
+	_, cmd = onTr(m, func(v tview) tea.Cmd { return v.clickFold(5) })
 	if cmd != nil {
 		t.Error("collapsing fetched a body")
 	}
@@ -392,5 +401,19 @@ func TestLongAgentMessageFolds(t *testing.T) {
 	exp := xansi.Strip(v.entryBlock(long, true, false, false, false, w))
 	if strings.Count(exp, "finding") != 20 || strings.Contains(exp, "lines hidden") {
 		t.Errorf("expanded agent message:\n%s", exp)
+	}
+}
+
+func TestExpandedSpawnShowsHeaderOnce(t *testing.T) {
+	m := liveWith(nil)
+	v := tvOf(&m)
+	e := transcript.Entry{ID: "s", Kind: transcript.EntrySubagent, ToolName: "spawn_agent",
+		Subagents: []transcript.Subagent{{Type: "explorer", Name: "Volta", Desc: "map the auth flow"}}}
+	out := xansi.Strip(v.entryBlock(e, true, false, false, false, 80))
+	if n := strings.Count(out, "Spawn Agent"); n != 1 {
+		t.Errorf("expanded spawn shows its header %d times, want 1:\n%s", n, out)
+	}
+	if !strings.Contains(out, "map the auth flow") {
+		t.Errorf("expanded spawn lost its input:\n%s", out)
 	}
 }

@@ -15,16 +15,16 @@
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
- ╭────────────────────────────────────╮                                                                                   │
- │ focus next               ^ww       │                                                                                   │
- │ focus prev               ^wW       │                                                                                   │
- │ focus right              ^wl       │                                                                                   │
- │ fold close               h ← zc    │                                                                                   │
- │ fold open                l → zo    │                                                                                   │
- │ goto bottom              G shift+g │                                                                                   │
- │ goto top                 gg        │                                                                                   │
- │ help                     g?        │                                                                                   │
- │ hover                    K shift+k │                                                                                   │
- │ next                     ↓ j       │                                                                                   │
- ╰────────────────────────────────────╯
+ ╭──────────────────────────────────────╮                                                                                 │
+ │ focus next                 ^ww       │                                                                                 │
+ │ focus prev                 ^wW       │                                                                                 │
+ │ focus right                ^wl       │                                                                                 │
+ │ fold close                 h ← zc    │                                                                                 │
+ │ fold open                  l → zo    │                                                                                 │
+ │ goto bottom                G shift+g │                                                                                 │
+ │ goto top                   gg        │                                                                                 │
+ │ help                       g?        │                                                                                 │
+ │ hover                      K shift+k │                                                                                 │
+ │ next                       ↓ j       │                                                                                 │
+ ╰──────────────────────────────────────╯
   :next 
