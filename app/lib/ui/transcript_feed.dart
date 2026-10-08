@@ -92,11 +92,29 @@ List<FeedRow> groupEntries(
   return rows;
 }
 
-/// "2 thinking · 5 tools", omitting a zero part.
-String _runCounts(int thinking, int tools) => [
+/// Screen-reader label for a run summary.
+String _runLabel(int thinking, int tools) => [
   if (thinking > 0) '$thinking thinking',
   if (tools > 0) '$tools ${tools == 1 ? 'tool' : 'tools'}',
-].join(' · ');
+].join(', ');
+
+const _runStyle = TextStyle(
+  fontFamily: 'monospace',
+  fontSize: 11,
+  color: AppColors.dim,
+);
+
+List<Widget> _runCounts(int thinking, int tools) => [
+  if (thinking > 0) ...[
+    const Icon(Icons.lightbulb, size: 12, color: thinkingCountColor),
+    Text(' $thinking', style: _runStyle),
+  ],
+  if (thinking > 0 && tools > 0) const Text(' · ', style: _runStyle),
+  if (tools > 0) ...[
+    const Icon(Icons.build, size: 12, color: toolCountColor),
+    Text(' $tools', style: _runStyle),
+  ],
+];
 
 /// Used by both the session detail and subagent trace screens.
 ///
@@ -134,6 +152,12 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   // because a row's state is dropped when it scrolls out of the list.
   final Set<String> _expanded = {};
 
+  // The rows last built, for finding a run's edges after it expands. Rebuilt
+  // only when the entries, verbose, or overrides change.
+  List<FeedRow> _rows = const [];
+  List<Entry>? _rowsEntries;
+  bool? _rowsVerbose;
+
   // Whether the view is currently tailing the bottom. Starts true so a freshly
   // opened feed lands on the newest content.
   bool _following = true;
@@ -155,6 +179,32 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     if (!_sc.hasClients) return;
     final p = _sc.position;
     _following = p.pixels >= p.maxScrollExtent - _bottomSlack;
+  }
+
+  /// Scrolls down until the expanded run's bottom row shows, then back to its
+  /// top row if the run is taller than the screen.
+  void _revealRun(String key) {
+    int edge(bool top) => _rows.indexWhere(
+      (r) => r is RunEdgeFeedRow && r.key == key && r.top == top,
+    );
+    void jump(int index, double alignment) {
+      _lc.jumpToItem(index: index, scrollController: _sc, alignment: alignment);
+      // Aligning a trailing row past the end overshoots; pin to the end.
+      final p = _sc.position;
+      if (p.pixels > p.maxScrollExtent) _sc.jumpTo(p.maxScrollExtent);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_lc.isAttached || !_sc.hasClients) return;
+      final foot = edge(false), range = _lc.visibleRange;
+      if (foot < 0 || range == null || foot < range.$2) return;
+      jump(foot, 1);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_lc.isAttached) return;
+        final head = edge(true), after = _lc.visibleRange;
+        if (head >= 0 && after != null && head < after.$1) jump(head, 0);
+      });
+    });
   }
 
   void _jumpToBottom() {
@@ -203,11 +253,16 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     final verbose = ref.watch(
       appearancePrefsProvider.select((p) => p.verboseTranscript),
     );
-    final rows = groupEntries(
-      widget.entries,
-      verbose: verbose,
-      overrides: _overrides,
-    );
+    if (!identical(_rowsEntries, widget.entries) || _rowsVerbose != verbose) {
+      _rowsEntries = widget.entries;
+      _rowsVerbose = verbose;
+      _rows = groupEntries(
+        widget.entries,
+        verbose: verbose,
+        overrides: _overrides,
+      );
+    }
+    final rows = _rows;
     return CenteredBody(
       child: PromptScrollbar(
         rows: rows,
@@ -233,7 +288,9 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
                 ValueKey('run:$key'),
                 key,
                 true,
-                '▸ ${_runCounts(thinking, tools)}',
+                Icons.chevron_right,
+                thinking,
+                tools,
               ),
             RunEdgeFeedRow(
               :final key,
@@ -241,40 +298,54 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
               :final tools,
               :final top,
             ) =>
-              top
-                  ? _runToggle(
-                      ValueKey('run-top:$key'),
-                      key,
-                      false,
-                      '▾ collapse · ${_runCounts(thinking, tools)}',
-                    )
-                  : _runToggle(
-                      ValueKey('run-bottom:$key'),
-                      key,
-                      false,
-                      '▴ collapse',
-                    ),
+              _runToggle(
+                ValueKey('${top ? 'run-top' : 'run-bottom'}:$key'),
+                key,
+                false,
+                top ? Icons.expand_more : Icons.expand_less,
+                thinking,
+                tools,
+              ),
           },
         ),
       ),
     );
   }
 
-  Widget _runToggle(Key key, String runKey, bool expand, String label) {
+  Widget _runToggle(
+    Key key,
+    String runKey,
+    bool expand,
+    IconData chevron,
+    int thinking,
+    int tools,
+  ) {
+    final label = _runLabel(thinking, tools);
     return Align(
-      key: key,
       alignment: Alignment.centerLeft,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
-        onTap: () => setState(() => _overrides[runKey] = expand),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 11,
-              color: AppColors.dim,
+      child: Semantics(
+        button: true,
+        label: expand ? label : 'collapse, $label',
+        excludeSemantics: true,
+        child: InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(4),
+          onTap: () {
+            setState(() {
+              _overrides[runKey] = expand;
+              _rowsEntries = null;
+            });
+            if (expand) _revealRun(runKey);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(chevron, size: 16, color: AppColors.dim),
+                const SizedBox(width: 8),
+                ..._runCounts(thinking, tools),
+              ],
             ),
           ),
         ),
