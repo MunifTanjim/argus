@@ -42,6 +42,7 @@ func (d *Node) handleProjectRename(ctx context.Context, params json.RawMessage) 
 	if err := d.projreg.RenameProject(ctx, p.ProjectID, name); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
+	d.notifyProjectsChanged()
 	return nil, nil
 }
 
@@ -56,6 +57,7 @@ func (d *Node) handleProjectSetHidden(ctx context.Context, params json.RawMessag
 	if err := d.projreg.SetProjectHidden(ctx, p.ProjectID, p.Value); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
+	d.notifyProjectsChanged()
 	return nil, nil
 }
 
@@ -70,6 +72,7 @@ func (d *Node) handleProjectSetPinned(ctx context.Context, params json.RawMessag
 	if err := d.projreg.SetProjectPinned(ctx, p.ProjectID, p.Value); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
+	d.notifyProjectsChanged()
 	return nil, nil
 }
 
@@ -90,6 +93,7 @@ func (d *Node) handleProjectForget(ctx context.Context, params json.RawMessage) 
 	if err := d.projreg.ForgetProject(ctx, p.ProjectID); err != nil {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
+	d.notifyProjectsChanged()
 	return nil, nil
 }
 

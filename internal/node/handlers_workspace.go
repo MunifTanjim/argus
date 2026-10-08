@@ -310,6 +310,7 @@ func (d *Node) handleWorkspaceSetTarget(ctx context.Context, params json.RawMess
 	if err := d.projreg.SetWorkspaceTarget(ctx, p.WorkspaceID, target); err != nil {
 		return nil, invalid("%s", err)
 	}
+	d.notifyProjectsChanged()
 	return nil, nil
 }
 
