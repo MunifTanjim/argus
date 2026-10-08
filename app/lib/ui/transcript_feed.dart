@@ -9,9 +9,10 @@ import 'entry_row.dart';
 import 'prompt_scrollbar.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'tool_registry.dart';
 
-/// One row of the feed: a single entry, or a run of tool calls folded behind
-/// a toggle.
+/// An expanded run is flattened into its own rows (header, entries, footer) so
+/// the list stays virtualized.
 sealed class FeedRow {
   const FeedRow();
 }
@@ -21,41 +22,81 @@ class EntryFeedRow extends FeedRow {
   final Entry entry;
 }
 
-class ToolGroupFeedRow extends FeedRow {
-  const ToolGroupFeedRow(this.key, this.tools);
+/// A collapsed run.
+class RunSummaryFeedRow extends FeedRow {
+  const RunSummaryFeedRow(this.key, this.thinking, this.tools);
 
-  /// The first tool's id: stable as the run grows, since entries are append-only.
+  /// The run's first entry id: stable as the run grows, since entries are
+  /// append-only.
   final String key;
-  final List<Entry> tools;
+  final int thinking;
+  final int tools;
 }
 
-bool _isBlankText(Entry e) =>
-    e.kind == EntryKind.text && (e.text ?? '').trim().isEmpty;
+/// The header ([top]) or footer control row of an expanded run.
+class RunEdgeFeedRow extends FeedRow {
+  const RunEdgeFeedRow(
+    this.key,
+    this.thinking,
+    this.tools, {
+    required this.top,
+  });
+  final String key;
+  final int thinking;
+  final int tools;
+  final bool top;
+}
 
-/// Folds each maximal run of tool calls into one [ToolGroupFeedRow] when
-/// [collapseTools] is on. Blank text entries are transparent inside a run;
-/// any other entry ends it.
-List<FeedRow> groupEntries(List<Entry> entries, {required bool collapseTools}) {
-  if (!collapseTools) return [for (final e in entries) EntryFeedRow(e)];
+/// A subagent spawn (not an agent-ref op like wait_agent) stands alone so it
+/// stays visible and drillable.
+bool _isSpawn(Entry e) =>
+    e.kind == EntryKind.subagent &&
+    !e.isTeammate &&
+    !isAgentRefTool(e.toolName);
+
+bool _inRun(Entry e) =>
+    e.kind == EntryKind.thinking || (e.isToolCall && !_isSpawn(e));
+
+/// Folds each maximal run of thinking/tool entries.
+List<FeedRow> groupEntries(
+  List<Entry> entries, {
+  required bool verbose,
+  Map<String, bool> overrides = const {},
+}) {
   final rows = <FeedRow>[];
   var i = 0;
   while (i < entries.length) {
     final e = entries[i];
-    if (!e.isToolCall) {
+    if (!_inRun(e)) {
       rows.add(EntryFeedRow(e));
       i++;
       continue;
     }
-    final tools = <Entry>[];
-    while (i < entries.length &&
-        (entries[i].isToolCall || _isBlankText(entries[i]))) {
-      if (entries[i].isToolCall) tools.add(entries[i]);
-      i++;
+    final run = <Entry>[];
+    while (i < entries.length && _inRun(entries[i])) {
+      run.add(entries[i++]);
     }
-    rows.add(ToolGroupFeedRow(tools.first.id, tools));
+    final key = run.first.id;
+    final thinking = run.where((e) => e.kind == EntryKind.thinking).length;
+    final tools = run.length - thinking;
+    if (overrides[key] ?? verbose) {
+      rows.add(RunEdgeFeedRow(key, thinking, tools, top: true));
+      for (final e in run) {
+        rows.add(EntryFeedRow(e));
+      }
+      rows.add(RunEdgeFeedRow(key, thinking, tools, top: false));
+    } else {
+      rows.add(RunSummaryFeedRow(key, thinking, tools));
+    }
   }
   return rows;
 }
+
+/// "2 thinking · 5 tools", omitting a zero part.
+String _runCounts(int thinking, int tools) => [
+  if (thinking > 0) '$thinking thinking',
+  if (tools > 0) '$tools ${tools == 1 ? 'tool' : 'tools'}',
+].join(' · ');
 
 /// Used by both the session detail and subagent trace screens.
 ///
@@ -86,8 +127,8 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   final ScrollController _sc = ScrollController();
   final ListController _lc = ListController();
 
-  // Group keys the user has expanded.
-  final Set<String> _revealed = {};
+  // Per-run expansion the user chose, overriding the verbose default.
+  final Map<String, bool> _overrides = {};
 
   // Ids of entries whose body the user expanded. Kept here, not in the rows,
   // because a row's state is dropped when it scrolls out of the list.
@@ -159,10 +200,14 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         ],
       );
     }
-    final collapse = ref.watch(
-      appearancePrefsProvider.select((p) => p.collapseToolCalls),
+    final verbose = ref.watch(
+      appearancePrefsProvider.select((p) => p.verboseTranscript),
     );
-    final rows = groupEntries(widget.entries, collapseTools: collapse);
+    final rows = groupEntries(
+      widget.entries,
+      verbose: verbose,
+      overrides: _overrides,
+    );
     return CenteredBody(
       child: PromptScrollbar(
         rows: rows,
@@ -183,49 +228,57 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
                 if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
               }),
             ),
-            ToolGroupFeedRow(:final key, :final tools) => _toolGroup(
-              key,
-              tools,
-            ),
+            RunSummaryFeedRow(:final key, :final thinking, :final tools) =>
+              _runToggle(
+                ValueKey('run:$key'),
+                key,
+                true,
+                '▸ ${_runCounts(thinking, tools)}',
+              ),
+            RunEdgeFeedRow(
+              :final key,
+              :final thinking,
+              :final tools,
+              :final top,
+            ) =>
+              top
+                  ? _runToggle(
+                      ValueKey('run-top:$key'),
+                      key,
+                      false,
+                      '▾ collapse · ${_runCounts(thinking, tools)}',
+                    )
+                  : _runToggle(
+                      ValueKey('run-bottom:$key'),
+                      key,
+                      false,
+                      '▴ collapse',
+                    ),
           },
         ),
       ),
     );
   }
 
-  Widget _toolGroup(String key, List<Entry> tools) {
-    final revealed = _revealed.contains(key);
-    final noun = tools.length == 1 ? 'tool call' : 'tool calls';
-    final toggle = InkWell(
-      borderRadius: BorderRadius.circular(4),
-      onTap: () => setState(() {
-        if (!_revealed.remove(key)) _revealed.add(key);
-      }),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Text(
-          revealed ? '▾ hide $noun' : '▸ ${tools.length} $noun',
-          style: const TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 11,
-            color: AppColors.dim,
+  Widget _runToggle(Key key, String runKey, bool expand, String label) {
+    return Align(
+      key: key,
+      alignment: Alignment.centerLeft,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => setState(() => _overrides[runKey] = expand),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: AppColors.dim,
+            ),
           ),
         ),
       ),
-    );
-    return Column(
-      key: ValueKey('group:$key'),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (revealed)
-          for (final t in tools)
-            EntryRow(
-              key: ValueKey(t.id),
-              detailRef: widget.detailRef,
-              entry: t,
-            ),
-        toggle,
-      ],
     );
   }
 }

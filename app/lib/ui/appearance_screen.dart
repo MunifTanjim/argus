@@ -9,8 +9,9 @@ class AppearanceScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final collapse = ref.watch(
-        appearancePrefsProvider.select((p) => p.collapseToolCalls));
+    final verbose = ref.watch(
+      appearancePrefsProvider.select((p) => p.verboseTranscript),
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('Appearance')),
       body: CenteredBody(
@@ -18,13 +19,12 @@ class AppearanceScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
             SwitchListTile(
-              value: collapse,
+              value: verbose,
               onChanged: ref
                   .read(appearancePrefsProvider.notifier)
-                  .setCollapseToolCalls,
-              title: const Text('Collapse tool calls'),
-              subtitle: const Text(
-                  'Hide tool calls in assistant messages behind a tap'),
+                  .setVerboseTranscript,
+              title: const Text('Verbose transcript'),
+              subtitle: const Text('Expand thinking and tool runs by default'),
             ),
           ],
         ),

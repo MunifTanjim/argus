@@ -5,12 +5,13 @@ import '../pairing/gateway_store.dart';
 /// Persisted appearance preferences. A value object (not a bare bool) so more
 /// options can be added without changing the provider type.
 class AppearancePrefs {
-  final bool collapseToolCalls;
+  /// Expand thinking/tool runs in the transcript by default.
+  final bool verboseTranscript;
 
-  const AppearancePrefs({this.collapseToolCalls = false});
+  const AppearancePrefs({this.verboseTranscript = false});
 
-  AppearancePrefs copyWith({bool? collapseToolCalls}) => AppearancePrefs(
-        collapseToolCalls: collapseToolCalls ?? this.collapseToolCalls,
+  AppearancePrefs copyWith({bool? verboseTranscript}) => AppearancePrefs(
+        verboseTranscript: verboseTranscript ?? this.verboseTranscript,
       );
 }
 
@@ -20,15 +21,15 @@ class AppearanceStore {
   AppearanceStore([this._kv = const FlutterSecureKv()]);
   final SecureKv _kv;
 
-  static const _collapseToolCallsKey = 'appearance.collapseToolCalls';
+  static const _verboseTranscriptKey = 'appearance.verboseTranscript';
 
   Future<AppearancePrefs> load() async {
-    final raw = await _kv.read(_collapseToolCallsKey);
-    return AppearancePrefs(collapseToolCalls: raw == 'true');
+    final raw = await _kv.read(_verboseTranscriptKey);
+    return AppearancePrefs(verboseTranscript: raw == 'true');
   }
 
-  Future<void> setCollapseToolCalls(bool v) =>
-      _kv.write(_collapseToolCallsKey, v ? 'true' : 'false');
+  Future<void> setVerboseTranscript(bool v) =>
+      _kv.write(_verboseTranscriptKey, v ? 'true' : 'false');
 }
 
 final appearanceStoreProvider =
@@ -50,12 +51,12 @@ class AppearanceController extends Notifier<AppearancePrefs> {
     }
   }
 
-  Future<void> setCollapseToolCalls(bool v) async {
+  Future<void> setVerboseTranscript(bool v) async {
     // Optimistic: update memory first; a failed persist only costs the value
     // on the next restart.
-    state = state.copyWith(collapseToolCalls: v);
+    state = state.copyWith(verboseTranscript: v);
     try {
-      await ref.read(appearanceStoreProvider).setCollapseToolCalls(v);
+      await ref.read(appearanceStoreProvider).setVerboseTranscript(v);
     } catch (_) {
       // Persist failure is non-fatal.
     }
