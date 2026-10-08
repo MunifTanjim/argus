@@ -739,9 +739,8 @@ type SessionRef struct {
 // TranscriptParams selects a session for MethodSessionTranscriptView.
 type TranscriptParams = SessionRef
 
-// ToolDetailParams selects one tool item's full body in a live session's
-// transcript. AgentID selects a subagent trace; ToolID is the tool_use id from
-// the (stripped) chunk item.
+// ToolDetailParams selects one tool entry's full body in a live session's
+// transcript. AgentID selects a subagent trace; ToolID is the entry's toolId.
 type ToolDetailParams struct {
 	SessionID string `json:"session_id"`
 	AgentID   string `json:"agent_id,omitempty"`
@@ -758,8 +757,8 @@ type HistoryToolDetailParams struct {
 	ToolID         string `json:"tool_id"`
 }
 
-// ToolDetail is one tool item's heavy body, fetched on demand. The json tags
-// match the Item fields so clients can fill a cached item in place.
+// ToolDetail is one tool entry's heavy body, fetched on demand. The json tags
+// match the Entry fields so clients can fill a cached entry in place.
 type ToolDetail struct {
 	ToolInput     string `json:"toolInput,omitempty"`
 	Result        string `json:"result,omitempty"`

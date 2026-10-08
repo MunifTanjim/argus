@@ -117,9 +117,12 @@ func (d *Node) resolveTranscriptPath(p api.TranscriptSubscribeParams) (path, roo
 	return sub, s.TranscriptPath, s.Cwd, a, nil
 }
 
-// diffChunks returns the first index at which cur differs from old, and whether
+// diffEntries returns the first index at which cur differs from old, and whether
 // they differ. Folding only changes the tail, so the index is near the end.
-func diffChunks(old, cur []transcript.Chunk) (from int, changed bool) {
+func diffEntries(old, cur []transcript.Entry) (from int, changed bool) {
+	if len(old) == len(cur) && (len(cur) == 0 || &old[0] == &cur[0]) {
+		return 0, false // an unchanged fold returns the same slice
+	}
 	n := len(old)
 	if len(cur) < n {
 		n = len(cur)
@@ -135,15 +138,37 @@ func diffChunks(old, cur []transcript.Chunk) (from int, changed bool) {
 	return 0, false
 }
 
-func clampFrom(haveChunks, total int) int {
-	from := haveChunks - 1 // resend the possibly-grown last cached chunk
-	if from < 0 {
-		from = 0
+// clampFrom picks the index to resend from on (re)subscribe. Entries of the
+// open turn can mutate after they were first sent (a tool result lands, a spawn
+// resolves its subagent), so it resends the whole turn that holds the client's
+// last cached entry. A user entry is not a boundary: a prompt queued while the
+// agent is busy lands inside the open turn.
+func clampFrom(entries []transcript.Entry, haveEntries int) int {
+	last := haveEntries - 1
+	if last >= len(entries) {
+		last = len(entries) - 1
 	}
-	if from > total {
-		from = total
+	if last < 0 {
+		return 0
 	}
-	return from
+	if turnBoundary(entries[last].Kind) {
+		return last
+	}
+	for i := last - 1; i >= 0; i-- {
+		if turnBoundary(entries[i].Kind) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func turnBoundary(k transcript.EntryKind) bool {
+	switch k {
+	case transcript.EntryTurnEnd, transcript.EntrySystem, transcript.EntryCompact,
+		transcript.EntryShell:
+		return true
+	}
+	return false
 }
 
 func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMessage) (any, error) {
@@ -172,16 +197,16 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	}
 
 	st := a.NewStreamingTranscript(path, root, p.AgentID != "")
-	chunks, err := st.Refresh()
+	entries, err := st.Refresh()
 	if err != nil {
 		return nil, err
 	}
-	from := clampFrom(p.HaveChunks, len(chunks))
+	from := clampFrom(entries, p.HaveEntries)
 
 	// Task-change detection rides this subscription: only for the main session
 	// (not subagent views), and only when the agent persists a task list. It
-	// reuses the chunks the poller already folds each tick — no extra I/O.
-	var taskSignals func([]transcript.Chunk) (int, bool)
+	// reuses the entries the poller already folds each tick — no extra I/O.
+	var taskSignals func([]transcript.Entry) (int, bool)
 	if p.AgentID == "" {
 		if ts, ok := a.(adapter.TaskSource); ok {
 			taskSignals = ts.TaskActivityCount
@@ -196,9 +221,9 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	// Start the poller bound to the connection ctx.
 	pollCtx, cancel := context.WithCancel(ctx)
 	cs.add(p.SubID, cancel)
-	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, chunks, driveStatus)
+	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, entries, driveStatus)
 
-	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Chunks: chunks[from:]}, nil
+	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Entries: entries[from:]}, nil
 }
 
 func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawMessage) (any, error) {
@@ -232,11 +257,11 @@ func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
 }
 
 // pollTranscript re-folds the transcript every interval and pushes a delta when
-// chunks change. `sent` must be the FULL chunk list the client holds (cached
-// prefix plus resent tail), not chunks[from:]: diffChunks compares against the
+// entries change. `sent` must be the FULL entry list the client holds (cached
+// prefix plus resent tail), not entries[from:]: diffEntries compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Chunk) (int, bool), sent []transcript.Chunk, driveStatus bool) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st adapter.StreamingTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)
@@ -258,8 +283,8 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 			if err != nil {
 				continue // transient (file rotated/locked); try next tick
 			}
-			if driveStatus && len(cur) > 0 {
-				interrupted := cur[len(cur)-1].Interrupted
+			if driveStatus {
+				interrupted := lastTurnInterrupted(cur)
 				if interrupted && !idleSurfaced {
 					d.surfaceIdleAfterInterrupt(sessionID)
 				}
@@ -281,17 +306,25 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 					}
 				}
 			}
-			from, changed := diffChunks(sent, cur)
+			from, changed := diffEntries(sent, cur)
 			if !changed {
 				continue
 			}
-			d.log.Info("transcript.delta", "sub_id", subID, "from", from, "chunks", len(cur)-from, "total", len(cur))
+			d.log.Info("transcript.delta", "sub_id", subID, "from", from, "entries", len(cur)-from, "total", len(cur))
 			if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{
-				SubID: subID, FromIndex: from, Chunks: cur[from:],
+				SubID: subID, FromIndex: from, Entries: cur[from:],
 			}); err != nil {
 				return // connection gone
 			}
 			sent = cur
 		}
 	}
+}
+
+func lastTurnInterrupted(entries []transcript.Entry) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	last := entries[len(entries)-1]
+	return last.Kind == transcript.EntryTurnEnd && last.Interrupted
 }

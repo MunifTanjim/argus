@@ -11,6 +11,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // TestSubscribeWorksWithoutRegisterConn proves the gateway case: handleTranscriptSubscribe
@@ -44,7 +45,7 @@ func TestSubscribeWorksWithoutRegisterConn(t *testing.T) {
 	if !ok {
 		t.Fatalf("result is %T, want TranscriptDelta", res)
 	}
-	t.Logf("initial delta: SubID=%q FromIndex=%d Chunks=%d", delta.SubID, delta.FromIndex, len(delta.Chunks))
+	t.Logf("initial delta: SubID=%q FromIndex=%d Entries=%d", delta.SubID, delta.FromIndex, len(delta.Entries))
 
 	// Verify the conn was lazily registered.
 	d.subsMu.Lock()
@@ -100,21 +101,60 @@ drained2:
 	}
 }
 
-func TestDiffChunks(t *testing.T) {
-	a := []claudecode.Chunk{{ID: "0"}, {ID: "1"}}
-	// no change
-	if from, changed := diffChunks(a, a); changed {
+func TestDiffEntries(t *testing.T) {
+	e := func(id string) transcript.Entry { return transcript.Entry{ID: id, Kind: transcript.EntryText} }
+	a := []transcript.Entry{e("0"), e("1")}
+	if from, changed := diffEntries(a, a); changed {
 		t.Fatalf("equal slices changed=%v from=%d", changed, from)
 	}
-	// appended chunk -> from = len(old)
-	b := []claudecode.Chunk{{ID: "0"}, {ID: "1"}, {ID: "2"}}
-	if from, changed := diffChunks(a, b); !changed || from != 2 {
+	b := []transcript.Entry{e("0"), e("1"), e("2")}
+	if from, changed := diffEntries(a, b); !changed || from != 2 {
 		t.Fatalf("append: from=%d changed=%v, want 2,true", from, changed)
 	}
-	// last chunk mutated -> from = index of last
-	c := []claudecode.Chunk{{ID: "0"}, {ID: "1", Text: "grown"}}
-	if from, changed := diffChunks(a, c); !changed || from != 1 {
+	g := e("1")
+	g.Text = "grown"
+	c := []transcript.Entry{e("0"), g}
+	if from, changed := diffEntries(a, c); !changed || from != 1 {
 		t.Fatalf("mutate: from=%d changed=%v, want 1,true", from, changed)
+	}
+}
+
+func TestDiffEntriesAppendedFooter(t *testing.T) {
+	old := []transcript.Entry{
+		{ID: "0", Kind: transcript.EntryUser, Text: "go"},
+		{ID: "1.0", Kind: transcript.EntryText, Text: "checking"},
+	}
+	cur := append(append([]transcript.Entry{}, old...),
+		transcript.Entry{ID: "1.end", Kind: transcript.EntryTurnEnd})
+	from, changed := diffEntries(old, cur)
+	if !changed || from != 2 {
+		t.Fatalf("diffEntries = (%d, %v), want (2, true)", from, changed)
+	}
+}
+
+func TestDiffEntriesGrownTail(t *testing.T) {
+	old := []transcript.Entry{{ID: "1.1", Kind: transcript.EntryTool, ToolID: "t"}}
+	cur := []transcript.Entry{{ID: "1.1", Kind: transcript.EntryTool, ToolID: "t", Result: "ok"}}
+	if from, changed := diffEntries(old, cur); !changed || from != 0 {
+		t.Fatalf("diffEntries = (%d, %v), want (0, true)", from, changed)
+	}
+}
+
+func TestLastTurnInterrupted(t *testing.T) {
+	cases := []struct {
+		name string
+		es   []transcript.Entry
+		want bool
+	}{
+		{"empty", nil, false},
+		{"interrupted footer", []transcript.Entry{{Kind: transcript.EntryTurnEnd, Interrupted: true}}, true},
+		{"plain footer", []transcript.Entry{{Kind: transcript.EntryTurnEnd}}, false},
+		{"prompt after", []transcript.Entry{{Kind: transcript.EntryTurnEnd, Interrupted: true}, {Kind: transcript.EntryUser}}, false},
+	}
+	for _, c := range cases {
+		if got := lastTurnInterrupted(c.es); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
@@ -178,15 +218,15 @@ func TestSubscribePushesDeltaOnAppend(t *testing.T) {
 
 	tmp := writeTempTranscript(t)
 
-	// Confirm the initial fold yields ≥1 chunk so the append produces a detectable delta.
+	// Confirm the initial fold yields ≥1 entry so the append produces a detectable delta.
 	initial, err := claudecode.ReadStreamingView(tmp)
 	if err != nil {
 		t.Fatalf("ReadStreamingView on fixture: %v", err)
 	}
 	if len(initial) == 0 {
-		t.Fatal("fixture produced 0 chunks — cannot detect a delta; check JSONL format")
+		t.Fatal("fixture produced 0 entries — cannot detect a delta; check JSONL format")
 	}
-	t.Logf("initial fold: %d chunks", len(initial))
+	t.Logf("initial fold: %d entries", len(initial))
 
 	// Insert a session pointing at the temp transcript.
 	s, _ := d.reg.ApplyHook(registry.HookUpdate{
@@ -210,7 +250,7 @@ func TestSubscribePushesDeltaOnAppend(t *testing.T) {
 	if !ok {
 		t.Fatalf("result is %T, want TranscriptDelta", res)
 	}
-	t.Logf("initial delta: SubID=%q FromIndex=%d Chunks=%d", delta.SubID, delta.FromIndex, len(delta.Chunks))
+	t.Logf("initial delta: SubID=%q FromIndex=%d Entries=%d", delta.SubID, delta.FromIndex, len(delta.Entries))
 
 	// Append a new line to trigger a delta push from the poller.
 	appendTranscriptLine(t, tmp)
@@ -224,7 +264,7 @@ func TestSubscribePushesDeltaOnAppend(t *testing.T) {
 		if err := json.Unmarshal(n.Params, &got); err != nil {
 			t.Fatalf("unmarshal delta: %v", err)
 		}
-		t.Logf("delta push: SubID=%q FromIndex=%d Chunks=%d", got.SubID, got.FromIndex, len(got.Chunks))
+		t.Logf("delta push: SubID=%q FromIndex=%d Entries=%d", got.SubID, got.FromIndex, len(got.Entries))
 		if got.SubID != "x" {
 			t.Errorf("sub_id = %q, want x", got.SubID)
 		}
@@ -299,5 +339,42 @@ func TestSurfaceIdleAfterInterruptClearedToWorking(t *testing.T) {
 	}
 	if got.Status != session.StatusIdle {
 		t.Errorf("status: got %q want idle", got.Status)
+	}
+}
+
+func TestClampFrom(t *testing.T) {
+	k := func(kind transcript.EntryKind) transcript.Entry { return transcript.Entry{Kind: kind} }
+	open := []transcript.Entry{
+		k(transcript.EntryUser), k(transcript.EntryText), k(transcript.EntryTurnEnd),
+		k(transcript.EntryUser), k(transcript.EntryThinking), k(transcript.EntryTool), k(transcript.EntryText),
+	}
+	finished := append(append([]transcript.Entry{}, open...), k(transcript.EntryTurnEnd))
+	// A prompt queued while the agent was busy lands inside the open turn; the
+	// spawn before it can still resolve.
+	queued := []transcript.Entry{
+		k(transcript.EntryUser), k(transcript.EntryText), k(transcript.EntryTurnEnd),
+		k(transcript.EntryUser), k(transcript.EntrySubagent), k(transcript.EntryUser),
+	}
+	cases := []struct {
+		name    string
+		entries []transcript.Entry
+		have    int
+		want    int
+	}{
+		{"mid-turn resends from turn start", open, 7, 3},
+		{"mid-turn partial cache", open, 6, 3},
+		{"cache ends on user entry", open, 4, 3},
+		{"queued prompt inside the turn is not a boundary", queued, 6, 3},
+		{"finished resends last entry", finished, 8, 7},
+		{"first turn open", open[:2], 2, 0},
+		{"no boundary at all", []transcript.Entry{k(transcript.EntryText), k(transcript.EntryTool)}, 2, 0},
+		{"have zero", open, 0, 0},
+		{"have beyond len", open, 20, 3},
+		{"empty", nil, 3, 0},
+	}
+	for _, c := range cases {
+		if got := clampFrom(c.entries, c.have); got != c.want {
+			t.Errorf("%s: clampFrom(have=%d) = %d, want %d", c.name, c.have, got, c.want)
+		}
 	}
 }
