@@ -737,7 +737,7 @@ func (m tview) clampCursor() {
 // view pins to the bottom so a live session keeps tailing, and a cursor that was
 // on the last row (wasLast) moves to the new last row.
 func (m tview) restoreEntryCursor(ref rowRef, follow, wasLast bool) {
-	m.transcript.cursor = restoreRowCursor(m.transcript.entries, m.displayRows(), ref, 0, follow && wasLast)
+	m.transcript.cursor = restoreRowCursor(m.transcript.entries, m.displayRows(), ref, m.transcript.cursor, follow && wasLast)
 	maxScroll := m.maxScroll()
 	if follow {
 		m.transcript.scroll = maxScroll
