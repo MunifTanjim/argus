@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/history_repository.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/history.dart';
 import 'package:argus/state/history_view_model.dart';
 
@@ -28,7 +28,7 @@ class _FakeRepo implements HistoryRepository {
       const Result.ok(HistorySessionPage(items: [], hasMore: false));
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,

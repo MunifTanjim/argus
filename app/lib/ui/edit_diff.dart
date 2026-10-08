@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../util/unified_diff.dart';
 import 'code_block.dart';
 import 'theme.dart';
@@ -13,7 +13,7 @@ const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
 String toolInputStr(Object? v) => v is String ? v : '';
 
-Widget editDiffView(Item item) {
+Widget editDiffView(Entry item) {
   Map<String, dynamic>? input;
   try {
     input = jsonDecode(item.toolInput ?? '') as Map<String, dynamic>;

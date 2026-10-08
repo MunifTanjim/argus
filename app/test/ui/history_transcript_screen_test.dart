@@ -3,16 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/history_repository.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/history.dart';
 import 'package:argus/ui/history_transcript_screen.dart';
 
 class _FakeHistoryRepository implements HistoryRepository {
   _FakeHistoryRepository(this._result);
-  final Object _result; // List<Chunk> or Exception
+  final Object _result; // List<Entry> or Exception
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,
@@ -20,7 +20,7 @@ class _FakeHistoryRepository implements HistoryRepository {
   }) async {
     final r = _result;
     if (r is Exception) return Result.error(r);
-    return Result.ok(r as List<Chunk>);
+    return Result.ok(r as List<Entry>);
   }
 
   @override
@@ -76,7 +76,7 @@ Widget _app(
 void main() {
   testWidgets('renders chunk text when transcript loads', (tester) async {
     final repo = _FakeHistoryRepository(const [
-      Chunk(id: 'c1', kind: ChunkKind.user, text: 'hello from history'),
+      Entry(id: 'c1', kind: EntryKind.user, text: 'hello from history'),
     ]);
     await tester.pumpWidget(_app(repo, _session(title: 'My Session')));
     await tester.pump(); // initState fires, future resolves
@@ -93,7 +93,7 @@ void main() {
   });
 
   testWidgets('uses title as AppBar title', (tester) async {
-    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(_app(repo, _session(title: 'My Title')));
     await tester.pump();
     await tester.pump();
@@ -101,7 +101,7 @@ void main() {
   });
 
   testWidgets('falls back to firstMessage when title is null', (tester) async {
-    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(
         _app(repo, _session(title: null, firstMessage: 'first msg')));
     await tester.pump();
@@ -111,7 +111,7 @@ void main() {
 
   testWidgets('falls back to sessionId when title and firstMessage null',
       (tester) async {
-    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(
         _app(repo, _session(title: null, firstMessage: null)));
     await tester.pump();
@@ -121,7 +121,7 @@ void main() {
 
   testWidgets('shows resume button when resumable and cwd is known',
       (tester) async {
-    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(_app(repo, _session(resumable: true),
         project: _project(cwd: '/home/user/project')));
     await tester.pump();
@@ -130,7 +130,7 @@ void main() {
   });
 
   testWidgets('hides resume button when cwd is unknown', (tester) async {
-    final repo = _FakeHistoryRepository(const <Chunk>[]);
+    final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(_app(repo, _session(resumable: true),
         project: _project(cwd: '')));
     await tester.pump();

@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/command.dart';
 import '../core/result.dart';
 import '../data/session_repository.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/prompt_drafts.dart';
@@ -175,9 +175,9 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     // JSON. A synthetic tool item is all toolDetailBody needs.
     if ((ix.toolInput ?? '').isNotEmpty) {
       detail.add(const SizedBox(height: 8));
-      detail.add(toolDetailBody(Item(
+      detail.add(toolDetailBody(Entry(
         id: '',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: ix.toolName,
         toolInput: ix.toolInput,
       )));

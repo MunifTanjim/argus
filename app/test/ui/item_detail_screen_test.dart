@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/item_detail_screen.dart';
 
@@ -28,9 +28,9 @@ void main() {
       child: const MaterialApp(
         home: ItemDetailScreen(
           detailRef: ToolDetailRef.live('s'),
-          item: Item(
+          item: Entry(
             id: 'i',
-            kind: ItemKind.tool,
+            kind: EntryKind.tool,
             toolName: 'Bash',
             toolInput: '{"command":"echo hi"}',
             result: 'hi',
@@ -44,24 +44,6 @@ void main() {
     expect(fake.calls, 0, reason: 'inline body must not trigger a fetch');
   });
 
-  testWidgets('renders a thinking item body without fetching', (tester) async {
-    final fake = _FakeToolDetailApi(const ToolDetail());
-    await tester.pumpWidget(ProviderScope(
-      overrides: [toolDetailApiProvider.overrideWithValue(fake)],
-      child: const MaterialApp(
-        home: ItemDetailScreen(
-          detailRef: ToolDetailRef.live('s'),
-          item: Item(
-              id: 'i', kind: ItemKind.thinking, text: 'pondering the design'),
-        ),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.text('Thinking'), findsOneWidget, reason: 'app bar title');
-    expect(find.textContaining('pondering'), findsOneWidget);
-    expect(fake.calls, 0, reason: 'thinking has no tool body to fetch');
-  });
-
   testWidgets('fetches the tool body on open when stripped', (tester) async {
     final fake = _FakeToolDetailApi(
         const ToolDetail(toolInput: '{"command":"echo hi"}', result: 'hi'));
@@ -70,7 +52,7 @@ void main() {
       child: const MaterialApp(
         home: ItemDetailScreen(
           detailRef: ToolDetailRef.live('s'),
-          item: Item(id: 'i', kind: ItemKind.tool, toolName: 'Bash', toolId: 'T1'),
+          item: Entry(id: 'i', kind: EntryKind.tool, toolName: 'Bash', toolId: 'T1'),
         ),
       ),
     ));

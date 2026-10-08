@@ -6,7 +6,7 @@ import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/data/transcript_repository.dart';
 import 'package:argus/models/changes.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/models/workspace_files.dart';
@@ -72,10 +72,10 @@ Session _s({
 
 class _SeededTranscript extends TranscriptNotifier {
   _SeededTranscript(this._seed);
-  final List<Chunk> _seed;
+  final List<Entry> _seed;
   @override
   TranscriptState build() =>
-      TranscriptState(subId: 'x', chunks: _seed, loaded: true);
+      TranscriptState(subId: 'x', entries: _seed, loaded: true);
 }
 
 class _NoopSub implements TranscriptSubscription {
@@ -181,7 +181,7 @@ void main() {
     await tester.pumpWidget(_app([
       gatewayProvider.overrideWithValue(null),
       transcriptProvider('mac:%1').overrideWith(() => _SeededTranscript(const [
-            Chunk(id: 'u', kind: ChunkKind.user, text: 'hello world'),
+            Entry(id: 'u', kind: EntryKind.user, text: 'hello world'),
           ])),
     ]));
     await tester.pump();
@@ -475,11 +475,11 @@ void main() {
       transcriptRepositoryProvider.overrideWithValue(repo),
       transcriptProvider('mac:%1') // fallback key, before any hook
           .overrideWith(() => _SeededTranscript(const [
-                Chunk(id: 'pre', kind: ChunkKind.user, text: 'pre-clear line'),
+                Entry(id: 'pre', kind: EntryKind.user, text: 'pre-clear line'),
               ])),
       transcriptProvider('c9') // post-clear store
           .overrideWith(() => _SeededTranscript(const [
-                Chunk(id: 'post', kind: ChunkKind.user, text: 'post-clear line'),
+                Entry(id: 'post', kind: EntryKind.user, text: 'post-clear line'),
               ])),
     ]));
     await tester.pump();

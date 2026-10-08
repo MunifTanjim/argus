@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
@@ -11,7 +11,7 @@ import 'tool_registry.dart';
 const _red = Color(0xFFfb4934);
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
-Map<String, dynamic> _input(Item it) {
+Map<String, dynamic> _input(Entry it) {
   try {
     return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
   } catch (_) {
@@ -32,7 +32,7 @@ Widget _header(String text) => Text(text,
     style:
         _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
 
-Widget _resultSection(Item it, {bool wrap = false, String? lang}) {
+Widget _resultSection(Entry it, {bool wrap = false, String? lang}) {
   if ((it.result ?? '').isEmpty) return const SizedBox.shrink();
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
@@ -40,10 +40,7 @@ Widget _resultSection(Item it, {bool wrap = false, String? lang}) {
   ]);
 }
 
-Widget toolDetailBody(Item item) {
-  if (item.kind == ItemKind.thinking) {
-    return appMarkdown(item.text ?? '');
-  }
+Widget toolDetailBody(Entry item) {
   final detail = toolMeta(item.toolName)?.detail;
   if (detail != null) return detail(item);
   switch (item.toolName) {
@@ -101,7 +98,7 @@ Widget toolDetailBody(Item item) {
   }
 }
 
-Widget _generic(Item it, {String? resultLang}) =>
+Widget _generic(Entry it, {String? resultLang}) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if ((it.toolInput ?? '').isNotEmpty) ...[
         _label('Input'),
@@ -113,7 +110,7 @@ Widget _generic(Item it, {String? resultLang}) =>
 // ExitPlanMode input carries a markdown `plan` and its `planFilePath`; the result
 // is the approval/rejection text. Render the plan (and result) as real markdown
 // rather than raw JSON / a highlighted code box.
-Widget _exitPlanMode(Item it) {
+Widget _exitPlanMode(Entry it) {
   final m = _input(it);
   final plan = toolInputStr(m['plan']);
   final planFilePath = toolInputStr(m['planFilePath']);
@@ -196,7 +193,7 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
   }
 }
 
-Widget _skill(Item it) {
+Widget _skill(Entry it) {
   // Claude uses `skill`; opencode uses `id`.
   final m = _input(it);
   final name = toolInputStr(m['skill'] ?? m['id']);
@@ -215,7 +212,7 @@ Widget _skill(Item it) {
   ]);
 }
 
-Widget _bash(Item it) {
+Widget _bash(Entry it) {
   final m = _input(it);
   final desc = toolInputStr(m['description']), cmd = toolInputStr(m['command']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -233,7 +230,7 @@ Widget _bash(Item it) {
 
 // opencode's `execute` runs code, not a shell command (unlike `bash`/`shell`),
 // so its input is under `code`.
-Widget _execute(Item it) {
+Widget _execute(Entry it) {
   final m = _input(it);
   final code = toolInputStr(m['code']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -245,7 +242,7 @@ Widget _execute(Item it) {
   ]);
 }
 
-Widget _read(Item it) {
+Widget _read(Entry it) {
   // Claude uses `file_path`; opencode uses `path`.
   final m = _input(it);
   final path = toolInputStr(m['file_path'] ?? m['path']);
@@ -259,7 +256,7 @@ Widget _read(Item it) {
   ]);
 }
 
-Widget _grep(Item it) {
+Widget _grep(Entry it) {
   final m = _input(it);
   // Claude uses `glob`; opencode uses `include`.
   var scope = toolInputStr(m['glob'] ?? m['include']);
@@ -272,7 +269,7 @@ Widget _grep(Item it) {
   ]);
 }
 
-Widget _glob(Item it) {
+Widget _glob(Entry it) {
   final m = _input(it);
   final head = toolInputStr(m['pattern']).isNotEmpty ? toolInputStr(m['pattern']) : toolInputStr(m['path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -281,7 +278,7 @@ Widget _glob(Item it) {
   ]);
 }
 
-Widget _web(Item it) {
+Widget _web(Entry it) {
   final m = _input(it);
   final url = toolInputStr(m['url']);
   final query = toolInputStr(m['query']);
@@ -301,7 +298,7 @@ Widget _web(Item it) {
   ]);
 }
 
-Widget _todo(Item it) {
+Widget _todo(Entry it) {
   final todos = (_input(it)['todos'] as List?) ?? const [];
   if (todos.isEmpty) return _generic(it);
   final rows = <Widget>[];
@@ -331,7 +328,7 @@ String? answeredAnswer(String result, String question) {
   return null;
 }
 
-Widget _askUserQuestion(Item it) {
+Widget _askUserQuestion(Entry it) {
   final qs = (_input(it)['questions'] as List?) ?? const [];
   if (qs.isEmpty) return _generic(it);
   final result = it.result ?? '';

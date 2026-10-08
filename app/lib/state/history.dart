@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../models/history.dart';
 import '../transport/gateway_client.dart';
 import 'gateway.dart';
@@ -56,7 +56,7 @@ class HistoryApi {
         return HistorySessionPage.fromJson(result as Map<String, dynamic>);
       });
 
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,
@@ -75,8 +75,8 @@ class HistoryApi {
         };
         final result = await c.call('sessions.historyTranscript', params);
         final map = result as Map<String, dynamic>;
-        return (map['chunks'] as List)
-            .map((e) => Chunk.fromJson(e as Map<String, dynamic>))
+        return (map['entries'] as List)
+            .map((e) => Entry.fromJson(e as Map<String, dynamic>))
             .toList();
       });
 }

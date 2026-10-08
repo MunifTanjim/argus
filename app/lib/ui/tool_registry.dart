@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'theme.dart';
 import 'tool_detail_antigravity.dart';
 import 'tool_detail_claude.dart';
@@ -51,7 +51,7 @@ Color categoryColor(ToolCategory c) => switch (c) {
         AppColors.accent,
     };
 
-typedef ToolDetailBuilder = Widget Function(Item item);
+typedef ToolDetailBuilder = Widget Function(Entry item);
 
 class ToolMeta {
   const ToolMeta(this.display, this.category, [this.detail]);

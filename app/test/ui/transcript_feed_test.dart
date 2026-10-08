@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/transcript_feed.dart';
 
-List<Chunk> _chunks(int n) => [
+List<Entry> _chunks(int n) => [
       for (var i = 0; i < n; i++)
-        Chunk(id: 'c$i', kind: ChunkKind.user, text: 'message number $i'),
+        Entry(id: 'c$i', kind: EntryKind.user, text: 'message number $i'),
     ];
 
-Widget _feed(List<Chunk> chunks) => MaterialApp(
-      home: Scaffold(
-        body: TranscriptFeed(
-            key: const ValueKey('feed'), detailRef: const ToolDetailRef.live('s'), chunks: chunks),
+Widget _feed(List<Entry> chunks) => ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: TranscriptFeed(
+              key: const ValueKey('feed'), detailRef: const ToolDetailRef.live('s'), entries: chunks),
+        ),
       ),
     );
 
@@ -21,17 +24,19 @@ ScrollController _controller(WidgetTester tester) =>
 
 void main() {
   testWidgets('renders chunks', (tester) async {
-    await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(
-            body: TranscriptFeed(detailRef: const ToolDetailRef.live('s'), chunks: [
-      Chunk(id: 'u', kind: ChunkKind.user, text: 'hi there'),
-    ]))));
+    await tester.pumpWidget(const ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(detailRef: ToolDetailRef.live('s'), entries: [
+      Entry(id: 'u', kind: EntryKind.user, text: 'hi there'),
+    ])))));
     expect(find.textContaining('hi there'), findsOneWidget);
   });
 
   testWidgets('empty state', (tester) async {
-    await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: TranscriptFeed(detailRef: const ToolDetailRef.live('s'), chunks: []))));
+    await tester.pumpWidget(const ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(body: TranscriptFeed(detailRef: ToolDetailRef.live('s'), entries: [])))));
     expect(find.textContaining('No transcript'), findsOneWidget);
   });
 
@@ -70,5 +75,11 @@ void main() {
 
     expect(_controller(tester).offset, closeTo(0, 1),
         reason: 'scrolled-up view must stay put');
+  });
+
+  testWidgets('rows are keyed by entry id', (tester) async {
+    await tester.pumpWidget(_feed(_chunks(3)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('c1')), findsOneWidget);
   });
 }

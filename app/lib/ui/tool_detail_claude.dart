@@ -2,13 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'code_block.dart';
 import 'theme.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
-Map<String, dynamic> _input(Item it) {
+Map<String, dynamic> _input(Entry it) {
   try {
     return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
   } catch (_) {
@@ -27,7 +27,7 @@ Widget _label(String text) => Padding(
               fontSize: 13)),
     );
 
-Widget claudeTaskCreateDetail(Item it) {
+Widget claudeTaskCreateDetail(Entry it) {
   final m = _input(it);
   final subject = _str(m['subject']);
   if (subject.isEmpty && (it.toolInput ?? '').isNotEmpty) {
@@ -52,7 +52,7 @@ Widget claudeTaskCreateDetail(Item it) {
   ]);
 }
 
-Widget claudeTaskUpdateDetail(Item it) {
+Widget claudeTaskUpdateDetail(Entry it) {
   final m = _input(it);
   final taskId = _str(m['taskId']);
   final rows = <Widget>[];
@@ -78,7 +78,7 @@ Widget claudeTaskUpdateDetail(Item it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-Widget _generic(Item it) =>
+Widget _generic(Entry it) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if ((it.toolInput ?? '').isNotEmpty) ...[
         _label('Input'),

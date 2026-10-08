@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/tool_detail.dart';
 import 'package:argus/ui/tool_detail_codex.dart';
 
-Widget _wrap(Item i) => MaterialApp(
+Widget _wrap(Entry i) => MaterialApp(
     home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
 
 void main() {
@@ -32,9 +32,9 @@ void main() {
     });
 
     test('agentName resolves via subagents, falls back to id', () {
-      const it = Item(
+      const it = Entry(
         id: 'i',
-        kind: ItemKind.subagent,
+        kind: EntryKind.subagent,
         subagents: [Subagent(id: 'a1', name: 'Volta')],
       );
       expect(agentName(it, 'a1'), 'Volta');
@@ -45,9 +45,9 @@ void main() {
   group('renderers', () {
     testWidgets('exec_command shows workdir, command and split output',
         (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'exec_command',
         toolInput:
             '{"cmd":"pwd","workdir":"/repo","yield_time_ms":1000,"max_output_tokens":2000}',
@@ -59,9 +59,9 @@ void main() {
     });
 
     testWidgets('update_plan shows steps with status glyphs', (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'update_plan',
         toolInput:
             '{"plan":[{"step":"Alpha","status":"completed"},{"step":"Beta","status":"in_progress"}]}',
@@ -71,9 +71,9 @@ void main() {
     });
 
     testWidgets('web_search shows the query', (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.tool,
+        kind: EntryKind.tool,
         toolName: 'web_search',
         toolInput:
             '{"type":"search","query":"example domain","queries":["example domain"]}',
@@ -83,9 +83,9 @@ void main() {
 
     testWidgets('wait_agent shows targets by name and their status',
         (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.subagent,
+        kind: EntryKind.subagent,
         toolName: 'wait_agent',
         toolInput: '{"targets":["a1"],"timeout_ms":30000}',
         result: '{"status":{"a1":{"completed":"all done"}}}',
@@ -99,9 +99,9 @@ void main() {
 
     testWidgets('close_agent shows the closed agent and previous status',
         (tester) async {
-      await tester.pumpWidget(_wrap(const Item(
+      await tester.pumpWidget(_wrap(const Entry(
         id: 'i',
-        kind: ItemKind.subagent,
+        kind: EntryKind.subagent,
         toolName: 'close_agent',
         toolInput: '{"target":"a1"}',
         result: '{"previous_status":{"completed":"bye"}}',

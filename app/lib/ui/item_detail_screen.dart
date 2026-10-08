@@ -2,41 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import '../state/tool_detail.dart';
 import 'responsive.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
 
-String itemTitle(Item it) {
+String itemTitle(Entry it) {
   switch (it.kind) {
-    case ItemKind.tool:
+    case EntryKind.tool:
       final meta = toolMeta(it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.toolName ?? 'Tool';
-    case ItemKind.thinking:
-      return 'Thinking';
-    case ItemKind.text:
-      return 'Output';
-    case ItemKind.subagent:
-      final tm = it.soleSubagent;
-      if (tm?.isTeammate ?? false) {
-        return tm!.name.isNotEmpty ? tm.name : 'Teammate';
-      }
+    case EntryKind.subagent:
       final meta = toolMeta(it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
-      return tm?.type ?? 'Subagent';
-    case ItemKind.skill:
+      return it.soleSubagent?.type ?? 'Subagent';
+    case EntryKind.skill:
       return 'Skill';
-    case ItemKind.unknown:
+    default:
       return 'Detail';
   }
 }
 
-/// Full-screen detail for one transcript item. The heavy tool body
-/// (input/result) is stripped from the streamed chunk, so a tool item fetches it
-/// on demand (sessions.toolDetail) and fills the item before rendering.
+/// Fetches a tool entry's stripped input/result on demand (sessions.toolDetail).
 class ItemDetailScreen extends ConsumerStatefulWidget {
   const ItemDetailScreen({
     super.key,
@@ -44,7 +34,7 @@ class ItemDetailScreen extends ConsumerStatefulWidget {
     required this.detailRef,
   });
 
-  final Item item;
+  final Entry item;
   final ToolDetailRef detailRef;
 
   @override
@@ -52,13 +42,13 @@ class ItemDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
-  late Item _item = widget.item;
+  late Entry _item = widget.item;
   bool _loading = false;
   Object? _error;
 
   bool get _needsFetch =>
-      (widget.item.kind == ItemKind.tool ||
-          widget.item.kind == ItemKind.skill ||
+      (widget.item.kind == EntryKind.tool ||
+          widget.item.kind == EntryKind.skill ||
           isAgentRefTool(widget.item.toolName)) &&
       (widget.item.toolId?.isNotEmpty ?? false) &&
       widget.item.toolInput == null &&

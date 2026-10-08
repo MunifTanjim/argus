@@ -12,7 +12,6 @@ class Usage {
   });
 
   int get context => input + cacheRead + cacheCreation;
-  int get total => input + output + cacheRead + cacheCreation;
 
   factory Usage.fromJson(Map<String, dynamic>? j) {
     if (j == null) return const Usage();
@@ -26,22 +25,44 @@ class Usage {
   }
 }
 
-enum ItemKind { thinking, text, tool, subagent, skill, unknown }
+enum EntryKind {
+  user,
+  thinking,
+  text,
+  tool,
+  subagent,
+  skill,
+  turnEnd,
+  system,
+  compact,
+  shell,
+  unknown,
+}
 
-ItemKind itemKindFromWire(String? s) {
+EntryKind entryKindFromWire(String? s) {
   switch (s) {
+    case 'user':
+      return EntryKind.user;
     case 'thinking':
-      return ItemKind.thinking;
+      return EntryKind.thinking;
     case 'text':
-      return ItemKind.text;
+      return EntryKind.text;
     case 'tool':
-      return ItemKind.tool;
+      return EntryKind.tool;
     case 'subagent':
-      return ItemKind.subagent;
+      return EntryKind.subagent;
     case 'skill':
-      return ItemKind.skill;
+      return EntryKind.skill;
+    case 'turn_end':
+      return EntryKind.turnEnd;
+    case 'system':
+      return EntryKind.system;
+    case 'compact':
+      return EntryKind.compact;
+    case 'shell':
+      return EntryKind.shell;
     default:
-      return ItemKind.unknown;
+      return EntryKind.unknown;
   }
 }
 
@@ -56,7 +77,7 @@ class Subagent {
   final bool isTeammate;
   final bool idle;
   final bool hasTrace;
-  final List<Chunk> trace;
+  final List<Entry> trace;
 
   const Subagent({
     this.id = '',
@@ -82,15 +103,17 @@ class Subagent {
         idle: j['idle'] as bool? ?? false,
         hasTrace: j['hasTrace'] as bool? ?? false,
         trace: (j['trace'] as List?)
-                ?.map((e) => Chunk.fromJson(e as Map<String, dynamic>))
+                ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
       );
 }
 
-class Item {
+/// One unit of the flat transcript timeline. Fields are used per [kind].
+class Entry {
   final String id;
-  final ItemKind kind;
+  final EntryKind kind;
+  final String? timestamp;
   final String? text;
   final bool signature;
   final String? toolName;
@@ -100,10 +123,29 @@ class Item {
   final String? result;
   final bool resultIsError;
   final List<Subagent> subagents;
+  // turn_end
+  final String? modelName;
+  final String? modelColor;
+  final Usage usage;
+  final String? stopReason;
+  final int durationMs;
+  final int thinking;
+  final int toolCount;
+  final bool interrupted;
+  final bool hasContext;
+  final double contextPct;
+  final double contextFirstPct;
+  final int contextDeltaTokens;
+  // system / compact / shell
+  final String? summary;
+  final String? label;
+  final String? detail;
+  final bool isError;
 
-  const Item({
+  const Entry({
     required this.id,
     required this.kind,
+    this.timestamp,
     this.text,
     this.signature = false,
     this.toolName,
@@ -113,15 +155,37 @@ class Item {
     this.result,
     this.resultIsError = false,
     this.subagents = const [],
+    this.modelName,
+    this.modelColor,
+    this.usage = const Usage(),
+    this.stopReason,
+    this.durationMs = 0,
+    this.thinking = 0,
+    this.toolCount = 0,
+    this.interrupted = false,
+    this.hasContext = false,
+    this.contextPct = 0,
+    this.contextFirstPct = 0,
+    this.contextDeltaTokens = 0,
+    this.summary,
+    this.label,
+    this.detail,
+    this.isError = false,
   });
 
   Subagent? get soleSubagent => subagents.length == 1 ? subagents.first : null;
 
   bool get isTeammate => soleSubagent?.isTeammate ?? false;
 
-  factory Item.fromJson(Map<String, dynamic> j) => Item(
+  bool get isToolCall =>
+      kind == EntryKind.tool ||
+      kind == EntryKind.skill ||
+      (kind == EntryKind.subagent && !isTeammate);
+
+  factory Entry.fromJson(Map<String, dynamic> j) => Entry(
         id: j['id'] as String? ?? '',
-        kind: itemKindFromWire(j['kind'] as String?),
+        kind: entryKindFromWire(j['kind'] as String?),
+        timestamp: j['timestamp'] as String?,
         text: j['text'] as String?,
         signature: j['signature'] as bool? ?? false,
         toolName: j['toolName'] as String?,
@@ -134,14 +198,30 @@ class Item {
                 ?.map((e) => Subagent.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        modelName: j['modelName'] as String?,
+        modelColor: j['modelColor'] as String?,
+        usage: Usage.fromJson(j['usage'] as Map<String, dynamic>?),
+        stopReason: j['stopReason'] as String?,
+        durationMs: (j['durationMs'] as num?)?.toInt() ?? 0,
+        thinking: (j['thinking'] as num?)?.toInt() ?? 0,
+        toolCount: (j['toolCount'] as num?)?.toInt() ?? 0,
+        interrupted: j['interrupted'] as bool? ?? false,
+        hasContext: j['hasContext'] as bool? ?? false,
+        contextPct: (j['contextPct'] as num?)?.toDouble() ?? 0,
+        contextFirstPct: (j['contextFirstPct'] as num?)?.toDouble() ?? 0,
+        contextDeltaTokens: (j['contextDeltaTokens'] as num?)?.toInt() ?? 0,
+        summary: j['summary'] as String?,
+        label: j['label'] as String?,
+        detail: j['detail'] as String?,
+        isError: j['isError'] as bool? ?? false,
       );
 
-  /// Returns a copy with the heavy tool body filled in. Transcript chunks ship
-  /// without [toolInput]/[result] (see the server's Item.MarshalJSON); the
-  /// detail view fetches them on demand and fills the item here for rendering.
-  Item withToolBody(ToolDetail d) => Item(
+  /// Entries ship without [toolInput]/[result] (see the server's
+  /// Entry.MarshalJSON).
+  Entry withToolBody(ToolDetail d) => Entry(
         id: id,
         kind: kind,
+        timestamp: timestamp,
         text: text,
         signature: signature,
         toolName: toolName,
@@ -170,125 +250,22 @@ class ToolDetail {
       );
 }
 
-enum ChunkKind { user, ai, system, shell, compact, unknown }
-
-ChunkKind chunkKindFromWire(String? s) {
-  switch (s) {
-    case 'user':
-      return ChunkKind.user;
-    case 'ai':
-      return ChunkKind.ai;
-    case 'system':
-      return ChunkKind.system;
-    case 'shell':
-      return ChunkKind.shell;
-    case 'compact':
-      return ChunkKind.compact;
-    default:
-      return ChunkKind.unknown;
-  }
-}
-
-class Chunk {
-  final String id;
-  final ChunkKind kind;
-  final String? timestamp;
-  final String? text;
-  final String? modelName;
-  final String? modelColor;
-  final List<Item> items;
-  final int thinking;
-  final int toolCount;
-  final Usage usage;
-  final String? stopReason;
-  final int durationMs;
-  final bool hasContext;
-  final double contextPct;
-  final double contextFirstPct;
-  final int contextDeltaTokens;
-  final String? summary;
-  final String? label;
-  final String? detail;
-  final bool isError;
-  final String previewItemId;
-
-  const Chunk({
-    required this.id,
-    required this.kind,
-    this.timestamp,
-    this.text,
-    this.modelName,
-    this.modelColor,
-    this.items = const [],
-    this.thinking = 0,
-    this.toolCount = 0,
-    this.usage = const Usage(),
-    this.stopReason,
-    this.durationMs = 0,
-    this.hasContext = false,
-    this.contextPct = 0,
-    this.contextFirstPct = 0,
-    this.contextDeltaTokens = 0,
-    this.summary,
-    this.label,
-    this.detail,
-    this.isError = false,
-    this.previewItemId = '',
-  });
-
-  factory Chunk.fromJson(Map<String, dynamic> j) => Chunk(
-        id: j['id'] as String? ?? '',
-        kind: chunkKindFromWire(j['kind'] as String?),
-        timestamp: j['timestamp'] as String?,
-        text: j['text'] as String?,
-        modelName: j['modelName'] as String?,
-        modelColor: j['modelColor'] as String?,
-        items: (j['items'] as List?)
-                ?.map((e) => Item.fromJson(e as Map<String, dynamic>))
-                .toList() ??
-            const [],
-        thinking: (j['thinking'] as num?)?.toInt() ?? 0,
-        toolCount: (j['toolCount'] as num?)?.toInt() ?? 0,
-        usage: Usage.fromJson(j['usage'] as Map<String, dynamic>?),
-        stopReason: j['stopReason'] as String?,
-        durationMs: (j['durationMs'] as num?)?.toInt() ?? 0,
-        hasContext: j['hasContext'] as bool? ?? false,
-        contextPct: (j['contextPct'] as num?)?.toDouble() ?? 0,
-        contextFirstPct: (j['contextFirstPct'] as num?)?.toDouble() ?? 0,
-        contextDeltaTokens: (j['contextDeltaTokens'] as num?)?.toInt() ?? 0,
-        summary: j['summary'] as String?,
-        label: j['label'] as String?,
-        detail: j['detail'] as String?,
-        isError: j['isError'] as bool? ?? false,
-        previewItemId: j['previewItemId'] as String? ?? '',
-      );
-
-  /// The server-chosen collapsed-preview item, or null when none was stamped.
-  Item? get previewItem {
-    if (previewItemId.isEmpty) return null;
-    for (final it in items) {
-      if (it.id == previewItemId) return it;
-    }
-    return null;
-  }
-}
-
 class TranscriptDelta {
   final String subId;
   final int fromIndex;
-  final List<Chunk> chunks;
+  final List<Entry> entries;
 
   const TranscriptDelta({
     required this.subId,
     required this.fromIndex,
-    required this.chunks,
+    required this.entries,
   });
 
   factory TranscriptDelta.fromJson(Map<String, dynamic> j) => TranscriptDelta(
         subId: j['sub_id'] as String? ?? '',
         fromIndex: (j['from_index'] as num?)?.toInt() ?? 0,
-        chunks: (j['chunks'] as List?)
-                ?.map((e) => Chunk.fromJson(e as Map<String, dynamic>))
+        entries: (j['entries'] as List?)
+                ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
       );

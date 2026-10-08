@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
 
@@ -9,7 +9,7 @@ const _redColor = Color(0xFFfb4934);
 class ItemRow extends StatelessWidget {
   const ItemRow({super.key, required this.item, this.onTap});
 
-  final Item item;
+  final Entry item;
 
   /// When set, the row is tappable (drill into a full-screen detail) and shows a
   /// trailing chevron.
@@ -22,18 +22,7 @@ class ItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     switch (item.kind) {
-      case ItemKind.text:
-      case ItemKind.unknown:
-        return const SizedBox.shrink();
-      case ItemKind.thinking:
-        return _row(
-          leading: const Icon(Icons.lightbulb, size: 14, color: AppColors.dim),
-          label: 'Thinking',
-          labelColor: AppColors.dim,
-          trailing: item.signature ? ' 🔒' : '',
-          preview: item.text,
-        );
-      case ItemKind.tool:
+      case EntryKind.tool:
         final err = item.resultIsError;
         final meta = toolMeta(item.toolName);
         final name = (meta?.display.isNotEmpty ?? false)
@@ -54,7 +43,7 @@ class ItemRow extends StatelessWidget {
           labelSemantics: err ? '$name, error' : null,
           preview: item.inputPreview,
         );
-      case ItemKind.skill:
+      case EntryKind.skill:
         return _row(
           leading: Icon(categoryIcon(ToolCategory.skill),
               size: 14, color: categoryColor(ToolCategory.skill)),
@@ -62,7 +51,7 @@ class ItemRow extends StatelessWidget {
           labelColor: AppColors.accent,
           preview: item.inputPreview,
         );
-      case ItemKind.subagent:
+      case EntryKind.subagent:
         final tm = item.soleSubagent;
         if (tm?.isTeammate ?? false) {
           final tc = teamColor(tm!.color);
@@ -98,6 +87,8 @@ class ItemRow extends StatelessWidget {
           labelColor: AppColors.accent,
           preview: sub?.desc,
         );
+      default:
+        return const SizedBox.shrink();
     }
   }
 

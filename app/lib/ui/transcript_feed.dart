@@ -1,39 +1,94 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/chunk.dart';
+import '../models/entry.dart';
+import '../state/appearance.dart';
 import '../state/tool_detail.dart';
-import 'chunk_card.dart';
+import 'entry_row.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
-/// The shared transcript body: a feed of [ChunkCard]s with an empty state.
+/// One row of the feed: a single entry, or a run of tool calls folded behind
+/// a toggle.
+sealed class FeedRow {
+  const FeedRow();
+}
+
+class EntryFeedRow extends FeedRow {
+  const EntryFeedRow(this.entry);
+  final Entry entry;
+}
+
+class ToolGroupFeedRow extends FeedRow {
+  const ToolGroupFeedRow(this.key, this.tools);
+
+  /// The first tool's id: stable as the run grows, since entries are append-only.
+  final String key;
+  final List<Entry> tools;
+}
+
+bool _isBlankText(Entry e) =>
+    e.kind == EntryKind.text && (e.text ?? '').trim().isEmpty;
+
+/// Folds each maximal run of tool calls into one [ToolGroupFeedRow] when
+/// [collapseTools] is on. Blank text entries are transparent inside a run;
+/// any other entry ends it.
+List<FeedRow> groupEntries(List<Entry> entries, {required bool collapseTools}) {
+  if (!collapseTools) return [for (final e in entries) EntryFeedRow(e)];
+  final rows = <FeedRow>[];
+  var i = 0;
+  while (i < entries.length) {
+    final e = entries[i];
+    if (!e.isToolCall) {
+      rows.add(EntryFeedRow(e));
+      i++;
+      continue;
+    }
+    final tools = <Entry>[];
+    while (i < entries.length &&
+        (entries[i].isToolCall || _isBlankText(entries[i]))) {
+      if (entries[i].isToolCall) tools.add(entries[i]);
+      i++;
+    }
+    rows.add(ToolGroupFeedRow(tools.first.id, tools));
+  }
+  return rows;
+}
+
 /// Used by both the session detail and subagent trace screens.
 ///
 /// When [stickToBottom] is true (live feeds) the view opens pinned to the
 /// bottom and tails new items while the user stays at the bottom; once the user
 /// scrolls up it stops following until they return to the bottom. Static views
 /// (history, inlined traces) pass false to keep the natural top-anchored scroll.
-class TranscriptFeed extends StatefulWidget {
+class TranscriptFeed extends ConsumerStatefulWidget {
   const TranscriptFeed({
     super.key,
     required this.detailRef,
-    required this.chunks,
+    required this.entries,
     this.emptyText = 'No transcript yet.',
     this.stickToBottom = true,
   });
 
   /// Addresses the transcript so tool rows can fetch their bodies on demand.
   final ToolDetailRef detailRef;
-  final List<Chunk> chunks;
+  final List<Entry> entries;
   final String emptyText;
   final bool stickToBottom;
 
   @override
-  State<TranscriptFeed> createState() => _TranscriptFeedState();
+  ConsumerState<TranscriptFeed> createState() => _TranscriptFeedState();
 }
 
-class _TranscriptFeedState extends State<TranscriptFeed> {
+class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   final ScrollController _sc = ScrollController();
+
+  // Group keys the user has expanded.
+  final Set<String> _revealed = {};
+
+  // Ids of entries whose body the user expanded. Kept here, not in the rows,
+  // because a row's state is dropped when it scrolls out of the list.
+  final Set<String> _expanded = {};
 
   // Whether the view is currently tailing the bottom. Starts true so a freshly
   // opened feed lands on the newest content.
@@ -70,7 +125,7 @@ class _TranscriptFeedState extends State<TranscriptFeed> {
     // bottom only if the user was already there.
     if (widget.stickToBottom &&
         _following &&
-        !identical(widget.chunks, old.chunks)) {
+        !identical(widget.entries, old.entries)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
     }
   }
@@ -84,7 +139,7 @@ class _TranscriptFeedState extends State<TranscriptFeed> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.stickToBottom ? _sc : null;
-    if (widget.chunks.isEmpty) {
+    if (widget.entries.isEmpty) {
       // No width cap on the empty state: a single centred line gains nothing
       // from it.
       return ListView(
@@ -100,14 +155,64 @@ class _TranscriptFeedState extends State<TranscriptFeed> {
         ],
       );
     }
+    final collapse = ref.watch(
+      appearancePrefsProvider.select((p) => p.collapseToolCalls),
+    );
+    final rows = groupEntries(widget.entries, collapseTools: collapse);
     return CenteredBody(
       child: ListView.builder(
         controller: controller,
         padding: const EdgeInsets.all(12),
-        itemCount: widget.chunks.length,
-        itemBuilder: (_, i) =>
-            ChunkCard(detailRef: widget.detailRef, chunk: widget.chunks[i]),
+        itemCount: rows.length,
+        itemBuilder: (_, i) => switch (rows[i]) {
+          EntryFeedRow(:final entry) => EntryRow(
+            key: ValueKey(entry.id),
+            detailRef: widget.detailRef,
+            entry: entry,
+            expanded: _expanded.contains(entry.id),
+            onToggle: () => setState(() {
+              if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
+            }),
+          ),
+          ToolGroupFeedRow(:final key, :final tools) => _toolGroup(key, tools),
+        },
       ),
+    );
+  }
+
+  Widget _toolGroup(String key, List<Entry> tools) {
+    final revealed = _revealed.contains(key);
+    final noun = tools.length == 1 ? 'tool call' : 'tool calls';
+    final toggle = InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: () => setState(() {
+        if (!_revealed.remove(key)) _revealed.add(key);
+      }),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Text(
+          revealed ? '▾ hide $noun' : '▸ ${tools.length} $noun',
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 11,
+            color: AppColors.dim,
+          ),
+        ),
+      ),
+    );
+    return Column(
+      key: ValueKey('group:$key'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (revealed)
+          for (final t in tools)
+            EntryRow(
+              key: ValueKey(t.id),
+              detailRef: widget.detailRef,
+              entry: t,
+            ),
+        toggle,
+      ],
     );
   }
 }

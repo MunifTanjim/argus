@@ -1,15 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/state/transcript.dart';
 import 'package:argus/state/transcript_controller.dart';
 
 final _provider =
     NotifierProvider<TranscriptNotifier, TranscriptState>(TranscriptNotifier.new);
 
-Chunk _c(String id) => Chunk(id: id, kind: ChunkKind.user, text: id);
+Entry _c(String id) => Entry(id: id, kind: EntryKind.user, text: id);
 TranscriptDelta _d(String sub, int from, List<String> ids) =>
-    TranscriptDelta(subId: sub, fromIndex: from, chunks: ids.map(_c).toList());
+    TranscriptDelta(subId: sub, fromIndex: from, entries: ids.map(_c).toList());
 
 void main() {
   test('applyDelta appends from index, clamps overflow', () {
@@ -37,10 +37,10 @@ void main() {
 
     n.setSubId('s1');
     n.applyDelta(_d('s1', 0, ['a']));
-    expect(c.read(_provider).chunks.map((x) => x.id), ['a']);
+    expect(c.read(_provider).entries.map((x) => x.id), ['a']);
 
     n.applyDelta(_d('OTHER', 0, ['x'])); // ignored
-    expect(c.read(_provider).chunks.map((x) => x.id), ['a']);
+    expect(c.read(_provider).entries.map((x) => x.id), ['a']);
   });
 
   test('loaded flips true on the first matching delta, even when empty', () {
@@ -54,7 +54,7 @@ void main() {
 
     n.applyDelta(_d('s1', 0, const [])); // empty snapshot still counts as loaded
     expect(c.read(_provider).loaded, isTrue);
-    expect(c.read(_provider).chunks, isEmpty);
+    expect(c.read(_provider).entries, isEmpty);
   });
 
   test('provider family isolates chunks per key (pre/post-clear)', () {
@@ -64,11 +64,11 @@ void main() {
     final pre = c.read(transcriptProvider('c0').notifier);
     pre.setSubId('s1');
     pre.applyDelta(_d('s1', 0, ['old0', 'old1']));
-    expect(c.read(transcriptProvider('c0')).chunks.map((x) => x.id),
+    expect(c.read(transcriptProvider('c0')).entries.map((x) => x.id),
         ['old0', 'old1']);
 
     // New agent session id after /clear ⇒ different key ⇒ empty store.
-    expect(c.read(transcriptProvider('c1')).chunks, isEmpty);
+    expect(c.read(transcriptProvider('c1')).entries, isEmpty);
   });
 
   test('loaded survives a re-subscribe (reconnect), no spinner flash', () {

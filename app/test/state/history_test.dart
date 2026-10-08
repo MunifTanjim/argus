@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/history.dart';
 import 'package:argus/transport/jsonrpc.dart';
 import 'package:argus/transport/rpc_client.dart';
@@ -88,7 +88,7 @@ void main() {
           RpcClient(incoming: incoming.stream, sendFrame: frames.add);
       final result = await HistoryApi(() => client)
           .transcript(transcriptPath: '/t.jsonl');
-      expect(result, isA<Error<List<Chunk>>>());
+      expect(result, isA<Error<List<Entry>>>());
       expect(frames, isEmpty);
     });
 
@@ -160,10 +160,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       final id = idOf(sent.single);
       incoming.add(RpcMessage.fromJson(jsonDecode(
-          '{"jsonrpc":"2.0","id":"$id","result":{"chunks":[{"id":"c1","kind":"user","text":"Hello"}]}}')));
+          '{"jsonrpc":"2.0","id":"$id","result":{"entries":[{"id":"c1","kind":"user","text":"Hello"}]}}')));
 
       final result = await fut;
-      final chunks = (result as Ok<List<Chunk>>).value;
+      final chunks = (result as Ok<List<Entry>>).value;
       expect(chunks, hasLength(1));
       expect(chunks.first.id, 'c1');
       expect(chunks.first.text, 'Hello');
@@ -182,10 +182,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       final id = idOf(sent.single);
       incoming.add(RpcMessage.fromJson(jsonDecode(
-          '{"jsonrpc":"2.0","id":"$id","result":{"chunks":[]}}')));
+          '{"jsonrpc":"2.0","id":"$id","result":{"entries":[]}}')));
 
       final result = await fut;
-      expect((result as Ok<List<Chunk>>).value, isEmpty);
+      expect((result as Ok<List<Entry>>).value, isEmpty);
     });
   });
 
@@ -205,7 +205,7 @@ void main() {
 
     test('transcript() returns Error when client is null', () async {
       expect(await HistoryApi(() => null).transcript(transcriptPath: '/t.jsonl'),
-          isA<Error<List<Chunk>>>());
+          isA<Error<List<Entry>>>());
     });
   });
 }

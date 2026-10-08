@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/history_repository.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/history.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/tool_detail.dart';
@@ -11,11 +11,11 @@ import 'package:argus/ui/subagent_trace_screen.dart';
 
 class _FakeHistoryRepository implements HistoryRepository {
   _FakeHistoryRepository(this._chunks);
-  final List<Chunk> _chunks;
+  final List<Entry> _chunks;
   String? capturedAgentId;
 
   @override
-  Future<Result<List<Chunk>>> transcript({
+  Future<Result<List<Entry>>> transcript({
     String? nodeId,
     required String transcriptPath,
     String? agentId,
@@ -40,17 +40,15 @@ class _FakeHistoryRepository implements HistoryRepository {
 
 void main() {
   testWidgets('renders an inline trace without subscribing', (tester) async {
-    const item = Item(
+    const item = Entry(
       id: 'i',
-      kind: ItemKind.subagent,
+      kind: EntryKind.subagent,
       subagents: [
         Subagent(
           type: 'Explore',
           hasTrace: true,
           trace: [
-            Chunk(id: 't', kind: ChunkKind.ai, previewItemId: 'ti', items: [
-              Item(id: 'ti', kind: ItemKind.text, text: 'searched everything'),
-            ]),
+            Entry(id: 'ti', kind: EntryKind.text, text: 'searched everything'),
           ],
         ),
       ],
@@ -68,13 +66,11 @@ void main() {
 
   testWidgets('fetches nested trace for a history subagent', (tester) async {
     final repo = _FakeHistoryRepository(const [
-      Chunk(id: 't', kind: ChunkKind.ai, previewItemId: 'ti', items: [
-        Item(id: 'ti', kind: ItemKind.text, text: 'nested output'),
-      ]),
+      Entry(id: 'ti', kind: EntryKind.text, text: 'nested output'),
     ]);
-    const item = Item(
+    const item = Entry(
       id: 'i',
-      kind: ItemKind.subagent,
+      kind: EntryKind.subagent,
       // no inline trace => lazy history fetch
       subagents: [Subagent(type: 'Explore', id: 'B', hasTrace: true)],
     );

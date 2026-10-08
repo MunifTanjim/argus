@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:argus/models/chunk.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/ui/item_row.dart';
 import 'package:argus/ui/tool_detail.dart';
 
-Widget _wrapDetail(Item i) => MaterialApp(
+Widget _wrapDetail(Entry i) => MaterialApp(
     home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
 
-Widget _wrapRow(Item i) =>
+Widget _wrapRow(Entry i) =>
     MaterialApp(home: Scaffold(body: ItemRow(item: i)));
 
 void main() {
   testWidgets('TaskCreate shows subject, active form and description',
       (tester) async {
-    await tester.pumpWidget(_wrapDetail(const Item(
+    await tester.pumpWidget(_wrapDetail(const Entry(
       id: 'i',
-      kind: ItemKind.tool,
+      kind: EntryKind.tool,
       toolName: 'TaskCreate',
       toolInput:
           '{"subject":"Make reader seekable","description":"Add Seek method","activeForm":"Implementing seeking"}',
@@ -26,9 +26,9 @@ void main() {
   });
 
   testWidgets('TaskUpdate shows task id and changed fields', (tester) async {
-    await tester.pumpWidget(_wrapDetail(const Item(
+    await tester.pumpWidget(_wrapDetail(const Entry(
       id: 'i',
-      kind: ItemKind.tool,
+      kind: EntryKind.tool,
       toolName: 'TaskUpdate',
       toolInput: '{"taskId":"5","status":"in_progress"}',
     )));
@@ -39,9 +39,9 @@ void main() {
 
   testWidgets('registry drives the row label and checklist icon for TaskCreate',
       (tester) async {
-    await tester.pumpWidget(_wrapRow(const Item(
+    await tester.pumpWidget(_wrapRow(const Entry(
       id: 'i',
-      kind: ItemKind.tool,
+      kind: EntryKind.tool,
       toolName: 'TaskCreate',
       inputPreview: 'Make reader seekable',
     )));
@@ -50,9 +50,9 @@ void main() {
   });
 
   testWidgets('built-in Bash still renders via the switch', (tester) async {
-    await tester.pumpWidget(_wrapDetail(const Item(
+    await tester.pumpWidget(_wrapDetail(const Entry(
       id: 'i',
-      kind: ItemKind.tool,
+      kind: EntryKind.tool,
       toolName: 'Bash',
       toolInput: '{"command":"ls -la","description":"list"}',
       result: 'total 0',
