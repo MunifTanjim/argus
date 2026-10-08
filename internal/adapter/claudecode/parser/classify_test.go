@@ -1125,3 +1125,40 @@ func TestClassify_BashInputIsShellMsg(t *testing.T) {
 		t.Errorf("Command = %q, want %q (bash-input tags should be stripped)", sh.Command, "git push")
 	}
 }
+
+func withQueuedCommand(mode, prompt string) func(*parser.Entry) {
+	return func(e *parser.Entry) {
+		e.Attachment.Type = "queued_command"
+		e.Attachment.CommandMode = mode
+		e.Attachment.Prompt = prompt
+	}
+}
+
+func TestClassify_QueuedPromptSurfaced(t *testing.T) {
+	e := makeEntry("attachment", "att1", "2026-10-07T16:07:34.000Z",
+		json.RawMessage(`null`), withQueuedCommand("prompt", "also check the subscription"))
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("queued prompt should be classified")
+	}
+	q, is := msg.(parser.QueuedPromptMsg)
+	if !is {
+		t.Fatalf("got %T, want QueuedPromptMsg", msg)
+	}
+	if q.Text != "also check the subscription" || q.Timestamp.IsZero() {
+		t.Errorf("QueuedPromptMsg = %+v", q)
+	}
+}
+
+func TestClassify_QueuedNonPromptDropped(t *testing.T) {
+	for _, tc := range []struct{ mode, prompt string }{
+		{"task-notification", "<task-notification>done</task-notification>"},
+		{"prompt", "   "},
+	} {
+		e := makeEntry("attachment", "att1", "2026-10-07T16:07:34.000Z",
+			json.RawMessage(`null`), withQueuedCommand(tc.mode, tc.prompt))
+		if _, ok := parser.Classify(e); ok {
+			t.Errorf("queued_command mode=%q prompt=%q should be dropped", tc.mode, tc.prompt)
+		}
+	}
+}

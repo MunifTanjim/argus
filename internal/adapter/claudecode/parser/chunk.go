@@ -16,6 +16,7 @@ const (
 	ItemSubagent        // Task tool spawned subagent
 	ItemTeammateMessage // message from a teammate agent
 	ItemMemoryLoad      // nested memory file loaded into context ("Loaded X")
+	ItemQueuedPrompt    // message the user sent while the agent was busy
 )
 
 // DisplayItem is a structured element within an AI chunk's detail view.
@@ -28,8 +29,9 @@ type DisplayItem struct {
 	ToolSummary string // "main.go" for Read, "go test" for Bash
 	ToolResult  string
 	ToolError   bool
-	DurationMs  int64 // tool_use -> tool_result timestamp delta
-	TokenCount  int   // estimated tokens: len(text)/4
+	DurationMs  int64     // tool_use -> tool_result timestamp delta
+	TokenCount  int       // estimated tokens: len(text)/4
+	Timestamp   time.Time // when the item was written (ItemQueuedPrompt only)
 
 	// SessionID is the snake_case session_id of the line this item came from,
 	// used to key the on-disk tasks/ and teams/ dirs (see Entry.SessionID).
@@ -195,6 +197,14 @@ func BuildChunks(msgs []ClassifiedMsg) []Chunk {
 					Type:        "memory_load",
 					DisplayPath: m.DisplayPath,
 				}},
+			})
+		case QueuedPromptMsg:
+			// Same fold pattern as TeammateMsg: Claude Code delivers a queued
+			// prompt inside the running turn, so it does not start a user chunk.
+			aiBuf = append(aiBuf, AIMsg{
+				Timestamp: m.Timestamp,
+				IsMeta:    true,
+				Blocks:    []ContentBlock{{Type: "queued_prompt", Text: m.Text}},
 			})
 		case CompactMsg:
 			flush()

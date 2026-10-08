@@ -170,3 +170,25 @@ func TestFoldEntriesUserSkillAndOtherKinds(t *testing.T) {
 		t.Errorf("entries = %+v", es)
 	}
 }
+
+func TestFoldEntriesQueuedPromptIsUserEntryInsideTurn(t *testing.T) {
+	cs := []parser.Chunk{
+		{Type: parser.UserChunk, Timestamp: t0, UserText: "go"},
+		{Type: parser.AIChunk, Timestamp: t0, Items: []parser.DisplayItem{
+			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu1", ToolResult: "ok"},
+			{Type: parser.ItemQueuedPrompt, Text: "also do X", Timestamp: t0.Add(time.Minute)},
+			{Type: parser.ItemOutput, Text: "done, and X too"},
+		}},
+	}
+	es := foldEntries(cs, nil, false)
+	want := []EntryKind{EntryUser, EntryTool, EntryUser, EntryText, EntryTurnEnd}
+	if got := kinds(es); !reflect.DeepEqual(got, want) {
+		t.Fatalf("kinds = %v, want %v", got, want)
+	}
+	if es[2].Text != "also do X" || es[2].ID != "1.1" || es[2].Timestamp != formatTS(t0.Add(time.Minute)) {
+		t.Errorf("queued entry = %+v", es[2])
+	}
+	if es[4].ToolCount != 1 {
+		t.Errorf("footer ToolCount = %d, want 1 (queued prompt is not a call)", es[4].ToolCount)
+	}
+}

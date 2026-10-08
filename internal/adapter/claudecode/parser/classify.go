@@ -18,14 +18,19 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		return nil, false
 	}
 
-	// Only nested_memory ("Loaded X") surfaces; every other attachment subtype
-	// is infrastructure. Enumerating tightly keeps the "unknown → drop" invariant.
+	// Only nested_memory ("Loaded X") and queued user prompts surface; every
+	// other attachment subtype (incl. queued task notifications) is
+	// infrastructure. Enumerating tightly keeps the "unknown → drop" invariant.
 	if e.Type == "attachment" {
 		if e.Attachment.Type == "nested_memory" && e.Attachment.DisplayPath != "" {
 			return MemoryLoadMsg{
 				Timestamp:   ts,
 				DisplayPath: e.Attachment.DisplayPath,
 			}, true
+		}
+		if e.Attachment.Type == "queued_command" && e.Attachment.CommandMode == "prompt" &&
+			strings.TrimSpace(e.Attachment.Prompt) != "" {
+			return QueuedPromptMsg{Timestamp: ts, Text: e.Attachment.Prompt}, true
 		}
 		return nil, false
 	}

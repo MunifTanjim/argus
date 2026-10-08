@@ -52,12 +52,14 @@ type Entry struct {
 	LeafUUID string `json:"leafUuid"`
 	Summary  string `json:"summary"`
 
-	// Attachment payload (Claude Code 2.1+ UI side-events). Only nested_memory
-	// (the "Loaded X" pill) is surfaced; other subtypes are dropped by Classify.
-	// Body omitted by design — we show the path, not file contents.
+	// Attachment payload (Claude Code 2.1+ UI side-events); Classify picks the
+	// subtypes that surface. Memory body omitted by design — we show the path,
+	// not contents.
 	Attachment struct {
 		Type        string `json:"type"`
 		DisplayPath string `json:"displayPath"`
+		Prompt      string `json:"prompt"`      // queued_command: the queued text
+		CommandMode string `json:"commandMode"` // queued_command: "prompt" for user input
 	} `json:"attachment"`
 }
 

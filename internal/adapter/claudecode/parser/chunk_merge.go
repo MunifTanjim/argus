@@ -189,6 +189,12 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 						Type: ItemMemoryLoad,
 						Text: b.DisplayPath,
 					})
+				case "queued_prompt":
+					items = append(items, DisplayItem{
+						Type:      ItemQueuedPrompt,
+						Text:      b.Text,
+						Timestamp: m.Timestamp,
+					})
 				case "text":
 					// Attach the skill file body to the most recent Skill item's result.
 					if body, ok := skillToolBody(b.Text); ok {
