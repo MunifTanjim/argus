@@ -184,40 +184,85 @@ void main() {
     });
   });
 
-  testWidgets('default: runs collapsed to a count summary', (tester) async {
+  Finder inKey(String key, Finder f) =>
+      find.descendant(of: find.byKey(ValueKey(key)), matching: f);
+
+  void expectCounts(String key, {int? thinking, int? tools}) {
+    expect(
+      inKey(key, find.byIcon(Icons.lightbulb)),
+      thinking == null ? findsNothing : findsOneWidget,
+    );
+    expect(
+      inKey(key, find.byIcon(Icons.build)),
+      tools == null ? findsNothing : findsOneWidget,
+    );
+    if (thinking != null) {
+      expect(inKey(key, find.text(' $thinking')), findsWidgets);
+    }
+    if (tools != null) {
+      expect(inKey(key, find.text(' $tools')), findsWidgets);
+    }
+    expect(inKey(key, find.textContaining('thinking')), findsNothing);
+    expect(inKey(key, find.textContaining('tool')), findsNothing);
+  }
+
+  testWidgets('default: runs collapsed to an icon count summary', (
+    tester,
+  ) async {
+    final sem = tester.ensureSemantics();
     await tester.pumpWidget(_feed({}));
     await tester.pumpAndSettle();
-    expect(find.text('▸ 1 thinking · 2 tools'), findsOneWidget);
-    expect(find.text('▸ 1 tool'), findsNWidgets(2));
-    expect(find.text('▸ 1 thinking'), findsOneWidget);
+    expectCounts('run:h', thinking: 1, tools: 2);
+    expect(inKey('run:h', find.byIcon(Icons.chevron_right)), findsOneWidget);
+    expect(find.bySemanticsLabel('1 thinking, 2 tools'), findsOneWidget);
+    expect(find.bySemanticsLabel('1 tool'), findsNWidgets(2));
+    expect(find.bySemanticsLabel('1 thinking'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run:f')), findsOneWidget);
+    expectCounts('run:f', tools: 1);
+    expectCounts('run:k', thinking: 1);
     expect(find.text('ZZAlpha'), findsNothing);
     expect(find.text('Thinking'), findsNothing);
     expect(find.text('prose'), findsOneWidget);
+    sem.dispose();
   });
 
   testWidgets('tap expands; footer and header collapse', (tester) async {
+    final sem = tester.ensureSemantics();
     await tester.pumpWidget(_feed({}));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('▸ 1 thinking · 2 tools'));
+    await tester.tap(find.byKey(const ValueKey('run:h')));
     await tester.pump();
-    expect(find.text('▾ collapse · 1 thinking · 2 tools'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-top:h')), findsOneWidget);
+    expect(inKey('run-top:h', find.byIcon(Icons.expand_more)), findsOneWidget);
+    expectCounts('run-top:h', thinking: 1, tools: 2);
+    expect(
+      find.bySemanticsLabel('collapse, 1 thinking, 2 tools'),
+      findsNWidgets(2), // header and footer read the same
+    );
     expect(find.text('ZZAlpha'), findsOneWidget);
     expect(find.text('ZZBeta'), findsOneWidget);
     expect(find.text('Thinking'), findsOneWidget);
-    expect(find.text('▴ collapse'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-bottom:h')), findsOneWidget);
+    expect(
+      inKey('run-bottom:h', find.byIcon(Icons.expand_less)),
+      findsOneWidget,
+    );
+    expectCounts('run-bottom:h', thinking: 1, tools: 2);
+    expect(find.textContaining('collapse'), findsNothing);
 
-    await tester.tap(find.text('▴ collapse'));
+    await tester.tap(find.byKey(const ValueKey('run-bottom:h')));
     await tester.pump();
     expect(find.text('ZZAlpha'), findsNothing);
-    expect(find.text('▸ 1 thinking · 2 tools'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run:h')), findsOneWidget);
 
-    await tester.tap(find.text('▸ 1 thinking · 2 tools'));
+    await tester.tap(find.byKey(const ValueKey('run:h')));
     await tester.pump();
-    await tester.tap(find.text('▾ collapse · 1 thinking · 2 tools'));
+    await tester.tap(find.byKey(const ValueKey('run-top:h')));
     await tester.pump();
     expect(find.text('ZZAlpha'), findsNothing);
-    expect(find.text('▴ collapse'), findsNothing);
+    expect(find.byKey(const ValueKey('run-bottom:h')), findsNothing);
+    sem.dispose();
   });
 
   testWidgets('verbose: runs start expanded and can collapse', (tester) async {
@@ -225,14 +270,71 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('ZZAlpha'), findsOneWidget);
     expect(find.text('ZZGamma'), findsOneWidget);
-    expect(find.text('▾ collapse · 1 thinking · 2 tools'), findsOneWidget);
-    expect(find.text('▴ collapse'), findsNWidgets(4));
+    expectCounts('run-top:h', thinking: 1, tools: 2);
+    for (final k in ['h', 'e', 'f', 'k']) {
+      expect(find.byKey(ValueKey('run-bottom:$k')), findsOneWidget);
+    }
 
-    await tester.tap(find.text('▾ collapse · 1 thinking · 2 tools'));
+    await tester.tap(find.byKey(const ValueKey('run-top:h')));
     await tester.pump();
     expect(find.text('ZZAlpha'), findsNothing);
-    expect(find.text('▸ 1 thinking · 2 tools'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run:h')), findsOneWidget);
     expect(find.text('ZZGamma'), findsOneWidget);
+  });
+
+  testWidgets('expanding a run near the bottom brings it into view', (
+    tester,
+  ) async {
+    final long = [
+      for (var i = 0; i < 30; i++)
+        Entry(id: 'p$i', kind: EntryKind.text, text: 'prose $i'),
+      for (var i = 0; i < 6; i++)
+        Entry(id: 't$i', kind: EntryKind.tool, toolName: 'ZZTool$i'),
+      for (var i = 30; i < 60; i++)
+        Entry(id: 'p$i', kind: EntryKind.text, text: 'prose $i'),
+    ];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appearanceStoreProvider.overrideWithValue(
+            AppearanceStore(_FakeKv({})),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: TranscriptFeed(
+              detailRef: const ToolDetailRef.live('s'),
+              entries: long,
+              stickToBottom: false,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final list = tester.widget<SuperListView>(find.byType(SuperListView));
+    // Put the collapsed run's summary (row 30) at the bottom edge.
+    list.listController!.jumpToItem(
+      index: 30,
+      scrollController: list.controller!,
+      alignment: 1,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('run:t0')));
+    await tester.pumpAndSettle();
+    final screen = tester.getRect(find.byType(SuperListView));
+    final bottom = tester.getRect(find.byKey(const ValueKey('run-bottom:t0')));
+    final top = tester.getRect(find.byKey(const ValueKey('run-top:t0')));
+    expect(
+      bottom.bottom,
+      lessThanOrEqualTo(screen.bottom + 1),
+      reason: 'the run\'s bottom row is on screen',
+    );
+    expect(
+      top.top,
+      greaterThanOrEqualTo(screen.top - 1),
+      reason: 'and so is its top row',
+    );
   });
 
   testWidgets('an expanded entry stays expanded after scrolling away', (
