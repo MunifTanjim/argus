@@ -31,144 +31,147 @@ class SettingsScreen extends ConsumerWidget {
     final sshHostPortValue = _sshHostPortOrNull(creds?.url);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: CenteredBody(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.palette_outlined),
-                      title: const Text('Appearance'),
-                      subtitle: const Text('Transcript display options'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const AppearanceScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.terminal),
-                      title: const Text('Terminal'),
-                      subtitle: const Text('Emulator for live screens'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const TerminalSettingsScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.notifications_outlined),
-                      title: const Text('Push Notifications'),
-                      subtitle: const Text('Delivery method and preferences'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const PushSettingsScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.mic_none),
-                      title: const Text('Voice Input'),
-                      subtitle: const Text('Transcription provider and model'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const VoiceScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.key_outlined),
-                      title: const Text('Device Trust'),
-                      subtitle: const Text('Status, enrollment & recovery'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const DeviceIdentityScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.info_outline),
-                      title: const Text('About'),
-                      subtitle: const Text('Privacy policy & licenses'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const AboutScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    _LabeledField(
-                      label: 'Gateway',
-                      child: SelectableText(
-                        creds?.url ?? '(not paired)',
-                        style: _monoStyle,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ref.watch(serverInfoProvider).maybeWhen(
-                          data: (info) =>
-                              info == null ? _unavailable : _serverInfo(info),
-                          loading: () => _versionRow,
-                          orElse: () => _unavailable,
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.palette_outlined),
+                        title: const Text('Appearance'),
+                        subtitle: const Text('Transcript display options'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const AppearanceScreen()),
                         ),
+                      ),
+                      const SizedBox(height: 24),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.terminal),
+                        title: const Text('Terminal'),
+                        subtitle: const Text('Emulator for live screens'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const TerminalSettingsScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.notifications_outlined),
+                        title: const Text('Push Notifications'),
+                        subtitle: const Text('Delivery method and preferences'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const PushSettingsScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.mic_none),
+                        title: const Text('Voice Input'),
+                        subtitle: const Text('Transcription provider and model'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const VoiceScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.key_outlined),
+                        title: const Text('Device Trust'),
+                        subtitle: const Text('Status, enrollment & recovery'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const DeviceIdentityScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.info_outline),
+                        title: const Text('About'),
+                        subtitle: const Text('Privacy policy & licenses'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const AboutScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      _LabeledField(
+                        label: 'Gateway',
+                        child: SelectableText(
+                          creds?.url ?? '(not paired)',
+                          style: _monoStyle,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ref.watch(serverInfoProvider).maybeWhen(
+                            data: (info) =>
+                                info == null ? _unavailable : _serverInfo(info),
+                            loading: () => _versionRow,
+                            orElse: () => _unavailable,
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (sshHostPortValue != null) ...[
+                      OutlinedButton(
+                        key: const Key('forget-host-key'),
+                        onPressed: () async {
+                          await ref
+                              .read(hostKeyStoreProvider)
+                              .forget(sshHostPortValue);
+                          // Redial now so a connection stuck on ConnState.failed
+                          // (rejected host key) recovers without waiting for a
+                          // resume; the new key is re-pinned trust-on-first-use.
+                          ref.read(gatewayProvider)?.reconnectNow();
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(
+                              'Forgot host key for $sshHostPortValue. Reconnecting; it will be re-pinned.',
+                            ),
+                          ));
+                        },
+                        child: const Text('Forget SSH host key'),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    OutlinedButton(
+                      onPressed: () async {
+                        // Clearing credentials disposes the gateway, which
+                        // unregisters this device from it (see gatewayProvider).
+                        await ref.read(profileStoreProvider).clearActiveId();
+                        ref.read(credentialsProvider.notifier).state = null;
+                      },
+                      child: const Text('Disconnect'),
+                    ),
                   ],
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (sshHostPortValue != null) ...[
-                    OutlinedButton(
-                      key: const Key('forget-host-key'),
-                      onPressed: () async {
-                        await ref
-                            .read(hostKeyStoreProvider)
-                            .forget(sshHostPortValue);
-                        // Redial now so a connection stuck on ConnState.failed
-                        // (rejected host key) recovers without waiting for a
-                        // resume; the new key is re-pinned trust-on-first-use.
-                        ref.read(gatewayProvider)?.reconnectNow();
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(
-                            'Forgot host key for $sshHostPortValue. Reconnecting; it will be re-pinned.',
-                          ),
-                        ));
-                      },
-                      child: const Text('Forget SSH host key'),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  OutlinedButton(
-                    onPressed: () async {
-                      // Clearing credentials disposes the gateway, which
-                      // unregisters this device from it (see gatewayProvider).
-                      await ref.read(profileStoreProvider).clearActiveId();
-                      ref.read(credentialsProvider.notifier).state = null;
-                    },
-                    child: const Text('Disconnect'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

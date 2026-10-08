@@ -36,49 +36,52 @@ class DeviceIdentityScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Device Trust')),
-      body: CenteredBody(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _StatusCard(summary: summary),
-            if (status == TrustStatus.supersededLiveRoot ||
-                status == TrustStatus.supersededNoRoot) ...[
-              const SizedBox(height: 8),
-              _SupersededCard(summary: summary, canAdopt: status == TrustStatus.supersededLiveRoot),
-            ],
-            if (summary.equivocation) ...[
-              const SizedBox(height: 8),
-              const _EquivocationBanner(),
-            ],
-            const SizedBox(height: 8),
-            ExpansionTile(
-              initiallyExpanded: enrollExpanded,
-              title: const Text('Enroll this Device'),
-              children: [
-                identityAsync.when(
-                  data: (kp) => _EnrollBody(kp: kp),
-                  loading: () => const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: CircularProgressIndicator(),
-                  ),
-                  error: (e, _) => Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text('Error: $e',
-                        style: const TextStyle(color: AppColors.error)),
-                  ),
-                ),
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _StatusCard(summary: summary),
+              if (status == TrustStatus.supersededLiveRoot ||
+                  status == TrustStatus.supersededNoRoot) ...[
+                const SizedBox(height: 8),
+                _SupersededCard(summary: summary, canAdopt: status == TrustStatus.supersededLiveRoot),
               ],
-            ),
-            if (summary.signers.isNotEmpty && trustSignersVerifiable(status))
+              if (summary.equivocation) ...[
+                const SizedBox(height: 8),
+                const _EquivocationBanner(),
+              ],
+              const SizedBox(height: 8),
               ExpansionTile(
-                title: const Text('Verify Trust'),
-                children: [_VerifyBody(summary: summary)],
+                initiallyExpanded: enrollExpanded,
+                title: const Text('Enroll this Device'),
+                children: [
+                  identityAsync.when(
+                    data: (kp) => _EnrollBody(kp: kp),
+                    loading: () => const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (e, _) => Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text('Error: $e',
+                          style: const TextStyle(color: AppColors.error)),
+                    ),
+                  ),
+                ],
               ),
-            const ExpansionTile(
-              title: Text('Advanced'),
-              children: [_AdvancedBody()],
-            ),
-          ],
+              if (summary.signers.isNotEmpty && trustSignersVerifiable(status))
+                ExpansionTile(
+                  title: const Text('Verify Trust'),
+                  children: [_VerifyBody(summary: summary)],
+                ),
+              const ExpansionTile(
+                title: Text('Advanced'),
+                children: [_AdvancedBody()],
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -14,19 +14,22 @@ class AppearanceScreen extends ConsumerWidget {
     );
     return Scaffold(
       appBar: AppBar(title: const Text('Appearance')),
-      body: CenteredBody(
-        child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          children: [
-            SwitchListTile(
-              value: verbose,
-              onChanged: ref
-                  .read(appearancePrefsProvider.notifier)
-                  .setVerboseTranscript,
-              title: const Text('Verbose transcript'),
-              subtitle: const Text('Expand thinking and tool runs by default'),
-            ),
-          ],
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              SwitchListTile(
+                value: verbose,
+                onChanged: ref
+                    .read(appearancePrefsProvider.notifier)
+                    .setVerboseTranscript,
+                title: const Text('Verbose transcript'),
+                subtitle: const Text('Expand thinking and tool runs by default'),
+              ),
+            ],
+          ),
         ),
       ),
     );

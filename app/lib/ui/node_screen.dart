@@ -140,30 +140,33 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
         false;
     return Scaffold(
       appBar: AppBar(title: Text(widget.label)),
-      body: CenteredBody(
-        child: error != null
-            ? _errorBody(error)
-            : info == null
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (info.os.isNotEmpty) _row('OS', info.os),
-                  _row('Uptime', formatUptime(info.uptimeSeconds)),
-                  if (info.battery != null) _row('Battery', formatBattery(info.battery!)),
-                  if (wakelock)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: info.wakelock.on,
-                      title: const Text('Keep awake'),
-                      subtitle: Text(
-                        _awakeLabel(info.wakelock),
-                        style: const TextStyle(color: AppColors.dim, fontSize: 11),
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          child: error != null
+              ? _errorBody(error)
+              : info == null
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (info.os.isNotEmpty) _row('OS', info.os),
+                    _row('Uptime', formatUptime(info.uptimeSeconds)),
+                    if (info.battery != null) _row('Battery', formatBattery(info.battery!)),
+                    if (wakelock)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: info.wakelock.on,
+                        title: const Text('Keep awake'),
+                        subtitle: Text(
+                          _awakeLabel(info.wakelock),
+                          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                        ),
+                        onChanged: _setting ? null : _onToggle,
                       ),
-                      onChanged: _setting ? null : _onToggle,
-                    ),
-                ],
-              ),
+                  ],
+                ),
+        ),
       ),
     );
   }

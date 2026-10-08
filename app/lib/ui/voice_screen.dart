@@ -72,54 +72,57 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
     final dirty = _key.text.trim() != prefs.apiKey;
     return Scaffold(
       appBar: AppBar(title: const Text('Voice Input')),
-      body: CenteredBody(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _header('Provider'),
-            RadioGroup<VoiceProvider>(
-              groupValue: prefs.provider,
-              onChanged: (v) {
-                if (v != null) {
-                  ref.read(voicePrefsProvider.notifier).setProvider(v);
-                }
-              },
-              child: Column(
-                children: [
-                  for (final p in VoiceProvider.values)
-                    RadioListTile<VoiceProvider>(
-                      key: Key('voice-provider-${p.name}'),
-                      contentPadding: EdgeInsets.zero,
-                      value: p,
-                      title: Text(p.label),
-                    ),
-                ],
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _header('Provider'),
+              RadioGroup<VoiceProvider>(
+                groupValue: prefs.provider,
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(voicePrefsProvider.notifier).setProvider(v);
+                  }
+                },
+                child: Column(
+                  children: [
+                    for (final p in VoiceProvider.values)
+                      RadioListTile<VoiceProvider>(
+                        key: Key('voice-provider-${p.name}'),
+                        contentPadding: EdgeInsets.zero,
+                        value: p,
+                        title: Text(p.label),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            if (prefs.provider == VoiceProvider.openrouter) ...[
-              const SizedBox(height: 24),
-              _header('OpenRouter'),
-              ..._openRouterBody(prefs, dirty),
+              if (prefs.provider == VoiceProvider.openrouter) ...[
+                const SizedBox(height: 24),
+                _header('OpenRouter'),
+                ..._openRouterBody(prefs, dirty),
+              ],
+              if (prefs.provider == VoiceProvider.system) ...[
+                const SizedBox(height: 24),
+                _header('System'),
+                ..._systemBody(prefs),
+              ],
+              if (!prefs.enabled) ...[
+                const SizedBox(height: 16),
+                Text(
+                  prefs.provider == VoiceProvider.off
+                      ? 'Pick a provider to turn on the mic button.'
+                      : 'Add a key to turn on the mic button.',
+                  style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                ),
+              ],
+              if (prefs.enabled) ...[
+                const SizedBox(height: 24),
+                ..._tryItBody(prefs),
+              ],
             ],
-            if (prefs.provider == VoiceProvider.system) ...[
-              const SizedBox(height: 24),
-              _header('System'),
-              ..._systemBody(prefs),
-            ],
-            if (!prefs.enabled) ...[
-              const SizedBox(height: 16),
-              Text(
-                prefs.provider == VoiceProvider.off
-                    ? 'Pick a provider to turn on the mic button.'
-                    : 'Add a key to turn on the mic button.',
-                style: const TextStyle(color: AppColors.dim, fontSize: 12),
-              ),
-            ],
-            if (prefs.enabled) ...[
-              const SizedBox(height: 24),
-              ..._tryItBody(prefs),
-            ],
-          ],
+          ),
         ),
       ),
     );

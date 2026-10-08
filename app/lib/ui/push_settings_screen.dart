@@ -83,33 +83,36 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     final active = _controller.activeBackend;
     return Scaffold(
       appBar: AppBar(title: const Text('Push Notifications')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : CenteredBody(
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _registrationStatus(),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: active == null ? null : _sendTest,
-                    icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('Send test notification'),
-                  ),
-                  const SizedBox(height: 16),
-                  _header('Pause'),
-                  ..._pauseBody(),
-                  const SizedBox(height: 16),
-                  _header('Provider'),
-                  ..._providerBody(),
-                  if (_showDistributorPicker) ...[
+      body: SafeArea(
+        top: false,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : CenteredBody(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _registrationStatus(),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: active == null ? null : _sendTest,
+                      icon: const Icon(Icons.notifications_active_outlined),
+                      label: const Text('Send test notification'),
+                    ),
                     const SizedBox(height: 16),
-                    _header('Distributor'),
-                    ..._distributorBody(),
+                    _header('Pause'),
+                    ..._pauseBody(),
+                    const SizedBox(height: 16),
+                    _header('Provider'),
+                    ..._providerBody(),
+                    if (_showDistributorPicker) ...[
+                      const SizedBox(height: 16),
+                      _header('Distributor'),
+                      ..._distributorBody(),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
+      ),
     );
   }
 

@@ -175,139 +175,142 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     final keys = ref.watch(keysProvider);
     return Scaffold(
       appBar: AppBar(title: Text(widget.initial == null ? 'New connection' : 'Edit connection')),
-      body: CenteredBody(
-        maxWidth: 480,
-        child: Padding(
-          // Scaffold.resizeToAvoidBottomInset already shrinks the body for the
-          // keyboard; adding viewInsets here too would double-count and push the
-          // focused field off-screen.
-          padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SegmentedButton<ProfileMode>(
-                  segments: const [
-                    ButtonSegment(
-                        value: ProfileMode.direct,
-                        label: Text('Direct', key: Key('mode-direct')),
-                        icon: Icon(Icons.link)),
-                    ButtonSegment(
-                        value: ProfileMode.ssh,
-                        label: Text('SSH', key: Key('mode-ssh')),
-                        icon: Icon(Icons.terminal)),
+      body: SafeArea(
+        top: false,
+        child: CenteredBody(
+          maxWidth: 480,
+          child: Padding(
+            // Scaffold.resizeToAvoidBottomInset already shrinks the body for the
+            // keyboard; adding viewInsets here too would double-count and push the
+            // focused field off-screen.
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SegmentedButton<ProfileMode>(
+                    segments: const [
+                      ButtonSegment(
+                          value: ProfileMode.direct,
+                          label: Text('Direct', key: Key('mode-direct')),
+                          icon: Icon(Icons.link)),
+                      ButtonSegment(
+                          value: ProfileMode.ssh,
+                          label: Text('SSH', key: Key('mode-ssh')),
+                          icon: Icon(Icons.terminal)),
+                    ],
+                    selected: {_mode},
+                    onSelectionChanged: (s) => setState(() { _mode = s.first; _error = null; }),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    key: const Key('profile-name'),
+                    controller: _name,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                  ),
+                  if (_mode == ProfileMode.direct)
+                    TextField(
+                      key: const Key('url'),
+                      controller: _url,
+                      decoration: const InputDecoration(labelText: 'Gateway URL'),
+                    )
+                  else ...[
+                    TextField(
+                      key: const Key('ssh-host'),
+                      controller: _host,
+                      decoration: const InputDecoration(labelText: 'SSH host'),
+                    ),
+                    TextField(
+                      key: const Key('ssh-user'),
+                      controller: _user,
+                      decoration: const InputDecoration(
+                          labelText: 'SSH user (optional)', helperText: 'Defaults to root'),
+                    ),
+                    TextField(
+                      key: const Key('ssh-port'),
+                      controller: _sshPort,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'SSH port (optional, default 22)'),
+                    ),
+                    TextField(
+                      key: const Key('ssh-gateway-port'),
+                      controller: _gatewayPort,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Gateway port'),
+                    ),
+                    const SizedBox(height: 8),
+                    keys.maybeWhen(
+                      data: (list) => DropdownButtonFormField<String>(
+                        key: const Key('ssh-key-picker'),
+                        initialValue: list.any((k) => k.id == _keyId) ? _keyId : null,
+                        decoration: const InputDecoration(labelText: 'SSH key'),
+                        items: [
+                          for (final k in list)
+                            DropdownMenuItem(value: k.id, child: Text(k.name)),
+                        ],
+                        onChanged: (v) => setState(() => _keyId = v),
+                      ),
+                      orElse: () => const LinearProgressIndicator(),
+                    ),
                   ],
-                  selected: {_mode},
-                  onSelectionChanged: (s) => setState(() { _mode = s.first; _error = null; }),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  key: const Key('profile-name'),
-                  controller: _name,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                ),
-                if (_mode == ProfileMode.direct)
                   TextField(
-                    key: const Key('url'),
-                    controller: _url,
-                    decoration: const InputDecoration(labelText: 'Gateway URL'),
-                  )
-                else ...[
-                  TextField(
-                    key: const Key('ssh-host'),
-                    controller: _host,
-                    decoration: const InputDecoration(labelText: 'SSH host'),
-                  ),
-                  TextField(
-                    key: const Key('ssh-user'),
-                    controller: _user,
-                    decoration: const InputDecoration(
-                        labelText: 'SSH user (optional)', helperText: 'Defaults to root'),
-                  ),
-                  TextField(
-                    key: const Key('ssh-port'),
-                    controller: _sshPort,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                        labelText: 'SSH port (optional, default 22)'),
-                  ),
-                  TextField(
-                    key: const Key('ssh-gateway-port'),
-                    controller: _gatewayPort,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Gateway port'),
-                  ),
-                  const SizedBox(height: 8),
-                  keys.maybeWhen(
-                    data: (list) => DropdownButtonFormField<String>(
-                      key: const Key('ssh-key-picker'),
-                      initialValue: list.any((k) => k.id == _keyId) ? _keyId : null,
-                      decoration: const InputDecoration(labelText: 'SSH key'),
-                      items: [
-                        for (final k in list)
-                          DropdownMenuItem(value: k.id, child: Text(k.name)),
-                      ],
-                      onChanged: (v) => setState(() => _keyId = v),
-                    ),
-                    orElse: () => const LinearProgressIndicator(),
-                  ),
-                ],
-                TextField(
-                  key: const Key('token'),
-                  controller: _token,
-                  obscureText: !_showToken,
-                  decoration: InputDecoration(
-                    labelText: 'Token',
-                    suffixIcon: IconButton(
-                      key: const Key('token-visibility'),
-                      icon: Icon(
-                          _showToken ? Icons.visibility_off : Icons.visibility),
-                      tooltip: _showToken ? 'Hide token' : 'Show token',
-                      onPressed: () => setState(() => _showToken = !_showToken),
+                    key: const Key('token'),
+                    controller: _token,
+                    obscureText: !_showToken,
+                    decoration: InputDecoration(
+                      labelText: 'Token',
+                      suffixIcon: IconButton(
+                        key: const Key('token-visibility'),
+                        icon: Icon(
+                            _showToken ? Icons.visibility_off : Icons.visibility),
+                        tooltip: _showToken ? 'Hide token' : 'Show token',
+                        onPressed: () => setState(() => _showToken = !_showToken),
+                      ),
                     ),
                   ),
-                ),
-                SwitchListTile(
-                  key: const Key('e2e-toggle'),
-                  value: _e2eEnabled,
-                  onChanged: (v) => setState(() => _e2eEnabled = v),
-                  title: const Text('End-to-end encryption'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!,
-                      key: const Key('form-error'),
-                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ],
-                const SizedBox(height: 16),
-                FilledButton(
-                  key: const Key('profile-submit'),
-                  onPressed: _submit,
-                  child: Text(widget.submitLabel),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  key: const Key('profile-test'),
-                  onPressed: _testing ? null : _testConnection,
-                  child: _testing
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Test connection'),
-                ),
-                if (widget.onDelete != null) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                    key: const Key('profile-delete'),
-                    style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error),
-                    onPressed: _confirmDelete,
-                    child: const Text('Delete connection'),
+                  SwitchListTile(
+                    key: const Key('e2e-toggle'),
+                    value: _e2eEnabled,
+                    onChanged: (v) => setState(() => _e2eEnabled = v),
+                    title: const Text('End-to-end encryption'),
+                    contentPadding: EdgeInsets.zero,
                   ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_error!,
+                        key: const Key('form-error'),
+                        style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    key: const Key('profile-submit'),
+                    onPressed: _submit,
+                    child: Text(widget.submitLabel),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    key: const Key('profile-test'),
+                    onPressed: _testing ? null : _testConnection,
+                    child: _testing
+                        ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Test connection'),
+                  ),
+                  if (widget.onDelete != null) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      key: const Key('profile-delete'),
+                      style: TextButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error),
+                      onPressed: _confirmDelete,
+                      child: const Text('Delete connection'),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
