@@ -16,7 +16,7 @@ func summarize(path string) *session.Summary {
 	if err != nil || len(pchunks) == 0 {
 		return nil
 	}
-	s := summarizeChunks(foldChunks(pchunks, nil, nil))
+	s := summarizeChunks(pchunks)
 	if keys := strings.Join(parser.ResolveSessionDirKeys(pchunks).TasksCandidates(), " "); keys != "" {
 		if s == nil {
 			s = &session.Summary{}
@@ -26,26 +26,25 @@ func summarize(path string) *session.Summary {
 	return s
 }
 
-// summarizeChunks distills the list-view summary from chronological chunks: the
-// latest model/context/tokens, the latest task (last user chunk's first line),
-// and the last-activity timestamp. Returns nil when no field could be filled.
-func summarizeChunks(chunks []Chunk) *session.Summary {
+// summarizeChunks counts a turn still in progress, and takes the task from the
+// last user chunk's first line. Returns nil when no field could be filled.
+func summarizeChunks(pchunks []parser.Chunk) *session.Summary {
 	s := &session.Summary{}
-	for i := len(chunks) - 1; i >= 0; i-- {
-		c := chunks[i]
-		if s.LastActivity == "" && c.Timestamp != "" {
-			s.LastActivity = c.Timestamp
+	for i := len(pchunks) - 1; i >= 0; i-- {
+		pc := pchunks[i]
+		if s.LastActivity == "" && !pc.Timestamp.IsZero() {
+			s.LastActivity = formatTS(pc.Timestamp)
 		}
-		if s.ModelName == "" && c.Kind == ChunkAI && c.ModelName != "" {
-			s.ModelName = c.ModelName
-			s.ModelColor = c.ModelColor
-			if c.HasContext {
-				s.HasContext, s.ContextPct = true, c.ContextPct
+		if s.ModelName == "" && pc.Type == parser.AIChunk && pc.Model != "" {
+			s.ModelName = modelDisplayName(pc.Model)
+			s.ModelColor = modelColorHex(pc.Model)
+			if d := parser.ComputeContextDelta(pc.Cycles); d != nil {
+				s.HasContext, s.ContextPct = true, d.LastUsagePct
 			}
-			s.Tokens = c.Usage.Context()
+			s.Tokens = transformUsage(pc.Usage).Context()
 		}
-		if s.Task == "" && c.Kind == ChunkUser && strings.TrimSpace(c.Text) != "" {
-			s.Task = firstLineOf(c.Text)
+		if s.Task == "" && pc.Type == parser.UserChunk && strings.TrimSpace(pc.UserText) != "" {
+			s.Task = firstLineOf(pc.UserText)
 		}
 		if s.ModelName != "" && s.Task != "" && s.LastActivity != "" {
 			break

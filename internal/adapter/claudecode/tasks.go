@@ -138,7 +138,7 @@ func taskIDLess(a, b string) bool {
 }
 
 // TaskActivityCount counts signals in the main transcript that a session's task
-// list may have changed, so live updates key off the folded chunks (what the
+// list may have changed, so live updates key off the folded entries (what the
 // user saw) rather than a disk poll. Two signals:
 //
 //   - Completed task-mutating tool calls (TaskCreate/TaskUpdate/TaskStop): a
@@ -156,18 +156,15 @@ func taskIDLess(a, b string) bool {
 // tool call is present — proof that tasks exist for this session without a disk
 // hit, letting the poller gate teammate-only activity (task-less teams also
 // produce it) on tasks actually existing.
-func TaskActivityCount(chunks []transcript.Chunk) (count int, hasTaskTool bool) {
-	for i := range chunks {
-		for j := range chunks[i].Items {
-			it := chunks[i].Items[j]
-			switch {
-			case it.Kind == transcript.ItemTool && parser.IsTaskMutatingTool(it.ToolName) &&
-				(it.Result != "" || it.ResultIsError):
-				count++
-				hasTaskTool = true
-			case it.IsTeammate():
-				count++
-			}
+func TaskActivityCount(entries []transcript.Entry) (count int, hasTaskTool bool) {
+	for _, e := range entries {
+		switch {
+		case e.Kind == transcript.EntryTool && parser.IsTaskMutatingTool(e.ToolName) &&
+			(e.Result != "" || e.ResultIsError):
+			count++
+			hasTaskTool = true
+		case e.IsTeammate():
+			count++
 		}
 	}
 	return count, hasTaskTool

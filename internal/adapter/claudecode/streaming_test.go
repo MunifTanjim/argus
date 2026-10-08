@@ -129,17 +129,15 @@ func TestStreamingTranscriptMatchesOneShotWithSubagent(t *testing.T) {
 	}
 
 	// Non-vacuity: after all lines are appended the final view must contain a
-	// linked ItemSubagent item (AgentID != "" && HasTrace == true).
+	// linked EntrySubagent entry (AgentID != "" && HasTrace == true).
 	final, err := ReadStreamingView(parentPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sub *Item
-	for ci := range final {
-		for ii := range final[ci].Items {
-			if final[ci].Items[ii].Kind == ItemSubagent {
-				sub = &final[ci].Items[ii]
-			}
+	var sub *Entry
+	for i := range final {
+		if final[i].Kind == EntrySubagent {
+			sub = &final[i]
 		}
 	}
 	if sub == nil {
@@ -231,15 +229,13 @@ func writeNestedStreamFixture(t *testing.T) (root, subA string) {
 	return root, subA
 }
 
-func subagentItem(chunks []Chunk) (Item, bool) {
-	for _, c := range chunks {
-		for _, it := range c.Items {
-			if it.Kind == ItemSubagent {
-				return it, true
-			}
+func subagentItem(entries []Entry) (Entry, bool) {
+	for _, e := range entries {
+		if e.Kind == EntrySubagent {
+			return e, true
 		}
 	}
-	return Item{}, false
+	return Entry{}, false
 }
 
 func TestStreaming_NestedSubagentLinked(t *testing.T) {

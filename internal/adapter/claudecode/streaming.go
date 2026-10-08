@@ -29,9 +29,9 @@ func NewStreamingTranscript(path, rootPath string, isSubagent bool) *StreamingTr
 }
 
 // Refresh reads newly appended lines, updates state, and returns the full folded
-// chunk list (subagent traces de-inlined). If the file shrank below the cursor
+// entry list (subagent traces de-inlined). If the file shrank below the cursor
 // (truncation/rotation) it rebuilds from the start.
-func (s *StreamingTranscript) Refresh() ([]Chunk, error) {
+func (s *StreamingTranscript) Refresh() ([]Entry, error) {
 	if fi, err := os.Stat(s.path); err == nil && fi.Size() < s.offset {
 		s.offset = 0
 		s.msgs = nil
@@ -58,5 +58,5 @@ func (s *StreamingTranscript) Refresh() ([]Chunk, error) {
 		// meta.json sidecars link still-running subagents (no tool_result yet).
 		addMetaRefs(agentRefs, s.rootPath, s.metaCache)
 	}
-	return foldChunks(pchunks, agentRefs, nil), nil
+	return foldEntries(pchunks, agentRefs, false), nil
 }

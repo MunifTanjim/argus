@@ -72,8 +72,8 @@ func (ccAdapter) ReadTasks(sessionIDs []string, transcriptPath string) ([]api.Ta
 	return ReadTasks(sessionIDs, transcriptPath)
 }
 
-func (ccAdapter) TaskActivityCount(chunks []transcript.Chunk) (int, bool) {
-	return TaskActivityCount(chunks)
+func (ccAdapter) TaskActivityCount(entries []transcript.Entry) (int, bool) {
+	return TaskActivityCount(entries)
 }
 
 func (ccAdapter) ReadTranscriptView(path string) (transcript.TranscriptView, error) {

@@ -275,29 +275,25 @@ func TestReadTasks_MissingDirIsEmpty(t *testing.T) {
 }
 
 func TestTaskActivityCount(t *testing.T) {
-	tool := func(name, result string) transcript.Item {
-		return transcript.Item{Kind: transcript.ItemTool, ToolName: name, Result: result}
+	tool := func(name, result string) transcript.Entry {
+		return transcript.Entry{Kind: transcript.EntryTool, ToolName: name, Result: result}
 	}
-	teammateMsg := func(id string) transcript.Item {
-		return transcript.Item{
-			Kind:      transcript.ItemSubagent,
+	teammateMsg := func(id string) transcript.Entry {
+		return transcript.Entry{
+			Kind:      transcript.EntrySubagent,
 			Subagents: []transcript.Subagent{{Name: id, IsTeammate: true}},
 		}
 	}
-	chunks := []transcript.Chunk{
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			tool("Bash", "ok"),               // not a task tool
-			tool("TaskCreate", "created #1"), // counts (lead)
-			tool("TaskUpdate", ""),           // in-flight, no result yet — excluded
-		}},
-		{Kind: transcript.ChunkAI, Items: []transcript.Item{
-			tool("TaskStop", "stopped #2"),                  // counts (lead)
-			{Kind: transcript.ItemText, Text: "TaskCreate"}, // text, not a tool item
-			teammateMsg("daneel"),                           // counts (teammate reported back)
-			{Kind: transcript.ItemSubagent},                 // a spawn, not a teammate — excluded
-		}},
+	entries := []transcript.Entry{
+		tool("Bash", "ok"),                               // not a task tool
+		tool("TaskCreate", "created #1"),                 // counts (lead)
+		tool("TaskUpdate", ""),                           // in-flight, no result yet — excluded
+		tool("TaskStop", "stopped #2"),                   // counts (lead)
+		{Kind: transcript.EntryText, Text: "TaskCreate"}, // text, not a tool entry
+		teammateMsg("daneel"),                            // counts (teammate reported back)
+		{Kind: transcript.EntrySubagent},                 // a spawn, not a teammate — excluded
 	}
-	if got, hasTool := TaskActivityCount(chunks); got != 3 || !hasTool {
+	if got, hasTool := TaskActivityCount(entries); got != 3 || !hasTool {
 		t.Fatalf("TaskActivityCount = (%d, %v), want (3, true)", got, hasTool)
 	}
 	if got, hasTool := TaskActivityCount(nil); got != 0 || hasTool {
@@ -305,7 +301,7 @@ func TestTaskActivityCount(t *testing.T) {
 	}
 	// Teammate message with no task tool: counts, but hasTaskTool is false so the
 	// caller must confirm tasks exist before firing.
-	tmOnly := []transcript.Chunk{{Kind: transcript.ChunkAI, Items: []transcript.Item{teammateMsg("dors")}}}
+	tmOnly := []transcript.Entry{teammateMsg("dors")}
 	if got, hasTool := TaskActivityCount(tmOnly); got != 1 || hasTool {
 		t.Fatalf("TaskActivityCount(teammate-only) = (%d, %v), want (1, false)", got, hasTool)
 	}
