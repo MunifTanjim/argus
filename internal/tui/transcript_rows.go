@@ -127,15 +127,15 @@ func rowIndexOf(es []transcript.Entry, rows []displayRow, ref rowRef) int {
 }
 
 // restoreRowCursor resolves a cursor after its rows changed: the last row when
-// toLast, else the row with identity ref, else fallback clamped to the rows.
-func restoreRowCursor(es []transcript.Entry, rows []displayRow, ref rowRef, fallback int, toLast bool) int {
+// toLast, else the row with identity ref, else cur clamped to the rows.
+func restoreRowCursor(es []transcript.Entry, rows []displayRow, ref rowRef, cur int, toLast bool) int {
 	if toLast && len(rows) > 0 {
 		return len(rows) - 1
 	}
 	if i := rowIndexOf(es, rows, ref); i >= 0 {
 		return i
 	}
-	return max(0, min(fallback, len(rows)-1))
+	return max(0, min(cur, len(rows)-1))
 }
 
 // runRowIndex finds the summary (collapsed) or head (expanded) row of run key.

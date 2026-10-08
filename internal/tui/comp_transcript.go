@@ -500,7 +500,7 @@ func (m *model) toggleVerboseTranscript() tea.Cmd {
 		n++
 		cmds = append(cmds, m.editTranscript(i, func(v tview) tea.Cmd {
 			clear(v.transcript.rows)
-			v.transcript.cursor = restoreRowCursor(v.transcript.entries, v.displayRows(), c.stream, 0, false)
+			v.transcript.cursor = restoreRowCursor(v.transcript.entries, v.displayRows(), c.stream, v.transcript.cursor, false)
 			for j := range v.transcript.detailStack {
 				f := &v.transcript.detailStack[j]
 				f.cursor = restoreRowCursor(f.items, v.frameRows(f), c.frames[j], f.cursor, false)

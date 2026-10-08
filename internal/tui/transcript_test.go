@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,6 +137,20 @@ func TestRestoreEntryCursorByID(t *testing.T) {
 
 	if got, _ := m.currentRowID(); got != id {
 		t.Errorf("cursor not preserved by id: want %v, got %v", id, got)
+	}
+}
+
+func TestRestoreEntryCursorKeepsIndexWhenRowGone(t *testing.T) {
+	mm := loaded()
+	m := tvOf(&mm)
+	m.transcript.cursor = 2
+	id, _ := m.currentRowID()
+
+	m.transcript.entries = slices.Delete(slices.Clone(m.transcript.entries), 2, 3)
+	m.restoreEntryCursor(id, false, false)
+
+	if m.transcript.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (old index)", m.transcript.cursor)
 	}
 }
 
