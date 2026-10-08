@@ -193,6 +193,10 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, id string) (E
 		}
 		e.Kind = EntryText
 		e.Text = pit.Text
+	case parser.ItemQueuedPrompt:
+		e.Kind = EntryUser
+		e.Text = pit.Text
+		e.Timestamp = formatTS(pit.Timestamp)
 	case parser.ItemTeammateMessage:
 		// A teammate is modeled as a subagent variant: identity on the Subagent,
 		// message body on the entry Text.

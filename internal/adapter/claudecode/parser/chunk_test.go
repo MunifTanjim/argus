@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1446,5 +1447,34 @@ func TestBuildChunks_ExpandedPrompt_CommandAtEndOfInput(t *testing.T) {
 	}
 	if chunks[0].ExpandedPrompt != "" {
 		t.Errorf("ExpandedPrompt = %q, want empty", chunks[0].ExpandedPrompt)
+	}
+}
+
+func TestBuildChunks_QueuedPromptFoldsIntoAITurn(t *testing.T) {
+	t0 := time.Date(2026, 10, 7, 16, 0, 0, 0, time.UTC)
+	msgs := []parser.ClassifiedMsg{
+		parser.AIMsg{Timestamp: t0, Model: "claude-opus-4-6", Text: "Working",
+			Blocks: []parser.ContentBlock{{Type: "text", Text: "Working"}}},
+		parser.QueuedPromptMsg{Timestamp: t0.Add(time.Second), Text: "also do X"},
+		parser.AIMsg{Timestamp: t0.Add(2 * time.Second), Model: "claude-opus-4-6", Text: "On it",
+			Blocks: []parser.ContentBlock{{Type: "text", Text: "On it"}}},
+	}
+	chunks := parser.BuildChunks(msgs)
+	if len(chunks) != 1 || chunks[0].Type != parser.AIChunk {
+		t.Fatalf("chunks = %+v, want one AI chunk (queued prompt stays in the turn)", chunks)
+	}
+	var got []parser.DisplayItemType
+	for _, it := range chunks[0].Items {
+		got = append(got, it.Type)
+	}
+	want := []parser.DisplayItemType{parser.ItemOutput, parser.ItemQueuedPrompt, parser.ItemOutput}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("item types = %v, want %v", got, want)
+	}
+	if chunks[0].Items[1].Text != "also do X" {
+		t.Errorf("queued item text = %q", chunks[0].Items[1].Text)
+	}
+	if !chunks[0].Items[1].Timestamp.Equal(t0.Add(time.Second)) {
+		t.Errorf("queued item timestamp = %v, want the attachment's", chunks[0].Items[1].Timestamp)
 	}
 }

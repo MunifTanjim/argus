@@ -24,7 +24,7 @@ func (UserMsg) classifiedMsg() {}
 
 // ContentBlock represents a single content block from an assistant or tool result message.
 type ContentBlock struct {
-	Type          string          // "thinking", "text", "tool_use", "tool_result", "teammate", "memory_load"
+	Type          string          // "thinking", "text", "tool_use", "tool_result", "teammate", "memory_load", "queued_prompt"
 	Text          string          // thinking or text content
 	ToolID        string          // tool_use: call ID; tool_result: tool_use_id
 	ToolName      string          // tool_use only
@@ -127,3 +127,11 @@ type MemoryLoadMsg struct {
 }
 
 func (MemoryLoadMsg) classifiedMsg() {}
+
+// QueuedPromptMsg is a message the user sent while the agent was busy.
+type QueuedPromptMsg struct {
+	Timestamp time.Time
+	Text      string
+}
+
+func (QueuedPromptMsg) classifiedMsg() {}
