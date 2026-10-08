@@ -29,6 +29,10 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 	ref := subRef{subID: newSubID(), sessionID: t.sessionID, cacheKey: m.cacheKeyFor(t.sessionID)}
 	bind := m.editTranscript(m.baseTop()-1, func(v tview) tea.Cmd {
 		v.transcript.err = nil // drop any stale pre-clear error
+		// Entry ids are positional, so pre-clear expansion would land on
+		// unrelated entries of the new transcript.
+		clear(v.transcript.expanded)
+		clear(v.transcript.runs)
 		return v.bindStream(ref)
 	})
 	return tea.Batch(m.unsubscribeCmd(old), bind)

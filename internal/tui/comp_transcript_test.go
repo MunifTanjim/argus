@@ -483,6 +483,10 @@ func TestClearThroughUpdateMovesTheStream(t *testing.T) {
 	s.AgentSessionID = "c0"
 	m.sessions["n1:s1"] = s
 	m = resumeInto(m, "n1:s1", userEntry("l1", "before clear"))
+	m = withTr(m, func(t *transcriptComp) {
+		t.transcript.expanded["l1"] = true
+		t.transcript.runs = map[string]bool{"l1": true}
+	})
 	old := trOf(m).activeSub
 	s.AgentSessionID = "c1"
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: s})
@@ -492,6 +496,9 @@ func TestClearThroughUpdateMovesTheStream(t *testing.T) {
 		t.Fatalf("/clear should move the transcript to a new stream on c1: %+v", sub)
 	}
 	assertUnsubscribed(t, rc, old.subID)
+	if tr := trOf(m).transcript; len(tr.expanded) != 0 || len(tr.runs) != 0 {
+		t.Errorf("/clear should drop expansion state: expanded=%v runs=%v", tr.expanded, tr.runs)
+	}
 }
 
 func countCalls(rc *recordingClient, method string) int {
