@@ -14,15 +14,21 @@ import (
 // user message, or at the end when finished (history reads).
 func foldMessages(msgs []ocMessage, finished bool) []transcript.Entry {
 	var out []transcript.Entry
-	var turn *transcript.Entry
-	turnHasEntries := false
+	var turn transcript.Turn
+	closeTurn := func(ts int64) {
+		if f, ok := turn.Close(); ok {
+			if ts != 0 {
+				f.Timestamp = tsMillis(ts)
+			}
+			out = append(out, f)
+		}
+	}
+	var runStart int64 // created time of the run's first assistant message
 	for _, m := range msgs {
 		switch m.Type {
 		case "user":
-			if turn != nil && turnHasEntries {
-				out = append(out, *turn)
-			}
-			turn, turnHasEntries = nil, false
+			closeTurn(0)
+			runStart = 0
 			out = append(out, transcript.Entry{
 				ID:        m.ID,
 				Kind:      transcript.EntryUser,
@@ -30,35 +36,33 @@ func foldMessages(msgs []ocMessage, finished bool) []transcript.Entry {
 				Text:      m.Text,
 			})
 		case "idle":
-			if turn != nil && turnHasEntries {
-				if m.Time.Created != 0 {
-					turn.Timestamp = tsMillis(m.Time.Created)
-				}
-				out = append(out, *turn)
-			}
-			turn, turnHasEntries = nil, false
+			closeTurn(m.Time.Created)
+			runStart = 0
 		case "assistant":
-			if turn == nil {
-				turn = &transcript.Entry{Kind: transcript.EntryTurnEnd}
+			if turn.Footer == nil {
+				turn.Open(transcript.Entry{Kind: transcript.EntryTurnEnd})
 			}
-			turn.ID = m.ID + ".end"
-			turn.ModelName = m.Model.ID
-			turn.Timestamp = tsMillis(m.Time.Created)
-			es := assistantEntries(m, turn)
-			turnHasEntries = turnHasEntries || len(es) > 0
-			out = append(out, es...)
+			f := turn.Footer
+			f.ID = m.ID + ".end"
+			f.ModelName = m.Model.ID
+			f.Timestamp = tsMillis(m.Time.Created)
+			addTurnStats(f, m, &runStart)
+			for _, e := range assistantEntries(m) {
+				turn.Count(e)
+				out = append(out, e)
+			}
 			if m.Error != nil {
 				out = append(out, errorEntry(m))
 			}
 		}
 	}
-	if finished && turn != nil && turnHasEntries {
-		out = append(out, *turn)
+	if finished {
+		closeTurn(0)
 	}
 	return out
 }
 
-func assistantEntries(m ocMessage, turn *transcript.Entry) []transcript.Entry {
+func assistantEntries(m ocMessage) []transcript.Entry {
 	ts := tsMillis(m.Time.Created)
 	var out []transcript.Entry
 	for j, p := range m.Content {
@@ -66,7 +70,6 @@ func assistantEntries(m ocMessage, turn *transcript.Entry) []transcript.Entry {
 		switch p.Type {
 		case "reasoning":
 			out = append(out, transcript.Entry{ID: id, Kind: transcript.EntryThinking, Timestamp: ts, Text: p.Text})
-			turn.Thinking++
 		case "text":
 			if strings.TrimSpace(p.Text) == "" {
 				continue
@@ -88,10 +91,26 @@ func assistantEntries(m ocMessage, turn *transcript.Entry) []transcript.Entry {
 				}
 			}
 			out = append(out, e)
-			turn.ToolCount++
 		}
 	}
 	return out
+}
+
+// addTurnStats sums output over the run but keeps the latest response's input
+// and cache: those describe the current context.
+func addTurnStats(turn *transcript.Entry, m ocMessage, runStart *int64) {
+	if *runStart == 0 {
+		*runStart = m.Time.Created
+	}
+	if m.Time.Completed > 0 && *runStart > 0 {
+		turn.DurationMs = m.Time.Completed - *runStart
+	}
+	if t := m.Tokens; t != nil {
+		turn.Usage.Input = t.Input
+		turn.Usage.CacheRead = t.Cache.Read
+		turn.Usage.CacheCreation = t.Cache.Write
+		turn.Usage.Output += t.Output + t.Reasoning
+	}
 }
 
 // errorEntry surfaces a failed assistant message (quota, rate limit, bad

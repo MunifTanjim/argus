@@ -24,7 +24,20 @@ Each message:
 
 `content` holds mixed part types: `text`, `reasoning`, `step-start`, `step-finish`, `tool`, etc.
 
-An assistant message also carries `finish`: `tool-calls`, `stop`, or `error`. On `error` it has an
+An assistant message also carries its usage and timing:
+
+```json
+{
+  "tokens": { "input": 5235, "output": 111, "reasoning": 168, "cache": { "read": 1297, "write": 0 } },
+  "cost": 0,
+  "time": { "created": 1789…, "streamed": 1789…, "completed": 1789… }
+}
+```
+
+`output` excludes `reasoning` (the reasoning text's length tracks `reasoning`, the reply and tool
+input track `output`). `input` excludes cache reads.
+
+It also carries `finish`: `tool-calls`, `stop`, or `error`. On `error` it has an
 `error` object and usually no `content`:
 
 ```json
