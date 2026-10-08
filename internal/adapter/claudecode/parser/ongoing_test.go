@@ -66,6 +66,23 @@ func TestIsOngoing_LastItemIsTextOutput(t *testing.T) {
 	}
 }
 
+func TestIsOngoing_TextAwaitingToolUse(t *testing.T) {
+	// Claude Code writes "let me check" and its tool_use as separate lines; the
+	// text line already carries stop_reason tool_use, so the turn is not over.
+	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
+		parser.AIMsg{
+			Timestamp:  t0,
+			Model:      "claude-opus-4-6",
+			StopReason: "tool_use",
+			Blocks:     []parser.ContentBlock{{Type: "text", Text: "Let me check."}},
+		},
+	})
+	if !parser.IsOngoing(chunks) {
+		t.Error("text whose message stops for tool_use should be ongoing")
+	}
+}
+
 func TestIsOngoing_LastItemIsToolUseNoResult(t *testing.T) {
 	t0 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	chunks := parser.BuildChunks([]parser.ClassifiedMsg{

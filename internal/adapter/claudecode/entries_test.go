@@ -79,6 +79,18 @@ func TestFoldEntriesFooterAppearsOnlyWhenDone(t *testing.T) {
 	}
 }
 
+func TestFoldEntriesNoFooterWhileTextAwaitsToolUse(t *testing.T) {
+	chunks := []parser.Chunk{
+		{Type: parser.UserChunk, Timestamp: t0, UserText: "go"},
+		{Type: parser.AIChunk, Timestamp: t0, StopReason: "tool_use", Items: []parser.DisplayItem{
+			{Type: parser.ItemOutput, Text: "let me check"},
+		}},
+	}
+	if got := kinds(foldEntries(chunks, nil, false)); got[len(got)-1] == EntryTurnEnd {
+		t.Fatalf("turn awaiting its tool_use got a footer: %v", got)
+	}
+}
+
 func TestFoldEntriesFinishedClosesDeadTurn(t *testing.T) {
 	// A history session that died mid-turn: the last tool call never returned.
 	died := []parser.Chunk{
