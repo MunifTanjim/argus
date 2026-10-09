@@ -115,6 +115,9 @@ func withOrigin(s session.Session, nodeID, label string) session.Session {
 
 func withTerminalOrigin(t api.Terminal, nodeID, label string) api.Terminal {
 	t.ID = session.CompositeID(nodeID, t.ID)
+	if t.WorkspaceID != "" {
+		t.WorkspaceID = session.CompositeID(nodeID, t.WorkspaceID)
+	}
 	t.NodeID = nodeID
 	t.NodeLabel = label
 	return t

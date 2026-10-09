@@ -645,6 +645,20 @@ func TestRenameWindowKeepsHashLiteral(t *testing.T) {
 	}
 }
 
+func TestSetWindowWorkspaceID(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	w1, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+	w2, _ := c.NewWindow(ctx, "terminal", t.TempDir())
+	if err := c.SetWindowWorkspaceID(ctx, w1, "ws-1"); err != nil {
+		t.Fatalf("SetWindowWorkspaceID: %v", err)
+	}
+	ws, _ := c.ListWindows(ctx, "terminal")
+	if len(ws) != 2 || ws[0].ID != w1 || ws[0].WorkspaceID != "ws-1" || ws[1].ID != w2 || ws[1].WorkspaceID != "" {
+		t.Fatalf("windows = %+v, want only %s marked ws-1", ws, w1)
+	}
+}
+
 func TestKillWindow(t *testing.T) {
 	c := testClient(t)
 	ctx := context.Background()

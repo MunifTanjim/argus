@@ -9,6 +9,7 @@ class NodeTerminal {
     this.cwd = '',
     this.command = '',
     this.attached = false,
+    this.workspaceId = '',
   });
 
   factory NodeTerminal.fromJson(Map<String, dynamic> j) => NodeTerminal(
@@ -19,6 +20,7 @@ class NodeTerminal {
         cwd: j['cwd'] as String? ?? '',
         command: j['command'] as String? ?? '',
         attached: j['attached'] as bool? ?? false,
+        workspaceId: j['workspace_id'] as String? ?? '',
       );
 
   final String id;
@@ -28,6 +30,9 @@ class NodeTerminal {
   final String cwd;
   final String command;
   final bool attached;
+
+  /// The composite id of the workspace the terminal was created in, or empty.
+  final String workspaceId;
 
   String get title =>
       name.isNotEmpty ? name : (command.isNotEmpty ? command : 'terminal');

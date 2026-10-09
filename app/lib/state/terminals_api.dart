@@ -11,9 +11,11 @@ class TerminalsApi {
   GatewayClient get _client =>
       _clientOf() ?? (throw StateError('not connected'));
 
-  Future<NodeTerminal> create(String? nodeId) async {
+  /// A [workspaceId] is node-local; the terminal opens in that workspace.
+  Future<NodeTerminal> create(String? nodeId, {String? workspaceId}) async {
     final r = await _client.call('terminal.create', {
       'node_id': ?nodeId,
+      'workspace_id': ?workspaceId,
     });
     return NodeTerminal.fromJson((r as Map).cast<String, dynamic>());
   }

@@ -970,6 +970,9 @@ type Terminal struct {
 	Cwd      string `json:"cwd"`            // the node user's home shows as ~
 	Command  string `json:"command"`
 	Attached bool   `json:"attached,omitempty"`
+	// WorkspaceID is the workspace the terminal was created in, composited by
+	// the aggregating client like session.workspace_id.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Set only by the aggregating client, not the node.
 	NodeID    string `json:"node_id,omitempty"`
 	NodeLabel string `json:"node_label,omitempty"`
@@ -998,8 +1001,11 @@ func SortTerminalsByNode(ts []Terminal) {
 	})
 }
 
+// TerminalCreateParams opens the terminal in $HOME, or in the directory of the
+// node-local WorkspaceID, which the terminal then belongs to.
 type TerminalCreateParams struct {
-	NodeID string `json:"node_id,omitempty"`
+	NodeID      string `json:"node_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 type TerminalRef struct {

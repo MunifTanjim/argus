@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../e2e/aggregate.dart' show splitCompositeId;
 import '../models/project.dart';
 import '../state/changes.dart';
+import '../state/control.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
+import 'terminal_tile.dart';
 import 'theme.dart';
 import 'workspace_changes_tab.dart';
 import 'workspace_files_tab.dart';
 import 'workspace_sessions_tab.dart';
+import 'workspace_terminals_tab.dart';
 
 class WorkspaceScreen extends ConsumerWidget {
   const WorkspaceScreen({
@@ -26,7 +30,20 @@ class WorkspaceScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tab = ref.watch(workspaceTabProvider(workspace.id));
+    final info = ref.watch(serverInfoProvider).value;
+    final showTerminals = info?.nodes
+            .any((n) => n.id == project.nodeId && n.terminalSupported) ??
+        false;
+    final selected = ref.watch(workspaceTabProvider(workspace.id));
+    // A tab that disappears must not stay selected, or back resets it unseen.
+    if (info != null && !showTerminals && selected == WorkspaceTab.terminals) {
+      WidgetsBinding.instance.addPostFrameCallback((_) =>
+          ref.read(workspaceTabProvider(workspace.id).notifier).state =
+              WorkspaceTab.sessions);
+    }
+    final tab = !showTerminals && selected == WorkspaceTab.terminals
+        ? WorkspaceTab.sessions
+        : selected;
     return Scaffold(
       appBar: AppBar(
         leading: shellMenuButton(context),
@@ -78,41 +95,62 @@ class WorkspaceScreen extends ConsumerWidget {
             workspace: workspace,
           ),
           WorkspaceTab.files => WorkspaceFilesTab(workspace: workspace),
+          WorkspaceTab.terminals => WorkspaceTerminalsTab(
+            workspaceId: workspace.id,
+          ),
         },
       ),
-      floatingActionButton: tab == WorkspaceTab.sessions
-          ? FloatingActionButton(
-              tooltip: 'New session',
-              onPressed: () => showSpawnDialog(
-                context,
-                ref,
-                target: SpawnTarget(
-                  nodeId: project.nodeId,
-                  cwd: workspace.dir,
-                  label: '${project.name} · ${workspace.name}',
-                ),
-              ),
-              child: const Icon(Icons.add),
-            )
-          : null,
+      floatingActionButton: switch (tab) {
+        WorkspaceTab.sessions => FloatingActionButton(
+          tooltip: 'New session',
+          onPressed: () => showSpawnDialog(
+            context,
+            ref,
+            target: SpawnTarget(
+              nodeId: project.nodeId,
+              cwd: workspace.dir,
+              label: '${project.name} · ${workspace.name}',
+            ),
+          ),
+          child: const Icon(Icons.add),
+        ),
+        WorkspaceTab.terminals when !workspace.isGone => FloatingActionButton(
+          tooltip: 'New terminal',
+          onPressed: () {
+            final (nodeId, localId, _) = splitCompositeId(workspace.id);
+            createTerminal(context, ref, nodeId, workspaceId: localId);
+          },
+          child: const Icon(Icons.add),
+        ),
+        _ => null,
+      },
       bottomNavigationBar: NavigationBar(
         selectedIndex: tab.index,
-        onDestinationSelected: (i) =>
-            ref.read(workspaceTabProvider(workspace.id).notifier).state =
-                WorkspaceTab.values[i],
-        destinations: const [
-          NavigationDestination(
+        onDestinationSelected: (i) {
+          ref.read(workspaceTabProvider(workspace.id).notifier).state =
+              WorkspaceTab.values[i];
+          if (WorkspaceTab.values[i] == WorkspaceTab.terminals) {
+            refreshTerminals(ref);
+          }
+        },
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.forum_outlined),
             label: 'Sessions',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.difference_outlined),
             label: 'Changes',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.folder_outlined),
             label: 'Files',
           ),
+          if (showTerminals)
+            const NavigationDestination(
+              icon: Icon(Icons.terminal),
+              label: 'Terminals',
+            ),
         ],
       ),
     );

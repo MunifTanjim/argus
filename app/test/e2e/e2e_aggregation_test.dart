@@ -366,6 +366,7 @@ void main() {
     final ids = [for (final t in r['terminals'] as List) (t as Map)['id']];
     expect(ids, ['A:@1', 'A:@2', 'B:@1', 'B:@2']);
     expect(((r['terminals'] as List).first as Map)['node_label'], 'A-box');
+    expect(((r['terminals'] as List).first as Map).containsKey('workspace_id'), isFalse);
     expect(r['failed_nodes'], ['C']);
     await client.close();
   });
@@ -421,12 +422,13 @@ void main() {
 
   test('terminal.create composites the result', () async {
     final a = LoopbackNode('A', await generateKeyPair(),
-        (m, p) => _json({'id': '@5', 'cwd': '~', 'command': 'zsh'}));
+        (m, p) => _json({'id': '@5', 'cwd': '~', 'command': 'zsh', 'workspace_id': 'w1'}));
     final lnk = MultiNodeLoopbackLink({'A': a});
     final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
     await client.connect();
     final r = await client.call('terminal.create', {'node_id': 'A'}) as Map;
     expect(r['id'], 'A:@5');
+    expect(r['workspace_id'], 'A:w1');
     expect(r['node_id'], 'A');
     expect(r['node_label'], 'A-box');
     await client.close();

@@ -48,6 +48,9 @@ func TestFanoutTerminalsCompositesAndSorts(t *testing.T) {
 	}
 	var got []string
 	for _, x := range res.Terminals {
+		if x.WorkspaceID != "" {
+			t.Errorf("terminal %s workspace = %q, want empty", x.ID, x.WorkspaceID)
+		}
 		got = append(got, x.ID+" "+x.NodeLabel)
 	}
 	want := []string{"na:@1 na-box", "na:@2 na-box", "nb:@1 nb-box", "nb:@2 nb-box"}
@@ -145,7 +148,7 @@ func TestTerminalCreateCompositesTheResult(t *testing.T) {
 	defer f.peer.Close()
 	f.handle = func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
 		if method == api.MethodTerminalCreate {
-			b, _ := json.Marshal(api.Terminal{ID: "@5", Cwd: "~", Command: "zsh"})
+			b, _ := json.Marshal(api.Terminal{ID: "@5", Cwd: "~", Command: "zsh", WorkspaceID: "w1"})
 			return b, nil, nil
 		}
 		return json.RawMessage(`null`), nil, nil
@@ -159,8 +162,8 @@ func TestTerminalCreateCompositesTheResult(t *testing.T) {
 	if err := c.Call(api.MethodTerminalCreate, api.TerminalCreateParams{NodeID: "n1"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != session.CompositeID("n1", "@5") || got.NodeID != "n1" || got.NodeLabel != "n1-box" {
-		t.Errorf("created = %+v, want composite id and node origin", got)
+	if got.ID != session.CompositeID("n1", "@5") || got.WorkspaceID != session.CompositeID("n1", "w1") || got.NodeID != "n1" || got.NodeLabel != "n1-box" {
+		t.Errorf("created = %+v, want composite ids and node origin", got)
 	}
 }
 

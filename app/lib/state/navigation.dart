@@ -5,7 +5,7 @@ final homeTabProvider = StateProvider<HomeTab>((ref) => HomeTab.sessions);
 
 enum HomeTab { sessions, history, terminals }
 
-enum WorkspaceTab { sessions, changes, files }
+enum WorkspaceTab { sessions, changes, files, terminals }
 
 /// The drawer selection: null is Home, else a composite workspace id.
 final scopeProvider = StateProvider<String?>((ref) => null);

@@ -49,7 +49,10 @@ func (d *Node) terminalAttached(id string) bool {
 }
 
 func (d *Node) terminalOf(w tmux.Window, home string) api.Terminal {
-	t := api.Terminal{ID: w.ID, Cwd: tildeHome(w.CurrentPath, home), Command: w.CurrentCommand, Attached: d.terminalAttached(w.ID)}
+	t := api.Terminal{
+		ID: w.ID, Cwd: tildeHome(w.CurrentPath, home), Command: w.CurrentCommand,
+		Attached: d.terminalAttached(w.ID), WorkspaceID: w.WorkspaceID,
+	}
 	if !w.AutoRename {
 		t.Name = w.Name
 	}
@@ -89,7 +92,11 @@ func (d *Node) handleTerminalList(ctx context.Context, _ json.RawMessage) (any, 
 	return res, nil
 }
 
-func (d *Node) handleTerminalCreate(ctx context.Context, _ json.RawMessage) (any, error) {
+func (d *Node) handleTerminalCreate(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.TerminalCreateParams](params)
+	if err != nil {
+		return nil, err
+	}
 	c, err := d.terminalClient()
 	if err != nil {
 		return nil, err
@@ -98,9 +105,25 @@ func (d *Node) handleTerminalCreate(ctx context.Context, _ json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	id, err := c.NewWindow(ctx, spawn.TerminalSession, home)
+	dir := home
+	if p.WorkspaceID != "" {
+		if dir, err = d.workspaceDir(ctx, p.WorkspaceID); err != nil {
+			return nil, err
+		}
+		// tmux silently opens $HOME for a missing directory.
+		if !dirExists(dir) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "workspace directory is gone: " + dir}
+		}
+	}
+	id, err := c.NewWindow(ctx, spawn.TerminalSession, dir)
 	if err != nil {
 		return nil, err
+	}
+	if p.WorkspaceID != "" {
+		if err := c.SetWindowWorkspaceID(ctx, id, p.WorkspaceID); err != nil {
+			_ = c.KillWindow(ctx, id)
+			return nil, err
+		}
 	}
 	d.notifyTerminalsChanged()
 	w, err := d.terminalWindow(ctx, c, id)

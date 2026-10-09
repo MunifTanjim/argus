@@ -105,9 +105,11 @@ Map<String, dynamic> projectWithOriginJson(
 Map<String, dynamic> terminalWithOriginJson(
     Map<String, dynamic> t, String nodeId, String? label) {
   final id = t['id'];
+  final ws = t['workspace_id'];
   return {
     ...t,
     'id': compositeId(nodeId, id is String ? id : ''),
+    if (ws is String && ws.isNotEmpty) 'workspace_id': compositeId(nodeId, ws),
     'node_id': nodeId,
     'node_label': label,
   };

@@ -24,7 +24,7 @@ class _FakeApi implements TerminalsApi {
   final killed = <String>[];
   final renamed = <(String, String)>[];
   @override
-  Future<NodeTerminal> create(String? nodeId) async =>
+  Future<NodeTerminal> create(String? nodeId, {String? workspaceId}) async =>
       NodeTerminal(id: '${nodeId ?? 'A'}:@9', command: 'zsh');
   @override
   Future<void> kill(String id) async {

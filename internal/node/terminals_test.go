@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/db"
+	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
@@ -113,6 +117,54 @@ func TestTerminalCreateListRenameKill(t *testing.T) {
 	}
 	if got := listTerminals(t, d); len(got) != 1 || got[0].ID != b.ID {
 		t.Fatalf("list after kill = %+v, want only %s", got, b.ID)
+	}
+}
+
+func TestTerminalCreateInWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	d, _ := terminalNode(t)
+	ctx := context.Background()
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "argus.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	d.SetProjectRegistry(projectreg.New(sqlDB))
+	dir := filepath.Join(os.Getenv("HOME"), "repo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "init", "-b", "main")
+	wsID, err := d.projreg.AdoptSession(ctx, dir)
+	if err != nil || wsID == "" {
+		t.Fatalf("adopt = %q, %v", wsID, err)
+	}
+
+	res, err := d.handleTerminalCreate(ctx, mustJSON(api.TerminalCreateParams{WorkspaceID: wsID}))
+	if err != nil {
+		t.Fatalf("terminal.create in workspace: %v", err)
+	}
+	created := res.(api.Terminal)
+	if created.Cwd != "~/repo" || created.WorkspaceID != wsID {
+		t.Fatalf("created = %+v, want cwd ~/repo in workspace %s", created, wsID)
+	}
+	plain := createTerminal(t, d)
+	got := listTerminals(t, d)
+	if len(got) != 2 || got[0].WorkspaceID != wsID || got[1].ID != plain.ID || got[1].WorkspaceID != "" {
+		t.Fatalf("list = %+v, want only %s in workspace %s", got, created.ID, wsID)
+	}
+
+	_, err = d.handleTerminalCreate(ctx, mustJSON(api.TerminalCreateParams{WorkspaceID: "nope"}))
+	wantErr(t, "create in an unknown workspace", err, "unknown workspace: nope")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.handleTerminalCreate(ctx, mustJSON(api.TerminalCreateParams{WorkspaceID: wsID}))
+	wantErr(t, "create in a gone workspace", err, "workspace directory is gone: "+dir)
+	if got := listTerminals(t, d); len(got) != 2 {
+		t.Fatalf("list after failed creates = %+v, want 2 terminals", got)
 	}
 }
 

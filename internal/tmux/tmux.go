@@ -637,7 +637,10 @@ type Window struct {
 	AutoRename     bool // tmux names the window after its command
 	CurrentPath    string
 	CurrentCommand string
+	WorkspaceID    string // set by SetWindowWorkspaceID
 }
+
+const workspaceIDOption = "@argus_workspace_id"
 
 var windowFormat = strings.Join([]string{
 	"#{window_id}",
@@ -646,6 +649,7 @@ var windowFormat = strings.Join([]string{
 	"#{automatic-rename}",
 	"#{pane_current_path}",
 	"#{pane_current_command}",
+	"#{" + workspaceIDOption + "}",
 }, fieldSep)
 
 func duplicateSession(err error) bool {
@@ -685,7 +689,7 @@ func (c *Client) ListWindows(ctx context.Context, session string) ([]Window, err
 func parseWindow(line string) (Window, error) {
 	line = strings.ReplaceAll(line, `\037`, fieldSep)
 	f := strings.Split(line, fieldSep)
-	if len(f) != 6 {
+	if len(f) != 7 {
 		return Window{}, fmt.Errorf("tmux: unexpected window format (%d fields): %q", len(f), line)
 	}
 	return Window{
@@ -695,7 +699,13 @@ func parseWindow(line string) (Window, error) {
 		AutoRename:     f[3] == "1",
 		CurrentPath:    f[4],
 		CurrentCommand: f[5],
+		WorkspaceID:    f[6],
 	}, nil
+}
+
+func (c *Client) SetWindowWorkspaceID(ctx context.Context, window, id string) error {
+	_, err := c.run(ctx, "set-option", "-w", "-t", window, workspaceIDOption, id)
+	return err
 }
 
 // NewWindow adds a window that runs the default shell in cwd to session,
