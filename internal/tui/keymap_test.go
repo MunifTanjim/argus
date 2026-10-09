@@ -431,3 +431,10 @@ func TestFocusCommandsStayInTheirSections(t *testing.T) {
 		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+func TestBuildKeymapAcceptsARenamedCommand(t *testing.T) {
+	km, errs := buildKeymap(map[string]map[string]string{"terminals": {"n": "terminal new"}}, time.Second, "")
+	if len(errs) != 0 || !km.screenKeys("terminals").has(terminalKeys.Spawn, "n") {
+		t.Errorf("terminal new should bind terminal spawn: errs=%v", errs)
+	}
+}

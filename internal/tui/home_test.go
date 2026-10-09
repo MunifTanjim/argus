@@ -354,16 +354,16 @@ func linesContaining(out, sub string) int {
 // frameRow identifies the status bar every framed state shares.
 const frameRow = glyphRobotSolid + " Argus"
 
-func TestFramedSessionHeaderInPane(t *testing.T) {
+func TestFramedSessionHeaderInTopBar(t *testing.T) {
 	m := homeTestModel()
 	mm, _ := m.enterSession("n1:s1")
 	out := mm.View().Content
 	lines := strings.Split(ansi.Strip(out), "\n")
-	if !strings.Contains(lines[0], frameRow) {
-		t.Errorf("row 0 should be the frame header, got %q", lines[0])
+	if !strings.Contains(lines[0], frameRow) || !strings.Contains(lines[0], "repo") {
+		t.Errorf("row 0 should be the frame header with the session, got %q", lines[0])
 	}
-	if !strings.Contains(lines[2], "│") || !strings.Contains(lines[2], "repo") || strings.Contains(lines[2], "argus ·") {
-		t.Errorf("the session header should sit in the pane without the brand, got %q", lines[2])
+	if strings.Contains(lines[2], "repo") {
+		t.Errorf("the pane should not repeat the session header, got %q", lines[2])
 	}
 	if len(lines) != mm.height {
 		t.Errorf("framed session is %d lines tall, want %d", len(lines), mm.height)
@@ -457,8 +457,8 @@ func TestHiddenSidebarHomeMatchesWorkspace(t *testing.T) {
 
 	hl := strings.Split(ansi.Strip(home.View().Content), "\n")
 	wl := strings.Split(ansi.Strip(ws.View().Content), "\n")
-	if !strings.Contains(hl[0], frameRow) || hl[0] != wl[0] {
-		t.Errorf("hidden-sidebar header rows differ:\n home: %q\n ws:   %q", hl[0], wl[0])
+	if !strings.Contains(hl[0], frameRow) || !strings.Contains(wl[0], frameRow+" · repo  main") {
+		t.Errorf("hidden-sidebar header rows:\n home: %q\n ws:   %q", hl[0], wl[0])
 	}
 	if hc, wc := cardColumn(home.View().Content), cardColumn(ws.View().Content); hc != wc {
 		t.Errorf("hidden-sidebar Home cards start at column %d, workspace at %d", hc, wc)
@@ -684,9 +684,6 @@ func TestPanesCenterTheirContentColumn(t *testing.T) {
 	}
 
 	ws = withFile(ws, fileComp{ws: "n1:w1", path: "a.go", diff: true, lines: []string{"@@ -1 +1 @@", "-a", "+bb"}})
-	if c := columnOf(ws.View().Content, "repo  main"); c != wantCards {
-		t.Errorf("diff viewer header moved to %d, want it to stay at %d", c, wantCards)
-	}
 	wantText := paneX + (paneW-min(paneW, maxContentWidth))/2
 	if c := columnOf(ws.View().Content, "+bb"); c != wantText {
 		t.Errorf("diff content at %d, want the wide column at %d", c, wantText)

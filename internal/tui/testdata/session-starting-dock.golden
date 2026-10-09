@@ -1,9 +1,9 @@
-  󰚩 Argus                                                                                                           
+  󰚩 Argus                            ·   repo · fix-login ·  main  [%1] starting                                   
 
-  Projects                           │   repo · fix-login ·  main  [%1] starting
-                                     │
-▌ 󰋜 Home                         ○ 3 │ Session is starting or waiting at a startup prompt.
-  ▾  home                           │ Press ^t to open the live screen and continue.
+  Projects                           │ Session is starting or waiting at a startup prompt.
+                                     │ Press ^t to open the live screen and continue.
+▌ 󰋜 Home                         ○ 3 │
+  ▾  home                           │
     ▾ argus                          │
       󰉋 repo  main               ○ 2 │
        repo-feat  feature       ○ 1 │

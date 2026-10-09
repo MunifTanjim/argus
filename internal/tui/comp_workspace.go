@@ -50,6 +50,8 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	switch {
 	case m.matches(msg, projectsKeys.Spawn):
 		return p, spawnSession(c, p.row(c)), true
+	case (m.matches(msg, listKeys.TabNext) || m.matches(msg, listKeys.TabPrev)) && m.wsHasTerminals(p.ws):
+		return p, openWorkspaceTerminals(c, p.ws), true
 	case m.matches(msg, projectsKeys.SetupLog):
 		return p, openSetupLog(c, p.ws), true
 	case paneTreeKey(c, msg):
@@ -107,6 +109,10 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 func (p workspaceComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	ss := c.m.wsSessions(p.ws)
 	switch {
+	case t.kind == hitTab:
+		if wsTab(t.index) == wsTabTerminals {
+			return p, openWorkspaceTerminals(c, p.ws)
+		}
 	case t.index >= len(ss):
 	case focused && t.index == p.cursor:
 		c.openSession(ss[t.index].ID)
@@ -154,25 +160,23 @@ func (p workspaceComp) row(c *ctx) projectsRow {
 
 func (p workspaceComp) view(c *ctx, w, h int) string {
 	cardW := min(w, maxCardWidth)
-	return centerBlock(p.column(c, cardW, max(1, h-footerRows)), cardW, w)
+	return centerBlock(p.column(c, centerGutter(cardW, w), cardW, max(1, h-footerRows)), cardW, w)
 }
 
-// fileHeader stays over a file opened on the pane.
-func (p workspaceComp) fileHeader(c *ctx, w int) string {
-	r, ok := c.m.wsRow(p.ws)
-	if !ok {
-		return ""
+func (p workspaceComp) paneHeader(c *ctx, w int) (string, int) {
+	if r, ok := c.m.wsRow(p.ws); ok {
+		return c.m.wsHeader(r), centerGutter(min(w, maxCardWidth), w)
 	}
-	cardW := min(w, maxCardWidth)
-	return centerBlock(truncateLine(c.m.wsHeader(r), cardW), cardW, w)
+	return "", 0
 }
 
-func (p workspaceComp) column(c *ctx, w, h int) string {
-	r, ok := c.m.wsRow(p.ws)
-	if !ok {
+// column draws the pane's card column; x is its offset in the pane.
+func (p workspaceComp) column(c *ctx, x, w, h int) string {
+	if _, ok := c.m.wsRow(p.ws); !ok {
 		return dimStyle.Render("workspace not found")
 	}
-	return truncateLine(c.m.wsHeader(r)+c.m.sessionFilterTitle(), w) + "\n\n" + p.sessions(c.below(2), w, max(1, h-2))
+	head := truncateLine(c.m.wsTabsHeader(c, p.ws, wsTabSessions, x)+c.m.sessionFilterTitle(), w)
+	return head + "\n\n" + p.sessions(c.below(2), w, max(1, h-2))
 }
 
 func (p workspaceComp) sessions(c *ctx, w, avail int) string {
@@ -211,8 +215,12 @@ func (p workspaceComp) footerPrompt(c *ctx) string {
 
 func (p workspaceComp) footer(c *ctx) []binding {
 	k := projectsKeys
-	return []binding{listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter,
-		clearFilterKey(k.Back, c.m.sessionFilter != ""), k.Help}
+	out := []binding{listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter,
+		clearFilterKey(k.Back, c.m.sessionFilter != "")}
+	if c.m.wsHasTerminals(p.ws) {
+		out = append(out, listKeys.TabNext)
+	}
+	return append(out, k.Help)
 }
 
 // disarmRoot drops a kill confirmation on the root pane before a component

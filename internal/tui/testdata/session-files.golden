@@ -1,14 +1,12 @@
-  󰚩 Argus                                                                                                                                    ◆ 1 need you   
+  󰚩 Argus                            ·   repo · fix-login ·  main  [%1] awaiting_input                                                      ◆ 1 need you   
 
-  Projects                           │   repo · fix-login ·  main  [%1] awaiting_input                                   │  Files  Changes
-                                     │                                                                                    │
-▌ 󰋜 Home                         ◆ 3 │ ▌                                                                                  │▌   go.mod
-  ▾  home                           │ ▌    You                                                             14:31:00     │
-    ▾ argus                          │ ▌   fix the bug                                                                    │
-      󰉋 repo  main               ◆ 2 │ ▌                                                                                  │
+  Projects                           │ ▌                                                                                  │  Files  Changes
+                                     │ ▌    You                                                             14:31:00     │
+▌ 󰋜 Home                         ◆ 3 │ ▌   fix the bug                                                                    │▌   go.mod
+  ▾  home                           │ ▌                                                                                  │
+    ▾ argus                          │                                                                                    │
+      󰉋 repo  main               ◆ 2 │      1                                                                           │
        repo-feat  feature       ○ 1 │                                                                                    │
-                                     │      1                                                                           │
-                                     │                                                                                    │
                                      │   󰆂 I'll check the handler.                                                        │
                                      │                                                                                    │
                                      │     󰯠 1                                                                           │
@@ -16,6 +14,8 @@
                                      │   ── Opus 4.8 ·  12.3k ·  1m 2s ──────────────────────────────────────────────   │
                                      │ ────────────────────────────────────────────────────────────────────────────────── │
                                      │    Allow Bash?                                                  ⇥ Tab to answer   │
+                                     │                                                                                    │
+                                     │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │

@@ -94,12 +94,12 @@ func TestSummaryHeaderFollowsFocus(t *testing.T) {
 		title string
 	}{"project": {project, "argus"}, "node": {node, "home"}} {
 		focused := withFocus(c.m, mainPane)
-		body := rowSummary(&ctx{m: &focused}, projectsRowOf(focused), 80)
+		body := focused.rowHeader(projectsRowOf(focused))
 		if !strings.Contains(body, StyleAccentBold.Render(c.title)) {
 			t.Errorf("%s summary: the header should use the focus color when the pane has focus:\n%q", name, body)
 		}
 		blurred := withFocus(c.m, leftSidebar)
-		if body := rowSummary(&ctx{m: &blurred}, projectsRowOf(blurred), 80); strings.Contains(body, StyleAccentBold.Render(c.title)) {
+		if body := blurred.rowHeader(projectsRowOf(blurred)); strings.Contains(body, StyleAccentBold.Render(c.title)) {
 			t.Errorf("%s summary: the header should not use the focus color without focus", name)
 		}
 	}

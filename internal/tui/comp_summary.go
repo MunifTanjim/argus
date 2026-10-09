@@ -97,6 +97,13 @@ func (s summaryComp) view(c *ctx, w, _ int) string {
 	return centerBlock(body, cardW, w)
 }
 
+func (s summaryComp) paneHeader(c *ctx, w int) (string, int) {
+	if r, ok := s.row(c); ok {
+		return c.m.rowHeader(r), centerGutter(min(w, maxCardWidth), w)
+	}
+	return "", 0
+}
+
 func (s summaryComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
 	if s.kind == rowNode && t.kind == hitTab && nodeTab(t.index) == nodeTabTerminals {
 		return s, openNodeTerminals(c, s.id)
@@ -111,12 +118,24 @@ func (s summaryComp) footer(c *ctx) []binding {
 	return []binding{projectsKeys.Help}
 }
 
+// rowHeader names the node or project of a summary pane in the top bar.
+func (m model) rowHeader(r projectsRow) string {
+	if r.kind == rowNode {
+		return m.paneHeadStyle().Render(r.label)
+	}
+	pr, _ := m.findProject(r.id)
+	dir := pr.Root
+	if dir == "" {
+		dir = pr.Dir
+	}
+	return m.paneHeadStyle().Render(pr.Name) + projectLabel("", pr.Hidden, pr.Pinned) + dimStyle.Render("  "+dir)
+}
+
 func rowSummary(c *ctx, r projectsRow, w int) string {
 	m := c.m
 	act := m.workspaceActivity()
 	var b strings.Builder
 	if r.kind == rowNode {
-		b.WriteString(m.paneHeadStyle().Render(r.label) + "\n\n")
 		if e, ok := m.hosts[r.id]; ok {
 			b.WriteString(hostLines(e, m.nodeHasWakelock(r.id), time.Now(), w))
 		}
@@ -131,11 +150,6 @@ func rowSummary(c *ctx, r projectsRow, w int) string {
 		return b.String()
 	}
 	pr, _ := m.findProject(r.id)
-	dir := pr.Root
-	if dir == "" {
-		dir = pr.Dir
-	}
-	b.WriteString(truncateLine(m.paneHeadStyle().Render(pr.Name)+projectLabel("", pr.Hidden, pr.Pinned)+dimStyle.Render("  "+dir), w) + "\n\n")
 	if pr.Error != "" {
 		b.WriteString(truncateLine(StyleErrorBold.Render("git error: "+pr.Error), w) + "\n\n")
 	}

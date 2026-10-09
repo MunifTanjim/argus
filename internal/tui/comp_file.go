@@ -199,22 +199,10 @@ func fileText(s string) string {
 	return b.String()
 }
 
-// fileHost is a component whose header stays over a file opened on it.
-type fileHost interface {
-	fileHeader(c *ctx, w int) string
-}
-
-// view draws f under the header of the component it opened over, so the header
-// does not jump when a file opens. The content widens past the header's card
-// column, up to maxContentWidth.
+// view widens the content past the card column, up to maxContentWidth.
 func (f fileComp) view(c *ctx, w, h int) string {
 	fw := fileViewWidth(w)
 	out := centerBlock(f.content(c, fw, fileViewHeight(h)), fw, w)
-	if host, ok := c.m.underFile().(fileHost); ok {
-		if head := host.fileHeader(c, w); head != "" {
-			out = head + "\n\n" + out
-		}
-	}
 	// One row covers the view, so that a right-click anywhere opens its menu.
 	c.hitRows(rowSpan{index: 0, top: 0, bottom: strings.Count(out, "\n") + 1})
 	return out
@@ -274,13 +262,6 @@ func (m model) openFile() (fileComp, bool) {
 		return m.main[i].(fileComp), true
 	}
 	return fileComp{}, false
-}
-
-func (m model) underFile() component {
-	if i := m.fileAt(); i > 0 {
-		return m.main[i-1]
-	}
-	return nil
 }
 
 func (m model) fileAt() int {

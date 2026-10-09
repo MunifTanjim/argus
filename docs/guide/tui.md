@@ -215,11 +215,11 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `session spawn` | home, project-tree, workspace | `s` |
 | `sidebar narrower` | changes, file-tree, node, project, project-tree, workspace | `<C-w><lt>` |
 | `sidebar wider` | changes, file-tree, node, project, project-tree, workspace | `<C-w>>` |
-| `tab next` | changes, file-tree, history, home, logs, node, session-dock, terminals | `<Right>` `gt` |
-| `tab prev` | changes, file-tree, history, home, logs, node, session-dock, terminals | `<Left>` `gT` |
+| `tab next` | changes, file-tree, history, home, logs, node, session-dock, terminals, workspace | `<Right>` `gt` |
+| `tab prev` | changes, file-tree, history, home, logs, node, session-dock, terminals, workspace | `<Left>` `gT` |
 | `terminal kill` | terminals | `dd` |
-| `terminal new` | terminals | `a` |
 | `terminal rename` | terminals | `r` |
+| `terminal spawn` | terminals | `a` |
 | `toggle active-only` | home, workspace | `za` |
 | `toggle diff-vs-target` | changes | `t` |
 | `toggle left-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<Leader>o` |

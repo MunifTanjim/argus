@@ -9,16 +9,19 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// terminalsComp lists every node's terminals on Home, or one node's in a node
-// pane. killID and renameID are the terminal that awaits a confirmation or a
-// name.
+// terminalsComp lists every node's terminals on Home, one node's in a node
+// pane, or one workspace's in a workspace pane. killID and renameID are the
+// terminal that awaits a confirmation or a name.
 type terminalsComp struct {
 	nodeID   string
+	ws       string
 	cursor   int
 	killID   string
 	renameID string
 	input    textinput.Model
 }
+
+func (t terminalsComp) onHome() bool { return t.nodeID == "" && t.ws == "" }
 
 func (t terminalsComp) section() string           { return "terminals" }
 func (t terminalsComp) raw(*ctx) bool             { return t.killID != "" || t.renameID != "" }
@@ -31,14 +34,22 @@ func (t terminalsComp) layer() layer              { return baseLayer }
 func (t terminalsComp) pageStep(c *ctx) int       { return c.m.listPageStep() }
 
 func (t terminalsComp) row() string {
-	if t.nodeID == "" {
-		return homeRowID
+	switch {
+	case t.ws != "":
+		return t.ws
+	case t.nodeID != "":
+		return t.nodeID
 	}
-	return t.nodeID
+	return homeRowID
 }
 
+func (t terminalsComp) workspace(*ctx) string { return t.ws }
+
 func (t terminalsComp) shown(m model) []api.Terminal {
-	if t.nodeID == "" {
+	switch {
+	case t.ws != "":
+		return m.wsTerminals(t.ws)
+	case t.nodeID == "":
 		return m.terminals
 	}
 	var out []api.Terminal
@@ -107,7 +118,7 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		cmd = t.stepTab(c, 1)
 	case m.matches(msg, k.TabPrev):
 		cmd = t.stepTab(c, -1)
-	case m.matches(msg, terminalKeys.New):
+	case m.matches(msg, terminalKeys.Spawn):
 		cmd = t.create(c)
 	case m.matches(msg, terminalKeys.Rename):
 		if t.cursor < n {
@@ -132,7 +143,11 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 }
 
 func (t terminalsComp) stepTab(c *ctx, d int) tea.Cmd {
-	if t.nodeID != "" {
+	switch {
+	case t.ws != "":
+		openWorkspaceSessions(c, t.ws)
+		return nil
+	case t.nodeID != "":
 		return openNodeSummary(c, t.nodeID)
 	}
 	return stepHomeTab(c, tabTerminals, d)
@@ -140,6 +155,13 @@ func (t terminalsComp) stepTab(c *ctx, d int) tea.Cmd {
 
 func (t terminalsComp) create(c *ctx) tea.Cmd {
 	m := c.m
+	if t.ws != "" {
+		if w, ok := m.findWorkspace(t.ws); !ok || w.IsGone {
+			c.setFlash("this workspace is gone")
+			return nil
+		}
+		return m.createWorkspaceTerminalCmd(t.ws)
+	}
 	if t.nodeID != "" {
 		return m.createTerminalCmd(t.nodeID)
 	}
@@ -184,6 +206,9 @@ func (t terminalsComp) renameKey(c *ctx, msg tea.KeyPressMsg) (terminalsComp, te
 }
 
 func (t terminalsComp) tabsHeader(c *ctx, x int) string {
+	if t.ws != "" {
+		return c.m.wsTabsHeader(c, t.ws, wsTabTerminals, x)
+	}
 	if t.nodeID != "" {
 		c.m.hitNodeTabs(c, x)
 		return c.m.nodeTabs(nodeTabTerminals)
@@ -194,6 +219,11 @@ func (t terminalsComp) tabsHeader(c *ctx, x int) string {
 
 func (t terminalsComp) clickTab(c *ctx, i int) tea.Cmd {
 	switch {
+	case t.ws != "":
+		if wsTab(i) == wsTabSessions {
+			openWorkspaceSessions(c, t.ws)
+		}
+		return nil
 	case t.nodeID != "":
 		if nodeTab(i) == nodeTabProjects {
 			return openNodeSummary(c, t.nodeID)
@@ -207,7 +237,7 @@ func (t terminalsComp) clickTab(c *ctx, i int) tea.Cmd {
 
 func (t terminalsComp) view(c *ctx, w, h int) string {
 	m := c.m
-	cardW := historyWidth(w)
+	cardW := t.cardWidth(w)
 	title := t.tabsHeader(c, centerGutter(cardW, w))
 	list := t.shown(*m)
 	var body string
@@ -217,11 +247,34 @@ func (t terminalsComp) view(c *ctx, w, h int) string {
 	case m.terminalsErr != nil && len(list) == 0:
 		body = dimStyle.Render("error: " + m.terminalsErr.Error())
 	case len(list) == 0:
-		body = dimStyle.Render("no terminals · " + m.keyText(terminalKeys.New) + " new")
+		body = dimStyle.Render("no terminals · " + m.keyText(terminalKeys.Spawn) + " spawn")
 	default:
 		body = t.rows(c.below(2), list, cardW, max(1, h-2))
 	}
 	return centerBlock(title+"\n\n"+body, cardW, w)
+}
+
+// cardWidth matches the Projects or Sessions tab of a node or workspace pane.
+func (t terminalsComp) cardWidth(w int) int {
+	if t.onHome() {
+		return historyWidth(w)
+	}
+	return min(w, maxCardWidth)
+}
+
+func (t terminalsComp) paneHeader(c *ctx, w int) (string, int) {
+	col := centerGutter(t.cardWidth(w), w)
+	switch {
+	case t.ws != "":
+		if r, ok := c.m.wsRow(t.ws); ok {
+			return c.m.wsHeader(r), col
+		}
+	case t.nodeID != "":
+		if r, ok := (summaryComp{kind: rowNode, id: t.nodeID}).row(c); ok {
+			return c.m.rowHeader(r), col
+		}
+	}
+	return "", 0
 }
 
 func (t terminalsComp) rows(c *ctx, list []api.Terminal, w, avail int) string {
@@ -229,7 +282,7 @@ func (t terminalsComp) rows(c *ctx, list []api.Terminal, w, avail int) string {
 	for _, x := range list {
 		nodes[x.NodeID] = true
 	}
-	grouped := t.nodeID == "" && max(len(nodes), len(c.m.terminalNodes())) > 1
+	grouped := t.onHome() && max(len(nodes), len(c.m.terminalNodes())) > 1
 	cursor := min(t.cursor, len(list)-1)
 	l := itemLines{key: "terminals"}
 	prev := ""
@@ -279,9 +332,9 @@ func (t terminalsComp) menu(c *ctx) []binding {
 func (t terminalsComp) footer(c *ctx) []binding {
 	k := listKeys
 	if len(t.shown(*c.m)) == 0 {
-		return []binding{k.TabNext, terminalKeys.New, k.Refresh, projectsKeys.Help}
+		return []binding{k.TabNext, terminalKeys.Spawn, k.Refresh, projectsKeys.Help}
 	}
-	return []binding{k.TabNext, terminalKeys.New, terminalKeys.Rename, terminalKeys.Kill, k.Refresh, projectsKeys.Help}
+	return []binding{k.TabNext, terminalKeys.Spawn, terminalKeys.Rename, terminalKeys.Kill, k.Refresh, projectsKeys.Help}
 }
 
 func (t terminalsComp) footerPrompt(c *ctx) string {

@@ -67,7 +67,10 @@ func (m *model) remember() {
 	case logsComp:
 		m.memory.home.view, m.memory.home.session = homeLogs, ""
 	case terminalsComp:
-		if b.nodeID == "" {
+		switch {
+		case b.ws != "":
+			delete(m.memory.ws, b.ws)
+		case b.nodeID == "":
 			m.memory.home.view, m.memory.home.session = homeTerminals, ""
 		}
 	}
@@ -134,8 +137,8 @@ func (m model) mainRow() string {
 	case summaryComp:
 		return b.id
 	case terminalsComp:
-		if b.nodeID != "" {
-			return b.nodeID
+		if !b.onHome() {
+			return b.row()
 		}
 	case transcriptComp:
 		if b.live {
@@ -245,7 +248,7 @@ func (m model) onRowPane() bool {
 	case workspaceComp, summaryComp:
 		return true
 	case terminalsComp:
-		return b.nodeID != ""
+		return !b.onHome()
 	}
 	return false
 }
@@ -262,7 +265,10 @@ func (m model) rowGone() bool {
 		_, ok := b.row(&ctx{m: &m})
 		return !ok
 	case terminalsComp:
-		if b.nodeID == "" {
+		switch {
+		case b.ws != "":
+			return !listed[b.ws]
+		case b.nodeID == "":
 			return false
 		}
 		_, ok := m.left.tree.row(b.nodeID)

@@ -103,7 +103,7 @@ var sectionLists = map[string]sectionList{
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter,
 			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill, listKeys.ActiveOnly,
-			listKeys.Filter})...),
+			listKeys.Filter, listKeys.TabPrev, listKeys.TabNext})...),
 		focus: focusFor("workspace"),
 	},
 	"project": {own: summaryKeys, focus: focusFor("project")},

@@ -168,13 +168,14 @@ func (m model) termDims() (cols, rows int) {
 }
 
 // termDimsFor sizes the screen box's interior for a w×h pane: the border takes
-// 2 columns. At the terminal edge, the box keeps the frame's left margin on its
-// right too; next to the right sidebar, the divider spaces it.
+// 2 columns and 2 rows, and the footer 2 rows. At the terminal edge, the box
+// keeps the frame's left margin on its right too; next to the right sidebar,
+// the divider spaces it.
 func termDimsFor(w, h int, atEdge bool) (cols, rows int) {
 	if atEdge {
 		w -= screenMargin
 	}
-	return max(10, w-2), max(1, h-6)
+	return max(10, w-2), max(1, h-2-footerRows)
 }
 
 func attachScreen(c *ctx, id string) tea.Cmd {

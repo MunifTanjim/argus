@@ -1,13 +1,13 @@
-  󰚩 Argus                                                                   
+  󰚩 Argus                            · home                                 
 
-  Projects                           │ home
-                                     │
-  󰋜 Home                         ○ 3 │   OS         macOS 26.0.1 (arm64)
-▌ ▾  home                           │   Uptime     3d 4h 12m
-    ▾ argus                          │   Battery    82% · charging
-      󰉋 repo  main               ○ 2 │   Wakelock   on until turned off
+  Projects                           │   OS         macOS 26.0.1 (arm64)
+                                     │   Uptime     3d 4h 12m
+  󰋜 Home                         ○ 3 │   Battery    82% · charging
+▌ ▾  home                           │   Wakelock   on until turned off
+    ▾ argus                          │
+      󰉋 repo  main               ○ 2 │   argus  2 workspaces                 ○ 3
        repo-feat  feature       ○ 1 │
-                                     │   argus  2 workspaces                 ○ 3
+                                     │
                                      │
                                      │
                                      │

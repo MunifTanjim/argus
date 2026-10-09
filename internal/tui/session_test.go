@@ -204,7 +204,7 @@ func TestSessionHeaderShowsBranch(t *testing.T) {
 	s.Branch = "feat/session-git-branch"
 	m.sessions["s1"] = s
 
-	out := ansi.Strip(paneView(m))
+	out := ansi.Strip(m.View().Content)
 	if !strings.Contains(out, "feat/session-git-branch") {
 		t.Errorf("header missing branch name:\n%s", out)
 	}
@@ -215,7 +215,7 @@ func TestSessionHeaderShowsBranch(t *testing.T) {
 	// No branch → no branch glyph in the header.
 	s.Branch = ""
 	m.sessions["s1"] = s
-	if strings.Contains(ansi.Strip(paneView(m)), Icon.Branch.Glyph) {
+	if strings.Contains(ansi.Strip(m.View().Content), Icon.Branch.Glyph) {
 		t.Error("branch glyph shown when branch is empty")
 	}
 }
@@ -326,15 +326,15 @@ func TestSessionLayoutSumsToViewport(t *testing.T) {
 	if d == 0 {
 		t.Fatal("dock height 0 with pending interaction")
 	}
-	// history + dock + chrome(4) == viewport; the rule is part of dock.
-	if h+d != max(1, m.bodyHeight()-4) {
-		t.Errorf("history(%d)+dock(%d) != %d", h, d, m.bodyHeight()-4)
+	// history + dock + footer == viewport; the rule is part of dock.
+	if h+d != max(1, m.bodyHeight()-footerRows) {
+		t.Errorf("history(%d)+dock(%d) != %d", h, d, m.bodyHeight()-footerRows)
 	}
 	m = sessionModel(nil)
 	m.height = 30
 	h, d = m.sessionLayout()
-	if d != 0 || h != max(1, m.bodyHeight()-4) {
-		t.Errorf("no-dock layout: h=%d d=%d want h=%d", h, d, m.bodyHeight()-4)
+	if d != 0 || h != max(1, m.bodyHeight()-footerRows) {
+		t.Errorf("no-dock layout: h=%d d=%d want h=%d", h, d, m.bodyHeight()-footerRows)
 	}
 }
 

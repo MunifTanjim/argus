@@ -1,11 +1,11 @@
-  󰚩 Argus                                                                                                           
+  󰚩 Argus                            · fix-login  [%1]                                                              
 
-  Projects                           │ fix-login  [%1]
-                                     │
-▌ 󰋜 Home                         ○ 3 │ ╭─────────────────────────────────────────────────────────────────────────────╮
-  ▾  home                           │ │$ go test ./...                                                              │
-    ▾ argus                          │ │ok      github.com/MunifTanjim/argus                                         │
-      󰉋 repo  main               ○ 2 │ │$                                                                            │
+  Projects                           │ ╭─────────────────────────────────────────────────────────────────────────────╮
+                                     │ │$ go test ./...                                                              │
+▌ 󰋜 Home                         ○ 3 │ │ok      github.com/MunifTanjim/argus                                         │
+  ▾  home                           │ │$                                                                            │
+    ▾ argus                          │ │                                                                             │
+      󰉋 repo  main               ○ 2 │ │                                                                             │
        repo-feat  feature       ○ 1 │ │                                                                             │
                                      │ │                                                                             │
                                      │ │                                                                             │

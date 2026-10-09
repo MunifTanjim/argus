@@ -1,11 +1,11 @@
-  󰚩 Argus                                                                                                                                    ◆ 1 need you   
+  󰚩 Argus                            ·   repo · fix-login ·  main  [%1] awaiting_input                                                      ◆ 1 need you   
 
-  Projects                           │   repo · fix-login ·  main  [%1] awaiting_input                                   │  Files  Changes
-                                     │                                                                                    │
-▌ 󰋜 Home                         ◆ 3 │ go.mod                                                                             │▌   go.mod
-  ▾  home                           │ module argus                                                                       │
-    ▾ argus                          │ ────────────────────────────────────────────────────────────────────────────────── │
-      󰉋 repo  main               ◆ 2 │    Allow Bash?                                                  ⇥ Tab to answer   │
+  Projects                           │ go.mod                                                                             │  Files  Changes
+                                     │ module argus                                                                       │
+▌ 󰋜 Home                         ◆ 3 │ ────────────────────────────────────────────────────────────────────────────────── │▌   go.mod
+  ▾  home                           │    Allow Bash?                                                  ⇥ Tab to answer   │
+    ▾ argus                          │                                                                                    │
+      󰉋 repo  main               ◆ 2 │                                                                                    │
        repo-feat  feature       ○ 1 │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │

@@ -38,8 +38,8 @@ func (m model) sessionLayout() (historyH, dockH int) {
 }
 
 // sessionRows is the height the history region and the dock share: the body
-// less the header, the blank under it, and the footer rows.
-func (m model) sessionRows() int { return max(1, m.bodyHeight()-4) }
+// less the footer rows.
+func (m model) sessionRows() int { return max(1, m.bodyHeight()-footerRows) }
 
 // dockHeight is the dock's height out of avail rows, its rule included.
 func (d dockComp) dockHeight(c *ctx, avail int) int {
@@ -258,9 +258,9 @@ func windowLines(s string, height, anchor int) string {
 	return strings.Join(lines[offset:offset+height], "\n")
 }
 
-// sessionHeader is the header over session s's live transcript, centered in a
-// main pane w wide, with its title in style title.
-func sessionHeader(s session.Session, w int, title lipgloss.Style) string {
+// sessionHeader names session s's live transcript, with its title in style
+// title.
+func sessionHeader(s session.Session, title lipgloss.Style) string {
 	name := s.Name
 	if name == "" {
 		name = s.Tmux.SessionName
@@ -277,8 +277,7 @@ func sessionHeader(s session.Session, w int, title lipgloss.Style) string {
 		branch := Icon.Branch.Render() + lipgloss.NewStyle().Foreground(ColorGitBranch).Render(" "+s.Branch)
 		header += title.Render(" · ") + branch
 	}
-	header += dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
-	return centerBlock(indentBlock(header, strings.Repeat(" ", contentPadX)), containerWidthOf(w), w)
+	return header + dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
 }
 
 // startingNotice renders the startup-gate message centered in place of the

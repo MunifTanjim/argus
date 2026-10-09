@@ -3,6 +3,7 @@ package tui
 import (
 	_ "embed"
 	"fmt"
+	"slices"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -184,16 +185,7 @@ func (m model) homeTabAt(i int) homeTab {
 }
 
 func (m model) homeTabs(active homeTab) string {
-	tabs := m.homeTabList()
-	parts := make([]string, len(tabs))
-	for i, t := range tabs {
-		st := StyleDim
-		if t == active {
-			st = m.paneHeadStyle()
-		}
-		parts[i] = st.Render(homeTabLabel[t])
-	}
-	return strings.Join(parts, StyleDim.Render("   "))
+	return m.tabLine(m.homeTabLabels(), slices.Index(m.homeTabList(), active))
 }
 
 func (m model) hitHomeTabs(c *ctx, x int) { c.hitTabs(x, 0, 3, m.homeTabLabels()...) }

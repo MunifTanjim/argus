@@ -156,7 +156,7 @@ func (m model) dockRows() int {
 }
 
 func (m model) dockDrawn() bool {
-	if top := m.main.top(); top == nil || top.layer() == overLayer {
+	if m.paneCovered() {
 		return false
 	}
 	return m.dockShown() && m.sessions[m.liveSessionID()].Status != session.StatusStarting
@@ -203,6 +203,9 @@ func (m model) frameTitle() string {
 	if !m.viewer && m.width >= sidebarMinWidth {
 		right += m.sidebarIcons()
 	}
+	if header, col := m.paneTitle(); header != "" {
+		left = m.titleWithPane(left, header, col, lipgloss.Width(right))
+	}
 	if right == "" {
 		return left
 	}
@@ -212,6 +215,48 @@ func (m model) frameTitle() string {
 		m.hitBrandIcon()
 	}
 	return truncateLeft(title, max(1, m.width-screenMargin))
+}
+
+// paneHeader is a pane that names its context in the top bar; col is the
+// column of the pane content the header lines up with.
+type paneHeader interface {
+	paneHeader(c *ctx, w int) (header string, col int)
+}
+
+func (m model) paneTitle() (header string, col int) {
+	p, ok := m.baseComp().(paneHeader)
+	if !ok || m.paneCovered() {
+		return "", 0
+	}
+	r := m.mainRect()
+	header, col = p.paneHeader(&ctx{m: &m}, r.Dx())
+	return header, r.Min.X + col
+}
+
+// paneCovered is true while the spawn flow covers the pane and its chrome.
+func (m model) paneCovered() bool {
+	top := m.main.top()
+	return top == nil || top.layer() == overLayer
+}
+
+// titleWithPane sets the dot over the tree divider and the pane header at
+// column headX. Without the tree, or without the room, the header follows the
+// brand, clipped so that the brand and the right side stay.
+func (m model) titleWithPane(brand, header string, headX, rightW int) string {
+	dot := dimStyle.Render("·")
+	room := m.width - screenMargin - 1 - rightW
+	if l := m.layout(); l.left > 0 && !l.full {
+		dotX := l.left + screenMargin + 1
+		if dotX > lipgloss.Width(brand) && headX > dotX+1 && headX+lipgloss.Width(header) <= room {
+			return brand + strings.Repeat(" ", dotX-lipgloss.Width(brand)) + dot +
+				strings.Repeat(" ", headX-dotX-1) + header
+		}
+	}
+	prefix := brand + " " + dot + " "
+	if avail := room - lipgloss.Width(prefix); avail > 0 {
+		return prefix + truncateLine(header, avail)
+	}
+	return brand
 }
 
 const (

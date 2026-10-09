@@ -215,15 +215,15 @@ func TestSidebarFootersListTabKeys(t *testing.T) {
 	}
 }
 
-func TestWorkspacePaneHasNoTabs(t *testing.T) {
+func TestWorkspacePaneHasNoChangesTab(t *testing.T) {
 	m := wideWorkspace()
 	m = withFocus(m, mainPane)
 	out := ansi.Strip(m.View().Content)
 	if strings.Contains(out, "Sessions  Changes") || !strings.Contains(out, "repo  main") {
-		t.Errorf("the pane header should be the workspace, with no tab strip:\n%s", out)
+		t.Errorf("the pane header should be the workspace, with no Changes tab:\n%s", out)
 	}
-	if f := ansi.Strip(m.currentFooter()); strings.Contains(f, "tabs") || strings.Contains(f, "vs target") {
-		t.Errorf("pane footer should not list tab or Changes keys: %q", f)
+	if f := ansi.Strip(m.currentFooter()); strings.Contains(f, "vs target") {
+		t.Errorf("pane footer should not list Changes keys: %q", f)
 	}
 }
 

@@ -476,11 +476,11 @@ func TestScreenCloseButtonShowsOnlyWithTheMouse(t *testing.T) {
 	m := withMouse(liveScreenModel())
 	x, y := closeCell(t, m)
 	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if cell := ansi.Cut(lines[y], x, x+1); cell != glyphClose || !strings.Contains(lines[y], "fix-login") {
-		t.Errorf("the zone at %d covers %q, want the close button on the header %q", x, cell, lines[y])
+	if cell := ansi.Cut(lines[y], x, x+1); cell != glyphClose || !strings.Contains(lines[y], "╭") {
+		t.Errorf("the zone at %d covers %q, want the close button on the box's top border %q", x, cell, lines[y])
 	}
-	if corner := ansi.Cut(lines[y+2], x, x+1); corner != "╮" {
-		t.Errorf("the close button should line up with the box's right edge, found %q under it", corner)
+	if corner := ansi.Cut(lines[y], x+1, x+2); corner != "╮" {
+		t.Errorf("the close button should sit in the box's top-right corner, found %q after it", corner)
 	}
 }
 

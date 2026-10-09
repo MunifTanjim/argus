@@ -1,9 +1,9 @@
-  󰚩 Argus                                                                                                                                                   
+  󰚩 Argus                            ·   repo  main                                                                                                         
 
-  Projects                           │   repo  main                                                                       │  Files  Changes
-                                     │                                                                                    │
-  󰋜 Home                         ○ 3 │ go.mod                                                                             │▌   go.mod
-  ▾  home                           │ module argus                                                                       │
+  Projects                           │ go.mod                                                                             │  Files  Changes
+                                     │ module argus                                                                       │
+  󰋜 Home                         ○ 3 │                                                                                    │▌   go.mod
+  ▾  home                           │                                                                                    │
     ▾ argus                          │                                                                                    │
 ▌     󰉋 repo  main               ○ 2 │                                                                                    │
        repo-feat  feature       ○ 1 │                                                                                    │

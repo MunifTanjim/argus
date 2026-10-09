@@ -211,12 +211,23 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.nodes != nil {
 			m.nodeInfo = msg.nodes
 		}
-		if t, ok := m.baseComp().(terminalsComp); ok && t.nodeID == "" && !m.hasTerminalsTab() {
-			c := &ctx{m: &m}
-			c.replaceBase(m.homePane())
-			return m, m.apply(c)
+		t, ok := m.baseComp().(terminalsComp)
+		if !ok {
+			return m, nil
 		}
-		return m, nil
+		c := &ctx{m: &m}
+		var cmd tea.Cmd
+		switch {
+		case t.ws != "" && !m.wsHasTerminals(t.ws):
+			openWorkspaceSessions(c, t.ws)
+		case t.nodeID != "" && !m.nodeHasTerminals(t.nodeID):
+			cmd = openNodeSummary(c, t.nodeID)
+		case t.onHome() && !m.hasTerminalsTab():
+			c.replaceBase(m.homePane())
+		default:
+			return m, nil
+		}
+		return m, tea.Batch(cmd, m.apply(c))
 	case hostInfoMsg, hostTickMsg, hostWakelockMsg:
 		return m.updateHost(msg)
 	case terminalActionMsg:

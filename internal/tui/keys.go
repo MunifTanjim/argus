@@ -111,9 +111,9 @@ var listKeys = struct {
 }
 
 var terminalKeys = struct {
-	New, Rename, Kill binding
+	Spawn, Rename, Kill binding
 }{
-	New:    nb("terminal new", "a", "new"),
+	Spawn:  nb("terminal spawn", "a", "spawn"),
 	Rename: nb("terminal rename", "r", "rename"),
 	Kill:   nb("terminal kill", "dd", "kill"),
 }

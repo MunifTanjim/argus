@@ -247,6 +247,7 @@ func longQuestion() *session.Interaction {
 
 func TestDockWheelScrolls(t *testing.T) {
 	m := withMouse(sessionModel(longQuestion()))
+	m.height = 20
 	m = withFocus(m, sessionDock)
 	m.View()
 	var dock *hitArea

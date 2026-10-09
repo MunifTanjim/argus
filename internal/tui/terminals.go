@@ -42,10 +42,20 @@ func mergeTerminals(prev, list []api.Terminal, failed []string) []api.Terminal {
 }
 
 func (m model) createTerminalCmd(nodeID string) tea.Cmd {
+	return m.callTerminalCreate(api.TerminalCreateParams{NodeID: nodeID})
+}
+
+// ws is a composite workspace id.
+func (m model) createWorkspaceTerminalCmd(ws string) tea.Cmd {
+	nodeID, localID, _ := session.SplitCompositeID(ws)
+	return m.callTerminalCreate(api.TerminalCreateParams{NodeID: nodeID, WorkspaceID: localID})
+}
+
+func (m model) callTerminalCreate(p api.TerminalCreateParams) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var t api.Terminal
-		if err := client.Call(api.MethodTerminalCreate, api.TerminalCreateParams{NodeID: nodeID}, &t); err != nil {
+		if err := client.Call(api.MethodTerminalCreate, p, &t); err != nil {
 			return terminalActionMsg{verb: "new terminal", err: err}
 		}
 		return terminalActionMsg{verb: "new terminal", created: &t}
@@ -198,11 +208,13 @@ func (m model) node(id string) (api.NodeInfo, bool) {
 	return api.NodeInfo{}, false
 }
 
-func (m model) nodeTabs(active nodeTab) string {
-	parts := make([]string, len(nodeTabLabels))
-	for i, l := range nodeTabLabels {
+func (m model) nodeTabs(active nodeTab) string { return m.tabLine(nodeTabLabels, int(active)) }
+
+func (m model) tabLine(labels []string, active int) string {
+	parts := make([]string, len(labels))
+	for i, l := range labels {
 		st := StyleDim
-		if nodeTab(i) == active {
+		if i == active {
 			st = m.paneHeadStyle()
 		}
 		parts[i] = st.Render(l)
@@ -211,6 +223,37 @@ func (m model) nodeTabs(active nodeTab) string {
 }
 
 func (m model) hitNodeTabs(c *ctx, x int) { c.hitTabs(x, 0, 3, nodeTabLabels...) }
+
+type wsTab int
+
+const (
+	wsTabSessions wsTab = iota
+	wsTabTerminals
+)
+
+var wsTabLabels = []string{"Sessions", "Terminals"}
+
+// wsTabsHeader shows only the Sessions tab for a node without tmux; x is the
+// tabs' column, for their click zones.
+func (m model) wsTabsHeader(c *ctx, ws string, active wsTab, x int) string {
+	if !m.wsHasTerminals(ws) {
+		return m.tabLine(wsTabLabels[:1], 0)
+	}
+	c.hitTabs(x, 0, 3, wsTabLabels...)
+	return m.tabLine(wsTabLabels, int(active))
+}
+
+func (m model) wsHasTerminals(ws string) bool {
+	nodeID, _, _ := session.SplitCompositeID(ws)
+	return m.nodeHasTerminals(nodeID)
+}
+
+func openWorkspaceSessions(c *ctx, ws string) { c.replaceBase(workspaceComp{ws: ws}) }
+
+func openWorkspaceTerminals(c *ctx, ws string) tea.Cmd {
+	c.replaceBase(terminalsComp{ws: ws})
+	return c.m.loadTerminalsCmd()
+}
 
 func openNodeTerminals(c *ctx, nodeID string) tea.Cmd {
 	c.replaceBase(terminalsComp{nodeID: nodeID})

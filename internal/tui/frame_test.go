@@ -256,12 +256,12 @@ func TestTermDimsMatchTheBase(t *testing.T) {
 		edit       func(m *model)
 		cols, rows int
 	}{
-		{"with the tree", func(*model) {}, 77, 22},
-		{"tree hidden", func(m *model) { m.left.hidden = true }, 114, 22},
+		{"with the tree", func(*model) {}, 77, 24},
+		{"tree hidden", func(m *model) { m.left.hidden = true }, 114, 24},
 		{"with both sidebars", func(m *model) {
 			m.width = 160
 			m.right.hidden = false
-		}, 80, 22},
+		}, 80, 24},
 	}
 	for _, tc := range cases {
 		m := liveScreenModelWith(tc.edit)

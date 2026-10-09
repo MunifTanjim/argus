@@ -1,8 +1,8 @@
-  󰚩 Argus                                                                                                           
+  󰚩 Argus                            ·  argus  /repo/.git                                                           
 
-  Projects                           │  argus  /repo/.git
-                                     │
-  󰋜 Home                         ○ 3 │  󰉋 repo  main                                                               ○ 2
+  Projects                           │  󰉋 repo  main                                                               ○ 2
+                                     │   repo-feat  feature                                                       ○ 1
+  󰋜 Home                         ○ 3 │
   ▾  home                           │  ╭────────────────────────────────────────────────────────────────────────────╮
 ▌   ▾ argus                          │  │ New workspace in argus target: main  (^t)                                  │
       󰉋 repo  main               ○ 2 │  │                                                                            │

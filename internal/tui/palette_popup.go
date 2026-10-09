@@ -98,7 +98,10 @@ func (m model) paletteScope() string {
 	case summaryComp:
 		return placeID(b.kind, b.id)
 	case terminalsComp:
-		if b.nodeID == "" {
+		switch {
+		case b.ws != "":
+			return placeID(rowWorkspace, b.ws)
+		case b.nodeID == "":
 			return ""
 		}
 		return placeID(rowNode, b.nodeID)

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -159,19 +158,17 @@ func (t transcriptComp) view(c *ctx, w, _ int) string {
 	if !t.live {
 		return t.bind(c).historyTranscriptView()
 	}
-	head := t.fileHeader(c, w)
 	if c.m.sessions[t.sessionID].Status == session.StatusStarting {
-		return head + "\n\n" + startingNotice(*c.m)
+		return startingNotice(*c.m)
 	}
-	return head + "\n\n" + t.bind(c.below(lipgloss.Height(head)+1)).historyBody()
+	return t.bind(c).historyBody()
 }
 
-// fileHeader stays over a file opened on the transcript.
-func (t transcriptComp) fileHeader(c *ctx, w int) string {
+func (t transcriptComp) paneHeader(c *ctx, w int) (string, int) {
 	if !t.live {
-		return ""
+		return "", 0
 	}
-	return sessionHeader(c.m.sessions[t.sessionID], w, c.m.paneHeadStyle())
+	return sessionHeader(c.m.sessions[t.sessionID], c.m.paneHeadStyle()), centerGutter(containerWidthOf(w), w) + contentPadX
 }
 
 func (t transcriptComp) footerPrompt(c *ctx) string {

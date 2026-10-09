@@ -13,11 +13,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// The interior of the screen box is below the 2 header rows and inside the
-// 1-cell border.
+// The interior of the screen box is inside its 1-cell border.
 const (
 	screenBodyX = 1
-	screenBodyY = 3
+	screenBodyY = 1
 )
 
 // screenWheelMsg is the wheel at (x, y) in the main pane.
@@ -147,21 +146,6 @@ func (s screenComp) close(c *ctx) tea.Cmd {
 func (s screenComp) view(c *ctx, w, h int) string {
 	m := c.m
 	cols, visible := termDimsFor(w, h, !m.filesVisible())
-	var header string
-	if s.terminalID != "" {
-		header = headerStyle.Render(s.title) + dimStyle.Render("  "+s.node)
-	} else {
-		ss := m.sessions[s.sessionID]
-		header = headerStyle.Render(ss.Tmux.SessionName) +
-			dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss)))
-	}
-	if m.mouse {
-		header = spaceBetween(truncateLine(header, cols), StyleDim.Render(glyphClose), cols+2)
-		c.hitZone(uv.Rect(cols+1, 0, 1, 1), hitTarget{kind: hitClose})
-	}
-	var b strings.Builder
-	b.WriteString(header + "\n\n")
-
 	var body string
 	switch {
 	case s.err != nil:
@@ -193,9 +177,22 @@ func (s screenComp) view(c *ctx, w, h int) string {
 		BorderForeground(ColorBorder).
 		Width(cols + 2).
 		Render(strings.Join(lines, "\n"))
-	b.WriteString(box)
+	if m.mouse {
+		border := lipgloss.NewStyle().Foreground(ColorBorder)
+		_, rest, _ := strings.Cut(box, "\n")
+		box = border.Render("╭"+strings.Repeat("─", cols-1)) + StyleDim.Render(glyphClose) + border.Render("╮") + "\n" + rest
+		c.hitZone(uv.Rect(cols, 0, 1, 1), hitTarget{kind: hitClose})
+	}
+	return box
+}
 
-	return b.String()
+func (s screenComp) paneHeader(c *ctx, _ int) (string, int) {
+	if s.terminalID != "" {
+		return headerStyle.Render(s.title) + dimStyle.Render("  "+s.node), 0
+	}
+	ss := c.m.sessions[s.sessionID]
+	return headerStyle.Render(ss.Tmux.SessionName) +
+		dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(ss), statusWord(ss))), 0
 }
 
 // cursor is the program's cursor on the frame, with the box at origin and rows

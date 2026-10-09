@@ -285,6 +285,16 @@ func (m model) wsSessions(ws string) []session.Session {
 	return out
 }
 
+func (m model) wsTerminals(ws string) []api.Terminal {
+	var out []api.Terminal
+	for _, t := range m.terminals {
+		if t.WorkspaceID == ws {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // wsRow builds the row of workspace ws even when the tree does not show it.
 func (m model) wsRow(ws string) (projectsRow, bool) {
 	for _, p := range m.left.tree.data {
@@ -566,9 +576,8 @@ func viewLines(s string) []string {
 func fileViewWidth(w int) int { return min(w, maxContentWidth) }
 
 // fileViewHeight is the height an open file lays out in, its title line
-// included, in a main pane h high: below the header it keeps and above the
-// footer.
-func fileViewHeight(h int) int { return max(1, h-footerRows-2) }
+// included, in a main pane h high: above the footer.
+func fileViewHeight(h int) int { return max(1, h-footerRows) }
 
 func wrapLine(s string, w int) []string {
 	return strings.Split(xansi.Hardwrap(s, max(1, w), true), "\n")

@@ -573,7 +573,7 @@ func TestFooterFollowsFocus(t *testing.T) {
 		t.Errorf("tree footer = %q", f)
 	}
 	m = withFocus(m, mainPane)
-	if f := m.currentFooter(); strings.Contains(f, "tabs") || !strings.Contains(f, "jump") {
+	if f := m.currentFooter(); strings.Contains(f, "fold") || !strings.Contains(f, "jump") {
 		t.Errorf("pane footer = %q", f)
 	}
 	m = withFile(m, fileComp{ws: "n1:w1", path: "a.go", diff: true})
@@ -1354,7 +1354,7 @@ func TestUnknownWorkspaceRefetchesTree(t *testing.T) {
 
 func TestPaneOfAMissingWorkspaceSaysSo(t *testing.T) {
 	m := projectsTestModel()
-	if out := ansi.Strip(workspaceComp{ws: "n1:gone"}.column(&ctx{m: &m}, 80, 20)); out != "workspace not found" {
+	if out := ansi.Strip(workspaceComp{ws: "n1:gone"}.column(&ctx{m: &m}, 0, 80, 20)); out != "workspace not found" {
 		t.Errorf("column = %q, want workspace not found", out)
 	}
 }

@@ -314,7 +314,17 @@ var commandArgs = func() map[string][]string {
 	return out
 }()
 
-func normalizeCommand(s string) string { return strings.Join(strings.Fields(s), " ") }
+// renamedCommands keeps keymap files that name a command by its old name
+// working.
+var renamedCommands = map[string]string{"terminal new": "terminal spawn"}
+
+func normalizeCommand(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if to, ok := renamedCommands[s]; ok {
+		return to
+	}
+	return s
+}
 
 func commandError(cmd string) string {
 	verb, arg, _ := strings.Cut(cmd, " ")
