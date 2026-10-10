@@ -368,9 +368,13 @@ func TestPickerReadCallsAndSetTarget(t *testing.T) {
 
 	ps, _ := d.projreg.Snapshot(ctx)
 	wsID := ps[0].Workspaces[0].ID
-	st, _ := json.Marshal(api.WorkspaceSetTargetParams{WorkspaceID: wsID, TargetBranch: "other"})
-	if _, err := d.handleWorkspaceSetTarget(ctx, st); err != nil {
+	st, _ := json.Marshal(api.WorkspaceSetTargetParams{WorkspaceID: wsID, TargetBranch: " other "})
+	got, err := d.handleWorkspaceSetTarget(ctx, st)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got != (api.WorkspaceSetTargetResult{TargetBranch: "other"}) {
+		t.Errorf("setTarget = %+v, want the stored target", got)
 	}
 	pl, _ := d.handleProjectList(ctx, nil)
 	if got := pl.(api.ProjectListResult).Projects[0].Workspaces[0].TargetBranch; got != "other" {
@@ -517,5 +521,17 @@ func TestCreateRefusesBusyPathWithoutStrandingBranch(t *testing.T) {
 	}
 	if gittree.RefExists(context.Background(), main, "refs/heads/busy") {
 		t.Error("a refused create left the new branch behind")
+	}
+}
+
+func TestProjectRenameReturnsTheStoredName(t *testing.T) {
+	d, projID, _ := createFixture(t)
+	raw, _ := json.Marshal(api.ProjectRenameParams{ProjectID: projID, Name: " renamed "})
+	got, err := d.handleProjectRename(context.Background(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != (api.ProjectRenameResult{Name: "renamed"}) {
+		t.Errorf("rename = %+v, want the stored name", got)
 	}
 }

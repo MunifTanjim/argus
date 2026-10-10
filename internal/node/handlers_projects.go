@@ -43,7 +43,7 @@ func (d *Node) handleProjectRename(ctx context.Context, params json.RawMessage) 
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
 	d.notifyProjectsChanged()
-	return nil, nil
+	return api.ProjectRenameResult{Name: name}, nil
 }
 
 func (d *Node) handleProjectSetHidden(ctx context.Context, params json.RawMessage) (any, error) {
@@ -125,9 +125,7 @@ func (d *Node) toProjectNodes(ps []projectreg.Project) []api.ProjectNode {
 				TargetBranch: w.TargetBranch,
 				CreatedAt:    rfc3339(w.CreatedAt),
 				LastSeenAt:   rfc3339(w.LastSeenAt),
-			}
-			if run, ok := d.scripts.Status(w.ID); ok {
-				node.Setup = scriptRun(run, d.scripts.Output(w.ID))
+				Setup:        d.setupRun(w.ID),
 			}
 			wss = append(wss, node)
 		}

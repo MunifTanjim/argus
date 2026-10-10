@@ -311,7 +311,7 @@ func (d *Node) handleWorkspaceSetTarget(ctx context.Context, params json.RawMess
 		return nil, invalid("%s", err)
 	}
 	d.notifyProjectsChanged()
-	return nil, nil
+	return api.WorkspaceSetTargetResult{TargetBranch: target}, nil
 }
 
 // diffBase returns "" for the uncommitted view, or the merge base with the

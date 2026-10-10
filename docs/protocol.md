@@ -1358,7 +1358,7 @@ CommitsResult {
 | ------------------------ | --------------------------------- | ------------------------------------- |
 | `project.list`           | none                              | `{ projects: ProjectNode[] }`         |
 | `project.changed`        | notification, empty params        | —                                     |
-| `project.rename`         | `{ project_id, name }`            | `null`                                |
+| `project.rename`         | `{ project_id, name }`            | `{ name }` (as stored)                |
 | `project.setHidden`      | `{ project_id, value }`           | `null`                                |
 | `project.setPinned`      | `{ project_id, value }`           | `null`                                |
 | `project.forget`         | `{ project_id }`                  | `null`                                |
@@ -1367,8 +1367,8 @@ CommitsResult {
 | `project.issues`         | `{ project_id }`                  | `{ issues: IssueInfo[], truncated? }` |
 | `workspace.create`       | `WorkspaceCreateParams`           | `WorkspaceCreateResult`               |
 | `workspace.remove`       | `{ workspace_id, force? }`        | `{ warning? }`                        |
-| `workspace.setTarget`    | `{ workspace_id, target_branch }` | `null`                                |
-| `workspace.runSetup`     | `WorkspaceRef`                    | `null`                                |
+| `workspace.setTarget`    | `{ workspace_id, target_branch }` | `{ target_branch }` (as stored)       |
+| `workspace.runSetup`     | `WorkspaceRef`                    | `ScriptRun`                           |
 | `workspace.setupLog`     | `WorkspaceRef`                    | `{ output: string }`                  |
 | `workspace.changedFiles` | `WorkspaceRef`                    | `ChangedFilesResult`                  |
 | `workspace.diff`         | `WorkspaceFileParams`             | `{ path, diff?, not_shown? }`         |
@@ -1402,13 +1402,15 @@ WorkspaceNode {
   head?:          string
   target_branch?: string
   created_at?, last_seen_at?: string
-  setup?: {
-    state:        "running" | "ok" | "failed"
-    command:      string
-    exit_code?:   number
-    started_at?, ended_at?: string
-    output_tail?: string
-  }
+  setup?:         ScriptRun
+}
+
+ScriptRun {
+  state:        "running" | "ok" | "failed"
+  command:      string
+  exit_code?:   number
+  started_at?, ended_at?: string
+  output_tail?: string
 }
 
 WorkspaceRef {
@@ -1437,6 +1439,9 @@ WorkspaceCreateResult {
   warning?: string
   prompt?:  string   // issue text, for an agent spawn
   setup?:   string   // setup command that started
+  setup_run?:     ScriptRun  // the setup's state when the reply was sent
+  branch?:        string
+  target_branch?: string     // absent: the repository's default branch
 }
 
 ListDirResult {

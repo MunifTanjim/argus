@@ -90,7 +90,7 @@ func (d *Node) handleWorkspaceRunSetup(ctx context.Context, params json.RawMessa
 	if _, err := d.startSetup(ctx, p.WorkspaceID, mainDir); err != nil {
 		return nil, invalid("%s", err)
 	}
-	return nil, nil
+	return d.setupRun(p.WorkspaceID), nil
 }
 
 func (d *Node) handleWorkspaceSetupLog(_ context.Context, params json.RawMessage) (any, error) {
@@ -141,6 +141,15 @@ func (d *Node) runTeardown(ctx context.Context, wsID, dir, mainDir string) strin
 		return fmt.Sprintf("teardown failed (exit %d): %s", code, last)
 	}
 	return ""
+}
+
+// setupRun is a workspace's last setup run, nil when it has none.
+func (d *Node) setupRun(wsID string) *api.ScriptRun {
+	run, ok := d.scripts.Status(wsID)
+	if !ok {
+		return nil
+	}
+	return scriptRun(run, d.scripts.Output(wsID))
 }
 
 func scriptRun(run wsscript.Run, output string) *api.ScriptRun {

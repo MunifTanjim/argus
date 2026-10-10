@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,35 +15,40 @@ import (
 	"github.com/MunifTanjim/argus/internal/node"
 )
 
-func TestPrintProjectTree(t *testing.T) {
+func TestPrintProjectTable(t *testing.T) {
 	out := captureStdout(t, func() {
-		printProjectTree(api.ProjectListResult{Projects: []api.ProjectNode{
-			{Name: "argus", Kind: "git", Dir: "/repo/.git", Root: "/repo", Hidden: true, Workspaces: []api.WorkspaceNode{
-				{Dir: "/repo", IsMain: true, Branch: "main", TargetBranch: "main"},
-				{Dir: "/repo-feat", Branch: "feature", TargetBranch: "main"},
-				{Dir: "/repo-old", IsGone: true, TargetBranch: "main"},
-			}},
-			{Name: "notes", Kind: "plain", Dir: "/notes", Root: "/notes", Workspaces: []api.WorkspaceNode{{Dir: "/notes", IsMain: true}}},
+		printProjectTable(api.ProjectListResult{Projects: []api.ProjectNode{
+			{ID: "aaaaaa111111ffff", Name: "argus", Kind: "git", Dir: "/repo/.git", Root: "/repo", DefaultBranch: "main", Hidden: true, Pinned: true, Workspaces: []api.WorkspaceNode{{}, {}, {}}},
+			{ID: "bbbbbb222222ffff", Name: "bare", Kind: "git", Dir: "/bare.git", Error: "worktree list: git missing"},
 		}})
 	})
-	for _, want := range []string{"argus (hidden)", "\n  /repo\n", "feature → main", "/repo-old (gone)"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	want := []string{
+		"ID            NAME   KIND  DEFAULT  WORKSPACES  STATUS                                 ROOT",
+		"aaaaaa111111  argus  git   main     3           pinned, hidden                         /repo",
+		"bbbbbb222222  bare   git   -        0           git error: worktree list: git missing  /bare.git",
 	}
-	for _, bad := range []string{"/repo/.git", "(detached)"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("output has %q:\n%s", bad, out)
-		}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("table =\n%s\nwant\n%s", out, strings.Join(want, "\n"))
 	}
 }
 
-func TestPrintProjectTreeShowsGitError(t *testing.T) {
+func TestPrintWorkspaceTableAlignsWideRunes(t *testing.T) {
 	out := captureStdout(t, func() {
-		printProjectTree(api.ProjectListResult{Projects: []api.ProjectNode{{Name: "argus", Kind: "git", Root: "/repo", Error: "worktree list: git missing"}}})
+		printWorkspaceTable([]api.ProjectNode{{Name: "argus", Kind: "git", Workspaces: []api.WorkspaceNode{
+			{ID: "wwwwww111111ffff", Dir: "/repo", IsMain: true, Branch: "main", TargetBranch: "main", Head: "ab24ff4"},
+			{ID: "wwwwww222222ffff", Dir: "/repo-ü", Branch: "fix-ümlaut", TargetBranch: "main", Head: "75bd1e0"},
+			{ID: "wwwwww333333ffff", Dir: "/repo-old", IsGone: true},
+		}}}, true)
 	})
-	if !strings.Contains(out, "argus (git error: worktree list: git missing)") {
-		t.Errorf("output lacks the git error:\n%s", out)
+	want := strings.Join([]string{
+		"ID            PROJECT  BRANCH      TARGET  HEAD     STATUS  DIR",
+		"wwwwww111111  argus    main        main    ab24ff4  main    /repo",
+		"wwwwww222222  argus    fix-ümlaut  main    75bd1e0  -       /repo-ü",
+		"wwwwww333333  argus    -           -       -        gone    /repo-old",
+	}, "\n") + "\n"
+	if out != want {
+		t.Errorf("table =\n%s\nwant\n%s", out, want)
 	}
 }
 
@@ -99,7 +106,7 @@ func TestResolveWorkspace(t *testing.T) {
 type fakeNode struct {
 	list      api.ProjectListResult
 	calls     []string
-	last      any
+	params    map[string]any
 	lists     []api.ProjectListResult // served in order after list, for --wait polls
 	removeRes api.WorkspaceRemoveResult
 	createRes *api.WorkspaceCreateResult // nil serves the default result
@@ -108,7 +115,10 @@ type fakeNode struct {
 
 func (f *fakeNode) call(method string, params, out any) error {
 	f.calls = append(f.calls, method)
-	f.last = params
+	if f.params == nil {
+		f.params = map[string]any{}
+	}
+	f.params[method] = params
 	if method == api.MethodProjectList {
 		l := f.list
 		if n := len(f.calls); n > 1 && len(f.lists) > 0 {
@@ -117,7 +127,7 @@ func (f *fakeNode) call(method string, params, out any) error {
 		*out.(*api.ProjectListResult) = l
 	}
 	if method == api.MethodWorkspaceCreate {
-		res := api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new", Warning: "fetch failed", Setup: "pnpm install"}
+		res := api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new", Warning: "fetch failed", Setup: "pnpm install", SetupRun: &api.ScriptRun{State: "running", Command: "pnpm install"}}
 		if f.createRes != nil {
 			res = *f.createRes
 		}
@@ -139,15 +149,15 @@ func TestProjectAndWorkspaceCommandsCallTheNode(t *testing.T) {
 		params any
 		out    string
 	}{
-		{[]string{"project", "rename", "argus", "Argus"}, api.MethodProjectRename, api.ProjectRenameParams{ProjectID: "aaaaaa111111ffff", Name: "Argus"}, "renamed argus to Argus"},
-		{[]string{"project", "unhide", "argus"}, api.MethodProjectSetHidden, api.ProjectFlagParams{ProjectID: "aaaaaa111111ffff", Value: false}, "unhid argus"},
-		{[]string{"project", "pin", "argus"}, api.MethodProjectSetPinned, api.ProjectFlagParams{ProjectID: "aaaaaa111111ffff", Value: true}, "pinned argus"},
-		{[]string{"project", "forget", "argus"}, api.MethodProjectForget, api.ProjectRef{ProjectID: "aaaaaa111111ffff"}, "forgot argus"},
-		{[]string{"workspace", "create", "argus", "42", "--source", "issue"}, api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: "aaaaaa111111ffff", Source: api.SourceIssue, Number: 42}, "created workspace /repo/.worktrees/new\nwarning: fetch failed"},
+		{[]string{"project", "rename", "argus", "Argus"}, api.MethodProjectRename, api.ProjectRenameParams{ProjectID: "aaaaaa111111ffff", Name: "Argus"}, "renamed project aaaaaa111111\n  from  argus\n  to    Argus\n"},
+		{[]string{"project", "unhide", "argus"}, api.MethodProjectSetHidden, api.ProjectFlagParams{ProjectID: "aaaaaa111111ffff", Value: false}, "unhid project aaaaaa111111\n  name  argus\n"},
+		{[]string{"project", "pin", "argus"}, api.MethodProjectSetPinned, api.ProjectFlagParams{ProjectID: "aaaaaa111111ffff", Value: true}, "pinned project aaaaaa111111"},
+		{[]string{"project", "forget", "argus"}, api.MethodProjectForget, api.ProjectRef{ProjectID: "aaaaaa111111ffff"}, "forgot project aaaaaa111111"},
+		{[]string{"workspace", "create", "argus", "42", "--source", "issue"}, api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: "aaaaaa111111ffff", Source: api.SourceIssue, Number: 42}, "created workspace wwwwww333333\n  project  argus\n  dir      /repo/.worktrees/new\n  setup    pnpm install (running)\n"},
 		{[]string{"workspace", "create", "argus", "login", "--target", "dev"}, api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: "aaaaaa111111ffff", Source: api.SourceNew, Branch: "login", TargetBranch: "dev"}, "created workspace"},
 		{[]string{"workspace", "create", "/repo/cmd", "login"}, api.MethodWorkspaceCreate, api.WorkspaceCreateParams{ProjectID: "aaaaaa111111ffff", Source: api.SourceNew, Branch: "login"}, "created workspace"},
-		{[]string{"workspace", "remove", "/repo/.worktrees/feat", "--force"}, api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: "wwwwww222222ffff", Force: true}, "removed /repo/.worktrees/feat"},
-		{[]string{"workspace", "target", "wwwwww222222", "dev"}, api.MethodWorkspaceSetTarget, api.WorkspaceSetTargetParams{WorkspaceID: "wwwwww222222ffff", TargetBranch: "dev"}, "target of /repo/.worktrees/feat → dev"},
+		{[]string{"workspace", "remove", "/repo/.worktrees/feat", "--force"}, api.MethodWorkspaceRemove, api.WorkspaceRemoveParams{WorkspaceID: "wwwwww222222ffff", Force: true}, "removed workspace wwwwww222222\n  dir     /repo/.worktrees/feat\n  branch  feat\n"},
+		{[]string{"workspace", "target", "wwwwww222222", "dev"}, api.MethodWorkspaceSetTarget, api.WorkspaceSetTargetParams{WorkspaceID: "wwwwww222222ffff", TargetBranch: "dev"}, "set target of workspace wwwwww222222\n  dir     /repo/.worktrees/feat\n  branch  feat\n  target  dev\n"},
 	} {
 		f := &fakeNode{list: projectFixture()}
 		out := captureStdout(t, func() {
@@ -155,12 +165,12 @@ func TestProjectAndWorkspaceCommandsCallTheNode(t *testing.T) {
 				t.Errorf("%v: %v", tc.args, err)
 			}
 		})
-		if len(f.calls) == 0 || f.calls[len(f.calls)-1] != tc.method {
-			t.Errorf("%v: calls = %v, want %s last", tc.args, f.calls, tc.method)
+		if !slices.Contains(f.calls, tc.method) {
+			t.Errorf("%v: calls = %v, want %s", tc.args, f.calls, tc.method)
 			continue
 		}
-		if fmt.Sprint(f.last) != fmt.Sprint(tc.params) {
-			t.Errorf("%v: params = %+v, want %+v", tc.args, f.last, tc.params)
+		if fmt.Sprint(f.params[tc.method]) != fmt.Sprint(tc.params) {
+			t.Errorf("%v: params = %+v, want %+v", tc.args, f.params[tc.method], tc.params)
 		}
 		if !strings.Contains(out, tc.out) {
 			t.Errorf("%v: output %q lacks %q", tc.args, out, tc.out)
@@ -199,7 +209,7 @@ func TestCreateWaitsForSetup(t *testing.T) {
 			t.Errorf("create --wait: %v", err)
 		}
 	})
-	if !strings.Contains(out, "setup started: pnpm install") || !strings.Contains(out, "setup done") {
+	if !strings.Contains(out, "setup    pnpm install (running)") || !strings.Contains(out, "setup done") {
 		t.Errorf("output = %q", out)
 	}
 }
@@ -223,8 +233,7 @@ func TestCreateWaitReportsASetupThatFailedToStart(t *testing.T) {
 	fastSetupPoll(t)
 	f := &fakeNode{
 		list:      projectFixture(),
-		createRes: &api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new"},
-		lists:     []api.ProjectListResult{listWithSetup("failed", -1, ".argus/settings.toml: bad")},
+		createRes: &api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new", SetupRun: &api.ScriptRun{State: "failed", ExitCode: -1, OutputTail: ".argus/settings.toml: bad"}},
 	}
 	out := captureStdout(t, func() {
 		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err == nil {
@@ -253,14 +262,9 @@ func TestWaitReportsALostSetup(t *testing.T) {
 	fastSetupPoll(t)
 	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("running", 0, ""), projectFixture()}}
 	f.calls = []string{"seed"} // serve lists from the first poll on
-	out := captureStdout(t, func() {
-		err := waitSetup(f.call, "wwwwww333333ffff")
-		if err == nil || err.Error() != "setup state lost (node restarted or workspace removed)" {
-			t.Errorf("a setup that disappears mid-wait: %v", err)
-		}
-	})
-	if strings.Contains(out, "setup done") {
-		t.Errorf("a lost setup is not done: %q", out)
+	_, err := waitSetup(f.call, "wwwwww333333ffff", &api.ScriptRun{State: "running"})
+	if err == nil || err.Error() != "setup state lost (node restarted or workspace removed)" {
+		t.Errorf("a setup that disappears mid-wait: %v", err)
 	}
 }
 
@@ -274,61 +278,44 @@ func TestSetupAndSetupLogCommands(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if !contains(f.calls, api.MethodWorkspaceRunSetup) || !strings.Contains(out, "installing") {
+	if !slices.Contains(f.calls, api.MethodWorkspaceRunSetup) || !strings.Contains(out, "installing") {
 		t.Errorf("calls=%v output=%q", f.calls, out)
 	}
 }
 
 func TestRemovePrintsTeardownWarning(t *testing.T) {
 	f := &fakeNode{list: projectFixture(), removeRes: api.WorkspaceRemoveResult{Warning: "teardown failed (exit 4): db"}}
-	out := captureStdout(t, func() {
+	out, errOut := captureOutput(t, func() {
 		if err := runRegistryCommand(f.call, []string{"workspace", "remove", "wwwwww222222", "--force"}); err != nil {
 			t.Error(err)
 		}
 	})
-	if !strings.Contains(out, "warning: teardown failed (exit 4): db") {
-		t.Errorf("output = %q", out)
+	if strings.Contains(out, "warning") || !strings.Contains(errOut, "warning: teardown failed (exit 4): db") {
+		t.Errorf("stdout = %q, stderr = %q", out, errOut)
 	}
 }
 
 func TestListMarksSetupState(t *testing.T) {
-	out := captureStdout(t, func() { printProjectTree(listWithSetup("running", 0, "")) })
-	if !strings.Contains(out, "(setting up)") {
+	out := captureStdout(t, func() { printWorkspaceTable(listWithSetup("running", 0, "").Projects, true) })
+	if !strings.Contains(out, "setting up") {
 		t.Errorf("output = %q", out)
 	}
-	out = captureStdout(t, func() { printProjectTree(listWithSetup("failed", 1, "")) })
-	if !strings.Contains(out, "(setup failed)") {
+	out = captureStdout(t, func() { printWorkspaceTable(listWithSetup("failed", 1, "").Projects, true) })
+	if !strings.Contains(out, "setup failed") {
 		t.Errorf("output = %q", out)
 	}
 }
 
-func contains(xs []string, x string) bool {
-	for _, s := range xs {
-		if s == x {
-			return true
+// A run that never exited, or a failed file copy, has no exit code to show.
+func TestSetupErrWithoutExitCode(t *testing.T) {
+	for _, run := range []api.ScriptRun{
+		{State: "failed", ExitCode: -1, OutputTail: "timed out after 15m"},
+		{State: "failed", ExitCode: 0, OutputTail: ".worktreeinclude: copied 1 of 2 files"},
+	} {
+		if err := setupErr(&run); err == nil || err.Error() != "setup failed" {
+			t.Errorf("setupErr(%+v) = %v", run, err)
 		}
 	}
-	return false
-}
-
-func TestWaitReportsASetupWithNoExitCode(t *testing.T) {
-	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("failed", -1, "timed out after 15m")}}
-	f.calls = []string{"seed"}
-	captureStdout(t, func() {
-		if err := waitSetup(f.call, "wwwwww333333ffff"); err == nil || err.Error() != "setup failed" {
-			t.Errorf("a setup that never exited has no exit code to show: %v", err)
-		}
-	})
-}
-
-func TestWaitReportsAFailedCopyWithoutExitCode(t *testing.T) {
-	f := &fakeNode{lists: []api.ProjectListResult{listWithSetup("failed", 0, ".worktreeinclude: copied 1 of 2 files")}}
-	f.calls = []string{"seed"}
-	captureStdout(t, func() {
-		if err := waitSetup(f.call, "wwwwww333333ffff"); err == nil || err.Error() != "setup failed" {
-			t.Errorf("a failed copy has no exit code to show: %v", err)
-		}
-	})
 }
 
 func TestEnableProjectRegistryRejectsRelativeAutoAdoptDir(t *testing.T) {
@@ -340,5 +327,129 @@ func TestEnableProjectRegistryRejectsRelativeAutoAdoptDir(t *testing.T) {
 	err := enableProjectRegistry(node.New(), cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "workspace.auto-adopt-dirs") {
 		t.Fatalf("err = %v, want one naming workspace.auto-adopt-dirs", err)
+	}
+}
+
+func TestWorkspaceListJSONIsFlat(t *testing.T) {
+	f := &fakeNode{list: projectFixture()}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "list", "--json"}); err != nil {
+			t.Error(err)
+		}
+	})
+	var got []workspaceEntry
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	if len(got) != 4 || got[1].ID != "wwwwww222222ffff" || got[1].ProjectID != "aaaaaa111111ffff" || got[1].ProjectName != "argus" || got[1].Branch != "feat" {
+		t.Errorf("entries = %+v", got)
+	}
+}
+
+func TestWorkspaceListOfOneProjectDropsTheProjectColumn(t *testing.T) {
+	f := &fakeNode{list: projectFixture()}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "list", "argus"}); err != nil {
+			t.Error(err)
+		}
+	})
+	if strings.Contains(out, "PROJECT") || strings.Contains(out, "twin") || !strings.Contains(out, "wwwwww222222") {
+		t.Errorf("output =\n%s", out)
+	}
+}
+
+func TestCreateWaitJSONPrintsOnlyTheResult(t *testing.T) {
+	fastSetupPoll(t)
+	for _, tc := range []struct {
+		final   api.ProjectListResult
+		state   string
+		wantErr bool
+	}{
+		{listWithSetup("ok", 0, ""), "ok", false},
+		{listWithSetup("failed", 2, "boom"), "failed", true},
+	} {
+		f := &fakeNode{list: projectFixture(), lists: []api.ProjectListResult{listWithSetup("running", 0, ""), tc.final}}
+		out, errOut := captureOutput(t, func() {
+			err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait", "--json"})
+			if (err != nil) != tc.wantErr {
+				t.Errorf("%s: err = %v", tc.state, err)
+			}
+		})
+		var got workspaceResult
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%s: stdout is not one JSON value: %v\n%s", tc.state, err, out)
+		}
+		if got.WorkspaceID != "wwwwww333333ffff" || got.Warning != "fetch failed" || got.Setup == nil || got.Setup.State != tc.state {
+			t.Errorf("%s: result = %+v", tc.state, got)
+		}
+		if strings.Contains(errOut, "warning") {
+			t.Errorf("%s: the warning belongs in the JSON, not stderr: %q", tc.state, errOut)
+		}
+	}
+}
+
+func TestProjectFlagJSON(t *testing.T) {
+	f := &fakeNode{list: projectFixture()}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"project", "hide", "argus", "--json"}); err != nil {
+			t.Error(err)
+		}
+	})
+	want := "{\n  \"project_id\": \"aaaaaa111111ffff\",\n  \"name\": \"argus\",\n  \"hidden\": true\n}\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestCreateWaitJSONPrintsTheResultWhenTheWaitFails(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{list: projectFixture(), lists: []api.ProjectListResult{projectFixture()}} // the setup vanishes
+	out, errOut := captureOutput(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait", "--json"}); err == nil {
+			t.Error("a lost setup should make --wait fail")
+		}
+	})
+	if !strings.Contains(errOut, "setup state lost") {
+		t.Errorf("stderr = %q", errOut)
+	}
+	var got workspaceResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.WorkspaceID != "wwwwww333333ffff" {
+		t.Errorf("stdout should still carry the created workspace: %v\n%s", err, out)
+	}
+}
+
+// A node older than the CLI reports no setup run; --wait must still find it.
+func TestCreateWaitFindsASetupTheNodeDidNotReport(t *testing.T) {
+	fastSetupPoll(t)
+	f := &fakeNode{
+		list:      projectFixture(),
+		createRes: &api.WorkspaceCreateResult{WorkspaceID: "wwwwww333333ffff", Dir: "/repo/.worktrees/new", Setup: "pnpm install"},
+		lists:     []api.ProjectListResult{listWithSetup("running", 0, ""), listWithSetup("failed", 3, "")},
+	}
+	_, errOut := captureOutput(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "create", "argus", "login", "--wait"}); err == nil {
+			t.Error("a failed setup should make --wait fail")
+		}
+	})
+	if !strings.Contains(errOut, "setup failed (exit 3)") {
+		t.Errorf("stderr = %q", errOut)
+	}
+}
+
+// A reset target reports the default branch it resolves to, as workspace list does.
+func TestTargetResetReportsTheDefaultBranch(t *testing.T) {
+	list := projectFixture()
+	list.Projects[0].DefaultBranch = "main"
+	f := &fakeNode{list: list}
+	out := captureStdout(t, func() {
+		if err := runRegistryCommand(f.call, []string{"workspace", "target", "wwwwww222222", "", "--json"}); err != nil {
+			t.Error(err)
+		}
+		if err := runRegistryCommand(f.call, []string{"workspace", "target", "wwwwww222222", ""}); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(out, `"target_branch": "main"`) || !strings.Contains(out, "target  main (default branch)\n") {
+		t.Errorf("output =\n%s", out)
 	}
 }

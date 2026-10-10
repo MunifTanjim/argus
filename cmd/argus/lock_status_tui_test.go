@@ -13,20 +13,29 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 )
 
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t *testing.T, fn func()) string { return capture(t, &os.Stdout, fn) }
+
+// captureOutput returns what fn writes to stdout and to stderr.
+func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
+	stderr = capture(t, &os.Stderr, func() { stdout = captureStdout(t, fn) })
+	return stdout, stderr
+}
+
+// capture returns what fn writes to *f.
+func capture(t *testing.T, f **os.File, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	old := os.Stdout
-	os.Stdout = w
+	old := *f
+	*f = w
 	fn()
 	w.Close()
-	os.Stdout = old
+	*f = old
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("reading captured stdout: %v", err)
+		t.Fatalf("reading captured output: %v", err)
 	}
 	r.Close()
 	return buf.String()

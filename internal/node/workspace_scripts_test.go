@@ -51,6 +51,9 @@ func TestCreateStartsSetupInTheBackground(t *testing.T) {
 	if res.Setup == "" || time.Since(start) > 5*time.Second {
 		t.Fatalf("create should report setup and return at once: %+v", res)
 	}
+	if res.Branch != "feat" || res.SetupRun == nil || res.SetupRun.State != "running" || res.SetupRun.Command != res.Setup {
+		t.Errorf("create should report the branch and the running setup: %+v %+v", res, res.SetupRun)
+	}
 	if run := waitSetup(t, d, res.WorkspaceID); run.State != wsscript.OK {
 		t.Fatalf("setup run = %+v output=%q", run, d.scripts.Output(res.WorkspaceID))
 	}
@@ -81,6 +84,9 @@ func TestSettingsParseErrorFailsSetupButKeepsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a bad settings file must not fail the create: %v", err)
 	}
+	if res.SetupRun == nil {
+		t.Error("create should report the setup run, so --wait can follow it to its failure")
+	}
 	if run := waitSetup(t, d, res.WorkspaceID); run.State != wsscript.Failed || !strings.Contains(d.scripts.Output(res.WorkspaceID), "settings.toml") {
 		t.Errorf("setup should be failed with the parse error: %+v %q", run, d.scripts.Output(res.WorkspaceID))
 	}
@@ -97,8 +103,12 @@ func TestRunSetupAndSetupLog(t *testing.T) {
 		t.Errorf("runSetup with no script: %v", err)
 	}
 	writeArgusSettings(t, main, "[scripts]\nsetup = \"echo hello; sleep 1\"\n")
-	if _, err := d.handleWorkspaceRunSetup(context.Background(), raw); err != nil {
+	got, err := d.handleWorkspaceRunSetup(context.Background(), raw)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if run, _ := got.(*api.ScriptRun); run == nil || run.State != "running" || run.Command != "echo hello; sleep 1" {
+		t.Errorf("runSetup should return the started run: %+v", got)
 	}
 	if _, err := d.handleWorkspaceRunSetup(context.Background(), raw); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Errorf("second runSetup: %v", err)
