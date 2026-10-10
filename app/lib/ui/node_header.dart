@@ -39,16 +39,27 @@ class SectionLabel extends StatelessWidget {
 }
 
 class NodeHeader extends StatelessWidget {
-  const NodeHeader({super.key, required this.label, this.offline = false});
+  const NodeHeader({
+    super.key,
+    required this.label,
+    this.offline = false,
+    this.outdated = false,
+  });
 
   final String label;
   final bool offline;
 
+  /// The node runs an argus older than the app's minimum.
+  final bool outdated;
+
   @override
-  Widget build(BuildContext context) => SectionLabel(
-    leading: const Icon(Icons.dns_outlined, size: 14, color: AppColors.dim),
-    label: offline ? '$label (offline)' : label,
-  );
+  Widget build(BuildContext context) {
+    final marks = [if (offline) 'offline', if (outdated) 'outdated'];
+    return SectionLabel(
+      leading: const Icon(Icons.dns_outlined, size: 14, color: AppColors.dim),
+      label: marks.isEmpty ? label : '$label (${marks.join(' · ')})',
+    );
+  }
 }
 
 class NeedsYouHeader extends StatelessWidget {

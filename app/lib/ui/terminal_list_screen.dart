@@ -47,6 +47,7 @@ class TerminalListScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final terms = ref.watch(terminalsProvider).terminals;
     final capable = ref.watch(serverInfoProvider).value?.nodes.where((n) => n.terminalSupported).length ?? 0;
+    final outdated = ref.watch(outdatedNodeIdsProvider);
     final grouped = max(terms.map((t) => t.nodeId).toSet().length, capable) > 1;
     final rows = <Widget>[];
     String? node;
@@ -55,7 +56,10 @@ class TerminalListScreen extends ConsumerWidget {
         node = t.nodeId;
         rows.add(Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: NodeHeader(label: t.nodeLabel.isEmpty ? t.nodeId : t.nodeLabel),
+          child: NodeHeader(
+            label: t.nodeLabel.isEmpty ? t.nodeId : t.nodeLabel,
+            outdated: outdated.contains(t.nodeId),
+          ),
         ));
       }
       rows.add(TerminalTile(terminal: t));

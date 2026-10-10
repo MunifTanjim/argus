@@ -17,6 +17,16 @@ void main() {
     expect(find.text('MACBOOK (OFFLINE)'), findsOneWidget);
   });
 
+  testWidgets('marks an outdated node', (tester) async {
+    await pump(tester, const NodeHeader(label: 'macbook', outdated: true));
+    expect(find.text('MACBOOK (OUTDATED)'), findsOneWidget);
+  });
+
+  testWidgets('marks an offline outdated node', (tester) async {
+    await pump(tester, const NodeHeader(label: 'macbook', offline: true, outdated: true));
+    expect(find.text('MACBOOK (OFFLINE · OUTDATED)'), findsOneWidget);
+  });
+
   testWidgets('needs you shows the needs-input diamond', (tester) async {
     await pump(tester, const NeedsYouHeader(label: 'Needs you'));
     expect(find.text('◆'), findsOneWidget);

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/compat.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
-import '../state/profiles.dart';
 import '../state/grouping.dart';
 import '../transport/ssh_gateway.dart';
 import 'about_screen.dart';
@@ -12,6 +12,7 @@ import 'device_identity_screen.dart';
 import 'push_settings_screen.dart';
 import 'terminal_settings_screen.dart';
 import 'responsive.dart';
+import 'sign_out.dart';
 import 'theme.dart';
 import 'voice_screen.dart';
 
@@ -159,12 +160,7 @@ class SettingsScreen extends ConsumerWidget {
                       const SizedBox(height: 8),
                     ],
                     OutlinedButton(
-                      onPressed: () async {
-                        // Clearing credentials disposes the gateway, which
-                        // unregisters this device from it (see gatewayProvider).
-                        await ref.read(profileStoreProvider).clearActiveId();
-                        ref.read(credentialsProvider.notifier).state = null;
-                      },
+                      onPressed: () => disconnect(ref),
                       child: const Text('Disconnect'),
                     ),
                   ],
@@ -228,11 +224,12 @@ Widget _serverInfo(ServerInfo info) {
   );
 }
 
-/// One node as "label · version · no tmux", omitting absent parts.
+/// One node as "label · version · no tmux" (or "outdated"), omitting absent parts.
 String _nodeLine(NodeRef n) => [
       n.label,
       if (n.version.isNotEmpty) n.version,
-      if (!n.spawnSupported) 'no tmux',
+      if (n.outdated) 'outdated, needs $minNodeVersion+'
+      else if (!n.spawnSupported) 'no tmux',
     ].join(' · ');
 
 /// A dim section label above a read-only value, the shared shape of the

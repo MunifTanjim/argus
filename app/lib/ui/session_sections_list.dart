@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/project.dart';
 import '../models/session.dart';
+import '../state/control.dart';
 import '../state/grouping.dart';
 import '../state/projects.dart';
 import '../state/session_filter.dart';
@@ -200,12 +201,14 @@ class _SessionSearchTitleState extends ConsumerState<SessionSearchTitle> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
+class _SectionHeader extends ConsumerWidget {
   const _SectionHeader({required this.section});
   final SessionSection section;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final outdated = ref.watch(outdatedNodeIdsProvider
+        .select((ids) => section.sessions.any((s) => ids.contains(s.nodeId))));
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, top: 4),
       child: switch (section.icon) {
@@ -213,6 +216,7 @@ class _SectionHeader extends StatelessWidget {
         SectionIcon.host => NodeHeader(
           label: section.title,
           offline: section.offline,
+          outdated: outdated,
         ),
         _ => SectionLabel(
           leading: _leading(),

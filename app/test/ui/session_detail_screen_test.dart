@@ -10,6 +10,7 @@ import 'package:argus/models/entry.dart';
 import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/models/workspace_files.dart';
+import 'package:argus/state/control.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
@@ -48,6 +49,7 @@ Session _s({
   String? name,
   String? branch,
   String? workspaceId,
+  String? nodeId,
 }) =>
     Session.fromJson({
       'id': 'mac:%1',
@@ -66,6 +68,7 @@ Session _s({
       'branch': ?branch,
       'workspace_id': ?workspaceId,
       'node_label': 'mac',
+      'node_id': ?nodeId,
       'agent_session_id': ?agentSessionId,
       'name': ?name,
     });
@@ -501,7 +504,7 @@ void main() {
 
   // opencode: paneless, input_mode api, so it accepts prompts and can be torn
   // down via the single Kill Session action.
-  Session oc({String status = 'idle', String inputMode = 'api'}) =>
+  Session oc({String status = 'idle', String inputMode = 'api', String? nodeId}) =>
       Session.fromJson({
         'id': 'oc:%1',
         'agent': 'opencode',
@@ -512,6 +515,7 @@ void main() {
         'tmux': {'pane_id': ''},
         'repo': 'proj',
         'node_label': 'mac',
+        'node_id': ?nodeId,
         'interaction': {'kind': 'idle'},
       });
 
@@ -583,6 +587,54 @@ void main() {
     await tester.tap(find.text('Kill').last);
     await tester.pumpAndSettle();
     expect(fake.killedIds, contains('oc:%1'));
+  });
+
+  testWidgets('a pending permission on an outdated node shows the upgrade notice',
+      (tester) async {
+    final s = Session.fromJson({
+      'id': 'mac:%1',
+      'agent': 'claude',
+      'status': 'awaiting_input',
+      'source': 'hooked',
+      'frontend': 'tmux',
+      'tmux': {'server': 'argus', 'pane_id': '%1', 'session_name': 's', 'window_index': 0, 'current_path': '/p'},
+      'node_label': 'mac',
+      'node_id': 'n-old',
+      'interaction': {'kind': 'permission', 'tool_name': 'Bash'},
+    });
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      outdatedNodeIdsProvider.overrideWithValue(const {'n-old'}),
+    ], session: s));
+    await tester.pump();
+    expect(find.text('Respond'), findsNothing);
+    expect(find.textContaining('Upgrade argus on mac'), findsOneWidget);
+  });
+
+  testWidgets('a session on an outdated node has no Live Screen', (tester) async {
+    await tester.pumpWidget(_app([
+      ..._baseOverrides(),
+      outdatedNodeIdsProvider.overrideWithValue(const {'n-old'}),
+    ], session: _s(nodeId: 'n-old')));
+    await tester.pump();
+    final button = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.terminal));
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets('a session on an outdated node shows the upgrade notice and no actions',
+      (tester) async {
+    await tester.pumpWidget(appFor(oc(nodeId: 'n-old'), extra: [
+      outdatedNodeIdsProvider.overrideWithValue(const {'n-old'}),
+    ]));
+    await tester.pump();
+    expect(find.text('Respond'), findsNothing);
+    expect(find.textContaining('Upgrade argus on mac'), findsOneWidget);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    final kill = tester.widget<PopupMenuItem<String>>(
+        find.widgetWithText(PopupMenuItem<String>, 'Kill Session'));
+    expect(kill.enabled, isFalse);
   });
 
   testWidgets('starting session shows startup notice and no input bar',

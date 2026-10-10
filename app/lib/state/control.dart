@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../core/result.dart';
 import '../transport/gateway_client.dart';
+import 'compat.dart';
 import 'gateway.dart';
 import 'grouping.dart';
 
@@ -132,6 +133,9 @@ class ServerInfo {
   const ServerInfo({required this.version, required this.nodes});
   final String version;
   final List<NodeRef> nodes;
+
+  /// Whether the server meets the app's minimum server version.
+  bool get supported => isSupported(version, minServerVersion);
 }
 
 /// Parses node maps (from server.info) into [NodeRef]s, dropping any with an empty
@@ -142,15 +146,17 @@ List<NodeRef> _parseNodes(List<dynamic> raw) => raw
     .map((m) {
       final id = m['id'] as String? ?? '';
       final label = m['label'] as String?;
-      final caps = m['capabilities'] as Map<String, dynamic>?;
-      final spawnSupported = caps?['spawn_session'] as bool? ?? false;
+      final version = m['version'] as String? ?? '';
+      final outdated = !isSupported(version, minNodeVersion);
+      // An outdated node gets no capabilities, so every capability gate hides it.
+      final caps = outdated ? null : m['capabilities'] as Map<String, dynamic>?;
       return NodeRef(
         id,
         label != null && label.isNotEmpty ? label : id,
-        spawnSupported: spawnSupported,
+        spawnSupported: caps?['spawn_session'] as bool? ?? false,
         terminalSupported: caps?['terminal'] as bool? ?? false,
         hostWakelockSupported: caps?['host_wakelock'] as bool? ?? false,
-        version: m['version'] as String? ?? '',
+        version: version,
       );
     })
     .where((n) => n.id.isNotEmpty)
@@ -176,3 +182,10 @@ final serverInfoProvider = FutureProvider.autoDispose<ServerInfo?>((ref) async {
     Error() => null,
   };
 });
+
+/// Ids of connected nodes older than the app's minimum node version. Their
+/// sessions take no actions (see session_detail_screen.dart).
+final outdatedNodeIdsProvider = Provider.autoDispose<Set<String>>((ref) => {
+      for (final n in ref.watch(serverInfoProvider).value?.nodes ?? const <NodeRef>[])
+        if (n.outdated) n.id,
+    });

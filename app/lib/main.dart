@@ -18,6 +18,7 @@ import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
 import 'ui/theme.dart';
+import 'ui/unsupported_server_screen.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -121,7 +122,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : creds == null
               ? const ProfilesScreen()
-              : const HomeShell(),
+              : const ServerGate(child: HomeShell()),
     );
   }
 }

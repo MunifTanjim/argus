@@ -5,6 +5,7 @@ import '../core/result.dart';
 import '../data/history_repository.dart';
 import '../models/entry.dart';
 import '../models/history.dart';
+import '../state/control.dart';
 import '../state/tool_detail.dart';
 import 'resume_action.dart';
 import 'shell_drawer.dart';
@@ -71,8 +72,11 @@ class _HistoryTranscriptScreenState
   Widget build(BuildContext context) {
     // A resume needs the original working directory; some sessions (e.g.
     // antigravity) have an unknown cwd and can't be reopened in place.
+    // A node older than the app's minimum may not understand the request.
     final canResume = widget.session.resumable &&
-        (widget.project?.cwd.isNotEmpty ?? false);
+        (widget.project?.cwd.isNotEmpty ?? false) &&
+        !ref.watch(outdatedNodeIdsProvider
+            .select((ids) => ids.contains(widget.session.nodeId)));
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.session.displayTitle),

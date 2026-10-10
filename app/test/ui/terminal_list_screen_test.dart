@@ -131,4 +131,18 @@ void main() {
     expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
     expect(find.byTooltip('New terminal'), findsOneWidget);
   });
+
+  testWidgets('a terminal on an outdated node is marked and takes no actions', (tester) async {
+    await _pump(
+      tester,
+      const [NodeTerminal(id: 'A:@1', nodeId: 'A', nodeLabel: 'alpha', command: 'zsh')],
+      nodes: const [NodeRef('A', 'alpha', version: '0.1.1'), NodeRef('B', 'beta')],
+    );
+    await tester.pump();
+    expect(find.text('ALPHA (OUTDATED)'), findsOneWidget);
+    expect(tester.widget<ListTile>(find.widgetWithText(ListTile, 'zsh')).enabled, isFalse);
+    await tester.longPress(find.text('zsh'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.text('Kill'), findsNothing);
+  });
 }

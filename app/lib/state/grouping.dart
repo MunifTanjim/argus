@@ -2,6 +2,7 @@ import '../models/agent.dart';
 import '../models/enums.dart';
 import '../models/project.dart';
 import '../models/session.dart';
+import 'compat.dart';
 
 class NodeRef {
   final String id;
@@ -30,6 +31,10 @@ class NodeRef {
     this.hostWakelockSupported = false,
     this.version = '',
   });
+
+  /// Whether [version] is below the app's minimum node version. An outdated
+  /// node reports no capabilities and its sessions take no actions.
+  bool get outdated => !isSupported(version, minNodeVersion);
 }
 
 class AgentInfo {

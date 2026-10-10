@@ -5,6 +5,7 @@ import 'package:argus/core/result.dart';
 import 'package:argus/data/history_repository.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/models/history.dart';
+import 'package:argus/state/control.dart';
 import 'package:argus/ui/history_transcript_screen.dart';
 
 class _FakeHistoryRepository implements HistoryRepository {
@@ -40,9 +41,11 @@ HistorySession _session({
   String? title,
   String? firstMessage,
   bool resumable = false,
+  String? nodeId,
 }) =>
     HistorySession(
       sessionId: 'sess-1',
+      nodeId: nodeId,
       title: title,
       firstMessage: firstMessage,
       transcriptPath: '/path/to/transcript',
@@ -65,9 +68,13 @@ Widget _app(
   HistoryRepository repo,
   HistorySession session, {
   HistoryProject? project,
+  Set<String> outdatedNodes = const {},
 }) =>
     ProviderScope(
-      overrides: [historyRepositoryProvider.overrideWithValue(repo)],
+      overrides: [
+        historyRepositoryProvider.overrideWithValue(repo),
+        outdatedNodeIdsProvider.overrideWithValue(outdatedNodes),
+      ],
       child: MaterialApp(
         home: HistoryTranscriptScreen(session: session, project: project),
       ),
@@ -133,6 +140,15 @@ void main() {
     final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(_app(repo, _session(resumable: true),
         project: _project(cwd: '')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Resume'), findsNothing);
+  });
+
+  testWidgets('hides resume button when the node is outdated', (tester) async {
+    final repo = _FakeHistoryRepository(const <Entry>[]);
+    await tester.pumpWidget(_app(repo, _session(resumable: true, nodeId: 'n-old'),
+        project: _project(cwd: '/home/user/project'), outdatedNodes: const {'n-old'}));
     await tester.pump();
     await tester.pump();
     expect(find.byTooltip('Resume'), findsNothing);
