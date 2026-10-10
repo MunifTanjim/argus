@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flterm/flterm.dart' as gt;
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
@@ -215,7 +216,9 @@ class _GhosttyEmulator implements LiveEmulator {
   final bool direct;
   final LiveSink sink;
   final gt.TerminalController _controller = gt.TerminalController();
+  final _focusNode = FocusNode();
   final _dragFilter = TouchDragFilter();
+  ({Offset at, bool focused})? _tap;
   int _cols = 80, _rows = 24;
   // Set while a key bar key is encoded: sendKey answers through onOutput.
   var _fromKeyBar = false;
@@ -261,15 +264,45 @@ class _GhosttyEmulator implements LiveEmulator {
     }
   }
 
-  @override
-  Widget view(double fontSize) => gt.TerminalView(
-        controller: _controller,
-        showKeyboard: direct,
-        theme: _ghosttyTheme.copyWith(fontSize: fontSize),
-      );
+  // flterm shows the keyboard only on focus gain, and believes it is still up
+  // after the user hides it.
+  void _onTapUp(BuildContext context, PointerUpEvent e) {
+    final tap = _tap;
+    _tap = null;
+    if (tap == null || !tap.focused) return;
+    if ((e.position - tap.at).distance > kTouchSlop) return;
+    if (View.of(context).viewInsets.bottom > 0) return;
+    _controller
+      ..hideKeyboard()
+      ..showKeyboard();
+  }
 
   @override
-  void dispose() => _controller.dispose();
+  Widget view(double fontSize) {
+    final terminal = gt.TerminalView(
+      controller: _controller,
+      focusNode: _focusNode,
+      showKeyboard: direct,
+      theme: _ghosttyTheme.copyWith(fontSize: fontSize),
+    );
+    if (!direct) return terminal;
+    return Builder(
+      builder: (context) => Listener(
+        onPointerDown: (e) => _tap = _tap == null
+            ? (at: e.position, focused: _focusNode.hasFocus)
+            : null,
+        onPointerUp: (e) => _onTapUp(context, e),
+        onPointerCancel: (_) => _tap = null,
+        child: terminal,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+  }
 }
 
 /// Hands wheel ticks and button presses and releases to the live screen; the
