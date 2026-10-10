@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:argus/models/session.dart';
+import 'package:argus/pairing/gateway_store.dart';
+import 'package:argus/state/grouping.dart';
 import 'package:argus/state/session_filter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +12,24 @@ Session _s(String status) => Session.fromJson(
     '{"id":"n:1","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"r"}',
   ),
 );
+
+class _FakeKv implements SecureKv {
+  _FakeKv(this.m);
+  final Map<String, String> m;
+  @override
+  Future<String?> read(String key) async => m[key];
+  @override
+  Future<void> write(String key, String value) async => m[key] = value;
+  @override
+  Future<void> delete(String key) async => m.remove(key);
+}
+
+ProviderContainer _groupContainer(_FakeKv kv) {
+  final c = ProviderContainer(
+      overrides: [groupByStoreProvider.overrideWithValue(GroupByStore(kv))]);
+  addTearDown(c.dispose);
+  return c;
+}
 
 void main() {
   test('active sessions are the running and awaiting ones', () {
@@ -53,5 +73,37 @@ void main() {
     expect(c.read(activeOnlyProvider), isFalse);
     c.read(activeOnlyProvider.notifier).toggle();
     expect(c.read(activeOnlyProvider), isTrue);
+  });
+
+  group('group-by', () {
+    test('host by default; a choice is saved', () async {
+      final kv = _FakeKv({});
+      final c = _groupContainer(kv);
+      expect(c.read(groupByProvider), GroupBy.host);
+      await c.read(groupByProvider.notifier).set(GroupBy.project);
+      expect(c.read(groupByProvider), GroupBy.project);
+      expect(kv.m['sessions.groupBy'], 'project');
+    });
+
+    test('loads the saved choice', () async {
+      final c = _groupContainer(_FakeKv({'sessions.groupBy': 'agent'}));
+      c.listen(groupByProvider, (_, _) {});
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(c.read(groupByProvider), GroupBy.agent);
+    });
+
+    test('an unknown stored value falls back to host', () async {
+      final g =
+          await GroupByStore(_FakeKv({'sessions.groupBy': 'folder'})).load();
+      expect(g, GroupBy.host);
+    });
+
+    test('a late load keeps a choice made while loading', () async {
+      final c = _groupContainer(_FakeKv({'sessions.groupBy': 'agent'}));
+      c.listen(groupByProvider, (_, _) {});
+      await c.read(groupByProvider.notifier).set(GroupBy.status);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(c.read(groupByProvider), GroupBy.status);
+    });
   });
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/device_identity.dart';
 import '../state/gateway.dart';
+import '../state/session_filter.dart';
 import '../state/sessions.dart';
 import '../transport/connection.dart';
 import 'device_identity_screen.dart';
@@ -32,7 +33,11 @@ class SessionListScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         title: const SessionSearchTitle(child: Text('Sessions')),
-        actions: const [SessionSearchButton(), ActiveOnlyButton()],
+        actions: const [
+          SessionSearchButton(),
+          GroupByButton(),
+          ActiveOnlyButton(),
+        ],
       ),
       // The home tabs share one route, so their buttons cannot share the
       // default hero tag.
@@ -57,6 +62,7 @@ class SessionListScreen extends ConsumerWidget {
               onRefresh: () => _refresh(ref),
               child: SessionSectionsList(
                 sessions: sessions,
+                groupBy: ref.watch(groupByProvider),
                 emptyText: unauthorized
                     ? 'Sessions appear after this device is authorized.'
                     : 'No sessions.',

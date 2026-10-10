@@ -8,7 +8,7 @@ import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
-import 'git_branch_icon.dart';
+import 'nerd_icon.dart';
 import 'node_screen.dart';
 import 'project_actions.dart';
 import 'settings_screen.dart';

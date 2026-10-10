@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/project.dart';
 import '../models/session.dart';
 import '../state/grouping.dart';
+import '../state/projects.dart';
 import '../state/session_filter.dart';
 import '../transport/connection.dart';
+import 'agent_badge.dart';
+import 'nerd_icon.dart';
 import 'node_header.dart';
 import 'responsive.dart';
 import 'session_card.dart';
 import 'session_detail_screen.dart';
+import 'status_style.dart';
 import 'theme.dart';
 
 /// Sessions grouped into "Needs you" and per-host sections, as session cards.
@@ -17,10 +22,14 @@ class SessionSectionsList extends ConsumerWidget {
     super.key,
     required this.sessions,
     this.emptyText = 'No sessions.',
+    this.groupBy = GroupBy.host,
   });
 
   final Iterable<Session> sessions;
   final String emptyText;
+
+  /// The home list's grouping; workspace lists keep host.
+  final GroupBy groupBy;
 
   // Tearing a session down lives on the detail screen's "Kill Session" action,
   // so the list is tap-to-open only.
@@ -28,11 +37,10 @@ class SessionSectionsList extends ConsumerWidget {
     BuildContext context,
     Session s,
     SessionSection section,
-    bool grouped,
     bool multiAgent,
   ) => SessionCard(
     session: s,
-    showNode: section.needsYou && grouped,
+    showNode: section.showNode,
     showAgent: multiAgent,
     onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
   );
@@ -45,10 +53,10 @@ class SessionSectionsList extends ConsumerWidget {
         .where((s) => !activeOnly || isActiveSession(s))
         .where((s) => matchesSessionQuery(s, query))
         .toList();
-    final sections = buildSections(shown);
-    // When sessions span nodes, the "Needs you" section mixes hosts under one
-    // header, so its cards must name their own node.
-    final grouped = nodesFromSessions(sessions).isNotEmpty;
+    final projects = groupBy == GroupBy.project || groupBy == GroupBy.workspace
+        ? ref.watch(projectsProvider).projects
+        : const <ProjectNode>[];
+    final sections = buildSections(shown, by: groupBy, projects: projects);
     final multiAgent =
         sessions.map((s) => s.agent).where((a) => a.isNotEmpty).toSet().length >
         1;
@@ -75,7 +83,7 @@ class SessionSectionsList extends ConsumerWidget {
             for (final s in section.sessions)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _buildCard(context, s, section, grouped, multiAgent),
+                child: _buildCard(context, s, section, multiAgent),
               ),
             const SizedBox(height: 8),
           ],
@@ -97,6 +105,37 @@ class ActiveOnlyButton extends ConsumerWidget {
       selectedIcon: const Icon(Icons.filter_list_alt),
       tooltip: activeOnly ? 'Show all sessions' : 'Show active sessions',
       onPressed: () => ref.read(activeOnlyProvider.notifier).toggle(),
+    );
+  }
+}
+
+class GroupByButton extends ConsumerWidget {
+  const GroupByButton({super.key});
+
+  static const _labels = {
+    GroupBy.host: 'Host',
+    GroupBy.project: 'Project',
+    GroupBy.workspace: 'Workspace',
+    GroupBy.agent: 'Agent',
+    GroupBy.status: 'Status',
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(groupByProvider);
+    return PopupMenuButton<GroupBy>(
+      icon: const Icon(Icons.view_agenda_outlined),
+      tooltip: 'Group sessions',
+      initialValue: current,
+      onSelected: (g) => ref.read(groupByProvider.notifier).set(g),
+      itemBuilder: (_) => [
+        for (final g in GroupBy.values)
+          CheckedPopupMenuItem(
+            value: g,
+            checked: g == current,
+            child: Text(_labels[g]!),
+          ),
+      ],
     );
   }
 }
@@ -169,10 +208,49 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, top: 4),
-      child: section.needsYou
-          ? NeedsYouHeader(label: section.title)
-          : NodeHeader(label: section.title, offline: section.offline),
+      child: switch (section.icon) {
+        SectionIcon.needsYou => NeedsYouHeader(label: section.title),
+        SectionIcon.host => NodeHeader(
+          label: section.title,
+          offline: section.offline,
+        ),
+        _ => SectionLabel(
+          leading: _leading(),
+          label: section.offline
+              ? '${section.title} (offline)'
+              : section.title,
+        ),
+      },
     );
+  }
+
+  // Sections of one agent or status share it, so the first session tells.
+  Widget _leading() {
+    final first = section.sessions.first;
+    Color tint(Color c) => section.other ? AppColors.dim : c;
+    return switch (section.icon) {
+      SectionIcon.project => const RepoIcon(size: 14, color: AppColors.dim),
+      SectionIcon.folder => const Icon(
+        Icons.folder_outlined,
+        size: 14,
+        color: AppColors.dim,
+      ),
+      SectionIcon.branch => const GitBranchIcon(size: 14, color: AppColors.dim),
+      SectionIcon.agent => Icon(
+        Icons.smart_toy_outlined,
+        size: 14,
+        color: tint(agentColor(first.agent)),
+      ),
+      SectionIcon.status => Text(
+        statusGlyph(first.status),
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          color: statusColor(first.status),
+        ),
+      ),
+      SectionIcon.needsYou || SectionIcon.host => const SizedBox.shrink(),
+    };
   }
 }
 

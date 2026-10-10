@@ -1,21 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/agent.dart';
 import 'theme.dart';
 
-String agentLabel(String agent) {
-  switch (agent) {
-    case 'claude':
-      return 'Claude';
-    case 'codex':
-      return 'Codex';
-    case 'antigravity':
-      return 'Antigravity';
-    case 'opencode':
-      return 'OpenCode';
-    default:
-      return agent;
-  }
-}
+export '../models/agent.dart' show agentLabel;
 
 Color agentColor(String agent) {
   switch (agent) {

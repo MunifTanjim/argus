@@ -3,7 +3,7 @@ import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
-import 'package:argus/ui/git_branch_icon.dart';
+import 'package:argus/ui/nerd_icon.dart';
 import 'package:argus/ui/node_screen.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/ui/theme.dart';
