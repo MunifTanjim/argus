@@ -54,7 +54,7 @@ func TestSummaryKeysActOnTheTree(t *testing.T) {
 		}{
 			{"/", []tea.KeyPressMsg{keyMsg("/")}, func(m model) bool { return m.focused == leftSidebar && m.left.tree.inputMode == pmFilter }},
 			{"z.", []tea.KeyPressMsg{keyMsg("z"), keyMsg(".")}, func(m model) bool { return m.left.tree.showHidden }},
-			{"zg", []tea.KeyPressMsg{keyMsg("z"), keyMsg("g")}, func(m model) bool { return m.left.tree.showGone }},
+			{"zx", []tea.KeyPressMsg{keyMsg("z"), keyMsg("x")}, func(m model) bool { return m.left.tree.showGone }},
 			{"<C-w>>", cw('>'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()+4 }},
 			{"<C-w><lt>", cw('<'), func(m model) bool { return m.projectsLeftW() == base().projectsLeftW()-4 }},
 			{"<Esc>", []tea.KeyPressMsg{keyMsg("esc")}, func(m model) bool { return m.focused == leftSidebar }},

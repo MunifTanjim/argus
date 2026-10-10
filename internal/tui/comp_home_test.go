@@ -198,8 +198,8 @@ func TestHomeKillTargetsTheSessionAskedAbout(t *testing.T) {
 	s3.Status = session.StatusAwaitingInput
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: s3})
 	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodSessionEvent, Params: params}))
-	if m.order[homeOf(m).cursor] == "n1:s2" {
-		t.Fatalf("setup: the order should move another session under the cursor: %v", m.order)
+	if m.order[homeOf(m).cursor] != "n1:s2" {
+		t.Fatalf("the re-sort should keep the cursor on the session the prompt named: %v", m.order)
 	}
 	m, cmd := typeKeysCmd(m, "y")
 	if cmd == nil {

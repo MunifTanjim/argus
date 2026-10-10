@@ -52,6 +52,12 @@ func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 	initStyles()
 
 	m := newModel(client, hasDark, logs).withKeymaps(cfg)
+	m.statePath = config.GetStatePath("tui.json")
+	g, err := loadGroupBy(m.statePath)
+	if err != nil {
+		log.Printf("tui state: %v", err)
+	}
+	m.groupBy = g
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
 	go sendTermKeyLoop(client, m.termKeyCh) // single ordered sender for live-terminal input
@@ -82,7 +88,7 @@ func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 			}
 		}()
 	}
-	_, err := p.Run()
+	_, err = p.Run()
 	return err
 }
 

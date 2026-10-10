@@ -102,6 +102,8 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		}
 	case m.matches(msg, k.ActiveOnly):
 		c.toggleActiveOnly()
+	case m.matches(msg, k.GroupBy):
+		c.cycleGroupBy()
 	case m.matches(msg, k.Filter):
 		h.filter, cmd = h.filter.start(m.sessionFilter)
 	default:
@@ -145,24 +147,23 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 		return centerBlock(title+"\n\n"+hint, cardW, w)
 	}
 	sel := h.cursor
-	// On a gateway, a host header precedes each group.
 	grouped := m.grouped()
 	showAgent := m.multiAgent()
 	l := itemLines{key: "home"}
+	var prev sectionInfo
 	for i, id := range m.order {
 		s := m.sessions[id]
+		sec := m.sessionSection(s)
 		if i > 0 {
 			l.text("")
 		}
-		if i == 0 || sectionKey(s) != sectionKey(m.sessions[m.order[i-1]]) {
-			switch {
-			case s.Status == session.StatusAwaitingInput:
-				l.text(m.needsYouHeader())
-			case grouped:
-				l.text(m.groupHeader(s.NodeLabel))
+		if i == 0 || !sec.same(prev) {
+			if hdr := m.sectionHeader(sec); hdr != "" {
+				l.text(hdr)
 			}
 		}
-		l.add(i, m.sessionCard(s, i == sel, cardW, showAgent))
+		prev = sec
+		l.add(i, m.sessionCard(s, i == sel, cardW, showAgent, grouped && !sec.namesHost))
 	}
 	lines := l.window(c.below(lipgloss.Height(title)+1), sel, max(1, ht-chrome))
 	return centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, w)

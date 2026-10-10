@@ -166,7 +166,7 @@ func (m model) multiAgent() bool {
 	return false
 }
 
-func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgent bool) string {
+func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgent, showNode bool) string {
 	border, chrome := ColorBorder, cardRounded
 	if selected {
 		border, chrome = ColorFocus, cardHeavy
@@ -229,14 +229,10 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgen
 		task = StyleDim.Render("(idle)")
 	}
 
-	// The cross-host "Needs you" section drops the per-node header, so surface the
-	// node on the card itself.
+	// The section header does not name the host, so the card does.
 	nodeLabel := ""
-	if s.Status == session.StatusAwaitingInput && m.grouped() {
-		nodeLabel = s.NodeLabel
-		if nodeLabel == "" {
-			nodeLabel = "local"
-		}
+	if showNode {
+		nodeLabel = hostName(s.NodeLabel)
 	}
 
 	agentTxt, agentCol := "", color.Color(nil)

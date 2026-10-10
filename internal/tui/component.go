@@ -99,6 +99,7 @@ const (
 	actClosePopup
 	actRunCommand
 	actToggleActiveOnly
+	actCycleGroupBy
 	actSetSessionFilter
 	actGoToRow
 	actRunNamed
@@ -165,6 +166,9 @@ func (c *ctx) goToRow(id string) { c.actions = append(c.actions, action{kind: ac
 // toggleActiveOnly switches the session lists between all sessions and the
 // active and awaiting-input ones.
 func (c *ctx) toggleActiveOnly() { c.actions = append(c.actions, action{kind: actToggleActiveOnly}) }
+
+// cycleGroupBy steps the home sessions list to its next grouping.
+func (c *ctx) cycleGroupBy() { c.actions = append(c.actions, action{kind: actCycleGroupBy}) }
 
 func (c *ctx) setSessionFilter(q string) {
 	c.actions = append(c.actions, action{kind: actSetSessionFilter, id: q})
@@ -301,6 +305,8 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			cmds = append(cmds, cmd)
 		case actToggleActiveOnly:
 			m.toggleActiveOnly()
+		case actCycleGroupBy:
+			m.cycleGroupBy()
 		case actSetSessionFilter:
 			m.setSessionFilter(a.id)
 		}
