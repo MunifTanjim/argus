@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -561,15 +561,31 @@ func (m model) taskUpdateDetail(it transcript.Entry, width int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-var askUserQuestionPair = regexp.MustCompile(`"([^"]+)"="([^"]*)"`)
-
-// parseAnsweredAnswers best-effort parses an AskUserQuestion result into a
-// question→answer map. The result is free text, so an unparseable string yields an
-// empty map and callers degrade gracefully (no marks).
-func parseAnsweredAnswers(result string) map[string]string {
+// parseAnsweredAnswers best-effort parses an AskUserQuestion result
+// (`"question"="answer", ...`) into a question→answer map. Questions and answers
+// may themselves contain quotes, so each answer is anchored on its known
+// question: it runs to the next question's key, or to the last quote. An
+// unparseable result yields an empty map and callers degrade gracefully (no marks).
+func parseAnsweredAnswers(result string, questions []string) map[string]string {
+	type key struct {
+		question   string
+		start, end int
+	}
+	var keys []key
+	for _, q := range questions {
+		k := `"` + q + `"="`
+		if i := strings.Index(result, k); q != "" && i >= 0 {
+			keys = append(keys, key{q, i, i + len(k)})
+		}
+	}
+	slices.SortFunc(keys, func(a, b key) int { return a.start - b.start })
 	out := map[string]string{}
-	for _, mt := range askUserQuestionPair.FindAllStringSubmatch(result, -1) {
-		out[mt[1]] = mt[2]
+	for i, k := range keys {
+		if i+1 < len(keys) {
+			out[k.question] = strings.TrimSuffix(result[k.end:keys[i+1].start], `", `)
+		} else if j := strings.LastIndex(result[k.end:], `"`); j >= 0 {
+			out[k.question] = result[k.end : k.end+j]
+		}
 	}
 	return out
 }
@@ -680,7 +696,11 @@ func (m model) questionDetail(it transcript.Entry, width int, brand string) stri
 	if len(in.Questions) == 0 {
 		return m.genericToolBody(it, width)
 	}
-	answers := parseAnsweredAnswers(it.Result)
+	asked := make([]string, len(in.Questions))
+	for i, q := range in.Questions {
+		asked[i] = q.Question
+	}
+	answers := parseAnsweredAnswers(it.Result, asked)
 
 	blocks := make([]string, 0, len(in.Questions))
 	for _, q := range in.Questions {

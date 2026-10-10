@@ -319,24 +319,46 @@ Widget _todo(Entry it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-final _answerPair = RegExp(r'"([^"]+)"="([^"]*)"');
-
-String? answeredAnswer(String result, String question) {
-  for (final m in _answerPair.allMatches(result)) {
-    if (m.group(1) == question) return m.group(2);
+/// Parses an AskUserQuestion result (`"question"="answer", ...`) into a
+/// question→answer map. Questions and answers may contain quotes, so each answer
+/// is anchored on its known question: it runs to the next question's key, or to
+/// the last quote.
+Map<String, String> answeredAnswers(String result, List<String> questions) {
+  final keys = <({String question, int start, int end})>[];
+  for (final q in questions) {
+    if (q.isEmpty) continue;
+    final k = '"$q"="';
+    final i = result.indexOf(k);
+    if (i >= 0) keys.add((question: q, start: i, end: i + k.length));
   }
-  return null;
+  keys.sort((a, b) => a.start.compareTo(b.start));
+  final out = <String, String>{};
+  for (var i = 0; i < keys.length; i++) {
+    final k = keys[i];
+    if (i + 1 < keys.length) {
+      var v = result.substring(k.end, keys[i + 1].start);
+      if (v.endsWith('", ')) v = v.substring(0, v.length - 3);
+      out[k.question] = v;
+    } else {
+      final j = result.lastIndexOf('"');
+      if (j >= k.end) out[k.question] = result.substring(k.end, j);
+    }
+  }
+  return out;
 }
 
 Widget _askUserQuestion(Entry it) {
   final qs = (_input(it)['questions'] as List?) ?? const [];
   if (qs.isEmpty) return _generic(it);
-  final result = it.result ?? '';
+  final answers = answeredAnswers(it.result ?? '', [
+    for (final q in qs.whereType<Map<String, dynamic>>())
+      toolInputStr(q['question']),
+  ]);
   final blocks = <Widget>[];
   for (final q in qs.cast<Map<String, dynamic>>()) {
     final question = toolInputStr(q['question']);
     final multi = (q['multiSelect'] as bool?) ?? false;
-    final chosen = (answeredAnswer(result, question) ?? '')
+    final chosen = (answers[question] ?? '')
         .split(', ')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)

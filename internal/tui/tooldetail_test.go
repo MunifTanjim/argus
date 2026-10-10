@@ -429,19 +429,27 @@ func TestGlobDetail(t *testing.T) {
 
 func TestParseAnsweredAnswers(t *testing.T) {
 	single := `Your questions have been answered: "Pick a color"="Blue". You can now continue with these answers in mind.`
-	got := parseAnsweredAnswers(single)
+	got := parseAnsweredAnswers(single, []string{"Pick a color"})
 	if got["Pick a color"] != "Blue" {
 		t.Errorf("single answer = %q, want Blue (map: %v)", got["Pick a color"], got)
 	}
 
 	multi := `Your questions have been answered: "Q one"="A1", "Q two"="A2". You can now continue.`
-	got = parseAnsweredAnswers(multi)
+	got = parseAnsweredAnswers(multi, []string{"Q one", "Q two"})
 	if got["Q one"] != "A1" || got["Q two"] != "A2" {
 		t.Errorf("multi answers parsed wrong: %v", got)
 	}
 
-	if g := parseAnsweredAnswers("no pairs here"); len(g) != 0 {
+	if g := parseAnsweredAnswers("no pairs here", []string{"Q one"}); len(g) != 0 {
 		t.Errorf("garbage result should parse to empty map, got %v", g)
+	}
+
+	// Quotes inside questions and answers (real Claude Code output).
+	quoted := "Your questions have been answered: \"What should \"chat about this\" do?\"=\"Interrupt (Recommended)\", " +
+		"\"With Esc back to \"back\", how?\"=\"Use `c` (\"chat\" slot)\". You can now continue with these answers in mind."
+	got = parseAnsweredAnswers(quoted, []string{`With Esc back to "back", how?`, `What should "chat about this" do?`})
+	if got[`What should "chat about this" do?`] != "Interrupt (Recommended)" || got[`With Esc back to "back", how?`] != "Use `c` (\"chat\" slot)" {
+		t.Errorf("quoted answers parsed wrong: %q", got)
 	}
 }
 

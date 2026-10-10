@@ -240,11 +240,23 @@ void main() {
     expect(toolMeta('question')!.category, ToolCategory.other);
   });
 
-  test('answeredAnswer parses question→answer pairs', () {
+  test('answeredAnswers parses question→answer pairs', () {
     const r =
         'Your questions have been answered: "Pick one"="A", "Colors"="red, blue"';
-    expect(answeredAnswer(r, 'Pick one'), 'A');
-    expect(answeredAnswer(r, 'Colors'), 'red, blue');
-    expect(answeredAnswer(r, 'Absent'), isNull);
+    final a = answeredAnswers(r, ['Pick one', 'Colors', 'Absent']);
+    expect(a['Pick one'], 'A');
+    expect(a['Colors'], 'red, blue');
+    expect(a.containsKey('Absent'), isFalse);
+  });
+
+  test('answeredAnswers handles quotes inside questions and answers', () {
+    const r = 'Your questions have been answered: '
+        '"What should "chat" do?"="Interrupt (Recommended)", '
+        '"Esc back to "back", how?"="Use `c` ("chat" slot)". '
+        'You can now continue with these answers in mind.';
+    final a =
+        answeredAnswers(r, ['Esc back to "back", how?', 'What should "chat" do?']);
+    expect(a['What should "chat" do?'], 'Interrupt (Recommended)');
+    expect(a['Esc back to "back", how?'], 'Use `c` ("chat" slot)');
   });
 }
