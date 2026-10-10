@@ -537,7 +537,11 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.routeByNode(method, raw, out)
 	case method == api.MethodTranscriptUnsubscribe:
 		id, _ := subIDFromParams(raw)
-		return m.routeByHandle(m.subNode, id, method, raw, out)
+		err := m.routeByHandle(m.subNode, id, method, raw, out)
+		m.mu.Lock()
+		delete(m.subNode, id)
+		m.mu.Unlock()
+		return err
 	case terminalHandleAddressed[method]:
 		id, _ := termIDFromParams(raw)
 		return m.routeByHandle(m.termNode, id, method, raw, out)
@@ -833,17 +837,26 @@ func (m *E2EClient) routeBySession(method string, raw json.RawMessage, out any) 
 	if err != nil {
 		return err
 	}
-	if err := m.callNode(nodeID, method, local, out); err != nil {
-		return err
-	}
 	// Remember the handle -> node so later handle-addressed calls route correctly.
-	switch method {
-	case api.MethodTranscriptSubscribe:
-		if id, _ := subIDFromParams(raw); id != "" {
+	// A subscription is recorded before the call so an unsubscribe sent while the
+	// subscribe is in flight still reaches the node.
+	subID := ""
+	if method == api.MethodTranscriptSubscribe {
+		if subID, _ = subIDFromParams(raw); subID != "" {
 			m.mu.Lock()
-			m.subNode[id] = nodeID
+			m.subNode[subID] = nodeID
 			m.mu.Unlock()
 		}
+	}
+	if err := m.callNode(nodeID, method, local, out); err != nil {
+		if subID != "" {
+			m.mu.Lock()
+			delete(m.subNode, subID)
+			m.mu.Unlock()
+		}
+		return err
+	}
+	switch method {
 	case api.MethodTerminalOpen:
 		if id, _ := termIDFromParams(raw); id != "" {
 			m.mu.Lock()

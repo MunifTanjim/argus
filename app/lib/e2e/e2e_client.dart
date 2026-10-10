@@ -622,12 +622,12 @@ class E2EClient implements GatewayClient {
       case 'terminal.list':
         return _fanoutTerminals(params);
       case 'transcript.unsubscribe':
-        return _routeByHandle(
-          _subNode,
-          stringField(params, 'sub_id'),
-          method,
-          params,
-        );
+        final sub = stringField(params, 'sub_id');
+        try {
+          return await _routeByHandle(_subNode, sub, method, params);
+        } finally {
+          _subNode.remove(sub);
+        }
     }
     if (terminalAddressed.contains(method) ||
         (method == 'terminal.open' && stringField(params, 'terminal_id') != null)) {
@@ -889,15 +889,24 @@ class E2EClient implements GatewayClient {
     if (!ok) {
       throw RpcError(-32600, 'session id is not gateway-qualified: $composite');
     }
-    final result = await _callNodeDecoded(
-      nodeId,
-      method,
-      rewriteSessionId(params, localId),
-    );
-    if (method == 'transcript.subscribe') {
-      final sub = stringField(params, 'sub_id');
-      if (sub != null && sub.isNotEmpty) _subNode[sub] = nodeId;
-    } else if (method == 'terminal.open') {
+    // A subscription is recorded before the call so an unsubscribe sent while
+    // the subscribe is in flight still reaches the node.
+    final sub = method == 'transcript.subscribe'
+        ? stringField(params, 'sub_id')
+        : null;
+    if (sub != null && sub.isNotEmpty) _subNode[sub] = nodeId;
+    final Object? result;
+    try {
+      result = await _callNodeDecoded(
+        nodeId,
+        method,
+        rewriteSessionId(params, localId),
+      );
+    } catch (_) {
+      if (sub != null) _subNode.remove(sub);
+      rethrow;
+    }
+    if (method == 'terminal.open') {
       final term = stringField(params, 'term_id');
       if (term != null && term.isNotEmpty) _termNode[term] = nodeId;
     }

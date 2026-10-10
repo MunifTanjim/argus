@@ -165,6 +165,26 @@ void main() {
     await client.call('transcript.subscribe', {'session_id': 'A:s1', 'sub_id': 'sub-1'});
     await client.call('transcript.unsubscribe', {'sub_id': 'sub-1'});
     expect(unsubNode, 'A');
+    // The route is dropped on unsubscribe.
+    expect(() => client.call('transcript.unsubscribe', {'sub_id': 'sub-1'}),
+        throwsA(isA<RpcError>()));
+    await client.close();
+  });
+
+  test('unsubscribe sent while the subscribe is in flight still routes', () async {
+    var unsubNode = '';
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      if (m == 'transcript.unsubscribe') unsubNode = 'A';
+      return _json(null);
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    final sub = client
+        .call('transcript.subscribe', {'session_id': 'A:s1', 'sub_id': 'sub-1'});
+    await client.call('transcript.unsubscribe', {'sub_id': 'sub-1'});
+    await sub;
+    expect(unsubNode, 'A');
     await client.close();
   });
 
