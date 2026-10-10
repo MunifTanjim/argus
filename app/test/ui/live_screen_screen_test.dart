@@ -377,6 +377,49 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('switches to another terminal of the same workspace', (tester) async {
+    final repo = _FakeTerminalRepo();
+    const a = NodeTerminal(id: 'A:@1', name: 'build', workspaceId: 'A:w1');
+    const b = NodeTerminal(id: 'A:@2', name: 'logs', workspaceId: 'A:w1');
+    const c = NodeTerminal(id: 'A:@3', name: 'other', workspaceId: 'A:w2');
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        terminalRepositoryProvider.overrideWithValue(repo),
+        terminalsProvider.overrideWith(() => _FixedTerminals([a, b, c])),
+      ],
+      child: const MaterialApp(home: LiveScreenScreen(terminal: a)),
+    ));
+    await tester.pump();
+    expect(repo.lastTerminalId, 'A:@1');
+
+    await tester.tap(find.byTooltip('Switch terminal'));
+    await tester.pumpAndSettle();
+    expect(find.text('other'), findsNothing);
+    await tester.tap(find.text('logs'));
+    await tester.pumpAndSettle();
+    await tester.pump();
+
+    expect(repo.lastTerminalId, 'A:@2');
+    expect(repo.openCount, 2);
+    expect(find.text('logs'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('no switch for a terminal alone in its workspace', (tester) async {
+    const a = NodeTerminal(id: 'A:@1', name: 'build', workspaceId: 'A:w1');
+    const c = NodeTerminal(id: 'A:@3', name: 'other', workspaceId: 'A:w2');
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        terminalRepositoryProvider.overrideWithValue(_FakeTerminalRepo()),
+        terminalsProvider.overrideWith(() => _FixedTerminals([a, c])),
+      ],
+      child: const MaterialApp(home: LiveScreenScreen(terminal: a)),
+    ));
+    await tester.pump();
+    expect(find.byTooltip('Switch terminal'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test('the mouse handler forwards wheel and button events', () {
     final wheels = <bool>[];
     final buttons = <(int, bool, int, int)>[];
@@ -539,4 +582,10 @@ class _CountingTerminals extends TerminalsNotifier {
   int loads = 0;
   @override
   Future<void> load(GatewayClient? client) async => loads++;
+}
+class _FixedTerminals extends TerminalsNotifier {
+  _FixedTerminals(this.terminals);
+  final List<NodeTerminal> terminals;
+  @override
+  TerminalsState build() => TerminalsState(terminals: terminals, loaded: true);
 }
