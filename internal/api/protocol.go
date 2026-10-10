@@ -98,6 +98,9 @@ const (
 	// relay.open pairs a client with a node into a chan_id E2E channel.
 	MethodRelayOpen  = "relay.open"  // request: RelayOpenParams; result: RelayOpenResult
 	MethodRelayClose = "relay.close" // request: RelayCloseParams; result: nil
+	// relay.closed tells the node the gateway dropped a channel (client gone), so
+	// the node can free what the channel holds.
+	MethodRelayClosed = "relay.closed" // gateway->node notification: RelayCloseParams
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)

@@ -481,12 +481,22 @@ func ResetTriggeredPullIntervalForTest() {
 	setTriggeredPullIntervalForTest(DefaultTriggeredPullInterval)
 }
 
-// onGatewayNotify handles gateway→node notifications. The only one is a hint that
-// the trust log moved; everything else is ignored.
+// onGatewayNotify handles gateway→node notifications: a dropped relay channel,
+// and a hint that the trust log moved; everything else is ignored.
 //
-// The notification only schedules work — a forged one changes when the node pulls,
-// not what it accepts (every branch is verified against the pinned genesis).
+// The trust-log notification only schedules work — a forged one changes when the
+// node pulls, not what it accepts (every branch is verified against the pinned
+// genesis). A forged relay.closed can only end a channel, which a gateway can
+// already do by dropping its frames.
 func (d *Node) onGatewayNotify(n api.Notification) {
+	if n.Method == api.MethodRelayClosed {
+		if p, err := api.Decode[api.RelayCloseParams](n.Params); err == nil && p.ChanID != "" {
+			if r := d.activeResponder.Load(); r != nil {
+				r.closeChan(p.ChanID)
+			}
+		}
+		return
+	}
 	if n.Method != api.MethodTrustLogChanged {
 		return
 	}

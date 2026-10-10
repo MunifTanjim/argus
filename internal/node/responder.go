@@ -318,3 +318,14 @@ func (cn *channelNotifier) Notify(method string, params any) error {
 	}
 	return peer.SendRawFrame(frame)
 }
+
+// RelayChannelCountForTest reports how many client channels the active uplink holds.
+func (d *Node) RelayChannelCountForTest() int {
+	r := d.activeResponder.Load()
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.chans)
+}

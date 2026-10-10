@@ -336,6 +336,9 @@ func (s *Server) dropChannel(chanID, reason string) {
 	if ok {
 		ch.stopOnce.Do(func() { close(ch.stop) })
 		s.logger().Info("relay channel dropped", "chan", chanID, "reason", reason)
+		// The node holds per-channel state (event stream, transcript pollers) that
+		// only it can free. Fails harmlessly when the node uplink is what closed.
+		go func() { _ = ch.node.Notify(api.MethodRelayClosed, api.RelayCloseParams{ChanID: chanID}) }()
 	}
 }
 

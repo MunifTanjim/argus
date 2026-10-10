@@ -425,10 +425,12 @@ The gateway closes a channel in these cases:
 - A frame write to either side fails.
 - A queue overflows.
 
-The gateway does not send a teardown frame to either side. The node frees its
-channel state when its uplink closes. The client drops a channel when it gets
-a `node.event` of type `offline` or `removed`. It opens a new channel when the
-node is `online` again.
+The gateway sends the node a `relay.closed` notification with the `chan_id`,
+and the node frees the channel's state, including its transcript
+subscriptions. The node also frees every channel when its uplink closes. The
+gateway sends the client no teardown frame. The client drops a channel when it
+gets a `node.event` of type `offline` or `removed`. It opens a new channel when
+the node is `online` again.
 
 `relay.close` returns `null`, even for a channel that the caller does not own.
 
@@ -1112,6 +1114,7 @@ are standard base64 strings in JSON.
 | `node.event`    | notification       | gateway → client | `NodeEvent`             | —                             |
 | `relay.open`    | request            | gateway          | `{ node_id: string }`   | `{ chan_id: string }`         |
 | `relay.close`   | request            | gateway          | `{ chan_id: string }`   | `null`                        |
+| `relay.closed`  | notification       | gateway → node   | `{ chan_id: string }`   | —                             |
 | `e2e.handshake` | relay notification | client ↔ node    | Noise message in `body` | —                             |
 
 ```ts
