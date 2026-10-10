@@ -22,48 +22,10 @@ func (m model) grouped() bool {
 	return false
 }
 
-// groupOffline reports whether every session from the node is offline.
-func (m model) groupOffline(label string) bool {
-	seen := false
-	for _, s := range m.sessions {
-		if s.NodeLabel == label {
-			seen = true
-			if !s.Offline {
-				return false
-			}
-		}
-	}
-	return seen
-}
-
 // needsYouHeader labels the cross-host group of awaiting-input sessions at the top
 // of the list (mirrors the mobile "Needs you" section).
 func (m model) needsYouHeader() string {
 	return StyleAccentBold.Render("Needs you")
-}
-
-// sectionKey assigns a session to a list section: awaiting-input sessions share
-// one cross-host "Needs you" section, others belong to their host. A header is
-// drawn whenever this key changes between rows.
-func sectionKey(s session.Session) string {
-	if s.Status == session.StatusAwaitingInput {
-		return "\x00needs-you"
-	}
-	return "host:" + s.NodeLabel
-}
-
-// groupHeader renders the per-host section header, flagged when the node is
-// disconnected from the gateway.
-func (m model) groupHeader(label string) string {
-	name := label
-	if name == "" {
-		name = "local"
-	}
-	h := Icon.Node.Render() + " " + StyleSecondaryBold.Render(name)
-	if m.groupOffline(label) {
-		h += dimStyle.Render("  (offline)")
-	}
-	return h
 }
 
 // Shared view styles, bound to theme colors by initStyles(). Zero-valued (plain

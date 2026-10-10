@@ -9,7 +9,7 @@
        re│ >toggle                                                                                          │
           │                                                                                                  │cs ·  ─╮
           │ > toggle mouse                                                                                   │       │
-          │ > toggle show-gone             zg                                                                │       │
+          │ > toggle show-gone             zx                                                                │       │
           │ > toggle show-hidden           z.                                                                │───────╯
           │ > toggle left-sidebar          ␣o                                                                │
           │ > toggle right-sidebar         ␣e                                                                │

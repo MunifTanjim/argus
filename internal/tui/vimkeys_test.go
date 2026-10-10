@@ -62,9 +62,9 @@ func TestVimZDotAndZGToggleProjects(t *testing.T) {
 	if !m.left.tree.showHidden || m.left.tree.showGone {
 		t.Errorf("z.: hidden = %v gone = %v, want only hidden", m.left.tree.showHidden, m.left.tree.showGone)
 	}
-	m = typeKeys(m, "zg")
+	m = typeKeys(m, "zx")
 	if !m.left.tree.showGone {
-		t.Error("zg should show gone projects")
+		t.Error("zx should show gone projects")
 	}
 }
 

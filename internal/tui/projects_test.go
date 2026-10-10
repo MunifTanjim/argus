@@ -754,10 +754,10 @@ func TestGoneRowsNeedTheirOwnToggle(t *testing.T) {
 	if got := len(res.(model).left.tree.rows); got != 4 {
 		t.Errorf("z. (hidden) should not reveal gone rows, got %d rows", got)
 	}
-	res, _ = m.runKey(seqKey("zg"))
+	res, _ = m.runKey(seqKey("zx"))
 	mm := res.(model)
 	if len(mm.left.tree.rows) != 6 {
-		t.Fatalf("zg should reveal the gone workspace and project: %+v", mm.left.tree.rows)
+		t.Fatalf("zx should reveal the gone workspace and project: %+v", mm.left.tree.rows)
 	}
 	if !strings.Contains(ansi.Strip(treePane(mm, 40, 20)), "+gone") {
 		t.Error("tree title should say gone rows are shown")

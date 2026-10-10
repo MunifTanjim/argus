@@ -7,7 +7,8 @@
   h ← zc/l → zo      fold / unfold · fold close    esc        close / tree · back
   enter              open; l opens Home/workspace  dd         kill session · session kill
   ^ww/^wW            cycle focus · focus next      za         active / all sessions · toggle active-only
-  /                  filter · filter-projects      /          filter sessions · filter-sessions
+  /                  filter · filter-projects      zg         home: group sessions by · cycle group-by
+                                                   /          filter sessions · filter-sessions
                                                    L shift+l  workspace setup log · open setup-log
                                                    ^wh/^wl    focus left / right pane · focus left
                                                    ^wj        session: focus the prompt · focus down
@@ -25,6 +26,5 @@
   F shift+f  forget project (files stay) · project forget     ␣o         toggle sidebar · toggle left-sidebar
   P shift+p  pin / unpin project · project pin                gr         refresh · refresh
   H shift+h  hide / unhide project · project hide             g?         help · help
-  z.         show hidden · toggle show-hidden                 Q shift+q  quit · quit
 
                                                ↑/↓ scroll · any key close

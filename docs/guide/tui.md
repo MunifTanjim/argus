@@ -16,7 +16,8 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
 
 ## Views
 
-- **Sessions**: the session list, with live status.
+- **Sessions**: the session list, with live status. You can group it by host,
+  project, workspace, agent, or status.
 - **Transcript**: the full conversation, with foldable sections and tool-call details.
 - **Live screen**: a session's terminal. You can type into it.
 - **History**: past projects and sessions. You can resume a session.
@@ -164,6 +165,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `answer note` | session-dock | `n` |
 | `answer submit` | session-dock | `<CR>` |
 | `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, terminals, transcript, workspace | `<Esc>` |
+| `cycle group-by` | home | `zg` |
 | `filter-projects` | node, project, project-tree | `/` |
 | `filter-sessions` | home, workspace | `/` |
 | `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
@@ -227,7 +229,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle line-wrap` | file | `yow` |
 | `toggle mouse` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace |  |
 | `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<Leader>e` |
-| `toggle show-gone` | node, project, project-tree, workspace | `zg` |
+| `toggle show-gone` | node, project, project-tree, workspace | `zx` |
 | `toggle show-hidden` | node, project, project-tree, workspace | `z.` |
 | `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace |  |
 | `transcript export` | history, transcript | `E` |

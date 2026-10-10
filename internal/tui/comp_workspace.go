@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // killID is the session awaiting a kill confirmation.
@@ -194,7 +196,7 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	cardW := min(w, maxCardWidth)
 	cards := make([]string, len(ss))
 	for i, s := range ss {
-		cards[i] = m.sessionCard(s, focused && i == p.cursor, cardW, true)
+		cards[i] = m.sessionCard(s, focused && i == p.cursor, cardW, true, s.Status == session.StatusAwaitingInput && m.grouped())
 	}
 	cursor := 0
 	if focused {

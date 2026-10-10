@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"slices"
 	"sort"
@@ -161,7 +162,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case projectsTreeMsg:
 		res, cmd := m.updateTree(msg)
 		res, file := res.(model).updateFile(msg)
-		return res, tea.Batch(cmd, file)
+		mm := res.(model)
+		mm.reorder() // project and workspace sections read the tree
+		return mm, tea.Batch(cmd, file)
 	case projectsActionMsg:
 		if msg.reloadChanges && msg.err == nil {
 			m.right.changes.reload()
@@ -464,22 +467,28 @@ func bellCmd() tea.Cmd {
 }
 
 func (m *model) reorder() {
+	sel := m.rootSessionID() // read before m.order is rebuilt in place
 	m.order = m.order[:0]
 	for id, s := range m.sessions {
 		if m.shows(s) {
 			m.order = append(m.order, id)
 		}
 	}
+	secs := make(map[string]sectionInfo, len(m.order))
+	for _, id := range m.order {
+		secs[id] = m.sessionSection(m.sessions[id])
+	}
 	sort.Slice(m.order, func(i, j int) bool {
 		a, b := m.sessions[m.order[i]], m.sessions[m.order[j]]
-		// Awaiting-input first (one cross-host "Needs you" group), then by host
-		// (label asc), then id asc. Local sessions share the empty label.
-		ai := a.Status == session.StatusAwaitingInput
-		bi := b.Status == session.StatusAwaitingInput
-		if ai != bi {
-			return ai
+		sa, sb := secs[a.ID], secs[b.ID]
+		if sa.rank != sb.rank {
+			return sa.rank < sb.rank
 		}
-		if a.NodeLabel != b.NodeLabel {
+		if sa.key != sb.key {
+			return sa.key < sb.key
+		}
+		// Needs you spans hosts: host, then id.
+		if sa.needsYou && a.NodeLabel != b.NodeLabel {
 			return a.NodeLabel < b.NodeLabel
 		}
 		return a.ID < b.ID
@@ -500,6 +509,9 @@ func (m *model) reorder() {
 		p.cursor, p.killID = min(p.cursor, cursorBottom(len(m.wsSessions(p.ws)))), present(p.killID)
 		m.main = m.main.replaceAt(0, p)
 	}
+	// Sections shift as sessions change status or the tree loads; keep the
+	// selected session under the cursor.
+	m.selectRootID(sel)
 }
 
 func activeStatus(s session.Session) bool {
@@ -524,8 +536,28 @@ func (m *model) toggleActiveOnly() {
 	}
 }
 
+// cycleGroupBy steps the home list to its next grouping, keeps the selected
+// session, and saves the choice. The write is synchronous so rapid cycling
+// cannot save an older choice last.
+func (m *model) cycleGroupBy() {
+	sel := m.rootSessionID()
+	m.groupBy = m.groupBy.next()
+	m.refilter(sel)
+	m.flash = "grouped by " + string(m.groupBy)
+	if m.statePath == "" {
+		return
+	}
+	if err := saveGroupBy(m.statePath, m.groupBy); err != nil {
+		log.Printf("tui state: %v", err)
+	}
+}
+
 func (m *model) refilter(sel string) {
 	m.reorder()
+	m.selectRootID(sel)
+}
+
+func (m *model) selectRootID(sel string) {
 	if i := slices.Index(m.rootIDs(), sel); i >= 0 {
 		switch p := m.rootComp().(type) {
 		case homeComp:

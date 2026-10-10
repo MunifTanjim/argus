@@ -752,11 +752,11 @@ func TestSessionCardAgentLabelGated(t *testing.T) {
 	s := session.Session{ID: "s1", Agent: "codex", Status: session.StatusIdle,
 		Tmux: session.TmuxLocation{SessionName: "work", PaneID: "%1", Server: session.TmuxServerDefault}}
 
-	shown := ansi.Strip(m.sessionCard(s, false, 78, true))
+	shown := ansi.Strip(m.sessionCard(s, false, 78, true, false))
 	if !strings.Contains(shown, "Codex") {
 		t.Errorf("showAgent=true should render agent label:\n%s", shown)
 	}
-	hidden := ansi.Strip(m.sessionCard(s, false, 78, false))
+	hidden := ansi.Strip(m.sessionCard(s, false, 78, false, false))
 	if strings.Contains(hidden, "Codex") {
 		t.Errorf("showAgent=false should not render agent label:\n%s", hidden)
 	}

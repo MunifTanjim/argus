@@ -128,7 +128,7 @@ var sectionLists = map[string]sectionList{
 	"home": {
 		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
 			listKeys.Open, listKeys.Jump, listKeys.TabPrev, listKeys.TabNext, listKeys.New, listKeys.Kill,
-			listKeys.Refresh, listKeys.Back, listKeys.ActiveOnly, listKeys.Filter),
+			listKeys.Refresh, listKeys.Back, listKeys.ActiveOnly, listKeys.GroupBy, listKeys.Filter),
 		focus: focusFor("home"),
 	},
 	"history": {
