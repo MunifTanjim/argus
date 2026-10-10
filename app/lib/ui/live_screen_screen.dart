@@ -162,6 +162,36 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   void _send(List<int> bytes) =>
       _direct ? _batcher.add(bytes) : _attach?.send(bytes);
 
+  Future<void> _switchTerminal(List<NodeTerminal> siblings) async {
+    final current = widget.terminal!;
+    final next = await showModalBottomSheet<NodeTerminal>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final t in siblings)
+              ListTile(
+                leading: const Icon(Icons.terminal),
+                title: Text(t.title),
+                subtitle: Text(t.cwd),
+                selected: t.id == current.id,
+                trailing: t.id == current.id ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.of(ctx).pop(t),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || next == null || next.id == current.id) return;
+    unawaited(Navigator.of(context).pushReplacement(PageRouteBuilder(
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      pageBuilder: (_, _, _) => LiveScreenScreen(terminal: next),
+    )));
+  }
+
   @override
   Widget build(BuildContext context) {
     // Match the TUI: leave the live screen on disconnect rather than silently
@@ -179,8 +209,24 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     final title = t != null
         ? (t.nodeLabel.isEmpty ? t.title : '${t.title} · ${t.nodeLabel}')
         : widget.session!.displayTitle;
+    final siblings = t == null || t.workspaceId.isEmpty
+        ? const <NodeTerminal>[]
+        : [
+            for (final s in ref.watch(terminalsProvider).terminals)
+              if (s.workspaceId == t.workspaceId) s,
+          ];
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(title),
+        actions: [
+          if (siblings.length > 1)
+            IconButton(
+              icon: const Icon(Icons.swap_horiz),
+              tooltip: 'Switch terminal',
+              onPressed: () => _switchTerminal(siblings),
+            ),
+        ],
+      ),
       backgroundColor: Colors.black,
       body: Column(
         children: [
