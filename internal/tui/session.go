@@ -50,7 +50,7 @@ func (d dockComp) dockHeight(c *ctx, avail int) int {
 }
 
 // dockSummary is the one-line description shown in the collapsed dock.
-func dockSummary(ix *session.Interaction) string {
+func dockSummary(agent string, ix *session.Interaction) string {
 	switch ix.Kind {
 	case session.InteractionQuestion:
 		if len(ix.Questions) > 1 {
@@ -62,7 +62,7 @@ func dockSummary(ix *session.Interaction) string {
 		return "Question"
 	case session.InteractionPermission:
 		if ix.ToolName != "" {
-			return "Allow " + toolDisplayName(ix.ToolName) + "?"
+			return "Allow " + toolDisplayName(agent, ix.ToolName) + "?"
 		}
 		return "Permission request"
 	case session.InteractionPlan:
@@ -84,7 +84,7 @@ func (m model) dockSummaryLine(width int) string {
 	}
 	hint := StyleDim.Render("⇥ Tab to answer")
 	leftW := max(1, width-lipgloss.Width(hint)-1)
-	left := Icon.Collapsed.WithColor(ColorAccent) + " " + dockSummary(ix)
+	left := Icon.Collapsed.WithColor(ColorAccent) + " " + dockSummary(m.liveAgent(), ix)
 	leftBlock := lipgloss.NewStyle().Width(leftW).Render(truncateLine(left, leftW))
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, " ", hint)
 }

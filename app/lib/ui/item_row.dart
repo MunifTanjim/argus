@@ -7,9 +7,12 @@ import 'tool_registry.dart';
 const _redColor = Color(0xFFfb4934);
 
 class ItemRow extends StatelessWidget {
-  const ItemRow({super.key, required this.item, this.onTap});
+  const ItemRow({super.key, required this.item, this.agent, this.onTap});
 
   final Entry item;
+
+  /// The transcript's agent, for tool lookups.
+  final String? agent;
 
   /// When set, the row is tappable (drill into a full-screen detail) and shows a
   /// trailing chevron.
@@ -24,7 +27,7 @@ class ItemRow extends StatelessWidget {
     switch (item.kind) {
       case EntryKind.tool:
         final err = item.resultIsError;
-        final meta = toolMeta(item.toolName);
+        final meta = toolMeta(agent, item.toolName);
         final name = (meta?.display.isNotEmpty ?? false)
             ? meta!.display
             : (item.toolName ?? 'tool');
@@ -66,7 +69,7 @@ class ItemRow extends StatelessWidget {
           return _row(
             leading: const Icon(Icons.smart_toy_outlined,
                 size: 14, color: AppColors.accent),
-            label: toolMeta(item.toolName)!.display,
+            label: toolMeta('codex', item.toolName)!.display,
             labelColor: AppColors.accent,
             preview: item.subagents
                 .map((s) => s.name.isNotEmpty ? s.name : s.id)

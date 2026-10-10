@@ -189,6 +189,9 @@ func (m model) liveSessionID() string {
 	return ""
 }
 
+// liveAgent is the agent of the live session (see liveSessionID).
+func (m model) liveAgent() string { return m.sessions[m.liveSessionID()].Agent }
+
 // interactionKey is a stable identity for a pending interaction: changes for a
 // different prompt, stays equal across re-publishes of the same one.
 func interactionKey(ix *session.Interaction) string {

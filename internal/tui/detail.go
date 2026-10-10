@@ -134,7 +134,7 @@ func drillable(it transcript.Entry) bool {
 	return ok && s.HasTrace
 }
 
-func drillLabel(e transcript.Entry) string {
+func drillLabel(agent string, e transcript.Entry) string {
 	switch e.Kind {
 	case transcript.EntryThinking:
 		return "Thinking"
@@ -143,7 +143,7 @@ func drillLabel(e transcript.Entry) string {
 	case transcript.EntrySubagent:
 		return subagentLabel(e)
 	default:
-		return toolDisplayName(e.ToolName)
+		return toolDisplayName(agent, e.ToolName)
 	}
 }
 
@@ -167,7 +167,7 @@ func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
 		return nil
 	}
 	m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
-		label: drillLabel(e), items: []transcript.Entry{e}, agentID: agentID,
+		label: drillLabel(m.agent(), e), items: []transcript.Entry{e}, agentID: agentID,
 		defaultExpanded: true, focused: true, expanded: map[int]bool{},
 	})
 	return m.fetchToolBodyCmd(e, agentID)
@@ -742,12 +742,12 @@ func (m tview) toolBody(it transcript.Entry, width int) string {
 	if !fetched && it.ToolID != "" {
 		return StyleDim.Render("loading…")
 	}
-	return m.c.m.renderToolBody(it, width)
+	return m.c.m.renderToolBody(m.agent(), it, width)
 }
 
-// renderToolBody needs the tool's input and result already fetched.
-func (m model) renderToolBody(it transcript.Entry, width int) string {
-	if body, ok := m.toolDetailBody(it, width); ok {
+// renderToolBody renders agent's tool; it needs the input and result already fetched.
+func (m model) renderToolBody(agent string, it transcript.Entry, width int) string {
+	if body, ok := m.toolDetailBody(agent, it, width); ok {
 		return body
 	}
 	return m.genericToolBody(it, width)

@@ -137,7 +137,10 @@ class EntryRow extends StatelessWidget {
       case EntryKind.tool:
       case EntryKind.skill:
       case EntryKind.subagent:
-        return ItemRow(item: e, onTap: drillFor(context, e, detailRef));
+        return ItemRow(
+            item: e,
+            agent: detailRef.agent,
+            onTap: drillFor(context, e, detailRef));
       case EntryKind.unknown:
         return const SizedBox.shrink();
     }

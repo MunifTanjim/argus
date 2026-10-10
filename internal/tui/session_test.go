@@ -694,7 +694,7 @@ func TestDockSummary(t *testing.T) {
 		{"idle fallback", &session.Interaction{Kind: session.InteractionIdle}, "Waiting for input"},
 	}
 	for _, c := range cases {
-		if got := dockSummary(c.ix); got != c.want {
+		if got := dockSummary("", c.ix); got != c.want {
 			t.Errorf("%s: dockSummary = %q, want %q", c.name, got, c.want)
 		}
 	}

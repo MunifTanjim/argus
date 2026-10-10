@@ -9,14 +9,14 @@ import 'theme.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
 
-String itemTitle(Entry it) {
+String itemTitle(Entry it, {String? agent}) {
   switch (it.kind) {
     case EntryKind.tool:
-      final meta = toolMeta(it.toolName);
+      final meta = toolMeta(agent, it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.toolName ?? 'Tool';
     case EntryKind.subagent:
-      final meta = toolMeta(it.toolName);
+      final meta = toolMeta(agent, it.toolName);
       if (meta?.display.isNotEmpty ?? false) return meta!.display;
       return it.soleSubagent?.type ?? 'Subagent';
     case EntryKind.skill:
@@ -82,7 +82,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(itemTitle(_item))),
+      appBar: AppBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
@@ -101,7 +101,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                           style: const TextStyle(color: AppColors.dim),
                         ),
                       ),
-                    toolDetailBody(_item),
+                    toolDetailBody(_item, agent: widget.detailRef.agent),
                   ],
                 ),
               ),

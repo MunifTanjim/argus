@@ -141,9 +141,9 @@ void main() {
           (label: 'Large', note: 'xl'));
     });
     test('toolMeta resolves MCP names', () {
-      expect(toolMeta('mcp__github__create_issue')?.display,
+      expect(toolMeta('codex', 'mcp__github__create_issue')?.display,
           'github › create_issue');
-      expect(toolMeta('mcp__server'), isNull);
+      expect(toolMeta('codex', 'mcp__server'), isNull);
     });
   });
 
@@ -297,7 +297,7 @@ void main() {
         'clock.sleep',
         'wait'
       ]) {
-        expect(toolMeta(n), isNotNull, reason: n);
+        expect(toolMeta('codex', n), isNotNull, reason: n);
       }
       expect(isAgentRefTool('close_agent'), isTrue);
       expect(isAgentRefTool('collaboration.wait_agent'), isFalse);

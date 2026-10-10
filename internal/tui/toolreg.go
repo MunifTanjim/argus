@@ -53,111 +53,125 @@ func categoryIcon(c toolCategory) StyledIcon {
 }
 
 type toolMeta struct {
-	agent    string
 	display  string
 	category toolCategory
 	detail   func(m model, it transcript.Entry, width int) string
 }
 
-// Unregistered tools fall back to the generic body and misc icon.
-var toolRegistry = map[string]toolMeta{
-	// antigravity
-	"run_command":                {agentAntigravity, "Run Command", catBash, (model).runCommandDetail},
-	"grep_search":                {agentAntigravity, "Grep Search", catGrep, (model).grepSearchDetail},
-	"list_dir":                   {agentAntigravity, "List Dir", catGlob, (model).listDirDetail},
-	"view_file":                  {agentAntigravity, "View File", catRead, (model).viewFileDetail},
-	"write_to_file":              {agentAntigravity, "Write to File", catWrite, (model).writeToFileDetail},
-	"replace_file_content":       {agentAntigravity, "Replace File Content", catEdit, (model).replaceFileContentDetail},
-	"multi_replace_file_content": {agentAntigravity, "Multi Replace File Content", catEdit, (model).multiReplaceFileContentDetail},
-	"search_web":                 {agentAntigravity, "Search Web", catWeb, (model).searchWebDetail},
-	"generate_image":             {agentAntigravity, "Generate Image", catOther, (model).generateImageDetail},
-	"invoke_subagent":            {agentAntigravity, "Invoke Subagent", catTask, nil}, // ItemSubagent: rendered by the subagent view
-	"define_subagent":            {agentAntigravity, "Define Subagent", catTask, (model).defineSubagentDetail},
-	"manage_subagents":           {agentAntigravity, "Manage Subagents", catTask, (model).manageSubagentsDetail},
-	"manage_task":                {agentAntigravity, "Manage Task", catOther, (model).manageTaskDetail},
-	"ask_question":               {agentAntigravity, "Ask Question", catOther, (model).askQuestionDetail},
-	"ask_permission":             {agentAntigravity, "Ask Permission", catOther, (model).askPermissionDetail},
-	"list_permissions":           {agentAntigravity, "List Permissions", catOther, (model).listPermissionsDetail},
-	"send_message":               {agentAntigravity, "Send Message", catOther, (model).sendMessageDetail},
-	"schedule":                   {agentAntigravity, "Schedule", catOther, (model).scheduleDetail},
-
-	// claude code
-	"Read":            {agentClaude, "", catRead, (model).readDetail},
-	"NotebookRead":    {agentClaude, "", catRead, (model).readDetail},
-	"Edit":            {agentClaude, "", catEdit, (model).editToolDetail},
-	"MultiEdit":       {agentClaude, "", catEdit, (model).editToolDetail},
-	"NotebookEdit":    {agentClaude, "", catEdit, (model).editToolDetail},
-	"Write":           {agentClaude, "", catWrite, (model).editToolDetail},
-	"Bash":            {agentClaude, "", catBash, (model).bashDetail},
-	"BashOutput":      {agentClaude, "", catBash, nil},
-	"KillShell":       {agentClaude, "", catBash, nil},
-	"Grep":            {agentClaude, "", catGrep, (model).grepDetail},
-	"Glob":            {agentClaude, "", catGlob, (model).globDetail},
-	"LS":              {agentClaude, "", catGlob, (model).globDetail},
-	"WebFetch":        {agentClaude, "", catWeb, (model).webDetail},
-	"WebSearch":       {agentClaude, "", catWeb, (model).webDetail},
-	"AskUserQuestion": {agentClaude, "", catOther, (model).askUserQuestionDetail},
-	"ExitPlanMode":    {agentClaude, "", catOther, nil},
-	"EnterPlanMode":   {agentClaude, "", catOther, nil},
-	"TodoWrite":       {agentClaude, "", catTodo, (model).todoDetail},
-	"TaskCreate":      {agentClaude, "Task Create", catTodo, (model).taskCreateDetail},
-	"TaskUpdate":      {agentClaude, "Task Update", catTodo, (model).taskUpdateDetail},
-	"TaskList":        {agentClaude, "Task List", catTodo, nil},
-	"TaskGet":         {agentClaude, "Task Get", catTodo, nil},
-	"TaskOutput":      {agentClaude, "Task Output", catTodo, nil},
-	"TaskStop":        {agentClaude, "Task Stop", catTodo, nil},
-	"ToolSearch":      {agentClaude, "Tool Search", catGrep, nil},
-	"LSP":             {agentClaude, "LSP", catOther, nil},
-	"Task":            {agentClaude, "", catTask, nil},  // ItemSubagent: subagent view
-	"Agent":           {agentClaude, "", catTask, nil},  // ItemSubagent: subagent view
-	"Skill":           {agentClaude, "", catSkill, nil}, // ItemSubagent: subagent view
-
-	// codex
-	"exec_command":             {agentCodex, "Exec Command", catBash, (model).execCommandDetail},
-	"apply_patch":              {agentCodex, "Apply Patch", catEdit, (model).applyPatchDetail},
-	"update_plan":              {agentCodex, "Update Plan", catOther, (model).planDetail},
-	"view_image":               {agentCodex, "View Image", catRead, (model).viewImageDetail},
-	"exec":                     {agentCodex, "Exec", catBash, (model).codexExecDetail},
-	"request_user_input":       {agentCodex, "Question", catOther, (model).codexQuestionDetail},
-	"request_user_input_async": {agentCodex, "Async Question", catOther, (model).codexAsyncQuestionDetail},
-	"web_search":               {agentCodex, "Web Search", catWeb, (model).webDetail},
-	"wait_agent":               {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
-	"close_agent":              {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
-	"spawn_agent":              {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
-	"wait":                     {agentCodex, "Wait", catBash, (model).codexWaitCellDetail},
-	"clock.sleep":              {agentCodex, "Sleep", catOther, (model).codexSleepDetail},
-	// codex multi-agent v2: agents are addressed by path
-	"collaboration.spawn_agent":     {agentCodex, "Spawn Agent", catTask, nil},
-	"collaboration.wait_agent":      {agentCodex, "Wait Agent", catTask, (model).codexV2WaitAgentDetail},
-	"collaboration.send_message":    {agentCodex, "Send Message", catTask, (model).codexAgentMessageDetail},
-	"collaboration.followup_task":   {agentCodex, "Follow-up Task", catTask, (model).codexAgentMessageDetail},
-	"collaboration.interrupt_agent": {agentCodex, "Interrupt Agent", catTask, (model).codexInterruptAgentDetail},
-	"collaboration.list_agents":     {agentCodex, "List Agents", catTask, (model).codexListAgentsDetail},
-
-	// opencode (lowercase tool names, distinct from the other agents' keys)
-	"read":      {agentOpenCode, "Read", catRead, (model).readDetail},
-	"edit":      {agentOpenCode, "Edit", catEdit, (model).editToolDetail},
-	"write":     {agentOpenCode, "Write", catWrite, (model).editToolDetail},
-	"bash":      {agentOpenCode, "Bash", catBash, (model).bashDetail},
-	"shell":     {agentOpenCode, "Shell", catBash, (model).bashDetail},
-	"execute":   {agentOpenCode, "Execute", catBash, (model).opencodeExecuteDetail},
-	"grep":      {agentOpenCode, "Grep", catGrep, (model).grepDetail},
-	"glob":      {agentOpenCode, "Glob", catGlob, (model).globDetail},
-	"webfetch":  {agentOpenCode, "Webfetch", catWeb, (model).webDetail},
-	"websearch": {agentOpenCode, "Websearch", catWeb, (model).webDetail},
-	"todowrite": {agentOpenCode, "Todo", catTodo, (model).todoDetail},
-	"skill":     {agentOpenCode, "Skill", catSkill, (model).opencodeSkillDetail},
-	"task":      {agentOpenCode, "Task", catTask, (model).opencodeTaskDetail},
-	"subagent":  {agentOpenCode, "Subagent", catTask, (model).opencodeTaskDetail},
-	"question":  {agentOpenCode, "Question", catOther, (model).opencodeQuestionDetail},
+// toolRegistry holds each agent's tools. Lookup prefers the session's agent, so
+// two agents may use one name for different tools. Unregistered tools fall back
+// to the generic body and misc icon.
+var toolRegistry = map[string]map[string]toolMeta{
+	agentClaude: {
+		"Read":            {"", catRead, (model).readDetail},
+		"NotebookRead":    {"", catRead, (model).readDetail},
+		"Edit":            {"", catEdit, (model).editToolDetail},
+		"MultiEdit":       {"", catEdit, (model).editToolDetail},
+		"NotebookEdit":    {"", catEdit, (model).editToolDetail},
+		"Write":           {"", catWrite, (model).editToolDetail},
+		"Bash":            {"", catBash, (model).bashDetail},
+		"BashOutput":      {"", catBash, nil},
+		"KillShell":       {"", catBash, nil},
+		"Grep":            {"", catGrep, (model).grepDetail},
+		"Glob":            {"", catGlob, (model).globDetail},
+		"LS":              {"", catGlob, (model).globDetail},
+		"WebFetch":        {"", catWeb, (model).webDetail},
+		"WebSearch":       {"", catWeb, (model).webDetail},
+		"AskUserQuestion": {"", catOther, (model).askUserQuestionDetail},
+		"ExitPlanMode":    {"", catOther, nil},
+		"EnterPlanMode":   {"", catOther, nil},
+		"TodoWrite":       {"", catTodo, (model).todoDetail},
+		"TaskCreate":      {"Task Create", catTodo, (model).taskCreateDetail},
+		"TaskUpdate":      {"Task Update", catTodo, (model).taskUpdateDetail},
+		"TaskList":        {"Task List", catTodo, nil},
+		"TaskGet":         {"Task Get", catTodo, nil},
+		"TaskOutput":      {"Task Output", catTodo, nil},
+		"TaskStop":        {"Task Stop", catTodo, nil},
+		"ToolSearch":      {"Tool Search", catGrep, nil},
+		"LSP":             {"LSP", catOther, nil},
+		"Task":            {"", catTask, nil},  // ItemSubagent: subagent view
+		"Agent":           {"", catTask, nil},  // ItemSubagent: subagent view
+		"Skill":           {"", catSkill, nil}, // ItemSubagent: subagent view
+	},
+	agentCodex: {
+		"exec_command":             {"Exec Command", catBash, (model).execCommandDetail},
+		"apply_patch":              {"Apply Patch", catEdit, (model).applyPatchDetail},
+		"update_plan":              {"Update Plan", catOther, (model).planDetail},
+		"view_image":               {"View Image", catRead, (model).viewImageDetail},
+		"exec":                     {"Exec", catBash, (model).codexExecDetail},
+		"request_user_input":       {"Question", catOther, (model).codexQuestionDetail},
+		"request_user_input_async": {"Async Question", catOther, (model).codexAsyncQuestionDetail},
+		"web_search":               {"Web Search", catWeb, (model).webDetail},
+		"wait_agent":               {"Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
+		"close_agent":              {"Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
+		"spawn_agent":              {"Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
+		"wait":                     {"Wait", catBash, (model).codexWaitCellDetail},
+		"clock.sleep":              {"Sleep", catOther, (model).codexSleepDetail},
+		"permissions":              {"Permissions", catOther, nil}, // approval prompts only
+		// codex multi-agent v2: agents are addressed by path
+		"collaboration.spawn_agent":     {"Spawn Agent", catTask, nil},
+		"collaboration.wait_agent":      {"Wait Agent", catTask, (model).codexV2WaitAgentDetail},
+		"collaboration.send_message":    {"Send Message", catTask, (model).codexAgentMessageDetail},
+		"collaboration.followup_task":   {"Follow-up Task", catTask, (model).codexAgentMessageDetail},
+		"collaboration.interrupt_agent": {"Interrupt Agent", catTask, (model).codexInterruptAgentDetail},
+		"collaboration.list_agents":     {"List Agents", catTask, (model).codexListAgentsDetail},
+		"Skill":                         {"", catSkill, nil}, // skill loads, shown like Claude's Skill rows
+	},
+	agentOpenCode: {
+		"read":      {"Read", catRead, (model).readDetail},
+		"edit":      {"Edit", catEdit, (model).editToolDetail},
+		"write":     {"Write", catWrite, (model).editToolDetail},
+		"bash":      {"Bash", catBash, (model).bashDetail},
+		"shell":     {"Shell", catBash, (model).bashDetail},
+		"execute":   {"Execute", catBash, (model).opencodeExecuteDetail},
+		"grep":      {"Grep", catGrep, (model).grepDetail},
+		"glob":      {"Glob", catGlob, (model).globDetail},
+		"webfetch":  {"Webfetch", catWeb, (model).webDetail},
+		"websearch": {"Websearch", catWeb, (model).webDetail},
+		"todowrite": {"Todo", catTodo, (model).todoDetail},
+		"skill":     {"Skill", catSkill, (model).opencodeSkillDetail},
+		"task":      {"Task", catTask, (model).opencodeTaskDetail},
+		"subagent":  {"Subagent", catTask, (model).opencodeTaskDetail},
+		"question":  {"Question", catOther, (model).opencodeQuestionDetail},
+	},
+	agentAntigravity: {
+		"run_command":                {"Run Command", catBash, (model).runCommandDetail},
+		"grep_search":                {"Grep Search", catGrep, (model).grepSearchDetail},
+		"list_dir":                   {"List Dir", catGlob, (model).listDirDetail},
+		"view_file":                  {"View File", catRead, (model).viewFileDetail},
+		"write_to_file":              {"Write to File", catWrite, (model).writeToFileDetail},
+		"replace_file_content":       {"Replace File Content", catEdit, (model).replaceFileContentDetail},
+		"multi_replace_file_content": {"Multi Replace File Content", catEdit, (model).multiReplaceFileContentDetail},
+		"search_web":                 {"Search Web", catWeb, (model).searchWebDetail},
+		"generate_image":             {"Generate Image", catOther, (model).generateImageDetail},
+		"invoke_subagent":            {"Invoke Subagent", catTask, nil}, // ItemSubagent: rendered by the subagent view
+		"define_subagent":            {"Define Subagent", catTask, (model).defineSubagentDetail},
+		"manage_subagents":           {"Manage Subagents", catTask, (model).manageSubagentsDetail},
+		"manage_task":                {"Manage Task", catOther, (model).manageTaskDetail},
+		"ask_question":               {"Ask Question", catOther, (model).askQuestionDetail},
+		"ask_permission":             {"Ask Permission", catOther, (model).askPermissionDetail},
+		"list_permissions":           {"List Permissions", catOther, (model).listPermissionsDetail},
+		"send_message":               {"Send Message", catOther, (model).sendMessageDetail},
+		"schedule":                   {"Schedule", catOther, (model).scheduleDetail},
+	},
 }
 
-// lookupTool resolves a tool's registry entry. MCP tools (mcp__<server>__<tool>),
-// named the same by every agent, share one entry whose display name is
-// "server › tool".
-func lookupTool(name string) (toolMeta, bool) {
-	if meta, ok := toolRegistry[name]; ok {
+// registryOrder is the search order when the agent is unknown.
+var registryOrder = []string{agentClaude, agentCodex, agentOpenCode, agentAntigravity}
+
+// lookupTool resolves agent's entry for a tool. An unknown agent ("") falls back
+// to any agent's entry, in registryOrder. MCP tools (mcp__<server>__<tool>), named
+// the same by every agent, share one entry whose display name is "server › tool".
+func lookupTool(agent, name string) (toolMeta, bool) {
+	if meta, ok := toolRegistry[agent][name]; ok {
 		return meta, true
+	}
+	if agent == "" {
+		for _, a := range registryOrder {
+			if meta, ok := toolRegistry[a][name]; ok {
+				return meta, true
+			}
+		}
 	}
 	if display, ok := transcript.MCPDisplayName(name); ok {
 		return toolMeta{display: display, category: catOther, detail: (model).mcpDetail}, true

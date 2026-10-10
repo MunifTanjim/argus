@@ -361,7 +361,7 @@ func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) str
 
 // callRow renders a tool, skill, or subagent op.
 func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) string {
-	row := itemRow(e)
+	row := itemRow(m.agent(), e)
 	if drillable(e) {
 		row += "  " + StyleDim.Render("↵")
 	}
@@ -557,7 +557,7 @@ func renderCompact(e transcript.Entry, width int) string {
 	return StyleMuted.Render(strings.Repeat(GlyphHRule, leftPad) + " " + text + " " + strings.Repeat(GlyphHRule, rightPad))
 }
 
-func itemRow(it transcript.Entry) string {
+func itemRow(agent string, it transcript.Entry) string {
 	if it.Kind == transcript.EntrySubagent {
 		var name string
 		if isAgentRefTool(it.ToolName) {
@@ -568,7 +568,7 @@ func itemRow(it transcript.Entry) string {
 		}
 		return Icon.Subagent.Render() + " " + StylePrimaryBold.Render(name)
 	}
-	row := toolIcon(it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(fmt.Sprintf("%-12s", toolDisplayName(it.ToolName)))
+	row := toolIcon(agent, it.ToolName, it.ResultIsError).Render() + " " + StylePrimaryBold.Render(fmt.Sprintf("%-12s", toolDisplayName(agent, it.ToolName)))
 	if it.InputPreview == "" {
 		return row
 	}

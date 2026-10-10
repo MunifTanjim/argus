@@ -13,6 +13,7 @@ import '../state/respond_view_model.dart';
 import 'code_block.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
+import 'tool_registry.dart';
 import 'voice_input_field.dart';
 
 /// Opens the respond sheet for [session]'s pending interaction.
@@ -155,11 +156,13 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   /// echoes the chosen value back.
   List<Widget> _serverDecision(Interaction ix, String kind) {
     final tool = ix.toolName ?? '';
+    final display = toolMeta(widget.session.agent, tool)?.display ?? '';
+    final toolLabel = display.isEmpty ? tool : display;
     final heading = kind == 'plan'
         ? 'Plan review'
         : (tool.isEmpty
             ? 'Permission requested'
-            : 'Permission requested · $tool');
+            : 'Permission requested · $toolLabel');
 
     final detail = <Widget>[
       Text(heading,
@@ -175,12 +178,14 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     // JSON. A synthetic tool item is all toolDetailBody needs.
     if ((ix.toolInput ?? '').isNotEmpty) {
       detail.add(const SizedBox(height: 8));
-      detail.add(toolDetailBody(Entry(
-        id: '',
-        kind: EntryKind.tool,
-        toolName: ix.toolName,
-        toolInput: ix.toolInput,
-      )));
+      detail.add(toolDetailBody(
+          Entry(
+            id: '',
+            kind: EntryKind.tool,
+            toolName: ix.toolName,
+            toolInput: ix.toolInput,
+          ),
+          agent: widget.session.agent));
     }
     if ((ix.plan ?? '').isNotEmpty) {
       detail.add(const SizedBox(height: 8));

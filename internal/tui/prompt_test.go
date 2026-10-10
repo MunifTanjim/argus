@@ -544,7 +544,7 @@ func TestPermissionBodyFormatsPerTool(t *testing.T) {
 		Kind: session.InteractionPermission, ToolName: "Bash",
 		ToolInput: `{"command":"ls -la","description":"list files"}`,
 	}
-	out := interactionBody(m, bash, 60)
+	out := interactionBody(m, "", bash, 60)
 	if !strings.Contains(out, "$ ls -la") || !strings.Contains(out, "list files") {
 		t.Errorf("bash permission should show a formatted command:\n%s", out)
 	}
@@ -557,7 +557,7 @@ func TestPermissionBodyFormatsPerTool(t *testing.T) {
 		Kind: session.InteractionPermission, ToolName: "Edit",
 		ToolInput: `{"file_path":"a.go","old_string":"foo","new_string":"bar"}`,
 	}
-	out = interactionBody(m, edit, 60)
+	out = interactionBody(m, "", edit, 60)
 	if !strings.Contains(out, "foo") || !strings.Contains(out, "bar") {
 		t.Errorf("edit permission should show a diff:\n%s", out)
 	}
@@ -567,7 +567,7 @@ func TestPermissionBodyFormatsPerTool(t *testing.T) {
 		Kind: session.InteractionPermission, ToolName: "mcp__x__do",
 		ToolInput: `{"k":"v"}`,
 	}
-	if out := interactionBody(m, other, 60); !strings.Contains(out, "v") {
+	if out := interactionBody(m, "", other, 60); !strings.Contains(out, "v") {
 		t.Errorf("unknown tool should still render its input:\n%s", out)
 	}
 }
@@ -1408,4 +1408,13 @@ func TestQuestionAnswersEchoRequestID(t *testing.T) {
 	if got := m.dock.questionAnswers(ix).RequestID; got != "7" {
 		t.Fatalf("request id = %q; want 7", got)
 	}
+}
+
+func TestQuestionHeadingNamesAgent(t *testing.T) {
+	q := session.QuestionSpec{Question: "Pick", Options: []string{"A"}}
+	m := promptModel(&session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{q}})
+	s := m.sessions["s1"]
+	s.Agent = "codex"
+	m.sessions["s1"] = s
+	assertContains(t, ansi.Strip(m.questionHeading(&q)), "Codex is asking")
 }

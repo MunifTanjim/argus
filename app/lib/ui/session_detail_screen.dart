@@ -373,7 +373,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 _ when !st.loaded && st.error == null =>
                   const Center(child: CircularProgressIndicator()),
                 _ => TranscriptFeed(
-                    detailRef: ToolDetailRef.live(_sid), entries: st.entries),
+                    detailRef: ToolDetailRef.live(_sid, agent: live.agent),
+                    entries: st.entries),
               },
             ),
             if (live.interaction != null)

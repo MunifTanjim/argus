@@ -344,7 +344,7 @@ func TestItemRowSubagentLabelHidesStatusAndDesc(t *testing.T) {
 			Desc:   "the full task message",
 		}},
 	}
-	out := itemRow(it)
+	out := itemRow("", it)
 	if !strings.Contains(out, "Spawn Agent: Volta (default)") {
 		t.Errorf("expected new label format, got:\n%s", out)
 	}
@@ -361,14 +361,14 @@ func TestItemRowAgentToolLabel(t *testing.T) {
 		Kind: transcript.EntrySubagent, ToolName: "wait_agent",
 		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
 	}
-	if got := itemRow(wait); !strings.Contains(got, "Wait Agent: Volta") {
+	if got := itemRow("", wait); !strings.Contains(got, "Wait Agent: Volta") {
 		t.Errorf("wait_agent row = %q, want label 'Wait Agent: Volta'", got)
 	}
 	closeIt := transcript.Entry{
 		Kind: transcript.EntrySubagent, ToolName: "close_agent",
 		Subagents: []transcript.Subagent{{ID: "a1", Name: "Volta"}},
 	}
-	if got := itemRow(closeIt); !strings.Contains(got, "Close Agent: Volta") {
+	if got := itemRow("", closeIt); !strings.Contains(got, "Close Agent: Volta") {
 		t.Errorf("close_agent row = %q, want label 'Close Agent: Volta'", got)
 	}
 }
