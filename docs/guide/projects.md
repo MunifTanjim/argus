@@ -21,6 +21,9 @@ argus project pin <project>
 argus project forget <project>
 ```
 
+The `project` and `workspace` commands take `--json` to print their result as
+JSON. With `--json`, warnings go into the JSON instead of stderr.
+
 ### Automatic Project Adoption
 
 When a session starts, the node records the project and workspace of its
@@ -54,6 +57,12 @@ A new workspace is a new git worktree. You can create it from one of these:
 
 ```sh
 argus workspace create <project> <name> --source new|branch|pr|issue
+```
+
+List the workspaces of every project, or of one project:
+
+```sh
+argus workspace list [project]
 ```
 
 Each workspace has a target branch. The default is the default branch of the

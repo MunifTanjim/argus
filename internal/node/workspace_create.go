@@ -119,13 +119,14 @@ func (d *Node) handleWorkspaceCreate(ctx context.Context, params json.RawMessage
 	if err != nil {
 		return rollback(err)
 	}
-	res := api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path, Warning: warning, Prompt: plan.prompt}
+	res := api.WorkspaceCreateResult{WorkspaceID: wsID, Dir: path, Warning: warning, Prompt: plan.prompt, Branch: plan.branch, TargetBranch: plan.target}
 	// Setup outlives this request, whose context ends with the reply.
 	if cmd, err := d.startSetup(context.WithoutCancel(ctx), wsID, mainDir); err == nil {
 		res.Setup = cmd
 	} else if !errors.Is(err, errNoSetup) {
 		d.scripts.Fail(wsID, cmd, err.Error())
 	}
+	res.SetupRun = d.setupRun(wsID)
 	d.notifyProjectsChanged()
 	return res, nil
 }

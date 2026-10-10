@@ -126,7 +126,7 @@ const (
 	// Mutating workspace/project management (project_id-addressed except remove).
 	MethodWorkspaceCreate  = "workspace.create"  // request: WorkspaceCreateParams; result: WorkspaceCreateResult
 	MethodWorkspaceRemove  = "workspace.remove"  // request: WorkspaceRemoveParams; result: WorkspaceRemoveResult
-	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: nil
+	MethodProjectRename    = "project.rename"    // request: ProjectRenameParams; result: ProjectRenameResult
 	MethodProjectSetHidden = "project.setHidden" // request: ProjectFlagParams; result: nil
 	MethodProjectSetPinned = "project.setPinned" // request: ProjectFlagParams; result: nil
 	MethodProjectForget    = "project.forget"    // request: ProjectRef; result: nil (drops the rows, keeps the files)
@@ -134,8 +134,8 @@ const (
 	MethodProjectBranches    = "project.branches"    // request: ProjectRef; result: BranchesResult
 	MethodProjectPRs         = "project.prs"         // request: ProjectRef; result: PRsResult
 	MethodProjectIssues      = "project.issues"      // request: ProjectRef; result: IssuesResult
-	MethodWorkspaceSetTarget = "workspace.setTarget" // request: WorkspaceSetTargetParams; result: nil
-	MethodWorkspaceRunSetup  = "workspace.runSetup"  // request: WorkspaceRef; result: nil
+	MethodWorkspaceSetTarget = "workspace.setTarget" // request: WorkspaceSetTargetParams; result: WorkspaceSetTargetResult
+	MethodWorkspaceRunSetup  = "workspace.runSetup"  // request: WorkspaceRef; result: ScriptRun
 	MethodWorkspaceSetupLog  = "workspace.setupLog"  // request: WorkspaceRef; result: SetupLogResult
 	MethodProjectChanged     = "project.changed"     // notification: empty params (server→client); refetch project.list
 	MethodHostInfo           = "host.info"           // request: HostInfoParams; result: HostInfo
@@ -248,6 +248,10 @@ type WorkspaceCreateResult struct {
 	Warning     string `json:"warning,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
 	Setup       string `json:"setup,omitempty"` // the setup command that started in the background
+	// SetupRun is the setup's state when the reply was sent, absent with no setup.
+	SetupRun     *ScriptRun `json:"setup_run,omitempty"`
+	Branch       string     `json:"branch,omitempty"`
+	TargetBranch string     `json:"target_branch,omitempty"` // empty: the repository's default branch
 }
 
 // ProjectRef addresses a project by its (composite) id.
@@ -298,6 +302,12 @@ type WorkspaceSetTargetParams struct {
 	TargetBranch string `json:"target_branch"`
 }
 
+// WorkspaceSetTargetResult is the target as stored; empty is the repository's
+// default branch.
+type WorkspaceSetTargetResult struct {
+	TargetBranch string `json:"target_branch"`
+}
+
 // WorkspaceRemoveParams removes a worktree. Force removes a dirty worktree; a
 // workspace with live sessions is refused either way.
 type WorkspaceRemoveParams struct {
@@ -334,6 +344,11 @@ type SetupLogResult struct {
 type ProjectRenameParams struct {
 	ProjectID string `json:"project_id"`
 	Name      string `json:"name"`
+}
+
+// ProjectRenameResult is the name as stored.
+type ProjectRenameResult struct {
+	Name string `json:"name"`
 }
 
 type ProjectFlagParams struct {
