@@ -91,6 +91,41 @@ func TestMCPDetailAndLookup(t *testing.T) {
 	}
 }
 
+func TestCodexV2AgentToolDetails(t *testing.T) {
+	for _, c := range []struct {
+		name, input, result string
+		want                []string
+	}{
+		{"collaboration.wait_agent", `{"timeout_ms":30000}`, `{"message":"Wait completed.","timed_out":false}`, []string{"Waiting on agents", "timeout 30s", "Wait completed."}},
+		{"collaboration.send_message", `{"target":"/root/a","message":"check the tests"}`, "", []string{"To /root/a", "check the tests"}},
+		{"collaboration.followup_task", `{"target":"/root/a","message":"gAAAAABq"}`, "", []string{"To /root/a", "message encrypted"}},
+		{"collaboration.interrupt_agent", `{"target":"/root/a"}`, `{"previous_status":"running"}`, []string{"Interrupted /root/a", "Previous status", "running"}},
+		{"collaboration.list_agents", `{}`, `{"agents":[{"agent_name":"/root/a","agent_status":{"completed":"done"}},{"agent_name":"/root/b","agent_status":"running"}]}`, []string{"/root/a", "completed", "done", "/root/b", "running"}},
+		{"clock.sleep", `{"duration_ms":10000}`, "Wall time: 10.0047 seconds\nSleep completed.", []string{"Sleep 10s", "Sleep completed."}},
+		{"wait", `{"cell_id":"1","yield_time_ms":25000}`, "Script completed\nWall time 18.1 seconds\nOutput:\nending...", []string{"Waiting on cell 1", "yield 25s", "ending..."}},
+	} {
+		out := ansi.Strip(bareTv().toolBody(codexItem(c.name, c.input, c.result), 80))
+		assertContains(t, out, c.want...)
+		assertNotContains(t, out, "gAAAAA")
+	}
+}
+
+func TestCodexNamespacedToolsRegistered(t *testing.T) {
+	for _, n := range []string{"collaboration.spawn_agent", "collaboration.wait_agent", "collaboration.send_message", "collaboration.followup_task",
+		"collaboration.interrupt_agent", "collaboration.list_agents", "clock.sleep", "wait"} {
+		if meta, ok := lookupTool(n); !ok || meta.agent != agentCodex {
+			t.Errorf("%s: not registered for codex", n)
+		}
+	}
+	if !isAgentRefTool("close_agent") || isAgentRefTool("collaboration.wait_agent") {
+		t.Error("only v1 wait/close are agent-ref status views")
+	}
+	// Antigravity keeps its bare send_message.
+	if meta, _ := lookupTool("send_message"); meta.agent != agentAntigravity {
+		t.Errorf("send_message agent = %q, want antigravity", meta.agent)
+	}
+}
+
 func TestRejectedQuestionShowsError(t *testing.T) {
 	for _, c := range []struct{ name, input, result string }{
 		{"request_user_input", `{"questions":[{"header":"Text","id":"t","question":"What exact message?"}]}`, "request_user_input requires non-empty options for every question"},

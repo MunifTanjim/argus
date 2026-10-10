@@ -62,11 +62,11 @@ class ItemRow extends StatelessWidget {
             preview: tm.idle ? 'is done' : item.text,
           );
         }
-        if (item.toolName == 'wait_agent' || item.toolName == 'close_agent') {
+        if (isAgentRefTool(item.toolName)) {
           return _row(
             leading: const Icon(Icons.smart_toy_outlined,
                 size: 14, color: AppColors.accent),
-            label: item.toolName == 'wait_agent' ? 'Wait Agent' : 'Close Agent',
+            label: toolMeta(item.toolName)!.display,
             labelColor: AppColors.accent,
             preview: item.subagents
                 .map((s) => s.name.isNotEmpty ? s.name : s.id)

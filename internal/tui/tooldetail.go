@@ -272,10 +272,8 @@ func agentTargetNames(it transcript.Entry) []string {
 }
 
 func agentToolLabel(it transcript.Entry) string {
-	prefix := "Wait Agent"
-	if it.ToolName == "close_agent" {
-		prefix = "Close Agent"
-	}
+	meta, _ := lookupTool(it.ToolName)
+	prefix := meta.display
 	names := agentTargetNames(it)
 	if len(names) == 0 {
 		return prefix
@@ -284,8 +282,13 @@ func agentToolLabel(it transcript.Entry) string {
 }
 
 // agentStatusText extracts the (state, message) pair from a status object of
-// shape {"<state>":"<message>"}.
+// shape {"<state>":"<message>"}, or a bare "<state>" string (Codex's states that
+// carry no message, e.g. "running").
 func agentStatusText(raw json.RawMessage) (state, message string, ok bool) {
+	var bare string
+	if json.Unmarshal(raw, &bare) == nil && bare != "" {
+		return bare, "", true
+	}
 	var m map[string]string
 	if json.Unmarshal(raw, &m) != nil || len(m) == 0 {
 		return "", "", false

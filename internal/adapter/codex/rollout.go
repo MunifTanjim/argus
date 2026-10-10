@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 type rolloutLine struct {
@@ -20,6 +22,8 @@ type rolloutPayload struct {
 
 	Role    string           `json:"role"`
 	Content []rolloutContent `json:"content"`
+	// agent_message (multi-agent v2): the agent path that sent it.
+	Author string `json:"author"`
 
 	// Polymorphic: array for reasoning, "auto" for turn_context; decoded per use.
 	Summary json.RawMessage `json:"summary"`
@@ -42,6 +46,15 @@ type rolloutPayload struct {
 	ThreadID string `json:"turn_id"` // turn_context turn id
 	ID       string `json:"id"`
 	Cwd      string `json:"cwd"`
+	// session_meta of a forked thread; a subagent's thread_source is "subagent".
+	ForkedFromID string `json:"forked_from_id"`
+	ThreadSource string `json:"thread_source"`
+	// event_msg thread_settings_applied
+	EventThreadID string `json:"thread_id"`
+	// response_item metadata; the daemon lists items by turn.
+	Meta struct {
+		TurnID string `json:"turn_id"`
+	} `json:"internal_chat_message_metadata_passthrough"`
 
 	// event_msg token_count
 	Info *tokenInfo `json:"info"`
@@ -124,4 +137,35 @@ func scanRolloutFrom(path string, offset int64) ([]rolloutLine, int64, error) {
 		out = append(out, rl)
 	}
 	return out, newOffset, nil
+}
+
+// ownLines drops the parent history a forked subagent's rollout starts with: the
+// lines from the copied parent session_meta up to the child's
+// thread_settings_applied event. Other rollouts, and a subagent rollout without
+// that marker, are returned whole.
+func ownLines(lines []rolloutLine) []rolloutLine {
+	if len(lines) == 0 || lines[0].Type != "session_meta" {
+		return lines
+	}
+	meta := lines[0].Payload
+	if meta.ForkedFromID == "" || meta.ThreadSource != "subagent" {
+		return lines
+	}
+	for i := 1; i < len(lines); i++ {
+		p := lines[i].Payload
+		if lines[i].Type == "event_msg" && p.Type == "thread_settings_applied" && p.EventThreadID == meta.ID {
+			return append(lines[:1:1], lines[i+1:]...)
+		}
+	}
+	return lines
+}
+
+// rolloutThreadID is the thread id a rollout file is named after:
+// rollout-<timestamp>-<uuid>.jsonl.
+func rolloutThreadID(path string) string {
+	stem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if n := len(stem); n > 36 && stem[n-37] == '-' {
+		return stem[n-36:]
+	}
+	return ""
 }

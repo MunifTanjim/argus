@@ -20,8 +20,43 @@ payloads, whose `payload.type` is one of:
 - `tool_search_call` / `tool_search_output` — Codex's dynamic tool discovery; the
   parser ignores these (no tool item emitted)
 
-A call pairs with its output by `call_id`. `spawn_agent`/`wait_agent`/`close_agent`
-become `ItemSubagent`; the rest become `ItemTool`.
+A call pairs with its output by `call_id`. `spawn_agent`, and v1's
+`wait_agent`/`close_agent`, become `ItemSubagent`; the rest become `ItemTool`.
+
+A `function_call` may carry a `namespace`. The recorded tool name keeps it:
+default-namespace tools (none or `functions`) stay bare, MCP namespaces join the
+way Codex flattens them (`mcp__server__` + `tool`), `multi_agent_v1` tools stay
+bare (older rollouts record them without it), and any other namespace is a
+`namespace.` prefix (`collaboration.send_message`, `clock.sleep`). The prefix keeps a Codex tool from colliding with
+another agent's tool of the same bare name.
+
+## Multi-agent v2 and clock tools
+
+| Tool | Input | Output |
+|---|---|---|
+| `collaboration.wait_agent` | `{timeout_ms}` | `{message, timed_out}` |
+| `collaboration.send_message`, `collaboration.followup_task` | `{target, message}` (message may be encrypted) | empty |
+| `collaboration.interrupt_agent` | `{target}` | `{previous_status}` |
+| `collaboration.list_agents` | `{path_prefix?}` | `{agents: [{agent_name, agent_status}]}` |
+| `clock.sleep` | `{duration_ms}` | `Wall time: …\nSleep completed.` |
+| `wait` (code mode) | `{cell_id, yield_time_ms}` | exec-style result of the cell |
+
+The parent's rollout records each subagent transition as an `event_msg`
+`item_completed` whose item is `{type: "SubAgentActivity", id, kind, agent_thread_id,
+agent_path}`. `id` is the call that caused it (the spawn, or a `send_message` /
+`followup_task`), so a `started` item links a spawn to its child without any lookup.
+`kind` is `started`, `interacted`, `completed` or `interrupted`; the latest one is the
+child's status (running, completed, interrupted). The state DB's spawn edge stays
+`open` until the agent is closed, so only its `closed` overrides that status.
+
+The message that starts a subagent's turn is a `response_item` of type `agent_message`
+(`author`, `recipient`, `content`): a readable header (`Message Type: NEW_TASK`,
+`Sender: /root`, … `Payload:`) and usually an `encrypted_content` payload. It renders as
+a user row naming the type and sender.
+
+`target` and `agent_name` are agent paths (`/root/<task>`), though the model may pass a
+bare task name (`delayed_print`). An agent status is a bare
+state (`"running"`) or a one-key `{state: message}` object (`{"completed": "…"}`).
 
 ## Conventions
 
@@ -115,6 +150,32 @@ Output:
 
 The child's `agent_id` and `nickname` are stamped onto the spawn item; the drill uses
 `agent_id` to load the child transcript.
+
+Multi-agent v2 (`namespace: "collaboration"`) names each task and may encrypt the
+message (a `gAAAAA…` token):
+
+```json
+{ "task_name": "sleep_demo", "fork_turns": "all", "message": "gAAAAAB…" }
+```
+
+Output is the agent path, with `nickname` unless Codex hides it:
+
+```json
+{ "task_name": "/root/sleep_demo" }
+```
+
+The path resolves to the child thread through the daemon first: `thread/items/list`
+for the spawn's turn (`internal_chat_message_metadata_passthrough.turn_id`) holds a
+`subAgentActivity` item whose `id` is the spawn's `call_id` and whose `agentThreadId`
+is the child; `thread/read` on the child gives its rollout `path` and `agentNickname`.
+Without the daemon it falls back to Codex's state DB (`threads.agent_path` joined with
+`thread_spawn_edges` on the spawning thread). Both describe only the live Codex home,
+so a bundle root resolves by searching its own sessions directory. Found links are
+cached; the open/closed status comes from `thread_spawn_edges` on each refresh. The task name stands in for
+an encrypted message. A forked child's rollout starts with a copy of the parent's
+history, from its second `session_meta` up to its own `thread_settings_applied` event;
+the subagent view skips it. v2's `wait_agent` takes only `timeout_ms` and returns
+`{ "message": "…", "timed_out": false }`.
 
 ## wait_agent — `function_call` → `ItemSubagent`
 

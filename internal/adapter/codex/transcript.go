@@ -13,50 +13,41 @@ func ReadTranscriptView(path string) (transcript.TranscriptView, error) {
 }
 
 func readTranscriptView(path string, finished bool) (transcript.TranscriptView, error) {
-	entries, err := parseRollout(path, finished)
+	lines, err := scanRollout(path)
 	if err != nil {
 		return transcript.TranscriptView{}, err
 	}
-	stampSubagents(entries, sessionsRootFrom(path))
+	entries := foldRollout(lines, loadModelNames(), finished)
+	stampSubagents(entries, lines, sessionsRootFrom(path), rolloutThreadID(path))
 	return transcript.TranscriptView{Entries: entries}, nil
 }
 
-func stampSubagents(entries []transcript.Entry, sessionsRoot string) {
-	var edges map[string]string
-	if p, err := stateDBPath(); err == nil {
-		edges = loadSpawnEdges(p)
-	}
-	for i := range entries {
-		e := &entries[i]
-		if e.ToolName != "spawn_agent" || len(e.Subagents) == 0 {
-			continue
-		}
-		sub := &e.Subagents[0]
-		if sub.ID == "" {
-			continue
-		}
-		sub.Status = edges[sub.ID]
-		sub.HasTrace = findRolloutPathIn(sessionsRoot, sub.ID) != ""
-	}
+// stampSubagents links each spawn_agent entry to its child thread. threadID is
+// the spawning thread, which scopes v2 agent paths (unique only within a session).
+func stampSubagents(entries []transcript.Entry, lines []rolloutLine, sessionsRoot, threadID string) {
+	l := subagentLinker{parent: threadID, sessionsRoot: sessionsRoot, turns: spawnTurns(lines)}
+	defer l.close()
+	l.stamp(entries)
 }
 
 func ReadSubagentView(rootPath, agentID string) (transcript.TranscriptView, bool, error) {
 	sessionsRoot := sessionsRootFrom(rootPath)
-	path := findRolloutPathIn(sessionsRoot, agentID)
+	path := subagentRollout(sessionsRoot, agentID)
 	if path == "" {
 		return transcript.TranscriptView{}, false, nil
 	}
-	entries, err := parseRollout(path, false)
+	lines, err := scanRollout(path)
 	if err != nil {
 		return transcript.TranscriptView{}, false, err
 	}
-	stampSubagents(entries, sessionsRoot) // nested spawns link one level deeper
+	entries := foldRollout(lines, loadModelNames(), false)
+	stampSubagents(entries, lines, sessionsRoot, agentID) // nested spawns link one level deeper
 	return transcript.TranscriptView{Entries: entries}, true, nil
 }
 
 func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	if agentID != "" {
-		if p := findRolloutPathIn(sessionsRootFrom(path), agentID); p != "" {
+		if p := subagentRollout(sessionsRootFrom(path), agentID); p != "" {
 			path = p
 		} else {
 			return transcript.ToolDetail{}, false, nil
@@ -71,7 +62,7 @@ func FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, 
 }
 
 func SubagentFilePath(rootPath, agentID string) (string, bool) {
-	if p := findRolloutPathIn(sessionsRootFrom(rootPath), agentID); p != "" {
+	if p := subagentRollout(sessionsRootFrom(rootPath), agentID); p != "" {
 		return p, true
 	}
 	return "", false
@@ -113,7 +104,7 @@ func (s *streamingTranscript) Refresh() ([]transcript.Entry, error) {
 		s.models = loadModelNames()
 	}
 	entries := foldRollout(s.lines, s.models, false)
-	stampSubagents(entries, s.sessionsRoot)
+	stampSubagents(entries, s.lines, s.sessionsRoot, rolloutThreadID(s.path))
 	s.entries = entries
 	return s.entries, nil
 }

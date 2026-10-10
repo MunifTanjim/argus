@@ -124,6 +124,15 @@ var toolRegistry = map[string]toolMeta{
 	"wait_agent":               {agentCodex, "Wait Agent", catTask, (model).waitAgentDetail},   // ItemSubagent: status view
 	"close_agent":              {agentCodex, "Close Agent", catTask, (model).closeAgentDetail}, // ItemSubagent: status view
 	"spawn_agent":              {agentCodex, "Spawn Agent", catTask, nil},                      // ItemSubagent: rendered by the subagent view
+	"wait":                     {agentCodex, "Wait", catBash, (model).codexWaitCellDetail},
+	"clock.sleep":              {agentCodex, "Sleep", catOther, (model).codexSleepDetail},
+	// codex multi-agent v2: agents are addressed by path
+	"collaboration.spawn_agent":     {agentCodex, "Spawn Agent", catTask, nil},
+	"collaboration.wait_agent":      {agentCodex, "Wait Agent", catTask, (model).codexV2WaitAgentDetail},
+	"collaboration.send_message":    {agentCodex, "Send Message", catTask, (model).codexAgentMessageDetail},
+	"collaboration.followup_task":   {agentCodex, "Follow-up Task", catTask, (model).codexAgentMessageDetail},
+	"collaboration.interrupt_agent": {agentCodex, "Interrupt Agent", catTask, (model).codexInterruptAgentDetail},
+	"collaboration.list_agents":     {agentCodex, "List Agents", catTask, (model).codexListAgentsDetail},
 
 	// opencode (lowercase tool names, distinct from the other agents' keys)
 	"read":      {agentOpenCode, "Read", catRead, (model).readDetail},

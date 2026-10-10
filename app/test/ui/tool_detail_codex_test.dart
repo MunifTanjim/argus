@@ -28,7 +28,10 @@ void main() {
       final s = agentStatus({'completed': 'all done'});
       expect(s?.state, 'completed');
       expect(s?.message, 'all done');
-      expect(agentStatus('nope'), isNull);
+      // States with no message serialize bare.
+      expect(agentStatus('running'), (state: 'running', message: ''));
+      expect(agentStatus(''), isNull);
+      expect(agentStatus(42), isNull);
       expect(agentStatus(const {}), isNull);
     });
 
@@ -219,6 +222,85 @@ void main() {
           result: '{"number":7}')));
       expect(find.textContaining('title:', findRichText: true), findsWidgets);
       expect(find.textContaining('Bug', findRichText: true), findsWidgets);
+    });
+  
+    for (final c in [
+      (
+        'collaboration.wait_agent',
+        '{"timeout_ms":30000}',
+        '{"message":"Wait completed.","timed_out":false}',
+        ['Waiting on agents', 'timeout 30s', 'Wait completed.']
+      ),
+      (
+        'collaboration.send_message',
+        '{"target":"/root/a","message":"check the tests"}',
+        '',
+        ['To ', '/root/a', 'check the tests']
+      ),
+      (
+        'collaboration.followup_task',
+        '{"target":"/root/a","message":"gAAAAABq"}',
+        '',
+        ['/root/a', 'message encrypted']
+      ),
+      (
+        'collaboration.interrupt_agent',
+        '{"target":"/root/a"}',
+        '{"previous_status":"running"}',
+        ['Interrupted ', '/root/a', 'Previous status', 'running']
+      ),
+      (
+        'collaboration.list_agents',
+        '{}',
+        '{"agents":[{"agent_name":"/root/a","agent_status":{"completed":"done"}},{"agent_name":"/root/b","agent_status":"running"}]}',
+        ['/root/a', 'completed', 'done', '/root/b', 'running']
+      ),
+      (
+        'clock.sleep',
+        '{"duration_ms":10000}',
+        'Wall time: 10.0047 seconds\nSleep completed.',
+        ['Sleep ', '10s', 'Sleep completed.']
+      ),
+      (
+        'wait',
+        '{"cell_id":"1","yield_time_ms":25000}',
+        'Script completed\nWall time 18.1 seconds\nOutput:\nending...',
+        ['Waiting on cell ', 'yield 25s', 'ending...']
+      ),
+    ]) {
+      testWidgets('${c.$1} renders', (tester) async {
+        await tester.pumpWidget(_wrap(Entry(
+            id: 'i',
+            kind: EntryKind.tool,
+            toolName: c.$1,
+            toolInput: c.$2,
+            result: c.$3.isEmpty ? null : c.$3)));
+        for (final want in c.$4) {
+          expect(find.textContaining(want, findRichText: true), findsWidgets,
+              reason: '${c.$1}: $want');
+        }
+        expect(find.textContaining('gAAAAA', findRichText: true), findsNothing);
+      });
+    }
+
+    test('msDuration', () {
+      expect(msDuration(10000), '10s');
+      expect(msDuration(1500), '1.5s');
+      expect(msDuration(90000), '1m30s');
+    });
+
+    test('namespaced codex tools are registered; v1 keeps its views', () {
+      for (final n in [
+        'spawn_agent',
+        'collaboration.send_message',
+        'collaboration.list_agents',
+        'clock.sleep',
+        'wait'
+      ]) {
+        expect(toolMeta(n), isNotNull, reason: n);
+      }
+      expect(isAgentRefTool('close_agent'), isTrue);
+      expect(isAgentRefTool('collaboration.wait_agent'), isFalse);
     });
 
     for (final c in [

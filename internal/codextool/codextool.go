@@ -1,6 +1,12 @@
 package codextool
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
+
+// EncryptedPrefix starts the Fernet tokens Codex sends for encrypted content.
+const EncryptedPrefix = "gAAAAA"
 
 // UserNotePrefix marks the note entry in a request_user_input answer.
 const UserNotePrefix = "user_note: "
@@ -16,4 +22,13 @@ func SplitAnswer(vals []string) (label, note string) {
 		}
 	}
 	return label, note
+}
+
+// MsDuration renders a millisecond count as a short duration ("10s"); empty for
+// zero.
+func MsDuration(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return (time.Duration(ms) * time.Millisecond).String()
 }
