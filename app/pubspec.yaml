@@ -64,6 +64,8 @@ dependencies:
   firebase_messaging: ^15.1.3
   flterm: ^0.0.5
   super_sliver_list: ^0.4.1
+  # Compares server/node versions against the app's minimums (state/compat.dart).
+  pub_semver: ^2.2.0
 
 dev_dependencies:
   flutter_test:

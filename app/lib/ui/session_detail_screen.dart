@@ -10,6 +10,7 @@ import '../data/transcript_repository.dart';
 import '../models/project.dart';
 import '../models/session.dart';
 import '../push/notifications.dart';
+import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/projects.dart';
 import '../state/sessions.dart';
@@ -188,6 +189,19 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
 
     final s = widget.session;
     final live = ref.watch(sessionsProvider)[_sid] ?? s;
+    // A node older than the app's minimum may not understand our requests.
+    final outdated = ref.watch(
+        outdatedNodeIdsProvider.select((ids) => ids.contains(live.nodeId)));
+    final canKill = live.canKill && !outdated;
+    final canOpenTerminal = live.canOpenTerminal && !outdated;
+    final String? inputNotice;
+    if (outdated) {
+      inputNotice = 'Upgrade argus on ${live.nodeLabel ?? 'this node'}';
+    } else if (!live.acceptsInput && live.interaction?.kind == InteractionKind.idle) {
+      inputNotice = respondElsewhereLabel(live.frontend);
+    } else {
+      inputNotice = null;
+    }
     final st = ref.watch(transcriptProvider(_cacheKey(live)));
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
@@ -252,7 +266,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Live Screen',
-            onPressed: live.canOpenTerminal
+            onPressed: canOpenTerminal
                 ? () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => LiveScreenScreen(session: live),
@@ -282,7 +296,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                   ),
                 );
               } else if (value == 'kill') {
-                if (!live.canKill) return;
+                if (!canKill) return;
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -346,7 +360,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               ],
               PopupMenuItem<String>(
                 value: 'kill',
-                enabled: live.canKill,
+                enabled: canKill,
                 child: const ListTile(
                   leading: Icon(Icons.dangerous),
                   title: Text('Kill Session'),
@@ -380,10 +394,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             if (live.interaction != null)
               InteractionBar(
                 interaction: live.interaction!,
-                informationalMessage: (!live.acceptsInput &&
-                        live.interaction!.kind == InteractionKind.idle)
-                    ? respondElsewhereLabel(live.frontend)
-                    : null,
+                informationalMessage: inputNotice,
                 onRespond: () => showRespondSheet(context, live),
               ),
           ],

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
+import 'package:argus/state/compat.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/transport/jsonrpc.dart';
 import 'package:argus/transport/rpc_client.dart';
@@ -202,6 +203,31 @@ void main() {
     expect(info.nodes[0].label, 'Box');
     expect(info.nodes[0].version, '1.2.3');
     expect(info.nodes[0].spawnSupported, isTrue);
+  });
+
+  test('serverInfo flags nodes below the minimum version and drops their capabilities',
+      () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client =
+        RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+
+    final fut = SessionService(() => client).serverInfo();
+    await Future<void>.delayed(Duration.zero);
+    final id = (jsonDecode(frames.single.trim()) as Map<String, dynamic>)['id'];
+    const caps = '{"spawn_session":true,"terminal":true,"host_wakelock":true}';
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","result":{"version":"$minServerVersion","nodes":['
+        '{"id":"old","version":"0.1.1","capabilities":$caps},'
+        '{"id":"new","version":"$minNodeVersion","capabilities":$caps}]}}')));
+
+    final nodes = (await fut as Ok<ServerInfo>).value.nodes;
+    expect(nodes[0].outdated, isTrue);
+    expect(nodes[0].spawnSupported, isFalse);
+    expect(nodes[0].terminalSupported, isFalse);
+    expect(nodes[0].hostWakelockSupported, isFalse);
+    expect(nodes[1].outdated, isFalse);
+    expect(nodes[1].spawnSupported, isTrue);
   });
 
   test('null client: nodes returns Error', () async {

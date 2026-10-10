@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/terminal.dart';
+import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/projects_api.dart';
 import '../state/terminals.dart';
@@ -111,7 +112,11 @@ class TerminalTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = terminal;
+    // A node older than the app's minimum may not understand our requests.
+    final outdated = ref.watch(
+        outdatedNodeIdsProvider.select((ids) => ids.contains(t.nodeId)));
     return ListTile(
+      enabled: !outdated,
       titleAlignment: ListTileTitleAlignment.titleHeight,
       leading: const Icon(Icons.terminal),
       title: Text(t.title),
