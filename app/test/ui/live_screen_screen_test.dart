@@ -467,6 +467,19 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('tapping the terminal brings back a hidden keyboard', (tester) async {
+    await pumpTerminal(tester, _FakeTerminalRepo());
+    await tester.tap(find.byType(TerminalView));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    tester.testTextInput.hide();
+    await tester.tap(find.byType(TerminalView));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('an armed Ctrl applies to the next key typed on the keyboard', (tester) async {
     final repo = _FakeTerminalRepo();
     final term = await pumpTerminal(tester, repo);
@@ -539,6 +552,19 @@ void main() {
       expect(repo.sends.map(utf8.decode), ['\x1b[A'], reason: terminal ? 'terminal' : 'session');
       await tester.pumpWidget(const SizedBox());
     }
+  });
+
+  testWidgets('Ghostty: tapping the terminal brings back a hidden keyboard', (tester) async {
+    await pumpGhostty(tester, _FakeTerminalRepo(), terminal: true);
+    await tester.tap(find.byType(gt.TerminalView));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    tester.testTextInput.hide();
+    await tester.tap(find.byType(gt.TerminalView));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('xterm: the cursor is translucent, so the character under it shows', (tester) async {
