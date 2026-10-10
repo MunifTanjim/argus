@@ -4,7 +4,8 @@ The **mobile app** for iOS and Android (in [`app/`](https://github.com/MunifTanj
 shows your sessions, status, transcripts, live screen, prompts, and history. It
 also adds **Push Notification**. The app notifies you as soon as a session needs
 you (a prompt, a question, a finished turn), **even when it is in the background or
-killed**.
+killed**. You can group the session list by host, project, workspace, agent,
+or status.
 
 <DemoVideo src="/screenshots/demo-app.mp4" alt="Argus Android app: sessions, transcript, and history" portrait />
 

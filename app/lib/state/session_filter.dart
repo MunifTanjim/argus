@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../pairing/gateway_store.dart';
+import 'grouping.dart';
 
 /// Whether a session runs or waits for input: the sessions that the
 /// active-only view keeps.
@@ -57,3 +59,59 @@ final sessionSearchProvider =
     NotifierProvider<SessionSearchController, String?>(
       SessionSearchController.new,
     );
+
+/// Saves the home sessions list's grouping on this device.
+class GroupByStore {
+  GroupByStore([this._kv = const FlutterSecureKv()]);
+  final SecureKv _kv;
+
+  static const _key = 'sessions.groupBy';
+
+  Future<GroupBy> load() async {
+    final v = await _kv.read(_key);
+    return GroupBy.values.firstWhere(
+      (g) => g.name == v,
+      orElse: () => GroupBy.host,
+    );
+  }
+
+  Future<void> save(GroupBy g) => _kv.write(_key, g.name);
+}
+
+final groupByStoreProvider = Provider<GroupByStore>((ref) => GroupByStore());
+
+/// The home sessions list's grouping, remembered across app starts.
+class GroupByController extends Notifier<GroupBy> {
+  @override
+  GroupBy build() {
+    // Hydrate async.
+    _load();
+    return GroupBy.host;
+  }
+
+  // Set by a choice made while the load runs, so the load does not undo it.
+  var _chosen = false;
+
+  Future<void> _load() async {
+    try {
+      final saved = await ref.read(groupByStoreProvider).load();
+      if (!_chosen) state = saved;
+    } catch (_) {
+      // Keep the default on read failure (e.g. secure storage unavailable).
+    }
+  }
+
+  Future<void> set(GroupBy g) async {
+    _chosen = true;
+    state = g;
+    try {
+      await ref.read(groupByStoreProvider).save(g);
+    } catch (_) {
+      // Persist failure is non-fatal.
+    }
+  }
+}
+
+final groupByProvider = NotifierProvider<GroupByController, GroupBy>(
+  GroupByController.new,
+);

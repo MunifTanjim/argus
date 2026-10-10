@@ -9,7 +9,7 @@ import '../state/sessions.dart';
 import '../state/setup_text.dart';
 import '../state/workspace.dart';
 import 'branch_picker_screen.dart';
-import 'git_branch_icon.dart';
+import 'nerd_icon.dart';
 import 'new_workspace_screen.dart';
 import 'setup_log_screen.dart';
 import 'spawn_dialog.dart';

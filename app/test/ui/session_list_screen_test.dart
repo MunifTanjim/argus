@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart' show KeyPair;
 import 'package:argus/models/session.dart';
+import 'package:argus/pairing/gateway_store.dart';
+import 'package:argus/state/session_filter.dart';
 import 'package:argus/state/device_identity.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/gateway.dart';
@@ -193,6 +195,29 @@ void main() {
       expect(find.byType(DeviceIdentityScreen), findsOneWidget);
     });
   });
+  testWidgets('the group-by menu regroups the list and is saved', (tester) async {
+    final kv = _MemKv();
+    await tester.pumpWidget(_app([
+      sessionsProvider.overrideWith(() => _SeededSessions([
+            _sa('dev:1', 'dev', 'working', 'claude'),
+            _sa('dev:2', 'dev', 'idle', 'claude'),
+          ])),
+      gatewayProvider.overrideWithValue(null),
+      groupByStoreProvider.overrideWithValue(GroupByStore(kv)),
+    ]));
+    await tester.pump();
+    expect(find.text('DEV'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Group sessions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Status'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('DEV'), findsNothing);
+    expect(find.text('WORKING'), findsOneWidget);
+    expect(find.text('IDLE'), findsOneWidget);
+    expect(kv.m['sessions.groupBy'], 'status');
+  });
 }
 
 class _SeededSessions extends SessionsNotifier {
@@ -200,4 +225,14 @@ class _SeededSessions extends SessionsNotifier {
   final List<Session> _seed;
   @override
   Map<String, Session> build() => {for (final s in _seed) s.id: s};
+}
+
+class _MemKv implements SecureKv {
+  final m = <String, String>{};
+  @override
+  Future<String?> read(String key) async => m[key];
+  @override
+  Future<void> write(String key, String value) async => m[key] = value;
+  @override
+  Future<void> delete(String key) async => m.remove(key);
 }
