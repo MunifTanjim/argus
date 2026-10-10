@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.1.2](https://github.com/MunifTanjim/argus/compare/0.1.1...0.1.2) (2026-10-10)
+
+
+### Features
+
+* add workspace terminals ([fb72753](https://github.com/MunifTanjim/argus/commit/fb72753be5b24cdb06a47c6eb7997013038d204d))
+* **antigravity:** fold transcript into flat entries ([00c5ebc](https://github.com/MunifTanjim/argus/commit/00c5ebc27c99f72149d078507cec364af658c72d))
+* **app:** group sessions by dimension ([ee5933d](https://github.com/MunifTanjim/argus/commit/ee5933d029eeaec7f63d6d4a960941e41afb6059))
+* **claude:** fold transcript into flat entries ([d4422bb](https://github.com/MunifTanjim/argus/commit/d4422bbca6459e2334a3c9b1d3d445be1b0b7030))
+* **cli:** structured project and workspace output with --json ([b5047fb](https://github.com/MunifTanjim/argus/commit/b5047fbc5150f88e51f22d552e9d51f57f2f083e))
+* **codex:** fold rollout into flat entries ([18b8a86](https://github.com/MunifTanjim/argus/commit/18b8a863388dc6bcb5595b7522f58fb695a7be34))
+* **codex:** match codex question answering ([8926430](https://github.com/MunifTanjim/argus/commit/8926430f152947bcc392fa37720b13e444c332fd))
+* **codex:** render codex tools ([e3ff185](https://github.com/MunifTanjim/argus/commit/e3ff185196142c14ef269a6aae018216d82c9aa0))
+* **codex:** render v2 agent and clock tools ([c24f68e](https://github.com/MunifTanjim/argus/commit/c24f68e482aa71943801b2893e3246361040ef1f))
+* **codex:** run codex over the app-server daemon ([3bf0796](https://github.com/MunifTanjim/argus/commit/3bf079649bfdf670d2ec694856f2237f6277a5a2))
+* flat entry model ([47d2366](https://github.com/MunifTanjim/argus/commit/47d2366234dbe85f011d6c71393230cd0a8a4af2))
+* **node:** ship transcript entries ([49b38cc](https://github.com/MunifTanjim/argus/commit/49b38cc1166482f51d4719bd3df2c0c36e89f879))
+* **opencode:** fold messages into flat entries ([e41e814](https://github.com/MunifTanjim/argus/commit/e41e814b04e3a6b2f0b1232efe2ba36c47878c40))
+* **opencode:** footer tokens and duration ([d4929bc](https://github.com/MunifTanjim/argus/commit/d4929bc3b9e94476bac3e5e770382aa4e9ba9d75))
+* **opencode:** surface provider errors ([8dc6f74](https://github.com/MunifTanjim/argus/commit/8dc6f74500a9943ebc98a1b22142d8c5b0ba233c))
+* **tui:** add tui.verbose-transcript config ([2a66e89](https://github.com/MunifTanjim/argus/commit/2a66e8949b8962e8a9bd897e9107d643c56c8fb3))
+* **tui:** add workspace tabs and top-bar headers ([dfee525](https://github.com/MunifTanjim/argus/commit/dfee525d281cd64cc6f57e25f4d7bccfd33de7b0))
+* **tui:** fold thinking and tool runs into summaries ([c2daaa9](https://github.com/MunifTanjim/argus/commit/c2daaa99a58562f80039bad0a8440abd50344cef))
+* **tui:** group sessions by dimension ([9337339](https://github.com/MunifTanjim/argus/commit/93373391b515fe8f1c7f49a741dc7208b0f453f4))
+* **tui:** render transcript as a flat entry stream ([109e3a7](https://github.com/MunifTanjim/argus/commit/109e3a750523991020f33b28d02236c8da8f1b9a))
+
+
+### Bug Fixes
+
+* **claude:** keep turn open while text awaits its tool call ([abfe758](https://github.com/MunifTanjim/argus/commit/abfe75861eff3271fb5d1dee8523232885f4b08a))
+* **claude:** mark quoted question answers ([be03b7c](https://github.com/MunifTanjim/argus/commit/be03b7cbffe58f89dda79b609d2c1827e45f547b))
+* **claude:** show prompts queued while the agent is busy ([92605b8](https://github.com/MunifTanjim/argus/commit/92605b86c75e35e20b541cfaac60b8eb1ecaae48))
+* **claude:** show subagent reports and peer messages ([7903796](https://github.com/MunifTanjim/argus/commit/7903796278206336fea1a23f64b589b856279eaa))
+* **claude:** sum turn output tokens across api calls ([8c18411](https://github.com/MunifTanjim/argus/commit/8c18411c08156e98369ef9a5c6ad5c9361f73e19))
+* **client:** route early transcript unsubscribe ([92359f3](https://github.com/MunifTanjim/argus/commit/92359f3134ee3df93f76a9a84372d1515b1c91bc))
+* **node:** close dropped relay channels ([76cd219](https://github.com/MunifTanjim/argus/commit/76cd219b56de0d22ecb05f94a69612e6ea2b213a))
+* **node:** notify on project edits ([07a4355](https://github.com/MunifTanjim/argus/commit/07a43550101b6f3e7c86b7bd29d9a73888f8b14a))
+* **node:** show right session in live terminal view ([17d6676](https://github.com/MunifTanjim/argus/commit/17d66765c00c4a938fea992d8fe1fa27292102df))
+* **tui:** drop expansion state on /clear ([bf0176f](https://github.com/MunifTanjim/argus/commit/bf0176fa29b4cd03571c7efa335219b4a96053b7))
+* **tui:** keep cursor index when its row disappears ([f11cfb1](https://github.com/MunifTanjim/argus/commit/f11cfb1cb1e2c26e2dd6069dddb2e55fc07ae401))
+* **tui:** move list cursor before scrolling the view ([1e10af2](https://github.com/MunifTanjim/argus/commit/1e10af2c5867e59d75135bc072237483b2acb7e9))
+* **tui:** move wheel like j/k ([2dbbfe8](https://github.com/MunifTanjim/argus/commit/2dbbfe8cc739976e2df7c4e8f8b6a5a18da8b33c))
+* **tui:** reload projects on notify only ([6dfdf40](https://github.com/MunifTanjim/argus/commit/6dfdf403183757cc52b8da45ab73d93c56f22ee3))
+
+
+### Performance Improvements
+
+* **claude:** decode message content once per line ([961e114](https://github.com/MunifTanjim/argus/commit/961e1147f19fd58f720b8eea68211b2a95ede4d4))
+* **node:** keep folded transcripts between subscribes ([b5a565d](https://github.com/MunifTanjim/argus/commit/b5a565d82817372e579cd7ead5181971b861babb))
+
 ## [0.1.1](https://github.com/MunifTanjim/argus/compare/0.1.0...0.1.1) (2026-10-03)
 
 
