@@ -623,8 +623,8 @@ func (d dockComp) questionLines(c *ctx, ix *session.Interaction, width int) ([]s
 // decisionLines renders a permission/plan allow-deny prompt with a deny reason.
 func (d dockComp) decisionLines(c *ctx, ix *session.Interaction, width int) ([]string, int, int) {
 	var b strings.Builder
-	b.WriteString(promptHeading(ix) + "\n\n")
-	if body := interactionBody(*c.m, ix, width); body != "" {
+	b.WriteString(promptHeading(c.m.liveAgent(), ix) + "\n\n")
+	if body := interactionBody(*c.m, c.m.liveAgent(), ix, width); body != "" {
 		b.WriteString(body + "\n\n")
 	}
 	opts := decisionOptions(ix)
@@ -657,8 +657,8 @@ func (d dockComp) rejectInput(ix *session.Interaction, width int) string {
 // idleLines renders the free-text composer for an idle interaction.
 func (d dockComp) idleLines(c *ctx, ix *session.Interaction, width int) ([]string, int, int) {
 	var b strings.Builder
-	b.WriteString(promptHeading(ix) + "\n\n")
-	if body := interactionBody(*c.m, ix, width); body != "" {
+	b.WriteString(promptHeading(c.m.liveAgent(), ix) + "\n\n")
+	if body := interactionBody(*c.m, c.m.liveAgent(), ix, width); body != "" {
 		b.WriteString(body + "\n\n")
 	}
 	anchor := strings.Count(b.String(), "\n")
@@ -781,7 +781,11 @@ func (d dockComp) answerSummary(q *session.QuestionSpec, tab int) string {
 // questionHeading is the single-question heading; multi-question prompts carry
 // headers in the tab bar instead.
 func (m model) questionHeading(q *session.QuestionSpec) string {
-	h := StyleAccentBold.Render(Icon.Chat.Glyph + " Claude is asking")
+	name, _ := agentLabel(m.liveAgent())
+	if name == "" {
+		name = "Claude"
+	}
+	h := StyleAccentBold.Render(Icon.Chat.Glyph + " " + name + " is asking")
 	if q.Header != "" {
 		h += "  " + headerChip(q.Header)
 	}
@@ -796,12 +800,12 @@ func headerChip(label string) string {
 		Padding(0, 1).Render(label)
 }
 
-func promptHeading(ix *session.Interaction) string {
+func promptHeading(agent string, ix *session.Interaction) string {
 	switch ix.Kind {
 	case session.InteractionPermission:
 		s := "Permission requested"
 		if ix.ToolName != "" {
-			s += " · " + toolDisplayName(ix.ToolName)
+			s += " · " + toolDisplayName(agent, ix.ToolName)
 		}
 		return StyleAccentBold.Render(Icon.SystemErr.Glyph + " " + s)
 	case session.InteractionPlan:
@@ -812,7 +816,7 @@ func promptHeading(ix *session.Interaction) string {
 }
 
 // interactionBody renders the descriptive body for plan/permission/idle prompts.
-func interactionBody(m model, ix *session.Interaction, width int) string {
+func interactionBody(m model, agent string, ix *session.Interaction, width int) string {
 	switch ix.Kind {
 	case session.InteractionPlan:
 		if ix.Plan != "" {
@@ -827,7 +831,7 @@ func interactionBody(m model, ix *session.Interaction, width int) string {
 			// Reuse the per-tool renderers (Bash → "$ cmd", Edit → diff, …) on a
 			// synthetic item; hardWrap bounds the result here (unlike the detail view).
 			it := transcript.Entry{Kind: transcript.EntryTool, ToolName: ix.ToolName, ToolInput: ix.ToolInput}
-			parts = append(parts, hardWrap(m.renderToolBody(it, width-2), width-2))
+			parts = append(parts, hardWrap(m.renderToolBody(agent, it, width-2), width-2))
 		}
 		return strings.Join(parts, "\n")
 	default:

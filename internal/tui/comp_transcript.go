@@ -215,6 +215,14 @@ type tview struct {
 
 func (t *transcriptComp) bind(c *ctx) tview { return tview{t, c} }
 
+// agent is the agent whose transcript this is, for tool lookups.
+func (m tview) agent() string {
+	if m.live {
+		return m.c.m.sessions[m.sessionID].Agent
+	}
+	return m.history.openAgent
+}
+
 func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.c.setFlash("")
 	switch {

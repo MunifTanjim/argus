@@ -133,7 +133,7 @@ func TestPermissionPromptWrapsLongCommand(t *testing.T) {
 		Message:   strings.Repeat("permission message ", 10),
 	}
 	m := testModel()
-	out := interactionBody(m, ix, width)
+	out := interactionBody(m, "", ix, width)
 	if got := maxLineWidth(out); got > width {
 		t.Errorf("permission body line width %d > %d:\n%s", got, width, out)
 	}

@@ -44,8 +44,8 @@ func (m tview) fetchToolBodyCmd(it transcript.Entry, agentID string) tea.Cmd {
 	}
 }
 
-func (m model) toolDetailBody(it transcript.Entry, width int) (string, bool) {
-	meta, ok := lookupTool(it.ToolName)
+func (m model) toolDetailBody(agent string, it transcript.Entry, width int) (string, bool) {
+	meta, ok := lookupTool(agent, it.ToolName)
 	if !ok || meta.detail == nil {
 		return "", false // unregistered, or registered with the generic body
 	}
@@ -272,7 +272,7 @@ func agentTargetNames(it transcript.Entry) []string {
 }
 
 func agentToolLabel(it transcript.Entry) string {
-	meta, _ := lookupTool(it.ToolName)
+	meta, _ := lookupTool(agentCodex, it.ToolName)
 	prefix := meta.display
 	names := agentTargetNames(it)
 	if len(names) == 0 {

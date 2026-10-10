@@ -218,7 +218,7 @@ func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgen
 	case s.Offline:
 		task = StyleDim.Render("(node offline)")
 	case s.Status == session.StatusAwaitingInput:
-		task = interactionHint(s.Interaction) // key signal: kept colored
+		task = interactionHint(s.Agent, s.Interaction) // key signal: kept colored
 	case s.Summary != nil && s.Summary.Task != "":
 		taskStyle := StyleDim
 		if selected {

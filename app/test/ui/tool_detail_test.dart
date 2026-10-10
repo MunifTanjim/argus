@@ -232,12 +232,12 @@ void main() {
   });
 
   test('opencode tool names are registered with display and category', () {
-    expect(toolMeta('read')!.display, 'Read');
-    expect(toolMeta('read')!.category, ToolCategory.read);
-    expect(toolMeta('edit')!.category, ToolCategory.edit);
-    expect(toolMeta('bash')!.category, ToolCategory.bash);
-    expect(toolMeta('todowrite')!.display, 'Todo');
-    expect(toolMeta('question')!.category, ToolCategory.other);
+    expect(toolMeta('opencode', 'read')!.display, 'Read');
+    expect(toolMeta('opencode', 'read')!.category, ToolCategory.read);
+    expect(toolMeta('opencode', 'edit')!.category, ToolCategory.edit);
+    expect(toolMeta('opencode', 'bash')!.category, ToolCategory.bash);
+    expect(toolMeta('opencode', 'todowrite')!.display, 'Todo');
+    expect(toolMeta('opencode', 'question')!.category, ToolCategory.other);
   });
 
   test('answeredAnswers parses question→answer pairs', () {
@@ -258,5 +258,20 @@ void main() {
         answeredAnswers(r, ['Esc back to "back", how?', 'What should "chat" do?']);
     expect(a['What should "chat" do?'], 'Interrupt (Recommended)');
     expect(a['Esc back to "back", how?'], 'Use `c` ("chat" slot)');
+  });
+
+  test('toolMeta prefers the agent\'s own entry', () {
+    // send_message is antigravity's; codex v2 records its own as
+    // collaboration.send_message.
+    expect(toolMeta('antigravity', 'send_message')?.display, 'Send Message');
+    expect(toolMeta('codex', 'send_message'), isNull);
+    // A known agent does not borrow another agent's tool.
+    expect(toolMeta('opencode', 'run_command'), isNull);
+    // An unknown agent falls back to any agent's entry.
+    expect(toolMeta(null, 'run_command')?.display, 'Run Command');
+    // MCP tools resolve for every agent.
+    expect(toolMeta('claude', 'mcp__github__create_issue'), isNotNull);
+    // Codex records skill loads under Claude's Skill name.
+    expect(toolMeta('codex', 'Skill'), isNotNull);
   });
 }

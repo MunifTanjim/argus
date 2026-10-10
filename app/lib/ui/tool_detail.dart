@@ -40,9 +40,13 @@ Widget _resultSection(Entry it, {bool wrap = false, String? lang}) {
   ]);
 }
 
-Widget toolDetailBody(Entry item) {
-  final detail = toolMeta(item.toolName)?.detail;
+/// Renders [agent]'s tool entry. The name-keyed renderers below apply only to
+/// tools the agent registers, so another agent's same-named tool stays generic.
+Widget toolDetailBody(Entry item, {String? agent}) {
+  final meta = toolMeta(agent, item.toolName);
+  final detail = meta?.detail;
   if (detail != null) return detail(item);
+  if (meta == null) return _generic(item);
   switch (item.toolName) {
     // opencode names are lowercase; they share these renderers with the other
     // agents, and the extractors below read both key shapes.

@@ -78,15 +78,15 @@ func TestViewImageDetail(t *testing.T) {
 }
 
 func TestMCPDetailAndLookup(t *testing.T) {
-	if got := toolDisplayName("mcp__github__create_issue"); got != "github › create_issue" {
+	if got := toolDisplayName("", "mcp__github__create_issue"); got != "github › create_issue" {
 		t.Errorf("display = %q", got)
 	}
-	if toolIcon("mcp__github__create_issue", false) != categoryIcon(catOther) {
+	if toolIcon("", "mcp__github__create_issue", false) != categoryIcon(catOther) {
 		t.Error("mcp tools use the other category")
 	}
 	out := bareTv().toolBody(codexItem("mcp__github__create_issue", `{"title":"Bug","labels":["a","b"],"repo":"o/r"}`, `{"number":7}`), 80)
 	assertContains(t, out, "title:", "Bug", "labels:", `["a","b"]`, "repo:", "Result", "number")
-	if _, ok := lookupTool("mcp__server"); ok {
+	if _, ok := lookupTool(agentCodex, "mcp__server"); ok {
 		t.Error("mcp name without a tool part must not resolve")
 	}
 }
@@ -113,7 +113,7 @@ func TestCodexV2AgentToolDetails(t *testing.T) {
 func TestCodexNamespacedToolsRegistered(t *testing.T) {
 	for _, n := range []string{"collaboration.spawn_agent", "collaboration.wait_agent", "collaboration.send_message", "collaboration.followup_task",
 		"collaboration.interrupt_agent", "collaboration.list_agents", "clock.sleep", "wait"} {
-		if meta, ok := lookupTool(n); !ok || meta.agent != agentCodex {
+		if _, ok := toolRegistry[agentCodex][n]; !ok {
 			t.Errorf("%s: not registered for codex", n)
 		}
 	}
@@ -121,8 +121,8 @@ func TestCodexNamespacedToolsRegistered(t *testing.T) {
 		t.Error("only v1 wait/close are agent-ref status views")
 	}
 	// Antigravity keeps its bare send_message.
-	if meta, _ := lookupTool("send_message"); meta.agent != agentAntigravity {
-		t.Errorf("send_message agent = %q, want antigravity", meta.agent)
+	if _, ok := toolRegistry[agentAntigravity]["send_message"]; !ok {
+		t.Error("send_message should stay antigravity's")
 	}
 }
 

@@ -25,10 +25,10 @@ class _RecordingControl extends FakeSessionRepository {
   }
 }
 
-Session _session(Map<String, dynamic> interaction) =>
+Session _session(Map<String, dynamic> interaction, {String agent = 'claude'}) =>
     Session.fromJson(jsonDecode(jsonEncode({
       'id': 'mac:%1',
-      'agent': 't',
+      'agent': agent,
       'status': 'awaiting',
       'source': 'hooked',
       'tmux': {
@@ -59,6 +59,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.respondCalls.single['option_value'], 'allow');
     expect(c.respondCalls.single['kind'], 'permission');
+  });
+
+  testWidgets('permission heading uses the tool display name',
+      (tester) async {
+    final c = _RecordingControl();
+    await _pumpSheet(
+        tester,
+        _session({'kind': 'permission', 'tool_name': 'exec_command'},
+            agent: 'codex'),
+        c);
+    expect(find.text('Permission requested · Exec Command'), findsOneWidget);
   });
 
   testWidgets('permission renders formatted tool detail, not raw JSON',

@@ -25,10 +25,9 @@ class ToolDetailRef {
   });
 
   /// A live session transcript (optionally a subagent trace within it).
-  const ToolDetailRef.live(this.sessionId, {this.agentId})
+  const ToolDetailRef.live(this.sessionId, {this.agentId, this.agent})
       : nodeId = null,
-        transcriptPath = null,
-        agent = null;
+        transcriptPath = null;
 
   /// A past session's transcript on a specific node.
   const ToolDetailRef.history({

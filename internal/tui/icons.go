@@ -191,18 +191,18 @@ func initIcons() {
 	}
 }
 
-func toolDisplayName(name string) string {
-	if meta, ok := lookupTool(name); ok && meta.display != "" {
+func toolDisplayName(agent, name string) string {
+	if meta, ok := lookupTool(agent, name); ok && meta.display != "" {
 		return meta.display
 	}
 	return name
 }
 
-func toolIcon(name string, isError bool) StyledIcon {
+func toolIcon(agent, name string, isError bool) StyledIcon {
 	if isError {
 		return Icon.Tool.Err
 	}
-	if meta, ok := lookupTool(name); ok {
+	if meta, ok := lookupTool(agent, name); ok {
 		return categoryIcon(meta.category)
 	}
 	return Icon.Tool.Misc

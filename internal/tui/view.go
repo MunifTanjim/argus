@@ -109,7 +109,7 @@ func statusGlyph(s session.Status) string {
 
 // interactionHint renders a short, attention-colored summary of what a waiting
 // session needs.
-func interactionHint(ix *session.Interaction) string {
+func interactionHint(agent string, ix *session.Interaction) string {
 	if ix == nil {
 		return StyleAccentBold.Render("needs input")
 	}
@@ -117,7 +117,7 @@ func interactionHint(ix *session.Interaction) string {
 	case session.InteractionPermission:
 		s := "needs permission"
 		if ix.ToolName != "" {
-			s += " · " + toolDisplayName(ix.ToolName)
+			s += " · " + toolDisplayName(agent, ix.ToolName)
 		}
 		return StyleAccentBold.Render(s)
 	case session.InteractionQuestion:
