@@ -102,6 +102,7 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 	for server, client := range clients {
 		d.servers = append(d.servers, serverClient{server: server, client: client})
 	}
+	activeDiscoverer.Store(d)
 	return d
 }
 

@@ -13,9 +13,12 @@ import (
 // rolloutItem is the subset of an event_msg item_completed item argus uses: the
 // commands a code-mode "exec" script runs are recorded as CommandExecution items.
 type rolloutItem struct {
-	Type             string   `json:"type"`
-	Source           string   `json:"source"`
-	ID               string   `json:"id"`
+	Type   string `json:"type"`
+	Source string `json:"source"`
+	ID     string `json:"id"`
+	// SubAgentActivity (multi-agent v2): id is the spawning or messaging call's id.
+	Kind             string   `json:"kind"`
+	AgentThreadID    string   `json:"agent_thread_id"`
 	Command          []string `json:"command"`
 	Cwd              string   `json:"cwd"`
 	AggregatedOutput string   `json:"aggregated_output"`

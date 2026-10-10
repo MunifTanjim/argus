@@ -15,6 +15,40 @@ import (
 // Clients only see this in rows: the wire form strips ToolInput.
 func toolPreview(name, input string) string {
 	switch name {
+	case "wait": // code mode: wait on a running exec cell
+		var in struct {
+			CellID string `json:"cell_id"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		if in.CellID != "" {
+			return "cell " + in.CellID
+		}
+	case "clock.sleep":
+		var in struct {
+			DurationMs int64 `json:"duration_ms"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		return codextool.MsDuration(in.DurationMs)
+	case multiAgentV2Namespace + ".wait_agent":
+		var in struct {
+			TimeoutMs int64 `json:"timeout_ms"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		if d := codextool.MsDuration(in.TimeoutMs); d != "" {
+			return "up to " + d
+		}
+	case multiAgentV2Namespace + ".send_message", multiAgentV2Namespace + ".followup_task", multiAgentV2Namespace + ".interrupt_agent":
+		var in struct {
+			Target string `json:"target"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		return in.Target
+	case multiAgentV2Namespace + ".list_agents":
+		var in struct {
+			PathPrefix string `json:"path_prefix"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		return in.PathPrefix
 	case "exec_command":
 		var in struct {
 			Cmd string `json:"cmd"`
@@ -161,7 +195,7 @@ func resultIsError(name, output string) (isErr, known bool) {
 		// call with plain text.
 		var obj map[string]json.RawMessage
 		return json.Unmarshal([]byte(output), &obj) != nil, true
-	case "exec":
+	case "exec", "wait": // wait reports the exec cell it waited on
 		return strings.HasPrefix(output, "Script failed") || strings.HasPrefix(output, "aborted"), true
 	}
 	if code, ok := execExitCode(output); ok {

@@ -89,6 +89,8 @@ const _execOutputMarker = 'Output:\n';
 
 /// Extracts a (state, message) pair from `{"state":"message"}`; null otherwise.
 ({String state, String message})? agentStatus(Object? raw) {
+  // Codex states that carry no message (e.g. "running") serialize bare.
+  if (raw is String && raw.isNotEmpty) return (state: raw, message: '');
   if (raw is! Map || raw.isEmpty) return null;
   final entry = raw.entries.first;
   return (state: '${entry.key}', message: '${entry.value}');
@@ -447,5 +449,133 @@ Widget codexViewImageDetail(Entry it) {
               style: _mono.copyWith(color: AppColors.dim)))
     else if (result.isNotEmpty)
       _resultSection(it, codeBlock(result)),
+  ]);
+}
+
+/// Renders a millisecond count as a short duration ("30s", "1m30s").
+String msDuration(int ms) {
+  String secs(num s) => s == s.truncate() ? '${s.truncate()}s' : '${s}s';
+  if (ms < 60000) return secs(ms / 1000);
+  final h = ms ~/ 3600000, m = (ms % 3600000) ~/ 60000;
+  final s = secs((ms % 60000) / 1000);
+  return h > 0 ? '${h}h${m}m$s' : '${m}m$s';
+}
+
+Widget _headline(String lead, String rest, [String? dim]) => RichText(
+      text: TextSpan(style: _mono, children: [
+        TextSpan(
+            text: lead,
+            style: _mono.copyWith(
+                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        TextSpan(text: rest, style: _mono.copyWith(color: AppColors.text)),
+        if (dim != null)
+          TextSpan(text: '  ($dim)', style: _mono.copyWith(color: AppColors.dim)),
+      ]),
+    );
+
+/// Code mode's wait on a running exec cell; the result reports the cell like
+/// exec does.
+Widget codexWaitCellDetail(Entry it) {
+  final m = _input(it);
+  final cell = toolInputStr(m['cell_id']);
+  final yieldMs = (m['yield_time_ms'] as num?)?.toInt() ?? 0;
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (cell.isNotEmpty)
+      _headline('Waiting on cell ', cell,
+          yieldMs > 0 ? 'yield ${msDuration(yieldMs)}' : null)
+    else if ((it.toolInput ?? '').isNotEmpty)
+      codeBlock(it.toolInput!),
+    if ((it.result ?? '').isNotEmpty)
+      _resultSection(it, _execResultBody(it.result!)),
+  ]);
+}
+
+Widget codexSleepDetail(Entry it) {
+  final ms = (_input(it)['duration_ms'] as num?)?.toInt() ?? 0;
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (ms > 0)
+      _headline('Sleep ', msDuration(ms))
+    else if ((it.toolInput ?? '').isNotEmpty)
+      codeBlock(it.toolInput!),
+    if ((it.result ?? '').isNotEmpty)
+      _resultSection(it, codeBlock(it.result!)),
+  ]);
+}
+
+/// Multi-agent v2's wait_agent waits on any agent: the input is only a timeout.
+Widget codexV2WaitAgentDetail(Entry it) {
+  final timeoutMs = (_input(it)['timeout_ms'] as num?)?.toInt() ?? 0;
+  final result = it.result ?? '';
+  Widget? body;
+  if (result.isNotEmpty) {
+    final message = _resultField(result, 'message');
+    final timedOut = _resultField(result, 'timed_out') == true;
+    body = message is String || timedOut
+        ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (timedOut)
+              Text('timed out', style: _mono.copyWith(color: AppColors.dim)),
+            if (message is String && message.isNotEmpty) appMarkdown(message),
+          ])
+        : codeBlock(result);
+  }
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    _headline('Waiting on agents', '',
+        timeoutMs > 0 ? 'timeout ${msDuration(timeoutMs)}' : null),
+    _resultSection(it, body),
+  ]);
+}
+
+/// Codex sends encrypted content as Fernet tokens with this prefix.
+const _encryptedPrefix = 'gAAAAA';
+
+/// Multi-agent v2's send_message and followup_task: a message to the agent at
+/// target. An encrypted message leaves only the target readable.
+Widget codexAgentMessageDetail(Entry it) {
+  final m = _input(it);
+  final target = toolInputStr(m['target']);
+  if (target.isEmpty) return _generic(it);
+  final message = toolInputStr(m['message']);
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    _headline('To ', target),
+    if (message.startsWith(_encryptedPrefix))
+      Text('message encrypted', style: _mono.copyWith(color: AppColors.dim))
+    else if (message.isNotEmpty)
+      appMarkdown(message),
+    if ((it.result ?? '').isNotEmpty)
+      _resultSection(it, codeBlock(it.result!)),
+  ]);
+}
+
+Widget codexInterruptAgentDetail(Entry it) {
+  final target = toolInputStr(_input(it)['target']);
+  if (target.isEmpty) return _generic(it);
+  final result = it.result ?? '';
+  final prev = _resultField(result, 'previous_status');
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    _headline('Interrupted ', target),
+    if (result.isNotEmpty)
+      _resultSection(it,
+          prev != null ? _statusBlock('Previous status', prev) : codeBlock(result)),
+  ]);
+}
+
+Widget codexListAgentsDetail(Entry it) {
+  final prefix = toolInputStr(_input(it)['path_prefix']);
+  final result = it.result ?? '';
+  final agents = _resultField(result, 'agents');
+  Widget? body;
+  if (agents is List) {
+    body = agents.isEmpty
+        ? Text('no agents', style: _mono.copyWith(color: AppColors.dim))
+        : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final a in agents.whereType<Map<String, dynamic>>())
+              _statusBlock(toolInputStr(a['agent_name']), a['agent_status']),
+          ]);
+  } else if (result.isNotEmpty) {
+    body = codeBlock(result);
+  }
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (prefix.isNotEmpty) _headline('Agents under ', prefix),
+    _resultSection(it, body),
   ]);
 }

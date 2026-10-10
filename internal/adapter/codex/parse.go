@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MunifTanjim/argus/internal/codextool"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -21,6 +22,7 @@ func parseRollout(path string, finished bool) ([]transcript.Entry, error) {
 // line slice each Refresh. finished closes the final turn even if it never
 // completed (history reads).
 func foldRollout(lines []rolloutLine, models map[string]string, finished bool) []transcript.Entry {
+	lines = ownLines(lines)
 	var out []transcript.Entry
 	model := ""
 	nicknames := map[string]string{} // agent id -> nickname, from each spawn seen so far
@@ -28,6 +30,9 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 	// place (subscribers rely on stable IDs), so a script that calls nothing but
 	// exec_command has its row taken over by its first recorded command.
 	var execOpen []*execCall
+	// Multi-agent v2 records each subagent transition as a SubAgentActivity item.
+	activityChild := map[string]string{} // call id -> child thread id
+	activityKind := map[string]string{}  // child thread id -> latest kind
 
 	// Footer of the open turn, closed by task_complete or the next user
 	// boundary. Aborted/usage-only turns add no entries and get no footer.
@@ -115,6 +120,10 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 				}
 				endTurn()
 			case "item_completed":
+				if p.Item != nil && p.Item.Type == "SubAgentActivity" && p.Item.AgentThreadID != "" {
+					activityChild[p.Item.ID] = p.Item.AgentThreadID
+					activityKind[p.Item.AgentThreadID] = p.Item.Kind
+				}
 				// A command a code-mode script ran; attributed to the latest open exec.
 				if p.Item != nil && p.Item.Type == "CommandExecution" && p.Item.Source == "unified_exec_startup" && len(execOpen) > 0 {
 					x := execOpen[len(execOpen)-1]
@@ -134,6 +143,11 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 			}
 		case "response_item":
 			switch p.Type {
+			case "agent_message":
+				// Another agent's message starts this agent's turn, as a user
+				// prompt starts a session's.
+				endTurn()
+				out = append(out, transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: agentMessageText(p)})
 			case "message":
 				switch p.Role {
 				case "user":
@@ -176,16 +190,17 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 				e := transcript.Entry{
 					Kind:      transcript.EntryTool,
 					Timestamp: l.Timestamp,
-					ToolName:  p.Name,
+					ToolName:  codexToolName(p.Namespace, p.Name),
 					ToolID:    p.CallID,
 					ToolInput: argString(p.Arguments),
 				}
-				switch p.Name {
-				case "spawn_agent":
+				switch {
+				case p.Name == "spawn_agent":
 					e.Kind = transcript.EntrySubagent
 					typ, desc := spawnArgs(p.Arguments)
 					e.Subagents = []transcript.Subagent{{Type: typ, Desc: desc}}
-				case "wait_agent", "close_agent":
+				case (p.Name == "wait_agent" || p.Name == "close_agent") && p.Namespace != multiAgentV2Namespace:
+					// v1 names its target agents by thread id; v2's wait_agent names none.
 					e.Kind = transcript.EntrySubagent
 					e.Subagents = buildSubagents(waitCloseTargets(p.Name, p.Arguments), nicknames)
 				}
@@ -197,7 +212,7 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 				if inlineAcceptedAsyncQuestion(e, res) {
 					uncount(p.CallID)
 				}
-				if id, nick := spawnResult(res); id != "" {
+				if id, nick, _ := spawnResult(res); id != "" {
 					setSpawnResult(e, id, nick)
 					if nick != "" {
 						nicknames[id] = nick
@@ -261,6 +276,7 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 	if finished {
 		endTurn()
 	}
+	applySubagentActivity(out, activityChild, activityKind)
 	stampIDs(out)
 	return out
 }
@@ -379,24 +395,36 @@ func exitCodeAfter(text, marker string) (code int, ok bool) {
 	return code, true
 }
 
-func spawnArgs(raw json.RawMessage) (agentType, message string) {
+// spawnArgs reads a spawn_agent call's agent type and task description. Multi-
+// agent v2 names each task and may send the message encrypted; the task name
+// stands in for an unreadable message.
+func spawnArgs(raw json.RawMessage) (agentType, desc string) {
 	var a struct {
 		AgentType string `json:"agent_type"`
 		Message   string `json:"message"`
+		TaskName  string `json:"task_name"`
 	}
 	_ = json.Unmarshal([]byte(argString(raw)), &a)
-	return a.AgentType, a.Message
+	desc = a.Message
+	if desc == "" || strings.HasPrefix(desc, codextool.EncryptedPrefix) {
+		desc = a.TaskName
+	}
+	return a.AgentType, desc
 }
 
-func spawnResult(output string) (agentID, nickname string) {
+// spawnResult reads a spawn_agent output. Multi-agent v1 returns the child's
+// thread id; v2 returns only its agent path (task_name), which stampSubagents
+// resolves to a thread.
+func spawnResult(output string) (agentID, nickname, agentPath string) {
 	var o struct {
 		AgentID  string `json:"agent_id"`
 		Nickname string `json:"nickname"`
+		TaskName string `json:"task_name"`
 	}
 	if json.Unmarshal([]byte(output), &o) != nil {
-		return "", ""
+		return "", "", ""
 	}
-	return o.AgentID, o.Nickname
+	return o.AgentID, o.Nickname, o.TaskName
 }
 
 func setSpawnResult(e *transcript.Entry, agentID, nickname string) {
@@ -528,4 +556,74 @@ func stampIDs(out []transcript.Entry) {
 			out[i].ToolID = "skill:" + strconv.Itoa(i)
 		}
 	}
+}
+
+// applySubagentActivity links v2 spawns to their child thread through the
+// "started" activity (its id is the spawn call's) and sets each child's status
+// from its latest activity.
+func applySubagentActivity(entries []transcript.Entry, childOf, kindOf map[string]string) {
+	if len(childOf) == 0 {
+		return
+	}
+	for i := range entries {
+		e := &entries[i]
+		if baseToolName(e.ToolName) != "spawn_agent" || len(e.Subagents) == 0 {
+			continue
+		}
+		sub := &e.Subagents[0]
+		if sub.ID == "" {
+			sub.ID = childOf[e.ToolID]
+		}
+		if st := activityStatus(kindOf[sub.ID]); st != "" {
+			sub.Status = st
+		}
+	}
+}
+
+// activityStatus names a subagent's state after a SubAgentActivity kind.
+func activityStatus(kind string) string {
+	switch kind {
+	case "started", "interacted":
+		return "running"
+	case "completed":
+		return "completed"
+	case "interrupted":
+		return "interrupted"
+	}
+	return ""
+}
+
+// agentMessageText renders an inter-agent message: its type and sender from
+// the readable header ("Message Type: NEW_TASK\n…Payload:\n"), then the payload,
+// which Codex usually sends encrypted.
+func agentMessageText(p rolloutPayload) string {
+	var text strings.Builder
+	encrypted := false
+	for _, c := range p.Content {
+		switch c.Type {
+		case "input_text", "output_text":
+			text.WriteString(c.Text)
+		case "encrypted_content":
+			encrypted = true
+		}
+	}
+	head, body, _ := strings.Cut(text.String(), "Payload:")
+	kind := "Message"
+	for _, ln := range strings.Split(head, "\n") {
+		if v, ok := strings.CutPrefix(ln, "Message Type: "); ok && v != "" {
+			kind = strings.ReplaceAll(strings.ToLower(v), "_", " ")
+			kind = strings.ToUpper(kind[:1]) + kind[1:]
+		}
+	}
+	line := kind
+	if p.Author != "" {
+		line += " from " + p.Author
+	}
+	switch body = strings.TrimSpace(body); {
+	case body != "":
+		return line + "\n\n" + body
+	case encrypted:
+		return line + " (message encrypted)"
+	}
+	return line
 }

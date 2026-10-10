@@ -150,7 +150,7 @@ func TestReadTranscriptViewStampsSubagent(t *testing.T) {
 	}
 	var sub *transcript.Entry
 	for i := range view.Entries {
-		if view.Entries[i].ToolName == "spawn_agent" {
+		if baseToolName(view.Entries[i].ToolName) == "spawn_agent" {
 			sub = &view.Entries[i]
 		}
 	}

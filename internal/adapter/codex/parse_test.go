@@ -204,7 +204,7 @@ func TestParseRolloutSubagentLink(t *testing.T) {
 	var sub transcript.Entry
 	var found bool
 	for _, it := range entries {
-		if it.ToolName == "spawn_agent" {
+		if baseToolName(it.ToolName) == "spawn_agent" {
 			sub, found = it, true
 		}
 	}
@@ -233,7 +233,7 @@ func TestParseRolloutManagementCallsAreSubagents(t *testing.T) {
 	}
 	names := map[string]transcript.EntryKind{}
 	for _, it := range entries {
-		names[it.ToolName] = it.Kind
+		names[baseToolName(it.ToolName)] = it.Kind
 	}
 	if names["wait_agent"] != transcript.EntrySubagent {
 		t.Fatalf("wait_agent kind = %v, want subagent", names["wait_agent"])
@@ -454,7 +454,7 @@ func TestParseRolloutWaitCloseResolveNickname(t *testing.T) {
 	const childID = "019f278e-50a5-7f83-91f2-c30e8ac18e19"
 	var wait, closeIt transcript.Entry
 	for _, it := range entries {
-		switch it.ToolName {
+		switch baseToolName(it.ToolName) {
 		case "wait_agent":
 			wait = it
 		case "close_agent":
@@ -523,7 +523,7 @@ func TestParseRolloutSpawnNickname(t *testing.T) {
 	var sub transcript.Entry
 	var found bool
 	for _, it := range entries {
-		if it.ToolName == "spawn_agent" {
+		if baseToolName(it.ToolName) == "spawn_agent" {
 			sub, found = it, true
 		}
 	}

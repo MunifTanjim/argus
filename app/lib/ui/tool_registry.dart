@@ -119,6 +119,20 @@ final Map<String, ToolMeta> toolRegistry = {
   'close_agent': const ToolMeta(
       'Close Agent', ToolCategory.task, codexCloseAgentDetail),
   'spawn_agent': const ToolMeta('Spawn Agent', ToolCategory.task),
+  'wait': const ToolMeta('Wait', ToolCategory.bash, codexWaitCellDetail),
+  'clock.sleep': const ToolMeta('Sleep', ToolCategory.other, codexSleepDetail),
+  // codex multi-agent v2: agents are addressed by path
+  'collaboration.spawn_agent': const ToolMeta('Spawn Agent', ToolCategory.task),
+  'collaboration.wait_agent': const ToolMeta(
+      'Wait Agent', ToolCategory.task, codexV2WaitAgentDetail),
+  'collaboration.send_message': const ToolMeta(
+      'Send Message', ToolCategory.task, codexAgentMessageDetail),
+  'collaboration.followup_task': const ToolMeta(
+      'Follow-up Task', ToolCategory.task, codexAgentMessageDetail),
+  'collaboration.interrupt_agent': const ToolMeta(
+      'Interrupt Agent', ToolCategory.task, codexInterruptAgentDetail),
+  'collaboration.list_agents': const ToolMeta(
+      'List Agents', ToolCategory.task, codexListAgentsDetail),
 
   'Read': const ToolMeta('', ToolCategory.read),
   'NotebookRead': const ToolMeta('', ToolCategory.read),
