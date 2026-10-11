@@ -23,8 +23,10 @@ import 'package:argus/ui/history_screen.dart';
 import 'package:argus/ui/history_transcript_screen.dart';
 import 'package:argus/ui/home_shell.dart';
 import 'package:argus/ui/live_screen_screen.dart';
+import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/ui/resume_action.dart';
 import 'package:argus/ui/session_card.dart';
+import 'package:argus/ui/sidebar_sessions_list.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
@@ -203,6 +205,81 @@ Finder get _detailInShell => find.descendant(
     );
 
 void main() {
+  testWidgets('a session tap in the drawer opens it and closes the drawer', (tester) async {
+    final c = await _shell(tester);
+    c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(ProjectDrawer),
+      matching: find.text('Sessions'),
+    ));
+    await tester.pumpAndSettle();
+    // _session has no name or tmux session name, so its title is its agent.
+    await tester.tap(find.descendant(
+      of: find.byType(SidebarSessionsList),
+      matching: find.text('claude'),
+    ));
+    await _pumpRoute(tester);
+    expect(_detailInShell, findsOneWidget);
+    expect(find.byType(SidebarSessionsList), findsNothing);
+  });
+
+  testWidgets('publishes the session shown in the current scope', (tester) async {
+    final container = ProviderContainer(
+      overrides: [gatewayProvider.overrideWithValue(null)],
+    );
+    addTearDown(container.dispose);
+    container.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: HomeShell()),
+    ));
+    await _pumpRoute(tester);
+    expect(container.read(shownSessionProvider), isNull);
+
+    container.read(pendingOpenSessionProvider.notifier).state =
+        const PendingOpen('s1');
+    await _pumpRoute(tester);
+    expect(container.read(shownSessionProvider), 's1');
+
+    await tester.binding.handlePopRoute();
+    await _pumpRoute(tester);
+    expect(container.read(shownSessionProvider), isNull);
+  });
+
+  testWidgets('a screen over the session keeps it shown', (tester) async {
+    final c = await _shell(tester);
+    await _openSessionIn(tester, c, 'A:w2');
+    await _pumpRoute(tester);
+    Navigator.of(tester.element(_detailInShell)).push(
+      MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('over'))),
+    );
+    await _pumpRoute(tester);
+    expect(find.text('over'), findsOneWidget);
+    expect(c.read(shownSessionProvider), 's2');
+
+    await tester.binding.handlePopRoute();
+    await _pumpRoute(tester);
+    expect(c.read(shownSessionProvider), 's2');
+    await tester.binding.handlePopRoute();
+    await _pumpRoute(tester);
+    expect(c.read(shownSessionProvider), isNull);
+  });
+
+  testWidgets('the shown session follows the scope', (tester) async {
+    final c = await _shell(tester);
+    await _openSessionIn(tester, c, 'A:w2');
+    await _pumpRoute(tester);
+    expect(c.read(shownSessionProvider), 's2');
+
+    await _switchTo(tester, c, null);
+    expect(c.read(shownSessionProvider), isNull);
+
+    await _switchTo(tester, c, 'A:w2');
+    expect(c.read(shownSessionProvider), 's2');
+  });
+
   testWidgets('a terminal-capable node adds the Terminals tab; opening it loads', (tester) async {
     final terms = _CountingTerminals();
     await _shellWithNodes(tester, const [NodeRef('A', 'home')], terms);

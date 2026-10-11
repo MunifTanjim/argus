@@ -85,6 +85,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     nav.pushReplacement(sessionDetailRoute(session));
   }
 
+  // Navigator callbacks run mid-build, so the provider is set after the frame.
+  void _publishShown() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(shownSessionProvider.notifier).state =
+          _nav?.stack.sessionIds.lastOrNull;
+    });
+  }
+
   // Keeps a session under its own workspace, or Home if it has none.
   void _remember(String id) {
     final session = ref.read(sessionsProvider)[id];
@@ -201,7 +210,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final id = ref.read(rememberedSessionsProvider)[scope];
     final session = id == null ? null : ref.read(sessionsProvider)[id];
     _canPop = session != null;
-    return _ScopeNavigator(scope, _onPop, session);
+    return _ScopeNavigator(scope, _onPop, session, _publishShown);
   }
 
   Widget _navigator(_ScopeNavigator nav) {
@@ -277,8 +286,9 @@ class _ScopeNavigator {
     this.scope,
     void Function(_ScopeNavigator, Route<dynamic>) onPop,
     this.session,
+    VoidCallback onChange,
   ) {
-    stack = _StackObserver((route) => onPop(this, route));
+    stack = _StackObserver((route) => onPop(this, route), onChange);
   }
 
   final String? scope;
@@ -289,9 +299,10 @@ class _ScopeNavigator {
 }
 
 class _StackObserver extends NavigatorObserver {
-  _StackObserver(this.onPop);
+  _StackObserver(this.onPop, this.onChange);
 
   final void Function(Route<dynamic>) onPop;
+  final VoidCallback onChange;
   final routes = <Route<dynamic>>[];
 
   /// The session details above the root, bottom to top.
@@ -299,24 +310,30 @@ class _StackObserver extends NavigatorObserver {
       [for (final r in routes.skip(1)) ?sessionDetailRouteId(r)];
 
   @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      routes.add(route);
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    routes.add(route);
+    onChange();
+  }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     routes.remove(route);
     onPop(route);
+    onChange();
   }
 
   @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      routes.remove(route);
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    routes.remove(route);
+    onChange();
+  }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     final i = oldRoute == null ? -1 : routes.indexOf(oldRoute);
     if (i < 0 || newRoute == null) return;
     routes[i] = newRoute;
+    onChange();
   }
 }
 

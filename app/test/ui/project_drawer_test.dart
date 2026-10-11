@@ -1,4 +1,11 @@
+import 'dart:convert';
+
+import 'package:argus/models/session.dart';
+import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/gateway.dart';
+import 'package:argus/state/left_sidebar.dart';
+import 'package:argus/state/push.dart';
+import 'package:argus/state/sessions.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
@@ -45,16 +52,52 @@ Map<String, dynamic> _tree({
   ],
 };
 
+class _MemKv implements SecureKv {
+  _MemKv([Map<String, String>? m]) : m = m ?? {};
+  final Map<String, String> m;
+  @override
+  Future<String?> read(String key) async => m[key];
+  @override
+  Future<void> write(String key, String value) async => m[key] = value;
+  @override
+  Future<void> delete(String key) async => m.remove(key);
+}
+
+Session _sess(String id, String status, {String? ws, String agent = 'claude'}) =>
+    Session.fromJson(
+  jsonDecode(jsonEncode({
+    'id': id,
+    'agent': agent,
+    'name': 'name-$id',
+    'status': status,
+    'source': 'hooked',
+    'workspace_id': ?ws,
+    'tmux': {
+      'server': 'argus',
+      'pane_id': '%1',
+      'session_name': 's',
+      'window_index': 0,
+      'current_path': '/p',
+    },
+  })) as Map<String, dynamic>,
+);
+
 Future<ProviderContainer> _pump(
   WidgetTester tester,
   Map<String, dynamic> tree, {
   double width = 400,
+  _MemKv? kv,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final c = ProviderContainer(
-    overrides: [gatewayProvider.overrideWithValue(null)],
+    overrides: [
+      gatewayProvider.overrideWithValue(null),
+      leftSidebarTabStoreProvider.overrideWithValue(
+        LeftSidebarTabStore(kv ?? _MemKv()),
+      ),
+    ],
   );
   addTearDown(c.dispose);
   await c
@@ -71,6 +114,58 @@ Future<ProviderContainer> _pump(
 }
 
 void main() {
+  testWidgets('the Sessions tab lists live sessions and is remembered', (tester) async {
+    final kv = _MemKv();
+    final c = await _pump(tester, _tree(), kv: kv);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'awaiting_input', ws: 'A:w1'),
+      _sess('A:s2', 'idle', ws: 'A:w2'),
+      _sess('A:s3', 'dead'),
+    ]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Needs you'), findsOneWidget);
+    expect(find.text('name-A:s1'), findsOneWidget);
+    expect(find.text('name-A:s2'), findsOneWidget);
+    expect(find.text('name-A:s3'), findsNothing);
+    expect(find.text('Home'), findsNothing);
+    expect(kv.m['leftSidebar.tab'], 'sessions');
+  });
+
+  testWidgets('the agent shows only when listed sessions mix agents', (tester) async {
+    final c = await _pump(tester, _tree(), kv: _MemKv({'leftSidebar.tab': 'sessions'}));
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'idle', ws: 'A:w1'),
+      _sess('A:s2', 'dead', agent: 'codex'),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Claude'), findsNothing);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'idle', ws: 'A:w1'),
+      _sess('A:s2', 'idle', ws: 'A:w2', agent: 'codex'),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Claude'), findsOneWidget);
+    expect(find.textContaining('Codex'), findsOneWidget);
+  });
+
+  testWidgets('a saved Sessions tab opens on Sessions', (tester) async {
+    await _pump(tester, _tree(), kv: _MemKv({'leftSidebar.tab': 'sessions'}));
+    await tester.pumpAndSettle();
+    expect(find.text('no live sessions'), findsOneWidget);
+  });
+
+  testWidgets('tapping a session asks the shell to open it', (tester) async {
+    final c = await _pump(tester, _tree());
+    c.read(sessionsProvider.notifier).replaceAll([_sess('A:s1', 'idle', ws: 'A:w1')]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('name-A:s1'));
+    await tester.pump();
+    expect(c.read(pendingOpenSessionProvider)?.sessionId, 'A:s1');
+    expect(c.read(pendingOpenSessionProvider)?.inHome, isFalse);
+  });
+
   testWidgets('the node row info button opens the node screen', (tester) async {
     await _pump(tester, _tree());
     await tester.tap(find.bySemanticsLabel('Node info'));
@@ -265,5 +360,84 @@ void main() {
     c.read(removingProvider.notifier).state = {'A:w2'};
     await tester.pump();
     expect(find.text('removing…'), findsOneWidget);
+  });
+
+  testWidgets('the Sessions tab filters on its own text', (tester) async {
+    final c = await _pump(tester, _tree());
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'awaiting_input', ws: 'A:w1'),
+      _sess('A:s2', 'idle', ws: 'A:w2'),
+    ]);
+    await tester.enterText(find.byType(TextField), 'argus');
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    // The Projects filter text does not carry over.
+    expect(find.text('name-A:s1'), findsOneWidget);
+    expect(find.text('name-A:s2'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 's2');
+    await tester.pumpAndSettle();
+    expect(find.text('name-A:s1'), findsNothing);
+    expect(find.text('name-A:s2'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.pumpAndSettle();
+    expect(find.text('no sessions match "zzz"'), findsOneWidget);
+
+    await tester.tap(find.text('Projects'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'argus'), findsOneWidget);
+  });
+
+  testWidgets('a long-press on a session shows its details', (tester) async {
+    final c = await _pump(tester, _tree());
+    c.read(sessionsProvider.notifier).replaceAll([
+      Session.fromJson(jsonDecode(jsonEncode({
+        'id': 'A:s1',
+        'agent': 'claude',
+        'name': 'fix-login',
+        'status': 'awaiting_input',
+        'status_label': 'needs input',
+        'source': 'hooked',
+        'offline': true,
+        'cwd': '/src/argus',
+        'branch': 'main',
+        'node_label': 'mbp',
+        'summary': {'task': 'fix the login bug'},
+        'tmux': {
+          'server': 'default',
+          'pane_id': '%3',
+          'session_name': 'work',
+          'window_index': 0,
+          'current_path': '/src/argus',
+        },
+      })) as Map<String, dynamic>),
+    ]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('fix-login'));
+    await tester.pumpAndSettle();
+    for (final v in [
+      'needs input, offline',
+      'Claude',
+      'fix the login bug',
+      '/src/argus',
+      'main',
+      'mbp',
+      'work · %3 · default',
+      'A:s1',
+    ]) {
+      expect(find.text(v), findsOneWidget, reason: v);
+    }
+    expect(find.text('Last activity'), findsNothing);
+  });
+
+  testWidgets('switching tabs keeps the header height', (tester) async {
+    await _pump(tester, _tree());
+    final before = tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>));
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>)), before);
+    expect(find.byTooltip('Tree options').hitTestable(), findsNothing);
   });
 }
