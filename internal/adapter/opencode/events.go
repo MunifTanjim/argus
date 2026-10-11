@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/gittree"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -208,8 +210,52 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 	case "session.deleted":
 		d.remove(sessionIDFrom(frame.Data))
 
+	case "session.updated":
+		d.applySessionUpdated(frame.Data)
+
 	case "server.connected":
 	}
+}
+
+// session.updated signals metadata, not activity: preserve status;
+// unknown sessions surface as Working.
+func (d *discoverer) applySessionUpdated(data json.RawMessage) {
+	var p struct {
+		Info ocSession `json:"info"`
+	}
+	if json.Unmarshal(data, &p) != nil || p.Info.ID == "" {
+		return
+	}
+	info := p.Info
+
+	d.mu.Lock()
+	e, tracked := d.presence[info.ID]
+	status := session.StatusWorking
+	if tracked {
+		status = e.status
+		e.lastActivity = time.Now()
+	}
+	d.mu.Unlock()
+
+	u := registry.HookUpdate{
+		Agent:          Agent,
+		AgentSessionID: info.ID,
+		Status:         status,
+		Frontend:       session.FrontendExternal,
+		TranscriptPath: info.ID,
+		Input:          session.InputAPI,
+	}
+	if info.Title != "" {
+		u.Name = info.Title
+	}
+	if info.Location.Directory != "" {
+		u.Cwd = info.Location.Directory
+		u.Repo = gittree.RepoName(info.Location.Directory)
+	}
+	if sum := summaryFor(info); sum != nil {
+		u.Summary = sum
+	}
+	d.reg.ApplyHook(u)
 }
 
 // formInfo is the Form.Info payload of a form.created event. OpenCode delivers
