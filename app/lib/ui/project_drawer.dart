@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/project.dart';
 import '../state/gateway.dart';
+import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
 import '../state/project_tree.dart';
 import '../state/projects.dart';
@@ -13,6 +14,7 @@ import 'node_screen.dart';
 import 'project_actions.dart';
 import 'settings_screen.dart';
 import 'shell_drawer.dart';
+import 'sidebar_sessions_list.dart';
 import 'theme.dart';
 
 const _amber = Color(0xFFd79921);
@@ -29,10 +31,20 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   late final _filter = TextEditingController(
     text: ref.read(treeViewProvider).filter,
   );
+  late final TextEditingController _sessionsFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionsFilter = TextEditingController(
+      text: ref.read(sidebarSessionsFilterProvider),
+    );
+  }
 
   @override
   void dispose() {
     _filter.dispose();
+    _sessionsFilter.dispose();
     super.dispose();
   }
 
@@ -86,6 +98,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     final removing = ref.watch(removingProvider);
     final act = workspaceActivity(sessions);
     final rows = buildTreeRows(projects.projects, view);
+    final tab = ref.watch(leftSidebarTabProvider);
 
     return Material(
       color: AppColors.card,
@@ -94,38 +107,50 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _header(view),
-            _search(),
+            _tabs(tab),
+            _search(tab),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: _refresh,
-                child: ListView(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  children: [
-                    _row(
-                      selected: scope == null,
-                      onTap: () => _select(null),
-                      leading: const Icon(Icons.home_outlined, size: 18),
-                      title: 'Home',
-                      trailing: _badges(homeActivity(sessions)),
-                    ),
-                    if (!projects.loaded && projects.error == null)
-                      const Padding(
-                        key: Key('projects-loading'),
-                        padding: EdgeInsets.all(12),
-                        child: Center(
-                          child: SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+              child: tab == LeftSidebarTab.sessions
+                  ? SidebarSessionsList(onOpen: _close)
+                  : RefreshIndicator(
+                      onRefresh: _refresh,
+                      child: ListView(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        children: [
+                          _row(
+                            selected: scope == null,
+                            onTap: () => _select(null),
+                            leading: const Icon(Icons.home_outlined, size: 18),
+                            title: 'Home',
+                            trailing: _badges(homeActivity(sessions)),
                           ),
-                        ),
+                          if (!projects.loaded && projects.error == null)
+                            const Padding(
+                              key: Key('projects-loading'),
+                              padding: EdgeInsets.all(12),
+                              child: Center(
+                                child: SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (projects.error != null &&
+                              projects.projects.isEmpty)
+                            _errorRow(projects.error!),
+                          for (final r in rows)
+                            _treeRow(
+                              r,
+                              act,
+                              scope,
+                              projects.projects,
+                              removing,
+                            ),
+                        ],
                       ),
-                    if (projects.error != null && projects.projects.isEmpty)
-                      _errorRow(projects.error!),
-                    for (final r in rows)
-                      _treeRow(r, act, scope, projects.projects, removing),
-                  ],
-                ),
-              ),
+                    ),
             ),
             const Divider(height: 1),
             Padding(
@@ -152,30 +177,37 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
         ),
-        PopupMenuButton<String>(
-          tooltip: 'Tree options',
-          onSelected: (v) {
-            final notifier = ref.read(treeViewProvider.notifier);
-            switch (v) {
-              case 'hidden':
-                notifier.toggleHidden();
-              case 'gone':
-                notifier.toggleGone();
-              default:
-                _refresh();
-            }
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'hidden',
-              child: _menuToggle('Show hidden', view.showHidden),
-            ),
-            PopupMenuItem(
-              value: 'gone',
-              child: _menuToggle('Show gone', view.showGone),
-            ),
-            const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
-          ],
+        // Hidden on Sessions but still laid out, so the header keeps its height.
+        Visibility(
+          visible: ref.watch(leftSidebarTabProvider) == LeftSidebarTab.projects,
+          maintainSize: true,
+          maintainAnimation: true,
+          maintainState: true,
+          child: PopupMenuButton<String>(
+            tooltip: 'Tree options',
+            onSelected: (v) {
+              final notifier = ref.read(treeViewProvider.notifier);
+              switch (v) {
+                case 'hidden':
+                  notifier.toggleHidden();
+                case 'gone':
+                  notifier.toggleGone();
+                default:
+                  _refresh();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'hidden',
+                child: _menuToggle('Show hidden', view.showHidden),
+              ),
+              PopupMenuItem(
+                value: 'gone',
+                child: _menuToggle('Show gone', view.showGone),
+              ),
+              const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+            ],
+          ),
         ),
       ],
     ),
@@ -197,12 +229,27 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     ],
   );
 
-  Widget _search() => Padding(
+  Widget _tabs(LeftSidebarTab tab) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+    child: SegmentedButton<LeftSidebarTab>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(value: LeftSidebarTab.projects, label: Text('Projects')),
+        ButtonSegment(value: LeftSidebarTab.sessions, label: Text('Sessions')),
+      ],
+      selected: {tab},
+      onSelectionChanged: (s) =>
+          ref.read(leftSidebarTabProvider.notifier).set(s.first),
+    ),
+  );
+
+  Widget _search(LeftSidebarTab tab) => Padding(
     padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
     child: SizedBox(
       height: 36,
       child: TextField(
-        controller: _filter,
+        key: ValueKey(tab),
+        controller: tab == LeftSidebarTab.projects ? _filter : _sessionsFilter,
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
           isDense: true,
@@ -210,7 +257,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           fillColor: AppColors.canvas,
           prefixIcon: const Icon(Icons.search, size: 16, color: AppColors.dim),
           prefixIconConstraints: const BoxConstraints(minWidth: 40),
-          hintText: 'Filter projects',
+          hintText: tab == LeftSidebarTab.projects
+              ? 'Filter projects'
+              : 'Filter sessions',
           hintStyle: const TextStyle(fontSize: 13, color: AppColors.dim),
           contentPadding: const EdgeInsets.symmetric(vertical: 10),
           border: OutlineInputBorder(
@@ -218,7 +267,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             borderSide: BorderSide.none,
           ),
         ),
-        onChanged: ref.read(treeViewProvider.notifier).setFilter,
+        onChanged: tab == LeftSidebarTab.projects
+            ? ref.read(treeViewProvider.notifier).setFilter
+            : (q) => ref.read(sidebarSessionsFilterProvider.notifier).state = q,
       ),
     ),
   );

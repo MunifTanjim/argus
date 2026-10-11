@@ -10,6 +10,10 @@ enum WorkspaceTab { sessions, changes, files, terminals }
 /// The drawer selection: null is Home, else a composite workspace id.
 final scopeProvider = StateProvider<String?>((ref) => null);
 
+/// The topmost session detail in the current scope's navigator, or null. The
+/// left sidebar marks it.
+final shownSessionProvider = StateProvider<String?>((ref) => null);
+
 /// A created workspace that becomes the scope when a tree load lists it. A
 /// manual scope change clears it.
 final pendingScopeProvider = StateProvider<String?>((ref) => null);
