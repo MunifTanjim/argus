@@ -95,7 +95,7 @@ func TestListHistory(t *testing.T) {
 
 func TestCollectSessionFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("PI_CODING_AGENT_HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "agent"))
 	root := filepath.Join(home, "agent", "sessions")
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", root)
 	p := writeHistFixture(t, root, "--work-proj--", "2026-10-11T18-00-00-000Z_aaa.jsonl", histFixtureA, time.Now())
@@ -170,5 +170,34 @@ func TestStreamingRefresh(t *testing.T) {
 	entries, err := missing.Refresh()
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("missing = %v %v", entries, err)
+	}
+}
+
+func TestListHistoryCustomSessionDir(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeHistFixture(t, root, "", "2026-10-11T18-00-00-000Z_aaa.jsonl", histFixtureA, now)
+	writeHistFixture(t, root, "", "2026-10-11T18-00-00-000Z_bbb.jsonl", histFixtureB, now)
+	projects, err := listHistoryProjectsIn(root)
+	if err != nil || len(projects) != 2 {
+		t.Fatalf("projects = %+v, %v", projects, err)
+	}
+	page, err := listHistorySessionsIn(root, "/work/proj", 10, 0)
+	if err != nil || len(page.Items) != 1 || page.Items[0].SessionID != "aaa" {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+}
+
+func TestCollectSessionFilesOutsideAgentDir(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(t.TempDir(), "agent"))
+	root := filepath.Join(t.TempDir(), "pi-sessions")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", root)
+	p := writeHistFixture(t, root, "", "2026-10-11T18-00-00-000Z_aaa.jsonl", histFixtureA, time.Now())
+	files, err := collectSessionFiles(p)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files = %+v, %v", files, err)
+	}
+	if want := "root/pi-sessions/2026-10-11T18-00-00-000Z_aaa.jsonl"; files[0].RelPath != want {
+		t.Fatalf("rel path = %q, want %q", files[0].RelPath, want)
 	}
 }

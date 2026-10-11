@@ -1,6 +1,8 @@
 package pi
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -28,5 +30,46 @@ func TestProjectGroupDir(t *testing.T) {
 	}
 	if got := projectGroupDir("/mnt/ephemeral/tmp/x"); got != "--mnt-ephemeral-tmp-x--" {
 		t.Fatalf("group = %q", got)
+	}
+}
+
+func TestPiDirsFollowPiEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, tc := range []struct{ agentDir, sessionDir, wantHome, wantSessions string }{
+		{"", "", filepath.Join(home, ".pi", "agent"), filepath.Join(home, ".pi", "agent", "sessions")},
+		{"/opt/pi", "", "/opt/pi", "/opt/pi/sessions"},
+		{"~/pi", "~/s", filepath.Join(home, "pi"), filepath.Join(home, "s")},
+		{"~", "", home, filepath.Join(home, "sessions")},
+	} {
+		t.Setenv("PI_CODING_AGENT_DIR", tc.agentDir)
+		t.Setenv("PI_CODING_AGENT_SESSION_DIR", tc.sessionDir)
+		if got, err := piHome(); err != nil || got != tc.wantHome {
+			t.Errorf("PI_CODING_AGENT_DIR=%q: piHome = %q, %v; want %q", tc.agentDir, got, err, tc.wantHome)
+		}
+		if got, err := sessionsRoot(); err != nil || got != tc.wantSessions {
+			t.Errorf("PI_CODING_AGENT_SESSION_DIR=%q: sessionsRoot = %q, %v; want %q", tc.sessionDir, got, err, tc.wantSessions)
+		}
+	}
+}
+
+func TestSessionsRootReadsSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agent := filepath.Join(home, "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	if err := os.MkdirAll(agent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agent, "settings.json"), []byte("\xef\xbb\xbf"+`{"sessionDir":"~/s"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sessionsRoot(); err != nil || got != filepath.Join(home, "s") {
+		t.Fatalf("sessionsRoot = %q, %v", got, err)
+	}
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "/env/s")
+	if got, err := sessionsRoot(); err != nil || got != "/env/s" {
+		t.Fatalf("env must win over settings: sessionsRoot = %q, %v", got, err)
 	}
 }

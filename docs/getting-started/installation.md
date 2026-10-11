@@ -115,3 +115,10 @@ not visible to Argus.
 Pi needs no hooks. Argus spawns and owns one `pi --mode rpc` process per
 session (with its bundled gate extension for approvals). Past sessions remain
 available as history once they hold conversation.
+
+Argus also installs the same gate extension globally when it starts, so
+interactive `pi` sessions started outside Argus show up too, with their status
+and approvals, and accept prompts. If such a session runs in a tmux pane,
+Argus shows that pane as its terminal. Dismissing such a session only untracks
+it; the terminal session keeps running. Dismissing a session in a pane that
+Argus opened closes that pane.

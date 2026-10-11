@@ -14,8 +14,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// sessionFiles lists the *.jsonl files under the sessions root. rootOverride
-// scopes tests to a temp dir.
+// sessionFiles lists the *.jsonl files under the sessions root, both directly
+// in it (a custom session dir) and in its per-project groups (the default).
+// rootOverride scopes tests to a temp dir.
 func sessionFiles(rootOverride string) []string {
 	root := rootOverride
 	if root == "" {
@@ -25,8 +26,9 @@ func sessionFiles(rootOverride string) []string {
 			return nil
 		}
 	}
-	matches, _ := filepath.Glob(filepath.Join(root, "--*--", "*.jsonl"))
-	return matches
+	flat, _ := filepath.Glob(filepath.Join(root, "*.jsonl"))
+	grouped, _ := filepath.Glob(filepath.Join(root, "--*--", "*.jsonl"))
+	return append(flat, grouped...)
 }
 
 // cachedSessions returns a history entry for every session file, served from

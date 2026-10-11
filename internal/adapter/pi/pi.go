@@ -4,13 +4,13 @@
 // gate extension (loaded with -e at spawn) provides tool-approval dialogs,
 // which arrive as extension_ui_request records in RPC mode.
 //
-// Session files live under ~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl,
-// but a file is created only after the first user/assistant message, so the
-// adapter treats get_entries/get_messages over RPC as the primary transcript
-// source and the file as fallback/history.
+// Transcripts and history read the session files under
+// ~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl.
 package pi
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,10 +23,10 @@ const Agent = "pi"
 // branches on it: RPC-dialog mode when set, socket-beacon mode otherwise.
 const gateEnv = "ARGUS_MANAGED"
 
-// piHome returns ~/.pi/agent (PI_CODING_AGENT_HOME override wins).
+// piHome returns pi's agent dir: PI_CODING_AGENT_DIR, else ~/.pi/agent.
 func piHome() (string, error) {
-	if h := os.Getenv("PI_CODING_AGENT_HOME"); h != "" {
-		return filepath.Join(h, "agent"), nil
+	if d := os.Getenv("PI_CODING_AGENT_DIR"); d != "" {
+		return expandTilde(d)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -35,18 +35,49 @@ func piHome() (string, error) {
 	return filepath.Join(home, ".pi", "agent"), nil
 }
 
-// sessionsRoot returns the directory holding per-project session groups.
-// PI_CODING_AGENT_SESSION_DIR / sessionDir setting override wins, mirroring
-// pi's own --session-dir precedence.
+// expandTilde expands a leading "~" or "~/" as pi does for its env paths.
+func expandTilde(p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
+}
+
+// sessionsRoot returns the directory pi writes session files under, in pi's
+// precedence: PI_CODING_AGENT_SESSION_DIR, then the sessionDir setting, then
+// <agent dir>/sessions. A custom dir holds every project's files directly;
+// the default groups them in per-project subdirectories.
 func sessionsRoot() (string, error) {
 	if d := os.Getenv("PI_CODING_AGENT_SESSION_DIR"); d != "" {
-		return d, nil
+		return expandTilde(d)
 	}
 	home, err := piHome()
 	if err != nil {
 		return "", err
 	}
+	if d := settingsSessionDir(home); d != "" {
+		return expandTilde(d)
+	}
 	return filepath.Join(home, "sessions"), nil
+}
+
+// settingsSessionDir is the sessionDir in pi's global settings.json, or "".
+func settingsSessionDir(home string) string {
+	b, err := os.ReadFile(filepath.Join(home, "settings.json"))
+	if err != nil {
+		return ""
+	}
+	var settings struct {
+		SessionDir string `json:"sessionDir"`
+	}
+	if json.Unmarshal(bytes.TrimPrefix(b, []byte("\xef\xbb\xbf")), &settings) != nil {
+		return ""
+	}
+	return settings.SessionDir
 }
 
 // projectGroupDir maps a cwd to its session group directory name:

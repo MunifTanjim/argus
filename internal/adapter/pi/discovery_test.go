@@ -435,3 +435,29 @@ func snapshotGone(t *testing.T, reg *registry.Registry, id string) {
 		}
 	}
 }
+
+func TestLiveSessionGetsNoResumePane(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &piAdapter{disc: d}
+	if _, _, ok := a.ResumeCommand(id); ok {
+		t.Fatal("a live owned session must not get a second pi process")
+	}
+	if _, _, ok := a.ResumeCommand("past-session"); !ok {
+		t.Fatal("a past session must stay resumable")
+	}
+	if err := d.dismiss(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := a.ResumeCommand(id); !ok {
+		t.Fatal("a dismissed session must be resumable again")
+	}
+}

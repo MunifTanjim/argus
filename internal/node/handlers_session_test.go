@@ -484,12 +484,18 @@ func TestClearResumingOnKill(t *testing.T) {
 	d := New()
 	d.resuming["claude\x00sess-1"] = "argus:%7"
 	d.resuming["claude\x00sess-2"] = "argus:%8"
-	d.clearResuming("argus:%7")
+	d.resuming["pi\x00p1"] = "argus:%9"
+	d.clearResuming(session.Session{ID: "argus:%7", Agent: "claude", AgentSessionID: "sess-1"})
 	if _, ok := d.resuming["claude\x00sess-1"]; ok {
 		t.Fatal("guard for the killed pane should be cleared")
 	}
 	if _, ok := d.resuming["claude\x00sess-2"]; !ok {
 		t.Fatal("guard for an unrelated pane must survive")
+	}
+	// A pi launch is guarded under its pane id, but its live record is pi:<id>.
+	d.clearResuming(session.Session{ID: "pi:p1", Agent: "pi", AgentSessionID: "p1"})
+	if _, ok := d.resuming["pi\x00p1"]; ok {
+		t.Fatal("guard for the killed agent session should be cleared")
 	}
 }
 
@@ -915,5 +921,19 @@ func TestShellInputRouting(t *testing.T) {
 					fs.shell, fs.gotText, fs.filled, tc.wantShell, tc.wantSent)
 			}
 		})
+	}
+}
+
+func TestControllableForFindsAgentRecord(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "pi", AgentSessionID: "x", Server: session.TmuxServerArgus, PaneID: "%9",
+		Input: session.InputAPI, Status: session.StatusAwaitingInput,
+	})
+	if id, ok := d.controllableFor("argus:%9", "pi", "x"); !ok || id != "pi:x" {
+		t.Fatalf("controllableFor = (%q, %v), want (\"pi:x\", true)", id, ok)
+	}
+	if id, ok := d.controllableFor("argus:%9", "pi", "other"); ok || id != "" {
+		t.Fatalf("controllableFor other = (%q, %v), want (\"\", false)", id, ok)
 	}
 }

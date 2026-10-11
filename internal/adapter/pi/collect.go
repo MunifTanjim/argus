@@ -30,13 +30,6 @@ func collectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 	} else if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("collect: %s is not a regular file", abs)
 	}
-	home, err := piHome()
-	if err != nil {
-		return nil, err
-	}
-	bf, ok := adapter.RootedFile(home, abs)
-	if !ok {
-		return nil, fmt.Errorf("collect: %s escapes pi home", abs)
-	}
+	bf, _ := adapter.RootedFile(filepath.Dir(root), abs)
 	return []adapter.BundledFile{bf}, nil
 }

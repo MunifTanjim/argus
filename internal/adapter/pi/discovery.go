@@ -51,20 +51,72 @@ type pendingUI struct {
 	options []string
 }
 
+// card is the state a pi session's card shows, owned or foreign.
+type card struct {
+	mu        sync.Mutex
+	id        string // pi session id (AgentSessionID)
+	cwd       string
+	repo      string
+	file      string // may be empty: pi creates it after the first user/assistant message
+	name      string
+	streaming bool
+	pending   map[string]*pendingUI // ui request id -> dialog
+}
+
+// hookUpdate builds the card's push; c.mu must be held. Empty status leaves
+// status/interaction alone; non-nil interaction replaces the current one.
+func (c *card) hookUpdate(st session.Status, ix *session.Interaction, replace bool) registry.HookUpdate {
+	return registry.HookUpdate{
+		Agent:              Agent,
+		AgentSessionID:     c.id,
+		Name:               c.name,
+		Cwd:                c.cwd,
+		Repo:               c.repo,
+		TranscriptPath:     c.file,
+		Frontend:           session.FrontendExternal,
+		Input:              session.InputAPI,
+		Status:             st,
+		Interaction:        ix,
+		ReplaceInteraction: replace,
+	}
+}
+
+// pickPending picks the dialog to answer: by RequestID when the client echoes
+// it, else the single pending dialog. Ambiguous state is an error rather than
+// a guess at which question the user saw.
+func (c *card) pickPending(requestID string) (*pendingUI, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var pend *pendingUI
+	if requestID != "" {
+		pend = c.pending[requestID]
+	} else if len(c.pending) == 1 {
+		for _, p := range c.pending {
+			pend = p
+		}
+	}
+	if pend == nil {
+		return nil, fmt.Errorf("pi: no pending dialog for session %s", c.id)
+	}
+	return pend, nil
+}
+
+// dropPending removes a dialog that is no longer waiting. It reports whether
+// that took down the last one.
+func (c *card) dropPending(uiID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, had := c.pending[uiID]
+	delete(c.pending, uiID)
+	return had && len(c.pending) == 0
+}
+
 // sessionProc is one Argus-owned `pi --mode rpc` child process.
 type sessionProc struct {
-	id          string // pi session id (AgentSessionID)
-	cwd         string
-	repo        string
-	sessionFile string
-	conn        *rpcConn
-	cmd         *exec.Cmd
-	exited      chan struct{} // closed once the reaper's cmd.Wait returns
-
-	mu        sync.Mutex
-	streaming bool
-	name      string
-	pending   map[string]*pendingUI // ui request id -> dialog
+	card
+	conn   *rpcConn
+	cmd    *exec.Cmd
+	exited chan struct{} // closed once the reaper's cmd.Wait returns
 }
 
 // discoverer supervises owned pi RPC processes and mirrors them into the
@@ -76,15 +128,21 @@ type discoverer struct {
 	reg *registry.Registry
 
 	mu    sync.Mutex
-	procs map[string]*sessionProc // pi session id -> proc
+	procs map[string]*sessionProc // pi session id -> owned proc
+
+	// Beacon side (Tier 2): foreign sessions whose gate extension dialed in.
+	foreign map[string]*foreignSession
+	paneFor func(ctx context.Context, pid int) (session.TmuxServer, string)
 
 	seq atomic.Uint64
 }
 
-func newDiscoverer(reg *registry.Registry, _ map[session.TmuxServer]*tmux.Client) *discoverer {
+func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) *discoverer {
 	return &discoverer{
-		reg:   reg,
-		procs: map[string]*sessionProc{},
+		reg:     reg,
+		procs:   map[string]*sessionProc{},
+		foreign: map[string]*foreignSession{},
+		paneFor: paneLookup(clients),
 	}
 }
 
@@ -101,7 +159,15 @@ func newSessionID() string {
 }
 
 func (d *discoverer) ScanOnce(_ context.Context) error {
+	d.sweepForeign()
 	return nil
+}
+
+// running reports whether a pi process runs session id, owned or foreign.
+func (d *discoverer) running(id string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.procs[id] != nil || d.foreign[id] != nil
 }
 
 func (d *discoverer) get(id string) *sessionProc {
@@ -126,13 +192,10 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		return "", err
 	}
 	p := &sessionProc{
-		id:      id,
-		cwd:     cwd,
-		repo:    gittree.RepoName(cwd),
-		conn:    conn,
-		cmd:     cmd,
-		exited:  make(chan struct{}),
-		pending: map[string]*pendingUI{},
+		card:   card{id: id, cwd: cwd, repo: gittree.RepoName(cwd), pending: map[string]*pendingUI{}},
+		conn:   conn,
+		cmd:    cmd,
+		exited: make(chan struct{}),
 	}
 	conn.start(func(typ string, raw json.RawMessage) { d.handleEvent(id, typ, raw) })
 	d.mu.Lock()
@@ -151,8 +214,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		}
 	}()
 
-	// Hydrate identity: sessionFile (may not exist on disk yet — pi creates it
-	// after the first user/assistant message) and canonical session id.
+	// Hydrate identity: session file and canonical session id.
 	if data, err := conn.call(ctx, d.nextID(), "get_state", nil); err == nil {
 		var st struct {
 			SessionID   string `json:"sessionId"`
@@ -161,7 +223,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		}
 		if json.Unmarshal(data, &st) == nil {
 			if st.SessionFile != "" {
-				p.sessionFile = st.SessionFile
+				p.file = st.SessionFile
 			}
 			if st.SessionName != "" {
 				p.name = st.SessionName
@@ -178,10 +240,21 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 }
 
 func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
-	p := d.get(id)
-	if p == nil {
-		return fmt.Errorf("pi: unknown session %s", id)
+	if p := d.get(id); p != nil {
+		return d.sendPromptOwned(ctx, p, text)
 	}
+	if fs := d.lookupForeign(id); fs != nil {
+		fs.mu.Lock()
+		busy := fs.streaming
+		fs.mu.Unlock()
+		return d.beaconSend(fs, map[string]any{
+			"type": "intent_prompt", "text": text, "busy": busy,
+		})
+	}
+	return fmt.Errorf("pi: unknown session %s", id)
+}
+
+func (d *discoverer) sendPromptOwned(ctx context.Context, p *sessionProc, text string) error {
 	p.mu.Lock()
 	busy := p.streaming
 	p.mu.Unlock()
@@ -228,21 +301,23 @@ func (d *discoverer) dismiss(ctx context.Context, id string) error {
 	delete(d.procs, id)
 	d.mu.Unlock()
 	if p == nil {
-		// The user's dismiss always removes the card, even one lost locally.
-		d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
+		// Foreign sessions untrack only: the user's own process keeps running.
+		// Unknown ids still emit Dead so a lost card is always cleared.
+		if !d.forgetForeign(id) {
+			d.markDead(id)
+		}
 		return nil
 	}
 	_ = p.conn.close() // orderly shutdown: pi disposes the runtime and exits
+	ctx, cancel := context.WithTimeout(ctx, dismissKillAfter)
+	defer cancel()
 	select {
 	case <-p.exited:
-	case <-time.After(dismissKillAfter):
-		_ = p.cmd.Process.Kill()
-		<-p.exited
 	case <-ctx.Done():
 		_ = p.cmd.Process.Kill()
 		<-p.exited
 	}
-	d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
+	d.markDead(id)
 	return nil
 }
 
@@ -251,26 +326,16 @@ func (d *discoverer) forget(id string) {
 	d.mu.Lock()
 	delete(d.procs, id)
 	d.mu.Unlock()
+	d.markDead(id)
+}
+
+func (d *discoverer) markDead(id string) {
 	d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
 }
 
-// upsert pushes a proc's card. Empty status leaves status/interaction alone;
-// non-nil interaction replaces the current one.
 func (d *discoverer) upsert(p *sessionProc, st session.Status, ix *session.Interaction, replace bool) {
 	p.mu.Lock()
-	u := registry.HookUpdate{
-		Agent:              Agent,
-		AgentSessionID:     p.id,
-		Name:               p.name,
-		Cwd:                p.cwd,
-		Repo:               p.repo,
-		TranscriptPath:     p.sessionFile,
-		Frontend:           session.FrontendExternal,
-		Input:              session.InputAPI,
-		Status:             st,
-		Interaction:        ix,
-		ReplaceInteraction: replace,
-	}
+	u := p.hookUpdate(st, ix, replace)
 	p.mu.Unlock()
 	d.reg.ApplyHook(u)
 }
@@ -340,15 +405,10 @@ type uiRequest struct {
 // managed mode (APPROVAL_MARKER in gate/argus.ts); the tool detail follows it.
 const approvalMarker = "argus:approval:"
 
-// applyUIRequest surfaces an extension dialog as an Argus interaction and
-// parks it for Respond. Dialog methods (select/confirm/input/editor) block the
-// extension until extension_ui_response; fire-and-forget methods (notify,
-// setStatus, ...) carry no decision and are ignored here.
-func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
-	var req uiRequest
-	if json.Unmarshal(raw, &req) != nil || req.ID == "" {
-		return
-	}
+// uiInteraction interprets one extension dialog, shared by owned RPC sessions
+// (extension_ui_request) and foreign beacons (approval_request mapped onto the
+// same shape). It returns the parked dialog and its Argus interaction.
+func uiInteraction(req uiRequest) (*pendingUI, *session.Interaction, bool) {
 	pend := &pendingUI{uiID: req.ID, method: req.Method, title: req.Title, message: req.Message, options: req.Options}
 	if detail, ok := strings.CutPrefix(req.Placeholder, approvalMarker); ok && req.Method == "input" {
 		pend.method, req.Method, req.Message = "approval", "confirm", detail
@@ -378,11 +438,27 @@ func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
 			AllowUnanswered: req.Method != "select",
 		}
 	default:
-		return // notify, setStatus, setWidget, setTitle, set_editor_text
+		return nil, nil, false // notify, setStatus, setWidget, setTitle, set_editor_text
 	}
 	ix.RequestID = req.ID
+	return pend, ix, true
+}
+
+// applyUIRequest surfaces an extension dialog as an Argus interaction and
+// parks it for Respond. Dialog methods (select/confirm/input/editor) block the
+// extension until extension_ui_response; fire-and-forget methods (notify,
+// setStatus, ...) carry no decision and are ignored here.
+func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
+	var req uiRequest
+	if json.Unmarshal(raw, &req) != nil || req.ID == "" {
+		return
+	}
+	pend, ix, ok := uiInteraction(req)
+	if !ok {
+		return
+	}
 	p.mu.Lock()
-	p.pending[req.ID] = pend
+	p.pending[pend.uiID] = pend
 	p.mu.Unlock()
 	d.upsert(p, session.StatusAwaitingInput, ix, true)
 	if req.Timeout > 0 {
@@ -393,12 +469,7 @@ func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
 // dropOwnedPending removes a dialog that is no longer waiting and, once none
 // is left, takes the prompt down from the card.
 func (d *discoverer) dropOwnedPending(p *sessionProc, uiID string) {
-	p.mu.Lock()
-	_, had := p.pending[uiID]
-	delete(p.pending, uiID)
-	stillPending := len(p.pending) > 0
-	p.mu.Unlock()
-	if had && !stillPending {
+	if p.dropPending(uiID) {
 		d.upsert(p, session.StatusWorking, nil, false)
 	}
 }
