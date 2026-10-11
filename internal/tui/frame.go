@@ -325,7 +325,7 @@ func (m model) currentFooter() string {
 	case m.flash != "":
 		return asstStyle.Render(firstLine(m.flash))
 	case m.showHelp:
-		return m.footer(hint("any key", "close"))
+		return m.plainFooter(hint("any key", "close"))
 	}
 	if f, ok := comp.(footerTexter); ok {
 		return f.footerText(c)

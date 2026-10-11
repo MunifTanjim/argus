@@ -392,9 +392,9 @@ tui:
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]map[string]string{
-		"global":     {"g.": "toggle show-hidden", "G": "goto bottom", "z": "", "x": ""},
-		"transcript": {"gt": "goto top", "n": "5"},
+	want := map[string]map[string]config.Mapping{
+		"global":     {"g.": {Action: "toggle show-hidden"}, "G": {Action: "goto bottom"}, "z": {}, "x": {}},
+		"transcript": {"gt": {Action: "goto top"}, "n": {Action: "5"}},
 	}
 	if !reflect.DeepEqual(km, want) {
 		t.Errorf("keymaps = %v, want %v", km, want)

@@ -75,7 +75,7 @@ func TestResolveTUIConfigReadsKeymaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveTUIConfig: %v", err)
 	}
-	if got := cfg.TUI.Keymaps["global"]["g."]; got != "toggle-show-hidden-projects" {
+	if got := cfg.TUI.Keymaps["global"]["g."].Action; got != "toggle-show-hidden-projects" {
 		t.Errorf(`keymaps["global"]["g."] = %q`, got)
 	}
 }

@@ -54,8 +54,8 @@ type TUIConfig struct {
 	// VerboseTranscript shows runs of thinking and tool calls expanded by
 	// default instead of folded into a one-line summary.
 	VerboseTranscript bool
-	// Keymaps is tui.keymap as written: screen → key sequence → RHS in Vim notation.
-	Keymaps map[string]map[string]string
+	// Keymaps is tui.keymap as written: screen → key sequence → mapping.
+	Keymaps map[string]map[string]Mapping
 }
 
 type MouseMode string

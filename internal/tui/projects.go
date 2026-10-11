@@ -206,8 +206,22 @@ func (m model) setupBlock(ws string, w int) string {
 			lines = append(lines, truncateLine(dimStyle.Render(l), w))
 		}
 	}
-	lines = append(lines, truncateLine(dimStyle.Render(m.keyTextOn("project-tree", projectsKeys.RunSetup)+" runs setup again · "+m.keyTextOn("project-tree", projectsKeys.SetupLog)+" shows the full log"), w))
+	lines = append(lines, truncateLine(dimStyle.Render(m.setupLogHint()), w))
 	return strings.Join(lines, "\n") + "\n\n"
+}
+
+// setupLogHint names the keys that act on the selected workspace's setup run.
+// The tree and the workspace pane both act on it, so a key comes from the
+// focused one when the command runs there, else from the tree.
+func (m model) setupLogHint() string {
+	return m.hereOrTreeKey(projectsKeys.RunSetup) + " runs setup again · " + m.hereOrTreeKey(projectsKeys.SetupLog) + " shows the full log"
+}
+
+func (m model) hereOrTreeKey(b binding) string {
+	if screenHas(m.screen(), b.name) {
+		return m.keyText(b)
+	}
+	return m.keyTextOn("project-tree", b) + " in the tree"
 }
 
 // sidebarMinWidth is the terminal width below which the left sidebar auto-
@@ -382,7 +396,7 @@ func (m model) helpScreen() string {
 	if len(lines) > rows {
 		keys = append([]binding{hint("↑/↓", "scroll")}, keys...)
 	}
-	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, rows, flexPanel(help)), m.footer(keys...), m.width, m.height)
+	return pinFooter(m.frameTitle()+"\n\n"+composeH(m.width, rows, flexPanel(help)), m.plainFooter(keys...), m.width, m.height)
 }
 
 func paneTitle(text string, focused bool) string {

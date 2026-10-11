@@ -10,16 +10,32 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func withKeymap(m model, raw map[string]map[string]string) model {
-	km, errs := buildKeymap(raw, time.Second, "")
+	km, errs := buildKeymap(strMaps(raw), time.Second, "")
 	if len(errs) > 0 {
 		panic(strings.Join(errs, "; "))
 	}
 	m.keys = km
 	return m
+}
+
+// strMaps is raw with each RHS as a mapping without a desc.
+func strMaps(raw map[string]map[string]string) map[string]map[string]config.Mapping {
+	if raw == nil {
+		return nil
+	}
+	out := make(map[string]map[string]config.Mapping, len(raw))
+	for s, entries := range raw {
+		out[s] = make(map[string]config.Mapping, len(entries))
+		for k, v := range entries {
+			out[s][k] = config.Mapping{Action: v}
+		}
+	}
+	return out
 }
 
 func ctrlKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
@@ -34,7 +50,7 @@ func TestShiftedLetterMatchesBothForms(t *testing.T) {
 
 func TestGlobalMappingSkipsScreensWithoutItsCommand(t *testing.T) {
 	raw := map[string]map[string]string{"global": {"j": ":toggle show-hidden<CR>"}}
-	km, errs := buildKeymap(raw, time.Second, "")
+	km, errs := buildKeymap(strMaps(raw), time.Second, "")
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -53,7 +69,7 @@ func TestGlobalMappingSkipsScreensWithoutItsCommand(t *testing.T) {
 }
 
 func TestBuildKeymapRecordsAKittyKey(t *testing.T) {
-	km, _ := buildKeymap(map[string]map[string]string{"global": {"<C-S-b>": ":toggle left-sidebar<CR>"}}, time.Second, "")
+	km, _ := buildKeymap(strMaps(map[string]map[string]string{"global": {"<C-S-b>": ":toggle left-sidebar<CR>"}}), time.Second, "")
 	if km.kittyKey != "<C-S-b>" {
 		t.Errorf("kittyKey = %q", km.kittyKey)
 	}
@@ -72,9 +88,9 @@ func TestTextInputOnly(t *testing.T) {
 }
 
 func TestSequenceForNonTextInputCommandIsAllowed(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"project-tree": {"gz": ":prev<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	if len(errs) > 0 {
 		t.Errorf("gz: prev should be valid on project-tree, got errors: %v", errs)
 	}
@@ -208,11 +224,11 @@ func TestNeedsKitty(t *testing.T) {
 }
 
 func TestPassThroughOnlyCommandsAreNotMappable(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"session-dock": {"a": ":help<CR>"},
 		"transcript":   {"b": ":help<CR>"},
 		"project-tree": {"c": ":focus-right-sidebar<CR>", "d": ":focus prompt<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	want := []string{
 		`keymap: project-tree "c": unknown command "focus-right-sidebar"`,
 		`keymap: project-tree "d": unknown command "focus prompt"`,
@@ -225,7 +241,7 @@ func TestPassThroughOnlyCommandsAreNotMappable(t *testing.T) {
 }
 
 func TestLeaderReplacesTheToken(t *testing.T) {
-	km, errs := buildKeymap(map[string]map[string]string{"project-tree": {"<Leader>x": ":toggle show-gone<CR>"}}, 0, ",")
+	km, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {"<Leader>x": ":toggle show-gone<CR>"}}), 0, ",")
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -235,7 +251,7 @@ func TestLeaderReplacesTheToken(t *testing.T) {
 }
 
 func TestBadLeaderFallsBackToSpace(t *testing.T) {
-	km, errs := buildKeymap(map[string]map[string]string{"project-tree": {"<Leader>x": ":toggle show-gone<CR>"}}, 0, "ab")
+	km, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {"<Leader>x": ":toggle show-gone<CR>"}}), 0, "ab")
 	if len(errs) != 1 || !strings.Contains(errs[0], `keymap: tui.leader-key "ab"`) {
 		t.Errorf("errs = %v", errs)
 	}
@@ -272,9 +288,9 @@ func TestNoDefaultKeyWaits(t *testing.T) {
 }
 
 func TestKeymapRejectsColonFirst(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"project-tree": {":": ":quit<CR>", ":x": ":quit<CR>", "g:": ":quit<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	want := []string{
 		`keymap: project-tree ":": ":" opens the command line`,
 		`keymap: project-tree ":x": ":" opens the command line`,
@@ -285,7 +301,7 @@ func TestKeymapRejectsColonFirst(t *testing.T) {
 }
 
 func TestBuildKeymapExplainsBadCommandNames(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{"project-tree": {
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {
 		"a": ":fokus left<CR>",
 		"b": ":sidebar<CR>",
 		"c": ":sidebar wide<CR>",
@@ -293,7 +309,7 @@ func TestBuildKeymapExplainsBadCommandNames(t *testing.T) {
 		"e": ":workspace rm<CR>",
 		"f": ":toggle-left-sidebar<CR>",
 		"g": ":  goto   top <CR>",
-	}}, time.Second, "")
+	}}), time.Second, "")
 	want := []string{
 		`keymap: project-tree "a": unknown command "fokus left"`,
 		`keymap: project-tree "b": sidebar needs an argument (narrower, wider)`,
@@ -364,10 +380,10 @@ func TestTabMovesFocusBothWays(t *testing.T) {
 }
 
 func TestFocusCommandsStayInTheirSections(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"transcript":   {"a": ":focus transcript<CR>"},
 		"session-dock": {"b": ":focus prompt<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	want := []string{
 		`keymap: session-dock "b": unknown command "focus prompt"`,
 		`keymap: transcript "a": unknown command "focus transcript"`,
@@ -378,7 +394,7 @@ func TestFocusCommandsStayInTheirSections(t *testing.T) {
 }
 
 func TestBuildKeymapAcceptsARenamedCommand(t *testing.T) {
-	km, errs := buildKeymap(map[string]map[string]string{"terminals": {"n": ":terminal new<CR>"}}, time.Second, "")
+	km, errs := buildKeymap(strMaps(map[string]map[string]string{"terminals": {"n": ":terminal new<CR>"}}), time.Second, "")
 	if len(errs) != 0 || !km.screenKeys("terminals").has(terminalKeys.Spawn, "n") {
 		t.Errorf("terminal new should bind terminal spawn: errs=%v", errs)
 	}
@@ -484,7 +500,7 @@ func TestKeyRHSIsNotRecursive(t *testing.T) {
 }
 
 func TestGlobalKeyRHSSkipsSectionsWithoutTheKey(t *testing.T) {
-	km, errs := buildKeymap(map[string]map[string]string{"global": {"<C-n>": "zc"}}, time.Second, "")
+	km, errs := buildKeymap(strMaps(map[string]map[string]string{"global": {"<C-n>": "zc"}}), time.Second, "")
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -498,7 +514,7 @@ func TestGlobalKeyRHSSkipsSectionsWithoutTheKey(t *testing.T) {
 
 func TestCommandRHSForms(t *testing.T) {
 	for _, rhs := range []string{":toggle show-gone<CR>", ":toggle show-gone<cr>", ":toggle show-gone<Enter>", ":  toggle   show-gone <CR>"} {
-		km, errs := buildKeymap(map[string]map[string]string{"project-tree": {"<C-g>": rhs}}, time.Second, "")
+		km, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {"<C-g>": rhs}}), time.Second, "")
 		if len(errs) > 0 {
 			t.Errorf("%q: %v", rhs, errs)
 			continue
@@ -510,14 +526,14 @@ func TestCommandRHSForms(t *testing.T) {
 }
 
 func TestBuildKeymapReportsBadEntries(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"nowhere": {"a": ":quit<CR>"},
 		"project-tree": {
 			"<X-a>": ":quit<CR>", "b": ":$lazygit<CR>", "c": ":goto tpo<CR>", "gt": ":workspace pick-target<CR>",
 			"e": "quit", "f": "", "g": ":a<CR>:b<CR>", "i": ":filter", "k": "ggj", "l": ":<CR>",
 		},
 		"transcript": {"e": ":toggle show-hidden<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	want := []string{
 		`keymap: unknown screen "nowhere"`,
 		`keymap: project-tree "<X-a>": unknown modifier "X" in <X-a>`,
@@ -552,7 +568,7 @@ func TestDefaultMappingsAreNotBuiltin(t *testing.T) {
 }
 
 func TestCommandRHSTakesTheCommandLineAliases(t *testing.T) {
-	km, errs := buildKeymap(map[string]map[string]string{"project-tree": {"<C-q>": ":q<CR>"}}, time.Second, "")
+	km, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {"<C-q>": ":q<CR>"}}), time.Second, "")
 	if len(errs) > 0 {
 		t.Fatalf(":q<CR> works on the command line, so it works in a mapping: %v", errs)
 	}
@@ -562,8 +578,26 @@ func TestCommandRHSTakesTheCommandLineAliases(t *testing.T) {
 }
 
 func TestKeyRHSSequenceRejectsTextInputOnlyCommands(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{"session-dock": {"gn": "n"}}, time.Second, "")
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{"session-dock": {"gn": "n"}}), time.Second, "")
 	if want := `keymap: session-dock "gn": answer note works only in a text input, which has no sequences`; len(errs) != 1 || errs[0] != want {
 		t.Errorf("errors %q, want %q", errs, want)
+	}
+}
+
+func TestObjectMappingErrors(t *testing.T) {
+	_, errs := buildKeymap(map[string]map[string]config.Mapping{"project-tree": {
+		"a": {Desc: "x", Problem: "needs an action"},
+		"b": {Action: "j", Problem: `unknown field "color"`},
+		"c": {Action: "<Nop>", Desc: "gone"},
+		"d": {Action: "quit", Desc: "bye"},
+	}}, time.Second, "")
+	want := []string{
+		`keymap: project-tree "a": needs an action`,
+		`keymap: project-tree "b": unknown field "color"`,
+		`keymap: project-tree "c": a removed key has no desc`,
+		`keymap: project-tree "d": use ":quit<CR>"`,
+	}
+	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
 	}
 }

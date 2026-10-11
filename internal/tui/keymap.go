@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/MunifTanjim/argus/internal/config"
 )
 
 type defaultKeys struct {
@@ -23,6 +25,23 @@ type keymap struct {
 	// kittyKey names the leader or the first mapped key that a terminal can
 	// only send with the Kitty keyboard protocol, "" when there is none.
 	kittyKey string
+	// userDescs are the user's mappings that have a desc, for the help: global
+	// first, then each section in name order, as buildKeymap parses them.
+	userDescs []userDesc
+}
+
+// userDesc is a user mapping with a desc. action is its command, or its key
+// RHS as written.
+type userDesc struct {
+	section, action, desc string
+	seq                   keySeq
+}
+
+// keyDesc is a user mapping with a desc that applies on a screen.
+type keyDesc struct {
+	id   string
+	cmds []string
+	desc string
 }
 
 type screenKeys struct {
@@ -30,12 +49,13 @@ type screenKeys struct {
 	addIDs   map[string][]string    // command → ids of those keys; a single key lists every form
 	takenBy  map[string][]string    // key id → the commands its mapping runs; empty removes it
 	seqs     []screenSeq            // every effective key the resolver serves on the screen
+	descs    []keyDesc              // the user's mappings with a desc, in the order they apply
 	defaults map[string]defaultKeys // shared with the keymap
 }
 
 type screenSeq struct {
-	seq     keySeq
-	id, cmd string
+	seq           keySeq
+	id, cmd, desc string
 }
 
 // keyEntry is one mapping. cmds is what it runs; rhs is a key RHS that
@@ -44,13 +64,14 @@ type keyEntry struct {
 	seq  keySeq
 	cmds []string
 	rhs  keySeq
+	desc string
 }
 
 // buildKeymap resolves raw (screen → key → RHS in Vim notation) into one table
 // per screen, with the default keymap under it.
 // It skips each bad entry and returns one message for it. leader is the key
 // that <Leader> stands for; "" defaults to <Space>.
-func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader string) (*keymap, []string) {
+func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration, leader string) (*keymap, []string) {
 	if timeout <= 0 {
 		timeout = time.Second
 	}
@@ -95,7 +116,8 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 	parse := func(section string) []keyEntry {
 		var out []keyEntry
 		for _, lhs := range slices.Sorted(maps.Keys(raw[section])) {
-			rhs := raw[section][lhs]
+			mp := raw[section][lhs]
+			rhs := mp.Action
 			bad := func(format string, a ...any) {
 				errs = append(errs, fmt.Sprintf("keymap: %s %q: ", section, lhs)+fmt.Sprintf(format, a...))
 			}
@@ -107,9 +129,17 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 			case seq[0][0] == ":":
 				bad(`":" opens the command line`)
 				continue
+			case mp.Problem != "":
+				bad("%s", mp.Problem)
+				continue
 			}
-			e := keyEntry{seq: replaceLeader(seq, leaderStep)}
+			e := keyEntry{seq: replaceLeader(seq, leaderStep), desc: mp.Desc}
 			switch kind, cmd := parseRHS(rhs); kind {
+			case rhsNop:
+				if mp.Desc != "" {
+					bad("a removed key has no desc")
+					continue
+				}
 			case rhsEmpty:
 				bad(`use "<Nop>" to remove a key`)
 				continue
@@ -161,6 +191,13 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 				km.kittyKey = lhs
 			}
 			out = append(out, e)
+			if e.desc != "" {
+				action := rhs
+				if len(e.cmds) == 1 {
+					action = e.cmds[0]
+				}
+				km.userDescs = append(km.userDescs, userDesc{section: section, action: action, desc: e.desc, seq: e.seq})
+			}
 		}
 		return out
 	}
@@ -248,6 +285,9 @@ func resolveScreen(screen string, own, global, defs []keyEntry, defaults map[str
 				sk.add[c] = append(sk.add[c], e.seq)
 				sk.addIDs[c] = append(sk.addIDs[c], ids...)
 			}
+			if e.desc != "" && len(cmds) > 0 {
+				sk.descs = append(sk.descs, keyDesc{id: e.seq.id(), cmds: cmds, desc: e.desc})
+			}
 		}
 	}
 	layer(own, false)
@@ -261,7 +301,7 @@ func resolveScreen(screen string, own, global, defs []keyEntry, defaults map[str
 		for _, s := range sk.seqsOf(b) {
 			if id := s.id(); !seen[id] {
 				seen[id] = true
-				sk.seqs = append(sk.seqs, screenSeq{seq: s, id: id, cmd: b.name})
+				sk.seqs = append(sk.seqs, screenSeq{seq: s, id: id, cmd: b.name, desc: sk.descOf(id)})
 			}
 		}
 	}
@@ -292,6 +332,26 @@ func (sk *screenKeys) listedKeys(b binding) []string {
 	return slices.DeleteFunc(sk.keys(b), func(k string) bool {
 		return slices.Contains(sk.defaults[b.defKey].quiet, k) && !slices.Contains(sk.addIDs[b.name], k)
 	})
+}
+
+// descOf is the desc of the user mapping of key id, "" for none.
+func (sk *screenKeys) descOf(id string) string {
+	for _, d := range sk.descs {
+		if d.id == id {
+			return d.desc
+		}
+	}
+	return ""
+}
+
+// descFor is the first user mapping with a desc that runs name.
+func (sk *screenKeys) descFor(name string) (keyDesc, bool) {
+	for _, d := range sk.descs {
+		if slices.Contains(d.cmds, name) {
+			return d, true
+		}
+	}
+	return keyDesc{}, false
 }
 
 // defaultKept reports whether b's built-in key k survives: no mapping took k,

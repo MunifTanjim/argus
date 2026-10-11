@@ -166,25 +166,43 @@ func (m model) keyHint() string {
 		typed.WriteString(keyLabel(k))
 	}
 	parts := []string{typed.String() + "…"}
-	seen := map[string]bool{}
+	// Each next key shows once: what it completes when it completes a
+	// mapping, else the first mapping it starts.
+	var order []string
+	labels := map[string]string{}
+	completes := map[string]bool{}
 	sk := m.keymap().screenKeys(m.screen())
 	for _, s := range sk.seqs {
 		if len(s.seq) <= len(pressed) || !s.seq.startsWith(pressed) {
 			continue
 		}
 		next := keyLabel(s.seq[len(pressed)][0])
-		if !seen[next] {
-			seen[next] = true
-			parts = append(parts, next+" "+s.cmd)
+		done := len(s.seq) == len(pressed)+1
+		if _, ok := labels[next]; !ok {
+			order = append(order, next)
+		} else if completes[next] || !done {
+			continue
 		}
+		labels[next], completes[next] = s.label(), done
+	}
+	for _, next := range order {
+		parts = append(parts, next+" "+labels[next])
 	}
 	if m.keyMatch != "" {
 		for _, s := range sk.seqs {
 			if s.id == m.keyMatch {
-				parts = append(parts, "(wait) "+s.cmd)
+				parts = append(parts, "(wait) "+s.label())
 				break
 			}
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// label names s in the footer: its desc, else its command.
+func (s screenSeq) label() string {
+	if s.desc != "" {
+		return s.desc
+	}
+	return s.cmd
 }

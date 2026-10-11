@@ -406,11 +406,37 @@ func (m model) keymap() *keymap {
 // skipped). Built per call so it needs no model state and works in tests with a
 // model literal.
 func (m model) footer(bindings ...binding) string {
+	sk := m.keymap().screenKeys(m.screen())
+	shown := map[string]bool{}
+	for _, b := range bindings {
+		if d, ok := sk.descFor(b.name); ok && showsDesc(b) {
+			shown[d.id] = true
+		}
+	}
+	for _, d := range sk.descs {
+		if !shown[d.id] && slices.ContainsFunc(d.cmds, func(c string) bool { return m.applies(binding{name: c}) }) {
+			bindings = append(bindings, hint(keyLabel(d.id), d.desc))
+		}
+	}
+	return m.plainFooter(bindings...)
+}
+
+// plainFooter is footer without the user's mappings, for screens where keys
+// do not reach the focused component, such as the help.
+func (m model) plainFooter(bindings ...binding) string {
 	w := m.width - 2*screenMargin
 	if m.width <= 0 {
 		w = 200 // no viewport yet (e.g. tests): don't truncate
 	}
 	return m.hints(w, bindings...)
+}
+
+// showsDesc reports whether b's footer entry shows a desc mapping of its
+// command in place of its own label: a shown entry for b alone, not one it
+// shares with a label partner.
+func showsDesc(b binding) bool {
+	_, paired := labelPairs[b.name]
+	return b.Enabled() && b.Help().Desc != "" && !paired
 }
 
 func (m model) hints(w int, bindings ...binding) string {

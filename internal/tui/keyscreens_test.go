@@ -46,11 +46,11 @@ func unlistedBindings() []string {
 }
 
 func TestScreensListOnlyCommandsTheyRun(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{
 		"transcript":   {"x": ":session kill<CR>", "<C-y>": ":session load-more<CR>"},
 		"project-tree": {"<C-y>": ":session load-more<CR>"},
 		"session-dock": {"E": ":transcript export<CR>"},
-	}, time.Second, "")
+	}), time.Second, "")
 	want := []string{
 		`keymap: project-tree "<C-y>": unknown command "session load-more"`,
 		`keymap: session-dock "E": unknown command "transcript export"`,
@@ -289,11 +289,11 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 	})
 
 	t.Run("the old names give the hint", func(t *testing.T) {
-		km, errs := buildKeymap(map[string]map[string]string{
+		km, errs := buildKeymap(strMaps(map[string]map[string]string{
 			"projects": {"a": ":quit<CR>"},
 			"session":  {"b": ":back<CR>"},
 			"detail":   {"c": ":back<CR>"},
-		}, time.Second, "")
+		}), time.Second, "")
 		want := []string{
 			`keymap: unknown screen "detail" (now transcript)`,
 			`keymap: unknown screen "projects" (now project-tree, workspace, project, node, file, file-tree, changes)`,

@@ -45,7 +45,7 @@ func (m model) helpGroups() []helpGroup {
 	tree := func(b binding, desc string) helpRow { return row("project-tree", b, desc) }
 	pane := func(b binding, desc string) helpRow { return row("workspace", b, desc) }
 	lrKey := m.helpKeys("workspace", paneKeys.Left) + "/" + m.helpKeys("workspace", paneKeys.Right)
-	return []helpGroup{
+	groups := []helpGroup{
 		{"Tree", []helpRow{
 			tree(k.Up, "move"),
 			tree(k.Bottom, "top / bottom"),
@@ -98,6 +98,23 @@ func (m model) helpGroups() []helpGroup {
 			tree(listKeys.Quit, "quit"),
 		}},
 	}
+	if mine := m.yourMappings(); len(mine) > 0 {
+		groups = append(groups, helpGroup{"Your mappings", mine})
+	}
+	return groups
+}
+
+// yourMappings are the help rows of the user's mappings that have a desc.
+func (m model) yourMappings() []helpRow {
+	var out []helpRow
+	for _, d := range m.keymap().userDescs {
+		desc := d.desc
+		if d.section != "global" {
+			desc += " (" + d.section + ")"
+		}
+		out = append(out, helpRow{key: keyLabel(d.seq.id()), desc: desc, name: d.action})
+	}
+	return out
 }
 
 // projectsHelpView lays out the help groups: all side by side, else two per

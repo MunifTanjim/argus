@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -38,14 +39,22 @@ func (m model) helpBinding(b binding) key.Binding {
 		return b.Binding
 	}
 	sk := m.keymap().screenKeys(m.screen())
+	if d, ok := sk.descFor(b.name); ok && showsDesc(b) {
+		out := b.Binding
+		out.SetHelp(keyLabel(d.id), d.desc)
+		return out
+	}
 	names := []string{b.name}
 	if p, ok := labelPairs[b.name]; ok {
 		names = p[:]
 	}
 	parts := make([]string, 0, len(names))
 	for _, n := range names {
-		if k := m.firstKey(sk, b, n); k != "" {
-			parts = append(parts, keyLabel(k))
+		// A desc mapping has its own footer entry, so a pair label names the
+		// half by another key.
+		keys := slices.DeleteFunc(cmdKeys(sk, m.screen(), b, n), func(id string) bool { return sk.descOf(id) != "" })
+		if len(keys) > 0 {
+			parts = append(parts, keyLabel(keys[0]))
 		}
 	}
 	if len(parts) == 0 {
@@ -65,13 +74,6 @@ func (m model) hintText(bs ...binding) string {
 		parts[i] = h.Key + " " + h.Desc
 	}
 	return strings.Join(parts, " · ")
-}
-
-func (m model) firstKey(sk *screenKeys, b binding, name string) string {
-	if keys := cmdKeys(sk, m.screen(), b, name); len(keys) > 0 {
-		return keys[0]
-	}
-	return ""
 }
 
 func cmdKeys(sk *screenKeys, screen string, b binding, name string) []string {
