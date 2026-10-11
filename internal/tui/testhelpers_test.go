@@ -451,7 +451,8 @@ func (m *model) beginPresetSpawn(nodeID, cwd, prompt string) tea.Cmd {
 	return tea.Batch(cmd, m.apply(c))
 }
 
-func treePane(m model, w, h int) string { return m.left.tree.view(&ctx{m: &m}, w, h) }
+// treePane draws the left sidebar: its tab strip over the current tab.
+func treePane(m model, w, h int) string { return m.left.view(&ctx{m: &m}, w, h) }
 
 func isPane(comp component) bool {
 	switch comp.(type) {

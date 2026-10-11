@@ -26,17 +26,18 @@ var sectionOffers = func() map[string]offer {
 	// offers: the workspace pane's help and quit, and nothing over a transcript.
 	withPane := offer{keys: helpQuit, where: "over the workspace pane"}
 	return map[string]offer{
-		"project-tree": {keys: helpQuit},
-		"workspace":    {keys: helpQuit},
-		"project":      {keys: helpQuit},
-		"node":         {keys: helpQuit},
-		"home":         {keys: helpQuit},
-		"logs":         {keys: help},
-		"terminals":    {keys: helpQuit},
-		"history":      {keys: help, where: "project list"},
-		"file":         withPane,
-		"file-tree":    withPane,
-		"changes":      withPane,
+		"project-tree":     {keys: helpQuit},
+		"sidebar-sessions": {keys: helpQuit},
+		"workspace":        {keys: helpQuit},
+		"project":          {keys: helpQuit},
+		"node":             {keys: helpQuit},
+		"home":             {keys: helpQuit},
+		"logs":             {keys: help},
+		"terminals":        {keys: helpQuit},
+		"history":          {keys: help, where: "project list"},
+		"file":             withPane,
+		"file-tree":        withPane,
+		"changes":          withPane,
 	}
 }()
 
@@ -45,6 +46,9 @@ func focusFor(s string) []binding { return slices.Concat(focusMoves, sectionOffe
 var (
 	leftSidebarKeys  = []any{projectsKeys.Widen, projectsKeys.Narrow}
 	rightSidebarKeys = []any{projectsKeys.Widen, projectsKeys.Narrow, projectsKeys.SideTabPrev, projectsKeys.SideTabNext}
+	// leftSidebarTabKeys are the left sidebar's keys in its own sections. The
+	// workspace pane takes leftSidebarKeys too, but gt/gT are its own tabs there.
+	leftSidebarTabKeys = append(slices.Clone(leftSidebarKeys), projectsKeys.SideTabPrev, projectsKeys.SideTabNext)
 )
 
 // treeKeys act on the tree from the tree and from a workspace pane. manageKeys
@@ -96,8 +100,14 @@ var sectionLists = map[string]sectionList{
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.PageUp, projectsKeys.PageDown, projectsKeys.Left,
 			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target, nodeKeys.Wakelock,
 			projectsKeys.Hover})...),
-		container: bindingsOf(leftSidebarKeys...),
+		container: bindingsOf(leftSidebarTabKeys...),
 		focus:     focusFor("project-tree"),
+	},
+	"sidebar-sessions": {
+		own: bindingsOf(projectsKeys.Back, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top, projectsKeys.Bottom,
+			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, listKeys.Filter),
+		container: bindingsOf(leftSidebarTabKeys...),
+		focus:     focusFor("sidebar-sessions"),
 	},
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,

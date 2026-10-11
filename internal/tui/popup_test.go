@@ -61,13 +61,35 @@ func frameLines(m model) []string { return strings.Split(ansi.Strip(m.View().Con
 
 func findBlock(t *testing.T, m model, s string) (row, col int) {
 	t.Helper()
+	return findBlockFrom(t, m, s, 0)
+}
+
+// findMainBlock finds s in the main pane, right of the left sidebar.
+func findMainBlock(t *testing.T, m model, s string) (row, col int) {
+	t.Helper()
+	return findBlockFrom(t, m, s, m.mainRect().Min.X)
+}
+
+func findBlockFrom(t *testing.T, m model, s string, x int) (row, col int) {
+	t.Helper()
 	for y, line := range frameLines(m) {
-		if i := strings.Index(line, s); i >= 0 {
-			return y, ansi.StringWidth(line[:i])
+		rest := ansi.Cut(line, x, ansi.StringWidth(line))
+		if i := strings.Index(rest, s); i >= 0 {
+			return y, x + ansi.StringWidth(rest[:i])
 		}
 	}
 	t.Fatalf("%q not in the view", s)
 	return 0, 0
+}
+
+// mainText is the frame's main pane columns, right of the left sidebar.
+func mainText(m model) string {
+	x := m.mainRect().Min.X
+	lines := frameLines(m)
+	for i, line := range lines {
+		lines[i] = ansi.Cut(line, x, ansi.StringWidth(line))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestPopupStack(t *testing.T) {

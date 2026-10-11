@@ -82,3 +82,55 @@ func TestSaveGroupByReplacesBadFile(t *testing.T) {
 		}
 	}
 }
+
+func TestLeftTabStateRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "argus", "tui.json")
+	if tab, err := loadLeftTab(path); err != nil || tab != leftProjects {
+		t.Fatalf("missing file = %v, %v; want projects, nil", tab, err)
+	}
+	if err := saveGroupBy(path, groupByProject); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveLeftTab(path, leftSessions); err != nil {
+		t.Fatal(err)
+	}
+	if tab, err := loadLeftTab(path); err != nil || tab != leftSessions {
+		t.Fatalf("after save = %v, %v; want sessions", tab, err)
+	}
+	if g, err := loadGroupBy(path); err != nil || g != groupByProject {
+		t.Fatalf("group_by lost after saving the tab: %q, %v", g, err)
+	}
+	data, _ := os.ReadFile(path)
+	var doc struct {
+		LeftSidebar struct {
+			Tab string `json:"tab"`
+		} `json:"left_sidebar"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil || doc.LeftSidebar.Tab != "sessions" {
+		t.Fatalf("file shape: %s", data)
+	}
+}
+
+func TestLeftTabStateFallbacks(t *testing.T) {
+	for name, body := range map[string]string{
+		"invalid json":  `{`,
+		"unknown value": `{"left_sidebar":{"tab":"files"}}`,
+		"wrong type":    `{"left_sidebar":"x"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "tui.json")
+			os.WriteFile(path, []byte(body), 0o600)
+			tab, err := loadLeftTab(path)
+			if tab != leftProjects || err == nil {
+				t.Fatalf("got %v, %v; want projects with an error", tab, err)
+			}
+		})
+	}
+	t.Run("absent key", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "tui.json")
+		os.WriteFile(path, []byte(`{"sessions":{"group_by":"agent"}}`), 0o600)
+		if tab, err := loadLeftTab(path); tab != leftProjects || err != nil {
+			t.Fatalf("got %v, %v; want projects, nil", tab, err)
+		}
+	})
+}

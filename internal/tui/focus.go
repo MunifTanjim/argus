@@ -20,7 +20,7 @@ func (m model) focusedComp() component {
 	}
 	switch m.focused {
 	case leftSidebar:
-		return m.left.tree
+		return m.left.current()
 	case rightSidebar:
 		return m.right.current()
 	case sessionDock:
@@ -179,8 +179,8 @@ func (m model) componentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focused {
 	case leftSidebar:
-		comp, cmd, _ = m.left.tree.handleKey(c, msg)
-		m.left.tree = comp.(projectTreeComp)
+		comp, cmd, _ = m.left.current().handleKey(c, msg)
+		m.left = m.left.store(comp)
 	case rightSidebar:
 		comp, cmd, _ = m.right.current().handleKey(c, msg)
 		m.right = m.right.store(comp)

@@ -528,7 +528,7 @@ func TestProjectRowShowsSummary(t *testing.T) {
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:p1")
 	out := m.View().Content
-	if strings.Contains(out, "Sessions") {
+	if strings.Contains(mainText(m), "Sessions") {
 		t.Error("a project row should not show workspace tabs")
 	}
 	for _, want := range []string{"repo-feat", "feature"} {

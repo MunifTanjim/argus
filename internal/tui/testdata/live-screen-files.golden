@@ -1,6 +1,6 @@
   󰚩 Argus                            · fix-login  [%1]                                                                                                      
 
-  Projects                           │ ╭────────────────────────────────────────────────────────────────────────────────╮ │  Files  Changes
+  Projects  Sessions                 │ ╭────────────────────────────────────────────────────────────────────────────────╮ │  Files  Changes
                                      │ │$ go test ./...                                                                 │ │
 ▌ 󰋜 Home                         ○ 3 │ │ok      github.com/MunifTanjim/argus                                            │ │  select a workspace
   ▾  home                           │ │$                                                                               │ │

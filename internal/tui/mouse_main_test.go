@@ -74,7 +74,7 @@ func TestHomeTabsSwitch(t *testing.T) {
 	if _, ok := m.baseComp().(historyComp); !ok {
 		t.Fatalf("base = %T, want the History tab", m.baseComp())
 	}
-	y, x = findBlock(t, m, "Sessions")
+	y, x = findMainBlock(t, m, "Sessions")
 	m, _ = click(m, x, y)
 	if _, ok := m.baseComp().(homeComp); !ok {
 		t.Fatalf("base = %T, want the Sessions tab", m.baseComp())

@@ -173,7 +173,7 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 	default:
 		tc := &ctx{m: c.m, area: m.hits.add(regTree, uv.Rect(0, 2, l.left+screenMargin, h))}
 		m.hits.add(regTreeDivider, uv.Rect(l.left+screenMargin, 2, dividerWidth, h))
-		panels = append(panels, fixedPanel(m.left.tree.view(tc, l.left, h), l.left+screenMargin), flexPanel(pane))
+		panels = append(panels, fixedPanel(m.left.view(tc, l.left, h), l.left+screenMargin), flexPanel(pane))
 	}
 	if l.right > 0 {
 		w := l.right + 1
@@ -357,7 +357,7 @@ func (m model) spinShown() bool {
 	if top := m.main.top(); top != nil && top.spins(c) {
 		return true
 	}
-	return l.left > 0 && m.left.tree.spins(c) ||
+	return l.left > 0 && m.left.current().spins(c) ||
 		l.right > 0 && m.right.current().spins(c) ||
 		m.dockDrawn() && m.dock.spins(c)
 }
