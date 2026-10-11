@@ -103,7 +103,7 @@ func (ch changesComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd
 	switch {
 	case m.matches(msg, k.DiffMode):
 		if ch.against == "" && m.targetOf(ch.ws) == "" {
-			c.setFlash("no target branch · " + m.keyTextOn("project-tree", projectsKeys.Target) + " in the tree sets one")
+			c.setFlash("no target branch · " + m.hereOrTreeKey(projectsKeys.Target) + " sets one")
 			return ch, nil, true
 		}
 		if ch.against == "" {

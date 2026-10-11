@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -217,14 +219,6 @@ func TestTranscriptFooterPairsPromptKeys(t *testing.T) {
 	}
 }
 
-func TestFileFooterNamesHalfPage(t *testing.T) {
-	for _, b := range (fileComp{}).footer(nil) {
-		if b.name == fileViewKeys.HalfDown.name && b.Help().Desc != "half" {
-			t.Errorf("half-page scroll is labeled %q; page names the full-page scroll", b.Help().Desc)
-		}
-	}
-}
-
 func TestHomeHintShowsItsKeyWhileTheTreeHasFocus(t *testing.T) {
 	m := projectsTestModel()
 	if m.focused != leftSidebar {
@@ -255,6 +249,178 @@ func TestKeyTextOnAnUnlistedSectionIsRecorded(t *testing.T) {
 	}
 }
 
+func descKeymap(m model, raw map[string]map[string]config.Mapping) model {
+	km, errs := buildKeymap(raw, time.Second, "")
+	if len(errs) > 0 {
+		panic(strings.Join(errs, "; "))
+	}
+	m.keys = km
+	return m
+}
+
+func homeFocused() model { return withFocus(homeTestModel(), mainPane) }
+
+func TestDescReplacesTheFooterEntryOfItsCommand(t *testing.T) {
+	m := descKeymap(homeFocused(), map[string]map[string]config.Mapping{
+		"home": {"x": {Action: ":session kill<CR>", Desc: "nuke"}},
+	})
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "x nuke") || strings.Contains(out, "dd kill") || strings.Count(out, "nuke") != 1 {
+		t.Errorf("the kill entry should become x nuke, once:\n%s", out)
+	}
+}
+
+func TestDescAddsAFooterEntryWhereItWorks(t *testing.T) {
+	raw := map[string]map[string]config.Mapping{
+		"global": {"<C-g>": {Action: ":open palette<CR>", Desc: "go to"}, "<C-n>": {Action: "j", Desc: "down"}},
+	}
+	m := descKeymap(homeFocused(), raw)
+	out := ansi.Strip(m.View().Content)
+	for _, want := range []string{"^g go to", "^n down"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("home footer should list %q:\n%s", want, out)
+		}
+	}
+	lm := descKeymap(logsModel(120, false), map[string]map[string]config.Mapping{
+		"global": {"<C-n>": {Action: "zc", Desc: "fold"}},
+	})
+	if out := ansi.Strip(lm.View().Content); strings.Contains(out, "fold") {
+		t.Errorf("logs has no built-in zc, so its footer must not list the mapping:\n%s", out)
+	}
+}
+
+func TestDescNamesTheNextKeyOfASequence(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"project-tree": {"<Leader>g": {Action: ":open palette<CR>", Desc: "go to"}},
+	})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if hint := ansi.Strip(m.keyHint()); !strings.Contains(hint, "g go to") {
+		t.Errorf("the pending footer should name g by its desc: %q", hint)
+	}
+}
+
+func TestHelpListsYourMappings(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"global":     {"<C-g>": {Action: ":open palette<CR>", Desc: "go to"}},
+		"transcript": {"<C-n>": {Action: "j", Desc: "down"}},
+	})
+	var rows []helpRow
+	for _, g := range m.helpGroups() {
+		if g.title == "Your mappings" {
+			rows = g.rows
+		}
+	}
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		got[i] = r.key + " " + r.label()
+	}
+	want := []string{"^g go to · open palette", "^n down (transcript) · j"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Your mappings rows = %q, want %q", got, want)
+	}
+}
+
+func footerOf(m model) string {
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	return lines[len(lines)-1]
+}
+
+func TestDescOfADisabledFooterEntryGetsItsOwnEntry(t *testing.T) {
+	m := descKeymap(homeFocused(), map[string]map[string]config.Mapping{
+		"global": {"<C-q>": {Action: ":quit<CR>", Desc: "bye"}},
+	})
+	if f := footerOf(m); !strings.Contains(f, "^q bye") {
+		t.Errorf("quit has no shown entry here, so ^q bye needs its own: %q", f)
+	}
+}
+
+func TestDescOnEitherHalfOfAPairKeepsThePair(t *testing.T) {
+	for _, tc := range []struct{ lhs, action, want string }{
+		{"<C-n>", "}", "^n next q"},
+		{"<C-p>", "{", "^p prev q"},
+	} {
+		m := descKeymap(idleSession(), map[string]map[string]config.Mapping{
+			"transcript": {tc.lhs: {Action: tc.action, Desc: strings.TrimPrefix(tc.want, tc.want[:3])}},
+		})
+		f := footerOf(m)
+		if !strings.Contains(f, "}/{ prompt") || strings.Count(f, tc.want) != 1 {
+			t.Errorf("%s: the pair keeps its keys and the desc gets one entry: %q", tc.lhs, f)
+		}
+	}
+}
+
+func TestHelpFooterListsNoMappings(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"global": {"<C-g>": {Action: ":open palette<CR>", Desc: "go to"}},
+	})
+	m = typeKeys(m, "g?")
+	if f := footerOf(m); strings.Contains(f, "go to") {
+		t.Errorf("any key closes the help, so its footer must not offer ^g: %q", f)
+	}
+}
+
+func TestPendingFooterPrefersTheMappingThatCompletes(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"project-tree": {
+			"<Leader>g":  {Action: ":open palette<CR>", Desc: "go to"},
+			"<Leader>gx": {Action: ":toggle show-gone<CR>"},
+		},
+	})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if hint := ansi.Strip(m.keyHint()); !strings.Contains(hint, "g go to") {
+		t.Errorf("g completes the go to mapping: %q", hint)
+	}
+	m, _ = upd(m, keyMsg("g"))
+	if hint := ansi.Strip(m.keyHint()); !strings.Contains(hint, "(wait) go to") {
+		t.Errorf("the waiting match is named by its desc: %q", hint)
+	}
+}
+
+func TestSetupHintNamesTheKeysWhereTheUserIs(t *testing.T) {
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"workspace": {"L": "<Nop>", "gl": ":open setup-log<CR>"}})
+	m = selectRow(m, "n1:w2")
+	if got := m.setupLogHint(); got != "S runs setup again · L shows the full log" {
+		t.Errorf("tree focused: setup hint = %q", got)
+	}
+	m = withFocus(m, mainPane)
+	if m.screen() != "workspace" {
+		t.Fatalf("the test needs the workspace pane focused: %q", m.screen())
+	}
+	if got := m.setupLogHint(); got != "S in the tree runs setup again · gl shows the full log" {
+		t.Errorf("workspace focused: setup hint = %q", got)
+	}
+}
+
+func TestTwoDescsForOneCommandBothShow(t *testing.T) {
+	m := descKeymap(homeFocused(), map[string]map[string]config.Mapping{
+		"home": {"X": {Action: ":session kill<CR>", Desc: "nuke"}, "x": {Action: ":session kill<CR>", Desc: "zap"}},
+	})
+	if f := footerOf(m); !strings.Contains(f, "X nuke") || !strings.Contains(f, "x zap") {
+		t.Errorf("each desc mapping is named once: %q", f)
+	}
+}
+
+func TestDescFooterEntryFollowsTheTreeRow(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"project-tree": {"x": {Action: ":workspace remove<CR>", Desc: "rm ws"}},
+	})
+	m.width = 250
+	if f := footerOf(selectRow(m, "n1:p1")); strings.Contains(f, "rm ws") || strings.Contains(f, "…") {
+		t.Errorf("workspace remove does nothing on a project row: %q", f)
+	}
+	if f := footerOf(selectRow(m, "n1:w2")); !strings.Contains(f, "x rm ws") {
+		t.Errorf("workspace remove works on a workspace row: %q", f)
+	}
+}
+
+func TestFileFooterNamesHalfPage(t *testing.T) {
+	for _, b := range (fileComp{}).footer(nil) {
+		if b.name == fileViewKeys.HalfDown.name && b.Help().Desc != "half" {
+			t.Errorf("half-page scroll is labeled %q; page names the full-page scroll", b.Help().Desc)
+		}
+	}
+}
+
 func TestStartingNoticeNamesTheFocusedKey(t *testing.T) {
 	m := withKeymap(waitingSession(), map[string]map[string]string{"session-dock": {"<C-g>": ":open live-screen<CR>"}, "transcript": {"<C-t>": "<Nop>"}})
 	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -267,7 +433,7 @@ func TestStartingNoticeNamesTheFocusedKey(t *testing.T) {
 }
 
 func TestRemovedCommandNamesItsReplacement(t *testing.T) {
-	_, errs := buildKeymap(map[string]map[string]string{"project-tree": {"P": "project unpin", "p": ":project pin<CR>"}}, time.Second, "")
+	_, errs := buildKeymap(strMaps(map[string]map[string]string{"project-tree": {"P": "project unpin", "p": ":project pin<CR>"}}), time.Second, "")
 	want := []string{
 		`keymap: project-tree "P": use ":toggle pin<CR>"`,
 		`keymap: project-tree "p": project pin is now toggle pin`,

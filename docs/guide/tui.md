@@ -85,6 +85,19 @@ A mapping has a key on the left and keys on the right, as in Vim:
   `"<C-n>": j` moves down even if you map `j` to something else.
 - `<Nop>` removes the key.
 
+A mapping can also be an object with an `action` and a `desc`. The `action`
+takes any of the forms above. The `desc` names the mapping in the footer and
+in the help:
+
+```yaml
+tui:
+  keymap:
+    global:
+      "<Leader>g":
+        action: ":open palette<CR>"
+        desc: go to
+```
+
 Some keys are built in: the Vim keys, such as `h`, `j`, `k`, `l`, the arrows,
 `gg`, `G`, `<C-u>`, `<C-d>`, `<C-b>`, `<C-f>`, and `<C-w>h`. The other default
 keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
@@ -161,6 +174,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 - A mapping cannot start with `:`. The `:` key opens the command line.
 - The right side runs one command or one built-in key. `:a<CR>:b<CR>` and
   `ggj` are not supported.
+- A removed key (`<Nop>`) takes no `desc`.
 - In a text input, only single keys work.
 - Yes/no prompts and the live screen do not use keymaps.
 - Some keys need a terminal with the
