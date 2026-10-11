@@ -34,7 +34,7 @@ func (m *model) setSessionFilter(q string) {
 	m.refilter(sel)
 }
 
-// filterPrompt edits the session filter from a session list.
+// filterPrompt edits a session list's text filter.
 type filterPrompt struct {
 	input textinput.Model
 	on    bool
@@ -47,20 +47,20 @@ func (f filterPrompt) start(q string) (filterPrompt, tea.Cmd) {
 	return f, f.input.Focus()
 }
 
-func (f filterPrompt) handleKey(c *ctx, msg tea.KeyPressMsg) (filterPrompt, tea.Cmd) {
+// handleKey edits the prompt and returns the query to apply: "" once esc
+// clears it.
+func (f filterPrompt) handleKey(msg tea.KeyPressMsg) (filterPrompt, tea.Cmd, string) {
 	switch {
 	case msg.Code == tea.KeyEscape:
 		f.on = false
-		c.setSessionFilter("")
-		return f, nil
+		return f, nil, ""
 	case msg.String() == "enter":
 		f.on = false
-		return f, nil
+		return f, nil, f.input.Value()
 	}
 	var cmd tea.Cmd
 	f.input, cmd = f.input.Update(msg)
-	c.setSessionFilter(f.input.Value())
-	return f, cmd
+	return f, cmd, f.input.Value()
 }
 
 func (f filterPrompt) view() string {

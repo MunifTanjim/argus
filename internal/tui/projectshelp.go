@@ -69,6 +69,7 @@ func (m model) helpGroups() []helpGroup {
 			{key: lrKey, desc: "focus left / right pane", name: paneKeys.Left.name},
 			row("transcript", paneKeys.Down, "session: focus the prompt"),
 			row("file-tree", k.SideTabNext, "right sidebar: Files / Changes"),
+			row("project-tree", k.SideTabNext, "left sidebar: Projects / Sessions"),
 			row("changes", k.DiffMode, "changes: uncommitted / vs target"),
 			{key: m.commitBackKeys(), desc: "changes: back from a commit", name: k.Back.name},
 			row("file", fileViewKeys.NextFile, "diff: next / previous file"),

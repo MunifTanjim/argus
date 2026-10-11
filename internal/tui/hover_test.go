@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func hoverText(m model) string {
@@ -138,4 +139,33 @@ func TestHoverCloses(t *testing.T) {
 	if m.hovered != "" {
 		t.Error("a popup must close the hover")
 	}
+}
+
+func TestHoverShowsSidebarSession(t *testing.T) {
+	m := projectsTestModel()
+	m.left.tab = leftSessions
+	m.sessions = map[string]session.Session{
+		"n1:a": {
+			ID: "n1:a", Agent: "claude", Name: "fix-login", Status: session.StatusAwaitingInput,
+			StatusLabel: "needs input", Cwd: "/repo", Branch: "main", NodeLabel: "home", Offline: true,
+			Tmux:    session.TmuxLocation{SessionName: "work", PaneID: "%3", Server: session.TmuxServerDefault},
+			Summary: &session.Summary{Task: "fix the login bug"},
+		},
+		"n1:b": {ID: "n1:b", Status: session.StatusIdle},
+	}
+	// The offline session sorts last, under the bare one.
+	m = typeKeys(m, "K")
+	got := hoverText(m)
+	for _, gone := range []string{"Agent:", "Task:", "Dir:", "Tmux:"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("an empty field shows: %q in\n%s", gone, got)
+		}
+	}
+	m = typeKeys(m, "j")
+	if m.hovered != "" {
+		t.Fatalf("moving off the session closes the hover, got %q", m.hovered)
+	}
+	m = typeKeys(m, "K")
+	assertHover(t, m, "fix-login", "Status: needs input, offline", "Agent: Claude", "Task: fix the login bug",
+		"Dir: /repo", "Branch: main", "Node: home", "Tmux: work · %3 · default", "ID: n1:a")
 }

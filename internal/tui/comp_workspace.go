@@ -40,7 +40,9 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	}
 	if p.filter.on {
 		var cmd tea.Cmd
-		p.filter, cmd = p.filter.handleKey(c, msg)
+		var q string
+		p.filter, cmd, q = p.filter.handleKey(msg)
+		c.setSessionFilter(q)
 		return p, cmd, true
 	}
 	c.setFlash("")

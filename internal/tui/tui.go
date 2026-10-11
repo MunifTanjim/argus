@@ -58,6 +58,11 @@ func Run(client Client, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 		log.Printf("tui state: %v", err)
 	}
 	m.groupBy = g
+	tab, err := loadLeftTab(m.statePath)
+	if err != nil {
+		log.Printf("tui state: %v", err)
+	}
+	m.left.tab = tab
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
 	go sendTermKeyLoop(client, m.termKeyCh) // single ordered sender for live-terminal input

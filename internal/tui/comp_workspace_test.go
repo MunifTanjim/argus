@@ -190,7 +190,7 @@ func TestWorkspaceTabsSwitch(t *testing.T) {
 	y, x := findBlock(t, m, "Terminals")
 	m, _ = click(m, x, y)
 	wsTerminalsTab(t, m)
-	y, x = findBlock(t, m, "Sessions")
+	y, x = findMainBlock(t, m, "Sessions")
 	m, _ = click(m, x, y)
 	if _, ok := m.baseComp().(workspaceComp); !ok {
 		t.Fatalf("a click on Sessions: base = %T, want the Sessions tab", m.baseComp())

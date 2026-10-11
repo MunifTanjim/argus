@@ -13,38 +13,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-type leftSidebarState struct {
-	tree   projectTreeComp
-	hidden bool // the user toggled it off
-	width  int  // 0 = default
-}
-
-func (l leftSidebarState) rawWidth() int {
-	if l.width == 0 {
-		return 34
-	}
-	return l.width
-}
-
-func (l leftSidebarState) handleKey(c *ctx, msg tea.KeyPressMsg) (leftSidebarState, bool) {
-	switch {
-	case c.m.matches(msg, projectsKeys.Widen):
-		return l.resize(c, 4), true
-	case c.m.matches(msg, projectsKeys.Narrow):
-		return l.resize(c, -4), true
-	}
-	return l, false
-}
-
-func (l leftSidebarState) setWidth(c *ctx, w int) leftSidebarState {
-	l.width = clampWidth(w, 20, c.m.leftMaxW())
-	return l
-}
-
-func (l leftSidebarState) resize(c *ctx, d int) leftSidebarState {
-	return l.setWidth(c, c.m.projectsLeftW()+d)
-}
-
 type projectTreeComp struct {
 	data       []api.ProjectNode
 	err        error
@@ -387,25 +355,29 @@ func (t projectTreeComp) rowBindings(c *ctx) []binding {
 	return []binding{k.Left, k.Filter}
 }
 
+// titleSuffix follows the Projects tab: the tree's view toggles, its filter,
+// and a refresh in flight.
+func (t projectTreeComp) titleSuffix() string {
+	var s string
+	if t.showHidden {
+		s += "  +hidden"
+	}
+	if t.showGone {
+		s += "  +gone"
+	}
+	if t.filter != "" {
+		s += "  /" + t.filter
+	}
+	if t.loading && t.data != nil {
+		s += "  refreshing…"
+	}
+	return StyleDim.Render(s)
+}
+
 func (t projectTreeComp) view(c *ctx, w, h int) string {
 	m := c.m
 	focused := m.focused == leftSidebar && len(m.popups) == 0
-	title := "Projects"
-	if t.showHidden {
-		title += "  +hidden"
-	}
-	if t.showGone {
-		title += "  +gone"
-	}
-	if t.filter != "" {
-		title += "  /" + t.filter
-	}
-	head := paneTitle(title, focused)
-	if t.loading && t.data != nil {
-		head += dimStyle.Render("  refreshing…")
-	}
 	margin := strings.Repeat(" ", screenMargin)
-	head = margin + truncateLine(head, w) + "\n\n"
 	act := m.workspaceActivity()
 	l := itemLines{key: "project-tree"}
 	for i, r := range t.rows {
@@ -421,8 +393,8 @@ func (t projectTreeComp) view(c *ctx, w, h int) string {
 	case len(t.rows) == 1:
 		l.text(margin + dimStyle.Render("no projects"))
 	}
-	avail := max(1, h-2)
-	rc := c.below(2)
+	avail := max(1, h)
+	rc := c
 	if t.filter == "" {
 		scroll := l.scroll(c, t.cursor, avail)
 		for i, r := range t.rows {
@@ -431,7 +403,7 @@ func (t projectTreeComp) view(c *ctx, w, h int) string {
 			}
 		}
 	}
-	return head + strings.Join(l.window(rc, t.cursor, avail), "\n")
+	return strings.Join(l.window(rc, t.cursor, avail), "\n")
 }
 
 func (t projectTreeComp) flatten() []projectsRow {

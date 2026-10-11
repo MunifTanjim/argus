@@ -122,6 +122,10 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	if ms.Button == tea.MouseRight {
 		return m.openMenu(k, t, ms)
 	}
+	if k == leftSidebar && t.kind == hitTab {
+		m.left = m.left.setTab(&ctx{m: &m}, leftTab(t.index))
+		return m, nil
+	}
 	if k == rightSidebar && t.kind == hitTab {
 		m.right.tab = sideTab(t.index)
 		return m, nil
@@ -231,7 +235,7 @@ func (m model) paneMouse(k container, f func(*ctx, component) (component, tea.Cm
 	var comp component
 	switch k {
 	case leftSidebar:
-		comp = m.left.tree
+		comp = m.left.current()
 	case rightSidebar:
 		comp = m.right.current()
 	case sessionDock:
@@ -245,7 +249,7 @@ func (m model) paneMouse(k container, f func(*ctx, component) (component, tea.Cm
 	}
 	switch k {
 	case leftSidebar:
-		m.left.tree = comp.(projectTreeComp)
+		m.left = m.left.store(comp)
 	case rightSidebar:
 		m.right = m.right.store(comp)
 	case sessionDock:

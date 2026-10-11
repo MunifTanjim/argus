@@ -47,7 +47,9 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	}
 	if h.filter.on {
 		var cmd tea.Cmd
-		h.filter, cmd = h.filter.handleKey(c, msg)
+		var q string
+		h.filter, cmd, q = h.filter.handleKey(msg)
+		c.setSessionFilter(q)
 		return h, cmd, true
 	}
 	c.setFlash("")

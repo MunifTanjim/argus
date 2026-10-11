@@ -118,7 +118,7 @@ func (r rightSidebarState) show(c *ctx, ws string) (rightSidebarState, tea.Cmd) 
 func (r rightSidebarState) view(c *ctx, w, h int) string {
 	gutter := strings.Repeat(" ", screenMargin)
 	focused := c.m.focused == rightSidebar
-	head := gutter + truncateLine(r.tabStrip(focused), max(1, w-screenMargin)) + "\n\n"
+	head := gutter + truncateLine(tabStrip(sideTabNames, int(r.tab), focused), max(1, w-screenMargin)) + "\n\n"
 	c.hitTabs(screenMargin, 0, 2, sideTabNames...)
 	if r.ws == "" {
 		return head + gutter + dimStyle.Render("select a workspace")
@@ -126,11 +126,12 @@ func (r rightSidebarState) view(c *ctx, w, h int) string {
 	return head + r.current().view(c.below(2), w, max(1, h-2))
 }
 
-func (r rightSidebarState) tabStrip(focused bool) string {
-	parts := make([]string, len(sideTabNames))
-	for i, n := range sideTabNames {
+// tabStrip draws a sidebar's tabs, the current one highlighted.
+func tabStrip(names []string, cur int, focused bool) string {
+	parts := make([]string, len(names))
+	for i, n := range names {
 		parts[i] = StyleDim.Render(n)
-		if sideTab(i) == r.tab {
+		if i == cur {
 			parts[i] = paneTitle(n, focused)
 			if !focused {
 				parts[i] = StylePrimaryBold.Render(n)

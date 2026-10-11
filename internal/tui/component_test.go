@@ -73,6 +73,7 @@ func TestActionsApplyAfterTheComponentIsStored(t *testing.T) {
 func contractComponents(m model) []component {
 	return []component{
 		m.left.tree,
+		sidebarSessionsComp{},
 		m.right.fileTree,
 		m.right.changes,
 		homeComp{},

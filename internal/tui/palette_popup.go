@@ -88,7 +88,7 @@ func (m model) openPalette() (model, tea.Cmd) {
 // paletteScope is the palette id of the place that the user is in: the tree's
 // cursor row while the tree has focus, else the main pane's place.
 func (m model) paletteScope() string {
-	if m.focused == leftSidebar {
+	if m.focused == leftSidebar && m.left.tab == leftProjects {
 		if r, ok := m.left.tree.cursorRow(); ok {
 			return placeID(r.kind, r.id)
 		}
