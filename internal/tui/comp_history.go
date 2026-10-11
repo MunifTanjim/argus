@@ -259,7 +259,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	title := m.homeTabs(tabHistory)
 	cardW := historyWidth(w)
 	m.hitHomeTabs(c, centerGutter(cardW, w))
-	backHint := m.keyText(historyProjectsKeys.Back) + " back"
+	backHint := m.keyTextOn(h.section(), historyProjectsKeys.Back) + " back"
 	if h.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+h.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW, w)
 	}
@@ -287,7 +287,7 @@ func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	m := c.m
 	title := headerStyle.Render("history · "+h.project.Label) + dimStyle.Render("  "+truncate(h.project.Cwd, 50))
 	cardW := historyWidth(w)
-	backHint := m.keyText(historySessionsKeys.Back) + " back"
+	backHint := m.keyTextOn(h.section(), historySessionsKeys.Back) + " back"
 	if h.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+h.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW, w)
 	}

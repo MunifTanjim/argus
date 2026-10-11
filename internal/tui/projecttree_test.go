@@ -173,7 +173,7 @@ func TestKeyAfterANarrowingResizeReachesOneHandler(t *testing.T) {
 // A mapping that extends the toggle makes the toggle and the next key run in
 // one Update; the next key must see focus repaired.
 func TestKeyReplayedAfterAToggleSeesRepairedFocus(t *testing.T) {
-	m := withKeymap(homeTestModel(), map[string]map[string]string{"project-tree": {"<Leader>ox": "toggle show-gone"}})
+	m := withKeymap(homeTestModel(), map[string]map[string]string{"project-tree": {"<Leader>ox": ":toggle show-gone<CR>"}})
 	m = withFocus(withView(m, viewTree), leftSidebar)
 	m.left.tree.cursor = 0
 	m = typeKeys(m, " oj")

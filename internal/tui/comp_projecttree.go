@@ -175,10 +175,10 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 		t, cmd = t.renameProject(c)
 	case m.matches(msg, k.Forget):
 		t = t.forgetProject(c)
-	case m.matches(msg, k.Hide, k.Unhide):
-		cmd = t.setHidden(c, m.matches(msg, k.Hide), m.matches(msg, k.Unhide))
-	case m.matches(msg, k.Pin, k.Unpin):
-		cmd = t.setPinned(c, m.matches(msg, k.Pin), m.matches(msg, k.Unpin))
+	case m.matches(msg, k.ToggleHidden):
+		cmd = t.toggleHidden(c)
+	case m.matches(msg, k.TogglePin):
+		cmd = t.togglePin(c)
 	case m.matches(msg, k.Remove):
 		t = t.removeWorkspace(c, false)
 	case m.matches(msg, k.ForceRemove):
@@ -235,7 +235,7 @@ func (t projectTreeComp) menu(c *ctx) []binding {
 	case r.kind == rowNode && c.m.nodeHasWakelock(r.id):
 		return []binding{nodeKeys.Wakelock}
 	case r.kind == rowProject:
-		return []binding{k.Spawn, k.New, k.Rename, k.Pin, k.Unpin, k.Hide, k.Unhide, k.Forget}
+		return []binding{k.Spawn, k.New, k.Rename, k.TogglePin, k.ToggleHidden, k.Forget}
 	case r.kind == rowWorkspace:
 		return []binding{k.Spawn, k.Target, k.RunSetup, k.SetupLog, k.Remove}
 	}
@@ -863,38 +863,32 @@ func (t projectTreeComp) forgetProject(c *ctx) projectTreeComp {
 	return t
 }
 
-func (t projectTreeComp) setHidden(c *ctx, hide, unhide bool) tea.Cmd {
+func (t projectTreeComp) toggleHidden(c *ctx) tea.Cmd {
 	projID := t.cursorProjectID()
 	if projID == "" {
 		return nil
 	}
 	p, _ := t.findProject(projID)
-	switch {
-	case p.Hidden && unhide:
+	if p.Hidden {
 		return c.m.setHiddenCmd(projID, false, "unhid "+p.Name)
-	case !p.Hidden && hide:
-		ok := "hid " + p.Name
-		if !t.showHidden {
-			ok += " · " + c.m.keyText(projectsKeys.ShowHidden) + " shows hidden"
-		}
-		return c.m.setHiddenCmd(projID, true, ok)
 	}
-	return nil
+	ok := "hid " + p.Name
+	if !t.showHidden {
+		ok += " · " + c.m.keyText(projectsKeys.ShowHidden) + " shows hidden"
+	}
+	return c.m.setHiddenCmd(projID, true, ok)
 }
 
-func (t projectTreeComp) setPinned(c *ctx, pin, unpin bool) tea.Cmd {
+func (t projectTreeComp) togglePin(c *ctx) tea.Cmd {
 	projID := t.cursorProjectID()
 	if projID == "" {
 		return nil
 	}
 	p, _ := t.findProject(projID)
-	switch {
-	case p.Pinned && unpin:
+	if p.Pinned {
 		return c.m.setPinnedCmd(projID, false, "unpinned "+p.Name)
-	case !p.Pinned && pin:
-		return c.m.setPinnedCmd(projID, true, "pinned "+p.Name)
 	}
-	return nil
+	return c.m.setPinnedCmd(projID, true, "pinned "+p.Name)
 }
 
 func (t projectTreeComp) removeWorkspace(c *ctx, force bool) projectTreeComp {

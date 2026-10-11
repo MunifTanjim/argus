@@ -65,7 +65,7 @@ func assertRunsLikeItsKey(t *testing.T, run func(m model, name string) (model, t
 		byTok := map[string][]string{}
 		var toks []string
 		for _, b := range st.build().commandSet() {
-			if f := strings.Fields(b.defaults); len(f) > 0 {
+			if f := b.defaultTokens(); len(f) > 0 {
 				if byTok[f[0]] == nil {
 					toks = append(toks, f[0])
 				}
@@ -195,7 +195,7 @@ func TestCommandSetFollowsTheView(t *testing.T) {
 
 func TestCommandWithRemovedKeysRunsByName(t *testing.T) {
 	m := withKeymap(wideWorkspace(), map[string]map[string]string{
-		"project-tree": {"z.": ""},
+		"project-tree": {"z.": "<Nop>"},
 	})
 	before := m.left.tree.showHidden
 	m, _ = upd(m, cmdMsg(projectsKeys.ShowHidden.name))
@@ -249,7 +249,7 @@ func TestColonGoesElsewhere(t *testing.T) {
 	if m = typeKeys(m, ":"); cmdLineOpen(m) || m.showHelp {
 		t.Error("with help open, : must only close the help")
 	}
-	m = withKeymap(wideWorkspace(), map[string]map[string]string{"project-tree": {"g:": "toggle show-gone"}})
+	m = withKeymap(wideWorkspace(), map[string]map[string]string{"project-tree": {"g:": ":toggle show-gone<CR>"}})
 	before := m.left.tree.showGone
 	if m = typeKeys(m, "g:"); cmdLineOpen(m) || m.left.tree.showGone == before {
 		t.Error("g: must run its mapping")
@@ -472,7 +472,7 @@ func TestLeaderCannotBeColon(t *testing.T) {
 	if len(errs) != 1 || errs[0] != `keymap: tui.leader-key ":": ":" opens the command line` {
 		t.Errorf("errors %v", errs)
 	}
-	if ids := strings.Join(km.bare.keys(projectsKeys.ToggleSidebar), " "); !strings.Contains(ids, "space") {
+	if ids := strings.Join(km.screens["project-tree"].keys(projectsKeys.ToggleSidebar), " "); !strings.Contains(ids, "space") {
 		t.Errorf("the leader must fall back to space, toggle left-sidebar keys %q", ids)
 	}
 }
@@ -601,7 +601,7 @@ func TestCommandLineIgnoresExtraSpaces(t *testing.T) {
 	}
 }
 
-func TestCommandSetListsTheHalfThatApplies(t *testing.T) {
+func TestCommandSetListsTheProjectToggles(t *testing.T) {
 	names := func(m model) []string {
 		var out []string
 		for _, b := range m.commandSet() {
@@ -611,14 +611,9 @@ func TestCommandSetListsTheHalfThatApplies(t *testing.T) {
 	}
 	m, _ := projectOnCursor(false, true)
 	got := names(m)
-	for _, want := range []string{"project pin", "project unhide"} {
+	for _, want := range []string{"toggle pin", "toggle hidden"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("command set %v must list %q", got, want)
-		}
-	}
-	for _, not := range []string{"project unpin", "project hide"} {
-		if slices.Contains(got, not) {
-			t.Errorf("command set %v must not list %q", got, not)
 		}
 	}
 	m = pressKeys(typeKeys(m, ":project unpin"), keyMsg("enter"))

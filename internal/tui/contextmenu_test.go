@@ -166,7 +166,7 @@ func TestMenuOnTreeRows(t *testing.T) {
 	m := withMouse(homeTestModel())
 	x, y := itemCell(t, m, regTree, 2)
 	mm, _ := rightClick(m, x, y)
-	wantMenu(t, mm, "session spawn", "workspace new", "project rename", "project pin", "project hide", "project forget")
+	wantMenu(t, mm, "session spawn", "workspace new", "project rename", "toggle pin", "toggle hidden", "project forget")
 
 	x, y = itemCell(t, m, regTree, 4)
 	mm, _ = rightClick(m, x, y)
@@ -319,12 +319,12 @@ func TestContextMenuFitsShortTerminal(t *testing.T) {
 	m := withMouse(homeTestModel())
 	m.height = 7
 	k := projectsKeys
-	menu := contextMenu{at: uv.Pos(5, 0), screen: m.screen(), entries: []binding{k.Spawn, k.New, k.Rename, k.Pin, k.Unpin, k.Hide, k.Unhide, k.Forget}, cursor: 7}
+	menu := contextMenu{at: uv.Pos(5, 0), screen: m.screen(), entries: []binding{k.Spawn, k.New, k.Rename, k.TogglePin, k.ToggleHidden, k.Forget}, cursor: 5}
 	m = withPopup(m, menu)
 	if y, _ := findBlock(t, m, "project forget"); y >= m.height {
 		t.Errorf("the cursor entry is on row %d, outside the %d-row screen", y, m.height)
 	}
-	x, y := itemCell(t, m, regPopup, 7)
+	x, y := itemCell(t, m, regPopup, 5)
 	if y >= m.height || x >= m.width {
 		t.Errorf("the cursor entry's hit row (%d,%d) is outside the screen", x, y)
 	}
@@ -336,7 +336,7 @@ func TestMenuOnPinnedProject(t *testing.T) {
 	m.left.tree.rebuild()
 	x, y := itemCell(t, m, regTree, 2)
 	m, _ = rightClick(m, x, y)
-	wantMenu(t, m, "session spawn", "workspace new", "project rename", "project unpin", "project hide", "project forget")
+	wantMenu(t, m, "session spawn", "workspace new", "project rename", "toggle pin", "toggle hidden", "project forget")
 }
 
 func TestNoMenuOnHistoryProject(t *testing.T) {

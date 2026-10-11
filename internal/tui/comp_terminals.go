@@ -251,7 +251,7 @@ func (t terminalsComp) view(c *ctx, w, h int) string {
 	case m.terminalsErr != nil && len(list) == 0:
 		body = dimStyle.Render("error: " + m.terminalsErr.Error())
 	case len(list) == 0:
-		body = dimStyle.Render("no terminals · " + m.keyText(terminalKeys.Spawn) + " spawn")
+		body = dimStyle.Render("no terminals · " + m.keyTextOn(t.section(), terminalKeys.Spawn) + " spawn")
 	default:
 		body = t.rows(c.below(2), list, cardW, max(1, h-2))
 	}

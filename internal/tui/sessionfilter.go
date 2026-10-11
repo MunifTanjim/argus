@@ -81,9 +81,9 @@ func (m model) sessionFilterTitle() string {
 
 // emptyFilterHint is the line a session list shows when its filters hide every
 // session; back is the list's key that clears the text filter.
-func (m model) emptyFilterHint(noActive string, back binding) string {
+func (m model) emptyFilterHint(section, noActive string, back binding) string {
 	if m.sessionFilter != "" {
-		return "no sessions match /" + m.sessionFilter + " · " + m.keyText(back) + " clears"
+		return "no sessions match /" + m.sessionFilter + " · " + m.keyTextOn(section, back) + " clears"
 	}
-	return noActive + " · " + m.showsAllHint()
+	return noActive + " · " + m.showsAllHint(section)
 }

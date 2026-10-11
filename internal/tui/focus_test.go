@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -186,7 +185,7 @@ func TestEveryDefaultBindingReachesOneHandler(t *testing.T) {
 			if textInputOnly(b.name) {
 				continue
 			}
-			for _, tok := range strings.Fields(b.defaults) {
+			for _, tok := range b.defaultTokens() {
 				seq, err := parseKeySeq(tok)
 				if err != nil {
 					t.Fatal(err)

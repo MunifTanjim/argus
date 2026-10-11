@@ -7,9 +7,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// defaultTokens is every default key of b: built-in, then mapped.
+func (b binding) defaultTokens() []string { return strings.Fields(b.defaults + " " + b.maps) }
+
 func TestEveryDefaultParses(t *testing.T) {
 	for _, b := range bindingsOf(append(allBindingSets(), screenLeave)...) {
-		for _, tok := range strings.Fields(b.defaults) {
+		for _, tok := range b.defaultTokens() {
 			if _, err := parseKeySeq(tok); err != nil {
 				t.Errorf("%s: default %q: %v", b.name, tok, err)
 			}

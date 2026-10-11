@@ -11,8 +11,8 @@ import (
 
 func seqModel() model {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"global":       {"g.": "toggle show-hidden"},
-		"project-tree": {"g": "goto top", "yy": "toggle show-gone", "<Space>x": "toggle left-sidebar"},
+		"global":       {"g.": ":toggle show-hidden<CR>"},
+		"project-tree": {"g": ":goto top<CR>", "yy": ":toggle show-gone<CR>", "<Space>x": ":toggle left-sidebar<CR>"},
 	})
 	m.width, m.height = 120, 30
 	m = moveTree(m, 2)
@@ -124,7 +124,7 @@ func TestFooterShowsThePendingKeys(t *testing.T) {
 // then w breaks av; w must still run.
 func TestRestKeyAfterNewWaitIsNotLost(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"project-tree": {"g": "goto top", "gab": "toggle show-gone", "av": "toggle show-hidden"},
+		"project-tree": {"g": ":goto top<CR>", "gab": ":toggle show-gone<CR>", "av": ":toggle show-hidden<CR>"},
 	})
 	m.width, m.height = 120, 30
 	m = moveTree(m, 2)
@@ -141,7 +141,7 @@ func TestRestKeyAfterNewWaitIsNotLost(t *testing.T) {
 // the flush runs / (filter-projects, opens an empty input) before the rest key.
 func rawModeModel() model {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"project-tree": {"/x": "toggle show-hidden", "yy": "toggle show-gone"},
+		"project-tree": {"/x": ":toggle show-hidden<CR>", "yy": ":toggle show-gone<CR>"},
 	})
 	m.width, m.height = 120, 30
 	m = moveTree(m, 2)
@@ -184,7 +184,7 @@ func TestMismatchMultiKeyDropsEarliestAndRunsLast(t *testing.T) {
 // Uses "gj" → next (valid on history) so g waits while gj can follow.
 func TestHistoryProjectsFooterShowsPendingKeys(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{
-		"global": {"gj": "next"},
+		"global": {"gj": ":next<CR>"},
 	})
 	m.width, m.height = 120, 30
 	m = withView(m, viewHistoryProjects)
@@ -199,7 +199,7 @@ func TestKeyAfterOpeningTheLiveScreenGoesToThePane(t *testing.T) {
 	m := testModel()
 	m = withLive(m, "s1")
 	m.sessions = map[string]session.Session{"s1": {ID: "s1", CanOpenTerminal: true}}
-	m = withKeymap(m, map[string]map[string]string{"transcript": {"zz": "open live-screen", "zzy": "fold close"}})
+	m = withKeymap(m, map[string]map[string]string{"transcript": {"zz": ":open live-screen<CR>", "zzy": ":fold close<CR>"}})
 	m, _ = upd(m, keyMsg("z"))
 	m, _ = upd(m, keyMsg("z"))
 	m, _ = upd(m, keyMsg("j"))
@@ -210,7 +210,7 @@ func TestKeyAfterOpeningTheLiveScreenGoesToThePane(t *testing.T) {
 }
 
 func TestHiddenTreeKeyRunsAfterOneTimeout(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"workspace": {"g": "goto top", "gz": "toggle show-gone"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"workspace": {"g": ":goto top<CR>", "gz": ":toggle show-gone<CR>"}})
 	m.width, m.height = 120, 30
 	m.left.hidden = true
 	m = withFocus(m, leftSidebar)

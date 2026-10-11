@@ -24,7 +24,7 @@
   D shift+d  force remove · workspace force-remove            ^w</^w>    resize focused sidebar · sidebar wider
   r          rename project · project rename                  ␣e         toggle right sidebar · toggle right-sidebar
   F shift+f  forget project (files stay) · project forget     ␣o         toggle sidebar · toggle left-sidebar
-  P shift+p  pin / unpin project · project pin                gr         refresh · refresh
-  H shift+h  hide / unhide project · project hide             g?         help · help
+  P shift+p  pin / unpin project · toggle pin                 gr         refresh · refresh
+  H shift+h  hide / unhide project · toggle hidden            g?         help · help
 
                                                ↑/↓ scroll · any key close

@@ -51,42 +51,50 @@ func (m model) commandSet() []binding {
 	return out
 }
 
-// applies reports whether b acts now. Of each pair that shares a key, only
-// the half that fits the selected project applies.
+// applies reports whether b acts now. On the tree, a command that acts on one
+// kind of row applies on that kind of row only.
 func (m model) applies(b binding) bool {
-	k := projectsKeys
 	switch b.name {
 	case nodeKeys.Wakelock.name:
 		r, ok := m.left.tree.cursorRow()
 		return ok && r.kind == rowNode
-	case k.Pin.name, k.Unpin.name, k.Hide.name, k.Unhide.name:
-	default:
+	case projectsKeys.TogglePin.name, projectsKeys.ToggleHidden.name:
+		return m.left.tree.cursorProjectID() != ""
+	}
+	if m.screen() != "project-tree" || !treeRowCommands[b.name] {
 		return true
 	}
-	id := m.left.tree.cursorProjectID()
-	if id == "" {
-		return false
-	}
-	p, _ := m.left.tree.findProject(id)
-	switch b.name {
-	case k.Pin.name:
-		return !p.Pinned
-	case k.Unpin.name:
-		return p.Pinned
-	case k.Hide.name:
-		return !p.Hidden
-	}
-	return p.Hidden
+	r, ok := m.left.tree.cursorRow()
+	return ok && slices.Contains(rowCommands[r.kind], b.name)
 }
 
-// applying is the half of a shared-key pair that applies now, or a when
-// neither does.
-func (m model) applying(a, b binding) binding {
-	if m.applies(b) {
-		return b
+// rowCommands are the tree commands that act on each kind of row.
+var rowCommands = func() map[projRowKind][]string {
+	k := projectsKeys
+	names := func(bs ...binding) []string {
+		out := make([]string, len(bs))
+		for i, b := range bs {
+			out[i] = b.name
+		}
+		return out
 	}
-	return a
-}
+	return map[projRowKind][]string{
+		rowHome:      names(k.Spawn),
+		rowProject:   names(k.Spawn, k.New, k.Rename, k.Forget),
+		rowWorkspace: names(k.Spawn, k.New, k.Remove, k.ForceRemove, k.Target, k.RunSetup, k.SetupLog),
+	}
+}()
+
+// treeRowCommands holds every command in rowCommands.
+var treeRowCommands = func() map[string]bool {
+	out := map[string]bool{}
+	for _, names := range rowCommands {
+		for _, n := range names {
+			out[n] = true
+		}
+	}
+	return out
+}()
 
 var cmdAliases = map[string]string{"q": "quit", "h": "help"}
 
@@ -287,10 +295,7 @@ func (m model) runCmdLine(typed string) (tea.Model, tea.Cmd) {
 	if typed == "" || m.keysRaw() {
 		return m, nil
 	}
-	name := normalizeCommand(typed)
-	if full, ok := cmdAliases[name]; ok {
-		name = full
-	}
+	name := resolveCommand(typed)
 	if !slices.ContainsFunc(m.commandSet(), func(b binding) bool { return b.name == name }) {
 		m.flash = "unknown command: " + typed
 		return m, nil

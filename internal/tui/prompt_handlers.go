@@ -119,14 +119,9 @@ func (d dockComp) handleQuestionKey(c *ctx, msg tea.KeyPressMsg, ix *session.Int
 		return d, nil
 	case c.m.matches(msg, promptKeys.Submit):
 		return d.commitQuestion(c, ix)
-	case q.MultiSelect && c.m.matches(msg, promptKeys.Select, promptKeys.Unselect):
+	case q.MultiSelect && c.m.matches(msg, promptKeys.Select):
 		sel := d.sel[tab]
-		switch on := d.toggles[tab][sel]; {
-		case !on && c.m.matches(msg, promptKeys.Select):
-			d.toggles[tab][sel] = true
-		case on && c.m.matches(msg, promptKeys.Unselect):
-			d.toggles[tab][sel] = false
-		}
+		d.toggles[tab][sel] = !d.toggles[tab][sel]
 		return d, nil
 	}
 	if accepts {

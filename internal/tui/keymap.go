@@ -28,7 +28,7 @@ type keymap struct {
 type screenKeys struct {
 	add      map[string][]keySeq    // command → keys the user mapped to it
 	addIDs   map[string][]string    // command → ids of those keys; a single key lists every form
-	takenBy  map[string]string      // key id → the command the user mapped it to; "" removes it
+	takenBy  map[string][]string    // key id → the commands its mapping runs; empty removes it
 	seqs     []screenSeq            // every effective key the resolver serves on the screen
 	defaults map[string]defaultKeys // shared with the keymap
 }
@@ -38,13 +38,16 @@ type screenSeq struct {
 	id, cmd string
 }
 
+// keyEntry is one mapping. cmds is what it runs; rhs is a key RHS that
+// resolveScreen turns into cmds per screen. Neither removes the key.
 type keyEntry struct {
-	lhs string
-	seq keySeq
-	cmd string
+	seq  keySeq
+	cmds []string
+	rhs  keySeq
 }
 
-// buildKeymap resolves raw (screen → key → command) into one table per screen.
+// buildKeymap resolves raw (screen → key → RHS in Vim notation) into one table
+// per screen, with the default keymap under it.
 // It skips each bad entry and returns one message for it. leader is the key
 // that <Leader> stands for; "" defaults to <Space>.
 func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader string) (*keymap, []string) {
@@ -75,11 +78,7 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 		var dk defaultKeys
 		quiet := strings.Fields(b.quiet)
 		for _, tok := range append(strings.Fields(b.defaults), quiet...) {
-			seq, err := parseKeySeq(tok)
-			if err != nil {
-				panic(fmt.Sprintf("buildKeymap: binding %q token %q: %v", b.name, tok, err))
-			}
-			seq = replaceLeader(seq, leaderStep)
+			seq := mustParseDefault(b, tok, leaderStep)
 			dk.seqs = append(dk.seqs, seq)
 			ids := seq[0]
 			if len(seq) > 1 {
@@ -92,11 +91,11 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 		}
 		km.defaults[b.defKey] = dk
 	}
-	km.bare = &screenKeys{defaults: km.defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string]string{}}
+	km.bare = &screenKeys{defaults: km.defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}}
 	parse := func(section string) []keyEntry {
 		var out []keyEntry
 		for _, lhs := range slices.Sorted(maps.Keys(raw[section])) {
-			cmd := normalizeCommand(raw[section][lhs])
+			rhs := raw[section][lhs]
 			bad := func(format string, a ...any) {
 				errs = append(errs, fmt.Sprintf("keymap: %s %q: ", section, lhs)+fmt.Sprintf(format, a...))
 			}
@@ -108,30 +107,66 @@ func buildKeymap(raw map[string]map[string]string, timeout time.Duration, leader
 			case seq[0][0] == ":":
 				bad(`":" opens the command line`)
 				continue
-			case cmd != "" && strings.ContainsAny(cmd[:1], "$!&%"):
-				bad("shell commands are not supported yet")
-				continue
-			case cmd != "" && commandError(cmd) != "":
-				bad("%s", commandError(cmd))
-				continue
-			case cmd != "" && !commandOn(section, cmd):
-				bad("unknown command %q", cmd)
-				continue
-			case cmd != "" && len(seq) > 1 && textInputOnly(cmd):
-				bad("%s works only in a text input, which has no sequences", cmd)
-				continue
 			}
-			seq = replaceLeader(seq, leaderStep)
-			if km.kittyKey == "" && needsKitty(seq) {
+			e := keyEntry{seq: replaceLeader(seq, leaderStep)}
+			switch kind, cmd := parseRHS(rhs); kind {
+			case rhsEmpty:
+				bad(`use "<Nop>" to remove a key`)
+				continue
+			case rhsUnsupported:
+				bad("not supported")
+				continue
+			case rhsCommand:
+				switch {
+				case strings.ContainsAny(cmd[:1], "$!&%"):
+					bad("shell commands are not supported yet")
+					continue
+				case commandError(cmd) != "":
+					bad("%s", commandError(cmd))
+					continue
+				case !commandOn(section, cmd):
+					bad("unknown command %q", cmd)
+					continue
+				case len(seq) > 1 && textInputOnly(cmd):
+					bad("%s works only in a text input, which has no sequences", cmd)
+					continue
+				}
+				e.cmds = []string{cmd}
+			case rhsKeys:
+				r, err := parseKeySeq(rhs)
+				if err != nil {
+					bad("%v", err)
+					continue
+				}
+				e.rhs = replaceLeader(r, leaderStep)
+				cmds := keyRHSCmds(section, e.rhs, km.defaults)
+				switch {
+				case len(cmds) == 0:
+					c := normalizeCommand(rhs)
+					if to, ok := removedCommands[c]; ok {
+						c = to
+					}
+					if commandError(c) == "" {
+						bad(`use ":%s<CR>"`, c)
+					} else {
+						bad("no built-in key %q in %s", rhs, section)
+					}
+					continue
+				case len(seq) > 1 && !slices.ContainsFunc(cmds, func(c string) bool { return !textInputOnly(c) }):
+					bad("%s works only in a text input, which has no sequences", cmds[0])
+					continue
+				}
+			}
+			if km.kittyKey == "" && needsKitty(e.seq) {
 				km.kittyKey = lhs
 			}
-			out = append(out, keyEntry{lhs, seq, cmd})
+			out = append(out, e)
 		}
 		return out
 	}
 	global := parse("global")
 	for _, s := range slices.Sorted(maps.Keys(screenBindings)) {
-		km.screens[s] = resolveScreen(s, parse(s), global, km.defaults)
+		km.screens[s] = resolveScreen(s, parse(s), global, defaultEntries(s, leaderStep), km.defaults)
 	}
 	return km, errs
 }
@@ -180,32 +215,44 @@ func (km *keymap) screenKeys(screen string) *screenKeys {
 	return km.bare
 }
 
-func resolveScreen(screen string, own, global []keyEntry, defaults map[string]defaultKeys) *screenKeys {
-	sk := &screenKeys{defaults: defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string]string{}}
-	apply := func(e keyEntry) {
-		ids := []string{e.seq.id()}
-		if len(e.seq) == 1 {
-			ids = e.seq[0]
-		}
-		for _, id := range ids {
-			sk.takenBy[id] = e.cmd
-		}
-		if e.cmd != "" {
-			sk.add[e.cmd] = append(sk.add[e.cmd], e.seq)
-			sk.addIDs[e.cmd] = append(sk.addIDs[e.cmd], ids...)
+// resolveScreen layers the user's section entries, then the user's global
+// entries, then the default keymap, over the built-in keys. The first layer
+// that maps a key wins.
+func resolveScreen(screen string, own, global, defs []keyEntry, defaults map[string]defaultKeys) *screenKeys {
+	sk := &screenKeys{defaults: defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}}
+	taken := map[string]bool{}
+	layer := func(es []keyEntry, isGlobal bool) {
+		for _, e := range es {
+			if taken[e.seq.id()] {
+				continue
+			}
+			cmds := e.cmds
+			if e.rhs != nil {
+				cmds = builtinCmds(screen, e.rhs, defaults)
+			}
+			if isGlobal {
+				cmds = slices.DeleteFunc(slices.Clone(cmds), func(c string) bool { return !screenHas(screen, c) })
+				if len(cmds) == 0 && (len(e.cmds) > 0 || e.rhs != nil) {
+					continue
+				}
+			}
+			taken[e.seq.id()] = true
+			ids := []string{e.seq.id()}
+			if len(e.seq) == 1 {
+				ids = e.seq[0]
+			}
+			for _, id := range ids {
+				sk.takenBy[id] = cmds
+			}
+			for _, c := range cmds {
+				sk.add[c] = append(sk.add[c], e.seq)
+				sk.addIDs[c] = append(sk.addIDs[c], ids...)
+			}
 		}
 	}
-	ownIDs := map[string]bool{}
-	for _, e := range own {
-		ownIDs[e.seq.id()] = true
-		apply(e)
-	}
-	for _, e := range global {
-		if ownIDs[e.seq.id()] || (e.cmd != "" && !screenHas(screen, e.cmd)) {
-			continue
-		}
-		apply(e)
-	}
+	layer(own, false)
+	layer(global, true)
+	layer(defs, false)
 	seen := map[string]bool{}
 	for _, b := range screenBindings[screen] {
 		if textInputOnly(b.name) {
@@ -247,11 +294,11 @@ func (sk *screenKeys) listedKeys(b binding) []string {
 	})
 }
 
-// defaultKept reports whether b's default key k survives: the user did not
-// remove it or give it to another command.
+// defaultKept reports whether b's built-in key k survives: no mapping took k,
+// or the one that did runs b.
 func (sk *screenKeys) defaultKept(b binding, k string) bool {
-	cmd, ok := sk.takenBy[k]
-	return !ok || cmd == b.name
+	cmds, ok := sk.takenBy[k]
+	return !ok || slices.Contains(cmds, b.name)
 }
 
 func (sk *screenKeys) seqsOf(b binding) []keySeq {
@@ -259,6 +306,88 @@ func (sk *screenKeys) seqsOf(b binding) []keySeq {
 	for _, s := range sk.defaults[b.defKey].seqs {
 		if sk.defaultKept(b, s.id()) {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+type rhsKind int
+
+const (
+	rhsKeys rhsKind = iota
+	rhsCommand
+	rhsNop
+	rhsEmpty
+	rhsUnsupported
+)
+
+// parseRHS classifies a mapping's RHS. cmd is the command of :cmd<CR>.
+func parseRHS(rhs string) (kind rhsKind, cmd string) {
+	switch {
+	case rhs == "":
+		return rhsEmpty, ""
+	case strings.EqualFold(rhs, "<Nop>"):
+		return rhsNop, ""
+	case !strings.HasPrefix(rhs, ":"):
+		return rhsKeys, ""
+	}
+	body := rhs[1:]
+	for _, cr := range []string{"<cr>", "<enter>", "<return>"} {
+		if n := len(body) - len(cr); n >= 0 && strings.EqualFold(body[n:], cr) {
+			cmd = resolveCommand(body[:n])
+			if cmd != "" && !strings.Contains(cmd, "<") {
+				return rhsCommand, cmd
+			}
+		}
+	}
+	return rhsUnsupported, ""
+}
+
+// builtinCmds is the commands whose built-in keys on screen include rhs.
+func builtinCmds(screen string, rhs keySeq, defaults map[string]defaultKeys) []string {
+	id := rhs.id()
+	var out []string
+	for _, b := range screenBindings[screen] {
+		if slices.ContainsFunc(defaults[b.defKey].seqs, func(s keySeq) bool { return s.id() == id }) && !slices.Contains(out, b.name) {
+			out = append(out, b.name)
+		}
+	}
+	return out
+}
+
+// keyRHSCmds is the commands that rhs runs as a built-in key in section, or,
+// for global, in any screen.
+func keyRHSCmds(section string, rhs keySeq, defaults map[string]defaultKeys) []string {
+	if section != "global" {
+		return builtinCmds(section, rhs, defaults)
+	}
+	var out []string
+	for _, s := range slices.Sorted(maps.Keys(screenBindings)) {
+		for _, c := range builtinCmds(s, rhs, defaults) {
+			if !slices.Contains(out, c) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// defaultEntries is screen's default keymap: each binding's maps keys run its
+// command.
+func defaultEntries(screen string, leader keyStep) []keyEntry {
+	at := map[string]int{}
+	var out []keyEntry
+	for _, b := range screenBindings[screen] {
+		for _, tok := range strings.Fields(b.maps) {
+			seq := mustParseDefault(b, tok, leader)
+			if i, ok := at[seq.id()]; ok {
+				if !slices.Contains(out[i].cmds, b.name) {
+					out[i].cmds = append(out[i].cmds, b.name)
+				}
+				continue
+			}
+			at[seq.id()] = len(out)
+			out = append(out, keyEntry{seq: seq, cmds: []string{b.name}})
 		}
 	}
 	return out
@@ -291,7 +420,7 @@ func textInputOnly(cmd string) bool { return !keySetNames[cmd] }
 // entity: the rest of such a command is an action, not an argument.
 var entityNames = map[string]bool{
 	"project": true, "workspace": true, "session": true, "transcript": true,
-	"redaction": true, "option": true, "answer": true, "tab": true,
+	"redaction": true, "answer": true, "tab": true,
 }
 
 // commandArgs maps the first word of every command to the rest of each
@@ -318,6 +447,34 @@ var commandArgs = func() map[string][]string {
 // working.
 var renamedCommands = map[string]string{"terminal new": "terminal spawn"}
 
+// removedCommands maps the commands that a toggle replaced to the toggle, so
+// that an old keymap gets a hint.
+var removedCommands = map[string]string{
+	"project pin": "toggle pin", "project unpin": "toggle pin",
+	"project hide": "toggle hidden", "project unhide": "toggle hidden",
+	"option select": "toggle selection", "option unselect": "toggle selection",
+}
+
+// mustParseDefault parses one of b's default key tokens, which are fixed in
+// code, so an error is a bug.
+func mustParseDefault(b binding, tok string, leader keyStep) keySeq {
+	seq, err := parseKeySeq(tok)
+	if err != nil {
+		panic(fmt.Sprintf("binding %q token %q: %v", b.name, tok, err))
+	}
+	return replaceLeader(seq, leader)
+}
+
+// resolveCommand is the command that typed text names, the way the command
+// line reads it: spaces normalized, renames and aliases applied.
+func resolveCommand(s string) string {
+	name := normalizeCommand(s)
+	if full, ok := cmdAliases[name]; ok {
+		return full
+	}
+	return name
+}
+
 func normalizeCommand(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if to, ok := renamedCommands[s]; ok {
@@ -327,6 +484,9 @@ func normalizeCommand(s string) string {
 }
 
 func commandError(cmd string) string {
+	if to, ok := removedCommands[cmd]; ok {
+		return fmt.Sprintf("%s is now %s", cmd, to)
+	}
 	verb, arg, _ := strings.Cut(cmd, " ")
 	args, ok := commandArgs[verb]
 	if !ok {

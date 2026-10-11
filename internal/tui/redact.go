@@ -122,7 +122,7 @@ func (m tview) redactListActive() bool {
 // are shown in full so they can be told apart and managed.
 func (m tview) redactListBody() string {
 	if len(m.redact.literals) == 0 {
-		return dimStyle.Render("no redactions queued — press " + m.c.m.keyText(transcriptKeys.Redact) + " to add a secret")
+		return dimStyle.Render("no redactions queued — press " + m.c.m.keyTextOn("transcript", transcriptKeys.Redact) + " to add a secret")
 	}
 	var b strings.Builder
 	b.WriteString(asstStyle.Render(fmt.Sprintf("queued redactions (%d)", len(m.redact.literals))))

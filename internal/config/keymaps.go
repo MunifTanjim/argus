@@ -10,7 +10,7 @@ import (
 // ReadKeymaps reads tui.keymap from the YAML file at path. It does not use
 // viper, which lowercases map keys and splits them on ".", and so breaks keys
 // such as "G" and "g.". An empty path gives no keymaps. A value that is not a
-// string is kept as its text, so the TUI reports it as an unknown command.
+// string is kept as its text, so the TUI reports it as a bad mapping.
 func ReadKeymaps(path string) (map[string]map[string]string, error) {
 	if path == "" {
 		return nil, nil

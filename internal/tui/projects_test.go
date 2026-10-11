@@ -1095,7 +1095,7 @@ func TestTreeFooterListsOnlyKeysForTheRow(t *testing.T) {
 
 func TestProjectHintFollowsMappedKeys(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {
-		"<C-n>": "workspace new", "<C-r>": "project rename",
+		"<C-n>": ":workspace new<CR>", "<C-r>": ":project rename<CR>",
 	}})
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:p1")
@@ -1435,34 +1435,17 @@ func TestSharedKeyRunsTheCommandThatApplies(t *testing.T) {
 	}
 }
 
-func TestRemappedHalfOfAPair(t *testing.T) {
-	// "p" is a new key for pin only: P still pins and unpins.
+func TestMappedKeyTogglesThePin(t *testing.T) {
 	m, rc := projectOnCursor(true, false)
-	m = withKeymap(m, map[string]map[string]string{"project-tree": {"p": "project pin"}})
-	_, cmd := upd(m, keyMsg("P"))
+	m = withKeymap(m, map[string]map[string]string{"project-tree": {"p": ":toggle pin<CR>"}})
+	_, cmd := upd(m, keyMsg("p"))
 	runCmd(cmd)
 	if got := flagCalls(rc); len(got) != 1 || got[0] != api.MethodProjectSetPinned+"=false" {
-		t.Errorf("P on a pinned project must still unpin: %v", got)
-	}
-	// "p" on a pinned project: pin does not apply, so nothing runs.
-	m, rc = projectOnCursor(true, false)
-	m = withKeymap(m, map[string]map[string]string{"project-tree": {"p": "project pin"}})
-	_, cmd = upd(m, keyMsg("p"))
-	runCmd(cmd)
-	if got := flagCalls(rc); len(got) != 0 {
-		t.Errorf("a command that does not apply must do nothing: %v", got)
-	}
-	// P mapped to pin only: unpin loses P.
-	m, rc = projectOnCursor(true, false)
-	m = withKeymap(m, map[string]map[string]string{"project-tree": {"P": "project pin"}})
-	_, cmd = upd(m, keyMsg("P"))
-	runCmd(cmd)
-	if got := flagCalls(rc); len(got) != 0 {
-		t.Errorf("P mapped to pin must not unpin: %v", got)
+		t.Errorf("p on a pinned project must unpin: %v", got)
 	}
 }
 
-func TestHelpRowFollowsTheHalfThatApplies(t *testing.T) {
+func TestHelpRowShowsTheToggle(t *testing.T) {
 	row := func(m model, desc string) helpRow {
 		for _, g := range m.helpGroups() {
 			for _, r := range g.rows {
@@ -1475,12 +1458,11 @@ func TestHelpRowFollowsTheHalfThatApplies(t *testing.T) {
 		return helpRow{}
 	}
 	m, _ := projectOnCursor(true, false)
-	m = withKeymap(m, map[string]map[string]string{"project-tree": {"P": "project unpin", "p": "project pin"}})
-	if r := row(m, "pin / unpin project"); r.name != "project unpin" || !strings.HasPrefix(r.key, "P") {
-		t.Errorf("a pinned project's row must show unpin and its key: name %q key %q", r.name, r.key)
+	if r := row(m, "pin / unpin project"); r.name != "toggle pin" || !strings.HasPrefix(r.key, "P") {
+		t.Errorf("the pin row shows toggle pin and its key: name %q key %q", r.name, r.key)
 	}
-	if r := row(m, "hide / unhide project"); r.name != "project hide" {
-		t.Errorf("a shown project's row must show hide: name %q", r.name)
+	if r := row(m, "hide / unhide project"); r.name != "toggle hidden" {
+		t.Errorf("the hide row shows toggle hidden: name %q", r.name)
 	}
 }
 
@@ -1511,5 +1493,24 @@ func TestTreeCursorMovesBeforeTheViewScrolls(t *testing.T) {
 	m = typeKeys(m, "k")
 	if !strings.Contains(ansi.Strip(m.View().Content), last) {
 		t.Errorf("k from the bottom scrolled the view; %q should stay visible", last)
+	}
+}
+
+func TestPTogglesPin(t *testing.T) {
+	m := projectsTestModel()
+	m.client = &recordingClient{}
+	m = selectRow(m, "n1:p1")
+	_, cmd := treeKey(m, keyMsg("P"))
+	res, _ := m.Update(cmd())
+	if got := res.(model).flash; got != "pinned argus" {
+		t.Errorf("flash = %q, want %q", got, "pinned argus")
+	}
+	m.left.tree.data[0].Pinned = true
+	m.left.tree.rebuild()
+	m = selectRow(m, "n1:p1")
+	_, cmd = treeKey(m, keyMsg("P"))
+	res, _ = m.Update(cmd())
+	if got := res.(model).flash; got != "unpinned argus" {
+		t.Errorf("flash = %q, want %q", got, "unpinned argus")
 	}
 }

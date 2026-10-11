@@ -269,7 +269,7 @@ func TestDiffModeWithoutTargetHints(t *testing.T) {
 }
 
 func TestSessionDiffModeHintNamesTheTreeKey(t *testing.T) {
-	m := withKeymap(withTarget(wideWorkspace(), ""), map[string]map[string]string{"project-tree": {"<C-g>": "workspace change-target"}})
+	m := withKeymap(withTarget(wideWorkspace(), ""), map[string]map[string]string{"project-tree": {"<C-g>": ":workspace change-target<CR>"}})
 	m.client = &recordingClient{}
 	m.right.tab = sideChanges
 	m = withFocus(m, mainPane)

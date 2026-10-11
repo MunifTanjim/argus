@@ -54,8 +54,8 @@ var (
 		projectsKeys.Spawn, projectsKeys.SetupLog, projectsKeys.ShowHidden, projectsKeys.ShowGone,
 	}
 	manageKeys = []any{
-		projectsKeys.New, projectsKeys.Rename, projectsKeys.Hide, projectsKeys.Unhide, projectsKeys.Pin,
-		projectsKeys.Unpin, projectsKeys.Target, projectsKeys.ForceRemove, projectsKeys.Forget, projectsKeys.RunSetup,
+		projectsKeys.New, projectsKeys.Rename, projectsKeys.ToggleHidden, projectsKeys.TogglePin,
+		projectsKeys.Target, projectsKeys.ForceRemove, projectsKeys.Forget, projectsKeys.RunSetup,
 	}
 )
 
@@ -214,4 +214,15 @@ func checkListed(screen string, b binding) {
 	if !screenHas(screen, b.name) {
 		unlisted[fmt.Sprintf("%s: %s %q", screen, b.name, b.defaults)] = true
 	}
+}
+
+// checkKeyText records a key lookup for b on a screen that does not list it:
+// the hint would name a key that does nothing there.
+func checkKeyText(screen string, b binding) {
+	if screen == "" || b.name == "" || screenHas(screen, b.name) {
+		return
+	}
+	strictMu.Lock()
+	defer strictMu.Unlock()
+	unlisted[fmt.Sprintf("%s: %s (key text)", screen, b.name)] = true
 }
