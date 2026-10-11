@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,9 +12,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"golang.org/x/sync/errgroup"
 )
 
 const sessionIdleTTL = time.Hour
+
+// Keep small: the service is a local single-process server.
+const scanConcurrency = 4
 
 type presenceEntry struct {
 	lastActivity       time.Time
@@ -101,6 +106,9 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 		// Sync pending prompts against the server before marking active sessions
 		// Working, so a backfilled prompt is in place when the loop below skips it.
 		d.reconcilePending(ctx, c, active)
+		// Each hydrate is one GET; fan out so a burst of new sessions
+		// doesn't serialize the scan.
+		var ids []string
 		for id := range active {
 			// A session that waits for a form or permission reply stays in the active
 			// list. Its interaction and AwaitingInput status come over SSE, so a bare
@@ -110,13 +118,32 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 			if d.hasPendingPrompt(id) {
 				continue
 			}
-			d.upsert(id, session.StatusWorking, nil)
+			ids = append(ids, id)
 		}
-		if !d.seeded.Load() {
-			if sessions, lerr := c.listSessions(ctx); lerr == nil {
+		sort.Strings(ids)
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(scanConcurrency)
+		for _, id := range ids {
+			g.Go(func() error {
+				select {
+				case <-gctx.Done():
+					return gctx.Err()
+				default:
+				}
+				d.upsert(id, session.StatusWorking, nil)
+				return nil
+			})
+		}
+		_ = g.Wait()
+		// One paginated list (vs N getSession) so it runs every scan; seeding
+		// stays once so dismissed sessions aren't resurrected, and refreshKnown
+		// only touches tracked ids.
+		if sessions, lerr := c.listSessions(ctx); lerr == nil {
+			if !d.seeded.Load() {
 				d.seedIdle(sessions)
 				d.seeded.Store(true)
 			}
+			d.refreshKnown(sessions)
 		}
 		d.sweepIdle()
 	}
@@ -162,6 +189,7 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 				u.Name = s.Title
 				u.Cwd = s.Location.Directory
 				u.Repo = gittree.RepoName(s.Location.Directory)
+				u.Summary = summaryFor(s)
 				d.mu.Lock()
 				if e, ok := d.presence[id]; ok {
 					e.hydrated = true
@@ -171,6 +199,69 @@ func (d *discoverer) upsert(id string, st session.Status, in *session.Interactio
 		}
 	}
 	d.reg.ApplyHook(u)
+}
+
+// refreshKnown never creates sessions (dismissed ids stay gone) and only
+// applies on change, to avoid spamming subscribers with EventUpdated.
+func (d *discoverer) refreshKnown(sessions []ocSession) {
+	for _, s := range sessions {
+		if s.ID == "" {
+			continue
+		}
+		d.mu.Lock()
+		e, tracked := d.presence[s.ID]
+		d.mu.Unlock()
+		if !tracked {
+			continue
+		}
+		name := s.Title
+		cwd := s.Location.Directory
+		repo := gittree.RepoName(cwd)
+		sum := summaryFor(s)
+
+		cur, ok := d.reg.Get(registry.AgentSessionKey(Agent, s.ID))
+		if !ok {
+			continue
+		}
+		changed := false
+		if name != "" && cur.Name != name {
+			changed = true
+		}
+		if cwd != "" && cur.Cwd != cwd {
+			changed = true
+		}
+		if repo != "" && cur.Repo != repo {
+			changed = true
+		}
+		if sum != nil && !summariesEqual(cur.Summary, sum) {
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		u := registry.HookUpdate{Agent: Agent, AgentSessionID: s.ID}
+		if name != "" {
+			u.Name = name
+		}
+		if cwd != "" {
+			u.Cwd = cwd
+		}
+		if repo != "" {
+			u.Repo = repo
+		}
+		if sum != nil {
+			u.Summary = sum
+		}
+		d.reg.ApplyHook(u)
+		// A rename implies recent activity; don't let the sweep drop it.
+		if updated := time.UnixMilli(s.Time.Updated); !updated.IsZero() {
+			d.mu.Lock()
+			if e != nil && updated.After(e.lastActivity) {
+				e.lastActivity = updated
+			}
+			d.mu.Unlock()
+		}
+	}
 }
 
 // seedIdle adds idle sessions whose last update falls within the idle TTL as
@@ -209,6 +300,7 @@ func (d *discoverer) seedIdle(sessions []ocSession) {
 			Name:               s.Title,
 			Cwd:                s.Location.Directory,
 			Repo:               gittree.RepoName(s.Location.Directory),
+			Summary:            summaryFor(s),
 			Interaction:        &session.Interaction{Kind: session.InteractionIdle},
 			ReplaceInteraction: true,
 		})
@@ -269,9 +361,25 @@ func (d *discoverer) reconcilePending(ctx context.Context, c *client, active map
 	}
 	d.mu.Unlock()
 
+	list := make([]string, 0, len(ids))
 	for id := range ids {
-		d.reconcileSession(ctx, c, id)
+		list = append(list, id)
 	}
+	sort.Strings(list)
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(scanConcurrency)
+	for _, id := range list {
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
+			}
+			d.reconcileSession(gctx, c, id)
+			return nil
+		})
+	}
+	_ = g.Wait()
 }
 
 func (d *discoverer) reconcileSession(ctx context.Context, c *client, id string) {
