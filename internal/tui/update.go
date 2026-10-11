@@ -720,10 +720,10 @@ func killVerb(s session.Session) string {
 	return "dismiss"
 }
 
-// dismissable reports whether a paneless OpenCode session can be removed. Kill is
-// unconditional, so status and interaction do not gate it.
+// dismissable reports whether a paneless headless session (OpenCode, Pi) can be
+// removed. Kill is unconditional, so status and interaction do not gate it.
 func dismissable(s session.Session) bool {
-	return s.Agent == "opencode" && !s.Controllable()
+	return (s.Agent == "opencode" || s.Agent == "pi") && !s.Controllable()
 }
 
 // quit's batch gives no order, so the program may exit before a close command
