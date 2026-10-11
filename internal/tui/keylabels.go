@@ -12,7 +12,7 @@ var labelPairs = func() map[string][2]string {
 	out := map[string][2]string{}
 	for _, p := range [][2]string{
 		{"prev", "next"}, {"scroll up", "scroll down"}, {"goto top", "goto bottom"},
-		{"scroll half-page-up", "scroll half-page-down"}, {"tab prev", "tab next"},
+		{"scroll half-page-up", "scroll half-page-down"}, {"scroll page-up", "scroll page-down"}, {"tab prev", "tab next"},
 		{"fold close", "fold open"}, {"sidebar narrower", "sidebar wider"}, {"next diff-file", "prev diff-file"},
 		{"next prompt", "prev prompt"},
 		{"focus next", "focus prev"},

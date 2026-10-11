@@ -29,7 +29,7 @@ func (t fileTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd
 		return t, cmd, true
 	}
 	is := func(bs ...binding) bool { return c.m.matches(msg, bs...) }
-	used := is(k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown, k.Left, k.Right, k.Enter)
+	used := is(k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown, k.PageUp, k.PageDown, k.Left, k.Right, k.Enter)
 	req := t.key(is, c.m.cardListPageStep())
 	if req.loadDir != nil || req.openFile != nil {
 		return t, t.run(c, req), true

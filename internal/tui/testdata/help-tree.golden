@@ -3,12 +3,12 @@
   Tree                                             Pane
   ↑ k/↓ j            move · prev                   ↑ k/↓ j    move / scroll · prev
   gg/G shift+g       top / bottom · goto bottom    enter      open session · open
-  ^u pgup/^d pgdown  page · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
-  h ← zc/l → zo      fold / unfold · fold close    esc        close / tree · back
-  enter              open; l opens Home/workspace  dd         kill session · session kill
-  ^ww/^wW            cycle focus · focus next      za         active / all sessions · toggle active-only
-  /                  filter · filter-projects      zg         home: group sessions by · cycle group-by
-                                                   /          filter sessions · filter-sessions
+  ^u/^d              half · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
+  ^b pgup/^f pgdown  page · scroll page-down       esc        close / tree · back
+  h ← zc/l → zo      fold / unfold · fold close    dd         kill session · session kill
+  enter              open; l opens Home/workspace  za         active / all sessions · toggle active-only
+  ^ww/^wW            cycle focus · focus next      zg         home: group sessions by · cycle group-by
+  /                  filter · filter-projects      /          filter sessions · filter-sessions
                                                    L shift+l  workspace setup log · open setup-log
                                                    ^wh/^wl    focus left / right pane · focus left
                                                    ^wj        session: focus the prompt · focus down

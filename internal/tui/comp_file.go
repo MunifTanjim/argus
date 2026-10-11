@@ -40,7 +40,7 @@ func (f fileComp) layer() layer              { return fileLayer }
 
 func (f fileComp) commands(c *ctx) []binding {
 	fk := fileViewKeys
-	out := []any{fk.Up, fk.Down, fk.HalfUp, fk.HalfDown, fk.Top, fk.Bottom, fk.Wrap, fk.Refresh, fk.Back}
+	out := []any{fk.Up, fk.Down, fk.HalfUp, fk.HalfDown, fk.PageUp, fk.PageDown, fk.Top, fk.Bottom, fk.Wrap, fk.Refresh, fk.Back}
 	if f.diff {
 		out = append(out, fk.NextFile, fk.PrevFile)
 	}
@@ -94,6 +94,10 @@ func (f fileComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		f.scroll = max(0, f.scroll-m.cardListPageStep())
 	case m.matches(msg, fk.HalfDown):
 		f.scroll = min(f.scroll+m.cardListPageStep(), f.maxScroll(c))
+	case m.matches(msg, fk.PageUp):
+		f.scroll = max(0, f.scroll-2*m.cardListPageStep())
+	case m.matches(msg, fk.PageDown):
+		f.scroll = min(f.scroll+2*m.cardListPageStep(), f.maxScroll(c))
 	case m.matches(msg, fk.Top):
 		f.scroll = 0
 	case m.matches(msg, fk.Bottom):
@@ -248,7 +252,7 @@ func (f fileComp) footerText(c *ctx) string {
 
 func (f fileComp) footer(*ctx) []binding {
 	fk := fileViewKeys
-	b := []binding{helpAs(fk.Up, "scroll"), helpAs(fk.HalfDown, "page"), helpAs(fk.Bottom, "ends")}
+	b := []binding{helpAs(fk.Up, "scroll"), helpAs(fk.HalfDown, "half"), helpAs(fk.Bottom, "ends")}
 	if f.diff {
 		b = append(b, fk.NextFile)
 	}
