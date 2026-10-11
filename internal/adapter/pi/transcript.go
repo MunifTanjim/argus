@@ -12,6 +12,10 @@ import (
 // Pi has no subagent files (it ships without sub-agents), so agent drill-down
 // is unsupported: readSubagentView always reports absent.
 func readTranscriptView(path string, finished bool) (transcript.TranscriptView, error) {
+	if path == "" {
+		// Foreign sessions report no file until pi persists one.
+		return transcript.TranscriptView{}, nil
+	}
 	sf, err := readSessionFile(path)
 	if err != nil {
 		return transcript.TranscriptView{}, err

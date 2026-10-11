@@ -75,3 +75,9 @@ not visible to Argus.
 Pi needs no hooks. Argus spawns and owns one `pi --mode rpc` process per
 session (with its bundled gate extension for approvals). Past sessions remain
 available as history once they hold conversation.
+
+To also watch interactive `pi` sessions started outside Argus, run
+`argus hooks install`: it stages the same gate extension globally, and the
+extension reports those sessions back to Argus (presence, status, approvals,
+prompt injection) over a local socket. Dismissing such a session only
+untracks it — the terminal session keeps running.

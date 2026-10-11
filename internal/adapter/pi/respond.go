@@ -8,29 +8,11 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// respond answers a parked extension dialog with extension_ui_response.
-// The dialog to answer is picked by RequestID when the client echoes it,
-// else the single pending dialog; ambiguous state is an error rather than a
-// guess at which question the user saw.
-func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
-	proc := d.get(sess.AgentSessionID)
-	if proc == nil {
-		return fmt.Errorf("pi: unknown session %s", sess.AgentSessionID)
-	}
-	proc.mu.Lock()
-	var pend *pendingUI
-	if p.RequestID != "" {
-		pend = proc.pending[p.RequestID]
-	} else if len(proc.pending) == 1 {
-		for _, v := range proc.pending {
-			pend = v
-		}
-	}
-	proc.mu.Unlock()
-	if pend == nil {
-		return fmt.Errorf("pi: no pending dialog for session %s", sess.AgentSessionID)
-	}
-	resp := map[string]any{"type": "extension_ui_response", "id": pend.uiID}
+// buildUIResponse renders a parked dialog's answer as the extension_ui_response
+// record (owned RPC sessions) or approval_decision (foreign beacons) payload.
+// Both channels share the decision mapping; callers add the envelope.
+func buildUIResponse(pend *pendingUI, p api.RespondParams) (map[string]any, error) {
+	resp := map[string]any{}
 	denied := p.Behavior == "deny" || p.OptionValue == "deny"
 	switch pend.method {
 	case "select":
@@ -48,9 +30,46 @@ func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.Re
 			resp["value"] = inputValue(pend, p)
 		}
 	default:
-		return fmt.Errorf("pi: cannot answer dialog method %q", pend.method)
+		return nil, fmt.Errorf("pi: cannot answer dialog method %q", pend.method)
 	}
-	if err := proc.conn.send(resp); err != nil {
+	return resp, nil
+}
+
+// respond answers a parked extension dialog with extension_ui_response.
+// The dialog to answer is picked by RequestID when the client echoes it,
+// else the single pending dialog; ambiguous state is an error rather than a
+// guess at which question the user saw.
+func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.RespondParams) error {
+	if proc := d.get(sess.AgentSessionID); proc != nil {
+		return d.respondOwned(proc, p)
+	}
+	if fs := d.lookupForeign(sess.AgentSessionID); fs != nil {
+		return d.respondForeign(fs, p)
+	}
+	return fmt.Errorf("pi: unknown session %s", sess.AgentSessionID)
+}
+
+func (d *discoverer) respondOwned(proc *sessionProc, p api.RespondParams) error {
+	proc.mu.Lock()
+	var pend *pendingUI
+	if p.RequestID != "" {
+		pend = proc.pending[p.RequestID]
+	} else if len(proc.pending) == 1 {
+		for _, v := range proc.pending {
+			pend = v
+		}
+	}
+	proc.mu.Unlock()
+	if pend == nil {
+		return fmt.Errorf("pi: no pending dialog for session %s", proc.id)
+	}
+	body, err := buildUIResponse(pend, p)
+	if err != nil {
+		return err
+	}
+	body["type"] = "extension_ui_response"
+	body["id"] = pend.uiID
+	if err := proc.conn.send(body); err != nil {
 		return err
 	}
 	proc.mu.Lock()
@@ -62,6 +81,46 @@ func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.Re
 	// wedge the session at its prompt. Later events correct the status.
 	if !stillPending {
 		d.upsert(proc, session.StatusWorking, nil, false)
+	}
+	return nil
+}
+
+// respondForeign answers a beacon approval request with approval_decision.
+func (d *discoverer) respondForeign(fs *foreignSession, p api.RespondParams) error {
+	fs.mu.Lock()
+	var pend *pendingUI
+	if p.RequestID != "" {
+		pend = fs.pending[p.RequestID]
+	} else if len(fs.pending) == 1 {
+		for _, v := range fs.pending {
+			pend = v
+		}
+	}
+	fs.mu.Unlock()
+	if pend == nil {
+		return fmt.Errorf("pi: no pending dialog for session %s", fs.id)
+	}
+	body, err := buildUIResponse(pend, p)
+	if err != nil {
+		return err
+	}
+	decision := "allow"
+	if c, ok := body["cancelled"].(bool); ok && c {
+		decision = "deny"
+	} else if c, ok := body["confirmed"].(bool); ok && !c {
+		decision = "deny"
+	}
+	if err := d.beaconSend(fs, map[string]any{
+		"type": "approval_decision", "id": pend.uiID, "decision": decision,
+	}); err != nil {
+		return err
+	}
+	fs.mu.Lock()
+	delete(fs.pending, pend.uiID)
+	stillPending := len(fs.pending) > 0
+	fs.mu.Unlock()
+	if !stillPending {
+		d.foreignCard(fs, session.StatusWorking, nil, false)
 	}
 	return nil
 }

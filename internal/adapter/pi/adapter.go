@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -142,10 +144,72 @@ func (a *piAdapter) SpawnSession(ctx context.Context, cwd, prompt string) (strin
 	return d.spawnSession(ctx, cwd, prompt)
 }
 
-// Pi needs no argus-managed config: the gate extension ships with argus and is
-// passed with -e at spawn, so there is nothing to install into pi's settings.
-func (piAdapter) Install(string) error                          { return nil }
-func (piAdapter) ReconcileIfInstalled(string) ([]string, error) { return nil, nil }
-func (piAdapter) Uninstall() error                              { return nil }
-func (piAdapter) SettingsPath() (string, error)                 { return "", nil }
-func (piAdapter) DefaultHookEvents() []string                   { return nil }
+// beaconPath is the global gate-extension install location. Every pi process
+// auto-loads it, so installing here turns the extension into a beacon for
+// foreign (non-Argus-spawned) sessions. Managed sessions are unaffected:
+// ARGUS_MANAGED switches the same file to RPC-dialog mode.
+func beaconPath() (string, error) {
+	home, err := piHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "extensions", "argus.ts"), nil
+}
+
+// Pi needs no hook config, but the Tier 2 beacon is an opt-in global install:
+// `argus hooks install` stages the gate extension where every pi process
+// auto-loads it. SettingsPath returns the pi home dir (not the file) so the
+// install is offered whenever pi has run once, even though the extensions
+// directory itself is created lazily.
+func (piAdapter) Install(string) error {
+	path, err := beaconPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if cur, err := os.ReadFile(path); err == nil && string(cur) == gateSource {
+		return nil
+	}
+	return os.WriteFile(path, []byte(gateSource), 0o644)
+}
+
+func (piAdapter) ReconcileIfInstalled(string) ([]string, error) {
+	path, err := beaconPath()
+	if err != nil {
+		return nil, err
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil // never installed: don't materialize uninvited
+	}
+	if string(cur) == gateSource {
+		return nil, nil
+	}
+	if err := os.WriteFile(path, []byte(gateSource), 0o644); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
+}
+
+func (piAdapter) Uninstall() error {
+	path, err := beaconPath()
+	if err != nil {
+		return err
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil || string(cur) != gateSource {
+		return nil // absent, or user-crafted: leave it alone
+	}
+	return os.Remove(path)
+}
+
+func (piAdapter) SettingsPath() (string, error) {
+	home, err := piHome()
+	if err != nil {
+		return "", err
+	}
+	return home, nil
+}
+func (piAdapter) DefaultHookEvents() []string { return nil }

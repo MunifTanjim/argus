@@ -25,7 +25,7 @@ export default function (pi: ExtensionAPI) {
 	g.__argusGateLoaded = true;
 
 	const managed = process.env["ARGUS_MANAGED"] === "1";
-	const socketPath = process.env["ARGUS_SOCKET"] ?? "";
+	const socketPath = process.env["ARGUS_SOCKET"] ?? defaultSocketPath();
 
 	pi.on("tool_call", async (event, ctx) => {
 		const tool = pi.getAllTools().find((t) => t.name === event.toolName);
@@ -81,6 +81,18 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	if (!managed && socketPath) {
+		// Lifecycle forwarding: the node has no RPC stdout for foreign
+		// sessions, so status travels over the socket. Managed sessions skip
+		// this — their events already flow over RPC.
+		pi.on("agent_start", async () => {
+			beaconSend({ type: "event", name: "agent_start" });
+		});
+		pi.on("agent_settled", async () => {
+			beaconSend({ type: "event", name: "agent_settled" });
+		});
+		pi.on("session_info_changed", async (ev) => {
+			beaconSend({ type: "event", name: "session_info_changed", displayName: ev.name ?? null });
+		});
 		// Intent handlers that need ExtensionContext use the stashed session
 		// context; pi.sendUserMessage is on the stable ExtensionAPI.
 		beaconIntents.onPrompt = (text, busy) => {
@@ -122,6 +134,19 @@ function summarizeInput(input: unknown): string {
 	return "";
 }
 
+/**
+ * Well-known Argus socket path, mirroring the node's default. Overridable
+ * with ARGUS_SOCKET (a unix path, or host:port for TCP where unix sockets
+ * are unavailable).
+ */
+function defaultSocketPath(): string {
+	const env = process.env["ARGUS_SOCKET"];
+	if (env) return env;
+	const xdg = process.env["XDG_RUNTIME_DIR"];
+	if (xdg) return `${xdg}/argus-pi.sock`;
+	return `/tmp/argus-pi-${process.getuid?.() ?? 0}.sock`;
+}
+
 // -- Beacon client (beacon mode only; managed sessions never reach here) --
 
 type Decision = "allow" | "deny" | "offline";
@@ -158,13 +183,17 @@ async function connectBeacon(pi: ExtensionAPI, socketPath: string) {
 	void pi;
 	if (beaconConn) return;
 	const net = await import("node:net");
-	const conn = net.createConnection(socketPath);
+	const isTCP = !socketPath.startsWith("/") && !socketPath.endsWith(".sock");
+	const conn = isTCP
+		? net.createConnection(parseTCPTarget(socketPath))
+		: net.createConnection(socketPath);
 	let buf = "";
 	conn.on("connect", () => {
 		beaconReady = true;
 		beaconConn = { write: (s: string) => conn.write(s), close: () => conn.end() };
 		const info = beaconIntents.describe?.();
 		beaconConn.write(JSON.stringify({ type: "hello", ...(info as object) }) + "\n");
+		startHeartbeat();
 	});
 	conn.on("data", (chunk: Buffer) => {
 		buf += chunk.toString();
@@ -178,16 +207,38 @@ async function connectBeacon(pi: ExtensionAPI, socketPath: string) {
 	const down = () => {
 		beaconReady = false;
 		beaconConn = null;
+		stopHeartbeat();
 		setTimeout(() => void connectBeacon(pi, socketPath), 3000);
 	};
 	conn.on("close", down);
 	conn.on("error", () => {});
 }
 
+function parseTCPTarget(addr: string): { host: string; port: number } {
+	const i = addr.lastIndexOf(":");
+	return { host: addr.slice(0, i) || "127.0.0.1", port: Number(addr.slice(i + 1)) };
+}
+
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+function startHeartbeat() {
+	stopHeartbeat();
+	heartbeatTimer = setInterval(() => {
+		beaconConn?.write(JSON.stringify({ type: "heartbeat" }) + "\n");
+	}, 30_000);
+}
+function stopHeartbeat() {
+	if (heartbeatTimer) clearInterval(heartbeatTimer);
+	heartbeatTimer = null;
+}
+
 function disconnectBeacon() {
 	beaconReady = false;
 	beaconConn?.close();
 	beaconConn = null;
+}
+
+function beaconSend(obj: unknown) {
+	if (beaconReady && beaconConn) beaconConn.write(JSON.stringify(obj) + "\n");
 }
 
 async function handleBeaconLine(line: string) {

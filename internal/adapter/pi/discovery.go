@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -59,7 +60,14 @@ type discoverer struct {
 	ctx context.Context
 
 	mu    sync.Mutex
-	procs map[string]*sessionProc // pi session id -> proc
+	procs map[string]*sessionProc // pi session id -> owned proc
+
+	// Beacon side (Tier 2): foreign sessions whose gate extension dialed in.
+	blnMu    sync.Mutex
+	bln      net.Listener
+	blnAddr  string
+	foreign  map[string]*foreignSession
+	sockPath func() string
 
 	seq      atomic.Uint64
 	gateOnce sync.Once
@@ -69,9 +77,11 @@ type discoverer struct {
 
 func newDiscoverer(reg *registry.Registry, _ map[session.TmuxServer]*tmux.Client) *discoverer {
 	return &discoverer{
-		reg:   reg,
-		ctx:   context.Background(),
-		procs: map[string]*sessionProc{},
+		reg:      reg,
+		ctx:      context.Background(),
+		procs:    map[string]*sessionProc{},
+		foreign:  map[string]*foreignSession{},
+		sockPath: defaultSocketPath,
 	}
 }
 
@@ -88,6 +98,7 @@ func newSessionID() string {
 }
 
 func (d *discoverer) ScanOnce(_ context.Context) error {
+	d.ensureBeacon()
 	d.mu.Lock()
 	var dead []string
 	for id, p := range d.procs {
@@ -102,6 +113,7 @@ func (d *discoverer) ScanOnce(_ context.Context) error {
 	for _, id := range dead {
 		d.forget(id)
 	}
+	d.sweepForeign()
 	return nil
 }
 
@@ -176,10 +188,21 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 }
 
 func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
-	p := d.get(id)
-	if p == nil {
-		return fmt.Errorf("pi: unknown session %s", id)
+	if p := d.get(id); p != nil {
+		return d.sendPromptOwned(ctx, p, text)
 	}
+	if fs := d.lookupForeign(id); fs != nil {
+		fs.mu.Lock()
+		busy := fs.streaming
+		fs.mu.Unlock()
+		return d.beaconSend(fs, map[string]any{
+			"type": "intent_prompt", "text": text, "busy": busy,
+		})
+	}
+	return fmt.Errorf("pi: unknown session %s", id)
+}
+
+func (d *discoverer) sendPromptOwned(ctx context.Context, p *sessionProc, text string) error {
 	p.mu.Lock()
 	busy := p.streaming
 	p.mu.Unlock()
@@ -203,8 +226,11 @@ func (d *discoverer) dismiss(ctx context.Context, id string) error {
 	delete(d.procs, id)
 	d.mu.Unlock()
 	if p == nil {
-		// The user's dismiss always removes the card, even one lost locally.
-		d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
+		// Foreign sessions untrack only: the user's own process keeps running.
+		// Unknown ids still emit Dead so a lost card is always cleared.
+		if !d.forgetForeign(id) {
+			d.reg.ApplyHook(registry.HookUpdate{Agent: Agent, AgentSessionID: id, Status: session.StatusDead})
+		}
 		return nil
 	}
 	_ = p.conn.close() // orderly shutdown: pi disposes the runtime and exits
@@ -331,14 +357,13 @@ type uiRequest struct {
 	Timeout     int      `json:"timeout"`
 }
 
-// applyUIRequest surfaces an extension dialog as an Argus interaction and
-// parks it for Respond. Dialog methods (select/confirm/input/editor) block the
-// extension until extension_ui_response; fire-and-forget methods (notify,
-// setStatus, ...) carry no decision and are ignored here.
-func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
+// parseUIRequest interprets one extension dialog record, shared by owned RPC
+// sessions (extension_ui_request) and foreign beacons (approval_request mapped
+// onto the same shape). It returns the parked dialog and its Argus interaction.
+func parseUIRequest(raw json.RawMessage) (*pendingUI, *session.Interaction, bool) {
 	var req uiRequest
 	if json.Unmarshal(raw, &req) != nil || req.ID == "" {
-		return
+		return nil, nil, false
 	}
 	pend := &pendingUI{uiID: req.ID, method: req.Method, title: req.Title, message: req.Message, options: req.Options}
 	var ix *session.Interaction
@@ -369,11 +394,23 @@ func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
 			}},
 		}
 	default:
-		return // notify, setStatus, setWidget, setTitle, set_editor_text
+		return nil, nil, false // notify, setStatus, setWidget, setTitle, set_editor_text
 	}
 	ix.RequestID = req.ID
+	return pend, ix, true
+}
+
+// applyUIRequest surfaces an extension dialog as an Argus interaction and
+// parks it for Respond. Dialog methods (select/confirm/input/editor) block the
+// extension until extension_ui_response; fire-and-forget methods (notify,
+// setStatus, ...) carry no decision and are ignored here.
+func (d *discoverer) applyUIRequest(p *sessionProc, raw json.RawMessage) {
+	pend, ix, ok := parseUIRequest(raw)
+	if !ok {
+		return
+	}
 	p.mu.Lock()
-	p.pending[req.ID] = pend
+	p.pending[pend.uiID] = pend
 	p.mu.Unlock()
 	d.upsert(p, session.StatusAwaitingInput, ix, true)
 }
