@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -46,9 +47,9 @@ func unlistedBindings() []string {
 
 func TestScreensListOnlyCommandsTheyRun(t *testing.T) {
 	_, errs := buildKeymap(map[string]map[string]string{
-		"transcript":   {"x": "session kill", "<C-y>": "session load-more"},
-		"project-tree": {"<C-y>": "session load-more"},
-		"session-dock": {"E": "transcript export"},
+		"transcript":   {"x": ":session kill<CR>", "<C-y>": ":session load-more<CR>"},
+		"project-tree": {"<C-y>": ":session load-more<CR>"},
+		"session-dock": {"E": ":transcript export<CR>"},
 	}, time.Second, "")
 	want := []string{
 		`keymap: project-tree "<C-y>": unknown command "session load-more"`,
@@ -62,7 +63,7 @@ func TestScreensListOnlyCommandsTheyRun(t *testing.T) {
 
 	m := testModel()
 	m = withView(m, viewSession)
-	m = withKeymap(m, map[string]map[string]string{"global": {"qm": "session load-more"}})
+	m = withKeymap(m, map[string]map[string]string{"global": {"qm": ":session load-more<CR>"}})
 	if m, _ = upd(m, keyMsg("q")); len(m.keyBuf) != 0 {
 		t.Error("session load-more does not run on session, so q must not wait for qm there")
 	}
@@ -119,7 +120,7 @@ func TestDetailDockFollowsDockKeymap(t *testing.T) {
 	m := withKeymap(promptModel(&session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{
 		{Question: "Many", Options: []string{"A", "B"}, MultiSelect: true},
 		{Question: "One", Options: []string{"C", "D"}},
-	}}), map[string]map[string]string{"session-dock": {"<C-y>": "option select"}})
+	}}), map[string]map[string]string{"session-dock": {"<C-y>": ":toggle selection<CR>"}})
 	m = withTr(m, func(t *transcriptComp) { t.historyView = histDetail })
 	m, _ = upd(m, ctrlKey('y'))
 	if !m.dock.toggles[0][0] {
@@ -248,7 +249,7 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 	})
 
 	t.Run("a file-tree mapping applies only in the file tree", func(t *testing.T) {
-		raw := map[string]map[string]string{"file-tree": {"<C-y>": "back"}}
+		raw := map[string]map[string]string{"file-tree": {"<C-y>": ":back<CR>"}}
 		if m, _ := upd(withKeymap(filesFocused(), raw), ctrlKey('y')); m.focused != mainPane {
 			t.Errorf("<C-y> in the Files tab should run back: focus = %v", m.focused)
 		}
@@ -275,7 +276,7 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 	})
 
 	t.Run("transcript covers the card detail", func(t *testing.T) {
-		raw := map[string]map[string]string{"transcript": {"<C-y>": "back"}}
+		raw := map[string]map[string]string{"transcript": {"<C-y>": ":back<CR>"}}
 		for name, m := range map[string]model{"live": waitingSession(), "history": historyTranscript(false)} {
 			m = pressKeys(withKeymap(m, raw), keyMsg("enter"))
 			if trOf(m).historyView != histDetail {
@@ -289,9 +290,9 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 
 	t.Run("the old names give the hint", func(t *testing.T) {
 		km, errs := buildKeymap(map[string]map[string]string{
-			"projects": {"a": "quit"},
-			"session":  {"b": "back"},
-			"detail":   {"c": "back"},
+			"projects": {"a": ":quit<CR>"},
+			"session":  {"b": ":back<CR>"},
+			"detail":   {"c": ":back<CR>"},
 		}, time.Second, "")
 		want := []string{
 			`keymap: unknown screen "detail" (now transcript)`,
@@ -308,7 +309,7 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 		}
 		for s := range km.screens {
 			for _, k := range []string{"a", "b", "c"} {
-				if _, taken := km.screens[s].takenBy[k]; taken {
+				if cmds := km.screens[s].takenBy[k]; slices.Contains(cmds, "quit") || slices.Contains(cmds, "back") {
 					t.Errorf("an old section's mapping of %s reached %s", k, s)
 				}
 			}

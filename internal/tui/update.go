@@ -532,7 +532,7 @@ func (m *model) toggleActiveOnly() {
 	m.refilter(sel)
 	m.flash = "showing all sessions"
 	if m.activeOnly {
-		m.flash = "showing active sessions · " + m.showsAllHint()
+		m.flash = "showing active sessions · " + m.showsAllHint(m.screen())
 	}
 }
 
@@ -570,8 +570,8 @@ func (m *model) selectRootID(sel string) {
 	}
 }
 
-func (m model) showsAllHint() string {
-	return m.keyText(listKeys.ActiveOnly) + " shows all"
+func (m model) showsAllHint(section string) string {
+	return m.keyTextOn(section, listKeys.ActiveOnly) + " shows all"
 }
 
 func (m model) rootIDs() []string {

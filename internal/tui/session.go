@@ -280,12 +280,21 @@ func sessionHeader(s session.Session, title lipgloss.Style) string {
 	return header + dimStyle.Render(fmt.Sprintf("  [%s] %s", paneTag(s), statusWord(s)))
 }
 
+// liveScreenKey is the key that opens the live screen from the focused part of
+// the session, the transcript or the dock.
+func (m model) liveScreenKey() string {
+	if screenHas(m.screen(), sessionKeys.Raw.name) {
+		return m.keyText(sessionKeys.Raw)
+	}
+	return m.keyTextOn("transcript", sessionKeys.Raw)
+}
+
 // startingNotice renders the startup-gate message centered in place of the
 // absent transcript.
 func startingNotice(m model) string {
 	lines := []string{
 		"Session is starting or waiting at a startup prompt.",
-		"Press " + m.keyText(sessionKeys.Raw) + " to open the live screen and continue.",
+		"Press " + m.liveScreenKey() + " to open the live screen and continue.",
 	}
 	return m.center(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth())
 }

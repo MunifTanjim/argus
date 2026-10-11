@@ -124,7 +124,12 @@ func (m model) helpKeys(section string, b binding) string {
 // key.
 func (m model) keyText(b binding) string { return m.keyTextOn(m.screen(), b) }
 
+// keyTextOn is the label of b's first key on screen, or b's name when it has
+// none there.
 func (m model) keyTextOn(screen string, b binding) string {
+	if strictScreens {
+		checkKeyText(screen, b)
+	}
 	if keys := m.keymap().screenKeys(screen).keys(b); len(keys) > 0 {
 		return keyLabel(keys[0])
 	}

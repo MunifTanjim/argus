@@ -69,7 +69,7 @@ func TestPaneShowsSetupBlock(t *testing.T) {
 
 func TestSetupBlockFollowsMappedKeys(t *testing.T) {
 	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {
-		"<C-s>": "workspace rerun-setup", "<C-o>": "open setup-log",
+		"<C-s>": ":workspace rerun-setup<CR>", "<C-o>": ":open setup-log<CR>",
 	}})
 	m.width, m.height = 120, 30
 	m = withSetup(m, 1, &api.ScriptRun{State: "failed", Command: "pnpm install", ExitCode: 1})

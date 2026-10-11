@@ -8,14 +8,14 @@
 ▌     󰉋 re│                                                                                                  │───────╯
        re│ >toggle                                                                                          │
           │                                                                                                  │cs ·  ─╮
+          │ > toggle pin                   P shift+p                                                         │       │
           │ > toggle mouse                                                                                   │       │
-          │ > toggle show-gone             zx                                                                │       │
-          │ > toggle show-hidden           z.                                                                │───────╯
+          │ > toggle hidden                H shift+h                                                         │───────╯
+          │ > toggle show-gone             zx                                                                │
+          │ > toggle show-hidden           z.                                                                │
           │ > toggle left-sidebar          ␣o                                                                │
           │ > toggle right-sidebar         ␣e                                                                │
           │ > toggle verbose-transcript                                                                      │
-          │                                                                                                  │
-          │                                                                                                  │
           │                                                                                                  │
           │                                                                                                  │
           │                                                                                                  │

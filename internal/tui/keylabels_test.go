@@ -3,9 +3,12 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func TestKeyLabel(t *testing.T) {
@@ -30,7 +33,7 @@ func TestFooterShowsARemappedPair(t *testing.T) {
 	m = withFile(m, fileComp{ws: "n1:w2", path: "a.go"})
 	m = withFocus(m, mainPane)
 	before := ansi.Strip(m.currentFooter())
-	m = withKeymap(m, map[string]map[string]string{"global": {"gg": "goto top"}})
+	m = withKeymap(m, map[string]map[string]string{"global": {"gg": ":goto top<CR>"}})
 	after := ansi.Strip(m.currentFooter())
 	if !strings.Contains(before, "g/G") || !strings.Contains(after, "gg/G") {
 		t.Errorf("footer before %q, after %q", before, after)
@@ -38,14 +41,14 @@ func TestFooterShowsARemappedPair(t *testing.T) {
 }
 
 func TestHelpNamesTheMappedExpandKey(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"l": "", "<Right>": "", "zo": "", "o": "fold open"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"l": "<Nop>", "<Right>": "<Nop>", "zo": "<Nop>", "o": ":fold open<CR>"}})
 	if out := ansi.Strip(m.projectsHelpView()); !strings.Contains(out, "open; o opens Home/workspace") {
 		t.Errorf("help should name o, the mapped expand key:\n%s", out)
 	}
 }
 
 func TestHelpShowsCommandNamesAndUserKeys(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-y>": "toggle show-hidden"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-y>": ":toggle show-hidden<CR>"}})
 	m.width, m.height = 160, 50
 	out := ansi.Strip(m.projectsHelpView())
 	if !strings.Contains(out, "toggle show-hidden") || !strings.Contains(out, "^y") {
@@ -54,7 +57,7 @@ func TestHelpShowsCommandNamesAndUserKeys(t *testing.T) {
 }
 
 func TestAnyKeyHintsIgnoreRemaps(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"<F1>": "help", "<C-x>": "back"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"<F1>": ":help<CR>", "<C-x>": ":back<CR>"}})
 	m.width, m.height = 160, 40
 	m.showHelp = true
 	if f := ansi.Strip(m.helpScreen()); !strings.Contains(f, "any key close") {
@@ -67,8 +70,8 @@ func TestAnyKeyHintsIgnoreRemaps(t *testing.T) {
 
 func TestRedactFootersShowEffectiveKeys(t *testing.T) {
 	m := withKeymap(newRedactModel(), map[string]map[string]string{"transcript": {
-		"<C-r>": "redaction add", "<C-l>": "redaction list", "<C-w>": "redaction save",
-		"<C-x>": "redaction remove", "gz": "goto bottom",
+		"<C-r>": ":redaction add<CR>", "<C-l>": ":redaction list<CR>", "<C-w>": ":redaction save<CR>",
+		"<C-x>": ":redaction remove<CR>", "gz": ":goto bottom<CR>",
 	}})
 	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "redact: ^r add secret") {
 		t.Errorf("idle footer: %q", f)
@@ -91,7 +94,7 @@ func TestLabelUsesTheLabeledBindingsOwnKeys(t *testing.T) {
 	m := testModel()
 	m = withView(m, viewSession)
 	m = withFocus(m, rightSidebar)
-	m = withKeymap(m, map[string]map[string]string{"file-tree": {"<Up>": ""}})
+	m = withKeymap(m, map[string]map[string]string{"file-tree": {"<Up>": "<Nop>"}})
 	if got := m.helpBinding(projectsKeys.Up).Help().Key; !strings.HasPrefix(got, "k/") {
 		t.Errorf("the files sidebar's prev label should start with its own k: %q", got)
 	}
@@ -122,7 +125,7 @@ func TestHelpKeysSkipQuietDefaultsUnlessMapped(t *testing.T) {
 	if got := projectsTestModel().helpKeys("workspace", paneKeys.Left); got != "^wh" {
 		t.Errorf("helpKeys focus left = %q, want %q", got, "^wh")
 	}
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-w><C-h>": "focus left"}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-w><C-h>": ":focus left<CR>"}})
 	if got := m.helpKeys("workspace", paneKeys.Left); got != "^w^h ^wh" {
 		t.Errorf("helpKeys with <C-w><C-h> mapped = %q, want %q", got, "^w^h ^wh")
 	}
@@ -135,7 +138,7 @@ func TestHelpKeysShowsAllEffectiveKeys(t *testing.T) {
 		t.Errorf("helpKeys prev pair = %q, want %q", got, "↑ k/↓ j")
 	}
 
-	m2 := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-y>": "toggle show-hidden"}})
+	m2 := withKeymap(projectsTestModel(), map[string]map[string]string{"global": {"<C-y>": ":toggle show-hidden<CR>"}})
 	got2 := m2.helpKeys("project-tree", projectsKeys.ShowHidden)
 	if !strings.Contains(got2, "^y") || !strings.Contains(got2, "z.") {
 		t.Errorf("helpKeys remapped ShowHidden = %q, want both ^y and z.", got2)
@@ -164,7 +167,7 @@ func TestHelpKeysResolveOnProjectsScreen(t *testing.T) {
 func TestFlashNamesEffectiveKey(t *testing.T) {
 	m := projectsTestModel()
 	m = selectRow(m, "n1:p1")
-	m = withKeymap(m, map[string]map[string]string{"project": {"<C-y>": "toggle left-sidebar"}})
+	m = withKeymap(m, map[string]map[string]string{"project": {"<C-y>": ":toggle left-sidebar<CR>"}})
 	m = typeKeys(m, " o")
 	m, _ = upd(m, keyMsg("/"))
 	if !strings.Contains(m.flash, "^y shows the tree") {
@@ -173,7 +176,7 @@ func TestFlashNamesEffectiveKey(t *testing.T) {
 }
 
 func TestKeyTextFallsBackToTheCommandName(t *testing.T) {
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"<Leader>o": ""}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"project-tree": {"<Leader>o": "<Nop>"}})
 	if got := m.keyText(projectsKeys.ToggleSidebar); got != "toggle left-sidebar" {
 		t.Errorf("keyText with every key removed = %q, want the command name", got)
 	}
@@ -183,11 +186,11 @@ func TestCommitBackKeys(t *testing.T) {
 	if got := projectsTestModel().commitBackKeys(); got != "esc h" {
 		t.Errorf("default: %q, want %q", got, "esc h")
 	}
-	m := withKeymap(projectsTestModel(), map[string]map[string]string{"changes": {"h": "", "<Left>": "", "zc": ""}})
+	m := withKeymap(projectsTestModel(), map[string]map[string]string{"changes": {"h": "<Nop>", "<Left>": "<Nop>", "zc": "<Nop>"}})
 	if got := m.commitBackKeys(); got != "esc" {
 		t.Errorf("with every collapse key removed: %q, want %q", got, "esc")
 	}
-	m = withKeymap(projectsTestModel(), map[string]map[string]string{"changes": {"<C-h>": "fold close"}})
+	m = withKeymap(projectsTestModel(), map[string]map[string]string{"changes": {"<C-h>": ":fold close<CR>"}})
 	if got := m.commitBackKeys(); got != "esc ^h" {
 		t.Errorf("with collapse remapped: %q, want %q", got, "esc ^h")
 	}
@@ -219,5 +222,57 @@ func TestFileFooterNamesHalfPage(t *testing.T) {
 		if b.name == fileViewKeys.HalfDown.name && b.Help().Desc != "half" {
 			t.Errorf("half-page scroll is labeled %q; page names the full-page scroll", b.Help().Desc)
 		}
+	}
+}
+
+func TestHomeHintShowsItsKeyWhileTheTreeHasFocus(t *testing.T) {
+	m := projectsTestModel()
+	if m.focused != leftSidebar {
+		t.Fatalf("the test needs the tree focused: %v", m.focused)
+	}
+	m.activeOnly = true
+	for id, s := range m.sessions {
+		s.Status = session.StatusIdle
+		m.sessions[id] = s
+	}
+	m.reorder()
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "za shows all") {
+		t.Errorf("the Home hint should name za while the tree has focus:\n%s", out)
+	}
+}
+
+func TestKeyTextOnAnUnlistedSectionIsRecorded(t *testing.T) {
+	m := projectsTestModel()
+	m.keyTextOn("logs", projectsKeys.TogglePin)
+	key := `logs: toggle pin (key text)`
+	strictMu.Lock()
+	recorded := unlisted[key]
+	delete(unlisted, key)
+	strictMu.Unlock()
+	if !recorded {
+		t.Error("a key lookup on a section that does not list the command must be recorded")
+	}
+}
+
+func TestStartingNoticeNamesTheFocusedKey(t *testing.T) {
+	m := withKeymap(waitingSession(), map[string]map[string]string{"session-dock": {"<C-g>": ":open live-screen<CR>"}, "transcript": {"<C-t>": "<Nop>"}})
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.screen() != "session-dock" {
+		t.Fatalf("the test needs the dock focused: %q", m.screen())
+	}
+	if got := startingNotice(m); !strings.Contains(got, "^g") {
+		t.Errorf("the notice should name the dock's key: %q", ansi.Strip(got))
+	}
+}
+
+func TestRemovedCommandNamesItsReplacement(t *testing.T) {
+	_, errs := buildKeymap(map[string]map[string]string{"project-tree": {"P": "project unpin", "p": ":project pin<CR>"}}, time.Second, "")
+	want := []string{
+		`keymap: project-tree "P": use ":toggle pin<CR>"`,
+		`keymap: project-tree "p": project pin is now toggle pin`,
+	}
+	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
 	}
 }

@@ -160,7 +160,7 @@ func rowSummary(c *ctx, r projectsRow, w int) string {
 		}
 		b.WriteString(m.projRowLine(row, false, false, act, w) + "\n")
 	}
-	hint := m.keyText(projectsKeys.Back) + " tree: " + m.keyText(projectsKeys.New) + " new workspace · " + m.keyText(projectsKeys.Rename) + " rename"
+	hint := m.keyTextOn("project", projectsKeys.Back) + " tree: " + m.keyTextOn("project-tree", projectsKeys.New) + " new workspace · " + m.keyTextOn("project-tree", projectsKeys.Rename) + " rename"
 	b.WriteString("\n" + dimStyle.Render(truncateLine(hint, w)))
 	return b.String()
 }

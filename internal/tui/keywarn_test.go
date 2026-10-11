@@ -12,7 +12,7 @@ import (
 
 func TestWithKeymapsShowsTheFirstErrorAndACount(t *testing.T) {
 	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{
-		"project-tree": {"a": "nope", "b": "nope2", "c": "nope3"},
+		"project-tree": {"a": ":nope<CR>", "b": ":nope2<CR>", "c": ":nope3<CR>"},
 	}})
 	if m.flash != `keymap: project-tree "a": unknown command "nope" (+2 more)` {
 		t.Errorf("flash = %q", m.flash)
@@ -34,7 +34,7 @@ func TestNoKeymapsKeepsTheDefaults(t *testing.T) {
 }
 
 func TestKittyWarningWithoutTheProtocol(t *testing.T) {
-	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{"global": {"<C-S-b>": "toggle left-sidebar"}}})
+	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{"global": {"<C-S-b>": ":toggle left-sidebar<CR>"}}})
 	m, _ = upd(m, kittyCheckMsg{})
 	if !strings.Contains(m.flash, "keymap: <C-S-b> needs a terminal with the Kitty keyboard protocol") {
 		t.Errorf("flash = %q", m.flash)
@@ -50,7 +50,7 @@ func TestKittyWarningForTheLeader(t *testing.T) {
 }
 
 func TestNoKittyWarningWithTheProtocol(t *testing.T) {
-	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{"global": {"<C-S-b>": "toggle left-sidebar"}}})
+	m := projectsTestModel().withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{"global": {"<C-S-b>": ":toggle left-sidebar<CR>"}}})
 	m, _ = upd(m, tea.KeyboardEnhancementsMsg{Flags: 1})
 	m, _ = upd(m, kittyCheckMsg{})
 	if strings.Contains(m.flash, "Kitty") {
@@ -62,7 +62,7 @@ func TestEmptyHomeFooterShowsTheWarningAndPendingKeys(t *testing.T) {
 	m := homeTestModel()
 	m.order = nil
 	m = m.withKeymaps(config.TUIConfig{Keymaps: map[string]map[string]string{
-		"home": {"a": "nope"}, "global": {"gr": "refresh"},
+		"home": {"a": ":nope<CR>"}, "global": {"gr": ":refresh<CR>"},
 	}})
 	if f := ansi.Strip(m.View().Content); !strings.Contains(f, `keymap: home "a": unknown command "nope"`) {
 		t.Errorf("the empty home list should show the keymap warning:\n%s", f)

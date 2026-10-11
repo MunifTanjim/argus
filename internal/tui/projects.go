@@ -206,7 +206,7 @@ func (m model) setupBlock(ws string, w int) string {
 			lines = append(lines, truncateLine(dimStyle.Render(l), w))
 		}
 	}
-	lines = append(lines, truncateLine(dimStyle.Render(m.keyText(projectsKeys.RunSetup)+" runs setup again · "+m.keyText(projectsKeys.SetupLog)+" shows the full log"), w))
+	lines = append(lines, truncateLine(dimStyle.Render(m.keyTextOn("project-tree", projectsKeys.RunSetup)+" runs setup again · "+m.keyTextOn("project-tree", projectsKeys.SetupLog)+" shows the full log"), w))
 	return strings.Join(lines, "\n") + "\n\n"
 }
 

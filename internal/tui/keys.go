@@ -20,8 +20,9 @@ import (
 type binding struct {
 	key.Binding
 	name     string
-	defaults string
-	quiet    string // default keys that work but that the help does not list
+	defaults string // built-in keys
+	quiet    string // built-in keys that work but that the help does not list
+	maps     string // keys that the default keymap maps to :name<CR>
 	defKey   string // name and default keys: bindings with equal defKey have equal default keys
 }
 
@@ -32,6 +33,14 @@ func nb(name, defaults, desc string) binding {
 		defaults: defaults,
 		defKey:   name + "\x00" + defaults,
 	}
+}
+
+// nm is a binding with no built-in keys, whose keys come from the default
+// keymap.
+func nm(name, maps, desc string) binding {
+	b := nb(name, "", desc)
+	b.maps = maps
+	return b
 }
 
 func (b binding) alt(keys string) binding {
@@ -99,43 +108,42 @@ var listKeys = struct {
 	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
 	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
-	Jump:     nb("open tmux-pane", "O", "jump"),
+	Jump:     nm("open tmux-pane", "O", "jump"),
 	TabPrev:  nb("tab prev", "gT", ""),
 	TabNext:  nb("tab next", "gt", "tabs"),
-	New:      nb("session spawn", "s", "spawn"),
-	Kill:     nb("session kill", "dd", "kill"),
-	Refresh:  nb("refresh", "gr", "refresh"),
+	New:      nm("session spawn", "s", "spawn"),
+	Kill:     nm("session kill", "dd", "kill"),
+	Refresh:  nm("refresh", "gr", "refresh"),
 	Back:     nb("back", "<Esc>", "tree"),
-	Quit:     nb("quit", "Q", "quit"),
+	Quit:     nm("quit", "Q", "quit"),
 
-	ActiveOnly: nb("toggle active-only", "za", "active"),
+	ActiveOnly: nm("toggle active-only", "za", "active"),
 	Filter:     nb("filter-sessions", "/", "filter"),
-	GroupBy:    nb("cycle group-by", "zg", "group"),
+	GroupBy:    nm("cycle group-by", "zg", "group"),
 }
 
 var terminalKeys = struct {
 	Spawn, Rename, Kill binding
 }{
-	Spawn:  nb("terminal spawn", "a", "spawn"),
-	Rename: nb("terminal rename", "r", "rename"),
-	Kill:   nb("terminal kill", "dd", "kill"),
+	Spawn:  nm("terminal spawn", "a", "spawn"),
+	Rename: nm("terminal rename", "r", "rename"),
+	Kill:   nm("terminal kill", "dd", "kill"),
 }
 
 var nodeKeys = struct {
 	Wakelock binding
 }{
-	Wakelock: nb("node wakelock", "w", "wakelock"),
+	Wakelock: nm("node wakelock", "w", "wakelock"),
 }
 
 var projectsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Left, Right, Enter binding
-	Widen, Narrow, ToggleSidebar, Filter, Help                                    binding
-	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone             binding
-	Unhide, Unpin                                                                 binding
-	Target, DiffMode, Spawn, ToggleFiles                                          binding
-	SideTabPrev, SideTabNext, Refresh, Back                                       binding
-	Forget                                                                        binding
-	RunSetup, SetupLog, Palette, ToggleMouse, ToggleVerbose, Hover                binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Left, Right, Enter   binding
+	Widen, Narrow, ToggleSidebar, Filter, Help                                      binding
+	New, Rename, ToggleHidden, TogglePin, Remove, ForceRemove, ShowHidden, ShowGone binding
+	Target, DiffMode, Spawn, ToggleFiles                                            binding
+	SideTabPrev, SideTabNext, Refresh, Back                                         binding
+	Forget                                                                          binding
+	RunSetup, SetupLog, Palette, ToggleMouse, ToggleVerbose, Hover                  binding
 }{
 	Up:            nb("prev", "<Up> k", "move"),
 	Down:          nb("next", "<Down> j", ""),
@@ -150,34 +158,32 @@ var projectsKeys = struct {
 	Enter:         nb("open", "<CR>", "open"),
 	Widen:         nb("sidebar wider", "<C-w>>", "resize"),
 	Narrow:        nb("sidebar narrower", "<C-w><lt>", ""),
-	ToggleSidebar: nb("toggle left-sidebar", "<Leader>o", "sidebar"),
+	ToggleSidebar: nm("toggle left-sidebar", "<Leader>o", "sidebar"),
 	Filter:        nb("filter-projects", "/", "filter"),
-	Help:          nb("help", "g?", "help"),
-	New:           nb("workspace new", "a", "new"),
-	Rename:        nb("project rename", "r", "rename"),
-	Hide:          nb("project hide", "H", "hide"),
-	Unhide:        nb("project unhide", "H", ""),
-	Pin:           nb("project pin", "P", "pin"),
-	Unpin:         nb("project unpin", "P", ""),
-	Remove:        nb("workspace remove", "dd", "remove"),
-	ForceRemove:   nb("workspace force-remove", "D", ""),
-	ShowHidden:    nb("toggle show-hidden", "z.", "hidden"),
-	ShowGone:      nb("toggle show-gone", "zx", "gone"),
-	Target:        nb("workspace change-target", "T", "target"),
-	DiffMode:      nb("toggle diff-vs-target", "t", "vs target"),
-	Spawn:         nb("session spawn", "s", "spawn"),
-	ToggleFiles:   nb("toggle right-sidebar", "<Leader>e", "files"),
+	Help:          nm("help", "g?", "help"),
+	New:           nm("workspace new", "a", "new"),
+	Rename:        nm("project rename", "r", "rename"),
+	ToggleHidden:  nm("toggle hidden", "H", "hide"),
+	TogglePin:     nm("toggle pin", "P", "pin"),
+	Remove:        nm("workspace remove", "dd", "remove"),
+	ForceRemove:   nm("workspace force-remove", "D", ""),
+	ShowHidden:    nm("toggle show-hidden", "z.", "hidden"),
+	ShowGone:      nm("toggle show-gone", "zx", "gone"),
+	Target:        nm("workspace change-target", "T", "target"),
+	DiffMode:      nm("toggle diff-vs-target", "t", "vs target"),
+	Spawn:         nm("session spawn", "s", "spawn"),
+	ToggleFiles:   nm("toggle right-sidebar", "<Leader>e", "files"),
 	SideTabPrev:   nb("tab prev", "gT", ""),
 	SideTabNext:   nb("tab next", "gt", "tabs"),
-	Refresh:       nb("refresh", "gr", "refresh"),
-	Forget:        nb("project forget", "F", "forget"),
+	Refresh:       nm("refresh", "gr", "refresh"),
+	Forget:        nm("project forget", "F", "forget"),
 	Back:          nb("back", "<Esc>", "back"),
-	RunSetup:      nb("workspace rerun-setup", "S", "setup again"),
-	SetupLog:      nb("open setup-log", "L", "setup log"),
-	Palette:       nb("open palette", "<C-k>", "palette"),
+	RunSetup:      nm("workspace rerun-setup", "S", "setup again"),
+	SetupLog:      nm("open setup-log", "L", "setup log"),
+	Palette:       nm("open palette", "<C-k>", "palette"),
 	ToggleMouse:   nb("toggle mouse", "", "mouse"),
 	ToggleVerbose: nb("toggle verbose-transcript", "", "verbose transcript"),
-	Hover:         nb("hover", "K", "hover"),
+	Hover:         nm("hover", "K", "hover"),
 }
 
 var createKeys = struct {
@@ -205,13 +211,13 @@ var transcriptKeys = struct {
 	Collapse:   nb("fold close", "h <Left> zc", "fold"),
 	Expand:     nb("fold open", "l <Right> zo", ""),
 	Detail:     nb("open", "<CR>", "detail"),
-	Answer:     nb("focus prompt", "<Tab>", "answer"),
-	Export:     nb("transcript export", "E", "export"),
+	Answer:     nm("focus prompt", "<Tab>", "answer"),
+	Export:     nm("transcript export", "E", "export"),
 	Back:       nb("back", "<Esc>", "back"),
-	Resume:     nb("session resume", "R", "resume"),
-	Redact:     nb("redaction add", "d", "redact"),
-	RedactList: nb("redaction list", "D", "redactions"),
-	RedactSave: nb("redaction save", "W", "save redacted"),
+	Resume:     nm("session resume", "R", "resume"),
+	Redact:     nm("redaction add", "d", "redact"),
+	RedactList: nm("redaction list", "D", "redactions"),
+	RedactSave: nm("redaction save", "W", "save redacted"),
 }
 
 var detailKeys = struct {
@@ -236,9 +242,9 @@ var detailKeys = struct {
 var sessionKeys = struct {
 	FocusPrompt, FocusTranscript, Raw binding
 }{
-	FocusPrompt:     nb("focus prompt", "<Tab>", "answer"),
-	FocusTranscript: nb("focus transcript", "<Tab>", "read"),
-	Raw:             nb("open live-screen", "<C-t>", "raw"),
+	FocusPrompt:     nm("focus prompt", "<Tab>", "answer"),
+	FocusTranscript: nm("focus transcript", "<Tab>", "read"),
+	Raw:             nm("open live-screen", "<C-t>", "raw"),
 }
 
 // paneKeys move focus between the tree, the main pane, the files sidebar, and
@@ -257,7 +263,6 @@ var paneKeys = struct {
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
 	Up, Down, HalfUp, HalfDown, PageUp, PageDown, TabPrev, TabNext, Submit, Next, Select, Read binding
-	Unselect                                                                                   binding
 	Back                                                                                       binding
 	Note                                                                                       binding
 }{
@@ -271,8 +276,7 @@ var promptKeys = struct {
 	TabNext:  nb("tab next", "<Right>", ""),
 	Submit:   nb("answer submit", "<CR>", "submit"),
 	Next:     nb("answer submit", "<CR>", "next"), // footer label for multi-question advance
-	Select:   nb("option select", "<Space>", "toggle"),
-	Unselect: nb("option unselect", "<Space>", ""),
+	Select:   nb("toggle selection", "<Space>", "toggle"),
 	Read:     nb("focus transcript", "<Tab>", "read"),
 	Back:     nb("back", "<Esc>", "back"),
 	Note:     nb("answer note", "n", "note"),
@@ -290,7 +294,7 @@ var historyProjectsKeys = struct {
 	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
 	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
-	Refresh:  nb("refresh", "gr", "refresh"),
+	Refresh:  nm("refresh", "gr", "refresh"),
 	Back:     nb("back", "<Esc>", "back"),
 }
 
@@ -306,9 +310,9 @@ var historySessionsKeys = struct {
 	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
 	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
-	More:     nb("session load-more", "m", "more"),
+	More:     nm("session load-more", "m", "more"),
 	Back:     nb("back", "<Esc>", "back"),
-	Resume:   nb("session resume", "R", "resume"),
+	Resume:   nm("session resume", "R", "resume"),
 }
 
 var logsKeys = struct {
@@ -337,10 +341,10 @@ var fileViewKeys = struct {
 	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
-	Wrap:     nb("toggle line-wrap", "yow", "wrap"),
-	NextFile: nb("next diff-file", "]f", "file"),
-	PrevFile: nb("prev diff-file", "[f", ""),
-	Refresh:  nb("refresh", "gr", "refresh"),
+	Wrap:     nm("toggle line-wrap", "yow", "wrap"),
+	NextFile: nm("next diff-file", "]f", "file"),
+	PrevFile: nm("prev diff-file", "[f", ""),
+	Refresh:  nm("refresh", "gr", "refresh"),
 	Back:     nb("back", "<Esc>", "back"),
 }
 
@@ -349,7 +353,7 @@ var redactListKeys = struct {
 }{
 	Up:     nb("prev", "<Up> k", ""),
 	Down:   nb("next", "<Down> j", "move"),
-	Remove: nb("redaction remove", "u", "remove"),
+	Remove: nm("redaction remove", "u", "remove"),
 }
 
 // screenLeave is the only app binding in live-screen passthrough; every other key

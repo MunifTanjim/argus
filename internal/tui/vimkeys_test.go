@@ -304,7 +304,7 @@ func TestVimCtrlTOpensLiveScreen(t *testing.T) {
 
 func TestVimRemovedCommandsAreUnknown(t *testing.T) {
 	for _, cmd := range []string{"expand-all-cards", "collapse-all-cards", "focus-right-sidebar", "focus-tree", "toggle-card-fold", "toggle-detail-fold"} {
-		_, errs := buildKeymap(map[string]map[string]string{"global": {"<C-y>": cmd}}, time.Second, "")
+		_, errs := buildKeymap(map[string]map[string]string{"global": {"<C-y>": ":" + cmd + "<CR>"}}, time.Second, "")
 		if len(errs) != 1 || !strings.Contains(errs[0], "unknown command") {
 			t.Errorf("%s: errs = %v, want an unknown command", cmd, errs)
 		}

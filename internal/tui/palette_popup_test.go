@@ -327,7 +327,7 @@ func TestCtrlKInThePaletteOpensNoSecondPalette(t *testing.T) {
 }
 
 func TestRemappedPaletteKey(t *testing.T) {
-	m := withKeymap(homeTestModel(), map[string]map[string]string{"global": {"<C-g>": "open palette"}})
+	m := withKeymap(homeTestModel(), map[string]map[string]string{"global": {"<C-g>": ":open palette<CR>"}})
 	m, _ = upd(m, ctrlKey('g'))
 	if _, ok := paletteOf(m); !ok {
 		t.Error("the remapped key did not open the palette")

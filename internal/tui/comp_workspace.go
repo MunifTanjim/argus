@@ -192,7 +192,7 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 	ss := m.wsSessions(p.ws)
 	if len(ss) == 0 {
 		if m.activeOnly || m.sessionFilter != "" {
-			return block + dimStyle.Render(m.emptyFilterHint("no active sessions in this workspace", projectsKeys.Back))
+			return block + dimStyle.Render(m.emptyFilterHint(p.section(), "no active sessions in this workspace", projectsKeys.Back))
 		}
 		return block + dimStyle.Render("no sessions in this workspace")
 	}

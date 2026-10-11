@@ -147,7 +147,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 		return h.welcome(c, title, chrome, w, ht)
 	}
 	if len(m.order) == 0 {
-		hint := dimStyle.Render(m.emptyFilterHint("no active sessions", listKeys.Back))
+		hint := dimStyle.Render(m.emptyFilterHint(h.section(), "no active sessions", listKeys.Back))
 		return centerBlock(title+"\n\n"+hint, cardW, w)
 	}
 	sel := h.cursor
@@ -234,7 +234,7 @@ func (h homeComp) welcome(c *ctx, title string, chrome, w, ht int) string {
 	textW := max(16, min(w-2, 52))
 	center := lipgloss.NewStyle().Width(textW).Align(lipgloss.Center)
 	hint := dimStyle.Render("No sessions yet. Start an AI agent in a tmux pane, or press ") +
-		StyleAccentBold.Render(m.keyText(listKeys.New)) + dimStyle.Render(" to spawn one right here.")
+		StyleAccentBold.Render(m.keyTextOn(h.section(), listKeys.New)) + dimStyle.Render(" to spawn one right here.")
 	welcome := lipgloss.JoinVertical(lipgloss.Center,
 		argusLogo(w, ht),
 		"",
