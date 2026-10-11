@@ -11,3 +11,13 @@ func TestAntigravityRegistered(t *testing.T) {
 		t.Fatalf("Agent() = %q", a.Agent())
 	}
 }
+
+func TestPiRegistered(t *testing.T) {
+	a := ByAgent("pi")
+	if a == nil {
+		t.Fatal("pi adapter not registered")
+	}
+	if a.Agent() != "pi" {
+		t.Fatalf("Agent() = %q", a.Agent())
+	}
+}

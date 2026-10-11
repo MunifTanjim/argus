@@ -13,6 +13,7 @@ You need these to *run* Argus, however you install it:
   - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
   - [Antigravity](https://antigravity.google/): Google's terminal agent, run as `agy`
   - [OpenCode](https://opencode.ai/) 2 or later: run as `opencode`
+  - [Pi](https://pi.dev/) 1.1 or later: Node 22.19+ must be on PATH for the `pi` launcher
 
 Argus watches the agents you have installed. You don't need all four.
 
@@ -70,3 +71,13 @@ OpenCode needs no hooks.
 Codex needs no hooks. Argus connects to Codex's background app-server daemon,
 which `codex` starts automatically. Sessions started with `codex --no-daemon` are
 not visible to Argus.
+
+Pi needs no hooks. Argus spawns and owns one `pi --mode rpc` process per
+session (with its bundled gate extension for approvals). Past sessions remain
+available as history once they hold conversation.
+
+To also watch interactive `pi` sessions started outside Argus, run
+`argus hooks install`: it stages the same gate extension globally, and the
+extension reports those sessions back to Argus (presence, status, approvals,
+prompt injection) over a local socket. Dismissing such a session only
+untracks it — the terminal session keeps running.

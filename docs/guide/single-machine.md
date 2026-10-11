@@ -41,6 +41,9 @@ OpenCode and Codex sessions do not need tmux. Start `opencode` or `codex` as usu
 and Argus discovers them while they are running. Opening a terminal for a Codex
 session attaches a `codex resume <id>` viewer.
 
+Pi sessions do not need tmux either. Argus spawns `pi --mode rpc` sessions
+itself; opening a terminal for one attaches a `pi --session <id>` viewer.
+
 ## Don't use tmux? Let Argus wrap it
 
 Argus can watch the live screen and type into a session only when the agent runs
