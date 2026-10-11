@@ -15,6 +15,8 @@ Color agentColor(String agent) {
       return const Color(0xFF83a598);
     case 'opencode':
       return AppColors.text; // monochrome, matching OpenCode's terminal brand
+    case 'pi':
+      return const Color(0xFFb294bb);
     default:
       return AppColors.dim;
   }
