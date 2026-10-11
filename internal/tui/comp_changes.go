@@ -126,6 +126,10 @@ func (ch changesComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd
 		ch.cursor = max(0, ch.cursor-m.cardListPageStep())
 	case m.matches(msg, k.HalfDown):
 		ch.cursor = min(cursorBottom(n), ch.cursor+m.cardListPageStep())
+	case m.matches(msg, k.PageUp):
+		ch.cursor = cursorBy(ch.cursor, -2*m.cardListPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		ch.cursor = cursorBy(ch.cursor, 2*m.cardListPageStep(), n)
 	case m.matches(msg, k.Enter, k.Right):
 		ch, cmd := ch.enter(c)
 		return ch, cmd, true
@@ -156,6 +160,10 @@ func (ch changesComp) commitFilesKey(c *ctx, msg tea.KeyPressMsg) (component, te
 		ch.commitCursor = max(0, ch.commitCursor-m.cardListPageStep())
 	case m.matches(msg, k.HalfDown):
 		ch.commitCursor = min(cursorBottom(n), ch.commitCursor+m.cardListPageStep())
+	case m.matches(msg, k.PageUp):
+		ch.commitCursor = cursorBy(ch.commitCursor, -2*m.cardListPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		ch.commitCursor = cursorBy(ch.commitCursor, 2*m.cardListPageStep(), n)
 	case m.matches(msg, k.Enter, k.Right):
 		return ch, ch.enterCommitFile(c), true
 	default:

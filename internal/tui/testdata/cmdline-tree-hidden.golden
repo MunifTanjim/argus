@@ -21,10 +21,10 @@
                                                                                                                           │
                                                                                                                           │
                                                                                                                           │
-                                                                                                                          │
-                                                                                                                          │
  ╭──────────────────────────────────╮                                                                                     │
- │ scroll half-page-up    ^u pgup   │                                                                                     │
- │ scroll half-page-down  ^d pgdown │                                                                                     │
+ │ scroll page-up         ^b pgup   │                                                                                     │
+ │ scroll page-down       ^f pgdown │                                                                                     │
+ │ scroll half-page-up    ^u        │                                                                                     │
+ │ scroll half-page-down  ^d        │                                                                                     │
  ╰──────────────────────────────────╯
   :scroll 

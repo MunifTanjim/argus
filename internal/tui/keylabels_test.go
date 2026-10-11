@@ -213,3 +213,11 @@ func TestTranscriptFooterPairsPromptKeys(t *testing.T) {
 		t.Errorf("prompt label = %q, want }/{", got)
 	}
 }
+
+func TestFileFooterNamesHalfPage(t *testing.T) {
+	for _, b := range (fileComp{}).footer(nil) {
+		if b.name == fileViewKeys.HalfDown.name && b.Help().Desc != "half" {
+			t.Errorf("half-page scroll is labeled %q; page names the full-page scroll", b.Help().Desc)
+		}
+	}
+}

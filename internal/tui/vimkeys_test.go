@@ -330,3 +330,21 @@ func TestVimQQuitsFromProjectsPane(t *testing.T) {
 		t.Error("Q with the projects pane focused should quit")
 	}
 }
+
+func TestCtrlWArrowsMoveFocus(t *testing.T) {
+	left, right := tea.KeyPressMsg{Code: tea.KeyLeft}, tea.KeyPressMsg{Code: tea.KeyRight}
+	m := pressKeys(filesFocused(), ctrlKey('w'), left)
+	if m.focused != mainPane {
+		t.Errorf("<C-w><Left> from the files sidebar: focus = %v, want the pane", m.focused)
+	}
+	m = pressKeys(withFocus(wideWorkspace(), mainPane), ctrlKey('w'), right)
+	if m.focused != rightSidebar {
+		t.Errorf("<C-w><Right> from the pane: focus = %v, want the files sidebar", m.focused)
+	}
+	for _, arrow := range []tea.KeyPressMsg{{Code: tea.KeyUp}, {Code: tea.KeyDown}} {
+		sk := defaultKeymap.screenKeys("workspace")
+		if exact, _ := defaultKeymap.lookup("workspace", []tea.KeyPressMsg{ctrlKey('w'), arrow}); exact == "" {
+			t.Errorf("<C-w>%s is not a key on workspace: %v", arrow.String(), sk.keys(paneKeys.Up))
+		}
+	}
+}

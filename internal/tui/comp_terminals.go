@@ -110,6 +110,10 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		t.cursor = max(0, t.cursor-m.listPageStep())
 	case m.matches(msg, k.HalfDown):
 		t.cursor = min(cursorBottom(n), t.cursor+m.listPageStep())
+	case m.matches(msg, k.PageUp):
+		t.cursor = cursorBy(t.cursor, -2*m.listPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		t.cursor = cursorBy(t.cursor, 2*m.listPageStep(), n)
 	case m.matches(msg, k.Open):
 		if t.cursor < n {
 			cmd = attachTerminal(c, list[t.cursor], t.row())

@@ -49,7 +49,8 @@ func (m model) helpGroups() []helpGroup {
 		{"Tree", []helpRow{
 			tree(k.Up, "move"),
 			tree(k.Bottom, "top / bottom"),
-			tree(k.HalfDown, "page"),
+			tree(k.HalfDown, "half"),
+			tree(k.PageDown, "page"),
 			tree(k.Left, "fold / unfold"),
 			{key: row("project-tree", k.Enter, "").key, desc: "open; " + m.keyTextOn("project-tree", k.Right) + " opens Home/workspace", name: ""},
 			tree(paneKeys.Next, "cycle focus"),

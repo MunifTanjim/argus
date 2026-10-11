@@ -74,6 +74,10 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		p.cursor = max(0, p.cursor-m.cardListPageStep())
 	case m.matches(msg, projectsKeys.HalfDown):
 		p.cursor = min(cursorBottom(len(ss)), p.cursor+m.cardListPageStep())
+	case m.matches(msg, projectsKeys.PageUp):
+		p.cursor = cursorBy(p.cursor, -2*m.cardListPageStep(), len(ss))
+	case m.matches(msg, projectsKeys.PageDown):
+		p.cursor = cursorBy(p.cursor, 2*m.cardListPageStep(), len(ss))
 	case m.matches(msg, listKeys.Jump):
 		if p.cursor < len(ss) {
 			cmd = jump(c, ss[p.cursor])

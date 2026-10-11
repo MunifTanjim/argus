@@ -172,3 +172,16 @@ func TestDetailHalfDownClampsScroll(t *testing.T) {
 		t.Fatalf("half-up after clamped half-down should move up immediately: %d -> %d", maxS, got)
 	}
 }
+
+func TestDetailPageDownScrollsAFullPage(t *testing.T) {
+	m := tallFocusedDetailModel(t)
+	m.actDetailPageDown(tea.KeyPressMsg{})
+	want := min(m.frameMaxScroll(m.topFrame()), max(1, m.viewportHeight()))
+	if got := m.topFrame().scroll; got != want {
+		t.Fatalf("page-down scroll = %d, want %d", got, want)
+	}
+	m.actDetailPageUp(tea.KeyPressMsg{})
+	if got := m.topFrame().scroll; got != 0 {
+		t.Fatalf("page-up back to the top: scroll = %d", got)
+	}
+}

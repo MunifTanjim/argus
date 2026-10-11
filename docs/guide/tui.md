@@ -168,14 +168,14 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `cycle group-by` | home | `zg` |
 | `filter-projects` | node, project, project-tree | `/` |
 | `filter-sessions` | home, workspace | `/` |
-| `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-j>` `<C-w>j` |
-| `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-h>` `<C-w>h` |
+| `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |
+| `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-h>` `<C-w><Left>` `<C-w>h` |
 | `focus next` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-w>` `<C-w>w` |
 | `focus prev` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w>W` |
 | `focus prompt` | file, transcript | `<Tab>` |
-| `focus right` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-l>` `<C-w>l` |
+| `focus right` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-l>` `<C-w><Right>` `<C-w>l` |
 | `focus transcript` | session-dock | `<Tab>` |
-| `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-k>` `<C-w>k` |
+| `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, terminals, transcript, workspace | `<C-w><C-k>` `<C-w><Up>` `<C-w>k` |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |
 | `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, terminals, transcript, workspace | `G` |
@@ -209,8 +209,10 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `redaction save` | transcript | `W` |
 | `refresh` | changes, file, file-tree, history, home, node, project, project-tree, terminals, workspace | `gr` |
 | `scroll down` | file, logs, transcript | `<Down>` `j` |
-| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-d>` `<PageDown>` |
-| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-u>` `<PageUp>` |
+| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-d>` |
+| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-u>` |
+| `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-f>` `<PageDown>` |
+| `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-b>` `<PageUp>` |
 | `scroll up` | file, logs, transcript | `<Up>` `k` |
 | `session kill` | home, workspace | `dd` |
 | `session load-more` | history | `m` |

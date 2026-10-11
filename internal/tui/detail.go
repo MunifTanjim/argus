@@ -239,6 +239,8 @@ var detailTable = []keyTableEntry{
 	{detailKeys.Drill, tview.actDetailDrill},
 	{detailKeys.HalfDown, tview.actDetailHalfDown},
 	{detailKeys.HalfUp, tview.actDetailHalfUp},
+	{detailKeys.PageDown, tview.actDetailPageDown},
+	{detailKeys.PageUp, tview.actDetailPageUp},
 	{detailKeys.Top, tview.actDetailTop},
 	{detailKeys.Bottom, tview.actDetailBottom},
 }
@@ -401,6 +403,18 @@ func (m tview) actDetailHalfDown(tea.KeyPressMsg) tea.Cmd {
 func (m tview) actDetailHalfUp(tea.KeyPressMsg) tea.Cmd {
 	f := m.topFrame()
 	f.scroll = max(0, f.scroll-max(1, m.viewportHeight()/2))
+	return nil
+}
+
+func (m tview) actDetailPageDown(tea.KeyPressMsg) tea.Cmd {
+	m.topFrame().scroll += max(1, m.viewportHeight())
+	m.clampDetailScroll()
+	return nil
+}
+
+func (m tview) actDetailPageUp(tea.KeyPressMsg) tea.Cmd {
+	f := m.topFrame()
+	f.scroll = max(0, f.scroll-max(1, m.viewportHeight()))
 	return nil
 }
 

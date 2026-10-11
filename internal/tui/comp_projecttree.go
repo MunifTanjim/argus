@@ -159,6 +159,10 @@ func (t projectTreeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.
 		t = t.move(max(0, t.cursor-m.cardListPageStep()))
 	case m.matches(msg, k.HalfDown):
 		t = t.move(min(cursorBottom(n), t.cursor+m.cardListPageStep()))
+	case m.matches(msg, k.PageUp):
+		t = t.move(cursorBy(t.cursor, -2*m.cardListPageStep(), n))
+	case m.matches(msg, k.PageDown):
+		t = t.move(cursorBy(t.cursor, 2*m.cardListPageStep(), n))
 	case m.matches(msg, k.Left):
 		t = t.treeLeft()
 	case m.matches(msg, k.Right):

@@ -102,6 +102,10 @@ func (h historyComp) projectsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		h.projCursor = max(0, h.projCursor-m.cardListPageStep())
 	case m.matches(msg, k.HalfDown):
 		h.projCursor = min(cursorBottom(n), h.projCursor+m.cardListPageStep())
+	case m.matches(msg, k.PageUp):
+		h.projCursor = cursorBy(h.projCursor, -2*m.cardListPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		h.projCursor = cursorBy(h.projCursor, 2*m.cardListPageStep(), n)
 	case m.matches(msg, k.Open):
 		h, cmd = h.openProject(c)
 	case m.matches(msg, k.Refresh):
@@ -154,6 +158,10 @@ func (h historyComp) sessionsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		h.sessCursor = max(0, h.sessCursor-m.cardListPageStep())
 	case m.matches(msg, k.HalfDown):
 		h.sessCursor = min(cursorBottom(n), h.sessCursor+m.cardListPageStep())
+	case m.matches(msg, k.PageUp):
+		h.sessCursor = cursorBy(h.sessCursor, -2*m.cardListPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		h.sessCursor = cursorBy(h.sessCursor, 2*m.cardListPageStep(), n)
 	case m.matches(msg, k.Open):
 		cmd = h.openSession(c)
 	case m.matches(msg, k.Resume):

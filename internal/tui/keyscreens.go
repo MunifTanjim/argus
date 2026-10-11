@@ -68,14 +68,14 @@ var summaryKeys = bindingsOf(slices.Concat(leftSidebarKeys, []any{projectsKeys.S
 // transcripts read.
 var transcriptViewKeys = []any{
 	transcriptKeys.ScrollUp, transcriptKeys.ScrollDown, transcriptKeys.PromptNext, transcriptKeys.PromptPrev,
-	transcriptKeys.HalfUp, transcriptKeys.HalfDown,
+	transcriptKeys.HalfUp, transcriptKeys.HalfDown, transcriptKeys.PageUp, transcriptKeys.PageDown,
 	transcriptKeys.Top, transcriptKeys.Bottom, transcriptKeys.Collapse, transcriptKeys.Expand,
 	transcriptKeys.Detail, transcriptKeys.Back,
 }
 
 var sidebarListKeys = []any{
 	projectsKeys.Back, projectsKeys.Refresh, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top,
-	projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
+	projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.PageUp, projectsKeys.PageDown, projectsKeys.Left,
 	projectsKeys.Right, projectsKeys.Enter, projectsKeys.Hover,
 }
 
@@ -93,7 +93,7 @@ type sectionList struct {
 var sectionLists = map[string]sectionList{
 	"project-tree": {
 		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Filter, projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
-			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Left,
+			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.PageUp, projectsKeys.PageDown, projectsKeys.Left,
 			projectsKeys.Right, projectsKeys.Enter, projectsKeys.Remove, projectsKeys.Refresh, createKeys.Target, nodeKeys.Wakelock,
 			projectsKeys.Hover})...),
 		container: bindingsOf(leftSidebarKeys...),
@@ -101,7 +101,7 @@ var sectionLists = map[string]sectionList{
 	},
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
-			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter,
+			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.PageUp, projectsKeys.PageDown, projectsKeys.Enter,
 			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill, listKeys.ActiveOnly,
 			listKeys.Filter, listKeys.TabPrev, listKeys.TabNext})...),
 		focus: focusFor("workspace"),
@@ -126,7 +126,7 @@ var sectionLists = map[string]sectionList{
 		focus:     focusFor("changes"),
 	},
 	"home": {
-		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
+		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown, listKeys.PageUp, listKeys.PageDown,
 			listKeys.Open, listKeys.Jump, listKeys.TabPrev, listKeys.TabNext, listKeys.New, listKeys.Kill,
 			listKeys.Refresh, listKeys.Back, listKeys.ActiveOnly, listKeys.GroupBy, listKeys.Filter),
 		focus: focusFor("home"),
@@ -137,7 +137,7 @@ var sectionLists = map[string]sectionList{
 	},
 	"terminals": {
 		own: bindingsOf(terminalKeys, listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp,
-			listKeys.HalfDown, listKeys.Open, listKeys.TabPrev, listKeys.TabNext, listKeys.Refresh, listKeys.Back),
+			listKeys.HalfDown, listKeys.PageUp, listKeys.PageDown, listKeys.Open, listKeys.TabPrev, listKeys.TabNext, listKeys.Refresh, listKeys.Back),
 		focus: focusFor("terminals"),
 	},
 	"logs": {

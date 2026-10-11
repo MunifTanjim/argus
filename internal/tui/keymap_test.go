@@ -438,3 +438,20 @@ func TestBuildKeymapAcceptsARenamedCommand(t *testing.T) {
 		t.Errorf("terminal new should bind terminal spawn: errs=%v", errs)
 	}
 }
+
+func TestPageKeysScrollAFullPage(t *testing.T) {
+	sk := defaultKeymap.screenKeys("transcript")
+	if got := sk.keys(transcriptKeys.PageDown); !slices.Contains(got, "ctrl+f") || !slices.Contains(got, "pgdown") {
+		t.Errorf("scroll page-down keys = %q, want ctrl+f and pgdown", got)
+	}
+	if got := sk.keys(transcriptKeys.PageUp); !slices.Contains(got, "ctrl+b") || !slices.Contains(got, "pgup") {
+		t.Errorf("scroll page-up keys = %q, want ctrl+b and pgup", got)
+	}
+	if got := sk.keys(transcriptKeys.HalfDown); slices.Contains(got, "pgdown") {
+		t.Errorf("<PageDown> must leave the half-page scroll: %q", got)
+	}
+	dock := defaultKeymap.screenKeys("session-dock")
+	if got := dock.keys(promptKeys.PageDown); slices.Contains(got, "ctrl+f") || !slices.Contains(got, "pgdown") {
+		t.Errorf("the dock pages with <PageDown> only, since <C-f> moves the cursor: %q", got)
+	}
+}

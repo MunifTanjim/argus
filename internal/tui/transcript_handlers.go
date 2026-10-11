@@ -19,6 +19,8 @@ var transcriptTable = []keyTableEntry{
 	{transcriptKeys.ScrollUp, tview.actScrollUp},
 	{transcriptKeys.HalfDown, tview.actHalfDown},
 	{transcriptKeys.HalfUp, tview.actHalfUp},
+	{transcriptKeys.PageDown, tview.actPageDown},
+	{transcriptKeys.PageUp, tview.actPageUp},
 	{transcriptKeys.Top, tview.actTop},
 	{transcriptKeys.Bottom, tview.actBottom},
 	{transcriptKeys.Collapse, tview.actCollapse},
@@ -107,6 +109,18 @@ func (m tview) actHalfDown(tea.KeyPressMsg) tea.Cmd {
 
 func (m tview) actHalfUp(tea.KeyPressMsg) tea.Cmd {
 	m.transcript.scroll -= max(1, m.viewportHeight()/2)
+	m.clampScrollNow()
+	return nil
+}
+
+func (m tview) actPageDown(tea.KeyPressMsg) tea.Cmd {
+	m.transcript.scroll += max(1, m.viewportHeight())
+	m.clampScrollNow()
+	return nil
+}
+
+func (m tview) actPageUp(tea.KeyPressMsg) tea.Cmd {
+	m.transcript.scroll -= max(1, m.viewportHeight())
 	m.clampScrollNow()
 	return nil
 }

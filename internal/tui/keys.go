@@ -86,7 +86,7 @@ func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown                      binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown    binding
 	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit binding
 	ActiveOnly, Filter, GroupBy                                  binding
 }{
@@ -94,8 +94,10 @@ var listKeys = struct {
 	Down:     nb("next", "<Down> j", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
 	Jump:     nb("open tmux-pane", "O", "jump"),
 	TabPrev:  nb("tab prev", "gT", ""),
@@ -126,21 +128,23 @@ var nodeKeys = struct {
 }
 
 var projectsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Left, Right, Enter       binding
-	Widen, Narrow, ToggleSidebar, Filter, Help                        binding
-	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone binding
-	Unhide, Unpin                                                     binding
-	Target, DiffMode, Spawn, ToggleFiles                              binding
-	SideTabPrev, SideTabNext, Refresh, Back                           binding
-	Forget                                                            binding
-	RunSetup, SetupLog, Palette, ToggleMouse, ToggleVerbose, Hover    binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Left, Right, Enter binding
+	Widen, Narrow, ToggleSidebar, Filter, Help                                    binding
+	New, Rename, Hide, Pin, Remove, ForceRemove, ShowHidden, ShowGone             binding
+	Unhide, Unpin                                                                 binding
+	Target, DiffMode, Spawn, ToggleFiles                                          binding
+	SideTabPrev, SideTabNext, Refresh, Back                                       binding
+	Forget                                                                        binding
+	RunSetup, SetupLog, Palette, ToggleMouse, ToggleVerbose, Hover                binding
 }{
 	Up:            nb("prev", "<Up> k", "move"),
 	Down:          nb("next", "<Down> j", ""),
 	Top:           nb("goto top", "gg", ""),
 	Bottom:        nb("goto bottom", "G", "ends"),
-	HalfUp:        nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown:      nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:        nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown:      nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:        nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown:      nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Left:          nb("fold close", "h <Left> zc", "fold"),
 	Right:         nb("fold open", "l <Right> zo", ""),
 	Enter:         nb("open", "<CR>", "open"),
@@ -183,17 +187,19 @@ var createKeys = struct {
 }
 
 var transcriptKeys = struct {
-	ScrollUp, ScrollDown, PromptNext, PromptPrev, HalfUp, HalfDown binding
-	Top, Bottom, Collapse, Expand, Detail                          binding
-	Answer, Export, Back, Resume                                   binding
-	Redact, RedactSave, RedactList                                 binding
+	ScrollUp, ScrollDown, PromptNext, PromptPrev, HalfUp, HalfDown, PageUp, PageDown binding
+	Top, Bottom, Collapse, Expand, Detail                                            binding
+	Answer, Export, Back, Resume                                                     binding
+	Redact, RedactSave, RedactList                                                   binding
 }{
 	ScrollUp:   nb("scroll up", "<Up> k", "scroll"),
 	ScrollDown: nb("scroll down", "<Down> j", ""),
 	PromptNext: nb("next prompt", "}", "prompt"),
 	PromptPrev: nb("prev prompt", "{", ""),
-	HalfUp:     nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown:   nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:     nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown:   nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:     nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown:   nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Top:        nb("goto top", "gg", ""),
 	Bottom:     nb("goto bottom", "G", "ends"),
 	Collapse:   nb("fold close", "h <Left> zc", "fold"),
@@ -209,12 +215,14 @@ var transcriptKeys = struct {
 }
 
 var detailKeys = struct {
-	Up, Down, HalfUp, HalfDown, Top, Bottom, Collapse, Expand, Drill, Back binding
+	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Collapse, Expand, Drill, Back binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", ""),
 	Collapse: nb("fold close", "h <Left> zc", "fold"),
@@ -238,25 +246,27 @@ var sessionKeys = struct {
 var paneKeys = struct {
 	Left, Down, Up, Right, Next, Prev binding
 }{
-	Left:  nb("focus left", "<C-w>h", "tree").alt("<C-w><C-h>"),
-	Down:  nb("focus down", "<C-w>j", "").alt("<C-w><C-j>"),
-	Up:    nb("focus up", "<C-w>k", "").alt("<C-w><C-k>"),
-	Right: nb("focus right", "<C-w>l", "files").alt("<C-w><C-l>"),
+	Left:  nb("focus left", "<C-w>h", "tree").alt("<C-w><C-h> <C-w><Left>"),
+	Down:  nb("focus down", "<C-w>j", "").alt("<C-w><C-j> <C-w><Down>"),
+	Up:    nb("focus up", "<C-w>k", "").alt("<C-w><C-k> <C-w><Up>"),
+	Right: nb("focus right", "<C-w>l", "files").alt("<C-w><C-l> <C-w><Right>"),
 	Next:  nb("focus next", "<C-w>w", "pane").alt("<C-w><C-w>"),
 	Prev:  nb("focus prev", "<C-w>W", ""),
 }
 
 // Prompt bindings (dock): drive dock footers; the prompt sub-views are modal text editors.
 var promptKeys = struct {
-	Up, Down, HalfUp, HalfDown, TabPrev, TabNext, Submit, Next, Select, Read binding
-	Unselect                                                                 binding
-	Back                                                                     binding
-	Note                                                                     binding
+	Up, Down, HalfUp, HalfDown, PageUp, PageDown, TabPrev, TabNext, Submit, Next, Select, Read binding
+	Unselect                                                                                   binding
+	Back                                                                                       binding
+	Note                                                                                       binding
 }{
 	Up:       nb("prev", "<Up>", "select"),
 	Down:     nb("next", "<Down>", ""),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", "scroll"),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", "scroll"),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<PageUp>", ""),
+	PageDown: nb("scroll page-down", "<PageDown>", ""),
 	TabPrev:  nb("tab prev", "<Left>", "tabs"),
 	TabNext:  nb("tab next", "<Right>", ""),
 	Submit:   nb("answer submit", "<CR>", "submit"),
@@ -269,28 +279,32 @@ var promptKeys = struct {
 }
 
 var historyProjectsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, Refresh, Back binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Open, Refresh, Back binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
 	Refresh:  nb("refresh", "gr", "refresh"),
 	Back:     nb("back", "<Esc>", "back"),
 }
 
 var historySessionsKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, Open, More, Back, Resume binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Open, More, Back, Resume binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Open:     nb("open", "<CR>", "open"),
 	More:     nb("session load-more", "m", "more"),
 	Back:     nb("back", "<Esc>", "back"),
@@ -298,12 +312,14 @@ var historySessionsKeys = struct {
 }
 
 var logsKeys = struct {
-	Up, Down, HalfUp, HalfDown, Top, Bottom, Back binding
+	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Back binding
 }{
 	Up:       nb("scroll up", "<Up> k", "scroll"),
 	Down:     nb("scroll down", "<Down> j", ""),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
 	Back:     nb("back", "<Esc>", "back"),
@@ -311,12 +327,14 @@ var logsKeys = struct {
 
 // fileViewKeys drive the file, diff, or setup log open in the projects pane.
 var fileViewKeys = struct {
-	Up, Down, HalfUp, HalfDown, Top, Bottom, Wrap, NextFile, PrevFile, Refresh, Back binding
+	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Wrap, NextFile, PrevFile, Refresh, Back binding
 }{
 	Up:       nb("scroll up", "<Up> k", "scroll"),
 	Down:     nb("scroll down", "<Down> j", ""),
-	HalfUp:   nb("scroll half-page-up", "<C-u> <PageUp>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d> <PageDown>", ""),
+	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
 	Top:      nb("goto top", "gg", ""),
 	Bottom:   nb("goto bottom", "G", "ends"),
 	Wrap:     nb("toggle line-wrap", "yow", "wrap"),

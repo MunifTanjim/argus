@@ -47,6 +47,10 @@ func (l logsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		l = l.scrollBy(c, -m.logsAvail()/2)
 	case m.matches(msg, k.HalfDown):
 		l = l.scrollBy(c, m.logsAvail()/2)
+	case m.matches(msg, k.PageUp):
+		l = l.scrollBy(c, -m.logsAvail())
+	case m.matches(msg, k.PageDown):
+		l = l.scrollBy(c, m.logsAvail())
 	case m.matches(msg, k.Top):
 		l.follow, l.scroll = false, 0
 	case m.matches(msg, k.Bottom):

@@ -105,6 +105,10 @@ func (t *fileTree) key(is func(...binding) bool, page int) treeRequest {
 		t.cursor = max(0, t.cursor-page)
 	case is(k.HalfDown):
 		t.cursor = min(cursorBottom(n), t.cursor+page)
+	case is(k.PageUp):
+		t.cursor = cursorBy(t.cursor, -2*page, n)
+	case is(k.PageDown):
+		t.cursor = cursorBy(t.cursor, 2*page, n)
 	case is(k.Left):
 		t.left(rows)
 	case is(k.Right) && t.cursor < n && rows[t.cursor].entry.IsDir:

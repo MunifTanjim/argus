@@ -81,6 +81,10 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		return d.scrollDock(c, -1), nil, true
 	case c.m.matches(msg, promptKeys.HalfDown):
 		return d.scrollDock(c, 1), nil, true
+	case c.m.matches(msg, promptKeys.PageUp):
+		return d.scrollDock(c, -2), nil, true
+	case c.m.matches(msg, promptKeys.PageDown):
+		return d.scrollDock(c, 2), nil, true
 	}
 
 	var cmd tea.Cmd

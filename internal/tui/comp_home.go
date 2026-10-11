@@ -65,6 +65,10 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		h.cursor = max(0, h.cursor-m.cardListPageStep())
 	case m.matches(msg, k.HalfDown):
 		h.cursor = min(cursorBottom(n), h.cursor+m.cardListPageStep())
+	case m.matches(msg, k.PageUp):
+		h.cursor = cursorBy(h.cursor, -2*m.cardListPageStep(), n)
+	case m.matches(msg, k.PageDown):
+		h.cursor = cursorBy(h.cursor, 2*m.cardListPageStep(), n)
 	case m.matches(msg, k.Open):
 		if h.cursor < n {
 			c.openSession(m.order[h.cursor])
