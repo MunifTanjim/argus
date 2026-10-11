@@ -28,14 +28,15 @@ class ProjectDrawer extends ConsumerStatefulWidget {
 }
 
 class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
-  late final _filter = TextEditingController(
-    text: ref.read(treeViewProvider).filter,
-  );
+  // Both are created here: a lazy one first read in dispose() would use ref
+  // after unmount, as when the other tab was showing the whole time.
+  late final TextEditingController _filter;
   late final TextEditingController _sessionsFilter;
 
   @override
   void initState() {
     super.initState();
+    _filter = TextEditingController(text: ref.read(treeViewProvider).filter);
     _sessionsFilter = TextEditingController(
       text: ref.read(sidebarSessionsFilterProvider),
     );
