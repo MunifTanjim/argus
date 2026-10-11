@@ -155,6 +155,26 @@ void main() {
     expect(find.text('no live sessions'), findsOneWidget);
   });
 
+  testWidgets('unmounting on the Sessions tab throws nothing', (tester) async {
+    final c = ProviderContainer(overrides: [
+      gatewayProvider.overrideWithValue(null),
+      leftSidebarTabStoreProvider.overrideWithValue(LeftSidebarTabStore(_MemKv())),
+    ]);
+    addTearDown(c.dispose);
+    // Chosen before the drawer mounts, so the Projects filter is never built.
+    await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.sessions);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: Scaffold(body: ProjectDrawer())),
+    ));
+    await tester.pump();
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: SizedBox()),
+    ));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('tapping a session asks the shell to open it', (tester) async {
     final c = await _pump(tester, _tree());
     c.read(sessionsProvider.notifier).replaceAll([_sess('A:s1', 'idle', ws: 'A:w1')]);
