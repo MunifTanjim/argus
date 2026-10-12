@@ -1,0 +1,432 @@
+import type { On } from 'claude-code'
+import { expect, mock, test } from 'claude-code/testing'
+
+const OPTIONS = { options: { socket: '/run/argus/mod.sock' } }
+
+type Sent = { path: string; socketPath?: string; body: Record<string, unknown> }
+
+// Answers the mod's requests as argusd would; an Error answer fails the request.
+// An answer may be a promise, e.g. one waiting on the mocked clock.
+function argusd(on: On, answer: (s: Sent) => unknown): Sent[] {
+  const sent: Sent[] = []
+  on('http.fetch', async ($, e) => {
+    const s = {
+      path: new URL(e.url).pathname,
+      socketPath: e.init?.socketPath,
+      body: JSON.parse(e.init?.body ?? '{}') as Record<string, unknown>,
+    }
+    sent.push(s)
+    const out = await answer(s)
+    if (out instanceof Error) throw out
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(out) } }
+  })
+  return sent
+}
+
+// The engine beneath the mod: a held clock, an empty environment and one session.
+function world(on: On, env: Record<string, string> = {}) {
+  const session = { id: 's1' }
+  const clock = mock.clock(on)
+  mock.env(on, env)
+  on('session.id', () => ({ value: session.id }) as never)
+  on('session.cwd', () => ({ value: '/w' }) as never)
+  return { clock, session }
+}
+
+const ALLOW = JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PermissionRequest',
+    decision: { behavior: 'allow', updatedInput: { plan: 'p' } },
+  },
+})
+
+test('forwards a classic event with the pane and auto mode', OPTIONS, async ($, on) => {
+  world(on, { TMUX_PANE: '%3', TMUX: '/tmp/tmux-1000/default,1,0', CLAUDE_CODE_ENABLE_AUTO_MODE: '1' })
+  const sent = argusd(on, () => ({}))
+  on('classic.Stop', () => ({}))
+  await $.classic.Stop({ stop_hook_active: false, session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+  expect(sent.length).toBe(1)
+  expect(sent[0].path).toBe('/claude/event')
+  expect(sent[0].socketPath).toBe('/run/argus/mod.sock')
+  expect(sent[0].body).toEqual(expect.objectContaining({
+    event: 'Stop', tmuxPane: '%3', tmux: '/tmp/tmux-1000/default,1,0', autoMode: true,
+  }))
+  expect((sent[0].body.payload as Record<string, unknown>).session_id).toBe('s1')
+})
+
+test('a ran tool call is forwarded without its output', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostToolUse', () => ({}))
+  await $.classic.PostToolUse({ session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: 'big' } } as never)
+  const payload = sent[0].body.payload as Record<string, unknown>
+  expect(payload.tool_name).toBe('Bash')
+  expect('tool_response' in payload).toBe(false)
+})
+
+test('forwards a failed tool call', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostToolUseFailure', () => ({}))
+  await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_input: { command: 'false' }, tool_use_id: 't1', error: 'exit 1' } as never)
+  expect(sent.length).toBe(1)
+  expect(sent[0].path).toBe('/claude/event')
+  expect(sent[0].body.event).toBe('PostToolUseFailure')
+  expect((sent[0].body.payload as Record<string, unknown>).tool_name).toBe('Bash')
+})
+
+test('an unreachable argusd does not stop the event', OPTIONS, async ($, on) => {
+  world(on)
+  argusd(on, () => new Error('connect ENOENT'))
+  let reached = false
+  on('classic.Stop', () => ((reached = true), {}))
+  await $.classic.Stop({ stop_hook_active: false } as never)
+  expect(reached).toBe(true)
+})
+
+test('PreToolUse is sent in the classic shape', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.UserPromptSubmit', () => ({}))
+  on('classic.PreToolUse', ($, e) => ({ result: { ok: true } } as never))
+  await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '/t/s1.jsonl' } as never)
+  await $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never).catch(() => undefined)
+  const pre = sent.find(s => s.body.event === 'PreToolUse')
+  expect(pre?.body.payload).toEqual(expect.objectContaining({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [] },
+    transcript_path: '/t/s1.jsonl',
+  }))
+})
+
+// Claude's own dialog: next(e) for classic.PermissionRequest stays pending until
+// someone answers it (a local answer abandons the hook instead of resolving).
+function dialog(on: On) {
+  let answer: (r: object) => void = () => {}
+  on('classic.PermissionRequest', () => new Promise(r => (answer = r)) as never)
+  return { answer: (r: object) => answer(r) }
+}
+
+// argusd's permission endpoints: the event registers request r1, and each
+// /claude/decision gets the next answer in line.
+function permissionArgusd(on: On, decisions: unknown[]) {
+  return argusd(on, s => {
+    if (s.path === '/claude/event') return { requestId: 'r1' }
+    if (s.path === '/claude/decision') return decisions.shift() ?? new Error('no more answers')
+    return {}
+  })
+}
+
+test("argus's answer wins while Claude's dialog is up", OPTIONS, async ($, on) => {
+  world(on)
+  const d = dialog(on)
+  const sent = permissionArgusd(on, [{ done: false }, { done: true, output: ALLOW }])
+  const res = await $.classic.PermissionRequest({ tool_name: 'ExitPlanMode', tool_input: { plan: 'p' } } as never)
+  expect(res.decision).toEqual({ behavior: 'allow', updatedInput: { plan: 'p' } })
+  expect(sent.map(s => s.path)).toEqual(['/claude/event', '/claude/decision', '/claude/decision'])
+  expect(sent[1].body).toEqual({ requestId: 'r1' })
+  d.answer({}) // let the dialog settle so the test can end
+})
+
+test('a cancel decision denies and interrupts', OPTIONS, async ($, on) => {
+  world(on)
+  const d = dialog(on)
+  const cancel = JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', interrupt: true } },
+  })
+  permissionArgusd(on, [{ done: true, output: cancel }])
+  const res = await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: {} } as never)
+  expect(res.decision).toEqual({ behavior: 'deny', interrupt: true })
+  d.answer({})
+})
+
+test("with no answer from argus, Claude's dialog decides", OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const d = dialog(on)
+  permissionArgusd(on, [{ done: true, output: '' }])
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+  await clock.settle()
+  d.answer({ decision: { behavior: 'deny', message: 'from the dialog' } })
+  expect((await pending).decision).toEqual({ behavior: 'deny', message: 'from the dialog' })
+})
+
+test("Claude's dialog still decides when argusd is unreachable", OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const d = dialog(on)
+  argusd(on, () => new Error('connect ENOENT'))
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+  await clock.settle()
+  d.answer({ decision: { behavior: 'allow' } })
+  expect((await pending).decision).toEqual({ behavior: 'allow' })
+})
+
+test("a settings hook's decision stands and takes argus's prompt down", OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const sent = argusd(on, async s => {
+    if (s.path === '/claude/event') return { requestId: 'r1' }
+    if (s.path === '/claude/decision') return clock.sleep(1000).then(() => ({ done: false }))
+    return {}
+  })
+  on('classic.PermissionRequest', async () => {
+    await clock.sleep(10) // decides after argus registered the request
+    return { decision: { behavior: 'deny', message: 'no' } }
+  })
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+  await clock.settle()
+  await clock.advance(10)
+  const res = await pending
+  expect(res.decision).toEqual({ behavior: 'deny', message: 'no' })
+  expect(sent.find(s => s.path === '/claude/cancel')?.body).toEqual({ requestId: 'r1' })
+  // The wait in flight ends with nothing further asked of argus.
+  await clock.advance(1000)
+  expect(sent.filter(s => s.path === '/claude/decision').length).toBe(1)
+})
+
+test('the poll runs prompts and slash commands', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [
+    {
+      commands: [
+        { id: '1', kind: 'prompt', text: 'fix the bug' },
+        { id: '2', kind: 'prompt', text: '/compact keep tests' },
+        { id: '3', kind: 'prompt', text: '/tmp/app.log shows a crash' },
+        { id: '4', kind: 'prompt', text: '/memory\nmore' },
+      ],
+    },
+  ]
+  // Once drained, fail the poll so the loop backs off on the held clock.
+  const polls = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  const prompts: unknown[] = []
+  const commands: unknown[] = []
+  on('prompt.submit', ($, e) => (prompts.push({ text: e.text }), { text: e.text }) as never)
+  on('command.run', ($, e) => (commands.push({ command: e.command, args: e.args }), { text: '' } as never))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(prompts).toEqual([{ text: 'fix the bug' }])
+  expect(commands).toEqual([{ command: 'compact', args: 'keep tests' }, { command: 'memory', args: 'more' }])
+  expect(polls.filter(s => s.path === '/claude/poll').map(s => s.body)).toEqual([{ sessionId: 's1' }, { sessionId: 's1' }])
+  const acks = polls.filter(s => s.path === '/claude/ack').map(s => s.body)
+  expect(acks.map(a => a.id)).toEqual(['1', '2', '3', '4'])
+  expect(String(acks[2].error)).toContain('/tmp/app.log is not a slash command')
+})
+
+test('a failed or dropped command is acked with its error', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [
+    { commands: [{ id: '1', kind: 'prompt', text: 'hi' }, { id: '2', kind: 'prompt', text: '/nope' }] },
+  ]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('prompt.submit', () => ({ drop: 'blocked by policy' }) as never)
+  // A failing hook is skipped, so the mod sees command.run fail with nothing beneath.
+  on('command.run', () => { throw new Error('unknown command') })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const acks = sent.filter(s => s.path === '/claude/ack').map(s => s.body)
+  expect(acks.length).toBe(2)
+  expect(acks[0]).toEqual({ id: '1', error: 'prompt dropped: blocked by policy' })
+  expect(acks[1].id).toBe('2')
+  expect(String(acks[1].error)).toContain('command.run')
+})
+
+// A prompt typed over a running turn, or a command whose panel stays open,
+// resolves late: it is acked as accepted and the poll goes on.
+test('a pending command is acked after the window and the poll goes on', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [{ commands: [{ id: '1', kind: 'prompt', text: '/cost' }] }, { commands: [] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('command.run', () => new Promise(() => {}) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent.filter(s => s.path === '/claude/ack').length).toBe(0)
+  await clock.advance(1000)
+  expect(sent.filter(s => s.path === '/claude/ack').map(s => s.body)).toEqual([{ id: '1' }])
+  expect(sent.filter(s => s.path === '/claude/poll').length).toBeGreaterThan(1)
+})
+
+test('the poll backs off while argusd is down', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  let up = false
+  let served = false
+  // Down, then up for exactly one poll (later polls fail so the held clock stops).
+  const sent = argusd(on, () => {
+    if (!up) return new Error('connect ENOENT')
+    if (served) return new Error('hold')
+    served = true
+    return { commands: [] }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent.length).toBe(1)
+  await clock.advance(999)
+  expect(sent.length).toBe(1)
+  await clock.advance(1)
+  expect(sent.length).toBe(2)
+  await clock.advance(2000)
+  expect(sent.length).toBe(3)
+  // argusd is back: the retry due in 4 s succeeds and the next poll goes out at once.
+  up = true
+  await clock.advance(4000)
+  expect(sent.length).toBe(5)
+})
+
+test('each poll reads the session id afresh', OPTIONS, async ($, on) => {
+  const { clock, session } = world(on)
+  let polls = 0
+  const sent = argusd(on, () => {
+    polls++
+    if (polls === 1) session.id = 's2' // /clear: the process goes on under a new id
+    return polls <= 2 ? { commands: [] } : new Error('hold')
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent.map(s => s.body.sessionId)).toEqual(['s1', 's2', 's2'])
+})
+
+test('a SessionStart restarts the poll under the new session id at once', OPTIONS, async ($, on) => {
+  const { clock, session } = world(on)
+  // argusd holds every poll for 25 s.
+  const sent = argusd(on, async s => {
+    if (s.path !== '/claude/poll') return {}
+    await clock.sleep(25000)
+    return { commands: [] }
+  })
+  const pollIds = () => sent.filter(s => s.path === '/claude/poll').map(s => s.body.sessionId)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(pollIds()).toEqual(['s1'])
+  session.id = 's2' // /clear
+  await $.classic.SessionStart({ source: 'clear', session_id: 's2', cwd: '/w' } as never)
+  await clock.settle()
+  expect(pollIds()).toEqual(['s1', 's2'])
+  // The old poll returns and its loop stops; only the new loop polls again.
+  await clock.advance(25000)
+  expect(pollIds()).toEqual(['s1', 's2', 's2'])
+  await clock.advance(25000)
+  expect(pollIds()).toEqual(['s1', 's2', 's2', 's2'])
+})
+
+test('with no socket, a classic event asks nothing of argusd', { options: {} }, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  let reached = false
+  on('classic.Stop', () => ((reached = true), {}))
+  await $.classic.Stop({ stop_hook_active: false, session_id: 's1' } as never)
+  expect(reached).toBe(true)
+  expect(sent.length).toBe(0)
+})
+
+test("with no socket, Claude's dialog decides and argusd is never asked", { options: {} }, async ($, on) => {
+  const { clock } = world(on)
+  const d = dialog(on)
+  const sent = permissionArgusd(on, [{ done: true, output: ALLOW }])
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+  await clock.settle()
+  d.answer({ decision: { behavior: 'deny', message: 'from the dialog' } })
+  expect((await pending).decision).toEqual({ behavior: 'deny', message: 'from the dialog' })
+  expect(sent.length).toBe(0)
+})
+
+test("a settings hook that doesn't decide still waits for argus", OPTIONS, async ($, on) => {
+  world(on)
+  on('classic.PermissionRequest', () => ({}) as never)
+  permissionArgusd(on, [{ done: false }, { done: true, output: ALLOW }])
+  const res = await $.classic.PermissionRequest({ tool_name: 'ExitPlanMode', tool_input: { plan: 'p' } } as never)
+  expect(res.decision).toEqual({ behavior: 'allow', updatedInput: { plan: 'p' } })
+})
+
+test('no decision from either side returns the settings result', OPTIONS, async ($, on) => {
+  world(on)
+  on('classic.PermissionRequest', () => ({}) as never)
+  permissionArgusd(on, [{ done: true, output: '' }])
+  const res = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+  expect(res.decision).toBe(undefined)
+})
+
+const TURN = { answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' as const }
+
+test('a main-loop turn end is reported as a Stop', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+  await $.turn.complete(TURN)
+  expect(sent.length).toBe(1)
+  expect(sent[0].path).toBe('/claude/event')
+  expect(sent[0].body.event).toBe('Stop')
+  expect(sent[0].body.payload).toEqual(expect.objectContaining({
+    hook_event_name: 'Stop', session_id: 's1', cwd: '/w', stop_hook_active: false,
+  }))
+})
+
+test("a subagent's turn end is not reported", OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  expect(sent.length).toBe(0)
+})
+
+// A permission request with no settings decision, argusd holding its decision
+// for 25 s, then a tool call that Claude answers with a deny.
+function heldRequest(on: On, clock: ReturnType<typeof world>['clock']) {
+  on('classic.PermissionRequest', () => ({}) as never)
+  return argusd(on, async s => {
+    if (s.path === '/claude/event') return { requestId: 'r1' }
+    if (s.path === '/claude/decision') return clock.sleep(25000).then(() => ({ done: true, output: '' }))
+    return {}
+  })
+}
+
+test("a local deny with feedback ends argus's request", OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const sent = heldRequest(on, clock)
+  on('tool.call', () => ({ result: 'denied', isError: true }) as never)
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'touch x' } } as never)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'touch x' } as never).catch(() => undefined)
+  expect(sent.find(s => s.path === '/claude/cancel')?.body).toEqual({ requestId: 'r1' })
+  await clock.advance(25000)
+  const res = await pending
+  expect(res.decision).toBe(undefined)
+  const paths = sent.map(s => s.path)
+  expect(paths.slice(paths.indexOf('/claude/cancel') + 1)).not.toContain('/claude/decision')
+})
+
+test("a tool call for another command leaves argus's request open", OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const sent = heldRequest(on, clock)
+  on('tool.call', () => ({ result: 'ok' }) as never)
+  const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'touch x' } } as never)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as never).catch(() => undefined)
+  expect(sent.some(s => s.path === '/claude/cancel')).toBe(false)
+  await clock.advance(25000) // the held decision returns, ending the request
+  await pending
+})
+
+// Kill must not wait out the running turn, and the ack must leave before Claude exits.
+test('exit ends the running turn, acks, then exits', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [{ commands: [{ id: '1', kind: 'exit', text: '' }] }]
+  const order: string[] = []
+  argusd(on, s => {
+    if (s.path === '/claude/poll') return queue.shift() ?? new Error('hold')
+    if (s.path === '/claude/ack') order.push('ack')
+    return {}
+  })
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.abort', ($, e) => (order.push('abort ' + e.turnId), { value: undefined }) as never)
+  on('command.run', ($, e) => (order.push('run ' + e.command), { text: '' }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.turn.start({ text: 'work', turnId: 't1' } as never)
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(order).toEqual(['abort t1', 'ack', 'run exit'])
+})
