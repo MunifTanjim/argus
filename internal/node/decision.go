@@ -5,14 +5,13 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
-	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// decisionTimeout bounds how long a PermissionRequest hook blocks, kept just under
-// the hook's own timeout so we fall back before Claude kills the hook.
-var decisionTimeout = (claudecode.PermissionRequestHookTimeoutSeconds - 10) * time.Second
+// decisionTimeout bounds how long a parked permission request waits for an
+// answer in argus; the agent's own prompt stays up after it.
+var decisionTimeout = 1490 * time.Second
 
 // pendingDecision is a parked PermissionRequest awaiting the user's answer. The
 // blocked hook handler waits on ch; MethodSessionRespond sends the user's response.
@@ -49,9 +48,10 @@ func (d *Node) takePending(sid string) *pendingDecision {
 // awaitDecision parks a PermissionRequest and blocks until the user answers in
 // argus, the hook goes away (dismissed/answered in Claude → ctx cancel), or the
 // timeout fires. It resolves the interaction on every exit so no stale prompt
-// lingers; non-answered exits return "" so the hook prints nothing and Claude uses
-// its own prompt. A cancel interrupts the turn (Claude stops rather than
-// continuing), so it surfaces the idle composer instead of clearing to working.
+// lingers (an idle state a later event set is kept); non-answered exits return
+// "" so the hook prints nothing and Claude uses its own prompt. A cancel
+// interrupts the turn (Claude stops rather than continuing), so it surfaces the
+// idle composer instead of clearing to working.
 func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid string, ev adapter.HookEvent) string {
 	toolName, toolInput := a.PermissionPayload(ev)
 	pd, cancel := d.park(sid)
@@ -65,10 +65,10 @@ func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid string,
 		}
 		return a.FormatDecision(toolName, toolInput, p)
 	case <-ctx.Done():
-		d.reg.ClearInteraction(sid)
+		d.reg.ClearPendingDecision(sid)
 		return ""
 	case <-time.After(decisionTimeout):
-		d.reg.ClearInteraction(sid)
+		d.reg.ClearPendingDecision(sid)
 		return ""
 	}
 }

@@ -238,6 +238,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateHost(msg)
 	case terminalActionMsg:
 		return m.updateTerminals(msg)
+	case inputSentMsg:
+		if msg.err != nil {
+			m.flash = "send failed: " + msg.err.Error()
+		}
+		return m, nil
 	case killResultMsg:
 		if msg.err != nil {
 			m.flash = "kill failed: " + msg.err.Error()
@@ -311,8 +316,8 @@ func (m *model) maybeSpin() tea.Cmd {
 func (m model) sendInputCmd(id, text string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		_ = client.Call(api.MethodSessionInput, api.InputParams{SessionID: id, Text: text, Submit: true, Prepare: true}, nil)
-		return nil
+		err := client.Call(api.MethodSessionInput, api.InputParams{SessionID: id, Text: text, Submit: true, Prepare: true}, nil)
+		return inputSentMsg{err: err}
 	}
 }
 
@@ -699,7 +704,7 @@ func killRefusal(s session.Session) string {
 }
 
 func killPrompt(s session.Session) string {
-	return killVerb(s) + " session " + sessionRef(s) + "? y/n"
+	return "kill session " + sessionRef(s) + "? y/n"
 }
 
 func sessionRef(s session.Session) string {
@@ -716,17 +721,11 @@ func sessionRef(s session.Session) string {
 	return s.Repo + " · " + name
 }
 
-func killVerb(s session.Session) string {
-	if s.Controllable() {
-		return "kill"
-	}
-	return "dismiss"
-}
-
-// dismissable reports whether a paneless OpenCode session can be removed. Kill is
-// unconditional, so status and interaction do not gate it.
+// dismissable reports whether a paneless API session (opencode, Claude with its
+// mod) can be removed. Kill is unconditional, so status and interaction do not
+// gate it.
 func dismissable(s session.Session) bool {
-	return s.Agent == "opencode" && !s.Controllable()
+	return s.Input == session.InputAPI && !s.Controllable()
 }
 
 // quit's batch gives no order, so the program may exit before a close command

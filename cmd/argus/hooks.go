@@ -1,13 +1,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/node"
+	"github.com/MunifTanjim/argus/internal/shell"
 )
 
 // newHooksCmd builds `argus hooks install|uninstall`, the opt-in command that
@@ -15,7 +19,7 @@ import (
 func newHooksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "hooks",
-		Short:         "Install or remove the Claude Code hooks",
+		Short:         "Install or remove argus's agent integrations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Reached only when no subcommand matched; returns a real error (printed by
@@ -35,7 +39,7 @@ func newHooksInstallCmd() *cobra.Command {
 	var bin string
 	cmd := &cobra.Command{
 		Use:           "install",
-		Short:         "Install argus's Claude Code hooks into settings.json",
+		Short:         "Install argus's agent integrations (hooks, Claude Code plugin)",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -44,10 +48,18 @@ func newHooksInstallCmd() *cobra.Command {
 			if argusBin == "" {
 				argusBin = detectArgusBin()
 			}
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			opts := adapter.InstallOptions{ArgusBin: argusBin, Socket: node.ModSocketPath(cfg.Socket)}
+			hooked, failed := false, false
 			for _, a := range adapters.All() {
 				path, err := a.SettingsPath()
 				if err != nil {
-					return fail(cmd, err)
+					shell.StdErrF("failed to install argus integration for %s: %v\n", a.Agent(), err)
+					failed = true
+					continue
 				}
 				if path == "" {
 					continue // agent needs no hooks
@@ -58,16 +70,33 @@ func newHooksInstallCmd() *cobra.Command {
 					fmt.Printf("skipped %s: %s does not exist (agent not set up)\n", a.Agent(), dir)
 					continue
 				}
-				if err := a.Install(argusBin); err != nil {
-					return fail(cmd, err)
+				if err := a.Install(opts); err != nil {
+					if errors.Is(err, adapter.ErrAgentNotInstalled) {
+						fmt.Printf("skipped %s: not installed\n", a.Agent())
+						continue
+					}
+					shell.StdErrF("failed to install argus integration for %s: %v\n", a.Agent(), err)
+					failed = true
+					continue
 				}
-				fmt.Printf("installed argus hooks for %s into %s\n", a.Agent(), path)
-				fmt.Printf("  events: %v\n", a.DefaultHookEvents())
+				if events := a.DefaultHookEvents(); len(events) > 0 {
+					hooked = true
+					fmt.Printf("installed argus hooks for %s into %s\n", a.Agent(), path)
+					fmt.Printf("  events: %v\n", events)
+				} else {
+					fmt.Printf("installed the argus plugin for %s\n", a.Agent())
+				}
 			}
-			fmt.Printf("  command: %s hook <event>\n", argusBin)
+			if hooked {
+				fmt.Printf("  command: %s hook <event>\n", argusBin)
+			}
+			if failed {
+				return errSilent // each failure was already printed
+			}
 			return nil
 		},
 	}
+	addSocketFlag(cmd.Flags())
 	cmd.Flags().StringVar(&bin, "bin", "", "path to the argus binary the hooks invoke (default: auto-detect)")
 	return cmd
 }
@@ -75,24 +104,34 @@ func newHooksInstallCmd() *cobra.Command {
 func newHooksUninstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:           "uninstall",
-		Short:         "Remove argus's Claude Code hooks from settings.json",
+		Short:         "Remove argus's agent integrations",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			failed := false
 			for _, a := range adapters.All() {
 				path, err := a.SettingsPath()
-				if err != nil {
-					return fail(cmd, err)
+				if err == nil {
+					err = a.Uninstall()
 				}
-				if err := a.Uninstall(); err != nil {
-					return fail(cmd, err)
+				if err != nil {
+					shell.StdErrF("failed to remove argus integration for %s: %v\n", a.Agent(), err)
+					failed = true
+					continue
 				}
 				if path == "" {
 					fmt.Printf("removed argus hooks for %s\n", a.Agent())
 					continue
 				}
+				if len(a.DefaultHookEvents()) == 0 {
+					fmt.Printf("removed argus integration for %s\n", a.Agent())
+					continue
+				}
 				fmt.Printf("removed argus hooks for %s from %s\n", a.Agent(), path)
+			}
+			if failed {
+				return errSilent // each failure was already printed
 			}
 			return nil
 		},

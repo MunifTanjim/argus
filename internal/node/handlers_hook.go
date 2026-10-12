@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
-	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // handleHook applies an agent hook event. Blocking hooks park until the user
@@ -14,19 +14,30 @@ import (
 func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, error) {
 	ev, err := api.Decode[adapter.HookEvent](params)
 	if err != nil {
-		return nil, err
+		return api.HookResult{}, err
 	}
-	a := adapters.ByAgent(ev.Agent)
-	if a == nil {
+	a, ok := d.adapterList[0], true
+	if ev.Agent != "" {
+		a, ok = d.adapters[ev.Agent]
+	}
+	if !ok {
 		return api.HookResult{}, nil
 	}
-	api.LogAttr(ctx, "agent", ev.Agent)
-	s, alive := a.ProcessHook(d.reg, ev)
+	s, alive := d.applyHook(ctx, a, ev)
+	if alive && a.ShouldBlock(ev) {
+		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, ev)}, nil
+	}
+	return api.HookResult{}, nil
+}
+
+// applyHook never waits on a decision.
+func (d *Node) applyHook(ctx context.Context, a adapter.Adapter, ev adapter.HookEvent) (s session.Session, alive bool) {
+	api.LogAttr(ctx, "agent", a.Agent())
+	s, alive = a.ProcessHook(d.reg, ev)
 	if alive {
 		d.adoptSessionWorkspace(ctx, s)
 	}
-	event := a.EventName(ev)
-	api.LogAttr(ctx, "event", event)
+	api.LogAttr(ctx, "event", a.EventName(ev))
 	if tool, _ := a.PermissionPayload(ev); tool != "" {
 		api.LogAttr(ctx, "tool", tool)
 	}
@@ -35,11 +46,7 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	if a.RescanOnHook(ev) {
 		go d.scan(context.Background())
 	}
-
-	if alive && a.ShouldBlock(ev) {
-		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, ev)}, nil
-	}
-	return api.HookResult{}, nil
+	return s, alive
 }
 
 // handleSessionRespond resolves the session's parked PermissionRequest with the

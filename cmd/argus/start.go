@@ -16,6 +16,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
@@ -147,7 +148,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	if local {
-		reconcileInstalledHooks()
+		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: detectArgusBin(), Socket: node.ModSocketPath(cfg.Socket)})
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
@@ -330,14 +331,13 @@ func applyLogLevel(cfg *config.Config) error {
 	return nil
 }
 
-// reconcileInstalledHooks syncs installed hooks with this binary's event set so
-// new hooks take effect without a manual reinstall. Best-effort.
-func reconcileInstalledHooks() {
-	log := logger.Scoped("hooks")
-	bin := detectArgusBin()
+// reconcileHooks syncs installed agent integrations with this binary so changes
+// take effect without a manual reinstall. Best-effort, and slow when it runs
+// the claude CLI, so callers run it in the background.
+func reconcileHooks(log *slog.Logger, opts adapter.InstallOptions) {
 	for _, a := range adapters.All() {
-		if added, err := a.ReconcileIfInstalled(bin); err != nil {
-			log.Error("reconcile hooks failed", "agent", a.Agent(), "err", err)
+		if added, err := a.ReconcileIfInstalled(opts); err != nil {
+			log.Warn("reconcile hooks failed", "agent", a.Agent(), "err", err)
 		} else if len(added) > 0 {
 			log.Info("reconciled argus hooks", "agent", a.Agent(), "added", added)
 		}

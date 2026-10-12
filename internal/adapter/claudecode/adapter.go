@@ -8,25 +8,35 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 	"github.com/MunifTanjim/argus/internal/adapter/hookdecision"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/modbridge"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-type ccAdapter struct{}
+type ccAdapter struct {
+	bridge *modbridge.Bridge
+}
 
-func New() adapter.Adapter { return ccAdapter{} }
+func New() adapter.Adapter { return &ccAdapter{} }
 
-var _ adapter.Adapter = ccAdapter{}
-var _ adapter.TaskSource = ccAdapter{}
+var _ adapter.Adapter = (*ccAdapter)(nil)
+var _ adapter.TaskSource = (*ccAdapter)(nil)
+var _ adapter.Prompter = (*ccAdapter)(nil)
+var _ adapter.ModBridged = (*ccAdapter)(nil)
+var _ adapter.Dismisser = (*ccAdapter)(nil)
 
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
 func (ccAdapter) AgentColor() string { return "#fe8019" }
 func (ccAdapter) IsHeadless() bool   { return false }
 
-func (ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
+// NewDiscoverer also wires the mod bridge: the node calls it once, so the bridge
+// and the input policy live on the node's adapter instance.
+func (a *ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
+	a.bridge = modbridge.New(modGrace, modAckTimeout, reg.RefreshInput)
+	reg.SetInputPolicy(Agent, a.inputMode)
 	return NewDiscoverer(reg, clients)
 }
 
@@ -120,14 +130,25 @@ func (ccAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return PrepareTextInput(ctx, pc, paneID)
 }
 
-func (ccAdapter) Install(argusBin string) error { return Install(argusBin, DefaultHookEvents) }
-
-func (ccAdapter) ReconcileIfInstalled(argusBin string) ([]string, error) {
-	return ReconcileIfInstalled(argusBin)
+func (ccAdapter) Install(opts adapter.InstallOptions) error {
+	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
+	defer cancel()
+	return installMod(ctx, opts)
 }
 
-func (ccAdapter) Uninstall() error { return Uninstall() }
+func (ccAdapter) ReconcileIfInstalled(opts adapter.InstallOptions) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
+	defer cancel()
+	return reconcileMod(ctx, opts)
+}
+
+func (ccAdapter) Uninstall() error {
+	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
+	defer cancel()
+	return uninstallMod(ctx)
+}
 
 func (ccAdapter) SettingsPath() (string, error) { return SettingsPath() }
 
-func (ccAdapter) DefaultHookEvents() []string { return DefaultHookEvents }
+// DefaultHookEvents is empty: Claude Code is integrated through the mod.
+func (ccAdapter) DefaultHookEvents() []string { return nil }

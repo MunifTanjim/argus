@@ -1,12 +1,16 @@
 package codex
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func TestAdapterIsHeadlessWithCapabilities(t *testing.T) {
@@ -67,5 +71,12 @@ func TestResumeCommandWaitsForRollout(t *testing.T) {
 	}
 	if _, _, ok := a.ResumeCommand("untracked"); !ok {
 		t.Error("untracked (history) threads must stay resumable")
+	}
+}
+
+func TestSendPromptRefusesBusySession(t *testing.T) {
+	busy := session.Session{Agent: Agent, AgentSessionID: "t1", Status: session.StatusWorking}
+	if err := New().(adapter.Prompter).SendPrompt(context.Background(), busy, "hello"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want ErrSessionBusy", err)
 	}
 }

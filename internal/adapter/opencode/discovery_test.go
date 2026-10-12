@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -619,5 +621,13 @@ func TestScanOnceSeedsRunning(t *testing.T) {
 	snap := reg.Snapshot()
 	if len(snap) != 1 || snap[0].AgentSessionID != "ses_1" || snap[0].Status != session.StatusWorking {
 		t.Fatalf("seed: %+v", snap)
+	}
+}
+
+func TestAdapterSendPromptRefusesBusySession(t *testing.T) {
+	a := &ocAdapter{}
+	busy := session.Session{Agent: Agent, AgentSessionID: "ses_1", Status: session.StatusWorking}
+	if err := a.SendPrompt(context.Background(), busy, "hello"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want ErrSessionBusy", err)
 	}
 }

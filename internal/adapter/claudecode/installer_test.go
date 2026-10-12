@@ -1,355 +1,567 @@
 package claudecode
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/adapter"
 )
 
-func readSettings(t *testing.T, path string) map[string]json.RawMessage {
+// fakeClaude records every claude invocation and answers the read-only ones.
+type fakeClaude struct {
+	version      string
+	marketplaces string // `plugin marketplace list --json`
+	plugins      string // `plugin list --json`
+	fail         string // a call that fails
+	calls        []string
+	stdin        []string
+}
+
+func installFake(t *testing.T, f *fakeClaude) {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
+	oldRun, oldLook, oldDir := runClaude, claudeOnPath, marketplaceDir
+	t.Cleanup(func() { runClaude, claudeOnPath, marketplaceDir = oldRun, oldLook, oldDir })
+	dir := filepath.Join(t.TempDir(), "claude-marketplace")
+	marketplaceDir = func() string { return dir }
+	claudeOnPath = func() bool { return true }
+	runClaude = func(_ context.Context, stdin string, args ...string) ([]byte, error) {
+		call := strings.Join(args, " ")
+		f.calls = append(f.calls, call)
+		f.stdin = append(f.stdin, stdin)
+		if call == f.fail {
+			return nil, errors.New("failed")
+		}
+		switch call {
+		case "--version":
+			return []byte(f.version + " (Claude Code)\n"), nil
+		case "plugin marketplace list --json":
+			// A bare argus entry stands for argus's own marketplace.
+			return []byte(strings.ReplaceAll(f.marketplaces, `{"name":"argus"}`, `{"name":"argus","path":"`+dir+`"}`)), nil
+		case "plugin list --json":
+			return []byte(f.plugins), nil
+		}
+		return nil, nil
 	}
-	m := map[string]json.RawMessage{}
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("parse settings: %v", err)
-	}
-	return m
 }
 
-func TestInstallIsIdempotentAndPreservesOtherSettings(t *testing.T) {
+func seedSettings(t *testing.T, body string) string {
+	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	path := filepath.Join(dir, "settings.json")
-
-	// Pre-existing settings: an unrelated key and a user's own Stop hook.
-	seed := `{
-	  "model": "opus",
-	  "hooks": {
-	    "Stop": [ { "hooks": [ { "type": "command", "command": "my-own-thing" } ] } ]
-	  }
-	}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
 
-	events := []string{"Stop", "Notification"}
-	if err := Install("/usr/local/bin/argus", events); err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	// Install twice — must not duplicate.
-	if err := Install("/usr/local/bin/argus", events); err != nil {
-		t.Fatalf("install 2: %v", err)
-	}
+const legacyAndUserHooks = `{
+  "model": "opus",
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "my-own-thing" } ] },
+      { "hooks": [ { "type": "command", "command": "/usr/bin/argus hook Stop --agent claude --argus-managed" } ] }
+    ]
+  }
+}`
 
-	m := readSettings(t, path)
-	if string(m["model"]) != `"opus"` {
-		t.Errorf("unrelated key not preserved: %s", m["model"])
-	}
+func TestInstallKeepsUserHooks(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	installFake(t, &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"})
 
-	hooks := map[string][]hookGroup{}
-	if err := json.Unmarshal(m["hooks"], &hooks); err != nil {
+	if err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
 		t.Fatal(err)
 	}
-
-	// Stop must contain the user's hook AND exactly one managed hook.
-	managed, userOwned := 0, 0
-	for _, g := range hooks["Stop"] {
-		for _, c := range g.Hooks {
-			if isManaged(c) {
-				managed++
-			} else if c.Command == "my-own-thing" {
-				userOwned++
-			}
-		}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "argus hook") {
+		t.Fatalf("argus hook left in settings.json:\n%s", b)
 	}
-	if managed != 1 {
-		t.Errorf("Stop managed hooks: want 1, got %d", managed)
-	}
-	if userOwned != 1 {
-		t.Errorf("user's own Stop hook should be preserved, got %d", userOwned)
-	}
-
-	// Uninstall removes only managed hooks; user's survive; other keys survive.
-	if err := Uninstall(); err != nil {
-		t.Fatalf("uninstall: %v", err)
-	}
-	m = readSettings(t, path)
-	if string(m["model"]) != `"opus"` {
-		t.Errorf("model lost after uninstall")
-	}
-	hooks = map[string][]hookGroup{}
-	_ = json.Unmarshal(m["hooks"], &hooks)
-	if _, ok := hooks["Notification"]; ok {
-		t.Errorf("Notification event should be gone after uninstall")
-	}
-	stopManaged := 0
-	stopUser := 0
-	for _, g := range hooks["Stop"] {
-		for _, c := range g.Hooks {
-			if isManaged(c) {
-				stopManaged++
-			} else {
-				stopUser++
-			}
-		}
-	}
-	if stopManaged != 0 || stopUser != 1 {
-		t.Errorf("after uninstall: managed=%d userOwned=%d (want 0,1)", stopManaged, stopUser)
+	if !strings.Contains(string(b), "my-own-thing") || !strings.Contains(string(b), `"opus"`) {
+		t.Fatalf("user settings lost:\n%s", b)
 	}
 }
 
-func TestInstallNoPriorFile(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	if err := Install("argus", []string{"Stop"}); err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "settings.json")); err != nil {
-		t.Fatalf("settings.json not created: %v", err)
-	}
-}
+func TestInstallAddsMarketplaceAndInstallsMod(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
+	installFake(t, f)
 
-func TestReconcileIfInstalledAddsMissingEvents(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-
-	// Simulate an older install: only a managed Stop hook, plus a user hook.
-	seed := `{
-	  "model": "opus",
-	  "hooks": {
-	    "Stop": [
-	      { "hooks": [ { "type": "command", "command": "my-own-thing" } ] },
-	      { "hooks": [ { "type": "command", "command": "/bin/argus hook --argus-managed --tool claude-code Stop", "timeout": 5 } ] }
-	    ]
-	  }
-	}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+	if err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
 		t.Fatal(err)
 	}
-
-	added, err := ReconcileIfInstalled("/bin/argus")
-	if err != nil {
-		t.Fatalf("reconcile: %v", err)
+	dir := marketplaceDir()
+	want := []string{
+		"--version",
+		"plugin list --json",
+		"plugin marketplace list --json",
+		"plugin marketplace add " + dir,
+		"plugin install argus@argus --config socket=/run/argus/mod.sock",
 	}
-	// PermissionRequest (and the rest) should now be added.
-	want := false
-	for _, e := range added {
-		if e == "PermissionRequest" {
-			want = true
-		}
-		if e == "Stop" {
-			t.Errorf("Stop already managed; should not be in added: %v", added)
-		}
+	if strings.Join(f.calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(f.calls, "\n"), strings.Join(want, "\n"))
 	}
-	if !want {
-		t.Fatalf("PermissionRequest not added: %v", added)
+	var manifest struct {
+		Version string `json:"version"`
 	}
-
-	top := readSettings(t, path)
-	hooks := map[string][]hookGroup{}
-	_ = json.Unmarshal(top["hooks"], &hooks)
-	if !hasManaged(hooks["PermissionRequest"]) {
-		t.Error("PermissionRequest managed hook not written")
-	}
-	// User's own Stop hook is preserved.
-	if top["model"] == nil {
-		t.Error("unrelated 'model' key dropped")
-	}
-	var foundUser bool
-	for _, g := range hooks["Stop"] {
-		for _, c := range g.Hooks {
-			if c.Command == "my-own-thing" {
-				foundUser = true
-			}
-		}
-	}
-	if !foundUser {
-		t.Error("user's Stop hook was dropped")
-	}
-
-	// Legacy #argus-managed marker must be migrated to the --argus-managed flag.
-	for _, g := range hooks["Stop"] {
-		for _, c := range g.Hooks {
-			if isManaged(c) && strings.Contains(c.Command, legacyHookMarker) {
-				t.Errorf("legacy marker not migrated: %q", c.Command)
-			}
-		}
-	}
-
-	// Second run is a no-op.
-	added2, err := ReconcileIfInstalled("/bin/argus")
-	if err != nil || len(added2) != 0 {
-		t.Errorf("second reconcile should be no-op: added=%v err=%v", added2, err)
-	}
-}
-
-func TestReconcileKeepingInstalledBinPreservesPath(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-
-	// Installed from /opt/argus; an older set with only Stop managed.
-	seed := `{
-	  "hooks": {
-	    "Stop": [
-	      { "hooks": [ { "type": "command", "command": "/opt/argus hook Stop #argus-managed", "timeout": 5 } ] }
-	    ]
-	  }
-	}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	added, err := ReconcileKeepingInstalledBin()
-	if err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if len(added) == 0 {
-		t.Fatal("expected missing events to be added")
-	}
-
-	top := readSettings(t, path)
-	hooks := map[string][]hookGroup{}
-	_ = json.Unmarshal(top["hooks"], &hooks)
-	// Managed commands must keep /opt/argus, not the test binary's os.Executable().
-	for event, groups := range hooks {
-		for _, g := range groups {
-			for _, c := range g.Hooks {
-				if isManaged(c) && !strings.HasPrefix(c.Command, "/opt/argus hook ") {
-					t.Errorf("%s: managed bin rewritten in %q", event, c.Command)
-				}
-			}
-		}
-	}
-	if !hasManaged(hooks["PermissionRequest"]) {
-		t.Error("PermissionRequest managed hook not added")
-	}
-}
-
-func TestReconcileKeepingInstalledBinOptInPreserved(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-
-	seed := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-own-thing"}]}]}}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	added, err := ReconcileKeepingInstalledBin()
-	if err != nil || len(added) != 0 {
-		t.Fatalf("opt-in: expected no-op, got added=%v err=%v", added, err)
-	}
-}
-
-func TestReconcileIfInstalledOptInPreserved(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-
-	// No argus-managed hooks at all → reconcile must do nothing.
-	seed := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-own-thing"}]}]}}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	added, err := ReconcileIfInstalled("/bin/argus")
-	if err != nil || len(added) != 0 {
-		t.Fatalf("opt-in: expected no-op, got added=%v err=%v", added, err)
-	}
-	top := readSettings(t, path)
-	hooks := map[string][]hookGroup{}
-	_ = json.Unmarshal(top["hooks"], &hooks)
-	if _, ok := hooks["PermissionRequest"]; ok {
-		t.Error("reconcile auto-installed hooks for a non-opted-in user")
-	}
-}
-
-func TestSavePreservesAngleBrackets(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-
-	seed := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sh -c 'env >> /tmp/x.txt'"}]}]}}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Install("/usr/bin/argus", DefaultHookEvents); err != nil {
-		t.Fatal(err)
-	}
-
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Join(dir, "argus", ".claude-plugin", "plugin.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), `\u003e`) {
-		t.Errorf("'>' escaped as \\u003e in written file:\n%s", b)
+	_ = json.Unmarshal(b, &manifest)
+	if manifest.Version != modVersion() {
+		t.Fatalf("written version = %q, want %q", manifest.Version, modVersion())
 	}
-	if !strings.Contains(string(b), ">> /tmp/x.txt") {
-		t.Errorf("redirect not preserved verbatim:\n%s", b)
+	if _, err := os.Stat(filepath.Join(dir, ".claude-plugin", "marketplace.json")); err != nil {
+		t.Fatalf("marketplace.json not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "argus", "hooks", "register.test.ts")); !os.IsNotExist(err) {
+		t.Fatal("tests must not be installed with the mod")
 	}
 }
 
-func TestReconcileMigratesLegacyMarker(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
+func TestInstallUpdatesStaleModAndSetsSocket(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{
+		version:      "2.1.296",
+		marketplaces: `[{"name":"argus"}]`,
+		plugins:      `[{"id":"argus@argus","scope":"user","version":"old"}]`,
+	}
+	installFake(t, f)
 
-	seed := `{
-	  "hooks": {
-	    "Stop": [
-	      { "hooks": [ { "type": "command", "command": "my-own-thing" } ] },
-	      { "hooks": [ { "type": "command", "command": "/bin/argus hook Stop #argus-managed", "timeout": 5 } ] }
-	    ],
-	    "SessionStart": [
-	      { "hooks": [ { "type": "command", "command": "/bin/argus hook SessionStart #argus-managed", "timeout": 5 } ] }
-	    ]
-	  }
-	}`
-	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+	if err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
 		t.Fatal(err)
 	}
+	joined := strings.Join(f.calls, "\n")
+	for _, want := range []string{
+		"plugin marketplace update argus",
+		"plugin update argus@argus",
+		"plugin configure argus@argus --values-stdin",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in calls:\n%s", want, joined)
+		}
+	}
+	if got := f.stdin[len(f.stdin)-1]; got != `{"socket":"/run/argus/mod.sock"}` {
+		t.Fatalf("configure stdin = %q", got)
+	}
+}
 
-	if _, err := ReconcileIfInstalled("/bin/argus"); err != nil {
+func TestInstallRefusesOldClaudeAndKeepsHooks(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{version: "2.1.290"}
+	installFake(t, f)
+
+	err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err == nil || !strings.Contains(err.Error(), minClaudeVersion) {
+		t.Fatalf("err = %v, want one naming %s", err, minClaudeVersion)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "argus hook") {
+		t.Fatal("old hooks must stay until Claude Code is upgraded")
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %v, want only --version", f.calls)
+	}
+	if !strings.Contains(err.Error(), "upgrade Claude Code") || !strings.Contains(err.Error(), "argus hooks install") {
+		t.Fatalf("err = %v, want it to state the upgrade and the re-run", err)
+	}
+}
+
+func TestInstallWithoutClaudeIsNotInstalled(t *testing.T) {
+	seedSettings(t, `{}`)
+	installFake(t, &fakeClaude{})
+	claudeOnPath = func() bool { return false }
+	if err := New().Install(adapter.InstallOptions{}); !errors.Is(err, adapter.ErrAgentNotInstalled) {
+		t.Fatalf("err = %v, want ErrAgentNotInstalled", err)
+	}
+}
+
+func TestReconcileDoesNothingWhenNeverInstalled(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
+	installFake(t, f)
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "plugin install") || strings.HasPrefix(c, "plugin marketplace add") {
+			t.Fatalf("reconcile installed without opt-in: %v", f.calls)
+		}
+	}
+}
+
+func TestReconcileSpawnsNothingWhenNeverInstalled(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
+	installFake(t, f)
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("claude called: %v", f.calls)
+	}
+}
+
+func TestReconcileIgnoresNonUserScopeRows(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`,
+		plugins: `[{"id":"argus@argus","scope":"project","version":"other"},{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	installFake(t, f)
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+}
 
-	b, err := os.ReadFile(path)
+func TestReconcileMigratesLegacyHooks(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
+	installFake(t, f)
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want a migration", changed, err)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "argus hook") {
+		t.Fatal("reconcile must remove old hooks")
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "plugin install argus@argus") {
+		t.Fatalf("reconcile must install the mod: %v", f.calls)
+	}
+	for _, c := range []string{"--version", "plugin list --json"} {
+		if n := slices.Index(f.calls, c); n < 0 || slices.Index(f.calls[n+1:], c) >= 0 {
+			t.Fatalf("want %q run once: %v", c, f.calls)
+		}
+	}
+}
+
+func TestReconcileReportsLegacyHooksWithoutClaude(t *testing.T) {
+	seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{}
+	installFake(t, f)
+	claudeOnPath = func() bool { return false }
+	_, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err == nil || !strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("err = %v, want it to name the missing claude", err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("claude called: %v", f.calls)
+	}
+}
+
+func TestReconcileWithoutClaudeOrLegacyHooksIsQuiet(t *testing.T) {
+	seedSettings(t, `{}`)
+	installFake(t, &fakeClaude{})
+	claudeOnPath = func() bool { return false }
+	if changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{}); err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+}
+
+func TestReconcileWithoutSocketDoesNotInstall(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
+	installFake(t, f)
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err == nil {
+		t.Fatalf("ReconcileIfInstalled = %v, nil; want an error for a fresh install with no socket", changed)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "plugin install") {
+			t.Fatalf("installed the mod with no socket: %v", f.calls)
+		}
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "argus hook") {
+		t.Fatal("old hooks must stay when the mod cannot be installed")
+	}
+}
+
+func TestReconcileSkipsClaudeWhenMarketplaceIsCurrent(t *testing.T) {
+	seedSettings(t, socketSettings("/run/argus/mod.sock"))
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	installFake(t, f)
+	if err := writeMarketplace(marketplaceDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampInstalled(); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("claude called: %v", f.calls)
+	}
+}
+
+func socketSettings(socket string) string {
+	return `{"pluginConfigs": {"argus@argus": {"options": {"socket": "` + socket + `"}}}}`
+}
+
+func currentModFake(t *testing.T, plugins string) *fakeClaude {
+	t.Helper()
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: plugins}
+	installFake(t, f)
+	if err := writeMarketplace(marketplaceDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampInstalled(); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+const currentUserPlugin = `[{"id":"argus@argus","scope":"user","version":"%s"}]`
+
+func TestReconcileReappliesChangedSocket(t *testing.T) {
+	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
+	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want a change", changed, err)
+	}
+	want := []string{"--version", "plugin list --json", "plugin configure argus@argus --values-stdin"}
+	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls = %v; want %v", f.calls, want)
+	}
+	if got := f.stdin[2]; got != `{"socket":"/tmp/argus-2/mod.sock"}` {
+		t.Fatalf("configure stdin = %q", got)
+	}
+}
+
+func TestReconcileKeepsMatchingSocket(t *testing.T) {
+	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
+	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-1/mod.sock"})
+	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
+		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
+	}
+}
+
+func TestReconcileChangedSocketSkipsWhenPluginNotInstalled(t *testing.T) {
+	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
+	f := currentModFake(t, `[{"id":"argus@argus","scope":"project","version":"x"}]`)
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("got %v, %v; want nothing", changed, err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "plugin configure") {
+			t.Fatalf("configured an absent plugin: %v", f.calls)
+		}
+	}
+}
+
+func TestReconcileEmptySocketMakesNoCalls(t *testing.T) {
+	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
+	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
+		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
+	}
+}
+
+func TestReconcileUpdatesStaleMod(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"old"}]`}
+	installFake(t, f)
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want an update", changed, err)
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "plugin update argus@argus") {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+func TestReconcileLeavesCurrentModAlone(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	installFake(t, f)
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	}
+}
+
+func TestUninstallRemovesModAndHooks(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"x"}]`}
+	installFake(t, f)
+	if err := New().Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(f.calls, "\n")
+	for _, want := range []string{"plugin uninstall argus@argus", "plugin marketplace remove argus"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %v", want, f.calls)
+		}
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "argus hook") || !strings.Contains(string(b), "my-own-thing") {
+		t.Fatalf("settings after uninstall:\n%s", b)
+	}
+}
+
+func TestClaudeVersionAtLeast(t *testing.T) {
+	for _, tc := range []struct {
+		have string
+		ok   bool
+	}{
+		{"2.1.293", true}, {"2.1.296", true}, {"2.2.0", true}, {"3.0.0", true},
+		{"2.1.292", false}, {"2.0.999", false}, {"garbage", false},
+	} {
+		if got := versionAtLeast(tc.have, minClaudeVersion); got != tc.ok {
+			t.Errorf("versionAtLeast(%q) = %v, want %v", tc.have, got, tc.ok)
+		}
+	}
+}
+
+// A failed install keeps the old hooks, so the next start migrates again.
+func TestFailedMigrationIsRetried(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]", fail: "plugin install argus@argus --config socket=/run/argus/mod.sock"}
+	installFake(t, f)
+	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
+		t.Fatal("reconcile must report the failed install")
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "argus hook") {
+		t.Fatal("a failed install must keep the old hooks")
+	}
+	f.fail, f.calls = "", nil
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("ReconcileIfInstalled = %v, %v; want the migration retried", changed, err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "argus hook") {
+		t.Fatal("the retried migration must remove the old hooks")
+	}
+}
+
+// A failed update leaves the old stamp, so the next start updates again.
+func TestFailedUpdateIsRetried(t *testing.T) {
+	seedSettings(t, socketSettings("/run/argus/mod.sock"))
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"old"}]`, fail: "plugin update argus@argus"}
+	installFake(t, f)
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
+		t.Fatal("reconcile must report the failed update")
+	}
+	f.fail, f.calls = "", nil
+	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, "plugin update argus@argus") {
+		t.Fatalf("the update must be retried: %v", f.calls)
+	}
+}
+
+func TestInstallRefusesForeignMarketplaceNamedArgus(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus","path":"/elsewhere"}]`, plugins: "[]"}
+	installFake(t, f)
+	err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err == nil || !strings.Contains(err.Error(), "/elsewhere") {
+		t.Fatalf("err = %v, want it to name the other marketplace", err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "plugin marketplace update") || strings.HasPrefix(c, "plugin marketplace add") || strings.HasPrefix(c, "plugin install") {
+			t.Fatalf("must not touch another marketplace: %v", f.calls)
+		}
+	}
+}
+
+func TestInstallRefreshesOldClaudeHooks(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	installFake(t, &fakeClaude{version: "2.1.290"})
+	err := New().Install(adapter.InstallOptions{ArgusBin: "/new/argus", Socket: "/run/argus/mod.sock"})
+	if err == nil || !strings.Contains(err.Error(), minClaudeVersion) {
+		t.Fatalf("err = %v, want one naming %s", err, minClaudeVersion)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "/new/argus hook") || strings.Contains(string(b), "/usr/bin/argus") {
+		t.Fatalf("old hooks must follow the new binary:\n%s", b)
+	}
+}
+
+func TestReconcileRefreshesHooksWithoutClaude(t *testing.T) {
+	path := seedSettings(t, legacyAndUserHooks)
+	installFake(t, &fakeClaude{})
+	claudeOnPath = func() bool { return false }
+	_, err := New().ReconcileIfInstalled(adapter.InstallOptions{ArgusBin: "/new/argus", Socket: "/run/argus/mod.sock"})
+	if err == nil || !strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("err = %v, want it to name the missing claude", err)
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "/new/argus hook") {
+		t.Fatalf("old hooks must follow the new binary:\n%s", b)
+	}
+}
+
+func TestReconcileReportsStaleModWithoutClaude(t *testing.T) {
+	seedSettings(t, `{}`)
+	installFake(t, &fakeClaude{})
+	claudeOnPath = func() bool { return false }
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{}); err == nil || !strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("err = %v, want it to name the missing claude", err)
+	}
+}
+
+func TestUninstallWithoutClaudeKeepsMarketplace(t *testing.T) {
+	seedSettings(t, `{}`)
+	installFake(t, &fakeClaude{})
+	claudeOnPath = func() bool { return false }
+	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := New().Uninstall(); err == nil {
+		t.Fatal("uninstall without claude must report the plugin it cannot remove")
+	}
+	if _, err := os.Stat(marketplaceDir()); err != nil {
+		t.Fatalf("marketplace removed: %v", err)
+	}
+}
+
+func TestReconcileLeavesSocketOfLiveNode(t *testing.T) {
+	dir, err := os.MkdirTemp("", "argus") // short: unix socket paths are limited
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(b)
-	if strings.Contains(content, "#argus-managed") {
-		t.Errorf("legacy marker not migrated away:\n%s", content)
-	}
-	if !strings.Contains(content, "/bin/argus hook --argus-managed --agent claude Stop") {
-		t.Errorf("Stop not rewritten to the unified form:\n%s", content)
-	}
-
-	top := readSettings(t, path)
-	hooks := map[string][]hookGroup{}
-	if err := json.Unmarshal(top["hooks"], &hooks); err != nil {
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	live := filepath.Join(dir, "mod.sock")
+	l, err := net.Listen("unix", live)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range DefaultHookEvents {
-		if !hasManaged(hooks[e]) {
-			t.Errorf("event %q not managed after migration", e)
-		}
-	}
-	var foundUser bool
-	for _, g := range hooks["Stop"] {
-		for _, c := range g.Hooks {
-			if c.Command == "my-own-thing" {
-				foundUser = true
-			}
-		}
-	}
-	if !foundUser {
-		t.Error("user's own hook was dropped during migration")
+	t.Cleanup(func() { l.Close() })
+	seedSettings(t, socketSettings(live))
+	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-dev/mod.sock"})
+	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
+		t.Fatalf("got %v, %v, calls %v; want the live node's socket kept", changed, err, f.calls)
 	}
 }

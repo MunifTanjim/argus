@@ -136,6 +136,8 @@ type hostTickMsg struct {
 	gen    int
 }
 
+type inputSentMsg struct{ err error }
+
 type hostWakelockMsg struct {
 	nodeID   string
 	wakelock api.HostWakelock

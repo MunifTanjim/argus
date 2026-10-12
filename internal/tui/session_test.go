@@ -820,3 +820,13 @@ func TestSessionViewStartingShowsNotice(t *testing.T) {
 		t.Errorf("header should show the starting status word:\n%s", out)
 	}
 }
+
+func TestSendInputErrorFlashes(t *testing.T) {
+	m := testModel()
+	m.client = &failingClient{err: errString("s1: session is busy")}
+	msg := m.sendInputCmd("s1", "hello")()
+	m, _ = upd(m, msg)
+	if m.flash != "send failed: s1: session is busy" {
+		t.Fatalf("flash = %q, want the send error", m.flash)
+	}
+}

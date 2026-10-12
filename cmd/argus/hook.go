@@ -27,6 +27,8 @@ func newHookCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
 			a := adapters.ByAgent(agent)
+			// Claude Code's old settings hooks still report here until the mod
+			// replaces them (kept for Claude too old to load it).
 			if a == nil {
 				shell.Exit(0)
 			}
@@ -34,7 +36,7 @@ func newHookCmd() *cobra.Command {
 			if len(args) > 0 {
 				event = args[0]
 			}
-			payload, _ := io.ReadAll(io.LimitReader(os.Stdin, 8*1024*1024))
+			payload, _ := io.ReadAll(io.LimitReader(os.Stdin, adapter.MaxHookPayload))
 
 			cfg, err := resolveConfig(cmd)
 			if err != nil {

@@ -127,7 +127,11 @@ func (a *cxAdapter) Respond(ctx context.Context, sess session.Session, p api.Res
 // OwnsInteraction: respond refreshes the card itself to show the next queued request.
 func (*cxAdapter) OwnsInteraction() bool { return true }
 
+// SendPrompt takes a prompt only while the session is idle.
 func (a *cxAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
+	if !sess.ReadyForPrompt() {
+		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
 	d, err := a.live()
 	if err != nil {
 		return err
@@ -154,8 +158,10 @@ func (a *cxAdapter) Dismiss(ctx context.Context, sess session.Session) error {
 
 // Codex needs no argus-managed config. Node start strips hooks older argus
 // versions installed; `argus hooks uninstall` still removes them too.
-func (cxAdapter) Install(string) error                          { return nil }
-func (cxAdapter) ReconcileIfInstalled(string) ([]string, error) { return nil, Uninstall() }
-func (cxAdapter) Uninstall() error                              { return Uninstall() }
-func (cxAdapter) SettingsPath() (string, error)                 { return "", nil }
-func (cxAdapter) DefaultHookEvents() []string                   { return nil }
+func (cxAdapter) Install(adapter.InstallOptions) error { return nil }
+func (cxAdapter) ReconcileIfInstalled(adapter.InstallOptions) ([]string, error) {
+	return nil, Uninstall()
+}
+func (cxAdapter) Uninstall() error              { return Uninstall() }
+func (cxAdapter) SettingsPath() (string, error) { return "", nil }
+func (cxAdapter) DefaultHookEvents() []string   { return nil }

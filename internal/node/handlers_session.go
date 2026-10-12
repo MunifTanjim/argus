@@ -254,24 +254,17 @@ func (d *Node) sendPaneInput(ctx context.Context, s session.Session, p api.Input
 	return nil, nil
 }
 
-// sendPromptInput delivers a prompt to an InputAPI session over its agent's API,
-// when the session is idle enough to accept one. It reports the absent terminal
-// control otherwise, as the pane path would.
+// sendPromptInput delivers a prompt to an InputAPI session over its agent's API.
+// The agent decides whether a busy session takes it (Claude queues it).
 func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
 	pr, ok := d.adapterFor(s.Agent).(adapter.Prompter)
-	if !ok || p.Text == "" || !promptEligible(s) {
+	if !ok || p.Text == "" {
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
 	if err := pr.SendPrompt(ctx, s, p.Text); err != nil {
 		return nil, err
 	}
 	return nil, nil
-}
-
-// promptEligible reports whether a session is idle enough to receive a new prompt.
-func promptEligible(s session.Session) bool {
-	return s.Status != session.StatusWorking &&
-		(s.Interaction == nil || s.Interaction.Kind == session.InteractionIdle)
 }
 
 // sleepCtx waits for d, returning early if ctx is cancelled.

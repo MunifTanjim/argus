@@ -134,6 +134,7 @@ func (s Spec) Reconcile(argusBin string) (added []string, err error) {
 }
 
 // Uninstall removes all argus-managed hooks, leaving user hooks untouched.
+// A file with no argus hooks is not rewritten.
 func (s Spec) Uninstall() error {
 	hooks, err := s.Load()
 	if err != nil {
@@ -141,6 +142,9 @@ func (s Spec) Uninstall() error {
 			return nil
 		}
 		return err
+	}
+	if !s.anyManaged(hooks) {
+		return nil
 	}
 	s.stripManagedFromAll(hooks)
 	return s.Save(hooks)
@@ -223,7 +227,6 @@ func (s Spec) hasManaged(groups []Group) bool {
 	}
 	return false
 }
-func (s Spec) HasManaged(groups []Group) bool { return s.hasManaged(groups) }
 
 func (s Spec) stripManagedFromAll(hooks Map) {
 	for event, groups := range hooks {

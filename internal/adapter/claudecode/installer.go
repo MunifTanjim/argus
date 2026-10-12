@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,34 +11,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter/hookset"
 )
 
-// legacyHookMarker is the old shell-comment marker; recognized for migration, never written.
+// legacyHookMarker is the old shell-comment marker; recognized for removal only.
 const legacyHookMarker = "#argus-managed"
-
-// DefaultHookEvents are the Claude Code hook events argus registers.
-var DefaultHookEvents = []string{
-	"SessionStart",
-	"UserPromptSubmit",
-	"PreToolUse",
-	"PostToolUse",
-	"Notification",
-	"PermissionRequest",
-	"Stop",
-	"SessionEnd",
-}
-
-// PermissionRequestHookTimeoutSeconds is exported so node.decisionTimeout can
-// derive from it instead of hardcoding a copy.
-const PermissionRequestHookTimeoutSeconds = 1500
-
-// hookTimeout returns the per-event command timeout in seconds. PermissionRequest
-// blocks until the user answers, so it gets a long timeout; others are
-// fire-and-forget observers.
-func hookTimeout(event string) int {
-	if event == "PermissionRequest" {
-		return PermissionRequestHookTimeoutSeconds
-	}
-	return 5
-}
 
 // SettingsPath returns the Claude Code settings.json path, honoring
 // CLAUDE_CONFIG_DIR and falling back to ~/.claude.
@@ -53,42 +28,58 @@ func SettingsPath() (string, error) {
 	return filepath.Join(dir, "settings.json"), nil
 }
 
-func managedCommand(argusBin, event string) string {
-	return hookset.ManagedCommand(argusBin, Agent, event)
+// legacyHookEvents are the events the old settings hooks covered. A Claude too
+// old for the mod keeps these hooks, refreshed to the current argus binary.
+var legacyHookEvents = []string{
+	"SessionStart",
+	"UserPromptSubmit",
+	"PreToolUse",
+	"PostToolUse",
+	"Notification",
+	"PermissionRequest",
+	"Stop",
+	"SessionEnd",
 }
 
-type hookCmd = hookset.Cmd
-type hookGroup = hookset.Group
+// legacyHookTimeout is the per-event command timeout in seconds. PermissionRequest
+// blocks until the user answers; the others only report.
+func legacyHookTimeout(event string) int {
+	if event == "PermissionRequest" {
+		return 1500
+	}
+	return 5
+}
 
+// spec describes the hooks argus used to install, so they can be refreshed for
+// an old Claude or removed once the mod replaces them.
 func spec() hookset.Spec {
 	return hookset.Spec{
-		Marker:        hookset.ManagedMarker,
-		LegacyMarker:  legacyHookMarker,
-		Command:       managedCommand,
-		Timeout:       hookTimeout,
-		DefaultEvents: DefaultHookEvents,
+		Marker:       hookset.ManagedMarker,
+		LegacyMarker: legacyHookMarker,
+		Command: func(argusBin, event string) string {
+			return hookset.ManagedCommand(argusBin, Agent, event)
+		},
+		Timeout:       legacyHookTimeout,
+		DefaultEvents: legacyHookEvents,
 		Load:          loadHooks,
 		Save:          saveHooks,
 	}
 }
 
-func isManaged(c hookCmd) bool           { return spec().IsManaged(c) }
-func hasManaged(groups []hookGroup) bool { return spec().HasManaged(groups) }
-
-func Install(argusBin string, events []string) error { return spec().Install(argusBin, events) }
-
-func ReconcileIfInstalled(argusBin string) (added []string, err error) {
-	return spec().Reconcile(argusBin)
+// refreshLegacyHooks points the old hooks at argusBin (kept when empty) and
+// returns cause, which says why they stay.
+func refreshLegacyHooks(argusBin string, cause error) ([]string, error) {
+	added, err := spec().Reconcile(argusBin)
+	if err != nil {
+		return nil, errors.Join(cause, err)
+	}
+	return added, cause
 }
 
-// ReconcileKeepingInstalledBin reconciles hooks but keeps the binary path already in
-// settings.json, for callers whose own executable path is transient (the ephemeral
-// embedded node) and must not be written into the user's hooks.
-func ReconcileKeepingInstalledBin() (added []string, err error) {
-	return spec().Reconcile("")
+// removeLegacyHooks strips argus's settings.json hooks, leaving the user's own.
+func removeLegacyHooks() error {
+	return spec().Uninstall()
 }
-
-func Uninstall() error { return spec().Uninstall() }
 
 // loadHooks reads settings.json's "hooks" section.
 // Returns os.IsNotExist when the config file is absent.
