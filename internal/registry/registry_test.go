@@ -224,3 +224,39 @@ func TestSnapshotStampsStatusLabel(t *testing.T) {
 		}
 	}
 }
+
+// A decision nobody answered clears a still-pending prompt to working, but
+// leaves the idle composer a later event surfaced untouched.
+func TestClearPendingDecision(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission},
+	})
+	id := r.Snapshot()[0].ID
+
+	r.ClearPendingDecision(id)
+	got, _ := r.Get(id)
+	if got.Status != session.StatusWorking || got.Interaction != nil {
+		t.Fatalf("want working with no interaction, got status=%q interaction=%+v", got.Status, got.Interaction)
+	}
+
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+	})
+	sub, unsub := r.Subscribe()
+	defer unsub()
+	r.ClearPendingDecision(id)
+	got, _ = r.Get(id)
+	if got.Status != session.StatusAwaitingInput || got.Interaction == nil || got.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("want the idle composer kept, got status=%q interaction=%+v", got.Status, got.Interaction)
+	}
+	select {
+	case ev := <-sub:
+		t.Fatalf("ClearPendingDecision on an idle interaction published %+v", ev)
+	default:
+	}
+}

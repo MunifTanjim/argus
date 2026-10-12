@@ -48,16 +48,20 @@ type Registry struct {
 	// happened.
 	ended      map[string]time.Time
 	endedGrace time.Duration
+
+	// inputPolicies are per-agent input channel overrides (see SetInputPolicy).
+	inputPolicies map[string]InputPolicy
 }
 
 // New returns an empty Registry.
 func New() *Registry {
 	return &Registry{
-		sessions:   make(map[string]*session.Session),
-		index:      newSessionIndex(),
-		subs:       make(map[int]chan Event),
-		ended:      make(map[string]time.Time),
-		endedGrace: defaultEndedGrace,
+		sessions:      make(map[string]*session.Session),
+		index:         newSessionIndex(),
+		subs:          make(map[int]chan Event),
+		ended:         make(map[string]time.Time),
+		endedGrace:    defaultEndedGrace,
+		inputPolicies: make(map[string]InputPolicy),
 	}
 }
 
@@ -243,7 +247,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
-		refreshInput(s)
+		r.refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
 
 		evType := EventUpdated
@@ -295,10 +299,51 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 	r.index.setAgentSession(agentSessionID, s.ID)
 }
 
+// InputPolicy decides a session's input channel in place of its pane state.
+// Policies run while the registry lock is held, so they must not call back into the Registry.
+type InputPolicy func(s session.Session) session.InputMode
+
+// SetInputPolicy makes p decide the input channel of agent's sessions; nil
+// removes it. Called before sessions arrive.
+func (r *Registry) SetInputPolicy(agent string, p InputPolicy) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p == nil {
+		delete(r.inputPolicies, agent)
+		return
+	}
+	r.inputPolicies[agent] = p
+}
+
+// RefreshInput re-derives the input channel of the session with agentSessionID,
+// publishing an update when it changed.
+func (r *Registry) RefreshInput(agentSessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.index.findByAgentSession(agentSessionID)
+	if !ok {
+		return
+	}
+	s := r.sessions[id]
+	if s == nil {
+		return
+	}
+	before := s.Input
+	r.refreshInput(s)
+	if s.Input != before {
+		r.publish(Event{Type: EventUpdated, Session: *s})
+	}
+}
+
 // refreshInput derives the input channel from pane state, but leaves an InputAPI
 // session (opencode) untouched: it prompts over its API whether or not a viewing
-// pane is adopted, and never reverts to keystrokes.
-func refreshInput(s *session.Session) {
+// pane is adopted, and never reverts to keystrokes. An agent's InputPolicy, when
+// set, decides instead. Caller holds r.mu.
+func (r *Registry) refreshInput(s *session.Session) {
+	if p, ok := r.inputPolicies[s.Agent]; ok {
+		s.Input = p(*s)
+		return
+	}
 	if s.Input == session.InputAPI {
 		return
 	}
@@ -430,6 +475,23 @@ func (r *Registry) ClearInteraction(id string) {
 	if s == nil {
 		return
 	}
+	r.clearInteractionLocked(s)
+}
+
+// ClearPendingDecision drops a still-pending permission, question or plan
+// interaction left by a decision nobody answered in argus. An idle interaction
+// (a later event already moved the session on) is left as is.
+func (r *Registry) ClearPendingDecision(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	if s == nil || s.Interaction == nil || s.Interaction.Kind == session.InteractionIdle {
+		return
+	}
+	r.clearInteractionLocked(s)
+}
+
+func (r *Registry) clearInteractionLocked(s *session.Session) {
 	s.Interaction = nil
 	if s.Status == session.StatusAwaitingInput {
 		s.Status = session.StatusWorking
@@ -455,7 +517,7 @@ func (r *Registry) ClearPane(agentSessionID string) {
 	r.index.clear(PaneKey(s.Tmux.Server, s.Tmux.PaneID), "")
 	s.Tmux = session.TmuxLocation{}
 	s.Frontend = session.FrontendExternal
-	refreshInput(s)
+	r.refreshInput(s)
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
@@ -591,7 +653,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	if u.Input == session.InputAPI {
 		s.Input = session.InputAPI
 	}
-	refreshInput(s)
+	r.refreshInput(s)
 	// Non-nil replaces the cached summary; nil keeps it.
 	if u.Summary != nil {
 		s.Summary = u.Summary
