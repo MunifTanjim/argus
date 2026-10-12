@@ -41,3 +41,6 @@ docs/superpowers
 
 # Firebase — real config is not committed; copy .example and fill in real values
 app/android/app/google-services.json
+
+# type files Claude Code writes beside a mod it loads
+internal/adapter/claudecode/mod/.claude-plugin/types/

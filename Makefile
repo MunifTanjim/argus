@@ -6,9 +6,10 @@ BIN     := bin
 PREFIX  ?= $(HOME)/.local
 BINDIR  ?= $(PREFIX)/bin
 APP_DIR ?= app
+MOD_DIR := internal/adapter/claudecode/mod
 
 .PHONY: build argus test test-all vet fmt fmt-check tidy check clean install uninstall help \
-	sqlc sqlc-check \
+	sqlc sqlc-check mod-check \
 	app-get app-analyze app-test app-fmt app-check app-run app-build app-clean
 
 build: argus ## Build the binary into bin/
@@ -90,6 +91,10 @@ app-build: ## Build the Flutter app release APK; loads app/.env if present (ARGS
 
 app-clean: ## Remove the Flutter app's build artifacts
 	cd $(APP_DIR) && flutter clean
+
+mod-check: ## Validate and test the Claude Code mod (needs claude)
+	claude plugin validate $(MOD_DIR)
+	claude plugin test $(MOD_DIR)
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \

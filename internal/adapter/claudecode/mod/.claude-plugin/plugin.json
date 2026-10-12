@@ -1,0 +1,13 @@
+{
+  "name": "argus",
+  "version": "0.0.0",
+  "description": "Connects Claude Code sessions to argus.",
+  "author": { "name": "Munif Tanjim" },
+  "userConfig": {
+    "socket": {
+      "type": "string",
+      "title": "argusd mod socket",
+      "description": "Path of argusd's mod socket."
+    }
+  }
+}
