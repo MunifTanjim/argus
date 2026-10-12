@@ -640,13 +640,19 @@ The node subscribes before it sends the snapshot, so one event can arrive
 twice. To repair the list, call `sessions.list` or `sessions.refresh`.
 
 A session with a tmux pane accepts pane methods: `sessions.capture`,
-`sessions.input`, `sessions.key`, `sessions.kill`, and `sessions.focus`. For
-a session without a pane, these methods fail with
-`session has no terminal control`. For an unknown id, they fail with
-`unknown session: <id>`.
+`sessions.key`, and `sessions.focus`. For a session without a pane, these
+methods fail with `session has no terminal control`. For an unknown id, they
+fail with `unknown session: <id>`.
 
-`sessions.kill` kills the tmux pane. For a session without a pane, it removes
-the session card.
+`sessions.input` uses the channel in the `input_mode` field of the session:
+
+- `pane`: the node types the text into the tmux pane.
+- `api`: the node sends the text through the agent itself. This applies to
+  opencode, and to Claude Code while the Argus plugin is connected.
+- No `input_mode`: the call fails with `session has no terminal control`.
+
+`sessions.kill` kills the tmux pane. For a session without a pane, opencode
+removes the session card, and Claude Code stops its running turn and exits.
 
 **Answering an interaction.** When a session waits for input, its
 `interaction` field describes the request. Answer it with `sessions.respond`:
@@ -671,7 +677,7 @@ the request's, answers or a `question_action` for an approval, an
 `option_value` the request did not offer, or an approval with no decision.
 
 A question with `allow_notes` also accepts a free-text note in `notes`, keyed
-by question text like `answers`. Adapters without note support ignore it.
+by question text like `answers`. Agents without note support ignore it.
 
 For a question with `cancel_interrupts`, `question_action: "cancel"` interrupts
 the asking thread's turn, which also ends its other open requests, and
@@ -1088,13 +1094,15 @@ record. `push.test` returns error `410` in this case.
 
 ### Hooks
 
-The `argus hook` command sends agent hook events to the local node over the
-unix socket. The method is `hook.event`:
+Claude Code sends its events through the Argus plugin.
+
+The `argus hook` command serves the hook-based agents. It sends the hook
+events to the local node over the unix socket. The method is `hook.event`:
 
 ```ts
 HookEvent {
-  agent:       string   // for example "claude"
-  event:       string   // for example "PermissionRequest"
+  agent:       string   // for example "antigravity"
+  event:       string   // for example "Stop"
   tmux_pane:   string
   tmux_socket: string   // base name of the $TMUX socket
   payload:     any      // the raw hook JSON from stdin (at most 8 MiB)
@@ -1103,15 +1111,15 @@ HookEvent {
 }
 ```
 
-For `PermissionRequest` from Claude Code, the call blocks if the
-session is live. The node holds it until a client answers with
+For an event that waits for an answer, such as a permission request, the
+call blocks if the session is live. The node holds it until a client answers with
 `sessions.respond`. The node then returns the decision as
 `hookSpecificOutput` JSON in `output`, and the command prints it. The agent
 prompt stays open at the same time, and the first answer wins. If the hook
 connection closes, or after 1490 seconds, the node returns an empty output.
 
 For all other events, the command waits at most 2 seconds for the node. It
-prints the output of the local adapter, not the result of the node, and
+prints its own output, not the result of the node, and
 always exits with status 0.
 
 ## Method reference
@@ -1200,6 +1208,16 @@ InputParams {
   submit:     boolean   // send Enter after the text
   prepare:    boolean   // leave copy mode and vim normal mode first
 }
+```
+
+For an `api` session, the node ignores `submit` and `prepare` and always
+submits the text. The call fails with `session has no terminal control` if
+`text` is empty. For opencode and Codex, the call fails with `session is busy`
+if the session is not idle. Claude Code queues text that comes while a turn
+runs. For Claude Code, text that starts with `/` runs as a slash command. Claude Code takes no prompt that starts with
+`/`, so other such text fails.
+
+```ts
 
 RespondParams {
   session_id:       string

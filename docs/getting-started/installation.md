@@ -9,7 +9,7 @@ You need these to *run* Argus, however you install it:
 
 - [tmux](https://github.com/tmux/tmux): Argus discovers agent sessions running in tmux
 - At least one supported AI coding agent for Argus to supervise:
-  - [Claude Code](https://www.claude.com/product/claude-code): run as `claude`
+  - [Claude Code](https://www.claude.com/product/claude-code) 2.1.293 or later: run as `claude`
   - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
   - [Antigravity](https://antigravity.google/): Google's terminal agent, run as `agy`
   - [OpenCode](https://opencode.ai/) 2 or later: run as `opencode`
@@ -53,17 +53,25 @@ make install
 ```
 
 
-## Install Hooks
+## Connect Your Agents
 
-Install the Argus hooks so it can track each session's status in real time:
+Connect Argus to your agents so it can track each session's status in real time:
 
 ```sh
 argus hooks install
 ```
 
-This installs hooks for every supported agent you have installed (Claude Code
-and Antigravity) and skips the others. It is safe to re-run and changes
-only its own entries. Without the hooks, status still works but is less precise.
+This sets up every supported agent you have installed and skips the others. It
+is safe to re-run.
+
+For Claude Code it installs the Argus plugin. Without it, Argus still lists your
+Claude sessions but cannot show their live status or answer their permission
+requests. It can send prompts only to sessions in tmux.
+
+Claude Code loads the plugin when a session starts. After you install or
+upgrade Argus, restart the Claude sessions that are running.
+
+For Antigravity it installs hooks and changes only its own entries.
 
 OpenCode needs no hooks.
 

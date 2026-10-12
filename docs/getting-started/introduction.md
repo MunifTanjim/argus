@@ -29,8 +29,9 @@ lists their sessions together. Support for more agents can come later.
 ## How it fits together
 
 Argus runs as a **node** on each machine. The node discovers your agent
-sessions in tmux, tracks their status, and serves a local API. The TUI and the
-agents' hooks use that API.
+sessions in tmux, tracks their status, and serves a local API. The TUI uses
+that API. The agents send their events to the node through hooks or the Argus
+plugin.
 
 - On a **single machine**, run the [TUI](/guide/tui). It connects to the local
   node automatically.
