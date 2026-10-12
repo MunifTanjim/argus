@@ -196,13 +196,8 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 		d.reg.SetBranch(p.SessionID, gitmeta.Branch(cwd))
 	}
 
-	isSub := p.AgentID != ""
-	st := d.transcripts.acquire(transcriptKey{path: path, isSubagent: isSub}, func() adapter.StreamingTranscript {
-		return a.NewStreamingTranscript(path, root, isSub)
-	})
-	entries, err := st.Refresh()
+	st, entries, err := d.openTranscript(a, path, root, p.AgentID != "")
 	if err != nil {
-		d.transcripts.release(st)
 		return nil, err
 	}
 	from := clampFrom(entries, p.HaveEntries)
@@ -225,9 +220,21 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	// Start the poller bound to the connection ctx.
 	pollCtx, cancel := context.WithCancel(ctx)
 	cs.add(p.SubID, cancel)
-	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, st, taskSignals, entries, driveStatus)
+	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, a, path, st, taskSignals, entries, driveStatus)
 
 	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Entries: entries[from:]}, nil
+}
+
+func (d *Node) openTranscript(a adapter.Adapter, path, root string, isSub bool) (*sharedTranscript, []transcript.Entry, error) {
+	st := d.transcripts.acquire(transcriptKey{path: path, isSubagent: isSub}, func() adapter.StreamingTranscript {
+		return a.NewStreamingTranscript(path, root, isSub)
+	})
+	entries, err := st.Refresh()
+	if err != nil {
+		d.transcripts.release(st)
+		return nil, nil, err
+	}
+	return st, entries, nil
 }
 
 func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawMessage) (any, error) {
@@ -265,8 +272,8 @@ func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
 // prefix plus resent tail), not entries[from:]: diffEntries compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, st *sharedTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
-	defer d.transcripts.release(st)
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, a adapter.Adapter, path string, st *sharedTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
+	defer func() { d.transcripts.release(st) }()
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
 			cs.remove(subID)
@@ -284,6 +291,29 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// A main-session view follows the session when the agent switches
+			// transcript files (/resume, /clear); the client replaces from 0.
+			if driveStatus {
+				if next, root, _, _, err := d.resolveTranscriptPath(api.TranscriptSubscribeParams{SessionID: sessionID}); err == nil && next != path {
+					nextSt, entries, err := d.openTranscript(a, next, root, false)
+					if err != nil {
+						continue // keep the old file; retry next tick
+					}
+					d.transcripts.release(st)
+					st = nextSt
+					d.log.Info("transcript.switch", "sub_id", subID, "from", path, "to", next)
+					path = next
+					if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{SubID: subID, FromIndex: 0, Entries: entries}); err != nil {
+						return // connection gone
+					}
+					sent = entries
+					if taskSignals != nil {
+						lastSignals, _ = taskSignals(entries)
+					}
+					idleSurfaced = false
+					continue
+				}
+			}
 			cur, err := st.Refresh()
 			if err != nil {
 				continue // transient (file rotated/locked); try next tick

@@ -378,3 +378,62 @@ func TestClampFrom(t *testing.T) {
 		}
 	}
 }
+
+func writeTranscriptFile(t *testing.T, text string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "transcript-*.jsonl")
+	if err != nil {
+		t.Fatalf("create transcript: %v", err)
+	}
+	defer f.Close()
+	line := `{"type":"user","uuid":"` + text + `","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return f.Name()
+}
+
+func TestTranscriptFollowsSessionToNewFile(t *testing.T) {
+	d := newNode(nil)
+	pathA := writeTranscriptFile(t, "from-a")
+	pathB := writeTranscriptFile(t, "from-b")
+
+	hook := func(id, path string) session.Session {
+		s, _ := d.reg.ApplyHook(registry.HookUpdate{
+			Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+			AgentSessionID: id, TranscriptPath: path, Status: session.StatusIdle,
+		})
+		return s
+	}
+	s := hook("old", pathA)
+
+	fn := &fakeNotifier{ch: make(chan api.Notification, 8)}
+	d.registerConn(fn)
+	defer d.dropConn(fn)
+	ctx := api.WithNotifier(context.Background(), fn)
+	if _, err := d.handleTranscriptSubscribe(ctx, mustJSON(api.TranscriptSubscribeParams{SubID: "x", SessionID: s.ID})); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	hook("new", pathB)
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case n := <-fn.ch:
+			if n.Method != api.MethodTranscriptDelta {
+				continue
+			}
+			var got api.TranscriptDelta
+			if err := json.Unmarshal(n.Params, &got); err != nil {
+				t.Fatalf("unmarshal delta: %v", err)
+			}
+			if got.FromIndex != 0 || len(got.Entries) == 0 || got.Entries[0].Text != "from-b" {
+				t.Fatalf("delta = from %d entries %+v, want from 0 with from-b", got.FromIndex, got.Entries)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no delta for the new transcript file (waited 10s)")
+		}
+	}
+}
