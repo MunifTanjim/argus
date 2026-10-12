@@ -5,15 +5,28 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/modbridge"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
+
+// InstallOptions configures an agent's argus integration. Empty fields keep what
+// is already installed.
+type InstallOptions struct {
+	ArgusBin string // binary the hooks invoke (hook-based agents)
+	Socket   string // argusd mod socket (Claude Code)
+}
+
+// ErrAgentNotInstalled reports that an agent's CLI is not available, so there is
+// nothing to install into.
+var ErrAgentNotInstalled = errors.New("agent not installed")
 
 // BundleRoot is the archive subtree every bundled file is rooted under.
 const BundleRoot = "root"
@@ -50,6 +63,10 @@ func WithinDir(dir, p string) bool {
 
 // HookMethod is the JSON-RPC method every argus hook invocation calls.
 const HookMethod = "hook.event"
+
+// MaxHookPayload caps the hook payload argus reads, from `argus hook` stdin or a
+// mod request body.
+const MaxHookPayload = 8 << 20
 
 // HookEvent is the payload argus hook <event> sends to the node.
 type HookEvent struct {
@@ -112,15 +129,21 @@ type InteractionOwner interface {
 }
 
 // Dismisser removes a session from the live list on the user's request, for
-// adapters whose sessions are presence-tracked rather than pane-bound (opencode).
+// sessions with no pane to kill (opencode, paneless Claude).
 type Dismisser interface {
 	Dismiss(ctx context.Context, sess session.Session) error
 }
 
-// Prompter delivers a user prompt to a paneless session over the agent's own API,
-// for agents whose sessions cannot receive tmux keystrokes (opencode).
+// Prompter delivers a user prompt to a session over the agent's own API. An agent
+// that takes no prompt while a turn runs refuses it with api.ErrSessionBusy.
 type Prompter interface {
 	SendPrompt(ctx context.Context, sess session.Session, text string) error
+}
+
+// ModBridged is an adapter whose sessions keep a mod connection to argusd (Claude
+// Code); the node serves the mod socket from its bridge.
+type ModBridged interface {
+	ModBridge() *modbridge.Bridge
 }
 
 // Spawner creates a new session over the agent's own service API, for headless
@@ -181,8 +204,8 @@ type Adapter interface {
 
 	PrepareTextInput(ctx context.Context, pc PaneController, paneID string) error
 
-	Install(argusBin string) error
-	ReconcileIfInstalled(argusBin string) (added []string, err error)
+	Install(opts InstallOptions) error
+	ReconcileIfInstalled(opts InstallOptions) (added []string, err error)
 	Uninstall() error
 	SettingsPath() (string, error)
 	DefaultHookEvents() []string

@@ -62,8 +62,10 @@ func TestCaptureAndInputEndToEnd(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{
 		session.TmuxServerArgus: tmuxClient,
 	})
+	// Pane input is agent-agnostic; drop Claude's mod-only input policy to exercise it.
+	d.reg.SetInputPolicy(claudecode.Agent, nil)
 
-	socket := filepath.Join(t.TempDir(), "d.sock")
+	socket := shortSocket(t)
 	go func() { _ = d.Run(ctx, socket) }()
 
 	client := dialWithRetry(t, socket)
@@ -132,6 +134,8 @@ func TestSessionInputDelaysEnterAfterText(t *testing.T) {
 	}
 
 	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: tmuxClient})
+	// Pane input is agent-agnostic; drop Claude's mod-only input policy to exercise it.
+	d.reg.SetInputPolicy(claudecode.Agent, nil)
 
 	// Register the pane directly (no API/discovery, so no scan prunes this
 	// non-Claude shell pane mid-test).
@@ -179,7 +183,7 @@ func TestSpawnAndKillEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = tmuxClient.KillServer(context.Background()) })
 
 	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: tmuxClient})
-	socket := filepath.Join(t.TempDir(), "d.sock")
+	socket := shortSocket(t)
 	go func() { _ = d.Run(ctx, socket) }()
 	client := dialWithRetry(t, socket)
 	defer client.Close()
@@ -238,7 +242,7 @@ func TestRunRefusesWhenAlreadyRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	socket := filepath.Join(t.TempDir(), "d.sock")
+	socket := shortSocket(t)
 	d1 := New()
 	go func() { _ = d1.Run(ctx, socket) }()
 	dialWithRetry(t, socket).Close() // wait until d1 is listening

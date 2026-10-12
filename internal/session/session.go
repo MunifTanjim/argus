@@ -250,3 +250,8 @@ const (
 // AcceptsInput reports whether argus can send a prompt to the session by any
 // channel. It is the single check clients and the node use for "can prompt".
 func (s Session) AcceptsInput() bool { return s.Input != InputNone }
+
+// ReadyForPrompt reports whether the session is idle enough to take a new prompt.
+func (s Session) ReadyForPrompt() bool {
+	return s.Status != StatusWorking && (s.Interaction == nil || s.Interaction.Kind == InteractionIdle)
+}

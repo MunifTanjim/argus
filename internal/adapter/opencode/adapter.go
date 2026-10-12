@@ -105,7 +105,11 @@ func (a *ocAdapter) Dismiss(_ context.Context, sess session.Session) error {
 	return nil
 }
 
+// SendPrompt takes a prompt only while the session is idle.
 func (a *ocAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
+	if !sess.ReadyForPrompt() {
+		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
 	if a.disc == nil {
 		return fmt.Errorf("opencode: no active discoverer")
 	}
@@ -127,8 +131,10 @@ func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.Res
 }
 
 // OpenCode needs no argus-managed config.
-func (ocAdapter) Install(string) error                          { return nil }
-func (ocAdapter) ReconcileIfInstalled(string) ([]string, error) { return nil, nil }
-func (ocAdapter) Uninstall() error                              { return nil }
-func (ocAdapter) SettingsPath() (string, error)                 { return "", nil }
-func (ocAdapter) DefaultHookEvents() []string                   { return nil }
+func (ocAdapter) Install(adapter.InstallOptions) error { return nil }
+func (ocAdapter) ReconcileIfInstalled(adapter.InstallOptions) ([]string, error) {
+	return nil, nil
+}
+func (ocAdapter) Uninstall() error              { return nil }
+func (ocAdapter) SettingsPath() (string, error) { return "", nil }
+func (ocAdapter) DefaultHookEvents() []string   { return nil }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/hookset"
 )
 
@@ -97,7 +98,7 @@ func TestReconcileIfInstalledRemovesLegacyHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	seedLegacyHooks(t, "/bin/argus")
-	if added, err := New().ReconcileIfInstalled("/bin/argus"); err != nil || len(added) != 0 {
+	if added, err := New().ReconcileIfInstalled(adapter.InstallOptions{ArgusBin: "/bin/argus"}); err != nil || len(added) != 0 {
 		t.Fatalf("ReconcileIfInstalled = %v, %v", added, err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "hooks.json")); !os.IsNotExist(err) {

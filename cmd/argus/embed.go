@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/config"
@@ -298,9 +297,9 @@ func nodeAbsent(err error) bool {
 
 // startEmbeddedNode runs a node in-process until ctx is cancelled. Logs go to an
 // in-memory buffer (in the returned embedded) for the TUI's Logs tab, not stderr, to keep the
-// alt-screen clean. Like `argus start` it reconciles installed Claude Code hooks,
-// but keeps the installed binary path: this ephemeral launch may run from a
-// different path than the install, which must not be written into the user's hooks.
+// alt-screen clean. Like `argus start` it reconciles installed agent hooks and the
+// Claude Code plugin with the configured mod socket, but keeps the installed binary
+// path, as this ephemeral launch may run from a different path.
 //
 // Fail-closed: a non-empty but unusable lock.genesis is returned as an error so the
 // node is never started in open mode when a genesis is configured.
@@ -326,24 +325,14 @@ func startEmbeddedNode(ctx context.Context, cfg *config.Config, socket string) (
 			return nil, nil, err
 		}
 	}
-	reconcileEmbeddedHooks(log.With("scope", "hooks"))
+	// An empty ArgusBin keeps the installed binary path.
+	go reconcileHooks(log.With("scope", "hooks"), adapter.InstallOptions{Socket: node.ModSocketPath(socket)})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		_ = d.Run(ctx, socket)
 	}()
 	return d, &embedded{logs: logs, done: done}, nil
-}
-
-// reconcileEmbeddedHooks reconciles hooks best-effort (empty bin keeps the installed path).
-func reconcileEmbeddedHooks(log *slog.Logger) {
-	for _, a := range adapters.All() {
-		if added, err := a.ReconcileIfInstalled(""); err != nil {
-			log.Error("reconcile hooks failed", "agent", a.Agent(), "err", err)
-		} else if len(added) > 0 {
-			log.Info("reconciled argus hooks", "agent", a.Agent(), "added", added)
-		}
-	}
 }
 
 // dialWithRetry polls dial until it succeeds or timeout elapses.

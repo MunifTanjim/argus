@@ -108,10 +108,12 @@ func (agAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return PrepareTextInput(ctx, pc, paneID)
 }
 
-func (agAdapter) Install(argusBin string) error { return Install(argusBin, DefaultHookEvents) }
+func (agAdapter) Install(opts adapter.InstallOptions) error {
+	return Install(opts.ArgusBin, DefaultHookEvents)
+}
 
-func (agAdapter) ReconcileIfInstalled(argusBin string) ([]string, error) {
-	return ReconcileIfInstalled(argusBin)
+func (agAdapter) ReconcileIfInstalled(opts adapter.InstallOptions) ([]string, error) {
+	return ReconcileIfInstalled(opts.ArgusBin)
 }
 
 func (agAdapter) Uninstall() error { return Uninstall() }

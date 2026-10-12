@@ -16,6 +16,10 @@ import (
 // cannot drive (paneless vscode/external). Clients gate the action's UI on it.
 var ErrNoTerminalControl = errors.New("session has no terminal control")
 
+// ErrSessionBusy is returned for a prompt to a session that takes one only
+// when idle, while it works or waits on an answer.
+var ErrSessionBusy = errors.New("session is busy: send the prompt once its turn ends")
+
 const jsonrpcVersion = "2.0"
 
 // Method names exchanged over the wire.

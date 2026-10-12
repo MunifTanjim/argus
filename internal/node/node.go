@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,9 @@ type Node struct {
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
+
+	modPermsMu sync.Mutex
+	modPerms   map[string]*modPermission // by request id
 
 	subsMu      sync.Mutex
 	conns       map[api.Notifier]*connSubs // per-connection transcript subscriptions
@@ -437,6 +441,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		wakelock:     wakelock,
 		log:          slog.New(slog.DiscardHandler),
 		pending:      map[string]*pendingDecision{},
+		modPerms:     map[string]*modPermission{},
 		forgeFor:     forge.For,
 		conns:        map[api.Notifier]*connSubs{},
 		transcripts:  newTranscriptCache(transcriptCacheMaxIdle, transcriptCacheIdleTTL),
@@ -500,9 +505,30 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	}
 }
 
+// listenOwnerOnly listens on a unix socket at path that only its owner can use.
+// The umask keeps the socket private from bind to chmod. It is process-wide, so
+// a file made meanwhile is owner-only too. Some filesystems (bind mounts under
+// colima) reject chmod on a socket, which then keeps the umask mode.
+func (d *Node) listenOwnerOnly(path string) (net.Listener, error) {
+	old := syscall.Umask(0o077)
+	l, err := net.Listen("unix", path)
+	syscall.Umask(old)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		d.log.Warn("restricting socket mode failed", "path", path, "err", err)
+	}
+	return l, nil
+}
+
 // Run scans once at startup and serves the API on the unix socket until ctx is
 // cancelled. The socket (and a stale leftover) are managed automatically.
 func (d *Node) Run(ctx context.Context, socketPath string) error {
+	modPath := ModSocketPath(socketPath)
+	if err := checkSocketPath(modPath); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return err
 	}
@@ -521,7 +547,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		}
 	}
 
-	l, err := net.Listen("unix", socketPath)
+	l, err := d.listenOwnerOnly(socketPath)
 	if err != nil {
 		return err
 	}
@@ -533,6 +559,23 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		l.Close()
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 			d.log.Warn("removing socket failed", "path", socketPath, "err", err)
+		}
+	}()
+
+	// The probe above proved no live node serves socketPath, so a leftover
+	// mod socket named after it is stale.
+	_ = os.Remove(modPath)
+	ml, err := d.listenOwnerOnly(modPath)
+	if err != nil {
+		return err
+	}
+	modSrv := &http.Server{Handler: d.modHandler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = modSrv.Serve(ml) }()
+	d.log.Info("serving mod socket", "socket", modPath)
+	defer func() {
+		_ = modSrv.Close()
+		if err := os.Remove(modPath); err != nil && !os.IsNotExist(err) {
+			d.log.Warn("removing mod socket failed", "path", modPath, "err", err)
 		}
 	}()
 

@@ -142,10 +142,11 @@ func TestHandleSessionInputPromptFallback(t *testing.T) {
 		t.Fatalf("idle prompt: err=%v called=%v text=%q", err, fp.called, fp.gotText)
 	}
 
+	// The agent decides whether a busy session takes the prompt.
 	fp.called = false
 	s, _ = d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusWorking})
-	if err := input(s.ID, "hi"); err == nil || fp.called {
-		t.Fatalf("working prompt should be rejected: err=%v called=%v", err, fp.called)
+	if err := input(s.ID, "hi"); err != nil || !fp.called || fp.gotText != "hi" {
+		t.Fatalf("working prompt: err=%v called=%v text=%q", err, fp.called, fp.gotText)
 	}
 }
 

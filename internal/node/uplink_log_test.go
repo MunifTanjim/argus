@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +81,7 @@ func TestRunLogsServingLocalAPI(t *testing.T) {
 	var logs syncBuffer
 	d.SetLogger(debugLogger(&logs))
 
-	sock := filepath.Join(t.TempDir(), "argus.sock")
+	sock := shortSocket(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = d.Run(ctx, sock) }()

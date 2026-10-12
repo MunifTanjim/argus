@@ -37,6 +37,8 @@ func TestSessionControlE2E(t *testing.T) {
 
 	// PaneIDs %30/%40 distinguish these from sibling sr-* tests (which use %10/%20).
 	nA := newE2ENode(t, "sc-node-a", "SC Node A")
+	// Pane input is agent-agnostic; drop Claude's mod-only input policy to exercise it.
+	nA.Registry().SetInputPolicy("claude", nil)
 	nA.Registry().ApplyHook(registry.HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%30",
 		AgentSessionID: "sc-session-a1", Status: session.StatusIdle,
@@ -44,6 +46,8 @@ func TestSessionControlE2E(t *testing.T) {
 	go nA.ConnectGateway(ctx, wsURL(ts.URL, "/node"), "", nil)
 
 	nB := newE2ENode(t, "sc-node-b", "SC Node B")
+	// Pane input is agent-agnostic; drop Claude's mod-only input policy to exercise it.
+	nB.Registry().SetInputPolicy("claude", nil)
 	nB.Registry().ApplyHook(registry.HookUpdate{
 		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%40",
 		AgentSessionID: "sc-session-b1", Status: session.StatusIdle,
