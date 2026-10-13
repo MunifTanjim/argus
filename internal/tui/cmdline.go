@@ -96,7 +96,7 @@ var treeRowCommands = func() map[string]bool {
 	return out
 }()
 
-var cmdAliases = map[string]string{"q": "quit", "h": "help"}
+var cmdAliases = map[string]string{"q": "quit", "h": "help", "upgrade": "upgrade node"}
 
 const cmdListRows = 10
 

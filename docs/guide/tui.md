@@ -262,6 +262,8 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle show-hidden` | node, project, project-tree, workspace |  | `z.` |
 | `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
 | `transcript export` | history, transcript |  | `E` |
+| `upgrade gateway` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
+| `upgrade node` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
 | `workspace change-target` | project-tree |  | `T` |
 | `workspace force-remove` | project-tree |  | `D` |
 | `workspace new` | project-tree |  | `a` |

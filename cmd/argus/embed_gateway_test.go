@@ -23,7 +23,7 @@ func TestConnectLocalGatewayServesFleet(t *testing.T) {
 	cfg.Token = "secret"
 	cfg.Gateway.ListenAddr = "127.0.0.1:0" // ephemeral port; loopback dial uses the bound addr
 
-	c, _, err := connectLocalGateway(ctx, cfg, sock)
+	c, _, _, err := connectLocalGateway(ctx, cfg, sock)
 	if err != nil {
 		t.Fatalf("connectLocalGateway: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestConnectLocalGatewayBindError(t *testing.T) {
 	cfg.Token = "secret"
 	cfg.Gateway.ListenAddr = occupied.Addr().String()
 
-	if _, _, err := connectLocalGateway(ctx, cfg, shortSocket(t)); err == nil {
+	if _, _, _, err := connectLocalGateway(ctx, cfg, shortSocket(t)); err == nil {
 		t.Fatal("expected a bind error for an occupied listen-addr")
 	}
 }

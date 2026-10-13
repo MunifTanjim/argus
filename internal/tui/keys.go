@@ -364,9 +364,16 @@ var screenLeave = nb("", "<C-]>", "leave")
 // resolver builds no sequences.
 func textInputSets() []any { return []any{createKeys, promptKeys} }
 
+var upgradeKeys = struct {
+	Node, Gateway binding
+}{
+	Node:    nb("upgrade node", "", ""),
+	Gateway: nb("upgrade gateway", "", ""),
+}
+
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys}
+		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

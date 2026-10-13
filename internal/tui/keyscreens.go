@@ -9,7 +9,7 @@ import (
 // focusMoves are the focus manager's pane moves, sidebar toggles, and the
 // palette key, which apply in every section whose component takes resolved
 // keys.
-var focusMoves = bindingsOf(paneKeys, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles, projectsKeys.Palette, projectsKeys.ToggleMouse, projectsKeys.ToggleVerbose)
+var focusMoves = bindingsOf(paneKeys, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles, projectsKeys.Palette, projectsKeys.ToggleMouse, projectsKeys.ToggleVerbose, upgradeKeys)
 
 // offer is the focus manager's help and quit that a section's component
 // offers, and the condition under which it offers them ("" for always). Each

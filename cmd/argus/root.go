@@ -63,11 +63,13 @@ func newRootCmd(version string) *cobra.Command {
 			}
 
 			var client tui.Client
+			var gatewayURL string // empty: the TUI drives a local socket
 			switch {
 			case cfg.Gateway.URL != "":
 				// The TUI drives the gateway to see the whole fleet. With no local node,
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
+				gatewayURL = cfg.Gateway.URL
 				if running {
 					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
@@ -86,10 +88,12 @@ func newRootCmd(version string) *cobra.Command {
 				case launchSpawnIsolated:
 					client, emb, err = connectLocalSpawn(ctx, cfg, cfg.Token, cfg.Socket)
 				case launchSpawnGateway:
-					client, emb, err = connectLocalGateway(ctx, cfg, cfg.Socket)
+					client, emb, gatewayURL, err = connectLocalGateway(ctx, cfg, cfg.Socket)
 				case launchSpawnConnected:
+					gatewayURL = choice.gatewayURL
 					client, emb, err = connectLocalSpawnWithGateway(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				case launchGateway:
+					gatewayURL = choice.gatewayURL
 					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				}
 			}
@@ -98,7 +102,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			defer client.Close()
 
-			if err := tui.Run(client, emb.Logs(), cfg.TUI); err != nil {
+			if err := tui.Run(client, gatewayURL, emb.Logs(), cfg.TUI); err != nil {
 				return fail(cmd, err)
 			}
 			return nil

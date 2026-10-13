@@ -69,6 +69,9 @@ service keeps tracking it.
 
 Argus must be able to write to the directory that holds its binary.
 
+In the TUI, the `upgrade node` and `upgrade gateway` commands upgrade another
+machine through the gateway.
+
 ## Connect Your Agents
 
 Connect Argus to your agents so it can track each session's status in real time:
