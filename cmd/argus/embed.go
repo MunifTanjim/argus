@@ -197,12 +197,13 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, gatew
 // connectLocalGateway starts an ephemeral embedded node AND a co-located gateway
 // (pairing + push, no tunnel), then points the TUI at that gateway over loopback
 // so it sees the whole fleet. Mirrors `argus start --token` minus the tunnel.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (tui.Client, *embedded, error) {
+// It returns the gateway URL.
+func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string) (tui.Client, *embedded, string, error) {
 	// Bind before the TUI takes the screen so a port-in-use fails cleanly.
 	ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
 	if err != nil {
 		shell.StdErrF("argus: cannot bind gateway listener at %s: %v\n", cfg.Gateway.ListenAddr, err)
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	// Drive the in-process gateway over loopback using the actually-bound address
@@ -220,7 +221,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	if serr != nil {
 		cancel()
 		shell.StdErrF("argus: %v\n", serr)
-		return nil, nil, serr
+		return nil, nil, "", serr
 	}
 	baseLog := logger.NewBufferLogger(emb.logs)
 	gwLog := baseLog.With("scope", "gateway")
@@ -246,7 +247,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	wsURL, gwClient, err := resolveGatewayURL(gwURL, routeClient, nil)
 	if err != nil {
 		cancel()
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	// serveGateway backgrounds Serve with no readiness signal, so wait for it to
 	// accept before connect() (which dials once and fails hard).
@@ -258,7 +259,7 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	if err != nil {
 		cancel()
 		shell.StdErrF("argus: embedded gateway did not accept at %s: %v\n", gwURL, err)
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	probe.Close()
 
@@ -266,14 +267,14 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, socket string)
 	if perr != nil {
 		cancel()
 		shell.StdErrF("argus: %v\n", fmt.Errorf("refusing to connect open: %w", perr))
-		return nil, nil, fmt.Errorf("refusing to connect open: %w", perr)
+		return nil, nil, "", fmt.Errorf("refusing to connect open: %w", perr)
 	}
 	c, err := connect(ctx, cfg, gwURL, cfg.Token, socket, pin.Genesis)
 	if err != nil {
 		cancel()
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return c, emb, nil
+	return c, emb, gwURL, nil
 }
 
 // loopbackDialAddr returns a host:port for reaching a listener from this host: its

@@ -236,6 +236,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.apply(c))
 	case hostInfoMsg, hostTickMsg, hostWakelockMsg:
 		return m.updateHost(msg)
+	case upgradeCheckMsg, upgradeDoneMsg:
+		return m.updateUpgrade(msg)
 	case terminalActionMsg:
 		return m.updateTerminals(msg)
 	case inputSentMsg:

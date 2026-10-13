@@ -104,6 +104,21 @@ func (m model) focusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	case m.matches(msg, projectsKeys.Palette):
 		mm, cmd := m.openPalette()
 		return mm, cmd, true
+	case !m.viewer && m.matches(msg, upgradeKeys.Node):
+		t, ok := m.upgradeNodeTarget()
+		if !ok {
+			m.flash = "select a node to upgrade"
+			return m, nil, true
+		}
+		m.flash = "checking " + t.label + " for an upgrade"
+		return m, m.upgradeCheckCmd(t), true
+	case !m.viewer && m.matches(msg, upgradeKeys.Gateway):
+		if m.gatewayURL == "" {
+			m.flash = "not connected to a gateway"
+			return m, nil, true
+		}
+		m.flash = "checking " + gatewayTarget.label + " for an upgrade"
+		return m, m.upgradeCheckCmd(gatewayTarget), true
 	case m.offered(projectsKeys.Help) && m.matches(msg, projectsKeys.Help):
 		if m.focused == leftSidebar || m.onRowPane() {
 			m.flash = ""
@@ -306,6 +321,9 @@ func (m model) focusCommands() []binding {
 		out = append(out, k.ToggleSidebar, k.ToggleFiles)
 	}
 	out = append(out, k.Palette, k.ToggleMouse, k.ToggleVerbose)
+	if !m.viewer {
+		out = append(out, upgradeKeys.Node, upgradeKeys.Gateway)
+	}
 	return out
 }
 
