@@ -1,5 +1,5 @@
 // Package logbuf is a bounded, concurrency-safe in-memory ring of log lines, used
-// by the TUI to tail the embedded node's output in a Logs tab. It implements
+// by the TUI to tail the managed server's output in a Logs tab. It implements
 // io.Writer: each newline-terminated record becomes one stored line.
 package logbuf
 

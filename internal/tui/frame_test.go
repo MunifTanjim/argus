@@ -30,7 +30,7 @@ func waitingSession() model {
 	return withEntries(m, sampleEntries())
 }
 
-// logsModel is the Logs tab of an embedded node with a few log lines.
+// logsModel is the Logs tab of a managed server with a few log lines.
 func logsModel(w int, treeHidden bool) model {
 	b := logbuf.New(100)
 	for i := range 5 {

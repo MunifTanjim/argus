@@ -132,8 +132,8 @@ type Node struct {
 	binCache map[string]bool // agent binary name -> found on PATH (memoized)
 }
 
-// SetLogger routes operational logging to l. Off by default so an embedded node
-// never writes to a TUI's stderr; the standalone `start` command enables it.
+// SetLogger routes operational logging to l. Off by default so a node never
+// writes to stderr unasked; the `start` command enables it.
 func (d *Node) SetLogger(l *slog.Logger) {
 	if l != nil {
 		d.log = l

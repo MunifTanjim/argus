@@ -112,7 +112,7 @@ const (
 var homeTabLabel = [...]string{tabSessions: "Sessions", tabHistory: "History", tabTerminals: "Terminals", tabLogs: "Logs"}
 
 // homeTabList is the Home tabs in order. Terminals hides once server.info shows
-// no node with tmux; Logs shows only with an embedded node (see hasLogsTab).
+// no node with tmux; Logs shows only with a managed server (see hasLogsTab).
 func (m model) homeTabList() []homeTab {
 	tabs := []homeTab{tabSessions, tabHistory}
 	if m.hasTerminalsTab() {

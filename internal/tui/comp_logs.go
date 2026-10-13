@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// logsComp is the embedded node's log tail. scroll is the absolute top-line
+// logsComp is the managed server's log tail. scroll is the absolute top-line
 // offset while paused; follow pins the newest line and ignores scroll. At ring
 // capacity a paused offset addresses shifting content as old lines evict.
 type logsComp struct {
@@ -139,7 +139,7 @@ func (l logsComp) footer(c *ctx) []binding {
 	return []binding{listKeys.TabNext, logsKeys.Bottom, projectsKeys.Help}
 }
 
-// The Logs tab exists only with an embedded node.
+// The Logs tab exists only with a managed server.
 func openLogs(c *ctx) {
 	if c.m.hasLogsTab() {
 		c.replaceBase(newLogsComp())

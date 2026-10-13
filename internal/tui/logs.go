@@ -4,8 +4,8 @@ package tui
 // blanks, footer).
 func (m model) logsAvail() int { return max(1, m.bodyHeight()-4) }
 
-// hasLogsTab reports whether the Logs tab exists (only when the TUI spawned an
-// embedded node and holds its log buffer).
+// hasLogsTab reports whether the Logs tab exists (only when the TUI spawned a
+// managed server and holds its log buffer).
 func (m model) hasLogsTab() bool { return m.logs != nil }
 
 // logsBottom is the top-line offset that shows the newest page.

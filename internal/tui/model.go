@@ -67,11 +67,12 @@ type model struct {
 	hostGen       int
 	width         int
 	height        int
-	reconnecting  bool // connection dropped; the client is retrying
-	refreshes     int  // sessions.refresh calls in flight; the session lists show a hint
-	hasDark       bool // terminal background; drives glamour/highlight styling
-	viewer        bool // offline viewer mode: opens directly in transcript view
-	brand         int  // the title icon, an index into brandGlyphs
+	reconnecting  bool   // connection dropped; the client is retrying
+	serverExited  string // exit status of the managed server; empty while it runs
+	refreshes     int    // sessions.refresh calls in flight; the session lists show a hint
+	hasDark       bool   // terminal background; drives glamour/highlight styling
+	viewer        bool   // offline viewer mode: opens directly in transcript view
+	brand         int    // the title icon, an index into brandGlyphs
 
 	redactMode   bool   // --redact: interactive redaction affordance in the viewer
 	bundlePath   string // source .argus path (for the -redacted output name)
@@ -116,7 +117,7 @@ type model struct {
 	keyMatchN int               // keys of keyBuf that keyMatch covers
 	keyGen    int               // bumped on every wait; a keyTimeoutMsg from an older wait is stale
 
-	logs *logbuf.Buffer // the embedded node's log lines; nil without one
+	logs *logbuf.Buffer // the managed server's log lines; nil without one
 }
 
 type transcriptState struct {

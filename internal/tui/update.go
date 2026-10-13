@@ -133,6 +133,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case notificationMsg:
 		cmd := m.applyEvent(api.Notification(msg))
 		return m, cmd
+	case serverExitedMsg:
+		m.serverExited = "exit status 0"
+		if msg.err != nil {
+			m.serverExited = msg.err.Error()
+		}
+		m.flash = "argus server exited (" + m.serverExited + ")"
+		return m, nil
 	case connStateMsg:
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
@@ -653,7 +660,7 @@ func planJump(s session.Session, hostname, tmuxEnv string) (paneID, reason strin
 }
 
 // sameMachine reports whether a node runs on this machine. Empty nodeID means a
-// local/embedded node (always this machine).
+// local node (always this machine).
 func sameMachine(nodeID, nodeLabel, hostname string) bool {
 	return nodeID == "" || nodeLabel == hostname || nodeID == hostname
 }

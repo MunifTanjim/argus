@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -68,11 +69,11 @@ func validateMode(cfg *config.Config) error {
 
 // runStart is split from the cobra RunE so tests can drive the node/gateway wiring
 // with a cancellable context instead of a real signal.
-func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, cfg *config.Config, version string) error {
+func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, cfg *config.Config, version string, managed bool) error {
 	if err := validateMode(cfg); err != nil {
 		return fail(cmd, err)
 	}
-	if err := setupLogger(cfg); err != nil {
+	if err := setupLogger(cfg, managed); err != nil {
 		return fail(cmd, err)
 	}
 	local := runLocalNode(cfg)
@@ -118,8 +119,6 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.SetSelfUpgrade(upgrades)
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
-		// Standalone node logs to the configured logger (the embedded node, sharing a
-		// TUI's terminal, stays at its discard default).
 		d.SetLogger(logger.Scoped("node").L)
 		if err := enableProjectRegistry(d, cfg, logger.Scoped("node").L); err != nil {
 			return fail(cmd, err)
@@ -160,7 +159,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	if local {
-		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: detectArgusBin(), Socket: node.ModSocketPath(cfg.Socket)})
+		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: hookBin(managed), Socket: node.ModSocketPath(cfg.Socket)})
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
@@ -282,7 +281,11 @@ func newStartCmd(version string) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			return runStart(ctx, stop, cmd, cfg, version)
+			managed, _ := cmd.Flags().GetBool("argus-managed")
+			if managed {
+				setupManagedChild(os.Stdin, stop)
+			}
+			return runStart(ctx, stop, cmd, cfg, version, managed)
 		},
 	}
 
@@ -310,6 +313,9 @@ func newStartCmd(version string) *cobra.Command {
 	f.String("external-url", "", "[external] the gateway's public URL for pairing QRs, e.g. wss://host[/base-path] [$ARGUS_EXTERNAL_URL]")
 	f.String("zrok-name", "", "[zrok] reserved name for a stable URL: 'namespace:name' or 'name' (default: argus) [$ARGUS_ZROK_NAME]")
 	f.String("ngrok-domain", "", "[ngrok] reserved/custom domain (default: the account's static dev domain) [$ARGUS_NGROK_DOMAIN]")
+
+	f.Bool("argus-managed", false, "")
+	_ = f.MarkHidden("argus-managed")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
@@ -354,9 +360,13 @@ func tokenAuth(want string) func(string) bool {
 
 // setupLogger resolves log level/format from config and installs the global logger
 // before anything logs.
-func setupLogger(cfg *config.Config) error {
+func setupLogger(cfg *config.Config, managed bool) error {
 	if err := applyLogLevel(cfg); err != nil {
 		return err
+	}
+	if managed {
+		logger.InitManaged()
+		return nil
 	}
 	config.LogFormat = cfg.Log.Format
 	logger.Init()
@@ -364,8 +374,8 @@ func setupLogger(cfg *config.Config) error {
 }
 
 // applyLogLevel sets the global config.LogLevel WITHOUT installing the stderr handler
-// (logger.Init). The TUI uses this so the embedded node honors the level while leaving
-// stderr untouched — the stderr handler would corrupt the alt-screen.
+// (logger.Init). The TUI uses this so it leaves stderr untouched: the stderr handler
+// would corrupt the alt-screen.
 func applyLogLevel(cfg *config.Config) error {
 	var lvl applog.Level
 	if err := lvl.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
@@ -388,6 +398,22 @@ func reconcileHooks(log *slog.Logger, opts adapter.InstallOptions) {
 	}
 }
 
+// watchParent stops a managed server once the TUI that owns it is gone. The TUI
+// holds the write end of stdin, and the kernel closes it when the TUI exits.
+func watchParent(r io.Reader, stop context.CancelFunc) {
+	_, _ = io.Copy(io.Discard, r)
+	stop()
+}
+
+// hookBin keeps the installed hook binary for a managed server: the TUI that
+// starts it can run from any path, for example a dev build.
+func hookBin(managed bool) string {
+	if managed {
+		return ""
+	}
+	return detectArgusBin()
+}
+
 // connectGateway dials an upstream gateway in the background to enroll the node as a
 // source. No-op when no --gateway is set.
 func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error {
@@ -407,12 +433,9 @@ func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error
 // pairing attempt. A var so tests can shrink it.
 var tunnelURLTimeout = 60 * time.Second
 
-// gatewayServeOpts configures serveGateway. Each capability is guarded by its own
-// flag so `argus start` (all on) and the embedded TUI gateway (tunnel off) share
-// one code path. The listener is pre-bound by the caller so bind errors surface
-// before backgrounding; log is the base (unscoped) logger — serveGateway derives
-// the gateway/tunnel/push scopes from it — injected so the embedded caller can
-// route to the TUI's log buffer instead of stderr.
+// gatewayServeOpts configures serveGateway. The listener is pre-bound by the
+// caller so bind errors surface before backgrounding; log is the base (unscoped)
+// logger — serveGateway derives the gateway/tunnel/push scopes from it.
 type gatewayServeOpts struct {
 	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
 	token         string
@@ -426,7 +449,7 @@ type gatewayServeOpts struct {
 	pushDelay     time.Duration
 	tunnel        tunnel.Provider
 	tunnelOrigin  string
-	selfUpgrade   *selfupgrade.Service // nil: no server.* upgrade methods (the embedded TUI gateway)
+	selfUpgrade   *selfupgrade.Service // nil: no server.* upgrade methods
 	tunnelWG      *sync.WaitGroup      // done once the tunnel child has exited; required with tunnel
 }
 
@@ -552,4 +575,14 @@ func setupBlindPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, del
 		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		go d.StartPush(ctx, delay)
 	}
+}
+
+// setupManagedChild runs before anything starts a process. Processes we start
+// (tmux, setup scripts) must not inherit the token. The TUI reads our output; once
+// it is gone, a log write must fail, not kill us before shutdown. Notify, not
+// Ignore, so that children get the default SIGPIPE back on exec.
+func setupManagedChild(parent io.Reader, stop context.CancelFunc) {
+	_ = os.Unsetenv("ARGUS_TOKEN")
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
+	go watchParent(parent, stop)
 }
