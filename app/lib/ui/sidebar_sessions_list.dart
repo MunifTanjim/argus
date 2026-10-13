@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/enums.dart';
 import '../models/project.dart';
 import '../models/session.dart';
+import '../state/gateway.dart';
 import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
@@ -34,40 +35,59 @@ class SidebarSessionsList extends ConsumerWidget {
       ),
     );
     if (groups.isEmpty) {
-      return Center(
-        child: Text(
-          query.isEmpty ? 'no live sessions' : 'no sessions match "$query"',
-          style: const TextStyle(color: AppColors.dim),
+      return RefreshIndicator(
+        onRefresh: () => _refresh(ref),
+        child: ListView(
+          children: [
+            const SizedBox(height: 120),
+            Center(
+              child: Text(
+                query.isEmpty
+                    ? 'no live sessions'
+                    : 'no sessions match "$query"',
+                style: const TextStyle(color: AppColors.dim),
+              ),
+            ),
+          ],
         ),
       );
     }
     final showAgent = _mixesAgents([for (final g in groups) ...g.sessions]);
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 8),
-      children: [
-        for (final g in groups) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text(
-              g.section.title,
-              style: const TextStyle(color: AppColors.dim, fontSize: 12),
+    return RefreshIndicator(
+      onRefresh: () => _refresh(ref),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 8),
+        children: [
+          for (final g in groups) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                g.section.title,
+                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+              ),
             ),
-          ),
-          for (final s in g.sessions)
-            _SessionRow(
-              session: s,
-              place: _place(s, projects, showAgent),
-              selected: s.id == shown,
-              onTap: () {
-                ref.read(pendingOpenSessionProvider.notifier).state =
-                    PendingOpen(s.id);
-                onOpen();
-              },
-              onLongPress: () => _showDetails(context, s),
-            ),
+            for (final s in g.sessions)
+              _SessionRow(
+                session: s,
+                place: _place(s, projects, showAgent),
+                selected: s.id == shown,
+                onTap: () {
+                  ref.read(pendingOpenSessionProvider.notifier).state =
+                      PendingOpen(s.id);
+                  onOpen();
+                },
+                onLongPress: () => _showDetails(context, s),
+              ),
+          ],
         ],
-      ],
+      ),
     );
+  }
+
+  static Future<void> _refresh(WidgetRef ref) async {
+    final client = ref.read(gatewayProvider)?.client;
+    if (client == null) return;
+    await refreshSessions(client, ref.read(sessionsProvider.notifier));
   }
 
   // The app's counterpart of the TUI's hover: what a row cannot fit.
