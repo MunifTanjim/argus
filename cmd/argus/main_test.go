@@ -17,16 +17,20 @@ import (
 
 func wsURL(u string) string { return "ws" + strings.TrimPrefix(u, "http") }
 
-// shortSocket returns a unique socket path under /tmp. The default temp dir on
-// macOS is too long for a unix socket's sun_path limit (~104 bytes).
-func shortSocket(t *testing.T) string {
+// shortTempDir returns a unique dir under /tmp. The default temp dir on macOS
+// is too long for a unix socket's sun_path limit (~104 bytes).
+func shortTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "argus")
+	dir, err := os.MkdirTemp("/tmp", "ar")
 	if err != nil {
-		t.Fatalf("mkdtemp: %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	return filepath.Join(dir, "s.sock")
+	return dir
+}
+
+func shortSocket(t *testing.T) string {
+	return filepath.Join(shortTempDir(t), "s.sock")
 }
 
 func sandboxHookDirs(t *testing.T) {

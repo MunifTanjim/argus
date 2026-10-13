@@ -52,6 +52,22 @@ cd argus
 make install                          
 ```
 
+## Upgrade
+
+```sh
+argus upgrade
+```
+
+This downloads the latest release, checks its SHA-256 checksum, and replaces the
+binary. If `argus start` is running, the running argus replaces its own binary
+and then restarts in place. The PID does not change, so a `systemd` or `launchd`
+service keeps tracking it.
+
+- `--no-restart` replaces the binary, but does not restart the running argus.
+- `--no-download` restarts the running argus with the binary that is already on
+  disk.
+
+Argus must be able to write to the directory that holds its binary.
 
 ## Connect Your Agents
 

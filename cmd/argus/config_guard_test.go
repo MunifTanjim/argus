@@ -39,6 +39,8 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a config key
 		"replacement":      true, // `lock revoke-signer` only: ceremony argument, not a config key
 		"fork-from":        true, // `lock revoke-signer` only: ceremony argument, not a config key
+		"no-restart":       true, // `upgrade` only: per-invocation step selection
+		"no-download":      true, // `upgrade` only: per-invocation step selection
 	}
 
 	seen := map[string]bool{}
