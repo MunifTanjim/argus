@@ -6,17 +6,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -28,6 +24,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
@@ -247,6 +244,10 @@ func (d *Node) SetIdentity(id, label string) {
 // SetVersion records the node's binary version, reported to clients via
 // identify/server.info. Call before Run.
 func (d *Node) SetVersion(v string) { d.version = v }
+
+// SetSelfUpgrade serves the server.* upgrade methods on the socket and on
+// relay channels. Call before Run.
+func (d *Node) SetSelfUpgrade(s *selfupgrade.Service) { s.Register(d.server) }
 
 // SetIdentityKey's public half is announced to the gateway (identity_pubkey). Call before Run.
 func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
@@ -505,23 +506,6 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	}
 }
 
-// listenOwnerOnly listens on a unix socket at path that only its owner can use.
-// The umask keeps the socket private from bind to chmod. It is process-wide, so
-// a file made meanwhile is owner-only too. Some filesystems (bind mounts under
-// colima) reject chmod on a socket, which then keeps the umask mode.
-func (d *Node) listenOwnerOnly(path string) (net.Listener, error) {
-	old := syscall.Umask(0o077)
-	l, err := net.Listen("unix", path)
-	syscall.Umask(old)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		d.log.Warn("restricting socket mode failed", "path", path, "err", err)
-	}
-	return l, nil
-}
-
 // Run scans once at startup and serves the API on the unix socket until ctx is
 // cancelled. The socket (and a stale leftover) are managed automatically.
 func (d *Node) Run(ctx context.Context, socketPath string) error {
@@ -529,29 +513,12 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if err := checkSocketPath(modPath); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return err
-	}
-	// Probe a leftover socket before removing it: if a live node answers, refuse
-	// rather than unlink it out from under the running node (which would orphan it).
-	// Only a stale/dead socket is removed.
-	if _, err := os.Stat(socketPath); err == nil {
-		if conn, derr := net.Dial("unix", socketPath); derr == nil {
-			conn.Close()
-			return fmt.Errorf("a node is already running at %s", socketPath)
-		} else if !nodeAbsent(derr) {
-			return fmt.Errorf("probing socket %s: %w", socketPath, derr)
-		}
-		if err := os.Remove(socketPath); err != nil {
-			d.log.Warn("removing stale socket failed", "path", socketPath, "err", err)
-		}
-	}
-
-	l, err := d.listenOwnerOnly(socketPath)
+	l, err := api.ListenUnix(socketPath, d.log)
 	if err != nil {
 		return err
 	}
 	defer d.scripts.Close()
+	defer d.dropAllTerms()
 	d.log.Info("serving local API", "socket", socketPath)
 	d.wakelock.SetLogger(d.log)
 	d.wakelock.Restore()
@@ -565,7 +532,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// The probe above proved no live node serves socketPath, so a leftover
 	// mod socket named after it is stale.
 	_ = os.Remove(modPath)
-	ml, err := d.listenOwnerOnly(modPath)
+	ml, err := api.ListenOwnerOnly(modPath, d.log)
 	if err != nil {
 		return err
 	}
@@ -590,21 +557,5 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// bare shell the agent leaves behind.
 	go d.watchSessionExits(ctx)
 
-	// Close the listener when the context is done so Serve returns.
-	go func() {
-		<-ctx.Done()
-		l.Close()
-	}()
-
-	err = d.server.Serve(l)
-	if ctx.Err() != nil {
-		return nil // shutdown requested
-	}
-	return err
-}
-
-// nodeAbsent reports whether a dial error means no node is listening (ENOENT or
-// ECONNREFUSED). Any other error is real and must not be treated as safe-to-remove.
-func nodeAbsent(err error) bool {
-	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+	return d.server.ServeContext(ctx, l)
 }

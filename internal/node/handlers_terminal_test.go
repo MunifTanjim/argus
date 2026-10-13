@@ -715,3 +715,34 @@ func TestTerminalWheelScrollsTheShellHistory(t *testing.T) {
 		t.Fatalf("pane_in_mode = %q after a wheel up over the shell, want 1 (copy mode scrolls its history)", got)
 	}
 }
+
+func TestDropAllTermsTearsDownEveryConnection(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	var restores int32
+	d.restoreMirrorFn = func(*tmux.Client, *mirrorState) { atomic.AddInt32(&restores, 1) }
+	for _, n := range []api.Notifier{newRecordingNotifier(), newRecordingNotifier()} {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer w.Close()
+		_, cancel := context.WithCancel(context.Background())
+		ct := newConnTerms()
+		ct.m["t"] = &term{pty: r, cancel: cancel, sessionID: "s", termID: "t", ct: ct}
+		d.termsMu.Lock()
+		d.terms[n] = ct
+		d.termsMu.Unlock()
+	}
+
+	d.dropAllTerms()
+
+	if got := atomic.LoadInt32(&restores); got != 2 {
+		t.Fatalf("restoreMirror called %d times, want 2", got)
+	}
+	d.termsMu.Lock()
+	left := len(d.terms)
+	d.termsMu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d connections left", left)
+	}
+}

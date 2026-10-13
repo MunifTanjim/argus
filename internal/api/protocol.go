@@ -48,6 +48,9 @@ const (
 	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
 	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
+	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: ServerTargetParams; result: CheckUpgradeResult
+	MethodServerUpgrade             = "server.upgrade"             // request: ServerTargetParams; result: UpgradeResult (swaps the binary, no restart)
+	MethodServerRestart             = "server.restart"             // request: ServerTargetParams; result: nil (execs the binary on disk after replying)
 	MethodNodesList                 = "nodes.list"                 // request: no params; result: NodesListResult
 	MethodNodeEvent                 = "node.event"                 // notification: NodeEvent
 	MethodTranscriptSubscribe       = "transcript.subscribe"       // request: TranscriptSubscribeParams; result: TranscriptDelta
@@ -633,8 +636,26 @@ func capabilityKeys(known knownCapabilities) (map[string]json.RawMessage, error)
 // and connected nodes. Served by the gateway.
 type ServerInfo struct {
 	Version            string     `json:"version"`
+	StartedAt          string     `json:"started_at,omitempty"` // RFC3339
 	Nodes              []NodeInfo `json:"nodes"`
 	PushPortConfigured bool       `json:"pushPortConfigured"`
+}
+
+// ServerTargetParams addresses a server.* call: the client sends it to the
+// node named by NodeID, or to the gateway when NodeID is empty.
+type ServerTargetParams struct {
+	NodeID string `json:"node_id,omitempty"`
+}
+
+type CheckUpgradeResult struct {
+	Current string `json:"current"`
+	Latest  string `json:"latest"`
+}
+
+// UpgradeResult: To == From means the target already runs the latest version.
+type UpgradeResult struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // IdentifyResult announces a node's identity to the gateway. ID is the stable node

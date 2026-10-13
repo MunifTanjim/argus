@@ -16,6 +16,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
@@ -92,6 +93,9 @@ func (s *Server) SetPushPortStatus(fn func() bool) { s.pushPortStatus = fn }
 
 // SetVersion records the server binary's version, served via server.info. Call before serving.
 func (s *Server) SetVersion(v string) { s.version = v }
+
+// SetSelfUpgrade serves the server.* upgrade methods to clients. Call before serving.
+func (s *Server) SetSelfUpgrade(svc *selfupgrade.Service) { svc.Register(s.clientSrv) }
 
 // SetPublicURL records the gateway's reachable base URL (scheme://host) for the
 // pairing QR. Safe to call repeatedly, e.g. once the tunnel URL is known.
@@ -442,7 +446,7 @@ func (s *Server) buildClientServer() *api.Server {
 
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		configured := s.pushPortStatus != nil && s.pushPortStatus()
-		return api.ServerInfo{Version: s.version, Nodes: s.agg.Nodes(), PushPortConfigured: configured}, nil
+		return api.ServerInfo{Version: s.version, StartedAt: api.StartedAtRFC3339(), Nodes: s.agg.Nodes(), PushPortConfigured: configured}, nil
 	})
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {

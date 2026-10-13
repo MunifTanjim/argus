@@ -119,8 +119,9 @@ func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error)
 // cross-node aggregation.
 func (d *Node) handleServerInfo(context.Context, json.RawMessage) (any, error) {
 	return api.ServerInfo{
-		Version: d.version,
-		Nodes:   []api.NodeInfo{{Label: d.label, Version: d.version, Capabilities: d.caps}},
+		Version:   d.version,
+		StartedAt: api.StartedAtRFC3339(),
+		Nodes:     []api.NodeInfo{{Label: d.label, Version: d.version, Capabilities: d.caps}},
 	}, nil
 }
 

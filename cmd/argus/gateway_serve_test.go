@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,6 +145,7 @@ func TestServeGatewayOnFatalWhenTunnelReportsNoURL(t *testing.T) {
 		onFatal:      func() { fatal <- struct{}{} },
 		version:      "test",
 		tunnel:       silentTunnel{},
+		tunnelWG:     new(sync.WaitGroup),
 		tunnelOrigin: "http://127.0.0.1:0",
 	})
 	t.Cleanup(func() {
@@ -181,6 +183,7 @@ func TestServeGatewayReportedURLSuppressesTimeout(t *testing.T) {
 		onFatal:      func() { fatal <- struct{}{} },
 		version:      "test",
 		tunnel:       silentTunnel{reportURL: "https://argus.example.com"},
+		tunnelWG:     new(sync.WaitGroup),
 		tunnelOrigin: "http://127.0.0.1:0",
 	})
 	t.Cleanup(func() {
@@ -241,6 +244,7 @@ func TestServeGatewayOnFatalOnTunnelFailure(t *testing.T) {
 		onFatal:      func() { fatal <- struct{}{} },
 		version:      "test",
 		tunnel:       failingTunnel{},
+		tunnelWG:     new(sync.WaitGroup),
 		tunnelOrigin: "http://127.0.0.1:0",
 	})
 	t.Cleanup(func() {

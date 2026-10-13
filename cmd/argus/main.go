@@ -21,6 +21,11 @@ func main() {
 	cmd := newRootCmd(version)
 	err := cmd.Execute()
 	if err == nil {
+		if p := restartPath.Load(); p != nil {
+			err := reexec(*p)
+			shell.StdErrLn("argus: restart failed:", err)
+			shell.Exit(1)
+		}
 		return
 	}
 	// Commands that printed their own diagnostic return errSilent; for everything else
