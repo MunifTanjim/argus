@@ -14,6 +14,7 @@ import 'terminal_settings_screen.dart';
 import 'responsive.dart';
 import 'sign_out.dart';
 import 'theme.dart';
+import 'upgrade_tile.dart';
 import 'voice_screen.dart';
 
 const _monoStyle = TextStyle(fontFamily: 'monospace', color: AppColors.text);
@@ -206,6 +207,12 @@ Widget _serverInfo(ServerInfo info) {
           info.version.isEmpty ? '(unknown)' : info.version,
           style: _monoStyle,
         ),
+      ),
+      UpgradeTile(
+        key: const ValueKey('upgrade-gateway'),
+        nodeId: null,
+        label: 'the gateway',
+        version: info.version,
       ),
       const SizedBox(height: 24),
       _LabeledField(

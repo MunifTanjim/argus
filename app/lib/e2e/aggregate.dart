@@ -31,6 +31,15 @@ const Set<String> nodeAddressed = {
   'terminal.create', 'host.info', 'host.setWakelock',
 };
 
+/// Methods routed to the node named by node_id, or to the gateway without one
+/// (never to the sole node).
+const Set<String> serverAddressed = {
+  'server.checkUpgrade', 'server.upgrade', 'server.restart',
+};
+
+bool routesToNode(Object? params) =>
+    (stringField(params, 'node_id') ?? '').isNotEmpty;
+
 /// Methods carrying a term_id, routed to the node the terminal was opened on.
 const Set<String> terminalHandleAddressed = {
   'terminal.input', 'terminal.resize', 'terminal.close',
