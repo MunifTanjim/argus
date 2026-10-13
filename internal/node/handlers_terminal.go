@@ -116,6 +116,20 @@ func (d *Node) dropConnTerms(n api.Notifier) {
 	}
 }
 
+// dropAllTerms tears down the terminals of every connection, so no attach
+// process outlives a shutdown or an exec in place.
+func (d *Node) dropAllTerms() {
+	d.termsMu.Lock()
+	conns := make([]api.Notifier, 0, len(d.terms))
+	for n := range d.terms {
+		conns = append(conns, n)
+	}
+	d.termsMu.Unlock()
+	for _, n := range conns {
+		d.dropConnTerms(n)
+	}
+}
+
 // teardownTerm cancels the attach context, closes the PTY, and restores the
 // mirror. Callers must not hold ct.mu: restoreMirror does blocking tmux round-trips.
 func (d *Node) teardownTerm(tm *term) {

@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -88,15 +86,15 @@ func gatewayDialer(gatewayURL, token, socket string) (api.Dialer, error) {
 	}, nil
 }
 
-// localNodeRunning reports whether a node is already listening on the socket. A
-// nodeAbsent error means "not running"; any other dial error is returned as a real failure.
+// localNodeRunning reports whether a node is already listening on the socket. An
+// api.SocketAbsent error means "not running"; any other dial error is returned as a real failure.
 func localNodeRunning(socket string) (bool, error) {
 	conn, err := net.Dial("unix", socket)
 	if err == nil {
 		conn.Close()
 		return true, nil
 	}
-	if nodeAbsent(err) {
+	if api.SocketAbsent(err) {
 		return false, nil
 	}
 	return false, err
@@ -287,12 +285,6 @@ func loopbackDialAddr(addr *net.TCPAddr) string {
 		host = addr.IP.String()
 	}
 	return net.JoinHostPort(host, strconv.Itoa(addr.Port))
-}
-
-// nodeAbsent reports whether a dial error means "no node is listening": a missing
-// socket (ENOENT) or a stale one with no listener (ECONNREFUSED).
-func nodeAbsent(err error) bool {
-	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // startEmbeddedNode runs a node in-process until ctx is cancelled. Logs go to an

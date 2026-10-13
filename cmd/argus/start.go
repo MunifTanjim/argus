@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/gateway"
@@ -25,6 +29,7 @@ import (
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -78,6 +83,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	} else {
 		logger.Scoped("gateway").Info("starting argus standalone gateway", "version", version)
 	}
+	var upgrades *selfupgrade.Service
+	if up, err := selfupgrade.New(version); err != nil {
+		logger.Scoped("upgrade").Warn("in-place upgrade unavailable", "err", err)
+	} else {
+		upgrades = selfupgrade.NewService(up, func() { requestRestart(up.ExecPath, stop) })
+	}
 	if config.RuntimeDirIsFallback {
 		logger.Scoped("config").Warn("XDG runtime dir unavailable; using fallback", "dir", config.RuntimeDir)
 	}
@@ -104,6 +115,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		d.SetSelfUpgrade(upgrades)
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		// Standalone node logs to the configured logger (the embedded node, sharing a
@@ -158,6 +170,15 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	// wait so the process exits non-zero.
 	var nodeFailed atomic.Bool
 	var httpSrv *http.Server
+	var tunnelWG sync.WaitGroup
+	var gwSock net.Listener
+	if d == nil {
+		gwSock, err = api.ListenUnix(gatewaySocketPath(cfg.Socket), logger.Scoped("gateway").L)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		defer gwSock.Close()
+	}
 	if serveGW {
 		ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
 		if err != nil {
@@ -176,6 +197,8 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			pushDelay:     cfg.Push.Mobile.Delay,
 			tunnel:        tun,
 			tunnelOrigin:  tunOrigin,
+			selfUpgrade:   upgrades,
+			tunnelWG:      &tunnelWG,
 		})
 	}
 
@@ -204,7 +227,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	if d != nil {
 		err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
 	} else {
-		<-ctx.Done() // standalone gateway: block on the signal (no node to run)
+		err = serveGatewaySocket(ctx, gwSock, version, upgrades)
 	}
 
 	if httpSrv != nil {
@@ -212,6 +235,10 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		defer cancel()
 		_ = httpSrv.Shutdown(sctx)
 	}
+	// An early d.Run or socket failure leaves ctx live; the tunnel child exits
+	// only once it is cancelled.
+	stop()
+	tunnelWG.Wait()
 	if err != nil {
 		return fail(cmd, err)
 	}
@@ -219,6 +246,23 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		return errSilent // a background subsystem already printed the cause
 	}
 	return nil
+}
+
+// gatewaySocketPath keeps a standalone gateway off the node's socket, so
+// both can run on one host.
+func gatewaySocketPath(nodeSocket string) string {
+	return filepath.Join(filepath.Dir(nodeSocket), "argus-gateway.sock")
+}
+
+// serveGatewaySocket lets `argus upgrade` reach a standalone gateway. It
+// blocks until ctx is done.
+func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service) error {
+	srv := api.NewServer()
+	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
+		return api.ServerInfo{Version: version, StartedAt: api.StartedAtRFC3339()}, nil
+	})
+	upgrades.Register(srv)
+	return srv.ServeContext(ctx, l)
 }
 
 // newStartCmd builds `argus start`: runs the local node (discovery + tmux control + the
@@ -382,6 +426,8 @@ type gatewayServeOpts struct {
 	pushDelay     time.Duration
 	tunnel        tunnel.Provider
 	tunnelOrigin  string
+	selfUpgrade   *selfupgrade.Service // nil: no server.* upgrade methods (the embedded TUI gateway)
+	tunnelWG      *sync.WaitGroup      // done once the tunnel child has exited; required with tunnel
 }
 
 // serveGateway starts the co-located gateway: aggregates the in-process node plus
@@ -410,6 +456,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	hsrv.SetVersion(o.version)
 	hsrv.SetPublicURL(o.publicURL)
 	hsrv.SetLogger(gwLog)
+	hsrv.SetSelfUpgrade(o.selfUpgrade)
 	if o.enablePush {
 		setupBlindPush(ctx, o.node, hsrv, o.pushDelay, o.log.With("scope", "push"))
 	}
@@ -451,7 +498,9 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 				o.onFatal()
 			}
 		})
+		o.tunnelWG.Add(1)
 		go func() {
+			defer o.tunnelWG.Done()
 			defer urlTimer.Stop()
 			rerr := sup.Run(ctx, o.tunnel, o.tunnelOrigin, func(u string) {
 				gotURL.Store(true)

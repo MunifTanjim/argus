@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -119,6 +120,7 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 	addr := freeAddr(t)
 	cfg := cfgWithMode("gateway", "", "secret")
 	cfg.Gateway.ListenAddr = addr
+	cfg.Socket = shortSocket(t)
 	cfg.Log.Level = "error" // keep the run quiet
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -157,6 +159,22 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 		t.Errorf("standalone gateway must report no nodes, got %d", len(info.Nodes))
 	}
 
+	if _, err := os.Stat(cfg.Socket); !os.IsNotExist(err) {
+		t.Errorf("standalone gateway must leave the node socket unbound, stat err = %v", err)
+	}
+	local, err := api.Dial(gatewaySocketPath(cfg.Socket))
+	if err != nil {
+		t.Fatalf("dial gateway socket: %v", err)
+	}
+	defer local.Close()
+	var localInfo api.ServerInfo
+	if err := local.Call(api.MethodServerInfo, nil, &localInfo); err != nil {
+		t.Fatalf("local server.info: %v", err)
+	}
+	if localInfo.Version != "test" || localInfo.StartedAt != api.StartedAtRFC3339() {
+		t.Errorf("local server.info = %+v", localInfo)
+	}
+
 	cancel() // simulate SIGINT/SIGTERM
 	select {
 	case err := <-done:
@@ -166,4 +184,40 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("runStart did not return after ctx cancel")
 	}
+	if _, err := os.Stat(gatewaySocketPath(cfg.Socket)); !os.IsNotExist(err) {
+		t.Errorf("gateway socket left behind after shutdown, stat err = %v", err)
+	}
+}
+
+func TestGatewaySocketPathSitsBesideNodeSocket(t *testing.T) {
+	if got := gatewaySocketPath("/x/argus.sock"); got != "/x/argus-gateway.sock" {
+		t.Fatalf("gatewaySocketPath = %q", got)
+	}
+}
+
+func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+
+	addr := freeAddr(t)
+	cfg := cfgWithMode("gateway", "", "secret")
+	cfg.Gateway.ListenAddr = addr
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+
+	taken, err := net.Listen("unix", gatewaySocketPath(cfg.Socket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test"); err == nil {
+		t.Fatal("runStart must fail when the gateway socket is taken")
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("gateway TCP listener was started: %v", err)
+	}
+	ln.Close()
 }

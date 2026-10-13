@@ -597,6 +597,7 @@ The client picks the node for each call:
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
 | Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
+| Node from `node_id` param, or the gateway when `node_id` is empty | `server.checkUpgrade`, `server.upgrade`, `server.restart` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
 
 The client removes the node prefix before it sends an id to a node. The Go
@@ -1130,17 +1131,20 @@ are standard base64 strings in JSON.
 
 ### Connection and nodes
 
-| Method          | Kind               | Served by        | Params                  | Result                        |
-| --------------- | ------------------ | ---------------- | ----------------------- | ----------------------------- |
-| `ping`          | request            | all              | none                    | `null`                        |
-| `node.identify` | request            | node             | none                    | `IdentifyResult`              |
-| `server.info`   | request            | gateway, node    | none                    | `ServerInfo`                  |
-| `nodes.list`    | request            | gateway          | none                    | `{ nodes: NodeDescriptor[] }` |
-| `node.event`    | notification       | gateway → client | `NodeEvent`             | —                             |
-| `relay.open`    | request            | gateway          | `{ node_id: string }`   | `{ chan_id: string }`         |
-| `relay.close`   | request            | gateway          | `{ chan_id: string }`   | `null`                        |
-| `relay.closed`  | notification       | gateway → node   | `{ chan_id: string }`   | —                             |
-| `e2e.handshake` | relay notification | client ↔ node    | Noise message in `body` | —                             |
+| Method                | Kind               | Served by        | Params                  | Result                                |
+| --------------------- | ------------------ | ---------------- | ----------------------- | ------------------------------------- |
+| `ping`                | request            | all              | none                    | `null`                                |
+| `node.identify`       | request            | node             | none                    | `IdentifyResult`                      |
+| `server.info`         | request            | gateway, node    | none                    | `ServerInfo`                          |
+| `server.checkUpgrade` | request            | gateway, node    | `{ node_id?: string }`  | `{ current: string, latest: string }` |
+| `server.upgrade`      | request            | gateway, node    | `{ node_id?: string }`  | `{ from: string, to: string }`        |
+| `server.restart`      | request            | gateway, node    | `{ node_id?: string }`  | `null`                                |
+| `nodes.list`          | request            | gateway          | none                    | `{ nodes: NodeDescriptor[] }`         |
+| `node.event`          | notification       | gateway → client | `NodeEvent`             | —                                     |
+| `relay.open`          | request            | gateway          | `{ node_id: string }`   | `{ chan_id: string }`                 |
+| `relay.close`         | request            | gateway          | `{ chan_id: string }`   | `null`                                |
+| `relay.closed`        | notification       | gateway → node   | `{ chan_id: string }`   | —                                     |
+| `e2e.handshake`       | relay notification | client ↔ node    | Noise message in `body` | —                                     |
 
 ```ts
 IdentifyResult {
@@ -1155,6 +1159,7 @@ IdentifyResult {
 
 ServerInfo {
   version:            string
+  started_at?:        string   // RFC3339; server.restart changes it
   nodes:              { id, label, version, capabilities }[]
   pushPortConfigured: boolean
 }
@@ -1172,6 +1177,16 @@ NodeEvent {
   node: NodeDescriptor       // empty for trust-changed
 }
 ```
+
+`server.upgrade` downloads the latest release, checks its SHA-256 against the
+`.sha256` release asset, and replaces the binary. It does not restart. If the
+binary on disk already matches the checksum, it skips the download. If `to`
+equals `from`, the target already runs the latest version. `server.restart`
+replies first, then shuts down and executes the binary on disk with the same
+arguments and the same PID. The shutdown can close the connection before the
+reply arrives, so only an error reply means that the restart failed. The new
+process reports a new `started_at`. A target that does not support these
+methods replies `-32601`.
 
 ### Sessions
 

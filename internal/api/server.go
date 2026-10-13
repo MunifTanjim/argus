@@ -78,6 +78,19 @@ func (s *Server) Serve(l net.Listener) error {
 	}
 }
 
+// ServeContext is Serve until ctx is done. It then closes l and returns nil.
+func (s *Server) ServeContext(ctx context.Context, l net.Listener) error {
+	go func() {
+		<-ctx.Done()
+		l.Close()
+	}()
+	err := s.Serve(l)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
+
 // ServeConn serves a single established connection until it closes. Exported so
 // non-listener transports (e.g. a WebSocket adapted to net.Conn) reuse the dispatch path.
 func (s *Server) ServeConn(netConn net.Conn) {

@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -153,19 +151,6 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	// Unreachable host: dial failure must also surface.
 	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t), nil); err == nil {
 		t.Fatal("expected an error for an unreachable gateway")
-	}
-}
-
-func TestNodeAbsent(t *testing.T) {
-	if !nodeAbsent(syscall.ENOENT) || !nodeAbsent(syscall.ECONNREFUSED) {
-		t.Fatal("ENOENT/ECONNREFUSED should count as node-absent")
-	}
-	if nodeAbsent(errors.New("some other error")) {
-		t.Fatal("unrelated errors should not count as node-absent")
-	}
-	// A real dial to a missing socket classifies as absent.
-	if _, err := api.Dial(shortSocket(t)); err == nil || !nodeAbsent(err) {
-		t.Fatalf("missing socket should be node-absent, got %v", err)
 	}
 }
 

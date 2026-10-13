@@ -2,122 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
-	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/shell"
-	"github.com/MunifTanjim/argus/internal/util"
 )
-
-// upgradeAssetName builds the release-asset filename (<binary>-<tag>-<os>-<arch>)
-func upgradeAssetName(tag, goos, goarch string) string {
-	return fmt.Sprintf("%s-%s-%s-%s", config.BinaryName, tag, goos, goarch)
-}
-
-// downloadBinary writes the release binary for tag to dst.
-func downloadBinary(ctx context.Context, tag, dst string, useGH bool) error {
-	assetName := upgradeAssetName(tag, runtime.GOOS, runtime.GOARCH)
-	shell.StdErrF("Downloading %s...\n", assetName)
-
-	if useGH {
-		dl := shell.NewCommand(
-			"gh", "release", "download", tag,
-			"--repo", config.Repo,
-			"--pattern", assetName,
-			"--output", dst,
-			"--clobber",
-		)
-		if err := dl.Run(); err != nil {
-			return fmt.Errorf("%w: %s", err, dl.StdErr().TrimSpace())
-		}
-		return os.Chmod(dst, 0o755)
-	}
-
-	client := &http.Client{Timeout: 5 * time.Minute}
-	return downloadReleaseAsset(ctx, client, tag, assetName, dst)
-}
-
-func latestTag(ctx context.Context, useGH bool) (string, error) {
-	if useGH {
-		out := shell.NewCommand("gh", "release", "view", "--repo", config.Repo, "--json", "tagName", "--jq", ".tagName")
-		if err := out.Run(); err != nil {
-			return "", fmt.Errorf("%w: %s", err, out.StdErr().TrimSpace())
-		}
-		tag := out.StdOut().TrimSpace().String()
-		if tag == "" {
-			return "", errors.New("release tag missing in response")
-		}
-		return tag, nil
-	}
-	return latestReleaseTag(ctx, &http.Client{Timeout: 5 * time.Minute})
-}
-
-func latestReleaseTag(ctx context.Context, client *http.Client) (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", config.Repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status %s", resp.Status)
-	}
-
-	var release struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", err
-	}
-	if release.TagName == "" {
-		return "", errors.New("release tag missing in response")
-	}
-	return release.TagName, nil
-}
-
-func downloadReleaseAsset(ctx context.Context, client *http.Client, tag, name, dst string) error {
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", config.Repo, tag, name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status %s", resp.Status)
-	}
-
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
-}
 
 // newUpgradeCmd builds `argus upgrade`: download the latest release binary for the
 // current platform and atomically swap it over the running executable.
@@ -129,70 +22,46 @@ func newUpgradeCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			execPath, err := os.Executable()
-			if err != nil {
-				return fail(cmd, fmt.Errorf("failed to get executable path: %w", err))
-			}
-			if execPath, err = filepath.EvalSymlinks(execPath); err != nil {
-				return fail(cmd, fmt.Errorf("failed to resolve executable path: %w", err))
-			}
-			// Refuse to swap anything that isn't the installed binary (e.g. `go run`
-			// or a renamed copy), so upgrade only ever overwrites a real argus install.
-			if filepath.Base(execPath) != config.BinaryName {
-				return fail(cmd, fmt.Errorf("upgrade can only be run with the %s binary", config.BinaryName))
-			}
-
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 			defer cancel()
-
-			useGH := util.HasTool("gh")
-			tag, err := latestTag(ctx, useGH)
-			if err != nil {
-				return fail(cmd, fmt.Errorf("failed to resolve latest release: %w", err))
-			}
-			currVersion := cmd.Root().Version
-
-			shell.StdErrF("Current version: %s\n", currVersion)
-			shell.StdErrF("Latest version: %s\n", tag)
-
-			if tag == currVersion {
-				shell.StdErrLn("Already on the latest version!")
-				return nil
-			}
-
-			// Keep the temp file beside the target so the final rename stays on the
-			// same filesystem (atomic, and safe to swap a running binary on Unix).
-			tempPath := execPath + ".tmp"
-
-			if err := downloadBinary(ctx, tag, tempPath, useGH); err != nil {
-				os.Remove(tempPath)
-				return fail(cmd, fmt.Errorf("failed to download: %w", err))
-			}
-
-			shell.StdErrLn("Verifying downloaded binary...")
-			if err := shell.NewCommand(tempPath, "--version").Run(); err != nil {
-				os.Remove(tempPath)
-				return fail(cmd, fmt.Errorf("downloaded binary verification failed: %w", err))
-			}
-
-			if err := os.Rename(tempPath, execPath); err != nil {
-				os.Remove(tempPath)
-				return fail(cmd, fmt.Errorf("failed to replace binary: %w", err))
-			}
-
-			// Report success before refreshing completion: a completion problem must
-			// not mask that the upgrade itself already succeeded.
-			shell.StdErrF("Upgraded to %s!\n", tag)
-
-			switch err := completion.Install(cmd); {
-			case err == nil:
-				shell.StdErrLn("Updated shell completion!")
-			case errors.Is(err, completion.ErrCompletionNotEnabled):
-			default:
-				shell.StdErrF("Warning: failed to refresh shell completion: %v\n", err)
-			}
-
-			return nil
+			return upgradeInProcess(ctx, cmd)
 		},
+	}
+}
+
+func upgradeInProcess(ctx context.Context, cmd *cobra.Command) error {
+	up, err := selfupgrade.New(cmd.Root().Version)
+	if err != nil {
+		return fail(cmd, err)
+	}
+	c, err := up.Check(ctx)
+	if err != nil {
+		return fail(cmd, err)
+	}
+	shell.StdErrF("Current version: %s\n", c.Current)
+	shell.StdErrF("Latest version: %s\n", c.Latest)
+	if c.Latest == c.Current {
+		shell.StdErrLn("Already on the latest version!")
+		return nil
+	}
+	shell.StdErrF("Downloading %s...\n", c.Latest)
+	_, to, err := up.Apply(ctx)
+	if err != nil {
+		return fail(cmd, err)
+	}
+	printUpgraded(cmd, to)
+	return nil
+}
+
+// printUpgraded reports success before refreshing completion, so a completion
+// problem does not mask that the upgrade itself succeeded.
+func printUpgraded(cmd *cobra.Command, tag string) {
+	shell.StdErrF("Upgraded to %s!\n", tag)
+	switch err := completion.Install(cmd); {
+	case err == nil:
+		shell.StdErrLn("Updated shell completion!")
+	case errors.Is(err, completion.ErrCompletionNotEnabled):
+	default:
+		shell.StdErrF("Warning: failed to refresh shell completion: %v\n", err)
 	}
 }
