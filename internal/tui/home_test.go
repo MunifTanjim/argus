@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -915,5 +916,37 @@ func TestPaneHeadStyleShowsFocus(t *testing.T) {
 		if got := m.paneHeadStyle().GetForeground(); got == ColorAccent {
 			t.Errorf("focus on %v: the pane's title should not use the accent", k)
 		}
+	}
+}
+
+func TestServerExitShowsInStatusBar(t *testing.T) {
+	m := homeTestModel()
+	m.width = 100
+	next, _ := m.Update(serverExitedMsg{err: errors.New("exit status 2")})
+	m = next.(model)
+	if m.flash != "argus server exited (exit status 2)" {
+		t.Errorf("flash = %q", m.flash)
+	}
+	m.flash = ""
+	bar := ansi.Strip(m.frameTitle())
+	if !strings.Contains(bar, "⚠ server exited") {
+		t.Errorf("status bar must keep the exit after the flash clears: %q", bar)
+	}
+}
+
+func TestServerCleanExitShowsStatusZero(t *testing.T) {
+	m := homeTestModel()
+	next, _ := m.Update(serverExitedMsg{})
+	if got := next.(model).flash; got != "argus server exited (exit status 0)" {
+		t.Errorf("flash = %q", got)
+	}
+}
+
+func TestSplashShowsServerExit(t *testing.T) {
+	m := homeTestModel()
+	m.order, m.sessions = nil, map[string]session.Session{}
+	m.serverExited = "exit status 2"
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "server exited") {
+		t.Error("the bare splash has no status bar, so it must show the exit itself")
 	}
 }

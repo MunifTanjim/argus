@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"net"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/gateway"
+	"github.com/MunifTanjim/argus/internal/tui"
 )
 
 func wsURL(u string) string { return "ws" + strings.TrimPrefix(u, "http") }
@@ -33,167 +34,71 @@ func shortSocket(t *testing.T) string {
 	return filepath.Join(shortTempDir(t), "s.sock")
 }
 
-func sandboxHookDirs(t *testing.T) {
+// waitForNodes polls until the client sees at least one node in server.info.
+func waitForNodes(t *testing.T, c tui.Client) {
 	t.Helper()
-	t.Setenv("CODEX_HOME", t.TempDir())
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	oldState, oldData := config.StateDir, config.DataDir
-	config.StateDir, config.DataDir = t.TempDir(), t.TempDir()
-	t.Cleanup(func() { config.StateDir, config.DataDir = oldState, oldData })
-}
-
-func TestSandboxHookDirsMovesTheDataDir(t *testing.T) {
-	real := config.DataDir
-	sandboxHookDirs(t)
-	if config.DataDir == real {
-		t.Errorf("tests must not use the real data dir: %s", real)
-	}
-}
-
-func TestConnectLocalSpawn(t *testing.T) {
-	sandboxHookDirs(t)
-	sock := shortSocket(t)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	c, _, err := connectLocalSpawn(ctx, &config.Config{}, "", sock)
-	if err != nil {
-		cancel()
-		t.Fatalf("connectLocalSpawn should start a node: %v", err)
-	}
-	// The embedded node serves: a refresh round-trips without error.
-	var out []any
-	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
-		c.Close()
-		cancel()
-		t.Fatalf("embedded node should answer: %v", err)
-	}
-	c.Close()
-
-	// Cancelling ctx stops the node; the socket becomes unconnectable.
-	cancel()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, err := api.Dial(sock); err != nil {
-			break // node gone
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("embedded node did not stop after ctx cancel")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// An embedded node must opt into desktop notifications when config enables them.
-func TestEmbeddedNodeOptsIntoDesktopNotify(t *testing.T) {
-	sandboxHookDirs(t)
-	sock := shortSocket(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	cfg := &config.Config{}
-	cfg.Push.Desktop.Enabled = true
-	d, _, err := startEmbeddedNode(ctx, cfg, sock)
-	if err != nil {
-		t.Fatalf("startEmbeddedNode: %v", err)
-	}
-	if !d.DesktopNotifyEnabled() {
-		t.Fatal("embedded node should render desktop notifications when config enables them")
-	}
-}
-
-// A connected spawn enrolls the embedded node on the gateway and points the TUI
-// client at the gateway, so the returned client sees the fleet (this machine
-// included via the uplink), not just the local socket.
-func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
-	sandboxHookDirs(t)
-	hsrv := gateway.NewServer(gateway.New(0), nil, nil) // allow all
-	ts := httptest.NewServer(hsrv.Handler())
-	defer ts.Close()
-
-	sock := shortSocket(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	c, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "", sock, nil)
-	if err != nil {
-		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
-	}
-	defer c.Close()
-
-	// The returned client talks to the gateway, so once the uplink establishes the
-	// embedded node shows up in its server.info — proving the TUI sees the fleet.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var info api.ServerInfo
 		if c.Call(api.MethodServerInfo, nil, &info) == nil && len(info.Nodes) > 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("embedded connected node never enrolled / not visible to the TUI client")
+			t.Fatal("no node visible to the TUI client")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-// A connected spawn against an unreachable/rejecting gateway fails synchronously
-// (surfacing the error) instead of dropping the user into the TUI with a silent,
-// forever-retrying background uplink.
+func TestConnectLocalSpawn(t *testing.T) {
+	sandboxChild(t)
+	spec := testSpec(t)
+	c, srv, err := connectLocalSpawn(context.Background(), &config.Config{}, spec)
+	if err != nil {
+		t.Fatalf("connectLocalSpawn should start a node: %v", err)
+	}
+	var out []any
+	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
+		t.Fatalf("managed node should answer: %v", err)
+	}
+	c.Close()
+	srv.stop(managedStopTimeout)
+	if _, err := api.Dial(spec.socket); err == nil {
+		t.Fatal("managed node still serves after stop")
+	}
+}
+
+// A connected spawn enrolls the managed node on the gateway and points the TUI
+// client at the gateway, so the client sees the fleet.
+func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
+	sandboxChild(t)
+	hsrv := gateway.NewServer(gateway.New(0), nil, nil)
+	ts := httptest.NewServer(hsrv.Handler())
+	defer ts.Close()
+
+	c, srv, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "", nil)
+	if err != nil {
+		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
+	}
+	defer srv.stop(managedStopTimeout)
+	defer c.Close()
+	waitForNodes(t, c)
+}
+
+// A connected spawn against a rejecting or unreachable gateway fails before the
+// child starts.
 func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	auth := func(tok string) bool { return tok == "right" }
 	hsrv := gateway.NewServer(gateway.New(0), auth, auth)
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
+	managedBin = func() (string, error) { return "", errors.New("the child must not start") }
+	t.Cleanup(func() { managedBin = os.Executable })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Wrong token: the gateway rejects the upgrade, so the probe must fail.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, wsURL(ts.URL), "WRONG", shortSocket(t), nil); err == nil {
-		t.Fatal("expected an error for a rejected gateway token")
+	if _, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "WRONG", nil); err == nil || strings.Contains(err.Error(), "must not start") {
+		t.Fatalf("want the probe error for a rejected token, got %v", err)
 	}
-
-	// Unreachable host: dial failure must also surface.
-	if _, _, err := connectLocalSpawnWithGateway(ctx, &config.Config{}, "ws://127.0.0.1:1", "right", shortSocket(t), nil); err == nil {
-		t.Fatal("expected an error for an unreachable gateway")
-	}
-}
-
-// Stopping the embedded node waits for Run to return, so its deferred cleanup
-// (which stops running workspace setups) ends before the process exits.
-func TestEmbeddedNodeStopWaitsForRun(t *testing.T) {
-	sandboxHookDirs(t)
-	sock := shortSocket(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, emb, err := startEmbeddedNode(ctx, &config.Config{}, sock)
-	if err != nil {
-		t.Fatalf("startEmbeddedNode: %v", err)
-	}
-	conn, err := dialWithRetry(func() (net.Conn, error) { return net.Dial("unix", sock) }, 3*time.Second)
-	if err != nil {
-		t.Fatalf("embedded node did not start: %v", err)
-	}
-	conn.Close()
-	if emb.wait(50 * time.Millisecond) {
-		t.Fatal("the node stopped before its context ended")
-	}
-	cancel()
-	if !emb.wait(3 * time.Second) {
-		t.Fatal("wait should return true once Run has returned")
-	}
-	if _, err := api.Dial(sock); err == nil {
-		t.Error("the node should no longer serve once wait returns")
-	}
-}
-
-func TestEmbeddedWaitIsBounded(t *testing.T) {
-	emb := &embedded{done: make(chan struct{})}
-	start := time.Now()
-	if emb.wait(100*time.Millisecond) || time.Since(start) > 2*time.Second {
-		t.Errorf("wait on a node that never stops should give up after its bound (took %v)", time.Since(start))
-	}
-	var none *embedded
-	if !none.wait(time.Second) {
-		t.Error("with no embedded node there is nothing to wait for")
+	if _, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), "ws://127.0.0.1:1", "right", nil); err == nil || strings.Contains(err.Error(), "must not start") {
+		t.Fatalf("want the probe error for an unreachable gateway, got %v", err)
 	}
 }

@@ -53,9 +53,14 @@ func Init() {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-// prettyHandler builds the tint+scope-prefix handler for human-readable output. The
-// single source of the stderr format, so reusers (e.g. NewBufferLogger) stay in
-// lockstep with `argus start`.
+// InitManaged installs the pretty handler with color on stderr, whatever the
+// configured format: a managed server's stderr feeds the TUI's Logs tab.
+func InitManaged() {
+	slog.SetDefault(slog.New(prettyHandler(os.Stderr, false)))
+	slog.SetLogLoggerLevel(slog.LevelInfo)
+}
+
+// prettyHandler builds the tint+scope-prefix handler for human-readable output.
 func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 	return slogpfx.NewHandler(
 		tint.NewHandler(w, &tint.Options{
@@ -70,10 +75,8 @@ func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 	)
 }
 
-// NewBufferLogger builds a pretty, color, scope-prefixed logger writing to w, used
-// by the TUI to tail the embedded node's logs in its Logs tab with formatting that
-// matches `argus start`. Color stays on for parity with stderr logs: the tab renders
-// in the alt-screen (not a pipe) and never truncates mid-line, so ANSI is safe.
+// NewBufferLogger builds a pretty, color, scope-prefixed logger writing to w, with
+// formatting that matches `argus start`. Color stays on even when w is not a terminal.
 func NewBufferLogger(w io.Writer) *slog.Logger {
 	return slog.New(prettyHandler(w, false))
 }

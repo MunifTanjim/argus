@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -126,7 +127,7 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test") }()
+	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false) }()
 
 	// serveGateway starts its listener asynchronously; poll until /client accepts.
 	url := "ws://" + addr + "/client"
@@ -212,7 +213,7 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test"); err == nil {
+	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false); err == nil {
 		t.Fatal("runStart must fail when the gateway socket is taken")
 	}
 	ln, err := net.Listen("tcp", addr)
@@ -220,4 +221,38 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 		t.Fatalf("gateway TCP listener was started: %v", err)
 	}
 	ln.Close()
+}
+
+func TestArgusManagedFlagIsHidden(t *testing.T) {
+	f := newStartCmd("test").Flags().Lookup("argus-managed")
+	if f == nil || !f.Hidden {
+		t.Fatalf("argus-managed must exist and be hidden: %+v", f)
+	}
+}
+
+func TestWatchParentStopsOnEOF(t *testing.T) {
+	r, w := io.Pipe()
+	stopped := make(chan struct{})
+	go watchParent(r, func() { close(stopped) })
+	select {
+	case <-stopped:
+		t.Fatal("stopped while the parent is alive")
+	case <-time.After(50 * time.Millisecond):
+	}
+	w.Close()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not stop after EOF")
+	}
+}
+
+func TestHookBin(t *testing.T) {
+	if got := hookBin(true); got != "" {
+		t.Errorf("managed hookBin = %q, want empty (keep the installed path)", got)
+	}
+	exe, _ := os.Executable()
+	if got := hookBin(false); got != exe {
+		t.Errorf("hookBin = %q, want %q", got, exe)
+	}
 }

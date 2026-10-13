@@ -200,7 +200,7 @@ func TestServeGatewayReportedURLSuppressesTimeout(t *testing.T) {
 }
 
 // A listener that dies after startup must invoke onFatal so `argus start` can exit
-// non-zero (and the embedded gateway can tear its stack down).
+// non-zero.
 func TestServeGatewayOnFatalOnListenerDeath(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
