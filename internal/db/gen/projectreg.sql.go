@@ -185,6 +185,36 @@ func (q *Queries) MarkWorkspacesGone(ctx context.Context, projectID string) erro
 	return err
 }
 
+const moveWorkspaces = `-- name: MoveWorkspaces :exec
+UPDATE workspace SET project_id = ?1 WHERE project_id = ?2
+`
+
+type MoveWorkspacesParams struct {
+	NewID string
+	OldID string
+}
+
+func (q *Queries) MoveWorkspaces(ctx context.Context, arg MoveWorkspacesParams) error {
+	_, err := q.db.ExecContext(ctx, moveWorkspaces, arg.NewID, arg.OldID)
+	return err
+}
+
+const rekeyProject = `-- name: RekeyProject :exec
+UPDATE project SET id = ?1 WHERE id = ?2
+`
+
+type RekeyProjectParams struct {
+	NewID string
+	OldID string
+}
+
+// RekeyProject changes a project's id; the caller moves its workspaces with
+// MoveWorkspaces in the same transaction, with foreign keys deferred.
+func (q *Queries) RekeyProject(ctx context.Context, arg RekeyProjectParams) error {
+	_, err := q.db.ExecContext(ctx, rekeyProject, arg.NewID, arg.OldID)
+	return err
+}
+
 const renameProject = `-- name: RenameProject :execrows
 UPDATE project SET name = ? WHERE id = ?
 `

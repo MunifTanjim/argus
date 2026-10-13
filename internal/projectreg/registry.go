@@ -547,6 +547,42 @@ func (r *Registry) syncPlain(ctx context.Context, p gen.Project) error {
 	return tx.Commit()
 }
 
+// RekeyPlainProjects gives each plain project the id record computes for it.
+// A plain project recorded before that id got its "plain:" prefix shares its
+// id with its workspace, so a client cannot tell the two apart. Call it before
+// the registry is in use.
+func (r *Registry) RekeyPlainProjects(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows, err := r.q.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// The workspaces point at the old id until MoveWorkspaces.
+	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
+		return err
+	}
+	q := r.q.WithTx(tx)
+	for _, p := range rows {
+		id := idFor("plain:" + p.Dir)
+		if p.Kind != "plain" || p.ID == id {
+			continue
+		}
+		if err := q.RekeyProject(ctx, gen.RekeyProjectParams{NewID: id, OldID: p.ID}); err != nil {
+			return err
+		}
+		if err := q.MoveWorkspaces(ctx, gen.MoveWorkspacesParams{NewID: id, OldID: p.ID}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func buildProject(p gen.Project, wss []gen.Workspace, live map[string]gittree.Worktree, def string) Project {
 	proj := Project{
 		ID: p.ID, Name: p.Name, Kind: p.Kind, Dir: p.Dir, DefaultBranch: def,

@@ -628,3 +628,47 @@ func TestAdoptReportsNewWorkspace(t *testing.T) {
 		t.Errorf("second adopt: isNew=%v err=%v", isNew, err)
 	}
 }
+
+func TestRekeyPlainProjectsFixesLegacyID(t *testing.T) {
+	ctx := context.Background()
+	r := newRegistry(t)
+	dir := cleanDir(t.TempDir())
+	legacy := idFor(dir) // the id a plain project got before the "plain:" prefix
+	for _, q := range []string{
+		`INSERT INTO project (id, name, kind, dir, pinned) VALUES (?1, 'legacy', 'plain', ?2, 1)`,
+		`INSERT INTO workspace (id, project_id, dir, is_main) VALUES (?1, ?1, ?2, 1)`,
+	} {
+		if _, err := r.db.ExecContext(ctx, q, legacy, dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := t.TempDir()
+	if _, err := r.AdoptSession(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 { // a second run finds nothing to change
+		if err := r.RekeyPlainProjects(ctx); err != nil {
+			t.Fatalf("RekeyPlainProjects: %v", err)
+		}
+	}
+	wsID, err := r.AdoptSession(ctx, dir)
+	if err != nil || wsID != legacy {
+		t.Fatalf("AdoptSession after rekey: id=%q err=%v, want %q", wsID, err, legacy)
+	}
+	projects, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("want 2 projects, got %+v", projects)
+	}
+	for _, p := range projects {
+		if want := idFor("plain:" + p.Dir); p.ID != want {
+			t.Fatalf("project %s: id %s, want %s", p.Dir, p.ID, want)
+		}
+		if p.Dir == dir && (!p.Pinned || len(p.Workspaces) != 1 || p.Workspaces[0].ID != legacy) {
+			t.Fatalf("rekeyed project lost its pin or workspace: %+v", p)
+		}
+	}
+}

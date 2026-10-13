@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -30,6 +31,9 @@ func enableProjectRegistry(d *node.Node, cfg *config.Config, log *slog.Logger) e
 	if err := reg.SetAutoAdoptDirs(cfg.Workspace.AutoAdoptDirs); err != nil {
 		sqlDB.Close()
 		return fmt.Errorf("workspace.auto-adopt-dirs: %w", err)
+	}
+	if err := reg.RekeyPlainProjects(context.Background()); err != nil && log != nil {
+		log.Warn("rekey plain projects", "err", err)
 	}
 	d.SetProjectRegistry(reg)
 	return nil

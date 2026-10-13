@@ -14,6 +14,14 @@ UPDATE project SET is_gone = 0 WHERE id = ?;
 -- name: MarkProjectGone :exec
 UPDATE project SET is_gone = 1 WHERE id = ?;
 
+-- RekeyProject changes a project's id; the caller moves its workspaces with
+-- MoveWorkspaces in the same transaction, with foreign keys deferred.
+-- name: RekeyProject :exec
+UPDATE project SET id = sqlc.arg(new_id) WHERE id = sqlc.arg(old_id);
+
+-- name: MoveWorkspaces :exec
+UPDATE workspace SET project_id = sqlc.arg(new_id) WHERE project_id = sqlc.arg(old_id);
+
 -- name: RenameProject :execrows
 UPDATE project SET name = ? WHERE id = ?;
 
