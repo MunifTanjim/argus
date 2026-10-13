@@ -45,7 +45,7 @@ func (s sidebarSessionsComp) spins(c *ctx) bool {
 
 func (s sidebarSessionsComp) footer(*ctx) []binding {
 	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, listKeys.Filter,
-		clearFilterKey(projectsKeys.Back, s.query != "")}
+		clearFilterKey(projectsKeys.Back, s.query != ""), projectsKeys.Refresh}
 }
 
 func (s sidebarSessionsComp) footerPrompt(*ctx) string {
@@ -79,12 +79,13 @@ func (m model) sidebarSessionMatches(ss session.Session, q string) bool {
 		strings.Contains(strings.ToLower(m.sidebarSessionPlace(ss, false)), lq)
 }
 
-// titleSuffix follows the Sessions tab: its filter.
-func (s sidebarSessionsComp) titleSuffix() string {
-	if s.query == "" {
-		return ""
+// titleSuffix follows the Sessions tab: its filter and a refresh in flight.
+func (s sidebarSessionsComp) titleSuffix(c *ctx) string {
+	var t string
+	if s.query != "" {
+		t = StyleDim.Render("  /" + s.query)
 	}
-	return StyleDim.Render("  /" + s.query)
+	return t + c.m.refreshTitle()
 }
 
 // index is the cursor's row: the selected session's, or its last place,
@@ -139,6 +140,8 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 		if n > 0 {
 			c.openSession(ids[i])
 		}
+	case m.matches(msg, k.Refresh):
+		c.refreshSessions()
 	default:
 		return s, nil, false
 	}

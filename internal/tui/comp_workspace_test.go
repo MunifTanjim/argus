@@ -451,3 +451,26 @@ func TestTopBarClipsALongHeaderAndKeepsTheBrand(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceRefreshReloadsSessionsAndTree(t *testing.T) {
+	rc := &reconnectClient{}
+	m := homeTestModel()
+	m.client = rc
+	m = workspacePane(m)
+	m.left.tree.err = errors.New("old")
+	res, cmd := m.runKey(seqKey("gr"))
+	runCmd(cmd)
+	if n := rc.count(api.MethodSessionsRefresh); n != 1 {
+		t.Errorf("gr: %d sessions.refresh calls, want 1", n)
+	}
+	if res.(model).left.tree.err != nil {
+		t.Error("gr should also reload the tree")
+	}
+	m = res.(model)
+	m.reconnecting = true
+	_, cmd = m.runKey(seqKey("gr"))
+	runCmd(cmd)
+	if n := rc.count(api.MethodSessionsRefresh); rc.reconnects != 1 || n != 1 {
+		t.Errorf("gr while reconnecting: reconnects=%d refreshes=%d, want a reconnect and no call", rc.reconnects, n)
+	}
+}

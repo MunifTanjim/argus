@@ -105,7 +105,8 @@ var sectionLists = map[string]sectionList{
 	},
 	"sidebar-sessions": {
 		own: bindingsOf(projectsKeys.Back, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top, projectsKeys.Bottom,
-			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, listKeys.Filter),
+			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, listKeys.Filter,
+			projectsKeys.Refresh),
 		container: bindingsOf(leftSidebarTabKeys...),
 		focus:     focusFor("sidebar-sessions"),
 	},

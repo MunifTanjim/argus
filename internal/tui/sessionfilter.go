@@ -79,6 +79,14 @@ func (m model) sessionFilterTitle() string {
 	return dimStyle.Render(s)
 }
 
+// refreshTitle follows a session list's title while a refresh is in flight.
+func (m model) refreshTitle() string {
+	if m.refreshes == 0 {
+		return ""
+	}
+	return dimStyle.Render("  refreshing…")
+}
+
 // emptyFilterHint is the line a session list shows when its filters hide every
 // session; back is the list's key that clears the text filter.
 func (m model) emptyFilterHint(section, noActive string, back binding) string {

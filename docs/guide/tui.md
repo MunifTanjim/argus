@@ -231,7 +231,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `redaction list` | transcript |  | `D` |
 | `redaction remove` | transcript |  | `u` |
 | `redaction save` | transcript |  | `W` |
-| `refresh` | changes, file, file-tree, history, home, node, project, project-tree, terminals, workspace |  | `gr` |
+| `refresh` | changes, file, file-tree, history, home, node, project, project-tree, sidebar-sessions, terminals, workspace |  | `gr` |
 | `scroll down` | file, logs, transcript | `<Down>` `j` |  |
 | `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<C-d>` |  |
 | `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<C-u>` |  |

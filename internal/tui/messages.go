@@ -13,6 +13,9 @@ type connStateMsg struct{ connected bool }
 
 // sessionsReplacedMsg carries an authoritative session list for a post-reconnect resync.
 type sessionsReplacedMsg []session.Session
+
+// sessionsRefreshedMsg says a sessions.refresh call returned.
+type sessionsRefreshedMsg struct{}
 type transcriptMsg struct {
 	id      string
 	entries []transcript.Entry

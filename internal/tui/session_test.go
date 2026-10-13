@@ -60,6 +60,27 @@ func (c *recordingClient) Reconnect()                      {}
 func (c *recordingClient) Close() error                    { return nil }
 func (c *recordingClient) Quarantined() bool               { return false }
 
+// count is how many calls to method were recorded.
+func (c *recordingClient) count(method string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, m := range c.calls {
+		if m == method {
+			n++
+		}
+	}
+	return n
+}
+
+// reconnectClient is a recordingClient that also counts Reconnect calls.
+type reconnectClient struct {
+	recordingClient
+	reconnects int
+}
+
+func (c *reconnectClient) Reconnect() { c.reconnects++ }
+
 func (c *recordingClient) paramsOf(method string) []any {
 	c.mu.Lock()
 	defer c.mu.Unlock()

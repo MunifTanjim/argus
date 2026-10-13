@@ -147,6 +147,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
 		return m.updateScreens(msg)
+	case sessionsRefreshedMsg:
+		m.refreshes--
+		return m, nil
 	case sessionsReplacedMsg:
 		m.sessions = make(map[string]session.Session, len(msg))
 		for _, s := range msg {

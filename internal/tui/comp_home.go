@@ -94,12 +94,7 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			}
 		}
 	case m.matches(msg, k.Refresh):
-		// While disconnected, refresh means reconnect now, not a call over a dead connection.
-		if m.reconnecting {
-			m.client.Reconnect()
-		} else {
-			cmd = m.refreshCmd()
-		}
+		c.refreshSessions()
 	case m.matches(msg, k.Back):
 		if m.sessionFilter != "" {
 			c.setSessionFilter("")
@@ -123,7 +118,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 	// The status bar shows connection and quarantine state when framed; the bare
 	// splash has no bar, so it keeps them in its own header.
 	bare := m.layout().bare
-	title := m.homeTabs(tabSessions) + m.sessionFilterTitle()
+	title := m.homeTabs(tabSessions) + m.sessionFilterTitle() + m.refreshTitle()
 	if bare {
 		title = m.brandMark() + title
 		if m.reconnecting {

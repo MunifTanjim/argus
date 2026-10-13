@@ -88,6 +88,7 @@ const (
 	actCloseScreen
 	actFocus
 	actFlash
+	actRefreshSessions
 	actHome
 	actOpenRow
 	actFocusTree
@@ -125,6 +126,10 @@ func (c *ctx) closePopup()         { c.actions = append(c.actions, action{kind: 
 func (c *ctx) runCommand(typed string) {
 	c.actions = append(c.actions, action{kind: actRunCommand, id: typed})
 }
+
+// refreshSessions asks for a fresh session list. While disconnected it
+// reconnects now instead, as a call over a dead connection does nothing.
+func (c *ctx) refreshSessions() { c.actions = append(c.actions, action{kind: actRefreshSessions}) }
 
 // runNamed runs command name the way the command line does, without its
 // history.
@@ -266,6 +271,14 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			}
 		case actFlash:
 			m.flash = a.flash
+		case actRefreshSessions:
+			if m.reconnecting {
+				m.client.Reconnect()
+			} else {
+				m.refreshes++
+				refresh := m.refreshCmd()
+				cmds = append(cmds, func() tea.Msg { refresh(); return sessionsRefreshedMsg{} })
+			}
 		case actHome:
 			m.left.tree.cursor = 0
 			cmds = append(cmds, m.openRow(homeRowID))

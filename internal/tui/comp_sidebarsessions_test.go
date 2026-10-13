@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -247,5 +248,29 @@ func TestSidebarSessionsFilterClampsCursor(t *testing.T) {
 	ids := sidebarListed(m)
 	if i := m.left.sessions.index(ids); ids[i] != "n1:b" {
 		t.Fatalf("cursor on %q, want the only match beta", ids[i])
+	}
+}
+
+func TestSidebarSessionsRefresh(t *testing.T) {
+	rc := &reconnectClient{}
+	m := *sidebarSessionsCtx().m
+	m.client = rc
+	_, cmd := m.runKey(seqKey("gr"))
+	runCmd(cmd)
+	if n := rc.count(api.MethodSessionsRefresh); n != 1 {
+		t.Errorf("gr: %d sessions.refresh calls, want 1", n)
+	}
+	m.reconnecting = true
+	_, cmd = m.runKey(seqKey("gr"))
+	runCmd(cmd)
+	if n := rc.count(api.MethodSessionsRefresh); rc.reconnects != 1 || n != 1 {
+		t.Errorf("gr while reconnecting: reconnects=%d refreshes=%d, want a reconnect and no call", rc.reconnects, n)
+	}
+}
+
+func TestSidebarSessionsFooterOffersRefresh(t *testing.T) {
+	c := sidebarSessionsCtx()
+	if !slices.ContainsFunc(sidebarSessionsComp{}.footer(c), func(b binding) bool { return b.name == projectsKeys.Refresh.name }) {
+		t.Error("the footer should offer refresh")
 	}
 }

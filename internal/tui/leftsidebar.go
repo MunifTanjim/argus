@@ -101,7 +101,7 @@ func (l leftSidebarState) view(c *ctx, w, h int) string {
 	if l.tab == leftProjects {
 		strip += l.tree.titleSuffix()
 	} else {
-		strip += l.sessions.titleSuffix()
+		strip += l.sessions.titleSuffix(c)
 	}
 	c.hitTabs(screenMargin, 0, 2, leftTabNames...)
 	head := strings.Repeat(" ", screenMargin) + truncateLine(strip, max(1, w)) + "\n\n"

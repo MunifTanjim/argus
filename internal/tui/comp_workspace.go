@@ -58,6 +58,11 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		return p, openWorkspaceTerminals(c, p.ws), true
 	case m.matches(msg, projectsKeys.SetupLog):
 		return p, openSetupLog(c, p.ws), true
+	case m.matches(msg, projectsKeys.Refresh):
+		// The pane shows sessions and tree rows, so refresh reloads both.
+		c.onTree(treeReload)
+		c.refreshSessions()
+		return p, nil, true
 	case paneTreeKey(c, msg):
 		return p, nil, true
 	}
@@ -183,7 +188,7 @@ func (p workspaceComp) column(c *ctx, x, w, h int) string {
 	if _, ok := c.m.wsRow(p.ws); !ok {
 		return dimStyle.Render("workspace not found")
 	}
-	head := truncateLine(c.m.wsTabsHeader(c, p.ws, wsTabSessions, x)+c.m.sessionFilterTitle(), w)
+	head := truncateLine(c.m.wsTabsHeader(c, p.ws, wsTabSessions, x)+c.m.sessionFilterTitle()+c.m.refreshTitle(), w)
 	return head + "\n\n" + p.sessions(c.below(2), w, max(1, h-2))
 }
 

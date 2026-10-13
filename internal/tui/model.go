@@ -67,6 +67,7 @@ type model struct {
 	width         int
 	height        int
 	reconnecting  bool // connection dropped; the client is retrying
+	refreshes     int  // sessions.refresh calls in flight; the session lists show a hint
 	hasDark       bool // terminal background; drives glamour/highlight styling
 	viewer        bool // offline viewer mode: opens directly in transcript view
 	brand         int  // the title icon, an index into brandGlyphs
