@@ -68,6 +68,14 @@ var nodeAddressed = map[string]bool{
 	api.MethodHostSetWakelock:           true,
 }
 
+// serverAddressed methods go to the node named by node_id, or to the gateway
+// when node_id is empty (never to the sole node).
+var serverAddressed = map[string]bool{
+	api.MethodServerCheckUpgrade: true,
+	api.MethodServerUpgrade:      true,
+	api.MethodServerRestart:      true,
+}
+
 // terminalHandleAddressed methods carry a term_id (not a session_id); the client
 // routes them to the node the terminal was opened on.
 var terminalHandleAddressed = map[string]bool{
