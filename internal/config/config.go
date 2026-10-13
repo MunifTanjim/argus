@@ -141,9 +141,11 @@ type LockConfig struct {
 	Genesis string
 }
 
+func DefaultSocket() string { return GetRuntimePath("argus.sock") }
+
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
-	"socket":                          GetRuntimePath("argus.sock"),
+	"socket":                          DefaultSocket(),
 	"token":                           "",
 	"gateway.url":                     "",
 	"gateway.listen-addr":             ":8443",
