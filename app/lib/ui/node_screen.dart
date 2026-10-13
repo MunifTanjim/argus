@@ -11,6 +11,7 @@ import 'duration_sheet.dart';
 import 'host_format.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'upgrade_tile.dart';
 
 class NodeScreen extends ConsumerStatefulWidget {
   const NodeScreen({
@@ -132,12 +133,14 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
   Widget build(BuildContext context) {
     final info = _info;
     final error = _error;
-    final wakelock = ref
-            .watch(serverInfoProvider)
-            .value
-            ?.nodes
-            .any((n) => n.id == widget.nodeId && n.hostWakelockSupported) ??
-        false;
+    final node = ref
+        .watch(serverInfoProvider)
+        .value
+        ?.nodes
+        .where((n) => n.id == widget.nodeId)
+        .firstOrNull;
+    final wakelock = node?.hostWakelockSupported ?? false;
+    final version = node?.version ?? '';
     return Scaffold(
       appBar: AppBar(title: Text(widget.label)),
       body: SafeArea(
@@ -153,6 +156,13 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
                     if (info.os.isNotEmpty) _row('OS', info.os),
                     _row('Uptime', formatUptime(info.uptimeSeconds)),
                     if (info.battery != null) _row('Battery', formatBattery(info.battery!)),
+                    if (version.isNotEmpty) _row('Version', version),
+                    UpgradeTile(
+                      key: ValueKey('upgrade-${widget.nodeId}'),
+                      nodeId: widget.nodeId,
+                      label: widget.label,
+                      version: version,
+                    ),
                     if (wakelock)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,

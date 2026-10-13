@@ -69,6 +69,7 @@ class E2EClient implements GatewayClient {
     this._static, {
     this.handshakeTimeout = const Duration(seconds: 15),
     this.callTimeout = const Duration(seconds: 30),
+    this.upgradeCallTimeout = const Duration(minutes: 6),
     Uint8List? genesisHash,
     this._initialTrustChain,
     bool tofu = false,
@@ -92,6 +93,8 @@ class E2EClient implements GatewayClient {
   final KeyPair _static;
   final Duration handshakeTimeout;
   final Duration callTimeout;
+  // Outlasts the daemon's own five-minute download budget.
+  final Duration upgradeCallTimeout;
   final TrustStore? _trust;
   final Uint8List? _initialTrustChain;
   final bool _plaintext;
@@ -639,6 +642,11 @@ class E2EClient implements GatewayClient {
       return _routeByWorkspace(method, params);
     if (projectAddressed.contains(method))
       return _routeByProject(method, params);
+    if (serverAddressed.contains(method)) {
+      return routesToNode(params)
+          ? _routeByNode(method, params)
+          : _gateway.call(method, params);
+    }
     if (nodeAddressed.contains(method)) return _routeByNode(method, params);
     if (terminalHandleAddressed.contains(method)) {
       return _routeByHandle(
@@ -782,7 +790,7 @@ class E2EClient implements GatewayClient {
           return (nodeId, list is List ? list : const <dynamic>[], null as Object?);
         } catch (e) {
           // A node older than terminals answers method-not-found: it has none.
-          final old = e is RpcError && e.code == -32601;
+          final old = e is RpcError && e.isMethodNotFound;
           return (nodeId, const <dynamic>[], old ? null : e as Object?);
         }
       }),
@@ -1163,6 +1171,9 @@ class E2EClient implements GatewayClient {
     return nc;
   }
 
+  Duration callTimeoutFor(String method) =>
+      method == 'server.upgrade' ? upgradeCallTimeout : callTimeout;
+
   Future<Uint8List> callNode(NodeChannel nc, String method, List<int> params) {
     if (_closed) return Future.error(StateError('client closed'));
     final idn = ++_nextId;
@@ -1171,7 +1182,7 @@ class E2EClient implements GatewayClient {
     _pending[id] = c;
     _writeFrame(nc.channel.sealRequestFrame(idn, method, nc.nodeId, params));
     return c.future.timeout(
-      callTimeout,
+      callTimeoutFor(method),
       onTimeout: () {
         _pending.remove(id);
         throw TimeoutException('callNode $method timed out');

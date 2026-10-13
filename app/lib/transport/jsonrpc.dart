@@ -5,6 +5,8 @@ class RpcError {
   final String message;
   const RpcError(this.code, this.message);
 
+  bool get isMethodNotFound => code == -32601;
+
   factory RpcError.fromJson(Map<String, dynamic> j) =>
       RpcError((j['code'] as num).toInt(), j['message'] as String? ?? '');
 
