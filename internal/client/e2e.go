@@ -23,12 +23,22 @@ import (
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/registry"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
 
 var callTimeout = 30 * time.Second
+
+const upgradeCallTimeout = selfupgrade.Timeout + time.Minute
+
+func callTimeoutFor(method string) time.Duration {
+	if method == api.MethodServerUpgrade {
+		return upgradeCallTimeout
+	}
+	return callTimeout
+}
 
 // defaultOfflineGrace is how long a disconnected node's sessions stay visible
 // (marked Offline) before the client drops them.
@@ -535,6 +545,11 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.routeByProject(method, raw, out)
 	case nodeAddressed[method]:
 		return m.routeByNode(method, raw, out)
+	case serverAddressed[method]:
+		if id, _ := nodeIDFromParams(raw); id != "" {
+			return m.routeByNode(method, raw, out)
+		}
+		return m.peer.Call(method, raw, out)
 	case method == api.MethodTranscriptUnsubscribe:
 		id, _ := subIDFromParams(raw)
 		err := m.routeByHandle(m.subNode, id, method, raw, out)
@@ -1098,7 +1113,7 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	case <-m.peer.Done():
 		m.forget(id)
 		return fmt.Errorf("client: connection closed")
-	case <-time.After(callTimeout):
+	case <-time.After(callTimeoutFor(method)):
 		m.forget(id)
 		return fmt.Errorf("client: call timeout")
 	}

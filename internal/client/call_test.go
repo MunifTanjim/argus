@@ -220,3 +220,48 @@ func TestCallSessionsListMergesMultipleNodes(t *testing.T) {
 func registryEvent(typ, id string) map[string]any {
 	return map[string]any{"type": typ, "session": map[string]any{"id": id}}
 }
+
+func TestCallServerAddressedRoutesByNodeID(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	saw := make(chan string, 4)
+	f.handle = func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		if method != api.MethodServerCheckUpgrade {
+			return json.RawMessage(`null`), nil, nil
+		}
+		saw <- method
+		return json.RawMessage(`{"current":"1.0.0","latest":"1.1.0"}`), nil, nil
+	}
+	c, _ := NewE2EClient(clientConn)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	var res api.CheckUpgradeResult
+	if err := c.Call(api.MethodServerCheckUpgrade, api.ServerTargetParams{NodeID: "n1"}, &res); err != nil {
+		t.Fatalf("with node_id: %v", err)
+	}
+	if got := <-saw; got != api.MethodServerCheckUpgrade || res.Latest != "1.1.0" {
+		t.Fatalf("node saw %q, result %+v", got, res)
+	}
+
+	err := c.Call(api.MethodServerCheckUpgrade, api.ServerTargetParams{}, &res)
+	if !api.IsMethodNotFound(err) {
+		t.Fatalf("without node_id: err %v, want the gateway's method-not-found", err)
+	}
+	if len(saw) != 0 {
+		t.Fatal("a call without node_id must not reach the node")
+	}
+}
+
+func TestCallTimeoutForUpgradeOutlastsDaemonBudget(t *testing.T) {
+	if got := callTimeoutFor(api.MethodServerUpgrade); got != 6*time.Minute {
+		t.Fatalf("server.upgrade timeout = %v, want 6m", got)
+	}
+	for _, m := range []string{api.MethodServerRestart, api.MethodServerCheckUpgrade, api.MethodSessionsList} {
+		if got := callTimeoutFor(m); got != callTimeout {
+			t.Fatalf("%s timeout = %v, want %v", m, got, callTimeout)
+		}
+	}
+}
