@@ -45,6 +45,10 @@ class FakeSessionRepository implements SessionRepository {
   Future<Result<void>> kill(String sessionId) async => const Result.ok(null);
 
   @override
+  Future<Result<bool>> rename(String sessionId, String name) async =>
+      const Result.ok(true);
+
+  @override
   Future<Result<List<NodeRef>>> nodes() async => const Result.ok(<NodeRef>[]);
 
   @override

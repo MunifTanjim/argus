@@ -671,6 +671,16 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 	return startTurn(ctx, c, id, text)
 }
 
+// renameSession renames a thread through thread/name/set. The daemon reports
+// the change back over thread/name/updated.
+func (d *discoverer) renameSession(ctx context.Context, id, name string) error {
+	c := d.conn()
+	if c == nil {
+		return fmt.Errorf("codex: daemon unavailable")
+	}
+	return c.call(ctx, "thread/name/set", map[string]any{"threadId": id, "name": name}, nil)
+}
+
 // spawnSession starts a thread in cwd with the user's config.toml approval and
 // sandbox defaults. The starting client is subscribed to the new thread.
 func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (string, error) {

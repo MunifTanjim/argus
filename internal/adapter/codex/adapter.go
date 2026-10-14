@@ -25,6 +25,7 @@ var _ adapter.InteractionOwner = (*cxAdapter)(nil)
 var _ adapter.Dismisser = (*cxAdapter)(nil)
 var _ adapter.Prompter = (*cxAdapter)(nil)
 var _ adapter.Spawner = (*cxAdapter)(nil)
+var _ adapter.Renamer = (*cxAdapter)(nil)
 
 func (cxAdapter) Agent() string      { return Agent }
 func (cxAdapter) AgentName() string  { return "Codex" }
@@ -154,6 +155,21 @@ func (a *cxAdapter) Dismiss(ctx context.Context, sess session.Session) error {
 	}
 	d.dismiss(ctx, sess.AgentSessionID)
 	return nil
+}
+
+// RenameSession renames the thread through the daemon.
+func (a *cxAdapter) RenameSession(ctx context.Context, sess session.Session, name string) (bool, error) {
+	d, err := a.live()
+	if err != nil {
+		return false, err
+	}
+	if sess.AgentSessionID == "" {
+		return false, fmt.Errorf("codex: session has no agent session id")
+	}
+	if err := d.renameSession(ctx, sess.AgentSessionID, name); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Codex needs no argus-managed config. Node start strips hooks older argus

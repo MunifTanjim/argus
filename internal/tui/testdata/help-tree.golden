@@ -5,10 +5,11 @@
   gg/G shift+g       top / bottom · goto bottom    enter      open session · open
   ^u/^d              half · scroll half-page-down  O shift+o  jump to its tmux pane · open tmux-pane
   ^b pgup/^f pgdown  page · scroll page-down       esc        close / tree · back
-  h ← zc/l → zo      fold / unfold · fold close    dd         kill session · session kill
-  enter              open; l opens Home/workspace  za         active / all sessions · toggle active-only
-  ^ww/^wW            cycle focus · focus next      zg         home: group sessions by · cycle group-by
-  /                  filter · filter-projects      /          filter sessions · filter-sessions
+  h ← zc/l → zo      fold / unfold · fold close    r          rename session · session rename
+  enter              open; l opens Home/workspace  dd         kill session · session kill
+  ^ww/^wW            cycle focus · focus next      za         active / all sessions · toggle active-only
+  /                  filter · filter-projects      zg         home: group sessions by · cycle group-by
+                                                   /          filter sessions · filter-sessions
                                                    L shift+l  workspace setup log · open setup-log
                                                    ^wh/^wl    focus left / right pane · focus left
                                                    ^wj        session: focus the prompt · focus down
@@ -25,6 +26,5 @@
   D shift+d  force remove · workspace force-remove            ^w</^w>    resize focused sidebar · sidebar wider
   r          rename project · project rename                  ␣e         toggle right sidebar · toggle right-sidebar
   F shift+f  forget project (files stay) · project forget     ␣o         toggle sidebar · toggle left-sidebar
-  P shift+p  pin / unpin project · toggle pin                 gr         refresh · refresh
 
                                                ↑/↓ scroll · any key close

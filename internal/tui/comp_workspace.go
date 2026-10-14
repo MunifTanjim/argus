@@ -14,11 +14,12 @@ type workspaceComp struct {
 	ws     string
 	cursor int
 	killID string
+	rename renamePrompt
 	filter filterPrompt
 }
 
 func (p workspaceComp) section() string                           { return "workspace" }
-func (p workspaceComp) raw(*ctx) bool                             { return p.killID != "" || p.filter.on }
+func (p workspaceComp) raw(*ctx) bool                             { return p.killID != "" || p.rename.on() || p.filter.on }
 func (p workspaceComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return p, nil }
 func (p workspaceComp) fullScreen(*ctx) fullLevel                 { return notFull }
 func (p workspaceComp) close(*ctx) tea.Cmd                        { return nil }
@@ -37,6 +38,15 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 			return p, m.killCmd(id), true
 		}
 		return p, nil, true
+	}
+	if p.rename.on() {
+		var cmd tea.Cmd
+		var id, name string
+		p.rename, cmd, id, name = p.rename.handleKey(msg)
+		if name != "" {
+			cmd = c.m.renameSessionCmd(id, name)
+		}
+		return p, cmd, true
 	}
 	if p.filter.on {
 		var cmd tea.Cmd
@@ -113,6 +123,10 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 				p.killID = s.ID
 			}
 		}
+	case m.matches(msg, listKeys.Rename):
+		if p.cursor < len(ss) {
+			p.rename, cmd = p.rename.start(ss[p.cursor].ID, ss[p.cursor].Name)
+		}
 	default:
 		return p, nil, false
 	}
@@ -144,7 +158,7 @@ func (p workspaceComp) menu(c *ctx) []binding {
 	if p.cursor >= len(c.m.wsSessions(p.ws)) {
 		return nil
 	}
-	return []binding{listKeys.Jump, listKeys.Kill}
+	return []binding{listKeys.Jump, listKeys.Rename, listKeys.Kill}
 }
 
 func paneTreeKey(c *ctx, msg tea.KeyPressMsg) bool {
@@ -220,6 +234,9 @@ func (p workspaceComp) footerPrompt(c *ctx) string {
 	if p.killID != "" {
 		return asstStyle.Render(killPrompt(c.m.sessions[p.killID]))
 	}
+	if p.rename.on() {
+		return p.rename.view()
+	}
 	if p.filter.on {
 		return p.filter.view()
 	}
@@ -242,9 +259,11 @@ func (m *model) disarmRoot() {
 	switch p := m.rootComp().(type) {
 	case homeComp:
 		p.killID = ""
+		p.rename = renamePrompt{}
 		m.main = m.main.replaceAt(0, p)
 	case workspaceComp:
 		p.killID = ""
+		p.rename = renamePrompt{}
 		m.main = m.main.replaceAt(0, p)
 	}
 }

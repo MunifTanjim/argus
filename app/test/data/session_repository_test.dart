@@ -25,4 +25,9 @@ void main() {
     final repo = SessionRepositoryRemote(SessionService(() => null));
     expect(await repo.kill('s'), isA<Error<void>>());
   });
+
+  test('rename surfaces the service Error when not connected', () async {
+    final repo = SessionRepositoryRemote(SessionService(() => null));
+    expect(await repo.rename('s', 'New'), isA<Error<bool>>());
+  });
 }

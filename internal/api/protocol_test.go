@@ -67,6 +67,20 @@ func TestTerminalWireShape(t *testing.T) {
 	}
 }
 
+func TestSessionRenameWireShape(t *testing.T) {
+	if MethodSessionRename != "session.rename" {
+		t.Errorf("MethodSessionRename = %q, want session.rename", MethodSessionRename)
+	}
+	b, _ := json.Marshal(SessionRenameParams{SessionID: "n1:s1", Name: "x"})
+	if string(b) != `{"session_id":"n1:s1","name":"x"}` {
+		t.Errorf("SessionRenameParams = %s", b)
+	}
+	b, _ = json.Marshal(SessionRenameResult{Name: "x", Applied: true})
+	if string(b) != `{"name":"x","applied":true}` {
+		t.Errorf("SessionRenameResult = %s", b)
+	}
+}
+
 func TestHostInfoJSON(t *testing.T) {
 	b, err := json.Marshal(HostInfo{UptimeSeconds: 90})
 	if err != nil {

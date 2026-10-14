@@ -521,6 +521,20 @@ func (r *Registry) ClearPane(agentSessionID string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+// RenameSession sets a session's name, publishing an update only when it
+// changes. It touches nothing else, so a rename never clears a pending
+// interaction or changes status. No-op for an unknown id.
+func (r *Registry) RenameSession(id, name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sessions[id]
+	if !ok || s.Name == name {
+		return
+	}
+	s.Name = name
+	r.publish(Event{Type: EventUpdated, Session: *s})
+}
+
 // SetBranch updates a session's current git branch, publishing an update only
 // when it changes. No-op for an unknown id. Called when a client opens a session
 // (path-derived, so it catches a mid-session checkout).

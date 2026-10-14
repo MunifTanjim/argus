@@ -106,14 +106,14 @@ var sectionLists = map[string]sectionList{
 	"sidebar-sessions": {
 		own: bindingsOf(projectsKeys.Back, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top, projectsKeys.Bottom,
 			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, listKeys.Filter,
-			projectsKeys.Refresh),
+			listKeys.Rename, projectsKeys.Refresh),
 		container: bindingsOf(leftSidebarTabKeys...),
 		focus:     focusFor("sidebar-sessions"),
 	},
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
 			projectsKeys.Top, projectsKeys.Bottom, projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.PageUp, projectsKeys.PageDown, projectsKeys.Enter,
-			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Kill, listKeys.ActiveOnly,
+			projectsKeys.Back, projectsKeys.Refresh, listKeys.Jump, listKeys.Rename, listKeys.Kill, listKeys.ActiveOnly,
 			listKeys.Filter, listKeys.TabPrev, listKeys.TabNext})...),
 		focus: focusFor("workspace"),
 	},
@@ -138,7 +138,7 @@ var sectionLists = map[string]sectionList{
 	},
 	"home": {
 		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown, listKeys.PageUp, listKeys.PageDown,
-			listKeys.Open, listKeys.Jump, listKeys.TabPrev, listKeys.TabNext, listKeys.New, listKeys.Kill,
+			listKeys.Open, listKeys.Jump, listKeys.TabPrev, listKeys.TabNext, listKeys.New, listKeys.Rename, listKeys.Kill,
 			listKeys.Refresh, listKeys.Back, listKeys.ActiveOnly, listKeys.GroupBy, listKeys.Filter),
 		focus: focusFor("home"),
 	},

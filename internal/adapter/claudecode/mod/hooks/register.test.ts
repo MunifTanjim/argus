@@ -249,6 +249,40 @@ test('a pending command is acked after the window and the poll goes on', OPTIONS
   expect(sent.filter(s => s.path === '/claude/poll').length).toBeGreaterThan(1)
 })
 
+// A rename reaches argusd once it ran, wherever it came from; a bare or failed
+// one does not.
+test('a rename is forwarded once it ran', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('command.run', ($, e) => {
+    if (e.args === 'Broken') throw new Error('rename failed')
+    return { text: '' } as never
+  })
+  await $.command.run({ command: 'rename', args: '  New name ' })
+  await $.command.run({ command: 'rename', args: '' })
+  await $.command.run({ command: 'rename', args: 'Broken' }).catch(() => undefined)
+  await $.command.run({ command: 'compact', args: 'x' })
+  const events = sent.filter(s => s.path === '/claude/event').map(s => s.body)
+  expect(events.length).toBe(1)
+  expect(events[0].event).toBe('SessionRename')
+  expect(events[0].payload).toEqual(expect.objectContaining({ session_id: 's1', name: 'New name' }))
+})
+
+// A /rename argus sends runs through the mod's own $.command.run, which its own
+// command.run hook does not see: the run itself reports it, once.
+test('a rename argus sends is forwarded once it ran', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [{ commands: [{ id: '1', kind: 'prompt', text: '/rename New name' }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('command.run', () => ({ text: '' }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const events = sent.filter(s => s.path === '/claude/event').map(s => s.body)
+  expect(events.map(e => e.event)).toEqual(['SessionRename'])
+  expect(events[0].payload).toEqual(expect.objectContaining({ session_id: 's1', name: 'New name' }))
+})
+
 test('the poll backs off while argusd is down', OPTIONS, async ($, on) => {
   const { clock } = world(on)
   let up = false

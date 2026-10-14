@@ -134,6 +134,13 @@ type Dismisser interface {
 	Dismiss(ctx context.Context, sess session.Session) error
 }
 
+// Renamer renames a session through the agent's own rename feature, so the
+// name shows in the agent's UI too. applied is false when the agent takes the
+// name later and reports it itself; the node records only an applied name.
+type Renamer interface {
+	RenameSession(ctx context.Context, sess session.Session, name string) (applied bool, err error)
+}
+
 // Prompter delivers a user prompt to a session over the agent's own API. An agent
 // that takes no prompt while a turn runs refuses it with api.ErrSessionBusy.
 type Prompter interface {

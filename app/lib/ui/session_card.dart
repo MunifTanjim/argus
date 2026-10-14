@@ -11,11 +11,13 @@ class SessionCard extends StatelessWidget {
       {super.key,
       required this.session,
       this.onTap,
+      this.onLongPress,
       this.showNode = false,
       this.showAgent = false});
 
   final Session session;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   /// Show the origin node on the card. Used in the cross-host "Needs you"
   /// section, where the per-node header is replaced and the node would
@@ -104,6 +106,7 @@ class SessionCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(6),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: card,
         ),
       ),

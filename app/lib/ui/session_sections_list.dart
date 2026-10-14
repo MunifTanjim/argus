@@ -12,6 +12,7 @@ import 'agent_badge.dart';
 import 'nerd_icon.dart';
 import 'node_header.dart';
 import 'responsive.dart';
+import 'session_actions.dart';
 import 'session_card.dart';
 import 'session_detail_screen.dart';
 import 'status_style.dart';
@@ -32,8 +33,7 @@ class SessionSectionsList extends ConsumerWidget {
   /// The home list's grouping; workspace lists keep host.
   final GroupBy groupBy;
 
-  // Tearing a session down lives on the detail screen's "Kill Session" action,
-  // so the list is tap-to-open only.
+  // A tap opens the session; a long press offers its actions.
   Widget _buildCard(
     BuildContext context,
     Session s,
@@ -44,6 +44,7 @@ class SessionSectionsList extends ConsumerWidget {
     showNode: section.showNode,
     showAgent: multiAgent,
     onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
+    onLongPress: () => showSessionActions(context, s),
   );
 
   @override

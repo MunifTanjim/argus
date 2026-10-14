@@ -257,6 +257,15 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "kill failed: " + msg.err.Error()
 		}
 		return m, nil
+	case sessionRenameResultMsg:
+		if msg.err != nil {
+			m.flash = "rename failed: " + msg.err.Error()
+		} else if msg.applied {
+			m.flash = "renamed to " + msg.name
+		} else {
+			m.flash = "rename to " + msg.name + " sent"
+		}
+		return m, nil
 	case resumeResultMsg:
 		if msg.err != nil {
 			m.flash = "resume failed: " + msg.err.Error()
@@ -392,6 +401,15 @@ func (m model) killCmd(id string) tea.Cmd {
 	return func() tea.Msg {
 		// On success, registry events remove the session.
 		return killResultMsg{err: client.Call(api.MethodSessionKill, api.SessionRef{SessionID: id}, nil)}
+	}
+}
+
+func (m model) renameSessionCmd(id, name string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.SessionRenameResult
+		err := client.Call(api.MethodSessionRename, api.SessionRenameParams{SessionID: id, Name: name}, &res)
+		return sessionRenameResultMsg{name: res.Name, applied: res.Applied, err: err}
 	}
 }
 

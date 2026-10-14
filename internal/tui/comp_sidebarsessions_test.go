@@ -274,3 +274,24 @@ func TestSidebarSessionsFooterOffersRefresh(t *testing.T) {
 		t.Error("the footer should offer refresh")
 	}
 }
+
+// Rename works on the session under the cursor, as on Home.
+func TestSidebarSessionsRename(t *testing.T) {
+	rc := &recordingClient{}
+	m := *sidebarSessionsCtx().m
+	m.client = rc
+	m = typeKeys(m, "r")
+	if s := m.left.sessions; s.rename.id != "n1:a" || s.rename.input.Value() != "alpha" {
+		t.Fatalf("r opens the rename prefilled for alpha: id=%q value=%q", s.rename.id, s.rename.input.Value())
+	}
+	m = typeKeys(m, "2")
+	m, cmd := upd(m, keyMsg("enter"))
+	runCmd(cmd)
+	ps := rc.paramsOf(api.MethodSessionRename)
+	if len(ps) != 1 || ps[0].(api.SessionRenameParams) != (api.SessionRenameParams{SessionID: "n1:a", Name: "alpha2"}) {
+		t.Fatalf("session.rename params = %+v", ps)
+	}
+	if m.left.sessions.rename.on() {
+		t.Error("the prompt should close after enter")
+	}
+}

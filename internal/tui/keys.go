@@ -95,9 +95,9 @@ func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
 // --- binding sets -------------------------------------------------------------
 
 var listKeys = struct {
-	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown    binding
-	Open, Jump, TabPrev, TabNext, New, Kill, Refresh, Back, Quit binding
-	ActiveOnly, Filter, GroupBy                                  binding
+	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown            binding
+	Open, Jump, TabPrev, TabNext, New, Kill, Rename, Refresh, Back, Quit binding
+	ActiveOnly, Filter, GroupBy                                          binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
@@ -113,6 +113,7 @@ var listKeys = struct {
 	TabNext:  nb("tab next", "gt", "tabs"),
 	New:      nm("session spawn", "s", "spawn"),
 	Kill:     nm("session kill", "dd", "kill"),
+	Rename:   nm("session rename", "r", "rename"),
 	Refresh:  nm("refresh", "gr", "refresh"),
 	Back:     nb("back", "<Esc>", "tree"),
 	Quit:     nm("quit", "Q", "quit"),

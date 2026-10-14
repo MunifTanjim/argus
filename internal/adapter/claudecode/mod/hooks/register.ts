@@ -63,6 +63,16 @@ export const register: Register = (on, options) => {
   on('classic.SessionEnd', async ($, e, next) => (await forward($, 'SessionEnd', e), next(e)))
     .catch(($, e, next) => next(e))
 
+  // A rename typed in Claude reaches argus once it has run. One argus sends runs
+  // through this mod's own $.command.run, which this hook does not see: execute
+  // reports that one.
+  on('command.run', { command: 'rename' }, async ($, e, next) => {
+    const result = await next(e)
+    void reportRename($, e.args)
+    return result
+  })
+    .catch(($, e, next) => next(e))
+
   // classic.PreToolUse carries the tool call, not the classic stdin shape: rebuild it.
   on('classic.PreToolUse', async ($, e, next) => {
     const { tool, tool_use_id, ...toolInput } = e as Record<string, unknown>
@@ -237,6 +247,13 @@ async function forward($: EngineInterface, event: string, payload: object): Prom
   ])
 }
 
+// Tell argus a /rename ran, so its card follows. A bare /rename names nothing
+// to tell.
+async function reportRename($: EngineInterface, args: string): Promise<void> {
+  const name = args.trim()
+  if (name !== '') await forward($, 'SessionRename', { ...(await sessionFields($)), name })
+}
+
 function startPolling($: EngineInterface): void {
   if (socketPath === '') return
   pollGen++
@@ -295,6 +312,7 @@ async function execute($: EngineInterface, c: Command): Promise<string> {
       failure = `/${slash[1]} is not a slash command, and Claude takes no prompt starting with /`
     } else if (slash) {
       await $.command.run({ command: slash[1], args: slash[2] })
+      if (slash[1] === 'rename') void reportRename($, slash[2])
     } else {
       const r = await $.prompt.submit({ text: c.text, asUser: true })
       if (r.drop !== undefined) failure = `prompt dropped: ${r.drop}`

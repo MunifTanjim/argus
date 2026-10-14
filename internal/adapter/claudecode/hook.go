@@ -3,6 +3,7 @@ package claudecode
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/gittree"
@@ -28,6 +29,8 @@ type hookPayload struct {
 	// Source is SessionStart's start cause. "clear" is the second half of /clear's
 	// end-then-start pair.
 	Source string `json:"source"`
+	// Name is SessionRename's new name.
+	Name string `json:"name"`
 }
 
 // statusFor maps a hook event to a session status. ok is false when the event
@@ -279,8 +282,14 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		paneID, server = "", ""
 	}
 
+	var name string
+	if event == "SessionRename" {
+		name = strings.TrimSpace(p.Name)
+	}
+
 	return reg.ApplyHook(registry.HookUpdate{
 		Agent:              Agent,
+		Name:               name,
 		Server:             server,
 		PaneID:             paneID,
 		AgentSessionID:     p.SessionID,

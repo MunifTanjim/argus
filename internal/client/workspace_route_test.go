@@ -74,6 +74,42 @@ func TestRouteByProjectSplitsCompositeID(t *testing.T) {
 	}
 }
 
+func TestSessionRenameRoutesBySession(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+
+	var gotSessionID, gotName string
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		if method == api.MethodSessionRename {
+			var p api.SessionRenameParams
+			_ = json.Unmarshal(params, &p)
+			gotSessionID, gotName = p.SessionID, p.Name
+			b, _ := json.Marshal(api.SessionRenameResult{Name: p.Name})
+			return b, nil, nil
+		}
+		return nil, nil, nil
+	}
+
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatalf("NewE2EClient: %v", err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	var res api.SessionRenameResult
+	if err := c.Call(api.MethodSessionRename, api.SessionRenameParams{SessionID: "n1:s1", Name: "New"}, &res); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if gotSessionID != "s1" || gotName != "New" {
+		t.Errorf("node received session_id %q name %q, want the node-local s1/New", gotSessionID, gotName)
+	}
+	if res.Name != "New" {
+		t.Errorf("result name = %q, want New", res.Name)
+	}
+}
+
 func TestProjectForgetRoutesByProject(t *testing.T) {
 	f, clientConn := newFakeGatewayNode(t, "n1")
 	defer f.peer.Close()

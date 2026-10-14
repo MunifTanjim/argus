@@ -110,6 +110,17 @@ class SessionService {
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 
+  /// Renames a session through the agent's own rename feature. Returns
+  /// whether the agent has applied the name; false means it takes it later.
+  Future<Result<bool>> rename(String sessionId, String name) =>
+      _guard((c) async {
+        final r = await c.call('session.rename', {
+          'session_id': sessionId,
+          'name': name,
+        });
+        return (r as Map?)?['applied'] as bool? ?? false;
+      });
+
   /// Fetches server-wide metadata (version + connected nodes) for the settings
   /// screen (server.info).
   Future<Result<ServerInfo>> serverInfo() => _guard((c) async {

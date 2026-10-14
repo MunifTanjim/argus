@@ -21,10 +21,11 @@ type sidebarSessionsComp struct {
 	at     int
 	query  string
 	filter filterPrompt
+	rename renamePrompt
 }
 
 func (s sidebarSessionsComp) section() string           { return "sidebar-sessions" }
-func (s sidebarSessionsComp) raw(*ctx) bool             { return s.filter.on }
+func (s sidebarSessionsComp) raw(*ctx) bool             { return s.filter.on || s.rename.on() }
 func (s sidebarSessionsComp) fullScreen(*ctx) fullLevel { return notFull }
 func (s sidebarSessionsComp) close(*ctx) tea.Cmd        { return nil }
 func (s sidebarSessionsComp) offers(*ctx) []binding     { return sectionOffers[s.section()].keys }
@@ -48,11 +49,21 @@ func (s sidebarSessionsComp) footer(*ctx) []binding {
 		clearFilterKey(projectsKeys.Back, s.query != ""), projectsKeys.Refresh}
 }
 
-func (s sidebarSessionsComp) footerPrompt(*ctx) string {
-	if s.filter.on {
+func (s sidebarSessionsComp) footerPrompt(c *ctx) string {
+	switch {
+	case s.rename.on():
+		return s.rename.view()
+	case s.filter.on:
 		return s.filter.view()
 	}
 	return ""
+}
+
+func (s sidebarSessionsComp) menu(c *ctx) []binding {
+	if len(s.ids(c)) == 0 {
+		return nil
+	}
+	return []binding{listKeys.Rename}
 }
 
 // groups are the listed sessions: the live ones that match the filter.
@@ -109,6 +120,15 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 	k, m := projectsKeys, c.m
 	ids := s.ids(c)
 	i, n := s.index(ids), len(ids)
+	if s.rename.on() {
+		var cmd tea.Cmd
+		var id, name string
+		s.rename, cmd, id, name = s.rename.handleKey(msg)
+		if name != "" {
+			cmd = m.renameSessionCmd(id, name)
+		}
+		return s, cmd, true
+	}
 	if s.filter.on {
 		var cmd tea.Cmd
 		s.filter, cmd, s.query = s.filter.handleKey(msg)
@@ -139,6 +159,13 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 	case m.matches(msg, k.Enter):
 		if n > 0 {
 			c.openSession(ids[i])
+		}
+	case m.matches(msg, listKeys.Rename):
+		if n > 0 {
+			ss := m.sessions[ids[i]]
+			var cmd tea.Cmd
+			s.rename, cmd = s.rename.start(ss.ID, ss.Name)
+			return s, cmd, true
 		}
 	case m.matches(msg, k.Refresh):
 		c.refreshSessions()

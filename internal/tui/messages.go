@@ -120,6 +120,14 @@ type spawnResultMsg struct{ err error }
 
 type killResultMsg struct{ err error }
 
+// sessionRenameResultMsg is a session.rename result; the renamed card arrives
+// as a registry event.
+type sessionRenameResultMsg struct {
+	name    string
+	applied bool
+	err     error
+}
+
 // terminalsMsg is one load of every node's terminals and the node list.
 type terminalsMsg struct {
 	list   []api.Terminal

@@ -234,6 +234,75 @@ func TestInitFetchesProjects(t *testing.T) {
 	t.Errorf("Init should fetch project.list; calls = %v", rc.calls)
 }
 
+func TestHomeSessionRename(t *testing.T) {
+	m := homeTestModel()
+	rc := &recordingClient{}
+	m.client = rc
+	m = typeKeys(m, "r")
+	h := m.main.top().(homeComp)
+	if h.rename.id != "n1:s1" {
+		t.Fatalf("rename.id = %q, want the session under the cursor", h.rename.id)
+	}
+	m = typeKeys(m, "New name")
+	m, cmd := upd(m, keyMsg("enter"))
+	runCmd(cmd)
+	ps := rc.paramsOf(api.MethodSessionRename)
+	if len(ps) != 1 || ps[0].(api.SessionRenameParams) != (api.SessionRenameParams{SessionID: "n1:s1", Name: "New name"}) {
+		t.Fatalf("session.rename params = %+v", ps)
+	}
+}
+
+func TestHomeSessionRenamePrefillsAndCancels(t *testing.T) {
+	m := homeTestModel()
+	s := m.sessions["n1:s1"]
+	s.Name = "Old"
+	m.sessions["n1:s1"] = s
+	m = typeKeys(m, "r")
+	h := m.main.top().(homeComp)
+	if got := h.rename.input.Value(); got != "Old" {
+		t.Fatalf("input = %q, want it prefilled with the current name", got)
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if h := m.main.top().(homeComp); h.rename.id != "" {
+		t.Errorf("rename.id = %q, want esc to cancel the rename", h.rename.id)
+	}
+}
+
+// Submitting the unchanged name sends nothing, like an empty one.
+func TestHomeSessionRenameUnchangedSendsNothing(t *testing.T) {
+	m := homeTestModel()
+	rc := &recordingClient{}
+	m.client = rc
+	s := m.sessions["n1:s1"]
+	s.Name = "Old"
+	m.sessions["n1:s1"] = s
+	m = typeKeys(m, "r")
+	m, cmd := upd(m, keyMsg("enter"))
+	runCmd(cmd)
+	if ps := rc.paramsOf(api.MethodSessionRename); len(ps) != 0 {
+		t.Fatalf("session.rename params = %+v, want no call for an unchanged name", ps)
+	}
+	if h := m.main.top().(homeComp); h.rename.on() {
+		t.Error("prompt still open after enter")
+	}
+}
+
+func TestHomeSessionRenameResultFlash(t *testing.T) {
+	m := homeTestModel()
+	m, _ = upd(m, sessionRenameResultMsg{name: "New name", applied: true})
+	if m.flash != "renamed to New name" {
+		t.Errorf("flash = %q, want the rename confirmation", m.flash)
+	}
+	m, _ = upd(m, sessionRenameResultMsg{name: "New name"})
+	if m.flash != "rename to New name sent" {
+		t.Errorf("flash = %q, want the rename reported as sent", m.flash)
+	}
+	m, _ = upd(m, sessionRenameResultMsg{err: errors.New("nope")})
+	if m.flash != "rename failed: nope" {
+		t.Errorf("flash = %q, want the rename error", m.flash)
+	}
+}
+
 func TestLeaderOWorksOutsideTheTree(t *testing.T) {
 	m := homeTestModel() // Home pane
 	m = typeKeys(m, " o")

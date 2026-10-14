@@ -61,6 +61,7 @@ func (m model) helpGroups() []helpGroup {
 			pane(k.Enter, "open session"),
 			pane(listKeys.Jump, "jump to its tmux pane"),
 			pane(k.Back, "close / tree"),
+			pane(listKeys.Rename, "rename session"),
 			pane(listKeys.Kill, "kill session"),
 			pane(listKeys.ActiveOnly, "active / all sessions"),
 			row("home", listKeys.GroupBy, "home: group sessions by"),
