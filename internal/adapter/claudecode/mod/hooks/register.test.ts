@@ -209,6 +209,8 @@ test('the poll runs prompts and slash commands', OPTIONS, async ($, on) => {
   expect(polls.filter(s => s.path === '/claude/poll').map(s => s.body)).toEqual([{ sessionId: 's1' }, { sessionId: 's1' }])
   const acks = polls.filter(s => s.path === '/claude/ack').map(s => s.body)
   expect(acks.map(a => a.id)).toEqual(['1', '2', '3', '4'])
+  expect(acks[0]).toEqual({ id: '1', ran: true })
+  expect(acks[1]).toEqual({ id: '2', ran: true })
   expect(String(acks[2].error)).toContain('/tmp/app.log is not a slash command')
 })
 

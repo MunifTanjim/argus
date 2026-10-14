@@ -17,7 +17,8 @@ const (
 	KindExit   = "exit"   // end the session
 )
 
-// Command is one instruction for the mod. The mod acks it by ID once run.
+// Command is one instruction for the mod. The mod acks it by ID once run, or
+// once accepted when it is still waiting (e.g. on a running turn).
 type Command struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
@@ -48,7 +49,7 @@ type Bridge struct {
 
 	mu     sync.Mutex
 	conns  map[string]*conn
-	acks   map[string]chan error
+	acks   map[string]chan ack
 	lastID uint64
 }
 
@@ -62,7 +63,7 @@ func New(grace, ackTimeout time.Duration, onChange func(sessionID string)) *Brid
 		ackTimeout: ackTimeout,
 		onChange:   onChange,
 		conns:      map[string]*conn{},
-		acks:       map[string]chan error{},
+		acks:       map[string]chan ack{},
 	}
 }
 
@@ -123,22 +124,30 @@ func (b *Bridge) Wait(ctx context.Context, sessionID string, hold time.Duration)
 	}
 }
 
+// ack is the mod's answer to one command: its failure, or whether it ran
+// rather than only being accepted.
+type ack struct {
+	err error
+	ran bool
+}
+
 // Send hands cmd to sessionID's open poll and waits for the mod's ack. Between
-// polls (within grace) it waits for the mod to re-poll. It returns
+// polls (within grace) it waits for the mod to re-poll. It reports whether the
+// command ran, as opposed to being accepted to run later. It returns
 // ErrUnreachable when no poll comes, ErrNoAck when the mod never acks, and the
 // mod's own failure when running the command failed.
-func (b *Bridge) Send(ctx context.Context, sessionID string, cmd Command) error {
+func (b *Bridge) Send(ctx context.Context, sessionID string, cmd Command) (bool, error) {
 	for {
 		b.mu.Lock()
 		c := b.conns[sessionID]
 		if c == nil {
 			b.mu.Unlock()
-			return ErrUnreachable
+			return false, ErrUnreachable
 		}
 		if p := c.poll; p != nil {
 			b.lastID++
 			cmd.ID = strconv.FormatUint(b.lastID, 10)
-			ack := make(chan error, 1)
+			ack := make(chan ack, 1)
 			b.acks[cmd.ID] = ack
 			b.closeLocked(sessionID, c)
 			p <- cmd
@@ -154,12 +163,12 @@ func (b *Bridge) Send(ctx context.Context, sessionID string, cmd Command) error 
 		select {
 		case <-opened:
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 	}
 }
 
-func (b *Bridge) awaitAck(ctx context.Context, id string, ack chan error) error {
+func (b *Bridge) awaitAck(ctx context.Context, id string, ch chan ack) (bool, error) {
 	defer func() {
 		b.mu.Lock()
 		delete(b.acks, id)
@@ -168,30 +177,31 @@ func (b *Bridge) awaitAck(ctx context.Context, id string, ack chan error) error 
 	t := time.NewTimer(b.ackTimeout)
 	defer t.Stop()
 	select {
-	case err := <-ack:
-		return err
+	case a := <-ch:
+		return a.ran, a.err
 	case <-t.C:
-		return ErrNoAck
+		return false, ErrNoAck
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 }
 
 // Ack completes the Send of command id. A non-empty failure is the mod's error
-// from running it. An unknown or already completed id is ignored.
-func (b *Bridge) Ack(id, failure string) {
+// from running it; ran reports that it ran rather than only being accepted. An
+// unknown or already completed id is ignored.
+func (b *Bridge) Ack(id, failure string, ran bool) {
 	b.mu.Lock()
-	ack := b.acks[id]
+	ch := b.acks[id]
 	delete(b.acks, id)
 	b.mu.Unlock()
-	if ack == nil {
+	if ch == nil {
 		return
 	}
 	if failure != "" {
-		ack <- fmt.Errorf("claude: %s", failure)
+		ch <- ack{err: fmt.Errorf("claude: %s", failure)}
 		return
 	}
-	ack <- nil
+	ch <- ack{ran: ran}
 }
 
 func (b *Bridge) closeLocked(sessionID string, c *conn) {

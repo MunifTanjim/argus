@@ -461,7 +461,8 @@ func TestModAckCompletesSend(t *testing.T) {
 	waitFor(t, func() bool { return b.Reachable("s1") })
 	sent := make(chan error, 1)
 	go func() {
-		sent <- b.Send(context.Background(), "s1", modbridge.Command{Kind: modbridge.KindPrompt, Text: "/nope"})
+		_, err := b.Send(context.Background(), "s1", modbridge.Command{Kind: modbridge.KindPrompt, Text: "/nope"})
+		sent <- err
 	}()
 	c := (<-cmds)[0]
 
@@ -478,6 +479,37 @@ func TestModAckCompletesSend(t *testing.T) {
 	d.modHandler().ServeHTTP(rec, httptest.NewRequest("POST", "/claude/ack", strings.NewReader(`{}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d for an ack without id, want 400", rec.Code)
+	}
+}
+
+// An ack says whether the command ran or was only accepted to run later.
+func TestModAckReportsWhetherTheCommandRan(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	b := d.adapterFor(claudecode.Agent).(adapter.ModBridged).ModBridge()
+	for _, tc := range []struct {
+		body func(id string) string
+		ran  bool
+	}{
+		{func(id string) string { return `{"id":"` + id + `","ran":true}` }, true},
+		{func(id string) string { return `{"id":"` + id + `"}` }, false},
+	} {
+		cmds := make(chan []modbridge.Command, 1)
+		go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute) }()
+		waitFor(t, func() bool { return b.Reachable("s1") })
+		type result struct {
+			ran bool
+			err error
+		}
+		sent := make(chan result, 1)
+		go func() {
+			ran, err := b.Send(context.Background(), "s1", modbridge.Command{Kind: modbridge.KindPrompt, Text: "/rename x"})
+			sent <- result{ran, err}
+		}()
+		c := (<-cmds)[0]
+		d.modHandler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/claude/ack", strings.NewReader(tc.body(c.ID))))
+		if r := <-sent; r.err != nil || r.ran != tc.ran {
+			t.Errorf("Send = (%v, %v) for %s, want (%v, nil)", r.ran, r.err, tc.body(c.ID), tc.ran)
+		}
 	}
 }
 
