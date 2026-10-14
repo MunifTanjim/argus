@@ -15,9 +15,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_session_repository.dart';
 
-Session _s(String id) => Session.fromJson(jsonDecode(jsonEncode({
+Session _s(String id, {String frontend = 'tmux'}) => Session.fromJson(jsonDecode(jsonEncode({
       'id': id,
-      'frontend': 'tmux',
+      'frontend': frontend,
       'agent': 'claude',
       'name': 'Old',
       'status': 'idle',
@@ -35,12 +35,19 @@ Session _s(String id) => Session.fromJson(jsonDecode(jsonEncode({
 
 class _Repo extends FakeSessionRepository {
   final renamed = <(String, String)>[];
+  final killed = <String>[];
   bool applied = true;
 
   @override
   Future<Result<bool>> rename(String sessionId, String name) async {
     renamed.add((sessionId, name));
     return Result.ok(applied);
+  }
+
+  @override
+  Future<Result<void>> kill(String sessionId) async {
+    killed.add(sessionId);
+    return const Result.ok(null);
   }
 }
 
@@ -89,6 +96,7 @@ void main() {
     await tester.longPress(find.text('Old'));
     await tester.pumpAndSettle();
     expect(find.text('Rename'), findsOneWidget);
+    expect(find.text('Kill'), findsOneWidget);
 
     await _renameTo(tester, 'New');
     expect(repo.renamed, [('A:s1', 'New')]);
@@ -104,12 +112,36 @@ void main() {
     expect(find.text('rename to New sent'), findsOneWidget);
   });
 
+  testWidgets('a long press on a session card kills it after confirming',
+      (tester) async {
+    final repo = _Repo();
+    await _pumpList(tester, repo, _s('A:s1'));
+    await tester.longPress(find.text('Old'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Kill'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kill Session?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Kill'));
+    await tester.pumpAndSettle();
+    expect(repo.killed, ['A:s1']);
+  });
+
+  testWidgets('a session that cannot be killed offers only rename',
+      (tester) async {
+    await _pumpList(tester, _Repo(), _s('A:s1', frontend: 'vscode'));
+    await tester.longPress(find.text('Old'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsOneWidget);
+    expect(find.text('Kill'), findsNothing);
+  });
+
   testWidgets('an outdated node offers an upgrade note instead of actions',
       (tester) async {
     await _pumpList(tester, _Repo(), _s('A:s1'), outdated: {'A'});
     await tester.longPress(find.text('Old'));
     await tester.pumpAndSettle();
     expect(find.text('Rename'), findsNothing);
+    expect(find.text('Kill'), findsNothing);
     expect(find.text('Upgrade argus on dev'), findsOneWidget);
   });
 
@@ -130,6 +162,7 @@ void main() {
     await tester.pump();
     await tester.longPress(find.text('Old'));
     await tester.pumpAndSettle();
+    expect(find.text('Kill'), findsOneWidget);
     await _renameTo(tester, 'New');
     expect(repo.renamed, [('A:s1', 'New')]);
   });

@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/result.dart';
-import '../data/session_repository.dart';
 import '../models/enums.dart';
 import '../data/transcript_repository.dart';
 import '../models/project.dart';
@@ -13,7 +11,6 @@ import '../push/notifications.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/projects.dart';
-import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import '../state/tasks.dart';
 import '../state/tool_detail.dart';
@@ -303,37 +300,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 await renameSession(ActionContext.of(context), live);
               } else if (value == 'kill') {
                 if (!canKill) return;
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Kill Session?'),
-                    content: const Text('This cannot be undone!'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        style: TextButton.styleFrom(
-                            foregroundColor: Colors.red),
-                        child: const Text('Kill'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed != true) return;
-                final result =
-                    await ref.read(sessionRepositoryProvider).kill(live.id);
-                if (!context.mounted) return;
-                switch (result) {
-                  case Ok():
-                    Navigator.of(context).pop();
-                  case Error(:final error):
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed: $error')),
-                    );
-                }
+                final killed = await killSession(ActionContext.of(context), live);
+                if (killed && context.mounted) Navigator.of(context).pop();
               }
             },
             itemBuilder: (_) => [

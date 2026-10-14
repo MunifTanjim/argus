@@ -28,8 +28,39 @@ Future<void> renameSession(ActionContext ax, Session s) async {
   });
 }
 
-/// The actions [s] offers: rename. When its node is too old for them, a note
-/// to upgrade it instead.
+/// Asks to kill [s] and kills it. True once it is killed.
+Future<bool> killSession(ActionContext ax, Session s) async {
+  final confirmed = await showDialog<bool>(
+    context: ax.navigator.context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Kill Session?'),
+      content: const Text('This cannot be undone!'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          style: TextButton.styleFrom(foregroundColor: Colors.red),
+          child: const Text('Kill'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return false;
+  final result = await ax.container.read(sessionRepositoryProvider).kill(s.id);
+  switch (result) {
+    case Ok():
+      return true;
+    case Error(:final error):
+      ax.say('kill failed: ${actionError(error)}');
+      return false;
+  }
+}
+
+/// The actions [s] offers: rename, and kill when it can be killed. When its
+/// node is too old for them, a note to upgrade it instead.
 List<Widget> sessionActionTiles(
   BuildContext sheet,
   ActionContext ax,
@@ -54,6 +85,15 @@ List<Widget> sessionActionTiles(
         renameSession(ax, s);
       },
     ),
+    if (s.canKill)
+      ListTile(
+        leading: const Icon(Icons.close, color: AppColors.error),
+        title: const Text('Kill', style: TextStyle(color: AppColors.error)),
+        onTap: () {
+          Navigator.of(sheet).pop();
+          killSession(ax, s);
+        },
+      ),
   ];
 }
 
