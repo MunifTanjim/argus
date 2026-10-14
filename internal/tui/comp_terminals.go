@@ -3,28 +3,26 @@ package tui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
 // terminalsComp lists every node's terminals on Home, one node's in a node
-// pane, or one workspace's in a workspace pane. killID and renameID are the
-// terminal that awaits a confirmation or a name.
+// pane, or one workspace's in a workspace pane. killID is the
+// terminal that awaits a kill confirmation.
 type terminalsComp struct {
-	nodeID   string
-	ws       string
-	cursor   int
-	killID   string
-	renameID string
-	input    textinput.Model
+	nodeID string
+	ws     string
+	cursor int
+	killID string
+	rename renamePrompt
 }
 
 func (t terminalsComp) onHome() bool { return t.nodeID == "" && t.ws == "" }
 
 func (t terminalsComp) section() string           { return "terminals" }
-func (t terminalsComp) raw(*ctx) bool             { return t.killID != "" || t.renameID != "" }
+func (t terminalsComp) raw(*ctx) bool             { return t.killID != "" || t.rename.on() }
 func (t terminalsComp) spins(*ctx) bool           { return false }
 func (t terminalsComp) fullScreen(*ctx) fullLevel { return notFull }
 func (t terminalsComp) close(*ctx) tea.Cmd        { return nil }
@@ -87,9 +85,13 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		}
 		return t, nil, true
 	}
-	if t.renameID != "" {
+	if t.rename.on() {
 		var cmd tea.Cmd
-		t, cmd = t.renameKey(c, msg)
+		var id, name string
+		t.rename, cmd, id, name = t.rename.handleKey(msg)
+		if name != "" {
+			cmd = m.renameTerminalCmd(id, name)
+		}
 		return t, cmd, true
 	}
 	list := t.shown(*m)
@@ -126,7 +128,7 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		cmd = t.create(c)
 	case m.matches(msg, terminalKeys.Rename):
 		if t.cursor < n {
-			cmd = t.startRename(list[t.cursor])
+			t.rename, cmd = t.rename.start(list[t.cursor].ID, list[t.cursor].Name)
 		}
 	case m.matches(msg, terminalKeys.Kill):
 		if t.cursor < n {
@@ -182,31 +184,6 @@ func (t terminalsComp) create(c *ctx) tea.Cmd {
 	}
 	c.openPopup(terminalNodePicker{nodes: nodes})
 	return nil
-}
-
-func (t *terminalsComp) startRename(x api.Terminal) tea.Cmd {
-	t.renameID = x.ID
-	t.input = newProjectsInput()
-	t.input.SetValue(x.Name)
-	return t.input.Focus()
-}
-
-func (t terminalsComp) renameKey(c *ctx, msg tea.KeyPressMsg) (terminalsComp, tea.Cmd) {
-	switch {
-	case msg.Code == tea.KeyEscape:
-		t.renameID = ""
-		return t, nil
-	case msg.String() == "enter":
-		id, name := t.renameID, strings.TrimSpace(t.input.Value())
-		t.renameID = ""
-		if name == "" {
-			return t, nil
-		}
-		return t, c.m.renameTerminalCmd(id, name)
-	}
-	var cmd tea.Cmd
-	t.input, cmd = t.input.Update(msg)
-	return t, cmd
 }
 
 func (t terminalsComp) tabsHeader(c *ctx, x int) string {
@@ -346,8 +323,8 @@ func (t terminalsComp) footerPrompt(c *ctx) string {
 	case t.killID != "":
 		x, _ := c.m.terminalByID(t.killID)
 		return asstStyle.Render("kill terminal " + terminalTitle(x) + "? its shell stops · y/n")
-	case t.renameID != "":
-		return asstStyle.Render("rename: " + t.input.View() + "  enter rename · esc cancel")
+	case t.rename.on():
+		return t.rename.view()
 	}
 	return ""
 }
