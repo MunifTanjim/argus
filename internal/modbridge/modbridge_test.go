@@ -31,7 +31,7 @@ func openPoll(b *Bridge, ctx context.Context, id string, hold time.Duration) <-c
 	go func() {
 		cmds := b.Wait(ctx, id, hold)
 		for _, c := range cmds {
-			b.Ack(c.ID, "")
+			b.Ack(c.ID, "", true)
 		}
 		out <- cmds
 	}()
@@ -42,7 +42,7 @@ func sameCommand(a, b Command) bool { return a.Kind == b.Kind && a.Text == b.Tex
 
 func TestSendWithoutPollIsUnreachable(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
-	err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
+	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}
@@ -54,7 +54,7 @@ func TestSendReachesOpenPoll(t *testing.T) {
 	waitFor(t, func() bool { return b.Reachable("s1") })
 
 	want := Command{Kind: KindPrompt, Text: "hi"}
-	if err := b.Send(context.Background(), "s1", want); err != nil {
+	if _, err := b.Send(context.Background(), "s1", want); err != nil {
 		t.Fatal(err)
 	}
 	if cmds := <-got; len(cmds) != 1 || !sameCommand(cmds[0], want) {
@@ -66,7 +66,7 @@ func TestCommandIsDeliveredAtMostOnce(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	first := openPoll(b, context.Background(), "s1", time.Minute)
 	waitFor(t, func() bool { return b.Reachable("s1") })
-	if err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "once"}); err != nil {
+	if _, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "once"}); err != nil {
 		t.Fatal(err)
 	}
 	<-first
@@ -80,11 +80,11 @@ func TestSendFailsWithModError(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	go func() {
 		for _, c := range b.Wait(context.Background(), "s1", time.Minute) {
-			b.Ack(c.ID, "unknown command")
+			b.Ack(c.ID, "unknown command", false)
 		}
 	}()
 	waitFor(t, func() bool { return b.Reachable("s1") })
-	err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "/nope"})
+	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "/nope"})
 	if err == nil || err.Error() != "claude: unknown command" {
 		t.Fatalf("err = %v, want the mod's failure", err)
 	}
@@ -96,7 +96,7 @@ func TestSendFailsWithoutAck(t *testing.T) {
 	got := make(chan []Command, 1)
 	go func() { got <- b.Wait(context.Background(), "s1", time.Minute) }()
 	waitFor(t, func() bool { return b.Reachable("s1") })
-	err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
+	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
 	if !errors.Is(err, ErrNoAck) {
 		t.Fatalf("err = %v, want ErrNoAck", err)
 	}
@@ -110,8 +110,8 @@ func TestLateAckIsIgnored(t *testing.T) {
 	got := make(chan []Command, 1)
 	go func() { got <- b.Wait(context.Background(), "s1", time.Minute) }()
 	waitFor(t, func() bool { return b.Reachable("s1") })
-	_ = b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
-	b.Ack((<-got)[0].ID, "")
+	_, _ = b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
+	b.Ack((<-got)[0].ID, "", true)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.acks) != 0 {
@@ -123,7 +123,7 @@ func TestLateAckIsIgnored(t *testing.T) {
 func TestExpiryReleasesWaitingSend(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	b.Wait(context.Background(), "s1", time.Millisecond)
-	if err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); !errors.Is(err, ErrUnreachable) {
+	if _, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}
 	waitFor(t, func() bool {
@@ -165,7 +165,7 @@ func TestNewerPollSupersedesOlder(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	want := Command{Kind: KindPrompt, Text: "/compact"}
-	if err := b.Send(context.Background(), "s1", want); err != nil {
+	if _, err := b.Send(context.Background(), "s1", want); err != nil {
 		t.Fatal(err)
 	}
 	if cmds := <-newer; len(cmds) != 1 || !sameCommand(cmds[0], want) {
@@ -211,7 +211,7 @@ func TestSupersededPollWaitsOutItsHold(t *testing.T) {
 	if !b.Reachable("s1") {
 		t.Fatal("session unreachable while the newer poll is open")
 	}
-	if err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); err != nil {
+	if _, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	if cmds := <-newer; len(cmds) != 1 {
@@ -224,7 +224,10 @@ func TestSendWaitsForRepollWithinGrace(t *testing.T) {
 	b.Wait(context.Background(), "s1", time.Millisecond) // closes; grace starts
 
 	sent := make(chan error, 1)
-	go func() { sent <- b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}) }()
+	go func() {
+		_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
+		sent <- err
+	}()
 	time.Sleep(10 * time.Millisecond)
 	got := openPoll(b, context.Background(), "s1", time.Minute)
 
@@ -240,7 +243,7 @@ func TestSendFailsWhenGraceRunsOut(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	b.Wait(context.Background(), "s1", time.Millisecond)
 	start := time.Now()
-	err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
+	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}

@@ -63,6 +63,7 @@ type modPoll struct {
 type modAck struct {
 	ID    string `json:"id"`
 	Error string `json:"error,omitempty"`
+	Ran   bool   `json:"ran,omitempty"` // ran, not only accepted to run later
 }
 
 type modPollResult struct {
@@ -188,7 +189,7 @@ func (d *Node) handleModAck(w http.ResponseWriter, r *http.Request, a adapter.Ad
 	if in.Error != "" {
 		d.log.Warn("mod command failed", "agent", a.Agent(), "id", in.ID, "err", in.Error)
 	}
-	b.Ack(in.ID, in.Error)
+	b.Ack(in.ID, in.Error, in.Ran)
 	writeModJSON(w, struct{}{})
 }
 

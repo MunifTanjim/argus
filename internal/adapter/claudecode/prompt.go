@@ -39,22 +39,26 @@ func (a *ccAdapter) ModBridge() *modbridge.Bridge { return a.bridge }
 // SendPrompt hands text to the session's mod: a leading "/" runs it as a slash
 // command, anything else is submitted as a prompt.
 func (a *ccAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
-	return a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindPrompt, Text: text})
+	_, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindPrompt, Text: text})
+	return err
 }
 
 // Dismiss ends a paneless Claude session through its mod, cutting short any
 // running turn.
 func (a *ccAdapter) Dismiss(ctx context.Context, sess session.Session) error {
-	return a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindExit})
+	_, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindExit})
+	return err
 }
 
-func (a *ccAdapter) sendMod(ctx context.Context, sess session.Session, cmd modbridge.Command) error {
+// sendMod sends cmd through the session's mod and reports whether it ran, as
+// opposed to being accepted to run later.
+func (a *ccAdapter) sendMod(ctx context.Context, sess session.Session, cmd modbridge.Command) (bool, error) {
 	if a.bridge == nil || sess.AgentSessionID == "" {
-		return fmt.Errorf("%s: %w", sess.ID, api.ErrNoTerminalControl)
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrNoTerminalControl)
 	}
-	err := a.bridge.Send(ctx, sess.AgentSessionID, cmd)
+	ran, err := a.bridge.Send(ctx, sess.AgentSessionID, cmd)
 	if errors.Is(err, modbridge.ErrUnreachable) {
-		return fmt.Errorf("%s: %w", sess.ID, api.ErrNoTerminalControl)
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrNoTerminalControl)
 	}
-	return err
+	return ran, err
 }

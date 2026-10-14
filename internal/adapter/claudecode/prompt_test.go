@@ -29,7 +29,7 @@ func modPoll(a *ccAdapter, ctx context.Context, sessionID string) <-chan []modbr
 	go func() {
 		cmds := a.ModBridge().Wait(ctx, sessionID, time.Minute)
 		for _, c := range cmds {
-			a.ModBridge().Ack(c.ID, "")
+			a.ModBridge().Ack(c.ID, "", true)
 		}
 		got <- cmds
 	}()

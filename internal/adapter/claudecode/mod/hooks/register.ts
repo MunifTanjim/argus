@@ -261,12 +261,19 @@ function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen:
 
 // Run a command and ack it: argusd fails the send in argus when no ack comes.
 // A call resolves only once its turn starts, or a command's panel closes, so a
-// call still pending after ACK_WINDOW_MS is acked as accepted and left to finish.
+// call still pending after ACK_WINDOW_MS is acked as accepted (not ran) and
+// left to finish.
 export async function run($: EngineInterface, c: Command): Promise<void> {
   if (c.kind === 'exit') return exit($, c)
-  const failure = await Promise.race([execute($, c), $.clock.sleep(ACK_WINDOW_MS).then(() => '')])
-  await post($, '/claude/ack', failure === '' ? { id: c.id } : { id: c.id, error: failure }).catch(() => '')
+  const failure = await Promise.race([execute($, c), $.clock.sleep(ACK_WINDOW_MS).then(() => PENDING)])
+  if (failure === PENDING) {
+    await post($, '/claude/ack', { id: c.id }).catch(() => '')
+    return
+  }
+  await post($, '/claude/ack', failure === '' ? { id: c.id, ran: true } : { id: c.id, error: failure }).catch(() => '')
 }
+
+const PENDING = Symbol('pending')
 
 // Ends the session at once: a command waits for the running turn, so end that
 // first, and ack before Claude exits and takes the ack with it.
