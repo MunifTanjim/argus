@@ -275,7 +275,7 @@ func TestSidebarSessionsFooterOffersRefresh(t *testing.T) {
 	}
 }
 
-// Rename works on the session under the cursor, as on Home.
+// Rename and kill work on the session under the cursor, as on Home.
 func TestSidebarSessionsRename(t *testing.T) {
 	rc := &recordingClient{}
 	m := *sidebarSessionsCtx().m
@@ -293,5 +293,37 @@ func TestSidebarSessionsRename(t *testing.T) {
 	}
 	if m.left.sessions.rename.on() {
 		t.Error("the prompt should close after enter")
+	}
+}
+
+func TestSidebarSessionsKill(t *testing.T) {
+	rc := &recordingClient{}
+	m := *sidebarSessionsCtx().m
+	m.client = rc
+	a := m.sessions["n1:a"]
+	a.Tmux.PaneID = "%1"
+	m.sessions["n1:a"] = a
+	m = typeKeys(m, "dd")
+	if m.left.sessions.killID != "n1:a" {
+		t.Fatalf("dd asks to kill alpha, killID = %q", m.left.sessions.killID)
+	}
+	if n := typeKeys(m, "n"); n.left.sessions.killID != "" {
+		t.Error("any key but y should cancel")
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	if m.left.sessions.killID != "" || cmd == nil {
+		t.Fatal("y should clear the prompt and kill")
+	}
+	cmd()
+	if p := rc.params[len(rc.params)-1].(api.SessionRef); p.SessionID != "n1:a" {
+		t.Errorf("kill sent for %q, want n1:a", p.SessionID)
+	}
+}
+
+func TestSidebarSessionsKillRefusesUncontrollable(t *testing.T) {
+	m := *sidebarSessionsCtx().m
+	m = typeKeys(m, "dd")
+	if m.left.sessions.killID != "" || m.flash == "" {
+		t.Errorf("dd on a session without terminal control should refuse: killID=%q flash=%q", m.left.sessions.killID, m.flash)
 	}
 }

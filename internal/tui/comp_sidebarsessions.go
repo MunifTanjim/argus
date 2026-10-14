@@ -15,17 +15,19 @@ import (
 // sidebarSessionsComp is the left sidebar's Sessions tab. It reads the
 // sessions each time, so it holds only the cursor (the session under it, and
 // its index for when that session leaves the list) and its own text filter,
-// apart from the home list's.
+// apart from the home list's. killID is the session awaiting a kill
+// confirmation.
 type sidebarSessionsComp struct {
 	sel    string
 	at     int
 	query  string
 	filter filterPrompt
+	killID string
 	rename renamePrompt
 }
 
 func (s sidebarSessionsComp) section() string           { return "sidebar-sessions" }
-func (s sidebarSessionsComp) raw(*ctx) bool             { return s.filter.on || s.rename.on() }
+func (s sidebarSessionsComp) raw(*ctx) bool             { return s.filter.on || s.killID != "" || s.rename.on() }
 func (s sidebarSessionsComp) fullScreen(*ctx) fullLevel { return notFull }
 func (s sidebarSessionsComp) close(*ctx) tea.Cmd        { return nil }
 func (s sidebarSessionsComp) offers(*ctx) []binding     { return sectionOffers[s.section()].keys }
@@ -45,12 +47,14 @@ func (s sidebarSessionsComp) spins(c *ctx) bool {
 }
 
 func (s sidebarSessionsComp) footer(*ctx) []binding {
-	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, listKeys.Filter,
+	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, listKeys.Kill, listKeys.Filter,
 		clearFilterKey(projectsKeys.Back, s.query != ""), projectsKeys.Refresh}
 }
 
 func (s sidebarSessionsComp) footerPrompt(c *ctx) string {
 	switch {
+	case s.killID != "":
+		return asstStyle.Render(killPrompt(c.m.sessions[s.killID]))
 	case s.rename.on():
 		return s.rename.view()
 	case s.filter.on:
@@ -63,7 +67,7 @@ func (s sidebarSessionsComp) menu(c *ctx) []binding {
 	if len(s.ids(c)) == 0 {
 		return nil
 	}
-	return []binding{listKeys.Rename}
+	return []binding{listKeys.Rename, listKeys.Kill}
 }
 
 // groups are the listed sessions: the live ones that match the filter.
@@ -120,6 +124,13 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 	k, m := projectsKeys, c.m
 	ids := s.ids(c)
 	i, n := s.index(ids), len(ids)
+	if id := s.killID; id != "" {
+		s.killID = ""
+		if msg.String() == "y" {
+			return s, m.killCmd(id), true
+		}
+		return s, nil, true
+	}
 	if s.rename.on() {
 		var cmd tea.Cmd
 		var id, name string
@@ -159,6 +170,14 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 	case m.matches(msg, k.Enter):
 		if n > 0 {
 			c.openSession(ids[i])
+		}
+	case m.matches(msg, listKeys.Kill):
+		if n > 0 {
+			if refusal := killRefusal(m.sessions[ids[i]]); refusal != "" {
+				c.setFlash(refusal)
+			} else {
+				s.killID = ids[i]
+			}
 		}
 	case m.matches(msg, listKeys.Rename):
 		if n > 0 {

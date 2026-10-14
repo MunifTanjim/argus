@@ -238,7 +238,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-f>` `<PageDown>` |  |
 | `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-b>` `<PageUp>` |  |
 | `scroll up` | file, logs, transcript | `<Up>` `k` |  |
-| `session kill` | home, workspace |  | `dd` |
+| `session kill` | home, sidebar-sessions, workspace |  | `dd` |
 | `session load-more` | history |  | `m` |
 | `session rename` | home, sidebar-sessions, workspace |  | `r` |
 | `session resume` | history, transcript |  | `R` |
