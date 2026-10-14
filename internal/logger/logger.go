@@ -45,12 +45,24 @@ func Init() {
 			ReplaceAttr: log.JSONReplaceAttr,
 		})
 	} else {
-		handler = prettyHandler(w, !isatty.IsTerminal(w.Fd()))
+		handler = prettyHandler(w, !colorEnabled(isatty.IsTerminal(w.Fd()), os.Getenv))
 	}
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 	slog.SetLogLoggerLevel(slog.LevelInfo)
+}
+
+// colorEnabled follows the NO_COLOR and CLICOLOR_FORCE conventions, so a
+// parent that reads a child's stderr through a pipe can still get color.
+func colorEnabled(tty bool, getenv func(string) string) bool {
+	if getenv("NO_COLOR") != "" {
+		return false
+	}
+	if f := getenv("CLICOLOR_FORCE"); f != "" && f != "0" {
+		return true
+	}
+	return tty
 }
 
 // InitManaged installs the pretty handler with color on stderr, whatever the
@@ -62,6 +74,10 @@ func InitManaged() {
 
 // prettyHandler builds the tint+scope-prefix handler for human-readable output.
 func prettyHandler(w io.Writer, noColor bool) slog.Handler {
+	prefix := slogpfx.ColorizePrefix(slogpfx.DefaultPrefixFormatter)
+	if noColor {
+		prefix = slogpfx.DefaultPrefixFormatter
+	}
 	return slogpfx.NewHandler(
 		tint.NewHandler(w, &tint.Options{
 			Level:       config.LogLevel,
@@ -70,7 +86,8 @@ func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 			TimeFormat:  time.DateTime,
 		}),
 		&slogpfx.HandlerOptions{
-			PrefixKeys: []string{"scope"},
+			PrefixKeys:      []string{"scope"},
+			PrefixFormatter: prefix,
 		},
 	)
 }
