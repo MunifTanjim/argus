@@ -267,6 +267,21 @@ func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
 	d.reg.SurfaceIdle(sessionID, expect)
 }
 
+// nextTranscript opens the session's transcript file when it is no longer
+// path. ok is false while the path is unchanged or the new file fails to open
+// (the caller keeps the old file and retries next tick).
+func (d *Node) nextTranscript(sessionID string, a adapter.Adapter, path string) (string, *sharedTranscript, []transcript.Entry, bool) {
+	next, root, _, _, err := d.resolveTranscriptPath(api.TranscriptSubscribeParams{SessionID: sessionID})
+	if err != nil || next == path {
+		return "", nil, nil, false
+	}
+	st, entries, err := d.openTranscript(a, next, root, false)
+	if err != nil {
+		return "", nil, nil, false
+	}
+	return next, st, entries, true
+}
+
 // pollTranscript re-folds the transcript every interval and pushes a delta when
 // entries change. `sent` must be the FULL entry list the client holds (cached
 // prefix plus resent tail), not entries[from:]: diffEntries compares against the
@@ -294,15 +309,10 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 			// A main-session view follows the session when the agent switches
 			// transcript files (/resume, /clear); the client replaces from 0.
 			if driveStatus {
-				if next, root, _, _, err := d.resolveTranscriptPath(api.TranscriptSubscribeParams{SessionID: sessionID}); err == nil && next != path {
-					nextSt, entries, err := d.openTranscript(a, next, root, false)
-					if err != nil {
-						continue // keep the old file; retry next tick
-					}
+				if next, nextSt, entries, ok := d.nextTranscript(sessionID, a, path); ok {
 					d.transcripts.release(st)
-					st = nextSt
 					d.log.Info("transcript.switch", "sub_id", subID, "from", path, "to", next)
-					path = next
+					st, path = nextSt, next
 					if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{SubID: subID, FromIndex: 0, Entries: entries}); err != nil {
 						return // connection gone
 					}
