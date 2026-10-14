@@ -24,6 +24,7 @@ var _ adapter.Responder = (*ocAdapter)(nil)
 var _ adapter.Dismisser = (*ocAdapter)(nil)
 var _ adapter.Prompter = (*ocAdapter)(nil)
 var _ adapter.Spawner = (*ocAdapter)(nil)
+var _ adapter.Renamer = (*ocAdapter)(nil)
 
 func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
@@ -121,6 +122,20 @@ func (a *ocAdapter) SpawnSession(ctx context.Context, cwd, prompt string) (strin
 		return "", fmt.Errorf("opencode: no active discoverer")
 	}
 	return a.disc.spawnSession(ctx, cwd, prompt)
+}
+
+// RenameSession renames the session through the OpenCode service.
+func (a *ocAdapter) RenameSession(ctx context.Context, sess session.Session, name string) (bool, error) {
+	if a.disc == nil {
+		return false, fmt.Errorf("opencode: no active discoverer")
+	}
+	if sess.AgentSessionID == "" {
+		return false, fmt.Errorf("opencode: session has no agent session id")
+	}
+	if err := a.disc.renameSession(ctx, sess.AgentSessionID, name); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.RespondParams) error {

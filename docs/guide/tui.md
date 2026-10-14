@@ -240,6 +240,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `scroll up` | file, logs, transcript | `<Up>` `k` |  |
 | `session kill` | home, workspace |  | `dd` |
 | `session load-more` | history |  | `m` |
+| `session rename` | home, sidebar-sessions, workspace |  | `r` |
 | `session resume` | history, transcript |  | `R` |
 | `session spawn` | home, project-tree, workspace |  | `s` |
 | `sidebar narrower` | changes, file-tree, node, project, project-tree, sidebar-sessions, workspace | `<C-w><lt>` |  |

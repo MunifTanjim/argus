@@ -590,7 +590,7 @@ The client picks the node for each call:
 | ---- | ------- |
 | All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list`, `terminal.list` |
 | All nodes; success if one node succeeds | `push.register`, `push.unregister`, `push.test`, `push.setPause` |
-| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
+| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `session.rename`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
@@ -653,6 +653,21 @@ fail with `unknown session: <id>`.
 
 `sessions.kill` kills the tmux pane. For a session without a pane, opencode
 removes the session card, and Claude Code stops its running turn and exits.
+
+`session.rename` renames a session through the agent's own rename feature
+(opencode's session title, codex's thread name, Claude's rename), so the new
+name shows in the agent's own UI as well as in argus. It needs no tmux pane.
+Agents without a rename feature fail with
+`rename unsupported for <agent> sessions`.
+
+The result's `applied` is true once the agent has taken the name, and the
+session update follows. While a Claude Code turn is running, Claude Code takes
+the name only after the turn, so `applied` is false and the session update
+arrives once it has. Claude Code renames only while the Argus plugin is
+connected; otherwise the call fails with
+`rename needs the Argus plugin connection`. While the plugin is connected, a
+rename typed in Claude Code reaches argus too. Names with control characters
+are rejected.
 
 **Answering an interaction.** When a session waits for input, its
 `interaction` field describes the request. Answer it with `sessions.respond`:
@@ -1204,6 +1219,7 @@ unix socket and on relay channels.
 | `sessions.resume`       | request      | `ResumeParams`                   | `{ session_id }`             |
 | `sessions.kill`         | request      | `SessionRef`                     | `null`                       |
 | `sessions.focus`        | request      | `SessionRef`                     | `null`                       |
+| `session.rename`        | request      | `{ session_id, name }`           | `{ name, applied }`          |
 | `agents.list`           | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`    |
 | `sessions.tasks`        | request      | `SessionRef`                     | `{ tasks: Task[] }`          |
 | `tasks.changed`         | notification | `{ sub_id, session_id }`         | —                            |

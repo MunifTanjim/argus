@@ -21,6 +21,7 @@ abstract class SessionRepository {
     required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
+  Future<Result<bool>> rename(String sessionId, String name);
   Future<Result<List<NodeRef>>> nodes();
 
   /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
@@ -70,6 +71,10 @@ class SessionRepositoryRemote implements SessionRepository {
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);
+
+  @override
+  Future<Result<bool>> rename(String sessionId, String name) =>
+      _service.rename(sessionId, name);
 
   @override
   Future<Result<List<NodeRef>>> nodes() => _service.nodes();

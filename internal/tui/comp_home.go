@@ -16,11 +16,12 @@ import (
 type homeComp struct {
 	cursor int
 	killID string
+	rename renamePrompt
 	filter filterPrompt
 }
 
 func (h homeComp) section() string                           { return "home" }
-func (h homeComp) raw(*ctx) bool                             { return h.killID != "" || h.filter.on }
+func (h homeComp) raw(*ctx) bool                             { return h.killID != "" || h.rename.on() || h.filter.on }
 func (h homeComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return h, nil }
 func (h homeComp) close(*ctx) tea.Cmd                        { return nil }
 func (h homeComp) offers(*ctx) []binding                     { return sectionOffers[h.section()].keys }
@@ -44,6 +45,15 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			return h, m.killCmd(id), true
 		}
 		return h, nil, true
+	}
+	if h.rename.on() {
+		var cmd tea.Cmd
+		var id, name string
+		h.rename, cmd, id, name = h.rename.handleKey(msg)
+		if name != "" {
+			cmd = c.m.renameSessionCmd(id, name)
+		}
+		return h, cmd, true
 	}
 	if h.filter.on {
 		var cmd tea.Cmd
@@ -92,6 +102,11 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 			} else {
 				h.killID = m.order[h.cursor]
 			}
+		}
+	case m.matches(msg, k.Rename):
+		if h.cursor < n {
+			s := m.sessions[m.order[h.cursor]]
+			h.rename, cmd = h.rename.start(s.ID, s.Name)
 		}
 	case m.matches(msg, k.Refresh):
 		c.refreshSessions()
@@ -199,7 +214,7 @@ func (h homeComp) menu(c *ctx) []binding {
 	if h.cursor >= len(c.m.order) {
 		return nil
 	}
-	return []binding{listKeys.Jump, listKeys.Kill}
+	return []binding{listKeys.Jump, listKeys.Rename, listKeys.Kill}
 }
 
 func switchHomeTab(c *ctx, t homeTab) tea.Cmd {
@@ -266,6 +281,9 @@ func (h homeComp) footerPrompt(c *ctx) string {
 	m := c.m
 	if h.killID != "" {
 		return asstStyle.Render(killPrompt(m.sessions[h.killID]))
+	}
+	if h.rename.on() {
+		return h.rename.view()
 	}
 	if h.filter.on {
 		return h.filter.view()

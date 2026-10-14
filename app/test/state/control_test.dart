@@ -281,6 +281,32 @@ void main() {
     expect((result as Error<void>).error, isA<StateError>());
   });
 
+  test('rename emits session.rename and returns whether it applied', () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client =
+        RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+
+    final fut = SessionService(() => client).rename('s', 'New');
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.single, contains('"method":"session.rename"'));
+    expect(frames.single, contains('"session_id":"s"'));
+    expect(frames.single, contains('"name":"New"'));
+    final id =
+        (jsonDecode(frames.single.trim()) as Map<String, dynamic>)['id'];
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","result":{"name":"New","applied":true}}')));
+    final result = await fut;
+    expect(result, isA<Ok<bool>>());
+    expect((result as Ok<bool>).value, isTrue);
+  });
+
+  test('null client: rename returns Error carrying StateError', () async {
+    final result = await SessionService(() => null).rename('s', 'New');
+    expect(result, isA<Error<bool>>());
+    expect((result as Error<bool>).error, isA<StateError>());
+  });
+
   test('reconnect: after swap, respond uses new client not old', () async {
     final framesA = <String>[];
     final framesB = <String>[];

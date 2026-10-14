@@ -23,6 +23,7 @@ var sessionAddressed = map[string]bool{
 	api.MethodSessionCommits:        true,
 	api.MethodSessionCommitFiles:    true,
 	api.MethodSessionFocus:          true,
+	api.MethodSessionRename:         true,
 	api.MethodSessionTasks:          true,
 	api.MethodTranscriptSubscribe:   true,
 	api.MethodTerminalOpen:          true,

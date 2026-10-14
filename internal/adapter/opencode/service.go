@@ -383,6 +383,23 @@ func (c *client) sendPrompt(ctx context.Context, sessionID, text string) error {
 	return nil
 }
 
+// updateTitle PATCHes a session's title. A 204 with no body is success.
+func (c *client) updateTitle(ctx context.Context, sessionID, title string) error {
+	payload, err := json.Marshal(map[string]string{"title": title})
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, http.MethodPatch, "/api/session/"+sessionID, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("update title: %s", resp.Status)
+	}
+	return nil
+}
+
 func (c *client) replyForm(ctx context.Context, sessionID, formID string, answer map[string]any) error {
 	payload, err := json.Marshal(map[string]any{"answer": answer})
 	if err != nil {

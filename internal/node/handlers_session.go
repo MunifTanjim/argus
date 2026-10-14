@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -601,6 +602,38 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	d.clearResuming(s.ID)
 	go d.scan(context.Background())
 	return nil, nil
+}
+
+// handleSessionRename renames a session through its agent; it needs no tmux
+// pane. An applied name is recorded at once, ahead of the agent's own event.
+func (d *Node) handleSessionRename(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.SessionRenameParams](params)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(p.Name)
+	if p.SessionID == "" || name == "" {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session_id and name are required"}
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "name must not contain control characters"}
+	}
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	r, ok := d.adapterFor(s.Agent).(adapter.Renamer)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "rename unsupported for " + s.Agent + " sessions"}
+	}
+	applied, err := r.RenameSession(ctx, s, name)
+	if err != nil {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+	}
+	if applied {
+		d.reg.RenameSession(p.SessionID, name)
+	}
+	return api.SessionRenameResult{Name: name, Applied: applied}, nil
 }
 
 // dismissSession removes a session via the adapter's Dismisser. Kill is

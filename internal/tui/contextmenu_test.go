@@ -141,14 +141,14 @@ func TestMenuOnHomeSessionCard(t *testing.T) {
 	m := withMouse(homeTestModel())
 	x, y := itemCell(t, m, regMain, 1)
 	m, _ = rightClick(m, x, y)
-	wantMenu(t, m, "open tmux-pane", "session kill")
+	wantMenu(t, m, "open tmux-pane", "session rename", "session kill")
 }
 
 func TestMenuOnWorkspaceSessionCard(t *testing.T) {
 	m := withMouse(wideWorkspace())
 	x, y := itemCell(t, m, regMain, 0)
 	m, _ = rightClick(m, x, y)
-	wantMenu(t, m, "open tmux-pane", "session kill")
+	wantMenu(t, m, "open tmux-pane", "session rename", "session kill")
 }
 
 func TestMenuOnHistorySessionCard(t *testing.T) {
@@ -232,6 +232,7 @@ func TestMenuRunsOnTheClickedPane(t *testing.T) {
 	m = withFocus(m, leftSidebar)
 	x, y := itemCell(t, m, regMain, 2)
 	m, _ = rightClick(m, x, y)
+	m, _ = upd(m, keyMsg("j"))
 	m, _ = upd(m, keyMsg("j"))
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if h := m.main.top().(homeComp); h.killID != m.order[2] {

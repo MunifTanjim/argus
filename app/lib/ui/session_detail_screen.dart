@@ -13,6 +13,7 @@ import '../push/notifications.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/projects.dart';
+import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import '../state/tasks.dart';
 import '../state/tool_detail.dart';
@@ -21,8 +22,10 @@ import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
 import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
+import 'project_actions.dart';
 import 'respond_sheet.dart';
 import 'route_observer.dart';
+import 'session_actions.dart';
 import 'session_tasks_screen.dart';
 import 'status_style.dart';
 import 'theme.dart';
@@ -295,6 +298,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                     builder: (_) => WorkspaceFilesScreen(workspaceId: wsId),
                   ),
                 );
+              } else if (value == 'rename') {
+                if (outdated) return;
+                await renameSession(ActionContext.of(context), live);
               } else if (value == 'kill') {
                 if (!canKill) return;
                 final confirmed = await showDialog<bool>(
@@ -358,6 +364,15 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                   ),
                 ),
               ],
+              PopupMenuItem<String>(
+                value: 'rename',
+                enabled: !outdated,
+                child: const ListTile(
+                  leading: Icon(Icons.edit_outlined),
+                  title: Text('Rename Session'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
               PopupMenuItem<String>(
                 value: 'kill',
                 enabled: canKill,

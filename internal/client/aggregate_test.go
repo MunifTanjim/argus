@@ -58,7 +58,8 @@ func TestParamFieldExtractors(t *testing.T) {
 
 func TestMethodSetsMirrorGateway(t *testing.T) {
 	if !sessionAddressed[api.MethodSessionInput] || !sessionAddressed[api.MethodTranscriptSubscribe] ||
-		!sessionAddressed[api.MethodTerminalOpen] || !sessionAddressed[api.MethodSessionFocus] {
+		!sessionAddressed[api.MethodTerminalOpen] || !sessionAddressed[api.MethodSessionFocus] ||
+		!sessionAddressed[api.MethodSessionRename] {
 		t.Error("sessionAddressed missing an expected method")
 	}
 	if !nodeAddressed[api.MethodSessionSpawn] || !nodeAddressed[api.MethodSessionsHistorySessions] {

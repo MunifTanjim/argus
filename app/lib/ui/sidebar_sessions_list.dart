@@ -12,7 +12,9 @@ import '../state/push.dart';
 import '../state/sessions.dart';
 import '../state/sidebar_sessions.dart';
 import 'agent_badge.dart';
+import 'project_actions.dart';
 import 'relative_time.dart';
+import 'session_actions.dart';
 import 'status_style.dart';
 import 'theme.dart';
 
@@ -90,8 +92,10 @@ class SidebarSessionsList extends ConsumerWidget {
     await refreshSessions(client, ref.read(sessionsProvider.notifier));
   }
 
-  // The app's counterpart of the TUI's hover: what a row cannot fit.
+  // The app's counterpart of the TUI's hover: what a row cannot fit, and the
+  // session's actions.
   static Future<void> _showDetails(BuildContext context, Session s) {
+    final ax = ActionContext.of(context);
     final status = s.statusLabel.isNotEmpty ? s.statusLabel : s.status.name;
     final tmux = s.tmux.paneId.isEmpty
         ? ''
@@ -147,6 +151,7 @@ class SidebarSessionsList extends ConsumerWidget {
                     ],
                   ),
                 ),
+              ...sessionActionTiles(ctx, ax, s),
             ],
           ),
         ),

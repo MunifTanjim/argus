@@ -91,6 +91,23 @@ func TestModEventRegistersSession(t *testing.T) {
 	}
 }
 
+// A rename the mod reports sets the name and leaves a pending prompt alone.
+func TestModSessionRenameSetsTheName(t *testing.T) {
+	d, srv := modTestNode(t)
+	_, sid := askPermission(t, d, srv, "Bash", bashLs)
+	modPost(t, context.Background(), srv.URL+"/claude/event", map[string]any{
+		"event":   "SessionRename",
+		"payload": map[string]any{"session_id": "s1", "cwd": "/w", "name": " New name "},
+	}, nil)
+	s, _ := d.reg.Get(sid)
+	if s.Name != "New name" {
+		t.Errorf("name = %q, want New name", s.Name)
+	}
+	if s.Interaction == nil || s.Status != session.StatusAwaitingInput {
+		t.Errorf("status %q, interaction %+v; want the pending prompt kept", s.Status, s.Interaction)
+	}
+}
+
 func TestModPermissionAnsweredInArgus(t *testing.T) {
 	d, srv := modTestNode(t)
 	id, sid := askPermission(t, d, srv, "Bash", bashLs)

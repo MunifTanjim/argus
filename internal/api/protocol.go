@@ -37,9 +37,10 @@ const (
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
-	MethodAgentsList   = "agents.list"    // request: AgentsListParams; result: AgentsListResult
-	MethodSessionKill  = "sessions.kill"  // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
-	MethodSessionFocus = "sessions.focus" // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
+	MethodAgentsList    = "agents.list"    // request: AgentsListParams; result: AgentsListResult
+	MethodSessionKill   = "sessions.kill"  // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
+	MethodSessionFocus  = "sessions.focus" // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
+	MethodSessionRename = "session.rename" // request: SessionRenameParams; result: SessionRenameResult
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
@@ -777,6 +778,20 @@ type HistoryTranscriptParams struct {
 // SessionRef selects a session by id.
 type SessionRef struct {
 	SessionID string `json:"session_id"`
+}
+
+// SessionRenameParams renames a session through the agent's own rename
+// feature. Name is trimmed; blank names are rejected.
+type SessionRenameParams struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
+// SessionRenameResult is the requested name. Applied is false when the agent
+// takes the name later; the session update follows once it has.
+type SessionRenameResult struct {
+	Name    string `json:"name"`
+	Applied bool   `json:"applied"`
 }
 
 // TranscriptParams selects a session for MethodSessionTranscriptView.
