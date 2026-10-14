@@ -96,7 +96,7 @@ type Node struct {
 	issueTmpl       string                                                            // Go-template branch name for issue workspaces
 	forgeFor        func(ctx context.Context, repoDir string) (forge.Provider, error) // seam for tests; defaults to forge.For
 	pushStore       *push.Store                                                       // per-node Web Push subscription store; nil = push disabled
-	pushDeliverer   atomic.Pointer[push.Deliverer]                                    // egress for encrypted mobile pushes (uplink RPC or in-process)
+	pushDeliverer   atomic.Pointer[push.Deliverer]                                    // egress for encrypted mobile pushes over the uplink RPC
 
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
@@ -352,14 +352,12 @@ func (d *Node) Version() string { return d.version }
 // Clients use it to gate features per node.
 func (d *Node) Capabilities() api.NodeCapabilities { return d.caps }
 
-// Registry exposes the node's live session store so a co-located gateway can
-// aggregate it as an in-process source.
+// Registry exposes the node's live session store.
 func (d *Node) Registry() *registry.Registry { return d.reg }
 
-// DispatchFunc exposes the local engine to a co-located gateway's in-process
-// source without a network hop. It returns remoteDispatch so that lock.* methods
-// registered on d.server are never reachable from a co-located gateway; only the
-// local unix socket (CLI) can invoke them.
+// DispatchFunc exposes the local engine without a network hop. It returns
+// remoteDispatch, so that lock.* methods registered on d.server stay reachable
+// only from the local unix socket (CLI).
 func (d *Node) DispatchFunc() api.DispatchFunc { return d.remoteDispatch() }
 
 // clientFor returns the tmux client for a session's server.

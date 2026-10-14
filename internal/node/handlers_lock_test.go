@@ -247,8 +247,8 @@ func TestHandleLockPinAndUnpin(t *testing.T) {
 }
 
 // TestRemoteDispatchFiltersLockMethods verifies that remoteDispatch — used by
-// both DispatchFunc (co-located gateway) and the plaintext uplink — rejects
-// lock.* while passing non-lock methods through.
+// both DispatchFunc and the plaintext uplink — rejects lock.* while passing
+// non-lock methods through.
 func TestRemoteDispatchFiltersLockMethods(t *testing.T) {
 	d, _ := newLockNode(t)
 	dispatch := d.remoteDispatch()

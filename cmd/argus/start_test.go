@@ -50,7 +50,7 @@ func TestRoleGates(t *testing.T) {
 		// Inference path (--mode unset): unchanged behavior.
 		{"connected node", "", "wss://h", "tok", true, false, true},
 		{"connected no token", "", "wss://h", "", true, false, true},
-		{"co-located gateway", "", "", "tok", false, true, true},
+		{"combined gateway", "", "", "tok", false, true, true},
 		{"local node", "", "", "", false, false, true},
 		// Explicit --mode node: always runs a node, never serves a gateway.
 		{"mode node", "node", "", "tok", false, false, true},
@@ -81,7 +81,7 @@ func TestValidateMode(t *testing.T) {
 		wantErr          bool
 	}{
 		{"unset", "", "", "", false},
-		{"unset with token infers co-located gateway", "", "", "tok", false},
+		{"unset with token infers combined mode", "", "", "tok", false},
 		{"node", "node", "", "", false},
 		{"node with uplink", "node", "wss://h", "", false},
 		{"node with uplink and token", "node", "wss://h", "tok", false},

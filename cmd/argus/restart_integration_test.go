@@ -46,20 +46,7 @@ func TestRestartInPlaceKeepsPID(t *testing.T) {
 	buildArgus(t, bin, "1.0.0")
 	sock := filepath.Join(root, "s.sock")
 
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "ARGUS_") {
-			env = append(env, kv)
-		}
-	}
-	env = append(env,
-		"HOME="+root, "SHELL=/bin/sh",
-		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
-		"XDG_STATE_HOME="+filepath.Join(root, "state"),
-		"XDG_DATA_HOME="+filepath.Join(root, "data"),
-		"XDG_CACHE_HOME="+filepath.Join(root, "cache"),
-		"XDG_RUNTIME_DIR="+filepath.Join(root, "run"),
-	)
+	env := sandboxEnv(root)
 	daemon := exec.Command(bin, "start", "--no-config", "--mode", "node", "--socket", sock)
 	var daemonOut syncBuffer
 	daemon.Env = env

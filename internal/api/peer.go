@@ -346,8 +346,8 @@ func (p *Peer) serveRequest(m message) {
 	resp := message{ID: m.ID}
 	// ping is a transport-level liveness probe, answered by the Peer itself so no
 	// application dispatch policy can break its own link's keepalive. Handlers may
-	// still register ping for callers that reach dispatch without a Peer (e.g. a
-	// co-located gateway calling Node.DispatchFunc directly).
+	// still register ping for callers that reach dispatch without a Peer (for example,
+	// a caller of Node.DispatchFunc).
 	if m.Method == MethodPing {
 		resp.Result = json.RawMessage("null")
 		_ = p.send(resp)

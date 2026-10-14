@@ -79,9 +79,9 @@ func (d *Node) connSubsFor(n api.Notifier) *connSubs {
 }
 
 // getOrCreateConnSubs returns the per-connection registry for n, creating it on
-// first use. Direct clients are pre-registered in OnConnect; connections reaching
-// handlers another way (gateway uplink, in-process gateway) are registered lazily
-// here and dropped when their context ends.
+// first use. Direct clients are pre-registered in OnConnect; the gateway uplink
+// reaches handlers another way, so its connections are registered lazily here
+// and dropped when their context ends.
 func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSubs {
 	d.subsMu.Lock()
 	cs, ok := d.conns[n]

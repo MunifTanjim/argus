@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
 // TestMain lets the test binary act as argus, so managed-server tests run
@@ -30,6 +33,14 @@ func TestMain(m *testing.M) {
 			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(gc.Process.Pid)), 0o600)
 		}
 		time.Sleep(time.Hour)
+	case os.Getenv("ARGUS_TEST_LATE_LINE") == "1":
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		gc := exec.Command("sh", "-c", "sleep 0.3; echo late-line")
+		gc.Stdout = os.Stdout
+		if err := gc.Start(); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
 	case os.Getenv("ARGUS_TEST_RUN_MAIN") == "1":
 		main()
 		os.Exit(0)
@@ -93,7 +104,7 @@ func TestSpawnArgsOverrideConfigFile(t *testing.T) {
 		{"isolated", spawnSpec{}, "", "node", "", "", "127.0.0.1:1"},
 		{"connected", spawnSpec{gatewayURL: "wss://g", token: "tok"}, "tok", "node", "wss://g", "tok", "127.0.0.1:1"},
 		{"connected no token", spawnSpec{gatewayURL: "wss://g"}, "", "node", "wss://g", "", "127.0.0.1:1"},
-		{"gateway", spawnSpec{listenAddr: "127.0.0.1:9", token: "tok"}, "tok", "", "", "tok", "127.0.0.1:9"},
+		{"gateway role", spawnSpec{role: roleGateway, listenAddr: "127.0.0.1:9", token: "tok"}, "tok", "gateway", "", "tok", "127.0.0.1:9"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,15 +160,15 @@ func TestResolveListenAddr(t *testing.T) {
 func TestManagedServerStopsOnEOF(t *testing.T) {
 	sandboxChild(t)
 	spec := testSpec(t)
-	srv, err := startManagedReady(spec)
+	srv, err := startManagedReady(spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(srv.Logs().Lines(), func(l string) bool { return strings.Contains(l, "starting argus node") }) {
-		t.Errorf("logs missing the startup line: %q", srv.Logs().Lines())
+	if !slices.ContainsFunc(srv.logs.Lines(), func(l string) bool { return strings.Contains(l, "starting argus node") }) {
+		t.Errorf("logs missing the startup line: %q", srv.logs.Lines())
 	}
 	srv.stop(managedStopTimeout)
-	if err := <-srv.Exited(); err != nil {
+	if err := srv.wait(); err != nil {
 		t.Fatalf("exit after EOF = %v, want a clean exit", err)
 	}
 	if _, err := api.Dial(spec.socket); err == nil {
@@ -168,7 +179,7 @@ func TestManagedServerStopsOnEOF(t *testing.T) {
 func TestManagedStopKillsAfterTimeout(t *testing.T) {
 	sandboxChild(t)
 	t.Setenv("ARGUS_TEST_IGNORE_STDIN", "1")
-	srv, err := startManaged(testSpec(t))
+	srv, err := startManaged(testSpec(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +189,7 @@ func TestManagedStopKillsAfterTimeout(t *testing.T) {
 		t.Fatalf("stop took %v", time.Since(start))
 	}
 	var exit *exec.ExitError
-	if err := <-srv.Exited(); !errors.As(err, &exit) || exit.Exited() {
+	if err := srv.wait(); !errors.As(err, &exit) || exit.Exited() {
 		t.Fatalf("exit = %v, want killed by a signal", err)
 	}
 }
@@ -188,7 +199,7 @@ func TestManagedStopKillsProcessGroup(t *testing.T) {
 	t.Setenv("ARGUS_TEST_IGNORE_STDIN", "1")
 	pidFile := filepath.Join(t.TempDir(), "gc.pid")
 	t.Setenv("ARGUS_TEST_GRANDCHILD_PIDFILE", pidFile)
-	srv, err := startManaged(testSpec(t))
+	srv, err := startManaged(testSpec(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,12 +221,26 @@ func TestManagedStopKillsProcessGroup(t *testing.T) {
 	}
 }
 
+func TestManagedStopWaitsForOutput(t *testing.T) {
+	sandboxChild(t)
+	t.Setenv("ARGUS_TEST_LATE_LINE", "1")
+	var out syncBuffer
+	srv, err := startManaged(testSpec(t), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.stop(managedStopTimeout)
+	if !strings.Contains(out.String(), "late-line") {
+		t.Fatalf("out = %q, want the line written after the child exited", out.String())
+	}
+}
+
 func TestStartManagedReportsEarlyExit(t *testing.T) {
 	sandboxChild(t)
 	spec := testSpec(t)
 	spec.configArgs = []string{"--config", filepath.Join(t.TempDir(), "missing.yaml")}
 	start := time.Now()
-	_, err := startManagedReady(spec)
+	_, err := startManagedReady(spec, nil)
 	if err == nil {
 		t.Fatal("want an error")
 	}
@@ -237,7 +262,7 @@ func TestStartManagedRefusesServedSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	if _, err := startManagedReady(spec); err == nil || !strings.Contains(err.Error(), "already running") {
+	if _, err := startManagedReady(spec, nil); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("err = %v, want already running", err)
 	}
 }
@@ -245,14 +270,15 @@ func TestStartManagedRefusesServedSocket(t *testing.T) {
 func TestManagedServerReportsUnexpectedExit(t *testing.T) {
 	sandboxChild(t)
 	spec := testSpec(t)
-	srv, err := startManagedReady(spec)
+	srv, err := startManagedReady(spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer srv.stop(managedStopTimeout)
 	_ = srv.cmd.Process.Kill()
 	select {
-	case err := <-srv.Exited():
+	case <-srv.done:
+		err := srv.err
 		if err == nil {
 			t.Fatal("a killed server must report an error")
 		}
@@ -263,16 +289,13 @@ func TestManagedServerReportsUnexpectedExit(t *testing.T) {
 
 func TestManagedServerNilSafe(t *testing.T) {
 	var srv *managedServer
-	if srv.Logs() != nil || srv.Exited() != nil {
-		t.Fatal("a nil server has no logs and no exit channel")
-	}
 	srv.stop(time.Second)
 }
 
 func TestManagedServerSurvivesClosedOutput(t *testing.T) {
 	sandboxChild(t)
 	spec := spawnSpec{socket: shortSocket(t), gatewayURL: "ws://127.0.0.1:1", token: "tok", configArgs: []string{"--no-config"}}
-	srv, err := startManaged(spec)
+	srv, err := startManaged(spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,12 +304,13 @@ func TestManagedServerSurvivesClosedOutput(t *testing.T) {
 	// The startup lines and the failing uplink write to the closed pipe before
 	// the socket is ready.
 	srv.out.Close()
-	if err := srv.waitReady(spec.socket); err != nil {
+	if err := srv.waitReady(spec); err != nil {
 		t.Fatal(err)
 	}
 	srv.stdin.Close()
 	select {
-	case err := <-srv.Exited():
+	case <-srv.done:
+		err := srv.err
 		if err != nil {
 			t.Fatalf("exit = %v, want a clean exit", err)
 		}
@@ -326,6 +350,36 @@ func TestSetupManagedChild(t *testing.T) {
 	}
 }
 
+// TestSetupLoggerDropsForcedColorInManagedChild runs in a subprocess, because
+// it changes the environment and the global logger.
+func TestSetupLoggerDropsForcedColorInManagedChild(t *testing.T) {
+	if os.Getenv("ARGUS_TEST_SETUP_LOGGER") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSetupLoggerDropsForcedColorInManagedChild$")
+		cmd.Env = append(os.Environ(), "ARGUS_TEST_SETUP_LOGGER=1", "CLICOLOR_FORCE=1", "NO_COLOR=")
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		if out, err := cmd.Output(); err != nil {
+			t.Fatalf("%v\n%s%s", err, out, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "\x1b[") {
+			t.Fatalf("log output lost its color: %q", stderr.String())
+		}
+		return
+	}
+	if !slices.Contains(startEnv, "CLICOLOR_FORCE=1") {
+		t.Fatal("a restart must keep CLICOLOR_FORCE")
+	}
+	cfg := &config.Config{}
+	cfg.Log.Level = "info"
+	if err := setupLogger(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	slog.Info("colored")
+	if v, ok := os.LookupEnv("CLICOLOR_FORCE"); ok {
+		t.Fatalf("CLICOLOR_FORCE still in env: %q", v)
+	}
+}
+
 type writeRecorder struct{ writes []string }
 
 func (w *writeRecorder) Write(p []byte) (int, error) {
@@ -338,5 +392,192 @@ func TestCopyLinesWritesWholeLines(t *testing.T) {
 	copyLines(&rec, strings.NewReader("one\ntwo\nlast"))
 	if want := []string{"one\n", "two\n", "last\n"}; !slices.Equal(rec.writes, want) {
 		t.Fatalf("writes = %q, want %q", rec.writes, want)
+	}
+}
+
+func gatewayTestSpec(t *testing.T) spawnSpec {
+	t.Helper()
+	return spawnSpec{role: roleGateway, socket: shortSocket(t), listenAddr: freeAddr(t), token: "tok", configArgs: []string{"--no-config"}}
+}
+
+func TestSpawnArgsRoles(t *testing.T) {
+	gw := spawnSpec{role: roleGateway, socket: "/s", listenAddr: "127.0.0.1:9", token: "t", extraArgs: []string{"--tunnel=zrok"}}
+	a := gw.args()
+	for _, want := range []string{"--mode=gateway", "--gateway=", "--listen-addr=127.0.0.1:9", "--tunnel=zrok"} {
+		if !slices.Contains(a, want) {
+			t.Fatalf("gateway args %v lack %q", a, want)
+		}
+	}
+	if slices.Index(a, "--tunnel=") > slices.Index(a, "--tunnel=zrok") {
+		t.Fatalf("extra args must come last so that they win: %v", a)
+	}
+	if got := gw.readySocket(); got != gatewaySocketPath("/s") {
+		t.Fatalf("gateway readySocket = %q", got)
+	}
+	n := spawnSpec{socket: "/s", gatewayURL: "ws://g"}
+	if !slices.Contains(n.args(), "--mode=node") || !slices.Contains(n.args(), "--gateway=ws://g") {
+		t.Fatalf("node args = %v", n.args())
+	}
+	if got := n.readySocket(); got != "/s" {
+		t.Fatalf("node readySocket = %q", got)
+	}
+}
+
+// A gateway binds its unix socket before its TCP listener, so the socket alone
+// does not mean that a node can uplink yet.
+func TestSpawnEnvAddsExtraEnv(t *testing.T) {
+	s := spawnSpec{extraEnv: []string{"CLICOLOR_FORCE=1"}}
+	if env := s.env([]string{"PATH=/bin"}); !slices.Contains(env, "CLICOLOR_FORCE=1") {
+		t.Fatalf("env = %v", env)
+	}
+}
+
+func TestManagedGroupStartsGatewayThenNode(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	n := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, token: "tok", configArgs: []string{"--no-config"}}
+	g, err := startManagedGroup([]spawnSpec{gw, n}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.stop(managedStopTimeout)
+	for _, sock := range []string{gatewaySocketPath(gw.socket), n.socket} {
+		if _, err := probeServerInfo(sock); err != nil {
+			t.Fatalf("%s: %v", sock, err)
+		}
+	}
+	waitForLog(t, g.Logs(), "gateway uplink established")
+	waitForLog(t, g.Logs(), "gateway listening")
+}
+
+func TestManagedGroupStopsStartedChildrenOnFailure(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	bad := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, configArgs: []string{"--config", filepath.Join(t.TempDir(), "missing.yaml")}}
+	if _, err := startManagedGroup([]spawnSpec{gw, bad}, nil); err == nil {
+		t.Fatal("want a startup error")
+	}
+	if _, err := api.Dial(gatewaySocketPath(gw.socket)); err == nil {
+		t.Fatal("the gateway still serves after the node failed to start")
+	}
+}
+
+func TestManagedGroupReportsAnyUnexpectedExit(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	n := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, token: "tok", configArgs: []string{"--no-config"}}
+	g, err := startManagedGroup([]spawnSpec{gw, n}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.stop(managedStopTimeout)
+	_ = g.servers[0].cmd.Process.Kill()
+	select {
+	case err := <-g.Exited():
+		if err == nil {
+			t.Fatal("a killed gateway reported a clean exit")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the gateway exit did not reach the group")
+	}
+}
+
+func TestManagedGroupStopIsNotAnExit(t *testing.T) {
+	sandboxChild(t)
+	g, err := startManagedGroup([]spawnSpec{testSpec(t)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.stop(managedStopTimeout)
+	select {
+	case err := <-g.Exited():
+		t.Fatalf("a requested stop reported an exit: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestManagedGroupStopsNodeFirst(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	n := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, token: "tok", configArgs: []string{"--no-config"}}
+	g, err := startManagedGroup([]spawnSpec{gw, n}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForLog(t, g.Logs(), "gateway uplink established")
+	g.stop(managedStopTimeout)
+	for _, l := range g.Logs().Lines() {
+		if strings.Contains(l, "gateway uplink closed") {
+			t.Fatalf("the gateway stopped before the node:\n%s", strings.Join(g.Logs().Lines(), "\n"))
+		}
+	}
+}
+
+func TestManagedGroupCopiesLinesToOut(t *testing.T) {
+	sandboxChild(t)
+	var out syncBuffer
+	g, err := startManagedGroup([]spawnSpec{testSpec(t)}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.stop(managedStopTimeout)
+	if !strings.Contains(out.String(), "starting argus node") {
+		t.Fatalf("out = %q", out.String())
+	}
+	if g.Logs() != nil {
+		t.Fatal("a group with out must not keep the lines")
+	}
+}
+
+func TestManagedGroupRefusesServedGatewaySocket(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	if err := os.MkdirAll(filepath.Dir(gw.socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", gatewaySocketPath(gw.socket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := startManagedGroup([]spawnSpec{gw}, nil); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("err = %v, want already running", err)
+	}
+}
+
+func TestManagedGroupNilSafe(t *testing.T) {
+	var g *managedGroup
+	if g.Logs() != nil || g.Exited() != nil {
+		t.Fatal("nil group must return nil")
+	}
+	g.stop(time.Second)
+}
+
+func waitForLog(t *testing.T, b *logbuf.Buffer, substr string) {
+	t.Helper()
+	waitFor(t, "a log line with "+strconv.Quote(substr), 10*time.Second, func() bool {
+		return slices.ContainsFunc(b.Lines(), func(l string) bool { return strings.Contains(l, substr) })
+	}, func() string { return strings.Join(b.Lines(), "\n") })
+}
+
+func TestTUISpecForcesPrettyColorLogs(t *testing.T) {
+	cmd := newRootCmd("test")
+	cfg := &config.Config{}
+	cfg.Log.Format = "json"
+	cfg.Log.Level = "debug"
+	s := tuiSpec(cmd, cfg)
+	a := s.args()
+	if !slices.Contains(a, "--log-format=pretty") || !slices.Contains(a, "--log-level=debug") {
+		t.Fatalf("args = %v", a)
+	}
+	if !slices.Contains(s.env(nil), "CLICOLOR_FORCE=1") {
+		t.Fatalf("env = %v", s.env(nil))
+	}
+}
+
+func TestSpawnArgsHaveNoCombinedForm(t *testing.T) {
+	s := spawnSpec{socket: "/s", listenAddr: "127.0.0.1:9"}
+	if slices.Contains(s.args(), "--mode=") {
+		t.Fatalf("a node spec gave the combined form: %v", s.args())
 	}
 }

@@ -27,8 +27,7 @@ gateway:  client ──WebSocket /client──▶ gateway ◀──WebSocket /no
 ```
 
 On the gateway path, the node dials out to the gateway. The gateway never
-dials a node. A gateway that runs with a node reaches that node through a
-loopback `/node` connection.
+dials a node.
 
 The gateway does not read session data, and it does not merge results from
 several nodes. The client opens one relay channel per node and
@@ -1059,8 +1058,7 @@ entries, the gateway sends these notifications:
 
 1. The node builds the payload and encrypts it for the device (RFC 8291,
    `aes128gcm`).
-2. The node sends `push.deliver` to the gateway with the ciphertext. A
-   gateway that runs with the node delivers in the same process.
+2. The node sends `push.deliver` to the gateway with the ciphertext.
 3. The gateway posts the ciphertext to the endpoint.
 
 The encrypted body is one `aes128gcm` record. The plaintext ends with the

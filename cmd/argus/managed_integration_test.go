@@ -26,7 +26,7 @@ func TestManagedServerRestartsInPlace(t *testing.T) {
 	t.Cleanup(func() { managedBin = os.Executable })
 
 	spec := spawnSpec{socket: filepath.Join(root, "s.sock"), configArgs: []string{"--no-config"}}
-	srv, err := startManagedReady(spec)
+	srv, err := startManagedReady(spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,25 +50,26 @@ func TestManagedServerRestartsInPlace(t *testing.T) {
 	c.Close()
 	after, err := waitForRestart(context.Background(), spec.socket, before.StartedAt, 30*time.Second)
 	if err != nil || after.Version != "2.0.0" {
-		t.Fatalf("after: %+v, %v\n%s", after, err, strings.Join(srv.Logs().Lines(), "\n"))
+		t.Fatalf("after: %+v, %v\n%s", after, err, strings.Join(srv.logs.Lines(), "\n"))
 	}
 	select {
-	case err := <-srv.Exited():
+	case <-srv.done:
+		err := srv.err
 		t.Fatalf("the managed process exited on restart: %v", err)
 	default:
 	}
 	starts := 0
-	for _, l := range srv.Logs().Lines() {
+	for _, l := range srv.logs.Lines() {
 		if strings.Contains(l, "starting argus node") {
 			starts++
 		}
 	}
 	if starts != 2 {
-		t.Errorf("want startup lines from both binaries in one buffer, got %d:\n%s", starts, strings.Join(srv.Logs().Lines(), "\n"))
+		t.Errorf("want startup lines from both binaries in one buffer, got %d:\n%s", starts, strings.Join(srv.logs.Lines(), "\n"))
 	}
 
 	srv.stop(managedStopTimeout)
-	if err := <-srv.Exited(); err != nil {
+	if err := srv.wait(); err != nil {
 		t.Fatalf("after a restart, EOF must still stop the server cleanly: %v", err)
 	}
 }

@@ -93,8 +93,19 @@ func localNodeRunning(socket string) (bool, error) {
 	return false, err
 }
 
+func refuseRunning(socket string) error {
+	running, err := localNodeRunning(socket)
+	if err != nil {
+		return err
+	}
+	if running {
+		return fmt.Errorf("argus is already running at %s", socket)
+	}
+	return nil
+}
+
 // connectLocalSpawn starts an isolated managed node and connects to its socket.
-func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedServer, error) {
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, error) {
 	return connectLocalSpawnWithGateway(ctx, cfg, spec, "", "", nil)
 }
 
@@ -102,7 +113,7 @@ func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) 
 // isolated node, and the TUI drives its socket. Set gatewayURL: the node uplinks
 // to that gateway, and the TUI drives the gateway to see the whole fleet.
 // genesisHash is the client's resolved trust root; nil means TOFU.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, *managedServer, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, *managedGroup, error) {
 	if gatewayURL != "" {
 		wsURL, gatewayClient, err := resolveGatewayURL(gatewayURL, routeNode, nil)
 		if err != nil {
@@ -118,13 +129,13 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec 
 		probe.Close()
 		spec.gatewayURL, spec.token = gatewayURL, token
 	}
-	return spawnAndConnect(ctx, cfg, spec, gatewayURL, genesisHash)
+	return spawnAndConnect(ctx, cfg, []spawnSpec{spec}, gatewayURL, genesisHash)
 }
 
-// connectLocalGateway starts a managed node with a co-located gateway (pairing
-// and push, no tunnel), then points the TUI at that gateway over loopback. It
-// returns the gateway URL.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedServer, string, error) {
+// connectLocalGateway starts a managed gateway (pairing and push, no tunnel)
+// and a managed node that uplinks to it, then points the TUI at the gateway
+// over loopback. It returns the gateway URL.
+func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, string, error) {
 	addr, bound, err := resolveListenAddr(cfg.Gateway.ListenAddr)
 	if err != nil {
 		shell.StdErrF("argus: cannot bind gateway listener at %s: %v\n", cfg.Gateway.ListenAddr, err)
@@ -137,23 +148,27 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec
 		return nil, nil, "", err
 	}
 	url := "ws://" + loopbackDialAddr(bound)
-	spec.listenAddr, spec.token = addr, cfg.Token
-	c, srv, err := spawnAndConnect(ctx, cfg, spec, url, pin.Genesis)
-	return c, srv, url, err
+	gw := spec
+	gw.role, gw.listenAddr, gw.token = roleGateway, addr, cfg.Token
+	node := spec
+	node.gatewayURL, node.token = url, cfg.Token
+	c, g, err := spawnAndConnect(ctx, cfg, []spawnSpec{gw, node}, url, pin.Genesis)
+	return c, g, url, err
 }
 
-func spawnAndConnect(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL string, genesisHash []byte) (tui.Client, *managedServer, error) {
-	srv, err := startManagedReady(spec)
+func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec, gatewayURL string, genesisHash []byte) (tui.Client, *managedGroup, error) {
+	g, err := startManagedGroup(specs, nil)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, nil, err
 	}
-	c, err := connect(ctx, cfg, gatewayURL, spec.token, spec.socket, genesisHash)
+	last := specs[len(specs)-1]
+	c, err := connect(ctx, cfg, gatewayURL, last.token, last.socket, genesisHash)
 	if err != nil {
-		srv.stop(managedStopTimeout)
+		g.stop(managedStopTimeout)
 		return nil, nil, err
 	}
-	return c, srv, nil
+	return c, g, nil
 }
 
 // loopbackDialAddr returns a host:port for reaching a listener from this host: its

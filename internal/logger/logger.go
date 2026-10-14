@@ -65,13 +65,6 @@ func colorEnabled(tty bool, getenv func(string) string) bool {
 	return tty
 }
 
-// InitManaged installs the pretty handler with color on stderr, whatever the
-// configured format: a managed server's stderr feeds the TUI's Logs tab.
-func InitManaged() {
-	slog.SetDefault(slog.New(prettyHandler(os.Stderr, false)))
-	slog.SetLogLoggerLevel(slog.LevelInfo)
-}
-
 // prettyHandler builds the tint+scope-prefix handler for human-readable output.
 func prettyHandler(w io.Writer, noColor bool) slog.Handler {
 	prefix := slogpfx.ColorizePrefix(slogpfx.DefaultPrefixFormatter)
