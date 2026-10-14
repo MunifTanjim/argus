@@ -248,6 +248,28 @@ void main() {
     expect(find.textContaining('is done'), findsNothing);
   });
 
+  testWidgets('long teammate message folds behind Show more / Show less', (
+    tester,
+  ) async {
+    final long = List.generate(30, (i) => 'line $i').join('\n\n');
+    await _pump(
+      tester,
+      Entry(
+        id: 'tm',
+        kind: EntryKind.subagent,
+        text: long,
+        subagents: const [Subagent(name: 'alice', isTeammate: true)],
+      ),
+      scroll: true,
+    );
+    expect(find.text('Show more'), findsOneWidget);
+    expect(find.textContaining('line 29'), findsNothing);
+    await tester.tap(find.text('Show more'));
+    await tester.pump();
+    expect(find.text('Show less'), findsOneWidget);
+    expect(find.textContaining('line 29'), findsOneWidget);
+  });
+
   testWidgets('idle teammate renders as an ItemRow saying is done', (
     tester,
   ) async {

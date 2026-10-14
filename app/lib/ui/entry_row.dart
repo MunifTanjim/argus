@@ -133,7 +133,8 @@ class EntryRow extends StatelessWidget {
         return _CompactDivider(summary: e.summary);
       case EntryKind.subagent
           when e.isTeammate && !(e.soleSubagent?.idle ?? false):
-        return _TeammateMessage(entry: e);
+        return _TeammateMessage(
+            entry: e, expanded: expanded, onToggle: onToggle);
       case EntryKind.tool:
       case EntryKind.skill:
       case EntryKind.subagent:
@@ -156,23 +157,8 @@ class _UserBand extends StatelessWidget {
   final Entry entry;
   final bool expanded;
   final VoidCallback? onToggle;
-  static const _maxLines = 10;
   @override
   Widget build(BuildContext context) {
-    final text = entry.text ?? '';
-    final lineCount = '\n'.allMatches(text).length + 1;
-    final long = lineCount > _maxLines || text.length > 600;
-    final Widget body;
-    if (long && !expanded) {
-      body = Text(
-        text.split('\n').take(_maxLines).join('\n'),
-        maxLines: _maxLines,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: AppColors.text, fontSize: 14),
-      );
-    } else {
-      body = appMarkdown(text);
-    }
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
       child: Container(
@@ -199,21 +185,58 @@ class _UserBand extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            body,
-            if (long)
-              GestureDetector(
-                onTap: onToggle,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    expanded ? 'Show less' : 'Show more',
-                    style: _mono.copyWith(color: AppColors.accent),
-                  ),
-                ),
-              ),
+            _Foldable(
+              text: entry.text ?? '',
+              expanded: expanded,
+              onToggle: onToggle,
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Markdown [text] that folds to its first lines behind Show more / Show less
+/// when it is long.
+class _Foldable extends StatelessWidget {
+  const _Foldable({
+    required this.text,
+    required this.expanded,
+    required this.onToggle,
+  });
+  final String text;
+  final bool expanded;
+  final VoidCallback? onToggle;
+  static const _maxLines = 10;
+  @override
+  Widget build(BuildContext context) {
+    final lineCount = '\n'.allMatches(text).length + 1;
+    final long = lineCount > _maxLines || text.length > 600;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (long && !expanded)
+          Text(
+            text.split('\n').take(_maxLines).join('\n'),
+            maxLines: _maxLines,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.text, fontSize: 14),
+          )
+        else
+          appMarkdown(text),
+        if (long)
+          GestureDetector(
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                expanded ? 'Show less' : 'Show more',
+                style: _mono.copyWith(color: AppColors.accent),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -256,8 +279,14 @@ class _ThinkingRow extends StatelessWidget {
 }
 
 class _TeammateMessage extends StatelessWidget {
-  const _TeammateMessage({required this.entry});
+  const _TeammateMessage({
+    required this.entry,
+    required this.expanded,
+    required this.onToggle,
+  });
   final Entry entry;
+  final bool expanded;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -281,7 +310,11 @@ class _TeammateMessage extends StatelessWidget {
           if ((entry.text ?? '').trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: appMarkdown(entry.text!),
+              child: _Foldable(
+                text: entry.text!,
+                expanded: expanded,
+                onToggle: onToggle,
+              ),
             ),
         ],
       ),
