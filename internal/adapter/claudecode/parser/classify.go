@@ -30,6 +30,12 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 		}
 		if e.Attachment.Type == "queued_command" && e.Attachment.CommandMode == "prompt" &&
 			strings.TrimSpace(e.Attachment.Prompt) != "" {
+			if o := e.Attachment.Origin; o.Kind == "peer" {
+				if text := peerText(o, e.Attachment.Prompt); text != "" {
+					return TeammateMsg{Timestamp: ts, Text: text, TeammateID: peerName(o)}, true
+				}
+				return nil, false
+			}
 			return QueuedPromptMsg{Timestamp: ts, Text: e.Attachment.Prompt}, true
 		}
 		return nil, false
@@ -164,8 +170,8 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 	// A peer agent's message (a subagent's hand-back report, or another session
 	// messaging this one) lands mid-turn like a teammate message.
 	if e.Type == "user" && e.Origin.Kind == "peer" {
-		if text := peerText(e, contentStr); text != "" {
-			return TeammateMsg{Timestamp: ts, Text: text, TeammateID: peerName(e)}, true
+		if text := peerText(e.Origin, contentStr); text != "" {
+			return TeammateMsg{Timestamp: ts, Text: text, TeammateID: peerName(e.Origin)}, true
 		}
 		return nil, false
 	}
@@ -236,11 +242,14 @@ func Classify(e Entry) (ClassifiedMsg, bool) {
 // report lines after it are indented by two spaces.
 const peerPreamble = "The report follows:\n"
 
-func peerText(e Entry, content string) string {
-	body := e.Origin.Body
+func peerText(o Origin, content string) string {
+	body := o.Body
 	if body == "" {
 		body = strings.TrimPrefix(strings.TrimSpace(content), "Another Claude session sent a message:")
-	} else if e.Origin.Handback {
+		if m := agentMessageRe.FindStringSubmatch(body); m != nil {
+			body = m[1]
+		}
+	} else if o.Handback {
 		if i := strings.Index(body, peerPreamble); i >= 0 {
 			lines := strings.Split(body[i+len(peerPreamble):], "\n")
 			for j, l := range lines {
@@ -252,12 +261,12 @@ func peerText(e Entry, content string) string {
 	return strings.TrimSpace(body)
 }
 
-func peerName(e Entry) string {
+func peerName(o Origin) string {
 	switch {
-	case e.Origin.Name != "":
-		return e.Origin.Name
-	case e.Origin.From != "" && e.Origin.From != "unknown":
-		return e.Origin.From
+	case o.Name != "":
+		return o.Name
+	case o.From != "" && o.From != "unknown":
+		return o.From
 	default:
 		return "agent"
 	}

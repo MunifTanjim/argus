@@ -1156,6 +1156,40 @@ func TestClassify_QueuedNonPromptDropped(t *testing.T) {
 	}
 }
 
+func TestClassify_QueuedPeerHandbackIsTeammateMessage(t *testing.T) {
+	line := `{"type":"attachment","uuid":"att1","timestamp":"2026-10-14T02:41:48.728Z",` +
+		`"attachment":{"type":"queued_command","commandMode":"prompt","isMeta":true,` +
+		`"prompt":"<agent-message from=\"a1\">\n[Subagent hand-back] The report follows:\n  done\n</agent-message>",` +
+		`"origin":{"kind":"peer","from":"a1","name":"general-purpose","handback":true,` +
+		`"body":"[Subagent hand-back] The report follows:\n  done"}}}`
+	e, ok := parser.ParseEntry([]byte(line))
+	if !ok {
+		t.Fatal("ParseEntry failed")
+	}
+	msg, ok := parser.Classify(e)
+	if !ok {
+		t.Fatal("queued peer hand-back should be classified")
+	}
+	tm, is := msg.(parser.TeammateMsg)
+	if !is {
+		t.Fatalf("got %T, want TeammateMsg", msg)
+	}
+	if tm.TeammateID != "general-purpose" || tm.Text != "done" {
+		t.Errorf("TeammateMsg = %+v, want text 'done' from 'general-purpose'", tm)
+	}
+}
+
+func TestClassify_QueuedPeerWithoutBodyStripsWrapper(t *testing.T) {
+	e := makeEntry("attachment", "att1", "2026-10-14T02:41:48.728Z", json.RawMessage(`null`),
+		withQueuedCommand("prompt", "<agent-message from=\"a1\">\nsay banana\n</agent-message>"))
+	e.Attachment.Origin.Kind = "peer"
+	e.Attachment.Origin.From = "a1"
+	msg, _ := parser.Classify(e)
+	if tm, ok := msg.(parser.TeammateMsg); !ok || tm.Text != "say banana" || tm.TeammateID != "a1" {
+		t.Errorf("got %#v", msg)
+	}
+}
+
 func withPeer(from, name, body string, handback bool) func(*parser.Entry) {
 	return func(e *parser.Entry) {
 		e.IsMeta = true

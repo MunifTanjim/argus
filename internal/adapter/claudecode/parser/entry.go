@@ -28,16 +28,7 @@ type Entry struct {
 		} `json:"usage"`
 	} `json:"message"`
 
-	// Origin marks who a user-role line came from. Kind "peer" is another agent
-	// (a subagent's hand-back report, or a session messaging this one); Body is
-	// the message text when present.
-	Origin struct {
-		Kind     string `json:"kind"`
-		From     string `json:"from"`
-		Name     string `json:"name"`
-		Body     string `json:"body"`
-		Handback bool   `json:"handback"`
-	} `json:"origin"`
+	Origin Origin `json:"origin"`
 
 	// SessionID is the snake_case session_id, one candidate key for the on-disk
 	// tasks/ and teams/ dirs. It is usually the root session that owns those dirs,
@@ -71,8 +62,20 @@ type Entry struct {
 		Type        string `json:"type"`
 		DisplayPath string `json:"displayPath"`
 		Prompt      string `json:"prompt"`      // queued_command: the queued text
-		CommandMode string `json:"commandMode"` // queued_command: "prompt" for user input
+		CommandMode string `json:"commandMode"` // queued_command: "prompt" for user input and peer messages
+		Origin      Origin `json:"origin"`
 	} `json:"attachment"`
+}
+
+// Origin marks who a user-role line or queued command came from. Kind "peer"
+// is another agent (a subagent's hand-back report, or a session messaging this
+// one); Body is the message text when present.
+type Origin struct {
+	Kind     string `json:"kind"`
+	From     string `json:"from"`
+	Name     string `json:"name"`
+	Body     string `json:"body"`
+	Handback bool   `json:"handback"`
 }
 
 // ToolUseResultMap attempts to parse ToolUseResult as a JSON object.

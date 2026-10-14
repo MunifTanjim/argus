@@ -50,6 +50,8 @@ var (
 	teammateProtocolRe = regexp.MustCompile(`^\s*\{\s*"type"\s*:\s*"(idle_notification|shutdown_approved|shutdown_request|teammate_terminated|task_assignment)"`)
 )
 
+var agentMessageRe = regexp.MustCompile(`(?s)<agent-message[^>]*>(.*?)</agent-message>`)
+
 // contentBlockJSON is the common shape for partially unmarshaling JSONL content
 // blocks; callers use different field subsets.
 type contentBlockJSON struct {
