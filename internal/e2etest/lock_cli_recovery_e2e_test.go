@@ -21,8 +21,8 @@ import (
 // TestLockCLIRecovery is the PR 6a acceptance test: recovery over the local
 // unix socket (the CLI path). An unpinned node on a locked network quarantines;
 // lock.pin over the local socket clears it; lock.status reports the enforcing
-// state; lock.local-disable is the escape hatch; and lock.* is refused over the
-// co-located gateway dispatch path (LOCAL-ONLY).
+// state; lock.local-disable is the escape hatch; and lock.* is refused over
+// Node.DispatchFunc (LOCAL-ONLY).
 func TestLockCLIRecovery(t *testing.T) {
 	node.SetTrustSyncIntervalForTest(100 * time.Millisecond)
 	t.Cleanup(func() { node.SetTrustSyncIntervalForTest(5 * time.Minute) })
@@ -310,7 +310,7 @@ func TestLockCLIRecovery(t *testing.T) {
 	})
 
 	t.Run("local-only", func(t *testing.T) {
-		// lock.* must be rejected by the co-located gateway dispatch path.
+		// lock.* must be rejected by Node.DispatchFunc.
 		dispatch := unpinnedNode.DispatchFunc()
 		ctx2 := context.Background()
 

@@ -12,7 +12,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/logger"
-	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -28,7 +27,6 @@ func TestServeGatewayEnforcesToken(t *testing.T) {
 
 	log := logger.NewBufferLogger(logbuf.New(50))
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
-		node:     node.New(),
 		token:    "secret",
 		listener: ln,
 		log:      log,
@@ -51,9 +49,8 @@ func TestServeGatewayEnforcesToken(t *testing.T) {
 	conn.Close()
 }
 
-// A standalone gateway (nil node) must serve /client without crashing and report an
-// empty view until remote nodes dial in.
-func TestServeGatewayStandaloneNoNode(t *testing.T) {
+// A gateway must serve /client and report an empty view until a node dials in.
+func TestServeGatewayReportsNoNodesUntilOneDials(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -62,7 +59,6 @@ func TestServeGatewayStandaloneNoNode(t *testing.T) {
 	defer cancel()
 
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
-		node:     nil, // standalone: no local node
 		token:    "secret",
 		listener: ln,
 		log:      logger.NewBufferLogger(logbuf.New(50)),
@@ -139,7 +135,6 @@ func TestServeGatewayOnFatalWhenTunnelReportsNoURL(t *testing.T) {
 
 	fatal := make(chan struct{}, 1)
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
-		node:         node.New(),
 		listener:     ln,
 		log:          logger.NewBufferLogger(logbuf.New(50)),
 		onFatal:      func() { fatal <- struct{}{} },
@@ -177,7 +172,6 @@ func TestServeGatewayReportedURLSuppressesTimeout(t *testing.T) {
 
 	fatal := make(chan struct{}, 1)
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
-		node:         node.New(),
 		listener:     ln,
 		log:          logger.NewBufferLogger(logbuf.New(50)),
 		onFatal:      func() { fatal <- struct{}{} },
@@ -211,7 +205,6 @@ func TestServeGatewayOnFatalOnListenerDeath(t *testing.T) {
 
 	fatal := make(chan struct{}, 1)
 	serveGateway(ctx, gatewayServeOpts{
-		node:     node.New(),
 		listener: ln,
 		log:      logger.NewBufferLogger(logbuf.New(50)),
 		onFatal:  func() { fatal <- struct{}{} },
@@ -238,7 +231,6 @@ func TestServeGatewayOnFatalOnTunnelFailure(t *testing.T) {
 
 	fatal := make(chan struct{}, 1)
 	httpSrv := serveGateway(ctx, gatewayServeOpts{
-		node:         node.New(),
 		listener:     ln,
 		log:          logger.NewBufferLogger(logbuf.New(50)),
 		onFatal:      func() { fatal <- struct{}{} },

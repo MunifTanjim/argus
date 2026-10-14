@@ -9,6 +9,7 @@ import (
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
@@ -38,7 +39,7 @@ func newRootCmd(version string) *cobra.Command {
 
 			// A managed server spawned below stops when the TUI returns.
 			ctx, cancel := context.WithCancel(context.Background())
-			var srv *managedServer
+			var srv *managedGroup
 			defer func() {
 				cancel()
 				srv.stop(managedStopTimeout)
@@ -59,7 +60,7 @@ func newRootCmd(version string) *cobra.Command {
 				head = pin.Genesis
 			}
 
-			spec := spawnSpec{socket: cfg.Socket, configArgs: configArgs(cmd)}
+			spec := tuiSpec(cmd, cfg)
 			var client tui.Client
 			var gatewayURL string // empty: the TUI drives a local socket
 			switch {
@@ -154,4 +155,15 @@ func gatewayAuthHint(err error) string {
 		return "  the gateway expects a different token: check --token, $ARGUS_TOKEN, or token: in the config file\n"
 	}
 	return "  no token was configured: pass --token, set $ARGUS_TOKEN, or set token: in the config file\n"
+}
+
+// tuiSpec gives the managed servers the pretty format with color, because the
+// Logs tab shows their lines.
+func tuiSpec(cmd *cobra.Command, cfg *config.Config) spawnSpec {
+	return spawnSpec{
+		socket:     cfg.Socket,
+		configArgs: configArgs(cmd),
+		extraArgs:  append([]string{"--log-format=pretty"}, setFlags("log-level", cfg.Log.Level)...),
+		extraEnv:   []string{"CLICOLOR_FORCE=1"},
+	}
 }

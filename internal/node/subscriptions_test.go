@@ -16,8 +16,8 @@ import (
 
 // TestSubscribeWorksWithoutRegisterConn proves the gateway case: handleTranscriptSubscribe
 // must succeed when the connection Notifier was never pre-registered via OnConnect
-// (the uplink and in-process gateway paths). It also confirms that cancelling the ctx
-// tears the subscription's poller down.
+// (the gateway uplink path). It also confirms that cancelling the ctx tears the
+// subscription's poller down.
 func TestSubscribeWorksWithoutRegisterConn(t *testing.T) {
 	d := newNode(nil)
 	tmp := writeTempTranscript(t)

@@ -9,9 +9,9 @@ import (
 )
 
 // Deliverer hands an opaque, pre-encrypted Web Push body to whatever performs the
-// actual HTTP egress (a co-located gateway in-process, or a remote gateway over the
-// uplink). The node encrypts; the deliverer only signs + POSTs, so the gateway
-// never sees cleartext. Returns ErrGone when the subscription is permanently dead.
+// actual HTTP egress (the gateway, over the uplink). The node encrypts; the
+// deliverer only signs + POSTs, so the gateway never sees cleartext. Returns
+// ErrGone when the subscription is permanently dead.
 type Deliverer interface {
 	Deliver(ctx context.Context, endpoint string, ciphertext []byte, ttl, urgency string) error
 }
@@ -46,8 +46,7 @@ type PushPortAuth struct {
 }
 
 // GatewayDeliverer POSTs pre-encrypted bodies via the gateway's VAPID key and HTTP
-// client — the in-process (co-located gateway) Deliverer, and the engine behind the
-// push.deliver RPC handler.
+// client — the engine behind the push.deliver RPC handler.
 type GatewayDeliverer struct {
 	client *http.Client
 	vapid  *VAPID

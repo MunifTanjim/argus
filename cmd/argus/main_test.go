@@ -34,20 +34,12 @@ func shortSocket(t *testing.T) string {
 	return filepath.Join(shortTempDir(t), "s.sock")
 }
 
-// waitForNodes polls until the client sees at least one node in server.info.
 func waitForNodes(t *testing.T, c tui.Client) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	waitFor(t, "a node visible to the TUI client", 5*time.Second, func() bool {
 		var info api.ServerInfo
-		if c.Call(api.MethodServerInfo, nil, &info) == nil && len(info.Nodes) > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no node visible to the TUI client")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return c.Call(api.MethodServerInfo, nil, &info) == nil && len(info.Nodes) > 0
+	}, func() string { return "" })
 }
 
 func TestConnectLocalSpawn(t *testing.T) {
@@ -101,4 +93,31 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	if _, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), "ws://127.0.0.1:1", "right", nil); err == nil || strings.Contains(err.Error(), "must not start") {
 		t.Fatalf("want the probe error for an unreachable gateway, got %v", err)
 	}
+}
+
+// The local gateway choice runs the gateway and the node as two processes:
+// the gateway socket answers, the node socket answers, and the client sees
+// the node through the gateway.
+func TestConnectLocalGatewayRunsTwoProcesses(t *testing.T) {
+	sandboxChild(t)
+	cfg := &config.Config{}
+	cfg.Gateway.ListenAddr = "127.0.0.1:0"
+	cfg.Token = "tok"
+	spec := testSpec(t)
+	c, g, _, err := connectLocalGateway(context.Background(), cfg, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.stop(managedStopTimeout)
+	defer c.Close()
+	if len(g.servers) != 2 {
+		t.Fatalf("want 2 managed servers, got %d", len(g.servers))
+	}
+	if g.servers[0].cmd.Process.Pid == g.servers[1].cmd.Process.Pid {
+		t.Fatal("the gateway and the node share a process")
+	}
+	if _, err := probeServerInfo(gatewaySocketPath(spec.socket)); err != nil {
+		t.Fatalf("gateway socket: %v", err)
+	}
+	waitForNodes(t, c)
 }

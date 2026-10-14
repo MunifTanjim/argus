@@ -45,6 +45,35 @@ func serveGatewayMode(cfg *config.Config) bool {
 }
 func uplinkMode(cfg *config.Config) bool { return cfg.Gateway.URL != "" }
 
+func tunnelOpts(cfg *config.Config, runGateway bool) tunnelOptions {
+	return tunnelOptions{
+		provider:     cfg.Tunnel.Provider,
+		cfToken:      cfg.Tunnel.Cloudflare.Token,
+		cfTunnelName: cfg.Tunnel.Cloudflare.TunnelName,
+		cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
+		externalURL:  cfg.Tunnel.External.URL,
+		zrokName:     cfg.Tunnel.Zrok.Name,
+		ngrokDomain:  cfg.Tunnel.Ngrok.Domain,
+		runGateway:   runGateway,
+		listenAddr:   cfg.Gateway.ListenAddr,
+		logLevel:     config.LogLevel.Level(),
+	}
+}
+
+// prepareTunnel runs the provider's login or token setup: interactively at a
+// terminal, else it fails fast. No-op without a tunnel.
+func prepareTunnel(ctx context.Context, tun tunnel.Provider, interactive bool) error {
+	switch t := tun.(type) {
+	case tunnel.Cloudflare:
+		return ensureCloudflareLogin(ctx, t, interactive)
+	case *tunnel.Zrok:
+		return ensureZrokEnabled(ctx, t.Bin, interactive)
+	case tunnel.Ngrok:
+		return ensureNgrokAuth(ctx, t.Bin, interactive)
+	}
+	return nil
+}
+
 func validateMode(cfg *config.Config) error {
 	switch cfg.Mode {
 	case "":
@@ -77,12 +106,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		return fail(cmd, err)
 	}
 	local := runLocalNode(cfg)
-	serveGW := serveGatewayMode(cfg)
 	onTTY := isatty.IsTerminal(os.Stdin.Fd())
 	if local {
 		logger.Scoped("node").Info("starting argus node", "version", version)
 	} else {
-		logger.Scoped("gateway").Info("starting argus standalone gateway", "version", version)
+		logger.Scoped("gateway").Info("starting argus gateway", "version", version)
 	}
 	var upgrades *selfupgrade.Service
 	if up, err := selfupgrade.New(version); err != nil {
@@ -94,23 +122,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		logger.Scoped("config").Warn("XDG runtime dir unavailable; using fallback", "dir", config.RuntimeDir)
 	}
 
-	tun, tunOrigin, err := resolveTunnel(tunnelOptions{
-		provider:     cfg.Tunnel.Provider,
-		cfToken:      cfg.Tunnel.Cloudflare.Token,
-		cfTunnelName: cfg.Tunnel.Cloudflare.TunnelName,
-		cfHostname:   cfg.Tunnel.Cloudflare.Hostname,
-		externalURL:  cfg.Tunnel.External.URL,
-		zrokName:     cfg.Tunnel.Zrok.Name,
-		ngrokDomain:  cfg.Tunnel.Ngrok.Domain,
-		runGateway:   serveGW,
-		listenAddr:   cfg.Gateway.ListenAddr,
-		logLevel:     config.LogLevel.Level(),
-	})
+	tun, tunOrigin, err := resolveTunnel(tunnelOpts(cfg, !local))
 	if err != nil {
 		return fail(cmd, err)
 	}
 
-	// nil in a standalone gateway: no local node, discovery, or socket API.
 	var d *node.Node
 	if local {
 		d = node.New()
@@ -130,26 +146,8 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.SetDesktopNotify(cfg.Push.Desktop.Enabled, clickCmd)
 	}
 
-	// A locally-managed Cloudflare tunnel needs an origin cert: run interactive
-	// `cloudflared tunnel login` when on a terminal, else fail fast. No-op
-	// otherwise.
-	if cf, ok := tun.(tunnel.Cloudflare); ok {
-		if err := ensureCloudflareLogin(ctx, cf, onTTY); err != nil {
-			return fail(cmd, err)
-		}
-	}
-	// A zrok share needs an enabled environment: prompt for an account token to
-	// enable it when on a terminal, else fail fast.
-	if z, ok := tun.(*tunnel.Zrok); ok {
-		if err := ensureZrokEnabled(ctx, z.Bin, onTTY); err != nil {
-			return fail(cmd, err)
-		}
-	}
-	// An ngrok tunnel needs an authtoken: prompt at a terminal, else fail fast.
-	if n, ok := tun.(tunnel.Ngrok); ok {
-		if err := ensureNgrokAuth(ctx, n.Bin, onTTY); err != nil {
-			return fail(cmd, err)
-		}
+	if err := prepareTunnel(ctx, tun, onTTY); err != nil {
+		return fail(cmd, err)
 	}
 
 	if local && cfg.E2EE.Enabled {
@@ -171,20 +169,24 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	var httpSrv *http.Server
 	var tunnelWG sync.WaitGroup
 	var gwSock net.Listener
-	if d == nil {
-		gwSock, err = api.ListenUnix(gatewaySocketPath(cfg.Socket), logger.Scoped("gateway").L)
-		if err != nil {
+	if !local {
+		// A running gateway holds the TCP port too, and its socket gives the
+		// clearer error.
+		if err := refuseRunning(gatewaySocketPath(cfg.Socket)); err != nil {
 			return fail(cmd, err)
 		}
-		defer gwSock.Close()
-	}
-	if serveGW {
+		// TCP first: a managed gateway is ready once its unix socket answers.
 		ln, err := net.Listen("tcp", cfg.Gateway.ListenAddr)
 		if err != nil {
 			return fail(cmd, err)
 		}
+		gwSock, err = api.ListenUnix(gatewaySocketPath(cfg.Socket), logger.Scoped("gateway").L)
+		if err != nil {
+			ln.Close()
+			return fail(cmd, err)
+		}
+		defer gwSock.Close()
 		httpSrv = serveGateway(ctx, gatewayServeOpts{
-			node:          d,
 			token:         cfg.Token,
 			listener:      ln,
 			log:           logger.New(context.Background()).L,
@@ -193,7 +195,6 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			publicURL:     gatewayBaseURL(cfg),
 			enablePairing: true,
 			enablePush:    true,
-			pushDelay:     cfg.Push.Mobile.Delay,
 			tunnel:        tun,
 			tunnelOrigin:  tunOrigin,
 			selfUpgrade:   upgrades,
@@ -201,21 +202,18 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		})
 	}
 
-	// Local nodes not hosting a gateway drive their own push loop when in uplink
-	// mode (any cipher) or when E2EE is on standalone. An uplink node gets a push
-	// store in either cipher mode: push.register/test fan out to nodes over relay
-	// channels regardless of cipher, mirroring the co-located node's unconditional
-	// store. The deliverer is set per connect by runUplink when an uplink is present.
-	if local && !serveGW && (cfg.E2EE.Enabled || uplinkMode(cfg)) {
+	// A node drives its own push loop when it uplinks (any cipher) or runs E2EE
+	// alone. An uplink node gets a push store in either cipher mode, because
+	// push.register and push.test reach nodes over relay channels.
+	if local && (cfg.E2EE.Enabled || uplinkMode(cfg)) {
 		if uplinkMode(cfg) {
 			d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
 		}
 		go d.StartPush(ctx, cfg.Push.Mobile.Delay)
 	}
 
-	// Standalone local node with no uplink: run a local Watch for desktop alerts.
-	// Uplink nodes (E2EE or plaintext) self-drive via StartPush above.
-	if local && cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !serveGW && !cfg.E2EE.Enabled {
+	// A node with no uplink and no E2EE runs a local Watch for desktop alerts.
+	if local && cfg.Push.Desktop.Enabled && !uplinkMode(cfg) && !cfg.E2EE.Enabled {
 		events, cancel := d.Registry().Subscribe()
 		go func() {
 			defer cancel()
@@ -223,7 +221,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		}()
 	}
 
-	if d != nil {
+	if local {
 		err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
 	} else {
 		err = serveGatewaySocket(ctx, gwSock, version, upgrades)
@@ -247,14 +245,14 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	return nil
 }
 
-// gatewaySocketPath keeps a standalone gateway off the node's socket, so
-// both can run on one host.
+// gatewaySocketPath keeps a gateway off the node's socket, so both can run on
+// one host.
 func gatewaySocketPath(nodeSocket string) string {
 	return filepath.Join(filepath.Dir(nodeSocket), "argus-gateway.sock")
 }
 
-// serveGatewaySocket lets `argus upgrade` reach a standalone gateway. It
-// blocks until ctx is done.
+// serveGatewaySocket lets `argus upgrade` reach a gateway. It blocks until ctx
+// is done.
 func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service) error {
 	srv := api.NewServer()
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
@@ -284,6 +282,9 @@ func newStartCmd(version string) *cobra.Command {
 			managed, _ := cmd.Flags().GetBool("argus-managed")
 			if managed {
 				setupManagedChild(os.Stdin, stop)
+			}
+			if combinedMode(cfg) {
+				return runSupervisor(ctx, cmd, cfg)
 			}
 			return runStart(ctx, stop, cmd, cfg, version, managed)
 		},
@@ -359,17 +360,18 @@ func tokenAuth(want string) func(string) bool {
 }
 
 // setupLogger resolves log level/format from config and installs the global logger
-// before anything logs.
+// before anything logs. A managed server's parent sets CLICOLOR_FORCE for our
+// log output only, so tmux and setup scripts must not inherit it; startEnv
+// keeps it for a restart.
 func setupLogger(cfg *config.Config, managed bool) error {
 	if err := applyLogLevel(cfg); err != nil {
 		return err
 	}
-	if managed {
-		logger.InitManaged()
-		return nil
-	}
 	config.LogFormat = cfg.Log.Format
 	logger.Init()
+	if managed {
+		_ = os.Unsetenv("CLICOLOR_FORCE")
+	}
 	return nil
 }
 
@@ -437,7 +439,6 @@ var tunnelURLTimeout = 60 * time.Second
 // caller so bind errors surface before backgrounding; log is the base (unscoped)
 // logger — serveGateway derives the gateway/tunnel/push scopes from it.
 type gatewayServeOpts struct {
-	node          *node.Node // in-process source; nil for a standalone gateway (relay only)
 	token         string
 	listener      net.Listener
 	log           *slog.Logger
@@ -446,17 +447,15 @@ type gatewayServeOpts struct {
 	publicURL     string
 	enablePairing bool
 	enablePush    bool
-	pushDelay     time.Duration
 	tunnel        tunnel.Provider
 	tunnelOrigin  string
 	selfUpgrade   *selfupgrade.Service // nil: no server.* upgrade methods
 	tunnelWG      *sync.WaitGroup      // done once the tunnel child has exited; required with tunnel
 }
 
-// serveGateway starts the co-located gateway: aggregates the in-process node plus
-// dialed-in nodes, serves clients over o.listener, and (when enabled) wires
-// client-token pairing, mobile push, and a tunnel. Returns the *http.Server to
-// shut down.
+// serveGateway serves clients and dialed-in nodes over o.listener and, when
+// enabled, wires client-token pairing, mobile push, and a tunnel. Returns the
+// *http.Server to shut down.
 func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	agg := gateway.New(0)
 
@@ -481,7 +480,7 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	hsrv.SetLogger(gwLog)
 	hsrv.SetSelfUpgrade(o.selfUpgrade)
 	if o.enablePush {
-		setupBlindPush(ctx, o.node, hsrv, o.pushDelay, o.log.With("scope", "push"))
+		setupBlindPush(hsrv, o.log.With("scope", "push"))
 	}
 
 	httpSrv := &http.Server{Handler: hsrv.Handler()}
@@ -494,12 +493,6 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 			}
 		}
 	}()
-
-	// Connect the in-process node over loopback so its identity handshake goes
-	// through the real uplink path (must come after Serve goroutine).
-	if d := o.node; d != nil {
-		go d.ConnectGateway(ctx, "ws://"+loopbackDialAddr(o.listener.Addr().(*net.TCPAddr))+routeNode, o.token, nil)
-	}
 
 	if o.tunnel != nil {
 		tunLog := o.log.With("scope", "tunnel")
@@ -542,10 +535,9 @@ func serveGateway(ctx context.Context, o gatewayServeOpts) *http.Server {
 	return httpSrv
 }
 
-// setupBlindPush wires the e2ee-on push path: the gateway holds the VAPID key and
-// relays opaque push.deliver bodies; a co-located node watches its own registry and
-// encrypts node-side. Uplink nodes get their deliverer set per-connect by runUplink.
-func setupBlindPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, delay time.Duration, log *slog.Logger) {
+// setupBlindPush wires the gateway side of push: the gateway holds the VAPID
+// key and relays opaque push.deliver bodies that nodes encrypted.
+func setupBlindPush(hsrv *gateway.Server, log *slog.Logger) {
 	vapid, err := push.LoadOrCreateVAPID(config.GetStatePath("vapid_key.pem"))
 	if err != nil {
 		log.Warn("vapid disabled", "err", err)
@@ -571,10 +563,6 @@ func setupBlindPush(ctx context.Context, d *node.Node, hsrv *gateway.Server, del
 		return nil
 	})
 	hsrv.SetPushPortStatus(func() bool { return dv.HasPushPort() })
-	if d != nil {
-		d.SetPushStore(push.NewStore(config.GetStatePath("push-tokens")))
-		go d.StartPush(ctx, delay)
-	}
 }
 
 // setupManagedChild runs before anything starts a process. Processes we start

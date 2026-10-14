@@ -8,8 +8,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/config"
 )
 
-// connectLocalGateway starts a managed co-located gateway and points the TUI
-// client at it over loopback, so the client sees the fleet.
+// connectLocalGateway starts a managed gateway and points the TUI client at it
+// over loopback, so the client sees the fleet.
 func TestConnectLocalGatewayServesFleet(t *testing.T) {
 	sandboxChild(t)
 	cfg := &config.Config{}

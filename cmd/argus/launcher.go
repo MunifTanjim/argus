@@ -14,7 +14,7 @@ type launchKind int
 const (
 	launchQuit           launchKind = iota // user backed out; spawn nothing, exit cleanly
 	launchSpawnIsolated                    // start an ephemeral isolated node
-	launchSpawnGateway                     // start an ephemeral node that also serves a gateway
+	launchSpawnGateway                     // start an ephemeral gateway and a node connected to it
 	launchSpawnConnected                   // start an ephemeral connected node
 	launchGateway                          // connect to the entered gateway URL + token
 )
@@ -49,7 +49,7 @@ type launcherModel struct {
 	cursor         int  // menu cursor: menuSpawnIsolated, menuSpawnConnected, or menuGateway
 	spawnConnected bool // gateway form is for a connected spawn, not a plain gateway connect
 	field          int  // gateway form focus: 0 = url, 1 = token
-	hasToken       bool // a gateway token is set: the isolated spawn actually serves a gateway
+	hasToken       bool // a gateway token is set: the isolated spawn also starts a gateway
 	urlIn          textinput.Model
 	tokenIn        textinput.Model
 	errMsg         string
