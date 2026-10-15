@@ -70,11 +70,14 @@ func (m model) View() tea.View {
 }
 
 // screenCursor shows the live screen program's cursor while the screen has the
-// keys.
+// keys, and marks the cursor end of a visual selection.
 func (m model) screenCursor() *tea.Cursor {
-	s, ok := m.liveScreen()
-	if !ok || m.focused != mainPane || len(m.popups) > 0 || m.helpShown() {
+	if m.focused != mainPane || len(m.popups) > 0 || m.helpShown() {
 		return nil
+	}
+	s, ok := m.liveScreen()
+	if !ok {
+		return m.visualScreenCursor()
 	}
 	l := m.layout()
 	_, rows := termDimsFor(l.w, l.h-m.dockRows(), l.right == 0)
@@ -364,4 +367,22 @@ func (m model) spinShown() bool {
 	return l.left > 0 && m.left.current().spins(c) ||
 		l.right > 0 && m.right.current().spins(c) ||
 		m.dockDrawn() && m.dock.spins(c)
+}
+
+// visualScreenCursor is the terminal cursor on the cursor end of the main
+// pane's visual selection, when that cell is on screen.
+func (m model) visualScreenCursor() *tea.Cursor {
+	t, ok := m.focusedComp().(transcriptComp)
+	if !ok || !t.visualActive() {
+		return nil
+	}
+	a := m.textAreaOf(mainPane)
+	if a == nil {
+		return nil
+	}
+	line, col, ok := t.bind(&ctx{m: &m}).visualCursor()
+	if !ok || line < a.text.scroll || line >= a.text.end {
+		return nil
+	}
+	return tea.NewCursor(a.rect.Min.X+a.text.left+col, a.rect.Min.Y+a.text.top+line-a.text.scroll)
 }

@@ -109,6 +109,7 @@ type model struct {
 	mouse     bool       // the mouse is captured on every screen
 	hits      *hitMap    // what the last frame drew that takes the mouse
 	drag      dragTarget // the divider that the mouse drags
+	sel       selectDrag // the press a text drag starts from
 
 	verboseTranscript bool // transcript runs of thinking/tool calls start expanded
 

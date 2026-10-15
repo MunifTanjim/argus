@@ -664,6 +664,122 @@ func TestDetailVisualBodyFrame(t *testing.T) {
 	}
 }
 
+func textCell(t *testing.T, m model, i, col int) (x, y int) {
+	t.Helper()
+	x, y = itemCell(t, m, regMain, i)
+	return x - 1 + m.transcriptTextX() + textInset + col, y
+}
+
+func mouseText() model {
+	return withMouse(visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"}))
+}
+
+func TestDragSelectsWithoutCopy(t *testing.T) {
+	got := captureClipboard(t)
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, x+4, y)
+	if !trOf(m).visualActive() {
+		t.Fatal("a drag must start visual mode")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("a drag must not copy, got %q", *got)
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha" {
+		t.Errorf("clipboard = %q, want alpha", *got)
+	}
+}
+
+func TestDragReleaseAppliesFinalPoint(t *testing.T) {
+	got := captureClipboard(t)
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m, _ = pressAt(m, x, y)
+	m, _ = upd(m, tea.MouseMotionMsg{X: x + 2, Y: y, Button: tea.MouseLeft})
+	m, _ = upd(m, tea.MouseReleaseMsg{X: x + 9, Y: y, Button: tea.MouseLeft}) // motion to here was throttled away
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha beta" {
+		t.Errorf("clipboard = %q, want %q", *got, "alpha beta")
+	}
+}
+
+func TestClickWithoutDragStillSelectsCard(t *testing.T) {
+	m := withMouse(visualModel())
+	x, y := itemCell(t, m, regMain, 1)
+	m, _ = click(m, x, y)
+	if trOf(m).transcript.cursor != 1 || trOf(m).visualActive() {
+		t.Errorf("cursor=%d visual=%v, want the card selected and no visual mode", trOf(m).transcript.cursor, trOf(m).visualActive())
+	}
+	m, _ = click(m, x, y)
+	if trOf(m).historyView != histDetail {
+		t.Error("a click on the selected card must still open it")
+	}
+}
+
+func TestPressThenDragOnSelectedCardDoesNotOpen(t *testing.T) {
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, x+4, y)
+	if trOf(m).historyView == histDetail {
+		t.Error("a drag on the selected card must not open it")
+	}
+}
+
+func TestRightClickInVisualKeepsSelection(t *testing.T) {
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, x+4, y)
+	before := *trOf(m).transcript.visual
+	m, _ = rightClick(m, x+8, y)
+	wantMenu(t, m, "copy", "back")
+	if s := trOf(m).transcript.visual; s == nil || *s != before {
+		t.Error("a right click must leave the selection as it was")
+	}
+}
+
+func TestLeftClickInVisualExits(t *testing.T) {
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, x+4, y)
+	m, _ = click(m, x, y)
+	if trOf(m).visualActive() {
+		t.Error("a click must end visual mode")
+	}
+}
+
+func TestDragReleasedOutsideClamps(t *testing.T) {
+	got := captureClipboard(t)
+	m := mouseText()
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, 0, m.height-1) // released over the footer, left edge
+	if !trOf(m).visualActive() {
+		t.Fatal("the selection must survive a release outside the pane")
+	}
+	if viewOf(m) != viewSession || trOf(m).historyView != histTranscript {
+		t.Error("a release outside must not click anything")
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha beta gamma" {
+		t.Errorf("clipboard = %q, want %q", *got, "alpha beta gamma")
+	}
+}
+
+func TestDetailDragSelects(t *testing.T) {
+	got := captureClipboard(t)
+	m := withMouse(detailVisualModel(t))
+	r, c := findMainBlock(t, m, "inner alpha")
+	m = dragXY(m, c, r, c+4, r)
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "inner" {
+		t.Errorf("clipboard = %q, want inner", *got)
+	}
+}
+
 // noSelection reports whether no frame and not the stream holds a selection.
 func noSelection(m model) bool {
 	tr := trOf(m)
@@ -676,6 +792,53 @@ func noSelection(m model) bool {
 		}
 	}
 	return true
+}
+
+func TestCloseClickInVisualLeavesNoSelection(t *testing.T) {
+	m := nestedDetail(true)
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() {
+		t.Fatal("v must start visual mode")
+	}
+	x, y := closeCell(t, m)
+	m, _ = click(m, x, y)
+	if n := len(trOf(m).transcript.detailStack); n != 1 {
+		t.Fatalf("detail depth = %d, want 1", n)
+	}
+	if trOf(m).visualActive() || !noSelection(m) {
+		t.Error("a close click must leave no selection anywhere")
+	}
+}
+
+func TestFoldClickInVisualExits(t *testing.T) {
+	m := withMouse(runModel(false))
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() {
+		t.Fatal("v must start visual mode")
+	}
+	m.View()
+	p, found := foldZoneCells(m)[1]
+	if !found {
+		t.Fatal("no fold zone on the summary row")
+	}
+	x, y := p[0], p[1]
+	m, _ = click(m, x, y)
+	if trOf(m).visualActive() || !noSelection(m) {
+		t.Error("a fold click must end visual mode")
+	}
+}
+
+func TestDrillClickInVisualLeavesNoSelection(t *testing.T) {
+	m := withMouse(visualModel())
+	m = typeKeys(m, "v")
+	x, y := itemCell(t, m, regMain, trOf(m).transcript.cursor)
+	m, _ = click(m, x, y)
+	if trOf(m).historyView != histDetail {
+		t.Fatal("a click on the selected card must open it")
+	}
+	if trOf(m).visualActive() || !noSelection(m) {
+		t.Error("a click that opens a card must leave no selection anywhere")
+	}
 }
 
 func manyTexts(n int) []transcript.Entry {
@@ -764,6 +927,33 @@ func TestMenuOnBodyFrameOffersCopy(t *testing.T) {
 	}
 }
 
+func TestClickInAnotherPaneEndsVisual(t *testing.T) {
+	m := mouseText()
+	m.left.hidden, m.width = false, max(m.width, sidebarMinWidth+40)
+	x, y := textCell(t, m, 0, 0)
+	m = dragXY(m, x, y, x+4, y)
+	if !trOf(m).visualActive() {
+		t.Fatal("a drag must start visual mode")
+	}
+	m.View()
+	var tree *hitArea
+	for _, a := range m.hits.areas {
+		if a.region == regTree {
+			tree = a
+		}
+	}
+	if tree == nil {
+		t.Fatal("no left sidebar on screen")
+	}
+	m, _ = click(m, tree.rect.Min.X+1, tree.rect.Max.Y-1)
+	if m.focused != leftSidebar {
+		t.Errorf("focused = %v, want the click to focus the sidebar", m.focused)
+	}
+	if trOf(m).transcript.visual != nil {
+		t.Error("a click in another pane must end the transcript's visual mode")
+	}
+}
+
 func TestFoldCommandInVisualEndsIt(t *testing.T) {
 	m := runModel(true)
 	m = withTr(m, func(t *transcriptComp) {
@@ -805,5 +995,49 @@ func TestDetailVisualRegistersOneCloseZone(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("close zones = %d, want 1", n)
+	}
+}
+
+// cursorChar is the character under the terminal cursor of the last frame.
+func cursorChar(t *testing.T, m model) string {
+	t.Helper()
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("no terminal cursor")
+	}
+	lines := strings.Split(ansi.Strip(v.Content), "\n")
+	return ansi.Cut(lines[v.Cursor.Y], v.Cursor.X, v.Cursor.X+1)
+}
+
+func TestVisualTerminalCursorMarksCursorEnd(t *testing.T) {
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	m.hits = &hitMap{}
+	if m.View().Cursor != nil {
+		t.Fatal("no terminal cursor outside visual mode")
+	}
+	m = typeKeys(m, "v")
+	if got := cursorChar(t, m); got != "a" {
+		t.Errorf("cursor on %q, want the a of alpha", got)
+	}
+	m = typeKeys(m, "w")
+	if got := cursorChar(t, m); got != "b" {
+		t.Errorf("after w, cursor on %q, want the b of beta", got)
+	}
+	m = typeKeys(m, "o")
+	if got := cursorChar(t, m); got != "a" {
+		t.Errorf("after o, cursor on %q, want the anchor's a", got)
+	}
+	m, _ = upd(m, keyMsg("esc"))
+	if m.View().Cursor != nil {
+		t.Error("the terminal cursor must go when visual mode ends")
+	}
+}
+
+func TestDetailVisualTerminalCursor(t *testing.T) {
+	m := detailVisualModel(t)
+	m.hits = &hitMap{}
+	m = typeKeys(m, "vw")
+	if got := cursorChar(t, m); got != "a" {
+		t.Errorf("cursor on %q, want the a of alpha", got)
 	}
 }

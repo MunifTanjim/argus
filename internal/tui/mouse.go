@@ -11,7 +11,18 @@ const (
 	dragNone dragTarget = iota
 	dragTree
 	dragFiles
+	dragSelect
 )
+
+// selectDrag is a press on selectable text: a drag from it selects, and a
+// release without a drag is the click it deferred.
+type selectDrag struct {
+	k            container
+	line, col    int
+	target       hitTarget
+	hit, focused bool
+	moved        bool
+}
 
 // focused reports whether the pane had focus before the click.
 type clicker interface {
@@ -114,8 +125,25 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	focused := m.focused == k
 	if !focused {
 		m.flash = ""
+		m = m.endVisualIn(m.focused)
 	}
 	m = m.focusContainer(k)
+	_, selects := m.paneComp(k).(textSelector)
+	switch ms.Button {
+	case tea.MouseRight:
+		if m.visualIn(k) {
+			return m.openMenuOnly(ms), nil // the selection stays, so no card-select click
+		}
+	case tea.MouseLeft:
+		if selects && a.text != nil && (!hit || t.kind == hitRow) {
+			if line, col, inside := a.textAt(ms.X, ms.Y); inside {
+				m.drag = dragSelect
+				m.sel = selectDrag{k: k, line: line, col: col, target: t, hit: hit, focused: focused}
+				return m, nil
+			}
+		}
+		m = m.endVisualIn(k) // a click ends visual mode, then acts as a click
+	}
 	if !hit {
 		return m, nil
 	}
@@ -140,6 +168,22 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	})
 }
 
+func (m model) visualIn(k container) bool {
+	ts, ok := m.paneComp(k).(textSelector)
+	return ok && ts.visualActive()
+}
+
+// endVisualIn ends pane k's visual mode, as a click does.
+func (m model) endVisualIn(k container) model {
+	if !m.visualIn(k) {
+		return m
+	}
+	res, _ := m.paneMouse(k, func(c *ctx, comp component) (component, tea.Cmd, bool) {
+		return comp.(textSelector).endVisual(c), nil, true
+	})
+	return res.(model)
+}
+
 func (m model) openMenu(k container, t hitTarget, at tea.Mouse) (tea.Model, tea.Cmd) {
 	res, cmd := m.paneMouse(k, func(c *ctx, comp component) (component, tea.Cmd, bool) {
 		cl, ok := comp.(clicker)
@@ -149,20 +193,24 @@ func (m model) openMenu(k container, t hitTarget, at tea.Mouse) (tea.Model, tea.
 		comp, cmd := cl.click(c, t, false)
 		return comp, cmd, true
 	})
-	m = res.(model)
+	return res.(model).openMenuOnly(at), cmd
+}
+
+// openMenuOnly opens the focused component's menu as it is.
+func (m model) openMenuOnly(at tea.Mouse) model {
 	if m.keysRaw() {
-		return m, cmd
+		return m
 	}
 	mn, ok := m.focusedComp().(menuer)
 	if !ok {
-		return m, cmd
+		return m
 	}
 	entries := m.applicable(mn.menu(&ctx{m: &m}))
 	if len(entries) == 0 {
-		return m, cmd
+		return m
 	}
 	m.popups = m.popups.open(contextMenu{at: uv.Pos(at.X, at.Y), screen: m.screen(), entries: entries})
-	return m, cmd
+	return m
 }
 
 func (m model) applicable(bs []binding) []binding {
@@ -232,18 +280,7 @@ func (m model) mouseWheel(msg wheelMsg) (tea.Model, tea.Cmd) {
 // f reports false when the component does not take the event.
 func (m model) paneMouse(k container, f func(*ctx, component) (component, tea.Cmd, bool)) (tea.Model, tea.Cmd) {
 	c := &ctx{m: &m}
-	var comp component
-	switch k {
-	case leftSidebar:
-		comp = m.left.current()
-	case rightSidebar:
-		comp = m.right.current()
-	case sessionDock:
-		comp = m.dock
-	default:
-		comp = m.main.top()
-	}
-	comp, cmd, ok := f(c, comp)
+	comp, cmd, ok := f(c, m.paneComp(k))
 	if !ok {
 		return m, nil
 	}
@@ -258,6 +295,55 @@ func (m model) paneMouse(k container, f func(*ctx, component) (component, tea.Cm
 		m.main = m.main.replaceTop(comp)
 	}
 	return m, tea.Batch(cmd, m.apply(c))
+}
+
+func (m model) paneComp(k container) component {
+	switch k {
+	case leftSidebar:
+		return m.left.current()
+	case rightSidebar:
+		return m.right.current()
+	case sessionDock:
+		return m.dock
+	}
+	return m.main.top()
+}
+
+// textAreaOf is the pane's text area in the last frame.
+func (m model) textAreaOf(k container) *hitArea {
+	if m.hits == nil {
+		return nil
+	}
+	for _, a := range m.hits.areas {
+		if a.region == k.region() && a.text != nil {
+			return a
+		}
+	}
+	return nil
+}
+
+// selectTo extends the drag's selection to the point under ms, anchoring it
+// at the press on the first move.
+func (m model) selectTo(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	a := m.textAreaOf(m.sel.k)
+	if a == nil {
+		return m, nil
+	}
+	line, col, _ := a.textAt(ms.X, ms.Y)
+	first := !m.sel.moved
+	m.sel.moved = true
+	s := m.sel
+	return m.paneMouse(s.k, func(c *ctx, comp component) (component, tea.Cmd, bool) {
+		ts, ok := comp.(textSelector)
+		if !ok {
+			return comp, nil, false
+		}
+		if first {
+			comp = ts.selectText(c, s.line, s.col, false)
+			ts = comp.(textSelector)
+		}
+		return ts.selectText(c, line, col, true), nil, true
+	})
 }
 
 func (m model) popupMouse(f func(*ctx, popup) (popup, tea.Cmd, bool)) (tea.Model, tea.Cmd) {
@@ -312,6 +398,8 @@ func (m model) mouseMotion(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	switch {
 	case m.drag == dragNone:
 		return m.hover(ms)
+	case m.drag == dragSelect:
+		return m.selectTo(ms)
 	case m.drag == dragTree && m.sidebarVisible():
 		m.left = m.left.setWidth(c, ms.X-screenMargin-1)
 	case m.drag == dragFiles && m.filesVisible():
@@ -320,6 +408,15 @@ func (m model) mouseMotion(ms tea.Mouse) (tea.Model, tea.Cmd) {
 		m.drag = dragNone
 	}
 	return m, nil
+}
+
+func (m model) releasedAway(ms tea.Mouse) bool {
+	a := m.textAreaOf(m.sel.k)
+	if a == nil {
+		return false
+	}
+	line, col, _ := a.textAt(ms.X, ms.Y)
+	return line != m.sel.line || col != m.sel.col
 }
 
 func (m model) hover(ms tea.Mouse) (tea.Model, tea.Cmd) {
@@ -335,8 +432,28 @@ func (m model) hover(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Motion is throttled, so the last motion before a release may be dropped.
+// Motion is throttled, so the last motion before a release may be dropped: a
+// release away from the press is a drag even when no motion arrived.
 func (m model) mouseRelease(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	if m.drag == dragSelect {
+		m.drag = dragNone
+		if m.sel.moved || m.releasedAway(ms) {
+			return m.selectTo(ms)
+		}
+		s := m.sel
+		m = m.endVisualIn(s.k) // a click ends visual mode, then acts as a click
+		if !s.hit {
+			return m, nil
+		}
+		return m.paneMouse(s.k, func(c *ctx, comp component) (component, tea.Cmd, bool) {
+			cl, ok := comp.(clicker)
+			if !ok {
+				return comp, nil, false
+			}
+			comp, cmd := cl.click(c, s.target, s.focused)
+			return comp, cmd, true
+		})
+	}
 	if m.drag != dragNone {
 		next, _ := m.mouseMotion(ms)
 		m = next.(model)

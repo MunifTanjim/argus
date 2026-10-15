@@ -178,16 +178,6 @@ func TestPaintReversesSelectedCells(t *testing.T) {
 			t.Errorf("cell %d reversed = %v, want %v", x, rev, want)
 		}
 	}
-	l := lineBuffer(out[0], 40).Line(0)
-	// Cell 4 is the cursor; verify it has bold and underline
-	if c := l.At(4); c != nil {
-		if c.Style.Attrs&uv.AttrBold == 0 {
-			t.Error("cursor cell should have bold")
-		}
-		if c.Style.Underline != uv.UnderlineSingle {
-			t.Error("cursor cell should have single underline")
-		}
-	}
 
 	// Verify visible width is not reduced
 	if ansi.StringWidth(out[0]) < ansi.StringWidth(s.lines[0]) {

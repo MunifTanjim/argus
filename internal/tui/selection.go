@@ -341,8 +341,8 @@ func (s textSurface) lineSpan(sel *selection, a, b absPos, line int) (c0, c1 int
 }
 
 // paint reverses the selected cells of the visible lines vis, which are
-// lines[scroll:scroll+len(vis)], and underlines the cursor cell. vis itself is
-// left as it was.
+// lines[scroll:scroll+len(vis)]. vis itself is left as it was. The terminal
+// cursor marks the selection's cursor (see visualCursor).
 func (s textSurface) paint(sel *selection, vis []string) []string {
 	out := make([]string, len(vis))
 	copy(out, vis)
@@ -350,7 +350,6 @@ func (s textSurface) paint(sel *selection, vis []string) []string {
 	if !ok {
 		return out
 	}
-	cur, curOK := s.abs(sel.cursor)
 	for i := range out {
 		line := s.scroll + i
 		if line < a.line || line > b.line {
@@ -368,10 +367,6 @@ func (s textSurface) paint(sel *selection, vis []string) []string {
 		for x := c0; x < c1; x++ {
 			if c := l.At(s.x0 + x); c != nil {
 				c.Style.Attrs |= uv.AttrReverse
-				if curOK && line == cur.line && x == cur.col {
-					c.Style.Attrs |= uv.AttrBold
-					c.Style.Underline = uv.UnderlineSingle
-				}
 			}
 		}
 		rendered := buf.Render()
