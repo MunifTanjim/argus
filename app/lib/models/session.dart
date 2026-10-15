@@ -35,6 +35,7 @@ class Summary {
   final int tokens;
   final String? task;
   final String? lastActivity;
+  final String? effort;
 
   const Summary({
     this.modelName,
@@ -44,6 +45,7 @@ class Summary {
     this.tokens = 0,
     this.task,
     this.lastActivity,
+    this.effort,
   });
 
   factory Summary.fromJson(Map<String, dynamic> j) => Summary(
@@ -54,6 +56,7 @@ class Summary {
         tokens: (j['tokens'] as num?)?.toInt() ?? 0,
         task: j['task'] as String?,
         lastActivity: j['last_activity'] as String?,
+        effort: j['effort'] as String?,
       );
 }
 
@@ -173,6 +176,9 @@ class Session {
   final String? transcriptPath;
   final SessionStatus status;
   final String statusLabel;
+
+  /// When [status] last changed; null from a node too old to say.
+  final DateTime? statusSince;
   final SessionSource source;
   final FrontendKind frontend;
   final InputMode inputMode;
@@ -195,6 +201,7 @@ class Session {
     required this.tmux,
     required this.status,
     this.statusLabel = '',
+    this.statusSince,
     required this.source,
     this.frontend = FrontendKind.unknown,
     this.inputMode = InputMode.none,
@@ -223,6 +230,7 @@ class Session {
         transcriptPath: j['transcript_path'] as String?,
         status: statusFromWire(j['status'] as String?),
         statusLabel: j['status_label'] as String? ?? '',
+        statusSince: DateTime.tryParse(j['status_since'] as String? ?? ''),
         source: sourceFromWire(j['source'] as String?),
         frontend: frontendFromWire(j['frontend'] as String?),
         inputMode: inputModeFromWire(j['input_mode'] as String?),
@@ -262,6 +270,12 @@ class Session {
   /// Mirrors the backend session.AcceptsInput(): true for tmux (pane) and for
   /// API agents like opencode, false for decision-only sessions.
   bool get acceptsInput => inputMode != InputMode.none;
+
+  /// Mirrors session.ReadyForPrompt(), and is false while starting.
+  bool get promptReady =>
+      status != SessionStatus.starting &&
+      status != SessionStatus.working &&
+      (interaction == null || interaction!.kind == InteractionKind.idle);
 
   /// Whether a paneless API session can be torn down (dismissed). Kill is
   /// unconditional, so status and interaction do not gate it.
