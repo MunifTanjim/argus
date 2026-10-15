@@ -191,6 +191,8 @@ type Session struct {
 	Status Status `json:"status"`
 	// StatusLabel is the server-rendered display word for Status (set on emit).
 	StatusLabel string `json:"status_label,omitempty"`
+	// StatusSince is when Status last changed (RFC 3339, UTC).
+	StatusSince string `json:"status_since,omitempty"`
 	Source      Source `json:"source"`
 
 	// Frontend classifies the session's UI host (tmux/vscode/external).

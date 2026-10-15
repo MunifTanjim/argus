@@ -16,6 +16,19 @@ import (
 // the rescan that hook triggers would otherwise rediscover the pane immediately.
 const defaultEndedGrace = 5 * time.Second
 
+// now is the registry's clock. A var so tests can fix it.
+var now = time.Now
+
+// setStatus sets s.Status and stamps StatusSince when the status changes (or
+// was never stamped). Caller holds r.mu.
+func setStatus(s *session.Session, st session.Status) {
+	if s.Status == st && s.StatusSince != "" {
+		return
+	}
+	s.Status = st
+	s.StatusSince = now().UTC().Format(time.RFC3339)
+}
+
 // EventType describes a change to the registry.
 type EventType string
 
@@ -205,10 +218,10 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			s = &session.Session{
 				ID:     id,
 				Agent:  agent,
-				Status: session.StatusDiscovered,
 				Source: session.SourceDiscovered,
 			}
 			r.sessions[id] = s
+			setStatus(s, session.StatusDiscovered)
 			created = true
 		}
 
@@ -376,12 +389,12 @@ func applyStatusHint(s *session.Session, hint session.Status) {
 			return // no pane = can't type into it, leave discovered
 		}
 		if s.AgentSessionID == "" {
-			s.Status = session.StatusStarting // pane still at a startup gate, not ready
+			setStatus(s, session.StatusStarting) // pane still at a startup gate, not ready
 			return
 		}
 		hint = session.StatusIdle // has a session id but no transcript yet: ready for the first prompt
 	}
-	s.Status = hint
+	setStatus(s, hint)
 	if hint == session.StatusIdle && s.Interaction == nil {
 		s.Interaction = &session.Interaction{Kind: session.InteractionIdle}
 	}
@@ -408,7 +421,7 @@ func (r *Registry) SurfaceIdle(id string, expectKind session.InteractionKind) bo
 	if cur == session.InteractionIdle || cur != expectKind {
 		return false // already idle, or state changed since the caller observed it
 	}
-	s.Status = session.StatusIdle
+	setStatus(s, session.StatusIdle)
 	s.Interaction = &session.Interaction{Kind: session.InteractionIdle}
 	r.publish(Event{Type: EventUpdated, Session: *s})
 	return true
@@ -459,7 +472,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	if s == nil {
 		return
 	}
-	s.Status = finalStatus
+	setStatus(s, finalStatus)
 	removed := *s
 	delete(r.sessions, id)
 	r.index.clear(paneK, s.AgentSessionID)
@@ -494,7 +507,7 @@ func (r *Registry) ClearPendingDecision(id string) {
 func (r *Registry) clearInteractionLocked(s *session.Session) {
 	s.Interaction = nil
 	if s.Status == session.StatusAwaitingInput {
-		s.Status = session.StatusWorking
+		setStatus(s, session.StatusWorking)
 	}
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
@@ -627,12 +640,13 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		if u.Input == session.InputAPI && u.AgentSessionID != "" {
 			id = AgentSessionKey(u.Agent, u.AgentSessionID)
 		}
-		s = &session.Session{ID: id, Agent: u.Agent, Status: session.StatusIdle, Source: session.SourceHooked}
+		s = &session.Session{ID: id, Agent: u.Agent, Source: session.SourceHooked}
 		if u.PaneID != "" {
 			s.Tmux.Server = u.Server
 			s.Tmux.PaneID = u.PaneID
 		}
 		r.sessions[id] = s
+		setStatus(s, session.StatusIdle)
 		if pKey != "" {
 			r.index.setPane(pKey, id)
 		}
@@ -685,7 +699,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	r.clearEnded(pKey)
 	r.clearEnded(u.AgentSessionID)
 	if u.Status != "" {
-		s.Status = u.Status
+		setStatus(s, u.Status)
 		// A status decision (re)sets the pending interaction, but a bare Notification
 		// must not clobber a richer one (see mergeInteraction). Stop opts out via
 		// ReplaceInteraction.
