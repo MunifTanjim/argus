@@ -403,3 +403,23 @@ func TestCtrlArrowsMoveByWordInTheSpawnPrompt(t *testing.T) {
 		t.Fatalf("<C-Left> then X: %q, want %q", got, "foo Xbar")
 	}
 }
+
+func TestTranscriptAndInputSpanAWideTerminal(t *testing.T) {
+	m := sessionModel(nil)
+	m.width = 260
+	if got, want := m.containerWidth(), m.bodyWidth(); got != want {
+		t.Fatalf("content column = %d, want the full body width %d", got, want)
+	}
+	// The input's bottom rule is the view's last rule; it spans the content column.
+	lines := strings.Split(ansi.Strip(paneView(m)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		if j := strings.Index(l, "──"); j >= 0 {
+			if w := lipgloss.Width(strings.TrimRight(l, " ")) - lipgloss.Width(l[:j]); w != m.bodyWidth() {
+				t.Fatalf("input rule spans %d columns, want %d", w, m.bodyWidth())
+			}
+			return
+		}
+	}
+	t.Fatal("no rule found")
+}

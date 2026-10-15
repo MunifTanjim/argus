@@ -71,20 +71,13 @@ func maxLineWidth(s string) int {
 	return w
 }
 
-func TestDetailBodyCentersOnWideTerminal(t *testing.T) {
+func TestDetailBodySpansAWideTerminal(t *testing.T) {
 	m := detailTestModel(traceFixture("Opus 4.8", transcript.Entry{Kind: transcript.EntryText, Text: "hi"}))
-	m.c.m.width = 200 // > maxContentWidth (160) → centerBlock adds a left gutter
+	m.c.m.width = 200
 	m.c.m.height = 40
-	m.c.m.viewer = true // centering applies only to the bare full-screen viewer
-	out := m.detailBody()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if !strings.HasPrefix(line, " ") {
-			t.Errorf("expected left gutter (centered) on wide terminal: %q", line)
-			break
-		}
+	m.c.m.viewer = true // the bare full-screen viewer
+	if g := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()); g != 0 {
+		t.Fatalf("the detail sits in a %d-column gutter, want the full width", g)
 	}
 }
 
