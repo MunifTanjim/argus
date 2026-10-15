@@ -69,12 +69,26 @@ type hitZone struct {
 	target hitTarget
 }
 
+// textHit maps screen cells to a pane's line buffer: buffer line
+// scroll+(y-top), buffer column x-left. Lines [scroll, end) show.
+type textHit struct{ top, left, scroll, end int }
+
 // hitArea rows and zones are relative to rect.Min.
 type hitArea struct {
 	region region
 	rect   uv.Rectangle
 	rows   []rowSpan
 	zones  []hitZone
+	text   *textHit
+}
+
+// textAt is the buffer point under a screen cell, unclamped so a drag past
+// the edge keeps going; inside reports whether it is on a shown text line.
+func (a *hitArea) textAt(x, y int) (line, col int, inside bool) {
+	t := a.text
+	line = t.scroll + y - a.rect.Min.Y - t.top
+	col = x - a.rect.Min.X - t.left
+	return line, col, line >= t.scroll && line < t.end
 }
 
 func (a *hitArea) target(x, y int) (hitTarget, bool) {
@@ -160,6 +174,12 @@ func (c *ctx) hitRows(spans ...rowSpan) {
 func (c *ctx) hitZone(r uv.Rectangle, t hitTarget) {
 	if c.area != nil {
 		c.area.zones = append(c.area.zones, hitZone{rect: r.Add(image.Pt(c.dx, c.dy)), target: t})
+	}
+}
+
+func (c *ctx) hitText(top, left, scroll, end int) {
+	if c.area != nil {
+		c.area.text = &textHit{top: top + c.dy, left: left + c.dx, scroll: scroll, end: end}
 	}
 }
 

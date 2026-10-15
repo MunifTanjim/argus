@@ -654,11 +654,13 @@ func (m tview) detailBody() string {
 	ch, overflow := m.detailBodyHeight(rows, len(lines))
 	if !overflow {
 		m.hitItems(f, first, len(lines), rows, 0, len(lines))
+		m.hitDetailText(rows, 0, len(lines))
 		return m.c.m.center(prefix+strings.Join(m.paintVisual(lines), "\n"), m.c.m.containerWidth())
 	}
 	scroll := max(0, min(f.scroll, len(lines)-ch))
 	end := scroll + ch
 	m.hitItems(f, first, len(lines), rows, scroll, end)
+	m.hitDetailText(rows, scroll, end)
 	body := strings.Join(m.paintVisual(lines[scroll:end]), "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
 	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())

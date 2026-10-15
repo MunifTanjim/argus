@@ -16,9 +16,15 @@ func withMouse(m model) model {
 	return m
 }
 
-func click(m model, x, y int) (model, tea.Cmd) {
+func pressAt(m model, x, y int) (model, tea.Cmd) {
 	m.View()
 	return upd(m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+func click(m model, x, y int) (model, tea.Cmd) {
+	m, cmd := pressAt(m, x, y)
+	m, cmd2 := upd(m, tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
+	return m, tea.Batch(cmd, cmd2)
 }
 
 func wheelAt(m model, x, y, d int) (model, tea.Cmd) {
@@ -208,10 +214,13 @@ const dragRow = 10
 
 func glyphAt(m model, x int) string { return ansi.Cut(frameLines(m)[dragRow], x, x+1) }
 
-func drag(m model, from, to int) model {
-	m, _ = click(m, from, dragRow)
-	m, _ = upd(m, tea.MouseMotionMsg{X: to, Y: dragRow, Button: tea.MouseLeft})
-	m, _ = upd(m, tea.MouseReleaseMsg{X: to, Y: dragRow, Button: tea.MouseLeft})
+func drag(m model, from, to int) model { return dragXY(m, from, dragRow, to, dragRow) }
+
+// dragXY presses at (x0, y0), moves to (x1, y1) and releases there.
+func dragXY(m model, x0, y0, x1, y1 int) model {
+	m, _ = pressAt(m, x0, y0)
+	m, _ = upd(m, tea.MouseMotionMsg{X: x1, Y: y1, Button: tea.MouseLeft})
+	m, _ = upd(m, tea.MouseReleaseMsg{X: x1, Y: y1, Button: tea.MouseLeft})
 	return m
 }
 
@@ -278,7 +287,7 @@ func TestReleaseAppliesFinalPosition(t *testing.T) {
 	m := withMouse(wideWorkspace())
 	w := m.projectsLeftW()
 	x := w + screenMargin + 1
-	m, _ = click(m, x, dragRow)
+	m, _ = pressAt(m, x, dragRow)
 	m, _ = upd(m, tea.MouseReleaseMsg{X: x + 4, Y: dragRow, Button: tea.MouseLeft})
 	if got := m.projectsLeftW(); got != w+4 {
 		t.Errorf("tree width = %d, want %d", got, w+4)
@@ -300,7 +309,7 @@ func TestDividerClickStartsDragAndReleaseEndsIt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m, _ := click(m, tc.x, dragRow)
+			m, _ := pressAt(m, tc.x, dragRow)
 			if m.drag != tc.want {
 				t.Fatalf("drag = %v, want %v", m.drag, tc.want)
 			}

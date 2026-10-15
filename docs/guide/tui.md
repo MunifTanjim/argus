@@ -50,8 +50,9 @@ line, move with the Vim motions `h` `j` `k` `l`, `w` `b` `e`, `0` `^` `$`, `gg`
 `G`, and the page keys, and press `y` to copy. `o` jumps to the other end of
 the selection, and `<Esc>` cancels.
 
-Copying sets the system clipboard, and the terminal's clipboard too, which
-works over SSH.
+With the mouse on, drag across text to select it, then press `y` or open the
+menu with a right click to copy. Copying sets the system clipboard, and the
+terminal's clipboard too, which works over SSH.
 
 To use your terminal's own selection instead, hold `Shift` (in most terminals)
 while you drag, or give the mouse back to the terminal: set `tui.mouse` to

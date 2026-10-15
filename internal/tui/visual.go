@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -387,6 +388,44 @@ func (m tview) dropStaleVisual() {
 	}
 }
 
+// hitDetailText records the detail body's text, which sits under the prefix
+// and is centered after it is drawn.
+func (m tview) hitDetailText(rows, scroll, end int) {
+	m.c.below(rows).hitText(0, centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()), scroll, end)
+}
+
+// textSelector is a component whose text the mouse selects. line and col are
+// buffer coordinates from textAt.
+type textSelector interface {
+	selectText(c *ctx, line, col int, extend bool) component
+	visualActive() bool
+	endVisual(c *ctx) component
+}
+
+// selectText takes a point past the last line as the end of the text, and one
+// above the first as its start.
+func (t transcriptComp) selectText(c *ctx, line, col int, extend bool) component {
+	v := t.bind(c)
+	vt, ok := v.visualTarget()
+	if !ok {
+		return t
+	}
+	a := absPos{line: line, col: col - vt.s.x0}
+	switch n := len(vt.s.lines); {
+	case line >= n:
+		a = absPos{line: n - 1, col: math.MaxInt}
+	case line < 0:
+		a = absPos{}
+	}
+	v.setVisualCursor(vt, a, extend)
+	return t
+}
+
+func (t transcriptComp) endVisual(c *ctx) component {
+	t.bind(c).clearVisual()
+	return t
+}
+
 func (m tview) clearVisual() {
 	m.transcript.visual = nil
 	if f := m.topFrame(); f != nil {
@@ -405,6 +444,21 @@ func (m tview) visualModeLine() string {
 		mode = "-- VISUAL LINE --"
 	}
 	return StyleAccentBold.Render(mode) + "  " + m.c.m.footer(visualKeys.Left, visualKeys.Swap, visualKeys.Copy, visualKeys.Back)
+}
+
+// visualCursor is the buffer line and column of the selection's cursor, for
+// the terminal cursor to sit on.
+func (m tview) visualCursor() (line, col int, ok bool) {
+	sel := m.activeSelection()
+	if sel == nil {
+		return 0, 0, false
+	}
+	vt, ok := m.visualTarget()
+	if !ok {
+		return 0, 0, false
+	}
+	a, ok := vt.s.abs(sel.cursor)
+	return a.line, vt.s.x0 + a.col, ok
 }
 
 // paintVisual draws the selection on the visible lines vis.

@@ -763,6 +763,7 @@ func (m tview) transcriptBody() string {
 	}
 	end := min(len(lines), scroll+h)
 	hitStarts(m.c, len(first), func(i int) (int, int) { return itemSpan(i, first, len(lines)) }, scroll, end)
+	m.c.hitText(0, 0, scroll, end)
 	m.hitFoldMarkers(lines, m.displayRows(), first, scroll, end)
 	b.WriteString(strings.Join(m.paintVisual(lines[scroll:end]), "\n"))
 	return b.String()
