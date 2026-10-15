@@ -473,3 +473,19 @@ func TestSweepIdleKeepsActiveThread(t *testing.T) {
 		t.Fatal("sweep removed a thread whose turn is running")
 	}
 }
+
+func TestThreadEffortFollowsSettings(t *testing.T) {
+	th := threadJSON("t1", "idle")
+	th["reasoningEffort"] = "high"
+	st := &daemonState{loaded: []string{"t1"}, threads: map[string]map[string]any{"t1": th}}
+	_, f, reg := startDiscoverer(t, st)
+	waitSession(t, reg, "t1", func(s session.Session) bool { return s.Summary != nil && s.Summary.Effort == "high" })
+
+	f.push("thread/settings/updated", map[string]any{
+		"threadId":       "t1",
+		"threadSettings": map[string]any{"model": "gpt-6-sol", "effort": "low"},
+	})
+	waitSession(t, reg, "t1", func(s session.Session) bool {
+		return s.Summary != nil && s.Summary.Effort == "low" && s.Summary.ModelName == "gpt-6-sol"
+	})
+}
