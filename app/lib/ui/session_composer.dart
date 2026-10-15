@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
@@ -96,6 +98,16 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   Timer? _tick;
   bool _collapsed = false;
 
+  /// The panel's height cap set by dragging the status line; null until then.
+  double? _panelHeight;
+
+  /// The height of the panel's fixed parts, as last laid out.
+  double _panelMin = 0;
+  final _panelKey = GlobalKey();
+
+  _RenderPanelBox? get _panelBox =>
+      _panelKey.currentContext?.findRenderObject() as _RenderPanelBox?;
+
   String get _sid => widget.session.id;
 
   @override
@@ -115,6 +127,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (_promptKey(old.session.interaction) !=
         _promptKey(widget.session.interaction)) {
       _collapsed = false;
+      _panelHeight = null;
     }
     if (old.session.id != _sid) {
       _text.text = ref.read(promptDraftsProvider.notifier).get(_sid);
@@ -174,12 +187,35 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     setState(() {});
   }
 
+  // Dragging the status line resizes the panel: up to the full height, down
+  // to its fixed parts, and past half of those it collapses. A drag past the
+  // top or past short content reverses at once.
+  void _dragStart(DragStartDetails _) {
+    _panelHeight = _collapsed ? 0 : _panelBox?.size.height ?? 0;
+  }
+
+  void _dragUpdate(DragUpdateDetails d) {
+    var h = _panelHeight ?? 0;
+    final box = _panelBox;
+    if (box != null) {
+      _panelMin = box.minHeight;
+      h = math.min(h, box.size.height);
+    }
+    h = math.max(0.0, h - d.delta.dy);
+    setState(() {
+      _collapsed = h <= _panelMin / 2;
+      _panelHeight = h;
+    });
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, box) => _build(box.maxHeight));
+
+  Widget _build(double maxHeight) {
     final s = widget.session;
     final notice = widget.inputNotice;
     final pending = _pending(s.interaction);
-    final mq = MediaQuery.of(context);
     final showPanel = pending && notice == null;
     final Widget body;
     if (notice != null) {
@@ -188,9 +224,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       body = _collapsed
           ? const SizedBox.shrink()
           : Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                    maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.6),
+              child: _PanelBox(
+                key: _panelKey,
+                cap: _panelHeight ?? maxHeight * 0.6,
                 child: InteractionPanel(
                     key: ValueKey(_promptKey(s.interaction)), session: s),
               ),
@@ -198,24 +234,37 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     } else {
       body = _input(s);
     }
+    final status = _rule(
+      label: composerStatus(s, DateTime.now()),
+      trailing: showPanel
+          ? IconButton(
+              tooltip: _collapsed ? 'Expand' : 'Collapse',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
+              onPressed: () => setState(() {
+                _collapsed = !_collapsed;
+                if ((_panelHeight ?? _panelMin) <= _panelMin / 2) {
+                  _panelHeight = null;
+                }
+              }),
+            )
+          : null,
+    );
     return Material(
       color: AppColors.canvas,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _rule(
-            label: composerStatus(s, DateTime.now()),
-            trailing: showPanel
-                ? IconButton(
-                    tooltip: _collapsed ? 'Expand' : 'Collapse',
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(
-                        _collapsed ? Icons.expand_less : Icons.expand_more),
-                    onPressed: () => setState(() => _collapsed = !_collapsed),
-                  )
-                : null,
-          ),
+          if (showPanel)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragStart: _dragStart,
+              onVerticalDragUpdate: _dragUpdate,
+              child: status,
+            )
+          else
+            status,
           body,
           _rule(label: modelLine(s.summary)),
         ],
@@ -311,5 +360,49 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         const SizedBox(width: 12, child: line),
       ]),
     );
+  }
+}
+
+/// Lays the panel out at most [cap] tall but never shorter than its minimum
+/// intrinsic height, so its fixed parts always fit.
+class _PanelBox extends SingleChildRenderObjectWidget {
+  const _PanelBox({super.key, required this.cap, required Widget super.child});
+
+  final double cap;
+
+  @override
+  _RenderPanelBox createRenderObject(BuildContext context) =>
+      _RenderPanelBox(cap);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderPanelBox r) =>
+      r.cap = cap;
+}
+
+class _RenderPanelBox extends RenderProxyBox {
+  _RenderPanelBox(this._cap);
+
+  double _cap;
+  set cap(double v) {
+    if (v == _cap) return;
+    _cap = v;
+    markNeedsLayout();
+  }
+
+  double minHeight = 0;
+
+  BoxConstraints _capped(BoxConstraints c, double min) =>
+      c.copyWith(maxHeight: c.constrainHeight(math.max(_cap, min)));
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) => constraints.constrain(
+      child!.getDryLayout(_capped(
+          constraints, child!.getMinIntrinsicHeight(constraints.maxWidth))));
+
+  @override
+  void performLayout() {
+    minHeight = child!.getMinIntrinsicHeight(constraints.maxWidth);
+    child!.layout(_capped(constraints, minHeight), parentUsesSize: true);
+    size = constraints.constrain(child!.size);
   }
 }
