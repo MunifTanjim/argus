@@ -96,9 +96,15 @@ func (m model) dockSummaryLine(width int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, " ", hint)
 }
 
-// dockContentWidth is the dock body width after horizontal padding (contentPadX),
-// keeping the dock body aligned with the transcript cards above.
-func (m model) dockContentWidth() int { return max(1, m.containerWidth()-2*contentPadX) }
+func (m model) dockWidth() int { return containerWidthOf(m.layout().dockW) }
+
+// dockBodyIndent aligns the dock body with the transcript text above.
+func (m model) dockBodyIndent() int {
+	l := m.layout()
+	return l.x + detailGutter - l.dockX
+}
+
+func (m model) dockContentWidth() int { return max(1, m.containerWidth()-detailGutter-contentPadX) }
 
 // dockWidths splits the dock into an option-list column and a preview column.
 // side is false (single full-width column) when there's no preview or the
@@ -303,5 +309,5 @@ func startingNotice(m model) string {
 		"Session is starting or waiting at a startup prompt.",
 		"Press " + m.liveScreenKey() + " to open the live screen and continue.",
 	}
-	return m.center(dimStyle.Render(strings.Join(lines, "\n")), m.containerWidth())
+	return m.transcriptText(dimStyle.Render(strings.Join(lines, "\n")))
 }

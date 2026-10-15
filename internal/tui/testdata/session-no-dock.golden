@@ -1,19 +1,17 @@
-  󰚩 Argus                            ·   repo · fix-login ·  main  [%1] idle                                       
+  󰚩 Argus                            ·  repo · fix-login ·  main  [%1] idle                                        
 
-  Projects  Sessions                 │ ▌                                                                              
-                                     │ ▌    You                                                            14:31:00  
-▌ 󰋜 Home                         ○ 3 │ ▌   fix the bug                                                                
-  ▾  home                           │ ▌                                                                              
+  Projects  Sessions                 │▌                                                                               
+                                     │▌    You                                                             14:31:00  
+▌ 󰋜 Home                         ○ 3 │▌   fix the bug                                                                 
+  ▾  home                           │▌                                                                               
     ▾ argus                          │
-      󰉋 repo  main               ○ 2 │      1
+      󰉋 repo  main               ○ 2 │     1
        repo-feat  feature       ○ 1 │
-                                     │   󰆂 I'll check the handler.
+                                     │  󰆂 I'll check the handler.
                                      │
-                                     │     󰯠 1
+                                     │    󰯠 1
                                      │
-                                     │   ── Opus 4.8 ·  12.3k ·  1m 2s ─────────────────────────────────────────────
-                                     │
-                                     │
+                                     │  ── Opus 4.8 ·  12.3k ·  1m 2s ──────────────────────────────────────────────
                                      │
                                      │
                                      │
@@ -22,9 +20,11 @@
                                      │
                                      │
                                      │
-                                     │ ─────────────────────────────────────────────────────────────────────────────────
-                                     │    Respond in your terminal
-                                     │   argus can't send input to this session
-                                     │ ─────────────────────────────────────────────────────────────────────────────────
+                                     │
+                                     │
+                                     │ ────────────────────────────────────────────────────────────────────────────────
+                                     │   Respond in your terminal
+                                     │  argus can't send input to this session
+                                     │ ────────────────────────────────────────────────────────────────────────────────
 
                                     }/{ prompt · h/l fold · enter detail · gg/G ends

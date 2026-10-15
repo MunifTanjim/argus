@@ -261,7 +261,7 @@ func TestInputHasNoLineHighlight(t *testing.T) {
 	if got := ansi.Strip(lines[0]); !strings.HasPrefix(got, promptMarker+"hi") {
 		t.Fatalf("first input line = %q, want it to start with %q", got, promptMarker+"hi")
 	}
-	if w, want := lipgloss.Width(lines[0]), m.containerWidth(); w != want {
+	if w, want := lipgloss.Width(lines[0]), m.dockWidth(); w != want {
 		t.Fatalf("input line is %d wide, want the region's full %d", w, want)
 	}
 	st := m.dock.reply.Styles()
@@ -314,8 +314,8 @@ func TestTabHintSitsAtTheRightOfTheEmptyInput(t *testing.T) {
 		t.Fatalf("empty input is %d lines, want 1", len(lines))
 	}
 	got := ansi.Strip(lines[0])
-	if !strings.HasPrefix(got, promptMarker) || !strings.HasSuffix(got, "⇥ Tab to type") || lipgloss.Width(got) != m.containerWidth() {
-		t.Fatalf("empty input = %q (width %d), want the marker left and the hint at the right edge of %d", got, lipgloss.Width(got), m.containerWidth())
+	if !strings.HasPrefix(got, promptMarker) || !strings.HasSuffix(got, "⇥ Tab to type") || lipgloss.Width(got) != m.dockWidth() {
+		t.Fatalf("empty input = %q (width %d), want the marker left and the hint at the right edge of %d", got, lipgloss.Width(got), m.dockWidth())
 	}
 }
 
@@ -415,8 +415,8 @@ func TestTranscriptAndInputSpanAWideTerminal(t *testing.T) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := lines[i]
 		if j := strings.Index(l, "──"); j >= 0 {
-			if w := lipgloss.Width(strings.TrimRight(l, " ")) - lipgloss.Width(l[:j]); w != m.bodyWidth() {
-				t.Fatalf("input rule spans %d columns, want %d", w, m.bodyWidth())
+			if w := lipgloss.Width(strings.TrimRight(l, " ")) - lipgloss.Width(l[:j]); w != m.dockWidth() {
+				t.Fatalf("input rule spans %d columns, want %d", w, m.dockWidth())
 			}
 			return
 		}

@@ -73,7 +73,7 @@ func withWordMotion(ta textarea.Model) textarea.Model {
 // textarea shares its viewport by pointer, so width must be set in the update
 // path, never during render, or a render-time resize would corrupt the offset.
 func (d *dockComp) sizeIdleReply(c *ctx) {
-	d.reply.SetWidth(max(1, c.m.containerWidth()-lipgloss.Width(promptMarker)))
+	d.reply.SetWidth(max(1, c.m.dockWidth()-lipgloss.Width(promptMarker)))
 }
 
 // -- Interaction / question accessors -----------------------------------------
@@ -437,7 +437,7 @@ func (d dockComp) promptBody(c *ctx) string {
 
 // promptLines renders the dock body at the container width.
 func (d dockComp) promptLines(c *ctx) ([]string, int, int) {
-	return d.promptLinesWidth(c, c.m.containerWidth())
+	return d.promptLinesWidth(c, c.m.dockWidth())
 }
 
 // promptLinesWidth renders the dock body wrapped to width and returns the anchor
@@ -698,7 +698,7 @@ func (d dockComp) composeLines(c *ctx) []string {
 	if s := c.m.sessions[c.m.liveSessionID()]; !s.AcceptsInput() {
 		return respondElsewhereLines(s)
 	}
-	width := c.m.containerWidth()
+	width := c.m.dockWidth()
 	v := strings.TrimRight(d.reply.Value(), "\n")
 	if strings.TrimSpace(v) == "" {
 		return []string{spaceBetween(userStyle.Render(promptGlyph), dimStyle.Render("⇥ Tab to type"), width)}

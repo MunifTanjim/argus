@@ -647,7 +647,7 @@ func (m tview) detailBody() string {
 	cw := m.c.m.transcriptWidth()
 	f := m.topFrame()
 	if f == nil {
-		return m.c.m.center(dimStyle.Render("(nothing to show)"), m.c.m.containerWidth())
+		return m.c.m.transcriptText(dimStyle.Render("(nothing to show)"))
 	}
 	lines, first := m.frameLines(f, cw)
 	prefix, rows := m.detailPrefix(f)

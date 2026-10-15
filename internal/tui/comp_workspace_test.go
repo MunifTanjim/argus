@@ -362,9 +362,9 @@ func TestTopBarAlignsTheLiveTranscript(t *testing.T) {
 	}
 	m = withEntries(m, sampleEntries())
 	divider, marker := paneCell(t, m, "│"), paneCell(t, m, "▌")
-	if dot, header := barHeader(m); dot != divider || header != marker+contentPadX || !strings.Contains(topBar(m), "repo  [") {
+	if dot, header := barHeader(m); dot != divider || header != marker+detailGutter || !strings.Contains(topBar(m), "repo  [") {
 		t.Fatalf("dot at %d, header at %d; want %d over the divider and %d over the transcript: %q",
-			dot, header, divider, marker+contentPadX, topBar(m))
+			dot, header, divider, marker+detailGutter, topBar(m))
 	}
 	if strings.Contains(topBar(m), "repo  main") {
 		t.Errorf("a session should replace the workspace in the top bar: %q", topBar(m))
