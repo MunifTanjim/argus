@@ -39,19 +39,23 @@ func newQuestionAnswerInput() textinput.Model {
 	return ti
 }
 
+// promptMarker leads the input's first line, at the region's left edge.
+const (
+	promptGlyph  = "❯"
+	promptMarker = promptGlyph + " "
+)
+
 func newIdleReplyArea() textarea.Model {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	// No current-line highlight: the whole box reads as one input.
+	st := ta.Styles()
+	st.Focused.CursorLine = st.Focused.Text
+	ta.SetStyles(st)
 	// Grow with content and self-clamp the scroll offset. A fixed height scrolls
 	// the first line out of view when a newline is added before a re-size.
 	ta.DynamicHeight = true
-	// Mark only the first line, so a multi-line reply is not prefixed on every row.
-	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "> "
-		}
-		return "  "
-	})
 	// enter submits, so newlines come from shift+enter (Kitty keyboard protocol).
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
 	return ta
@@ -61,8 +65,7 @@ func newIdleReplyArea() textarea.Model {
 // textarea shares its viewport by pointer, so width must be set in the update
 // path, never during render, or a render-time resize would corrupt the offset.
 func (d *dockComp) sizeIdleReply(c *ctx) {
-	leftW, _, _ := d.dockWidths(c)
-	d.reply.SetWidth(leftW)
+	d.reply.SetWidth(max(1, c.m.containerWidth()-lipgloss.Width(promptMarker)))
 }
 
 // -- Interaction / question accessors -----------------------------------------
@@ -420,24 +423,17 @@ func (d dockComp) promptLines(c *ctx) ([]string, int, int) {
 // ctrlStart, the first line of the pinned control block: lines above ctrlStart
 // scroll, lines from ctrlStart on stay pinned at the dock bottom.
 func (d dockComp) promptLinesWidth(c *ctx, width int) ([]string, int, int) {
+	if c.m.composing() {
+		if s := c.m.sessions[c.m.liveSessionID()]; !s.AcceptsInput() {
+			return respondElsewhereLines(s), 0, 0
+		}
+		return d.idleLines()
+	}
 	ix := c.m.interaction()
-	if ix == nil {
-		return []string{dimStyle.Render("(no pending interaction)")}, 0, 0
-	}
-
-	// Paneless idle session with no API prompt path: argus has no way to deliver
-	// input, so show a static "respond elsewhere" indicator instead of a composer.
-	if s := c.m.sessions[c.m.liveSessionID()]; ix.Kind == session.InteractionIdle && !s.AcceptsInput() {
-		label := StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend))
-		sub := dimStyle.Render("argus can't send input to this session")
-		return strings.Split(label+"\n"+sub, "\n"), 0, 0
-	}
 
 	switch ix.Kind {
 	case session.InteractionQuestion:
 		return d.questionLines(c, ix, width)
-	case session.InteractionIdle:
-		return d.idleLines(c, ix, width)
 	default: // permission / plan
 		return d.decisionLines(c, ix, width)
 	}
@@ -651,22 +647,52 @@ func (d dockComp) rejectInput(ix *session.Interaction, width int) string {
 	ti := d.reason
 	ti.Placeholder = ph
 	ti.SetWidth(width)
-	return userStyle.Render("> ") + ti.View()
+	return userStyle.Render(promptMarker) + ti.View()
 }
 
-// idleLines renders the free-text composer for an idle interaction.
-func (d dockComp) idleLines(c *ctx, ix *session.Interaction, width int) ([]string, int, int) {
-	var b strings.Builder
-	b.WriteString(promptHeading(c.m.liveAgent(), ix) + "\n\n")
-	if body := interactionBody(*c.m, c.m.liveAgent(), ix, width); body != "" {
-		b.WriteString(body + "\n\n")
+// idleLines renders the focused input. It is sized in the update path
+// (sizeIdleReply): resizing here would mutate the shared viewport pointer and
+// scroll the next keypress.
+func (d dockComp) idleLines() ([]string, int, int) {
+	return markLines(strings.Split(d.reply.View(), "\n")), 0, 0
+}
+
+// markLines leads the first input line with the marker and indents the rest
+// to align with it.
+func markLines(lines []string) []string {
+	for i := range lines {
+		if i == 0 {
+			lines[i] = userStyle.Render(promptMarker) + lines[i]
+		} else {
+			lines[i] = strings.Repeat(" ", lipgloss.Width(promptMarker)) + lines[i]
+		}
 	}
-	anchor := strings.Count(b.String(), "\n")
-	// The composer is sized in the update path (sizeIdleReply): resizing here would
-	// mutate the shared viewport pointer and scroll the next keypress.
-	b.WriteString(d.reply.View())
-	// The message body above scrolls; the reply composer pins to the bottom.
-	return splitAnchorCtrl(&b, anchor, anchor)
+	return lines
+}
+
+// composeLines renders the unfocused input: the draft as typed, or a hint to
+// focus it when empty.
+func (d dockComp) composeLines(c *ctx) []string {
+	if s := c.m.sessions[c.m.liveSessionID()]; !s.AcceptsInput() {
+		return respondElsewhereLines(s)
+	}
+	width := c.m.containerWidth()
+	v := strings.TrimRight(d.reply.Value(), "\n")
+	if strings.TrimSpace(v) == "" {
+		return []string{spaceBetween(userStyle.Render(promptGlyph), dimStyle.Render("⇥ Tab to type"), width)}
+	}
+	// The text keeps the columns it has when focused.
+	wrapped := lipgloss.NewStyle().Width(max(1, width-lipgloss.Width(promptMarker))).Render(v)
+	return markLines(strings.Split(wrapped, "\n"))
+}
+
+// respondElsewhereLines stands in for the input when argus cannot send to the
+// session.
+func respondElsewhereLines(s session.Session) []string {
+	return []string{
+		StyleAccentBold.Render(Icon.System.Glyph + " " + respondElsewhereLabel(s.Frontend)),
+		dimStyle.Render("argus can't send input to this session"),
+	}
 }
 
 // promptTabs renders the header tab row (+ trailing Submit tab) for a
@@ -808,14 +834,12 @@ func promptHeading(agent string, ix *session.Interaction) string {
 			s += " · " + toolDisplayName(agent, ix.ToolName)
 		}
 		return StyleAccentBold.Render(Icon.SystemErr.Glyph + " " + s)
-	case session.InteractionPlan:
+	default: // plan
 		return StyleAccentBold.Render(Icon.Output.Glyph + " Plan approval")
-	default:
-		return StyleAccentBold.Render(Icon.System.Glyph + " Waiting for input")
 	}
 }
 
-// interactionBody renders the descriptive body for plan/permission/idle prompts.
+// interactionBody renders the descriptive body for plan/permission prompts.
 func interactionBody(m model, agent string, ix *session.Interaction, width int) string {
 	switch ix.Kind {
 	case session.InteractionPlan:
@@ -834,10 +858,6 @@ func interactionBody(m model, agent string, ix *session.Interaction, width int) 
 			parts = append(parts, hardWrap(m.renderToolBody(agent, it, width-2), width-2))
 		}
 		return strings.Join(parts, "\n")
-	default:
-		if ix.Message != "" {
-			return hardWrap(StyleSecondary.Render(ix.Message), width-2)
-		}
 	}
 	return ""
 }

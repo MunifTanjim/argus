@@ -243,7 +243,7 @@ var detailKeys = struct {
 var sessionKeys = struct {
 	FocusPrompt, FocusTranscript, Raw binding
 }{
-	FocusPrompt:     nm("focus prompt", "<Tab>", "answer"),
+	FocusPrompt:     nm("focus prompt", "<Tab>", "prompt"),
 	FocusTranscript: nm("focus transcript", "<Tab>", "read"),
 	Raw:             nm("open live-screen", "<C-t>", "raw"),
 }

@@ -252,6 +252,7 @@ func foldZoneCells(m model) map[int][2]int {
 // user, 1 head, 2 thinking, 3 foot, 4 text, 5 head, 6 tool, 7 foot, 8 turn end.
 func TestFoldMarkerClickTogglesEntry(t *testing.T) {
 	m := withFocus(withMouse(withVerbose(liveWith(sampleEntries()))), mainPane)
+	m.height = 40
 	lines := strings.Split(xansi.Strip(m.View().Content), "\n")
 	zones := foldZoneCells(m)
 	for _, i := range []int{1, 2, 3, 5, 6, 7} {

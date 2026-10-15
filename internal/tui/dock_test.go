@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -33,8 +34,8 @@ var dockPermission = &session.Interaction{
 
 func TestDockAppearsAndClosesWithTheInteraction(t *testing.T) {
 	m := sessionModel(nil)
-	if m.dockShown() {
-		t.Fatal("the dock shows with no interaction")
+	if !m.dockShown() {
+		t.Fatal("the region shows with no interaction")
 	}
 	m = withInteraction(m, dockPermission)
 	if !m.dockShown() || !strings.Contains(ansi.Strip(paneView(m)), "Allow Bash?") {
@@ -45,11 +46,8 @@ func TestDockAppearsAndClosesWithTheInteraction(t *testing.T) {
 		t.Fatalf("<Tab>: focus = %v, want the dock", m.focused)
 	}
 	m = withInteraction(m, nil)
-	if m.dockShown() || strings.Contains(ansi.Strip(paneView(m)), "Allow Bash?") {
-		t.Error("the dock should close with the interaction")
-	}
-	if m.focused != mainPane {
-		t.Errorf("the dock closed: focus = %v, want the main pane", m.focused)
+	if !m.dockShown() || strings.Contains(ansi.Strip(paneView(m)), "Allow Bash?") {
+		t.Error("the prompt should leave the region with the interaction")
 	}
 }
 
@@ -78,8 +76,8 @@ func TestDockTabTogglesFocus(t *testing.T) {
 		t.Fatalf("<Tab> in the dock: focus = %v view = %v, want the main pane", m.focused, viewOf(m))
 	}
 	m = pressKeys(sessionModel(nil), keyMsg("tab"))
-	if m.focused != mainPane {
-		t.Errorf("<Tab> with no interaction: focus = %v, want the main pane", m.focused)
+	if m.focused != sessionDock {
+		t.Errorf("<Tab> with no interaction: focus = %v, want the dock", m.focused)
 	}
 }
 
@@ -161,5 +159,162 @@ func TestDockFocusWaitsUnderTheLiveScreen(t *testing.T) {
 	assertView(t, "^]", m, viewSession)
 	if m.focused != sessionDock {
 		t.Errorf("back from the live screen: focus = %v, want the dock", m.focused)
+	}
+}
+
+func TestRegionShowsWithoutAnInteraction(t *testing.T) {
+	m := sessionModel(nil)
+	if !m.dockShown() {
+		t.Fatal("the region should show in a live session with nothing pending")
+	}
+	out := ansi.Strip(paneView(m))
+	if !strings.Contains(out, "Tab to type") {
+		t.Fatalf("the unfocused empty input should hint Tab:\n%s", out)
+	}
+	if _, h := m.sessionLayout(); h != 4 {
+		t.Fatalf("unfocused empty region height = %d, want 4 (margin, rule, input, rule)", h)
+	}
+}
+
+func TestRegionHasATopMargin(t *testing.T) {
+	m := sessionModel(nil)
+	lines := strings.Split(ansi.Strip(paneView(m)), "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "Tab to type") {
+			if i < 2 || strings.TrimSpace(lines[i-2]) != "" || !strings.Contains(lines[i-1], "──") {
+				t.Fatalf("want a blank line above the top rule:\n%s", strings.Join(lines[max(0, i-3):i+1], "\n"))
+			}
+			return
+		}
+	}
+	t.Fatal("input not found")
+}
+
+func TestTabFocusesTheInputAndTyping(t *testing.T) {
+	m := sessionModel(nil)
+	m = pressKeys(m, keyMsg("tab"))
+	if m.focused != sessionDock {
+		t.Fatalf("<Tab>: focus = %v, want the region", m.focused)
+	}
+	m = pressKeys(m, keyMsg("h"), keyMsg("i"))
+	if got := m.dock.reply.Value(); got != "hi" {
+		t.Fatalf("typed %q, want %q", got, "hi")
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if m.focused != mainPane {
+		t.Fatalf("<Esc>: focus = %v, want the transcript", m.focused)
+	}
+	if !strings.Contains(ansi.Strip(paneView(m)), promptMarker+"hi") {
+		t.Fatalf("the unfocused input should show the draft:\n%s", ansi.Strip(paneView(m)))
+	}
+}
+
+func TestRegionHidesWhenTheSessionIsGone(t *testing.T) {
+	m := sessionModel(nil)
+	m = pressKeys(m, keyMsg("tab"))
+	s := m.sessions["s1"]
+	params, _ := json.Marshal(registry.Event{Type: registry.EventRemoved, Session: s})
+	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodSessionEvent, Params: params}))
+	if m.dockShown() {
+		t.Fatal("the region should hide once the session is gone")
+	}
+	if m.focused != mainPane {
+		t.Fatalf("focus = %v, want the transcript", m.focused)
+	}
+}
+
+func TestPromptReplacesTheInputAndTheDraftReturns(t *testing.T) {
+	m := sessionModel(nil)
+	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"), keyMsg("esc"))
+	m = withInteraction(m, dockPermission)
+	out := ansi.Strip(paneView(m))
+	if !strings.Contains(out, "Allow Bash?") || strings.Contains(out, promptMarker+"hi") {
+		t.Fatalf("the prompt should take the input's place:\n%s", out)
+	}
+	m = withInteraction(m, nil)
+	if !strings.Contains(ansi.Strip(paneView(m)), promptMarker+"hi") {
+		t.Fatalf("the draft should return with the input:\n%s", ansi.Strip(paneView(m)))
+	}
+}
+
+func TestRegionSitsAtTheBottomUnderAShortTranscript(t *testing.T) {
+	m := sessionModel(nil)
+	m.height = 60
+	l := m.layout()
+	lines := strings.Split(ansi.Strip(m.mainColumn(&ctx{m: &m}, l)), "\n")
+	if len(lines) != m.sessionRows() {
+		t.Fatalf("main column is %d lines, want the full %d", len(lines), m.sessionRows())
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "──") {
+		t.Fatalf("the bottom rule should be the last line, got %q", last)
+	}
+}
+
+func TestInputHasNoLineHighlight(t *testing.T) {
+	m := sessionModel(nil)
+	m = pressKeys(m, keyMsg("tab"))
+	m = typeKeys(m, "hi")
+	if strings.Contains(ansi.Strip(m.dock.reply.View()), "❯") {
+		t.Fatalf("the marker should not be inside the textarea: %q", ansi.Strip(m.dock.reply.View()))
+	}
+	lines, _, _ := m.dock.idleLines()
+	if got := ansi.Strip(lines[0]); !strings.HasPrefix(got, promptMarker+"hi") {
+		t.Fatalf("first input line = %q, want it to start with %q", got, promptMarker+"hi")
+	}
+	if w, want := lipgloss.Width(lines[0]), m.containerWidth(); w != want {
+		t.Fatalf("input line is %d wide, want the region's full %d", w, want)
+	}
+	st := m.dock.reply.Styles()
+	if st.Focused.CursorLine.GetBackground() != st.Focused.Text.GetBackground() {
+		t.Fatal("the current line should not be highlighted")
+	}
+}
+
+func TestInputMarkerSitsAtTheRegionsLeftEdge(t *testing.T) {
+	ruleCol := func(view string) int {
+		for _, l := range strings.Split(ansi.Strip(view), "\n") {
+			if i := strings.Index(l, "──"); i >= 0 {
+				return lipgloss.Width(l[:i])
+			}
+		}
+		return -1
+	}
+	markCol := func(view string) int {
+		for _, l := range strings.Split(ansi.Strip(view), "\n") {
+			if i := strings.Index(l, "❯"); i >= 0 {
+				return lipgloss.Width(l[:i])
+			}
+		}
+		return -2
+	}
+	m := sessionModel(nil)
+	m.height = 30
+	m = pressKeys(m, keyMsg("tab"))
+	m = typeKeys(m, "hi")
+	region := func(m model) string {
+		l := m.layout()
+		out := m.mainColumn(&ctx{m: &m}, l)
+		lines := strings.Split(out, "\n")
+		_, h := m.sessionLayout()
+		return strings.Join(lines[len(lines)-h:], "\n")
+	}
+	if r := region(m); markCol(r) != ruleCol(r) {
+		t.Fatalf("focused: marker at column %d, rules at %d:\n%s", markCol(r), ruleCol(r), ansi.Strip(r))
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if r := region(m); markCol(r) != ruleCol(r) || !strings.Contains(ansi.Strip(r), promptMarker+"hi") {
+		t.Fatalf("unfocused: marker at column %d, rules at %d:\n%s", markCol(r), ruleCol(r), ansi.Strip(r))
+	}
+}
+
+func TestTabHintSitsAtTheRightOfTheEmptyInput(t *testing.T) {
+	m := sessionModel(nil)
+	lines := m.dock.composeLines(&ctx{m: &m})
+	if len(lines) != 1 {
+		t.Fatalf("empty input is %d lines, want 1", len(lines))
+	}
+	got := ansi.Strip(lines[0])
+	if !strings.HasPrefix(got, promptMarker) || !strings.HasSuffix(got, "⇥ Tab to type") || lipgloss.Width(got) != m.containerWidth() {
+		t.Fatalf("empty input = %q (width %d), want the marker left and the hint at the right edge of %d", got, lipgloss.Width(got), m.containerWidth())
 	}
 }

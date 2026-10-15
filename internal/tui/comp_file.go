@@ -44,7 +44,7 @@ func (f fileComp) commands(c *ctx) []binding {
 	if f.diff {
 		out = append(out, fk.NextFile, fk.PrevFile)
 	}
-	if c.m.inSession() && c.m.sessionInteraction() != nil {
+	if c.m.dockShown() {
 		out = append(out, sessionKeys.FocusPrompt)
 	}
 	return bindingsOf(out...)

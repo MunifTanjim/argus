@@ -92,7 +92,7 @@ func (t transcriptComp) commands(c *ctx) []binding {
 		return bindingsOf(transcriptKeys.Back, redactListKeys, transcriptKeys.Redact)
 	case v.redactActive():
 		out = append(out, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave)
-	case t.live && c.m.sessionInteraction() != nil:
+	case t.live && c.m.dockShown():
 		out = append(out, sessionKeys.Raw, sessionKeys.FocusPrompt)
 	case t.live:
 		out = append(out, sessionKeys.Raw)
@@ -227,7 +227,7 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.c.setFlash("")
 	switch {
 	case m.c.m.matches(msg, sessionKeys.FocusPrompt):
-		if m.c.m.sessionInteraction() != nil {
+		if m.c.m.dockShown() {
 			m.c.focusOn(sessionDock)
 		}
 		return nil

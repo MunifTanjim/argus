@@ -9,8 +9,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// A live transcript is a history region over a prompt dock that shows only
-// while an interaction is pending.
+// A live transcript is a history region over the session region: the input, or
+// the pending prompt in its place.
 
 // historyFocused reports whether the history region (not the dock) holds focus.
 func (m model) historyFocused() bool {
@@ -25,12 +25,11 @@ func (m tview) historyBody() string {
 	return m.transcriptBody()
 }
 
-// sessionLayout returns the history-region and dock heights. dockH is 0 with no
-// pending interaction; an unfocused dock collapses to rule + summary line
-// (dockH == 2); only the focused dock expands to the full option panel.
+// sessionLayout returns the history and region heights; the region expands to
+// its content only when focused.
 func (m model) sessionLayout() (historyH, dockH int) {
 	avail := m.sessionRows()
-	if m.sessionInteraction() == nil {
+	if !m.dockShown() {
 		return avail, 0
 	}
 	dockH = m.dock.dockHeight(&ctx{m: &m}, avail)
@@ -41,12 +40,20 @@ func (m model) sessionLayout() (historyH, dockH int) {
 // less the footer rows.
 func (m model) sessionRows() int { return max(1, m.bodyHeight()-footerRows) }
 
-// dockHeight is the dock's height out of avail rows, its rule included.
+// dockChrome is the rows the region spends around its body: a blank margin
+// that sets it off from the transcript, then the top and bottom rules.
+const dockChrome = 3
+
+// dockHeight is the region's height out of avail rows, its chrome included.
 func (d dockComp) dockHeight(c *ctx, avail int) int {
-	if c.m.focused != sessionDock {
-		return 2
+	switch {
+	case c.m.focused == sessionDock:
+		return min(max(d.dockContentLines(c)+dockChrome, dockChrome+1), avail-1)
+	case c.m.composing():
+		return min(len(d.composeLines(c))+dockChrome, max(dockChrome+1, avail/3))
+	default:
+		return dockChrome + 1
 	}
-	return min(max(d.dockContentLines(c)+1, 3), avail-1)
 }
 
 // dockSummary is the one-line description shown in the collapsed dock.
@@ -222,13 +229,13 @@ func (d dockComp) dockScrolls(c *ctx) bool {
 	if c.m.focused != sessionDock || c.m.sessionInteraction() == nil {
 		return false
 	}
-	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
+	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-dockChrome)
 	return maxScroll > 0
 }
 
 // scrollDock moves the dock body scroll offset by dir half-pages, clamped.
 func (d dockComp) scrollDock(c *ctx, dir int) dockComp {
-	maxScroll, page := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
+	maxScroll, page := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-dockChrome)
 	cur := min(d.scroll, maxScroll) // re-clamp first: a resize may have shrunk the body
 	d.scroll = max(0, min(cur+dir*page, maxScroll))
 	return d

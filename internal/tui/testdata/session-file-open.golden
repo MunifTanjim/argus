@@ -2,8 +2,8 @@
 
   Projects  Sessions                 │ go.mod                                                                             │  Files  Changes
                                      │ module argus                                                                       │
-▌ 󰋜 Home                         ◆ 3 │ ────────────────────────────────────────────────────────────────────────────────── │▌   go.mod
-  ▾  home                           │    Allow Bash?                                                  ⇥ Tab to answer   │
+▌ 󰋜 Home                         ◆ 3 │                                                                                    │▌   go.mod
+  ▾  home                           │                                                                                    │
     ▾ argus                          │                                                                                    │
       󰉋 repo  main               ◆ 2 │                                                                                    │
        repo-feat  feature       ○ 1 │                                                                                    │
@@ -23,8 +23,8 @@
                                      │                                                                                    │
                                      │                                                                                    │
                                      │                                                                                    │
-                                     │                                                                                    │
-                                     │                                                                                    │
-                                     │                                                                                    │
+                                     │ ────────────────────────────────────────────────────────────────────────────────── │
+                                     │    Allow Bash?                                                  ⇥ Tab to answer   │
+                                     │ ────────────────────────────────────────────────────────────────────────────────── │
 
                                              ↑/↓ scroll · ^u/^d half · gg/G ends · yow wrap · gr reload · esc close

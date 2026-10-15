@@ -1029,7 +1029,7 @@ func TestIdleDockInformationalForPaneless(t *testing.T) {
 	if !strings.Contains(out, "argus can't send input to this session") {
 		t.Errorf("paneless idle dock should show the sub-line, got:\n%s", out)
 	}
-	if strings.Contains(out, "> ") {
+	if strings.Contains(out, promptGlyph) {
 		t.Errorf("paneless idle dock must NOT show the editable composer, got:\n%s", out)
 	}
 }
@@ -1042,7 +1042,7 @@ func TestIdleDockComposerForControllable(t *testing.T) {
 	if strings.Contains(out, "Respond in VSCode") {
 		t.Errorf("controllable idle dock must not show the indicator, got:\n%s", out)
 	}
-	if !strings.Contains(out, "> ") {
+	if !strings.Contains(out, promptGlyph) {
 		t.Errorf("controllable idle dock should show the composer, got:\n%s", out)
 	}
 }
@@ -1062,7 +1062,7 @@ func TestIdleDockComposerForInputAPI(t *testing.T) {
 	if strings.Contains(out, "argus can't send input to this session") {
 		t.Errorf("InputAPI idle dock must NOT show respond-elsewhere, got:\n%s", out)
 	}
-	if !strings.Contains(out, "> ") {
+	if !strings.Contains(out, promptGlyph) {
 		t.Errorf("InputAPI idle dock should show the composer, got:\n%s", out)
 	}
 }
@@ -1139,7 +1139,7 @@ func TestDockScrollKeysRevealTallBody(t *testing.T) {
 		},
 	})
 
-	dockH := func() int { _, h := m.sessionLayout(); return h - 1 }
+	dockH := func() int { _, h := m.sessionLayout(); return h - dockChrome }
 	render := func() string { return m.dock.dockBody(&ctx{m: &m}, dockH()) }
 
 	out := render()

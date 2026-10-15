@@ -118,10 +118,11 @@ func runCmd(cmd tea.Cmd) {
 func sessionModel(ix *session.Interaction) model {
 	m := testModel()
 	m.sessions = map[string]session.Session{
-		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix, Tmux: session.TmuxLocation{PaneID: "%0"}},
+		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix, Input: session.InputPane, Tmux: session.TmuxLocation{PaneID: "%0"}},
 	}
 	m = withLive(m, "s1")
 	m = withFocus(m, mainPane)
+	m.dock.loadReplyDraft(&ctx{m: &m}, "s1")
 	m = withEntries(m, sampleEntries())
 	if ix != nil && ix.Kind == session.InteractionQuestion {
 		m.dock.ensurePromptState(len(ix.Questions))
@@ -241,12 +242,12 @@ func TestSessionHeaderShowsBranch(t *testing.T) {
 	}
 }
 
-func TestSessionTabTogglesFocusOnlyWhenPending(t *testing.T) {
+func TestSessionTabTogglesFocus(t *testing.T) {
 	m := sessionModel(nil)
 	res, _ := m.runKey(tea.KeyPressMsg{Code: '\t'})
 	m = res.(model)
-	if m.focused != mainPane {
-		t.Fatalf("no pending: focus=%v want history", m.focused)
+	if m.focused != sessionDock {
+		t.Fatalf("no pending: focus=%v want region", m.focused)
 	}
 	m = sessionModel(&session.Interaction{Kind: session.InteractionPermission})
 	res, _ = m.runKey(tea.KeyPressMsg{Code: '\t'})
@@ -283,15 +284,6 @@ func TestSessionEscIsContextual(t *testing.T) {
 	}
 }
 
-func TestSessionDockFocusResetsWhenNotPending(t *testing.T) {
-	m := sessionModel(nil)
-	m = withFocus(m, sessionDock)
-	m, _ = upd(m, tea.KeyPressMsg{Code: 'j'})
-	if m.focused != mainPane {
-		t.Fatalf("focus not reset: %v", m.focused)
-	}
-}
-
 func TestSessionDockShownWhenPending(t *testing.T) {
 	// Unfocused, the dock collapses to a one-line summary ("Allow <tool>?").
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"})
@@ -299,9 +291,8 @@ func TestSessionDockShownWhenPending(t *testing.T) {
 	if !strings.Contains(out, "Allow Bash?") {
 		t.Errorf("collapsed dock not rendered:\n%s", out)
 	}
-	m = sessionModel(nil)
-	if strings.Contains(ansi.Strip(paneView(m)), "Allow Bash?") {
-		t.Error("dock shown without a pending interaction")
+	if !sessionModel(nil).dockShown() {
+		t.Error("region hidden with nothing pending")
 	}
 }
 
@@ -335,8 +326,8 @@ func TestSessionFooterReflectsFocus(t *testing.T) {
 		t.Errorf("dock footer should hint submit: %q", foot(m))
 	}
 	m2 := sessionModel(nil)
-	if strings.Contains(foot(m2), "answer") {
-		t.Errorf("no-interaction footer should not hint answering: %q", foot(m2))
+	if strings.Contains(foot(m2), "answer") || !strings.Contains(foot(m2), "prompt") {
+		t.Errorf("no-interaction footer should hint the prompt key, not answering: %q", foot(m2))
 	}
 }
 
@@ -354,8 +345,8 @@ func TestSessionLayoutSumsToViewport(t *testing.T) {
 	m = sessionModel(nil)
 	m.height = 30
 	h, d = m.sessionLayout()
-	if d != 0 || h != max(1, m.bodyHeight()-footerRows) {
-		t.Errorf("no-dock layout: h=%d d=%d want h=%d", h, d, m.bodyHeight()-footerRows)
+	if d != dockChrome+1 || h+d != max(1, m.bodyHeight()-footerRows) {
+		t.Errorf("idle layout: h=%d d=%d want d=%d and h+d=%d", h, d, dockChrome+1, m.bodyHeight()-footerRows)
 	}
 }
 
@@ -372,6 +363,24 @@ func TestSessionViewFitsViewport(t *testing.T) {
 		if got > m.height {
 			t.Errorf("the session pane rendered %d lines > height %d (ix=%v)", got, m.height, ix)
 		}
+	}
+}
+
+// The region clips a long draft, keeping its bottom rule on screen.
+func TestUnfocusedLongDraftFitsReservedRows(t *testing.T) {
+	m := sessionModel(nil)
+	m.height, m.width = 24, 80
+	m.dock.reply.SetValue(strings.TrimSuffix(strings.Repeat("line\n", 21), "\n"))
+	out := paneView(m)
+	if got := strings.Count(out, "\n") + 1; got > m.height {
+		t.Errorf("the session pane rendered %d lines > height %d", got, m.height)
+	}
+	lines := strings.Split(out, "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(ansi.Strip(last), "──") {
+		t.Errorf("bottom rule not on the last row: %q", ansi.Strip(last))
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("clipped draft shows no ellipsis line")
 	}
 }
 
@@ -722,19 +731,26 @@ func TestDockSummary(t *testing.T) {
 }
 
 func TestSessionLayoutCollapsesWhenUnfocused(t *testing.T) {
-	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission, ToolName: "Read"})
+	m := sessionModel(&session.Interaction{
+		Kind: session.InteractionPermission, ToolName: "Read",
+		Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"},
+			{Label: "Deny", Value: "deny", Reject: true},
+		},
+	})
+	m.height = 30
 
-	// Unfocused (mainPane): dock collapses to rule + one line.
+	// Unfocused (mainPane): the region collapses to margin, rule, one line, rule.
 	uh, ud := m.sessionLayout()
-	if ud != 2 {
-		t.Fatalf("unfocused dockH = %d, want 2", ud)
+	if ud != 4 {
+		t.Fatalf("unfocused dockH = %d, want 4", ud)
 	}
 
 	// Focused: dock expands to the full panel.
 	m = withFocus(m, sessionDock)
 	fh, fd := m.sessionLayout()
-	if fd <= 2 {
-		t.Fatalf("focused dockH = %d, want > 2 (full panel)", fd)
+	if fd <= 3 {
+		t.Fatalf("focused dockH = %d, want > 3 (full panel)", fd)
 	}
 	if uh <= fh {
 		t.Fatalf("collapsed historyH (%d) should exceed focused historyH (%d)", uh, fh)

@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -56,9 +56,7 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		d.notes[d.tab].Blur()
 		return d, nil, true
 	case c.m.matches(msg, sessionKeys.FocusTranscript):
-		if c.m.sessionInteraction() != nil {
-			c.focusOn(mainPane)
-		}
+		c.focusOn(mainPane)
 		return d, nil, true
 	case d.confirming && c.m.matches(msg, promptKeys.Back):
 		d.confirming = false
@@ -69,10 +67,11 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	case c.m.matches(msg, sessionKeys.Raw):
 		return d, openLiveScreen(c), true
 	}
-	ix := c.m.interaction()
-	if ix == nil {
-		return d, nil, true
+	if c.m.composing() {
+		d, cmd := d.handleIdleKey(c, msg)
+		return d, cmd, true
 	}
+	ix := c.m.interaction()
 
 	// Scroll keys are never text or selection, so they run for every interaction
 	// kind before the per-kind handlers.
@@ -89,8 +88,6 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 
 	var cmd tea.Cmd
 	switch ix.Kind {
-	case session.InteractionIdle:
-		d, cmd = d.handleIdleKey(c, msg)
 	case session.InteractionQuestion:
 		d, cmd = d.handleQuestionKey(c, msg, ix)
 	default: // permission / plan
@@ -105,8 +102,8 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		return d, nil
 	}
 	var cmd tea.Cmd
-	switch ix := c.m.interaction(); {
-	case ix != nil && ix.Kind == session.InteractionIdle:
+	switch {
+	case c.m.composing():
 		d.reply, cmd = d.reply.Update(p)
 		d.sizeIdleReply(c)
 	case d.noteEditing(c):
@@ -119,7 +116,8 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	return d, cmd
 }
 
-// The body is inset by contentPadX to align with the transcript above.
+// A prompt's body is inset to align with the transcript; the input spans the
+// rules' full width.
 func (d dockComp) view(c *ctx, w, h int) string {
 	focused := c.m.focused == sessionDock
 	ruleColor := ColorBorder
@@ -127,15 +125,35 @@ func (d dockComp) view(c *ctx, w, h int) string {
 		ruleColor = ColorAccent
 	}
 	cw := containerWidthOf(w)
-	rule := lipgloss.NewStyle().Foreground(ruleColor).Render(strings.Repeat("─", cw))
-	body := c.m.dockSummaryLine(c.m.dockContentWidth())
-	if focused {
-		body = d.dockBody(c, h-1)
+	top, bottom := c.m.dockRules(cw, ruleColor)
+	bodyH := h - dockChrome
+	var body string
+	switch {
+	case focused:
+		body = d.dockBody(c, bodyH)
+	case c.m.composing():
+		lines := d.composeLines(c)
+		if len(lines) > bodyH {
+			lines = append(lines[:max(0, bodyH-1)], dimStyle.Render("…"))
+		}
+		body = strings.Join(lines[:min(len(lines), max(1, bodyH))], "\n")
+	default:
+		body = c.m.dockSummaryLine(c.m.dockContentWidth())
 	}
-	return centerBlock(rule+"\n"+indentBlock(body, strings.Repeat(" ", contentPadX)), cw, w)
+	if !c.m.inputShown() {
+		body = indentBlock(body, strings.Repeat(" ", contentPadX))
+	}
+	return "\n" + centerBlock(top+"\n"+body+"\n"+bottom, cw, w)
 }
 
 func (d dockComp) footer(c *ctx) []binding {
+	if c.m.composing() {
+		var binds []binding
+		if c.m.sessions[c.m.liveSessionID()].AcceptsInput() {
+			binds = append(binds, promptKeys.Submit)
+		}
+		return append(binds, promptKeys.Read, sessionKeys.Raw)
+	}
 	multi := c.m.isMultiQuestion()
 	binds := []binding{promptKeys.Up}
 	if multi {
@@ -156,10 +174,32 @@ func (d dockComp) footer(c *ctx) []binding {
 	return binds
 }
 
-// dockShown reports whether the session dock shows: the main pane shows a live
-// session, under an open file or not, and that session waits for input.
+// dockShown reports whether the session region shows: the main pane shows a
+// live session, under an open file or not, and that session still exists.
 func (m model) dockShown() bool {
-	return m.inSession() && m.sessionInteraction() != nil
+	if !m.inSession() {
+		return false
+	}
+	_, ok := m.sessions[m.liveSessionID()]
+	return ok
+}
+
+// inputShown reports whether the region's body is the input itself, not a
+// prompt or the notice that argus cannot send to the session.
+func (m model) inputShown() bool {
+	return m.composing() && m.sessions[m.liveSessionID()].AcceptsInput()
+}
+
+// composing reports whether the region holds the input: nothing is pending
+// but, at most, an idle prompt.
+func (m model) composing() bool {
+	ix := m.sessionInteraction()
+	return ix == nil || ix.Kind == session.InteractionIdle
+}
+
+// dockRules are the region's top and bottom rules.
+func (m model) dockRules(w int, c color.Color) (top, bottom string) {
+	return dockRule("", "", w, c), dockRule("", "", w, c)
 }
 
 func (m model) dockFocused() bool {
@@ -209,7 +249,7 @@ func (d dockComp) wheel(c *ctx, delta int) (component, tea.Cmd) {
 	if c.m.focused != sessionDock {
 		return d, nil
 	}
-	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-1)
+	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-dockChrome)
 	d.scroll = max(0, min(min(d.scroll, maxScroll)+delta, maxScroll))
 	return d, nil
 }

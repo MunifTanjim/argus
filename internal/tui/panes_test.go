@@ -121,14 +121,14 @@ func TestPaneSessionFilesAndBack(t *testing.T) {
 	}
 }
 
-func TestPaneDownFocusesTheDockOnlyWithAPrompt(t *testing.T) {
+func TestPaneDownFocusesTheDock(t *testing.T) {
 	m := pressKeys(sessionModel(&session.Interaction{Kind: session.InteractionPermission}), cw('j')...)
 	if m.focused != sessionDock {
 		t.Errorf("<C-w>j with a prompt: focus = %v, want the dock", m.focused)
 	}
 	m = pressKeys(sessionModel(nil), cw('j')...)
-	if m.focused != mainPane {
-		t.Errorf("<C-w>j with no prompt: focus = %v, want no change", m.focused)
+	if m.focused != sessionDock {
+		t.Errorf("<C-w>j with no prompt: focus = %v, want the dock", m.focused)
 	}
 }
 
