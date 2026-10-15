@@ -23,17 +23,14 @@ import (
 // refresh. Full per-entry bodies live in the detail drill-down (detail.go).
 
 const (
-	maxContentWidth   = 160 // cap content column width on very wide terminals
+	maxContentWidth   = 160 // cap the file view's width on very wide terminals
 	maxCollapsedLines = 12  // lines shown for a collapsed text preview
 )
 
-// containerWidth is the width of the content column, centered within the terminal.
+// containerWidth is the content column's width: the whole body.
 func (m model) containerWidth() int { return containerWidthOf(m.bodyWidth()) }
 
 func containerWidthOf(w int) int {
-	if w > maxContentWidth {
-		w = maxContentWidth
-	}
 	if w < 24 {
 		w = 24
 	}
