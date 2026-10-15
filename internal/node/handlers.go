@@ -34,6 +34,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPushSetPause, d.handlePushSetPause)
 	srv.Handle(api.MethodHostInfo, d.handleHostInfo)
 	srv.Handle(api.MethodHostSetWakelock, d.handleHostSetWakelock)
+	srv.Handle(api.MethodHostCompleteDir, d.handleHostCompleteDir)
 	srv.Handle(api.MethodSessionsHistoryProjects, d.handleHistoryProjects)
 	srv.Handle(api.MethodSessionsHistorySessions, d.handleHistorySessions)
 	srv.Handle(api.MethodSessionsHistoryTranscript, d.handleHistoryTranscript)

@@ -99,11 +99,9 @@ type histTranscriptMsg struct {
 }
 
 // spawnNodesMsg carries the server.info reply for a pending "new session" action.
-// cwd is the working dir captured when the user pressed New.
 type spawnNodesMsg struct {
 	nodes    []api.NodeInfo
 	projects []session.HistoryProject
-	cwd      string
 	err      error
 }
 
@@ -112,6 +110,16 @@ type spawnNodesMsg struct {
 type spawnAgentsMsg struct {
 	nodeID string
 	agents []api.AgentInfo
+	err    error
+}
+
+// spawnDirsDueMsg ends the debounce of the custom path edit numbered seq.
+type spawnDirsDueMsg struct{ seq int }
+
+type spawnDirsMsg struct {
+	nodeID string
+	path   string
+	res    api.HostCompleteDirResult
 	err    error
 }
 

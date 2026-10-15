@@ -45,6 +45,29 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
       Result.ok(agents);
 }
 
+class _CompletingRepo extends _RecordingSpawnRepo {
+  _CompletingRepo(this.subdirs, {this.homes = const {}, this.latency});
+  final Map<String, String> homes; // by node id ('' = sole node)
+  final Duration? latency; // lets the field mount before the reply lands
+  final Map<String, List<String>> subdirs; // by path
+  final List<String> completedOn = [];
+  final List<String> completedPaths = [];
+  List<NodeRef> nodeList = const [];
+  @override
+  Future<Result<List<NodeRef>>> nodes() async => Result.ok(nodeList);
+  @override
+  Future<Result<DirCompletion>> completeDir(String? nodeId, String path) async {
+    completedOn.add(nodeId ?? '');
+    completedPaths.add(path);
+    if (latency case final d?) await Future<void>.delayed(d);
+    final home = homes[nodeId ?? ''] ?? '';
+    final p = path.isEmpty ? '$home/' : path;
+    final parent = p.substring(0, p.lastIndexOf('/') + 1);
+    return Result.ok(DirCompletion(
+        home: home, paths: [for (final n in subdirs[p] ?? const []) '$parent$n/']));
+  }
+}
+
 class _NodesRepo extends FakeSessionRepository {
   _NodesRepo(this._nodes);
   final List<NodeRef> _nodes;
@@ -211,6 +234,80 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
     expect(repo.spawnedCwd, '/tmp/x');
+  });
+
+  testWidgets('a custom path starts at the node\'s home and completes',
+      (tester) async {
+    final repo = _CompletingRepo({
+      '/home/u/': ['Dev', 'Docs', 'src'],
+      '/home/u/D': ['Dev', 'Docs'],
+    }, homes: {'': '/home/u'}, latency: const Duration(milliseconds: 500));
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a directory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom path…'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500)); // the reply
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('spawn-custom-path'));
+    expect(tester.widget<TextField>(field).controller!.text, '/home/u/');
+    expect(find.text('/home/u/src/'), findsOneWidget);
+    expect(repo.completedPaths, ['']); // the seed's reply lists the home
+
+    await tester.enterText(field, '/home/u/D');
+    await tester.pump(const Duration(milliseconds: 300)); // the debounce
+    await tester.pumpAndSettle();
+    expect(find.text('/home/u/Dev/'), findsOneWidget);
+    await tester.tap(find.text('/home/u/Docs/'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(field).controller!.text, '/home/u/Docs/');
+
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
+    await tester.pumpAndSettle();
+    expect(repo.spawnedCwd, '/home/u/Docs/');
+  });
+
+  testWidgets('a custom path asks the chosen node, not another',
+      (tester) async {
+    final repo = _CompletingRepo({}, homes: {'a': '/Users/me', 'b': '/home/b'})
+      ..nodeList = const [NodeRef('a', 'A'), NodeRef('b', 'B')];
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a directory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom path…'));
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('spawn-custom-path'));
+    expect(tester.widget<TextField>(field).controller!.text, '/home/b/');
+    expect(repo.completedOn, everyElement('b'));
+  });
+
+  testWidgets('a custom path asks for completions once typing pauses',
+      (tester) async {
+    final repo = _CompletingRepo({}, homes: {'': '/home/u'});
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a directory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom path…'));
+    await tester.pumpAndSettle();
+    final asked = repo.completedPaths.length;
+    final field = find.byKey(const Key('spawn-custom-path'));
+    await tester.enterText(field, '/home/u/D');
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.enterText(field, '/home/u/De');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(repo.completedPaths.length, asked);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(repo.completedPaths.sublist(asked), ['/home/u/De']);
   });
 
   testWidgets('spawn fires with the typed prompt', (tester) async {

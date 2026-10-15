@@ -553,6 +553,25 @@ func TestHandleSessionSpawnRejectsMissingDir(t *testing.T) {
 	}
 }
 
+func TestHandleSessionSpawnExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "proj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSpawner{id: "ses_x"}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["fake"] = fs
+
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: "~/proj", Prompt: "hi"})
+	if _, err := d.handleSessionSpawn(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "proj"); fs.gotCwd != want {
+		t.Fatalf("cwd = %q, want %q", fs.gotCwd, want)
+	}
+}
+
 func TestHandleSessionResumeRejectsMissingDir(t *testing.T) {
 	d := New()
 	d.caps.SpawnSession = true

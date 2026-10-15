@@ -346,6 +346,8 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
+	home, _ := os.UserHomeDir()
+	p.Cwd = expandHome(p.Cwd, home)
 	// Checked for every agent; tmux would silently fall back to $HOME.
 	if err := d.cwdError("cannot spawn", p.Cwd); err != nil {
 		return nil, err

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
 	"slices"
 	"sort"
 	"time"
@@ -207,8 +206,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil { // no gateway node list (plain local node); nodeID stays empty
 			nodes = nil
 		}
-		return m.beginSpawn(nodes, msg.projects, msg.cwd)
-	case spawnAgentsMsg:
+		return m.beginSpawn(nodes, msg.projects)
+	case spawnAgentsMsg, spawnDirsDueMsg, spawnDirsMsg:
 		return m.updateSpawn(m.spawnAt(), msg)
 	case spawnResultMsg:
 		if msg.err != nil {
@@ -374,22 +373,26 @@ func (m model) fetchSpawnAgents(nodeID string) tea.Cmd {
 	}
 }
 
-func (m model) newSessionCmd() tea.Cmd {
-	cwd, _ := os.Getwd()
-	return m.fetchSpawnNodes(cwd)
+func (m model) fetchSpawnDirs(nodeID, path string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.HostCompleteDirResult
+		err := client.Call(api.MethodHostCompleteDir, api.HostCompleteDirParams{NodeID: nodeID, Path: path}, &res)
+		return spawnDirsMsg{nodeID: nodeID, path: path, res: res, err: err}
+	}
 }
 
-// fetchSpawnNodes asks server.info which nodes can be spawn targets (gateway →
+// newSessionCmd asks server.info which nodes can be spawn targets (gateway →
 // every node; plain local → just itself). A call error yields no nodes, leaving
 // node_id empty for an immediate local spawn.
-func (m model) fetchSpawnNodes(cwd string) tea.Cmd {
+func (m model) newSessionCmd() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		var info api.ServerInfo
 		err := client.Call(api.MethodServerInfo, nil, &info)
 		var projects []session.HistoryProject
 		_ = client.Call(api.MethodSessionsHistoryProjects, nil, &projects)
-		return spawnNodesMsg{nodes: info.Nodes, projects: projects, cwd: cwd, err: err}
+		return spawnNodesMsg{nodes: info.Nodes, projects: projects, err: err}
 	}
 }
 

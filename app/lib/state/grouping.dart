@@ -51,6 +51,14 @@ class AgentInfo {
   });
 }
 
+/// A node's completion of a directory path: its user's [home], and the [paths]
+/// of the subdirectories in the path's parent that start with its last segment.
+class DirCompletion {
+  final String home;
+  final List<String> paths;
+  const DirCompletion({required this.home, required this.paths});
+}
+
 class ResumeOutcome {
   final String sessionId;
   const ResumeOutcome({required this.sessionId});

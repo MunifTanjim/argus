@@ -107,6 +107,19 @@ class SessionService {
         ];
       });
 
+  /// An empty [nodeId] targets the sole node.
+  Future<Result<DirCompletion>> completeDir(String? nodeId, String path) =>
+      _guard((c) async {
+        final r = await c.call('host.completeDir', {
+          'path': path,
+          if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
+        }) as Map?;
+        return DirCompletion(
+          home: r?['home'] as String? ?? '',
+          paths: [for (final p in r?['paths'] as List? ?? const []) p as String],
+        );
+      });
+
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -67,6 +69,68 @@ func TestWakelockRPCErrorCodes(t *testing.T) {
 		var rpcErr *api.RPCError
 		if !errors.As(wakelockRPCError(tc.err), &rpcErr) || rpcErr.Code != tc.code || rpcErr.Message != tc.err.Error() {
 			t.Errorf("wakelockRPCError(%v) = %v, want code %d", tc.err, rpcErr, tc.code)
+		}
+	}
+}
+
+func TestHandleHostCompleteDir(t *testing.T) {
+	d := newTestNode(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{"Dev", "Desktop", "Docs", ".dots", "Dev/argus"} {
+		if err := os.Mkdir(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, "Dexter"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "Docs"), filepath.Join(home, "Delta")); err != nil {
+		t.Fatal(err)
+	}
+	complete := func(path string) api.HostCompleteDirResult {
+		t.Helper()
+		params, _ := json.Marshal(api.HostCompleteDirParams{Path: path})
+		out, err := d.DispatchFunc()(context.Background(), api.MethodHostCompleteDir, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(api.HostCompleteDirResult)
+	}
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"", []string{home + "/Delta/", home + "/Desktop/", home + "/Dev/", home + "/Docs/"}},
+		{"~", []string{"~/Delta/", "~/Desktop/", "~/Dev/", "~/Docs/"}},
+		{"~/De", []string{"~/Delta/", "~/Desktop/", "~/Dev/"}},
+		{home + "/D", []string{home + "/Delta/", home + "/Desktop/", home + "/Dev/", home + "/Docs/"}},
+		{"~/", []string{"~/Delta/", "~/Desktop/", "~/Dev/", "~/Docs/"}},
+		{"~/.", []string{"~/.dots/"}},
+		{"~/Dev/", []string{"~/Dev/argus/"}},
+		{"~/nope/", []string{}},
+		{"relative", []string{}},
+	} {
+		res := complete(tc.path)
+		if res.Home != home {
+			t.Fatalf("%q: home %q, want %q", tc.path, res.Home, home)
+		}
+		if fmt.Sprint(res.Paths) != fmt.Sprint(tc.want) {
+			t.Errorf("%q: paths %v, want %v", tc.path, res.Paths, tc.want)
+		}
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	for in, want := range map[string]string{
+		"~":       "/home/u",
+		"~/p":     "/home/u/p",
+		"~other":  "~other",
+		"/abs/~/": "/abs/~/",
+		"":        "",
+	} {
+		if got := expandHome(in, "/home/u"); got != want {
+			t.Errorf("expandHome(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
