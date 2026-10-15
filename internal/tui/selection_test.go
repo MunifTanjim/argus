@@ -124,12 +124,12 @@ func sel(s textSurface, a, b absPos, linewise bool) *selection {
 
 func TestSelectedTextCharwise(t *testing.T) {
 	s := surf("hello world", "second line")
-	got := s.selectedText(sel(s, absPos{0, 6}, absPos{1, 5}, false), func(int) string { return "" })
+	got := s.selectedText(sel(s, absPos{0, 6}, absPos{1, 5}, false), srcOf(""))
 	if got != "world\nsecond" {
 		t.Errorf("got %q", got)
 	}
 	// Backwards selection normalizes.
-	got = s.selectedText(sel(s, absPos{1, 5}, absPos{0, 6}, false), func(int) string { return "" })
+	got = s.selectedText(sel(s, absPos{1, 5}, absPos{0, 6}, false), srcOf(""))
 	if got != "world\nsecond" {
 		t.Errorf("backwards: got %q", got)
 	}
@@ -137,7 +137,7 @@ func TestSelectedTextCharwise(t *testing.T) {
 
 func TestSelectedTextLinewiseAcrossRows(t *testing.T) {
 	s := surf("first row", "", "second row")
-	got := s.selectedText(sel(s, absPos{0, 3}, absPos{2, 1}, true), func(int) string { return "" })
+	got := s.selectedText(sel(s, absPos{0, 3}, absPos{2, 1}, true), srcOf(""))
 	if got != "first row\n\nsecond row" {
 		t.Errorf("got %q", got)
 	}
@@ -145,7 +145,7 @@ func TestSelectedTextLinewiseAcrossRows(t *testing.T) {
 
 func TestSelectedTextRejoinsWithSource(t *testing.T) {
 	s := surf("the quick", "brown fox")
-	got := s.selectedText(sel(s, absPos{0, 0}, absPos{1, 8}, false), func(int) string { return "the quick brown fox" })
+	got := s.selectedText(sel(s, absPos{0, 0}, absPos{1, 8}, false), srcOf("the quick brown fox"))
 	if got != "the quick brown fox" {
 		t.Errorf("got %q", got)
 	}
@@ -153,7 +153,7 @@ func TestSelectedTextRejoinsWithSource(t *testing.T) {
 
 func TestSelectedTextWideChars(t *testing.T) {
 	s := surf("a漢b")
-	got := s.selectedText(sel(s, absPos{0, 0}, absPos{0, 3}, false), func(int) string { return "" })
+	got := s.selectedText(sel(s, absPos{0, 0}, absPos{0, 3}, false), srcOf(""))
 	if got != "a漢b" {
 		t.Errorf("got %q, want each character once", got)
 	}

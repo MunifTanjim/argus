@@ -377,18 +377,28 @@ func (s textSurface) paint(sel *selection, vis []string) []string {
 	return out
 }
 
-// selectedText is the selection's text: each line's selected cells, grouped
-// by row, rejoined against the row's source, rows apart by a blank line.
-func (s textSurface) selectedText(sel *selection, source func(row int) string) string {
+// selectedText is the selection's text, cards apart by a blank line. A line
+// selection copies each card's source lines (see lineText); a character
+// selection copies the selected cells, rejoined against the card's source.
+func (s textSurface) selectedText(sel *selection, source func(row int) cardSource) string {
 	a, b, ok := s.bounds(sel)
 	if !ok {
 		return ""
 	}
 	var cards []string
+	if sel.linewise {
+		for row := s.rowOf(a.line); row < len(s.first) && s.first[row] <= b.line; row++ {
+			l0, l1 := s.first[row], s.rowEnd(row)
+			if t := s.lineText(max(a.line, l0), min(b.line, l1-1), l0, l1, source(row)); t != "" {
+				cards = append(cards, t)
+			}
+		}
+		return strings.Join(cards, "\n\n")
+	}
 	var rows []string
 	row := s.rowOf(a.line)
 	flush := func() {
-		if t := rejoin(rows, source(row)); t != "" {
+		if t := rejoin(rows, source(row).text); t != "" {
 			cards = append(cards, t)
 		}
 		rows = rows[:0]

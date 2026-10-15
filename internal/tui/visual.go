@@ -116,8 +116,8 @@ type visualTarget struct {
 	s      textSurface
 	sel    **selection
 	scroll *int
-	cursor *int                 // the card cursor, which follows the visual cursor
-	source func(row int) string // a row's source, for rejoining wraps
+	cursor *int                     // the card cursor, which follows the visual cursor
+	source func(row int) cardSource // what a row's selected text copies
 }
 
 func rowIDs(es []transcript.Entry, rows []displayRow) []rowRef {
@@ -157,16 +157,17 @@ func (m tview) detailSurface(f *detailFrame) textSurface {
 	return newSurface(lines, first, ids, detailGutter+textInset, cw-detailGutter-textInset, scroll, ch)
 }
 
-// rowSource reads rows only when a copy asks for a source.
-func (m tview) rowSource(es []transcript.Entry, rows func() []displayRow) func(int) string {
+// rowSource reads rows only when a copy asks for a source. spans is what the
+// lines of entry i copy in a line selection.
+func (m tview) rowSource(es []transcript.Entry, rows func() []displayRow, spans func(i int) []cardSpan) func(int) cardSource {
 	rows = sync.OnceValue(rows)
-	return func(i int) string {
+	return func(i int) cardSource {
 		rs := rows()
 		if i < 0 || i >= len(rs) || rs[i].isControl() {
-			return ""
+			return cardSource{}
 		}
 		src, _, _ := m.entrySource(es[rs[i].entry])
-		return src
+		return cardSource{text: src, spans: func() []cardSpan { return resolveSpans(spans(rs[i].entry)) }}
 	}
 }
 
@@ -181,12 +182,15 @@ func (m tview) visualTarget() (visualTarget, bool) {
 		if len(s.lines) == 0 {
 			return visualTarget{}, false
 		}
-		source := func(int) string {
+		source := func(int) cardSource {
 			src, _, _ := m.entrySource(f.entry)
-			return src
+			return cardSource{text: src, spans: func() []cardSpan { return f.bodySpans }}
 		}
 		if f.items != nil {
-			source = m.rowSource(f.items, func() []displayRow { return m.frameRows(f) })
+			source = m.rowSource(f.items, func() []displayRow { return m.frameRows(f) }, func(i int) []cardSpan {
+				_, spans := m.entryLayout(f.items[i], f.isExpanded(i), false, true, f.focused, m.c.m.transcriptWidth())
+				return spans
+			})
 		}
 		return visualTarget{s: s, sel: &f.visual, scroll: &f.scroll, cursor: &f.cursor, source: source}, true
 	}
@@ -198,7 +202,11 @@ func (m tview) visualTarget() (visualTarget, bool) {
 		return visualTarget{}, false
 	}
 	return visualTarget{s: s, sel: &m.transcript.visual, scroll: &m.transcript.scroll,
-		cursor: &m.transcript.cursor, source: m.rowSource(m.transcript.entries, m.displayRows)}, true
+		cursor: &m.transcript.cursor, source: m.rowSource(m.transcript.entries, m.displayRows, func(i int) []cardSpan {
+			e := m.transcript.entries[i]
+			_, spans := m.entryLayout(e, m.entryExpanded(e), false, false, false, m.c.m.transcriptWidth())
+			return spans
+		})}, true
 }
 
 func (t transcriptComp) visualActive() bool { return t.activeSelection() != nil }

@@ -23,6 +23,7 @@ type detailFrame struct {
 	agentID         string             // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
 	items           []transcript.Entry // nil for a body frame
 	body            string             // pre-rendered body (user/system/shell entries)
+	bodySpans       []cardSpan         // what body's lines copy in a line selection
 	entry           transcript.Entry   // the entry a body frame renders
 	cursor          int                // selected display row index (see frameRows)
 	scroll          int                // top line offset
@@ -165,7 +166,7 @@ func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
 	switch e.Kind {
 	case transcript.EntryUser, transcript.EntrySystem, transcript.EntryShell:
 		m.transcript.detailStack = append(m.transcript.detailStack,
-			detailFrame{label: "detail", body: m.c.m.renderDetail(e), entry: e})
+			m.bodyFrame(e))
 		return nil
 	}
 	m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
@@ -724,13 +725,20 @@ func (m tview) wheelDetail(d int) {
 	}
 }
 
-// renderDetail renders the body frame of a user, system, or shell entry.
-func (m model) renderDetail(e transcript.Entry) string {
+func (m tview) bodyFrame(e transcript.Entry) detailFrame {
+	body, spans := m.c.m.renderDetail(e)
+	return detailFrame{label: "detail", body: body, bodySpans: spans, entry: e}
+}
+
+// renderDetail renders the body frame of a user, system, or shell entry, and
+// what its lines copy in a line selection.
+func (m model) renderDetail(e transcript.Entry) (string, []cardSpan) {
 	width := m.transcriptWidth() - detailGutter
 	switch e.Kind {
 	case transcript.EntryUser:
 		head := StylePrimaryBold.Render("You") + " " + Icon.User.Render() + "  " + StyleDim.Render(clockTime(e.Timestamp))
-		return head + "\n\n" + m.renderMD(e.Text, width-2)
+		body := m.renderMD(e.Text, width-2)
+		return head + "\n\n" + body, append(chromeSpans(2), textSpan(body, e.Text))
 	case transcript.EntrySystem:
 		icon := Icon.System
 		label := StyleSecondary.Render("System")
@@ -743,9 +751,10 @@ func (m model) renderDetail(e transcript.Entry) string {
 			head += "  " + StyleDim.Render(e.Label)
 		}
 		if e.Detail == "" {
-			return head
+			return head, chromeSpans(1)
 		}
-		return head + "\n\n" + hardWrap(StyleDim.Render(strings.TrimRight(e.Detail, "\n")), width-2)
+		body := hardWrap(StyleDim.Render(strings.TrimRight(e.Detail, "\n")), width-2)
+		return head + "\n\n" + body, append(chromeSpans(2), textSpan(body, e.Detail))
 	default:
 		label := StylePrimaryBold.Render("Shell")
 		if e.IsError {
@@ -753,14 +762,18 @@ func (m model) renderDetail(e transcript.Entry) string {
 		}
 		head := Icon.Shell.Render() + " " + label + "  " + StyleDim.Render(clockTime(e.Timestamp))
 		body := StyleSecondaryBold.Render("$") + " " + e.Text
+		spans := append(chromeSpans(2), wholeSpan(linesIn(e.Text), e.Text))
 		if e.Detail != "" {
 			resultLabel := "Result"
 			if e.IsError {
 				resultLabel = "Error"
 			}
-			body += "\n\n" + sectionLabel(resultLabel, e.IsError) + "\n" + m.execCommandResultBody(e.Detail, width-2)
+			result := m.execCommandResultBody(e.Detail, width-2)
+			body += "\n\n" + sectionLabel(resultLabel, e.IsError) + "\n" + result
+			spans = append(spans, chromeSpans(2)...) // the blank line and the label
+			spans = append(spans, textSpan(result, e.Detail))
 		}
-		return head + "\n\n" + body
+		return head + "\n\n" + body, spans
 	}
 }
 
