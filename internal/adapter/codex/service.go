@@ -26,12 +26,12 @@ const sessionIdleTTL = time.Hour
 const dismissGrace = 30 * time.Second
 
 type threadEntry struct {
-	cwd, path, name, model string
-	repo                   string
-	tokens                 int
-	lastActivity           time.Time
-	activeTurn             string
-	status                 string // root's last status type: active, idle, systemError
+	cwd, path, name, model, effort string
+	repo                           string
+	tokens                         int
+	lastActivity                   time.Time
+	activeTurn                     string
+	status                         string // root's last status type: active, idle, systemError
 }
 
 type serverClient struct {
@@ -282,7 +282,7 @@ func (d *discoverer) adopt(t cxThread) {
 		e = &threadEntry{}
 		d.threads[t.ID] = e
 	}
-	e.cwd, e.repo, e.path, e.model = t.Cwd, repo, *t.Path, t.Model
+	e.cwd, e.repo, e.path, e.model, e.effort = t.Cwd, repo, *t.Path, t.Model, t.ReasoningEffort
 	if name := t.title(); name != "" {
 		e.name = name
 	}
@@ -338,6 +338,24 @@ func (d *discoverer) handle(ctx context.Context, c *rpcConn, m inbound) {
 			if d.updateEntry(p.ThreadID, func(e *threadEntry) bool {
 				changed := e.name != name
 				e.name = name
+				return changed
+			}) {
+				d.applyHook(p.ThreadID, "", nil)
+			}
+		}
+	case "thread/settings/updated":
+		var p struct {
+			ThreadID       string `json:"threadId"`
+			ThreadSettings struct {
+				Model  string `json:"model"`
+				Effort string `json:"effort"`
+			} `json:"threadSettings"`
+		}
+		if json.Unmarshal(m.Params, &p) == nil && p.ThreadID != "" {
+			ts := p.ThreadSettings
+			if d.updateEntry(p.ThreadID, func(e *threadEntry) bool {
+				changed := e.model != ts.Model || e.effort != ts.Effort
+				e.model, e.effort = ts.Model, ts.Effort
 				return changed
 			}) {
 				d.applyHook(p.ThreadID, "", nil)
@@ -545,7 +563,7 @@ func (d *discoverer) applyHook(id string, st session.Status, ix *session.Interac
 		Frontend:           session.FrontendExternal,
 		Input:              session.InputAPI,
 		Status:             st,
-		Summary:            summaryFor(e.model, e.name, e.tokens, names),
+		Summary:            summaryFor(e.model, e.effort, e.name, e.tokens, names),
 		Interaction:        ix,
 		ReplaceInteraction: st != "",
 	}

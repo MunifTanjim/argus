@@ -14,14 +14,14 @@ const Agent = "codex"
 func normalizeTTY(tty string) string { return strings.TrimPrefix(tty, "/dev/") }
 
 // Returns nil when all metadata fields are empty.
-func summaryFor(model, title string, tokens int, modelNames map[string]string) *session.Summary {
+func summaryFor(model, effort, title string, tokens int, modelNames map[string]string) *session.Summary {
 	if dn := modelNames[model]; dn != "" {
 		model = dn
 	}
-	if model == "" && title == "" && tokens == 0 {
+	if model == "" && effort == "" && title == "" && tokens == 0 {
 		return nil
 	}
-	return &session.Summary{ModelName: model, ModelColor: modelColorFor(model), Tokens: tokens, Task: title}
+	return &session.Summary{ModelName: model, ModelColor: modelColorFor(model), Effort: effort, Tokens: tokens, Task: title}
 }
 
 // findRolloutPathIn globs for a thread's rollout under sessionsRoot; empty falls

@@ -11,15 +11,15 @@ import (
 func TestSummaryForResolvesModelName(t *testing.T) {
 	names := map[string]string{"gpt-5.5": "GPT-5.5"}
 
-	s := summaryFor("gpt-5.5", "t", 5, names)
-	if s == nil || s.ModelName != "GPT-5.5" || s.ModelColor != modelBrandColor {
+	s := summaryFor("gpt-5.5", "high", "t", 5, names)
+	if s == nil || s.ModelName != "GPT-5.5" || s.ModelColor != modelBrandColor || s.Effort != "high" {
 		t.Errorf("model slug not resolved to display name: %+v", s)
 	}
-	s = summaryFor("gpt-x", "", 0, names)
+	s = summaryFor("gpt-x", "", "", 0, names)
 	if s == nil || s.ModelName != "gpt-x" {
 		t.Errorf("unknown slug should fall back to raw: %+v", s)
 	}
-	if s := summaryFor("", "", 0, names); s != nil {
+	if s := summaryFor("", "", "", 0, names); s != nil {
 		t.Errorf("empty meta should yield nil summary, got %+v", s)
 	}
 }

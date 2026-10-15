@@ -11,15 +11,16 @@ import (
 
 // cxThread is the subset of the app-server Thread that argus uses.
 type cxThread struct {
-	ID             string       `json:"id"`
-	Cwd            string       `json:"cwd"`
-	Path           *string      `json:"path"` // rollout JSONL; null for ephemeral threads
-	Name           *string      `json:"name"`
-	Preview        string       `json:"preview"`
-	Model          string       `json:"model"`
-	Ephemeral      bool         `json:"ephemeral"`
-	ParentThreadID *string      `json:"parentThreadId"`
-	Status         threadStatus `json:"status"`
+	ID              string       `json:"id"`
+	Cwd             string       `json:"cwd"`
+	Path            *string      `json:"path"` // rollout JSONL; null for ephemeral threads
+	Name            *string      `json:"name"`
+	Preview         string       `json:"preview"`
+	Model           string       `json:"model"`
+	ReasoningEffort string       `json:"reasoningEffort"` // null when the model takes none
+	Ephemeral       bool         `json:"ephemeral"`
+	ParentThreadID  *string      `json:"parentThreadId"`
+	Status          threadStatus `json:"status"`
 }
 
 // trackable excludes threads with no rollout, such as the ephemeral thread Codex
