@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../pairing/gateway_store.dart';
+import 'navigation.dart';
+import 'sessions.dart';
 
 enum LeftSidebarTab { projects, sessions }
 
@@ -66,3 +68,22 @@ final leftSidebarTabProvider =
 
 /// The Sessions tab's filter text, apart from the Projects filter.
 final sidebarSessionsFilterProvider = StateProvider<String>((ref) => '');
+
+/// Whether the Sessions tab lists only the shown workspace's sessions.
+final sidebarSessionsWorkspaceOnlyProvider = StateProvider<bool>(
+  (ref) => false,
+);
+
+final shownWorkspaceProvider = Provider<String?>((ref) {
+  final id = ref.watch(shownSessionProvider);
+  if (id == null) return null;
+  final ws = ref.watch(sessionsProvider.select((s) => s[id]?.workspaceId));
+  return (ws?.isNotEmpty ?? false) ? ws : null;
+});
+
+/// The workspace the Sessions tab is narrowed to, or null when it lists all.
+final sidebarSessionsWorkspaceFilterProvider = Provider<String?>(
+  (ref) => ref.watch(sidebarSessionsWorkspaceOnlyProvider)
+      ? ref.watch(shownWorkspaceProvider)
+      : null,
+);

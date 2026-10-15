@@ -13,15 +13,15 @@ import (
 )
 
 // sidebarSessionsComp is the left sidebar's Sessions tab. It reads the
-// sessions each time, so it holds only the cursor (the session under it, and
-// its index for when that session leaves the list) and its own text filter,
-// apart from the home list's. killID is the session awaiting a kill
-// confirmation.
+// sessions each time, so it holds only the cursor (sel, and its index at for
+// when sel leaves the list) and its own text filter, apart from the home
+// list's. killID awaits a kill confirmation.
 type sidebarSessionsComp struct {
 	sel    string
 	at     int
 	query  string
 	filter filterPrompt
+	wsOnly bool
 	killID string
 	rename renamePrompt
 }
@@ -47,7 +47,7 @@ func (s sidebarSessionsComp) spins(c *ctx) bool {
 }
 
 func (s sidebarSessionsComp) footer(*ctx) []binding {
-	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, projectsKeys.Spawn, listKeys.Kill, listKeys.Filter,
+	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, projectsKeys.Spawn, listKeys.Kill, listKeys.Filter, listKeys.WorkspaceOnly,
 		clearFilterKey(projectsKeys.Back, s.query != ""), projectsKeys.Refresh}
 }
 
@@ -70,19 +70,28 @@ func (s sidebarSessionsComp) menu(c *ctx) []binding {
 	return []binding{listKeys.Rename, listKeys.Kill}
 }
 
-// groups are the listed sessions: the live ones that match the filter.
 func (s sidebarSessionsComp) groups(c *ctx) []sidebarSessionGroup {
-	if s.query == "" {
+	ws := s.workspace(c)
+	if s.query == "" && ws == "" {
 		return sidebarSessionGroups(c.m.sessions)
 	}
 	shown := map[string]session.Session{}
 	for id, ss := range c.m.sessions {
-		if c.m.sidebarSessionMatches(ss, s.query) {
+		if (ws == "" || ss.WorkspaceID == ws) && (s.query == "" || c.m.sidebarSessionMatches(ss, s.query)) {
 			shown[id] = ss
 		}
 	}
 	return sidebarSessionGroups(shown)
 }
+
+func (s sidebarSessionsComp) workspace(c *ctx) string {
+	if !s.wsOnly {
+		return ""
+	}
+	return openWorkspace(c)
+}
+
+func openWorkspace(c *ctx) string { return c.m.sessions[c.m.liveSessionID()].WorkspaceID }
 
 func (s sidebarSessionsComp) ids(c *ctx) []string { return sidebarSessionIDs(s.groups(c)) }
 
@@ -94,13 +103,15 @@ func (m model) sidebarSessionMatches(ss session.Session, q string) bool {
 		strings.Contains(strings.ToLower(m.sidebarSessionPlace(ss, false)), lq)
 }
 
-// titleSuffix follows the Sessions tab: its filter and a refresh in flight.
 func (s sidebarSessionsComp) titleSuffix(c *ctx) string {
 	var t string
-	if s.query != "" {
-		t = StyleDim.Render("  /" + s.query)
+	if s.workspace(c) != "" {
+		t += "  workspace"
 	}
-	return t + c.m.refreshTitle()
+	if s.query != "" {
+		t += "  /" + s.query
+	}
+	return StyleDim.Render(t) + c.m.refreshTitle()
 }
 
 // index is the cursor's row: the selected session's, or its last place,
@@ -157,6 +168,18 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 		return s, cmd, true
 	case m.matches(msg, k.Spawn):
 		return s, m.newSessionCmd(), true
+	case m.matches(msg, listKeys.WorkspaceOnly):
+		ws := openWorkspace(c)
+		switch {
+		case s.wsOnly && ws != "":
+			s.wsOnly = false
+			c.setFlash("showing all sessions")
+		case ws == "":
+			c.setFlash("no open session in a workspace")
+		default:
+			s.wsOnly = true
+			c.setFlash("showing the open session's workspace")
+		}
 	case m.matches(msg, k.Up):
 		s = s.moveTo(ids, cursorUp(i))
 	case m.matches(msg, k.Down):
@@ -222,6 +245,8 @@ func (s sidebarSessionsComp) view(c *ctx, w, h int) string {
 	switch {
 	case len(ids) == 0 && s.query != "":
 		return margin + StyleDim.Render("no sessions match /"+s.query+" · "+m.keyTextOn(s.section(), projectsKeys.Back)+" clears")
+	case len(ids) == 0 && s.workspace(c) != "":
+		return margin + StyleDim.Render("no live sessions in this workspace · "+m.keyTextOn(s.section(), listKeys.WorkspaceOnly)+" shows all")
 	case len(ids) == 0:
 		return margin + StyleDim.Render("no live sessions")
 	}

@@ -328,6 +328,34 @@ func TestSidebarSessionsKillRefusesUncontrollable(t *testing.T) {
 	}
 }
 
+func TestSidebarSessionsWorkspaceOnly(t *testing.T) {
+	m := sidebarFilterModel()
+	m = withFocus(m, leftSidebar)
+	m = typeKeys(m, "zw")
+	if m.left.sessions.wsOnly || len(sidebarListed(m)) != 3 {
+		t.Fatalf("zw without an open session changed the list: wsOnly=%v listed=%v", m.left.sessions.wsOnly, sidebarListed(m))
+	}
+	m = openLive(m, "n1:a")
+	m = withFocus(m, leftSidebar)
+	m = typeKeys(m, "zw")
+	if got := sidebarListed(m); !slices.Equal(got, []string{"n1:a", "n1:c"}) {
+		t.Fatalf("zw lists %v, want the open session's workspace", got)
+	}
+	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  workspace") {
+		t.Errorf("the strip does not name the workspace filter")
+	}
+	m = typeKeys(m, "/be")
+	m, _ = upd(m, keyMsg("enter"))
+	if got := sidebarListed(m); len(got) != 0 {
+		t.Fatalf("the text filter looks outside the workspace: %v", got)
+	}
+	m, _ = upd(m, keyMsg("esc"))
+	m = typeKeys(m, "zw")
+	if m.left.sessions.wsOnly || len(sidebarListed(m)) != 3 {
+		t.Fatalf("zw again lists every session: wsOnly=%v listed=%v", m.left.sessions.wsOnly, sidebarListed(m))
+	}
+}
+
 // s in the Sessions tab opens an untargeted spawn; esc returns to the tab.
 func TestSidebarSessionsSpawn(t *testing.T) {
 	m := projectsTestModel()

@@ -31,9 +31,12 @@ class SidebarSessionsList extends ConsumerWidget {
     final projects = ref.watch(projectsProvider).projects;
     final shown = ref.watch(shownSessionProvider);
     final query = ref.watch(sidebarSessionsFilterProvider).trim();
+    final ws = ref.watch(sidebarSessionsWorkspaceFilterProvider);
     final groups = buildSidebarSections(
       sessions.where(
-        (s) => sidebarSessionMatches(s, query, _place(s, projects, false)),
+        (s) =>
+            (ws == null || s.workspaceId == ws) &&
+            sidebarSessionMatches(s, query, _place(s, projects, false)),
       ),
     );
     if (groups.isEmpty) {
@@ -44,9 +47,11 @@ class SidebarSessionsList extends ConsumerWidget {
             const SizedBox(height: 120),
             Center(
               child: Text(
-                query.isEmpty
-                    ? 'no live sessions'
-                    : 'no sessions match "$query"',
+                query.isNotEmpty
+                    ? 'no sessions match "$query"'
+                    : ws != null
+                    ? 'no live sessions in this workspace'
+                    : 'no live sessions',
                 style: const TextStyle(color: AppColors.dim),
               ),
             ),

@@ -97,7 +97,7 @@ func (m model) matches(msg tea.KeyPressMsg, bs ...binding) bool {
 var listKeys = struct {
 	Up, Down, Top, Bottom, HalfUp, HalfDown, PageUp, PageDown            binding
 	Open, Jump, TabPrev, TabNext, New, Kill, Rename, Refresh, Back, Quit binding
-	ActiveOnly, Filter, GroupBy                                          binding
+	ActiveOnly, WorkspaceOnly, Filter, GroupBy                           binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
@@ -118,9 +118,10 @@ var listKeys = struct {
 	Back:     nb("back", "<Esc>", "tree"),
 	Quit:     nm("quit", "Q", "quit"),
 
-	ActiveOnly: nm("toggle active-only", "za", "active"),
-	Filter:     nb("filter-sessions", "/", "filter"),
-	GroupBy:    nm("cycle group-by", "zg", "group"),
+	ActiveOnly:    nm("toggle active-only", "za", "active"),
+	WorkspaceOnly: nm("toggle workspace-only", "zw", "workspace"),
+	Filter:        nb("filter-sessions", "/", "filter"),
+	GroupBy:       nm("cycle group-by", "zg", "group"),
 }
 
 var terminalKeys = struct {
