@@ -74,7 +74,7 @@ var transcriptViewKeys = []any{
 	transcriptKeys.ScrollUp, transcriptKeys.ScrollDown, transcriptKeys.PromptNext, transcriptKeys.PromptPrev,
 	transcriptKeys.HalfUp, transcriptKeys.HalfDown, transcriptKeys.PageUp, transcriptKeys.PageDown,
 	transcriptKeys.Top, transcriptKeys.Bottom, transcriptKeys.Collapse, transcriptKeys.Expand,
-	transcriptKeys.Detail, transcriptKeys.Back,
+	transcriptKeys.Detail, transcriptKeys.Copy, transcriptKeys.Back,
 }
 
 var sidebarListKeys = []any{
