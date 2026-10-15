@@ -37,15 +37,23 @@ let pollGen = 0
 const asks = new Set<Ask>()
 // The running main-loop turn, which $.turn.abort takes; '' when idle.
 let turnId = ''
+// The model and effort last reported to argusd, so steps report only a change.
+let lastModel = ''
+let lastEffort: string | undefined
 
 export const register: Register = (on, options) => {
   socketPath = String(options.socket ?? '')
   env = undefined
+  lastModel = ''
+  lastEffort = undefined
 
   // The session may move to a new id (/clear, /resume): repoll under it at once.
   on('classic.SessionStart', async ($, e, next) => {
     await forward($, 'SessionStart', e)
     startPolling($)
+    lastModel = ''
+    lastEffort = undefined
+    await reportModel($, await $.session.model().catch(() => ''))
     return next(e)
   })
     .catch(($, e, next) => next(e))
@@ -62,6 +70,17 @@ export const register: Register = (on, options) => {
     .catch(($, e, next) => next(e))
   on('classic.SessionEnd', async ($, e, next) => (await forward($, 'SessionEnd', e), next(e)))
     .catch(($, e, next) => next(e))
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    await reportModel($, String((e as Record<string, unknown>).to_model ?? ''))
+    return next(e)
+  })
+    .catch(($, e, next) => next(e))
+
+  // No effort, or a numeric one (a budget, not a level), reports ''.
+  on('turn.step', async function* ($, e, next) {
+    if (!e.agentId) await reportModel($, e.model, typeof e.effort === 'string' ? e.effort : '')
+    return yield* next(e)
+  })
 
   // A rename typed in Claude reaches argus once it has run. One argus sends runs
   // through this mod's own $.command.run, which this hook does not see: execute
@@ -254,6 +273,24 @@ async function reportRename($: EngineInterface, args: string): Promise<void> {
   if (name !== '') await forward($, 'SessionRename', { ...(await sessionFields($)), name })
 }
 
+// Report the session's live model to argusd when it changed. effort is left
+// out when unknown, keeping argusd's last one. Never throws.
+async function reportModel($: EngineInterface, model: string, effort?: string): Promise<void> {
+  if (model === '' || (model === lastModel && (effort === undefined || effort === lastEffort))) return
+  lastModel = model
+  if (effort !== undefined) lastEffort = effort
+  try {
+    await forward($, 'ModelInfo', {
+      hook_event_name: 'ModelInfo',
+      ...(await sessionFields($)),
+      model,
+      ...(effort === undefined ? {} : { effort }),
+    })
+  } catch {
+    // argusd hears of it on the next change or reconnect
+  }
+}
+
 function startPolling($: EngineInterface): void {
   if (socketPath === '') return
   pollGen++
@@ -262,16 +299,23 @@ function startPolling($: EngineInterface): void {
 
 // A loop whose gen is no longer current still runs the commands its in-flight
 // poll already received, then stops.
-function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen: number): void {
+// A poll that succeeds after a failure means argusd may have restarted, losing
+// the live model it kept in memory: report the model again.
+function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen: number, failed = false): void {
   $.clock.after(delayMs, async () => {
     if (gen !== pollGen) return
     try {
       const out = await post($, '/claude/poll', { sessionId: await $.session.id() })
       const { commands } = JSON.parse(out) as { commands?: Command[] }
+      if (failed) {
+        lastModel = ''
+        lastEffort = undefined
+        await reportModel($, await $.session.model().catch(() => ''))
+      }
       for (const c of commands ?? []) await run($, c)
       if (gen === pollGen) schedulePoll($, 0, RETRY_MIN_MS, gen)
     } catch {
-      if (gen === pollGen) schedulePoll($, retryMs, Math.min(retryMs * 2, RETRY_MAX_MS), gen)
+      if (gen === pollGen) schedulePoll($, retryMs, Math.min(retryMs * 2, RETRY_MAX_MS), gen, true)
     }
   })
 }

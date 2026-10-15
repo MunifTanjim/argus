@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const OPTIONS = { options: { socket: '/run/argus/mod.sock' } }
@@ -465,4 +465,117 @@ test('exit ends the running turn, acks, then exits', OPTIONS, async ($, on) => {
   await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(order).toEqual(['abort t1', 'ack', 'run exit'])
+})
+
+const STEP = { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high' as const, messageCount: 1 }
+
+// The engine answering model requests beneath the hooks; registered once per test.
+function engineSteps(on: On) {
+  on('turn.step', async function* (_, e) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never })
+}
+
+// Runs one model request through the hooks.
+async function step($: EngineInterface, e: Record<string, unknown>) {
+  const s = $.turn.step(e as never)
+  for await (const _ of s) { /* drain */ }
+}
+
+function modelInfos(sent: Sent[]) {
+  return sent.filter(s => s.body.event === 'ModelInfo').map(s => s.body.payload as Record<string, unknown>)
+}
+
+test('a session start reports the model', OPTIONS, async ($, on) => {
+  world(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5[1m]' }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SessionStart', () => ({}))
+  await $.classic.SessionStart({ session_id: 's1', source: 'startup', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+  const infos = modelInfos(sent)
+  expect(infos.length).toBe(1)
+  expect(infos[0]).toEqual(expect.objectContaining({ hook_event_name: 'ModelInfo', session_id: 's1', model: 'claude-opus-5-5[1m]' }))
+  expect('effort' in infos[0]).toBe(false)
+})
+
+test('a model switch reports the new model', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostModelSwitch', () => ({}))
+  await $.classic.PostModelSwitch({ session_id: 's1', from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5' } as never)
+  expect(modelInfos(sent).map(p => p.model)).toEqual(['claude-sonnet-5-5'])
+})
+
+test('main-loop steps report model and effort on change only', OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  const sent = argusd(on, () => ({}))
+  await step($, STEP)
+  await step($, { ...STEP, index: 1 })
+  await step($, { ...STEP, index: 2, effort: undefined })
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([
+    ['claude-opus-5-5', 'high'],
+    ['claude-opus-5-5', ''],
+  ])
+})
+
+test("a subagent's step is not reported", OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  const sent = argusd(on, () => ({}))
+  await step($, { ...STEP, agentId: 'a1' })
+  expect(modelInfos(sent).length).toBe(0)
+})
+
+test('a new session start reports the effort again', OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SessionStart', () => ({}))
+  const start = { session_id: 's1', source: 'startup', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never
+  await step($, STEP)
+  await $.classic.SessionStart(start)
+  await step($, STEP)
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([
+    ['claude-opus-5-5', 'high'],
+    ['claude-opus-5-5', undefined],
+    ['claude-opus-5-5', 'high'],
+  ])
+})
+
+// argusd keeps live models in memory only, so after it was unreachable the
+// session reports its model and effort again.
+test('a recovered poll reports the model and effort again', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  engineSteps(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }) as never)
+  let polls = 0
+  const sent = argusd(on, s => {
+    if (s.path !== '/claude/poll') return {}
+    polls++
+    return polls === 1 ? new Error('connect ENOENT') : polls === 2 ? { commands: [] } : new Error('hold')
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await step($, STEP)
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([['claude-opus-5-5', 'high']])
+  await clock.advance(1000)
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([
+    ['claude-opus-5-5', 'high'],
+    ['claude-opus-5-5', undefined],
+  ])
+  await step($, STEP)
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([
+    ['claude-opus-5-5', 'high'],
+    ['claude-opus-5-5', undefined],
+    ['claude-opus-5-5', 'high'],
+  ])
+})
+
+test('a numeric effort reports no label', OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  const sent = argusd(on, () => ({}))
+  await step($, { ...STEP, effort: 31999 })
+  expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([['claude-opus-5-5', '']])
 })
