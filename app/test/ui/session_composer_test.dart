@@ -283,6 +283,67 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  testWidgets('dragging the status line resizes and collapses the prompt',
+      (t) async {
+    t.view.physicalSize = const Size(400, 800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final plan = List.generate(100, (i) => 'Step $i').join('\n\n');
+    await _pump(
+        t,
+        _s(status: 'awaiting_input', interaction: {
+          'kind': 'plan',
+          'plan': plan,
+        }),
+        _Recording());
+    await t.pump();
+    final status = find.text('Plan review').first;
+    double panel() => t.getSize(find.byType(InteractionPanel)).height;
+    expect(panel(), lessThanOrEqualTo(800 * 0.6));
+    await t.drag(status, const Offset(0, -800));
+    await t.pump();
+    expect(t.getSize(find.byType(SessionComposer)).height, 800);
+    expect(t.takeException(), isNull);
+    await t.drag(status, const Offset(0, -200));
+    await t.pump();
+    await t.drag(status, const Offset(0, 200));
+    await t.pump();
+    expect(panel(), lessThan(800 - 56 - 100));
+    await t.drag(status, const Offset(0, 800));
+    await t.pump();
+    expect(find.byType(InteractionPanel), findsNothing);
+    await t.tap(find.byTooltip('Expand'));
+    await t.pump();
+    expect(panel(), closeTo(800 * 0.6, 1));
+  });
+
+  testWidgets('a prompt never shrinks below its buttons', (t) async {
+    t.view.physicalSize = const Size(400, 800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final long = List.generate(60, (i) => 'Line $i').join('\n');
+    await _pump(t, _s(status: 'awaiting_input', interaction: question(long)),
+        _Recording());
+    await t.pump();
+    final status = find.text('Question').first;
+    final gesture = await t.startGesture(t.getCenter(status));
+    for (var y = 0; y < 80; y++) {
+      await gesture.moveBy(const Offset(0, 10));
+      await t.pump();
+      expect(t.takeException(), isNull);
+      if (find.byType(InteractionPanel).evaluate().isEmpty) break;
+      expect(find.text('Chat about this').hitTestable(), findsOneWidget);
+    }
+    await gesture.up();
+    expect(find.byType(InteractionPanel), findsNothing);
+
+    t.view.physicalSize = const Size(400, 260);
+    await _pump(t, _s(status: 'awaiting_input', interaction: question(long)),
+        _Recording());
+    await t.pump();
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets('long rule labels truncate on a narrow screen', (t) async {
     t.view.physicalSize = const Size(320, 800);
     t.view.devicePixelRatio = 1;

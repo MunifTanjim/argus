@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/command.dart';
@@ -185,14 +186,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     }
 
     return [
-      Flexible(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: detail,
-          ),
-        ),
-      ),
+      _scrollBody(detail),
       const SizedBox(height: 16),
       if (!_denying)
         for (var i = 0; i < options.length; i++)
@@ -268,17 +262,10 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         ) !=
         null;
     return [
-      Flexible(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var qi = 0; qi < qs.length; qi++)
-                _questionCard(qs[qi], drafts[qi]),
-            ],
-          ),
-        ),
-      ),
+      _scrollBody([
+        for (var qi = 0; qi < qs.length; qi++)
+          _questionCard(qs[qi], drafts[qi]),
+      ]),
       const SizedBox(height: 12),
       FilledButton(
         onPressed: (_busy || !canSubmit)
@@ -468,4 +455,31 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       ),
     );
   }
+}
+
+/// The prompt's scrolling part; the fixed parts around it set the panel's
+/// minimum height.
+Widget _scrollBody(List<Widget> children) => Flexible(
+      child: _Scrolling(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        ),
+      ),
+    );
+
+/// A scroll area fits any height, so its minimum intrinsic height is zero and
+/// the panel's is just its fixed parts.
+class _Scrolling extends SingleChildRenderObjectWidget {
+  const _Scrolling({required Widget super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderScrolling();
+}
+
+class _RenderScrolling extends RenderProxyBox {
+  @override
+  double computeMinIntrinsicHeight(double width) => 0;
 }
