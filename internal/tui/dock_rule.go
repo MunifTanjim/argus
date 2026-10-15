@@ -7,6 +7,8 @@ import (
 	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 // dockRuleEdge is the run of dashes before the left label and after the right.
@@ -54,4 +56,59 @@ func formatElapsed(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dh %02dm", s/3600, s/60%60)
 	}
+}
+
+// clockNow is the TUI's clock for running timers. A var so tests can fix it.
+var clockNow = time.Now
+
+// dockStatusLabel is the top rule's label: the pending prompt's kind, or what
+// the session is doing; "" while it waits for a prompt.
+func (m model) dockStatusLabel(s session.Session) string {
+	accent := lipgloss.NewStyle().Foreground(ColorAccent)
+	if ix := s.Interaction; ix != nil && ix.Kind != session.InteractionIdle {
+		return StyleAccentBold.Render(interactionKindLabel(ix.Kind))
+	}
+	switch s.Status {
+	case session.StatusWorking:
+		label := spinnerFrame(m) + " Working…"
+		if t, err := time.Parse(time.RFC3339, s.StatusSince); err == nil {
+			label += " " + formatElapsed(clockNow().Sub(t))
+		}
+		return accent.Render(label)
+	case session.StatusStarting:
+		return dimStyle.Render("Starting…")
+	}
+	return ""
+}
+
+// interactionKindLabel names a pending prompt on the top rule.
+func interactionKindLabel(k session.InteractionKind) string {
+	switch k {
+	case session.InteractionPermission:
+		return "Permission"
+	case session.InteractionQuestion:
+		return "Question"
+	case session.InteractionPlan:
+		return "Plan"
+	}
+	return "Input"
+}
+
+// modelEffortLabel is "<model> · <effort>", each part left out when unknown.
+func modelEffortLabel(sum *session.Summary) string {
+	if sum == nil {
+		return ""
+	}
+	var parts []string
+	if sum.ModelName != "" {
+		st := dimStyle
+		if sum.ModelColor != "" {
+			st = lipgloss.NewStyle().Foreground(modelColorOf(sum.ModelColor))
+		}
+		parts = append(parts, st.Render(sum.ModelName))
+	}
+	if sum.Effort != "" {
+		parts = append(parts, dimStyle.Render(sum.Effort))
+	}
+	return strings.Join(parts, dimStyle.Render(" · "))
 }
