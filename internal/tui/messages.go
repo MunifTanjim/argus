@@ -147,7 +147,11 @@ type hostTickMsg struct {
 	gen    int
 }
 
-type inputSentMsg struct{ err error }
+// inputSentMsg reports a sent input; id and text let a failure restore the draft.
+type inputSentMsg struct {
+	err      error
+	id, text string
+}
 
 type hostWakelockMsg struct {
 	nodeID   string

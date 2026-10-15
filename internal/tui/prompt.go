@@ -179,6 +179,20 @@ func (d *dockComp) pruneReplyDrafts(sessions map[string]session.Session) {
 	}
 }
 
+// restoreDraft puts text back as the session's draft after a failed send,
+// unless a newer draft has been typed meanwhile.
+func (d *dockComp) restoreDraft(id, text string, live bool) {
+	if live {
+		if strings.TrimSpace(d.reply.Value()) == "" {
+			d.reply.SetValue(text)
+		}
+		return
+	}
+	if d.drafts[id] == "" {
+		d.drafts[id] = text
+	}
+}
+
 func (d *dockComp) loadReplyDraft(c *ctx, id string) {
 	d.reply = newIdleReplyArea()
 	if v := d.drafts[id]; v != "" {

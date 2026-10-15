@@ -250,6 +250,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inputSentMsg:
 		if msg.err != nil {
 			m.flash = "send failed: " + msg.err.Error()
+			m.dock.restoreDraft(msg.id, msg.text, m.liveSessionID() == msg.id)
 		}
 		return m, nil
 	case killResultMsg:
@@ -331,7 +332,7 @@ func (m model) sendInputCmd(id, text string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		err := client.Call(api.MethodSessionInput, api.InputParams{SessionID: id, Text: text, Submit: true, Prepare: true}, nil)
-		return inputSentMsg{err: err}
+		return inputSentMsg{err: err, id: id, text: text}
 	}
 }
 

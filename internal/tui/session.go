@@ -226,7 +226,7 @@ func (d dockComp) dockScrollGeom(c *ctx, height int) (maxScroll, page int) {
 // dockScrolls reports whether the focused dock body currently overflows (so the
 // footer should advertise the scroll keys).
 func (d dockComp) dockScrolls(c *ctx) bool {
-	if c.m.focused != sessionDock || c.m.sessionInteraction() == nil {
+	if c.m.focused != sessionDock || c.m.composing() {
 		return false
 	}
 	maxScroll, _ := d.dockScrollGeom(c, d.dockHeight(c, c.m.sessionRows())-dockChrome)
