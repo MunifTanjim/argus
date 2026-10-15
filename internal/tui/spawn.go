@@ -69,7 +69,7 @@ func newSpawnPromptArea() textarea.Model {
 	ta.ShowLineNumbers = false
 	// enter submits (router), so newlines come from shift+enter or the ctrl+j fallback.
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
-	return ta
+	return withWordMotion(ta)
 }
 
 // dirCursorMax is the dir-step selectable row count: one per project plus the
