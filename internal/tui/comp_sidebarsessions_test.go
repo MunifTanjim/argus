@@ -327,3 +327,21 @@ func TestSidebarSessionsKillRefusesUncontrollable(t *testing.T) {
 		t.Errorf("dd on a session without terminal control should refuse: killID=%q flash=%q", m.left.sessions.killID, m.flash)
 	}
 }
+
+// s in the Sessions tab opens an untargeted spawn; esc returns to the tab.
+func TestSidebarSessionsSpawn(t *testing.T) {
+	m := projectsTestModel()
+	m.width, m.height = 160, 30
+	m.left.tab = leftSessions
+	m.client = &spawnPickClient{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}}
+	m = withFocus(m, leftSidebar)
+	n := len(m.main)
+	m, cmd := upd(m, keyMsg("s"))
+	m = runSpawnReplies(m, cmd)
+	assertSpawnOpen(t, "s in the Sessions tab", m, n)
+	m = pressKeys(m, keyMsg("esc"))
+	assertSpawnClosed(t, "esc", m, n, leftSidebar)
+	if m.left.tab != leftSessions {
+		t.Errorf("esc: tab %v, want the Sessions tab", m.left.tab)
+	}
+}

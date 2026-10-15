@@ -47,7 +47,7 @@ func (s sidebarSessionsComp) spins(c *ctx) bool {
 }
 
 func (s sidebarSessionsComp) footer(*ctx) []binding {
-	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, listKeys.Kill, listKeys.Filter,
+	return []binding{projectsKeys.SideTabNext, projectsKeys.Enter, projectsKeys.Spawn, listKeys.Kill, listKeys.Filter,
 		clearFilterKey(projectsKeys.Back, s.query != ""), projectsKeys.Refresh}
 }
 
@@ -155,6 +155,8 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 		var cmd tea.Cmd
 		s.filter, cmd = s.filter.start(s.query)
 		return s, cmd, true
+	case m.matches(msg, k.Spawn):
+		return s, m.newSessionCmd(), true
 	case m.matches(msg, k.Up):
 		s = s.moveTo(ids, cursorUp(i))
 	case m.matches(msg, k.Down):
