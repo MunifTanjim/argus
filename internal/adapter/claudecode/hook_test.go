@@ -433,3 +433,30 @@ func TestNotificationAlwaysIdle(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessHookModelInfoSetsLiveModel(t *testing.T) {
+	reg := registry.New()
+	mk := func(fields map[string]any) HookEvent {
+		fields["session_id"] = "sess-1"
+		fields["hook_event_name"] = "ModelInfo"
+		payload, _ := json.Marshal(fields)
+		return HookEvent{Event: "ModelInfo", Payload: payload}
+	}
+
+	got, _ := ProcessHook(reg, mk(map[string]any{"model": "claude-opus-5-5[1m]"}))
+	if got.Summary == nil || got.Summary.ModelName != modelDisplayName("claude-opus-5-5[1m]") ||
+		got.Summary.ModelColor != modelColorHex("claude-opus-5-5[1m]") || got.Summary.Effort != "" {
+		t.Fatalf("model not applied: %+v", got.Summary)
+	}
+
+	got, _ = ProcessHook(reg, mk(map[string]any{"model": "claude-opus-5-5[1m]", "effort": "xhigh"}))
+	if got.Summary.Effort != "xhigh" {
+		t.Fatalf("effort not applied: %+v", got.Summary)
+	}
+
+	before := got.Status
+	got, _ = ProcessHook(reg, mk(map[string]any{"model": "claude-sonnet-5-5"}))
+	if got.Summary.Effort != "xhigh" || got.Status != before {
+		t.Fatalf("a model-only report should keep effort and status: %+v %q", got.Summary, got.Status)
+	}
+}
