@@ -22,7 +22,11 @@ func (d *Node) handleHistoryProjects(context.Context, json.RawMessage) (any, err
 		}
 		lists = append(lists, ps)
 	}
-	return mergeProjects(lists), nil
+	out := mergeProjects(lists)
+	for i := range out {
+		out[i].Missing = dirMissing(out[i].Cwd)
+	}
+	return out, nil
 }
 
 func (d *Node) handleHistorySessions(_ context.Context, params json.RawMessage) (any, error) {

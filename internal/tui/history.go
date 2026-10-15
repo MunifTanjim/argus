@@ -101,16 +101,20 @@ func exportPrompt(pending bool) string {
 	return asstStyle.Render("export this session? y/n")
 }
 
-func historyResume(c *ctx, resumable bool, nodeID, agent, sessionID, cwd string) tea.Cmd {
-	if !resumable {
+func historyResume(c *ctx, s session.HistorySession, p session.HistoryProject) tea.Cmd {
+	if !s.Resumable {
 		c.setFlash("resume not supported for this session")
 		return nil
 	}
-	if cwd == "" {
+	if p.Cwd == "" {
 		c.setFlash("resume unavailable: unknown working directory")
 		return nil
 	}
-	return c.m.resumeCmd(nodeID, agent, sessionID, cwd)
+	if p.Missing {
+		c.setFlash("resume unavailable: directory no longer exists")
+		return nil
+	}
+	return c.m.resumeCmd(p.NodeID, s.Agent, s.SessionID, p.Cwd)
 }
 
 // --- views --------------------------------------------------------------------

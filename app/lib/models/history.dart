@@ -8,6 +8,9 @@ class HistoryProject {
   final String? nodeId;
   final String? nodeLabel;
 
+  /// The cwd no longer exists on its node.
+  final bool missing;
+
   const HistoryProject({
     required this.projectDir,
     required this.cwd,
@@ -17,6 +20,7 @@ class HistoryProject {
     required this.lastActivity,
     this.nodeId,
     this.nodeLabel,
+    this.missing = false,
   });
 
   factory HistoryProject.fromJson(Map<String, dynamic> j) => HistoryProject(
@@ -28,6 +32,7 @@ class HistoryProject {
         lastActivity: j['last_activity'] as String? ?? '',
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
+        missing: j['missing'] as bool? ?? false,
       );
 }
 
