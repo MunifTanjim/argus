@@ -36,9 +36,13 @@ func (a *ccAdapter) inputMode(s session.Session) session.InputMode {
 // ModBridge is the bridge the node's mod socket serves.
 func (a *ccAdapter) ModBridge() *modbridge.Bridge { return a.bridge }
 
-// SendPrompt hands text to the session's mod: a leading "/" runs it as a slash
-// command, anything else is submitted as a prompt.
+// SendPrompt hands text to the session's mod while the session is ready for a
+// prompt: a leading "/" runs it as a slash command, anything else is submitted
+// as a prompt.
 func (a *ccAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
+	if !sess.ReadyForPrompt() {
+		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
 	_, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindPrompt, Text: text})
 	return err
 }

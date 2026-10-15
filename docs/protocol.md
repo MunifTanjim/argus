@@ -1241,10 +1241,11 @@ InputParams {
 
 For an `api` session, the node ignores `submit` and `prepare` and always
 submits the text. The call fails with `session has no terminal control` if
-`text` is empty. For opencode and Codex, the call fails with `session is busy`
-if the session is not idle. Claude Code queues text that comes while a turn
-runs. For Claude Code, text that starts with `/` runs as a slash command. Claude Code takes no prompt that starts with
-`/`, so other such text fails.
+`text` is empty. For opencode, Codex, and Claude Code, the call fails with
+`session is busy` if the session is not idle, including while a permission,
+question, or plan is pending. For Claude Code, text that starts with `/` runs
+as a slash command. Claude Code takes no prompt that starts with `/`, so other
+such text fails.
 
 ```ts
 
