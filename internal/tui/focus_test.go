@@ -27,9 +27,7 @@ func TestFocusTransitions(t *testing.T) {
 		return out
 	}
 	dockGone := func(m model) model {
-		s := m.sessions["n1:s1"]
-		s.Interaction = nil
-		m.sessions["n1:s1"] = s
+		delete(m.sessions, "n1:s1")
 		return m
 	}
 	cases := []struct {

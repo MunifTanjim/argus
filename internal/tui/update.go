@@ -300,11 +300,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) idleComposerActive() bool {
-	if !m.dockFocused() {
-		return false
-	}
-	s, ok := m.sessions[m.liveSessionID()]
-	return ok && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle
+	return m.dockFocused() && m.composing()
 }
 
 func spinTickCmd() tea.Cmd {

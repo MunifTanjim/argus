@@ -132,6 +132,10 @@ func (m model) mainColumn(c *ctx, l frameLayout) string {
 	mc := &ctx{m: c.m, area: m.hits.add(regMain, r)}
 	pane := m.main.top().view(mc, l.w, l.h-dockH)
 	if dockH > 0 {
+		// Pad a short pane so the region sits at the bottom.
+		if pad := m.sessionRows() - dockH - lipgloss.Height(pane); pad > 0 {
+			pane += strings.Repeat("\n", pad)
+		}
 		paneH := lipgloss.Height(pane)
 		if mc.area != nil {
 			mc.area.rect.Max.Y = r.Min.Y + paneH
@@ -156,10 +160,7 @@ func (m model) dockRows() int {
 }
 
 func (m model) dockDrawn() bool {
-	if m.paneCovered() {
-		return false
-	}
-	return m.dockShown() && m.sessions[m.liveSessionID()].Status != session.StatusStarting
+	return !m.paneCovered() && m.dockShown()
 }
 
 func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
