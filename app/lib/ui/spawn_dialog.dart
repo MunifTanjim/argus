@@ -9,6 +9,7 @@ import '../state/grouping.dart';
 import '../state/history_view_model.dart';
 import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
+import 'relative_time.dart';
 import 'theme.dart';
 import 'voice_input_field.dart';
 
@@ -28,13 +29,10 @@ class SpawnTarget {
   final String prompt;
 }
 
-Future<void> showSpawnDialog(BuildContext context, WidgetRef ref,
-    {SpawnTarget? target}) {
-  return showDialog(
-    context: context,
-    builder: (_) => SpawnDialog(target: target),
-  );
-}
+Route<void> spawnRoute({SpawnTarget? target}) => MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => SpawnDialog(target: target),
+    );
 
 class SpawnDialog extends StatelessWidget {
   const SpawnDialog({super.key, this.target});
@@ -42,9 +40,9 @@ class SpawnDialog extends StatelessWidget {
   final SpawnTarget? target;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('New session'),
-        content: SpawnDialogBody(target: target),
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('New session')),
+        body: SafeArea(child: SpawnDialogBody(target: target)),
       );
 }
 
@@ -213,98 +211,71 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
 
     final allProjects = ref.watch(historyProjectsProvider).value ??
         const <HistoryProject>[];
-    // Dedupe by cwd: the same path can appear on multiple nodes (or repeat in
-    // history), and the dropdown asserts one item per value.
+    // Most recent first; dedupe by cwd since the same path can appear on
+    // multiple nodes (or repeat in history).
     final seenCwds = <String>{};
     final projects = [
       for (final p in allProjects)
         if (_nodeId == null || (p.nodeId ?? '') == _nodeId)
           if (seenCwds.add(p.cwd)) p,
     ];
-    // Drop a stale selection that no longer maps to an item, else the dropdown
-    // has zero matches for its value and asserts.
+    // Drop a stale selection from another node's list.
     if (_selectedCwd != null && !seenCwds.contains(_selectedCwd)) {
       _selectedCwd = null;
     }
     _selectedCwd ??= projects.isNotEmpty ? projects.first.cwd : null;
 
-    return SingleChildScrollView(
+    final target = widget.target;
+    final agents = _agents;
+    final agent = agents?.where((a) => a.id == _agent).firstOrNull;
+    final project = projects.where((p) => p.cwd == _selectedCwd).firstOrNull;
+
+    final page = SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.target != null)
+          if (target == null && nodes.length >= 2)
+            _PickerField(
+              label: 'Node',
+              value: selectedNode?.label ?? 'Choose a node',
+              onTap: busy ? null : () => _pickNode(nodes),
+            ),
+          if (agents != null && agents.length >= 2)
+            _PickerField(
+              label: 'Agent',
+              value: agent?.name ?? 'Choose an agent',
+              valueColor: agent == null ? null : _hexColor(agent.color),
+              onTap: busy ? null : () => _pickAgent(agents),
+            ),
+          if (target != null)
+            _PickerField(
+              label: 'Directory',
+              value: target.label,
+              detail: target.cwd,
+            )
+          else
+            _PickerField(
+              label: 'Directory',
+              value: _customCwd
+                  ? 'Custom path'
+                  : project?.label ?? 'Choose a directory',
+              detail: _customCwd ? null : project?.cwd,
+              onTap: busy ? null : () => _pickDirectory(projects),
+            ),
+          if (target == null && _customCwd)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('In ${widget.target!.label}',
-                  style: const TextStyle(color: AppColors.dim)),
-            ),
-          if (widget.target == null && nodes.length >= 2)
-            DropdownButton<String>(
-              value: _nodeId,
-              isExpanded: true,
-              items: [
-                for (final n in nodes)
-                  DropdownMenuItem(
-                    value: n.id,
-                    enabled: n.spawnSupported,
-                    child: Text(
-                      n.spawnSupported ? n.label : '${n.label} (no tmux)',
-                    ),
-                  ),
-              ],
-              onChanged: (v) {
-                setState(() {
-                  _nodeId = v;
-                  // Reset directory selection when node changes
-                  _selectedCwd = null;
-                  _customCwd = false;
-                  _customPath = '';
-                  _agents = null;
-                  _agent = null;
-                });
-                _loadAgents();
-              },
-            ),
-          if (_agents != null && _agents!.length >= 2)
-            DropdownButton<String>(
-              value: _agent,
-              isExpanded: true,
-              hint: const Text('Agent'),
-              items: [
-                for (final a in _agents!)
-                  DropdownMenuItem(
-                    value: a.id,
-                    child:
-                        Text(a.name, style: TextStyle(color: _hexColor(a.color))),
-                  ),
-              ],
-              onChanged: (v) => setState(() => _agent = v),
-            ),
-          if (widget.target == null)
-            DropdownButton<String>(
-              isExpanded: true,
-              value: _customCwd ? '__custom__' : _selectedCwd,
-              hint: const Text('Working directory'),
-              items: [
-                for (final p in projects)
-                  DropdownMenuItem(value: p.cwd, child: Text(p.label)),
-                const DropdownMenuItem(
-                    value: '__custom__', child: Text('Custom path…')),
-              ],
-              onChanged: (v) => setState(() {
-                if (v == '__custom__') {
-                  _customCwd = true;
-                } else {
-                  _customCwd = false;
-                  _selectedCwd = v;
-                }
-              }),
-            ),
-          if (widget.target == null && _customCwd)
-            TextField(
-              decoration: const InputDecoration(labelText: 'Custom path'),
-              onChanged: (v) => setState(() => _customPath = v),
+              padding: const EdgeInsets.only(bottom: 16),
+              child: TextField(
+                key: const Key('spawn-custom-path'),
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Path',
+                  hintText: '/path/to/project',
+                ),
+                onChanged: (v) => setState(() => _customPath = v),
+              ),
             ),
           VoiceInputField(
             controller: _promptCtl,
@@ -314,7 +285,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               key: const Key('spawn-prompt'),
               controller: _promptCtl,
               decoration: InputDecoration(
-                labelText: 'Initial prompt',
+                labelText: 'Prompt',
                 hintText: 'What should this session work on?',
                 suffixIcon: suffixIcon,
               ),
@@ -335,33 +306,258 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
                     ),
               ),
             ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: busy ? null : () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                // Block while agent probe is in flight: agent isn't known yet.
-                onPressed: (busy ||
-                        _prompt.trim().isEmpty ||
-                        !spawnable ||
-                        _agents == null)
+          const SizedBox(height: 24),
+          FilledButton(
+            // Block while agent probe is in flight: agent isn't known yet.
+            onPressed:
+                (busy || _prompt.trim().isEmpty || !spawnable || agents == null)
                     ? null
                     : _spawn,
-                child: busy
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Spawn'),
-              ),
-            ],
+            child: busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Spawn'),
           ),
         ],
+      ),
+    );
+    // Leaving mid-spawn would drop its outcome.
+    return PopScope(canPop: !busy, child: page);
+  }
+
+  Future<void> _pickNode(List<NodeRef> nodes) async {
+    final v = await _pick(
+      title: 'Node',
+      selected: _nodeId,
+      choices: [
+        for (final n in nodes)
+          _Choice(
+            value: n.id,
+            title: n.label,
+            subtitle: n.spawnSupported ? null : 'no tmux',
+            enabled: n.spawnSupported,
+          ),
+      ],
+    );
+    if (v == null || v == _nodeId) return;
+    setState(() {
+      _nodeId = v;
+      _selectedCwd = null;
+      _customCwd = false;
+      _customPath = '';
+      _agents = null;
+      _agent = null;
+    });
+    _loadAgents();
+  }
+
+  Future<void> _pickAgent(List<AgentInfo> agents) async {
+    final v = await _pick(
+      title: 'Agent',
+      selected: _agent,
+      choices: [
+        for (final a in agents)
+          _Choice(value: a.id, title: a.name, color: _hexColor(a.color)),
+      ],
+    );
+    if (v != null) setState(() => _agent = v);
+  }
+
+  Future<void> _pickDirectory(List<HistoryProject> projects) async {
+    final v = await _pick(
+      title: 'Directory',
+      selected: _customCwd ? _customValue : _selectedCwd,
+      filterHint: 'Filter by name or path',
+      choices: [
+        for (final p in projects)
+          _Choice(
+            value: p.cwd,
+            title: p.label,
+            subtitle: p.cwd,
+            trailing: relativeTime(p.lastActivity),
+          ),
+      ],
+      footer: const _Choice(value: _customValue, title: 'Custom path…'),
+    );
+    if (v == null) return;
+    setState(() {
+      _customCwd = v == _customValue;
+      if (!_customCwd) _selectedCwd = v;
+    });
+  }
+
+  Future<String?> _pick({
+    required String title,
+    required List<_Choice> choices,
+    String? selected,
+    String? filterHint,
+    _Choice? footer,
+  }) =>
+      Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (_) => _ChoiceScreen(
+            title: title,
+            choices: choices,
+            selected: selected,
+            filterHint: filterHint,
+            footer: footer,
+          ),
+        ),
+      );
+}
+
+const _customValue = '__custom__';
+
+/// Read-only when [onTap] is null.
+class _PickerField extends StatelessWidget {
+  const _PickerField({
+    required this.label,
+    required this.value,
+    this.detail,
+    this.valueColor,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final String? detail;
+  final Color? valueColor;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: InkWell(
+          onTap: onTap,
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: label,
+              suffixIcon: onTap == null ? null : const Icon(Icons.chevron_right),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(value, style: TextStyle(color: valueColor)),
+                if (detail != null && detail!.isNotEmpty)
+                  Text(
+                    detail!,
+                    style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+class _Choice {
+  const _Choice({
+    required this.value,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.color,
+    this.enabled = true,
+  });
+
+  final String value;
+  final String title;
+  final String? subtitle;
+  final String? trailing;
+  final Color? color;
+  final bool enabled;
+}
+
+/// A full-page list of choices; pops with the picked value. Shows a filter
+/// over title and subtitle when [filterHint] is set; [footer] is never
+/// filtered out.
+class _ChoiceScreen extends StatefulWidget {
+  const _ChoiceScreen({
+    required this.title,
+    required this.choices,
+    this.selected,
+    this.filterHint,
+    this.footer,
+  });
+
+  final String title;
+  final List<_Choice> choices;
+  final String? selected;
+  final String? filterHint;
+  final _Choice? footer;
+
+  @override
+  State<_ChoiceScreen> createState() => _ChoiceScreenState();
+}
+
+class _ChoiceScreenState extends State<_ChoiceScreen> {
+  var _filter = '';
+
+  bool _matches(_Choice c) {
+    final q = _filter.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return c.title.toLowerCase().contains(q) ||
+        (c.subtitle ?? '').toLowerCase().contains(q);
+  }
+
+  Widget _tile(_Choice c) => ListTile(
+        enabled: c.enabled,
+        title: Text(c.title, style: TextStyle(color: c.color)),
+        subtitle: c.subtitle == null ? null : Text(c.subtitle!),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (c.trailing != null && c.trailing!.isNotEmpty)
+              Text(
+                c.trailing!,
+                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+              ),
+            if (c.value == widget.selected)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Icon(Icons.check, size: 20),
+              ),
+          ],
+        ),
+        onTap: c.enabled ? () => Navigator.of(context).pop(c.value) : null,
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = widget.choices.where(_matches).toList();
+    final footer = widget.footer;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            if (widget.filterHint != null)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: TextField(
+                  key: const Key('spawn-filter'),
+                  decoration: InputDecoration(
+                    hintText: widget.filterHint,
+                    prefixIcon: const Icon(Icons.search),
+                  ),
+                  onChanged: (v) => setState(() => _filter = v),
+                ),
+              ),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final c in shown) _tile(c),
+                  if (footer != null) _tile(footer),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

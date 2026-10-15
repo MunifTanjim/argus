@@ -103,13 +103,13 @@ class WorkspaceScreen extends ConsumerWidget {
       floatingActionButton: switch (tab) {
         WorkspaceTab.sessions => FloatingActionButton(
           tooltip: 'New session',
-          onPressed: () => showSpawnDialog(
-            context,
-            ref,
-            target: SpawnTarget(
-              nodeId: project.nodeId,
-              cwd: workspace.dir,
-              label: '${project.name} · ${workspace.name}',
+          onPressed: () => Navigator.of(context).push(
+            spawnRoute(
+              target: SpawnTarget(
+                nodeId: project.nodeId,
+                cwd: workspace.dir,
+                label: '${project.name} · ${workspace.name}',
+              ),
             ),
           ),
           child: const Icon(Icons.add),
