@@ -379,31 +379,39 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
       // navigation bar (e.g. Android 3-button nav).
       body: SafeArea(
         top: false,
-        // The composer is capped to the body, which the keyboard shrinks.
-        child: LayoutBuilder(
-          builder: (context, box) => Column(
-            children: [
-              if (conn != ConnState.connected)
-                _Banner(state: conn, message: connError),
-              Expanded(
-                // Spinner until the first snapshot arrives; error stops it.
-                child: switch (live.status) {
-                  SessionStatus.starting => const _StartingNotice(),
-                  _ when !st.loaded && st.error == null =>
-                    const Center(child: CircularProgressIndicator()),
-                  _ => TranscriptFeed(
-                      detailRef: ToolDetailRef.live(_sid, agent: live.agent),
-                      entries: st.entries),
-                },
-              ),
-              if (live.status != SessionStatus.dead)
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: box.maxHeight * 0.6),
-                  child: SessionComposer(
-                      session: live, inputNotice: inputNotice),
+        child: Column(
+          children: [
+            if (conn != ConnState.connected)
+              _Banner(state: conn, message: connError),
+            Expanded(
+              // The composer is capped to the body, which the keyboard
+              // shrinks; a dragged prompt can fill all of it.
+              child: LayoutBuilder(
+                builder: (context, box) => Column(
+                  children: [
+                    Expanded(
+                      // Spinner until the first snapshot arrives; error stops it.
+                      child: switch (live.status) {
+                        SessionStatus.starting => const _StartingNotice(),
+                        _ when !st.loaded && st.error == null =>
+                          const Center(child: CircularProgressIndicator()),
+                        _ => TranscriptFeed(
+                            detailRef:
+                                ToolDetailRef.live(_sid, agent: live.agent),
+                            entries: st.entries),
+                      },
+                    ),
+                    if (live.status != SessionStatus.dead)
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: box.maxHeight),
+                        child: SessionComposer(
+                            session: live, inputNotice: inputNotice),
+                      ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
