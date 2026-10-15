@@ -17,12 +17,11 @@ import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
-import 'interaction_bar.dart';
 import 'live_screen_screen.dart';
 import 'project_actions.dart';
-import 'respond_sheet.dart';
 import 'route_observer.dart';
 import 'session_actions.dart';
+import 'session_composer.dart';
 import 'session_tasks_screen.dart';
 import 'status_style.dart';
 import 'theme.dart';
@@ -194,10 +193,12 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         outdatedNodeIdsProvider.select((ids) => ids.contains(live.nodeId)));
     final canKill = live.canKill && !outdated;
     final canOpenTerminal = live.canOpenTerminal && !outdated;
+    final ix = live.interaction;
+    final pendingPrompt = ix != null && ix.kind != InteractionKind.idle;
     final String? inputNotice;
     if (outdated) {
       inputNotice = 'Upgrade argus on ${live.nodeLabel ?? 'this node'}';
-    } else if (!live.acceptsInput && live.interaction?.kind == InteractionKind.idle) {
+    } else if (!live.acceptsInput && !pendingPrompt) {
       inputNotice = respondElsewhereLabel(live.frontend);
     } else {
       inputNotice = null;
@@ -355,32 +356,35 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         ],
       ),
       // top:false — AppBar already insets the top; we only need the bottom
-      // (and side) safe-area so content/InteractionBar clear the system
+      // (and side) safe-area so content/SessionComposer clear the system
       // navigation bar (e.g. Android 3-button nav).
       body: SafeArea(
         top: false,
-        child: Column(
-          children: [
-            if (conn != ConnState.connected)
-              _Banner(state: conn, message: connError),
-            Expanded(
-              // Spinner until the first snapshot arrives; error stops it.
-              child: switch (live.status) {
-                SessionStatus.starting => const _StartingNotice(),
-                _ when !st.loaded && st.error == null =>
-                  const Center(child: CircularProgressIndicator()),
-                _ => TranscriptFeed(
-                    detailRef: ToolDetailRef.live(_sid, agent: live.agent),
-                    entries: st.entries),
-              },
-            ),
-            if (live.interaction != null)
-              InteractionBar(
-                interaction: live.interaction!,
-                informationalMessage: inputNotice,
-                onRespond: () => showRespondSheet(context, live),
+        // The composer is capped to the body, which the keyboard shrinks.
+        child: LayoutBuilder(
+          builder: (context, box) => Column(
+            children: [
+              if (conn != ConnState.connected)
+                _Banner(state: conn, message: connError),
+              Expanded(
+                // Spinner until the first snapshot arrives; error stops it.
+                child: switch (live.status) {
+                  SessionStatus.starting => const _StartingNotice(),
+                  _ when !st.loaded && st.error == null =>
+                    const Center(child: CircularProgressIndicator()),
+                  _ => TranscriptFeed(
+                      detailRef: ToolDetailRef.live(_sid, agent: live.agent),
+                      entries: st.entries),
+                },
               ),
-          ],
+              if (live.status != SessionStatus.dead)
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: box.maxHeight * 0.6),
+                  child: SessionComposer(
+                      session: live, inputNotice: inputNotice),
+                ),
+            ],
+          ),
         ),
       ),
     );

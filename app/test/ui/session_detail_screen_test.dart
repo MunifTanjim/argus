@@ -21,7 +21,7 @@ import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/transport/rpc_client.dart';
 import 'package:argus/state/transcript.dart';
 import 'package:argus/state/transcript_controller.dart';
-import 'package:argus/ui/interaction_bar.dart';
+import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/workspace_screen.dart';
 import '../support/fake_gateway_client.dart';
@@ -33,6 +33,7 @@ Session _sStarting() => Session.fromJson({
       'status': 'starting',
       'source': 'discovered',
       'frontend': 'tmux',
+      'input_mode': 'pane',
       'tmux': {
         'server': 'argus',
         'pane_id': '%1',
@@ -529,11 +530,11 @@ void main() {
         child: MaterialApp(home: SessionDetailScreen(session: s)),
       );
 
-  testWidgets('idle opencode session shows a tappable reply bar', (tester) async {
+  testWidgets('idle opencode session shows the input', (tester) async {
     await tester.pumpWidget(appFor(oc()));
     await tester.pump();
-    expect(find.byType(InteractionBar), findsOneWidget);
-    expect(find.text('Respond'), findsOneWidget);
+    expect(find.byType(SessionComposer), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
     expect(
         find.text("argus can't send input to this session"), findsNothing);
   });
@@ -637,7 +638,7 @@ void main() {
     expect(kill.enabled, isFalse);
   });
 
-  testWidgets('starting session shows startup notice and no input bar',
+  testWidgets('starting session shows startup notice and an input that cannot send',
       (tester) async {
     await tester.pumpWidget(_app(
       [
@@ -649,6 +650,38 @@ void main() {
     ));
     await tester.pump();
     expect(find.textContaining('startup prompt'), findsOneWidget);
-    expect(find.byType(InteractionBar), findsNothing);
+    expect(find.text('Starting…'), findsOneWidget);
+    expect(find.byTooltip('Wait for idle to send'), findsOneWidget);
+    final send = tester
+        .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send));
+    expect(send.onPressed, isNull);
+  });
+
+  testWidgets('a tall plan with the keyboard up does not overflow the screen',
+      (tester) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.reset);
+    final s = Session.fromJson({
+      'id': 'mac:%1',
+      'agent': 'claude',
+      'status': 'awaiting_input',
+      'source': 'hooked',
+      'frontend': 'tmux',
+      'input_mode': 'pane',
+      'tmux': {'pane_id': '%1'},
+      'repo': 'proj',
+      'interaction': {
+        'kind': 'plan',
+        'plan': List.generate(100, (i) => 'Step $i').join('\n\n'),
+      },
+    });
+    await tester.pumpWidget(appFor(s));
+    await tester.pump();
+    await tester.tap(find.text('Deny'));
+    await tester.pump();
+    expect(find.byType(TextField), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
