@@ -139,3 +139,23 @@ func TestClaudeAdapterIsPrompterAndModBridged(t *testing.T) {
 		t.Fatal("claude adapter must implement adapter.ModBridged")
 	}
 }
+
+func TestSendPromptRefusesABusySession(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	got := modPoll(a, context.Background(), "s1")
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	for _, s := range []session.Session{
+		{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking},
+		{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+			Interaction: &session.Interaction{Kind: session.InteractionPermission}},
+	} {
+		if err := a.SendPrompt(context.Background(), s, "hi"); !errors.Is(err, api.ErrSessionBusy) {
+			t.Fatalf("%s: err = %v, want ErrSessionBusy", s.Status, err)
+		}
+	}
+	select {
+	case cmds := <-got:
+		t.Fatalf("a busy session was sent %v", cmds)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

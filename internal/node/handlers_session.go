@@ -257,7 +257,7 @@ func (d *Node) sendPaneInput(ctx context.Context, s session.Session, p api.Input
 }
 
 // sendPromptInput delivers a prompt to an InputAPI session over its agent's API.
-// The agent decides whether a busy session takes it (Claude queues it).
+// The agent decides whether a busy session takes it; each refuses with "session is busy".
 func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
 	pr, ok := d.adapterFor(s.Agent).(adapter.Prompter)
 	if !ok || p.Text == "" {
