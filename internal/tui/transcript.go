@@ -236,6 +236,12 @@ func (m model) center(content string, contentWidth int) string {
 
 func centerGutter(contentWidth, termWidth int) int { return max(0, (termWidth-contentWidth)/2) }
 
+// transcriptTextX is the screen column where the transcript's content starts,
+// past the centering margin and the accent gutter.
+func (m model) transcriptTextX() int {
+	return centerGutter(m.containerWidth(), m.bodyWidth()) + detailGutter
+}
+
 // centerBlock left-pads each line so a contentWidth-wide block sits centered in
 // termWidth. No-op when content already fills the terminal.
 func centerBlock(content string, contentWidth, termWidth int) string {
@@ -672,13 +678,7 @@ func (m tview) keepCursorVisible() {
 // (the fallback when a single entry is taller than the viewport).
 func (m tview) entryAtLine(line int) int {
 	_, first := m.layoutEntries()
-	idx := 0
-	for i, s := range first {
-		if s <= line {
-			idx = i
-		}
-	}
-	return idx
+	return rowAtLine(first, line)
 }
 
 // firstVisibleEntry/lastVisibleEntry return the first/last entry starting within
@@ -764,7 +764,7 @@ func (m tview) transcriptBody() string {
 	end := min(len(lines), scroll+h)
 	hitStarts(m.c, len(first), func(i int) (int, int) { return itemSpan(i, first, len(lines)) }, scroll, end)
 	m.hitFoldMarkers(lines, m.displayRows(), first, scroll, end)
-	b.WriteString(strings.Join(lines[scroll:end], "\n"))
+	b.WriteString(strings.Join(m.paintVisual(lines[scroll:end]), "\n"))
 	return b.String()
 }
 
@@ -775,7 +775,7 @@ func (m tview) hitFoldMarkers(lines []string, rows []displayRow, first []int, sc
 	if !m.c.recording() {
 		return
 	}
-	x0 := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()) + detailGutter
+	x0 := m.c.m.transcriptTextX()
 	for i, top := range first {
 		if top < scroll || top >= end {
 			continue

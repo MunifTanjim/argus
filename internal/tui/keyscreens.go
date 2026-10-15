@@ -74,7 +74,7 @@ var transcriptViewKeys = []any{
 	transcriptKeys.ScrollUp, transcriptKeys.ScrollDown, transcriptKeys.PromptNext, transcriptKeys.PromptPrev,
 	transcriptKeys.HalfUp, transcriptKeys.HalfDown, transcriptKeys.PageUp, transcriptKeys.PageDown,
 	transcriptKeys.Top, transcriptKeys.Bottom, transcriptKeys.Collapse, transcriptKeys.Expand,
-	transcriptKeys.Detail, transcriptKeys.Copy, transcriptKeys.Back,
+	transcriptKeys.Detail, transcriptKeys.Copy, transcriptKeys.Back, transcriptKeys.Visual, transcriptKeys.VisualLine,
 }
 
 var sidebarListKeys = []any{
@@ -160,6 +160,10 @@ var sectionLists = map[string]sectionList{
 			redactListKeys, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave,
 			transcriptKeys.Export, transcriptKeys.Resume})...),
 		focus: focusFor("transcript"),
+	},
+	"visual": {
+		own:   bindingsOf(visualKeys),
+		focus: focusFor("visual"),
 	},
 	"session-dock": {
 		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw),

@@ -34,15 +34,28 @@ Press `:` to open the command line. Type a command name and press `<CR>` to
 run it. The command line offers only the commands that do something in the
 current view.
 
-The TUI captures the mouse. To select text, hold `Shift` (in most terminals)
-while you drag. To give the mouse back to the terminal, set `tui.mouse` to
-`off`, or run the `toggle mouse` command for the current session.
-
 In a transcript, each run of thinking and tool calls is folded. Press `l` or
 `<CR>` on a folded run, or click it, to expand it. Press `h` or `<CR>` on
 either end of an expanded run to fold it again. To show runs expanded by
 default, set `tui.verbose-transcript` to `true`, or run the
 `toggle verbose-transcript` command for the current session.
+
+### Select and copy
+
+In a transcript or an entry's detail, `y` copies the selected entry as the
+agent or you wrote it.
+
+To copy part of the text, press `v` to select by character or `V` to select by
+line, move with the Vim motions `h` `j` `k` `l`, `w` `b` `e`, `0` `^` `$`, `gg`
+`G`, and the page keys, and press `y` to copy. `o` jumps to the other end of
+the selection, and `<Esc>` cancels.
+
+Copying sets the system clipboard, and the terminal's clipboard too, which
+works over SSH.
+
+To use your terminal's own selection instead, hold `Shift` (in most terminals)
+while you drag, or give the mouse back to the terminal: set `tui.mouse` to
+`off`, or run the `toggle mouse` command for the current session.
 
 ### Palette
 
@@ -124,6 +137,7 @@ keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
 | `history` | History |
 | `logs` | Logs |
 | `transcript` | A session transcript, its entry detail, and its redaction list |
+| `visual` | Selecting text in a session transcript or its entry detail |
 | `session-dock` | The reply, question, or permission prompt of a session |
 | `file` | An open file or diff |
 | `file-tree` | The Files tab |
@@ -194,23 +208,33 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 |---|---|---|---|
 | `answer note` | session-dock | `n` |  |
 | `answer submit` | session-dock | `<CR>` |  |
-| `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<Esc>` |  |
-| `copy` | transcript | `y` |  |
+| `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<Esc>` |  |
+| `copy` | transcript, visual | `y` |  |
+| `cursor down` | visual | `<Down>` `j` |  |
+| `cursor first-non-blank` | visual | `^` |  |
+| `cursor left` | visual | `<Left>` `h` |  |
+| `cursor line-end` | visual | `$` |  |
+| `cursor line-start` | visual | `0` |  |
+| `cursor right` | visual | `<Right>` `l` |  |
+| `cursor up` | visual | `<Up>` `k` |  |
+| `cursor word-end` | visual | `e` |  |
+| `cursor word-next` | visual | `w` |  |
+| `cursor word-prev` | visual | `b` |  |
 | `cycle group-by` | home |  | `zg` |
 | `filter-projects` | node, project, project-tree | `/` |  |
 | `filter-sessions` | home, sidebar-sessions, workspace | `/` |  |
-| `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |  |
-| `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w><C-h>` `<C-w><Left>` `<C-w>h` |  |
-| `focus next` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w><C-w>` `<C-w>w` |  |
-| `focus prev` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w>W` |  |
+| `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |  |
+| `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-h>` `<C-w><Left>` `<C-w>h` |  |
+| `focus next` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-w>` `<C-w>w` |  |
+| `focus prev` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w>W` |  |
 | `focus prompt` | file, transcript |  | `<Tab>` |
-| `focus right` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w><C-l>` `<C-w><Right>` `<C-w>l` |  |
+| `focus right` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-l>` `<C-w><Right>` `<C-w>l` |  |
 | `focus transcript` | session-dock | `<Tab>` | `<Tab>` |
-| `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace | `<C-w><C-k>` `<C-w><Up>` `<C-w>k` |  |
+| `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-k>` `<C-w><Up>` `<C-w>k` |  |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |  |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |  |
-| `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, workspace | `G` |  |
-| `goto top` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, workspace | `gg` |  |
+| `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `G` |  |
+| `goto top` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `gg` |  |
 | `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, sidebar-sessions, terminals, workspace |  | `g?` |
 | `hover` | changes, file-tree, project-tree, sidebar-sessions |  | `K` |
 | `next` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<Down>` `j` |  |
@@ -219,7 +243,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `node wakelock` | node, project-tree |  | `w` |
 | `open` | changes, file-tree, history, home, project-tree, sidebar-sessions, terminals, transcript, workspace | `<CR>` |  |
 | `open live-screen` | session-dock, transcript |  | `<C-t>` |
-| `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  | `<C-k>` |
+| `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` | project-tree, workspace |  | `L` |
 | `open tmux-pane` | home, workspace |  | `O` |
 | `prev` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<Up>` `k` |  |
@@ -234,10 +258,10 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `redaction save` | transcript |  | `W` |
 | `refresh` | changes, file, file-tree, history, home, node, project, project-tree, sidebar-sessions, terminals, workspace |  | `gr` |
 | `scroll down` | file, logs, transcript | `<Down>` `j` |  |
-| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<C-d>` |  |
-| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<C-u>` |  |
-| `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-f>` `<PageDown>` |  |
-| `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, workspace | `<C-b>` `<PageUp>` |  |
+| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<C-d>` |  |
+| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<C-u>` |  |
+| `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, visual, workspace | `<C-f>` `<PageDown>` |  |
+| `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, visual, workspace | `<C-b>` `<PageUp>` |  |
 | `scroll up` | file, logs, transcript | `<Up>` `k` |  |
 | `session kill` | home, sidebar-sessions, workspace |  | `dd` |
 | `session load-more` | history |  | `m` |
@@ -254,18 +278,21 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle active-only` | home, workspace |  | `za` |
 | `toggle diff-vs-target` | changes |  | `t` |
 | `toggle hidden` | project-tree |  | `H` |
-| `toggle left-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  | `<Leader>o` |
+| `toggle left-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<Leader>o` |
 | `toggle line-wrap` | file |  | `yow` |
-| `toggle mouse` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
+| `toggle mouse` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
 | `toggle pin` | project-tree |  | `P` |
-| `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  | `<Leader>e` |
+| `toggle right-sidebar` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<Leader>e` |
 | `toggle selection` | session-dock | `<Space>` |  |
 | `toggle show-gone` | node, project, project-tree, workspace |  | `zx` |
 | `toggle show-hidden` | node, project, project-tree, workspace |  | `z.` |
-| `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
+| `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
 | `transcript export` | history, transcript |  | `E` |
-| `upgrade gateway` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
-| `upgrade node` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, workspace |  |  |
+| `upgrade gateway` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
+| `upgrade node` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
+| `visual char` | transcript, visual | `v` |  |
+| `visual line` | transcript, visual | `V` |  |
+| `visual swap` | visual | `o` |  |
 | `workspace change-target` | project-tree |  | `T` |
 | `workspace force-remove` | project-tree |  | `D` |
 | `workspace new` | project-tree |  | `a` |
