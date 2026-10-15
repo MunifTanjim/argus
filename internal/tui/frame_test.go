@@ -446,6 +446,7 @@ func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {
 		build func() model
 	}{
 		{"session-no-dock", idleSession},
+		{"session-empty-transcript", func() model { return withEntries(idleSession(), nil) }},
 		{"session-card-detail", func() model { return pressKeys(typeKeys(idleSession(), "gg"), keyMsg("enter")) }},
 		{"retarget-picker", func() model {
 			m := onTree(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")))
