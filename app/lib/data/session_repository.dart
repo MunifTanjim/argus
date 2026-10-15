@@ -27,6 +27,9 @@ abstract class SessionRepository {
   /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId);
 
+  /// An empty [nodeId] targets the sole node.
+  Future<Result<DirCompletion>> completeDir(String? nodeId, String path);
+
   Future<Result<ResumeOutcome>> resume({
     String? nodeId,
     required String agent,
@@ -82,6 +85,10 @@ class SessionRepositoryRemote implements SessionRepository {
   @override
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
       _service.listAgents(nodeId);
+
+  @override
+  Future<Result<DirCompletion>> completeDir(String? nodeId, String path) =>
+      _service.completeDir(nodeId, path);
 
   @override
   Future<Result<ResumeOutcome>> resume({

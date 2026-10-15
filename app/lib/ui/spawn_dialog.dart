@@ -73,7 +73,10 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   // Directory state
   String? _selectedCwd; // resolved when projects load or the user picks
   bool _customCwd = false;
-  String _customPath = '';
+  final _pathCtl = TextEditingController();
+  final _pathFocus = FocusNode();
+  int _completeCalls = 0; // only the latest call asks the node
+  (String, List<String>)? _seeded; // the home and its children, from the seed
 
   @override
   void initState() {
@@ -152,13 +155,15 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     _vm.spawn.removeListener(_onCommand);
     _vm.dispose();
     _promptCtl.dispose();
+    _pathCtl.dispose();
+    _pathFocus.dispose();
     super.dispose();
   }
 
   String? _effectiveCwd() {
     final target = widget.target;
     if (target != null) return target.cwd;
-    final cwd = _customCwd ? _customPath.trim() : (_selectedCwd ?? '').trim();
+    final cwd = _customCwd ? _pathCtl.text.trim() : (_selectedCwd ?? '').trim();
     return cwd.isEmpty ? null : cwd;
   }
 
@@ -267,14 +272,26 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
           if (target == null && _customCwd)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: TextField(
-                key: const Key('spawn-custom-path'),
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Path',
-                  hintText: '/path/to/project',
+              child: Autocomplete<String>(
+                textEditingController: _pathCtl,
+                focusNode: _pathFocus,
+                optionsBuilder: (v) => _completePath(v.text),
+                onSelected: (_) => setState(() {}),
+                fieldViewBuilder: (context, controller, focusNode, onSubmit) =>
+                    TextField(
+                  key: const Key('spawn-custom-path'),
+                  controller: controller,
+                  focusNode: focusNode,
+                  autofocus: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Path',
+                    hintText: '/path/to/project',
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) => onSubmit(),
                 ),
-                onChanged: (v) => setState(() => _customPath = v),
               ),
             ),
           VoiceInputField(
@@ -347,7 +364,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       _nodeId = v;
       _selectedCwd = null;
       _customCwd = false;
-      _customPath = '';
+      _pathCtl.clear();
+      _seeded = null;
       _agents = null;
       _agent = null;
     });
@@ -383,10 +401,41 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       footer: const _Choice(value: _customValue, title: 'Custom path…'),
     );
     if (v == null) return;
+    final wasCustom = _customCwd;
     setState(() {
       _customCwd = v == _customValue;
       if (!_customCwd) _selectedCwd = v;
     });
+    if (_customCwd && !wasCustom) _seedHome();
+  }
+
+  Future<void> _seedHome() async {
+    final nodeId = _nodeId;
+    final result =
+        await ref.read(sessionRepositoryProvider).completeDir(nodeId, '');
+    if (!mounted || nodeId != _nodeId || !_customCwd) return;
+    if (result case Ok(:final value)
+        when value.home.isNotEmpty && _pathCtl.text.isEmpty) {
+      final home = value.home.endsWith('/') ? value.home : '${value.home}/';
+      _seeded = (home, value.paths);
+      _pathCtl.value = TextEditingValue(
+        text: home,
+        selection: TextSelection.collapsed(offset: home.length),
+      );
+      setState(() {});
+    }
+  }
+
+  // Asks only once [path] has stayed unchanged for [_completeDebounce].
+  Future<Iterable<String>> _completePath(String path) async {
+    final call = ++_completeCalls;
+    if (_seeded case (final home, final paths) when path == home) return paths;
+    await Future<void>.delayed(_completeDebounce);
+    if (!mounted || call != _completeCalls || path.isEmpty) return const [];
+    final result =
+        await ref.read(sessionRepositoryProvider).completeDir(_nodeId, path);
+    if (result case Ok(:final value)) return value.paths;
+    return const [];
   }
 
   Future<String?> _pick({
@@ -410,6 +459,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
 }
 
 const _customValue = '__custom__';
+
+const _completeDebounce = Duration(milliseconds: 300);
 
 /// Read-only when [onTap] is null.
 class _PickerField extends StatelessWidget {
