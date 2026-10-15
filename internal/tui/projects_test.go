@@ -865,6 +865,7 @@ func TestSessionFromProjectsRendersInPane(t *testing.T) {
 	m = selectRow(m, "n1:w1")
 	m = withFocus(m, mainPane)
 	mm, _ := m.enterSession("n1:s1")
+	// The transcript takes the divider's trailing space and keeps a cell off the right edge.
 	if got, want := mm.bodyWidth(), mm.frameWidth()-mm.projectsLeftW()-dividerWidth; got != want {
 		t.Errorf("bodyWidth = %d, want the pane width %d", got, want)
 	}
@@ -911,7 +912,7 @@ func TestCtrlBInPaneSessionTogglesSidebar(t *testing.T) {
 	m.width, m.height = 120, 30
 	m = selectRow(m, "n1:w1")
 	mm, _ := m.enterSession("n1:s1")
-	if got := typeKeys(mm, " o"); got.bodyWidth() != got.frameWidth() || viewOf(got) != viewSession {
+	if got := typeKeys(mm, " o"); got.bodyWidth() != got.frameWidth()+1 || viewOf(got) != viewSession {
 		t.Errorf("␣o should hide the sidebar and keep the session: width=%d view=%v", got.bodyWidth(), viewOf(got))
 	}
 }

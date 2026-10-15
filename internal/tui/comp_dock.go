@@ -140,7 +140,7 @@ func (d dockComp) view(c *ctx, w, h int) string {
 		body = c.m.dockSummaryLine(c.m.dockContentWidth())
 	}
 	if !c.m.inputShown() {
-		body = indentBlock(body, strings.Repeat(" ", contentPadX))
+		body = indentBlock(body, strings.Repeat(" ", c.m.dockBodyIndent()))
 	}
 	return "\n" + centerBlock(top+"\n"+body+"\n"+bottom, cw, w)
 }

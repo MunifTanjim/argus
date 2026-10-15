@@ -39,13 +39,19 @@ func containerWidthOf(w int) int {
 
 // contentPadX is the right-edge padding for session content (transcript entries and
 // the dock body). The left edge carries the cursor-marker column instead, so
-// content reads flush-left with a marker + 1-cell gap.
-const contentPadX = 2
+// content reads flush-left with a marker + 1-cell gap (detailGutter).
+const contentPadX = 1
 
 // transcriptWidth is the content column width: the container minus the right padding.
 // centerBlock renders it against the full container, so on normal terminals the
 // left gutter is 0 (marker at the edge) and the right gutter is contentPadX.
-func (m model) transcriptWidth() int { return max(20, m.containerWidth()-contentPadX) }
+func (m model) transcriptWidth() int {
+	pad := contentPadX
+	if m.layout().bare {
+		pad++ // no frame keeps the right edge a cell off the terminal
+	}
+	return max(20, m.containerWidth()-pad)
+}
 
 // renderMD renders markdown at a wrap width. Caches both the per-width renderer
 // and the output (keyed by width+content) so the refresh re-renders only changes.
@@ -232,6 +238,11 @@ func indentBlock(text, indent string) string {
 // pane when framed).
 func (m model) center(content string, contentWidth int) string {
 	return centerBlock(content, contentWidth, m.bodyWidth())
+}
+
+// transcriptText places s where the transcript's text goes.
+func (m model) transcriptText(s string) string {
+	return m.center(indentBlock(s, strings.Repeat(" ", detailGutter)), m.containerWidth())
 }
 
 func centerGutter(contentWidth, termWidth int) int { return max(0, (termWidth-contentWidth)/2) }
@@ -778,11 +789,11 @@ func (m tview) transcriptBody() string {
 	var b strings.Builder
 
 	if m.transcript.err != nil {
-		b.WriteString(dimStyle.Render("transcript unavailable: " + m.transcript.err.Error()))
+		b.WriteString(m.c.m.transcriptText(dimStyle.Render("transcript unavailable: " + m.transcript.err.Error())))
 		return b.String()
 	}
 	if len(m.transcript.entries) == 0 {
-		b.WriteString(dimStyle.Render("(no transcript yet)"))
+		b.WriteString(m.c.m.transcriptText(dimStyle.Render("(no transcript yet)")))
 		return b.String()
 	}
 

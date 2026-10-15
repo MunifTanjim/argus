@@ -133,11 +133,11 @@ func renderCardList(c *ctx, key string, cards []string, cursor, avail int) strin
 }
 
 func (m tview) historyTranscriptView() string {
-	header := m.c.m.center(indentBlock(m.historyTranscriptHeader(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
+	header := m.c.m.transcriptText(m.historyTranscriptHeader())
 	var body string
 	if m.redactListActive() {
 		// The list (D) replaces the transcript body so the queued secrets are visible.
-		body = m.c.m.center(indentBlock(m.redactListBody(), strings.Repeat(" ", contentPadX)), m.c.m.containerWidth())
+		body = m.c.m.transcriptText(m.redactListBody())
 	} else {
 		body = m.transcriptComp.bind(m.c.below(lipgloss.Height(header) + 1)).historyBody()
 	}

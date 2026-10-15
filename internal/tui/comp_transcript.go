@@ -72,6 +72,7 @@ func (t transcriptComp) spins(*ctx) bool       { return false }
 func (t transcriptComp) offers(*ctx) []binding { return nil }
 func (t transcriptComp) pageStep(c *ctx) int   { return c.m.listPageStep() }
 func (t transcriptComp) layer() layer          { return baseLayer }
+func (t transcriptComp) joinsDivider()         {}
 
 func (t transcriptComp) raw(*ctx) bool {
 	return t.pendingExport || t.redact.pendingSave || t.redact.inputActive
@@ -175,11 +176,11 @@ func (t transcriptComp) view(c *ctx, w, _ int) string {
 	return t.bind(c).historyBody()
 }
 
-func (t transcriptComp) paneHeader(c *ctx, w int) (string, int) {
+func (t transcriptComp) paneHeader(c *ctx, _ int) (string, int) {
 	if !t.live {
 		return "", 0
 	}
-	return sessionHeader(c.m.sessions[t.sessionID], c.m.paneHeadStyle()), centerGutter(containerWidthOf(w), w) + contentPadX
+	return sessionHeader(c.m.sessions[t.sessionID], c.m.paneHeadStyle()), c.m.transcriptTextX()
 }
 
 // footerPrompt is empty in visual mode, which takes every key a prompt would

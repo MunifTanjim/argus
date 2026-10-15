@@ -18,13 +18,19 @@ type frameLayout struct {
 	bare  bool // the top takes the whole terminal and draws its own title
 	left  int  // the left sidebar's width; 0 when it does not show
 	right int  // the right sidebar's width; 0 when it does not show
+	x     int  // the main pane's screen column
 	w, h  int  // the main pane's size, its footer rows included
+	// joined: the pane draws against the left divider, or the terminal edge
+	// with no left sidebar (see dividerJoiner).
+	joined bool
+	// dockX and dockW place the dock under the pane on screen.
+	dockX, dockW int
 }
 
 func (m model) layout() frameLayout {
 	full := m.topFull()
 	if full == fullTerminal {
-		return frameLayout{full: true, bare: true, w: m.width, h: m.height}
+		return frameLayout{full: true, bare: true, w: m.width, h: m.height, dockW: m.width}
 	}
 	l := frameLayout{full: full == fullWidth, h: m.framedHeight()}
 	if m.filesVisible() {
@@ -35,11 +41,42 @@ func (m model) layout() frameLayout {
 		l.w = max(1, m.width-m.rightCols())
 	case m.sidebarVisible():
 		l.left = m.projectsLeftW()
+		l.x = l.left + screenMargin + dividerWidth
 		l.w = m.bodyWidthFor(l.left)
 	default:
+		l.x = screenMargin
 		l.w = m.bodyWidthFor(-dividerWidth)
 	}
+	if !l.full && m.joinsDivider() {
+		// A joined pane starts in the divider's trailing space, or at the
+		// terminal edge, and keeps a cell off the terminal edge on its right, as
+		// the right divider's leading space does.
+		l.joined = true
+		x := l.x - 1
+		if l.left == 0 {
+			x = 0
+		}
+		l.w += l.x - x
+		l.x = x
+		if l.right == 0 {
+			l.w = max(1, l.w-1)
+		}
+	}
+	// The dock keeps a cell off what a joined pane draws against.
+	l.dockX, l.dockW = l.x, l.w
+	if l.joined {
+		l.dockX, l.dockW = l.x+1, max(1, l.w-1)
+	}
 	return l
+}
+
+// dividerJoiner is a pane that draws its cursor marker against the divider on
+// its left, or against the terminal edge with no left sidebar.
+type dividerJoiner interface{ joinsDivider() }
+
+func (m model) joinsDivider() bool {
+	_, ok := m.main.top().(dividerJoiner)
+	return ok
 }
 
 func (m model) topFull() fullLevel { return m.main.top().fullScreen(&ctx{m: &m}) }
@@ -111,15 +148,8 @@ func (m model) mainRect() uv.Rectangle {
 	if l.bare {
 		return uv.Rect(0, 0, l.w, h)
 	}
-	x := screenMargin
-	switch {
-	case l.full:
-		x = 0
-	case l.left > 0:
-		x = l.left + screenMargin + dividerWidth
-	}
 	// The body starts below the title row and a blank row.
-	return uv.Rect(x, 2, l.w, h)
+	return uv.Rect(l.x, 2, l.w, h)
 }
 
 // A spawn flow opened from the tree or over a row's pane stays in front of the
@@ -143,8 +173,8 @@ func (m model) mainColumn(c *ctx, l frameLayout) string {
 		if mc.area != nil {
 			mc.area.rect.Max.Y = r.Min.Y + paneH
 		}
-		dc := &ctx{m: c.m, area: m.hits.add(regDock, uv.Rect(r.Min.X, r.Min.Y+paneH, r.Dx(), dockH))}
-		pane += "\n" + m.dock.view(dc, l.w, dockH)
+		dc := &ctx{m: c.m, area: m.hits.add(regDock, uv.Rect(l.dockX, r.Min.Y+paneH, l.dockW, dockH))}
+		pane += "\n" + indentBlock(m.dock.view(dc, l.dockW, dockH), strings.Repeat(" ", l.dockX-l.x))
 	}
 	return pane
 }
@@ -173,11 +203,14 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 	case l.full:
 		panels = append(panels, flexPanel(pane))
 	case l.left == 0:
-		panels = append(panels, flexPanel(indentBlock(pane, strings.Repeat(" ", screenMargin))))
+		panels = append(panels, flexPanel(indentBlock(pane, strings.Repeat(" ", l.x))))
 	default:
 		tc := &ctx{m: c.m, area: m.hits.add(regTree, uv.Rect(0, 2, l.left+screenMargin, h))}
-		m.hits.add(regTreeDivider, uv.Rect(l.left+screenMargin, 2, dividerWidth, h))
-		panels = append(panels, fixedPanel(m.left.view(tc, l.left, h), l.left+screenMargin), flexPanel(pane))
+		main := flexPanel(pane)
+		main.joined = l.joined
+		divX := l.left + screenMargin
+		m.hits.add(regTreeDivider, uv.Rect(divX, 2, l.x-divX, h))
+		panels = append(panels, fixedPanel(m.left.view(tc, l.left, h), l.left+screenMargin), main)
 	}
 	if l.right > 0 {
 		w := l.right + 1

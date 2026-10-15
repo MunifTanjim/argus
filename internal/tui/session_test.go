@@ -464,7 +464,7 @@ func TestOptionPreviewRendersSideBySide(t *testing.T) {
 func TestDockRuleSpansContentWidth(t *testing.T) {
 	m := sessionModel(&session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"})
 	m.height, m.width = 24, 80
-	want := m.containerWidth()
+	want := m.dockWidth()
 
 	var ruleWidth int
 	for _, line := range strings.Split(paneView(m), "\n") {
@@ -473,7 +473,7 @@ func TestDockRuleSpansContentWidth(t *testing.T) {
 		}
 	}
 	if ruleWidth != want {
-		t.Errorf("dock rule spans %d cols, want %d (containerWidth)", ruleWidth, want)
+		t.Errorf("dock rule spans %d cols, want %d (dockWidth)", ruleWidth, want)
 	}
 }
 
