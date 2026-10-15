@@ -378,3 +378,28 @@ func TestTranscriptOffersAnswerOnlyForAPendingPrompt(t *testing.T) {
 		t.Error("a permission prompt must offer answer")
 	}
 }
+
+func TestCtrlArrowsMoveByWordInTheInput(t *testing.T) {
+	m := sessionModel(nil)
+	m = pressKeys(m, keyMsg("tab"))
+	m = typeKeys(m, "foo bar")
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl}, keyMsg("X"))
+	if got := m.dock.reply.Value(); got != "foo Xbar" {
+		t.Fatalf("<C-Left> then X: %q, want %q", got, "foo Xbar")
+	}
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl}, keyMsg("Y"))
+	if got := m.dock.reply.Value(); got != "foo XbarY" {
+		t.Fatalf("<C-Right> then Y: %q, want %q", got, "foo XbarY")
+	}
+}
+
+func TestCtrlArrowsMoveByWordInTheSpawnPrompt(t *testing.T) {
+	ta := newSpawnPromptArea()
+	ta.Focus()
+	ta.SetValue("foo bar")
+	ta, _ = ta.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl})
+	ta, _ = ta.Update(keyMsg("X"))
+	if got := ta.Value(); got != "foo Xbar" {
+		t.Fatalf("<C-Left> then X: %q, want %q", got, "foo Xbar")
+	}
+}

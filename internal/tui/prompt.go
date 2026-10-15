@@ -58,6 +58,14 @@ func newIdleReplyArea() textarea.Model {
 	ta.DynamicHeight = true
 	// enter submits, so newlines come from shift+enter (Kitty keyboard protocol).
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
+	return withWordMotion(ta)
+}
+
+// withWordMotion adds ctrl+left/right, which the textarea leaves unbound
+// unlike textinput.
+func withWordMotion(ta textarea.Model) textarea.Model {
+	ta.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "ctrl+right", "alt+f"))
+	ta.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "ctrl+left", "alt+b"))
 	return ta
 }
 
