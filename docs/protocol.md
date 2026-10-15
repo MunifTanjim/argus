@@ -1674,6 +1674,7 @@ Session {
 
 Summary {
   model_name?, model_color?: string
+  effort?:            string          // reasoning effort, e.g. "high"
   has_context?:       boolean
   context_pct?:       number          // 0 to 100
   tokens?:            number

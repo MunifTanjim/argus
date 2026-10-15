@@ -64,6 +64,10 @@ type Registry struct {
 
 	// inputPolicies are per-agent input channel overrides (see SetInputPolicy).
 	inputPolicies map[string]InputPolicy
+
+	// models are the live models agents report, by session id. They win over
+	// the transcript-derived Summary fields (see overlayModel).
+	models map[string]liveModel
 }
 
 // New returns an empty Registry.
@@ -75,6 +79,7 @@ func New() *Registry {
 		ended:         make(map[string]time.Time),
 		endedGrace:    defaultEndedGrace,
 		inputPolicies: make(map[string]InputPolicy),
+		models:        make(map[string]liveModel),
 	}
 }
 
@@ -260,6 +265,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
+		r.overlayModel(s)
 		r.refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
 
@@ -475,6 +481,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	setStatus(s, finalStatus)
 	removed := *s
 	delete(r.sessions, id)
+	delete(r.models, id)
 	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(Event{Type: EventRemoved, Session: removed})
 }
@@ -573,6 +580,46 @@ func (r *Registry) SetWorkspaceID(id, workspaceID string) {
 	r.publish(Event{Type: EventUpdated, Session: *s})
 }
 
+// ModelUpdate is a live model and effort as an agent reports them.
+type ModelUpdate struct {
+	Name, Color string // formatted model name and its color; "" keeps the last
+	// Effort is nil when the report says nothing about effort, keeping the
+	// last one; "" means the model takes none.
+	Effort *string
+}
+
+type liveModel struct{ name, color, effort string }
+
+// setModel merges u into session id's live model. Caller holds r.mu.
+func (r *Registry) setModel(id string, u ModelUpdate) {
+	lm := r.models[id]
+	if u.Name != "" {
+		lm.name, lm.color = u.Name, u.Color
+	}
+	if u.Effort != nil {
+		lm.effort = *u.Effort
+	}
+	r.models[id] = lm
+}
+
+// overlayModel lays the session's live model over its summary. It copies the
+// summary: a published event shares the pointer. Caller holds r.mu.
+func (r *Registry) overlayModel(s *session.Session) {
+	lm, ok := r.models[s.ID]
+	if !ok {
+		return
+	}
+	var sum session.Summary
+	if s.Summary != nil {
+		sum = *s.Summary
+	}
+	if lm.name != "" {
+		sum.ModelName, sum.ModelColor = lm.name, lm.color
+	}
+	sum.Effort = lm.effort
+	s.Summary = &sum
+}
+
 // HookUpdate carries the correlation keys and fields from an agent hook event. Empty
 // string fields leave an existing session unchanged. A non-empty Status sets the
 // status; StatusDead removes the session.
@@ -602,6 +649,7 @@ type HookUpdate struct {
 	// Used by the Stop hook: the turn ended, so the idle prompt must supersede any
 	// stale pending interaction.
 	ReplaceInteraction bool
+	Model              *ModelUpdate
 }
 
 // ApplyHook correlates a hook event to a session (by pane, else agent session id),
@@ -686,6 +734,11 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	if u.Summary != nil {
 		s.Summary = u.Summary
 	}
+
+	if u.Model != nil {
+		r.setModel(s.ID, *u.Model)
+	}
+	r.overlayModel(s)
 
 	if u.Status == session.StatusDead {
 		r.markEnded(pKey)

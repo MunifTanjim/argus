@@ -157,6 +157,7 @@ type Interaction struct {
 type Summary struct {
 	ModelName    string  `json:"model_name,omitempty"`    // formatted, e.g. "Opus 4.8"
 	ModelColor   string  `json:"model_color,omitempty"`   // hex like "#d3869b"; "" = uncolored
+	Effort       string  `json:"effort,omitempty"`        // reasoning effort, e.g. "high"; "" = unknown or none
 	HasContext   bool    `json:"has_context,omitempty"`   // whether ContextPct is meaningful
 	ContextPct   float64 `json:"context_pct,omitempty"`   // 0..100, latest turn
 	Tokens       int     `json:"tokens,omitempty"`        // latest turn prompt-side token count
