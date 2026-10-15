@@ -13,6 +13,7 @@ import 'package:argus/state/project_tree.dart';
 import 'package:argus/ui/nerd_icon.dart';
 import 'package:argus/ui/node_screen.dart';
 import 'package:argus/ui/project_drawer.dart';
+import 'package:argus/ui/spawn_dialog.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -459,5 +460,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>)), before);
     expect(find.byTooltip('Tree options').hitTestable(), findsNothing);
+  });
+
+  testWidgets('the Sessions tab header opens the spawn dialog', (tester) async {
+    await _pump(tester, _tree());
+    expect(find.byTooltip('New session'), findsNothing);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('New session'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SpawnDialog), findsOneWidget);
   });
 }

@@ -270,7 +270,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `session load-more` | history |  | `m` |
 | `session rename` | home, sidebar-sessions, workspace |  | `r` |
 | `session resume` | history, transcript |  | `R` |
-| `session spawn` | home, project-tree, workspace |  | `s` |
+| `session spawn` | home, project-tree, sidebar-sessions, workspace |  | `s` |
 | `sidebar narrower` | changes, file-tree, node, project, project-tree, sidebar-sessions, workspace | `<C-w><lt>` |  |
 | `sidebar wider` | changes, file-tree, node, project, project-tree, sidebar-sessions, workspace | `<C-w>>` |  |
 | `tab next` | changes, file-tree, history, home, logs, node, project-tree, session-dock, sidebar-sessions, terminals, workspace | `<Right>` `gt` |  |
