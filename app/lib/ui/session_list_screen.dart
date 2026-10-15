@@ -44,7 +44,7 @@ class SessionListScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton(
         heroTag: null,
         tooltip: 'New session',
-        onPressed: () => showSpawnDialog(context, ref),
+        onPressed: () => Navigator.of(context).push(spawnRoute()),
         child: const Icon(Icons.add),
       ),
       body: Column(

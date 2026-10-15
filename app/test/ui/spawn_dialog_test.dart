@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -61,6 +63,18 @@ class _FailingSpawnRepo extends FakeSessionRepository {
       const Result.error('backend error');
 }
 
+class _PendingSpawnRepo extends FakeSessionRepository {
+  final done = Completer<Result<void>>();
+  @override
+  Future<Result<void>> spawn({
+    String? nodeId,
+    String? cwd,
+    String? agent,
+    required String prompt,
+  }) =>
+      done.future;
+}
+
 Widget _app(List<HistoryProject> projects) => ProviderScope(
       overrides: [
         historyProjectsProvider.overrideWith(() => _FakeProjects(projects)),
@@ -81,12 +95,12 @@ void main() {
     await tester.pumpWidget(_app(const []));
     await tester.pumpAndSettle();
 
-    final spawnFinder = find.widgetWithText(TextButton, 'Spawn');
-    expect(tester.widget<TextButton>(spawnFinder).onPressed, isNull);
+    final spawnFinder = find.widgetWithText(FilledButton, 'Spawn');
+    expect(tester.widget<FilledButton>(spawnFinder).onPressed, isNull);
 
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'do the thing');
     await tester.pump();
-    expect(tester.widget<TextButton>(spawnFinder).onPressed, isNotNull);
+    expect(tester.widget<FilledButton>(spawnFinder).onPressed, isNotNull);
   });
 
   testWidgets('name and command fields are gone', (tester) async {
@@ -100,22 +114,55 @@ void main() {
     expect(find.byKey(const Key('spawn-prompt')), findsOneWidget);
   });
 
-  testWidgets('directory picker still lists projects', (tester) async {
+  testWidgets('directory picker shows paths, most recent first',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      const HistoryProject(
+          projectDir: '/b', cwd: '/home/u/argus', label: 'argus',
+          sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z'),
+      const HistoryProject(
+          projectDir: '/a', cwd: '/home/u/old', label: 'old',
+          sessionCount: 1, lastActivity: '2026-06-01T10:00:00Z'),
+    ]));
+    await tester.pumpAndSettle();
+    // The most recent directory is the default, with its path.
+    expect(find.text('Directory'), findsOneWidget);
+    expect(find.text('argus'), findsOneWidget);
+    expect(find.text('/home/u/argus'), findsOneWidget);
+
+    await tester.tap(find.text('argus'));
+    await tester.pumpAndSettle();
+    expect(find.text('/home/u/old'), findsOneWidget);
+    expect(find.text('Custom path…'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('argus')).dy,
+        lessThan(tester.getTopLeft(find.text('old')).dy));
+
+    await tester.tap(find.text('old'));
+    await tester.pumpAndSettle();
+    expect(find.text('/home/u/old'), findsOneWidget);
+    expect(find.text('/home/u/argus'), findsNothing);
+  });
+
+  testWidgets('directory filter matches the path', (tester) async {
     await tester.pumpWidget(_app([
       const HistoryProject(
           projectDir: '/a', cwd: '/home/u/argus', label: 'argus',
           sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z'),
+      const HistoryProject(
+          projectDir: '/b', cwd: '/srv/web', label: 'web',
+          sessionCount: 1, lastActivity: '2026-06-01T10:00:00Z'),
     ]));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButton<String>).last);
+    await tester.tap(find.text('argus'));
     await tester.pumpAndSettle();
-    expect(find.text('argus'), findsWidgets);
-    expect(find.text('Custom path…'), findsWidgets);
+    await tester.enterText(find.byKey(const Key('spawn-filter')), 'srv');
+    await tester.pump();
+    expect(find.text('argus'), findsNothing);
+    expect(find.text('web'), findsOneWidget);
+    expect(find.text('Custom path…'), findsOneWidget);
   });
 
-  testWidgets('duplicate project cwds do not crash the picker', (tester) async {
-    // Same cwd on two nodes would trip DropdownButton's one-item-per-value
-    // assertion if not deduped.
+  testWidgets('duplicate project cwds are listed once', (tester) async {
     await tester.pumpWidget(_app([
       const HistoryProject(
           projectDir: '/a', cwd: '/home/u/argus', label: 'argus',
@@ -125,11 +172,26 @@ void main() {
           sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z', nodeId: 'n2'),
     ]));
     await tester.pumpAndSettle();
-
-    expect(tester.takeException(), isNull);
-    await tester.tap(find.byType(DropdownButton<String>).last);
+    await tester.tap(find.text('argus'));
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    expect(find.text('/home/u/argus'), findsOneWidget);
+  });
+
+  testWidgets('a custom path is sent as the cwd', (tester) async {
+    final repo = _RecordingSpawnRepo();
+    await tester.pumpWidget(_appWithRepo(repo));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a directory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom path…'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const Key('spawn-custom-path')), '/tmp/x');
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
+    await tester.pumpAndSettle();
+    expect(repo.spawnedCwd, '/tmp/x');
   });
 
   testWidgets('spawn fires with the typed prompt', (tester) async {
@@ -140,7 +202,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'the text');
     await tester.pump();
 
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
 
     expect(repo.spawnedPrompt, equals('the text'));
@@ -154,12 +216,12 @@ void main() {
     await tester.pumpWidget(_appWithRepo(repo));
     await tester.pumpAndSettle();
 
-    // One agent → no picker (no DropdownMenuItem labeled Codex is shown).
-    expect(find.text('Codex'), findsNothing);
+    // One agent → no picker.
+    expect(find.text('Agent'), findsNothing);
 
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
     await tester.pump();
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
 
     expect(repo.spawnedAgent, equals('codex'));
@@ -174,18 +236,18 @@ void main() {
     await tester.pumpWidget(_appWithRepo(repo));
     await tester.pumpAndSettle();
 
-    // Default selection is the first agent, shown in the dropdown.
+    // Default selection is the first agent.
+    expect(find.text('Agent'), findsOneWidget);
     expect(find.text('Claude'), findsOneWidget);
 
-    // Open the picker and choose Codex.
     await tester.tap(find.text('Claude'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Codex').last);
+    await tester.tap(find.text('Codex'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
     await tester.pump();
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
 
     expect(repo.spawnedAgent, equals('codex'));
@@ -201,8 +263,8 @@ void main() {
     await tester.pump();
 
     // Even with a prompt, a non-tmux node can't spawn.
-    final spawnFinder = find.widgetWithText(TextButton, 'Spawn');
-    expect(tester.widget<TextButton>(spawnFinder).onPressed, isNull);
+    final spawnFinder = find.widgetWithText(FilledButton, 'Spawn');
+    expect(tester.widget<FilledButton>(spawnFinder).onPressed, isNull);
     expect(find.textContaining('tmux is not available'), findsOneWidget);
   });
 
@@ -215,7 +277,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'anything');
     await tester.pump();
 
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Failed'), findsOneWidget);
@@ -243,11 +305,13 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('In argus · registry'), findsOneWidget);
-    expect(find.text('Working directory'), findsNothing);
+    // Shown read-only, with the path.
+    expect(find.text('argus · registry'), findsOneWidget);
+    expect(find.text('/src/argus/.worktrees/registry'), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsNothing);
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
     await tester.pump();
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
 
     expect(repo.spawnedNode, 'A');
@@ -279,8 +343,41 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('Fix issue #3'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, 'Spawn'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
     await tester.pumpAndSettle();
     expect(repo.spawnedPrompt, 'Fix issue #3');
+  });
+
+  testWidgets('the page stays open while a spawn runs', (tester) async {
+    final repo = _PendingSpawnRepo();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        historyProjectsProvider.overrideWith(() => _FakeProjects(const [])),
+        sessionRepositoryProvider.overrideWithValue(repo),
+      ],
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => Navigator.of(context).push(spawnRoute()),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
+    await tester.pump();
+
+    await tester.state<NavigatorState>(find.byType(Navigator)).maybePop();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(find.text('open'), findsNothing); // the page still covers home
+
+    repo.done.complete(const Result.ok(null));
+    await tester.pumpAndSettle();
+    expect(find.text('open'), findsOneWidget);
   });
 }

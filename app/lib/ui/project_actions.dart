@@ -198,9 +198,8 @@ Future<void> spawnIn(
   ProjectNode p,
   WorkspaceNode w, {
   String prompt = '',
-}) => showDialog<void>(
-  context: ax.navigator.context,
-  builder: (_) => SpawnDialog(
+}) => ax.navigator.push(
+  spawnRoute(
     target: SpawnTarget(
       nodeId: p.nodeId,
       cwd: w.dir,
