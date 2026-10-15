@@ -92,8 +92,8 @@ type sectionList struct {
 }
 
 // sectionLists names each keymap section after its component. The create
-// picker reads the tree's section; the live screen, the retarget picker, and
-// the spawn flow have none.
+// picker reads the tree's section; the live screen and the retarget picker
+// have none.
 var sectionLists = map[string]sectionList{
 	"project-tree": {
 		own: bindingsOf(slices.Concat(treeKeys, manageKeys, []any{projectsKeys.Filter, projectsKeys.Back, projectsKeys.Up, projectsKeys.Down,
@@ -164,6 +164,10 @@ var sectionLists = map[string]sectionList{
 	"visual": {
 		own:   bindingsOf(visualKeys),
 		focus: focusFor("visual"),
+	},
+	"spawn": {
+		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
+			listKeys.PageUp, listKeys.PageDown, listKeys.Open, listKeys.Back, spawnKeys.Filter),
 	},
 	"session-dock": {
 		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw),
